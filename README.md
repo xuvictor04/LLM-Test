@@ -49,5 +49,6 @@ not answer questions or follow instructions, and it is semi-coherent, not fluent
 ## Honest status (see STATE.md §7 for numbers)
 A (editing by provenance): PROVEN — surgical unlearn of a whole process, ~1000× less collateral than weights.
 C (self-assembly): works, over-segments (harmless — segments compose at retrieval).
-B (wrong-detection): DOES NOT WORK in the realistic regime (~1% precision); runs detect-only, never deletes.
+V (verify — renamed from B "wrong-detection"): the old surprise-based B did NOT work (~1% precision, detect-only); being
+replaced by reconstruction-based verification (reverse-embed → compare), decoupled from surprise.
 Generation: semi-coherent with the tokenizer (~1.7 bits/byte); the small base model is the ceiling on fluency.

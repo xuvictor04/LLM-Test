@@ -45,8 +45,11 @@ deletion must RELEASE affiliations, not cascade-delete experts.
 
 **Memory / A (edit)** — the external key→token store with per-entry provenance. Deleting by provenance is the oldest, most consistently proven result. Surprise-gated writes; `pos` records the source byte position.
 
-**B (wrongness)** — self-consistency detection of "wrong" entries. Recall good; precision ~1% every realistic run
-because the write-gate stores SURPRISING tokens and B flags SURPRISING tokens — novel and wrong look identical. Detect-only.
+**V (Verify)** — *renamed from B (wrongness).* Verification by RECONSTRUCTION: reverse-embed the representation and
+compare to the original/expectation ("can I regenerate this from my understanding?"), DECOUPLED from surprise. Replaces
+the old B, which was self-consistency-on-surprise and stuck at ~1% precision (surprise ≡ its detection signal — a
+category error; surprise drives learning, not truth). See `decisions/B-renamed-to-V-verify-reconstruction-based-not-wrongness.md`
+and `design-directions/reverse-embedders-for-thought-verification-and-training.md`. (Old code names `is_wrong`/`selfcheck`/`sweep_wrong` persist until the build replaces them.)
 
 **C (self-assemble)** — the domain-discovery loop. Works; over-segments; harmless. The signature encoder reads the BYTE stream (not tokens).
 

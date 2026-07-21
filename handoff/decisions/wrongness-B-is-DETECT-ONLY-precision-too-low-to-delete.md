@@ -1,5 +1,10 @@
 # Wrongness (B) = self-consistency, DETECT-ONLY — never deletes — SETTLED [USER]
 
+> RENAMED (2026-07-21): "B / wrongness" is retired in favor of **V (Verify)** — reconstruction-based, decoupled from
+> surprise. This file documents the OLD, broken surprise-based approach as the record + the root-cause that motivated V.
+> See `B-renamed-to-V-verify-reconstruction-based-not-wrongness.md`.
+
+
 **Decision:** B flags entries via self-consistency but does NOT delete (`WRONG_SWEEP=0`).
 **Why:** the write gate stores SURPRISING tokens and B flags SURPRISING tokens, so genuine-novel and
 wrong are conflated — high recall, ~1–2% precision across runs. Deleting at that precision would gut

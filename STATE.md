@@ -30,8 +30,8 @@ NOTE: root is Garry's DESCENDANT, not a byte-copy — it adds later retrieval-gr
 
 ## 1. What this is
 Autonomous continual-learning system. One unlabeled stream (bytes, or tokens if the expanding tokenizer is on) →
-self-ASSEMBLE domains (C) → detect WRONG info (B, detect-only) → EDIT / unlearn by provenance (A). Nothing frozen,
-nothing labeled.
+self-ASSEMBLE domains (C) → VERIFY by reconstruction (V, formerly "B / detect wrong info") → EDIT / unlearn by
+provenance (A). Nothing frozen, nothing labeled.
 
 **NORTH STAR [USER] (full statement in `handoff/NORTH_STAR.md`):** a SMALL model (much smaller than conventional LLMs)
 that LEARNS and does complex REASONING, with an ever-EXPANDING, UPDATABLE knowledge base. **SACRED INVARIANT: when
@@ -62,8 +62,10 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
 
 ### Design decisions [USER]
 - Memory key = the model's OWN representation (unfrozen) + periodic re-keying. Frozen key = baseline only.
-- Wrongness (B) = SELF-CONSISTENCY. B is **DETECT-ONLY** — broken in the realistic regime (~1% precision every run),
-  because the write gate stores SURPRISING tokens and B flags SURPRISING tokens (novelty ≡ wrongness to it). Reports, never deletes.
+- **V (Verify) — RENAMED from B (wrongness) [USER]:** the middle of the loop is verification by RECONSTRUCTION
+  (reverse-embed → compare), NOT wrongness-detection on surprise. The old B (self-consistency on surprise) was a category
+  error — surprise drives LEARNING, not truth — hence its ~1% precision. V is decoupled from surprise. Old `is_wrong`/
+  `selfcheck` code persists until the build replaces it. Name "V" is `[me]`-proposed, confirm/override. (see `handoff/decisions/B-renamed-to-V-...`)
 - Genuineness = SILHOUETTE (coh+sep-1), not size — the COUNT is arbitrary; PERFORMANCE is what matters.
 - Write-gate signal is SURPRISE (1 − p_model(true token)); "novelty" was a misnomer, renamed.
 - Tokenizer = the EXPANDING `DynamicTokenizer` (online mint-on-repetition), NOT the static ByteBPE. Mints DURING training (`TOK_ONLINE=1`).
@@ -122,8 +124,9 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
   Weakness: a frequently-routed BAD expert still wins (cheap-to-reach beats good). **Prior-context rec: (a) Darwinian
   per-expert-LOSS fitness** (the clearly-wrong piece first). Alternatives: (b) tournament vs argmax; (c) adapter crossover;
   (d) self-adaptive mutation; (e) age-layered protection. **USER's call — not decided.**
-- **Q3 — B direction?** Attempt corroboration-based B (hard, speculative), or CUT autonomous B and ship clean-unlearn-on-command (A delivers)?
-  **Prior-context rec: (b) cut B** — corroboration-B is a research detour from the current language-quality priority. **USER's call.**
+- ~~**Q3 — B direction?**~~ SUPERSEDED by the V reframe: neither corroboration-B nor cut-B — REPLACE B with **V**,
+  reconstruction-based verification decoupled from surprise (see §2 and `handoff/decisions/B-renamed-to-V-...`). What
+  remains is a BUILD, not a decision.
 - **Q-regime — REDUNDANCY vs MODULARITY as the standing default?** Genuine product fork, both measured (§7). No recommendation —
   redundancy = losing any component costs nothing; modularity = components mean something, deletion cost small + attributable
   (stronger for a machine-unlearning/compliance framing). **USER's call.**
@@ -152,7 +155,13 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R9 (current):** [USER: added to the vision] (1) Clarified SURPRISE is a mechanic for ONGOING LEARNING, not a
+- **R10 (current):** [USER: rename B; document + set handling; then build+test] Phase 1 (docs): RENAMED B (wrongness) →
+  **V (Verify)** — reconstruction-based, decoupled from surprise; propagated through STATE/README/CL_TESTBED/GLOSSARY and
+  superseded Q3 (it's now a build, not a decision). Added `decisions/B-renamed-to-V-...`, the learning-signal HANDLING
+  spec (`design-directions/learning-signal-classification-surprise-and-reconstruction.md`, incl. the surprise×reconstruction
+  2×2), and the build-readiness GAP LIST (`design-directions/what-is-missing-from-the-idea-before-it-is-buildable.md`).
+  Historical/frozen docs keep "B". Phase 2 (build+test) plan presented; no code changed yet.
+- **R9:** [USER: added to the vision] (1) Clarified SURPRISE is a mechanic for ONGOING LEARNING, not a
   wrongness/truth signal — casting it as wrong-detection is the category error behind B's ~1% precision; verification
   belongs elsewhere. Added `decisions/surprise-is-a-learning-driver-not-a-wrongness-or-truth-signal.md` + noted on the B
   decision. (2) New direction REVERSE EMBEDDERS — decode from the embedding space for THOUGHT, VERIFICATION
@@ -218,7 +227,8 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 - **Self-assembly (C):** purity 0.90–0.96 vs 4 hidden processes; boundary precision ~0.40–0.44 (fires 2–3× too often) — HARMLESS (composition below).
 - **Composition:** GLOBAL retrieval beats siloing to nearest segment by +0.03…+0.56 b/B → over-segmentation is harmless.
 - **Tokenizer:** ~−0.5 b/B vs raw bytes, every comparison. Online == frozen at matched vocab/memory.
-- **B (wrongness):** recall 92–96% best; precision ~1% EVERY realistic run — never resolved (surprise ≡ detection signal). Detect-only.
+- **V (Verify, formerly B):** the old surprise-based B measured recall 92–96% / precision ~1% every realistic run (never
+  resolved — surprise ≡ detection signal). Being REPLACED by reconstruction-based V; no V measurement exists yet.
 - **Management ablation:** no prediction-quality cost ON vs OFF; its job is bounding domain-record growth.
 - **Non-stationary (`PHASED=1`):** system adapts (domains grow/cull, memory bounded, editing clean on active + faded) — BUT bounded `EVICT=recency` fully evicts a faded process's knowledge; `EVICT=usage` does not fix it (faded ≡ least-used); only a per-domain quota would (unbuilt).
 - **Data reality:** product loop trained on ~3.7MB effectively seen — thousands× less than a small LM. Fluent language was never in reach at that scale, independent of architecture.

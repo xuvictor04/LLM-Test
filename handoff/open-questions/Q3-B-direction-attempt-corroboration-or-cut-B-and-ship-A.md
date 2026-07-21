@@ -1,4 +1,12 @@
-# Q3 — B direction: attempt corroboration-based detection, or cut B and ship A? — OPEN, needs USER decision
+# Q3 — B direction — SUPERSEDED (2026-07-21): B is renamed V and reframed (reconstruction), not corroboration-vs-cut
+
+> RESOLUTION: the old fork (attempt corroboration-B vs cut B) is moot. B is RENAMED **V (Verify)** and reframed as
+> reconstruction-based verification decoupled from surprise — see
+> `../decisions/B-renamed-to-V-verify-reconstruction-based-not-wrongness.md`. What remains is a BUILD, not a decision.
+> Original question kept below as the record.
+
+---
+
 
 **Question:** autonomous wrong-detection (B) is broken in the realistic regime — ~1% precision in EVERY run, because
 self-consistency conflates surprising with wrong (the write gate stores surprising tokens; B flags surprising tokens).

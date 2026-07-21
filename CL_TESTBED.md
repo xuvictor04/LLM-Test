@@ -39,7 +39,12 @@ follows by provenance (reassign/delete). Kept LIVE with re-keyed centroids.
   a diagnostic, **not** a capability metric — the system works regardless of the count, and the count is just where the
   silhouette cutoff sits.
 
-### B — detect WRONG info  — DOES NOT WORK in the realistic regime
+### V — VERIFY (reconstruction)  — renamed from "B (detect WRONG info)", reframed
+> RENAMED (2026-07-21): "B / detect wrong info" is retired. The old approach below (self-consistency on SURPRISE) was a
+> category error — surprise drives learning, not truth — which is why it stuck at ~1% precision. The replacement, **V**,
+> verifies by RECONSTRUCTION (reverse-embed → compare), decoupled from surprise. The old approach is kept here as the record.
+
+**(historical) B — detect WRONG info — DOES NOT WORK in the realistic regime**
 Self-consistency: run the model on each stored entry's OWN context; flag entries whose stored token the model ranks in
 the high tail of implausibility (adaptive median + k·MAD threshold; single-shot per entry, so every entry is judged).
 - Works for CATEGORICALLY wrong info (cross-domain corruption): ~78-86% recall/precision in `cl_bench`, domain recovers.
