@@ -152,7 +152,13 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R7 (current):** [USER: refined the vision] Two refinements in `handoff/design-directions/`: (1) the full task should
+- **R8 (current):** [USER: added to the vision] Three more design directions: (1) experts can be TOOL CALLS / SCRIPTS,
+  self-authored when a procedure recurs (crystallize-on-repetition, like tokens); (2) reusability comes from ROUTER +
+  DISCOVERY + SIMILARITY — the router acts as an EMBEDDER (input+source → modification → embed → nearest expert / learned
+  recognition), giving transfer to prior-unknown parts; the open crux is CONTENT vs FUNCTIONAL similarity in that space;
+  (3) filed the UNIFYING-PRIMITIVE hypothesis (subtokenize→embed→match→discover→crystallize at every layer: tokens, senses,
+  domains, experts, tools) — the "much smaller architecture" thread. No code changed.
+- **R7:** [USER: refined the vision] Two refinements in `handoff/design-directions/`: (1) the full task should
   NOT be done alone — it is SUBCONTRACTED / spread via the router base (division of labor at the sub-task level), which
   REVISES the independence-loss premise; redundancy/safety then comes from shared reusable SUB-SKILLS, not whole-task
   generalists. Flagged on the GLOSSARY independence-loss entry. (2) senses live at the LOWEST tokenizer layer, DISCOVERED
