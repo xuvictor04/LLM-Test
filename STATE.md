@@ -160,7 +160,13 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R17 (current):** [USER: continue building] Turned Verification from detect-only into an ACTIONABLE capability (the
+- **R18 (current):** [USER: build whatever you recommend up to a GPU test] Built `keystone_probe.py` and VALIDATED the
+  keystone on CPU: functional (operation) similarity IS separable from content similarity — a transfer-coded embedding
+  (z from one input→output pair must transform NEW content under the same op) hits k-NN op-purity 0.80 vs 0.50 surface
+  (chance 0.20, gap +0.30). Naive same-input coding gave only 0.61 (z cheated with content) — cross-content TRANSFER is
+  the key, and it concretely realizes the design's "modification before embedding" step. De-risks routing/reuse. Recorded in §7;
+  updated the routing / unifying-primitive / what-is-missing direction files. Toy synthetic — real integration is future.
+- **R17:** [USER: continue building] Turned Verification from detect-only into an ACTIONABLE capability (the
   old B stayed detect-only because ~1% precision made deleting suicidal): `memory.read()` now excludes `is_unverified`
   entries (no-op until `verify()` runs), and `VERIFY_SWEEP=1` DELETES them (detect-AND-remove). Opt-in, memory-only,
   CPU-smoke-tested (recon+sweep and the default both run; default unchanged). Deliberately did NOT stack the riskier
@@ -279,6 +285,11 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   steps, cuda]: AUC 0.980 vs 0.907, precision@1% 100% vs 36.9%, recall 32% vs 65%.** (Still the simplified standalone
   harness — small GRU, no fabric/tokenizer; the full product-loop `run_verify_test.py` is the last mile.) NOTE: the naive
   50%-cross-domain test is the EASY regime B already handles (B ~97% there) — not informative.
+- **Keystone (functional vs content embedding) — MECHANISM VALIDATED (CPU, `keystone_probe.py`):** an embedding trained as
+  a REUSABLE code that must TRANSFER across content (derive z from one input→output pair, require it to transform a NEW
+  input under the same op) organizes by FUNCTION — k-NN op-purity **0.80 vs 0.50 surface** (chance 0.20), gap +0.30. So
+  functional similarity IS learnable (the make-or-break for routing/reuse), and the "modification before embedding" step
+  is concretely: cross-content transfer training. Toy synthetic; the real integration is future.
 - **Management ablation:** no prediction-quality cost ON vs OFF; its job is bounding domain-record growth.
 - **Non-stationary (`PHASED=1`):** system adapts (domains grow/cull, memory bounded, editing clean on active + faded) — BUT bounded `EVICT=recency` fully evicts a faded process's knowledge; `EVICT=usage` does not fix it (faded ≡ least-used). A per-domain quota is REJECTED [USER]; the direction is memory-pressure → grow experts / retrain / domain-split (see `handoff/designed-but-not-built/memory-pressure-...`). Unbuilt.
 - **Data reality:** product loop trained on ~3.7MB effectively seen — thousands× less than a small LM. Fluent language was never in reach at that scale, independent of architecture.

@@ -14,10 +14,13 @@ generalize across tasks IF the embedding makes functionally-similar sub-tasks la
 **The "modification" step (hypothesis):** the modification applied before embedding is plausibly where surface content is
 ABSTRACTED AWAY so that FUNCTIONAL similarity (same procedure needed) emerges instead of mere content similarity.
 
-**The deep tension (OPEN, make-or-break):** the current signature encoder learns CONTENT similarity (InfoNCE:
-nearby-in-stream = similar). Sub-skill reuse needs FUNCTIONAL similarity — two inputs of different content that need the
-SAME procedure ("sort numbers" vs "sort words"). Whether the router's space can capture FUNCTION, not just content,
-decides whether reuse/transfer actually works. This is the crux to solve before this direction is buildable.
+**The deep tension — MECHANISM VALIDATED (CPU, `keystone_probe.py`, 2026-07-21):** the current signature encoder learns
+CONTENT similarity (InfoNCE); sub-skill reuse needs FUNCTIONAL similarity (different content, SAME procedure — "sort
+numbers" vs "sort words"). Probe result: an embedding trained as a REUSABLE code that must TRANSFER across content
+(z from one input→output pair must transform a NEW input under the same op) organizes by FUNCTION — op-purity 0.80 vs
+0.50 surface (chance 0.20). Naive same-input coding gave only 0.61 (z cheated with content). **So the "modification
+before embedding" step is concretely CROSS-CONTENT TRANSFER training.** Functional similarity is learnable — reuse/transfer
+is buildable. (Toy synthetic; real integration into the router is future.)
 
 **Source:** user, session 2026-07-21.
 </content>

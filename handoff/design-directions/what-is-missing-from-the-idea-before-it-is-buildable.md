@@ -6,11 +6,12 @@ to turn it into code. Grounded in the current code: forward encoders exist (`Sig
 `memory.py` `set_selfcon`/`is_wrong`/`sweep_wrong`. **Nothing decodes back from the representation** — the reverse
 embedder is entirely new.
 
-## The keystone gap (blocks everything)
-1. **Reconstruction TARGET: content or function?** Does the reverse embedder regenerate the SURFACE (input bytes/tokens)
-   or the FUNCTION/effect (what a sub-skill does)? This single choice decides whether the embedding space encodes content
-   or function — and functional similarity is what routing/reuse/transfer needs. (See
-   `routing-is-embedding-plus-similarity-for-reuse-and-transfer.md`.)
+## The keystone gap (blocks everything) — MECHANISM VALIDATED (CPU) 2026-07-21
+1. **Reconstruction TARGET: content or function?** RESOLVED in principle by `keystone_probe.py`: functional similarity is
+   learnable via CROSS-CONTENT TRANSFER coding (train an embedding as a reusable code that must transform NEW content under
+   the same operation) — op-purity 0.80 vs 0.50 surface (chance 0.20). The "modification before embedding" step = transfer
+   training. Remaining: integrate this into the real router (sub-tasks aren't labeled ops; transfer pairs must be
+   discovered, not given). (See `routing-is-embedding-plus-similarity-for-reuse-and-transfer.md`.)
 
 ## Reverse-embedder / V gaps
 2. **Architecture of the reverse embedder** — decode from WHICH representation (SigEncoder signature? LM hidden? memory
