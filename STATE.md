@@ -93,6 +93,7 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
   self-consistency `is_wrong` (old B), reconstruction `is_unverified`/`set_recon` (Verification), optional adaptive gate, selectable eviction, stats.
 - `verification.py` — **Verification** (renamed B): `Reconstructor` (reverse embedder, cross-reconstructs the expected
   token-code from the context key), `recon_loss`, `verify()`. Standalone CPU probe validates the core claim (AUC ~0.93 on structured data).
+- `run_verify_test.py` — one-shot copy-paste A/B test: Garry-like config + `VERIFY=recon`, runs the product loop, prints reconstruction precision vs old-B precision.
 - `self_organize.py` — product loop: byte-signature assembly (C) → B detect-only → performance → composition →
   generation → unlearn (A); online tokenizer; the society/fabric of experts; affiliation map; validation/memorization check.
 - `cl_bench.py` — mechanics: forgetting vs replay, editability (memory-delete vs weights-unlearn), drift, wrongness.

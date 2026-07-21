@@ -25,7 +25,8 @@ Key switches (default ON unless noted): `FABRIC=1 SOCIETY=1 ENS_K=2`, `TOKENIZER
 `EVICT=recency` (not `usage` — doesn't protect faded knowledge; see `../STATE.md §7`, non-stationary line).
 
 ## Test VERIFICATION (reconstruction) vs the old self-consistency B  [VERIFY=recon]
-One full run prints BOTH signals' precision on the same injected-corruption set — it IS the A/B.
+**Easiest — one script:** `python3 run_verify_test.py` (Garry-like config, Verification ON, prints both precisions).
+Or the full-suite route (also prints both, plus everything else):
 ```
 VERIFY=recon WRONG_INJECT=100 RUN_NAME=verify bash run_full_unfrozen.sh
 ```
