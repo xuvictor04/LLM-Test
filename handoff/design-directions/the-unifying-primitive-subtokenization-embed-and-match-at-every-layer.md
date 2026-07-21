@@ -9,7 +9,7 @@ right target" [USER]. One primitive appears at every granularity:
 
 **Applied at each layer:**
 - bytes → **tokens** — mint on repetition. *(already built)*
-- tokens → **senses** — branch on unknown/unusual input, at the lowest tokenizer layer. *(direction)*
+- tokens → **meanings** (polysemy — which vector when a surface form has several meanings) — branch at the token layer. *(direction; provisional name "Meaning", NOT "Sense")*
 - stream windows → **domains** — assemble / merge / cull in signature space. *(already built)*
 - sub-tasks → **experts / sub-skills** — route by embedding-similarity; born when a recurring sub-pattern is handled poorly. *(direction)*
 - recurring procedures → **tool-experts / scripts** — crystallize on repetition, like tokens. *(direction)*

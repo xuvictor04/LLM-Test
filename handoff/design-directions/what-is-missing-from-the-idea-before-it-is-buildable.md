@@ -25,7 +25,8 @@ embedder is entirely new.
 6. **The "modification" step** — the abstraction the router applies before embedding (the candidate content→function bridge). Undefined.
 
 ## Structural gaps (later)
-7. Senses at the lowest tokenizer layer: discovery-on-unusual, bounding vectors/surface-form, reconcile stage, edit propagation.
+7. Meanings (polysemy) at the token layer: bounding vectors/surface-form, reconcile stage, edit propagation. AND Senses
+   (modalities) at the lowest tokenizer layer: discovery-on-unusual-input, per-sense tokenizer/embedding into the shared space.
 8. Sub-skill routing (router-as-embedder), emergent subspecialties without losing redundancy.
 9. Tool-experts: distilling a recurring neural pattern into a script; validation; shared routing space.
 

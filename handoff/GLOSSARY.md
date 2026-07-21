@@ -16,9 +16,18 @@ result. Superseded two rejected designs (a 1:1 domain-tied bank; and a "node").
 **Node** — an abandoned name for what an expert is inside the "fabric." In old comments/history, "node" = today's
 "expert"; renamed once the chained/entangled fabric was rejected for the society design.
 
-**Fabric** — the routing mechanism experts sit inside. Two very different things have been called this:
-- *chained* fabric (rejected, `SOCIETY=0`): each step's blended output fed the next step, entangling every expert with every other. Not used today.
-- *society* fabric (current, `SOCIETY=1`): every expert maps the same base representation to its own output, independently, no chaining; blended once at the end.
+**Fabric** — RETIRED name (2026-07-21). It conflated two jobs, now split into **Router** (selects which experts) and
+**Compositor** (blends their outputs, `fab_logits`). The code flag `FABRIC=1` and identifier keep the old name until the
+build renames them. Historical: a *chained* fabric (rejected, `SOCIETY=0`) fed each step's blend into the next step,
+entangling experts; the current *society* (`SOCIETY=1`) has each expert map the shared base representation to its own
+output independently, blended once at the end by the Compositor.
+
+**Router** — selects which experts handle the input (routing by grounded keys / similarity). **Compositor** — blends the
+selected experts' OUTPUTS (`Σ wᵢ·head`, never hidden states) into the final prediction. (Together = the retired "Fabric".)
+
+**Sense** — a MODALITY / perceptual channel (input AND output), integrated at the LOWEST tokenizer layer. One sense today
+= language (the system is an LLM). Adding a modality = adding a sense (mic → audio, camera → vision) — the multimodality
+"pluggable avenues" goal. NOT the same as polysemy (multiple meanings of one surface form; that's provisionally "Meaning").
 
 **Society** — shorthand for the current expert architecture: independent experts + prediction-level ensembling + an
 independence loss training each expert to solve the task alone. The opposite of a "decomposition" (parts that only work in combination).
@@ -45,10 +54,10 @@ deletion must RELEASE affiliations, not cascade-delete experts.
 
 **Memory / A (edit)** — the external key→token store with per-entry provenance. Deleting by provenance is the oldest, most consistently proven result. Surprise-gated writes; `pos` records the source byte position.
 
-**V (Verify)** — *renamed from B (wrongness).* Verification by RECONSTRUCTION: reverse-embed the representation and
+**Verification** — *renamed from B (wrongness).* Verification by RECONSTRUCTION: reverse-embed the representation and
 compare to the original/expectation ("can I regenerate this from my understanding?"), DECOUPLED from surprise. Replaces
 the old B, which was self-consistency-on-surprise and stuck at ~1% precision (surprise ≡ its detection signal — a
-category error; surprise drives learning, not truth). See `decisions/B-renamed-to-V-verify-reconstruction-based-not-wrongness.md`
+category error; surprise drives learning, not truth). See `decisions/B-renamed-to-Verification-reconstruction-based.md`
 and `design-directions/reverse-embedders-for-thought-verification-and-training.md`. (Old code names `is_wrong`/`selfcheck`/`sweep_wrong` persist until the build replaces them.)
 
 **C (self-assemble)** — the domain-discovery loop. Works; over-segments; harmless. The signature encoder reads the BYTE stream (not tokens).

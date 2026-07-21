@@ -3,7 +3,7 @@
 An autonomous continual-learning system with a three-part loop, tested on one **unlabeled** byte stream that
 secretly switches between latent processes:
 
-    self-ASSEMBLE domains (C)  ->  VERIFY by reconstruction (V, formerly "B / detect wrong")  ->  EDIT / unlearn by provenance (A)
+    self-ASSEMBLE domains (C)  ->  VERIFY by reconstruction (Verification, formerly "B / detect wrong")  ->  EDIT / unlearn by provenance (A)
 
 Byte-level by default (vocab = 256, raw UTF-8 bytes); an optional **expanding subword tokenizer** is available via
 `TOKENIZER=1` — an online byte-BPE that GROWS its vocabulary by mint-on-repetition (byte-grounded, lossless; can also
@@ -39,9 +39,9 @@ follows by provenance (reassign/delete). Kept LIVE with re-keyed centroids.
   a diagnostic, **not** a capability metric — the system works regardless of the count, and the count is just where the
   silhouette cutoff sits.
 
-### V — VERIFY (reconstruction)  — renamed from "B (detect WRONG info)", reframed
+### Verification (by reconstruction)  — renamed from "B (detect WRONG info)", reframed
 > RENAMED (2026-07-21): "B / detect wrong info" is retired. The old approach below (self-consistency on SURPRISE) was a
-> category error — surprise drives learning, not truth — which is why it stuck at ~1% precision. The replacement, **V**,
+> category error — surprise drives learning, not truth — which is why it stuck at ~1% precision. The replacement, **Verification**,
 > verifies by RECONSTRUCTION (reverse-embed → compare), decoupled from surprise. The old approach is kept here as the record.
 
 **(historical) B — detect WRONG info — DOES NOT WORK in the realistic regime**

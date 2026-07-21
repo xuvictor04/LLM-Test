@@ -1,8 +1,8 @@
 # Q3 — B direction — SUPERSEDED (2026-07-21): B is renamed V and reframed (reconstruction), not corroboration-vs-cut
 
-> RESOLUTION: the old fork (attempt corroboration-B vs cut B) is moot. B is RENAMED **V (Verify)** and reframed as
+> RESOLUTION: the old fork (attempt corroboration-B vs cut B) is moot. B is RENAMED **Verification** and reframed as
 > reconstruction-based verification decoupled from surprise — see
-> `../decisions/B-renamed-to-V-verify-reconstruction-based-not-wrongness.md`. What remains is a BUILD, not a decision.
+> `../decisions/B-renamed-to-Verification-reconstruction-based.md`. What remains is a BUILD, not a decision.
 > Original question kept below as the record.
 
 ---

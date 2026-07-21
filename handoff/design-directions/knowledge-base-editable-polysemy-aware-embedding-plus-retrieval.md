@@ -1,5 +1,10 @@
 # Knowledge base = editable memory + built-in retrieval + a polysemy-aware embedding system [USER direction]
 
+> TERMINOLOGY [USER, 2026-07-21]: this file's "multiple meanings per surface form" is **polysemy** — provisionally named
+> **"Meaning"**. It is NOT a "Sense" (Sense now means a MODALITY — mic/camera; see `STRUCTURES.md`). Read "sense-vector"
+> below as "meaning-vector". The "discovered at the lowest tokenizer layer on unusual input" mechanism belongs to SENSES
+> (modalities), captured in `designed-but-not-built/multimodality-pluggable-avenues.md`.
+
 **What the user wants the knowledge base to be** — a combination of:
 1. the CURRENT `EditableMemory` (provenance-tagged, surgically deletable), plus
 2. BUILT-IN RETRIEVAL, plus

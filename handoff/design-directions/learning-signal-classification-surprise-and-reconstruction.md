@@ -5,11 +5,11 @@ The two signals are DIFFERENT and drive DIFFERENT things. Keeping them separate 
 
 ## The two signals
 - **SURPRISE** = `1 − p_model(true token)` — a FORWARD signal. "I did not predict this." Meaning: novelty / where the
-  model is wrong-footed. **Drives LEARNING:** where to WRITE to memory, where to DISCOVER a new sense / domain / expert,
-  where to ADAPT. NOT a truth signal.
+  model is wrong-footed. **Drives LEARNING:** where to WRITE to memory, where to DISCOVER a new meaning / domain / expert
+  (and, on genuinely new input, a new Sense/modality), where to ADAPT. NOT a truth signal.
 - **RECONSTRUCTION error** = decode the representation back (reverse embedder) and COMPARE to the original / expectation —
   a REVERSE signal. "I cannot regenerate this from my understanding." Meaning: lack of UNDERSTANDING. **Drives
-  VERIFICATION (V):** is this genuinely grasped, or only surface-matched?
+  VERIFICATION:** is this genuinely grasped, or only surface-matched?
 
 ## The 2×2 that surprise-alone could never see
 |                              | low reconstruction error (understood)        | high reconstruction error (not understood)      |
