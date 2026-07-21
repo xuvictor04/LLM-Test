@@ -8,7 +8,10 @@
 **This is a genuine PRODUCT-SHAPE fork, not a technical bug** — prior context gave no recommendation. Modularity is the
 stronger position for a machine-unlearning / compliance framing ("we removed the component that knew this," with a
 measurable concentrated effect); redundancy is the stronger position for robustness (losing any component costs nothing).
-**North-star implication (neutral):** an ever-expanding, UPDATABLE knowledge base (`../NORTH_STAR.md`) leans toward
-MODULARITY (meaningful, addable/removable pieces) — but redundancy buys robustness (losing any component costs nothing). Still the user's call.
-**Who decides:** USER — pick one as default, or keep both available per-run.
+**USER direction (2026-07-21) — NOT a binary pick:** the target is a redundant/interchangeable BASE **with emergent
+subspecialties** for specific tasks. Redundancy is wanted for (a) safety against incorrect removal and (b) shared
+sub-task structure; specialization should EMERGE by task decomposition on top of it. This turns the question from a
+config toggle into a DESIGN CHALLENGE — get emergent specialization without losing the redundant safety net. Full note:
+`../design-directions/interchangeable-base-with-emergent-subspecialties.md`. Tightly coupled to Q0 (evolution).
+**Who decides:** USER has set the DIRECTION; the mechanism is open.
 **Source:** `../../STATE.md §4 Q-regime`.

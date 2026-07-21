@@ -27,7 +27,8 @@ and you can continue without the prior conversation.
 ## How this folder is organized
 **One idea per file. The filename IS the summary — `ls` a subfolder and you have the map.**
 `process/` (how we work) · `decisions/` (settled `[USER]` calls) · `open-questions/` (needs a USER decision) ·
-`designed-but-not-built/` (specified, unbuilt) · `history/` (per-phase narrative) · `migrations/` (dated hand-offs).
+`design-directions/` (vision the user has set, mechanism still open) · `designed-but-not-built/` (specified, unbuilt) ·
+`history/` (per-phase narrative) · `migrations/` (dated hand-offs).
 
 ## Relationship to STATE.md (avoid drift — this is the lesson that created this folder)
 `STATE.md` is the single LIVE source of truth. Everything here is short and points back to it. **The reason §6/§7 of

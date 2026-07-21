@@ -96,8 +96,9 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
 - `tokenizer.py` (DynamicTokenizer + retire_stale), `run_full_unfrozen.sh` (RUN_NAME-namespaced), `run_cl_test.sh`.
 - `fetch_data.sh` (~85MB GitHub-sourced, verified; `BIG=1` ~1GB), `fetch_big.py` (HF streaming — network UNTESTED from sandbox).
 - Docs: `README.md`, `CL_TESTBED.md`, `STATE.md`, `docs/FILES.md`, `docs/HANDOFF.md`.
-- `handoff/` — chat-to-chat context-exchange folder [USER]: `README.md` bootstrap + `GLOSSARY.md`, `COMMANDS.md`,
-  and atomic one-idea files under `process/`, `decisions/`, `open-questions/`, `designed-but-not-built/`, `history/`, `migrations/`.
+- `handoff/` — chat-to-chat context-exchange folder [USER]: `README.md` bootstrap + `NORTH_STAR.md`, `GLOSSARY.md`,
+  `COMMANDS.md`, and atomic one-idea files under `process/`, `decisions/`, `open-questions/`, `design-directions/`,
+  `designed-but-not-built/`, `history/`, `migrations/`.
 
 ### NOT INCLUDED — built but OFF by default, or archived
 - Frozen memory / frozen key: baseline only. Adaptive write-gate: ON in the full run, toggleable off for byte baselines.
@@ -151,7 +152,13 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R5 (current):** [USER: answered my strategic questions on the system] Captured the NORTH STAR — small, learning,
+- **R6 (current):** [USER: elaborated the vision] Captured two design DIRECTIONS (new `handoff/design-directions/`):
+  (1) the expert society should be a redundant/interchangeable BASE **with emergent subspecialties** — redundancy for
+  safety-against-incorrect-removal + shared sub-task structure, specialization emerging by task decomposition; this makes
+  Q-regime a design challenge (emergent specialization without losing redundancy) and couples it to Q0. (2) knowledge base
+  = EditableMemory + built-in retrieval + a polysemy-aware EDITABLE embedding (multiple sense-vectors per surface form,
+  with sense selection). Threaded the direction into Q-regime. No code changed.
+- **R5:** [USER: answered my strategic questions on the system] Captured the NORTH STAR — small, learning,
   reasoning, ever-expanding/updatable model; growability is the SACRED INVARIANT; language is a benchmark; multimodality
   + an observability dashboard are long-horizon goals; from-scratch for novelty+ownership; rented H100 as-needed; success
   priority convo→sentence-gen→architecture→shipping. Wrote `handoff/NORTH_STAR.md`, updated §1/§3, added multimodality +
