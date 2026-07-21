@@ -16,8 +16,16 @@ keys by the model's representation, tags provenance, does global kNN retrieval, 
 sense-vectored, editable embedding layer would sit around these — multiple keys per surface form, editable per sense,
 retrieval selecting the sense that fits the context.
 
-**Open sub-questions (undecided):** how senses are discovered (emergent, like domains? on collision?); how many vectors
-per surface form and how that's bounded; how a sense-edit propagates to memory entries written under the old sense.
+**Sense discovery (USER direction, 2026-07-21):** senses live at the **LOWEST tokenizer layer** (not a separate higher
+layer). A new sense is **DISCOVERED when an UNKNOWN or UNUSUAL input is received** — novelty/surprise-triggered — and this
+happens **BEFORE reconciliation and understanding** (a staged pipeline: unusual input → provisional sense at the
+tokenizer layer → reconcile against known senses → integrate/understand). Reuses existing signals: the tokenizer already
+mints on REPETITION; sense discovery adds branching on SURPRISE (the same `1 − p_model(true token)` signal the write gate uses).
+**How I read the stages (confirm):** *reconciliation* = align/merge the provisional new sense with existing senses (is
+this genuinely new, or a variant of a known one?); *understanding* = integrate the reconciled sense so it can be used and edited.
+
+**Still open:** how many vectors per surface form and how that's bounded; how a sense-edit propagates to memory entries
+written under the old sense; whether SENSES and DOMAINS are the same emergent mechanism at different granularities.
 
 **Status:** design direction, not specified or built.
 **Source:** user, session 2026-07-21.

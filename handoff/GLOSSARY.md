@@ -29,7 +29,7 @@ independence loss training each expert to solve the task alone. The opposite of 
 before decoding produces a representation none was trained to emit (degenerate generation, broken self-check). Averaging
 their DECODED predictions (`Σ wᵢ·head(oᵢ)`, via `fab_logits`) does not. Keep it the latter.
 
-**Independence loss** — trains each top-`IND_K` routed expert to independently predict the target, weighted by routing mass, on top of the ensembled loss. This is what makes deleting one expert cost little.
+**Independence loss** — trains each top-`IND_K` routed expert to independently predict the target, weighted by routing mass, on top of the ensembled loss. This is what makes deleting one expert cost little. NOTE (direction): the user wants work SUBCONTRACTED / distributed via the router rather than each expert solving the whole task alone — a proposed revision to this premise; see `design-directions/interchangeable-base-with-emergent-subspecialties.md`.
 
 **Grounded routing (`ROUTE_GROUNDED`)** — expert routing keys as EMA centroids in signature space (like domains), not
 freely-learned keys. Free keys stay symmetric → every expert serves every domain equally (redundancy). Grounded +

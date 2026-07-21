@@ -152,7 +152,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R6 (current):** [USER: elaborated the vision] Captured two design DIRECTIONS (new `handoff/design-directions/`):
+- **R7 (current):** [USER: refined the vision] Two refinements in `handoff/design-directions/`: (1) the full task should
+  NOT be done alone — it is SUBCONTRACTED / spread via the router base (division of labor at the sub-task level), which
+  REVISES the independence-loss premise; redundancy/safety then comes from shared reusable SUB-SKILLS, not whole-task
+  generalists. Flagged on the GLOSSARY independence-loss entry. (2) senses live at the LOWEST tokenizer layer, DISCOVERED
+  on unknown/unusual input (surprise-triggered), BEFORE reconciliation + understanding. No code changed.
+- **R6:** [USER: elaborated the vision] Captured two design DIRECTIONS (new `handoff/design-directions/`):
   (1) the expert society should be a redundant/interchangeable BASE **with emergent subspecialties** — redundancy for
   safety-against-incorrect-removal + shared sub-task structure, specialization emerging by task decomposition; this makes
   Q-regime a design challenge (emergent specialization without losing redundancy) and couples it to Q0. (2) knowledge base
