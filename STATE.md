@@ -71,6 +71,8 @@ Code: `memory.py` (the store), `self_organize.py` (product loop), `cl_bench.py` 
 - `run_full_unfrozen.sh` (whole system, one command; now also writes a checkpoint), `prompt.py` (message the
   trained model interactively), `run_cl_test.sh`, `README.md`, `CL_TESTBED.md`, `STATE.md`, `tokenizer.py`, `data/`.
 - `docs/FILES.md` — file-by-file map (read from source). `docs/HANDOFF.md` — pick-up-here guide + reconciliation ledger.
+- `handoff/` — chat-to-chat context-exchange folder [USER]: blank-chat bootstrap (`handoff/README.md`) + atomic one-idea
+  files under `process/`, `decisions/`, `open-questions/`, `migrations/`. Filename-as-index; points back to this ledger.
 
 ### NOT INCLUDED — built but OFF by default, or archived
 - Frozen memory: present, baseline only (not the product path).
@@ -144,7 +146,12 @@ Unless a value is marked `[USER]`, treat it as `[me]` and flag it when I put it 
 > CAVEAT: this changelog runs T0–T5, but the frozen milestone is "T33" (`garry/GARRY.md`) — a DIFFERENT counter. The
 > Fabric/society/experts/phased-stream/grounding work between them lived in a since-migrated chat + GPU logs and is not
 > reconstructable from the repo. §2 (Decisions) WAS kept current through it; §6/§7 were not. See `docs/HANDOFF.md §7`.
-- **T5 (current):** [USER: file documentation + reconciliation + docs for the future] Added `docs/FILES.md` (file-by-file
+- **T6 (current):** [USER: add a separate folder for workflow / context exchange as chats migrate] Created `handoff/` at
+  repo root: a blank-chat bootstrap (`handoff/README.md`) plus atomic one-idea-per-file subfolders `process/` (8 files),
+  `decisions/` (11), `open-questions/` (3), `migrations/` (1, this session). Filename-carries-the-summary style per user;
+  designed so the next chat can rely on it with ZERO prior context. Keeps `STATE.md` as the live source of truth; the
+  handoff files are short and point back here to avoid drift. No code changed.
+- **T5:** [USER: file documentation + reconciliation + docs for the future] Added `docs/FILES.md` (file-by-file
   map, read from source) and `docs/HANDOFF.md` (pick-up-here guide + reconciliation ledger). Reconciled this file: removed
   dangling §7z/§7x/§7n/§7r/§7c refs, relabeled §7 as the T2 dev run and pointed "newest" at `garry/GARRY.md`, fixed the
   double "(current)" tag, harmonized B precision to "~1–2% across runs". Fixed two doc-vs-code bugs: `README.md` output
