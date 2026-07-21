@@ -158,7 +158,14 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R14 (current):** [USER: rejected the strict per-domain quota] Replaced the rejected faded-knowledge quota with a
+- **R15 (current):** [USER: a console script, repo is private] Added `verify_console_test.py` — self-contained A/B
+  (torch + `data/` only, no repo imports, no git pull; paste-able via `exec(open(...).read())`). Building it caught a
+  REAL methodology error: the first version injected 50% cross-domain corruption = the EASY regime B already handles
+  (B ~97%). Rewrote it FAITHFUL: surprise-gated genuine negatives (B's real failure mode) + base-rate-honest metrics
+  (AUC, precision@1%). Result on CPU real data (undertrained toy): reconstruction **AUC 0.978 vs B 0.903**, precision@1%
+  **100% vs 30.5%** — the reframe holds (reconstruction is decoupled from surprise, doesn't false-positive on
+  surprise-gated genuine). Recorded in §7. GPU run still the real validation. torch stays installed for CPU probes.
+- **R14:** [USER: rejected the strict per-domain quota] Replaced the rejected faded-knowledge quota with a
   structural direction: memory pressure → GROW the domain's experts / retrain / or split the domain (consistent with the
   growability invariant, not a foreign cap). Renamed the designed-but-not-built file, fixed §7 + recommended-next-steps.
   Also added the copy-paste Verification test to `handoff/COMMANDS.md`. No code changed.
@@ -254,7 +261,11 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 - **Composition:** GLOBAL retrieval beats siloing to nearest segment by +0.03…+0.56 b/B → over-segmentation is harmless.
 - **Tokenizer:** ~−0.5 b/B vs raw bytes, every comparison. Online == frozen at matched vocab/memory.
 - **Verification (formerly B):** the old surprise-based B measured recall 92–96% / precision ~1% every realistic run (never
-  resolved — surprise ≡ detection signal). Being REPLACED by reconstruction-based Verification; no Verification measurement exists yet.
+  resolved — surprise ≡ detection signal). **Reconstruction Verification VALIDATED (CPU, `verify_console_test.py`, real
+  corpora, undertrained toy GRU):** in the REALISTIC regime (surprise-gated genuine negatives — the hard case B fails on),
+  reconstruction **AUC 0.978 vs B 0.903**, and precision-at-1%-base-rate **100% vs 30.5%** (reconstruction does NOT
+  false-positive on surprise-gated genuine entries — the exact B failure). Directional (toy CPU model); the GPU run is the
+  real number. NOTE: the naive test (50% cross-domain corruption) is the EASY regime B already handles (B ~97% there) — not informative.
 - **Management ablation:** no prediction-quality cost ON vs OFF; its job is bounding domain-record growth.
 - **Non-stationary (`PHASED=1`):** system adapts (domains grow/cull, memory bounded, editing clean on active + faded) — BUT bounded `EVICT=recency` fully evicts a faded process's knowledge; `EVICT=usage` does not fix it (faded ≡ least-used). A per-domain quota is REJECTED [USER]; the direction is memory-pressure → grow experts / retrain / domain-split (see `handoff/designed-but-not-built/memory-pressure-...`). Unbuilt.
 - **Data reality:** product loop trained on ~3.7MB effectively seen — thousands× less than a small LM. Fluent language was never in reach at that scale, independent of architecture.
