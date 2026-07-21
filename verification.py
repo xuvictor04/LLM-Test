@@ -48,14 +48,25 @@ def recon_loss(recon, keys, toks):
     return recon.error(keys.detach(), toks).mean()
 
 
-@torch.no_grad()
-def verify(mem, recon):
-    """Compute reconstruction error for every active memory entry and store it as the Verification signal
-    (mem.set_recon). Mirrors the old selfcheck(), but the signal is reconstruction error, not self-consistency."""
+def verify(mem, recon, fit_steps=3000, lr=1e-3, bs=512):
+    """Compute reconstruction error for every active memory entry and store it as the Verification signal (mem.set_recon).
+
+    KEY LESSON (product-loop failure, 2026-07-21): training the Reconstructor JOINTLY during the loop fails -- the online
+    tokenizer re-tokenizes the stream and keys get re-keyed, so the genuine-association manifold is a MOVING TARGET and the
+    signal comes out as noise (0.3% precision). So we FIT the Reconstructor HERE, on the FINAL, settled store (its keys no
+    longer move), which reproduces the standalone regime where reconstruction cleanly separates genuine from corrupt.
+    The injected/wrong entries are a tiny fraction, so fitting on all active entries doesn't corrupt the manifold."""
     ii = mem.active.nonzero(as_tuple=True)[0]
     if ii.numel() == 0:
         return
-    er = [recon.error(mem.keys[ii[s:s + 8192]], mem.tok[ii[s:s + 8192]]) for s in range(0, ii.numel(), 8192)]
+    if fit_steps > 0:
+        opt = torch.optim.Adam(recon.parameters(), lr=lr); recon.train()
+        for _ in range(fit_steps):
+            b = ii[torch.randint(0, ii.numel(), (min(bs, ii.numel()),), device=ii.device)]
+            opt.zero_grad(); recon.error(mem.keys[b].detach(), mem.tok[b]).mean().backward(); opt.step()
+        recon.eval()
+    with torch.no_grad():
+        er = [recon.error(mem.keys[ii[s:s + 8192]], mem.tok[ii[s:s + 8192]]) for s in range(0, ii.numel(), 8192)]
     mem.set_recon(ii, torch.cat(er))
 
 

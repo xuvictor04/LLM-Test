@@ -160,7 +160,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R18 (current):** [USER: build whatever you recommend up to a GPU test] Built `keystone_probe.py` and VALIDATED the
+- **R19 (current):** [USER ran the full product-loop test] Verification FAILED in the real loop (0.3% precision vs the
+  standalone's 100%) — diagnosed: joint Reconstructor training on a churning store (online re-tokenization + rekey +
+  underfit base) = a moving target. FIXED: `verify()` now FITS the Reconstructor POST-HOC on the final settled store
+  (`VERIFY_FIT=3000`); joint training off by default (`RECON_W=0`). CPU-smoke-tested. Awaiting a GPU re-test (sweep OFF
+  until re-confirmed). Honest lesson recorded in §7: the standalone was necessary but not sufficient; the full-loop test caught the integration flaw.
+- **R18:** [USER: build whatever you recommend up to a GPU test] Built `keystone_probe.py` and VALIDATED the
   keystone on CPU: functional (operation) similarity IS separable from content similarity — a transfer-coded embedding
   (z from one input→output pair must transform NEW content under the same op) hits k-NN op-purity 0.80 vs 0.50 surface
   (chance 0.20, gap +0.30). Naive same-input coding gave only 0.61 (z cheated with content) — cross-content TRANSFER is
@@ -285,6 +290,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   steps, cuda]: AUC 0.980 vs 0.907, precision@1% 100% vs 36.9%, recall 32% vs 65%.** (Still the simplified standalone
   harness — small GRU, no fabric/tokenizer; the full product-loop `run_verify_test.py` is the last mile.) NOTE: the naive
   50%-cross-domain test is the EASY regime B already handles (B ~97% there) — not informative.
+- **Verification PRODUCT-LOOP test [USER GPU run] — FAILED as first wired, then FIXED:** in the full loop (fabric +
+  online tokenizer 256→6176 + rekey + underfit base 7.2 b/B) reconstruction gave **0.3% precision / 8.3% recall** (worse
+  than B's 1%) and `VERIFY_SWEEP` gutted the store (~21k of 292k deleted, mostly genuine). Root cause: the Reconstructor
+  trained JOINTLY on a CHURNING store (a moving target) → noise. FIX: fit it POST-HOC on the FINAL settled store
+  (`VERIFY_FIT=3000`; `RECON_W=0` default, joint training off) — reproduces the standalone's winning condition. **Awaiting a
+  GPU re-test** (keep `VERIFY_SWEEP=0` until precision is re-confirmed). Standalone (AUC 0.980) stands; only the integration was broken.
 - **Keystone (functional vs content embedding) — MECHANISM VALIDATED (CPU, `keystone_probe.py`):** an embedding trained as
   a REUSABLE code that must TRANSFER across content (derive z from one input→output pair, require it to transform a NEW
   input under the same op) organizes by FUNCTION — k-NN op-purity **0.80 vs 0.50 surface** (chance 0.20), gap +0.30. So

@@ -26,7 +26,9 @@ def _i(k, d): return int(os.environ.get(k, d))
 def _f(k, d): return float(os.environ.get(k, d))
 DEV = os.environ.get("DEVICE", "cpu")
 VERIFY = os.environ.get("VERIFY", "selfcon")               # "selfcon" (old B, default, unchanged) or "recon" (Verification)
-RECON_W = _f("RECON_W", 0.1)                               # weight of the Reconstructor's training loss (VERIFY=recon only)
+RECON_W = _f("RECON_W", 0.0)                               # joint Reconstructor training during the loop: OFF by default --
+#   it trained on the churning (re-tokenized, re-keyed) store and failed (0.3% precision). Verification now FITS post-hoc
+#   on the final settled store (VERIFY_FIT). Set RECON_W>0 only to also nudge the base keys to be reconstructable.
 VERIFY_SWEEP = _i("VERIFY_SWEEP", 0)                       # VERIFY=recon: also DELETE unverified entries (detect-AND-remove).
 #   The old B stayed detect-only because ~1% precision made deleting suicidal; reconstruction's high precision earns this.
 D = _i("D_MODEL", 128); WIN = _i("WIN", 128); NP = _i("N_PROCESSES", 4); STREAM_LEN = _i("STREAM_LEN", 120000)
@@ -934,7 +936,7 @@ def main():
             mem.write(mem_key(XW), YW.reshape(-1), src=99, surprise=None, ctx=mem_ctx(XW))   # bypass gate: force-write the synthetic wrong entries
         selfcheck(model, mem, fab if FABRIC else None)
         if VERIFY == "recon" and recon is not None:              # VERIFICATION (reconstruction): the A/B against old B
-            verify_mem(mem, recon)
+            verify_mem(mem, recon, fit_steps=_i("VERIFY_FIT", 3000))   # FIT on the FINAL settled store (joint training fails on the churning loop)
             _uv = mem.is_unverified(); _inj = (mem.src == 99) & mem.active
             _tp = int((_uv & _inj).sum()); _fp = int((_uv & (mem.src != 99) & mem.active).sum()); _pos = int(_inj.sum())
             _pr = _tp / max(1, _tp + _fp); _rc = _tp / max(1, _pos)
