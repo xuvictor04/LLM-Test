@@ -157,7 +157,11 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R13 (current):** [USER: build Verification + fix broken, as wide as comfortable before testing] FIRST CODE CHANGE.
+- **R14 (current):** [USER: rejected the strict per-domain quota] Replaced the rejected faded-knowledge quota with a
+  structural direction: memory pressure → GROW the domain's experts / retrain / or split the domain (consistent with the
+  growability invariant, not a foreign cap). Renamed the designed-but-not-built file, fixed §7 + recommended-next-steps.
+  Also added the copy-paste Verification test to `handoff/COMMANDS.md`. No code changed.
+- **R13:** [USER: build Verification + fix broken, as wide as comfortable before testing] FIRST CODE CHANGE.
   Built **Verification** (`verification.py`): a `Reconstructor` (reverse embedder) that CROSS-reconstructs the expected
   token-code from the context key — reconstruction error = the verify signal, decoupled from surprise. Wired into the
   loop ADDITIVE + OPT-IN (`VERIFY=recon`, default `selfcon` → zero change to existing runs): trained in the LM loop,
@@ -165,7 +169,7 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   vs the old self-consistency B. Validated on CPU: the standalone probe separates genuine vs corrupt at **AUC ~0.93**
   (the naive joint-autoencoder gave only ~0.65 — caught + fixed to cross-reconstruction before any GPU run); end-to-end
   smoke ran (14.6% precision on a tiny undertrained CPU model vs old B ~1%). REAL validation = the GPU A/B (see §7 / handoff).
-  Deferred (comfortable-before-test): retire_stale, release-don't-kill, quota — behind the first green GPU test. torch installed in-sandbox for the probe.
+  Deferred (comfortable-before-test): retire_stale, release-don't-kill, memory-pressure response — behind the first green GPU test. torch installed in-sandbox for the probe.
 - **R12:** [USER: confirmed the names] LOCKED the naming pass: B → **Verification**; **Fabric** RETIRED →
   **Router** (selects) + **Compositor** (blends outputs); population grades **Expert → Sub-skill → Tool-expert** confirmed;
   **Domain** kept; **Sense = a MODALITY** (the multimodality axis — one sense = language today; mic → audio) — NOT the
@@ -251,7 +255,7 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 - **Verification (formerly B):** the old surprise-based B measured recall 92–96% / precision ~1% every realistic run (never
   resolved — surprise ≡ detection signal). Being REPLACED by reconstruction-based Verification; no Verification measurement exists yet.
 - **Management ablation:** no prediction-quality cost ON vs OFF; its job is bounding domain-record growth.
-- **Non-stationary (`PHASED=1`):** system adapts (domains grow/cull, memory bounded, editing clean on active + faded) — BUT bounded `EVICT=recency` fully evicts a faded process's knowledge; `EVICT=usage` does not fix it (faded ≡ least-used); only a per-domain quota would (unbuilt).
+- **Non-stationary (`PHASED=1`):** system adapts (domains grow/cull, memory bounded, editing clean on active + faded) — BUT bounded `EVICT=recency` fully evicts a faded process's knowledge; `EVICT=usage` does not fix it (faded ≡ least-used). A per-domain quota is REJECTED [USER]; the direction is memory-pressure → grow experts / retrain / domain-split (see `handoff/designed-but-not-built/memory-pressure-...`). Unbuilt.
 - **Data reality:** product loop trained on ~3.7MB effectively seen — thousands× less than a small LM. Fluent language was never in reach at that scale, independent of architecture.
 - **Scale gap (stated to USER):** ~300× more tokens for GPT-2-small-level coherence (which still can't converse); ~3 more orders of magnitude + dialogue data + instruction-tuning/RLHF for real conversation. None of that exists yet.
 </content>

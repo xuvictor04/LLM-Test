@@ -24,6 +24,16 @@ RUN_NAME=full bash run_full_unfrozen.sh
 Key switches (default ON unless noted): `FABRIC=1 SOCIETY=1 ENS_K=2`, `TOKENIZER=1 TOK_ONLINE=1`, `MANAGE=1`,
 `EVICT=recency` (not `usage` — doesn't protect faded knowledge; see `../STATE.md §7`, non-stationary line).
 
+## Test VERIFICATION (reconstruction) vs the old self-consistency B  [VERIFY=recon]
+One full run prints BOTH signals' precision on the same injected-corruption set — it IS the A/B.
+```
+VERIFY=recon WRONG_INJECT=100 RUN_NAME=verify bash run_full_unfrozen.sh
+```
+Read `~/verify.txt` for two lines: `=== VERIFICATION (reconstruction) … precision P% …` and the old
+`=== WRONGNESS (B) … ===` block. SUCCESS = recon precision clearly beats B's ~1%. Default `VERIFY=selfcon` is
+unchanged (Reconstructor not built). Knobs: `RECON_W` (recon train weight, 0.1), `RECON_TOK`/`RECON_HID` (32/64).
+CPU mechanism check (no GPU): `python3 verification.py` → separation AUC (~0.93 on structured data).
+
 ## Ablations (one env var against the full run)
 ```
 RUN_NAME=abl_manage MANAGE=0 bash run_full_unfrozen.sh             # management vs QUALITY? (no cost — STATE §7; RESOLVED)
