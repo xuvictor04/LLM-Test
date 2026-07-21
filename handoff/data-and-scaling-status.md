@@ -6,6 +6,13 @@
 - `fetch_data.sh BIG=1`: adds large GitHub-hosted Gutenberg mirrors → ~1GB, still in-allowlist (a 101MB single source was actually downloaded + inspected as a check).
 - `fetch_big.py`: streams slices (never the whole set) from FineWeb-Edu / C4 / OpenWebText / Wikipedia / OpenAssistant(oasst1, dialogue) / The Pile via HuggingFace `datasets` streaming. **NOT exercisable from the sandbox** (HF outside the allowlist) — only non-network paths verified with a stub; the USER must run the real download and report errors.
 
+**Where the big data lives (provenance — so it's not "lost" next session)**
+- Training data is STREAMED/FETCHED on demand and **NEVER committed to git** (only the ~7MB bundled `data/train/` is in the repo).
+- The few-TB public sources (FineWeb-Edu / C4 / The Pile / …) live on HuggingFace — always upstream, re-pullable; you only ever keep local SLICES.
+- Slices land on the DISK of the machine that ran the pull, under `--out`/`DATA_DIR` (e.g. `data_big/train/<domain>/`). A
+  fresh clone or a new/ephemeral environment will NOT have them — check `du -sh data_big` on the box, or re-pull.
+- Example (a ~20GB slice done in a prior context): `python3 fetch_big.py --dataset fineweb-edu --gb 20 --out data_big`. Point a run at it with `DATA_DIR=data_big`.
+
 **Throughput**
 - `BATCH_W` batches the LM's forward/backward over multiple windows while keeping domain assembly + memory writes strictly per-window/sequential (stream order + provenance preserved). **Caveat: `STREAM_LEN` must scale WITH `BATCH_W`** or the model sees fewer optimizer steps and trains LESS.
 
