@@ -8,5 +8,7 @@
 **This is a genuine PRODUCT-SHAPE fork, not a technical bug** — prior context gave no recommendation. Modularity is the
 stronger position for a machine-unlearning / compliance framing ("we removed the component that knew this," with a
 measurable concentrated effect); redundancy is the stronger position for robustness (losing any component costs nothing).
+**North-star implication (neutral):** an ever-expanding, UPDATABLE knowledge base (`../NORTH_STAR.md`) leans toward
+MODULARITY (meaningful, addable/removable pieces) — but redundancy buys robustness (losing any component costs nothing). Still the user's call.
 **Who decides:** USER — pick one as default, or keep both available per-run.
 **Source:** `../../STATE.md §4 Q-regime`.

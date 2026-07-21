@@ -6,8 +6,9 @@ and you can continue without the prior conversation.
 
 ## Read in this order
 1. **This file.**
-2. `../README.md` — what the project is (the pitch).
-3. `migrations/` — newest dated file = the latest state of play.
+2. **`NORTH_STAR.md`** — what the project is ultimately FOR (the goal + the sacred growability invariant). Read this early.
+3. `../README.md` — what the project is (the pitch).
+4. `migrations/` — newest dated file = the latest state of play.
 4. `../STATE.md` — the LIVE ledger and single source of truth: §1 what it is + the two regimes, §2 decisions you
    must honor, §4 the four OPEN decisions, §5 config, §6 phase history, §7 measured numbers.
 5. `history/` — the full narrative as atomic per-phase files (how every current decision got made).

@@ -31,8 +31,15 @@ NOTE: root is Garry's DESCENDANT, not a byte-copy — it adds later retrieval-gr
 ## 1. What this is
 Autonomous continual-learning system. One unlabeled stream (bytes, or tokens if the expanding tokenizer is on) →
 self-ASSEMBLE domains (C) → detect WRONG info (B, detect-only) → EDIT / unlearn by provenance (A). Nothing frozen,
-nothing labeled. **Stated END GOAL [USER]: a full novel model, trained by us FROM SCRATCH (not on a pretrained base),
-that produces intelligible language and eventually holds a real conversation.**
+nothing labeled.
+
+**NORTH STAR [USER] (full statement in `handoff/NORTH_STAR.md`):** a SMALL model (much smaller than conventional LLMs)
+that LEARNS and does complex REASONING, with an ever-EXPANDING, UPDATABLE knowledge base. **SACRED INVARIANT: when
+compromises are forced, EXPANSION and GROWABILITY must NOT be lost.** Language capability is a personal BENCHMARK, not the
+endpoint. Longer-horizon goals: MULTIMODALITY (pluggable "avenues") and an observability DASHBOARD streaming the
+thinking/processes live. From-scratch (not a pretrained base) = for NOVELTY + full OWNERSHIP. Compute = rented H100, as
+long as needed (scale is feasible; "small" means capability-per-parameter via architecture, not brute scale).
+**Success priorities (most→least) [USER]: (1) conversation → (2) sentence generation → (3) characterized architecture → (4) shipping** (importance ranking; (1) depends on (2) in practice).
 
 **TWO CHARACTERIZED REGIMES (a genuine product fork — see §4 Q-regime):**
 - **REDUNDANCY** (`ROUTE_T=1.0`, = frozen `garry/`): **1.967** b/B, expert deletion FREE (-0.0009), no specialization.
@@ -104,6 +111,11 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
 - Redundancy vs modularity as the standing default.
 - The first real-GPU-scale run on the expanded corpus + batched training (the direct test of the language goal).
 
+### FUTURE DIRECTIONS — north-star goals, not yet designed (see `handoff/NORTH_STAR.md` + `handoff/designed-but-not-built/`)
+- MULTIMODALITY: pluggable "avenues" to add modalities beyond text. [USER, long-horizon]
+- OBSERVABILITY DASHBOARD: stream the model's thinking / internal processes live. [USER, long-horizon]
+- Reasoning + a genuinely small footprint with growth intact — the capability-per-parameter bet.
+
 ## 4. Open questions — awaiting the user's call (I should ASK, not default)
 - **Q0 — expert evolution type?** Verified: fitness = pure OCCUPANCY (`fit = use/age`), NO loss term. Never approved — accreted `[me]`.
   Weakness: a frequently-routed BAD expert still wins (cheap-to-reach beats good). **Prior-context rec: (a) Darwinian
@@ -139,7 +151,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R4 (current):** [USER: fold the prior-context material in; rebuild STATE.md + self-verify] Rebuilt this ledger from the
+- **R5 (current):** [USER: answered my strategic questions on the system] Captured the NORTH STAR — small, learning,
+  reasoning, ever-expanding/updatable model; growability is the SACRED INVARIANT; language is a benchmark; multimodality
+  + an observability dashboard are long-horizon goals; from-scratch for novelty+ownership; rented H100 as-needed; success
+  priority convo→sentence-gen→architecture→shipping. Wrote `handoff/NORTH_STAR.md`, updated §1/§3, added multimodality +
+  dashboard as `designed-but-not-built/`, noted north-star implications on Q0/Q-regime. No code changed.
+- **R4:** [USER: fold the prior-context material in; rebuild STATE.md + self-verify] Rebuilt this ledger from the
   context export: restored the real history (§6 phases), replaced the stale/misleading §7, added the self-verify protocol
   step (§ protocol #2), folded the new architecture decisions into §2, refreshed §3/§4/§5. Folded the export into `handoff/`
   as atomic files: `GLOSSARY.md`, `COMMANDS.md`, `history/` (12 phases), `designed-but-not-built/` (5), new `decisions/`,
