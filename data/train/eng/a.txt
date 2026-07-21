@@ -1,0 +1,181 @@
+Project Gutenberg's The Chemical History Of A Candle, by Michael Faraday
+
+This eBook is for the use of anyone anywhere at no cost and with
+almost no restrictions whatsoever.  You may copy it, give it away or
+re-use it under the terms of the Project Gutenberg License included
+with this eBook or online at www.gutenberg.net
+
+
+Title: The Chemical History Of A Candle
+
+Author: Michael Faraday
+
+Release Date: December 26, 2004 [EBook #14474]
+[Date last updated: October 1, 2005]
+
+Language: English
+
+Character set encoding: ISO-8859-1
+
+*** START OF THIS PROJECT GUTENBERG EBOOK THE CHEMICAL HISTORY OF A CANDLE ***
+
+
+
+
+Produced by Clare Boothby, Richard Prairie and the PG Online
+Distributed Proofreading Team
+
+
+
+
+
+
+                               THE CHEMICAL
+                           HISTORY OF A CANDLE
+
+             A COURSE OF LECTURES DELIVERED BEFORE A JUVENILE
+                    AUDIENCE AT THE ROYAL INSTITUTION
+
+
+                                    BY
+
+                     MICHAEL FARADAY, D.C.L., F.R.S.
+
+                                EDITED BY
+
+                         WILLIAM CROOKES, F.C.S.
+
+                   A NEW IMPRESSION, WITH ILLUSTRATIONS
+
+                                  LONDON
+
+                             CHATTO & WINDUS
+
+                                   1908
+
+
+
+
+PREFACE
+
+From the primitive pine-torch to the paraffin candle, how wide an
+interval! between them how vast a contrast! The means adopted by man to
+illuminate his home at night, stamp at once his position in the scale of
+civilisation. The fluid bitumen of the far East, blazing in rude vessels
+of baked earth; the Etruscan lamp, exquisite in form, yet ill adapted to
+its office; the whale, seal, or bear fat, filling the hut of the Esquimaux
+or Lap with odour rather than light; the huge wax candle on the glittering
+altar, the range of gas lamps in our streets,--all have their stories to
+tell. All, if they could speak (and, after their own manner, they can),
+might warm our hearts in telling, how they have ministered to man's
+comfort, love of home, toil, and devotion.
+
+Surely, among the millions of fire-worshippers and fire-users who have
+passed away in earlier ages, _some_ have pondered over the mystery of
+fire; perhaps some clear minds have guessed shrewdly near the truth. Think
+of the time man has lived in hopeless ignorance: think that only during a
+period which might be spanned by the life of one man, has the truth been
+known.
+
+Atom by atom, link by link, has the reasoning chain been forged. Some
+links, too quickly and too slightly made, have given way, and been
+replaced by better work; but now the great phenomena are known--the
+outline is correctly and firmly drawn--cunning artists are filling in the
+rest, and the child who masters these Lectures knows more of fire than
+Aristotle did.
+
+The candle itself is now made to light up the dark places of nature; the
+blowpipe and the prism are adding to our knowledge of the earth's crust;
+but the torch must come first.
+
+Among the readers of this book some few may devote themselves to
+increasing the stores of knowledge: the Lamp of Science _must_ burn.
+"_Alere flammam._"
+
+W. CROOKES.
+
+
+
+
+CONTENTS.
+
+
+LECTURE I.
+
+A CANDLE: THE FLAME--ITS SOURCES--STRUCTURE--MOBILITY--BRIGHTNESS
+
+
+LECTURE II.
+
+BRIGHTNESS OF THE FLAME--AIR NECESSARY FOR COMBUSTION--PRODUCTION OF WATER
+
+
+LECTURE III.
+
+PRODUCTS: WATER FROM THE COMBUSTION--NATURE OF WATER--A COMPOUND--HYDROGEN
+
+
+LECTURE IV.
+
+HYDROGEN IN THE CANDLE--BURNS INTO WATER--THE OTHER PART OF WATER--OXYGEN
+
+
+LECTURE V.
+
+OXYGEN PRESENT IN THE AIR--NATURE OF THE ATMOSPHERE--ITS PROPERTIES--OTHER
+PRODUCTS FROM THE CANDLE--CARBONIC ACID--ITS PROPERTIES
+
+
+LECTURE VI.
+
+CARBON OR CHARCOAL--COAL GAS--RESPIRATION AND ITS ANALOGY TO THE BURNING
+OP A CANDLE--CONCLUSION
+
+
+LECTURE ON PLATINUM.
+
+
+NOTES.
+
+
+
+
+THE CHEMICAL HISTORY OF A CANDLE
+
+LECTURE I.
+
+A CANDLE: THE FLAME--ITS SOURCES--STRUCTURE--MOBILITY--BRIGHTNESS.
+
+
+I purpose, in return for the honour you do us by coming to see what are
+our proceedings here, to bring before you, in the course of these
+lectures, the Chemical History of a Candle. I have taken this subject on a
+former occasion; and were it left to my own will, I should prefer to
+repeat it almost every year--so abundant is the interest that attaches
+itself to the subject, so wonderful are the varieties of outlet which it
+offers into the various departments of philosophy. There is not a law
+under which any part of this universe is governed which does not come into
+play, and is touched upon in these phenomena. There is no better, there is
+no more open door by which you can enter into the study of natural
+philosophy, than by considering the physical phenomena of a candle. I
+trust, therefore, I shall not disappoint you in choosing this for my
+subject rather than any newer topic, which could not be better, were it
+even so good.
+
+And before proceeding, let me say this also--that though our subject be so
+great, and our intention that of treating it honestly, seriously, and
+philosophically, yet I mean to pass away from all those who are seniors
+amongst us. I claim the privilege of speaking to juveniles as a juvenile
+myself. I have done so on former occasions--and, if you please, I shall do
+so again. And though I stand here with the knowledge of having the words I
+utter given to the world, yet that shall not deter me from speaking in the
+same familiar way to those whom I esteem nearest to me on this occasion.
+
+And now, my boys and girls, I must first tell you of what candles are
+made. Some are great curiosities. I have here some bits of timber,
+branches of trees particularly famous for their burning. And here you see
+a piece of that very curious substance taken out of some of the bogs in
+Ireland, called _candle-wood_,--a hard, strong, excellent wood, evidently
+fitted for good work as a resister of force, and yet withal burning so
+well that where it is found they make splinters of it, and torches, since
+it burns like a candle, and gives a very good l
