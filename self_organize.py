@@ -27,6 +27,8 @@ def _f(k, d): return float(os.environ.get(k, d))
 DEV = os.environ.get("DEVICE", "cpu")
 VERIFY = os.environ.get("VERIFY", "selfcon")               # "selfcon" (old B, default, unchanged) or "recon" (Verification)
 RECON_W = _f("RECON_W", 0.1)                               # weight of the Reconstructor's training loss (VERIFY=recon only)
+VERIFY_SWEEP = _i("VERIFY_SWEEP", 0)                       # VERIFY=recon: also DELETE unverified entries (detect-AND-remove).
+#   The old B stayed detect-only because ~1% precision made deleting suicidal; reconstruction's high precision earns this.
 D = _i("D_MODEL", 128); WIN = _i("WIN", 128); NP = _i("N_PROCESSES", 4); STREAM_LEN = _i("STREAM_LEN", 120000)
 SUSTAIN = _i("SUSTAIN", 2); NEW_DIST = _f("NEW_DIST", 0.35); SHIFT_DIST = _f("SHIFT_DIST", 0.30)
 SIG_MODE = os.environ.get("SIG_MODE", "learned"); SIG_D = _i("SIG_D", 64); SIG_DIM = _i("SIG_DIM", 512)
@@ -938,6 +940,9 @@ def main():
             _pr = _tp / max(1, _tp + _fp); _rc = _tp / max(1, _pos)
             print(f"=== VERIFICATION (reconstruction) [VERIFY=recon]: flagged {_tp} injected / {_pos} "
                   f"(precision {_pr:.1%}, recall {_rc:.1%}) -- compare to self-consistency B below ===")
+            if VERIFY_SWEEP:                                     # detect-AND-remove (the old B never earned this at ~1% precision)
+                _before = mem.n; _rm = mem.delete(mem.is_unverified())
+                print(f"    VERIFY_SWEEP: removed {_rm} unverified entries ({_before}->{mem.n}); reads now exclude them.")
         sr = mem.src; iw = mem.is_wrong(); flg = int(iw.sum())
         print(f"\n=== WRONGNESS (B) in the loop: self-consistency detect + sweep ===")
         if ninj > 0:

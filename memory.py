@@ -119,7 +119,8 @@ class EditableMemory:
     def read(self, q, tau=0.1):
         """q:(B,d) -> (dist:(B,V), conf:(B,), hit_idx:(B,topk)). Excludes deleted + flagged-wrong entries."""
         B = q.size(0)
-        valid = self.active & (~self.is_wrong())
+        valid = self.active & (~self.is_wrong()) & (~self.is_unverified())   # exclude old-B-wrong AND recon-unverified
+        #   (is_unverified() is a no-op until verify() has populated recon, so default runs are unchanged)
         dist = torch.zeros(B, self.V, device=self.dev)
         conf = torch.zeros(B, device=self.dev)
         hit = torch.full((B, self.topk), -1, dtype=torch.long, device=self.dev)

@@ -94,6 +94,8 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
 - `verification.py` — **Verification** (renamed B): `Reconstructor` (reverse embedder, cross-reconstructs the expected
   token-code from the context key), `recon_loss`, `verify()`. Standalone CPU probe validates the core claim (AUC ~0.93 on structured data).
 - `run_verify_test.py` — one-shot copy-paste A/B test: Garry-like config + `VERIFY=recon`, runs the product loop, prints reconstruction precision vs old-B precision.
+  Reads now EXCLUDE unverified entries (no-op until `verify()` runs); `VERIFY_SWEEP=1` DELETES them (detect-AND-remove — the old B never earned this at ~1% precision).
+- `verify_console_test.py` — self-contained (torch + `data/` only) A/B; the faithful surprise-gated-regime test (validated AUC 0.980 vs B 0.907).
 - `self_organize.py` — product loop: byte-signature assembly (C) → B detect-only → performance → composition →
   generation → unlearn (A); online tokenizer; the society/fabric of experts; affiliation map; validation/memorization check.
 - `cl_bench.py` — mechanics: forgetting vs replay, editability (memory-delete vs weights-unlearn), drift, wrongness.
@@ -158,7 +160,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R16 (current):** [USER ran the GPU A/B] Verification CONFIRMED on a GPU-trained model: reconstruction AUC 0.980 vs
+- **R17 (current):** [USER: continue building] Turned Verification from detect-only into an ACTIONABLE capability (the
+  old B stayed detect-only because ~1% precision made deleting suicidal): `memory.read()` now excludes `is_unverified`
+  entries (no-op until `verify()` runs), and `VERIFY_SWEEP=1` DELETES them (detect-AND-remove). Opt-in, memory-only,
+  CPU-smoke-tested (recon+sweep and the default both run; default unchanged). Deliberately did NOT stack the riskier
+  deferred items (`retire_stale`, release-don't-kill) — they touch the collapse-prone online-tokenizer / fabric and need a careful, tested pass.
+- **R16:** [USER ran the GPU A/B] Verification CONFIRMED on a GPU-trained model: reconstruction AUC 0.980 vs
   B 0.907, precision@1% 100% vs 36.9%, recall 32% vs 65% — the reframe holds on real trained data. Recorded in §7. (User
   also asked where the "large database" went: the repo ships only the small bundled `data/train/` ~7MB; the ~85MB/GB
   corpora are produced on-demand by `fetch_data.sh`/`fetch_big.py` and are NOT committed — the test capped `PERDOM=400000`.)
