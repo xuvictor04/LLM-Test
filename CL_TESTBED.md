@@ -3,7 +3,7 @@
 An autonomous continual-learning system with a three-part loop, tested on one **unlabeled** byte stream that
 secretly switches between latent processes:
 
-    self-ASSEMBLE domains (C)  ->  detect WRONG info (B)  ->  EDIT / unlearn by provenance (A)
+    self-ASSEMBLE domains (C)  ->  VERIFY by reconstruction (V, formerly "B / detect wrong")  ->  EDIT / unlearn by provenance (A)
 
 Byte-level by default (vocab = 256, raw UTF-8 bytes); an optional **expanding subword tokenizer** is available via
 `TOKENIZER=1` — an online byte-BPE that GROWS its vocabulary by mint-on-repetition (byte-grounded, lossless; can also
