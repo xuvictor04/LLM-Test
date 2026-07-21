@@ -18,12 +18,15 @@ separate SELF-CONSISTENCY check on stored entries.
 import os, math, random, glob, sys
 import torch, torch.nn as nn, torch.nn.functional as F
 from memory import EditableMemory
+from verification import Reconstructor, recon_loss, verify as verify_mem   # Verification (renamed from B): reconstruction, not surprise
 try: sys.stdout.reconfigure(line_buffering=True)          # stream progress even when piped through tee (no -u needed)
 except Exception: pass
 
 def _i(k, d): return int(os.environ.get(k, d))
 def _f(k, d): return float(os.environ.get(k, d))
 DEV = os.environ.get("DEVICE", "cpu")
+VERIFY = os.environ.get("VERIFY", "selfcon")               # "selfcon" (old B, default, unchanged) or "recon" (Verification)
+RECON_W = _f("RECON_W", 0.1)                               # weight of the Reconstructor's training loss (VERIFY=recon only)
 D = _i("D_MODEL", 128); WIN = _i("WIN", 128); NP = _i("N_PROCESSES", 4); STREAM_LEN = _i("STREAM_LEN", 120000)
 SUSTAIN = _i("SUSTAIN", 2); NEW_DIST = _f("NEW_DIST", 0.35); SHIFT_DIST = _f("SHIFT_DIST", 0.30)
 SIG_MODE = os.environ.get("SIG_MODE", "learned"); SIG_D = _i("SIG_D", 64); SIG_DIM = _i("SIG_DIM", 512)
@@ -589,6 +592,7 @@ def main():
     ENC_SEQ = byte_stream if ONLINE else stream       # signature encoder reads THIS: bytes when online (invariant to re-tokenization)
     route_at = torch.full(((len(ENC_SEQ) if ONLINE else len(stream)) + WIN + 2,), -1, dtype=torch.int16) if EXPERTS else None
     model = build_lm().to(DEV); enc = SigEncoder(D, SIG_D).to(DEV)
+    recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _i("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 1500), _i("FAB_WARMUP", 2000)) if FABRIC else None
@@ -639,7 +643,8 @@ def main():
     # forgetting term inside a system whose whole point is CONTROLLED forgetting. Now explicit; 0 disables it.
     WD = WEIGHT_DECAY                                     # default 0.0: we are UNDERFIT, regularization would hurt
     om = torch.optim.AdamW(list(model.parameters()) + (list(experts.parameters()) if EXPERTS else [])
-                           + (list(fab.parameters()) if FABRIC else []), lr=2e-3, weight_decay=WD)
+                           + (list(fab.parameters()) if FABRIC else [])
+                           + (list(recon.parameters()) if recon is not None else []), lr=2e-3, weight_decay=WD)
     oe = torch.optim.AdamW(enc.parameters(), lr=2e-3, weight_decay=WD)
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
@@ -729,6 +734,8 @@ def main():
             for _j in _ki:                                    #   an ENSEMBLE, which survives member removal, rather than
                 _lj = model.head(fab.norm(_O[:, _j]))         #   a DECOMPOSITION, which does not
                 tot = tot + IND_W * float(_w[:, _j].mean()) * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
+        if recon is not None:                                    # VERIFICATION: train the Reconstructor on GENUINE
+            tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # (key, token) pairs from the live stream
         (tot / ACCUM).backward()                                 # gradient accumulation over ACCUM windows
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
         _lm_run.append(float(loss.detach()))                     # LM loss curve: is the model still improving?
@@ -924,6 +931,13 @@ def main():
             XW = torch.tensor(rx, device=DEV); YW = torch.tensor(ry, device=DEV)
             mem.write(mem_key(XW), YW.reshape(-1), src=99, surprise=None, ctx=mem_ctx(XW))   # bypass gate: force-write the synthetic wrong entries
         selfcheck(model, mem, fab if FABRIC else None)
+        if VERIFY == "recon" and recon is not None:              # VERIFICATION (reconstruction): the A/B against old B
+            verify_mem(mem, recon)
+            _uv = mem.is_unverified(); _inj = (mem.src == 99) & mem.active
+            _tp = int((_uv & _inj).sum()); _fp = int((_uv & (mem.src != 99) & mem.active).sum()); _pos = int(_inj.sum())
+            _pr = _tp / max(1, _tp + _fp); _rc = _tp / max(1, _pos)
+            print(f"=== VERIFICATION (reconstruction) [VERIFY=recon]: flagged {_tp} injected / {_pos} "
+                  f"(precision {_pr:.1%}, recall {_rc:.1%}) -- compare to self-consistency B below ===")
         sr = mem.src; iw = mem.is_wrong(); flg = int(iw.sum())
         print(f"\n=== WRONGNESS (B) in the loop: self-consistency detect + sweep ===")
         if ninj > 0:

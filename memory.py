@@ -49,6 +49,8 @@ class EditableMemory:
         self.keys = torch.zeros(cap, key_dim, device=device)
         self.tok = torch.full((cap,), -1, dtype=torch.long, device=device)   # value = the next token to predict
         self.src = torch.full((cap,), -1, dtype=torch.long, device=device)   # provenance (which domain wrote it)
+        self.recon = torch.full((cap,), -1.0, device=device)                 # per-entry RECONSTRUCTION error (Verification
+        #   signal, decoupled from surprise; set by verification.verify()); -1 = not checked
         self.selfcon = torch.full((cap,), -1.0, device=device)               # per-entry self-consistency implausibility
         #   (fraction of vocab the model ranks above the stored token, given the entry's own context); -1 = not checked
         self.use = torch.zeros(cap, device=device)                          # retrieval count (for turnover)
@@ -97,6 +99,7 @@ class EditableMemory:
         if self.ctx_w > 0 and ctx is not None: self.ctx[idx] = ctx.to(self.dev)
         self.use[idx] = 0.0; self.active[idx] = True
         self.selfcon[idx] = -1.0                                              # new entry: self-consistency not yet checked
+        self.recon[idx] = -1.0                                                # new entry: reconstruction not yet checked
         self.ptr = int((self.ptr + m) % self.cap)
         self._wc += m                                                         # decay usage so it reflects RECENT utility
         if self.use_decay < 1.0 and self._wc >= self.decay_every:
@@ -158,6 +161,23 @@ class EditableMemory:
             thr = med + self.selfcon_k * (mad + 1e-6)
             selfc = self.active & checked & (self.selfcon >= thr)
         return selfc
+
+    # ---- VERIFICATION (renamed from B): reconstruction error, decoupled from surprise ----
+    def set_recon(self, idx, err):
+        """Record per-entry reconstruction error (the Verification signal). Set by verification.verify()."""
+        self.recon[idx] = err.to(self.dev)
+
+    def is_unverified(self):
+        """Flagged by VERIFICATION: reconstruction error in the high tail (adaptive median + k*MAD) -- the entry can't be
+        regenerated from its own key, i.e. it is OFF the learned-association manifold. Parallels is_wrong() but uses
+        reconstruction error instead of self-consistency, so genuine-novel (low error) and corrupt (high error) separate."""
+        checked = self.recon >= 0
+        out = torch.zeros_like(self.active)
+        if int(checked.sum()) > 10:
+            v = self.recon[checked]; med = v.median(); mad = (v - med).abs().median()
+            thr = med + self.selfcon_k * (mad + 1e-6)
+            out = self.active & checked & (self.recon >= thr)
+        return out
 
     # ---- FORGET (the editability) ----
     def delete(self, mask):

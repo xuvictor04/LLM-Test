@@ -30,6 +30,14 @@ embedder is entirely new.
 8. Sub-skill routing (router-as-embedder), emergent subspecialties without losing redundancy.
 9. Tool-experts: distilling a recurring neural pattern into a script; validation; shared routing space.
 
+## STATUS (2026-07-21): the probe is BUILT + CPU-validated
+`verification.py` implements the Reconstructor (CROSS-reconstruction: predict the expected token-code from the context
+key). CPU probe on structured data separates genuine vs corrupt at **AUC ~0.93** (naive joint-autoencoding was ~0.65 —
+the key dominated and diluted the token signal; fixed). Wired into `self_organize.py` opt-in (`VERIFY=recon`). **Still
+open:** the keystone (gap 1, content-vs-FUNCTION reconstruction target) is untouched — this probe reconstructs the token
+(surface), which is right for the wrongness test but NOT yet the functional-similarity the routing/reuse layer needs.
+The REAL validation (below) is the GPU run.
+
 ## The cheapest first probe (does the core idea even hold?)
 Build ONLY a reverse embedder over the existing representation + a reconstruction-error signal, and test the ONE claim
 that justifies the whole reframe: **does reconstruction error separate genuine-novel from wrong where surprise cannot?**

@@ -90,7 +90,9 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
 ## 3. Included / Not included / Deferred
 ### INCLUDED — active, in root
 - `memory.py` — EditableMemory: surprise-gated write (+source `pos`), model|frozen key, re-key, delete/delete_src (A),
-  self-consistency `is_wrong` (B), optional adaptive gate, selectable eviction, stats.
+  self-consistency `is_wrong` (old B), reconstruction `is_unverified`/`set_recon` (Verification), optional adaptive gate, selectable eviction, stats.
+- `verification.py` — **Verification** (renamed B): `Reconstructor` (reverse embedder, cross-reconstructs the expected
+  token-code from the context key), `recon_loss`, `verify()`. Standalone CPU probe validates the core claim (AUC ~0.93 on structured data).
 - `self_organize.py` — product loop: byte-signature assembly (C) → B detect-only → performance → composition →
   generation → unlearn (A); online tokenizer; the society/fabric of experts; affiliation map; validation/memorization check.
 - `cl_bench.py` — mechanics: forgetting vs replay, editability (memory-delete vs weights-unlearn), drift, wrongness.
@@ -155,7 +157,16 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R12 (current):** [USER: confirmed the names] LOCKED the naming pass: B → **Verification**; **Fabric** RETIRED →
+- **R13 (current):** [USER: build Verification + fix broken, as wide as comfortable before testing] FIRST CODE CHANGE.
+  Built **Verification** (`verification.py`): a `Reconstructor` (reverse embedder) that CROSS-reconstructs the expected
+  token-code from the context key — reconstruction error = the verify signal, decoupled from surprise. Wired into the
+  loop ADDITIVE + OPT-IN (`VERIFY=recon`, default `selfcon` → zero change to existing runs): trained in the LM loop,
+  `verify()` scores entries, `memory.is_unverified`/`set_recon` added, and the wrongness test now reports recon precision
+  vs the old self-consistency B. Validated on CPU: the standalone probe separates genuine vs corrupt at **AUC ~0.93**
+  (the naive joint-autoencoder gave only ~0.65 — caught + fixed to cross-reconstruction before any GPU run); end-to-end
+  smoke ran (14.6% precision on a tiny undertrained CPU model vs old B ~1%). REAL validation = the GPU A/B (see §7 / handoff).
+  Deferred (comfortable-before-test): retire_stale, release-don't-kill, quota — behind the first green GPU test. torch installed in-sandbox for the probe.
+- **R12:** [USER: confirmed the names] LOCKED the naming pass: B → **Verification**; **Fabric** RETIRED →
   **Router** (selects) + **Compositor** (blends outputs); population grades **Expert → Sub-skill → Tool-expert** confirmed;
   **Domain** kept; **Sense = a MODALITY** (the multimodality axis — one sense = language today; mic → audio) — NOT the
   polysemy idea (that's provisionally "Meaning"). Propagated through STATE/README/CL_TESTBED/GLOSSARY/STRUCTURES, renamed
