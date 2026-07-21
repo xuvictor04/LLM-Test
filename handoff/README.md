@@ -12,7 +12,7 @@ and you can continue without the prior conversation.
 4. `../STATE.md` — the LIVE ledger and single source of truth: §1 what it is + the two regimes, §2 decisions you
    must honor, §4 the four OPEN decisions, §5 config, §6 phase history, §7 measured numbers.
 5. `history/` — the full narrative as atomic per-phase files (how every current decision got made).
-6. `GLOSSARY.md` — the overloaded terms (domain / expert / node / fabric / society / regimes). Read before touching code.
+6. `STRUCTURES.md` — what every structure IS + its clear/proposed name (the naming pass). `GLOSSARY.md` — terms as used in code today.
 7. `COMMANDS.md` — every run command, each flag verified present in the code.
 8. `designed-but-not-built/` — specified future work, one item per file.
 9. `../docs/FILES.md` (file-by-file map) and `../docs/HANDOFF.md` (snapshot + reconciliation ledger).

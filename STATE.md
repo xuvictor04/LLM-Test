@@ -155,7 +155,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R10 (current):** [USER: rename B; document + set handling; then build+test] Phase 1 (docs): RENAMED B (wrongness) →
+- **R11 (current):** [USER: clarify what structures ARE + name them first; then full V integration + fix broken] Started a
+  NAMING PASS — added `handoff/STRUCTURES.md` clarifying every structure (loop stages, signals, encoders incl. the new
+  Reconstructor, the populations at each grain, routing, memory) with proposed canonical names + the overloaded terms to
+  settle (Fabric, population grades, Domain-vs-Sense). Name "V" NOT locked pending this. Build approach chosen by USER:
+  full V integration + fix anything broken — queued behind the naming. No code changed.
+- **R10:** [USER: rename B; document + set handling; then build+test] Phase 1 (docs): RENAMED B (wrongness) →
   **V (Verify)** — reconstruction-based, decoupled from surprise; propagated through STATE/README/CL_TESTBED/GLOSSARY and
   superseded Q3 (it's now a build, not a decision). Added `decisions/B-renamed-to-V-...`, the learning-signal HANDLING
   spec (`design-directions/learning-signal-classification-surprise-and-reconstruction.md`, incl. the surprise×reconstruction
