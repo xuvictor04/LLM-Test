@@ -92,12 +92,12 @@ partly maintained. What I found, and what I did about it:
   `legacy/` and there is no `clbench` subcommand. Corrected to `python3 cl_bench.py`.
 
 ### Flagged, NOT auto-changed (left for the user to decide)
-- **The T5–T32 history gap.** `STATE.md`'s changelog runs T0–T4; `garry/GARRY.md` is "T33". These are
-  different counters — the ledger's `T0` was "created this ledger" (adopted late), while the Fabric /
-  society / experts / phased-stream / grounding work that the *code* clearly contains is **not** written
-  up in `STATE.md §6/§7`. That history lived in the migrated chat and on the GPU logs; it is not
-  recoverable from the repo. **Do not fabricate it.** `STATE.md §2` (Decisions) *was* kept current
-  through that work, so it is the trustworthy part of the ledger; §6/§7 are the stale part.
+- **The T5–T32 history gap — RESOLVED (2026-07-21b).** This note originally said the missing history was
+  "not recoverable from the repo." That was correct *about the repo* but wrong as a conclusion: the prior
+  context **reconstructed the full history** (Phases 0–11) from the still-visible conversation. It now
+  lives in `handoff/history/` and `STATE.md §6`. Root cause of the drift: `STATE.md` **silently stopped
+  saving to disk after ~T4** in the original environment while later turns narrated edits to it. `STATE.md`
+  has since been rebuilt from that export and is trustworthy again; a self-verify step was added to its protocol.
 - **B precision "1%" vs "2%"** across README/STATE/CL_TESTBED/GARRY — different runs; both are "very
   low," the point ("B is detect-only") is unaffected. Left the run-specific numbers in place.
 - **Collateral ratios** (810× / 1250× / ~25,000×) compare *different* operations (memory-delete-vs-

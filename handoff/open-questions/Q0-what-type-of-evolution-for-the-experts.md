@@ -1,13 +1,12 @@
 # Q0 — What TYPE of evolution should the experts use? — OPEN, needs USER decision
 
-**Question:** The expert-evolution scheme was never chosen by the user — it is an assistant default `[me]`.
-**Current `[me]` scheme (flagged, not user-approved):** steady-state (no generations), mutation-only
-(no crossover), LAMARCKIAN (gradient-trained weights inherited by offspring), niche-based speciation
-(new expert when nothing matches within `EXPERT_NEW_DIST`), and **fitness = OCCUPANCY** (how often the
-router picks it), NOT task performance.
-**Biggest weakness:** a frequently-routed BAD expert still wins.
-**Alternatives to weigh:** (a) Darwinian performance fitness (per-expert loss reduction); (b) tournament
-instead of argmax; (c) crossover between adapters; (d) self-adaptive mutation rates; (e) age-layered
-protection for young experts.
+**Question:** the expert-evolution scheme was never approved — it accreted as a `[me]` default.
+**Verified against the code (not memory):** fitness = pure OCCUPANCY (`fit = use/age`) — there is NO loss term anywhere.
+The rest of the scheme: steady-state (no generations), mutation-only (no crossover), Lamarckian (trained weights
+inherited by offspring), niche speciation (new expert when nothing matches within `EXPERT_NEW_DIST`).
+**Biggest weakness:** an expert can WIN by being cheap to reach rather than good — a frequently-routed BAD expert survives.
+**Prior-context recommendation (not decided on your behalf):** **(a) Darwinian per-expert-LOSS fitness** first, since
+occupancy-as-fitness is the most clearly wrong piece. Other options: (b) tournament vs argmax; (c) adapter crossover;
+(d) self-adaptive mutation rates; (e) age-layered protection for young experts.
 **Who decides:** USER. Do not default further.
-**Source:** `STATE.md §4 Q0`.
+**Source:** `../../STATE.md §4 Q0`.

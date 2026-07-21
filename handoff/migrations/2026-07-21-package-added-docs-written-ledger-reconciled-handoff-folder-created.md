@@ -1,5 +1,8 @@
 # 2026-07-21 — Package added to the repo, docs written, ledger reconciled, handoff/ created
 
+> CORRECTION (see 2026-07-21b): the "history unrecoverable" claim below was superseded — the prior context
+> recovered the full history (now in `../history/`). Left here as a point-in-time record.
+
 **Context:** first chat in the migrated-repo era. The user uploaded `overarching-package_12.zip` and is
 moving chats because context can no longer be compressed. Repo `xuvictor04/LLM-Test` started EMPTY.
 
