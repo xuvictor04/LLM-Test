@@ -25,6 +25,19 @@ Key switches (default ON unless noted): `FABRIC=1 SOCIETY=1 ENS_K=2`, `TOKENIZER
 `EVICT=recency` (not `usage` — doesn't protect faded knowledge; see `../STATE.md §7`, non-stationary line).
 
 ## Test VERIFICATION (reconstruction) vs the old self-consistency B  [VERIFY=recon]
+**One paste into a Python console (mobile-friendly; clones the public repo itself, needs only torch + the bundled data):**
+```python
+import os, subprocess
+if not os.path.exists("verify_console_test.py"):
+    if not os.path.isdir("LLM-Test"):
+        subprocess.run(["git", "clone", "https://github.com/xuvictor04/LLM-Test.git"], check=True)
+    os.chdir("LLM-Test")
+subprocess.run(["git", "pull"], check=False)
+os.environ.update(STEPS="8000", RSTEPS="3000", PERDOM="400000")   # a properly-trained run
+exec(open("verify_console_test.py").read())
+```
+Want: reconstruction AUC + precision@1% clearly above self-consistency B (toy CPU already gave 0.978/100% vs 0.903/30.5%).
+
 **Easiest — one script:** `python3 run_verify_test.py` (Garry-like config, Verification ON, prints both precisions).
 Or the full-suite route (also prints both, plus everything else):
 ```
