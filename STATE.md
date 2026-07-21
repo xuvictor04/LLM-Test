@@ -158,7 +158,11 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R15 (current):** [USER: a console script, repo is private] Added `verify_console_test.py` — self-contained A/B
+- **R16 (current):** [USER ran the GPU A/B] Verification CONFIRMED on a GPU-trained model: reconstruction AUC 0.980 vs
+  B 0.907, precision@1% 100% vs 36.9%, recall 32% vs 65% — the reframe holds on real trained data. Recorded in §7. (User
+  also asked where the "large database" went: the repo ships only the small bundled `data/train/` ~7MB; the ~85MB/GB
+  corpora are produced on-demand by `fetch_data.sh`/`fetch_big.py` and are NOT committed — the test capped `PERDOM=400000`.)
+- **R15:** [USER: a console script, repo is private] Added `verify_console_test.py` — self-contained A/B
   (torch + `data/` only, no repo imports, no git pull; paste-able via `exec(open(...).read())`). Building it caught a
   REAL methodology error: the first version injected 50% cross-domain corruption = the EASY regime B already handles
   (B ~97%). Rewrote it FAITHFUL: surprise-gated genuine negatives (B's real failure mode) + base-rate-honest metrics
@@ -264,8 +268,10 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   resolved — surprise ≡ detection signal). **Reconstruction Verification VALIDATED (CPU, `verify_console_test.py`, real
   corpora, undertrained toy GRU):** in the REALISTIC regime (surprise-gated genuine negatives — the hard case B fails on),
   reconstruction **AUC 0.978 vs B 0.903**, and precision-at-1%-base-rate **100% vs 30.5%** (reconstruction does NOT
-  false-positive on surprise-gated genuine entries — the exact B failure). Directional (toy CPU model); the GPU run is the
-  real number. NOTE: the naive test (50% cross-domain corruption) is the EASY regime B already handles (B ~97% there) — not informative.
+  false-positive on surprise-gated genuine entries — the exact B failure). **CONFIRMED on a GPU-trained model [USER run, 8000
+  steps, cuda]: AUC 0.980 vs 0.907, precision@1% 100% vs 36.9%, recall 32% vs 65%.** (Still the simplified standalone
+  harness — small GRU, no fabric/tokenizer; the full product-loop `run_verify_test.py` is the last mile.) NOTE: the naive
+  50%-cross-domain test is the EASY regime B already handles (B ~97% there) — not informative.
 - **Management ablation:** no prediction-quality cost ON vs OFF; its job is bounding domain-record growth.
 - **Non-stationary (`PHASED=1`):** system adapts (domains grow/cull, memory bounded, editing clean on active + faded) — BUT bounded `EVICT=recency` fully evicts a faded process's knowledge; `EVICT=usage` does not fix it (faded ≡ least-used). A per-domain quota is REJECTED [USER]; the direction is memory-pressure → grow experts / retrain / domain-split (see `handoff/designed-but-not-built/memory-pressure-...`). Unbuilt.
 - **Data reality:** product loop trained on ~3.7MB effectively seen — thousands× less than a small LM. Fluent language was never in reach at that scale, independent of architecture.
