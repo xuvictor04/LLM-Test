@@ -10,8 +10,10 @@
 ---
 
 ## 0. GARRY — frozen milestone checkpoint
-`garry/` is a FROZEN, independently runnable copy of the T33 state (§7z): the first version where the whole
-architecture works at once and expert-deletion collateral hit **-0.0009** with end-to-end **1.967**.
+`garry/` is a FROZEN, independently runnable snapshot of the T33 state (numbers in `garry/GARRY.md`): the first version
+where the whole architecture works at once and expert-deletion collateral hit **-0.0009** with end-to-end **1.967**.
+NOTE: root is T33's DESCENDANT, not a byte-copy — it adds a later retrieval-grounding / source-`pos` feature set
+(`cl_bench.py`/`tokenizer.py` are identical; see `docs/FILES.md`).
 - Do NOT edit `garry/`. Development continues in the package root.
 - It reads the shared corpora via `DATA_DIR=../data` and namespaces its runs (`~/garry.txt`, `runs/garry/`), so it
   never collides with development runs. `garry/GARRY.md` records the exact config, the measured results, and the
@@ -43,7 +45,7 @@ Code: `memory.py` (the store), `self_organize.py` (product loop), `cl_bench.py` 
 ### Design decisions [USER]
 - Memory key = the model's OWN representation (unfrozen) + periodic re-keying. Frozen key = baseline only.
 - Wrongness (B) = SELF-CONSISTENCY (not the old retrieval running-mean). B is **DETECT-ONLY** — it is broken in the
-  realistic regime (~2% precision), so it reports but does NOT delete.
+  realistic regime (~1-2% precision across runs), so it reports but does NOT delete.
 - Genuineness = SILHOUETTE (coh+sep-1), not size — but the COUNT is arbitrary; PERFORMANCE is what matters.
 - Write-gate signal is SURPRISE (1 − p_model(true token)); the name "novelty" was a misnomer, renamed.
 - Tokenizer = the EXPANDING `DynamicTokenizer` (online mint-on-repetition), NOT the static ByteBPE.
@@ -54,9 +56,9 @@ Code: `memory.py` (the store), `self_organize.py` (product loop), `cl_bench.py` 
 - **Memory MANAGEMENT (merge/cull/reassign + turnover) and EDITING (A) are the important part for continual learning.** [USER]
 - **Tokenizer mints DURING training (ongoing), not just a pre-pass.** [USER] -> implemented as `TOK_ONLINE=1`.
 - **Experts are INDEPENDENT AGENTS blended at a router layer; nothing frozen; new experts cloned from the live base;
-  DOMAINS are collections of experts; independence is what makes removal clean.** [USER] -> `SOCIETY=1` (§7x).
-- **Build expanding/selective per-domain EXPERTS + router, accept the weights-editability tension.** [USER] -> `EXPERTS=1` (superseded).
-- **Experts+domains are DUAL populations; the router is a FABRIC that reroutes within itself and node->node.** [USER] -> `FABRIC=1` (§7n).
+  DOMAINS are collections of experts; independence is what makes removal clean.** [USER] -> `SOCIETY=1`.
+- **Build expanding/selective per-domain EXPERTS + router, accept the weights-editability tension.** [USER] -> `EXPERTS=1` (superseded by the Fabric society; `EXPERTS=0` by default).
+- **Experts+domains are DUAL populations; the router is a FABRIC that reroutes within itself and node->node.** [USER] -> `FABRIC=1`.
   -> Priority shifts toward these as the CL-defensible core (B is broken; generation is base-model-limited).
 
 ## 3. Included / Not included / Deferred
@@ -68,6 +70,7 @@ Code: `memory.py` (the store), `self_organize.py` (product loop), `cl_bench.py` 
 - `cl_bench.py` — mechanics: forgetting vs replay, editability (memory-delete vs weights-unlearn), drift, wrongness.
 - `run_full_unfrozen.sh` (whole system, one command; now also writes a checkpoint), `prompt.py` (message the
   trained model interactively), `run_cl_test.sh`, `README.md`, `CL_TESTBED.md`, `STATE.md`, `tokenizer.py`, `data/`.
+- `docs/FILES.md` — file-by-file map (read from source). `docs/HANDOFF.md` — pick-up-here guide + reconciliation ledger.
 
 ### NOT INCLUDED — built but OFF by default, or archived
 - Frozen memory: present, baseline only (not the product path).
@@ -92,12 +95,12 @@ Code: `memory.py` (the store), `self_organize.py` (product loop), `cl_bench.py` 
    (how often the router picks it), NOT task performance. Biggest weakness: a frequently-routed BAD expert still wins.
    Alternatives: (a) Darwinian performance fitness (per-expert loss reduction); (b) tournament instead of argmax;
    (c) crossover between adapters; (d) self-adaptive mutation rates; (e) age-layered protection for young experts.
-1. ~~Test the CONTINUAL aspect~~ BUILT (§7r): `PHASED=1`. Remaining sub-item: a management ON-vs-OFF ablation to put a
+1. ~~Test the CONTINUAL aspect~~ BUILT: `PHASED=1`. Remaining sub-item: a management ON-vs-OFF ablation to put a
    number on how much management matters. [previously:] the testbed distribution is FIXED
    (4 processes throughout). Where management + editing earn their keep is a NON-STATIONARY stream (domains enter/leave
    over time). Proposed test (design `[me]`): phased stream; measure the assembler opens/culls domains, memory stays
    bounded + useful across the shift, editing is clean on both active + faded processes. Optional: management ON/OFF ablation.
-2. ~~Online minting hurts~~ RESOLVED (§7c): online == frozen at matched vocab+memory. The GPU regression was undertraining
+2. ~~Online minting hurts~~ RESOLVED: online == frozen at matched vocab+memory. The GPU regression was undertraining
    (Transformer @ 8333 batch-1 steps) + small vocab (1785 vs 4096). Fix = GRU + train longer + grow vocab to 4-8k + bigger
    MEM_CAP. Online minting KEPT. (Transformer would need batched training -- a separate, less-online design -- if ever wanted.)
 3. **B direction:** attempt a corroboration-based B (hard, speculative), or cut B and ship clean-unlearning-on-command (A already delivers)?
@@ -117,7 +120,11 @@ Unless a value is marked `[USER]`, treat it as `[me]` and flag it when I put it 
   (a Transformer wants big batches) but completes in reasonable time; the PROBE prints the real per-step estimate first.
   Bundled corpora ~1-3M bytes each = ceiling on data (supply more files for a genuinely large corpus).
 
-## 7. Latest measured results — full run, ALL ideas ON (GPU, real data, expanding tokenizer VMAX 4096)
+## 7. Measured results — T2 dev run, ALL ideas ON (GPU, real data, expanding tokenizer VMAX 4096)
+> RECONCILIATION (T5): this section is the OLDER T2 dev run and is superseded by the T33 GARRY milestone
+> (VMAX 8192, end-to-end **1.967** b/B, expert-deletion **-0.0009**) recorded in `garry/GARRY.md` — treat THAT as the
+> newest numbers until a fresher GPU run is pasted in here. The Fabric/society/experts/phased/grounding work that the
+> CODE contains (and that §2 decided) was never written into this section; that history is not recoverable from the repo.
 - Tokenizer grew 256 -> 4096 (mint-on-repetition, 3 passes); corpora -> 2.12M tokens.
 - PERFORMANCE (true bits/byte): model alone **2.124** -> model+memory **1.727** (memory +0.397).
   vs byte-level last run (2.668 -> 2.273): **tokenizer cut ~0.5 bits/byte** off both.
@@ -134,7 +141,16 @@ Unless a value is marked `[USER]`, treat it as `[me]` and flag it when I put it 
   6256x faster, 810x less collateral; drift survived.
 
 ## 6. Changelog (newest first)
-- **T4 (current):** [USER: how to use] Added top-level `README.md` (setup -> run -> message-the-model, plus the
+> CAVEAT: this changelog runs T0–T5, but the frozen milestone is "T33" (`garry/GARRY.md`) — a DIFFERENT counter. The
+> Fabric/society/experts/phased-stream/grounding work between them lived in a since-migrated chat + GPU logs and is not
+> reconstructable from the repo. §2 (Decisions) WAS kept current through it; §6/§7 were not. See `docs/HANDOFF.md §7`.
+- **T5 (current):** [USER: file documentation + reconciliation + docs for the future] Added `docs/FILES.md` (file-by-file
+  map, read from source) and `docs/HANDOFF.md` (pick-up-here guide + reconciliation ledger). Reconciled this file: removed
+  dangling §7z/§7x/§7n/§7r/§7c refs, relabeled §7 as the T2 dev run and pointed "newest" at `garry/GARRY.md`, fixed the
+  double "(current)" tag, harmonized B precision to "~1–2% across runs". Fixed two doc-vs-code bugs: `README.md` output
+  paths (`~/full_unfrozen.txt`→`~/full.txt`, `runs/ck`→`runs/full`) and `cl_bench.py` header (`control.py clbench`→
+  `cl_bench.py`). No behavior changed. [me]: chose to FLAG rather than fabricate the missing T5–T32 history.
+- **T4:** [USER: how to use] Added top-level `README.md` (setup -> run -> message-the-model, plus the
   pieces and honest status). No code changed.
 - **T3:** [USER: message the model] Added checkpoint save (`SAVE_CKPT`, writes model+tokenizer+memory
   before the destructive tests) and `prompt.py` (interactive: type a message -> the model continues it, model-only or
@@ -142,7 +158,7 @@ Unless a value is marked `[USER]`, treat it as `[me]` and flag it when I put it 
 - **T2:** Ran the full test, ALL ideas ON [USER]. Results in §7. Tokenizer is a clear win (bits/byte down
   ~0.5, generation readable, separation up). B recall 96% but precision still 1% (unchanged core problem). No code
   changed this turn.
-- **T1 (current):** [USER: full test, all ideas ON] Turned the expanding tokenizer + adaptive gate ON in
+- **T1:** [USER: full test, all ideas ON] Turned the expanding tokenizer + adaptive gate ON in
   `run_full_unfrozen.sh`. Found + fixed a bug surfaced by running them together: the adaptive gate overshot on a
   skewed-high (weak-model) surprise distribution and starved writes (blocked the B-test injections) -> added a
   ceiling `gate_ceil`; and made synthetic wrong-injections bypass the write gate. Verified both parts run with all

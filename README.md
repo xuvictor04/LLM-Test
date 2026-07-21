@@ -23,8 +23,8 @@ to edit *because they're entangled*; an independent-expert society makes them as
 ## 1. Run the whole system (trains + measures + saves a checkpoint)
     tmux new -s full 'bash run_full_unfrozen.sh'
 Runs everything with all features on (unfrozen model key, expanding tokenizer, adaptive gate, self-consistency B
-detect-only, silhouette genuineness, composition, performance, generation, plus the mechanics). Output → `~/full_unfrozen.txt`.
-Partway through it saves the trained model + tokenizer + memory to `runs/ck/`.
+detect-only, silhouette genuineness, composition, performance, generation, plus the mechanics). Output → `~/full.txt` (or `~/<RUN_NAME>.txt`).
+Partway through it saves the trained model + tokenizer + memory to `runs/full/` (or `runs/<RUN_NAME>/`; the `runs/ck` examples below assume you launched with `RUN_NAME=ck`).
 (tmux keeps it alive if SSH drops: `Ctrl-b d` to detach, `tmux attach -t full` to return.)
 
 ## 2. Message the trained model

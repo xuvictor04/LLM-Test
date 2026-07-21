@@ -13,7 +13,7 @@ Two questions this answers that matter more than "does memory reduce forgetting"
   1. Is EDITING the real differentiator? (memory: local+cheap; weights-unlearn: expensive+collateral)
   2. Does editable memory survive when its key is the model's OWN, DRIFTING representation? (frozen vs model key)
 
-  python3 control.py clbench [DEVICE=cuda D_MODEL=256 STEPS_PER_DOMAIN=2000 N_DOMAINS=5 LAMBDA=0.5 REPLAY_FRAC=0.3 ...]
+  python3 cl_bench.py [DEVICE=cuda D_MODEL=256 STEPS_PER_DOMAIN=2000 N_DOMAINS=5 LAMBDA=0.5 REPLAY_FRAC=0.3 ...]
 """
 import os, json, math, random, time
 import torch, torch.nn as nn, torch.nn.functional as F
