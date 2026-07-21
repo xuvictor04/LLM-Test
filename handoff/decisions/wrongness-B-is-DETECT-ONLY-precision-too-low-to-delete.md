@@ -6,4 +6,7 @@ wrong are conflated — high recall, ~1–2% precision across runs. Deleting at 
 the store. A (edit/unlearn on command) does not need B.
 **Open follow-up:** whether to attempt a corroboration-based B or cut B entirely — see
 `../open-questions/Q3-B-direction-attempt-corroboration-or-cut-B-and-ship-A.md`.
+**Root-cause direction:** surprise is a LEARNING driver, not a truth signal
+(`surprise-is-a-learning-driver-not-a-wrongness-or-truth-signal.md`); verification should come from reverse-embedding
+RECONSTRUCTION, not surprise (`../design-directions/reverse-embedders-for-thought-verification-and-training.md`).
 **Source:** `STATE.md §2` Design decisions; `CL_TESTBED.md` §B.

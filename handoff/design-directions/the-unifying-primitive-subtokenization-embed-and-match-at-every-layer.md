@@ -22,6 +22,10 @@ the "much smaller than conventional models" north star (`../NORTH_STAR.md`). **T
 each layer — and for experts/sub-skills that means FUNCTIONAL similarity, not just CONTENT similarity (see
 `routing-is-embedding-plus-similarity-for-reuse-and-transfer.md`). Solve the embedding space and the rest composes; don't, and it fragments.
 
+**Reverse path:** the same embedding space also runs BACKWARD — reverse embedders decode from it for THOUGHT, VERIFICATION
+(reconstruction, not surprise), and TRAINING. Forward = learn (surprise-gated); reverse = think/verify (reconstruction-gated).
+See `reverse-embedders-for-thought-verification-and-training.md`.
+
 **Status:** HYPOTHESIS to test, not a decision. The cheapest first probe: does one clustering/discovery mechanism, retargeted, serve two layers at once?
 **Source:** user, sessions 2026-07-21 (reinforced across several turns).
 </content>

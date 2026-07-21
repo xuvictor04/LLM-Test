@@ -152,7 +152,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R8 (current):** [USER: added to the vision] Three more design directions: (1) experts can be TOOL CALLS / SCRIPTS,
+- **R9 (current):** [USER: added to the vision] (1) Clarified SURPRISE is a mechanic for ONGOING LEARNING, not a
+  wrongness/truth signal — casting it as wrong-detection is the category error behind B's ~1% precision; verification
+  belongs elsewhere. Added `decisions/surprise-is-a-learning-driver-not-a-wrongness-or-truth-signal.md` + noted on the B
+  decision. (2) New direction REVERSE EMBEDDERS — decode from the embedding space for THOUGHT, VERIFICATION
+  (reconstruction, not surprise), TRAINING; forward=learn / reverse=think-verify symmetry; cross-ref'd the unifying primitive. No code changed.
+- **R8:** [USER: added to the vision] Three more design directions: (1) experts can be TOOL CALLS / SCRIPTS,
   self-authored when a procedure recurs (crystallize-on-repetition, like tokens); (2) reusability comes from ROUTER +
   DISCOVERY + SIMILARITY — the router acts as an EMBEDDER (input+source → modification → embed → nearest expert / learned
   recognition), giving transfer to prior-unknown parts; the open crux is CONTENT vs FUNCTIONAL similarity in that space;
