@@ -24,6 +24,13 @@ RUN_NAME=full bash run_full_unfrozen.sh
 Key switches (default ON unless noted): `FABRIC=1 SOCIETY=1 ENS_K=2`, `TOKENIZER=1 TOK_ONLINE=1`, `MANAGE=1`,
 `EVICT=recency` (not `usage` — doesn't protect faded knowledge; see `../STATE.md §7`, non-stationary line).
 
+## Fresh cloud box (nothing installed, no clone) — run this first
+```bash
+cd ~ && rm -rf LLM-Test && git clone -q https://github.com/xuvictor04/LLM-Test.git && cd LLM-Test
+python3 -c "import torch" 2>/dev/null || pip install -q torch numpy
+```
+(The run scripts cd to their own directory, so they work from any clone location.)
+
 ## Test VERIFICATION (reconstruction) vs the old self-consistency B  [VERIFY=recon]
 **One paste into a Python console (mobile-friendly; clones the public repo itself, needs only torch + the bundled data):**
 ```python
