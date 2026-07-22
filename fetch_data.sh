@@ -23,7 +23,7 @@ for c in gutenberg brown reuters movie_reviews nps_chat inaugural treebank; do
   ( cd "$TMP" && unzip -qo "$c.zip" >/dev/null 2>&1 ) || { echo "  skip $c (unzip)"; continue; }
   find "$TMP/$c" -type f ! -name 'README*' ! -name 'CONTENTS*' ! -name 'cats.txt' \
        ! -name 'stopwords' ! -name '*.xml' ! -name '*.json' -size +100c -exec cat {} + 2>/dev/null \
-    | sed -E 's#/[A-Z$][A-Z$|@^-]*##g; s#\[[^]]*\]##g' >> "$OUT/train/eng/eng.txt" || true
+    | sed -E 's#/[A-Za-z$][A-Za-z$*+-]*##g; s#\[[^]]*\]##g' >> "$OUT/train/eng/eng.txt" || true  # strip POS tags: Brown uses LOWERCASE tags (the/at movie/nn) -> [A-Z] alone leaked them; digits/dots excluded so 12/25 & URLs survive
   printf "  %-14s -> eng.txt %9d bytes\n" "$c" "$(wc -c < "$OUT/train/eng/eng.txt")"
 done
 

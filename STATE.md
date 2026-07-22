@@ -160,7 +160,14 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R23 (current):** [USER ran the 5×-steps run] Decisive: (1) Verification store-wide failure is NOT undertraining —
+- **R24 (current):** [USER ran the 12×-data run] Two findings: (1) DATA confirms as the lever — memorization gap
+  +0.249 → +0.139, domain genuineness 1 → 9 genuine; architecture responds well to more data, still not at a capacity wall.
+  (2) Generation showed `the/at movie/nn` POS-tag artifacts → traced to a REAL BUG in `fetch_data.sh`: its eng tag-stripper
+  matched UPPERCASE tags only (`[A-Z$]`) but NLTK Brown tags in lowercase (`the/at`), so every Brown POS tag leaked in.
+  FIXED the regex to `[A-Za-z$…]` (dates/URLs preserved; verified on a sample). The existing fast 85MB corpus is now clean —
+  a proper re-run should generate tag-free text. fineweb stays reserved for a genuinely larger/dialogue corpus, not needed
+  just for cleanliness. Only `fetch_data.sh` changed.
+- **R23:** [USER ran the 5×-steps run] Decisive: (1) Verification store-wide failure is NOT undertraining —
   0.3% precision even at 30M stream → LOCKED as a dead end (per-candidate check only). (2) The short-run concern is
   RESOLVED for everything else — memory/composition/independence/generation all held or improved at 5× steps, so they're
   real, not artifacts. (3) NEW: the model is now DATA-limited (memorization gap +0.046→+0.249, memorizing ~7MB) — more
@@ -326,6 +333,15 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   and are NOT artifacts — memory +2.1 b/B, composition +0.54, expert-deletion collateral +0.034, fabric+memory 1.951 b/B,
   generation visibly more coherent. BUT the model is now DATA-limited (memorization gap +0.046 → +0.249, starting to
   memorize the ~7MB corpus). More STEPS is exhausted; the real lever for quality + clean keys is MORE DATA (fetch_data / the 20GB fineweb).
+- **Data-scaling run [USER, 12× data, fetch_data ~85MB]:** DATA confirmed as the lever — memorization gap +0.249 → +0.139,
+  domain genuineness 1 → 9 genuine (silhouette +0.06 → +0.12); the architecture responds well to data. Absolute b/B across
+  runs is NOT comparable (different corpora). The base GRU is still underfit (LM curve falling), not yet at a capacity wall.
+- **fetch_data.sh POS-tag bug — FOUND & FIXED [R24]:** the 12× run's generation emitted `the/at movie/nn` artifacts. ROOT
+  CAUSE: the eng-corpus tag-stripper was `s#/[A-Z$]…#` (UPPERCASE only), but NLTK's Brown corpus tags tokens in
+  **lowercase** (`the/at`, `movie/nn`) — so every Brown token's POS tag leaked into training. Fixed to `[A-Za-z$]` (digits/dots
+  excluded so `12/25` and URLs survive; verified on a Brown-format sample). Was a data-quality bug, NOT architecture. The
+  same 85MB `fetch_data.sh` corpus is now clean — no need to switch to fineweb just for cleanliness (fineweb/`fetch_big.py`
+  remains the path for a genuinely LARGER, dialogue-bearing corpus later).
 - **Keystone (functional vs content embedding) — MECHANISM VALIDATED (CPU, `keystone_probe.py`):** an embedding trained as
   a REUSABLE code that must TRANSFER across content (derive z from one input→output pair, require it to transform a NEW
   input under the same op) organizes by FUNCTION — k-NN op-purity **0.80 vs 0.50 surface** (chance 0.20), gap +0.30. So
@@ -335,4 +351,3 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 - **Non-stationary (`PHASED=1`):** system adapts (domains grow/cull, memory bounded, editing clean on active + faded) — BUT bounded `EVICT=recency` fully evicts a faded process's knowledge; `EVICT=usage` does not fix it (faded ≡ least-used). A per-domain quota is REJECTED [USER]; the direction is memory-pressure → grow experts / retrain / domain-split (see `handoff/designed-but-not-built/memory-pressure-...`). Unbuilt.
 - **Data reality:** product loop trained on ~3.7MB effectively seen — thousands× less than a small LM. Fluent language was never in reach at that scale, independent of architecture.
 - **Scale gap (stated to USER):** ~300× more tokens for GPT-2-small-level coherence (which still can't converse); ~3 more orders of magnitude + dialogue data + instruction-tuning/RLHF for real conversation. None of that exists yet.
-</content>
