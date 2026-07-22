@@ -160,7 +160,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R22 (current):** [USER: memory should stay native+useful; short runs may mislead] Two clarifications recorded: (1)
+- **R23 (current):** [USER ran the 5×-steps run] Decisive: (1) Verification store-wide failure is NOT undertraining —
+  0.3% precision even at 30M stream → LOCKED as a dead end (per-candidate check only). (2) The short-run concern is
+  RESOLVED for everything else — memory/composition/independence/generation all held or improved at 5× steps, so they're
+  real, not artifacts. (3) NEW: the model is now DATA-limited (memorization gap +0.046→+0.249, memorizing ~7MB) — more
+  steps is exhausted; MORE DATA is the lever. Recommend pivoting to a data-scaled run (fetch_data / 20GB fineweb) toward the north star.
+- **R22:** [USER: memory should stay native+useful; short runs may mislead] Two clarifications recorded: (1)
   memory-native-and-useful is ALREADY proven (this run: memory +2.5 b/B, composition +0.41, editing local) — only
   autonomous store-wide wrong-DETECTION failed, a separable layer. (2) CAVEAT: all product-loop numbers are from ~4-min
   UNDERFIT runs (LM still falling, memorization gap +0.046), so noisy keys may be inflating reconstruction's FPR — the
@@ -314,7 +319,13 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   PER-CANDIDATE / pairwise discriminator (rank 1 corrupt vs 1 genuine ~98%) — its home is the reconcile→understand gate
   (verify ONE provisional sense/expert), NOT a store-wide auto-delete (`VERIFY_SWEEP` stays OFF). Store-wide autonomous
   wrong-detection remains UNSOLVED (B and reconstruction both die on base rate); the standing rec to lean on A
-  (edit-on-command, proven) holds. The only untried lever for store-wide use is a MUCH better-trained base (cleaner keys → lower genuine FPR).
+  (edit-on-command, proven) holds. **CONFIRMED not an undertraining artifact [USER, 5× steps]: precision stayed 0.3% at
+  30M stream (0.3→0.5→0.3 across 3 runs). Store-wide Verification is a genuine dead end — LOCK it as a per-candidate check.**
+  (Contributing factor: token-level 8192-vocab reconstruction is harder than the byte-256 standalone, but base rate dominates.)
+- **Short-run "misleading" concern — RESOLVED for the rest [USER, 5× run]:** at 30M stream the core results HELD/improved
+  and are NOT artifacts — memory +2.1 b/B, composition +0.54, expert-deletion collateral +0.034, fabric+memory 1.951 b/B,
+  generation visibly more coherent. BUT the model is now DATA-limited (memorization gap +0.046 → +0.249, starting to
+  memorize the ~7MB corpus). More STEPS is exhausted; the real lever for quality + clean keys is MORE DATA (fetch_data / the 20GB fineweb).
 - **Keystone (functional vs content embedding) — MECHANISM VALIDATED (CPU, `keystone_probe.py`):** an embedding trained as
   a REUSABLE code that must TRANSFER across content (derive z from one input→output pair, require it to transform a NEW
   input under the same op) organizes by FUNCTION — k-NN op-purity **0.80 vs 0.50 surface** (chance 0.20), gap +0.30. So
