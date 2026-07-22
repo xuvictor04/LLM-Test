@@ -13,5 +13,9 @@ subspecialties** for specific tasks. Redundancy is wanted for (a) safety against
 sub-task structure; specialization should EMERGE by task decomposition on top of it. This turns the question from a
 config toggle into a DESIGN CHALLENGE — get emergent specialization without losing the redundant safety net. Full note:
 `../design-directions/interchangeable-base-with-emergent-subspecialties.md`. Tightly coupled to Q0 (evolution).
+**USER refinement (2026-07-22):** the target is neither extreme — **PARTIAL compartmentalization**, isolation as a tunable
+DIAL set to a deliberately leaky middle, with **CREATIVITY** added as a criterion (slight mixing wanted as a novelty
+source, not merely tolerated). Tension: the leaky dial that aids creativity is the same one that raises deletion collateral
+(fights editability). Full note: `../design-directions/partial-compartmentalization-controlled-leakage-for-creativity.md`.
 **Who decides:** USER has set the DIRECTION; the mechanism is open.
 **Source:** `../../STATE.md §4 Q-regime`.

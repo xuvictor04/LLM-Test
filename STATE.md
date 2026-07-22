@@ -138,7 +138,11 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
   remains is a BUILD, not a decision.
 - **Q-regime — REDUNDANCY vs MODULARITY as the standing default?** Genuine product fork, both measured (§7). No recommendation —
   redundancy = losing any component costs nothing; modularity = components mean something, deletion cost small + attributable
-  (stronger for a machine-unlearning/compliance framing). **USER's call.**
+  (stronger for a machine-unlearning/compliance framing). **USER's call.** **USER refinement (R22):** the target is neither
+  extreme — **PARTIAL compartmentalization / controlled leakage**, with isolation as a tunable DIAL set to a deliberately
+  leaky middle; **CREATIVITY joins safety/reuse/compliance as a selection criterion** (slight mixing is wanted as a source
+  of novelty, not merely tolerated). NOTE the tension: the leaky dial that helps creativity is the same dial that raises
+  deletion collateral (fights the editability headline). See `handoff/design-directions/partial-compartmentalization-controlled-leakage-for-creativity.md`.
 - **Q-compute — what to run next at GPU scale?** Data + throughput blockers are resolved (corpus expansion + `BATCH_W`), but
   NOTHING has been run at the new scale. A GPT-2-scale token budget is WEEKS of H100 time, not hours. Size the next run deliberately. **USER's call.**
 
@@ -164,7 +168,16 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R21 (current):** [USER: added to the vision — "do not write code, just update the context handler"] Captured a new
+- **R22 (current):** [USER: added to the vision, context-handler only] Captured a new design direction: **PARTIAL
+  COMPARTMENTALIZATION / controlled leakage for creativity** — information is often relevant to several aspects at once,
+  so compartments (domains / experts / meanings / memory) should be **partially, not fully, isolated**; slight mixing is
+  wanted as a SOURCE of creativity, not merely tolerated. Reframed leakage from cost→feature, made isolation a tunable
+  DIAL aimed at a leaky middle, and added CREATIVITY as a criterion on the Q-regime fork (§4). Noted this is already the
+  system's behavior (global-kNN retrieval, 0 exclusive experts, composition-is-a-feature) — the direction is to tune-and-keep
+  it, not sharpen it away. Surfaced the core TENSION: the leaky dial that aids creativity is the same one that raises
+  deletion collateral (fights the editability headline — same family as R21). Wrote `handoff/design-directions/partial-compartmentalization-controlled-leakage-for-creativity.md`,
+  updated §4 Q-regime. NO code changed. Mechanism (what carries leakage, how bounded, global vs context-dependent, how to measure creativity) left OPEN.
+- **R21:** [USER: added to the vision — "do not write code, just update the context handler"] Captured a new
   design direction: **ACTIVE LEARNING via a self-generated closed-book curriculum** — once the system reaches a certain
   competence level it authors its own items (reference article → prompt → reproduce the output WITHOUT the reference), and
   is graded on regenerating the target once the reference is removed. Cast in the project's own terms: it is the REVERSE /
