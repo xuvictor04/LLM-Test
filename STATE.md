@@ -160,7 +160,13 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R21 (current):** [USER ran the re-test] Post-hoc-fit fix did NOT recover Verification in the product loop (0.5%
+- **R22 (current):** [USER: memory should stay native+useful; short runs may mislead] Two clarifications recorded: (1)
+  memory-native-and-useful is ALREADY proven (this run: memory +2.5 b/B, composition +0.41, editing local) — only
+  autonomous store-wide wrong-DETECTION failed, a separable layer. (2) CAVEAT: all product-loop numbers are from ~4-min
+  UNDERFIT runs (LM still falling, memorization gap +0.046), so noisy keys may be inflating reconstruction's FPR — the
+  base-rate verdict on Verification is NOT final until a properly-trained run. Handed the user a longer well-trained
+  command (fetch_data → data_big, higher STREAM_LEN) to de-risk. No code changed.
+- **R21:** [USER ran the re-test] Post-hoc-fit fix did NOT recover Verification in the product loop (0.5%
   precision, ~unchanged). HONEST diagnosis: reconstruction hits the SAME base-rate wall as B — at ~0.26% injection its
   ~5% FPR on the noisy underfit store sinks precision. The standalone's 100% was an FPR≈0 projection that doesn't hold.
   No more blind patching. Reframed Verification (§7) as a strong PER-CANDIDATE discriminator (~98% pairwise) for the
