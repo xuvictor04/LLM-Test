@@ -17,10 +17,10 @@
 #           -> GENERATION (does it produce comprehensible text)
 #           -> EDIT/unlearn a whole process by self-provenance (A)
 #
-# Run:  cd ~ && unzip -o overarching-package.zip && cd overarching-package
-#       tmux new -s full 'bash run_full_unfrozen.sh'
+# Run:  git clone the repo, then:  tmux new -s full 'bash run_full_unfrozen.sh'
+#       (the script cd's to its own directory, so it works from any clone location)
 set -u
-cd ~/overarching-package
+cd "$(dirname "$(readlink -f "$0")")"   # the repo root (this script's own dir) -- was a hardcoded ~/overarching-package
 # RUN_NAME namespaces EVERY artifact (log, checkpoint, tokenizer) so concurrent or successive runs never clobber
 # each other. Default "full" reproduces the historical paths.
 RUN=${RUN_NAME:-full}

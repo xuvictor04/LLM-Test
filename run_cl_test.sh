@@ -6,7 +6,7 @@
 # Everything on REAL corpora (eng/py/num/c). Results -> ~/cl_results.txt
 #   edit the CONFIG block, then:  tmux new -s cl 'bash run_cl_test.sh'
 set -u
-cd ~/overarching-package
+cd "$(dirname "$(readlink -f "$0")")"   # the repo root (this script's own dir) -- was a hardcoded ~/overarching-package
 R=~/cl_results.txt; : > "$R"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 say(){ echo "" | tee -a "$R"; echo "======== $* | $(date +%H:%M) ========" | tee -a "$R"; }

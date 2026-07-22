@@ -160,7 +160,11 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R19 (current):** [USER ran the full product-loop test] Verification FAILED in the real loop (0.3% precision vs the
+- **R20 (current):** [USER: assume a fresh box; bug surfaced in the GPU run] Fixed a real bug: `run_full_unfrozen.sh` +
+  `run_cl_test.sh` had a hardcoded `cd ~/overarching-package` (dead since the repo was flattened) that errored on every
+  run — now `cd "$(dirname "$(readlink -f "$0")")"` (the script's own dir), so they work from any clone. `garry/` left
+  untouched (frozen); `legacy/` skipped (unused). Test commands are now written fresh-box-safe (clone + deps + run).
+- **R19:** [USER ran the full product-loop test] Verification FAILED in the real loop (0.3% precision vs the
   standalone's 100%) — diagnosed: joint Reconstructor training on a churning store (online re-tokenization + rekey +
   underfit base) = a moving target. FIXED: `verify()` now FITS the Reconstructor POST-HOC on the final settled store
   (`VERIFY_FIT=3000`); joint training off by default (`RECON_W=0`). CPU-smoke-tested. Awaiting a GPU re-test (sweep OFF
