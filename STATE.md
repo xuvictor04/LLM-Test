@@ -160,7 +160,12 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R20 (current):** [USER: assume a fresh box; bug surfaced in the GPU run] Fixed a real bug: `run_full_unfrozen.sh` +
+- **R21 (current):** [USER ran the re-test] Post-hoc-fit fix did NOT recover Verification in the product loop (0.5%
+  precision, ~unchanged). HONEST diagnosis: reconstruction hits the SAME base-rate wall as B — at ~0.26% injection its
+  ~5% FPR on the noisy underfit store sinks precision. The standalone's 100% was an FPR≈0 projection that doesn't hold.
+  No more blind patching. Reframed Verification (§7) as a strong PER-CANDIDATE discriminator (~98% pairwise) for the
+  reconcile→understand gate, NOT a store-wide auto-delete; `VERIFY_SWEEP` stays off. Owned the earlier overclaim.
+- **R20:** [USER: assume a fresh box; bug surfaced in the GPU run] Fixed a real bug: `run_full_unfrozen.sh` +
   `run_cl_test.sh` had a hardcoded `cd ~/overarching-package` (dead since the repo was flattened) that errored on every
   run — now `cd "$(dirname "$(readlink -f "$0")")"` (the script's own dir), so they work from any clone. `garry/` left
   untouched (frozen); `legacy/` skipped (unused). Test commands are now written fresh-box-safe (clone + deps + run).
@@ -294,12 +299,16 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   steps, cuda]: AUC 0.980 vs 0.907, precision@1% 100% vs 36.9%, recall 32% vs 65%.** (Still the simplified standalone
   harness — small GRU, no fabric/tokenizer; the full product-loop `run_verify_test.py` is the last mile.) NOTE: the naive
   50%-cross-domain test is the EASY regime B already handles (B ~97% there) — not informative.
-- **Verification PRODUCT-LOOP test [USER GPU run] — FAILED as first wired, then FIXED:** in the full loop (fabric +
-  online tokenizer 256→6176 + rekey + underfit base 7.2 b/B) reconstruction gave **0.3% precision / 8.3% recall** (worse
-  than B's 1%) and `VERIFY_SWEEP` gutted the store (~21k of 292k deleted, mostly genuine). Root cause: the Reconstructor
-  trained JOINTLY on a CHURNING store (a moving target) → noise. FIX: fit it POST-HOC on the FINAL settled store
-  (`VERIFY_FIT=3000`; `RECON_W=0` default, joint training off) — reproduces the standalone's winning condition. **Awaiting a
-  GPU re-test** (keep `VERIFY_SWEEP=0` until precision is re-confirmed). Standalone (AUC 0.980) stands; only the integration was broken.
+- **Verification PRODUCT-LOOP test [USER GPU runs] — reconstruction does NOT beat the BASE-RATE wall for store-wide
+  detection.** First wiring 0.3% precision; after the POST-HOC-fit fix (fit the Reconstructor on the settled store,
+  `VERIFY_FIT=3000`, `RECON_W=0`): **0.5% precision / 9.4% recall — essentially unchanged.** Diagnosis: at the realistic
+  ~0.26% injection, reconstruction fires on ~5% of the 292k genuine entries (noisy, token-level, UNDERFIT base) → base
+  rate sinks precision to ~0.5% — the SAME wall B hits (1%). The standalone's AUC 0.980 / 100%@1% was a projection
+  assuming FPR≈0, which does NOT hold on the heterogeneous real store. **HONEST REFRAME:** reconstruction is a strong
+  PER-CANDIDATE / pairwise discriminator (rank 1 corrupt vs 1 genuine ~98%) — its home is the reconcile→understand gate
+  (verify ONE provisional sense/expert), NOT a store-wide auto-delete (`VERIFY_SWEEP` stays OFF). Store-wide autonomous
+  wrong-detection remains UNSOLVED (B and reconstruction both die on base rate); the standing rec to lean on A
+  (edit-on-command, proven) holds. The only untried lever for store-wide use is a MUCH better-trained base (cleaner keys → lower genuine FPR).
 - **Keystone (functional vs content embedding) — MECHANISM VALIDATED (CPU, `keystone_probe.py`):** an embedding trained as
   a REUSABLE code that must TRANSFER across content (derive z from one input→output pair, require it to transform a NEW
   input under the same op) organizes by FUNCTION — k-NN op-purity **0.80 vs 0.50 surface** (chance 0.20), gap +0.30. So
