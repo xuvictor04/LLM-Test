@@ -122,6 +122,10 @@ Code: `memory.py` (the store), `self_organize.py` (product loop + society/fabric
 ### FUTURE DIRECTIONS — north-star goals, not yet designed (see `handoff/NORTH_STAR.md` + `handoff/designed-but-not-built/`)
 - MULTIMODALITY: pluggable "avenues" to add modalities beyond text. [USER, long-horizon]
 - OBSERVABILITY DASHBOARD: stream the model's thinking / internal processes live. [USER, long-horizon]
+- ACTIVE LEARNING — self-generated CLOSED-BOOK curriculum: at a competence gate the system authors its own items
+  (reference article → prompt → reproduce WITHOUT the reference) and trains to close the open-book/closed-book gap
+  (drives knowledge memory→weights). Mechanism open; tension with the editability invariant flagged.
+  See `handoff/design-directions/active-learning-self-generated-closed-book-curriculum.md`. [USER, R21]
 - Reasoning + a genuinely small footprint with growth intact — the capability-per-parameter bet.
 
 ## 4. Open questions — awaiting the user's call (I should ASK, not default)
@@ -160,7 +164,17 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R20 (current):** [USER: assume a fresh box; bug surfaced in the GPU run] Fixed a real bug: `run_full_unfrozen.sh` +
+- **R21 (current):** [USER: added to the vision — "do not write code, just update the context handler"] Captured a new
+  design direction: **ACTIVE LEARNING via a self-generated closed-book curriculum** — once the system reaches a certain
+  competence level it authors its own items (reference article → prompt → reproduce the output WITHOUT the reference), and
+  is graded on regenerating the target once the reference is removed. Cast in the project's own terms: it is the REVERSE /
+  reconstruction path (Verification) at the passage/task level, and the training-time twin of internal-only grounding —
+  alternate open-book/closed-book and train to CLOSE THE GAP, driving knowledge from the editable store into weights.
+  Flagged the open mechanism (the competence GATE; scoring; where the reference comes from) and the real TENSION with the
+  editability invariant (consolidating into entangled base weights could forfeit clean deletion — candidate fix:
+  consolidate into an EXPERT, still a deletable unit). Wrote `handoff/design-directions/active-learning-self-generated-closed-book-curriculum.md`
+  and added it to §3 FUTURE DIRECTIONS. NO code changed. Belongs after the first green GPU-scale run (needs fluency first).
+- **R20:** [USER: assume a fresh box; bug surfaced in the GPU run] Fixed a real bug: `run_full_unfrozen.sh` +
   `run_cl_test.sh` had a hardcoded `cd ~/overarching-package` (dead since the repo was flattened) that errored on every
   run — now `cd "$(dirname "$(readlink -f "$0")")"` (the script's own dir), so they work from any clone. `garry/` left
   untouched (frozen); `legacy/` skipped (unused). Test commands are now written fresh-box-safe (clone + deps + run).
