@@ -670,6 +670,7 @@ def main():
             print("[encoder training curve] step:loss:separation -> " + "  ".join(f"{t}:{l:.2f}:{s:.2f}" for t, l, s in curve))
             print(f"  (loss still dropping / separation still rising at the end = MORE warmup would help; flat = converged)")
     assigns = []; bounds = []; i = 0; step = 0; _cur_ph = -1; PH_SNAP = []
+    _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
     CKPT_EVERY = _i("CKPT_EVERY", 0)                       # >0: also save the checkpoint every N steps mid-run, so a long
@@ -813,6 +814,8 @@ def main():
         if ONLINE and step % RETOK_EVERY == 0:             # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
             stream, tok_bs, labels = _retok(); i = _bisect.bisect_left(tok_bs, cur_byte)
+            print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; +{TOK.vocab_size - _last_vsz} since last retok)")
+            _last_vsz = TOK.vocab_size
 
     if ONLINE:                                             # freeze + final tokenization for eval + persist the grown vocab
         stream, tok_bs, labels = _retok()
