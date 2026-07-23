@@ -160,7 +160,14 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R26 (current):** [USER: surprised checkpointing was absent; estimates always run long; can we inject a forced checkpoint?]
+- **R27 (current):** [USER: end-only ≠ checkpointing; likely removed pre-git; live data must be retrievable] Accepted the
+  framing (end-only save is NOT checkpointing) and that a pre-git removal is plausible+unverifiable (git only sees from the
+  import commit; Phases 0–11 predate VCS). Corrected my overstated injection risk: the weights ARE live in the process and
+  ARE retrievable — an injected-thread exception is NON-fatal (training continues), only the GPU→CPU copy carries real risk.
+  Added `rescue_ckpt.py`: a `pyrasite`-injected full-checkpoint dump that frame-walks to `main()`'s locals and rebuilds the
+  exact save dict → promptable via `prompt.py`. Best-effort, self-wrapped. This salvages the CURRENTLY running old-code run
+  without killing it. (⚠ never `kill -USR1` the OLD process — no handler → default action terminates it.)
+- **R26:** [USER: surprised checkpointing was absent; estimates always run long; can we inject a forced checkpoint?]
   Verified: mid-run checkpointing was NEVER present — `torch.save` has one commit (the initial import), so it saved only at
   loop end from day one (not a regression). Added CHECKPOINT-ON-DEMAND: a `SIGUSR1` handler sets a flag, the loop saves at
   the next safe step — `kill -USR1 <pid>` forces a checkpoint WITHOUT killing the run (pid is printed at start). Complements
