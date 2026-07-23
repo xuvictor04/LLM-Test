@@ -12,9 +12,14 @@ Knobs: DEVICE, GEN_LEN (default 200), GEN_TEMP (default 0.6), MEM (0/1), TOPK.
 The model is a small byte/token-level GRU trained on the stream -- expect domain-appropriate, semi-coherent text, not a chatbot.
 """
 import os
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+for _a in sys.argv[1:]:                       # accept KEY=VALUE on the command line too (docs showed `prompt.py CKPT=...`,
+    if "=" in _a and not _a.startswith("="):  # but only env vars were read -> silent fallback to the default checkpoint)
+        _k, _v = _a.split("=", 1); os.environ[_k] = _v
 
 DEV = os.environ.get("DEVICE", "cpu")
 CK = os.environ.get("CKPT", "runs/ck")
