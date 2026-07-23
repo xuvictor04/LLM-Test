@@ -1,28 +1,34 @@
-# A world model built WITHIN the system [USER direction — core, previously under-expressed]
+# A GENERAL world model built within the system [USER direction — core / near-north-star]
 
-**Idea:** the system should build an internal WORLD MODEL — not just predict the next token, but hold a structured,
-updatable internal representation of how things work, that REASONING can run over (predict consequences, plan, verify).
-The user flags this as something wanted from early on but not fully expressed until now; treat it as near-north-star.
+**Idea (corrected & sharpened by USER):** the system should build a **GENERAL world model** — a model of EXTERNAL
+REALITY, not of its own internal state. Three defining properties:
+- **PHYSICS-LIKE:** it learns how the world WORKS and EVOLVES — dynamics, cause→effect, consequences — the way a
+  physics engine models how things behave (learned, not hand-coded equations).
+- **MULTIMODAL:** it integrates other MODALITIES ("senses" — text now; a mic, a camera later), which enter through the
+  LOWEST tokenizer/embedding layer (the sense-integration point USER specified earlier). The world model is of a
+  multi-sensory world, not just text.
+- **REASONED-OVER:** "complex reasoning" (north star) = reasoning that runs over this world model (imagine consequences,
+  plan, verify).
+NOT a self-model / not latent-dynamics-of-its-own-hidden-state (an earlier misread). It models the WORLD.
 
-**Why it fits the whole design (much of the scaffolding is already pointed at this):**
-- The predictive LM is already a PROTO world model — it models "what comes next" in its data-world. The goal is to make
-  that model richer and reasoned-over, not just sampled from.
-- The EditableMemory + provenance is the DECLARATIVE half of a world model — facts/knowledge that stay updatable and
-  removable. A world model that can be EDITED (unlearn a wrong fact) is exactly the editable-knowledge thesis.
-- Reverse embedders / reconstruction (Verification) are a GENERATIVE-and-checking internal model — the system
-  regenerating/among-verifying its own representations is world-model machinery.
-- The active-learning closed-book loop is HOW the world model gets internalized into weights (reference → reproduce
-  without it) rather than living only in retrieval.
-- "Complex REASONING" (north star) is precisely reasoning OVER a world model. Multimodality ("senses") feeds the world
-  model additional modalities so the model is of a richer world, not just text.
-- Partial compartmentalization keeps the world model coherent (mixing) yet editable (provenance) — the same tension.
+**"Maybe it is all 3" [USER]:** the general world model likely UNIFIES the three mechanisms previously listed, all
+turned OUTWARD at the world:
+1. **Latent forward dynamics** — predict how the WORLD's latent state evolves (the physics-like core; JEPA-style —
+   predict the representation of the future, not raw tokens/pixels).
+2. **Structured / relational knowledge** — entities and relations in the world, held in EditableMemory
+   (declarative, provenance-tagged, editable/removable).
+3. **Generative reconstruction** — decode the latent back to a modality to IMAGINE / VERIFY (reuses the reverse-embedder).
+
+**Architecture sketch (how it sits on what exists):**
+- **Shared modality-agnostic LATENT** every sense maps into via the lowest layer = the integration point for new senses.
+- **Forward-dynamics model** over that latent = the "physics" (self-supervised: predict future latent from past).
+- **Relational memory** grounds the latent in editable facts; **reconstruction** imagines/checks; **reasoning** = rollouts + composition over the dynamics.
+- Provenance-without-partition keeps it coherent (mixing) yet editable; active-learning closed-book loop internalizes it into weights.
 
 **Open (the real design questions):**
-- What KIND of world model: implicit (the LM's latent state), a learned latent-dynamics model (predict future
-  latent states / consequences, à la model-based RL), or a structured/relational store? Likely a blend.
-- How does reasoning RUN over it — rollouts/simulation of consequences, or retrieval+composition, or both?
-- How does it stay UPDATABLE and consistent as new experience arrives (ties directly to EditableMemory + editing-by-provenance)?
-- Is the world model a SEPARATE module, or an emergent property of experts + memory + prediction? (Design bias so far:
-  emergent, not a bolted-on module — but this needs deciding.)
-- How is "the world model is correct/coherent" measured?
-**Source:** user, session 2026-07-23. Not built (capture). Elevate toward the north-star statement if the user confirms priority.
+- The minimal FIRST buildable increment (text-only, but modality-agnostic by construction so senses plug in later).
+- Latent objective: JEPA-style latent prediction vs reconstruction vs contrastive — which for v1.
+- How reasoning consumes the dynamics (rollout depth, planning).
+- How the relational layer is extracted without labels (self-assembly, as domains are).
+- Measurement: what says "the world model is correct" (forward-prediction accuracy, consequence tests, cross-modal).
+**Source:** user, session 2026-07-23. Foundational — candidate to fold into the north-star statement. Design before build.
