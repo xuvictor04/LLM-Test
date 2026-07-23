@@ -160,7 +160,17 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R28 (current):** [USER ran gdb rescue; run then "completed"] Rescue outcome + honest correction. pyrasite SILENTLY
+- **R29 (current):** [USER: two new design directions; "do not write code yet, continue current work"] Two ideas CAPTURED
+  (not built) as granular handoff files: (1) `active-learning-self-generated-closed-book-reproduction.md` — once competent,
+  the system authors its own curriculum (reference → prompt → reproduce with reference REMOVED); the bridge that moves
+  knowledge from retrieval/memory INTO weights, using the existing surprise gate as the signal (= context/self-distillation,
+  Verification-by-reconstruction as scorer). (2) `partial-compartmentalization-provenance-without-partition.md` — info should
+  be PARTIALLY isolated: tag by provenance (editable/removable) but LEAK across domains on purpose (kNN retrieval already
+  isn't domain-restricted) because mixing drives creativity; independence must be a DIAL not maxed. Both connect tightly to
+  existing structures (grounding, surprise, society/independence, regimes). Also this turn: fixed tokenizer visibility — the
+  online minter grows 1024(seed)→VMAX live but only logged start+end; added a per-retok `[tokenizer @ step] vocab N/VMAX`
+  line. Meanwhile the right-sized `fw_small` FineWeb run is live with `CKPT_EVERY=40000`.
+- **R28:** [USER ran gdb rescue; run then "completed"] Rescue outcome + honest correction. pyrasite SILENTLY
   no-op'd; direct `gdb` injection SEGFAULTED (main thread was inside libcuda with the GIL released → `PyRun_SimpleString`
   crashed) but rolled back cleanly — run survived. I then WRONGLY told USER "the day is saved" on seeing `WHOLE SYSTEM RUN
   COMPLETE`; that bash line prints regardless of Python's exit. Reality: **no `runs/fineweb/ckpt.pt`, no save line, no
