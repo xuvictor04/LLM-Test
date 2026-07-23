@@ -672,7 +672,32 @@ def main():
     assigns = []; bounds = []; i = 0; step = 0; _cur_ph = -1; PH_SNAP = []
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
-    import bisect as _bisect
+    CKPT_EVERY = _i("CKPT_EVERY", 0)                       # >0: also save the checkpoint every N steps mid-run, so a long
+    import bisect as _bisect                               #      run is killable/promptable and a crash never loses everything
+
+    def _save_ckpt(src_stream, quiet=False):               # persist model+tokenizer+memory so `prompt.py` can load it
+        ck = os.environ.get("SAVE_CKPT")
+        if not ck: return
+        os.makedirs(ck, exist_ok=True)
+        if USE_TOK: TOK.save(os.environ.get("TOKENIZER_PATH", "data/dyntok.json"))
+        act = mem.active
+        torch.save({"model": model.state_dict(), "D": D, "V": V, "KW": KW, "KEY_SRC": KEY_SRC,
+                    "model_type": MODEL_TYPE, "layers": _i("LAYERS", 4 if MODEL_TYPE=="transformer" else 1), "heads": _i("HEADS", 8), "maxlen": _i("MAXLEN", 512),
+                    "use_tok": USE_TOK, "tok_path": (os.environ.get("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None),
+                    "mem_keys": mem.keys[act].cpu(), "mem_tok": mem.tok[act].cpu(), "mem_src": mem.src[act].cpu(),
+                    "mem_ctx": (mem.ctx[act].cpu() if mem.ctx_w > 0 else None), "topk": mem.topk,
+                    "mem_pos": mem.pos[act].cpu(),                     # -> source passages for grounded answers
+                    "sig_d": SIG_D, "win": WIN, "enc": enc.state_dict(),          # encoder -> gist for fabric routing
+                    "fab": (fab.state_dict() if FABRIC else None),
+                    "fab_cfg": ({"n": len(fab.bodies), "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
+                                 "max_steps": _i("FAB_STEPS", 4), "hid_mult": _i("FAB_HID_MULT", 2),
+                                 "min_steps": _i("FAB_MIN_STEPS", 0), "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
+                                 "society": SOCIETY} if FABRIC else None)},
+                   f"{ck}/ckpt.pt")
+        with open(f"{ck}/source.bin", "wb") as _srcf:             # the corpus text retrieval points INTO
+            _srcf.write(bytes(byte_stream) if ONLINE else (bytes(src_stream) if not USE_TOK else TOK.decode(src_stream).encode("utf-8", "replace")))
+        if not quiet:
+            print(f"[saved checkpoint -> {ck}/ckpt.pt | {int(act.sum())} memory entries{', fabric ' + str(len(fab.bodies)) + 'n' if FABRIC else ''} | prompt it: python3 prompt.py CKPT={ck}]")
     while i + WIN + 1 < len(stream):
         w = stream[i:i + WIN + 1]
         x = torch.tensor([list(w[:-1])], device=DEV); y = torch.tensor([list(w[1:])], device=DEV)
@@ -773,6 +798,8 @@ def main():
                                 model.head.bias[nid] = 0.5 * (model.head.bias[a] + model.head.bias[b])
         _bx = []; _by = []; _bg = []; _bd = []; _bp = []
         i += WIN; step += 1
+        if CKPT_EVERY and step % CKPT_EVERY == 0:          # mid-run save: a multi-hour run stays killable/promptable
+            _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} -> {os.environ.get('SAVE_CKPT')}]"); model.train()
         if ONLINE and step % RETOK_EVERY == 0:             # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
             stream, tok_bs, labels = _retok(); i = _bisect.bisect_left(tok_bs, cur_byte)
@@ -783,25 +810,7 @@ def main():
         TOK.save(os.environ.get("TOKENIZER_PATH", "data/dyntok.json"))
         print(f"[tokenizer] ONLINE: minted throughout -> grew 256 -> {TOK.vocab_size} during training; final re-tokenization for eval")
 
-    if os.environ.get("SAVE_CKPT"):                                  # save trained model + tokenizer + memory so it can be prompted
-        ck = os.environ["SAVE_CKPT"]; os.makedirs(ck, exist_ok=True)
-        act = mem.active
-        torch.save({"model": model.state_dict(), "D": D, "V": V, "KW": KW, "KEY_SRC": KEY_SRC,
-                    "model_type": MODEL_TYPE, "layers": _i("LAYERS", 4 if MODEL_TYPE=="transformer" else 1), "heads": _i("HEADS", 8), "maxlen": _i("MAXLEN", 512),
-                    "use_tok": USE_TOK, "tok_path": (os.environ.get("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None),
-                    "mem_keys": mem.keys[act].cpu(), "mem_tok": mem.tok[act].cpu(), "mem_src": mem.src[act].cpu(),
-                    "mem_ctx": (mem.ctx[act].cpu() if mem.ctx_w > 0 else None), "topk": mem.topk,
-                    "mem_pos": mem.pos[act].cpu(),                     # -> source passages for grounded answers
-                    "sig_d": SIG_D, "win": WIN, "enc": enc.state_dict(),          # encoder -> gist for fabric routing
-                    "fab": (fab.state_dict() if FABRIC else None),
-                    "fab_cfg": ({"n": len(fab.bodies), "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
-                                 "max_steps": _i("FAB_STEPS", 4), "hid_mult": _i("FAB_HID_MULT", 2),
-                                 "min_steps": _i("FAB_MIN_STEPS", 0), "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
-                                 "society": SOCIETY} if FABRIC else None)},
-                   f"{ck}/ckpt.pt")
-        with open(f"{ck}/source.bin", "wb") as _srcf:             # the corpus text retrieval points INTO
-            _srcf.write(bytes(byte_stream) if ONLINE else (bytes(stream) if not USE_TOK else TOK.decode(stream).encode("utf-8", "replace")))
-        print(f"[saved checkpoint -> {ck}/ckpt.pt | {int(act.sum())} memory entries{', fabric ' + str(len(fab.bodies)) + 'n' if FABRIC else ''} | prompt it: python3 prompt.py CKPT={ck}]")
+    _save_ckpt(stream)                                               # final save (also runs mid-run if CKPT_EVERY>0)
 
     assigns = [(i, asm.resolve(d), t) for i, d, t in assigns]        # follow merges -> the surviving domain
     try:                                                   # === MEMORIZATION CHECK: train vs HELD-OUT ===

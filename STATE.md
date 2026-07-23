@@ -160,7 +160,14 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R24 (current):** [USER ran the 12×-data run] Two findings: (1) DATA confirms as the lever — memorization gap
+- **R25 (current):** [USER: fineweb run at 400k steps after ~a day] Two issues surfaced. (1) The fineweb command I gave was
+  OVERSIZED for the question (does clean data fix generation): `VMAX=16384` + `D_MODEL_B=768` + `WIN=256` (GRU is sequential,
+  so long windows hurt) + online re-tokenization over a 1B-BYTE stream = ~1–2M step target, ~2–4 days. My sizing error —
+  the generation-quality check needs ~200MB, not 1GB. (2) BUG-CLASS GAP: `self_organize.py` saved the checkpoint ONLY at
+  loop end, so a long run wasn't killable/promptable and a crash lost everything. FIXED: extracted `_save_ckpt()` + added
+  `CKPT_EVERY=N` for mid-run saves (default 0 = end-only, unchanged). Recommend killing the oversized run and relaunching
+  right-sized with `CKPT_EVERY` on. Only `self_organize.py` changed (py_compile-verified; no GPU here).
+- **R24:** [USER ran the 12×-data run] Two findings: (1) DATA confirms as the lever — memorization gap
   +0.249 → +0.139, domain genuineness 1 → 9 genuine; architecture responds well to more data, still not at a capacity wall.
   (2) Generation showed `the/at movie/nn` POS-tag artifacts → traced to a REAL BUG in `fetch_data.sh`: its eng tag-stripper
   matched UPPERCASE tags only (`[A-Z$]`) but NLTK Brown tags in lowercase (`the/at`), so every Brown POS tag leaked in.
