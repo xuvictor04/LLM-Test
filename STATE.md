@@ -160,7 +160,18 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R27 (current):** [USER: end-only ≠ checkpointing; likely removed pre-git; live data must be retrievable] Accepted the
+- **R28 (current):** [USER ran gdb rescue; run then "completed"] Rescue outcome + honest correction. pyrasite SILENTLY
+  no-op'd; direct `gdb` injection SEGFAULTED (main thread was inside libcuda with the GIL released → `PyRun_SimpleString`
+  crashed) but rolled back cleanly — run survived. I then WRONGLY told USER "the day is saved" on seeing `WHOLE SYSTEM RUN
+  COMPLETE`; that bash line prints regardless of Python's exit. Reality: **no `runs/fineweb/ckpt.pt`, no save line, no
+  eval/generation** — the process DIED at end-of-training-loop (most likely OOM on the final full-stream re-tokenization of
+  the 1B-byte stream; possibly gdb aftermath) BEFORE the end-only save. Day's promptable model LOST. Lesson: end-only save
+  is the trap; `CKPT_EVERY` (R25) would have banked step-80k+ checkpoints immune to an end crash — vindicated. Also fixed a
+  real `prompt.py` bug: it read `CKPT` from ENV only, so the documented `prompt.py CKPT=runs/<tag>` fell back to `runs/ck`
+  and errored; now folds `KEY=VALUE` argv into env. Domain fragmentation (~700 on web text): USER says it does NOT affect
+  the system (prior context) → dropped as a concern (consistent with "over-seg OK if genuine"). Injection is a dead end for
+  a CUDA loop; in-loop checkpointing is the right mechanism. Files: `prompt.py`.
+- **R27:** [USER: end-only ≠ checkpointing; likely removed pre-git; live data must be retrievable] Accepted the
   framing (end-only save is NOT checkpointing) and that a pre-git removal is plausible+unverifiable (git only sees from the
   import commit; Phases 0–11 predate VCS). Corrected my overstated injection risk: the weights ARE live in the process and
   ARE retrievable — an injected-thread exception is NON-fatal (training continues), only the GPU→CPU copy carries real risk.
