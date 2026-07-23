@@ -160,7 +160,15 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R25 (current):** [USER: fineweb run at 400k steps after ~a day] Two issues surfaced. (1) The fineweb command I gave was
+- **R26 (current):** [USER: surprised checkpointing was absent; estimates always run long; can we inject a forced checkpoint?]
+  Verified: mid-run checkpointing was NEVER present — `torch.save` has one commit (the initial import), so it saved only at
+  loop end from day one (not a regression). Added CHECKPOINT-ON-DEMAND: a `SIGUSR1` handler sets a flag, the loop saves at
+  the next safe step — `kill -USR1 <pid>` forces a checkpoint WITHOUT killing the run (pid is printed at start). Complements
+  `CKPT_EVERY` (R25). For a currently-running OLD-code process the only salvage is `pyrasite` frame-walk injection (model/mem
+  are `main()` locals, not globals) — risky under CUDA, given to USER with caveats. Estimate criticism ACK'd: `ESTIMATE=1`
+  times PART A mechanics only and does NOT model online re-tokenization (the cost that dominates big streams) — it's a floor,
+  not a prediction. Only `self_organize.py` changed (py_compile-verified).
+- **R25:** [USER: fineweb run at 400k steps after ~a day] Two issues surfaced. (1) The fineweb command I gave was
   OVERSIZED for the question (does clean data fix generation): `VMAX=16384` + `D_MODEL_B=768` + `WIN=256` (GRU is sequential,
   so long windows hurt) + online re-tokenization over a 1B-BYTE stream = ~1–2M step target, ~2–4 days. My sizing error —
   the generation-quality check needs ~200MB, not 1GB. (2) BUG-CLASS GAP: `self_organize.py` saved the checkpoint ONLY at

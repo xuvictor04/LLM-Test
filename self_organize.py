@@ -698,6 +698,15 @@ def main():
             _srcf.write(bytes(byte_stream) if ONLINE else (bytes(src_stream) if not USE_TOK else TOK.decode(src_stream).encode("utf-8", "replace")))
         if not quiet:
             print(f"[saved checkpoint -> {ck}/ckpt.pt | {int(act.sum())} memory entries{', fabric ' + str(len(fab.bodies)) + 'n' if FABRIC else ''} | prompt it: python3 prompt.py CKPT={ck}]")
+
+    import signal as _signal                               # CHECKPOINT-ON-DEMAND: `kill -USR1 <pid>` sets a flag and the
+    _ckpt_req = {"on": False}                              #   loop saves at the next SAFE point (never torch.save inside a
+    def _on_usr1(*_): _ckpt_req["on"] = True              #   handler -- reentrancy). Pause+dump without killing the run.
+    try: _signal.signal(_signal.SIGUSR1, _on_usr1)
+    except (ValueError, OSError): pass                     # not the main thread / unsupported platform -> silently skip
+    if os.environ.get("SAVE_CKPT"):
+        print(f"[pid {os.getpid()}] checkpoint-on-demand: kill -USR1 {os.getpid()}  ->  saves to {os.environ['SAVE_CKPT']} at the next step"
+              + (f" (auto every {CKPT_EVERY} steps)" if CKPT_EVERY else " (no periodic auto-save; set CKPT_EVERY to enable)"))
     while i + WIN + 1 < len(stream):
         w = stream[i:i + WIN + 1]
         x = torch.tensor([list(w[:-1])], device=DEV); y = torch.tensor([list(w[1:])], device=DEV)
@@ -798,8 +807,9 @@ def main():
                                 model.head.bias[nid] = 0.5 * (model.head.bias[a] + model.head.bias[b])
         _bx = []; _by = []; _bg = []; _bd = []; _bp = []
         i += WIN; step += 1
-        if CKPT_EVERY and step % CKPT_EVERY == 0:          # mid-run save: a multi-hour run stays killable/promptable
-            _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} -> {os.environ.get('SAVE_CKPT')}]"); model.train()
+        if (CKPT_EVERY and step % CKPT_EVERY == 0) or _ckpt_req["on"]:   # periodic OR on-demand (kill -USR1) save
+            _why = "SIGUSR1" if _ckpt_req["on"] else f"every {CKPT_EVERY}"; _ckpt_req["on"] = False
+            _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {os.environ.get('SAVE_CKPT')}]"); model.train()
         if ONLINE and step % RETOK_EVERY == 0:             # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
             stream, tok_bs, labels = _retok(); i = _bisect.bisect_left(tok_bs, cur_byte)
