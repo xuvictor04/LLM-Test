@@ -94,9 +94,21 @@ def main():
         f.close()
 
     print(f"[fetch_big] wrote {written/1e9:.2f} GB in {shard+1} shard(s) to {outdir}")
-    print(f"\nNext:\n  DATA_DIR={a.out} CORPUS_CAP=2000000000 STREAM_LEN={int(written*0.9)} \\\n"
-          f"    WIN=256 BATCH_W=16 ACCUM=4 D_MODEL_B=768 VMAX=16384 bash run_full_unfrozen.sh")
+    tag = a.dataset.replace("/", "_")
+    stream_len = int(written * 0.9)
+    # Only stack the heavy knobs (long windows / big vocab) for a genuinely LARGE corpus; on a small pull they just
+    # make a 40-min run take many hours. ALWAYS include CKPT_EVERY (killable/promptable mid-run) + RUN_NAME (isolates artifacts).
+    heavy = written >= 250_000_000
+    knobs = " WIN=256 BATCH_W=16 ACCUM=4 D_MODEL_B=768 VMAX=16384" if heavy else ""
+    print(f"\nNext ({'large corpus -> heavy config' if heavy else 'small corpus -> light defaults'}; "
+          f"CKPT_EVERY = saves every N steps so a crash never loses everything):\n"
+          f"  DATA_DIR={a.out} CORPUS_CAP=2000000000 STREAM_LEN={stream_len} CKPT_EVERY=40000 RUN_NAME={tag}{knobs} bash run_full_unfrozen.sh")
 
 
 if __name__ == "__main__":
     main()
+    # HF `datasets` streaming leaves background download threads alive; normal interpreter shutdown then crashes them
+    # ("PyGILState_Release: no thread-state" / "Bad file descriptor") AFTER our data is safely written. Skip that noisy
+    # teardown with a hard exit -- stdout is already flushed by the prints above.
+    sys.stdout.flush()
+    os._exit(0)
