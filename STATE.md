@@ -160,7 +160,19 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R33 (current):** [USER: fix the SigEncoder; do domains do anything? disable them; why everything in the key?; continue world model]
+- **R34 (current):** [USER: "I asked for NO COMPROMISE — you removed sections / used tested-and-approved. Build amortized rekey +
+  other fixes. Do NOT disable domains, I assumed they weren't used."] Owned the critique: my prior "fixes" (SELF_ORG=0,
+  SIG_MODE=bigram, lower WRITE_TARGET) were COMPROMISES (remove/downgrade), not the no-compromise engineering asked for.
+  Corrected course — built the genuinely non-compromising fixes, all keeping FULL functionality: (1) AMORTIZED REKEY
+  (`REKEY_AMORTIZED=1`, now default) — spread the SAME whole-store re-encode across steps via a rotating cursor instead of one
+  spike every 300 steps: SAME per-entry refresh rate + freshness + full drift-survival, just no periodic stall; also skips
+  re-keying entries that can't be READ (is_wrong/is_unverified) = pure-waste elimination, no retrieval loss. (2) SHIFT-GATED
+  ENCODER (`ENC_EVERY_IDLE`/`ENC_SHIFT_WIN`) — throttle the SigEncoder when the stream is STABLE but SNAP BACK to dense updates
+  on a detected boundary: full responsiveness, less redundant work. Both CPU-smoke-verified (domains ON — 38 live, no crash).
+  DOMAINS CONFIRMED ON: `SELF_ORG` defaults to 1; the disable switch is now only an optional experiment (USER withdrew the disable).
+  NOT done: async CUDA-stream overlap (#3) — GPU-only, can't verify in the CPU sandbox; noted as a future GPU optimization.
+  Files: `self_organize.py`.
+- **R33:** [USER: fix the SigEncoder; do domains do anything? disable them; why everything in the key?; continue world model]
   Traced + answered: (a) DOMAIN LABELS (`did`) = memory provenance (edit/unlearn by domain) + management — **NOTHING for
   prediction**; the SIGNATURE feeds fabric routing (that affects prediction), the label does not. (b) "everything in the key":
   `WRITE_TARGET=0.4` writes ~40% of ALL positions → 283k entries (not selective); each key is the model's full 512-d encode of

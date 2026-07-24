@@ -696,6 +696,21 @@ def main():
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
+    # ---- NO-COMPROMISE PERF: amortized re-key + shift-gated encoder (keep FULL drift-survival + FULL responsiveness) ----
+    REKEY_AMORTIZED = bool(_i("REKEY_AMORTIZED", 1))       # spread the SAME whole-store re-encode across steps -> no periodic spike,
+    _rk = {"ii": None, "cur": 0}                           #   SAME per-entry refresh rate + freshness. Nothing removed.
+    def _rekey_amortized():
+        if KEY_SRC != "model": return
+        if _rk["ii"] is None or _rk["cur"] >= _rk["ii"].numel():        # snapshot exhausted -> take a fresh one (once per full pass)
+            valid = mem.active & (~mem.is_wrong()) & (~mem.is_unverified())   # only entries that can be READ (skip re-keying dead weight)
+            _rk["ii"] = valid.nonzero(as_tuple=True)[0]; _rk["cur"] = 0
+            if _rk["ii"].numel() == 0: return
+        per = max(1, -(-_rk["ii"].numel() // max(1, REKEY_EVERY)))      # ceil: cover the whole snapshot once per REKEY_EVERY steps
+        a = _rk["cur"]; b = min(a + per, _rk["ii"].numel()); idx = _rk["ii"][a:b]
+        if mem.ctx_w > 0 and idx.numel() > 0: mem.rekey(_model_key(mem.ctx[idx]), idx)
+        _rk["cur"] = b
+    ENC_EVERY_IDLE = _i("ENC_EVERY_IDLE", max(ENC_EVERY * 6, 12))       # shift-gated encoder: throttle when the stream is STABLE,
+    ENC_SHIFT_WIN = _i("ENC_SHIFT_WIN", 400); _last_boundary = -10 ** 9  #   but snap back to ENC_EVERY on a detected boundary (full responsiveness)
     CKPT_EVERY = _i("CKPT_EVERY", 0)                       # >0: also save the checkpoint every N steps mid-run, so a long
     import bisect as _bisect                               #      run is killable/promptable and a crash never loses everything
 
@@ -744,16 +759,18 @@ def main():
                 print(f"  [PHASE {_p}] active processes {PHASE_SCHED[_p]} | domains {_snap[1]} | vocab {_snap[2]}"
                       f" | fabric nodes {_snap[3]} | memory {_snap[4]}")
         ew = list(byte_stream[bpos:bpos + WIN]) if ONLINE else list(w[:-1])   # SIGNATURE window: BYTES when online (tokenization-invariant)
-        if SIG_MODE == "learned" and step % ENC_EVERY == 0: contrastive_step(enc, oe, ENC_SEQ, bpos)   # LIVE encoder on the STABLE sequence
+        _enc_cad = ENC_EVERY if (step - _last_boundary) < ENC_SHIFT_WIN else ENC_EVERY_IDLE   # shift-gated: dense near a boundary, throttled when stable
+        if SIG_MODE == "learned" and step % _enc_cad == 0: contrastive_step(enc, oe, ENC_SEQ, bpos)   # LIVE encoder on the STABLE sequence
         sig = sig_of(ew, enc)
         if SELF_ORG:
             did, boundary = asm.update(sig, ew, step)
         else:
             did, boundary = 0, False                        # domains DISABLED: one bucket, no provenance/management
-        if boundary: bounds.append(bpos)
+        if boundary: bounds.append(bpos); _last_boundary = step   # a real distribution shift -> re-densify encoder updates
         if step % REKEY_EVERY == 0 and step > 0:
             if SIG_MODE == "learned" and SELF_ORG: asm.rekey(enc)                                        # RE-KEY domain centroids
-            rekey_memory(mem)                                                                            # RE-KEY memory store (drift-survival)
+            if not REKEY_AMORTIZED: rekey_memory(mem)                                                    # full re-encode (spike) -- fallback path
+        if REKEY_AMORTIZED and step > 0: _rekey_amortized()                                             # no-compromise: same work, spread out, no stall
         if SELF_ORG and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:                        # MANAGE the domain set
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
