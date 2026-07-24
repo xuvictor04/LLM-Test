@@ -64,11 +64,17 @@ class EditableMemory:
     def n(self): return int(self.active.sum())
 
     # ---- WRITE (surprise-gated, provenance-tagged) ----
-    def write(self, k, tok, src, surprise=None, ctx=None, pos=None):
+    def write(self, k, tok, src, surprise=None, ctx=None, pos=None, key_fn=None):
         """k:(B,d) keys, tok:(B,) next tokens, src:int domain id. surprise:(B,)=1-p_model(true tok) gates writing.
         ctx:(B,ctx_w) optional
-        raw context window stored so keys can be re-encoded later (drift fix)."""
-        k = k.detach()
+        raw context window stored so keys can be re-encoded later (drift fix).
+
+        key_fn: if given, k may be None and the keys are encoded from ctx AFTER the surprise gate instead of before.
+        The caller was encoding a key for EVERY position and then throwing ~88% of them away here (the gate keeps only
+        `gate_target` of them), which made this the most expensive operation in the step by a wide margin. Encoding the
+        survivors only is exactly equivalent -- the encoder is row-independent, so a row's key does not depend on which
+        other rows are in the batch -- and the gate, its controller and the resulting entries are untouched."""
+        if k is not None: k = k.detach()
         if surprise is not None:
             sd = surprise.detach()
             if self.adaptive_gate:
@@ -77,9 +83,14 @@ class EditableMemory:
                 self.gate_theta = min(self.gate_ceil, max(self.gate_floor, self.gate_theta + self.gate_step * (fired - self.gate_target)))
             else:
                 keep = sd >= self.write_gate                 # keep only tokens the model was unsure about (>= fixed gate)
-            k, tok = k[keep], tok[keep]
+            if k is not None: k = k[keep]
+            tok = tok[keep]
             if ctx is not None: ctx = ctx[keep]
             if pos is not None: pos = pos[keep]
+        if k is None:                                    # deferred encode: only the SURVIVORS pay for a key
+            if key_fn is None or ctx is None: raise ValueError("write(k=None) requires key_fn and ctx")
+            if tok.numel() == 0: return 0
+            k = key_fn(ctx).detach()
         m = k.size(0)
         if m == 0: return 0
         if self.evict == "usage" and int(self.active.sum()) >= self.cap:      # LEAST-USED dies (sampled, O(m) not O(cap))

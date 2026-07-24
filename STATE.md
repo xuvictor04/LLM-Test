@@ -160,6 +160,28 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
+- **R38 (current):** [USER: "GPT-2 parity can't be reached on what we're running on — stronger GPU, make the system more
+  efficient"] EFFICIENCY, with the standing no-compromise rule: nothing removed, nothing downgraded, every change either
+  exactly equivalent or an explicit opt-in flag.
+  - **Instrumented first** (`PROFILE=1`): per-component wall-clock attribution printed with the `[rate]` line. Built
+    BEFORE optimizing, because the last bottleneck claim was made without profiling and was wrong.
+  - **The dominant cost was `mem_key(x)`**, not the SigEncoder. It encoded a memory key for EVERY position —
+    `(BATCH_W*WIN, KW)` through the LM, i.e. `KW`× more token-positions than the main forward, every step — and then
+    `mem.write` discarded the ~88% that fail the surprise gate. `write()` now takes `key_fn` and encodes AFTER the gate,
+    so only the survivors pay. Exactly equivalent (the encoder is row-independent; gate, controller and resulting
+    entries untouched). `KEY_PREGATE=0` restores the old order for A/B.
+  - **Removed per-step GPU→CPU synchronizations**, each of which stalls the whole pipeline on an async CUDA queue:
+    `dom_exp` now accumulates on device and moves to host once in the end-of-run report; `_fab_nov` stays a 0-dim device
+    tensor (it is consumed by `expand` next step); the independence-loss weight uses `.detach()` instead of `float()`
+    (numerically identical — both stop the gradient); the loss scalar is pulled back ONCE per step instead of twice.
+  - **Precision knobs**: `TF32=1` (default on — matmul TF32 is off by default in current torch, leaving most of an
+    H100's matmul throughput unused) and `AMP=bf16` (opt-in autocast for the LM step; bf16 shares fp32's exponent range
+    so no GradScaler). Memory keys deliberately stay fp32 — retrieval is a dot product over normalized keys, the one
+    place reduced precision would change behaviour rather than just speed.
+  - **NOT done, deliberately**: `mem.write`'s adaptive-gate controller still syncs once per call (`float(keep.mean())`).
+    Moving it on-device would change float64-vs-float32 accumulation in the last bits and could slowly drift which
+    entries get written — a real behavioural change for a marginal gain, since the boolean-index sync in the same
+    function remains regardless.
 - **R37 (current):** [USER: "before I test, is there anything we can or should do before?"] Audited the PILOT'S OWN CODE PATH
   and found three gaps, two of which would have wrecked the run. (1) **World model absent from the checkpoint.** With
   `WORLD_FEEDBACK=1` the base LM is TRAINED as `h += world_proj(forecast)`, but `_save_ckpt` saved no world state and

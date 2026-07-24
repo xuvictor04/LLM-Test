@@ -45,6 +45,13 @@ MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 2000)      
 KW = _i("KEY_WIN", 8); V = 256
 USE_TOK = bool(_i("TOKENIZER", 0)); TOK_ONLINE = bool(_i("TOK_ONLINE", 0)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
+# ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
+# TF32: on by default for cuDNN but NOT for matmul in current torch, so the fp32 path leaves most of an H100's matmul
+# throughput unused. AMP=bf16 additionally runs the LM step in bfloat16 -- same exponent range as fp32 (so no loss
+# scaling and no GradScaler), which is the standard training precision on H100-class hardware.
+if bool(_i("TF32", 1)):
+    torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
+AMP = os.environ.get("AMP", "off").lower()                 # "off" (default) | "bf16" | "fp16"
 
 
 # ---------------- latent processes + the mixed, unlabeled stream ----------------
@@ -626,7 +633,7 @@ def main():
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _i("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 1500), _i("FAB_WARMUP", 2000)) if FABRIC else None
-    FAB_NMAX = _i("FAB_NMAX", 8); PONDER = _f("PONDER", 0.01); _fab_nov = 0.5
+    FAB_NMAX = _i("FAB_NMAX", 8); PONDER = _f("PONDER", 0.01); _fab_nov = torch.full((), 0.5, device=DEV)
     PONDER_WARM = _i("PONDER_WARM", 8000); FAB_BAL = _f("FAB_BALANCE", 0.01)
     BATCH_W = max(1, _i("BATCH_W", 1))                        # LM steps over BATCH_W windows AT ONCE. Domain assembly
     _bx = []; _by = []; _bg = []; _bd = []; _bp = []          #   and memory stay per-window (sequential, cheap), so
@@ -678,6 +685,7 @@ def main():
     # multi-epoch run that dies at hour 20 previously lost everything even though checkpoints existed -- they were
     # generate-only. Grown populations (fabric nodes, dynamics predictors) are re-grown to their saved size BEFORE the
     # optimizers are built so their params are in the param groups and their Adam moments restore.
+    KEY_PREGATE = bool(_i("KEY_PREGATE", 1))              # encode memory keys AFTER the surprise gate (see the write call)
     RESUME = os.environ.get("RESUME", "")
     _RD, _resume_step = None, 0
     if RESUME:
@@ -820,6 +828,39 @@ def main():
     # this measures the ACTUAL loop and re-projects from observed throughput, so the ETA self-corrects as the run goes.
     import time as _time
     RATE_EVERY = _i("RATE_EVERY", 2000); _t_start = _time.time(); _t_mark = _t_start; _s_mark = step
+    _AC = None                                             # autocast context for the LM step (None = plain fp32)
+    if AMP in ("bf16", "fp16") and DEV == "cuda":
+        _AC = torch.autocast("cuda", dtype=(torch.bfloat16 if AMP == "bf16" else torch.float16))
+        print(f"[precision] LM step in {AMP} autocast (memory keys stay fp32 -- retrieval is a dot-product over "
+              f"normalized keys and is the one place reduced precision would change behaviour, not just speed)")
+    elif AMP != "off":
+        print(f"[precision] AMP={AMP} ignored on device {DEV}")
+    # PER-COMPONENT PROFILER (PROFILE=1): attributes wall-clock to each part of the step, so tuning targets what is
+    # actually slow instead of what seems slow. Off by default -- on CUDA it must synchronize to attribute time, which
+    # itself costs throughput, so it is a diagnostic mode, not the run mode.
+    PROFILE = bool(_i("PROFILE", 0)); _prof = {}
+    class _Null:
+        def __enter__(s): return s
+        def __exit__(s, *a): return False
+    _NULL = _Null()
+    class _Timer:
+        __slots__ = ("k", "t")
+        def __init__(s, k): s.k = k
+        def __enter__(s):
+            if DEV == "cuda": torch.cuda.synchronize()
+            s.t = _time.time(); return s
+        def __exit__(s, *a):
+            if DEV == "cuda": torch.cuda.synchronize()
+            _prof[s.k] = _prof.get(s.k, 0.0) + (_time.time() - s.t); return False
+    def _T(k): return _Timer(k) if PROFILE else _NULL      # zero cost when PROFILE=0
+    def _t0():                                             # start/stop form, for spans too long to re-indent into a `with`
+        if not PROFILE: return None
+        if DEV == "cuda": torch.cuda.synchronize()
+        return _time.time()
+    def _t1(k, t):
+        if t is None: return
+        if DEV == "cuda": torch.cuda.synchronize()
+        _prof[k] = _prof.get(k, 0.0) + (_time.time() - t)
     _total_steps = EPOCHS * (len(stream) // WIN)
     _bpw = WIN * (len(byte_stream) / max(1, len(stream))) if ONLINE else WIN     # BYTES of corpus consumed per step
     while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
@@ -829,6 +870,11 @@ def main():
             print(f"  [rate @ {step}] {_rate*60:.0f} steps/min | {_rate*_bpw/1e3:.1f} kB/s of corpus | "
                   f"elapsed {(_now-_t_start)/60:.0f} min | ~{_left/max(1e-9,_rate)/3600:.1f} h left ({_left} steps) | "
                   f"{_rate*_bpw*86400/1e9:.2f} GB of text per DAY at this rate")
+            if PROFILE and _prof:
+                _tot = sum(_prof.values())
+                _br = "  ".join(f"{k} {v/max(1e-9,_tot)*100:.0f}%" for k, v in sorted(_prof.items(), key=lambda kv: -kv[1]))
+                print(f"    [profile] {_br}   ({_tot/max(1e-9,_now-_t_start)*100:.0f}% of wall-clock attributed)")
+                _prof.clear()
             _t_mark = _now; _s_mark = step
         if i + WIN + 1 >= len(stream):
             _epoch += 1
@@ -850,17 +896,19 @@ def main():
                       f" | fabric nodes {_snap[3]} | memory {_snap[4]}")
         ew = list(byte_stream[bpos:bpos + WIN]) if ONLINE else list(w[:-1])   # SIGNATURE window: BYTES when online (tokenization-invariant)
         _enc_cad = ENC_EVERY if (step - _last_boundary) < ENC_SHIFT_WIN else ENC_EVERY_IDLE   # shift-gated: dense near a boundary, throttled when stable
-        if SIG_MODE == "learned" and step % _enc_cad == 0: contrastive_step(enc, oe, ENC_SEQ, bpos)   # LIVE encoder on the STABLE sequence
-        sig = sig_of(ew, enc)
+        if SIG_MODE == "learned" and step % _enc_cad == 0:
+            with _T("encoder(contrastive)"): contrastive_step(enc, oe, ENC_SEQ, bpos)   # LIVE encoder on the STABLE sequence
+        with _T("sig_of"): sig = sig_of(ew, enc)
         if SELF_ORG:
-            did, boundary = asm.update(sig, ew, step)
+            with _T("domain assembly"): did, boundary = asm.update(sig, ew, step)
         else:
             did, boundary = 0, False                        # domains DISABLED: one bucket, no provenance/management
         if boundary: bounds.append(bpos); _last_boundary = step   # a real distribution shift -> re-densify encoder updates
         if step % REKEY_EVERY == 0 and step > 0:
             if SIG_MODE == "learned" and SELF_ORG: asm.rekey(enc)                                        # RE-KEY domain centroids
             if not REKEY_AMORTIZED: rekey_memory(mem)                                                    # full re-encode (spike) -- fallback path
-        if REKEY_AMORTIZED and step > 0: _rekey_amortized()                                             # no-compromise: same work, spread out, no stall
+        if REKEY_AMORTIZED and step > 0:
+            with _T("rekey(amortized)"): _rekey_amortized()                                             # no-compromise: same work, spread out, no stall
         if SELF_ORG and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:                        # MANAGE the domain set
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
@@ -875,8 +923,12 @@ def main():
         if len(_bx) < BATCH_W:                              # accumulate a batch of windows first
             i += WIN; step += 1; continue
         model.train()
-        x = torch.tensor(_bx, device=DEV); y = torch.tensor(_by, device=DEV)   # (BATCH_W, WIN)
-        sigb = torch.stack(_bg)
+        with _T("batch->tensor"):
+            x = torch.tensor(_bx, device=DEV); y = torch.tensor(_by, device=DEV)   # (BATCH_W, WIN)
+            sigb = torch.stack(_bg)
+        _plm = _t0()
+        if _AC is not None: _AC.__enter__()                     # autocast the LM step (entered/exited explicitly rather
+        #   than as a `with` block purely to avoid re-indenting the whole step); backward runs OUTSIDE it, as recommended.
         _sl = router.route(sig, step) if EXPERTS else -1        # route by SIGNATURE to the expert population (coarser than domains)
         if EXPERTS and _sl >= 0: route_at[bpos:bpos + WIN] = _sl   # remember WHICH expert trained on this span
         h = model.encode(x)
@@ -887,13 +939,15 @@ def main():
                 _wpred_seq = world_fwd(_wz.reshape(-1, WLAT))[0].reshape(x.size(0), x.size(1), WLAT)
                 h = h + world_proj(_wpred_seq)                   # BEFORE fabric/head -> generation is conditioned on the forecast
         if FABRIC and SOCIETY:
-            _hs, _w, _O = fab.society(h, sigb, torch.full((x.size(0),), _fab_nov, device=DEV))
+            _hs, _w, _O = fab.society(h, sigb, _fab_nov.expand(x.size(0)))
             _dep = _hs.new_zeros(()); _bal = fab_bal(_w); h = _hs
-            _wd = _w[0].detach().cpu()                     # which experts serve THIS domain, and how much
+            _wd = _w[0].detach()                           # which experts serve THIS domain, and how much. Kept ON DEVICE:
+            #   `.cpu()` here forced a full GPU->CPU synchronization EVERY step for a number that is only read once, in
+            #   the end-of-run affiliation report. Accumulate on device; move to host when reporting.
             if did in dom_exp and dom_exp[did].numel() == _wd.numel(): dom_exp[did] += _wd
             else: dom_exp[did] = _wd.clone()
         elif FABRIC:
-            h, _dep, _mass, _bal = fab(h, sigb, torch.full((x.size(0),), _fab_nov, device=DEV))
+            h, _dep, _mass, _bal = fab(h, sigb, _fab_nov.expand(x.size(0)))
         elif _sl >= 0:
             h = experts.one(h, _sl)
         if FABRIC and SOCIETY:                             # ENSEMBLE the experts' OUTPUTS (not their hidden states)
@@ -917,7 +971,9 @@ def main():
             _ki = _w.mean(0).topk(min(IND_K, _O.size(1))).indices  #   (weighted by its routing mass) -- makes the population
             for _j in _ki:                                    #   an ENSEMBLE, which survives member removal, rather than
                 _lj = model.head(fab.norm(_O[:, _j]))         #   a DECOMPOSITION, which does not
-                tot = tot + IND_W * float(_w[:, _j].mean()) * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
+                #   `.detach()` instead of `float()`: numerically identical (both stop the gradient) but stays on device,
+                #   where `float()` forced a GPU->CPU sync per expert per step.
+                tot = tot + IND_W * _w[:, _j].mean().detach() * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
         if recon is not None and RECON_W > 0:                    # VERIFICATION: train the Reconstructor on GENUINE (key, token)
             tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # guard RECON_W>0: skips a redundant key-encode
         #   that was computed then multiplied by 0.0 on the default VERIFY=recon path (workflow finding)
@@ -929,24 +985,40 @@ def main():
             tot = tot + WORLD_W * _wpl + WORLD_VAR * (_wv + 0.04 * _wc)   # anti-collapse at FULL strength (was under-weighted -> collapse)
             if WORLD_GROW:                                       # selection: GROW on plateau, SOFT-CULL the unused (like experts)
                 _wl_ema = _winv if _wl_ema is None else 0.98 * _wl_ema + 0.02 * _winv
+        if _AC is not None: _AC.__exit__(None, None, None)
         (tot / ACCUM).backward()                                 # gradient accumulation over ACCUM windows
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
-        _lm_run.append(float(loss.detach()))                     # LM loss curve: is the model still improving?
+        _t1("lm fwd+bwd (incl. fabric/world)", _plm)
+        _lf = float(loss.detach())                               # ONE host sync per step (was two: the curve and the
+        _lm_run.append(_lf)                                      #   plateau detector each pulled the same scalar back)
         if step % max(1, (STREAM_LEN // WIN) // 8) == 0 and _lm_run:
             _lm_curve.append((step, sum(_lm_run[-2000:]) / len(_lm_run[-2000:]))); _lm_run = _lm_run[-2000:]
-        if FABRIC and not fab.norm_only and fabgrow.step(float(loss.detach()), step) and len(fab.bodies) < FAB_NMAX:
+        if FABRIC and not fab.norm_only and fabgrow.step(_lf, step) and len(fab.bodies) < FAB_NMAX:
             om.add_param_group({"params": fab.grow(sig[None, :] if SOCIETY else None)})   # PLATEAU -> new expert, keyed HERE
             print(f"  [fabric @ {step}] progress plateaued -> grew node {len(fab.bodies)}")
+        _pmem = _t0()
         with torch.no_grad():
             pm = F.softmax(lg.detach(), -1)                    # reuse the expert-routed logits for the write-gate surprise
             surprise = 1 - pm.gather(-1, y.unsqueeze(-1)).squeeze(-1)
-            if FABRIC: _fab_nov = float(surprise.mean())        # last step's surprise biases the next routing query
-            _K = mem_key(x); _C = mem_ctx(x); _n1 = x.size(1)
+            if FABRIC: _fab_nov = surprise.mean()               # last step's surprise biases the next routing query
+            #   kept as a 0-dim DEVICE tensor: it is consumed next step by torch.full/expand, so `float()` bought
+            #   nothing but a per-step synchronization.
+            # KEY-BEHIND-THE-GATE: `mem_key(x)` used to encode a key for EVERY position -- (BATCH_W*WIN, KW) through the
+            # LM, i.e. KW times MORE token-positions than the main forward, every step -- and then `write` discarded the
+            # ~88% that fail the surprise gate. Encoding only the survivors is exactly equivalent (row-independent
+            # encoder, identical gate/controller/entries) and removes the step's single largest cost. KEY_PREGATE=0
+            # restores the old order for A/B verification.
+            _C = mem_ctx(x); _n1 = x.size(1)
+            _pre = KEY_PREGATE and KEY_SRC == "model" and _C is not None
+            _K = None if _pre else mem_key(x)
             for _b in range(x.size(0)):                     # per-window: each carries its OWN domain + source position
-                mem.write(_K[_b * _n1:(_b + 1) * _n1], y[_b], src=_bd[_b], surprise=surprise[_b],
-                          ctx=(None if _C is None else _C[_b * _n1:(_b + 1) * _n1]),
+                _cb = None if _C is None else _C[_b * _n1:(_b + 1) * _n1]
+                mem.write(None if _pre else _K[_b * _n1:(_b + 1) * _n1], y[_b], src=_bd[_b], surprise=surprise[_b],
+                          ctx=_cb, key_fn=(_model_key if _pre else None),
                           pos=torch.arange(_bp[_b], _bp[_b] + _n1, device=DEV))
+        _t1("memory key+write", _pmem)
         assigns.append((bpos, did, byte_labels[min(bpos, len(byte_labels) - 1)] if ONLINE else labels[i]))
+        _ptok = _t0()
         if ONLINE:                                         # ONGOING minting: tally this window's token pairs, mint, re-tokenize
             for a, b in zip(w[:-1], w[1:]): TOK.pair[(a, b)] += 1
             if step % GROW_EVERY == 0 and step > 0:
@@ -960,6 +1032,7 @@ def main():
                             model.head.weight[nid] = 0.5 * (model.head.weight[a] + model.head.weight[b])
                             if model.head.bias is not None:
                                 model.head.bias[nid] = 0.5 * (model.head.bias[a] + model.head.bias[b])
+        _t1("tokenizer (mint/tally)", _ptok)
         _bx = []; _by = []; _bg = []; _bd = []; _bp = []
         i += WIN; step += 1
         if (CKPT_EVERY and step % CKPT_EVERY == 0) or _ckpt_req["on"]:   # periodic OR on-demand (kill -USR1) save
@@ -1166,6 +1239,7 @@ def main():
     compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=_i("EVAL_N", 64))
     if FABRIC and SOCIETY and dom_exp:                     # === AFFILIATION: which experts serve which domains? ===
       try:                                                 # a DIAGNOSTIC must never kill a run (this one did once)
+        dom_exp = {_k: _v.cpu() for _k, _v in dom_exp.items()}   # accumulated on device (no per-step sync) -> host ONCE, here
         _NE = max(v.numel() for v in dom_exp.values())     # population GREW mid-run -> vectors differ in length
         def _pad(v): return torch.cat([v, torch.zeros(_NE - v.numel())]) if v.numel() < _NE else v[:_NE]
         _aff = {}                                          # resolve merged domains, keep only live ones
