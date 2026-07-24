@@ -160,17 +160,22 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R32 (current):** [USER: "make the world model like the rest of the system in its separation — build it"; also "a few agents"
-  to find the real bottleneck] BUILT the SEPARATED world model: `DynamicsPopulation` (world_model.py) = a routed SOCIETY of
-  forward-dynamics predictors over a shared latent — routes each latent to the predictor whose "physics" fits, blends the
-  top few, tracks per-predictor FITNESS, GROWS on plateau (clones the fittest), SOFT-CULLS the unused. Mirrors the expert
-  society, reusing the same primitive (per USER's "broken-down tasks are similar"). Integrated into self_organize.py:
-  `WORLD_MODEL=1` = routed population; `WORLD_GROW=1` = grow/cull selection at the experts/domains cadence; held-out eval
-  reports predictor count + fitness. STATUS (honest): both files COMPILE and the path is GATED off by default (safe no-op);
-  the multi-regime specialization probe + CPU integration smoke-test were still RUNNING at commit time — NOT yet confirmed
-  passing. Also launched a background WORKFLOW ("a few agents") to profile the training bottleneck (GPU-bound? reverse
-  encoders / rekey_memory / SigEncoder) and return non-compromising fix OPTIONS — analysis only, no edits. Corrected my earlier
-  unverified "CPU-bound" claim: deferring to USER's profiled "GPU-bound". Files: `world_model.py`, `self_organize.py`.
+- **R32 (current):** [USER: make world model separated like the rest; "a few agents" for the bottleneck; "physics need not be
+  the target, just simulate the world"] RESULTS IN (updates the mid-build note): (1) SEPARATED world model `DynamicsPopulation`
+  (world_model.py) — routed society of forward-dynamics predictors (route by fitness, blend, grow-on-plateau cloning fittest,
+  soft-cull), integrated + gated (`WORLD_MODEL`/`WORLD_GROW`). Integration VERIFIED end-to-end (grew 1→3, soft-culled, held-out
+  beats persistence +53.4%, no collapse, exit 0). HONEST NEGATIVE: vs a PARAM-MATCHED monolith on a toy multi-regime probe it's
+  −5.1% (worse), routing purity 0.32 — separation does NOT improve accuracy here / does not specialize (regime is inferable from
+  the latent, so one net suffices). Structural value (editability/growth/consistency — the stated reason) real; accuracy benefit
+  UNPROVEN. Did NOT p-hack. Hypothesis to test: route the population by DOMAIN CONTEXT (sig), not z alone, so predictors specialize
+  per-domain. (2) "Physics" reframed [USER]: metaphor for a FAITHFUL world SIMULATION; latent-dynamics already fits. (3) BOTTLENECK
+  (5-agent workflow, empirical cProfile + analysis): NOT the reverse-embedder (Reconstructor OFF by default `VERIFY=selfcon` → zero
+  — a red herring). It's the FORWARD **SigEncoder** contrastive (30k warmup up front + every-2-steps = ~61% of the loop) and
+  **rekey_memory** (re-encodes the WHOLE store every 300 steps, grows with store → late-run stall), plus pure-Python
+  `tokenizer.segment`. OPTIONS given (non-compromising): env-only (ENC_WARMUP↓/ENC_EVERY↑/REKEY_EVERY↑); structural (adaptive-warmup
+  plateau-stop, adaptive ENC_EVERY on shift signal, rekey rotating-subsample+async = the only fix that kills O(store) growth). CPU
+  profile caveat: a GPU profile would settle batch/hidden shrinks. NO fixes applied (confirm-before-action). KEY GAP: the world model
+  is a SIDE-HEAD — not yet wired to condition generation/learning, so it doesn't improve the system YET. Files: `world_model.py`, `self_organize.py`.
 - **R31:** [USER: robust evals; integrate world model; "is it vastly undertrained? I thought we need a few epochs"]
   DECISIVE FINDING (verified in code): the product loop does a SINGLE pass — `while i+WIN+1 < len(stream)`, no epoch loop;
   "epochs" only come from `STREAM_LEN > corpus` (build_stream resamples with replacement). `fw_small` STREAM_LEN=60M vs

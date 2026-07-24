@@ -31,4 +31,18 @@ turned OUTWARD at the world:
 - How reasoning consumes the dynamics (rollout depth, planning).
 - How the relational layer is extracted without labels (self-assembly, as domains are).
 - Measurement: what says "the world model is correct" (forward-prediction accuracy, consequence tests, cross-modal).
+**"Physics" is a METAPHOR [USER, refined]:** the target is a FAITHFUL SIMULATION of the world (whatever real regularities
+exist — what follows from what, persistence, cause→effect), NOT physics equations. Latent-forward-dynamics already fits this.
+
+**BUILT so far (session 2026-07-23):** the dynamics-core trunk (`world_model.py`): `WorldEncoder` + `ForwardModel` (JEPA/
+VICReg latent forward-prediction, CPU-probe: beats persistence 99.6%, R² 0.988) and a SEPARATED `DynamicsPopulation` (routed
+society of predictors: route/blend/fitness/grow/soft-cull, mirrors the experts). Integrated + gated (`WORLD_MODEL`/`WORLD_GROW`),
+verified end-to-end (grows/culls, held-out +53.4% vs persistence). CAVEAT: separation does NOT yet beat a param-matched monolith
+on toy tests (−5.1%, no specialization) — structural value only so far; likely needs DOMAIN-CONTEXT-conditioned routing to specialize.
+
+**THE KEY GAP:** the world model is currently a SIDE-HEAD — it predicts latents but does NOT condition the base model's generation
+or drive its learning. Until that FEEDBACK LINK is built, it can't improve the system. The remaining bricks: senses/multimodality
+(new encoder paths into the shared latent), grounding in editable memory (relational layer), imagination (decode latent → observations),
+reasoning (roll dynamics forward for consequences/planning), and the feedback link (the one that makes it matter).
+
 **Source:** user, session 2026-07-23. Foundational — candidate to fold into the north-star statement. Design before build.
