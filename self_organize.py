@@ -827,11 +827,24 @@ def main():
                            + (list(world_enc.parameters()) + list(world_fwd.parameters()) if WORLD_MODEL else [])
                            + (list(world_proj.parameters()) if world_proj is not None else []), lr=2e-3, weight_decay=WD)
     oe = torch.optim.AdamW(enc.parameters(), lr=2e-3, weight_decay=WD)
+    # PER-EXPERT MEMORY: each expert owns MEM_QUOTA entries, evicted by LRU on last USE. Sized to FAB_NMAX so the
+    # partition does not have to be rebuilt as the population grows. MEM_PER_EXPERT=0 keeps the single global store.
+    # DEFAULT OFF, on measurement: same seed, same config, only the store differs --
+    #   global 200k slots -> memory contributes -0.097 b/B
+    #   32 owners x 64    -> memory contributes -0.652 b/B
+    # The partition costs 0.555 b/B at the scale tested, so it does not become the default path until it is shown to
+    # help. (Memory being slightly net-negative even globally is a separate, pre-existing finding.)
+    MEM_PER_EXPERT = bool(_i("MEM_PER_EXPERT", 0)) and FABRIC and SOCIETY
+    MEM_QUOTA = _i("MEM_QUOTA", 128)
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
                          adaptive_gate=bool(_i("WRITE_ADAPTIVE", 0)), gate_target=_f("WRITE_TARGET", 0.5),
                          evict=os.environ.get("EVICT", "recency"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
-                         quantile_gate=bool(_i("WRITE_QUANTILE", 1)))   # WRITE_QUANTILE=0 restores the old additive controller
+                         quantile_gate=bool(_i("WRITE_QUANTILE", 1)),   # WRITE_QUANTILE=0 restores the old additive controller
+                         n_own=(_i("FAB_NMAX", 64) if MEM_PER_EXPERT else 1), quota=(MEM_QUOTA if MEM_PER_EXPERT else None))
+    if MEM_PER_EXPERT:
+        print(f"[memory] PER-EXPERT: {mem.n_own} owners x {mem.quota} entries = {mem.cap} slots, LRU by last USE "
+              f"(writes partitioned by routed expert; reads global so information still mixes)")
     asm = DomainAssembler()
     if _RD is not None:                                    # part 2 of RESUME: optimizer moments, memory store, domains
         try: om.load_state_dict(_RD["opt_m"]); oe.load_state_dict(_RD["opt_e"])
@@ -1221,10 +1234,14 @@ def main():
             _C = mem_ctx(x); _n1 = x.size(1)
             _pre = KEY_PREGATE and KEY_SRC == "model" and _C is not None
             if _pre and KEY_BATCH:                          # ONE key encode for the whole BATCH_W batch instead of
+                # OWNER = the argmax-routed expert for this batch. Writes are compartmentalized per expert (each gets
+                # its own quota, evicted by LRU); READS stay global, so knowledge is owned but not walled off.
+                _own = None if not (FABRIC and SOCIETY and MEM_PER_EXPERT) else \
+                    [int(_w[min(_b, _w.size(0) - 1)].argmax()) for _b in range(x.size(0))]
                 mem.write_batch([(y[_b], _bd[_b], surprise[_b],   # BATCH_W separate tiny encodes -- the measured
                                   _C[_b * _n1:(_b + 1) * _n1],    # bottleneck was CALL COUNT, not FLOPs
                                   _posv(_b, _n1))
-                                 for _b in range(x.size(0))], _model_key)
+                                 for _b in range(x.size(0))], _model_key, owners=_own)
             else:
                 _K = None if _pre else mem_key(x)
                 for _b in range(x.size(0)):                 # per-window: each carries its OWN domain + source position

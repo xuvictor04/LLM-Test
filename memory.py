@@ -21,8 +21,22 @@ class EditableMemory:
     def __init__(self, cap, key_dim, device="cpu", vocab=256, write_gate=0.0, wrong_thresh=1.0, topk=8, ctx_w=0,
                  wrong_margin=1.5, wrong_min_n=3, flag_min_w=0.0, selfcon_thresh=2.5,
                  adaptive_gate=False, gate_target=0.5, gate_step=0.02, gate_floor=0.0, gate_ceil=0.95,
-                 evict="recency", use_decay=0.98, decay_every=20000, quantile_gate=True):
+                 evict="recency", use_decay=0.98, decay_every=20000, quantile_gate=True,
+                 n_own=1, quota=None):
+        # PER-OWNER PARTITION (n_own > 1): the store is split into n_own contiguous blocks of `quota` entries, one per
+        # expert, and an entry lives at index owner*quota + slot. Eviction is per-owner LRU on LAST-USE TIME -- not
+        # self.use, which is a decayed retrieval COUNT (an LFU signal, and decayed by WRITE count rather than time).
+        # Rationale: a global recency FIFO gives every expert the same 66-second window regardless of how useful its
+        # entries are, and makes the whole store one undifferentiated pool. Partitioning gives each expert a small,
+        # bounded, independently-managed memory -- partial compartmentalization at the storage level -- while READS
+        # stay global so information can still mix.
+        self.n_own = max(1, int(n_own))
+        self.quota = int(quota) if quota else int(cap // self.n_own)
+        if self.n_own > 1: cap = self.n_own * self.quota          # cap is DERIVED from the partition
         self.cap, self.kd, self.dev, self.V = cap, key_dim, device, vocab
+        self.own = torch.full((cap,), -1, dtype=torch.long, device=device)   # which expert owns each slot
+        self.last = torch.zeros(cap, dtype=torch.long, device=device)        # LAST-USE TICK (monotonic), for true LRU
+        self.tick = 0
         self.write_gate = float(write_gate)      # write only items with surprise (1-p_model) >= this (0 = write everything)
         # ADAPTIVE GATE (optional): the surprise scale drifts as the base trains, so a FIXED gate is too permissive early
         # / too strict late. When on, the threshold self-calibrates to keep a stable write fraction (gate_target) at any
@@ -94,7 +108,7 @@ class EditableMemory:
     # had its own inline copy of the additive controller, which meant the quantile fix silently did nothing whenever
     # KEY_PREGATE=0 or KEY_BATCH=0 sent writes down the per-window path.
 
-    def write_batch(self, rows, key_fn):
+    def write_batch(self, rows, key_fn, owners=None):
         """DISPATCH BATCHING: write several windows with ONE key encode instead of one per window.
 
         Profiling on an A100 showed the step is dominated by call COUNT, not FLOPs: `_model_key` ran ~1952 times per
@@ -110,11 +124,12 @@ class EditableMemory:
         allk = key_fn(torch.cat(ctxs, 0)).detach()           # <-- the single encode this whole method exists for
         n = 0
         off = 0
-        for r, keep in zip(rows, keeps):
+        for _r, (r, keep) in enumerate(zip(rows, keeps)):
             tok, src, _, ctx, pos = r
             m = int(keep.sum())
             if ctx is None or m == 0: continue
-            n += self._store(allk[off:off + m], tok[keep], src, ctx[keep], (None if pos is None else pos[keep]))
+            n += self._store(allk[off:off + m], tok[keep], src, ctx[keep], (None if pos is None else pos[keep]),
+                             own=(None if owners is None else owners[_r]))
             off += m
         return n
 
@@ -142,10 +157,32 @@ class EditableMemory:
             k = key_fn(ctx).detach()
         return self._store(k, tok, src, ctx, pos)
 
-    def _store(self, k, tok, src, ctx, pos):
+    def _store(self, k, tok, src, ctx, pos, own=None):
         """Commit already-gated, already-keyed rows. Shared by write() and write_batch() so the two cannot drift."""
         m = k.size(0)
         if m == 0: return 0
+        if self.n_own > 1 and own is not None:
+            # PER-OWNER LRU. One window can present far more survivors than a small quota holds, so keep the most
+            # surprising `quota` of them rather than letting the tail evict rows written microseconds earlier in the
+            # same call. Then fill this owner's free slots first, and only after that evict its least-recently-USED.
+            o = int(own) % self.n_own
+            base = o * self.quota
+            if m > self.quota:
+                m = self.quota
+                k, tok = k[:m], tok[:m]
+                if ctx is not None: ctx = ctx[:m]
+                if pos is not None: pos = pos[:m]
+            blk = torch.arange(base, base + self.quota, device=self.dev)
+            free = blk[~self.active[blk]]
+            if free.numel() >= m:
+                idx = free[:m]
+            else:
+                need = m - free.numel()
+                lru = blk[self.last[blk].argsort()][:need]                    # oldest LAST-USE within this owner only
+                idx = torch.cat([free, lru]) if free.numel() else lru
+            self.tick += 1
+            self.own[idx] = o; self.last[idx] = self.tick
+            return self._commit(idx, k, tok, src, ctx, pos, m)
         if self.evict == "usage" and int(self.active.sum()) >= self.cap:      # LEAST-USED dies (sampled, O(m) not O(cap))
             ns = int(min(self.cap, max(8 * m, 64)))
             cand = torch.randint(0, self.cap, (ns,), device=self.dev)
@@ -156,6 +193,11 @@ class EditableMemory:
                 idx = torch.cat([idx, pad])
         else:
             idx = (torch.arange(m, device=self.dev) + self.ptr) % self.cap    # circular overwrite (recency only)
+        self.ptr = int((self.ptr + m) % self.cap)
+        return self._commit(idx, k, tok, src, ctx, pos, m)
+
+    def _commit(self, idx, k, tok, src, ctx, pos, m):
+        """Write the chosen slots. Split out so the partitioned and global eviction paths share one body."""
         self.keys[idx] = torch.nn.functional.normalize(k, dim=-1)
         self.tok[idx] = tok.to(self.dev)
         self.src[idx] = int(src)
@@ -164,7 +206,6 @@ class EditableMemory:
         self.use[idx] = 0.0; self.active[idx] = True
         self.selfcon[idx] = -1.0                                              # new entry: self-consistency not yet checked
         self.recon[idx] = -1.0                                                # new entry: reconstruction not yet checked
-        self.ptr = int((self.ptr + m) % self.cap)
         self._wc += m                                                         # decay usage so it reflects RECENT utility
         if self.use_decay < 1.0 and self._wc >= self.decay_every:
             self.use *= self.use_decay; self._wc = 0
@@ -203,6 +244,12 @@ class EditableMemory:
         hit[:, :kk] = gi
         wfull = torch.zeros(B, self.topk, device=self.dev); wfull[:, :kk] = w   # retrieval weights (0 for empty slots)
         self.use.index_add_(0, gi.reshape(-1), w.reshape(-1))                 # track usage
+        if self.n_own > 1:                                                    # LAST-USE stamp: this is what makes the
+            self.tick += 1                                                    #   per-owner eviction a true LRU rather
+            self.last[gi.reshape(-1)] = self.tick                             #   than a decayed retrieval count (LFU).
+        # NOTE reads are deliberately GLOBAL across owners even when the store is partitioned: writes compartmentalize,
+        # reads mix. That is the "partially, not fully, isolate" property -- an expert's knowledge is its own to keep
+        # and to lose, but any query can still reach it.
         return dist, conf, hit, wfull
 
     # ---- WRONG (SELF-CONSISTENCY: is each stored token plausible under the model given its OWN context?) ----
