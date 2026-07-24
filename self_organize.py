@@ -868,6 +868,20 @@ def main():
             mem.src[:_mn] = _RD["mem_src"][:_mn].to(DEV); mem.pos[:_mn] = _RD["mem_pos"][:_mn].to(DEV)
             if mem.ctx_w > 0 and _RD.get("mem_ctx") is not None: mem.ctx[:_mn] = _RD["mem_ctx"][:_mn].to(DEV)
             if _RD.get("mem_use") is not None: mem.use[:_mn] = _RD["mem_use"][:_mn].to(DEV)
+            if _RD.get("mem_own") is not None and mem.n_own > 1 and int(_RD.get("mem_n_own", 1)) == mem.n_own:
+                # restore the partition IN PLACE (owner*quota+slot), not compacted -- compacting would reassign every
+                # entry to the wrong owner block and silently destroy the per-expert structure.
+                _ow = _RD["mem_own"].to(DEV); _la = _RD["mem_last"].to(DEV)
+                mem.active[:] = False
+                for _o in range(mem.n_own):
+                    _sel = (_ow == _o).nonzero(as_tuple=True)[0][:mem.quota]
+                    if _sel.numel() == 0: continue
+                    _dst = torch.arange(_o * mem.quota, _o * mem.quota + _sel.numel(), device=DEV)
+                    mem.keys[_dst] = _mk[_sel].to(DEV); mem.tok[_dst] = _RD["mem_tok"][_sel].to(DEV)
+                    mem.src[_dst] = _RD["mem_src"][_sel].to(DEV); mem.pos[_dst] = _RD["mem_pos"][_sel].to(DEV)
+                    if mem.ctx_w > 0 and _RD.get("mem_ctx") is not None: mem.ctx[_dst] = _RD["mem_ctx"][_sel].to(DEV)
+                    mem.own[_dst] = _o; mem.last[_dst] = _la[_sel]; mem.active[_dst] = True
+                mem.tick = int(_RD.get("mem_tick", 0))
             if _RD.get("mem_selfcon") is not None: mem.selfcon[:_mn] = _RD["mem_selfcon"][:_mn].to(DEV)
             mem.active[:_mn] = True; mem.ptr = _mn % mem.cap
         _a = _RD.get("asm")
@@ -954,6 +968,8 @@ def main():
                     "mem_ctx": (mem.ctx[act].cpu() if mem.ctx_w > 0 else None), "topk": mem.topk,
                     "mem_pos": mem.pos[act].cpu(),                     # -> source passages for grounded answers
                     "mem_use": mem.use[act].cpu(), "mem_selfcon": mem.selfcon[act].cpu(),   # for RESUME (retrieval fitness + wrongness)
+                    "mem_own": mem.own[act].cpu(), "mem_last": mem.last[act].cpu(),         # per-expert partition + LRU clock
+                    "mem_n_own": mem.n_own, "mem_quota": mem.quota, "mem_tick": mem.tick,
                     "sig_d": SIG_D, "win": WIN, "enc": enc.state_dict(),          # encoder -> gist for fabric routing
                     # WORLD MODEL: with WORLD_FEEDBACK the base LM is TRAINED with `h += world_proj(forecast)`. Omitting
                     # it from the checkpoint made generation run a DIFFERENT network than training -> the coherence test
