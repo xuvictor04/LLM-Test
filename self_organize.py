@@ -719,6 +719,7 @@ def main():
     # generate-only. Grown populations (fabric nodes, dynamics predictors) are re-grown to their saved size BEFORE the
     # optimizers are built so their params are in the param groups and their Adam moments restore.
     KEY_PREGATE = bool(_i("KEY_PREGATE", 1))              # encode memory keys AFTER the surprise gate (see the write call)
+    KEY_BATCH = bool(_i("KEY_BATCH", 1))                  # ...and encode the whole BATCH_W batch in ONE call (KEY_BATCH=0 = per-window)
     RESUME = os.environ.get("RESUME", "")
     _RD, _resume_step = None, 0
     if RESUME:
@@ -794,13 +795,18 @@ def main():
     # ---- NO-COMPROMISE PERF: amortized re-key + shift-gated encoder (keep FULL drift-survival + FULL responsiveness) ----
     REKEY_AMORTIZED = bool(_i("REKEY_AMORTIZED", 1))       # spread the SAME whole-store re-encode across steps -> no periodic spike,
     _rk = {"ii": None, "cur": 0}                           #   SAME per-entry refresh rate + freshness. Nothing removed.
-    def _rekey_amortized():
+    # REKEY_CHUNK: do C steps' worth of re-keying in ONE call every C steps instead of a small call EVERY step.
+    # Identical total work and identical per-entry refresh RATE; an entry's refresh can land up to C steps later than
+    # it would have. Profiling showed the loop is bound by _model_key CALL COUNT (~1952 calls per 976 steps against
+    # ~61 real LM forwards), and after batching the writes this is what remains. Default 1 = exactly the old cadence.
+    REKEY_CHUNK = max(1, _i("REKEY_CHUNK", 1))
+    def _rekey_amortized(chunk=1):
         if KEY_SRC != "model": return
         if _rk["ii"] is None or _rk["cur"] >= _rk["ii"].numel():        # snapshot exhausted -> take a fresh one (once per full pass)
             valid = mem.active & (~mem.is_wrong()) & (~mem.is_unverified())   # only entries that can be READ (skip re-keying dead weight)
             _rk["ii"] = valid.nonzero(as_tuple=True)[0]; _rk["cur"] = 0
             if _rk["ii"].numel() == 0: return
-        per = max(1, -(-_rk["ii"].numel() // max(1, REKEY_EVERY)))      # ceil: cover the whole snapshot once per REKEY_EVERY steps
+        per = max(1, -(-_rk["ii"].numel() // max(1, REKEY_EVERY))) * chunk   # ceil: cover the whole snapshot once per REKEY_EVERY steps
         a = _rk["cur"]; b = min(a + per, _rk["ii"].numel()); idx = _rk["ii"][a:b]
         if mem.ctx_w > 0 and idx.numel() > 0: mem.rekey(_model_key(mem.ctx[idx]), idx)
         _rk["cur"] = b
@@ -941,8 +947,8 @@ def main():
         if step % REKEY_EVERY == 0 and step > 0:
             if SIG_MODE == "learned" and SELF_ORG: asm.rekey(enc)                                        # RE-KEY domain centroids
             if not REKEY_AMORTIZED: rekey_memory(mem)                                                    # full re-encode (spike) -- fallback path
-        if REKEY_AMORTIZED and step > 0:
-            with _T("rekey(amortized)"): _rekey_amortized()                                             # no-compromise: same work, spread out, no stall
+        if REKEY_AMORTIZED and step > 0 and step % REKEY_CHUNK == 0:
+            with _T("rekey(amortized)"): _rekey_amortized(REKEY_CHUNK)                                  # no-compromise: same work, spread out, no stall
         if SELF_ORG and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:                        # MANAGE the domain set
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
@@ -1044,12 +1050,18 @@ def main():
             # restores the old order for A/B verification.
             _C = mem_ctx(x); _n1 = x.size(1)
             _pre = KEY_PREGATE and KEY_SRC == "model" and _C is not None
-            _K = None if _pre else mem_key(x)
-            for _b in range(x.size(0)):                     # per-window: each carries its OWN domain + source position
-                _cb = None if _C is None else _C[_b * _n1:(_b + 1) * _n1]
-                mem.write(None if _pre else _K[_b * _n1:(_b + 1) * _n1], y[_b], src=_bd[_b], surprise=surprise[_b],
-                          ctx=_cb, key_fn=(_model_key if _pre else None),
-                          pos=torch.arange(_bp[_b], _bp[_b] + _n1, device=DEV))
+            if _pre and KEY_BATCH:                          # ONE key encode for the whole BATCH_W batch instead of
+                mem.write_batch([(y[_b], _bd[_b], surprise[_b],   # BATCH_W separate tiny encodes -- the measured
+                                  _C[_b * _n1:(_b + 1) * _n1],    # bottleneck was CALL COUNT, not FLOPs
+                                  torch.arange(_bp[_b], _bp[_b] + _n1, device=DEV))
+                                 for _b in range(x.size(0))], _model_key)
+            else:
+                _K = None if _pre else mem_key(x)
+                for _b in range(x.size(0)):                 # per-window: each carries its OWN domain + source position
+                    _cb = None if _C is None else _C[_b * _n1:(_b + 1) * _n1]
+                    mem.write(None if _pre else _K[_b * _n1:(_b + 1) * _n1], y[_b], src=_bd[_b], surprise=surprise[_b],
+                              ctx=_cb, key_fn=(_model_key if _pre else None),
+                              pos=torch.arange(_bp[_b], _bp[_b] + _n1, device=DEV))
         _t1("memory key+write", _pmem)
         assigns.append((bpos, did, byte_labels[min(bpos, len(byte_labels) - 1)] if ONLINE else labels[i]))
         _ptok = _t0()

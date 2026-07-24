@@ -63,6 +63,42 @@ class EditableMemory:
     @property
     def n(self): return int(self.active.sum())
 
+    def _gate(self, surprise):
+        """The surprise gate + its controller, factored out so a batched caller can run the gate for several windows
+        BEFORE paying for any key encode. Advances gate_theta exactly as write() does, in call order."""
+        sd = surprise.detach()
+        if self.adaptive_gate:
+            keep = sd > self.gate_theta                      # gate on RELATIVE surprise (above the self-calibrated level)
+            fired = float(keep.float().mean())               # controller: rise if firing above target, fall if below ->
+            self.gate_theta = min(self.gate_ceil, max(self.gate_floor, self.gate_theta + self.gate_step * (fired - self.gate_target)))
+        else:
+            keep = sd >= self.write_gate                     # keep only tokens the model was unsure about (>= fixed gate)
+        return keep
+
+    def write_batch(self, rows, key_fn):
+        """DISPATCH BATCHING: write several windows with ONE key encode instead of one per window.
+
+        Profiling on an A100 showed the step is dominated by call COUNT, not FLOPs: `_model_key` ran ~1952 times per
+        976 steps on tiny tensors against ~61 real LM forwards, and memory-key + rekey were 48-72% of the loop. The
+        per-window write loop was BATCH_W of those calls. Here the gate runs for every window first (same order, so
+        gate_theta evolves identically), the survivors are concatenated, ONE key_fn call encodes all of them, and the
+        stores then proceed per window exactly as before. Row-independent encoder => identical keys.
+
+        rows: list of (tok, src, surprise, ctx, pos). Returns total entries written."""
+        keeps = [self._gate(r[2]) for r in rows]             # gate FIRST, for every window, before any encode
+        ctxs = [r[3][k] for r, k in zip(rows, keeps) if r[3] is not None and int(k.sum()) > 0]
+        if not ctxs: return 0
+        allk = key_fn(torch.cat(ctxs, 0)).detach()           # <-- the single encode this whole method exists for
+        n = 0
+        off = 0
+        for r, keep in zip(rows, keeps):
+            tok, src, _, ctx, pos = r
+            m = int(keep.sum())
+            if ctx is None or m == 0: continue
+            n += self._store(allk[off:off + m], tok[keep], src, ctx[keep], (None if pos is None else pos[keep]))
+            off += m
+        return n
+
     # ---- WRITE (surprise-gated, provenance-tagged) ----
     def write(self, k, tok, src, surprise=None, ctx=None, pos=None, key_fn=None):
         """k:(B,d) keys, tok:(B,) next tokens, src:int domain id. surprise:(B,)=1-p_model(true tok) gates writing.
@@ -91,6 +127,10 @@ class EditableMemory:
             if key_fn is None or ctx is None: raise ValueError("write(k=None) requires key_fn and ctx")
             if tok.numel() == 0: return 0
             k = key_fn(ctx).detach()
+        return self._store(k, tok, src, ctx, pos)
+
+    def _store(self, k, tok, src, ctx, pos):
+        """Commit already-gated, already-keyed rows. Shared by write() and write_batch() so the two cannot drift."""
         m = k.size(0)
         if m == 0: return 0
         if self.evict == "usage" and int(self.active.sum()) >= self.cap:      # LEAST-USED dies (sampled, O(m) not O(cap))
