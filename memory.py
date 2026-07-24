@@ -21,7 +21,7 @@ class EditableMemory:
     def __init__(self, cap, key_dim, device="cpu", vocab=256, write_gate=0.0, wrong_thresh=1.0, topk=8, ctx_w=0,
                  wrong_margin=1.5, wrong_min_n=3, flag_min_w=0.0, selfcon_thresh=2.5,
                  adaptive_gate=False, gate_target=0.5, gate_step=0.02, gate_floor=0.0, gate_ceil=0.95,
-                 evict="recency", use_decay=0.98, decay_every=20000):
+                 evict="recency", use_decay=0.98, decay_every=20000, quantile_gate=True):
         self.cap, self.kd, self.dev, self.V = cap, key_dim, device, vocab
         self.write_gate = float(write_gate)      # write only items with surprise (1-p_model) >= this (0 = write everything)
         # ADAPTIVE GATE (optional): the surprise scale drifts as the base trains, so a FIXED gate is too permissive early
@@ -30,6 +30,7 @@ class EditableMemory:
         self.adaptive_gate = bool(adaptive_gate); self.gate_target = float(gate_target)
         self.gate_step = float(gate_step); self.gate_floor = float(gate_floor); self.gate_theta = float(write_gate)
         self.gate_ceil = float(gate_ceil)        # cap so the controller can't overshoot and starve writes (skewed-high surprise)
+        self.quantile_gate = bool(quantile_gate) # honour gate_target by QUANTILE rather than an absolute threshold (see _gate)
         # EVICTION: "recency" = circular overwrite (oldest dies regardless of value). "usage" = least-RETRIEVED dies,
         # so entries that stay useful survive -- the same relative-fitness selection the domains and fabric nodes use.
         # Without this, memory is the only population in the system with no selection pressure at all.
@@ -67,6 +68,20 @@ class EditableMemory:
         """The surprise gate + its controller, factored out so a batched caller can run the gate for several windows
         BEFORE paying for any key encode. Advances gate_theta exactly as write() does, in call order."""
         sd = surprise.detach()
+        if self.adaptive_gate and self.quantile_gate:
+            # QUANTILE GATE. The additive controller below CANNOT hit gate_target on a large vocabulary: surprise is
+            # 1 - p_model(true token), so with V=16384 an undertrained model puts surprise ~1.0 almost everywhere, the
+            # controller drives gate_theta straight into gate_ceil=0.95, and the kept fraction runs 1.00/0.93/0.80
+            # instead of the requested 0.12 -- MEM_CAP was reached by step ~831 instead of ~6510. An absolute threshold
+            # cannot track a distribution squeezed against 1.0; a QUANTILE is scale-free and hits the target by
+            # construction. Tracked as an EMA so a genuinely dull stretch still writes less and a surprising one more,
+            # which is what the "relative surprise" intent was after. Kept on-device: no per-window host sync.
+            q = torch.quantile(sd.float().flatten(), max(0.0, min(1.0, 1.0 - self.gate_target)))
+            if not torch.is_tensor(self.gate_theta):
+                self.gate_theta = q.detach().clone()                      # seed from the first batch, not from write_gate
+            else:
+                self.gate_theta = (1 - self.gate_step) * self.gate_theta + self.gate_step * q.detach()
+            return sd > self.gate_theta
         if self.adaptive_gate:
             keep = sd > self.gate_theta                      # gate on RELATIVE surprise (above the self-calibrated level)
             fired = float(keep.float().mean())               # controller: rise if firing above target, fall if below ->

@@ -644,8 +644,8 @@ def main():
     global model, BLEN
     print(f"self-organize | d{D} | {NP} hidden processes | stream {STREAM_LEN} | win {WIN} | SIG_MODE={SIG_MODE} | data {DATA_MODE}\n")
     ONLINE = USE_TOK and TOK_ONLINE
-    def _retok(bstream, blabels):                          # tokenize given bytes with the LIVE vocab -> (ids, byte-pos, labels)
-        ids = TOK.segment(bytes(bstream), count=False); bs, off = [], 0
+    def _retok(bstream, blabels, start=0):                 # tokenize given bytes with the LIVE vocab -> (ids, byte-pos, labels)
+        ids = TOK.segment(bytes(bstream[start:]) if start else bytes(bstream), count=False); bs, off = [], start
         for t in ids: bs.append(off); off += TOK.blen(t)
         return ids, bs, [blabels[min(o, len(blabels) - 1)] for o in bs]
     def _resample():                                       # (re)build the stream from a FRESH corpus sample -- called PER EPOCH on
@@ -752,7 +752,8 @@ def main():
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
                          adaptive_gate=bool(_i("WRITE_ADAPTIVE", 0)), gate_target=_f("WRITE_TARGET", 0.5),
-                         evict=os.environ.get("EVICT", "recency"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000))
+                         evict=os.environ.get("EVICT", "recency"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
+                         quantile_gate=bool(_i("WRITE_QUANTILE", 1)))   # WRITE_QUANTILE=0 restores the old additive controller
     asm = DomainAssembler()
     if _RD is not None:                                    # part 2 of RESUME: optimizer moments, memory store, domains
         try: om.load_state_dict(_RD["opt_m"]); oe.load_state_dict(_RD["opt_e"])
@@ -808,6 +809,7 @@ def main():
     # it would have. Profiling showed the loop is bound by _model_key CALL COUNT (~1952 calls per 976 steps against
     # ~61 real LM forwards), and after batching the writes this is what remains. Default 1 = exactly the old cadence.
     REKEY_CHUNK = max(1, _i("REKEY_CHUNK", 1))
+    RETOK_TAIL = bool(_i("RETOK_TAIL", 1))                 # re-tokenize only the UNCONSUMED tail at each retok (see below)
     def _rekey_amortized(chunk=1):
         if KEY_SRC != "model": return
         if _rk["ii"] is None or _rk["cur"] >= _rk["ii"].numel():        # snapshot exhausted -> take a fresh one (once per full pass)
@@ -1128,7 +1130,17 @@ def main():
             _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {os.environ.get('SAVE_CKPT')}]"); model.train()
         if ONLINE and step % RETOK_EVERY == 0:             # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
-            stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
+            if RETOK_TAIL:
+                # TAIL-ONLY RETOK: re-segment just the UNCONSUMED remainder. The old code re-tokenized the whole
+                # byte_stream every RETOK_EVERY steps, so the cost scaled with STREAM_LEN and taxed throughput ~x0.77
+                # at a 10MB stream and ~x0.25 at 100MB -- for work that is pure waste, since the consumed prefix is
+                # never read again this epoch. Safe because DynamicTokenizer minting is APPEND-ONLY: existing ids keep
+                # their meaning, so a stream whose prefix uses the older vocab still decodes correctly (which is what
+                # _save_ckpt's source.bin needs). `i` is unchanged because the prefix is preserved verbatim.
+                _ti, _tb, _tl = _retok(byte_stream, byte_labels, cur_byte)
+                stream = stream[:i] + _ti; tok_bs = tok_bs[:i] + _tb; labels = labels[:i] + _tl
+            else:
+                stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
             _sigq = []                                       # re-tokenized -> window boundaries moved, queue is stale
             print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; +{TOK.vocab_size - _last_vsz} since last retok)")
             _last_vsz = TOK.vocab_size
