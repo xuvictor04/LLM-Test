@@ -32,7 +32,12 @@ RECON_W = _f("RECON_W", 0.0)                               # joint Reconstructor
 #   on the final settled store (VERIFY_FIT). Set RECON_W>0 only to also nudge the base keys to be reconstructable.
 VERIFY_SWEEP = _i("VERIFY_SWEEP", 0)                       # VERIFY=recon: also DELETE unverified entries (detect-AND-remove).
 #   The old B stayed detect-only because ~1% precision made deleting suicidal; reconstruction's high precision earns this.
-D = _i("D_MODEL", 128); WIN = _i("WIN", 128); NP = _i("N_PROCESSES", 4); STREAM_LEN = _i("STREAM_LEN", 120000)
+D = _i("D_MODEL", _i("D_MODEL_B", 128))                    # D_MODEL_B accepted as an ALIAS: it is the name used by
+#   run_full_unfrozen.sh (which translates it to D_MODEL) and therefore the name every doc/command in this project
+#   quotes -- but a DIRECT `D_MODEL_B=768 python3 self_organize.py` silently ran at the d=128 default, because nothing
+#   here read it. That mis-sized every direct-invocation run, including the GPU bench (which reported 4.3M/5.1M params
+#   instead of the intended 28.7M/53.9M) and the pilot command. Accepting both names removes the silent failure.
+WIN = _i("WIN", 128); NP = _i("N_PROCESSES", 4); STREAM_LEN = _i("STREAM_LEN", 120000)
 SUSTAIN = _i("SUSTAIN", 2); NEW_DIST = _f("NEW_DIST", 0.35); SHIFT_DIST = _f("SHIFT_DIST", 0.30)
 SIG_MODE = os.environ.get("SIG_MODE", "learned"); SIG_D = _i("SIG_D", 64); SIG_DIM = _i("SIG_DIM", 512)
 SELF_ORG = bool(_i("SELF_ORG", 1))                         # 0 = DISABLE domain self-assembly (standstill): one bucket, no provenance,

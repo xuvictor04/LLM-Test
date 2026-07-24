@@ -54,15 +54,18 @@ CONFIGS=(
   "D|transformer|bf16|1|the two wins combined"
   "E|gru|off|0|what the fused encoder pass is worth on a GPU"
 )
-# NOTE ON A-vs-C: LAYERS defaults to 4 for transformer and 1 for GRU, so C/D carry ~8x the parameters of A/B.
-# That is deliberate -- it is the configuration each would actually be RUN at -- but it means "C is faster than A"
-# is a stronger result than it looks (more model for less time), while "C is slower" is NOT evidence that the
-# transformer is worse per-parameter. The [BENCH] line prints the parameter count of each so the two can be read
-# apart, and TRF_LAYERS=1 reruns C/D at matched depth if the headline numbers come out ambiguous.
+# NOTE ON A-vs-C: LAYERS defaults to 4 for transformer and 1 for GRU -- at d=768 that is 28.7M vs 53.9M params
+# (1.9x), which is the configuration each would actually be RUN at. So "C beats A" is a stronger result than it
+# looks, while "C is slower" is NOT evidence the transformer is worse per-parameter. The [BENCH] line prints each
+# param count; TRF_LAYERS=1 reruns C/D at matched depth. (The FIRST bench ran at d=128 because D_MODEL_B was read
+# by nothing, making both models ~84% vocab tables and the LM a rounding error -- that is fixed above.)
 TRF_LAYERS=${TRF_LAYERS:-4}
 
 WIN=${WIN:-256}
-STREAM_LEN=$(( STEPS * WIN ))
+# STREAM_LEN is in BYTES but the loop iterates the TOKEN stream, so steps = STREAM_LEN/(WIN*bytes_per_token).
+# The first bench asked for 1800 and got 976 because the seeded BPE compresses ~1.84 bytes/token. Scale by it.
+BPT=${BPT:-1.85}
+STREAM_LEN=$(python3 -c "print(int($STEPS*$WIN*$BPT))")
 
 run_one() {
   local tag=$1 model=$2 amp=$3 fuse=$4 desc=$5
@@ -71,15 +74,17 @@ run_one() {
   echo ""; echo "=== [$tag] MODEL=$model LAYERS=$layers AMP=$amp ENC_FUSE=$fuse -- $desc ==="
   local log="$OUT/$tag.log" util="$OUT/$tag.util"
 
-  # sample GPU utilization DURING the run: this is what distinguishes "slow because the GPU is saturated"
-  # from "slow because the GPU is waiting for kernel launches".
+  # Sample GPU utilization during the run. READ THIS CAREFULLY: `utilization.gpu` is the FRACTION OF TIME any
+  # kernel was resident -- NOT FLOP efficiency -- and this average also covers tokenizer seeding and ENC_WARMUP,
+  # which run before the loop is timed. Both effects push it DOWN. The summary reports a tail average (post-startup)
+  # alongside the full one; treat a low number as "look closer", never as proof of anything.
   ( nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits -l 1 > "$util" 2>/dev/null ) &
   local sampler=$!
 
   local t0=$(date +%s)
   DEVICE=cuda DATA_MODE=real DATA_DIR="$DATA" DISK_STREAM=1 CORPUS_CAP=100000000000 \
   STREAM_LEN="$STREAM_LEN" EPOCHS=1 WIN="$WIN" BATCH_W=${BATCH_W:-16} ACCUM=${ACCUM:-2} \
-  D_MODEL_B=${D_MODEL_B:-768} MODEL="$model" AMP="$amp" ENC_FUSE="$fuse" LAYERS="$layers" \
+  D_MODEL=${D_MODEL:-768} MODEL="$model" AMP="$amp" ENC_FUSE="$fuse" LAYERS="$layers" \
   TOKENIZER=1 TOK_ONLINE=1 VMAX=${VMAX:-16384} SEED_VOCAB=512 \
   WORLD_MODEL=1 WORLD_FEEDBACK=1 WRITE_ADAPTIVE=1 WRITE_TARGET=0.12 \
   ENC_WARMUP=300 ENC_WARMUP_MIN=150 PROBE=0 PROFILE=1 RATE_EVERY=250 BENCH=1 SEED=7 \
@@ -90,7 +95,8 @@ run_one() {
   kill $sampler 2>/dev/null; wait $sampler 2>/dev/null
 
   local util_avg="n/a"
-  [ -s "$util" ] && util_avg=$(awk -F, '{s+=$1;n++} END{if(n)printf "%.0f%%",s/n}' "$util")
+  [ -s "$util" ] && util_avg=$(awk -F, '{a[n++]=$1} END{if(!n)exit; s=0;for(i=0;i<n;i++)s+=a[i];
+      h=int(n/2); t=0; for(i=h;i<n;i++)t+=a[i]; printf "%.0f%% (tail %.0f%%)", s/n, t/(n-h)}' "$util")
   if [ $rc -ne 0 ]; then
     echo "  FAILED (exit $rc) -- last lines:"; tail -5 "$log" | sed 's/^/    /'
     printf "%-3s %-12s %-5s %-5s %-28s %s\n" "$tag" "$model" "$amp" "$fuse" "FAILED (exit $rc)" "$util_avg" >> "$OUT/rows.txt"
@@ -111,7 +117,7 @@ for c in "${CONFIGS[@]}"; do IFS='|' read -r a b d e f <<< "$c"; run_one "$a" "$
   echo "================ GPU BENCH SUMMARY ================"
   cat "$OUT/env.txt"
   echo ""
-  echo "steps/config: $STEPS | WIN=$WIN BATCH_W=${BATCH_W:-16} D_MODEL_B=${D_MODEL_B:-768}"
+  echo "steps/config: $STEPS (STREAM_LEN=$STREAM_LEN bytes @ ~${BPT} B/tok) | WIN=$WIN BATCH_W=${BATCH_W:-16} D_MODEL=${D_MODEL:-768}"
   echo ""
   while IFS=$'\t' read -r tag model amp fuse wall util bench prof; do
     echo "[$tag] MODEL=$model AMP=$amp ENC_FUSE=$fuse"
@@ -128,9 +134,12 @@ for c in "${CONFIGS[@]}"; do IFS='|' read -r a b d e f <<< "$c"; run_one "$a" "$
   echo "    boundaries are rare and the encoder should throttle itself ~12x. If the encoder is NOT dominant"
   echo "    here, that is the shift-gate working as designed, not a contradiction -- and it means the"
   echo "    bottleneck for the real run depends on which data mix that run uses."
-  echo "  * GPU util well under ~40% with a slow step = LAUNCH-BOUND. A bigger card will not help;"
-  echo "    a parallel-over-sequence model (C/D) or CUDA graphs is what helps."
-  echo "  * If C/D beat A/B by a lot, the sequential GRU -- not the encoder's workload -- is the real ceiling."
+  echo "  * DO NOT read low GPU util as 'launch-bound' on its own. utilization.gpu is time-occupancy, not FLOP"
+  echo "    efficiency, and the average includes pre-loop startup. The FIRST bench read 16-22% and the real"
+  echo "    in-loop figure was ~40-50%. Use the profile shares and absolute seconds to attribute cost, not util."
+  echo "  * The step is dominated by _model_key: it runs ~1952 times per 976 steps on TINY tensors (memory-key"
+  echo "    writes + amortized rekey) against ~61 real LM forwards. That is a DISPATCH-COUNT problem, which is"
+  echo "    why the transformer loses -- its encode is ~192 aten ops vs the GRU's single fused cuDNN call."
   echo "  * GB/day x days-you-will-run vs GPT-2's ~40GB tells you what data scale is actually reachable."
 } > "$OUT/SUMMARY.txt"
 cat "$OUT/SUMMARY.txt"

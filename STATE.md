@@ -160,6 +160,40 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
+- **R39 (current):** [USER ran `bench_gpu.sh` on an A100-40GB and asked about two reverse-encoder paths] The bench found
+  three real bugs, two of them mine, and BOTH proposed reverse-encoder designs were refuted under adversarial review.
+  - **`D_MODEL_B` was read by NOTHING.** `self_organize.py:35` reads `D_MODEL`; only `run_full_unfrozen.sh` translated
+    `D_MODEL_B`→`D_MODEL`. So a direct `D_MODEL_B=768 python3 self_organize.py` silently ran at the **d=128** default.
+    Proven by exact param counts: GRU d128/V16384/L1 = 4,309,760 ("4.3M" ✓) and TRF d128/L4 = 5,069,312 ("5.1M" ✓);
+    at d=768 they would be 28.7M and 53.9M. The whole A100 bench measured a toy model whose params are ~84% vocab
+    tables — and **the pilot command handed to the user had the same bug**. FIXED: `D_MODEL_B` is now an accepted alias.
+  - **`STREAM_LEN` is BYTES, the loop counts TOKENS** → `STEPS=1800` produced 976 steps (BPE ≈1.84 B/tok). Fixed in
+    `bench_gpu.sh` with a `BPT` scale factor. (`LAYERS=4` DID apply — that fix worked.)
+  - **"Launch-bound" was wrong in MECHANISM.** cuDNN fuses the whole GRU sequence into ONE dispatch, not WIN sequential
+    launches. And **16-22% `utilization.gpu` proves nothing**: it is time-occupancy, not FLOP efficiency, and the average
+    included ~10 s of pre-loop startup; in-loop it is ~40-50%. The bench's own "low util = launch-bound" guidance was
+    wrong and has been rewritten.
+  - **The real diagnosis is DISPATCH COUNT, and it is `_model_key`.** Reconciled to absolute seconds, the transformer's
+    5.716 s deficit vs the GRU is **90.5% `_model_key`** (memory-key +2.772 s, rekey +2.403 s) and only 10% LM.
+    `_model_key` runs **1952×/976 steps on tiny tensors** vs ~61 real LM forwards; transformer `encode` ≈192 aten ops
+    vs the GRU's single fused cuDNN call. Fixes ranked: batch the ~32 tiny encodes into ≤2/step; `model.eval()` +
+    cached mask for key encodes (192→28 dispatches); or reuse the LM's own `h` as the key.
+  - **`WRITE_TARGET=0.12` is NOT honored.** The adaptive gate pins `gate_theta` at `gate_ceil=0.95` within ~40 calls
+    (V=16384 ⇒ surprise≈1 nearly everywhere early), so the kept fraction runs 1.00→0.93→0.80 and the store saturates
+    `MEM_CAP=200000` by step ~831 instead of the predicted 6510. Steady state was therefore ALREADY reached in the
+    bench: config A holds 12.2-13.3k steps/min ≈ 8.3-9.0 GB/day. Real error bars are elsewhere — retokenization never
+    fired (×0.77 at 10MB, ×0.25 at 100MB stream) and `_bpw` is frozen at 1.844 B/tok, understating GB/day ~2× once the
+    vocab matures.
+  - **BOTH reverse-encoder paths REFUTED (do not build either as proposed).**
+    * *Decompositional back pass* fails **algebraically**: `tcode` is unit-norm (`verification.py:32`), so for a fixed
+      query, ranking by `||net(k)-tcode[t]||²` is IDENTICAL to ranking by `net(q)·tcode[t]` — an LM head with frozen
+      random output embeddings; the inverse arm is the same with learned ones. Both arms are language models, so the
+      gate is surprise re-branded and weaker than the `pm` already computed at both call sites. The decoupling that
+      makes the Reconstructor interesting requires key and token to be a STORED PAIR; at retrieval the pair is gone.
+    * *Reinforce* fails **statistically**: per-expert aggregation cuts variance, not bias. At 0.26% base rate with
+      real-loop AUC ~0.55, wrongness moves a per-domain mean by ~1e-3 sd against 0.1-1 sd intrinsic-difficulty spread —
+      and since experts specialize BY DOMAIN, that confound IS the differential being ranked. It also leaned on the
+      AUC 0.978 standalone this file already retracted (real store: TPR 9.4% @ FPR 4.9%).
 - **R38 (current):** [USER: "GPT-2 parity can't be reached on what we're running on — stronger GPU, make the system more
   efficient"] EFFICIENCY, with the standing no-compromise rule: nothing removed, nothing downgraded, every change either
   exactly equivalent or an explicit opt-in flag.
