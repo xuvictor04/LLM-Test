@@ -160,6 +160,39 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
+- **R40 (current):** [USER re-ran `bench_gpu.sh` at the corrected d=768] The corrected bench RETIRED the previous
+  bottleneck story and set a new one; the falsification criterion stated in advance FIRED against my own last two commits.
+  - **Corrected A100 baseline (d=768, 1808 real steps, single-domain):** 5873 steps/min, **3.987 GB/day**, 28.7M params,
+    util 57% avg / 73% tail, 10.216 ms/step. Profile: **`sig_of` 46%** | encoder 16% | lm 15% | rekey 11% | memkey 9%.
+    Absolute ms: sig 4.699 | enc 1.635 | lm 1.532 | rekey 1.124 | memkey 0.919.
+  - **`memory key+write` fell 29%→9%, so `KEY_BATCH`/`REKEY_CHUNK` targeted a component that is small at real scale.**
+    But NOT worthless, and NOT separable: the step inflated 2.257×, so a log-split puts ~70% of the drop on the
+    denominator, ~30% real. A-vs-A′ bounds the true `_model_key` dispatch gain at **~1.5-1.6×**, not the 9.9× a naive
+    rescale implies.
+  - **The transformer's LM is COMPETITIVE — it loses for an unrelated reason.** LM spans tie: **1.532 ms (GRU, 28.7M)
+    vs 1.572 ms (TRF, 53.9M)** — +2.6% for 1.9× params. 99% of its +9.430 ms deficit is `_model_key` (rekey +8.306,
+    memkey +1.831), because `KEY_SRC=model` runs the full 4-layer stack on ~1000 tiny KW=8 rows/step: **9.43 µs/row vs
+    1.12**. So the correct statement is NOT "the GRU is a better architecture" but "the memory-key path punishes any
+    model with a high per-call op count". A separate small key encoder would make the transformer viable.
+  - **`ENC_FUSE` = +9.5% on GPU** (96% attributable to the encoder delta; 1.57× not 2×, since only the GRU recurrence
+    fuses). Worth **~+40% on a boundary-dense multi-domain mix**. KEEP IT ON.
+  - **`REKEY_CHUNK=16` REJECTED**: +1.5% is at/below the noise floor (component deltas sum to −0.253 ms vs a −0.156 ms
+    measured total) and costs **2.34× peak memory** (3.24→7.57 GiB). Stays default 1.
+  - **`AMP=bf16` REJECTED for speed**: autocast wraps ONLY the LM block (15% of step) so its ceiling is +8.1%; measured
+    −3.0%. TF32 already uses the tensor cores. Keep only for the ~8% memory saving.
+  - **BOUNDARY DENSITY IS THE BIGGEST PLANNING VARIABLE.** Measured: single-domain = **0 boundaries**, cadence pinned at
+    `ENC_EVERY_IDLE`=12, `contrastive_step` fires on 8.4% of steps. 4-domain = **373 boundaries / 1130 steps**, cadence
+    1 on 99.6% of steps, contrastive fires on **99.6%**. That is ~10.2 ms/step → ~28 ms/step, i.e. **~4 GB/day
+    single-domain vs ~1.5 GB/day multi-domain**, with a DIFFERENT dominant component in each.
+  - **`SIG_BATCH` BUILT (default 1).** Batches `sig_of` over the span where `enc` is PROVABLY frozen (between
+    `contrastive_step` firings — `enc` is written only there), not over `BATCH_W`; a detected boundary clears the queue,
+    closing the sig→boundary→cadence→sig feedback loop. Also cleared on retok and epoch resample.
+    * Multi-domain stress A/B (4-domain, `RETOK_EVERY=200`, 2 epochs): **fully BIT-IDENTICAL** — memory, model, enc,
+      33 domains, next_id 39. It SELF-DISABLES there by construction (cadence 1 ⇒ frozen span = 1 step ⇒ nothing to batch).
+    * Single-domain A/B (where the gain lives): **`sig_of` 9% → 3%**, **492 → 543 steps/min (+10.4%)**.
+      The pre-registered prediction was "sig_of falls to ~3-8%" — it hit 3%.
+    * On GPU at d=768 `sig_of` is 46% (vs 9% in this CPU config), so the same ~3× share reduction should be worth much
+      more there. NOT yet measured on GPU; do not quote a GPU number until it is.
 - **R39 (current):** [USER ran `bench_gpu.sh` on an A100-40GB and asked about two reverse-encoder paths] The bench found
   three real bugs, two of them mine, and BOTH proposed reverse-encoder designs were refuted under adversarial review.
   - **`D_MODEL_B` was read by NOTHING.** `self_organize.py:35` reads `D_MODEL`; only `run_full_unfrozen.sh` translated
