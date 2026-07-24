@@ -422,14 +422,37 @@ def sig_of(win, enc):                                      # win: list[int] -> s
         v.scatter_add_(0, bg, torch.ones_like(bg, dtype=torch.float)); return F.normalize(v, dim=0)
     return F.normalize(FROZEN[t].mean(0), dim=0)
 
+_ENC_T = {"t": None}                                       # device-resident copy of the encoder sequence (see below)
+
+
+def set_enc_tensor(seq):
+    """Cache the encoder's source sequence as a DEVICE tensor. contrastive_step is the single most expensive part of the
+    step (profiled: ~87% of loop wall-clock at ENC_EVERY=1), and a large part of that was building its two batches out of
+    Python lists -- 2*ENC_BATCH*WIN int conversions per step -- and copying them to the device. Gathering the same windows
+    out of a resident tensor produces bit-identical batches with none of that."""
+    if seq is None: _ENC_T["t"] = None; return
+    try:
+        _ENC_T["t"] = torch.as_tensor(bytes(seq) if isinstance(seq, (bytes, bytearray)) else list(seq),
+                                      dtype=torch.uint8 if max(seq) < 256 else torch.int32, device=DEV)
+    except (ValueError, TypeError, RuntimeError):
+        _ENC_T["t"] = None                                 # fall back to the original list path rather than fail a run
+
+
 def contrastive_step(enc, opt, stream, seen):              # InfoNCE: nearby windows = positive, random = negative
     hi = seen - 3 * WIN
     if hi < ENC_BATCH: return
     enc.train()
     st = [random.randint(0, hi) for _ in range(ENC_BATCH)]; off = [random.randint(WIN // 2, 2 * WIN) for _ in st]
-    A = torch.tensor([list(stream[s:s + WIN]) for s in st], device=DEV)
-    P = torch.tensor([list(stream[s + o:s + o + WIN]) for s, o in zip(st, off)], device=DEV)
-    za, zp = enc(A), enc(P)
+    _t = _ENC_T["t"]
+    if _t is not None and _t.numel() >= len(stream):
+        _ar = torch.arange(WIN, device=DEV)
+        A = _t[torch.tensor(st, device=DEV).unsqueeze(1) + _ar].long()
+        P = _t[torch.tensor([s + o for s, o in zip(st, off)], device=DEV).unsqueeze(1) + _ar].long()
+    else:
+        A = torch.tensor([list(stream[s:s + WIN]) for s in st], device=DEV)
+        P = torch.tensor([list(stream[s + o:s + o + WIN]) for s, o in zip(st, off)], device=DEV)
+    z = enc(torch.cat([A, P], 0))                          # ONE encoder pass instead of two: the encoder is row-independent
+    za, zp = z[:ENC_BATCH], z[ENC_BATCH:]                  #   so this is identical, at half the sequential GRU launches
     logits = za @ zp.t() / TEMP
     loss = F.cross_entropy(logits, torch.arange(ENC_BATCH, device=DEV))
     opt.zero_grad(); loss.backward(); opt.step()
@@ -615,6 +638,7 @@ def main():
             return _s, _b, _l, _t, _lab, _b, _sw           # stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw
         return _b, None, _l, None, _l, _b, _sw
     stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
+    set_enc_tensor(ENC_SEQ)
     route_at = torch.full(((len(ENC_SEQ) if ONLINE else len(stream)) + WIN + 2,), -1, dtype=torch.int16) if EXPERTS else None
     model = build_lm().to(DEV); enc = SigEncoder(D, SIG_D).to(DEV)
     recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
@@ -881,6 +905,7 @@ def main():
             if _epoch >= EPOCHS: break
             if DISK_STREAM:                                # draw FRESH data from the larger-than-RAM corpus each epoch
                 stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
+                set_enc_tensor(ENC_SEQ)
             i = 0; print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
             continue
         w = stream[i:i + WIN + 1]

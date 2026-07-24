@@ -165,11 +165,25 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   exactly equivalent or an explicit opt-in flag.
   - **Instrumented first** (`PROFILE=1`): per-component wall-clock attribution printed with the `[rate]` line. Built
     BEFORE optimizing, because the last bottleneck claim was made without profiling and was wrong.
-  - **The dominant cost was `mem_key(x)`**, not the SigEncoder. It encoded a memory key for EVERY position —
+  - **PROFILE RESULT (this overturned my hypothesis).** I predicted `mem_key` was the dominant cost. It is not — it is
+    **4-5%**. Measured share of loop wall-clock (CPU, `D=256 WIN=128 BATCH_W=8 KEY_WIN=32`):
+    `encoder(contrastive) 87% | memory key+write 4% | lm fwd+bwd 4% | sig_of 4% | rekey(amortized) 1%`.
+    `ENC_EVERY` defaults to **1**, so the SigEncoder's InfoNCE step runs EVERY step over `2*ENC_BATCH(=48)` windows —
+    ~12× the LM's own forward work, plus a backward pass. **The language model is 4% of its own training loop.** This is
+    exactly why the profiler was built first; the previous two bottleneck claims (mine: `mem_key`; the earlier
+    "reverse embedder") were both wrong, and the user's instinct that the ENCODERS were the problem was the closest.
+  - **`mem_key(x)` fix (correct, equivalent, but only a 4% component).** It encoded a memory key for EVERY position —
     `(BATCH_W*WIN, KW)` through the LM, i.e. `KW`× more token-positions than the main forward, every step — and then
     `mem.write` discarded the ~88% that fail the surprise gate. `write()` now takes `key_fn` and encodes AFTER the gate,
     so only the survivors pay. Exactly equivalent (the encoder is row-independent; gate, controller and resulting
-    entries untouched). `KEY_PREGATE=0` restores the old order for A/B.
+    entries untouched). `KEY_PREGATE=0` restores the old order for A/B. Equivalence PROVEN by seeded A/B: `mem_keys`,
+    `mem_tok`, `mem_src`, `mem_pos`, `mem_ctx` bit-identical over 20364 entries, model weights identical. Speed effect
+    at the tested scale: **none** (70s vs 73s, i.e. noise) — it optimizes 4% of the loop.
+  - **The real target — `contrastive_step` (87%).** Two changes, both exactly equivalent: `enc(A)` and `enc(P)` were two
+    separate passes and are now ONE concatenated pass (rows are independent → identical result, half the sequential GRU
+    launches); and both batches were built from Python lists (`2*ENC_BATCH*WIN` int conversions per step, then copied to
+    device) and are now gathered from a device-resident tensor (`set_enc_tensor`, refreshed on every resample).
+    MEASUREMENT AND EQUIVALENCE PROOF STILL PENDING at time of commit — do not quote a speedup until it is run.
   - **Removed per-step GPU→CPU synchronizations**, each of which stalls the whole pipeline on an async CUDA queue:
     `dom_exp` now accumulates on device and moves to host once in the end-of-run report; `_fab_nov` stays a 0-dim device
     tensor (it is consumed by `expand` next step); the independence-loss weight uses `.detach()` instead of `float()`
