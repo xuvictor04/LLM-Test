@@ -190,6 +190,13 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
     float addition is not associative — so this is mathematically equivalent but NOT bit-identical, unlike
     `KEY_PREGATE`. Nothing discrete diverged at this scale (same domains, same memory, same LM weights), but rounding
     can compound over a multi-day run, so `ENC_FUSE=0` restores the two-pass form and the bit-level guarantee.
+  - **ISOLATED — the two halves have different guarantees, and the choice is now explicit.** Running gather-only
+    (`ENC_FUSE=0`) against the old code: `enc`, `model` and memory ALL bit-identical. So the device-resident gather is
+    free and strictly safe; **the fuse alone causes the ~1e-5 drift, and the fuse alone carries nearly all the speedup**:
+      * `ENC_FUSE=0` → **69s** vs 70s baseline (~1%), BIT-IDENTICAL.
+      * `ENC_FUSE=1` → **62s/64s** vs 70s (~11%), mathematically equivalent, not bit-identical.
+    Default is 1. On GPU the fuse should pay MORE than it does here, since it halves the sequential GRU launches and
+    launch latency is what dominates a GPU step — whereas on CPU it only improves BLAS/threading efficiency.
   - **Removed per-step GPU→CPU synchronizations**, each of which stalls the whole pipeline on an async CUDA queue:
     `dom_exp` now accumulates on device and moves to host once in the end-of-run report; `_fab_nov` stays a 0-dim device
     tensor (it is consumed by `expand` next step); the independence-loss weight uses `.detach()` instead of `float()`
