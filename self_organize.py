@@ -219,6 +219,7 @@ class Fabric(nn.Module):
         # whole task there is no gradient that breaks the symmetry -> uniform generalists. A centroid EMA'd toward the
         # signatures it actually serves acquires a constituency, so its traffic becomes distinct and it specializes.
         s.grounded = bool(int(os.environ.get("ROUTE_GROUNDED", 1)))
+        s.route_learn = bool(int(os.environ.get("ROUTE_LEARN", 1)))   # add the learned bilinear term (see route_w)
         s.cent_m = float(os.environ.get("CENT_EMA", 0.02))
     def grow(s, gist=None):                                 # add an expert; returns its new params
         dev = s.halt_key.device
@@ -230,25 +231,48 @@ class Fabric(nn.Module):
         q = nn.Linear(s.sig_d, s.dk).to(dev)
         s.bodies.append(b); s.keys.append(k); s.qproj.append(q); s.grown += 1
         return list(b.parameters()) + [k] + list(q.parameters())
-    def society(s, h, gist, nov):
-        """SOCIETY OF EXPERTS: every expert maps the SAME base representation to its OWN output -- no chaining, so
-        expert i's output never depends on expert j's. A router layer blends the outputs. Contrast the mixture path
-        below, where each step's blend feeds the next step, entangling every expert with every other."""
+    def route_w(s, gist, nov):
+        """Routing weights over the N experts. Two terms, both kept:
+          GROUNDED  cosine of the signature to each expert's owned REGION (centroid, EMA'd under no_grad).
+          LEARNED   qproj[i](gist).keys[i] -- a per-expert bilinear score. This revives parameters that were
+                    measurably DEAD: with ROUTE_GROUNDED=1 the router ran entirely off the centroid buffer and a
+                    detached signature, so keys/qproj/q_entry/nov/ctrl/halt_key received NO gradient at all and
+                    routing could not learn. `gist` is still detached (sig_of is no_grad), so the gradient reaches
+                    the router's own parameters but never back into the SigEncoder -- which is the intent."""
         N = len(s.bodies)
-        K = torch.stack(list(s.keys) + [s.halt_key], 0)
-        nb = s.nov(nov[:, None])
-        if s.grounded:                                                         # route by REGION OWNERSHIP
+        if s.grounded:
             C = F.normalize(s.cent[:N].to(gist.device), dim=-1)
-            w = torch.softmax((F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t), -1)
+            logits = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
+            if s.route_learn:
+                Q = torch.stack([q(gist) for q in s.qproj], 1)                 # (B,N,dk)
+                Kn = torch.stack(list(s.keys), 0)                              # (N,dk)
+                logits = logits + (Q * Kn[None]).sum(-1) + s.nov(nov[:, None]).sum(-1, keepdim=True)
+            w = torch.softmax(logits, -1)
             with torch.no_grad():                                              # the winner's region moves toward this signature
                 j = int(w.mean(0).argmax())
                 s.cent[j] = F.normalize((1 - s.cent_m) * s.cent[j].to(gist.device)
                                         + s.cent_m * F.normalize(gist, dim=-1).mean(0), dim=-1).cpu()
         else:
-            c = torch.softmax(((s.q_entry(gist) + nb) @ K.t()) / max(1e-3, s.route_t), -1)
+            K = torch.stack(list(s.keys) + [s.halt_key], 0)
+            c = torch.softmax(((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t), -1)
             w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)      # router weights over experts
-        O = torch.stack([b(h) for b in s.bodies], 1)                           # (B,N,L,d) INDEPENDENT outputs
-        return s.norm((w[:, :, None, None] * O).sum(1)), w, O
+        return w
+
+    def society(s, h, gist, nov, k=None):
+        """SOCIETY OF EXPERTS: every expert maps the SAME base representation to its OWN output -- no chaining, so
+        expert i's output never depends on expert j's.
+
+        SPARSE: only the top-k experts by routing mass are COMPUTED. This is not an approximation of what ran before
+        -- the caller already used only the top ENS_K outputs to form the logits and threw the dense blend away, so
+        every expert beyond the k-th was computed, unused, and un-gradiented. Computing k of N makes the cost match
+        the selection that was already happening, which is what makes a LARGE expert population affordable.
+        Returns (w_full, O_k, idx) where idx maps O_k's columns back to global expert ids."""
+        N = len(s.bodies)
+        w = s.route_w(gist, nov)
+        kk = N if k is None else int(min(max(1, k), N))
+        idx = w.mean(0).topk(kk).indices if kk < N else torch.arange(N, device=w.device)
+        O = torch.stack([s.bodies[int(i)](h) for i in idx], 1)                 # (B,kk,L,d) INDEPENDENT outputs
+        return w, O, idx
     def remove(s, j):
         """DELETE an expert outright: its parameters are gone. In a society this should cost roughly that expert's
         own contribution; in an entangled mixture it damages everyone (the weights-unlearn failure mode)."""
@@ -620,13 +644,12 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     if gist is None: gist = torch.zeros(h.size(0), fab.q_entry.in_features, device=h.device)
     if nov is None: nov = torch.zeros(h.size(0), device=h.device)
     if not SOCIETY: return model.head(fab(h, gist, nov)[0])
-    _, w, O = fab.society(h, gist, nov)
-    kk = int(min(k or ENS_K, O.size(1)))
-    idx = w.mean(0).topk(kk).indices
-    ww = w[:, idx]; ww = ww / ww.sum(-1, keepdim=True).clamp_min(1e-9)
+    kk = int(k or ENS_K)
+    w, O, oid = fab.society(h, gist, nov, k=kk)               # SPARSE: computes only the kk it is about to use
+    ww = w[:, oid]; ww = ww / ww.sum(-1, keepdim=True).clamp_min(1e-9)
     out = None
-    for j in range(kk):
-        lj = model.head(fab.norm(O[:, idx[j]])) * ww[:, j][:, None, None]
+    for j in range(O.size(1)):
+        lj = model.head(fab.norm(O[:, j])) * ww[:, j][:, None, None]
         out = lj if out is None else out + lj
     return out
 
@@ -706,7 +729,12 @@ def main():
             h = model.encode(xb)
             if FABRIC:
                 _g0 = torch.zeros(1, SIG_D, device=DEV); _n0 = torch.zeros(1, device=DEV)
-                h = fab.society(h, _g0, _n0)[0] if SOCIETY else fab(h, _g0, _n0)[0]
+                if SOCIETY:
+                    _w0, _O0, _ = fab.society(h, _g0, _n0, k=ENS_K)
+                    model.head(fab.norm(_O0[:, 0])).sum().backward(); model.zero_grad()
+                    if FABRIC: fab.zero_grad()
+                    return
+                h = fab(h, _g0, _n0)[0]
             model.head(h).sum().backward(); model.zero_grad()
             if FABRIC: fab.zero_grad()
         for _ in range(3): _one()
@@ -1056,8 +1084,10 @@ def main():
                 _wpred_seq = world_fwd(_wz.reshape(-1, WLAT))[0].reshape(x.size(0), x.size(1), WLAT)
                 h = h + world_proj(_wpred_seq)                   # BEFORE fabric/head -> generation is conditioned on the forecast
         if FABRIC and SOCIETY:
-            _hs, _w, _O = fab.society(h, sigb, _fab_nov.expand(x.size(0)))
-            _dep = _hs.new_zeros(()); _bal = fab_bal(_w); h = _hs
+            # SPARSE: compute only the experts whose outputs are actually consumed below. The dense blend that used
+            # to be assigned to h here was never read -- the logits come from _O -- so it was pure waste.
+            _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K))
+            _dep = h.new_zeros(()); _bal = fab_bal(_w)
             _wd = _w[0].detach()                           # which experts serve THIS domain, and how much. Kept ON DEVICE:
             #   `.cpu()` here forced a full GPU->CPU synchronization EVERY step for a number that is only read once, in
             #   the end-of-run affiliation report. Accumulate on device; move to host when reporting.
@@ -1068,12 +1098,13 @@ def main():
         elif _sl >= 0:
             h = experts.one(h, _sl)
         if FABRIC and SOCIETY:                             # ENSEMBLE the experts' OUTPUTS (not their hidden states)
-            _ki = _w.mean(0).topk(min(ENS_K, _O.size(1))).indices
-            _wk = _w[:, _ki].mean(0); _wk = _wk / _wk.sum().clamp_min(1e-9)
+            _ki = torch.arange(min(ENS_K, _O.size(1)), device=_O.device)   # _O is ALREADY the top-k, in rank order
+            _wk = _w[:, _oid[_ki]].mean(0); _wk = _wk / _wk.sum().clamp_min(1e-9)
+            _hd = {}                                       # cache: ENS_K and IND_K overlap, so share the head passes
             lg = None
-            for _q, _j in enumerate(_ki):
-                _lj = model.head(fab.norm(_O[:, _j])) * _wk[_q]
-                lg = _lj if lg is None else lg + _lj
+            for _q, _j in enumerate(_ki.tolist()):
+                _hd[_j] = model.head(fab.norm(_O[:, _j]))
+                lg = _hd[_j] * _wk[_q] if lg is None else lg + _hd[_j] * _wk[_q]
         else:
             lg = model.head(h)
         loss = F.cross_entropy(lg.reshape(-1, V), y.reshape(-1))
@@ -1085,12 +1116,12 @@ def main():
             _a = _O[:, _t2[0]].reshape(-1); _b = _O[:, _t2[1]].reshape(-1)   #   converging on the same generalist function
             tot = tot + DIV_W * F.cosine_similarity(_a, _b, dim=0).clamp_min(0.0)
         if FABRIC and SOCIETY and IND_W > 0:                # INDEPENDENCE: each expert must solve the task ALONE
-            _ki = _w.mean(0).topk(min(IND_K, _O.size(1))).indices  #   (weighted by its routing mass) -- makes the population
-            for _j in _ki:                                    #   an ENSEMBLE, which survives member removal, rather than
-                _lj = model.head(fab.norm(_O[:, _j]))         #   a DECOMPOSITION, which does not
+            for _j in range(min(IND_K, _O.size(1))):          #   (weighted by its routing mass) -- makes the population
+                _lj = _hd.get(_j)                             #   an ENSEMBLE, which survives member removal, rather than
+                if _lj is None: _lj = model.head(fab.norm(_O[:, _j]))   #   a DECOMPOSITION, which does not
                 #   `.detach()` instead of `float()`: numerically identical (both stop the gradient) but stays on device,
                 #   where `float()` forced a GPU->CPU sync per expert per step.
-                tot = tot + IND_W * _w[:, _j].mean().detach() * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
+                tot = tot + IND_W * _w[:, _oid[_j]].mean().detach() * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
         if recon is not None and RECON_W > 0:                    # VERIFICATION: train the Reconstructor on GENUINE (key, token)
             tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # guard RECON_W>0: skips a redundant key-encode
         #   that was computed then multiplied by 0.0 on the default VERIFY=recon path (workflow finding)
@@ -1438,8 +1469,8 @@ def main():
         _ps2 = sorted(set(labels))
         with torch.no_grad():                              # find the busiest expert (the one worth deleting)
             _sg2 = enc(torch.tensor([list(ENC_SEQ[WIN * 3:WIN * 4])], device=DEV))
-            _, _w2, _ = fab.society(model.encode(torch.tensor([list(stream[:WIN])], device=DEV)), _sg2,
-                                    torch.zeros(1, device=DEV))
+            _w2, _, _ = fab.society(model.encode(torch.tensor([list(stream[:WIN])], device=DEV)), _sg2,
+                                    torch.zeros(1, device=DEV), k=1)
         _j2 = int(_w2[0].argmax())
         _pre = {p: bpb_true(p, use_mem=False) for p in _ps2}
         import copy as _copy
