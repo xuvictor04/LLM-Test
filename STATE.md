@@ -205,6 +205,18 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
     H100's matmul throughput unused) and `AMP=bf16` (opt-in autocast for the LM step; bf16 shares fp32's exponent range
     so no GradScaler). Memory keys deliberately stay fp32 — retrieval is a dot product over normalized keys, the one
     place reduced precision would change behaviour rather than just speed.
+  - **CAVEAT on the 85% figure — it is DATA-DEPENDENT.** `contrastive_step` is shift-gated: `ENC_EVERY`(=1) near a
+    detected boundary, `ENC_EVERY_IDLE`(=12) when the stream is stable. Every profile above used the 4-domain
+    `eng/py/num/c` mix, which switches constantly, so the encoder ran at the DENSE cadence nearly always. A later probe
+    on a short single-domain run showed the share collapse to 33% (encoder 33 | memkey 22 | lm 20 | sig_of 18) as the
+    gate throttled it. So "the encoder is 85%" is true for MULTI-DOMAIN streams; on a single-domain corpus
+    (e.g. fineweb-edu alone) the bottleneck ranking is different and must be re-measured. `bench_gpu.sh` says this on
+    its summary sheet so the number is not carried over blindly.
+  - **`bench_gpu.sh` + `BENCH=1`** built to settle all of this ON A GPU: 5 configs (gru/transformer × fp32/bf16, plus
+    `ENC_FUSE=0`), `nvidia-smi` sampled DURING each run (low SM utilization + slow step = launch-bound = a bigger card
+    will not help), and per-config steps/min, GB/day, peak GPU memory, param count and profile. `MODEL=transformer`
+    CPU-verified to work before spending GPU time on it. `LAYERS` is set explicitly per config (it defaults to 4 for
+    transformer vs 1 for GRU, so an unguarded A-vs-C comparison would have differed ~8× in parameter count).
   - **NOT done, deliberately**: `mem.write`'s adaptive-gate controller still syncs once per call (`float(keep.mean())`).
     Moving it on-device would change float64-vs-float32 accumulation in the last bits and could slowly drift which
     entries get written — a real behavioural change for a marginal gain, since the boolean-index sync in the same
