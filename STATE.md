@@ -160,7 +160,18 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R31 (current):** [USER: robust evals; integrate world model; "is it vastly undertrained? I thought we need a few epochs"]
+- **R32 (current):** [USER: "make the world model like the rest of the system in its separation — build it"; also "a few agents"
+  to find the real bottleneck] BUILT the SEPARATED world model: `DynamicsPopulation` (world_model.py) = a routed SOCIETY of
+  forward-dynamics predictors over a shared latent — routes each latent to the predictor whose "physics" fits, blends the
+  top few, tracks per-predictor FITNESS, GROWS on plateau (clones the fittest), SOFT-CULLS the unused. Mirrors the expert
+  society, reusing the same primitive (per USER's "broken-down tasks are similar"). Integrated into self_organize.py:
+  `WORLD_MODEL=1` = routed population; `WORLD_GROW=1` = grow/cull selection at the experts/domains cadence; held-out eval
+  reports predictor count + fitness. STATUS (honest): both files COMPILE and the path is GATED off by default (safe no-op);
+  the multi-regime specialization probe + CPU integration smoke-test were still RUNNING at commit time — NOT yet confirmed
+  passing. Also launched a background WORKFLOW ("a few agents") to profile the training bottleneck (GPU-bound? reverse
+  encoders / rekey_memory / SigEncoder) and return non-compromising fix OPTIONS — analysis only, no edits. Corrected my earlier
+  unverified "CPU-bound" claim: deferring to USER's profiled "GPU-bound". Files: `world_model.py`, `self_organize.py`.
+- **R31:** [USER: robust evals; integrate world model; "is it vastly undertrained? I thought we need a few epochs"]
   DECISIVE FINDING (verified in code): the product loop does a SINGLE pass — `while i+WIN+1 < len(stream)`, no epoch loop;
   "epochs" only come from `STREAM_LEN > corpus` (build_stream resamples with replacement). `fw_small` STREAM_LEN=60M vs
   ~100-110MB corpus = **~0.5 epoch at completion, ~0.2 at the 100k checkpoint**. So EVERY run to date has been <1 epoch —

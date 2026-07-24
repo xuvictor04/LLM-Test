@@ -19,7 +19,7 @@ import os, math, random, glob, sys
 import torch, torch.nn as nn, torch.nn.functional as F
 from memory import EditableMemory
 from verification import Reconstructor, recon_loss, verify as verify_mem   # Verification (renamed from B): reconstruction, not surprise
-from world_model import WorldEncoder, ForwardModel, _var_cov               # world model FIRST BRICK: latent forward-dynamics (gated)
+from world_model import WorldEncoder, DynamicsPopulation, pop_loss, _var_cov   # world model: latent forward-dynamics + SEPARATED population (gated)
 try: sys.stdout.reconfigure(line_buffering=True)          # stream progress even when piped through tee (no -u needed)
 except Exception: pass
 
@@ -601,8 +601,10 @@ def main():
     # WORLD MODEL (first brick, gated off by default): reads OBSERVATION EMBEDDINGS (the lowest layer = the point where
     # new SENSES plug in) and learns to predict how that observed world EVOLVES in latent space (physics-like, modality-agnostic).
     WORLD_MODEL = bool(_i("WORLD_MODEL", 0)); WLAT = _i("WORLD_LAT", 32); WORLD_W = _f("WORLD_W", 0.1); WORLD_K = max(1, _i("WORLD_K", 1)); WHID = _i("WORLD_HID", 128)
+    WORLD_GROW = bool(_i("WORLD_GROW", 0))               # opt-in: also GROW-on-plateau + soft-cull the dynamics population (like experts)
     world_enc = WorldEncoder(D, WLAT, WHID).to(DEV) if WORLD_MODEL else None
-    world_fwd = ForwardModel(WLAT, WHID).to(DEV) if WORLD_MODEL else None
+    world_fwd = DynamicsPopulation(WLAT, _i("WORLD_N0", 3), _i("WORLD_NMAX", 6), WHID, _i("WORLD_ROUTE", 24)).to(DEV) if WORLD_MODEL else None  # SEPARATED: a routed society of dynamics predictors
+    _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _i("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 1500), _i("FAB_WARMUP", 2000)) if FABRIC else None
@@ -739,6 +741,12 @@ def main():
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
         if EXPERTS and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0: router.manage(step)   # experts: create/replicate/cull (their own selective force)
+        if WORLD_GROW and step % MANAGE_EVERY == 0 and step > 0:                                    # world-model SELECTION (same cadence as experts/domains)
+            if world_fwd.n() < world_fwd.nmax and _wl_ema is not None and _winv > 0.9 * _wl_ema and step - _wl_lastgrow > 4 * MANAGE_EVERY:
+                _newp = world_fwd.grow(_wz.reshape(-1, WLAT).detach())   # plateau (no improvement) -> add a dynamics predictor, cloned from the fittest
+                if _newp: om.add_param_group({"params": _newp}); _wl_lastgrow = step; print(f"  [world-model @ {step}] plateau -> grew to {world_fwd.n()} dynamics predictors")
+            _wcull = world_fwd.soft_cull()
+            if _wcull: print(f"  [world-model @ {step}] soft-culled {_wcull} unused -> {int(world_fwd.alive[:world_fwd.n()].sum())} live predictors")
         _bx.append(list(w[:-1])); _by.append(list(w[1:])); _bg.append(sig); _bd.append(did); _bp.append(bpos)
         if len(_bx) < BATCH_W:                              # accumulate a batch of windows first
             i += WIN; step += 1; continue
@@ -786,7 +794,10 @@ def main():
             _wz = world_enc(model.emb(x))                        # (B,WIN,WLAT) from observation embeddings -- NOT the GRU state (world, not self)
             _zt = _wz[:, :-WORLD_K].reshape(-1, WLAT); _zn = _wz[:, WORLD_K:].reshape(-1, WLAT)
             _wv, _wc = _var_cov(_wz.reshape(-1, WLAT))           # anti-collapse (variance + decorrelation)
-            tot = tot + WORLD_W * (F.mse_loss(world_fwd(_zt), _zn) + _wv + 0.04 * _wc)
+            _wpl, _, _winv = pop_loss(world_fwd, _zt, _zn)       # routed POPULATION forward-prediction + load-balance
+            tot = tot + WORLD_W * (_wpl + _wv + 0.04 * _wc)
+            if WORLD_GROW:                                       # selection: GROW on plateau, SOFT-CULL the unused (like experts)
+                _wl_ema = _winv if _wl_ema is None else 0.98 * _wl_ema + 0.02 * _winv
         (tot / ACCUM).backward()                                 # gradient accumulation over ACCUM windows
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
         _lm_run.append(float(loss.detach()))                     # LM loss curve: is the model still improving?
@@ -884,13 +895,15 @@ def main():
                     _X = torch.tensor([_v[a:a + WIN] for a in _st], device=DEV)   # HELD-OUT windows, never trained on
                     _z = world_enc(model.emb(_X))
                     _zt = _z[:, :-WORLD_K].reshape(-1, WLAT); _zn = _z[:, WORLD_K:].reshape(-1, WLAT)
-                    _wm.append(F.mse_loss(world_fwd(_zt), _zn).item())            # world-model forward prediction
+                    _wm.append(F.mse_loss(world_fwd(_zt)[0], _zn).item())         # POPULATION blended forward prediction
                     _pm.append(F.mse_loss(_zt, _zn).item())                       # baseline: "assume the world doesn't change"
                     _sd.append(_z.reshape(-1, WLAT).std(0).mean().item())         # collapse check
             if _wm:
                 wm, pm, sd = sum(_wm) / len(_wm), sum(_pm) / len(_pm), sum(_sd) / len(_sd)
-                print(f"\n=== WORLD MODEL: latent forward-dynamics on HELD-OUT observations (unseen data + baseline + collapse check) ===")
+                _nlive = int(world_fwd.alive[:world_fwd.n()].sum())
+                print(f"\n=== WORLD MODEL (separated population): forward-dynamics on HELD-OUT observations (unseen + baseline + collapse) ===")
                 print(f"  forward-pred MSE {wm:.4f} | persistence baseline {pm:.4f} | beats baseline {(1 - wm / max(pm, 1e-9)) * 100:+.1f}% | latent std {sd:.2f}")
+                print(f"  dynamics predictors: {world_fwd.n()} ({_nlive} live) | per-predictor fitness (err, lower=fitter): {[round(float(world_fwd.fit[i]),3) for i in range(world_fwd.n())]}")
                 print(f"  >> positive beat AND std > ~0.5 = it learned real dynamics on UNSEEN data; ~0% beat or std~0 (collapsed) = it did NOT")
             world_enc.train(); world_fwd.train()
         except Exception as _e:
