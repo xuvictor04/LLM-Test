@@ -604,6 +604,8 @@ def main():
     # WORLD MODEL (first brick, gated off by default): reads OBSERVATION EMBEDDINGS (the lowest layer = the point where
     # new SENSES plug in) and learns to predict how that observed world EVOLVES in latent space (physics-like, modality-agnostic).
     WORLD_MODEL = bool(_i("WORLD_MODEL", 0)); WLAT = _i("WORLD_LAT", 32); WORLD_W = _f("WORLD_W", 0.1); WORLD_K = max(1, _i("WORLD_K", 1)); WHID = _i("WORLD_HID", 128)
+    WORLD_VAR = _f("WORLD_VAR", 1.0)                     # anti-collapse (variance+decorrelation) weight -- applied at FULL strength,
+    #   NOT scaled by WORLD_W (scaling it by 0.1 let the latent collapse to std 0.24; the standalone probe uses full strength).
     WORLD_GROW = bool(_i("WORLD_GROW", 0))               # opt-in: also GROW-on-plateau + soft-cull the dynamics population (like experts)
     WORLD_FEEDBACK = bool(_i("WORLD_FEEDBACK", 0))       # THE LINK THAT MAKES IT MATTER: wire the world model's forecast BACK to
     #   condition the base LM -- generation is now informed by where the world model predicts the world is going, not a side-head.
@@ -746,7 +748,13 @@ def main():
     if os.environ.get("SAVE_CKPT"):
         print(f"[pid {os.getpid()}] checkpoint-on-demand: kill -USR1 {os.getpid()}  ->  saves to {os.environ['SAVE_CKPT']} at the next step"
               + (f" (auto every {CKPT_EVERY} steps)" if CKPT_EVERY else " (no periodic auto-save; set CKPT_EVERY to enable)"))
-    while i + WIN + 1 < len(stream):
+    EPOCHS = max(1, _i("EPOCHS", 1)); _epoch = 0            # multi-EPOCH: reset to the stream start EPOCHS times (clean passes,
+    while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
+        if i + WIN + 1 >= len(stream):
+            _epoch += 1
+            if _epoch >= EPOCHS: break
+            i = 0; print(f"  [epoch {_epoch + 1}/{EPOCHS} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
+            continue
         w = stream[i:i + WIN + 1]
         x = torch.tensor([list(w[:-1])], device=DEV); y = torch.tensor([list(w[1:])], device=DEV)
         bpos = tok_bs[i] if ONLINE else i                  # stable (byte) coordinate so metrics survive re-tokenization
@@ -828,14 +836,15 @@ def main():
             for _j in _ki:                                    #   an ENSEMBLE, which survives member removal, rather than
                 _lj = model.head(fab.norm(_O[:, _j]))         #   a DECOMPOSITION, which does not
                 tot = tot + IND_W * float(_w[:, _j].mean()) * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
-        if recon is not None:                                    # VERIFICATION: train the Reconstructor on GENUINE
-            tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # (key, token) pairs from the live stream
+        if recon is not None and RECON_W > 0:                    # VERIFICATION: train the Reconstructor on GENUINE (key, token)
+            tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # guard RECON_W>0: skips a redundant key-encode
+        #   that was computed then multiplied by 0.0 on the default VERIFY=recon path (workflow finding)
         if WORLD_MODEL:                                          # WORLD MODEL: predict how the OBSERVED world evolves in latent space
             # _wz was computed above (once) from observation embeddings -- NOT the GRU state (world, not self)
             _zt = _wz[:, :-WORLD_K].reshape(-1, WLAT); _zn = _wz[:, WORLD_K:].reshape(-1, WLAT)
             _wv, _wc = _var_cov(_wz.reshape(-1, WLAT))           # anti-collapse (variance + decorrelation)
             _wpl, _, _winv = pop_loss(world_fwd, _zt, _zn)       # routed POPULATION forward-prediction + load-balance
-            tot = tot + WORLD_W * (_wpl + _wv + 0.04 * _wc)
+            tot = tot + WORLD_W * _wpl + WORLD_VAR * (_wv + 0.04 * _wc)   # anti-collapse at FULL strength (was under-weighted -> collapse)
             if WORLD_GROW:                                       # selection: GROW on plateau, SOFT-CULL the unused (like experts)
                 _wl_ema = _winv if _wl_ema is None else 0.98 * _wl_ema + 0.02 * _winv
         (tot / ACCUM).backward()                                 # gradient accumulation over ACCUM windows

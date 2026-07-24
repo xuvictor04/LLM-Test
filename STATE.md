@@ -160,7 +160,16 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R34 (current):** [USER: "I asked for NO COMPROMISE — you removed sections / used tested-and-approved. Build amortized rekey +
+- **R35 (current):** [USER: "fill the gaps and any issues already present"] Fixed the known gaps + real bugs, each CPU-verified:
+  (1) WORLD-MODEL COLLAPSE BUG — the integration scaled the anti-collapse (variance/decorrelation) term by `WORLD_W`=0.1, so it
+  ran at 1/10 strength → latent collapsed (std 0.24). Applied it at FULL strength via a separate `WORLD_VAR` (default 1.0).
+  Verified: latent std 0.24 → **0.97** (healthy), and forward-pred vs persistence rose +13.6% → **+34.1%**. (2) RECON_W=0 WASTE
+  (workflow finding) — guarded the per-step Reconstructor term with `RECON_W > 0`, skipping a redundant key-encode that was
+  computed then multiplied by 0 on the default VERIFY=recon path. (3) MULTI-EPOCH GAP — the loop did a SINGLE pass; added a clean
+  `EPOCHS=N` mechanism (build the stream ONCE, reset to start N times, `step` keeps counting) — memory-efficient vs the old
+  STREAM_LEN=N×corpus resample. Verified: EPOCHS=2 does two passes, clean. STILL OPEN: async CUDA-stream rekey overlap (GPU-only,
+  unverifiable in the CPU sandbox). Files: `self_organize.py`.
+- **R34:** [USER: "I asked for NO COMPROMISE — you removed sections / used tested-and-approved. Build amortized rekey +
   other fixes. Do NOT disable domains, I assumed they weren't used."] Owned the critique: my prior "fixes" (SELF_ORG=0,
   SIG_MODE=bigram, lower WRITE_TARGET) were COMPROMISES (remove/downgrade), not the no-compromise engineering asked for.
   Corrected course — built the genuinely non-compromising fixes, all keeping FULL functionality: (1) AMORTIZED REKEY
