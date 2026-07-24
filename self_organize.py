@@ -86,8 +86,9 @@ if DATA_MODE == "real":
         VMAX = _i("VMAX", 4096)
         _target = _i("SEED_VOCAB", 512) if TOK_ONLINE else VMAX            # online: only SEED here; keep minting during training
         _passes = _i("SEED_PASSES", 2) if TOK_ONLINE else _i("GROW_PASSES", 8)
-        if os.path.exists(_tp) and not TOK_ONLINE:
-            TOK = DynamicTokenizer.load(_tp)
+        if os.path.exists(_tp) and (not TOK_ONLINE or os.environ.get("RESUME")):
+            TOK = DynamicTokenizer.load(_tp)               # RESUME must reuse the SAVED vocab: a fresh online seed would
+            #   re-mint different ids, so the restored embedding table would be indexed by a DIFFERENT vocabulary.
         else:
             TOK = DynamicTokenizer(vmax=VMAX, min_pair=_i("MIN_PAIR", 50), max_tok=_i("MAX_TOK", 16), dropout=_f("TOK_DROPOUT", 0.0))
             gb = b"".join(c[:_i("TOK_GROW_CAP", 1000000)] for c in CORP)   # bytes the tokenizer grows on
@@ -666,11 +667,32 @@ def main():
         print(f"[probe] {MODEL_TYPE} d{D} L{_i('LAYERS', 4 if MODEL_TYPE=='transformer' else 1)}{f' + FABRIC {len(fab.bodies)}n' if FABRIC else ''} | ~{per*1000:.1f} ms/step x {steps} steps "
               f"= ~{per*steps/60:.1f} min train (+ tokenizer build, {_i('ENC_WARMUP',800)} warmup steps, re-keys, tests). "
               f"{'Ctrl-C in 12s to abort/resize.' if DEV=='cuda' else ''}")
+        print("  [probe is a LOWER BOUND -- it times ONLY the LM forward/backward. The real step also pays sig_of, the "
+              "live contrastive encoder, the amortized re-key, domain assembly and memory. Trust the [rate] lines below.]")
         if DEV == "cuda": _t.sleep(12)
     # WEIGHT DECAY was implicit (AdamW defaults to 0.01). Decoupled decay is applied EVERY step to EVERY parameter
     # regardless of gradient, so a dormant expert loses ~71% of its magnitude over a 62.5k-step run -- an UNCONTROLLED
     # forgetting term inside a system whose whole point is CONTROLLED forgetting. Now explicit; 0 disables it.
     WD = WEIGHT_DECAY                                     # default 0.0: we are UNDERFIT, regularization would hurt
+    # ---- RESUME (RESUME=runs/x): reload a checkpoint and CONTINUE training instead of starting from zero. A multi-day
+    # multi-epoch run that dies at hour 20 previously lost everything even though checkpoints existed -- they were
+    # generate-only. Grown populations (fabric nodes, dynamics predictors) are re-grown to their saved size BEFORE the
+    # optimizers are built so their params are in the param groups and their Adam moments restore.
+    RESUME = os.environ.get("RESUME", "")
+    _RD, _resume_step = None, 0
+    if RESUME:
+        _RD = torch.load(RESUME if RESUME.endswith(".pt") else f"{RESUME}/ckpt.pt", map_location=DEV, weights_only=False)
+        if FABRIC and _RD.get("fab_cfg"):
+            while len(fab.bodies) < _RD["fab_cfg"]["n"]: fab.grow()
+        if WORLD_MODEL and _RD.get("world_cfg"):
+            while world_fwd.n() < _RD["world_cfg"]["n"]: world_fwd.grow()
+        model.load_state_dict(_RD["model"]); enc.load_state_dict(_RD["enc"])
+        if FABRIC and _RD.get("fab") is not None: fab.load_state_dict(_RD["fab"])
+        if EXPERTS and _RD.get("experts") is not None: experts.load_state_dict(_RD["experts"])
+        if WORLD_MODEL and _RD.get("world_enc") is not None:
+            world_enc.load_state_dict(_RD["world_enc"]); world_fwd.load_state_dict(_RD["world_fwd"])
+            if world_proj is not None and _RD.get("world_proj") is not None: world_proj.load_state_dict(_RD["world_proj"])
+        _resume_step = int(_RD.get("step", 0))
     om = torch.optim.AdamW(list(model.parameters()) + (list(experts.parameters()) if EXPERTS else [])
                            + (list(fab.parameters()) if FABRIC else [])
                            + (list(recon.parameters()) if recon is not None else [])
@@ -682,7 +704,28 @@ def main():
                          adaptive_gate=bool(_i("WRITE_ADAPTIVE", 0)), gate_target=_f("WRITE_TARGET", 0.5),
                          evict=os.environ.get("EVICT", "recency"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000))
     asm = DomainAssembler()
-    if SIG_MODE == "learned":                              # WARM UP the encoder first (unsupervised on the raw stream);
+    if _RD is not None:                                    # part 2 of RESUME: optimizer moments, memory store, domains
+        try: om.load_state_dict(_RD["opt_m"]); oe.load_state_dict(_RD["opt_e"])
+        except (KeyError, ValueError) as e: print(f"[resume] optimizer state not restored ({e}) -- weights still loaded")
+        _mk = _RD["mem_keys"]; _mn = _mk.size(0)
+        if _mn > 0:
+            _mn = min(_mn, mem.cap)
+            mem.keys[:_mn] = _mk[:_mn].to(DEV); mem.tok[:_mn] = _RD["mem_tok"][:_mn].to(DEV)
+            mem.src[:_mn] = _RD["mem_src"][:_mn].to(DEV); mem.pos[:_mn] = _RD["mem_pos"][:_mn].to(DEV)
+            if mem.ctx_w > 0 and _RD.get("mem_ctx") is not None: mem.ctx[:_mn] = _RD["mem_ctx"][:_mn].to(DEV)
+            if _RD.get("mem_use") is not None: mem.use[:_mn] = _RD["mem_use"][:_mn].to(DEV)
+            if _RD.get("mem_selfcon") is not None: mem.selfcon[:_mn] = _RD["mem_selfcon"][:_mn].to(DEV)
+            mem.active[:_mn] = True; mem.ptr = _mn % mem.cap
+        _a = _RD.get("asm")
+        if _a:
+            asm.cent = {int(k): v.to(DEV) for k, v in _a["cent"].items()}
+            asm.size = {int(k): v for k, v in _a["size"].items()}; asm.last = {int(k): v for k, v in _a["last"].items()}
+            asm.wins = {i: [] for i in asm.cent}           # sample windows are stream-local; the new stream refills them
+            asm.next_id = _a["next_id"]; asm.merged = {int(k): int(v) for k, v in _a["merged"].items()}; asm.cur = -1
+        print(f"[RESUME] {RESUME} -> step {_resume_step} | {mem.n} memory entries | {len(asm.cent)} domains"
+              + (f" | fabric {len(fab.bodies)}n" if FABRIC else "") + (f" | {world_fwd.n()} dynamics predictors" if WORLD_MODEL else "")
+              + "  (encoder warmup skipped: already trained)")
+    if SIG_MODE == "learned" and _RD is None:              # WARM UP the encoder first (unsupervised on the raw stream);
         wu = _i("ENC_WARMUP", 800)                         #   an undertrained encoder gives noisy (unseparated) signatures.
         def _sep_probe():                                  # mean pairwise distance of random-window encodings (global spread)
             with torch.no_grad():
@@ -703,7 +746,7 @@ def main():
         if wu:
             print("[encoder training curve] step:loss:separation -> " + "  ".join(f"{t}:{l:.2f}:{s:.2f}" for t, l, s in curve))
             print(f"  (adaptive warmup: stopped at {_stop}/{wu} on separation plateau; floor {_wfloor}, eps {_weps}. Set ENC_WARMUP_MIN/EPS to tune)")
-    assigns = []; bounds = []; i = 0; step = 0; _cur_ph = -1; PH_SNAP = []
+    assigns = []; bounds = []; i = 0; step = _resume_step; _cur_ph = -1; PH_SNAP = []
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
@@ -737,7 +780,22 @@ def main():
                     "mem_keys": mem.keys[act].cpu(), "mem_tok": mem.tok[act].cpu(), "mem_src": mem.src[act].cpu(),
                     "mem_ctx": (mem.ctx[act].cpu() if mem.ctx_w > 0 else None), "topk": mem.topk,
                     "mem_pos": mem.pos[act].cpu(),                     # -> source passages for grounded answers
+                    "mem_use": mem.use[act].cpu(), "mem_selfcon": mem.selfcon[act].cpu(),   # for RESUME (retrieval fitness + wrongness)
                     "sig_d": SIG_D, "win": WIN, "enc": enc.state_dict(),          # encoder -> gist for fabric routing
+                    # WORLD MODEL: with WORLD_FEEDBACK the base LM is TRAINED with `h += world_proj(forecast)`. Omitting
+                    # it from the checkpoint made generation run a DIFFERENT network than training -> the coherence test
+                    # would have been invalid. Saved with its grown population size so it reconstructs exactly.
+                    "world_cfg": ({"lat": WLAT, "hid": WHID, "n": world_fwd.n(), "nmax": world_fwd.nmax,
+                                   "route": world_fwd.route_dim, "feedback": world_proj is not None} if WORLD_MODEL else None),
+                    "world_enc": (world_enc.state_dict() if WORLD_MODEL else None),
+                    "world_fwd": (world_fwd.state_dict() if WORLD_MODEL else None),
+                    "world_proj": (world_proj.state_dict() if world_proj is not None else None),
+                    # RESUME state: optimizer moments + step + domain centroids. Without these a crashed multi-day run
+                    # restarts from zero even though a checkpoint exists.
+                    "step": step, "opt_m": om.state_dict(), "opt_e": oe.state_dict(),
+                    "asm": {"cent": {int(k): v.cpu() for k, v in asm.cent.items()}, "size": dict(asm.size),
+                            "last": dict(asm.last), "next_id": asm.next_id, "merged": dict(asm.merged), "cur": asm.cur},
+                    "experts": (experts.state_dict() if EXPERTS else None),
                     "fab": (fab.state_dict() if FABRIC else None),
                     "fab_cfg": ({"n": len(fab.bodies), "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _i("FAB_HID_MULT", 2),
@@ -758,7 +816,20 @@ def main():
         print(f"[pid {os.getpid()}] checkpoint-on-demand: kill -USR1 {os.getpid()}  ->  saves to {os.environ['SAVE_CKPT']} at the next step"
               + (f" (auto every {CKPT_EVERY} steps)" if CKPT_EVERY else " (no periodic auto-save; set CKPT_EVERY to enable)"))
     EPOCHS = max(1, _i("EPOCHS", 1)); _epoch = 0            # multi-EPOCH: reset to the stream start EPOCHS times (clean passes,
+    # LIVE RATE METER: the [probe] extrapolates from a SYNTHETIC LM-only step, so its ETA has always been optimistic --
+    # this measures the ACTUAL loop and re-projects from observed throughput, so the ETA self-corrects as the run goes.
+    import time as _time
+    RATE_EVERY = _i("RATE_EVERY", 2000); _t_start = _time.time(); _t_mark = _t_start; _s_mark = step
+    _total_steps = EPOCHS * (len(stream) // WIN)
+    _bpw = WIN * (len(byte_stream) / max(1, len(stream))) if ONLINE else WIN     # BYTES of corpus consumed per step
     while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
+        if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark:
+            _now = _time.time(); _rate = (step - _s_mark) / max(1e-9, _now - _t_mark)      # steps/sec over the last window
+            _left = max(0, _total_steps - (step - _resume_step))
+            print(f"  [rate @ {step}] {_rate*60:.0f} steps/min | {_rate*_bpw/1e3:.1f} kB/s of corpus | "
+                  f"elapsed {(_now-_t_start)/60:.0f} min | ~{_left/max(1e-9,_rate)/3600:.1f} h left ({_left} steps) | "
+                  f"{_rate*_bpw*86400/1e9:.2f} GB of text per DAY at this rate")
+            _t_mark = _now; _s_mark = step
         if i + WIN + 1 >= len(stream):
             _epoch += 1
             if _epoch >= EPOCHS: break

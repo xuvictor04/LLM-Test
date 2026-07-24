@@ -112,6 +112,26 @@ class Fabric(nn.Module):
         return h
 
 
+# ---- WORLD MODEL (the model was TRAINED with `h += world_proj(forecast)` when WORLD_FEEDBACK=1; running without it
+# generates from a DIFFERENT network than the one that was trained, which silently invalidates any coherence judgement) ----
+WCFG = d.get("world_cfg"); WENC = WFWD = WPROJ = None
+if WCFG and d.get("world_enc") is not None:
+    from world_model import WorldEncoder, DynamicsPopulation
+    WENC = WorldEncoder(D, WCFG["lat"], WCFG["hid"]).to(DEV); WENC.load_state_dict(d["world_enc"]); WENC.eval()
+    WFWD = DynamicsPopulation(WCFG["lat"], WCFG["n"], WCFG["nmax"], WCFG["hid"], WCFG["route"]).to(DEV)
+    WFWD.load_state_dict(d["world_fwd"]); WFWD.eval()
+    if WCFG.get("feedback") and d.get("world_proj") is not None:
+        WPROJ = nn.Linear(WCFG["lat"], D).to(DEV); WPROJ.load_state_dict(d["world_proj"]); WPROJ.eval()
+
+
+def _world_h(x, h):
+    """Same conditioning the training loop applies, in the same place (before fabric/head)."""
+    if WPROJ is None: return h
+    z = WENC(model.emb(x))
+    pred = WFWD(z.reshape(-1, WCFG["lat"]))[0].reshape(x.size(0), x.size(1), WCFG["lat"])
+    return h + WPROJ(pred)
+
+
 # ---- RETRIEVAL GROUNDING: memory entries point back at real source text ----
 import os.path as _op
 MPOS = d.get("mem_pos"); SRC = None
@@ -204,12 +224,11 @@ def generate(seed, n, temp):
     if not seq: seq = [10]                                          # avoid empty context
     for _ in range(n):
         x = torch.tensor([seq[-256:]], device=DEV)
+        _h = _world_h(x, model.encode(x))                           # world-model forecast conditions h (as in training)
         if FAB is not None and GIST is not None:
-            _h = model.encode(x); _n0 = torch.zeros(1, device=DEV)
+            _n0 = torch.zeros(1, device=DEV)
             _h = FAB.society(_h, GIST, _n0) if FAB_SOC else FAB(_h, GIST, _n0)
-            logits = model.head(_h)[0, -1]
-        else:
-            logits = model(x)[0][0, -1]
+        logits = model.head(_h)[0, -1]
         if VLIM is not None and VLIM < logits.numel(): logits = logits.clone(); logits[VLIM:] = float('-inf')
         if REP_PEN != 1.0:                                          # repetition penalty on recently-used tokens (anti-degeneracy)
             for t in set(seq[-REP_WIN:]):

@@ -160,7 +160,26 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R36 (current):** [USER: "disk streaming loader sounds important, build it first"] BUILT the disk-streaming data loader so
+- **R37 (current):** [USER: "before I test, is there anything we can or should do before?"] Audited the PILOT'S OWN CODE PATH
+  and found three gaps, two of which would have wrecked the run. (1) **World model absent from the checkpoint.** With
+  `WORLD_FEEDBACK=1` the base LM is TRAINED as `h += world_proj(forecast)`, but `_save_ckpt` saved no world state and
+  `prompt.py` had no world path — so generation would have run a DIFFERENT network than training, silently invalidating the
+  coherence judgement that is the whole point of the pilot. Now saved (`world_cfg/world_enc/world_fwd/world_proj`, including
+  the GROWN population size) and applied in `prompt.py` at the same place as training (before fabric/head).
+  (2) **No RESUME.** Checkpoints were generate-only: a multi-day run that died at hour 20 restarted from zero even though a
+  checkpoint existed. `RESUME=runs/x` now reloads model/enc/fabric/experts/world + BOTH optimizer states + step + memory store
+  + domain centroids, re-growing fabric nodes and dynamics predictors to their saved sizes BEFORE the optimizers are built so
+  Adam moments restore into the right param groups; encoder warmup is skipped (already trained).
+  (3) **Resume would have corrupted the vocab**: under `TOK_ONLINE=1` the tokenizer always re-seeded from scratch, so a
+  restored embedding table would have been indexed by a DIFFERENT vocabulary — `RESUME` now forces the saved `dyntok.json`.
+  Verified end-to-end on CPU: trained → checkpointed → resumed (exit 0), Adam step counters CONTINUED 937→1171 (not reset
+  to 1, so the moments and bias correction genuinely restored), memory 105k→130k entries, domains and predictors intact.
+  Also found WHY "the estimates are always wrong and longer than expected": `[probe]` extrapolates from a SYNTHETIC
+  batch-1 LM forward/backward and ignores `sig_of`, the live contrastive encoder, the amortized re-key, domain assembly
+  and memory — i.e. most of the step. It is now labelled a LOWER BOUND, and a `[rate]` meter measures the ACTUAL loop
+  every `RATE_EVERY` steps (steps/min, kB/s of corpus, self-correcting ETA, and GB-of-text-per-day vs the GPT-2 target).
+  Files: `self_organize.py`, `prompt.py`.
+- **R36:** [USER: "disk streaming loader sounds important, build it first"] BUILT the disk-streaming data loader so
   training data is DISK-bounded, not RAM-bounded (the ceiling on GPT-2-scale data). `datastream.py`: `MmapConcat` presents
   on-disk corpus files as ONE indexable byte sequence via mmap (disk-paged, not resident) — CPU-probe verified BYTE-IDENTICAL
   to read-all-into-RAM (300 random slices). Integrated (`DISK_STREAM=1`, gated off): corpus is mmap-backed (`CORPUS_CAP` can
