@@ -179,11 +179,17 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
     entries untouched). `KEY_PREGATE=0` restores the old order for A/B. Equivalence PROVEN by seeded A/B: `mem_keys`,
     `mem_tok`, `mem_src`, `mem_pos`, `mem_ctx` bit-identical over 20364 entries, model weights identical. Speed effect
     at the tested scale: **none** (70s vs 73s, i.e. noise) — it optimizes 4% of the loop.
-  - **The real target — `contrastive_step` (87%).** Two changes, both exactly equivalent: `enc(A)` and `enc(P)` were two
-    separate passes and are now ONE concatenated pass (rows are independent → identical result, half the sequential GRU
-    launches); and both batches were built from Python lists (`2*ENC_BATCH*WIN` int conversions per step, then copied to
-    device) and are now gathered from a device-resident tensor (`set_enc_tensor`, refreshed on every resample).
-    MEASUREMENT AND EQUIVALENCE PROOF STILL PENDING at time of commit — do not quote a speedup until it is run.
+  - **The real target — `contrastive_step` (87%).** Two changes: (a) `enc(A)`/`enc(P)` fused into ONE concatenated pass
+    (`ENC_FUSE=1`, default; rows are independent so the MATHS is identical, at half the sequential GRU launches);
+    (b) both batches were built from Python lists (`2*ENC_BATCH*WIN` int conversions per step, then copied to device)
+    and are now gathered from a device-resident tensor (`set_enc_tensor`, refreshed on every resample).
+    MEASURED: wall 70s/73s → **62s/64s** (~12%), encoder share 87%/86% → **81%/82%**, same config and seed.
+  - **EQUIVALENCE — a weaker guarantee here than for the memory-key change, stated honestly.** Old-code vs new-code,
+    seeded: memory (`keys/tok/src/pos/ctx`, 23707 entries) and **model weights identical**, but **`enc` weights differ by
+    ~1e-5 relative**. Cause: fusing A and P changes the GRU kernel's batch shape and therefore its reduction order, and
+    float addition is not associative — so this is mathematically equivalent but NOT bit-identical, unlike
+    `KEY_PREGATE`. Nothing discrete diverged at this scale (same domains, same memory, same LM weights), but rounding
+    can compound over a multi-day run, so `ENC_FUSE=0` restores the two-pass form and the bit-level guarantee.
   - **Removed per-step GPU→CPU synchronizations**, each of which stalls the whole pipeline on an async CUDA queue:
     `dom_exp` now accumulates on device and moves to host once in the end-of-run report; `_fab_nov` stays a 0-dim device
     tensor (it is consumed by `expand` next step); the independence-loss weight uses `.detach()` instead of `float()`

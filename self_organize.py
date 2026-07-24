@@ -39,6 +39,7 @@ SELF_ORG = bool(_i("SELF_ORG", 1))                         # 0 = DISABLE domain 
 #   no management. Domains only give editing-by-provenance (NOT prediction), so a language-capability run can turn them off.
 #   NOTE: the SigEncoder ALSO feeds fabric routing, so to remove ITS cost use SIG_MODE=bigram or the adaptive warmup -- separate lever.
 ENC_EVERY = _i("ENC_EVERY", 1); ENC_BATCH = _i("ENC_BATCH", 48); TEMP = _f("TEMP", 0.1); REKEY_EVERY = _i("REKEY_EVERY", 200)
+ENC_FUSE = bool(_i("ENC_FUSE", 1))                         # encode the InfoNCE anchor+positive batches in ONE pass (see below)
 MANAGE_EVERY = _i("MANAGE_EVERY", 500); MANAGE_MERGE = _f("MANAGE_MERGE", 0.12)   # domain management: merge/cull cadence
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 2000)        #   cull domains < MIN windows unseen for STALE
@@ -451,8 +452,11 @@ def contrastive_step(enc, opt, stream, seen):              # InfoNCE: nearby win
     else:
         A = torch.tensor([list(stream[s:s + WIN]) for s in st], device=DEV)
         P = torch.tensor([list(stream[s + o:s + o + WIN]) for s, o in zip(st, off)], device=DEV)
-    z = enc(torch.cat([A, P], 0))                          # ONE encoder pass instead of two: the encoder is row-independent
-    za, zp = z[:ENC_BATCH], z[ENC_BATCH:]                  #   so this is identical, at half the sequential GRU launches
+    if ENC_FUSE:                                           # ONE encoder pass instead of two: the encoder is row-independent,
+        z = enc(torch.cat([A, P], 0))                      #   so the MATHS is identical, at half the sequential GRU launches.
+        za, zp = z[:ENC_BATCH], z[ENC_BATCH:]              #   Note: a different batch shape changes the kernel's reduction
+    else:                                                  #   order, so results agree only to float32 rounding (~1e-5 rel),
+        za, zp = enc(A), enc(P)                            #   not bit-for-bit. ENC_FUSE=0 restores the two-pass form.
     logits = za @ zp.t() / TEMP
     loss = F.cross_entropy(logits, torch.arange(ENC_BATCH, device=DEV))
     opt.zero_grad(); loss.backward(); opt.step()
