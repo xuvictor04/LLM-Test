@@ -160,7 +160,17 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R35 (current):** [USER: "fill the gaps and any issues already present"] Fixed the known gaps + real bugs, each CPU-verified:
+- **R36 (current):** [USER: "disk streaming loader sounds important, build it first"] BUILT the disk-streaming data loader so
+  training data is DISK-bounded, not RAM-bounded (the ceiling on GPT-2-scale data). `datastream.py`: `MmapConcat` presents
+  on-disk corpus files as ONE indexable byte sequence via mmap (disk-paged, not resident) — CPU-probe verified BYTE-IDENTICAL
+  to read-all-into-RAM (300 random slices). Integrated (`DISK_STREAM=1`, gated off): corpus is mmap-backed (`CORPUS_CAP` can
+  exceed RAM; only the current `STREAM_LEN` slice is resident), and each EPOCH RE-SAMPLES a FRESH `STREAM_LEN` slice from the
+  big corpus — so `EPOCHS × STREAM_LEN` = unique tokens covered (toward GPT-2 data scale) without holding it all in RAM.
+  Refactored `_retok`/`_resample` (stream rebuild per epoch), added `SEG_LEN` to bound sampling to the train head without
+  slicing the mmap into RAM, capped the materialized held-out set (`VAL_CAP`), and fixed the memorization-check train sample
+  to stay in the train region under mmap. IN-RAM PATH UNCHANGED when `DISK_STREAM=0` (default). CPU-smoke-verified end-to-end:
+  epoch 2 drew a FRESH sample, memorization gap +0.110 (correct split), domains on, exit 0. Files: `datastream.py`, `self_organize.py`.
+- **R35:** [USER: "fill the gaps and any issues already present"] Fixed the known gaps + real bugs, each CPU-verified:
   (1) WORLD-MODEL COLLAPSE BUG — the integration scaled the anti-collapse (variance/decorrelation) term by `WORLD_W`=0.1, so it
   ran at 1/10 strength → latent collapsed (std 0.24). Applied it at FULL strength via a separate `WORLD_VAR` (default 1.0).
   Verified: latent std 0.24 → **0.97** (healthy), and forward-pred vs persistence rose +13.6% → **+34.1%**. (2) RECON_W=0 WASTE

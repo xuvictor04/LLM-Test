@@ -68,11 +68,18 @@ ALPHA = [list(range(65, 80)), list(range(97, 112)), list(range(48, 58)), list(ra
 DATA_MODE = os.environ.get("DATA_MODE", "synthetic")
 if DATA_MODE == "real":
     DN = os.environ.get("DOMAINS", "eng,py,num,c").split(",")
-    CORP = [b"".join(open(f, "rb").read() for f in sorted(glob.glob(f"{os.environ.get('DATA_DIR', 'data')}/train/{d}/*")))[:_i("CORPUS_CAP", 2000000)] for d in DN]
+    DISK_STREAM = bool(_i("DISK_STREAM", 0))              # mmap the corpus (disk-paged) so training data can EXCEED RAM (GPT-2 scale)
+    from datastream import open_corpus
+    CORP = open_corpus(os.environ.get("DATA_DIR", "data"), DN, cap=_i("CORPUS_CAP", 2000000), disk=DISK_STREAM)
     CORP = [c for c in CORP if len(c) > 5000]; NP = len(CORP)
-    VAL_FRAC = _f("VAL_FRAC", 0.05)                        # HELD-OUT tail of each corpus, never sampled into the
-    VALC = [c[int(len(c) * (1 - VAL_FRAC)):] for c in CORP]  #   training stream. Without it, "is it memorizing?" is
-    CORP = [c[:int(len(c) * (1 - VAL_FRAC))] for c in CORP]  #   unanswerable -- every eval was on training data.
+    VAL_FRAC = _f("VAL_FRAC", 0.05)                        # HELD-OUT tail of each corpus, never sampled into the training stream.
+    if DISK_STREAM:                                        # mmap: do NOT slice CORP (would copy the whole thing into RAM) --
+        SEG_LEN = [int(len(c) * (1 - VAL_FRAC)) for c in CORP]   #   bound sampling to the training HEAD; keep CORP the full mmap.
+        VALC = [bytes(CORP[p][SEG_LEN[p]:min(len(CORP[p]), SEG_LEN[p] + _i("VAL_CAP", 4000000))]) for p in range(NP)]
+    else:
+        VALC = [c[int(len(c) * (1 - VAL_FRAC)):] for c in CORP]  # in-RAM: unchanged -- val = tail, CORP = head.
+        CORP = [c[:int(len(c) * (1 - VAL_FRAC))] for c in CORP]
+        SEG_LEN = [len(c) for c in CORP]
     if USE_TOK:                                            # EXPANDING SUBWORD MODE: an online byte-BPE that GROWS its vocab
         from tokenizer import DynamicTokenizer             #   by mint-on-repetition as it reads the stream (byte-grounded)
         _tp = os.environ.get("TOKENIZER_PATH", "data/dyntok.json")
@@ -103,7 +110,7 @@ if DATA_MODE == "real":
             CORP = [TOK.segment(c, count=False) for c in CORP]             # final deterministic tokenization of each corpus
             V = TOK.vocab_size; BLEN = torch.tensor(TOK.bytes_per_id, dtype=torch.float, device=DEV)
             print(f"[tokenizer] vocab {V} | corpora -> tokens ({sum(len(c) for c in CORP)} total, ~{sum(len(c) for c in CORP)//max(1,len(CORP))}/domain)")
-    def seg_from(p, L): s = random.randint(0, len(CORP[p]) - L - 1); return CORP[p][s:s + L]
+    def seg_from(p, L): s = random.randint(0, SEG_LEN[p] - L - 1); return CORP[p][s:s + L]   # SEG_LEN bounds sampling to the train head
 else:
     PROCS = [make_proc(s, ALPHA[s % len(ALPHA)]) for s in range(NP)]
     def seg_from(p, L): return PROCS[p](L)
@@ -588,16 +595,18 @@ def selfcheck(model, mem, fab=None):                       # WRONGNESS (B): is e
 def main():
     global model, BLEN
     print(f"self-organize | d{D} | {NP} hidden processes | stream {STREAM_LEN} | win {WIN} | SIG_MODE={SIG_MODE} | data {DATA_MODE}\n")
-    stream, labels, true_sw = build_stream()
     ONLINE = USE_TOK and TOK_ONLINE
-    if ONLINE:                                             # corpora are BYTES here; derive a token stream with the live vocab
-        byte_stream, byte_labels = stream, labels
-        def _retok():
-            ids = TOK.segment(bytes(byte_stream), count=False); bs, off = [], 0
-            for t in ids: bs.append(off); off += TOK.blen(t)
-            return ids, bs, [byte_labels[min(o, len(byte_labels) - 1)] for o in bs]
-        stream, tok_bs, labels = _retok()
-    ENC_SEQ = byte_stream if ONLINE else stream       # signature encoder reads THIS: bytes when online (invariant to re-tokenization)
+    def _retok(bstream, blabels):                          # tokenize given bytes with the LIVE vocab -> (ids, byte-pos, labels)
+        ids = TOK.segment(bytes(bstream), count=False); bs, off = [], 0
+        for t in ids: bs.append(off); off += TOK.blen(t)
+        return ids, bs, [blabels[min(o, len(blabels) - 1)] for o in bs]
+    def _resample():                                       # (re)build the stream from a FRESH corpus sample -- called PER EPOCH on
+        _b, _l, _sw = build_stream()                       #   disk so each epoch draws NEW data from the larger-than-RAM corpus
+        if ONLINE:
+            _s, _t, _lab = _retok(_b, _l)
+            return _s, _b, _l, _t, _lab, _b, _sw           # stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw
+        return _b, None, _l, None, _l, _b, _sw
+    stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
     route_at = torch.full(((len(ENC_SEQ) if ONLINE else len(stream)) + WIN + 2,), -1, dtype=torch.int16) if EXPERTS else None
     model = build_lm().to(DEV); enc = SigEncoder(D, SIG_D).to(DEV)
     recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
@@ -753,7 +762,9 @@ def main():
         if i + WIN + 1 >= len(stream):
             _epoch += 1
             if _epoch >= EPOCHS: break
-            i = 0; print(f"  [epoch {_epoch + 1}/{EPOCHS} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
+            if DISK_STREAM:                                # draw FRESH data from the larger-than-RAM corpus each epoch
+                stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
+            i = 0; print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
             continue
         w = stream[i:i + WIN + 1]
         x = torch.tensor([list(w[:-1])], device=DEV); y = torch.tensor([list(w[1:])], device=DEV)
@@ -885,12 +896,12 @@ def main():
             _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {os.environ.get('SAVE_CKPT')}]"); model.train()
         if ONLINE and step % RETOK_EVERY == 0:             # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
-            stream, tok_bs, labels = _retok(); i = _bisect.bisect_left(tok_bs, cur_byte)
+            stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
             print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; +{TOK.vocab_size - _last_vsz} since last retok)")
             _last_vsz = TOK.vocab_size
 
     if ONLINE:                                             # freeze + final tokenization for eval + persist the grown vocab
-        stream, tok_bs, labels = _retok()
+        stream, tok_bs, labels = _retok(byte_stream, byte_labels)
         BLEN = torch.tensor(TOK.bytes_per_id, dtype=torch.float, device=DEV)
         TOK.save(os.environ.get("TOKENIZER_PATH", "data/dyntok.json"))
         print(f"[tokenizer] ONLINE: minted throughout -> grew 256 -> {TOK.vocab_size} during training; final re-tokenization for eval")
@@ -913,7 +924,8 @@ def main():
                 _vb.append(-(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y))
         _tb = []
         for _p in range(len(CORP)):                        # same measurement on TRAIN data, for a like-for-like gap
-            _t = TOK.segment(CORP[_p][-len(VALC[_p]) or -1:], count=False) if USE_TOK else list(CORP[_p][-len(VALC[_p]):])
+            _src = CORP[_p][max(0, SEG_LEN[_p] - len(VALC[_p])):SEG_LEN[_p]]   # tail of the TRAIN region (disk: CORP still holds val, so bound by SEG_LEN)
+            _t = TOK.segment(_src, count=False) if USE_TOK else list(_src)
             if len(_t) < WIN + 2: continue
             _st = [random.randint(0, len(_t) - WIN - 2) for _ in range(min(24, _i("EVAL_N", 64)))]
             with torch.no_grad():
