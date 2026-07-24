@@ -35,6 +35,9 @@ VERIFY_SWEEP = _i("VERIFY_SWEEP", 0)                       # VERIFY=recon: also 
 D = _i("D_MODEL", 128); WIN = _i("WIN", 128); NP = _i("N_PROCESSES", 4); STREAM_LEN = _i("STREAM_LEN", 120000)
 SUSTAIN = _i("SUSTAIN", 2); NEW_DIST = _f("NEW_DIST", 0.35); SHIFT_DIST = _f("SHIFT_DIST", 0.30)
 SIG_MODE = os.environ.get("SIG_MODE", "learned"); SIG_D = _i("SIG_D", 64); SIG_DIM = _i("SIG_DIM", 512)
+SELF_ORG = bool(_i("SELF_ORG", 1))                         # 0 = DISABLE domain self-assembly (standstill): one bucket, no provenance,
+#   no management. Domains only give editing-by-provenance (NOT prediction), so a language-capability run can turn them off.
+#   NOTE: the SigEncoder ALSO feeds fabric routing, so to remove ITS cost use SIG_MODE=bigram or the adaptive warmup -- separate lever.
 ENC_EVERY = _i("ENC_EVERY", 1); ENC_BATCH = _i("ENC_BATCH", 48); TEMP = _f("TEMP", 0.1); REKEY_EVERY = _i("REKEY_EVERY", 200)
 MANAGE_EVERY = _i("MANAGE_EVERY", 500); MANAGE_MERGE = _f("MANAGE_MERGE", 0.12)   # domain management: merge/cull cadence
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
@@ -671,13 +674,20 @@ def main():
                 st = [random.randint(0, len(ENC_SEQ) - WIN - 1) for _ in range(64)]
                 Z = enc(torch.tensor([list(ENC_SEQ[s:s + WIN]) for s in st], device=DEV))
                 return float((1 - Z @ Z.t()).mean())
-        curve = []
+        # ADAPTIVE WARMUP: stop once separation PLATEAUS instead of always running the full (30k) budget -- the #1 startup
+        # cost. Probe periodically; stop when the trailing relative gain < eps, with a min floor so we never underfit it.
+        curve = []; _wfloor = min(_i("ENC_WARMUP_MIN", 3000), wu); _weps = _f("ENC_WARMUP_EPS", 0.015); _probe_ev = max(1, _i("ENC_WARMUP_PROBE", 500))
+        _prev_sep = None; _stop = wu
         for t in range(wu):
             l = contrastive_step(enc, oe, ENC_SEQ, len(ENC_SEQ))
-            if t % max(1, wu // 6) == 0 and l is not None: curve.append((t, l, _sep_probe()))
+            if t % _probe_ev == 0 or t == wu - 1:
+                _sep = _sep_probe(); curve.append((t, l if l is not None else 0.0, _sep))
+                if t >= _wfloor and _prev_sep is not None and _sep <= _prev_sep * (1 + _weps):   # separation flat -> converged, stop
+                    _stop = t + 1; break
+                _prev_sep = _sep
         if wu:
             print("[encoder training curve] step:loss:separation -> " + "  ".join(f"{t}:{l:.2f}:{s:.2f}" for t, l, s in curve))
-            print(f"  (loss still dropping / separation still rising at the end = MORE warmup would help; flat = converged)")
+            print(f"  (adaptive warmup: stopped at {_stop}/{wu} on separation plateau; floor {_wfloor}, eps {_weps}. Set ENC_WARMUP_MIN/EPS to tune)")
     assigns = []; bounds = []; i = 0; step = 0; _cur_ph = -1; PH_SNAP = []
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
@@ -732,12 +742,15 @@ def main():
         ew = list(byte_stream[bpos:bpos + WIN]) if ONLINE else list(w[:-1])   # SIGNATURE window: BYTES when online (tokenization-invariant)
         if SIG_MODE == "learned" and step % ENC_EVERY == 0: contrastive_step(enc, oe, ENC_SEQ, bpos)   # LIVE encoder on the STABLE sequence
         sig = sig_of(ew, enc)
-        did, boundary = asm.update(sig, ew, step)
+        if SELF_ORG:
+            did, boundary = asm.update(sig, ew, step)
+        else:
+            did, boundary = 0, False                        # domains DISABLED: one bucket, no provenance/management
         if boundary: bounds.append(bpos)
         if step % REKEY_EVERY == 0 and step > 0:
-            if SIG_MODE == "learned": asm.rekey(enc)                                                    # RE-KEY centroids
-            rekey_memory(mem)                                                                            # RE-KEY memory store
-        if MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:                                     # MANAGE the domain set
+            if SIG_MODE == "learned" and SELF_ORG: asm.rekey(enc)                                        # RE-KEY domain centroids
+            rekey_memory(mem)                                                                            # RE-KEY memory store (drift-survival)
+        if SELF_ORG and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:                        # MANAGE the domain set
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
         if EXPERTS and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0: router.manage(step)   # experts: create/replicate/cull (their own selective force)

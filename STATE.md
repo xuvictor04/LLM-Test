@@ -160,7 +160,17 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R32 (current):** [USER: make world model separated like the rest; "a few agents" for the bottleneck; "physics need not be
+- **R33 (current):** [USER: fix the SigEncoder; do domains do anything? disable them; why everything in the key?; continue world model]
+  Traced + answered: (a) DOMAIN LABELS (`did`) = memory provenance (edit/unlearn by domain) + management — **NOTHING for
+  prediction**; the SIGNATURE feeds fabric routing (that affects prediction), the label does not. (b) "everything in the key":
+  `WRITE_TARGET=0.4` writes ~40% of ALL positions → 283k entries (not selective); each key is the model's full 512-d encode of
+  the last 8 bytes (why rekey is costly). Lever: lower WRITE_TARGET (~0.1) → selective memory + smaller rekey. FIXES SHIPPED
+  (both CPU-smoke-verified): (1) ADAPTIVE WARMUP — stop the 30k SigEncoder warmup when separation plateaus (`ENC_WARMUP_MIN`/`EPS`);
+  smoke: stopped 1201/8000. (2) `SELF_ORG=0` — disable domain self-assembly (one bucket, no provenance/management); smoke: 0 live
+  domains, run+unlearn clean. Zero-code levers also noted: `SIG_MODE=bigram` (kills SigEncoder training entirely), lower WRITE_TARGET.
+  Honest: SELF_ORG=0 disables DOMAINS but the SigEncoder also feeds fabric, so its cost needs SIG_MODE=bigram/adaptive-warmup (separate
+  lever). World-model feedback link (wire it to condition generation) = next. Files: `self_organize.py`.
+- **R32:** [USER: make world model separated like the rest; "a few agents" for the bottleneck; "physics need not be
   the target, just simulate the world"] RESULTS IN (updates the mid-build note): (1) SEPARATED world model `DynamicsPopulation`
   (world_model.py) — routed society of forward-dynamics predictors (route by fitness, blend, grow-on-plateau cloning fittest,
   soft-cull), integrated + gated (`WORLD_MODEL`/`WORLD_GROW`). Integration VERIFIED end-to-end (grew 1→3, soft-culled, held-out
