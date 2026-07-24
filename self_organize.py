@@ -428,6 +428,14 @@ def sig_of(win, enc):                                      # win: list[int] -> s
         v.scatter_add_(0, bg, torch.ones_like(bg, dtype=torch.float)); return F.normalize(v, dim=0)
     return F.normalize(FROZEN[t].mean(0), dim=0)
 
+def sig_of_batch(wins, enc):
+    """Signatures for N windows in ONE encoder call. `sig_of` is a BATCH-1 GRU over WIN timesteps run once per step,
+    measured at 46% of the loop on an A100 at d=768 (4.7 ms/step, invariant to model type / AMP / ENC_FUSE) -- the
+    single largest cost. Rows are independent, so this returns the same signatures the per-window calls would."""
+    if SIG_MODE != "learned": return torch.stack([sig_of(w, enc) for w in wins])
+    with torch.no_grad(): return enc(torch.tensor(wins, device=DEV, dtype=torch.long))
+
+
 _ENC_T = {"t": None}                                       # device-resident copy of the encoder sequence (see below)
 
 
@@ -812,6 +820,19 @@ def main():
         _rk["cur"] = b
     ENC_EVERY_IDLE = _i("ENC_EVERY_IDLE", max(ENC_EVERY * 6, 12))       # shift-gated encoder: throttle when the stream is STABLE,
     ENC_SHIFT_WIN = _i("ENC_SHIFT_WIN", 400); _last_boundary = -10 ** 9  #   but snap back to ENC_EVERY on a detected boundary (full responsiveness)
+    # SIG_BATCH: compute signatures for a RUN of upcoming windows in one encoder call. The batching interval is not
+    # BATCH_W -- it is the span over which `enc` is PROVABLY frozen, i.e. from one contrastive_step firing to the next.
+    # `enc.parameters()` are written ONLY by contrastive_step (`asm.rekey` reads it, never writes), so every window in
+    # that span is encoded under exactly the parameters the sequential loop would have used. A detected boundary moves
+    # `_last_boundary` and therefore the cadence, so a boundary INVALIDATES the queue -- that closes the
+    # sig -> boundary -> cadence -> sig feedback loop rather than ignoring it.
+    SIG_BATCH = bool(_i("SIG_BATCH", 1)); SIG_LOOK = max(1, _i("SIG_LOOK", ENC_EVERY_IDLE))
+    _sigq = []                                              # pre-computed signatures for the current frozen run
+
+    def _sig_horizon(s, L):                                 # how many steps until the NEXT encoder update, if no boundary fires
+        if (s - L) < ENC_SHIFT_WIN:                         # dense phase: cadence ENC_EVERY, and never cross the dense->idle flip
+            return max(1, min((s // ENC_EVERY + 1) * ENC_EVERY, L + ENC_SHIFT_WIN) - s)
+        return max(1, (s // ENC_EVERY_IDLE + 1) * ENC_EVERY_IDLE - s)
     CKPT_EVERY = _i("CKPT_EVERY", 0)                       # >0: also save the checkpoint every N steps mid-run, so a long
     import bisect as _bisect                               #      run is killable/promptable and a crash never loses everything
 
@@ -920,7 +941,7 @@ def main():
             if _epoch >= EPOCHS: break
             if DISK_STREAM:                                # draw FRESH data from the larger-than-RAM corpus each epoch
                 stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
-                set_enc_tensor(ENC_SEQ)
+                set_enc_tensor(ENC_SEQ); _sigq = []          # stream replaced -> queued lookahead windows are stale
             i = 0; print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
             continue
         w = stream[i:i + WIN + 1]
@@ -938,12 +959,33 @@ def main():
         _enc_cad = ENC_EVERY if (step - _last_boundary) < ENC_SHIFT_WIN else ENC_EVERY_IDLE   # shift-gated: dense near a boundary, throttled when stable
         if SIG_MODE == "learned" and step % _enc_cad == 0:
             with _T("encoder(contrastive)"): contrastive_step(enc, oe, ENC_SEQ, bpos)   # LIVE encoder on the STABLE sequence
-        with _T("sig_of"): sig = sig_of(ew, enc)
+        with _T("sig_of"):
+            if not (SIG_BATCH and SIG_MODE == "learned"):
+                sig = sig_of(ew, enc)
+            else:
+                if not _sigq:                               # refill: one encoder call for the whole frozen run
+                    _H = min(_sig_horizon(step, _last_boundary), SIG_LOOK, (len(stream) - 1 - i) // WIN)
+                    if ONLINE: _H = min(_H, RETOK_EVERY - step % RETOK_EVERY)   # stream is rebuilt at retok -> stop there
+                    _H = max(1, _H)
+                    _ws = [ew]
+                    for _k in range(1, _H):                 # the SAME byte windows the later steps would build
+                        _j = i + _k * WIN
+                        if ONLINE:
+                            if _j >= len(tok_bs): break
+                            _b0 = tok_bs[_j]; _w = list(byte_stream[_b0:_b0 + WIN])
+                        else:
+                            _w = list(stream[_j:_j + WIN])
+                        if len(_w) != WIN: break
+                        _ws.append(_w)
+                    _sigq = list(sig_of_batch(_ws, enc)) if len(_ws) > 1 else [sig_of(ew, enc)]
+                sig = _sigq.pop(0)
         if SELF_ORG:
             with _T("domain assembly"): did, boundary = asm.update(sig, ew, step)
         else:
             did, boundary = 0, False                        # domains DISABLED: one bucket, no provenance/management
-        if boundary: bounds.append(bpos); _last_boundary = step   # a real distribution shift -> re-densify encoder updates
+        if boundary:
+            bounds.append(bpos); _last_boundary = step      # a real distribution shift -> re-densify encoder updates
+            _sigq = []                                      # cadence just changed -> queued signatures are no longer valid
         if step % REKEY_EVERY == 0 and step > 0:
             if SIG_MODE == "learned" and SELF_ORG: asm.rekey(enc)                                        # RE-KEY domain centroids
             if not REKEY_AMORTIZED: rekey_memory(mem)                                                    # full re-encode (spike) -- fallback path
@@ -1087,6 +1129,7 @@ def main():
         if ONLINE and step % RETOK_EVERY == 0:             # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
             stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
+            _sigq = []                                       # re-tokenized -> window boundaries moved, queue is stale
             print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; +{TOK.vocab_size - _last_vsz} since last retok)")
             _last_vsz = TOK.vocab_size
 
