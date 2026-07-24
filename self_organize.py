@@ -605,8 +605,11 @@ def main():
     # new SENSES plug in) and learns to predict how that observed world EVOLVES in latent space (physics-like, modality-agnostic).
     WORLD_MODEL = bool(_i("WORLD_MODEL", 0)); WLAT = _i("WORLD_LAT", 32); WORLD_W = _f("WORLD_W", 0.1); WORLD_K = max(1, _i("WORLD_K", 1)); WHID = _i("WORLD_HID", 128)
     WORLD_GROW = bool(_i("WORLD_GROW", 0))               # opt-in: also GROW-on-plateau + soft-cull the dynamics population (like experts)
+    WORLD_FEEDBACK = bool(_i("WORLD_FEEDBACK", 0))       # THE LINK THAT MAKES IT MATTER: wire the world model's forecast BACK to
+    #   condition the base LM -- generation is now informed by where the world model predicts the world is going, not a side-head.
     world_enc = WorldEncoder(D, WLAT, WHID).to(DEV) if WORLD_MODEL else None
     world_fwd = DynamicsPopulation(WLAT, _i("WORLD_N0", 3), _i("WORLD_NMAX", 6), WHID, _i("WORLD_ROUTE", 24)).to(DEV) if WORLD_MODEL else None  # SEPARATED: a routed society of dynamics predictors
+    world_proj = nn.Linear(WLAT, D).to(DEV) if (WORLD_MODEL and WORLD_FEEDBACK) else None   # forecast -> hidden-state conditioning
     _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _i("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
@@ -660,7 +663,8 @@ def main():
     om = torch.optim.AdamW(list(model.parameters()) + (list(experts.parameters()) if EXPERTS else [])
                            + (list(fab.parameters()) if FABRIC else [])
                            + (list(recon.parameters()) if recon is not None else [])
-                           + (list(world_enc.parameters()) + list(world_fwd.parameters()) if WORLD_MODEL else []), lr=2e-3, weight_decay=WD)
+                           + (list(world_enc.parameters()) + list(world_fwd.parameters()) if WORLD_MODEL else [])
+                           + (list(world_proj.parameters()) if world_proj is not None else []), lr=2e-3, weight_decay=WD)
     oe = torch.optim.AdamW(enc.parameters(), lr=2e-3, weight_decay=WD)
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
@@ -769,6 +773,12 @@ def main():
         _sl = router.route(sig, step) if EXPERTS else -1        # route by SIGNATURE to the expert population (coarser than domains)
         if EXPERTS and _sl >= 0: route_at[bpos:bpos + WIN] = _sl   # remember WHICH expert trained on this span
         h = model.encode(x)
+        _wz = None
+        if WORLD_MODEL:                                          # world latent per position (computed once; reused for feedback + loss)
+            _wz = world_enc(model.emb(x))                        # (B,WIN,WLAT)
+            if WORLD_FEEDBACK:                                   # FEEDBACK: fold the world model's forecast into the hidden state
+                _wpred_seq = world_fwd(_wz.reshape(-1, WLAT))[0].reshape(x.size(0), x.size(1), WLAT)
+                h = h + world_proj(_wpred_seq)                   # BEFORE fabric/head -> generation is conditioned on the forecast
         if FABRIC and SOCIETY:
             _hs, _w, _O = fab.society(h, sigb, torch.full((x.size(0),), _fab_nov, device=DEV))
             _dep = _hs.new_zeros(()); _bal = fab_bal(_w); h = _hs
@@ -804,7 +814,7 @@ def main():
         if recon is not None:                                    # VERIFICATION: train the Reconstructor on GENUINE
             tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # (key, token) pairs from the live stream
         if WORLD_MODEL:                                          # WORLD MODEL: predict how the OBSERVED world evolves in latent space
-            _wz = world_enc(model.emb(x))                        # (B,WIN,WLAT) from observation embeddings -- NOT the GRU state (world, not self)
+            # _wz was computed above (once) from observation embeddings -- NOT the GRU state (world, not self)
             _zt = _wz[:, :-WORLD_K].reshape(-1, WLAT); _zn = _wz[:, WORLD_K:].reshape(-1, WLAT)
             _wv, _wc = _var_cov(_wz.reshape(-1, WLAT))           # anti-collapse (variance + decorrelation)
             _wpl, _, _winv = pop_loss(world_fwd, _zt, _zn)       # routed POPULATION forward-prediction + load-balance

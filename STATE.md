@@ -169,7 +169,11 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
   smoke: stopped 1201/8000. (2) `SELF_ORG=0` — disable domain self-assembly (one bucket, no provenance/management); smoke: 0 live
   domains, run+unlearn clean. Zero-code levers also noted: `SIG_MODE=bigram` (kills SigEncoder training entirely), lower WRITE_TARGET.
   Honest: SELF_ORG=0 disables DOMAINS but the SigEncoder also feeds fabric, so its cost needs SIG_MODE=bigram/adaptive-warmup (separate
-  lever). World-model feedback link (wire it to condition generation) = next. Files: `self_organize.py`.
+  lever). WORLD-MODEL FEEDBACK LINK BUILT (`WORLD_FEEDBACK=1`, gated off): the world model's forecast (population-blended predicted next
+  latent) is projected and ADDED to the LM hidden state BEFORE fabric/head — so generation is conditioned on the forecast, no longer a
+  side-head. CPU-smoke-verified end-to-end: LM still trains (loss 6.51→3.4, gap +0.393), world model still learns (+13.6% held-out), no
+  crash. HONEST FLAG: latent std 0.24 < 0.5 (partial collapse in the tiny run) — anti-collapse weight may need raising; re-check at scale.
+  Files: `self_organize.py`.
 - **R32:** [USER: make world model separated like the rest; "a few agents" for the bottleneck; "physics need not be
   the target, just simulate the world"] RESULTS IN (updates the mid-build note): (1) SEPARATED world model `DynamicsPopulation`
   (world_model.py) — routed society of forward-dynamics predictors (route by fitness, blend, grow-on-plateau cloning fittest,
