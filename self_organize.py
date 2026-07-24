@@ -19,6 +19,7 @@ import os, math, random, glob, sys
 import torch, torch.nn as nn, torch.nn.functional as F
 from memory import EditableMemory
 from verification import Reconstructor, recon_loss, verify as verify_mem   # Verification (renamed from B): reconstruction, not surprise
+from world_model import WorldEncoder, ForwardModel, _var_cov               # world model FIRST BRICK: latent forward-dynamics (gated)
 try: sys.stdout.reconfigure(line_buffering=True)          # stream progress even when piped through tee (no -u needed)
 except Exception: pass
 
@@ -597,6 +598,11 @@ def main():
     route_at = torch.full(((len(ENC_SEQ) if ONLINE else len(stream)) + WIN + 2,), -1, dtype=torch.int16) if EXPERTS else None
     model = build_lm().to(DEV); enc = SigEncoder(D, SIG_D).to(DEV)
     recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
+    # WORLD MODEL (first brick, gated off by default): reads OBSERVATION EMBEDDINGS (the lowest layer = the point where
+    # new SENSES plug in) and learns to predict how that observed world EVOLVES in latent space (physics-like, modality-agnostic).
+    WORLD_MODEL = bool(_i("WORLD_MODEL", 0)); WLAT = _i("WORLD_LAT", 32); WORLD_W = _f("WORLD_W", 0.1); WORLD_K = max(1, _i("WORLD_K", 1)); WHID = _i("WORLD_HID", 128)
+    world_enc = WorldEncoder(D, WLAT, WHID).to(DEV) if WORLD_MODEL else None
+    world_fwd = ForwardModel(WLAT, WHID).to(DEV) if WORLD_MODEL else None
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _i("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 1500), _i("FAB_WARMUP", 2000)) if FABRIC else None
@@ -648,7 +654,8 @@ def main():
     WD = WEIGHT_DECAY                                     # default 0.0: we are UNDERFIT, regularization would hurt
     om = torch.optim.AdamW(list(model.parameters()) + (list(experts.parameters()) if EXPERTS else [])
                            + (list(fab.parameters()) if FABRIC else [])
-                           + (list(recon.parameters()) if recon is not None else []), lr=2e-3, weight_decay=WD)
+                           + (list(recon.parameters()) if recon is not None else [])
+                           + (list(world_enc.parameters()) + list(world_fwd.parameters()) if WORLD_MODEL else []), lr=2e-3, weight_decay=WD)
     oe = torch.optim.AdamW(enc.parameters(), lr=2e-3, weight_decay=WD)
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
@@ -775,6 +782,11 @@ def main():
                 tot = tot + IND_W * float(_w[:, _j].mean()) * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
         if recon is not None:                                    # VERIFICATION: train the Reconstructor on GENUINE
             tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # (key, token) pairs from the live stream
+        if WORLD_MODEL:                                          # WORLD MODEL: predict how the OBSERVED world evolves in latent space
+            _wz = world_enc(model.emb(x))                        # (B,WIN,WLAT) from observation embeddings -- NOT the GRU state (world, not self)
+            _zt = _wz[:, :-WORLD_K].reshape(-1, WLAT); _zn = _wz[:, WORLD_K:].reshape(-1, WLAT)
+            _wv, _wc = _var_cov(_wz.reshape(-1, WLAT))           # anti-collapse (variance + decorrelation)
+            tot = tot + WORLD_W * (F.mse_loss(world_fwd(_zt), _zn) + _wv + 0.04 * _wc)
         (tot / ACCUM).backward()                                 # gradient accumulation over ACCUM windows
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
         _lm_run.append(float(loss.detach()))                     # LM loss curve: is the model still improving?
@@ -860,6 +872,29 @@ def main():
         model.train()
     except Exception as _e:
         print(f"[memorization check skipped: {type(_e).__name__}: {_e}]")
+    if WORLD_MODEL:                                        # === WORLD MODEL: forward-dynamics on HELD-OUT observations ===
+        try:                                              # ROBUST: unseen data, a real baseline, and a collapse check
+            world_enc.eval(); world_fwd.eval()
+            _wm, _pm, _sd = [], [], []
+            for _p in range(len(VALC)):
+                _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+                if len(_v) < WIN + 2: continue
+                _st = [random.randint(0, len(_v) - WIN - 2) for _ in range(min(24, _i("EVAL_N", 64)))]
+                with torch.no_grad():
+                    _X = torch.tensor([_v[a:a + WIN] for a in _st], device=DEV)   # HELD-OUT windows, never trained on
+                    _z = world_enc(model.emb(_X))
+                    _zt = _z[:, :-WORLD_K].reshape(-1, WLAT); _zn = _z[:, WORLD_K:].reshape(-1, WLAT)
+                    _wm.append(F.mse_loss(world_fwd(_zt), _zn).item())            # world-model forward prediction
+                    _pm.append(F.mse_loss(_zt, _zn).item())                       # baseline: "assume the world doesn't change"
+                    _sd.append(_z.reshape(-1, WLAT).std(0).mean().item())         # collapse check
+            if _wm:
+                wm, pm, sd = sum(_wm) / len(_wm), sum(_pm) / len(_pm), sum(_sd) / len(_sd)
+                print(f"\n=== WORLD MODEL: latent forward-dynamics on HELD-OUT observations (unseen data + baseline + collapse check) ===")
+                print(f"  forward-pred MSE {wm:.4f} | persistence baseline {pm:.4f} | beats baseline {(1 - wm / max(pm, 1e-9)) * 100:+.1f}% | latent std {sd:.2f}")
+                print(f"  >> positive beat AND std > ~0.5 = it learned real dynamics on UNSEEN data; ~0% beat or std~0 (collapsed) = it did NOT")
+            world_enc.train(); world_fwd.train()
+        except Exception as _e:
+            print(f"[world-model eval skipped: {type(_e).__name__}: {_e}]")
     if _lm_curve:
         print("[LM training curve] step:loss -> " + "  ".join(f"{a}:{b:.2f}" for a, b in _lm_curve))
         _d8 = (_lm_curve[-2][1] - _lm_curve[-1][1]) if len(_lm_curve) > 1 else 0.0

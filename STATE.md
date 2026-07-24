@@ -160,7 +160,17 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R30 (current):** [USER: "build the world model"; frustration that we produce talk + walk-backs, not results] BUILT the
+- **R31 (current):** [USER: robust evals; integrate world model; "is it vastly undertrained? I thought we need a few epochs"]
+  DECISIVE FINDING (verified in code): the product loop does a SINGLE pass — `while i+WIN+1 < len(stream)`, no epoch loop;
+  "epochs" only come from `STREAM_LEN > corpus` (build_stream resamples with replacement). `fw_small` STREAM_LEN=60M vs
+  ~100-110MB corpus = **~0.5 epoch at completion, ~0.2 at the 100k checkpoint**. So EVERY run to date has been <1 epoch —
+  we have NEVER trained past one pass, so the "is the architecture capable" question is genuinely UNANSWERED; the incoherent
+  generation is an undertraining false-negative, not a verdict. FIX (config, not code): `STREAM_LEN = N×corpus` for N epochs
+  (e.g. 400M ≈ 4 epochs). INTEGRATED the world model into the stream (`WORLD_MODEL=1`, gated off): reads OBSERVATION
+  EMBEDDINGS (lowest layer = sense point, world not self) -> latent -> forward-predict next latent; added a ROBUST held-out
+  eval (unseen VALC windows + persistence baseline + collapse check). CPU smoke-test (tiny, undertrained): beats persistence
+  **+58.3%** on held-out, std 0.60 (no collapse), exit 0 — integration verified end-to-end. Files: `self_organize.py`.
+- **R30:** [USER: "build the world model"; frustration that we produce talk + walk-backs, not results] BUILT the
   FIRST BRICK and VERIFIED it on CPU in-turn (real numbers, not a projection): `world_model.py` — the latent
   forward-dynamics core of the GENERAL world model. `observation --E--> latent --ForwardModel--> next latent`,
   JEPA/VICReg-style (predict the future REPRESENTATION, not tokens/pixels -> modality-agnostic + physics-like; variance+cov
