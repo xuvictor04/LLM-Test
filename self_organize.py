@@ -472,7 +472,7 @@ KEY_SRC = os.environ.get("KEY_SRC", "model")
 def _windows(x, W): return F.pad(x, (W - 1, 0)).unfold(1, W, 1)             # (B,L) -> (B,L,W)
 @torch.no_grad()
 def _model_key(win):                                                        # (N,W) -> (N,D)
-    return model.encode(win)[:, -1]
+    return getattr(model, "_raw_encode", model.encode)(win)[:, -1]          # RAW: keys must match what rekey re-encodes
 @torch.no_grad()
 def mem_key(x):                                                             # (B,L) -> (B*L, D)
     if KEY_SRC == "model": return _model_key(_windows(x, KW).reshape(-1, KW))
@@ -738,6 +738,18 @@ def main():
     world_enc = WorldEncoder(D, WLAT, WHID).to(DEV) if WORLD_MODEL else None
     world_fwd = DynamicsPopulation(WLAT, _i("WORLD_N0", 3), _i("WORLD_NMAX", 6), WHID, _i("WORLD_ROUTE", 24)).to(DEV) if WORLD_MODEL else None  # SEPARATED: a routed society of dynamics predictors
     world_proj = nn.Linear(WLAT, D).to(DEV) if (WORLD_MODEL and WORLD_FEEDBACK) else None   # forecast -> hidden-state conditioning
+    if WORLD_MODEL and WORLD_FEEDBACK:
+        # WORLD FEEDBACK, APPLIED ONCE, CENTRALLY. Training added world_proj(forecast) to h inline while every eval and
+        # generation path called model.encode directly -- so their numbers described a DIFFERENT network than the one
+        # being trained. Wrapping encode fixes all of them at once. _raw_encode is kept for _model_key, whose output
+        # must stay comparable with the stored keys that _rekey_amortized re-encodes.
+        model._raw_encode = model.encode
+        def _encode_wf(_xx, _m=model):
+            _h = _m._raw_encode(_xx)
+            _z = world_enc(_m.emb(_xx))
+            _p = world_fwd(_z.reshape(-1, WLAT))[0].reshape(_xx.size(0), _xx.size(1), WLAT)
+            return _h + world_proj(_p)
+        model.encode = _encode_wf
     _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _i("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
@@ -997,10 +1009,6 @@ def main():
         _warn.append("EXPERTS=1 AND FABRIC=1 -> the expert bank is a NO-OP. The forward pass is an elif chain "
                      "(FABRIC wins), so the adapters never receive gradient, yet the end-of-run report still prints "
                      "expert counts. Use one or the other.")
-    if WORLD_MODEL and WORLD_FEEDBACK:
-        _warn.append("WORLD_FEEDBACK=1 -> training adds world_proj(forecast) to h, but the in-script eval/generation "
-                     "paths do NOT, so their numbers describe a different network than the one trained. "
-                     "prompt.py DOES apply it. Use WORLD_FEEDBACK=0 if you need the in-script evals to be comparable.")
     if _warn:
         print("\n".join(["!! CONFIG WARNING: " + w for w in _warn]) + "\n")
     # LIVE RATE METER: the [probe] extrapolates from a SYNTHETIC LM-only step, so its ETA has always been optimistic --
@@ -1137,13 +1145,8 @@ def main():
         #   than as a `with` block purely to avoid re-indenting the whole step); backward runs OUTSIDE it, as recommended.
         _sl = router.route(sig, step) if EXPERTS else -1        # route by SIGNATURE to the expert population (coarser than domains)
         if EXPERTS and _sl >= 0: route_at[bpos:bpos + WIN] = _sl   # remember WHICH expert trained on this span
-        h = model.encode(x)
-        _wz = None
-        if WORLD_MODEL:                                          # world latent per position (computed once; reused for feedback + loss)
-            _wz = world_enc(model.emb(x))                        # (B,WIN,WLAT)
-            if WORLD_FEEDBACK:                                   # FEEDBACK: fold the world model's forecast into the hidden state
-                _wpred_seq = world_fwd(_wz.reshape(-1, WLAT))[0].reshape(x.size(0), x.size(1), WLAT)
-                h = h + world_proj(_wpred_seq)                   # BEFORE fabric/head -> generation is conditioned on the forecast
+        h = model.encode(x)                                      # includes the world-model feedback when enabled (wrapped above)
+        _wz = world_enc(model.emb(x)) if WORLD_MODEL else None   # world latent per position (also used by the world loss)
         if FABRIC and SOCIETY:
             # SPARSE: compute only the experts whose outputs are actually consumed below. The dense blend that used
             # to be assigned to h here was never read -- the logits come from _O -- so it was pure waste.
