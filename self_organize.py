@@ -1036,7 +1036,7 @@ def main():
                 if _newp: om.add_param_group({"params": _newp}); _wl_lastgrow = step; print(f"  [world-model @ {step}] plateau -> grew to {world_fwd.n()} dynamics predictors")
             _wcull = world_fwd.soft_cull()
             if _wcull: print(f"  [world-model @ {step}] soft-culled {_wcull} unused -> {int(world_fwd.alive[:world_fwd.n()].sum())} live predictors")
-        _bx.append(list(w[:-1])); _by.append(list(w[1:])); _bg.append(sig); _bd.append(did); _bp.append(bpos)
+        _bx.append(list(w[:-1])); _by.append(list(w[1:])); _bg.append(sig); _bd.append(did); _bp.append((bpos, i))
         if len(_bx) < BATCH_W:                              # accumulate a batch of windows first
             i += WIN; step += 1; continue
         model.train()
@@ -1125,12 +1125,22 @@ def main():
             # ~88% that fail the surprise gate. Encoding only the survivors is exactly equivalent (row-independent
             # encoder, identical gate/controller/entries) and removes the step's single largest cost. KEY_PREGATE=0
             # restores the old order for A/B verification.
+            def _posv(_b, _n):
+                # TRUE byte position PER TOKEN. This used to be arange(bpos, bpos+WIN), which walks one BYTE per
+                # TOKEN -- but under the online tokenizer a token averages ~1.85 bytes, so by the end of a WIN=256
+                # window the recorded provenance drifted ~200+ bytes while prompt.py's _recall reads only a 220-byte
+                # span around it. Every grounded passage lookup was pointing at the wrong text.
+                _bp0, _it = _bp[_b]
+                if not ONLINE: return torch.arange(_bp0, _bp0 + _n, device=DEV)
+                _sl = tok_bs[_it:_it + _n]
+                if len(_sl) < _n: _sl = _sl + [_sl[-1] if _sl else _bp0] * (_n - len(_sl))
+                return torch.tensor(_sl, device=DEV, dtype=torch.long)
             _C = mem_ctx(x); _n1 = x.size(1)
             _pre = KEY_PREGATE and KEY_SRC == "model" and _C is not None
             if _pre and KEY_BATCH:                          # ONE key encode for the whole BATCH_W batch instead of
                 mem.write_batch([(y[_b], _bd[_b], surprise[_b],   # BATCH_W separate tiny encodes -- the measured
                                   _C[_b * _n1:(_b + 1) * _n1],    # bottleneck was CALL COUNT, not FLOPs
-                                  torch.arange(_bp[_b], _bp[_b] + _n1, device=DEV))
+                                  _posv(_b, _n1))
                                  for _b in range(x.size(0))], _model_key)
             else:
                 _K = None if _pre else mem_key(x)
@@ -1138,7 +1148,7 @@ def main():
                     _cb = None if _C is None else _C[_b * _n1:(_b + 1) * _n1]
                     mem.write(None if _pre else _K[_b * _n1:(_b + 1) * _n1], y[_b], src=_bd[_b], surprise=surprise[_b],
                               ctx=_cb, key_fn=(_model_key if _pre else None),
-                              pos=torch.arange(_bp[_b], _bp[_b] + _n1, device=DEV))
+                              pos=_posv(_b, _n1))
         _t1("memory key+write", _pmem)
         assigns.append((bpos, did, byte_labels[min(bpos, len(byte_labels) - 1)] if ONLINE else labels[i]))
         _ptok = _t0()
