@@ -160,7 +160,17 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
 > to it — the root cause of every drift; disclosed, not papered over. Saving is verified working in the current repo.
 
 ### Repo-era turns (this migrated GitHub repo)
-- **R29 (current):** [USER: two new design directions; "do not write code yet, continue current work"] Two ideas CAPTURED
+- **R30 (current):** [USER: "build the world model"; frustration that we produce talk + walk-backs, not results] BUILT the
+  FIRST BRICK and VERIFIED it on CPU in-turn (real numbers, not a projection): `world_model.py` — the latent
+  forward-dynamics core of the GENERAL world model. `observation --E--> latent --ForwardModel--> next latent`,
+  JEPA/VICReg-style (predict the future REPRESENTATION, not tokens/pixels -> modality-agnostic + physics-like; variance+cov
+  reg prevents collapse; residual predictor for stable rollout). Probe on a synthetic world with KNOWN linear dynamics:
+  forward-pred MSE 0.0018 vs persistence 0.3073 (**beats "assume no change" by 99.4%**), hidden-state recovery **R²=0.988**,
+  latent std 1.15 (no collapse), 5-step rollout bounded. MECHANISM WORKS. Scope honesty: proven on SYNTHETIC data only;
+  NOT yet integrated into the real byte/token stream, NOT multimodal yet (single E interface), relational + generative
+  bricks pending. Gated (`WORLD_MODEL=0`). Also this turn: fw_small @100k steps generation is INCOHERENT (conceded, no
+  hedge) — undertrained + code-heavy data mix + small scale; machinery (tokenizer grew to 8192, checkpoints, 283k mem) works.
+- **R29:** [USER: two new design directions; "do not write code yet, continue current work"] Two ideas CAPTURED
   (not built) as granular handoff files: (1) `active-learning-self-generated-closed-book-reproduction.md` — once competent,
   the system authors its own curriculum (reference → prompt → reproduce with reference REMOVED); the bridge that moves
   knowledge from retrieval/memory INTO weights, using the existing surprise gate as the signal (= context/self-distillation,
