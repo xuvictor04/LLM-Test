@@ -1,21 +1,21 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-env/
-
-# Training artifacts / checkpoints
-runs/
-*.pt
-*.ckpt
-*.log
 
 # Generated tokenizer caches (dynamic tokenizer saves these per-run)
-data/dyntok.json
-data/tok_*.json
-
 # OS / editor
-.DS_Store
+# Python
+# Training artifacts / checkpoints
+*.ckpt
+*.egg-info/
+*.log
+*.pt
+*.py[cod]
 *.swp
+.DS_Store
+.venv/
+__pycache__/
+bench_out/
+data/dyntok.json
+data/dyntok_*.json
+data/tok_*.json
+env/
+runs/
+venv/
