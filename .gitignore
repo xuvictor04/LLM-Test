@@ -12,6 +12,10 @@ runs/
 *.ckpt
 *.log
 
+# Generated tokenizer caches (dynamic tokenizer saves these per-run)
+data/dyntok.json
+data/tok_*.json
+
 # OS / editor
 .DS_Store
 *.swp
