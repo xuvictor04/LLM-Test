@@ -194,6 +194,16 @@ Unless marked `[USER]`, treat as `[me]` and flag when used in a command.
       real-loop AUC ~0.55, wrongness moves a per-domain mean by ~1e-3 sd against 0.1-1 sd intrinsic-difficulty spread —
       and since experts specialize BY DOMAIN, that confound IS the differential being ranked. It also leaned on the
       AUC 0.978 standalone this file already retracted (real store: TPR 9.4% @ FPR 4.9%).
+  - **ACTED ON THE DIAGNOSIS: `mem.write_batch()` (`KEY_BATCH`, default 1) + `REKEY_CHUNK` (default 1, opt-in).**
+    Together these cut `_model_key` calls per LM step from ~32 toward ~2. Gate runs for all windows first (same order,
+    identical `gate_theta` evolution), survivors concatenated, ONE encode; `write()`/`write_batch()` share `_store()`.
+    A/B (SEED=7, `KEY_BATCH=0` vs `1`): `mem_tok`, `mem_src`, `mem_pos`, `mem_ctx` and **model weights bit-identical**;
+    `mem_keys` differ on **82 of 23237 rows, max abs 4.2e-8, min per-key cosine 0.99999976** — float32 reduction-order
+    noise from the changed batch shape, ~1000× tighter than the `ENC_FUSE` drift and, unlike it, NON-COMPOUNDING
+    (stored keys are detached, so nothing trains on them — which is why the model stayed identical).
+    **CPU wall: 142s → 144s, i.e. no speedup — AS PREDICTED.** This is a dispatch-count fix and CPU has no comparable
+    dispatch overhead; the speed claim is GPU-only and is NOT yet measured. Re-run `bench_gpu.sh` at the corrected
+    d=768 before believing any of it.
 - **R38 (current):** [USER: "GPT-2 parity can't be reached on what we're running on — stronger GPU, make the system more
   efficient"] EFFICIENCY, with the standing no-compromise rule: nothing removed, nothing downgraded, every change either
   exactly equivalent or an explicit opt-in flag.
