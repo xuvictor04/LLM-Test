@@ -90,6 +90,10 @@ class EditableMemory:
             keep = sd >= self.write_gate                     # keep only tokens the model was unsure about (>= fixed gate)
         return keep
 
+    # NOTE: write() below routes its gating through _gate() too, so WRITE_QUANTILE applies on BOTH paths. It previously
+    # had its own inline copy of the additive controller, which meant the quantile fix silently did nothing whenever
+    # KEY_PREGATE=0 or KEY_BATCH=0 sent writes down the per-window path.
+
     def write_batch(self, rows, key_fn):
         """DISPATCH BATCHING: write several windows with ONE key encode instead of one per window.
 
@@ -127,13 +131,7 @@ class EditableMemory:
         other rows are in the batch -- and the gate, its controller and the resulting entries are untouched."""
         if k is not None: k = k.detach()
         if surprise is not None:
-            sd = surprise.detach()
-            if self.adaptive_gate:
-                keep = sd > self.gate_theta                  # gate on RELATIVE surprise (above the self-calibrated level)
-                fired = float(keep.float().mean())           # controller: rise if firing above target, fall if below ->
-                self.gate_theta = min(self.gate_ceil, max(self.gate_floor, self.gate_theta + self.gate_step * (fired - self.gate_target)))
-            else:
-                keep = sd >= self.write_gate                 # keep only tokens the model was unsure about (>= fixed gate)
+            keep = self._gate(surprise)                      # SAME gate as write_batch (incl. WRITE_QUANTILE)
             if k is not None: k = k[keep]
             tok = tok[keep]
             if ctx is not None: ctx = ctx[keep]

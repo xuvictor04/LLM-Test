@@ -203,7 +203,10 @@ class Fabric(nn.Module):
                                                             #   forcing node use (2.034 vs 2.176). Only raise this if
                                                             #   node mass is ~0 AND the fabric is underperforming.
         s.bodies = nn.ModuleList([FabricNode(d, s.hid) for _ in range(n0)])
-        s.cent = F.normalize(torch.randn(n0, sig_d), dim=-1)   # one region per expert
+        s.register_buffer("cent", F.normalize(torch.randn(n0, sig_d), dim=-1))   # one region per expert. BUFFER, not a
+        #   plain attribute: as an attribute it was absent from state_dict(), so the GROUNDED router's centroids -- which
+        #   ARE the routing function when ROUTE_GROUNDED=1 (the default) -- were never saved, never resumed, and never
+        #   moved to the GPU. prompt.py therefore routed every generation with untrained centroids.
         s.keys = nn.ParameterList([nn.Parameter(torch.randn(dk) * 0.1) for _ in range(n0)])
         s.qproj = nn.ModuleList([nn.Linear(sig_d, dk) for _ in range(n0)])
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
@@ -221,7 +224,7 @@ class Fabric(nn.Module):
         dev = s.halt_key.device
         _ng = (F.normalize(gist.detach().mean(0, keepdim=True).cpu(), dim=-1) if gist is not None
                else F.normalize(torch.randn(1, s.sig_d), dim=-1))
-        s.cent = torch.cat([s.cent, _ng], 0)                # the newborn OWNS the region that triggered its birth
+        s.cent = torch.cat([s.cent.cpu(), _ng], 0)          # the newborn OWNS the region that triggered its birth
         b = FabricNode(s.d, s.hid).to(dev)                  # IDENTITY at birth -> inherits the CURRENT base's competence
         k = nn.Parameter(s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
         q = nn.Linear(s.sig_d, s.dk).to(dev)
@@ -871,7 +874,12 @@ def main():
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _i("FAB_HID_MULT", 2),
                                  "min_steps": _i("FAB_MIN_STEPS", 0), "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
                                  "society": SOCIETY} if FABRIC else None)},
-                   f"{ck}/ckpt.pt")
+                   f"{ck}/ckpt.pt.tmp")
+        if os.path.exists(f"{ck}/ckpt.pt"):                       # keep ONE previous generation: a corrupt or
+            try: os.replace(f"{ck}/ckpt.pt", f"{ck}/ckpt.prev.pt")   # interrupted write is then always recoverable
+            except OSError: pass
+        os.replace(f"{ck}/ckpt.pt.tmp", f"{ck}/ckpt.pt")          # ATOMIC: a kill mid-save used to leave a truncated
+        #   ckpt.pt and destroy the only copy, together with the tokenizer that decodes it.
         with open(f"{ck}/source.bin", "wb") as _srcf:             # the corpus text retrieval points INTO
             _srcf.write(bytes(byte_stream) if ONLINE else (bytes(src_stream) if not USE_TOK else TOK.decode(src_stream).encode("utf-8", "replace")))
         if not quiet:
@@ -886,6 +894,27 @@ def main():
         print(f"[pid {os.getpid()}] checkpoint-on-demand: kill -USR1 {os.getpid()}  ->  saves to {os.environ['SAVE_CKPT']} at the next step"
               + (f" (auto every {CKPT_EVERY} steps)" if CKPT_EVERY else " (no periodic auto-save; set CKPT_EVERY to enable)"))
     EPOCHS = max(1, _i("EPOCHS", 1)); _epoch = 0            # multi-EPOCH: reset to the stream start EPOCHS times (clean passes,
+    # ---- STARTUP GUARDS: each of these silently produced a run that did NOT test what it claimed to ----
+    _warn = []
+    if EPOCHS > 1 and not DISK_STREAM:
+        _warn.append(f"EPOCHS={EPOCHS} with DISK_STREAM=0 -> every epoch is a BYTE-IDENTICAL REPLAY "
+                     f"(_resample runs only under DISK_STREAM). Set DISK_STREAM=1 for fresh data per epoch.")
+    if _i("CORPUS_CAP", 2000000) <= 2000000 and DATA_MODE == "real":
+        _warn.append(f"CORPUS_CAP={_i('CORPUS_CAP', 2000000)} bytes -> each domain is capped at ~2MB regardless of how "
+                     f"much data is on disk. A multi-day run would see 2MB of text. Set CORPUS_CAP to the real size.")
+    if os.environ.get("SAVE_CKPT") and not CKPT_EVERY:
+        _warn.append("SAVE_CKPT set but CKPT_EVERY=0 -> the ONLY save is at the very end (plus SIGUSR1). "
+                     "A crash loses the whole run. Set CKPT_EVERY.")
+    if EXPERTS and FABRIC:
+        _warn.append("EXPERTS=1 AND FABRIC=1 -> the expert bank is a NO-OP. The forward pass is an elif chain "
+                     "(FABRIC wins), so the adapters never receive gradient, yet the end-of-run report still prints "
+                     "expert counts. Use one or the other.")
+    if WORLD_MODEL and WORLD_FEEDBACK:
+        _warn.append("WORLD_FEEDBACK=1 -> training adds world_proj(forecast) to h, but the in-script eval/generation "
+                     "paths do NOT, so their numbers describe a different network than the one trained. "
+                     "prompt.py DOES apply it. Use WORLD_FEEDBACK=0 if you need the in-script evals to be comparable.")
+    if _warn:
+        print("\n".join(["!! CONFIG WARNING: " + w for w in _warn]) + "\n")
     # LIVE RATE METER: the [probe] extrapolates from a SYNTHETIC LM-only step, so its ETA has always been optimistic --
     # this measures the ACTUAL loop and re-projects from observed throughput, so the ETA self-corrects as the run goes.
     import time as _time
@@ -1403,6 +1432,8 @@ def main():
                                     torch.zeros(1, device=DEV))
         _j2 = int(_w2[0].argmax())
         _pre = {p: bpb_true(p, use_mem=False) for p in _ps2}
+        import copy as _copy
+        _fab_bak = _copy.deepcopy(fab)                     # RESTORE AFTERWARDS: this ablation deletes the BUSIEST
         fab.remove(_j2)                                    # <- the expert's parameters are deleted
         _post = {p: bpb_true(p, use_mem=False) for p in _ps2}
         _d2 = sum(_post[p] - _pre[p] for p in _ps2) / max(1, len(_ps2))
@@ -1410,6 +1441,11 @@ def main():
         print(f"  deleted expert {_j2} (busiest, routing mass {float(_w2[0, _j2]):.2f})")
         for p in _ps2: print(f"    process {p}: {_pre[p]:.3f}->{_post[p]:.3f} ({_post[p] - _pre[p]:+.4f})")
         print(f"  mean collateral {_d2:+.4f}  ->  {'INDEPENDENT (society survives losing a member)' if abs(_d2) < 0.3 else 'ENTANGLED (the population depended on it)'}")
+        # restore by swapping the containers back -- load_state_dict cannot repopulate a ModuleList that remove()
+        # shrank (its keys are gone from the live module), so reassign the four things remove() rebuilds.
+        fab.bodies = _fab_bak.bodies; fab.keys = _fab_bak.keys; fab.qproj = _fab_bak.qproj; fab.cent = _fab_bak.cent
+        print("  (expert restored -- GENERATION and the remaining evals run on the INTACT model; before this fix every"
+              " eval after this point, including the generation samples used to judge coherence, ran on the mutilated one)")
         print(f"  reference points: memory-delete collateral ~0.02-0.03 | weights gradient-ascent ~22-25 bits")
     if FABRIC:                                             # does the routed node fabric help?
         _ps = sorted(set(labels))
