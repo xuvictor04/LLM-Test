@@ -196,7 +196,7 @@ def _probe_population():
     must average them; a POPULATION should SPECIALIZE (route each regime to its own predictor) and predict better.
     Reports population vs monolithic vs persistence, routing specialization, and that it GREW."""
     g = torch.Generator().manual_seed(1)
-    M, D_OBS, D_LAT, T, NPER, K = 6, 24, 12, 10, 1500, 3
+    M, D_OBS, D_LAT, T, NPER, K = 6, 24, 12, 10, 1500, 5   # K=5 distinct regimes: hard enough that ONE small net can't fit all
     W = torch.randn(M, D_OBS, generator=g) / (M ** 0.5)
     As = []                                                          # K different "physics"
     for _k in range(K):
@@ -214,21 +214,24 @@ def _probe_population():
     o_t = OBS[:, :-1].reshape(-1, D_OBS); o_next = OBS[:, 1:].reshape(-1, D_OBS)
     reg_flat = REG.repeat_interleave(T - 1)
 
+    PHID = 40                                                        # per-predictor capacity (small: one alone can't fit K regimes)
+    MHID = int(PHID * (K ** 0.5))                                    # PARAM-MATCHED monolith (~K x one predictor) -> fair fight
     def train(pop_mode):
         torch.manual_seed(0)
         enc = WorldEncoder(D_OBS, D_LAT, 96)
         if pop_mode:
-            head = DynamicsPopulation(D_LAT, n0=1, nmax=K + 1, hid=96, route_dim=16)   # START at 1 -> must GROW
+            head = DynamicsPopulation(D_LAT, n0=1, nmax=K, hid=PHID, route_dim=16, tau=0.5)   # START at 1 -> must GROW; sharp routing
         else:
-            head = ForwardModel(D_LAT, 96)
+            head = ForwardModel(D_LAT, MHID)                         # same TOTAL params as the population
         opt = torch.optim.Adam(list(enc.parameters()) + list(head.parameters()), lr=3e-3)
-        for step in range(5000):
+        for step in range(6000):
             idx = torch.randint(0, o_t.size(0), (512,), generator=g)
             zt = enc(o_t[idx]); zn = enc(o_next[idx])
             v, c = _var_cov(zt)
             if pop_mode:
-                l, _, inv = pop_loss(head, zt, zn); loss = l + v + 0.04 * c
-                if step and step % 1200 == 0 and head.n() < head.nmax:   # GROW on schedule (stands in for a plateau trigger)
+                _bal = 0.05 * max(0.0, 1.0 - step / 2000.0)          # DECAY balance: uniform early (no collapse), free to specialize late
+                l, _, inv = pop_loss(head, zt, zn, w_bal=_bal); loss = l + v + 0.04 * c
+                if step and step % 900 == 0 and head.n() < head.nmax:   # grow toward K predictors
                     newp = head.grow(zt.detach())
                     if newp: opt.add_param_group({"params": newp})
             else:
