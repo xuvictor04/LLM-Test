@@ -931,7 +931,11 @@ def main():
             _left = max(0, _total_steps - (step - _resume_step))
             print(f"  [rate @ {step}] {_rate*60:.0f} steps/min | {_rate*_bpw/1e3:.1f} kB/s of corpus | "
                   f"elapsed {(_now-_t_start)/60:.0f} min | ~{_left/max(1e-9,_rate)/3600:.1f} h left ({_left} steps) | "
-                  f"{_rate*_bpw*86400/1e9:.2f} GB of text per DAY at this rate")
+                  f"{_rate*_bpw*86400/1e9:.2f} GB of text per DAY at this rate | "
+                  # DOMAIN FORMATION, LIVE: on a single-domain corpus the byte-level signature may never shift enough
+                  # to trigger a boundary, which would leave domain assembly / provenance / per-domain unlearning
+                  # untested. Surfacing it here turns a multi-day unknown into an hour-one signal.
+                  f"{len(asm.cent)} domains / {len(bounds)} boundaries")
             if PROFILE and _prof:
                 _tot = sum(_prof.values())
                 _br = "  ".join(f"{k} {v/max(1e-9,_tot)*100:.0f}%" for k, v in sorted(_prof.items(), key=lambda kv: -kv[1]))
@@ -1312,8 +1316,18 @@ def main():
     # ---- WRONGNESS (B) IN THE LOOP: detect + remove implausible associations via self-consistency ----
     if _i("WRONG_CHECK", 1):
         ninj = _i("WRONG_INJECT", 8)                       # inject a few cross-domain WRONG windows so B has real errors to catch
+        procs = sorted(set(labels))
+        if ninj > 0 and len(procs) < 2:
+            # SINGLE-DOMAIN RUN: the injection builds a WRONG pair by taking a context from one process and a
+            # continuation from a DIFFERENT one, which is undefined with a single source -- `random.choice` on the
+            # empty "other processes" list raised IndexError and killed the whole eval battery AFTER training and the
+            # checkpoint had completed. An English-only run is a supported configuration, so skip the injection and
+            # say so, rather than crashing on it.
+            print(f"[wrongness] skipping synthetic injection: needs >=2 source processes, found {len(procs)} "
+                  f"(single-domain run). Self-consistency still runs on the GENUINE store below.")
+            ninj = 0
         if ninj > 0:
-            procs = sorted(set(labels)); rx = []; ry = []
+            rx = []; ry = []
             for _ in range(ninj):
                 p = random.choice(procs); qd = random.choice([z for z in procs if z != p])
                 sp = random.choice([s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p])
