@@ -213,18 +213,27 @@ class Fabric(nn.Module):
         s.q_entry = nn.Linear(sig_d, dk); s.nov = nn.Linear(1, dk); s.ctrl = nn.Linear(3, dk)
         s.norm = nn.LayerNorm(d); s.grown = 0
         s.norm_only = norm_only                             # ABLATION: normalization only, no nodes, no routing
-        s.route_t = float(os.environ.get("ROUTE_T", 1.0))   # <1 sharpens routing -> mass concentrates -> specialization
+        s.route_t = float(os.environ.get("ROUTE_T", 0.1))   # <1 sharpens routing -> mass concentrates -> specialization.
+        #   DEFAULT LOWERED 1.0 -> 0.1: signature and centroid are unit vectors in SIG_D=64, so cosine logits have
+        #   std ~1/sqrt(64) = 0.125. At T=1.0 the top-vs-mean weight ratio is ~1.37x REGARDLESS of N -- at N=64 that
+        #   is w ~= 0.016 +/- 12%, i.e. very nearly uniform, so top-k picks noise and no expert can specialize.
+        #   T=0.1 amplifies the same differences 10x, which is what makes a large population selectable at all.
         # GROUNDED ROUTING: an expert owns a REGION of signature space, exactly as a domain does (and domains DO
         # differentiate: purity 0.92). Free learned keys start symmetric, and with every expert trained to solve the
         # whole task there is no gradient that breaks the symmetry -> uniform generalists. A centroid EMA'd toward the
         # signatures it actually serves acquires a constituency, so its traffic becomes distinct and it specializes.
         s.grounded = bool(int(os.environ.get("ROUTE_GROUNDED", 1)))
         s.route_learn = bool(int(os.environ.get("ROUTE_LEARN", 1)))   # add the learned bilinear term (see route_w)
+        s.birth_jitter = float(os.environ.get("BIRTH_JITTER", 0.15))
         s.cent_m = float(os.environ.get("CENT_EMA", 0.02))
     def grow(s, gist=None):                                 # add an expert; returns its new params
         dev = s.halt_key.device
-        _ng = (F.normalize(gist.detach().mean(0, keepdim=True).cpu(), dim=-1) if gist is not None
+        _ng = (F.normalize(gist.detach().mean(0, keepdim=True).cpu()
+                           + s.birth_jitter * torch.randn(1, s.sig_d), dim=-1) if gist is not None
                else F.normalize(torch.randn(1, s.sig_d), dim=-1))
+        #   JITTER: a burst grows several experts at ONE signature, so without it they are born as exact clones with
+        #   identical regions and can never differentiate. Small enough to keep the newborn in the region that
+        #   triggered its birth, large enough that the routing EMA can pull them apart.
         s.cent = torch.cat([s.cent.cpu(), _ng], 0)          # the newborn OWNS the region that triggered its birth
         b = FabricNode(s.d, s.hid).to(dev)                  # IDENTITY at birth -> inherits the CURRENT base's competence
         k = nn.Parameter(s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
@@ -280,6 +289,9 @@ class Fabric(nn.Module):
         s.bodies = nn.ModuleList([s.bodies[i] for i in keep])
         s.keys = nn.ParameterList([s.keys[i] for i in keep])
         s.qproj = nn.ModuleList([s.qproj[i] for i in keep])
+        s.cent = s.cent[keep].clone()                       # PRUNE THE CENTROID TOO. Without this, society() reads
+        #   cent[:N] against the SHIFTED body list, so after deleting expert j every expert above j is routed by its
+        #   neighbour's region -- silently misrouting the whole population and corrupting the independence test.
     def seed_key(s, gist):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
         random. A randomly-keyed expert receives no traffic, gets no gradient, and stays dead (measured: 12/17 idle)."""
@@ -317,18 +329,48 @@ class Fabric(nn.Module):
         return h, depth / steps, mass / steps, bal / steps
 
 class PlateauGrowth:
-    """Grow capacity when PROGRESS STALLS, not when a distance threshold trips: fast-vs-slow EMA of the loss is
-    scale-free, so it needs no retuning across byte/token modes. Pruning is deliberately OFF by default -- fixed
-    thresholds caused grow/prune sawtooth (and did, measurably, in the flat bank: 77% churn)."""
-    def __init__(s, rel=0.002, cooldown=1500, warmup=2000):
+    """Grow capacity on a REGRESSION BURST, then hold until progress stalls again.
+
+    The old rule grew ONE node whenever fast-vs-slow improvement fell below a threshold. Three problems, all measured:
+    it could not fire before FAB_WARMUP=2000, then only once per FAB_COOLDOWN=1500, so a run got ~3 growth events in
+    its first minute and none ever again; and one node per event cannot answer a distribution shift that needs several.
+
+    The state machine instead is:
+      WATCH   -- looking for an UNEXPECTED worsening: loss above the slow EMA by `z` robust deviations (running MAD,
+                 so it is scale-free like the original fast/slow design and does not fire on ordinary gradient noise).
+                 Also fires on a RAMP early on, so growth is rapid at the start instead of blocked by a warmup.
+      BURST   -- return a burst of `burst` nodes at once.
+      RECOVER -- do NOT re-arm while the model is re-learning. The burst itself causes a transient worsening, which
+                 would otherwise re-trigger immediately; this is the "not resetting till stall" the design calls for.
+                 Leaves RECOVER only once improvement has flattened (the ORIGINAL plateau test), or after rmax steps.
+    Returns an INT (how many to grow), 0 for none."""
+    def __init__(s, rel=0.002, cooldown=1500, warmup=2000, z=4.0, burst=3, ramp=0, rmin=600, rmax=20000):
         s.fast = s.slow = None; s.rel = rel; s.cool = cooldown; s.warm = warmup; s.last = -10**9
+        s.z = z; s.burst = max(1, burst); s.ramp = ramp; s.rmin = rmin; s.rmax = rmax
+        s.dev = 0.0; s.n = 0; s.state = "W"; s.t0 = 0; s.blackout = -10**9; s.why = ""
+    def note_shift(s, t): s.blackout = t          # retok / resample: the loss jump is OURS, not the data's
     def step(s, loss, t):
         s.fast = loss if s.fast is None else 0.98 * s.fast + 0.02 * loss
         s.slow = loss if s.slow is None else 0.998 * s.slow + 0.002 * loss
-        if t < s.warm or t - s.last < s.cool: return False
-        if (s.slow - s.fast) / max(1e-6, abs(s.slow)) < s.rel:               # improvement stalled -> add capacity
-            s.last = t; return True
-        return False
+        s.n += 1
+        d = abs(loss - s.slow)                                               # running MAD -> robust scale
+        s.dev = d if s.n == 1 else 0.99 * s.dev + 0.01 * d
+        improving = (s.slow - s.fast) / max(1e-6, abs(s.slow))
+        # EARLY RAMP first, and deliberately ABOVE the RECOVER gate: rapid initial growth is the point, and the
+        # recover-until-stall rule (rmin=600) is far longer than the ramp cadence, so gating the ramp behind it let
+        # the ramp fire exactly once. During the ramp the population is still forming, so there is no progress to
+        # protect; RECOVER starts mattering after it.
+        if s.ramp and t < s.ramp and t - s.last >= max(1, s.cool // 8):
+            s.last = t; s.why = "ramp"; return s.burst
+        if s.state == "R":                                                   # RECOVER: wait for the stall
+            if t - s.t0 >= s.rmin and (improving < s.rel or t - s.t0 > s.rmax): s.state = "W"
+            return 0
+        if t - s.last < s.cool or t - s.blackout < s.cool: return 0
+        unexpected = (loss - s.slow) > s.z * max(1e-6, s.dev)                 # a REGRESSION we did not cause
+        if unexpected or (t >= s.warm and improving < s.rel):
+            s.last = t; s.t0 = t; s.state = "R"; s.why = "REGRESSION" if unexpected else "stall"
+            return s.burst if unexpected else 1                               # burst on shift, single node on a stall
+        return 0
 
 EXPERTS = bool(_i("EXPERTS", 0))                           # EXPERTS=1: a growing, selective bank of per-domain experts
 class ExpertBank(nn.Module):
@@ -699,8 +741,13 @@ def main():
     _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _i("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
-    fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 1500), _i("FAB_WARMUP", 2000)) if FABRIC else None
-    FAB_NMAX = _i("FAB_NMAX", 8); PONDER = _f("PONDER", 0.01); _fab_nov = torch.full((), 0.5, device=DEV)
+    fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
+                            _f("FAB_Z", 4.0), _i("FAB_BURST", 3), _i("FAB_RAMP", 4000),
+                            _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000)) if FABRIC else None
+    FAB_NMAX = _i("FAB_NMAX", 64); PONDER = _f("PONDER", 0.01)   # raised from 8: with sparse top-k the cost of a
+    #   LARGE population is the k it computes, not N, so the old cap (3 growth events, all spent in the first
+    #   minute) was limiting the population for a reason that no longer applies.
+    _fab_nov = torch.full((), 0.5, device=DEV)
     PONDER_WARM = _i("PONDER_WARM", 8000); FAB_BAL = _f("FAB_BALANCE", 0.01)
     BATCH_W = max(1, _i("BATCH_W", 1))                        # LM steps over BATCH_W windows AT ONCE. Domain assembly
     _bx = []; _by = []; _bg = []; _bd = []; _bp = []          #   and memory stay per-window (sequential, cheap), so
@@ -1005,6 +1052,7 @@ def main():
             if DISK_STREAM:                                # draw FRESH data from the larger-than-RAM corpus each epoch
                 stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
                 set_enc_tensor(ENC_SEQ); _sigq = []          # stream replaced -> queued lookahead windows are stale
+                if FABRIC and fabgrow is not None: fabgrow.note_shift(step)
             i = 0; print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
             continue
         w = stream[i:i + WIN + 1]
@@ -1141,9 +1189,13 @@ def main():
         _lm_run.append(_lf)                                      #   plateau detector each pulled the same scalar back)
         if step % max(1, (STREAM_LEN // WIN) // 8) == 0 and _lm_run:
             _lm_curve.append((step, sum(_lm_run[-2000:]) / len(_lm_run[-2000:]))); _lm_run = _lm_run[-2000:]
-        if FABRIC and not fab.norm_only and fabgrow.step(_lf, step) and len(fab.bodies) < FAB_NMAX:
-            om.add_param_group({"params": fab.grow(sig[None, :] if SOCIETY else None)})   # PLATEAU -> new expert, keyed HERE
-            print(f"  [fabric @ {step}] progress plateaued -> grew node {len(fab.bodies)}")
+        if FABRIC and not fab.norm_only:
+            _nb = fabgrow.step(_lf, step)                       # 0, or HOW MANY to grow (burst on an unexpected regression)
+            _nb = min(_nb, FAB_NMAX - len(fab.bodies))
+            for _g in range(max(0, _nb)):                       # each newborn is keyed at the CURRENT signature, so a
+                om.add_param_group({"params": fab.grow(sig[None, :] if SOCIETY else None)})   # burst owns this region
+            if _nb > 0:
+                print(f"  [fabric @ {step}] {fabgrow.why} -> grew {_nb} -> {len(fab.bodies)}/{FAB_NMAX} experts")
         _pmem = _t0()
         with torch.no_grad():
             pm = F.softmax(lg.detach(), -1)                    # reuse the expert-routed logits for the write-gate surprise
@@ -1216,6 +1268,7 @@ def main():
             else:
                 stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
             _sigq = []                                       # re-tokenized -> window boundaries moved, queue is stale
+            if FABRIC and fabgrow is not None: fabgrow.note_shift(step)   # the loss jump after a retok is OURS, not a shift
             print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; +{TOK.vocab_size - _last_vsz} since last retok)")
             _last_vsz = TOK.vocab_size
 
