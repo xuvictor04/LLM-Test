@@ -169,11 +169,27 @@ class TinyTransformer(nn.Module):                          # decoder-only Transf
         # saved checkpoint loads into a different network.
         s.tr = nn.TransformerEncoder(lyr, layers, norm=nn.LayerNorm(d), enable_nested_tensor=False)
         s.head = nn.Linear(d, V)
-    def encode(s, x):
+    def _mask(s, L, dev):
+        # cache the causal mask: it is rebuilt on EVERY encode, and _model_key calls encode thousands of times per
+        # step on tiny KW-length windows, so the allocate+triu is pure per-call overhead there.
+        k = (L, str(dev))
+        if getattr(s, "_mk", None) is None: s._mk = {}
+        if k not in s._mk: s._mk[k] = torch.triu(torch.ones(L, L, device=dev), 1).bool()
+        return s._mk[k]
+    def encode(s, x, nlayers=None):
+        """nlayers: run only the FIRST n blocks. The memory key only needs a representation of a KW=8 window, but it
+        was paying the full stack -- at LAYERS=12 that is 12 layers of attention over 8 tokens, thousands of rows per
+        step, in both the memory write and the amortized rekey, and it is what made the transformer lose overall
+        despite its LM step time matching the GRU's. KEY_LAYERS caps the depth for the key path ONLY; the LM keeps
+        every layer. Keys stay mutually comparable because rekey re-encodes stored contexts through the same path."""
         L = x.size(1); p = torch.arange(L, device=x.device).clamp(max=s.maxlen - 1)
         h = s.emb(x) + s.pos(p)
-        m = torch.triu(torch.ones(L, L, device=x.device), 1).bool()            # causal mask
-        return s.tr(h, mask=m)
+        m = s._mask(L, x.device)
+        if nlayers is None or nlayers >= len(s.tr.layers):
+            return s.tr(h, mask=m)
+        for _l in s.tr.layers[:max(1, int(nlayers))]:
+            h = _l(h, src_mask=m)
+        return h
     def forward(s, x): h = s.encode(x); return s.head(h), h
 def build_lm():
     if MODEL_TYPE == "transformer":
@@ -309,7 +325,10 @@ class Fabric(nn.Module):
             return h, z, torch.zeros(N + 1, device=h.device), z
         K = torch.stack(list(s.keys) + [s.halt_key], 0)                       # (N+1, dk) operator keys
         nb = s.nov(nov[:, None])                                              # surprise -> routing bias
-        c = torch.softmax((s.q_entry(gist) + nb) @ K.t(), -1)                 # (B, N+1) ENTRY distribution
+        c = torch.softmax(((s.q_entry(gist) + nb) @ K.t()) / max(1e-3, s.route_t), -1)   # (B,N+1) ENTRY distribution
+        #   route_t applied HERE TOO. It was only ever applied on the society path, so the chaining path kept the
+        #   flat T=1.0 distribution -- with N+1 near-equal logits, HALT starts with ~1/(N+1) and, being ABSORBING,
+        #   accumulates every step. That is a large part of the measured 'halt 0.76, mean routed depth 0.24 of 4'.
         steps = max(1, min(s.max_steps, 2 + N // 2))                          # adaptive depth budget
         depth = h.new_zeros(()); mass = torch.zeros(N + 1, device=h.device); bal = h.new_zeros(())
         for _t_ in range(steps):
@@ -326,7 +345,7 @@ class Fabric(nn.Module):
             summ = torch.stack([nm.sum(-1), c[:, HALT], ent], -1)             # recurrent control summary
             bias = nb + s.ctrl(summ)
             Q = torch.stack([q(gist) for q in s.qproj], 1) + bias[:, None, :] # (B,N,dk) per-node routing queries
-            R = torch.softmax(torch.einsum('bnk,mk->bnm', Q, K), -1)          # (B,N,N+1) TRANSITION MATRIX
+            R = torch.softmax(torch.einsum('bnk,mk->bnm', Q, K) / max(1e-3, s.route_t), -1)   # (B,N,N+1) TRANSITION
             nxt = torch.einsum('bn,bnm->bm', nm, R)                           # propagate mass node -> operator
             nxt = nxt.clone(); nxt[:, HALT] = nxt[:, HALT] + c[:, HALT]       # HALT absorbs
             c = nxt / nxt.sum(-1, keepdim=True).clamp_min(1e-9)
@@ -474,9 +493,16 @@ def key_frozen(x):
 # KEY_SRC=frozen: static byte-statistic key -- TESTING BASELINE ONLY.
 KEY_SRC = os.environ.get("KEY_SRC", "model")
 def _windows(x, W): return F.pad(x, (W - 1, 0)).unfold(1, W, 1)             # (B,L) -> (B,L,W)
+KEY_LAYERS = _i("KEY_LAYERS", 0)                                            # >0: memory keys use only the first N
+#   transformer blocks (see TinyTransformer.encode). 0 = full stack, i.e. unchanged. No effect on the GRU.
+
+
 @torch.no_grad()
 def _model_key(win):                                                        # (N,W) -> (N,D)
-    return getattr(model, "_raw_encode", model.encode)(win)[:, -1]          # RAW: keys must match what rekey re-encodes
+    _enc = getattr(model, "_raw_encode", model.encode)                      # RAW: keys must match what rekey re-encodes
+    if KEY_LAYERS and MODEL_TYPE == "transformer":
+        return _enc(win, nlayers=KEY_LAYERS)[:, -1]
+    return _enc(win)[:, -1]
 @torch.no_grad()
 def mem_key(x):                                                             # (B,L) -> (B*L, D)
     if KEY_SRC == "model": return _model_key(_windows(x, KW).reshape(-1, KW))
