@@ -55,28 +55,37 @@ K_CENT    = int(os.environ.get("PROBE_K_CENT", S.DOM_WINS))     # windows per ce
 MAXEVAL   = int(os.environ.get("PROBE_MAXEVAL", 4000))          # cap on eval windows PER CLASS
 ENC_LR    = float(os.environ.get("PROBE_ENC_LR", 2e-3))         # matches main(): AdamW(enc, lr=2e-3)
 RUNS      = [int(x) for x in os.environ.get("PROBE_RUNS", "1,2,4").split(",")]  # run-smoothing widths
+SWEEP     = bool(int(os.environ.get("PROBE_SWEEP", 1)))         # 0 = skip (a)-(g), run ONLY the rekey-lag probe
+DRIFT_ON  = bool(int(os.environ.get("PROBE_DRIFT_ON", 1)))      # append the rekey-lag probe after the sweep
 OUT_JSON  = os.environ.get("PROBE_JSON", "")
 
 
 # ---------------- stream + labelled window universe ----------------------------------------------------------
 def build_universe():
-    """Grid windows (stride WIN, exactly what the main loop steps over) whose TRUE corpus label is unambiguous."""
+    """Grid windows (stride WIN -- exactly what the main loop steps over). `gp` is EVERY grid window (the boundary
+    detector sees those too); `pos/lab/seg` are the subset whose TRUE corpus label is unambiguous (no splice inside)."""
+    import bisect
     random.seed(SEED); torch.manual_seed(SEED)
     stream, labels, sw = S.build_stream()
     S.set_enc_tensor(stream)
     starts = sorted(int(x) for x in sw)                          # splice-segment starts
-    segof = []                                                   # segment index per byte position (grid only)
-    import bisect
-    pos, lab, seg = [], [], []
-    for p in range(0, len(stream) - WIN, WIN):
+    gp = list(range(0, len(stream) - WIN, WIN))
+    pos, lab, seg, pidx = [], [], [], []
+    for k, p in enumerate(gp):
         a = labels[p]
-        if labels[p + WIN - 1] != a:                             # window straddles a splice -> impure, drop
-            continue
+        if labels[p + WIN - 1] != a: continue                    # window straddles a splice -> impure, drop
         si = bisect.bisect_right(starts, p) - 1
-        if bisect.bisect_right(starts, p + WIN - 1) - 1 != si:    # same-label but different segment: still impure
-            continue
-        pos.append(p); lab.append(a); seg.append(si)
-    return stream, labels, starts, pos, lab, seg
+        if bisect.bisect_right(starts, p + WIN - 1) - 1 != si: continue   # same label, different segment: still impure
+        pos.append(p); lab.append(a); seg.append(si); pidx.append(k)
+    # adjacency categories for consecutive grid windows (k, k+1): 0 = no splice in the 2*WIN span,
+    # 1 = splice joining two segments of the SAME corpus, 2 = splice joining DIFFERENT corpora.
+    acat = []
+    for k in range(len(gp) - 1):
+        p = gp[k]; hi = min(p + 2 * WIN, len(stream)) - 1
+        nsp = bisect.bisect_left(starts, hi + 1) - bisect.bisect_right(starts, p)
+        acat.append(0 if nsp == 0 else (1 if labels[p] == labels[hi] else 2))
+    return {"stream": stream, "labels": labels, "starts": starts, "gp": gp, "pos": pos, "lab": lab,
+            "seg": seg, "pidx": pidx, "acat": acat}
 
 
 def split_pools(pos, lab, seg, nclass):
@@ -115,6 +124,7 @@ def _auc(w, b):
 
 
 def _dprime(w, b):
+    if w.numel() < 2 or b.numel() < 2: return float("nan")
     vw, vb = float(w.var(unbiased=True)), float(b.var(unbiased=True))
     den = math.sqrt(max(1e-12, 0.5 * (vw + vb)))
     return (float(b.mean()) - float(w.mean())) / den
@@ -165,22 +175,22 @@ def centroid_metrics(Q, qy, C):
             "absorb_wrong": float((d_oth < NEW_DIST).float().mean())}      # a WRONG corpus is close enough to absorb
 
 
-def adjacent_metrics(Zall, pos, lab, seg):
-    """(f) boundary-detector SNR proxy: distance between consecutive grid windows, same segment vs across a splice."""
-    same, cross = [], []
-    for i in range(len(pos) - 1):
-        j = i + 1
-        if pos[j] != pos[i] + WIN: continue                       # an impure window was dropped between them
-        d = float(1.0 - torch.dot(Zall[i], Zall[j]))
-        (same if seg[i] == seg[j] else cross).append(d)
-    ts, tc = torch.tensor(same), torch.tensor(cross)
-    ms, ss = _ms(ts); mc, sc = _ms(tc)
-    tp = float((tc > SHIFT_DIST).float().mean()) if tc.numel() else float("nan")
+def adjacent_metrics(Zg, acat):
+    """(f) boundary-detector SNR: distance between CONSECUTIVE grid windows (the run's own stride), split by whether
+    a true splice falls between them, and if so whether it joins the same corpus or two different corpora."""
+    d = (1.0 - (Zg[:-1] * Zg[1:]).sum(-1)).cpu()
+    c = torch.tensor(acat[:d.numel()])
+    ts, t1, t2 = d[c == 0], d[c == 1], d[c == 2]
+    tb = d[c > 0]                                                 # ground-truth boundary set = every splice
+    ms, ss = _ms(ts); mb, sb = _ms(tb)
+    tp = float((tb > SHIFT_DIST).float().mean()) if tb.numel() else float("nan")
     fp = float((ts > SHIFT_DIST).float().mean()) if ts.numel() else float("nan")
-    prec = (tp * tc.numel()) / max(1e-9, tp * tc.numel() + fp * ts.numel())
-    return {"n_same": int(ts.numel()), "n_cross": int(tc.numel()), "same_mean": ms, "same_sd": ss,
-            "cross_mean": mc, "cross_sd": sc, "auc": _auc(ts, tc), "dprime": _dprime(ts, tc),
-            "trip_rate_cross": tp, "trip_rate_same": fp, "implied_precision_1win": prec}
+    prec = (tp * tb.numel()) / max(1e-9, tp * tb.numel() + fp * ts.numel())
+    return {"n_same": int(ts.numel()), "n_splice": int(tb.numel()), "n_splice_same_corpus": int(t1.numel()),
+            "n_splice_diff_corpus": int(t2.numel()), "same_mean": ms, "same_sd": ss,
+            "splice_mean": mb, "splice_sd": sb, "splice_same_corpus_mean": _ms(t1)[0],
+            "splice_diff_corpus_mean": _ms(t2)[0], "auc": _auc(ts, tb), "dprime": _dprime(ts, tb),
+            "trip_rate_splice": tp, "trip_rate_same": fp, "implied_precision_1win": prec}
 
 
 # ---------------- signature backends -------------------------------------------------------------------------
@@ -193,19 +203,47 @@ def sigs_for(idx_pos, stream, enc, chunk=1024):
     return torch.cat(out) if out else torch.zeros(0, SIG_D, device=DEV)
 
 
-def evaluate(stream, enc, pos, lab, seg, cent_idx, eval_idx):
-    nclass = len(cent_idx)
-    Zall = sigs_for(pos, stream, enc)                               # ONE encode of every pure grid window
-    # --- centroids: normalize(mean of K_CENT window signatures) -- exactly DomainAssembler.rekey
-    C = torch.stack([F.normalize(Zall[torch.tensor(cent_idx[c], device=Zall.device)].mean(0), dim=0)
-                     for c in range(nclass)])
-    # --- balanced eval set (held-out SEGMENTS)
+def encode_all(U, enc):
+    """(Zall over pure windows in `pos` order, Zg over EVERY grid window)."""
+    Zg = sigs_for(U["gp"], U["stream"], enc)                        # ONE encode of EVERY grid window
+    return Zg[torch.tensor(U["pidx"], device=Zg.device)], Zg
+
+
+def centroids_of(Zall, cent_idx):
+    """normalize(mean of K_CENT window signatures) -- exactly DomainAssembler.rekey."""
+    return torch.stack([F.normalize(Zall[torch.tensor(cent_idx[c], device=Zall.device)].mean(0), dim=0)
+                        for c in range(len(cent_idx))])
+
+
+def balanced_eval(eval_idx):
     rng = random.Random(SEED + 2)
     per = min(min(len(v) for v in eval_idx.values()), MAXEVAL)
     ev = []
-    for c in range(nclass):
+    for c in range(len(eval_idx)):
         v = list(eval_idx[c]); rng.shuffle(v); ev += v[:per]
-    ev.sort()
+    ev.sort(); return ev, per
+
+
+def queries_R(Zall, U, ev, in_eval, R):
+    """The assembler's actual _assign query: normalize(mean of the R-window run that tripped the boundary)."""
+    pos, lab, seg = U["pos"], U["lab"], U["seg"]
+    rows, rl = [], []
+    for i in ev:
+        run = [i + t for t in range(R)]
+        if run[-1] >= len(pos): continue
+        if any((j not in in_eval) or seg[j] != seg[i] or pos[j] != pos[i] + t * WIN
+               for t, j in enumerate(run)): continue
+        rows.append(F.normalize(Zall[torch.tensor(run, device=Zall.device)].mean(0), dim=0)); rl.append(lab[i])
+    if not rows: return None, None
+    return torch.stack(rows), torch.tensor(rl, device=Zall.device)
+
+
+def evaluate(U, enc, cent_idx, eval_idx):
+    stream, pos, lab, seg = U["stream"], U["pos"], U["lab"], U["seg"]
+    nclass = len(cent_idx)
+    Zall, Zg = encode_all(U, enc)
+    C = centroids_of(Zall, cent_idx)
+    ev, per = balanced_eval(eval_idx)
     evt = torch.tensor(ev, device=Zall.device)
     Ze = Zall[evt]
     ye = torch.tensor([lab[i] for i in ev], device=Zall.device)
@@ -215,16 +253,10 @@ def evaluate(stream, enc, pos, lab, seg, cent_idx, eval_idx):
     # --- (d) run-smoothed queries: mean of R CONSECUTIVE grid windows of the same segment (the _pend mean)
     in_eval = set().union(*[set(v) for v in eval_idx.values()])
     for R in RUNS:
-        rows, rl = [], []
-        for i in ev:
-            run = [i + t for t in range(R)]
-            if run[-1] >= len(pos): continue
-            if any((j not in in_eval) or seg[j] != seg[i] or pos[j] != pos[i] + t * WIN
-                   for t, j in enumerate(run)): continue
-            rows.append(F.normalize(Zall[torch.tensor(run, device=Zall.device)].mean(0), dim=0)); rl.append(lab[i])
-        if not rows: continue
-        res["centroid"][R] = centroid_metrics(torch.stack(rows), torch.tensor(rl, device=Zall.device), C)
-    res["adjacent"] = adjacent_metrics(Zall, pos, lab, seg)
+        Q, qy = queries_R(Zall, U, ev, in_eval, R)
+        if Q is None: continue
+        res["centroid"][R] = centroid_metrics(Q, qy, C)
+    res["adjacent"] = adjacent_metrics(Zg, U["acat"])
     return res
 
 
@@ -252,9 +284,85 @@ def row_cent(N, R, c):
           f"{100*c['absorb_wrong']:>12.1f}%")
 
 
+def drift_probe(U, cent_idx, eval_idx):
+    """REKEY LAG. The frozen-encoder numbers above are the BEST case: they encode the centroid and the query with
+    the SAME encoder. The live system does not. `asm.rekey` re-encodes the reservoir every REKEY_EVERY(=200) steps,
+    while contrastive_step updates the encoder EVERY step (ENC_EVERY=1 near a boundary). So a query is matched
+    against centroids that are up to REKEY_EVERY encoder updates STALE, in an embedding space that moved underneath
+    them. This measures d(own centroid) as a function of that lag -- if it crosses NEW_DIST, every re-entry spawns a
+    new domain no matter how discriminative the signature is at a fixed instant."""
+    import copy
+    pm = int(os.environ.get("PROBE_DRIFT_POSMAX", POSMAX[0]))
+    base = int(os.environ.get("PROBE_DRIFT_BASE", 1000))
+    lags = sorted(int(x) for x in os.environ.get("PROBE_DRIFT", "0,25,50,100,200,400,800").split(","))
+    R = int(os.environ.get("PROBE_DRIFT_R", 2))
+    os.environ["ENC_POS_MAX"] = str(pm * WIN)
+    torch.manual_seed(SEED); random.seed(SEED + 7)
+    enc = S.SigEncoder(S.D, SIG_D).to(DEV)
+    opt = torch.optim.AdamW(enc.parameters(), lr=ENC_LR, weight_decay=0.0)
+    for _ in range(base): S.contrastive_step(enc, opt, U["stream"], len(U["stream"]))
+    enc.eval()
+    Zall0, _ = encode_all(U, enc)
+    C_old = centroids_of(Zall0, cent_idx)                            # what rekey STORED at t = base
+    ev, _ = balanced_eval(eval_idx); in_eval = set().union(*[set(v) for v in eval_idx.values()])
+    print(f"[REKEY LAG | ENC_POS_MAX {pm}*WIN | centroids frozen at step {base}, queries R={R} from the LIVE "
+          f"encoder | REKEY_EVERY={S.REKEY_EVERY}, ENC_EVERY={S.ENC_EVERY}]")
+    print(f"  {'lag':>5} | {'d_own STALE cent':>16} | {'SPAWN%':>7} | {'1-NN':>6} | {'d_own FRESH cent':>16} | "
+          f"{'SPAWN%':>7} | {'1-NN':>6} | {'self-drift':>10}")
+    out, done = {}, 0
+    for lg in lags:
+        while done < lg:
+            enc.train(); S.contrastive_step(enc, opt, U["stream"], len(U["stream"])); done += 1
+        enc.eval()
+        Zall, _ = encode_all(U, enc)
+        Q, qy = queries_R(Zall, U, ev, in_eval, R)
+        st = centroid_metrics(Q, qy, C_old)                          # stale centroid (the live system)
+        fr = centroid_metrics(Q, qy, centroids_of(Zall, cent_idx))   # re-keyed this instant (the ideal)
+        sd = float((1 - (Zall * Zall0).sum(-1)).mean())              # how far the SAME windows moved in `lg` steps
+        out[lg] = {"stale": st, "fresh": fr, "self_drift": sd}
+        print(f"  {lg:>5} | {st['d_own']:>7.3f} +-{st['d_own_sd']:<6.3f} | {100*st['spawn_rate']:>6.1f}% | "
+              f"{100*st['nn_acc']:>5.1f}% | {fr['d_own']:>7.3f} +-{fr['d_own_sd']:<6.3f} | "
+              f"{100*fr['spawn_rate']:>6.1f}% | {100*fr['nn_acc']:>5.1f}% | {sd:>10.3f}")
+    print()
+    return out
+
+
+def verdict(res):
+    """ASSEMBLER or ENCODER? The learned signature is only 'fine' if it beats the untrained controls AND its own
+    operating point (R=2, the SUSTAIN=2 smoothed query vs a 40-window centroid) can re-identify a corpus."""
+    print("=" * 118)
+    ctl = max((r["pairs"]["auc"] for r in res["controls"].values()), default=float("nan"))
+    best = None
+    for k, r in res["runs"].items():
+        a = r["pairs"]["auc"]
+        if best is None or a > best[1]: best = (k, a)
+    print(f"VERDICT INPUTS: best UNTRAINED control AUC {ctl:.3f} | best LEARNED AUC {best[1]:.3f} ({best[0]})")
+    print(f"  window-pair AUC 0.5 = signature carries NO corpus information; 1.0 = perfectly separable.")
+    for k, r in res["runs"].items():
+        c = r["centroid"].get(2) or r["centroid"].get(1)
+        if not c: continue
+        print(f"  {k:<18} R=2 query vs own 40-window centroid: d_own {c['d_own']:.3f} (NEW_DIST {NEW_DIST}) -> "
+              f"SPAWN {100*c['spawn_rate']:.1f}% | 4-way 1-NN {100*c['nn_acc']:.1f}% | margin {c['margin']:+.3f}")
+    print("  A high SPAWN% with a high 1-NN accuracy = the signature RANKS corpora correctly but the SCALE is wrong")
+    print("     -> ASSEMBLER/threshold problem (raise NEW_DIST, or normalize distances per-domain).")
+    print("  A ~chance 1-NN accuracy (25% at 4 corpora) = the signature genuinely cannot tell the corpora apart at")
+    print("     window scale -> ENCODER problem (positive radius / objective), thresholds cannot fix it.")
+    print("=" * 118)
+
+
+def bnd_line(a, tag):
+    return (f"  [boundary SNR{tag}] adjacent-window d: WITHIN segment {a['same_mean']:.3f}+-{a['same_sd']:.3f} "
+            f"({100*a['trip_rate_same']:.1f}% > SHIFT_DIST={SHIFT_DIST}) | ACROSS splice {a['splice_mean']:.3f}"
+            f"+-{a['splice_sd']:.3f} ({100*a['trip_rate_splice']:.1f}% trip) | AUC {a['auc']:.3f} d' "
+            f"{a['dprime']:.2f} | splice same-corpus {a['splice_same_corpus_mean']:.3f} vs diff-corpus "
+            f"{a['splice_diff_corpus_mean']:.3f} | implied 1-window precision {a['implied_precision_1win']:.2f} "
+            f"(n {a['n_same']}/{a['n_splice']})")
+
+
 def main():
     t0 = time.time()
-    stream, labels, starts, pos, lab, seg = build_universe()
+    U = build_universe()
+    stream, starts, pos, lab, seg = U["stream"], U["starts"], U["pos"], U["lab"], U["seg"]
     nclass = S.NP
     cent_idx, eval_idx = split_pools(pos, lab, seg, nclass)
     dn = os.environ.get("DOMAINS", "eng,py,num,c").split(",")
@@ -269,22 +377,27 @@ def main():
                           "new_dist": NEW_DIST, "shift_dist": SHIFT_DIST, "k_cent": K_CENT,
                           "steps": STEPS, "posmax_mult": POSMAX, "domains": dn}, "runs": {}, "controls": {}}
 
+    if not SWEEP:
+        results["drift"] = {str(k): v for k, v in drift_probe(U, cent_idx, eval_idx).items()}
+        if OUT_JSON:
+            with open(OUT_JSON, "w") as f: json.dump(results, f, indent=1)
+            print(f"[saved] {OUT_JSON}")
+        print(f"[probe done in {time.time()-t0:.0f}s]"); return
+
     # ---- (g) CONTROLS: untrained, non-learned signatures ----
     for mode in ("bigram", "frozen"):
         old = S.SIG_MODE; S.SIG_MODE = mode
         try:
-            r = evaluate(stream, None, pos, lab, seg, cent_idx, eval_idx)
+            r = evaluate(U, None, cent_idx, eval_idx)
         finally:
             S.SIG_MODE = old
         results["controls"][mode] = r
-        m = r["pairs"]
-        print(f"[CONTROL {mode:>6} (untrained, dim {S.SIG_DIM if mode=='bigram' else S.D})]")
-        hdr_pairs(); row_pairs("-", m)
+        print(f"[CONTROL {mode:>6} -- untrained non-learned signature, dim {S.SIG_DIM if mode=='bigram' else S.D}"
+              f" (NEW_DIST is calibrated for the LEARNED sig, so read AUC/d', not the % columns)]")
+        hdr_pairs(); row_pairs("-", r["pairs"])
         hdr_cent()
         for R in sorted(r["centroid"]): row_cent("-", R, r["centroid"][R])
-        a = r["adjacent"]
-        print(f"  adjacent windows: same-seg {a['same_mean']:.3f}+-{a['same_sd']:.3f} | across-splice "
-              f"{a['cross_mean']:.3f}+-{a['cross_sd']:.3f} | AUC {a['auc']:.3f}\n")
+        print(bnd_line(r["adjacent"], "") + "\n")
 
     # ---- (c) learned encoder at each ENC_POS_MAX ----
     for pm in POSMAX:
@@ -299,24 +412,25 @@ def main():
             while trained < N:
                 S.contrastive_step(enc, opt, stream, len(stream)); trained += 1
             enc.eval()
-            r = evaluate(stream, enc, pos, lab, seg, cent_idx, eval_idx)
+            r = evaluate(U, enc, cent_idx, eval_idx)
             results["runs"][f"posmax{pm}_N{N}"] = r
-            row_pairs(N, r["pairs"]); rows_c.append((N, r))
+            row_pairs(N, r["pairs"]); rows_c.append((N, r)); enc.train()
         print()
         hdr_cent()
         for N, r in rows_c:
             for R in sorted(r["centroid"]): row_cent(N, R, r["centroid"][R])
-        a = rows_c[-1][1]["adjacent"]
-        print(f"  [boundary SNR @N={rows_c[-1][0]}] adjacent same-seg {a['same_mean']:.3f}+-{a['same_sd']:.3f} "
-              f"({100*a['trip_rate_same']:.1f}% > SHIFT_DIST) | across-splice {a['cross_mean']:.3f}+-{a['cross_sd']:.3f} "
-              f"({100*a['trip_rate_cross']:.1f}% trip) | AUC {a['auc']:.3f} | implied 1-window precision "
-              f"{a['implied_precision_1win']:.2f}")
-        print(f"  [same-corpus distance vs BYTE SEPARATION @N={rows_c[-1][0]}]  (between-corpus = "
-              f"{rows_c[-1][1]['pairs']['between_mean']:.3f})")
-        for lo, hi, n, mu in rows_c[-1][1]["pairs"]["sep_curve"]:
-            if n: print(f"      {lo:>6}-{'inf' if hi > (1<<29) else hi:>6} bytes  n={n:>7}  mean d = {mu:.3f}")
+        for N, r in rows_c: print(bnd_line(r["adjacent"], f" @N={N}"))
+        sc = rows_c[-1][1]["pairs"]["sep_curve"]
+        print("  [SAME-corpus mean d vs BYTE SEPARATION of the two windows]  " +
+              " ".join(f"{lo}-{'inf' if hi > (1<<29) else hi:>5}" for lo, hi, _, _ in sc) + "   | BETWEEN-corpus")
+        for N, r in rows_c:
+            print(f"      N={N:<6} " + " ".join(f"{mu:>10.3f}" for _, _, n, mu in r["pairs"]["sep_curve"]) +
+                  f"   | {r['pairs']['between_mean']:.3f}")
+        print("      n pairs   " + " ".join(f"{n:>10}" for _, _, n, _ in sc))
         print()
 
+    if DRIFT_ON: results["drift"] = {str(k): v for k, v in drift_probe(U, cent_idx, eval_idx).items()}
+    verdict(results)
     if OUT_JSON:
         with open(OUT_JSON, "w") as f: json.dump(results, f, indent=1)
         print(f"[saved] {OUT_JSON}")

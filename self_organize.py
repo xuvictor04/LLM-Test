@@ -56,6 +56,8 @@ DOM_DECAY = _f("DOM_DECAY", 0.9)           # per-manage decay of the activity co
 DOM_GRACE = _i("DOM_GRACE", 500)           # min age before a domain may be culled
 DOM_CULL_FRAC = _f("DOM_CULL_FRAC", 0.10)  # per-manage cull budget: bottom fraction by DECAYED activity
 DOM_WINS = _i("DOM_WINS", 40)              # reservoir of sample windows per domain (the rekey basis)
+DOM_ADAPTIVE = bool(_i("DOM_ADAPTIVE", 1))  # calibrate the spawn threshold to MEASURED within-domain scatter
+DOM_SPAWN_K = _f("DOM_SPAWN_K", 3.0)       # spawn only beyond median + K*MAD of recent assign distances
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
@@ -647,6 +649,7 @@ class DomainAssembler:
         s.act = {}; s.born = {}                                           # act: DECAYED use (cull); size: cumulative (reporting)
         s.cur = -1; s.run = 0; s.next_id = 0; s.merged = {}               # merged[b]=a: b was folded into a (for scoring)
         s._ids = []; s._C = None; s._pend = []                            # cached (N,SIG_D) centroid matrix + pending run sigs
+        s._dh = []                                                        # recent assign distances -> the adaptive spawn threshold
         s.created = 0; s.capped = 0
     def _dirty(s): s._C = None
     def _mat(s):
@@ -682,8 +685,23 @@ class DomainAssembler:
         if not s.cent: return s._new(sig, step)
         ids, C = s._mat()
         sims = C @ sig                                                    # ONE matmul + ONE sync (was N python .item() calls)
-        j = int(sims.argmax())
-        if 1 - float(sims[j]) < NEW_DIST: return s._touch(ids[j], sig)
+        j = int(sims.argmax()); d = 1 - float(sims[j])
+        # ADAPTIVE SPAWN THRESHOLD. A FIXED NEW_DIST cannot work here, and the GH200 run showed exactly why:
+        # measured mean within-domain cohesion 0.61, i.e. a query re-entering its OWN domain sits 0.39 from that
+        # domain's centroid -- while NEW_DIST is 0.35. Re-entry was ARITHMETICALLY FORCED to spawn, every time, so
+        # the population ran to 142 domains for 4 corpora with silhouette -0.22 (not distinct clusters at all).
+        # The scale of within-domain scatter is a property of the encoder and of the data, and it MOVES as the
+        # encoder trains -- so it has to be measured, not assumed. Track the distances at which we actually assign
+        # and spawn only on the high tail (median + k*MAD), the same robust-deviation rule used for self-consistency.
+        thr = NEW_DIST
+        if DOM_ADAPTIVE and len(s._dh) >= 64:
+            v = sorted(s._dh); m = v[len(v) // 2]
+            mad = sorted(abs(x - m) for x in v)[len(v) // 2]
+            thr = max(NEW_DIST, min(0.9, m + DOM_SPAWN_K * (mad + 1e-6)))
+        if d < thr:
+            s._dh.append(d)
+            if len(s._dh) > 512: s._dh.pop(0)
+            return s._touch(ids[j], sig)
         if len(s.cent) >= MAX_DOMAINS:                                    # AT CAP: absorb into the nearest WITHOUT dragging
             s.capped += 1; return ids[j]                                  #   its centroid (a forced far match must not
         #   pollute the cluster it lands in). manage() reclaims slots on the next tick; `capped` says if the cap is binding.
