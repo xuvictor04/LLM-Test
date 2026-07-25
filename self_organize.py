@@ -46,8 +46,18 @@ SELF_ORG = bool(_i("SELF_ORG", 1))                         # 0 = DISABLE domain 
 ENC_EVERY = _i("ENC_EVERY", 1); ENC_BATCH = _i("ENC_BATCH", 48); TEMP = _f("TEMP", 0.1); REKEY_EVERY = _i("REKEY_EVERY", 200)
 ENC_FUSE = bool(_i("ENC_FUSE", 1))                         # encode the InfoNCE anchor+positive batches in ONE pass (see below)
 MANAGE_EVERY = _i("MANAGE_EVERY", 500); MANAGE_MERGE = _f("MANAGE_MERGE", 0.12)   # domain management: merge/cull cadence
+# --- domain population control. The old rules disagreed about what a domain IS: create at NEW_DIST=0.35 but
+# merge at 0.12 (3x tighter, so everything between was permanent); `size` cumulative so anything reaching
+# MANAGE_MIN was immortal; and no cap at all -- domains were the only population without a slot pool. The
+# result was ~1 domain per SPLICE SEGMENT (96 for 4 corpora), with manage() O(N^2) doubling wall-clock at N~300.
+MAX_DOMAINS = _i("MAX_DOMAINS", 64)        # hard cap, mirroring the expert bank's fixed slot pool
+MERGE_FRAC = _f("MERGE_FRAC", 0.8)         # merge threshold = MERGE_FRAC*NEW_DIST -> ONE scale for create+merge
+DOM_DECAY = _f("DOM_DECAY", 0.9)           # per-manage decay of the activity counter (ExpertRouter's rule)
+DOM_GRACE = _i("DOM_GRACE", 500)           # min age before a domain may be culled
+DOM_CULL_FRAC = _f("DOM_CULL_FRAC", 0.10)  # per-manage cull budget: bottom fraction by DECAYED activity
+DOM_WINS = _i("DOM_WINS", 40)              # reservoir of sample windows per domain (the rekey basis)
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
-MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 2000)        #   cull domains < MIN windows unseen for STALE
+MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
 USE_TOK = bool(_i("TOKENIZER", 0)); TOK_ONLINE = bool(_i("TOK_ONLINE", 0)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
@@ -575,7 +585,16 @@ def contrastive_step(enc, opt, stream, seen):              # InfoNCE: nearby win
     hi = seen - 3 * WIN
     if hi < ENC_BATCH: return
     enc.train()
-    st = [random.randint(0, hi) for _ in range(ENC_BATCH)]; off = [random.randint(WIN // 2, 2 * WIN) for _ in st]
+    # POSITIVE-PAIR RADIUS. This sets what the encoder learns to be INVARIANT to, and it is the root of the
+    # over-segmentation: the default draws the positive 64-256 bytes away (WIN//2 .. 2*WIN at WIN=128), which is
+    # SHORTER than a splice segment (SEG_MIN=700). So a well-trained encoder is explicitly taught that two distant
+    # windows of the SAME corpus are different -- and _assign, querying a single window against a 40-window centroid
+    # mean, then spawns a new domain on every re-entry. MORE encoder training makes this WORSE, not better.
+    # Widening it teaches corpus-level rather than 256-byte-locality invariance, but it also raises the fraction of
+    # positives that straddle a domain boundary (measured 17.3% at 2*WIN with 4 domains), which teaches the opposite
+    # error. The trade is real and unmeasured at scale, so the default is UNCHANGED and this is a sweepable knob.
+    _pmax = _i("ENC_POS_MAX", 2 * WIN)
+    st = [random.randint(0, hi) for _ in range(ENC_BATCH)]; off = [random.randint(WIN // 2, max(WIN // 2 + 1, _pmax)) for _ in st]
     _t = _ENC_T["t"]
     if _t is not None and _t.numel() >= len(stream):
         _ar = torch.arange(WIN, device=DEV)
@@ -599,61 +618,112 @@ class DomainAssembler:
     """Self-organizes an unlabeled stream into domains AND MANAGES them: MERGES redundant domains and CULLS
     tiny/stale ones (analogous to the expert cull -- the project's biggest win). Domains carry STABLE ids so the
     memory's provenance stays valid across merges/culls. manage() prunes the domain set and the MEMORY together --
-    a merge reassigns the loser's memory to the survivor; a cull deletes the culled domain's memory."""
+    a merge reassigns the loser's memory to the survivor; a cull deletes the culled domain's memory.
+
+    OVER-SEGMENTATION FIX. The old version partitioned the stream into ~1 domain per SEGMENT (96 domains for 4
+    corpora) because four rules disagreed with each other:
+      1. _assign was queried with the SINGLE raw window that tripped the boundary -- the noisiest possible sample of
+         the new run -- against centroids that are MEANS of 40 windows. A single-window signature sits further from
+         its own class mean than NEW_DIST, so re-entering a known domain reliably SPAWNED instead of re-identifying.
+         The encoder makes this worse as it trains: contrastive_step's positive is a window 64-256 bytes away, i.e.
+         its learned invariance radius is SHORTER than a segment (SEG_MIN=700), so a trained encoder is *supposed* to
+         separate two distant windows of the same corpus. Assign now uses the MEAN of the run that triggered the
+         boundary, which shrinks within-domain scatter without touching between-domain separation.
+      2. creation used NEW_DIST=0.35 but consolidation used MANAGE_MERGE=0.12 -- 3x tighter. Every pair in
+         [0.12, 0.35) was permanent. Merge now derives from the SAME scale as creation (MERGE_FRAC*NEW_DIST).
+      3. `size` was cumulative and never reset, so any domain that ever reached MANAGE_MIN windows was immortal.
+         `act` is a DECAYED activity counter -- the exact rule ExpertRouter already uses (`s.use[i] *= 0.9`).
+      4. domains were the only UNCAPPED population. MAX_DOMAINS mirrors the expert bank's fixed slot pool: at cap we
+         absorb into the nearest centroid instead of growing. `capped` counts how often the cap bound (if it is
+         large, the encoder or NEW_DIST is wrong -- the cap is a safety net, not a substitute for calibration).
+    Also: _assign/manage/rekey were O(N) and O(N^2) PYTHON loops with a .item() sync per pair. They are now one
+    matmul each, which is what makes a bounded-but-large population affordable."""
     def __init__(s):
         s.run_sig = None; s.cent = {}; s.wins = {}; s.size = {}; s.last = {}
-        s.cur = -1; s.run = 0; s.next_id = 0; s.merged = {}                # merged[b]=a: b was folded into a (for scoring)
+        s.act = {}; s.born = {}                                           # act: DECAYED use (cull); size: cumulative (reporting)
+        s.cur = -1; s.run = 0; s.next_id = 0; s.merged = {}               # merged[b]=a: b was folded into a (for scoring)
+        s._ids = []; s._C = None; s._pend = []                            # cached (N,SIG_D) centroid matrix + pending run sigs
+        s.created = 0; s.capped = 0
+    def _dirty(s): s._C = None
+    def _mat(s):
+        if s._C is None:
+            s._ids = list(s.cent); s._C = torch.stack([s.cent[i] for i in s._ids]) if s._ids else None
+        return s._ids, s._C
     def _new(s, sig, step):
         i = s.next_id; s.next_id += 1
-        s.cent[i] = sig.clone(); s.wins[i] = []; s.size[i] = 0; s.last[i] = step; return i
+        s.cent[i] = sig.clone(); s.wins[i] = []; s.size[i] = 0; s.act[i] = 0.0
+        s.last[i] = step; s.born[i] = step; s.created += 1; s._dirty(); return i
     def resolve(s, d):
         while d in s.merged: d = s.merged[d]                              # follow merge chains to the survivor
         return d
+    def _touch(s, i, sig):
+        s.cent[i] = F.normalize(0.9 * s.cent[i] + 0.1 * sig, dim=0); s._dirty(); return i
     def update(s, sig, window, step):
         boundary = False
         if s.run_sig is None: s.run_sig = sig.clone()
         else:
             d = 1 - F.cosine_similarity(sig.unsqueeze(0), s.run_sig.unsqueeze(0)).item()
-            if d > SHIFT_DIST: s.run += 1; boundary = s.run >= SUSTAIN
-            else: s.run = 0; s.run_sig = F.normalize(0.85 * s.run_sig + 0.15 * sig, dim=0)
+            if d > SHIFT_DIST: s.run += 1; s._pend.append(sig); boundary = s.run >= SUSTAIN
+            else: s.run = 0; s._pend = []; s.run_sig = F.normalize(0.85 * s.run_sig + 0.15 * sig, dim=0)
         if boundary or s.cur < 0 or s.cur not in s.cent:
-            s.cur = s._assign(sig, step); s.run_sig = sig.clone(); s.run = 0
-        s.size[s.cur] += 1; s.last[s.cur] = step
-        if len(s.wins[s.cur]) < 40: s.wins[s.cur].append(window)
+            q = F.normalize(torch.stack(s._pend).mean(0), dim=0) if s._pend else sig   # SMOOTHED assign query
+            s.cur = s._assign(q, step); s.run_sig = q.clone(); s.run = 0; s._pend = []
+        s.size[s.cur] += 1; s.act[s.cur] = s.act.get(s.cur, 0.0) + 1.0; s.last[s.cur] = step
+        w = s.wins[s.cur]
+        if len(w) < DOM_WINS: w.append(window)                             # RESERVOIR (was: first-40-only, which pinned the
+        elif random.random() < DOM_WINS / float(s.size[s.cur]):            #   centroid to the domain's BIRTH forever, so rekey
+            w[random.randrange(DOM_WINS)] = window                         #   kept undoing both the EMA drift and every merge)
         return s.cur, boundary
     def _assign(s, sig, step):
         if not s.cent: return s._new(sig, step)
-        ids = list(s.cent); ds = [1 - F.cosine_similarity(sig.unsqueeze(0), s.cent[i].unsqueeze(0)).item() for i in ids]
-        j = min(range(len(ids)), key=lambda k: ds[k])
-        if ds[j] < NEW_DIST:
-            i = ids[j]; s.cent[i] = F.normalize(0.9 * s.cent[i] + 0.1 * sig, dim=0); return i
+        ids, C = s._mat()
+        sims = C @ sig                                                    # ONE matmul + ONE sync (was N python .item() calls)
+        j = int(sims.argmax())
+        if 1 - float(sims[j]) < NEW_DIST: return s._touch(ids[j], sig)
+        if len(s.cent) >= MAX_DOMAINS:                                    # AT CAP: absorb into the nearest WITHOUT dragging
+            s.capped += 1; return ids[j]                                  #   its centroid (a forced far match must not
+        #   pollute the cluster it lands in). manage() reclaims slots on the next tick; `capped` says if the cap is binding.
         return s._new(sig, step)
-    def rekey(s, enc):
-        with torch.no_grad():
-            for i in list(s.cent):
-                if s.wins[i]:
-                    W = torch.tensor([w for w in s.wins[i]], device=DEV); s.cent[i] = F.normalize(enc(W).mean(0), dim=0)
+    def rekey(s, enc, chunk=512):
+        ids = [i for i in s.cent if s.wins[i]]
+        if not ids: return
+        flat = [w for i in ids for w in s.wins[i]]                        # ONE batched encode for ALL domains (was N
+        with torch.no_grad():                                             #   sequential GRU passes: N*128 serial launches)
+            Z = torch.cat([enc(torch.tensor(flat[a:a + chunk], device=DEV)) for a in range(0, len(flat), chunk)])
+        o = 0
+        for i in ids:
+            n = len(s.wins[i]); s.cent[i] = F.normalize(Z[o:o + n].mean(0), dim=0); o += n
+        s._dirty()
     def manage(s, step, mem, merge_dist, min_size, stale):
         merged = culled = 0
-        ids = list(s.cent)
-        for ai in range(len(ids)):
-            a = ids[ai]
-            if a not in s.cent: continue
-            for bi in range(ai + 1, len(ids)):
-                b = ids[bi]
-                if b not in s.cent or a not in s.cent: continue
-                if 1 - F.cosine_similarity(s.cent[a].unsqueeze(0), s.cent[b].unsqueeze(0)).item() < merge_dist:
-                    if mem is not None: mem.reassign_src(b, a)             # MERGE -> memory follows (indirect prune)
-                    na, nb = s.size[a], s.size[b]
-                    s.cent[a] = F.normalize((s.cent[a] * na + s.cent[b] * nb) / max(1, na + nb), dim=0)
-                    s.size[a] += nb; s.wins[a] = (s.wins[a] + s.wins[b])[:40]; s.last[a] = max(s.last[a], s.last[b])
-                    del s.cent[b], s.wins[b], s.size[b], s.last[b]; s.merged[b] = a; merged += 1
-        for d in list(s.cent):
-            if s.size[d] < min_size and step - s.last[d] > stale:
+        md = merge_dist if merge_dist > 0 else MERGE_FRAC * NEW_DIST      # ONE scale for create AND consolidate
+        while len(s.cent) > 1:                                            # merge every pair under md, ONE matmul per merge
+            ids, C = s._mat(); n = len(ids)
+            M = C @ C.t(); M.fill_diagonal_(-2.0)
+            k = int(M.argmax()); r, c = k // n, k % n
+            if 1 - float(M[r, c]) >= md: break
+            a, b = ids[r], ids[c]
+            if s.act.get(b, 0.0) > s.act.get(a, 0.0): a, b = b, a         # keep the more ACTIVE (was: the lower id)
+            if mem is not None: mem.reassign_src(b, a)                    # MERGE -> memory follows (indirect prune)
+            na, nb = s.size[a], s.size[b]
+            s.cent[a] = F.normalize((s.cent[a] * na + s.cent[b] * nb) / max(1, na + nb), dim=0)
+            s.size[a] += nb; s.act[a] = s.act.get(a, 0.0) + s.act.get(b, 0.0)
+            pool = s.wins[a] + s.wins[b]                                  # SAMPLE the union (was [:40], which kept only the
+            s.wins[a] = random.sample(pool, DOM_WINS) if len(pool) > DOM_WINS else pool   # survivor's -> next rekey UNDID the merge)
+            s.last[a] = max(s.last[a], s.last[b]); s.born[a] = min(s.born[a], s.born[b])
+            for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born): _D.pop(b, None)
+            s.merged[b] = a; merged += 1; s._dirty()
+        if len(s.cent) > 1:                                               # CULL: DECAYED activity + age grace (expert rule)
+            order = sorted(s.cent, key=lambda i: s.act.get(i, 0.0))
+            for d in order[:max(1, int(DOM_CULL_FRAC * len(s.cent)))]:
+                if len(s.cent) <= 1: break
+                if step - s.born.get(d, step) < DOM_GRACE: continue
+                if not (s.act.get(d, 0.0) < min_size and step - s.last[d] > stale): continue
                 if mem is not None: mem.delete_src(d)                     # CULL -> memory follows (direct prune)
-                del s.cent[d], s.wins[d], s.size[d], s.last[d]; culled += 1
-        return merged, culled
-
+                for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born): _D.pop(d, None)
+                culled += 1; s._dirty()
+        for i in s.act: s.act[i] *= DOM_DECAY                             # DECAY -> `act` reflects RECENT use, so a domain
+        return merged, culled                                             #   that stops being fed becomes cullable
 
 @torch.no_grad()
 def compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=64):
@@ -1463,7 +1533,23 @@ def main():
     purity = sum(c.most_common(1)[0][1] for c in by.values()) / max(1, len(assigns))
     s2t = {d: c.most_common(1)[0][0] for d, c in by.items()}
     smap = [(d, s2t[d]) for d in sorted(by)]
-    print(f"clustering purity: {purity:.2f}   (1.0 = perfectly recovered)   [{len(smap)} self-domains; first 20 self->true] {smap[:20]}")
+    # PURITY ALONE IS NOT A SCORE. It rises MONOTONICALLY with fragmentation -- one window per cluster gives purity
+    # 1.0 -- so it read 0.96 while the assembler was producing one domain per SPLICE SEGMENT (96 for 4 corpora), and
+    # the "improvement" from 0.54 was mostly the cluster count going 4 -> 96. COMPLETENESS is the other half (are all
+    # windows of one true process in ONE domain), and V-measure is their harmonic mean. Report all three, always.
+    import math as _m
+    _n = max(1, len(assigns))
+    _ct = Counter(t for _, _, t in assigns)                 # true-class sizes
+    _hc_given_k = -sum(c[t] / _n * _m.log((c[t] / max(1, sum(c.values()))) or 1)
+                       for c in by.values() for t in c)     # H(true | domain)
+    _hc = -sum(v / _n * _m.log(v / _n) for v in _ct.values() if v)                 # H(true)
+    completeness = 1.0 if _hc == 0 else max(0.0, 1 - _hc_given_k / _hc)
+    vmeas = 0.0 if (purity + completeness) == 0 else 2 * purity * completeness / (purity + completeness)
+    _frag = len(smap) / max(1, len(_ct))
+    print(f"clustering purity: {purity:.2f} | completeness: {completeness:.2f} | V-measure: {vmeas:.2f}"
+          f"   [{len(smap)} self-domains for {len(_ct)} true processes = {_frag:.0f}x fragmentation]")
+    print(f"  >> purity alone is gameable by fragmenting; judge on V-measure. {'OVER-SEGMENTED' if _frag > 3 else 'ok'}"
+          f" (first 20 self->true) {smap[:20]}")
     biggest = max(by, key=lambda d: sum(by[d].values())); tgt = s2t[biggest]
 
     # ---- GENUINENESS on the FINAL MANAGED set (merge/cull already applied live) ----
