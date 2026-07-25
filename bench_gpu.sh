@@ -34,6 +34,15 @@ python3 -c "import torch;print('torch',torch.__version__,'cuda',torch.cuda.is_av
 torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')" 2>&1 | tee -a "$OUT/env.txt"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>&1 | tee -a "$OUT/env.txt"
 if ! python3 -c "import torch" 2>/dev/null; then echo "!! torch missing: pip install -r requirements.txt"; exit 1; fi
+# GATE ON CUDA, NOT ON IMPORT. Every arm below hardcodes DEVICE=cuda, so a torch that imports but cannot see the
+# GPU burns the 1 GB fetch and then fails all 5 arms one at a time. That is the default outcome on a fresh aarch64
+# box installed with an old pin: torch<=2.3's aarch64 wheels were CPU-ONLY, and `torch>=2.1` in requirements.txt
+# is happily satisfied by one. Fail here instead, with the fix in the message.
+python3 -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" || {
+  echo "!! torch imports but torch.cuda.is_available() is False."
+  echo "   arch=$(uname -m) torch=$(python3 -c 'import torch;print(torch.__version__)')"
+  echo "   On aarch64/Grace this is almost always a CPU-only wheel or a driver older than the wheel's CUDA major."
+  echo "   Run: bash preflight.sh   (it prints the exact install command for this box)"; exit 1; }
 
 # ---------- 1. data ----------
 # The bench only needs enough text that the stream never wraps; 1 GB is ample and costs one download.

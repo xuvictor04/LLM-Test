@@ -164,7 +164,11 @@ class TinyTransformer(nn.Module):                          # decoder-only Transf
     def __init__(s, d, layers=4, heads=8, maxlen=512):
         super().__init__(); s.emb = nn.Embedding(V, d); s.pos = nn.Embedding(maxlen, d); s.maxlen = maxlen
         lyr = nn.TransformerEncoderLayer(d, heads, dim_feedforward=4 * d, batch_first=True, dropout=0.0, activation="gelu", norm_first=True)
-        s.tr = nn.TransformerEncoder(lyr, layers, enable_nested_tensor=False); s.head = nn.Linear(d, V)
+        # norm=LayerNorm(d): with norm_first=True the FINAL sublayer output is never normalised, which is fine at
+        # L1-L4 and progressively worse with depth -- GPT-2 has this final norm. prompt.py MUST match or every
+        # saved checkpoint loads into a different network.
+        s.tr = nn.TransformerEncoder(lyr, layers, norm=nn.LayerNorm(d), enable_nested_tensor=False)
+        s.head = nn.Linear(d, V)
     def encode(s, x):
         L = x.size(1); p = torch.arange(L, device=x.device).clamp(max=s.maxlen - 1)
         h = s.emb(x) + s.pos(p)
@@ -197,7 +201,7 @@ class Fabric(nn.Module):
     Contrast with a top-1 bank: there is no hard selection to get wrong, and EVERY node gets gradient every step."""
     def __init__(s, d, sig_d, dk, n0, alpha, max_steps, hid_mult=2, min_steps=1, norm_only=False):
         super().__init__()
-        s.d, s.sig_d, s.dk, s.alpha, s.max_steps, s.hid = d, sig_d, dk, alpha, max_steps, hid_mult * d
+        s.d, s.sig_d, s.dk, s.alpha, s.max_steps, s.hid = d, sig_d, dk, alpha, max_steps, int(hid_mult * d)
         s.min_steps = min_steps                             # HALT blocked for this many steps. DEFAULT 0: measured,
                                                             #   the router's OWN light-touch routing (mass ~0.1) beat
                                                             #   forcing node use (2.034 vs 2.176). Only raise this if
@@ -497,6 +501,26 @@ def sig_of(win, enc):                                      # win: list[int] -> s
         v.scatter_add_(0, bg, torch.ones_like(bg, dtype=torch.float)); return F.normalize(v, dim=0)
     return F.normalize(FROZEN[t].mean(0), dim=0)
 
+# MEMORY BLEND, GATED ON MATCH QUALITY. `hp` was dist.sum(), but read() scatters a SOFTMAX over the top-k, so
+# dist ALWAYS sums to exactly 1.0 -- verified numerically. hp was therefore identically 1.0 and this was an
+# UNCONDITIONAL 50/50 mix at every position, however bad the nearest neighbour. Meanwhile `conf` (the top cosine
+# similarity) was computed by read() and discarded by every caller. That is why memory measured NET-NEGATIVE at
+# every store size (-0.097 at 200k slots, -0.652 at 2k): half the probability mass came from retrieval even when
+# retrieval had nothing useful. Gating on conf makes a poor match contribute ~nothing and a strong one contribute
+# up to MEM_W. MEM_GATE=0 restores the old unconditional mix for A/B.
+MEM_W = _f("MEM_W", 0.5)                                   # max share retrieval may take when the match is perfect
+MEM_GATE = bool(_i("MEM_GATE", 1))                         # 0 = old unconditional 0.5 mix
+MEM_CONF0 = _f("MEM_CONF0", 0.3)                           # similarity below this contributes nothing
+
+
+def _mem_hp(dist, conf, dim=-1):
+    """Blend weight for the memory distribution: MEM_W scaled by how good the nearest neighbour actually was."""
+    if not MEM_GATE or conf is None:
+        return dist.sum(dim, keepdim=True).clamp(max=1.0) * (MEM_W if MEM_GATE else 0.5)
+    g = ((conf - MEM_CONF0) / max(1e-6, 1.0 - MEM_CONF0)).clamp(0.0, 1.0)
+    return (MEM_W * g).reshape(*g.shape, 1) if g.dim() == dist.dim() - 1 else (MEM_W * g).unsqueeze(-1)
+
+
 def sig_of_batch(wins, enc):
     """Signatures for N windows in ONE encoder call. `sig_of` is a BATCH-1 GRU over WIN timesteps run once per step,
     measured at 46% of the loop on an A100 at d=768 (4.7 ms/step, invariant to model type / AMP / ENC_FUSE) -- the
@@ -627,18 +651,21 @@ def compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=64):
     outs = []
     div_sum = 0.0; n = 0
     distG = torch.zeros(pm.size(0), V, device=DEV); distS = torch.zeros(pm.size(0), V, device=DEV)
+    confG = torch.zeros(pm.size(0), device=DEV)           # top similarity per query -- the blend gate (see _mem_hp)
     for s in range(0, keys.size(0), 4096):                # chunk to bound memory
         sim = F.normalize(keys[s:s + 4096], dim=-1) @ K.t()
         tv, ti = sim.topk(kk, -1); w = torch.softmax(tv / 0.1, -1)
+        confG[s:s + 4096] = tv.max(-1).values.clamp(0, 1)
         ht = toks[ti]; hs = srcs[ti]
         div_sum += (torch.tensor([len(set(r.tolist())) for r in hs], device=DEV).float()).sum().item(); n += hs.size(0)
         distG[s:s + 4096].scatter_add_(1, ht, w)
         keep = (hs == hs[:, 0:1]).float(); wS = w * keep; wS = wS / wS.sum(-1, keepdim=True).clamp(min=1e-9)
         distS[s:s + 4096].scatter_add_(1, ht, wS)
-    def bpb(dist):
-        hp = dist.sum(-1, keepdim=True).clamp(max=1.0); pp = (1 - 0.5 * hp) * pm + 0.5 * hp * dist
+    def bpb(dist, cf=None):
+        hp = _mem_hp(dist, cf, dim=-1)
+        pp = (1 - hp) * pm + hp * dist
         return -(torch.log(pp.gather(-1, Y.unsqueeze(-1)).squeeze(-1).clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(Y)
-    bm, bg, bs = bpb(torch.zeros_like(distG)), bpb(distG), bpb(distS)   # model ALONE (no memory) vs +memory vs siloed
+    bm, bg, bs = bpb(torch.zeros_like(distG)), bpb(distG, confG), bpb(distS, confG)   # ALONE vs +memory vs siloed
     print(f"\n=== PERFORMANCE: does the memory earn its keep? (bits/byte, lower=better) ===")
     print(f"  model ALONE (weights only) {bm:.3f}  ->  model + MEMORY {bg:.3f}   (memory contributes {bm - bg:+.3f})")
     print(f"\n=== CROSS-SEGMENT COMPOSITION (do the {len(procs)}-process / many-segment store's segments work together?) ===")
@@ -667,9 +694,9 @@ def generate(model, mem, seed, n, use_mem, DEV, temp=0.7, vlim=None, fab=None, g
         if vlim is not None and vlim < lg.numel(): lg = lg.clone(); lg[vlim:] = float("-inf")   # never sample untrained ids
         pm = F.softmax(lg / temp, -1)
         if use_mem:
-            dist, _, _, _ = mem.read(mem_key(x)[-1:])      # retrieval for the next position
-            pmem = dist[0]; hp = pmem.sum().clamp(max=1.0)
-            p = (1 - 0.5 * hp) * pm + 0.5 * hp * pmem
+            dist, _cf, _, _ = mem.read(mem_key(x)[-1:])   # retrieval for the next position
+            pmem = dist[0]; hp = _mem_hp(dist, _cf, dim=-1)[0]
+            p = (1 - hp) * pm + hp * pmem
             p = (p / p.sum().clamp_min(1e-9))
         else:
             p = pm
@@ -696,7 +723,10 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     return out
 
 
-def selfcheck(model, mem, fab=None):                       # WRONGNESS (B): is each stored token plausible under the model
+@torch.no_grad()                                           # was building a full autograd graph over every stored
+def selfcheck(model, mem, fab=None):                       # entry -- tens of GiB at L12, and pure waste: nothing
+    #                                                        here is ever backpropagated. WRONGNESS (B): is each
+    #                                                        stored token plausible under the model
     ii, ctx = mem.active_ctx()                             # given the entry's OWN context? single pass, every entry judged
     if ctx is None or ii.numel() == 0: return
     fr = []
@@ -752,7 +782,7 @@ def main():
         model.encode = _encode_wf
     _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
-                 _i("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
+                 _f("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
                             _f("FAB_Z", 4.0), _i("FAB_BURST", 3), _i("FAB_RAMP", 4000),
                             _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000)) if FABRIC else None
@@ -987,9 +1017,10 @@ def main():
                     "experts": (experts.state_dict() if EXPERTS else None),
                     "fab": (fab.state_dict() if FABRIC else None),
                     "fab_cfg": ({"n": len(fab.bodies), "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
-                                 "max_steps": _i("FAB_STEPS", 4), "hid_mult": _i("FAB_HID_MULT", 2),
+                                 "max_steps": _i("FAB_STEPS", 4), "hid_mult": _f("FAB_HID_MULT", 2),
                                  "min_steps": _i("FAB_MIN_STEPS", 0), "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
-                                 "society": SOCIETY} if FABRIC else None)},
+                                 "society": SOCIETY, "grounded": fab.grounded, "route_t": fab.route_t,
+                                 "route_learn": fab.route_learn, "ens_k": ENS_K} if FABRIC else None)},
                    f"{ck}/ckpt.pt.tmp")
         if os.path.exists(f"{ck}/ckpt.pt"):                       # keep ONE previous generation: a corrupt or
             try: os.replace(f"{ck}/ckpt.pt", f"{ck}/ckpt.prev.pt")   # interrupted write is then always recoverable
@@ -1466,9 +1497,10 @@ def main():
                 if mk.any(): h = h.clone(); h[mk] = experts.batch(h[mk], sl[mk])
             if h is not None: pm = F.softmax(model.head(h), -1)
             if use_mem:
-                dist, _, _, _ = mem.read(mem_key(X))
-                pmem = dist.reshape(X.size(0), X.size(1), V); hp = pmem.sum(-1, keepdim=True).clamp(max=1.0)
-                pp = (1 - 0.5 * hp) * pm + 0.5 * hp * pmem
+                dist, _cf, _, _ = mem.read(mem_key(X))
+                pmem = dist.reshape(X.size(0), X.size(1), V)
+                hp = _mem_hp(dist, _cf, dim=-1).reshape(X.size(0), X.size(1), 1)
+                pp = (1 - hp) * pm + hp * pmem
             else:
                 pp = pm
             return -(torch.log(pp.gather(-1, Y.unsqueeze(-1)).squeeze(-1).clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(Y)

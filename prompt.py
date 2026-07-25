@@ -39,7 +39,8 @@ class TinyTransformer(nn.Module):
     def __init__(s):
         super().__init__(); s.emb = nn.Embedding(V, D); s.pos = nn.Embedding(MAXLEN, D); s.maxlen = MAXLEN
         lyr = nn.TransformerEncoderLayer(D, HEADS, dim_feedforward=4 * D, batch_first=True, dropout=0.0, activation="gelu", norm_first=True)
-        s.tr = nn.TransformerEncoder(lyr, LAYERS, enable_nested_tensor=False); s.head = nn.Linear(D, V)
+        s.tr = nn.TransformerEncoder(lyr, LAYERS, norm=nn.LayerNorm(D), enable_nested_tensor=False)   # MUST match
+        s.head = nn.Linear(D, V)                                                                     # self_organize
     def encode(s, x):
         L = x.size(1); p = torch.arange(L, device=x.device).clamp(max=s.maxlen - 1)
         h = s.emb(x) + s.pos(p); m = torch.triu(torch.ones(L, L, device=x.device), 1).bool()
@@ -53,6 +54,7 @@ model.load_state_dict(d["model"]); model.eval()
 # ---- ROUTER FABRIC (the model was TRAINED with it; running without it gives the crippled path) ----
 FAB_CFG = d.get("fab_cfg"); SIG_D = d.get("sig_d"); WIN = d.get("win", 96)
 FAB_SOC = bool(FAB_CFG.get("society", True)) if FAB_CFG else False
+ENS_K = int(FAB_CFG.get("ens_k", 2)) if FAB_CFG else 2
 
 
 class SigEncoder(nn.Module):
@@ -70,7 +72,7 @@ class FabricNode(nn.Module):
 class Fabric(nn.Module):
     def __init__(s, dd, sig_d, dk, n, alpha, max_steps, hid_mult, min_steps, norm_only):
         super().__init__()
-        s.d, s.dk, s.alpha, s.max_steps, s.hid = dd, dk, alpha, max_steps, hid_mult * dd
+        s.d, s.dk, s.alpha, s.max_steps, s.hid = dd, dk, alpha, max_steps, int(hid_mult * dd)
         s.min_steps, s.norm_only = min_steps, norm_only
         s.bodies = nn.ModuleList([FabricNode(dd, s.hid) for _ in range(n)])
         s.keys = nn.ParameterList([nn.Parameter(torch.randn(dk) * 0.1) for _ in range(n)])
@@ -78,14 +80,30 @@ class Fabric(nn.Module):
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
         s.q_entry = nn.Linear(sig_d, dk); s.nov = nn.Linear(1, dk); s.ctrl = nn.Linear(3, dk)
         s.norm = nn.LayerNorm(dd)
-    def society(s, h, gist, nov):                          # independent experts, blended once at the router
+        s.register_buffer("cent", F.normalize(torch.randn(n, sig_d), dim=-1))
+        s.grounded = True; s.route_t = 0.1; s.route_learn = True   # overwritten from fab_cfg below
+    def society(s, h, gist, nov, k=None):
+        """MUST match self_organize.Fabric.society/route_w. It previously used the NON-grounded q_entry path while
+        training routed by centroid, so every generation was routed by a different function than the one trained --
+        on parameters that receive no gradient in grounded mode. That is why generation looked incoherent even when
+        training was fine."""
         N = len(s.bodies)
-        K = torch.stack(list(s.keys) + [s.halt_key], 0)
-        nb = s.nov(nov[:, None])
-        c = torch.softmax((s.q_entry(gist) + nb) @ K.t(), -1)
-        w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)
-        O = torch.stack([b(h) for b in s.bodies], 1)
-        return s.norm((w[:, :, None, None] * O).sum(1))
+        if s.grounded:
+            C = F.normalize(s.cent[:N].to(gist.device), dim=-1)
+            logits = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
+            if s.route_learn:
+                Q = torch.stack([q(gist) for q in s.qproj], 1)
+                Kn = torch.stack(list(s.keys), 0)
+                logits = logits + (Q * Kn[None]).sum(-1) + s.nov(nov[:, None]).sum(-1, keepdim=True)
+            w = torch.softmax(logits, -1)
+        else:
+            K = torch.stack(list(s.keys) + [s.halt_key], 0)
+            c = torch.softmax(((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t), -1)
+            w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)
+        kk = N if k is None else int(min(max(1, k), N))
+        idx = w.mean(0).topk(kk).indices if kk < N else torch.arange(N, device=w.device)
+        O = torch.stack([s.bodies[int(i)](h) for i in idx], 1)
+        return w, O, idx
     def forward(s, h, gist, nov):
         N = len(s.bodies); HALT = N
         steps = max(1, min(s.max_steps, 2 + N // 2))
@@ -167,7 +185,11 @@ FAB = ENC = None
 if FAB_CFG and d.get("fab") is not None:
     FAB = Fabric(D, SIG_D, FAB_CFG["dk"], FAB_CFG["n"], FAB_CFG["alpha"], FAB_CFG["max_steps"],
                  FAB_CFG["hid_mult"], FAB_CFG["min_steps"], FAB_CFG["norm_only"]).to(DEV)
-    FAB.load_state_dict(d["fab"]); FAB.eval()
+    # honour the ROUTING MODE the checkpoint was trained with, rather than assuming one
+    FAB.grounded = bool(FAB_CFG.get("grounded", True))
+    FAB.route_t = float(FAB_CFG.get("route_t", 0.1))
+    FAB.route_learn = bool(FAB_CFG.get("route_learn", True))
+    FAB.load_state_dict(d["fab"]); FAB.eval()          # loads `cent` too, now that it is a registered buffer
     ENC = SigEncoder(D, SIG_D).to(DEV); ENC.load_state_dict(d["enc"]); ENC.eval()
 
 # ---- tokenizer (or raw bytes) ----
@@ -225,10 +247,22 @@ def generate(seed, n, temp):
     for _ in range(n):
         x = torch.tensor([seq[-256:]], device=DEV)
         _h = _world_h(x, model.encode(x))                           # world-model forecast conditions h (as in training)
-        if FAB is not None and GIST is not None:
+        if FAB is not None and GIST is not None and FAB_SOC:
+            # ENSEMBLE AT THE OUTPUT, exactly as training does: logits are a routing-weighted sum of each expert's
+            # OWN head output. Blending hidden states instead produces a representation no expert was trained to
+            # emit. society() now returns (w, O, idx) and computes only the top-k, matching self_organize.
             _n0 = torch.zeros(1, device=DEV)
-            _h = FAB.society(_h, GIST, _n0) if FAB_SOC else FAB(_h, GIST, _n0)
-        logits = model.head(_h)[0, -1]
+            _w, _O, _oid = FAB.society(_h, GIST, _n0, k=ENS_K)
+            _wk = _w[:, _oid]; _wk = _wk / _wk.sum(-1, keepdim=True).clamp_min(1e-9)
+            _lg = None
+            for _j in range(_O.size(1)):
+                _t = model.head(FAB.norm(_O[:, _j])) * _wk[:, _j][:, None, None]
+                _lg = _t if _lg is None else _lg + _t
+            logits = _lg[0, -1]
+        else:
+            if FAB is not None and GIST is not None:
+                _h = FAB(_h, GIST, torch.zeros(1, device=DEV))
+            logits = model.head(_h)[0, -1]
         if VLIM is not None and VLIM < logits.numel(): logits = logits.clone(); logits[VLIM:] = float('-inf')
         if REP_PEN != 1.0:                                          # repetition penalty on recently-used tokens (anti-degeneracy)
             for t in set(seq[-REP_WIN:]):
