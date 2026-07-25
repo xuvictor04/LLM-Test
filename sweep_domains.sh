@@ -12,6 +12,20 @@
 # GH200: stage 0-3 ~25 min at STREAM_LEN=120000 (937 steps/run). Stage 4-5 ~20 min.
 # ---------------------------------------------------------------------------------------------------------------
 set -u
+
+# ---- GUARD: every knob this sweep sets must actually be READ by self_organize.py. -------------------------------
+# This project has lost a full benchmark campaign to D_MODEL_B, a variable read by nothing: every run silently used
+# the default and the results described a model nobody intended. A sweep is the worst place for that failure, since
+# each unread knob turns a whole stage into duplicate rows that look like a clean null result.
+python3 - <<'PYGUARD' || { echo "!! aborting: fix or remove the unread knobs above"; exit 1; }
+import re, sys
+sw = open("sweep_domains.sh").read(); so = open("self_organize.py").read()
+local = {"OUT","TSV","STAGES","SL","DOMS","COMMON","DATA_DIR","D_MODEL","STREAM_LEN","DOMAINS","LC_ALL","PYTHONWARNINGS"}
+miss = [k for k in sorted(set(re.findall(r'\b([A-Z][A-Z0-9_]{2,})=', sw)))
+        if k not in local and not re.search(r'["\']' + k + r'["\']', so)]
+print("  UNREAD KNOBS (setting these does NOTHING): " + ", ".join(miss) if miss else "  all sweep knobs are read")
+sys.exit(1 if miss else 0)
+PYGUARD
 OUT=${OUT:-runs/sweep_domains_$(date +%m%d_%H%M)}
 mkdir -p "$OUT"
 TSV="$OUT/results.tsv"

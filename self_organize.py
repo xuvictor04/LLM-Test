@@ -56,13 +56,26 @@ DOM_DECAY = _f("DOM_DECAY", 0.9)           # per-manage decay of the activity co
 DOM_GRACE = _i("DOM_GRACE", 500)           # min age before a domain may be culled
 DOM_CULL_FRAC = _f("DOM_CULL_FRAC", 0.10)  # per-manage cull budget: bottom fraction by DECAYED activity
 DOM_WINS = _i("DOM_WINS", 40)              # reservoir of sample windows per domain (the rekey basis)
-DOM_ADAPTIVE = bool(_i("DOM_ADAPTIVE", 1))  # calibrate the spawn threshold to MEASURED within-domain scatter
+# DEFAULTS RESTORED TO THE BEST MEASURED CONFIGURATION. Three successive 'fixes' of mine each LOWERED the
+# primary metric: fixed thresholds V=0.42 (boundary recall 0.96) -> adaptive spawn 0.38 -> relative margin
+# + recalibrated shift 0.12 -> relative margin + guessed shift 0.00. The scale analysis behind them is
+# sound and the probe data is real, but no variant has yet BEATEN the constant thresholds end to end, and
+# two of those runs changed the threshold rule and ENC_WARMUP together so they cannot even be attributed.
+# They stay in the code, off by default, until a sweep shows one beating V=0.42. Turning them on:
+#   DOM_RELATIVE=1   scale-free assignment (validated against 20 probe cells, never validated end to end)
+#   SHIFT_REL=1      scale-free boundary test (calibrated q50*1.5 from probe within/across distances)
+#   DOM_ADAPTIVE=1   the censored-median spawn threshold (superseded; kept for the record)
+DOM_ADAPTIVE = bool(_i("DOM_ADAPTIVE", 0))  # calibrate the spawn threshold to MEASURED within-domain scatter
 DOM_SPAWN_K = _f("DOM_SPAWN_K", 3.0)       # spawn only beyond median + K*MAD of recent assign distances
-DOM_RELATIVE = bool(_i("DOM_RELATIVE", 1))  # assign on the RELATIVE margin (scale-free) rather than an absolute distance
+DOM_RELATIVE = bool(_i("DOM_RELATIVE", 0))  # assign on the RELATIVE margin (scale-free) rather than an absolute distance
 DOM_MARGIN = _f("DOM_MARGIN", 0.75)        # re-identify when d(nearest) <= DOM_MARGIN * d(runner-up)
-SHIFT_REL = bool(_i("SHIFT_REL", 1))       # boundary test relative to recent adjacent-distance scale, not a constant
+SHIFT_REL = bool(_i("SHIFT_REL", 0))       # boundary test relative to recent adjacent-distance scale, not a constant
 SHIFT_Q = _f("SHIFT_Q", 0.50)              # quantile of recent adjacent distances used as the base
 SHIFT_MULT = _f("SHIFT_MULT", 1.5)         # trip when the jump is this many times that base
+DOM_RADIUS = bool(_i("DOM_RADIUS", 0))     # PER-DOMAIN acceptance radius measured from that domain's own matches
+DOM_RQ = _f("DOM_RQ", 0.90)                # quantile of a domain's own assign distances used as its radius
+DOM_RMULT = _f("DOM_RMULT", 1.25)          # slack on that quantile
+DOM_RMIN = _i("DOM_RMIN", 12)              # samples before a domain trusts its own radius
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
@@ -661,6 +674,7 @@ class DomainAssembler:
         s._ids = []; s._C = None; s._pend = []                            # cached (N,SIG_D) centroid matrix + pending run sigs
         s._dh = []                                                        # recent assign distances -> the adaptive spawn threshold
         s._sh = []                                                        # recent adjacent-window distances -> scale-free shift test
+        s._rd = {}; s._rad = {}                                           # per-domain assign distances -> per-domain radius
         s.created = 0; s.capped = 0
     def _dirty(s): s._C = None
     def _mat(s):
@@ -670,7 +684,8 @@ class DomainAssembler:
     def _new(s, sig, step):
         i = s.next_id; s.next_id += 1
         s.cent[i] = sig.clone(); s.wins[i] = []; s.size[i] = 0; s.act[i] = 0.0
-        s.last[i] = step; s.born[i] = step; s.created += 1; s._dirty(); return i
+        s.last[i] = step; s.born[i] = step; s.created += 1
+        s._rd[i] = []; s._rad[i] = None; s._dirty(); return i
     def resolve(s, d):
         while d in s.merged: d = s.merged[d]                              # follow merge chains to the survivor
         return d
@@ -734,6 +749,24 @@ class DomainAssembler:
         # The RELATIVE margin is invariant to that whole inflation: the corpus signal is intact throughout
         # (1-NN corpus accuracy 84-95% at every stage), so ask whether the nearest centroid is decisively nearer
         # than the runner-up, not whether it is nearer than some absolute number.
+        if DOM_RADIUS:
+            # Each domain carries its own radius, estimated from the distances at which IT was matched, so the
+            # test is "is this within THIS domain's habitual spread" rather than a single number for all domains
+            # at all times. Bootstrapped from NEW_DIST until a domain has DOM_RMIN samples of its own.
+            rad = s._rad.get(ids[j])
+            if rad is None or len(s._rd.get(ids[j], ())) < DOM_RMIN:
+                ok = d < NEW_DIST
+            else:
+                ok = d <= rad
+            if ok:
+                h = s._rd.setdefault(ids[j], [])
+                h.append(d)
+                if len(h) > 256: h.pop(0)
+                if len(h) >= DOM_RMIN:
+                    v = sorted(h); s._rad[ids[j]] = v[min(len(v) - 1, int(DOM_RQ * len(v)))] * DOM_RMULT
+                return s._touch(ids[j], sig)
+            if len(s.cent) < MAX_DOMAINS: return s._new(sig, step)
+            s.capped += 1; return ids[j]
         if DOM_RELATIVE and sims.numel() >= 2:
             top2 = torch.topk(sims, 2).values
             d1 = 1 - float(top2[0]); d2 = 1 - float(top2[1])
@@ -780,7 +813,7 @@ class DomainAssembler:
             pool = s.wins[a] + s.wins[b]                                  # SAMPLE the union (was [:40], which kept only the
             s.wins[a] = random.sample(pool, DOM_WINS) if len(pool) > DOM_WINS else pool   # survivor's -> next rekey UNDID the merge)
             s.last[a] = max(s.last[a], s.last[b]); s.born[a] = min(s.born[a], s.born[b])
-            for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born): _D.pop(b, None)
+            for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s._rd, s._rad): _D.pop(b, None)
             s.merged[b] = a; merged += 1; s._dirty()
         if len(s.cent) > 1:                                               # CULL: DECAYED activity + age grace (expert rule)
             order = sorted(s.cent, key=lambda i: s.act.get(i, 0.0))
@@ -789,7 +822,7 @@ class DomainAssembler:
                 if step - s.born.get(d, step) < DOM_GRACE: continue
                 if not (s.act.get(d, 0.0) < min_size and step - s.last[d] > stale): continue
                 if mem is not None: mem.delete_src(d)                     # CULL -> memory follows (direct prune)
-                for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born): _D.pop(d, None)
+                for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s._rd, s._rad): _D.pop(d, None)
                 culled += 1; s._dirty()
         for i in s.act: s.act[i] *= DOM_DECAY                             # DECAY -> `act` reflects RECENT use, so a domain
         return merged, culled                                             #   that stops being fed becomes cullable
