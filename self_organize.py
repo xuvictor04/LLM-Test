@@ -61,8 +61,8 @@ DOM_SPAWN_K = _f("DOM_SPAWN_K", 3.0)       # spawn only beyond median + K*MAD of
 DOM_RELATIVE = bool(_i("DOM_RELATIVE", 1))  # assign on the RELATIVE margin (scale-free) rather than an absolute distance
 DOM_MARGIN = _f("DOM_MARGIN", 0.75)        # re-identify when d(nearest) <= DOM_MARGIN * d(runner-up)
 SHIFT_REL = bool(_i("SHIFT_REL", 1))       # boundary test relative to recent adjacent-distance scale, not a constant
-SHIFT_Q = _f("SHIFT_Q", 0.75)              # quantile of recent adjacent distances used as the base
-SHIFT_MULT = _f("SHIFT_MULT", 2.0)         # trip when the jump is this many times that base
+SHIFT_Q = _f("SHIFT_Q", 0.50)              # quantile of recent adjacent distances used as the base
+SHIFT_MULT = _f("SHIFT_MULT", 1.5)         # trip when the jump is this many times that base
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
@@ -681,7 +681,16 @@ class DomainAssembler:
         if s.run_sig is None: s.run_sig = sig.clone()
         else:
             d = 1 - F.cosine_similarity(sig.unsqueeze(0), s.run_sig.unsqueeze(0)).item()
-            # SCALE-FREE SHIFT TEST. SHIFT_DIST has exactly the disease NEW_DIST had: the probe measured
+            # SCALE-FREE SHIFT TEST, CALIBRATED. q75*2.0 (the first attempt) was a GUESS shipped alongside the
+            # probe-validated DOM_MARGIN, and it silently switched the boundary detector OFF: against the measured
+            # within/across distances it stops firing from N=1000 onward, and a run at ENC_WARMUP=4000 found 14
+            # boundaries for 3213 true switches (recall 0.01), collapsing the assembler to a single domain.
+            #   N=200  within 0.019 across 0.094 | q75*2.0 = 0.068 fires | q50*1.5 = 0.028 fires
+            #   N=1000 within 0.106 across 0.215 | q75*2.0 = 0.316 DEAD  | q50*1.5 = 0.159 fires
+            #   N=4000 within 0.212 across 0.342 | q75*2.0 = 0.559 DEAD  | q50*1.5 = 0.318 fires
+            # q50*1.5 fires at every stage the probe measured (it fails only at N=16000, where the distributions
+            # overlap so heavily that AUC is 0.70 and no threshold does well -- another reason not to over-train
+            # the encoder). SHIFT_DIST has exactly the disease NEW_DIST had: the probe measured
             # within-segment adjacent-window distance running 0.044 -> 0.229 -> 0.317 -> 0.340 as the encoder
             # trains, against a CONSTANT 0.30 -- so boundary precision goes 0.92 at N=200 to 0.27 at N=16000,
             # tripping on ordinary within-segment variation. Compare instead against a running quantile of recent
