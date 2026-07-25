@@ -89,6 +89,7 @@ def load(out):
     cells = {}
     for p in sorted(glob.glob(os.path.join(out, "cells", "*.log"))):
         c = parse(p)
+        c["name"] = os.path.basename(p)[:-4]      # the FILE is the identity, not the echoed name
         cells[c["name"]] = c
     return cells
 
@@ -133,9 +134,9 @@ DHDR = ("| cell | created/merged/culled | clusters raw/resolved | median wins/do
         "dN/dstep | compl(res) | run |\n|---|---|---|---|---|---|---|---|")
 
 
-def pick(cells):
+def pick(cells, prefixes=("B_",)):
     cand = [c for c in cells.values()
-            if c["name"].startswith("B_") and c["ok"] and not c["void"]]
+            if c["name"].startswith(prefixes) and c["ok"] and not c["void"]]
     gated = [c for c in cand if (c.get("rec") or 0) >= GATE_REC]
     pool = gated or cand
     if not pool:
@@ -150,10 +151,28 @@ def pick(cells):
 
 
 def env_of(c):
+    """The four threshold/encoder knobs only -- this string is CARRIED into later stages, which set
+    the rule knobs themselves, so it must not pin them."""
     a = c["audit"]
     return "ENC_POS_MAX={} ENC_WARMUP={} NEW_DIST={} SHIFT_DIST={}".format(
         a.get("enc_pos_max", 256), a.get("enc_warmup", 800),
         a.get("new_dist", 0.35), a.get("shift_dist", 0.30))
+
+
+def full_env_of(c):
+    """Everything needed to reproduce the cell, including any rule variant it had switched on."""
+    a = c["audit"]
+    out = [env_of(c)]
+    if a.get("dom_relative"):
+        out.append("DOM_RELATIVE=1 DOM_MARGIN=%s" % a.get("dom_margin", 0.75))
+    if a.get("shift_rel"):
+        out.append("SHIFT_REL=1 SHIFT_Q=%s SHIFT_MULT=%s"
+                   % (a.get("shift_q", 0.5), a.get("shift_mult", 1.5)))
+    if a.get("dom_adaptive"):
+        out.append("DOM_ADAPTIVE=1 DOM_SPAWN_K=%s" % a.get("dom_spawn_k", 3.0))
+    if a.get("sig_mode") and a["sig_mode"] != "learned":
+        out.append("SIG_MODE=%s" % a["sig_mode"])
+    return " ".join(out)
 
 
 def verdicts(cells, best):
@@ -204,6 +223,19 @@ def verdicts(cells, best):
     else:
         L.append("**K5 extensivity** — Stage D incomplete (run STAGES=D).")
 
+    # K7: the incumbent is the shipped fixed-threshold config, V=0.42 at boundary recall 0.96.
+    inc = cells.get("C_stock_all") or cells.get("A_cap64") or cells.get("smoke")
+    if inc and inc["ok"] and best:
+        iv = inc["res"].get("vmeasure", inc.get("V", 0))
+        bv = best["res"].get("vmeasure", best.get("V", 0))
+        L.append("**K7 beats the incumbent** — measured incumbent (`%s`) V %.2f at recall %.2f; best cell "
+                 "V %.2f at recall %.2f → %s"
+                 % (inc["name"], iv, inc.get("rec", 0), bv, best.get("rec", 0),
+                    "improvement." if bv > iv else
+                    "NO IMPROVEMENT. The reference point for this project is V=0.42 with recall 0.96 on "
+                    "fixed thresholds; a variant that does not beat it is rejected regardless of how few "
+                    "domains it produces."))
+
     bg = cells.get("C_bigram")
     if bg and bg["ok"] and best:
         bv = bg["res"].get("vmeasure", bg.get("V", 0))
@@ -226,11 +258,10 @@ def main():
             print(env_of(best))
         return
 
-    order = ["smoke"] + [n for n in sorted(cells) if n.startswith("A_")] \
-        + [n for n in sorted(cells) if n.startswith("B_")] \
-        + [n for n in sorted(cells) if n.startswith("C_")] \
-        + [n for n in sorted(cells) if n.startswith("D_")] \
-        + [n for n in sorted(cells) if n.startswith("E_")]
+    winner, wwhy = pick(cells, ("B_", "R_"))          # overall winner may be a rule variant
+    order = ["smoke"]
+    for p in ("A_", "B_", "R_", "C_", "D_", "E_"):
+        order += [n for n in sorted(cells) if n.startswith(p)]
     order = [n for n in order if n in cells]
 
     P = print
@@ -253,8 +284,9 @@ def main():
     P("fragmentation). `V(res)` is V recomputed after resolving merge chains — the shipped V is computed on the")
     P("raw assign-time domain id, so it cannot see consolidation that happened by MERGE. `capped` must be 0 or")
     P("the row is void. `found/true` is the boundary count: a low `found` with few domains is a dead detector,")
-    P("not convergence. `mem Δb/B` is bits/byte the memory removes (negative is better); the LM is identical in")
-    P("every cell, so it is comparable across rows but is not a headline number.")
+    P("not convergence. `mem Δb/B` is `bits/byte(model alone) - bits/byte(model+memory)`, so POSITIVE means the")
+    P("memory helped; the LM is identical in every cell, so the column is comparable across rows but is not a")
+    P("headline number.")
     P("")
     P(HDR)
     for n in order:
@@ -271,19 +303,23 @@ def main():
     for n in order:
         P(diag_row(cells[n]))
     P("")
-    if best:
-        P("## Winner")
+    if winner:
+        P("## Winner (across the grid AND the rule variants)")
         P("")
-        P("`%s`  →  `%s`%s" % (best["name"], env_of(best), why))
+        P("`%s`%s" % (winner["name"], wwhy))
         P("")
-        P("Full command:")
+        P("Reproduce it:")
         P("")
         P("```bash")
         P("DATA_MODE=real DATA_DIR=data DOMAINS=eng,py,num,c DEVICE=cuda \\")
-        P("  MAX_DOMAINS=4096 DOM_ADAPTIVE=0 MANAGE_MERGE=0 ENC_WARMUP_MIN=1000000000 \\")
-        P("  %s \\" % env_of(best))
+        P("  MAX_DOMAINS=4096 MANAGE_MERGE=0 MERGE_FRAC=0.8 ENC_WARMUP_MIN=1000000000 \\")
+        P("  %s \\" % full_env_of(winner))
         P("  python3 self_organize.py")
         P("```")
+        if best and best["name"] != winner["name"]:
+            P("")
+            P("(Stage-B grid winner, which is what stages R/C/D/E were run at: `%s` → `%s`)"
+              % (best["name"], env_of(best)))
 
 
 if __name__ == "__main__":
