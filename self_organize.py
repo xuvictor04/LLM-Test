@@ -58,6 +58,11 @@ DOM_CULL_FRAC = _f("DOM_CULL_FRAC", 0.10)  # per-manage cull budget: bottom frac
 DOM_WINS = _i("DOM_WINS", 40)              # reservoir of sample windows per domain (the rekey basis)
 DOM_ADAPTIVE = bool(_i("DOM_ADAPTIVE", 1))  # calibrate the spawn threshold to MEASURED within-domain scatter
 DOM_SPAWN_K = _f("DOM_SPAWN_K", 3.0)       # spawn only beyond median + K*MAD of recent assign distances
+DOM_RELATIVE = bool(_i("DOM_RELATIVE", 1))  # assign on the RELATIVE margin (scale-free) rather than an absolute distance
+DOM_MARGIN = _f("DOM_MARGIN", 0.75)        # re-identify when d(nearest) <= DOM_MARGIN * d(runner-up)
+SHIFT_REL = bool(_i("SHIFT_REL", 1))       # boundary test relative to recent adjacent-distance scale, not a constant
+SHIFT_Q = _f("SHIFT_Q", 0.75)              # quantile of recent adjacent distances used as the base
+SHIFT_MULT = _f("SHIFT_MULT", 2.0)         # trip when the jump is this many times that base
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
@@ -655,6 +660,7 @@ class DomainAssembler:
         s.cur = -1; s.run = 0; s.next_id = 0; s.merged = {}               # merged[b]=a: b was folded into a (for scoring)
         s._ids = []; s._C = None; s._pend = []                            # cached (N,SIG_D) centroid matrix + pending run sigs
         s._dh = []                                                        # recent assign distances -> the adaptive spawn threshold
+        s._sh = []                                                        # recent adjacent-window distances -> scale-free shift test
         s.created = 0; s.capped = 0
     def _dirty(s): s._C = None
     def _mat(s):
@@ -675,7 +681,17 @@ class DomainAssembler:
         if s.run_sig is None: s.run_sig = sig.clone()
         else:
             d = 1 - F.cosine_similarity(sig.unsqueeze(0), s.run_sig.unsqueeze(0)).item()
-            if d > SHIFT_DIST: s.run += 1; s._pend.append(sig); boundary = s.run >= SUSTAIN
+            # SCALE-FREE SHIFT TEST. SHIFT_DIST has exactly the disease NEW_DIST had: the probe measured
+            # within-segment adjacent-window distance running 0.044 -> 0.229 -> 0.317 -> 0.340 as the encoder
+            # trains, against a CONSTANT 0.30 -- so boundary precision goes 0.92 at N=200 to 0.27 at N=16000,
+            # tripping on ordinary within-segment variation. Compare instead against a running quantile of recent
+            # adjacent distances, which rides the scale up with the encoder. SHIFT_REL=0 restores the constant.
+            thr = SHIFT_DIST
+            if SHIFT_REL and len(s._sh) >= 64:
+                v = sorted(s._sh); thr = max(1e-6, v[min(len(v) - 1, int(SHIFT_Q * len(v)))] * SHIFT_MULT)
+            s._sh.append(d)
+            if len(s._sh) > 512: s._sh.pop(0)
+            if d > thr: s.run += 1; s._pend.append(sig); boundary = s.run >= SUSTAIN
             else: s.run = 0; s._pend = []; s.run_sig = F.normalize(0.85 * s.run_sig + 0.15 * sig, dim=0)
         if boundary or s.cur < 0 or s.cur not in s.cent:
             q = F.normalize(torch.stack(s._pend).mean(0), dim=0) if s._pend else sig   # SMOOTHED assign query
@@ -698,6 +714,23 @@ class DomainAssembler:
         # The scale of within-domain scatter is a property of the encoder and of the data, and it MOVES as the
         # encoder trains -- so it has to be measured, not assumed. Track the distances at which we actually assign
         # and spawn only on the high tail (median + k*MAD), the same robust-deviation rule used for self-consistency.
+        # SCALE-FREE ASSIGNMENT. The previous rule tracked the median of distances AT WHICH ASSIGNMENT HAPPENED --
+        # but assignment only happens when d < threshold, so that sample is CENSORED and structurally cannot follow
+        # the drift it exists to follow. It halved the domain count and made the partition worse.
+        # The measured problem is that the metric's SCALE is non-stationary while every threshold is a constant:
+        # d(query, own centroid) runs .037 -> .136 -> .319 -> .421 -> .668 at 200/400/800/1000/4000 encoder steps,
+        # because the InfoNCE positive is only 64-256 bytes away and training keeps pushing same-corpus windows
+        # apart. NEW_DIST=0.35 is below d_other early (everything merges) and above d_own later (everything splits);
+        # no constant sits between them for more than a few hundred steps.
+        # The RELATIVE margin is invariant to that whole inflation: the corpus signal is intact throughout
+        # (1-NN corpus accuracy 84-95% at every stage), so ask whether the nearest centroid is decisively nearer
+        # than the runner-up, not whether it is nearer than some absolute number.
+        if DOM_RELATIVE and sims.numel() >= 2:
+            top2 = torch.topk(sims, 2).values
+            d1 = 1 - float(top2[0]); d2 = 1 - float(top2[1])
+            if d1 <= DOM_MARGIN * d2: return s._touch(ids[j], sig)      # decisively closest -> re-identify
+            if len(s.cent) < MAX_DOMAINS: return s._new(sig, step)
+            s.capped += 1; return ids[j]                                 # at cap: absorb without dragging
         thr = NEW_DIST
         if DOM_ADAPTIVE and len(s._dh) >= 64:
             v = sorted(s._dh); m = v[len(v) // 2]

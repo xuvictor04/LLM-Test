@@ -186,7 +186,18 @@ def adjacent_metrics(Zg, acat):
     tp = float((tb > SHIFT_DIST).float().mean()) if tb.numel() else float("nan")
     fp = float((ts > SHIFT_DIST).float().mean()) if ts.numel() else float("nan")
     prec = (tp * tb.numel()) / max(1e-9, tp * tb.numel() + fp * ts.numel())
-    return {"n_same": int(ts.numel()), "n_splice": int(tb.numel()), "n_splice_same_corpus": int(t1.numel()),
+    # best achievable SHIFT_DIST for THIS encoder state (max F1 over a grid) -- the threshold is only meaningful
+    # relative to the current scale of the embedding, which moves by ~20x over training.
+    bestf, bestt, bestpr = -1.0, float("nan"), (float("nan"), float("nan"))
+    if tb.numel() and ts.numel():
+        for q in torch.linspace(0.0, 1.0, 101):
+            th = float(torch.quantile(d, q))
+            rec = float((tb > th).float().mean()); fpr = float((ts > th).float().mean())
+            pr = (rec * tb.numel()) / max(1e-9, rec * tb.numel() + fpr * ts.numel())
+            f1 = 2 * pr * rec / max(1e-9, pr + rec)
+            if f1 > bestf: bestf, bestt, bestpr = f1, th, (pr, rec)
+    return {"best_shift_dist": bestt, "best_f1": bestf, "best_prec": bestpr[0], "best_rec": bestpr[1],
+            "n_same": int(ts.numel()), "n_splice": int(tb.numel()), "n_splice_same_corpus": int(t1.numel()),
             "n_splice_diff_corpus": int(t2.numel()), "same_mean": ms, "same_sd": ss,
             "splice_mean": mb, "splice_sd": sb, "splice_same_corpus_mean": _ms(t1)[0],
             "splice_diff_corpus_mean": _ms(t2)[0], "auc": _auc(ts, tb), "dprime": _dprime(ts, tb),
@@ -371,7 +382,8 @@ def bnd_line(a, tag):
             f"+-{a['splice_sd']:.3f} ({100*a['trip_rate_splice']:.1f}% trip) | AUC {a['auc']:.3f} d' "
             f"{a['dprime']:.2f} | splice same-corpus {a['splice_same_corpus_mean']:.3f} vs diff-corpus "
             f"{a['splice_diff_corpus_mean']:.3f} | implied 1-window precision {a['implied_precision_1win']:.2f} "
-            f"(n {a['n_same']}/{a['n_splice']})")
+            f"(n {a['n_same']}/{a['n_splice']}) | BEST SHIFT_DIST here {a['best_shift_dist']:.3f} "
+            f"-> P {a['best_prec']:.2f} R {a['best_rec']:.2f} F1 {a['best_f1']:.2f}")
 
 
 def main():
