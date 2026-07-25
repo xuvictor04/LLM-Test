@@ -588,7 +588,13 @@ def set_enc_tensor(seq):
 
 
 def contrastive_step(enc, opt, stream, seen):              # InfoNCE: nearby windows = positive, random = negative
-    hi = seen - 3 * WIN
+    # The anchor bound must leave room for the POSITIVE, whose furthest start is `off` and which is WIN long.
+    # `hi = seen - 3*WIN` only allowed for the DEFAULT radius (off <= 2*WIN, +WIN for the window), so raising
+    # ENC_POS_MAX above 2*WIN ran the positive past the end of the stream -- IndexError on the gather path, and a
+    # short window into torch.tensor on the list path. i.e. the knob added to TEST wider positives could not be
+    # used at any non-default value. Bound it by the radius actually in use.
+    _pmax = max(2 * WIN, _i("ENC_POS_MAX", 2 * WIN))
+    hi = seen - WIN - _pmax
     if hi < ENC_BATCH: return
     enc.train()
     # POSITIVE-PAIR RADIUS. This sets what the encoder learns to be INVARIANT to, and it is the root of the
@@ -599,7 +605,6 @@ def contrastive_step(enc, opt, stream, seen):              # InfoNCE: nearby win
     # Widening it teaches corpus-level rather than 256-byte-locality invariance, but it also raises the fraction of
     # positives that straddle a domain boundary (measured 17.3% at 2*WIN with 4 domains), which teaches the opposite
     # error. The trade is real and unmeasured at scale, so the default is UNCHANGED and this is a sweepable knob.
-    _pmax = _i("ENC_POS_MAX", 2 * WIN)
     st = [random.randint(0, hi) for _ in range(ENC_BATCH)]; off = [random.randint(WIN // 2, max(WIN // 2 + 1, _pmax)) for _ in st]
     _t = _ENC_T["t"]
     if _t is not None and _t.numel() >= len(stream):

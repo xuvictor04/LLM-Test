@@ -203,6 +203,21 @@ def sigs_for(idx_pos, stream, enc, chunk=1024):
     return torch.cat(out) if out else torch.zeros(0, SIG_D, device=DEV)
 
 
+def train_steps(enc, opt, stream, pmax, n):
+    """n contrastive steps at positive radius `pmax`.
+
+    BUG WORKAROUND (self_organize.py:589) -- contrastive_step bounds the ANCHOR with `hi = seen - 3*WIN`, which
+    only leaves room for a positive at the DEFAULT radius (off <= 2*WIN, plus WIN for the window itself). With
+    ENC_POS_MAX > 2*WIN the positive window runs past the end of the stream: the tensor path raises
+    `IndexError: index N out of bounds`, and the list path builds a short window and dies in torch.tensor. So the
+    very knob that exists to test wider positives cannot be used at its non-default values -- in a real run it
+    survives only while `seen` (=bpos) is far from the end of the stream, then crashes at the end of the epoch.
+    Fix in self_organize: `hi = seen - WIN - max(2*WIN, _pmax)` (and compute _pmax before hi). Here we instead
+    pass a reduced `seen` so the SAMPLED positions stay in range and the sampler is otherwise untouched."""
+    seen = min(len(stream), len(stream) + 2 * WIN - pmax)
+    for _ in range(n): S.contrastive_step(enc, opt, stream, seen)
+
+
 def encode_all(U, enc):
     """(Zall over pure windows in `pos` order, Zg over EVERY grid window)."""
     Zg = sigs_for(U["gp"], U["stream"], enc)                        # ONE encode of EVERY grid window
@@ -300,7 +315,7 @@ def drift_probe(U, cent_idx, eval_idx):
     torch.manual_seed(SEED); random.seed(SEED + 7)
     enc = S.SigEncoder(S.D, SIG_D).to(DEV)
     opt = torch.optim.AdamW(enc.parameters(), lr=ENC_LR, weight_decay=0.0)
-    for _ in range(base): S.contrastive_step(enc, opt, U["stream"], len(U["stream"]))
+    train_steps(enc, opt, U["stream"], pm * WIN, base)
     enc.eval()
     Zall0, _ = encode_all(U, enc)
     C_old = centroids_of(Zall0, cent_idx)                            # what rekey STORED at t = base
@@ -311,8 +326,8 @@ def drift_probe(U, cent_idx, eval_idx):
           f"{'SPAWN%':>7} | {'1-NN':>6} | {'self-drift':>10}")
     out, done = {}, 0
     for lg in lags:
-        while done < lg:
-            enc.train(); S.contrastive_step(enc, opt, U["stream"], len(U["stream"])); done += 1
+        if lg > done:
+            enc.train(); train_steps(enc, opt, U["stream"], pm * WIN, lg - done); done = lg
         enc.eval()
         Zall, _ = encode_all(U, enc)
         Q, qy = queries_R(Zall, U, ev, in_eval, R)
@@ -409,8 +424,7 @@ def main():
         hdr_pairs()
         rows_c, trained = [], 0
         for N in STEPS:
-            while trained < N:
-                S.contrastive_step(enc, opt, stream, len(stream)); trained += 1
+            if N > trained: train_steps(enc, opt, stream, pm * WIN, N - trained); trained = N
             enc.eval()
             r = evaluate(U, enc, cent_idx, eval_idx)
             results["runs"][f"posmax{pm}_N{N}"] = r
