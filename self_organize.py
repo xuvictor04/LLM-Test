@@ -1211,7 +1211,7 @@ def main():
             if PROFILE and _prof:
                 _tot = sum(_prof.values())
                 _br = "  ".join(f"{k} {v/max(1e-9,_tot)*100:.0f}%" for k, v in sorted(_prof.items(), key=lambda kv: -kv[1]))
-                print(f"    [profile] {_br}   ({_tot/max(1e-9,_now-_t_start)*100:.0f}% of wall-clock attributed)")
+                print(f"    [profile] {_br}   ({_tot/max(1e-9,_now-_t_mark)*100:.0f}% of this window attributed)")
                 _prof.clear()
             _t_mark = _now; _s_mark = step
         if i + WIN + 1 >= len(stream):
