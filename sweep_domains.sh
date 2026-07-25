@@ -89,7 +89,7 @@ if has 1; then
     run 1 "warmup$W" ENC_WARMUP=$W ENC_WARMUP_MIN=$W MAX_DOMAINS=1024
   done
   echo "== stage 1b: the loss-floor gate (continual-safe alternative to freezing) =="
-  for K in 4 8 16; do run 1 "floorK$K" ENC_WARMUP=30000 ENC_FLOOR_K=$K MAX_DOMAINS=1024; done
+  for K in 0 4 8 16 32; do run 1 "floorK$K" ENC_WARMUP=30000 ENC_FLOOR_K=$K MAX_DOMAINS=1024; done
 fi
 
 # ---- STAGE 2. THE PRIMARY. Measured per-domain radius OR'd with the landed margin. --------------------------
@@ -101,7 +101,12 @@ fi
 # DOM_RCAP is the sensitive knob and NOT in the direction first assumed: 0.5 is the WORST value in the table (65
 # live / V 0.82 -- it strangles the radius back to baseline, because the cap is set by a SAME-corpus sibling and
 # so forbids exactly the absorption that would consolidate them), while 0 (off) and >=1.5 are indistinguishable.
-# The shipped default is 2.0: free in the healthy regime, still a bound on a runaway. Confirm that here on text.
+# The shipped default is 2.0: free in the healthy regime, still a bound on a runaway.
+# IT DOES NOT TRANSFER CLEANLY, and that is the interesting part. Same mechanism on REAL text (60 kB, 4 corpora,
+# ENC_WARMUP=4000) moves 50 -> 36 live and recurrence 34% -> 61%, but leaves V flat (0.42 -> 0.40) and costs
+# homogeneity (0.80 -> 0.70). What DOES move V is the encoder loss floor (stage 1b): 50 -> 23 alone, 50 -> 16
+# combined with radius+fold at 88% recurrent, V 0.50. So the assign rule was never the dominant term -- the
+# encoder's geometry was. Stage 2 exists to confirm that ranking at 120 kB, not to reproduce the isolated numbers.
 if has 2; then
   echo "== stage 2: acceptance radius grid (MAX_DOMAINS=1024 so the cap cannot contribute) =="
   run 2 "radius_off" DOM_RADIUS=0 MAX_DOMAINS=1024
@@ -132,6 +137,10 @@ if has 3; then
   # An UNGUARDED fold collapses to ONE domain (measured). DOM_FOLD_MULT bounds the fold to a multiple of the
   # pooled domain radius; if homogeneity falls while live falls, this is the knob that is too loose.
   for F in 1.0 1.5 2.5; do run 3 "foldmult$F" DOM_RADIUS=1 DOM_RECUR=1 DOM_FOLD_MULT=$F MAX_DOMAINS=1024; done
+  # THE CADENCE. Domain management shared MANAGE_EVERY=500 with the expert/world populations, and at 937 steps
+  # that pass fired ONCE per run (at 468 steps, NEVER) -- so merge, cull and fold were all off by arithmetic in
+  # every domain number this project has reported. It now has its own knob. 500 reproduces the old behaviour.
+  for E in 50 100 250 500; do run 3 "mgmt$E" DOM_MANAGE_EVERY=$E MAX_DOMAINS=1024; done
 fi
 
 # ---- STAGE 4. (a) ENC_POS_MAX -- now INTERPRETABLE, because the radius rule re-quantiles itself. --------------

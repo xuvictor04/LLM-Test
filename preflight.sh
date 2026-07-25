@@ -157,7 +157,10 @@ names = ["D_MODEL","D_MODEL_B","MODEL","LAYERS","HEADS","WIN","BATCH_W","ACCUM",
          "WRITE_ADAPTIVE","WRITE_TARGET","WRITE_QUANTILE","TOKENIZER","TOK_ONLINE","VMAX","SEED_VOCAB","RETOK_EVERY",
          "RETOK_TAIL","WORLD_MODEL","WORLD_FEEDBACK","WORLD_GROW","SELF_ORG","DISK_STREAM","CORPUS_CAP","STREAM_LEN",
          "EPOCHS","CKPT_EVERY","SAVE_CKPT","RESUME","SIG_BATCH","ENC_FUSE","KEY_BATCH","KEY_PREGATE","REKEY_CHUNK",
-         "AMP","TF32","PROFILE","RATE_EVERY","BENCH","SEED","DEVICE","DATA_MODE","DATA_DIR","DOMAINS","ENC_WARMUP"]
+         "AMP","TF32","PROFILE","RATE_EVERY","BENCH","SEED","DEVICE","DATA_MODE","DATA_DIR","DOMAINS","ENC_WARMUP",
+         # domain self-assembly: on by default now, so a run that does NOT set them still depends on them existing
+         "MAX_DOMAINS","DOM_RADIUS","DOM_RQ","DOM_RMULT","DOM_RCAP","DOM_RECUR","DOM_MIN_VISITS",
+         "DOM_RECUR_HORIZON","DOM_FOLD_MULT","ENC_FLOOR_K","ENC_PROTO"]
 missing = [n for n in names if not re.search(r'["\']' + n + r'["\']', src)]
 print("  " + ("all %d documented knobs are READ by self_organize.py" % len(names)) if not missing
       else "  UNREAD KNOBS (setting these does NOTHING): " + ", ".join(missing))

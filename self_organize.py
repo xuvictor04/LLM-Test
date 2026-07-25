@@ -98,6 +98,13 @@ DOM_RECUR = bool(_i("DOM_RECUR", 1))       # fold domains that never RECUR into 
 DOM_MIN_VISITS = _i("DOM_MIN_VISITS", 2)   # "recurs" = entered on >= this many SEPARATE occasions
 DOM_RECUR_HORIZON = _i("DOM_RECUR_HORIZON", 32)   # judged only after this many BOUNDARIES since birth
 DOM_FOLD_MULT = _f("DOM_FOLD_MULT", 1.5)   # refuse to fold further than this x the pooled radius (unguarded -> 1 domain)
+# DOMAIN management gets its OWN cadence. It was sharing MANAGE_EVERY=500 with the expert and world-model
+# populations, and at that cadence it essentially never ran: a 60 kB run is 468 steps, so `step % 500 == 0` was
+# NEVER true and merge/cull/fold all executed ZERO times; the 120 kB GH200 runs are 937 steps, so it fired ONCE.
+# Every domain-population number this project has reported was therefore produced with the consolidation half of
+# the mechanism switched off by arithmetic. The expert and world cadences are left where they are -- their costs
+# and their grace periods are tuned to 500 -- because this is a domain problem, not a shared-cadence problem.
+DOM_MANAGE_EVERY = _i("DOM_MANAGE_EVERY", 100)
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
@@ -680,13 +687,30 @@ def contrastive_step(enc, opt, stream, seen, asm=None):    # InfoNCE: nearby win
         za, zp = enc(A), enc(P)                            #   not bit-for-bit. ENC_FUSE=0 restores the two-pass form.
     logits = za @ zp.t() / TEMP
     loss = F.cross_entropy(logits, torch.arange(ENC_BATCH, device=DEV))
-    # LOSS FLOOR. Freezing the encoder is not an option in a continual system -- new material has to be able to move
-    # it. But training it to convergence is measurably HARMFUL here: 1-NN corpus accuracy PEAKS at ~1000-4000 steps
-    # and degrades after, while d(query, own centroid) keeps inflating (.037 -> .668 over the same range) because
-    # InfoNCE keeps pushing same-corpus windows apart long after they are already separable. The floor gates the
-    # STEP, not the loss: below ln(1 + (B-1)/K) -- "the true positive is comfortably inside the top K of B" -- the
-    # encoder stops being pushed, and resumes by itself the moment new material makes the loss climb back.
-    _fk = _i("ENC_FLOOR_K", 0)
+    # LOSS FLOOR -- the single largest measured lever on domain identity, and the one that says the ASSIGN RULE was
+    # never the main problem. Freezing the encoder is not an option in a continual system; new material has to be
+    # able to move it. But training it to convergence is actively HARMFUL: 1-NN corpus accuracy PEAKS at ~1000-4000
+    # steps and degrades after, while d(query, own centroid) inflates .037 -> .668 over the same range, because
+    # InfoNCE keeps pushing same-corpus windows apart long after they are separable. The floor gates the STEP, not
+    # the loss, so training resumes by itself the moment new material makes the loss climb back.
+    # WHY THIS FORM: with batch B, one positive and B-1 negatives, ln(1 + (B-1)/K) is the loss of an encoder that
+    # cannot separate the positive from K-1 equally-good candidates. If the stream holds NP kinds of material, ~
+    # (B-1)/NP of the negatives are the SAME kind as the positive, so a perfect KIND encoder cannot do better than
+    # ln(1 + (B-1)/NP) -- i.e. K = the number of kinds present, and everything below that floor is the encoder
+    # learning to tell apart things that are not actually different.
+    # MEASURED, real text, 60 kB / 4 corpora / ENC_WARMUP=4000, everything else identical:
+    #   arm                        live  created  folded  recurrent  bnd prec/rec  hom   comp    V
+    #   constants (old default)     50     50       0        34%      0.61/0.84   0.80  0.29   0.42
+    #   radius+fold                 36     46      10        61%      0.61/0.84   0.70  0.28   0.40
+    #   floor K=8 alone             23     28       0        48%      0.78/0.84   0.70  0.38   0.49
+    #   floor K=8 + radius+fold     16     21       1        88%      0.76/0.86   0.70  0.39   0.50
+    #   floor K=4 + radius+fold      6     10       0        83%      0.79/0.59   0.56  0.52   0.54
+    # The floor dominates, the two compose, and K=4 (= NP here, the theoretical value) lands closest to the truth.
+    # The default is 8 and not 4 deliberately: K=4 buys its V by finding only 38 of 49 true switches (recall 0.59)
+    # and by letting homogeneity fall to 0.56, and a domain that blends two corpora poisons provenance -- delete_src
+    # would unlearn the wrong material. 8 keeps recall 0.86 and homogeneity 0.70. It also nearly HALVES wall clock.
+    # Caveat, stated plainly: one run per arm, one stream length, one seed. sweep_domains.sh stage 1b grids K.
+    _fk = _i("ENC_FLOOR_K", 8)
     if _fk > 0 and float(loss.detach()) <= math.log(1.0 + (ENC_BATCH - 1) / float(_fk)):
         return float(loss.detach())
     opt.zero_grad(); loss.backward(); opt.step()
@@ -1472,8 +1496,8 @@ def main():
             if not REKEY_AMORTIZED: rekey_memory(mem)                                                    # full re-encode (spike) -- fallback path
         if REKEY_AMORTIZED and step > 0 and step % REKEY_CHUNK == 0:
             with _T("rekey(amortized)"): _rekey_amortized(REKEY_CHUNK)                                  # no-compromise: same work, spread out, no stall
-        if SELF_ORG and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:                        # MANAGE the domain set
-            m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull
+        if SELF_ORG and MANAGE_ON and step % DOM_MANAGE_EVERY == 0 and step > 0:                    # MANAGE the domain set
+            m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull + fold
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
         if EXPERTS and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0: router.manage(step)   # experts: create/replicate/cull (their own selective force)
         if WORLD_GROW and step % MANAGE_EVERY == 0 and step > 0:                                    # world-model SELECTION (same cadence as experts/domains)
