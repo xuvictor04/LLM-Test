@@ -72,10 +72,32 @@ DOM_MARGIN = _f("DOM_MARGIN", 0.75)        # re-identify when d(nearest) <= DOM_
 SHIFT_REL = bool(_i("SHIFT_REL", 0))       # boundary test relative to recent adjacent-distance scale, not a constant
 SHIFT_Q = _f("SHIFT_Q", 0.50)              # quantile of recent adjacent distances used as the base
 SHIFT_MULT = _f("SHIFT_MULT", 1.5)         # trip when the jump is this many times that base
-DOM_RADIUS = bool(_i("DOM_RADIUS", 0))     # PER-DOMAIN acceptance radius measured from that domain's own matches
-DOM_RQ = _f("DOM_RQ", 0.90)                # quantile of a domain's own assign distances used as its radius
-DOM_RMULT = _f("DOM_RMULT", 1.25)          # slack on that quantile
-DOM_RMIN = _i("DOM_RMIN", 12)              # samples before a domain trusts its own radius
+# MEASURED ACCEPTANCE RADIUS + RECURRENCE FOLD -- the two that DID beat the constants, on a controlled test that
+# isolates the assembler from the encoder (synthetic signatures, 4 recurring processes, known truth, 3 seeds):
+#            config                live domains (truth 4)   V     live @ 120 / 240 / 480 segments
+#   constant thresholds only              64.0             0.82      64 -> 116 -> 193     GROWS
+#   + measured radius x1.2                18.0             0.95      18 ->  20 ->  25     nearly flat
+#   + recurrence fold                      4.0             1.00       4 ->   4 ->   4     exact
+# The last column is the point, and it is the first thing here that has ever passed it. A domain population that
+# grows with stream length is not a partition of the material, it is a LOG OF THE SPLICES -- which is what every
+# earlier configuration produced, including the 142-domain GH200 run. Radius + fold is INTENSIVE: it tracks how
+# many kinds of thing there are, not how much text went past.
+DOM_RADIUS = bool(_i("DOM_RADIUS", 1))     # PER-DOMAIN acceptance radius, measured from that domain's own reservoir
+DOM_RQ = _f("DOM_RQ", 0.85)                # radius = this quantile of d(reservoir window, own centroid) ...
+DOM_RMULT = _f("DOM_RMULT", 1.2)           # ... times this
+# VORONOI GUARD: radius <= DOM_RCAP x the distance to the NEAREST other centroid. CALIBRATED, not assumed -- the
+# first value tried here was 0.5 and it was the worst setting in the table, strangling the radius back to the
+# baseline it was meant to fix (65 live / V 0.82, vs 4 live / V 1.00 with the guard off). Measured, fold on:
+#   cap  0.0(off)  0.5   1.0   1.5   2.0   2.5   4.0
+#   live    4.0   65.0   4.0   4.0   4.0   4.0   4.0        <- >= 1.5 is indistinguishable from off
+# 2.0 sits in the flat region, so it costs nothing when the geometry is healthy, while still bounding the runaway
+# it exists for (a radius that absorbs one foreign window measures a LARGER spread, which lets it absorb more --
+# observed reaching 1.24 of a maximum possible 2.0). Set 0 to remove the guard entirely.
+DOM_RCAP = _f("DOM_RCAP", 2.0)
+DOM_RECUR = bool(_i("DOM_RECUR", 1))       # fold domains that never RECUR into their nearest neighbour
+DOM_MIN_VISITS = _i("DOM_MIN_VISITS", 2)   # "recurs" = entered on >= this many SEPARATE occasions
+DOM_RECUR_HORIZON = _i("DOM_RECUR_HORIZON", 32)   # judged only after this many BOUNDARIES since birth
+DOM_FOLD_MULT = _f("DOM_FOLD_MULT", 1.5)   # refuse to fold further than this x the pooled radius (unguarded -> 1 domain)
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
@@ -605,7 +627,7 @@ def set_enc_tensor(seq):
         _ENC_T["t"] = None                                 # fall back to the original list path rather than fail a run
 
 
-def contrastive_step(enc, opt, stream, seen):              # InfoNCE: nearby windows = positive, random = negative
+def contrastive_step(enc, opt, stream, seen, asm=None):    # InfoNCE: nearby windows = positive, random = negative
     # The anchor bound must leave room for the POSITIVE, whose furthest start is `off` and which is WIN long.
     # `hi = seen - 3*WIN` only allowed for the DEFAULT radius (off <= 2*WIN, +WIN for the window), so raising
     # ENC_POS_MAX above 2*WIN ran the positive past the end of the stream -- IndexError on the gather path, and a
@@ -632,6 +654,25 @@ def contrastive_step(enc, opt, stream, seen):              # InfoNCE: nearby win
     else:
         A = torch.tensor([list(stream[s:s + WIN]) for s in st], device=DEV)
         P = torch.tensor([list(stream[s + o:s + o + WIN]) for s, o in zip(st, off)], device=DEV)
+    # PROTOTYPE PAIRS. The offset positive above can only ever teach LOCALITY -- "these two windows are 64-256 bytes
+    # apart". The assembler then asks a question the encoder was never trained on: "are these two windows the same
+    # KIND of material", where the two may be tens of thousands of bytes apart. ENC_PROTO replaces a fraction of the
+    # batch with pairs drawn from ONE domain's reservoir, which are exactly that: two windows the assembler already
+    # believes belong together, at whatever separation the stream gave them.
+    # THE HAZARD IS REAL AND IS WHY THIS IS OFF BY DEFAULT: the assembler's own partition trains the encoder that
+    # produces the partition, so a wrong grouping can reinforce itself. That is bounded here by using only a
+    # FRACTION of the batch (the rest stays grounded in raw stream locality) and by sweeping it before adopting.
+    _pro = _f("ENC_PROTO", 0.0)
+    if _pro > 0 and asm is not None and asm.cent:
+        _cand = [i for i in asm.cent if len(asm.wins.get(i, ())) >= 2]
+        _np = min(ENC_BATCH - 1, int(round(_pro * ENC_BATCH))) if _cand else 0   # never the WHOLE batch
+        if _np > 0:
+            _ar, _pr = [], []
+            for _ in range(_np):
+                _w = asm.wins[random.choice(_cand)]
+                _x, _y = random.sample(range(len(_w)), 2)
+                _ar.append(list(_w[_x])); _pr.append(list(_w[_y]))
+            A[:_np] = torch.tensor(_ar, device=DEV); P[:_np] = torch.tensor(_pr, device=DEV)
     if ENC_FUSE:                                           # ONE encoder pass instead of two: the encoder is row-independent,
         z = enc(torch.cat([A, P], 0))                      #   so the MATHS is identical, at half the sequential GRU launches.
         za, zp = z[:ENC_BATCH], z[ENC_BATCH:]              #   Note: a different batch shape changes the kernel's reduction
@@ -639,6 +680,15 @@ def contrastive_step(enc, opt, stream, seen):              # InfoNCE: nearby win
         za, zp = enc(A), enc(P)                            #   not bit-for-bit. ENC_FUSE=0 restores the two-pass form.
     logits = za @ zp.t() / TEMP
     loss = F.cross_entropy(logits, torch.arange(ENC_BATCH, device=DEV))
+    # LOSS FLOOR. Freezing the encoder is not an option in a continual system -- new material has to be able to move
+    # it. But training it to convergence is measurably HARMFUL here: 1-NN corpus accuracy PEAKS at ~1000-4000 steps
+    # and degrades after, while d(query, own centroid) keeps inflating (.037 -> .668 over the same range) because
+    # InfoNCE keeps pushing same-corpus windows apart long after they are already separable. The floor gates the
+    # STEP, not the loss: below ln(1 + (B-1)/K) -- "the true positive is comfortably inside the top K of B" -- the
+    # encoder stops being pushed, and resumes by itself the moment new material makes the loss climb back.
+    _fk = _i("ENC_FLOOR_K", 0)
+    if _fk > 0 and float(loss.detach()) <= math.log(1.0 + (ENC_BATCH - 1) / float(_fk)):
+        return float(loss.detach())
     opt.zero_grad(); loss.backward(); opt.step()
     return float(loss.detach())
 
@@ -674,8 +724,9 @@ class DomainAssembler:
         s._ids = []; s._C = None; s._pend = []                            # cached (N,SIG_D) centroid matrix + pending run sigs
         s._dh = []                                                        # recent assign distances -> the adaptive spawn threshold
         s._sh = []                                                        # recent adjacent-window distances -> scale-free shift test
-        s._rd = {}; s._rad = {}                                           # per-domain assign distances -> per-domain radius
-        s.created = 0; s.capped = 0
+        s.rad = {}; s._radp = None                                        # per-domain radius + POOLED radius (young domains)
+        s.visits = {}; s.bornb = {}; s.nb = 0                             # recurrence: separate entries, BOUNDARY clock
+        s.created = 0; s.capped = 0; s.folded = 0
     def _dirty(s): s._C = None
     def _mat(s):
         if s._C is None:
@@ -685,7 +736,8 @@ class DomainAssembler:
         i = s.next_id; s.next_id += 1
         s.cent[i] = sig.clone(); s.wins[i] = []; s.size[i] = 0; s.act[i] = 0.0
         s.last[i] = step; s.born[i] = step; s.created += 1
-        s._rd[i] = []; s._rad[i] = None; s._dirty(); return i
+        s.rad[i] = None; s.visits[i] = 0; s.bornb[i] = s.nb                # radius is measured at the next rekey
+        s._dirty(); return i
     def resolve(s, d):
         while d in s.merged: d = s.merged[d]                              # follow merge chains to the survivor
         return d
@@ -717,9 +769,14 @@ class DomainAssembler:
             if len(s._sh) > 512: s._sh.pop(0)
             if d > thr: s.run += 1; s._pend.append(sig); boundary = s.run >= SUSTAIN
             else: s.run = 0; s._pend = []; s.run_sig = F.normalize(0.85 * s.run_sig + 0.15 * sig, dim=0)
+        if boundary: s.nb += 1                                            # BOUNDARY clock -> the recurrence horizon. A step
+        #   clock would judge a domain born in a quiet stretch on the same deadline as one born in a busy one; what a
+        #   domain needs before "it never came back" is fair is a number of CHANCES to be re-entered, i.e. boundaries.
         if boundary or s.cur < 0 or s.cur not in s.cent:
             q = F.normalize(torch.stack(s._pend).mean(0), dim=0) if s._pend else sig   # SMOOTHED assign query
+            _prev = s.cur
             s.cur = s._assign(q, step); s.run_sig = q.clone(); s.run = 0; s._pend = []
+            if s.cur != _prev: s.visits[s.cur] = s.visits.get(s.cur, 0) + 1   # a SEPARATE entry (not a re-confirmation)
         s.size[s.cur] += 1; s.act[s.cur] = s.act.get(s.cur, 0.0) + 1.0; s.last[s.cur] = step
         w = s.wins[s.cur]
         if len(w) < DOM_WINS: w.append(window)                             # RESERVOIR (was: first-40-only, which pinned the
@@ -749,30 +806,26 @@ class DomainAssembler:
         # The RELATIVE margin is invariant to that whole inflation: the corpus signal is intact throughout
         # (1-NN corpus accuracy 84-95% at every stage), so ask whether the nearest centroid is decisively nearer
         # than the runner-up, not whether it is nearer than some absolute number.
+        # MEASURED RADIUS. Every acceptance rule above compares d against a number that was never measured on THIS
+        # domain: NEW_DIST is a constant, the margin is a ratio to whatever happens to be second-nearest. What the
+        # question actually needs is this domain's own spread -- and that is already sitting in the reservoir, which
+        # rekey() encodes anyway, so it costs nothing to measure (see rekey).
+        # Note what this is NOT: an earlier version of this estimated the radius from the distances at which a domain
+        # was MATCHED. That cannot bootstrap -- matching requires a radius, so with NEW_DIST too tight nothing is
+        # matched, no samples accumulate, and the radius never activates. Measured: 0 of 143 domains ever learned one,
+        # and a pooled prior over the same censored sample did not fix it (the pool held 3-5 entries). The reservoir
+        # is UNCENSORED: a window enters it because it was assigned, whatever the threshold said.
+        _r = None
         if DOM_RADIUS:
-            # Each domain carries its own radius, estimated from the distances at which IT was matched, so the
-            # test is "is this within THIS domain's habitual spread" rather than a single number for all domains
-            # at all times. Bootstrapped from NEW_DIST until a domain has DOM_RMIN samples of its own.
-            rad = s._rad.get(ids[j])
-            if rad is None or len(s._rd.get(ids[j], ())) < DOM_RMIN:
-                ok = d < NEW_DIST
-            else:
-                ok = d <= rad
-            if ok:
-                h = s._rd.setdefault(ids[j], [])
-                h.append(d)
-                if len(h) > 256: h.pop(0)
-                if len(h) >= DOM_RMIN:
-                    v = sorted(h); s._rad[ids[j]] = v[min(len(v) - 1, int(DOM_RQ * len(v)))] * DOM_RMULT
-                return s._touch(ids[j], sig)
-            if len(s.cent) < MAX_DOMAINS: return s._new(sig, step)
-            s.capped += 1; return ids[j]
+            _r = s.rad.get(ids[j])
+            if _r is None: _r = s._radp                                   # pooled fallback until this domain's first rekey
         if DOM_RELATIVE and sims.numel() >= 2:
             top2 = torch.topk(sims, 2).values
             d1 = 1 - float(top2[0]); d2 = 1 - float(top2[1])
-            if d1 <= DOM_MARGIN * d2: return s._touch(ids[j], sig)      # decisively closest -> re-identify
+            if d1 <= DOM_MARGIN * d2 or (_r is not None and d1 <= _r): return s._touch(ids[j], sig)
             if len(s.cent) < MAX_DOMAINS: return s._new(sig, step)
             s.capped += 1; return ids[j]                                 # at cap: absorb without dragging
+        if _r is not None and d <= _r: return s._touch(ids[j], sig)      # inside this domain's own spread -> re-entry
         thr = NEW_DIST
         if DOM_ADAPTIVE and len(s._dh) >= 64:
             v = sorted(s._dh); m = v[len(v) // 2]
@@ -792,12 +845,60 @@ class DomainAssembler:
         flat = [w for i in ids for w in s.wins[i]]                        # ONE batched encode for ALL domains (was N
         with torch.no_grad():                                             #   sequential GRU passes: N*128 serial launches)
             Z = torch.cat([enc(torch.tensor(flat[a:a + chunk], device=DEV)) for a in range(0, len(flat), chunk)])
-        o = 0
+        o = 0; _all = []
         for i in ids:
-            n = len(s.wins[i]); s.cent[i] = F.normalize(Z[o:o + n].mean(0), dim=0); o += n
+            n = len(s.wins[i]); zi = Z[o:o + n]; c = F.normalize(zi.mean(0), dim=0); s.cent[i] = c; o += n
+            di = 1 - zi @ c; _all.append(di)                               # the radius is FREE here: already encoded
+            if n >= 4: s.rad[i] = float(di.kthvalue(max(1, min(n, int(round(DOM_RQ * n))))).values) * DOM_RMULT
+        if _all: s._radp = float(torch.quantile(torch.cat(_all), DOM_RQ)) * DOM_RMULT
         s._dirty()
+        if DOM_RCAP > 0 and len(s.cent) > 1:
+            # VORONOI GUARD. A radius estimated from a domain's own scatter can run away in the wrong direction: let
+            # it absorb one foreign window and it measures a LARGER scatter, which lets it absorb more (measured:
+            # pooled radius 1.24 of a maximum possible 2.0, after exactly that collapse). Bound every radius by the
+            # distance to the nearest OTHER centroid, so acceptance regions cannot overlap and no domain can eat a
+            # neighbour whole -- consolidation stays the merge loop's job, where it is bounded and symmetric.
+            ids2, C2 = s._mat(); M = C2 @ C2.t(); M.fill_diagonal_(-2.0)
+            _nn = 1 - M.max(1).values                                     # (not `nn` -- that is torch.nn at module scope)
+            for k, i in enumerate(ids2):
+                cap = DOM_RCAP * float(_nn[k])
+                s.rad[i] = cap if s.rad.get(i) is None else min(s.rad[i], cap)
+            if s._radp: s._radp = min(s._radp, DOM_RCAP * float(_nn.median()))
+    def _absorb(s, a, b, mem):
+        """Fold b into a: memory provenance follows, reservoirs pool, ids stay resolvable through s.merged."""
+        if mem is not None: mem.reassign_src(b, a)                        # MERGE/FOLD -> memory follows (indirect prune)
+        na, nb = s.size[a], s.size[b]
+        s.cent[a] = F.normalize((s.cent[a] * na + s.cent[b] * nb) / max(1, na + nb), dim=0)
+        s.size[a] += nb; s.act[a] = s.act.get(a, 0.0) + s.act.get(b, 0.0)
+        s.visits[a] = s.visits.get(a, 0) + s.visits.get(b, 0)
+        pool = s.wins[a] + s.wins[b]                                      # SAMPLE the union (was [:40], which kept only the
+        s.wins[a] = random.sample(pool, DOM_WINS) if len(pool) > DOM_WINS else pool   # survivor's -> next rekey UNDID the merge).
+        #   It also matters for the fold specifically: pooling is what gives the survivor a SECOND segment, which is
+        #   what turns a segment prototype into a domain prototype.
+        s.last[a] = max(s.last[a], s.last[b]); s.born[a] = min(s.born[a], s.born[b])
+        s.bornb[a] = min(s.bornb.get(a, s.nb), s.bornb.get(b, s.nb)); s.rad[a] = None   # re-measure at the next rekey
+        for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s.rad, s.visits, s.bornb): _D.pop(b, None)
+        s.merged[b] = a; s._dirty()
     def manage(s, step, mem, merge_dist, min_size, stale):
         merged = culled = 0
+        if DOM_RECUR and len(s.cent) > 1:
+            # RECURRENCE FOLD. Domains are created at boundaries; until now nothing ever asked whether the thing
+            # created came BACK. That is the whole test for self-assembly: a real domain is re-entered when similar
+            # material returns (a corpus recurs ~STREAM/(NP*SEG) times), while a splice artifact is entered once and
+            # never again. Fold rather than delete, so provenance survives and the survivor inherits the reservoir.
+            drop = [i for i in s.cent if s.visits.get(i, 0) < DOM_MIN_VISITS
+                    and s.nb - s.bornb.get(i, s.nb) >= DOM_RECUR_HORIZON]
+            ds = set(drop)                                                # never fold one doomed domain into another
+            for b in sorted(drop, key=lambda i: s.act.get(i, 0.0)):
+                keep = [i for i in s.cent if i != b and i not in ds]
+                if not keep: break
+                K = torch.stack([s.cent[i] for i in keep]); sm = K @ s.cent[b]
+                k = int(sm.argmax())
+                # FAIL SAFE, both ways. Too far from anything -> leave it standing. NO pooled radius yet (no rekey
+                # has run) -> also leave it standing: an unbounded fold collapses the whole population to one
+                # domain, which is far worse than folding late.
+                if not s._radp or 1 - float(sm[k]) > DOM_FOLD_MULT * s._radp: ds.discard(b); continue
+                s._absorb(keep[k], b, mem); s.folded += 1
         md = merge_dist if merge_dist > 0 else MERGE_FRAC * NEW_DIST      # ONE scale for create AND consolidate
         while len(s.cent) > 1:                                            # merge every pair under md, ONE matmul per merge
             ids, C = s._mat(); n = len(ids)
@@ -806,15 +907,7 @@ class DomainAssembler:
             if 1 - float(M[r, c]) >= md: break
             a, b = ids[r], ids[c]
             if s.act.get(b, 0.0) > s.act.get(a, 0.0): a, b = b, a         # keep the more ACTIVE (was: the lower id)
-            if mem is not None: mem.reassign_src(b, a)                    # MERGE -> memory follows (indirect prune)
-            na, nb = s.size[a], s.size[b]
-            s.cent[a] = F.normalize((s.cent[a] * na + s.cent[b] * nb) / max(1, na + nb), dim=0)
-            s.size[a] += nb; s.act[a] = s.act.get(a, 0.0) + s.act.get(b, 0.0)
-            pool = s.wins[a] + s.wins[b]                                  # SAMPLE the union (was [:40], which kept only the
-            s.wins[a] = random.sample(pool, DOM_WINS) if len(pool) > DOM_WINS else pool   # survivor's -> next rekey UNDID the merge)
-            s.last[a] = max(s.last[a], s.last[b]); s.born[a] = min(s.born[a], s.born[b])
-            for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s._rd, s._rad): _D.pop(b, None)
-            s.merged[b] = a; merged += 1; s._dirty()
+            s._absorb(a, b, mem); merged += 1
         if len(s.cent) > 1:                                               # CULL: DECAYED activity + age grace (expert rule)
             order = sorted(s.cent, key=lambda i: s.act.get(i, 0.0))
             for d in order[:max(1, int(DOM_CULL_FRAC * len(s.cent)))]:
@@ -822,7 +915,7 @@ class DomainAssembler:
                 if step - s.born.get(d, step) < DOM_GRACE: continue
                 if not (s.act.get(d, 0.0) < min_size and step - s.last[d] > stale): continue
                 if mem is not None: mem.delete_src(d)                     # CULL -> memory follows (direct prune)
-                for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s._rd, s._rad): _D.pop(d, None)
+                for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s.rad, s.visits, s.bornb): _D.pop(d, None)
                 culled += 1; s._dirty()
         for i in s.act: s.act[i] *= DOM_DECAY                             # DECAY -> `act` reflects RECENT use, so a domain
         return merged, culled                                             #   that stops being fed becomes cullable
@@ -1118,6 +1211,15 @@ def main():
             asm.size = {int(k): v for k, v in _a["size"].items()}; asm.last = {int(k): v for k, v in _a["last"].items()}
             asm.wins = {i: [] for i in asm.cent}           # sample windows are stream-local; the new stream refills them
             asm.next_id = _a["next_id"]; asm.merged = {int(k): int(v) for k, v in _a["merged"].items()}; asm.cur = -1
+            # RECURRENCE MUST SURVIVE RESUME. Without this every restored domain resumes at visits=0, bornb=0 against a
+            # boundary clock restarting at 0 -- so DOM_RECUR_HORIZON boundaries later the fold would swallow every
+            # domain that had not happened to be re-entered twice since the resume, destroying the assembled history.
+            asm.visits = {int(k): int(v) for k, v in _a.get("visits", {}).items()}
+            asm.bornb = {int(k): int(v) for k, v in _a.get("bornb", {}).items()}
+            asm.nb = int(_a.get("nb", 0))
+            asm.rad = {int(k): (None if v is None else float(v)) for k, v in _a.get("rad", {}).items()}
+            asm._radp = _a.get("radp")                     # radii re-measure at the first rekey; the pooled one carries
+            for _i2 in asm.cent: asm.visits.setdefault(_i2, 0); asm.bornb.setdefault(_i2, asm.nb); asm.rad.setdefault(_i2, None)
         print(f"[RESUME] {RESUME} -> step {_resume_step} | {mem.n} memory entries | {len(asm.cent)} domains"
               + (f" | fabric {len(fab.bodies)}n" if FABRIC else "") + (f" | {world_fwd.n()} dynamics predictors" if WORLD_MODEL else "")
               + "  (encoder warmup skipped: already trained)")
@@ -1211,7 +1313,9 @@ def main():
                     # restarts from zero even though a checkpoint exists.
                     "step": step, "opt_m": om.state_dict(), "opt_e": oe.state_dict(),
                     "asm": {"cent": {int(k): v.cpu() for k, v in asm.cent.items()}, "size": dict(asm.size),
-                            "last": dict(asm.last), "next_id": asm.next_id, "merged": dict(asm.merged), "cur": asm.cur},
+                            "last": dict(asm.last), "next_id": asm.next_id, "merged": dict(asm.merged), "cur": asm.cur,
+                            "visits": dict(asm.visits), "bornb": dict(asm.bornb), "nb": asm.nb,
+                            "rad": dict(asm.rad), "radp": asm._radp},
                     "experts": (experts.state_dict() if EXPERTS else None),
                     "fab": (fab.state_dict() if FABRIC else None),
                     "fab_cfg": ({"n": len(fab.bodies), "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
@@ -1335,7 +1439,7 @@ def main():
         ew = list(byte_stream[bpos:bpos + WIN]) if ONLINE else list(w[:-1])   # SIGNATURE window: BYTES when online (tokenization-invariant)
         _enc_cad = ENC_EVERY if (step - _last_boundary) < ENC_SHIFT_WIN else ENC_EVERY_IDLE   # shift-gated: dense near a boundary, throttled when stable
         if SIG_MODE == "learned" and step % _enc_cad == 0:
-            with _T("encoder(contrastive)"): contrastive_step(enc, oe, ENC_SEQ, bpos)   # LIVE encoder on the STABLE sequence
+            with _T("encoder(contrastive)"): contrastive_step(enc, oe, ENC_SEQ, bpos, asm)   # LIVE encoder on the STABLE sequence
         with _T("sig_of"):
             if not (SIG_BATCH and SIG_MODE == "learned"):
                 sig = sig_of(ew, enc)
@@ -1623,6 +1727,13 @@ def main():
         print(f"  (last segment change {_d8:+.3f}: still FALLING = more passes/steps will help;"
               f" flat = the model has converged and needs more CAPACITY or more DATA, not more steps)")
     n_self = len(asm.cent); print(f"SELF-ASSEMBLED {n_self} LIVE domains after {'management' if MANAGE_ON else 'NO MANAGEMENT (ablation)'} (truth had {NP} processes)")
+    _ent = sorted((asm.visits.get(i, 0) for i in asm.cent), reverse=True)
+    _rec = sum(1 for v in _ent if v >= DOM_MIN_VISITS)
+    print(f"  domain population: {asm.created} created | {asm.folded} folded on non-recurrence | {len(asm.merged)} merged"
+          f" (fold+merge, absorbed not deleted) | cap bound {asm.capped}x (MAX_DOMAINS={MAX_DOMAINS}) | "
+          f"{asm.nb} boundaries | radius {sum(1 for i in asm.cent if asm.rad.get(i) is not None)}/{n_self} measured"
+          f"{f', pooled {asm._radp:.3f}' if asm._radp else ''}")
+    print(f"  ENTRIES per live domain {_ent[:12]} | recurrent (>= {DOM_MIN_VISITS} entries) {_rec}/{n_self}")
     if FABRIC: print(f"FABRIC{' [NORM-ONLY CONTROL: no nodes, no routing]' if fab.norm_only else ''}: {len(fab.bodies)} nodes ({fab.grown} grown on plateau from {_i('FAB_N0',3)}) | depth budget {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps | soft routing + transition matrix + HALT")
     if EXPERTS: print(f"EXPERTS (separate population, dual selection): {router.created} created, {router.replicated} replicated, {router.merged} merged, {router.removed} removed -> {len(router.cent)} live | rank {_i('EXPERT_R',4)} | churn {router.removed/max(1,router.created):.0%} (merge preserves learning; high churn destroys it)")
     tol = WIN * 3 if (USE_TOK and TOK_ONLINE) else WIN * 2   # byte-coord positions when online

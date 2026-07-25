@@ -92,23 +92,32 @@ if has 1; then
   for K in 4 8 16; do run 1 "floorK$K" ENC_WARMUP=30000 ENC_FLOOR_K=$K MAX_DOMAINS=1024; done
 fi
 
-# ---- STAGE 2. THE PRIMARY. Per-domain measured radius vs the relative margin alone. --------------------------
-# Prediction (simulation on the probe's measured geometry, N=1000 cell): margin-only 102 live / V 0.49;
-# margin OR radius 8 live / V 0.80. If DOM_RADIUS=1 does not cut live by >=3x at ANY grid point, kill it.
+# ---- STAGE 2. THE PRIMARY. Measured per-domain radius OR'd with the landed margin. --------------------------
+# Measured on the SHIPPED DomainAssembler, isolated from the encoder (synthetic signatures, 4 recurring processes,
+# 3 seeds, uncapped) -- this is what stage 2 has to reproduce on real text or the mechanism does not transfer:
+#   constant thresholds     64.0 live | V 0.82 | completeness 0.70 | 4 of 64 domains recurrent
+#   + radius x1.2           18.0 live | V 0.95 | completeness 0.91
+#   + recurrence fold        4.0 live | V 1.00 | completeness 1.00 | 4 of 4 recurrent
+# DOM_RCAP is the sensitive knob and NOT in the direction first assumed: 0.5 is the WORST value in the table (65
+# live / V 0.82 -- it strangles the radius back to baseline, because the cap is set by a SAME-corpus sibling and
+# so forbids exactly the absorption that would consolidate them), while 0 (off) and >=1.5 are indistinguishable.
+# The shipped default is 2.0: free in the healthy regime, still a bound on a runaway. Confirm that here on text.
 if has 2; then
   echo "== stage 2: acceptance radius grid (MAX_DOMAINS=1024 so the cap cannot contribute) =="
   run 2 "radius_off" DOM_RADIUS=0 MAX_DOMAINS=1024
   run 2 "margin_off" DOM_RADIUS=1 DOM_RELATIVE=0 MAX_DOMAINS=1024
-  for Q in 0.75 0.85 0.95; do
-    for R in 1.0 1.3 1.6 2.0; do
-      run 2 "rq${Q}_rm${R}" DOM_RADIUS=1 DOM_RQ=$Q DOM_RMULT=$R MAX_DOMAINS=1024
+  for M in 1.0 1.2 1.6; do
+    for C in 0 0.5 1.5 2.0 3.0; do
+      run 2 "rm${M}_cap${C}" DOM_RADIUS=1 DOM_RMULT=$M DOM_RCAP=$C MAX_DOMAINS=1024
     done
   done
+  for Q in 0.75 0.95; do run 2 "rq$Q" DOM_RADIUS=1 DOM_RQ=$Q MAX_DOMAINS=1024; done
 fi
 
 # ---- STAGE 3. INTENSIVITY + RECURRENCE. Does the count stop growing with the stream? -------------------------
 # THE decisive convergence test. A population that is EXTENSIVE in bytes consumed has not converged, whatever its
-# value at 120 kB. Prediction: HEAD roughly doubles (102 -> 193 in simulation); the fix stays flat (8 -> 9).
+# value at 120 kB. PRE-REGISTERED, from the isolated test at 120/240/480 segments: the constants go 64 -> 116 ->
+# 193 (extensive), radius alone 18 -> 20 -> 25 (nearly flat), radius+fold 4 -> 4 -> 4 (exact).
 if has 3; then
   echo "== stage 3: stream-length doubling x recurrence fold =="
   for L in 120000 240000 480000; do
@@ -116,10 +125,13 @@ if has 3; then
     SL=$L run 3 "len${L}_fix"   DOM_RADIUS=1 DOM_RECUR=1 MAX_DOMAINS=1024
     SL=$L run 3 "len${L}_norec" DOM_RADIUS=1 DOM_RECUR=0 MAX_DOMAINS=1024
   done
-  echo "== stage 3b: recurrence horizon / min visits =="
+  echo "== stage 3b: recurrence horizon / min visits / fold ceiling =="
   for H in 16 32 64; do for V in 2 3; do
     run 3 "h${H}_v${V}" DOM_RADIUS=1 DOM_RECUR=1 DOM_RECUR_HORIZON=$H DOM_MIN_VISITS=$V MAX_DOMAINS=1024
   done; done
+  # An UNGUARDED fold collapses to ONE domain (measured). DOM_FOLD_MULT bounds the fold to a multiple of the
+  # pooled domain radius; if homogeneity falls while live falls, this is the knob that is too loose.
+  for F in 1.0 1.5 2.5; do run 3 "foldmult$F" DOM_RADIUS=1 DOM_RECUR=1 DOM_FOLD_MULT=$F MAX_DOMAINS=1024; done
 fi
 
 # ---- STAGE 4. (a) ENC_POS_MAX -- now INTERPRETABLE, because the radius rule re-quantiles itself. --------------
@@ -135,11 +147,14 @@ if has 4; then
 fi
 
 # ---- STAGE 5. (b) SPECULATIVE: the second positive drawn from the assembler's OWN reservoir. -----------------
-# Corpus-scale separation at a contamination equal to (1 - domain purity), instead of 33-53% for a blind radius.
-# Kill unless V rises >= 0.05 at matched budget AND homogeneity stays >= 0.85 (a collapse also lowers the count).
+# ENC_PROTO is the FRACTION of the InfoNCE batch replaced by reservoir pairs, so 1.0 would be the whole batch --
+# it is clamped to ENC_BATCH-1 precisely so some of the signal stays grounded in raw stream locality. This is the
+# one genuinely self-referential mechanism in the system (the assembler's partition trains the encoder that
+# produces the partition), so the kill criterion is deliberately harsh: kill unless V rises >= 0.05 at matched
+# budget AND homogeneity stays >= 0.85. A confirmation collapse shows up as BOTH the count and homogeneity falling.
 if has 5; then
   echo "== stage 5: reservoir (prototype) positive =="
-  for A in 0.0 0.5 1.0 2.0; do
+  for A in 0.0 0.25 0.5 0.75; do
     run 5 "proto$A" ENC_PROTO=$A DOM_RADIUS=1 DOM_RECUR=1 MAX_DOMAINS=1024
   done
   echo "== stage 5b: controls =="
