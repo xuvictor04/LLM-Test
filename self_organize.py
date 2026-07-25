@@ -89,6 +89,10 @@ def make_proc(seed, alphabet, order=2):
 
 ALPHA = [list(range(65, 80)), list(range(97, 112)), list(range(48, 58)), list(range(80, 95)), list(range(112, 123))]
 DATA_MODE = os.environ.get("DATA_MODE", "synthetic")
+if USE_TOK and DATA_MODE != "real":
+    raise SystemExit("TOKENIZER=1 requires DATA_MODE=real -- the tokenizer is only built on the real-data path,\n"
+                     "  so the synthetic path leaves TOK=None and dies later inside _retok with a bare\n"
+                     "  AttributeError. Add DATA_MODE=real (and DATA_DIR=...) to your command.")
 if DATA_MODE == "real":
     DN = os.environ.get("DOMAINS", "eng,py,num,c").split(",")
     DISK_STREAM = bool(_i("DISK_STREAM", 0))              # mmap the corpus (disk-paged) so training data can EXCEED RAM (GPT-2 scale)
@@ -1540,13 +1544,19 @@ def main():
     import math as _m
     _n = max(1, len(assigns))
     _ct = Counter(t for _, _, t in assigns)                 # true-class sizes
-    _hc_given_k = -sum(c[t] / _n * _m.log((c[t] / max(1, sum(c.values()))) or 1)
-                       for c in by.values() for t in c)     # H(true | domain)
-    _hc = -sum(v / _n * _m.log(v / _n) for v in _ct.values() if v)                 # H(true)
-    completeness = 1.0 if _hc == 0 else max(0.0, 1 - _hc_given_k / _hc)
-    vmeas = 0.0 if (purity + completeness) == 0 else 2 * purity * completeness / (purity + completeness)
+    _ck = Counter(d for _, d, _ in assigns)                                        # cluster sizes
+    _hck = -sum(c[t] / _n * _m.log((c[t] / max(1, sum(c.values()))) or 1)
+                for c in by.values() for t in c)                                   # H(true | domain)
+    _hc = -sum(v / _n * _m.log(v / _n) for v in _ct.values() if v)                  # H(true)
+    homogeneity = 1.0 if _hc == 0 else max(0.0, 1 - _hck / _hc)
+    # COMPLETENESS is the OTHER conditional: H(domain | true). Getting this backwards printed 0.89 for a partition
+    # that was 16x fragmented -- H(true|domain) is homogeneity, which is high for ANY pure-but-shattered clustering.
+    _hkc = -sum(by[d][t] / _n * _m.log((by[d][t] / max(1, _ct[t])) or 1) for d in by for t in by[d])
+    _hk = -sum(v / _n * _m.log(v / _n) for v in _ck.values() if v)                  # H(domain)
+    completeness = 1.0 if _hk == 0 else max(0.0, 1 - _hkc / _hk)
+    vmeas = 0.0 if (homogeneity + completeness) == 0 else 2 * homogeneity * completeness / (homogeneity + completeness)
     _frag = len(smap) / max(1, len(_ct))
-    print(f"clustering purity: {purity:.2f} | completeness: {completeness:.2f} | V-measure: {vmeas:.2f}"
+    print(f"clustering purity: {purity:.2f} | homogeneity: {homogeneity:.2f} | completeness: {completeness:.2f} | V-measure: {vmeas:.2f}"
           f"   [{len(smap)} self-domains for {len(_ct)} true processes = {_frag:.0f}x fragmentation]")
     print(f"  >> purity alone is gameable by fragmenting; judge on V-measure. {'OVER-SEGMENTED' if _frag > 3 else 'ok'}"
           f" (first 20 self->true) {smap[:20]}")
