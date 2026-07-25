@@ -45,6 +45,8 @@ def main():
     ap.add_argument("--domain", default="eng", help="which DATA_DIR domain to fill (eng/py/num/c/...)")
     ap.add_argument("--shard-mb", type=int, default=512, help="split output into shards of this size")
     ap.add_argument("--min-chars", type=int, default=200, help="skip very short documents")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue a previous pull instead of overwriting it (see the manifest note below)")
     a = ap.parse_args()
 
     p = PRESETS.get(a.dataset, dict(path=a.dataset, config=a.config, field="text", split="train"))
@@ -66,7 +68,26 @@ def main():
     ds = load_dataset(path, **kw)
 
     is_dialogue = a.dataset == "oasst1"
-    written = shard = 0
+    # RESUME. A 40 GB pull is hours long and HF streaming has no seek, so a mid-way failure used to mean starting
+    # over: the writer always began at part000 and re-streamed from document 0. We record (docs_consumed,
+    # bytes_written, shard) in a manifest after every shard, and on --resume skip that many documents with
+    # IterableDataset.skip() and continue at the next shard index. Skipping still walks the stream, but it neither
+    # decodes nor writes, so it is far cheaper than re-downloading.
+    man_path = os.path.join(outdir, "_fetch_manifest.json")
+    written = shard = docs_done = 0
+    if a.resume and os.path.exists(man_path):
+        try:
+            man = json.load(open(man_path))
+            written, shard, docs_done = int(man["bytes"]), int(man["shard"]) + 1, int(man["docs"])
+            print(f"[fetch_big] RESUME: {written/1e9:.2f} GB already on disk in {shard} shard(s); "
+                  f"skipping {docs_done:,} documents already consumed")
+            ds = ds.skip(docs_done)
+        except (ValueError, KeyError, OSError) as e:
+            print(f"[fetch_big] manifest unusable ({e}) -- starting fresh"); written = shard = docs_done = 0
+    elif a.resume:
+        print("[fetch_big] --resume given but no manifest found -- starting fresh")
+    if written >= target:
+        print(f"[fetch_big] target already met ({written/1e9:.2f} GB >= {a.gb} GB); nothing to do"); return
     t0 = time.time()
     f = open(os.path.join(outdir, f"part{shard:03d}.txt"), "w", encoding="utf-8")
     try:
@@ -82,7 +103,9 @@ def main():
                 txt = txt.strip() + "\n\n"
             f.write(txt); written += len(txt.encode("utf-8", "replace"))
             if written // (a.shard_mb * 1_000_000) > shard:
-                f.close(); shard += 1
+                f.close()
+                json.dump({"bytes": written, "shard": shard, "docs": docs_done + i + 1}, open(man_path, "w"))
+                shard += 1
                 f = open(os.path.join(outdir, f"part{shard:03d}.txt"), "w", encoding="utf-8")
             if i % 20000 == 0 and i:
                 el = time.time() - t0
@@ -92,6 +115,8 @@ def main():
         print("\n  interrupted -- keeping what was written")
     finally:
         f.close()
+        try: json.dump({"bytes": written, "shard": shard, "docs": docs_done + i + 1}, open(man_path, "w"))
+        except (NameError, OSError): pass
 
     print(f"[fetch_big] wrote {written/1e9:.2f} GB in {shard+1} shard(s) to {outdir}")
     tag = a.dataset.replace("/", "_")
@@ -99,7 +124,7 @@ def main():
     # Only stack the heavy knobs (long windows / big vocab) for a genuinely LARGE corpus; on a small pull they just
     # make a 40-min run take many hours. ALWAYS include CKPT_EVERY (killable/promptable mid-run) + RUN_NAME (isolates artifacts).
     heavy = written >= 250_000_000
-    knobs = " WIN=256 BATCH_W=16 ACCUM=4 D_MODEL_B=768 VMAX=16384" if heavy else ""
+    knobs = " WIN=256 BATCH_W=16 ACCUM=4 D_MODEL=768 VMAX=16384" if heavy else ""
     print(f"\nNext ({'large corpus -> heavy config' if heavy else 'small corpus -> light defaults'}; "
           f"CKPT_EVERY = saves every N steps so a crash never loses everything):\n"
           f"  DATA_DIR={a.out} CORPUS_CAP=2000000000 STREAM_LEN={stream_len} CKPT_EVERY=40000 RUN_NAME={tag}{knobs} bash run_full_unfrozen.sh")
