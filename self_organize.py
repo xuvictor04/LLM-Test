@@ -1257,17 +1257,26 @@ def main():
         # ADAPTIVE WARMUP: stop once separation PLATEAUS instead of always running the full (30k) budget -- the #1 startup
         # cost. Probe periodically; stop when the trailing relative gain < eps, with a min floor so we never underfit it.
         curve = []; _wfloor = min(_i("ENC_WARMUP_MIN", 3000), wu); _weps = _f("ENC_WARMUP_EPS", 0.015); _probe_ev = max(1, _i("ENC_WARMUP_PROBE", 500))
-        _prev_sep = None; _stop = wu
+        _prev_sep = None; _stop = wu; _plateau = False
         for t in range(wu):
             l = contrastive_step(enc, oe, ENC_SEQ, len(ENC_SEQ))
             if t % _probe_ev == 0 or t == wu - 1:
                 _sep = _sep_probe(); curve.append((t, l if l is not None else 0.0, _sep))
                 if t >= _wfloor and _prev_sep is not None and _sep <= _prev_sep * (1 + _weps):   # separation flat -> converged, stop
-                    _stop = t + 1; break
+                    _stop = t + 1; _plateau = True; break
                 _prev_sep = _sep
         if wu:
             print("[encoder training curve] step:loss:separation -> " + "  ".join(f"{t}:{l:.2f}:{s:.2f}" for t, l, s in curve))
-            print(f"  (adaptive warmup: stopped at {_stop}/{wu} on separation plateau; floor {_wfloor}, eps {_weps}. Set ENC_WARMUP_MIN/EPS to tune)")
+            # SAY WHICH ONE ACTUALLY HAPPENED. This used to claim "stopped on separation plateau" unconditionally,
+            # including when it had simply run out of budget -- and setting ENC_WARMUP_MIN == ENC_WARMUP makes the
+            # plateau test UNREACHABLE (`t >= _wfloor` needs t == wu, but the loop stops at wu-1), so the run that
+            # paid all 30000 steps was told it had converged at 30000. A message that cannot report failure is not
+            # a message. Also warn, because equal MIN and budget is the one setting that disables the whole feature.
+            print(f"  (adaptive warmup: {'STOPPED EARLY at' if _plateau else 'ran the FULL budget'} {_stop}/{wu}"
+                  f"{' on separation plateau' if _plateau else ' -- no plateau detected'}; floor {_wfloor}, eps {_weps})")
+            if not _plateau and _wfloor >= wu:
+                print(f"  !! ENC_WARMUP_MIN ({_wfloor}) >= ENC_WARMUP ({wu}) makes the plateau test unreachable -- "
+                      f"the adaptive stop was OFF for this run. Lower ENC_WARMUP_MIN to enable it.")
     assigns = []; bounds = []; i = 0; step = _resume_step; _cur_ph = -1; PH_SNAP = []
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
