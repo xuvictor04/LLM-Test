@@ -1272,6 +1272,19 @@ def main():
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
+    # CADENCES BELOW THE BATCH EARLY-OUT MUST BE THRESHOLDS, NOT MODULO. Everything after the
+    # `if len(_bx) < BATCH_W: step += 1; continue` accumulator only executes on FLUSH steps, which land on a fixed
+    # residue mod BATCH_W -- while `step` advances on every window. `step % N == 0` then asks for a simultaneous
+    # solution to two congruences that usually has none, so the block silently NEVER fires. Simulated over 200k
+    # windows: at BATCH_W=1 the mint fires 999 times and re-tokenization 66 times; at BATCH_W = 2, 8, 15, 16 or 32
+    # it fires ZERO times -- for every BATCH_W > 1 tested, odd ones included. That is exactly what the 4 MB
+    # BATCH_W=16 run showed: "vocab 512/16384 (minting live; +0 since last retok)", a model sized for 16384 ids
+    # running on the 512 the SEED passes had already produced. CKPT_EVERY sat in the same block, so a long run
+    # would also never have checkpointed. Elapsed-since-last-fire is phase-independent and resume-safe.
+    _fired = {"grow": step, "retok": step, "ckpt": step, "lmcurve": step}
+    def _due(_k, _n):                                      # True at most once per _n steps, whatever the batch phase
+        if _n <= 0 or step - _fired[_k] < _n: return False
+        _fired[_k] = step; return True
     # ---- NO-COMPROMISE PERF: amortized re-key + shift-gated encoder (keep FULL drift-survival + FULL responsiveness) ----
     REKEY_AMORTIZED = bool(_i("REKEY_AMORTIZED", 1))       # spread the SAME whole-store re-encode across steps -> no periodic spike,
     _rk = {"ii": None, "cur": 0}                           #   SAME per-entry refresh rate + freshness. Nothing removed.
@@ -1470,7 +1483,10 @@ def main():
             else:
                 if not _sigq:                               # refill: one encoder call for the whole frozen run
                     _H = min(_sig_horizon(step, _last_boundary), SIG_LOOK, (len(stream) - 1 - i) // WIN)
-                    if ONLINE: _H = min(_H, RETOK_EVERY - step % RETOK_EVERY)   # stream is rebuilt at retok -> stop there
+                    if ONLINE: _H = min(_H, RETOK_EVERY - (step - _fired["retok"]))   # stream is rebuilt at retok
+                    #   -> stop the lookahead there. Must track the SAME threshold retok now fires on: reading a
+                    #   modulo here while retok fires on elapsed-since-last would queue windows built from a stream
+                    #   that gets rebuilt underneath them.
                     _H = max(1, _H)
                     _ws = [ew]
                     for _k in range(1, _H):                 # the SAME byte windows the later steps would build
@@ -1507,6 +1523,15 @@ def main():
             _wcull = world_fwd.soft_cull()
             if _wcull: print(f"  [world-model @ {step}] soft-culled {_wcull} unused -> {int(world_fwd.alive[:world_fwd.n()].sum())} live predictors")
         _bx.append(list(w[:-1])); _by.append(list(w[1:])); _bg.append(sig); _bd.append(did); _bp.append((bpos, i))
+        # PER-WINDOW BOOKKEEPING GOES ABOVE THE EARLY-OUT. Both of these describe THIS window, not the batch, and
+        # both used to sit below the accumulator -- so at BATCH_W=16 they saw 6.2% of the stream. `assigns` is what
+        # every clustering metric is computed from, which means the 4 MB run's purity/homogeneity/completeness/
+        # V-measure and its whole RECURRENCE histogram were computed from one window in sixteen (and recurrence in
+        # particular is destroyed by subsampling, since it counts maximal consecutive runs). The tokenizer pair
+        # tally was under-counted by the same factor, on top of never being acted on.
+        assigns.append((bpos, did, byte_labels[min(bpos, len(byte_labels) - 1)] if ONLINE else labels[i]))
+        if ONLINE:
+            for a, b in zip(w[:-1], w[1:]): TOK.pair[(a, b)] += 1   # ONGOING minting: tally THIS window's pairs
         if len(_bx) < BATCH_W:                              # accumulate a batch of windows first
             i += WIN; step += 1; continue
         model.train()
@@ -1576,7 +1601,7 @@ def main():
         _t1("lm fwd+bwd (incl. fabric/world)", _plm)
         _lf = float(loss.detach())                               # ONE host sync per step (was two: the curve and the
         _lm_run.append(_lf)                                      #   plateau detector each pulled the same scalar back)
-        if step % max(1, (STREAM_LEN // WIN) // 8) == 0 and _lm_run:
+        if _due("lmcurve", max(1, (STREAM_LEN // WIN) // 8)) and _lm_run:
             _lm_curve.append((step, sum(_lm_run[-2000:]) / len(_lm_run[-2000:]))); _lm_run = _lm_run[-2000:]
         if FABRIC and not fab.norm_only:
             _nb = fabgrow.step(_lf, step)                       # 0, or HOW MANY to grow (burst on an unexpected regression)
@@ -1626,11 +1651,9 @@ def main():
                               ctx=_cb, key_fn=(_model_key if _pre else None),
                               pos=_posv(_b, _n1))
         _t1("memory key+write", _pmem)
-        assigns.append((bpos, did, byte_labels[min(bpos, len(byte_labels) - 1)] if ONLINE else labels[i]))
         _ptok = _t0()
-        if ONLINE:                                         # ONGOING minting: tally this window's token pairs, mint, re-tokenize
-            for a, b in zip(w[:-1], w[1:]): TOK.pair[(a, b)] += 1
-            if step % GROW_EVERY == 0 and step > 0:
+        if ONLINE:                                         # ONGOING minting: mint from the tally accumulated above
+            if _due("grow", GROW_EVERY):
                 for _ in range(_i("GROW_BURST", 6)):       # mint several of the current top pairs per grow event
                     g = TOK.maybe_grow()
                     if g is None: break
@@ -1644,10 +1667,10 @@ def main():
         _t1("tokenizer (mint/tally)", _ptok)
         _bx = []; _by = []; _bg = []; _bd = []; _bp = []
         i += WIN; step += 1
-        if (CKPT_EVERY and step % CKPT_EVERY == 0) or _ckpt_req["on"]:   # periodic OR on-demand (kill -USR1) save
+        if (CKPT_EVERY and _due("ckpt", CKPT_EVERY)) or _ckpt_req["on"]:   # periodic OR on-demand (kill -USR1) save
             _why = "SIGUSR1" if _ckpt_req["on"] else f"every {CKPT_EVERY}"; _ckpt_req["on"] = False
             _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {os.environ.get('SAVE_CKPT')}]"); model.train()
-        if ONLINE and step % RETOK_EVERY == 0:             # refresh the token stream with the grown vocab; remap position by byte
+        if ONLINE and _due("retok", RETOK_EVERY):          # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
             if RETOK_TAIL:
                 # TAIL-ONLY RETOK: re-segment just the UNCONSUMED remainder. The old code re-tokenized the whole
