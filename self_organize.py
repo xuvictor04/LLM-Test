@@ -1852,26 +1852,51 @@ def main():
     # sil>0 means members are genuinely closer to their own domain than to any neighbor; sil<=0 means the domain overlaps
     # a neighbor and is really an arbitrary slice of a continuum. (The old test used coh>=0.5 & sep>=0.10, which never
     # bound -- so it silently reduced to a size threshold. This makes cohesion AND separation actually count.)
-    sizes = {d: sum(by[d].values()) for d in by}
+    # SIZE COMES FROM THE ASSEMBLER, NOT FROM THE REPORT LOG. `by` is built from `assigns`, which is one record per
+    # window -- correct now, but it made every size in this table read 1/BATCH_W of the truth for as long as
+    # assigns.append sat below the batch accumulator (the 4 MB run showed "size 134" for a domain of ~2100). asm.size
+    # is incremented inside update(), which runs per window unconditionally, so it cannot drift from the stream again.
+    sizes = {d: int(asm.size.get(d, sum(by[d].values()))) for d in by}
     MIN_SIZE = _i("GENUINE_MIN", 20); SIL_MIN = _f("GENUINE_SIL", 0.10)
     live = [d for d in by if d in asm.cent]               # domains that survived management (still have a centroid)
     print(f"\n=== domain genuineness ({len(live)} live domains: size | cohesion | separation | silhouette=coh+sep-1) ===")
-    genuine = 0; cohs = []; seps = []; sils = []
+    # SEPARATION IS REPORTED TWICE, ON PURPOSE. `sep` is a MIN over the other N-1 centroids -- an extreme order
+    # statistic, so it shrinks mechanically as the population grows and penalises exactly the fragmentation the
+    # recurrence fold exists to reduce. For OVERLAPPING self-assembled domains (the stated design intent) that is
+    # the wrong question: neighbouring domains are SUPPOSED to touch. `sepm` is the MEDIAN distance to the other
+    # centroids, which asks instead whether this domain sits anywhere distinct in the space at all. Read them
+    # together: sil < 0 with silm > 0 means "crowded by a near neighbour but globally placed" (fragmentation, which
+    # merging fixes); BOTH negative means the signature space has no cluster structure and no assign rule can help.
+    genuine = 0; cohs = []; seps = []; sils = []; sepms = []; silms = []
     with torch.no_grad():
         for d in sorted(live, key=lambda k: -sizes[k]):
             if not asm.wins[d]: continue
             W = torch.tensor([w for w in asm.wins[d]], device=DEV)
             sg = enc(W) if SIG_MODE == "learned" else torch.stack([sig_of(list(w), enc) for w in asm.wins[d]])
             coh = F.cosine_similarity(sg, asm.cent[d].unsqueeze(0)).mean().item()
-            sep = min([1 - F.cosine_similarity(asm.cent[d].unsqueeze(0), asm.cent[o].unsqueeze(0)).item()
-                       for o in asm.cent if o != d] or [1.0])
+            _o = sorted(1 - F.cosine_similarity(asm.cent[d].unsqueeze(0), asm.cent[o].unsqueeze(0)).item()
+                        for o in asm.cent if o != d)
+            sep = _o[0] if _o else 1.0                     # nearest other centroid
+            sepm = _o[len(_o) // 2] if _o else 1.0         # MEDIAN other centroid (population-size robust)
             sil = coh + sep - 1.0                          # silhouette-style cluster-validity score
+            silm = coh + sepm - 1.0
             g = sizes[d] >= MIN_SIZE and sil >= SIL_MIN
-            genuine += g; cohs.append(coh); seps.append(sep); sils.append(sil)
+            genuine += g; cohs.append(coh); seps.append(sep); sils.append(sil); sepms.append(sepm); silms.append(silm)
             if sizes[d] >= 5:
-                print(f"  domain {d:4d}: size {sizes[d]:5d} | cohesion {coh:.2f} | separation {sep:.2f} | sil {sil:+.2f} | {'GENUINE' if g else 'weak'}")
+                print(f"  domain {d:4d}: size {sizes[d]:6d} | cohesion {coh:.2f} | sep nearest {sep:.2f} median "
+                      f"{sepm:.2f} | sil {sil:+.2f} / median {silm:+.2f} | {'GENUINE' if g else 'weak'}")
+    _mc = sum(cohs)/max(1,len(cohs)); _ms = sum(sils)/max(1,len(sils)); _mm = sum(silms)/max(1,len(silms))
     print(f"  >> {genuine}/{len(live)} live domains GENUINE (size>={MIN_SIZE} AND silhouette>={SIL_MIN}) | "
-          f"mean cohesion {sum(cohs)/max(1,len(cohs)):.2f} sep {sum(seps)/max(1,len(seps)):.2f} sil {sum(sils)/max(1,len(sils)):+.2f}")
+          f"mean cohesion {_mc:.2f} sep {sum(seps)/max(1,len(seps)):.2f}/{sum(sepms)/max(1,len(sepms)):.2f} "
+          f"sil {_ms:+.2f} / median {_mm:+.2f}")
+    # Random unit vectors in SIG_D dimensions sit at cosine distance 1.0 +/- 1/sqrt(SIG_D). If the MEDIAN centroid
+    # separation is far below that, the encoder is mapping everything into a narrow cone and the assign rule is not
+    # the thing to fix -- no partition of a collapsed space is a good partition.
+    _rnd = 1.0 / (SIG_D ** 0.5); _z = (sum(sepms)/max(1,len(sepms)) - 1.0) / _rnd
+    print(f"  >> COLLAPSE CHECK: median centroid separation {sum(sepms)/max(1,len(sepms)):.2f} vs {1.0:.2f}+/-{_rnd:.2f} "
+          f"for random unit vectors in {SIG_D}-d = {_z:+.1f} sigma. "
+          + ("signature space is COLLAPSED -- fix the ENCODER, not the assign rule" if _z < -3 else
+             "centroids span the space; separation is a clustering question, not a collapse"))
     print(f"  ({len(by)-len(live)} domains merged/culled by management; {sum(1 for d in live if sizes[d] < MIN_SIZE)} live tiny)")
 
     # ---- fixed eval windows per process: SAME windows before and after the delete (the old version redrew random
