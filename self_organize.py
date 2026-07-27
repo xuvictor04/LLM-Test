@@ -62,10 +62,20 @@ MANAGE_EVERY = _i("MANAGE_EVERY", 500)                     # expert/world-model 
 # Beyond 0.45 the count still falls but purity collapses, so "4 domains" can be reached two ways and the COUNT
 # ALONE CANNOT TELL THEM APART -- read purity/homogeneity alongside it, always. And note 0.45 yields 7 on CPU and 4
 # on GPU: the threshold is a scale, not a target, and the count is a property of the data.
-# NOT the final form. The natural consolidation scale is the MEASURED radius (pooled 0.29-0.62 across these runs),
-# not a constant -- two domains should merge when their acceptance balls substantially overlap. That is a design
-# change, unmeasured, and deliberately left undone here.
-MANAGE_MERGE = _f("MANAGE_MERGE", 0.45)
+# WHICH IS WHY THE DEFAULT IS 0.28 AND NOT 0.45. 0.45 maximises V-measure against the four SEEDED corpora -- and
+# those four are a scaffold we spliced in, not something the system discovered. Optimising to them is a
+# RECONSTRUCTION score, and it is bought with the one thing the domain id actually controls.
+# `did` is consumed in exactly three places: mem.src (provenance -> delete_src/reassign_src), dom_exp (reporting),
+# and the clustering report. ROUTING DOES NOT USE IT -- fabric and experts route on the continuous `gist`, so the
+# domain COUNT has essentially no effect on prediction. What it sets is the GRANULARITY OF FORGETTING. Measured,
+# unlearning one process: at 25 domains that is 20 deletes of ~1.6% each; at 4 it is a single delete of 30%.
+# Coarser domains do not predict better, they only make editing blunter.
+# 0.28 = MERGE_FRAC*NEW_DIST, the value the code was designed around, restoring create/consolidate consistency
+# without forcing the population down to the seeded count. Treat this as a POLICY knob (how finely do you want to
+# be able to forget?), not a correctness one -- and read purity/homogeneity beside the count, never the count alone.
+# NOT the final form. The natural scale is the MEASURED radius (pooled 0.29-0.62 across these runs), not a constant:
+# two domains should merge when their acceptance balls substantially overlap. Unmeasured, so left undone.
+MANAGE_MERGE = _f("MANAGE_MERGE", 0.28)
 # --- domain population control. The old rules disagreed about what a domain IS: create at NEW_DIST=0.35 but
 # merge at 0.12 (3x tighter, so everything between was permanent); `size` cumulative so anything reaching
 # MANAGE_MIN was immortal; and no cap at all -- domains were the only population without a slot pool. The
@@ -1045,6 +1055,59 @@ def compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=64):
     print(f"  model+memory GLOBAL (all segments) {bg:.3f}  vs  SILOED (nearest segment only) {bs:.3f}")
     print(f"  >> cross-segment retrieval {'HELPS' if bs > bg + 1e-3 else 'is not load-bearing'} by {bs - bg:+.3f} bits/byte "
           f"({'segments compose' if bs > bg + 1e-3 else 'each query served by one segment -- still fine, no siloing cost'})")
+    # ---- IS THE PARTITION INFORMATIVE? A LABEL-FREE TEST. ------------------------------------------------------
+    # Every clustering score above is scored against the SEEDED corpora, which are a scaffold WE spliced in -- so
+    # they can only ever measure reconstruction of our own categories, never discovery. This asks a question that
+    # needs no labels at all: restrict retrieval to the entries written by ONE domain, and compare the domain the
+    # assembler actually assigned against a RANDOM other domain. If the partition carries information about the
+    # data, own-domain retrieval predicts better than foreign-domain retrieval. If it is arbitrary, they tie.
+    # Note this is deliberately NOT "own-domain vs global": global retrieval is expected to win (it has more to
+    # draw on, and cross-segment composition is load-bearing above). The comparison is own vs foreign at MATCHED
+    # restriction, which isolates whether the LABEL means anything.
+    _own = mem.src[vi]                                    # provenance of every retrievable entry
+    _doms = sorted(set(_own.tolist()))
+    if len(_doms) >= 2:
+        def _own_vs_foreign(prov):
+            """bits/byte with retrieval restricted to the query's OWN domain, and to a RANDOM OTHER one."""
+            _ds = sorted(set(prov.tolist())); _dm = {d: k for k, d in enumerate(_ds)}
+            _dt = torch.tensor(_ds, device=DEV)
+            dO = torch.zeros(pm.size(0), V, device=DEV); dF = torch.zeros(pm.size(0), V, device=DEV)
+            cO = torch.zeros(pm.size(0), device=DEV); cF = torch.zeros(pm.size(0), device=DEV)
+            _g = torch.Generator(device="cpu"); _g.manual_seed(0)
+            for s in range(0, keys.size(0), 4096):
+                sim = F.normalize(keys[s:s + 4096], dim=-1) @ K.t()
+                near = prov[sim.argmax(-1)]                                    # the query's own domain
+                sh = torch.randint(1, len(_ds), (near.size(0),), generator=_g).to(DEV)
+                ix = torch.tensor([_dm[int(x)] for x in near.tolist()], device=DEV)
+                far = _dt[(ix + sh) % len(_ds)]                                # always a DIFFERENT domain
+                for tag, dst, cf in ((near, dO, cO), (far, dF, cF)):
+                    m = (prov.unsqueeze(0) == tag.unsqueeze(1))
+                    sm = sim.masked_fill(~m, -1e9)
+                    k2 = min(kk, int(m.sum(-1).max().item()) or 1)
+                    tv2, ti2 = sm.topk(k2, -1)
+                    ok = tv2 > -1e8
+                    w2 = torch.softmax(tv2.masked_fill(~ok, -1e9) / 0.1, -1) * ok.float()
+                    cf[s:s + 4096] = tv2.max(-1).values.clamp(0, 1)
+                    dst[s:s + 4096].scatter_add_(1, toks[ti2], w2)
+            return bpb(dO, cO), bpb(dF, cF)
+        bo, bf = _own_vs_foreign(_own)
+        # THE CONTROL, WITHOUT WHICH THE ABOVE IS WORTHLESS. "Own domain" is defined as the domain of the query's
+        # NEAREST entry, so own-domain retrieval always contains the global top-1 hit and foreign never does -- it
+        # would win on a partition made of coin flips. Re-run the identical comparison on a RANDOM PERMUTATION of
+        # the provenance tags: same sizes, same top-1 advantage, no information. The permuted gap is the floor;
+        # only the excess over it is evidence that the partition means anything.
+        _perm = _own[torch.randperm(_own.numel(), generator=torch.Generator().manual_seed(0)).to(DEV)]
+        bo2, bf2 = _own_vs_foreign(_perm)
+        _real, _null = bf - bo, bf2 - bo2
+        print(f"\n=== IS THE PARTITION INFORMATIVE? (label-free -- the seeded corpora play no part) ===")
+        print(f"  OWN domain {bo:.3f}  vs  a RANDOM OTHER domain {bf:.3f}   -> gap {_real:+.3f} bits/byte "
+              f"over {len(_doms)} domains present in memory")
+        print(f"  SHUFFLED-provenance control (same sizes, no information)   -> gap {_null:+.3f}  [the floor]")
+        print(f"  >> EXCESS OVER THE NULL {_real - _null:+.3f} bits/byte. "
+              + ("the partition CARRIES INFORMATION beyond the top-1 artifact" if _real - _null > 0.01 else
+                 "NOT distinguishable from a random partition of the same shape -- the domain labels are not"
+                 " earning their keep for prediction (they may still be earning it for EDITING, which this"
+                 " test does not measure)"))
 
 def _dec(units):                                           # bytes OR token IDs -> printable one-liner
     txt = TOK.decode(units) if USE_TOK else bytes(units).decode("utf-8", "replace")
