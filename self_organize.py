@@ -1349,6 +1349,14 @@ def main():
     CKPT_EVERY = _i("CKPT_EVERY", 0)                       # >0: also save the checkpoint every N steps mid-run, so a long
     import bisect as _bisect                               #      run is killable/promptable and a crash never loses everything
 
+    # SAVE_CKPT=0 MEANS OFF. Every other switch in this file is an integer flag, so `SAVE_CKPT=0` is the obvious way
+    # to disable checkpointing -- but this one is a PATH, and "0" is a truthy string. `if not ck: return` never
+    # fired, os.makedirs("0") ran, and the run wrote ckpt.pt/source.bin into a directory literally named `0` in the
+    # repo root. It is not covered by .gitignore (source.bin is not *.pt and `0/` is not `runs/`), so it got
+    # committed. Normalise the disabled spellings once, here, so all four call sites see a clean value.
+    if os.environ.get("SAVE_CKPT", "").strip().lower() in ("0", "", "off", "no", "none", "false"):
+        os.environ.pop("SAVE_CKPT", None)
+
     def _save_ckpt(src_stream, quiet=False):               # persist model+tokenizer+memory so `prompt.py` can load it
         ck = os.environ.get("SAVE_CKPT")
         if not ck: return

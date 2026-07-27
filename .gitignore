@@ -19,3 +19,7 @@ data/tok_*.json
 env/
 runs/
 venv/
+
+# accidental checkpoint dirs from SAVE_CKPT=<falsy> (now normalised to OFF, kept so old trees stay clean)
+/0/
+source.bin
