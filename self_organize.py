@@ -1916,6 +1916,41 @@ def main():
             print(f"  >> gap < ~0.3 = UNDERFIT, keep training / add data (regularization would HURT)")
             print(f"     gap > ~0.5 = MEMORIZING, now turn on DROPOUT=0.1-0.2 and WEIGHT_DECAY=0.01")
             print(f"  currently: {'MEMORIZING -> enable DROPOUT/WEIGHT_DECAY' if _gap > 0.5 else 'UNDERFIT -> more data/passes, not regularization'}")
+        # === RETENTION: is the system still good at what it saw FIRST? =======================================
+        # THE central continual-learning question, and until now nothing measured it on a default run. The
+        # forgetting test that did exist (PHASED=1) is off by default and had never been executed; when finally
+        # run it showed faded material +0.65 bits/byte worse than a stationary control, with 100% of its memory
+        # evicted. Every "unlearning is local" result in this project was measured on ACTIVE material -- deleting
+        # something the store already evicted is vacuous.
+        # This needs no labels, no PHASED mode and no seeded corpora: the stream is a splice of the same corpora
+        # throughout, so its first fifth and its last fifth are statistically identical. Both were TRAINED on, so
+        # a gap is not generalisation -- it is forgetting. Memory is included because retention is a property of
+        # the whole system, weights plus store, and the store is bounded and evicts.
+        _early = _late = None
+        try:
+            _lo = [a for a in range(0, len(stream) // 5 - WIN - 2, WIN)]
+            _hi = [a for a in range(4 * len(stream) // 5, len(stream) - WIN - 2, WIN)]
+            _nE = min(64, len(_lo), len(_hi))
+            if _nE >= 8:
+                random.shuffle(_lo); random.shuffle(_hi)
+                def _bpb_at(starts):
+                    _X = torch.tensor([list(stream[a:a + WIN]) for a in starts[:_nE]], device=DEV)
+                    _Y = torch.tensor([list(stream[a + 1:a + WIN + 1]) for a in starts[:_nE]], device=DEV)
+                    with torch.no_grad():
+                        _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                        _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
+                    return -(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y)
+                _early, _late = _bpb_at(_lo), _bpb_at(_hi)
+                _d = _early - _late
+                print(f"\n=== RETENTION: does it still know what it saw FIRST? (label-free, no PHASED needed) ===")
+                print(f"  first fifth of the stream {_early:.3f}  |  last fifth {_late:.3f}  |  "
+                      f"forgetting {_d:+.3f} bits/byte")
+                print(f"  >> both were TRAINED on and are statistically identical material, so a positive gap is "
+                      f"FORGETTING, not generalisation.")
+                print(f"  >> {'RETAINED -- early material is as well modelled as recent' if _d < 0.10 else ('DRIFTING -- early material is measurably worse' if _d < 0.40 else 'CATASTROPHIC -- the system has largely moved on from what it saw first')}"
+                      f". This is the metric the continual-learning claim rests on; the domain scores are not.")
+        except Exception as _e:
+            print(f"[retention check skipped: {type(_e).__name__}: {_e}]")
         model.train()
     except Exception as _e:
         print(f"[memorization check skipped: {type(_e).__name__}: {_e}]")
