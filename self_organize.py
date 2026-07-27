@@ -539,10 +539,28 @@ class ExpertRouter:
                 if s.use.get(i, 0) < s.cull_frac * mean and step - s.last.get(i, 0) > s.cull_stale:
                     s._drop(i); s.removed += 1
         for i in s.use: s.use[i] *= 0.9                       # decay -> fitness reflects RECENT use
+# THE ENCODER IS SIZED BY THE STREAM IT ACTUALLY READS, NOT BY THE LM'S VOCAB. It was nn.Embedding(V, d), and V is
+# VMAX in online-tokenizer mode -- but ENC_SEQ is the raw BYTE stream there (see _resample: the ONLINE branch returns
+# `_b` as ENC_SEQ), so ids 256..VMAX-1 could never be indexed. At Run A's VMAX=16384 / d=768 that is 12.4M of the
+# encoder's 16.2M parameters -- 77% -- unreachable, yet allocated, held in two AdamW moment buffers, and traversed
+# by the optimizer every single step, while the encoder is 70% of wall clock. It is NOT always 256: with
+# TOKENIZER=1 TOK_ONLINE=0 the corpora themselves are tokenized, so ENC_SEQ really does carry ids up to
+# TOK.vocab_size. Size it by which of those two streams this configuration feeds it.
+ENC_V = V if (USE_TOK and not TOK_ONLINE) else 256
 class SigEncoder(nn.Module):                               # LEARNED, LIVE domain-signature encoder (stays GRU regardless of LM)
     def __init__(s, d, sd):
-        super().__init__(); s.emb = nn.Embedding(V, d); s.gru = nn.GRU(d, d, batch_first=True); s.proj = nn.Linear(d, sd)
+        super().__init__(); s.emb = nn.Embedding(ENC_V, d); s.gru = nn.GRU(d, d, batch_first=True); s.proj = nn.Linear(d, sd)
     def forward(s, x): h, _ = s.gru(s.emb(x)); return F.normalize(s.proj(h[:, -1]), dim=-1)
+
+def _load_enc(enc, sd):
+    """Restore an encoder whose saved embedding may be the OLD over-sized one. Rows 0..ENC_V-1 are the only ones
+    that were ever indexed, so they carry all the training that happened; the rest are at their init values."""
+    w = sd.get("emb.weight")
+    if w is not None and w.size(0) != ENC_V:
+        if w.size(0) < ENC_V: raise ValueError(f"checkpoint encoder vocab {w.size(0)} < required {ENC_V}")
+        sd = dict(sd); sd["emb.weight"] = w[:ENC_V]
+        print(f"  [resume] encoder embedding {w.size(0)} -> {ENC_V} rows (ids >= {ENC_V} were never indexable)")
+    enc.load_state_dict(sd)
 
 FROZEN = torch.randn(V, D, device=DEV) * (D ** -0.5)       # (testing-only byte baselines + memory retrieval key)
 def key_frozen(x):
@@ -1171,7 +1189,7 @@ def main():
             while len(fab.bodies) < _RD["fab_cfg"]["n"]: fab.grow()
         if WORLD_MODEL and _RD.get("world_cfg"):
             while world_fwd.n() < _RD["world_cfg"]["n"]: world_fwd.grow()
-        model.load_state_dict(_RD["model"]); enc.load_state_dict(_RD["enc"])
+        model.load_state_dict(_RD["model"]); _load_enc(enc, _RD["enc"])
         if FABRIC and _RD.get("fab") is not None: fab.load_state_dict(_RD["fab"])
         if EXPERTS and _RD.get("experts") is not None: experts.load_state_dict(_RD["experts"])
         if WORLD_MODEL and _RD.get("world_enc") is not None:

@@ -58,8 +58,11 @@ ENS_K = int(FAB_CFG.get("ens_k", 2)) if FAB_CFG else 2
 
 
 class SigEncoder(nn.Module):
-    def __init__(s, dd, sd):
-        super().__init__(); s.emb = nn.Embedding(V, dd); s.gru = nn.GRU(dd, dd, batch_first=True); s.proj = nn.Linear(dd, sd)
+    # Sized from the CHECKPOINT, not from V. The trainer now sizes the encoder embedding to the stream it actually
+    # reads (bytes in online-tokenizer mode), so its width no longer tracks the LM's vocab -- and a generator that
+    # guessed the width would either fail to load or, worse, load a shifted table. Read it off the saved tensor.
+    def __init__(s, dd, sd, nv=None):
+        super().__init__(); s.emb = nn.Embedding(nv or V, dd); s.gru = nn.GRU(dd, dd, batch_first=True); s.proj = nn.Linear(dd, sd)
     def forward(s, x): h, _ = s.gru(s.emb(x)); return F.normalize(s.proj(h[:, -1]), dim=-1)
 
 
@@ -190,7 +193,7 @@ if FAB_CFG and d.get("fab") is not None:
     FAB.route_t = float(FAB_CFG.get("route_t", 0.1))
     FAB.route_learn = bool(FAB_CFG.get("route_learn", True))
     FAB.load_state_dict(d["fab"]); FAB.eval()          # loads `cent` too, now that it is a registered buffer
-    ENC = SigEncoder(D, SIG_D).to(DEV); ENC.load_state_dict(d["enc"]); ENC.eval()
+    ENC = SigEncoder(D, SIG_D, d["enc"]["emb.weight"].size(0)).to(DEV); ENC.load_state_dict(d["enc"]); ENC.eval()
 
 # ---- tokenizer (or raw bytes) ----
 if d["use_tok"]:
