@@ -45,7 +45,27 @@ SELF_ORG = bool(_i("SELF_ORG", 1))                         # 0 = DISABLE domain 
 #   NOTE: the SigEncoder ALSO feeds fabric routing, so to remove ITS cost use SIG_MODE=bigram or the adaptive warmup -- separate lever.
 ENC_EVERY = _i("ENC_EVERY", 1); ENC_BATCH = _i("ENC_BATCH", 48); TEMP = _f("TEMP", 0.1); REKEY_EVERY = _i("REKEY_EVERY", 200)
 ENC_FUSE = bool(_i("ENC_FUSE", 1))                         # encode the InfoNCE anchor+positive batches in ONE pass (see below)
-MANAGE_EVERY = _i("MANAGE_EVERY", 500); MANAGE_MERGE = _f("MANAGE_MERGE", 0.12)   # domain management: merge/cull cadence
+MANAGE_EVERY = _i("MANAGE_EVERY", 500)                     # expert/world-model cadence (domains use DOM_MANAGE_EVERY)
+# CONSOLIDATION SCALE. This was 0.12, and because manage() takes `md = merge_dist if merge_dist > 0 else
+# MERGE_FRAC*NEW_DIST`, a non-zero MANAGE_MERGE OVERRIDES the fallback -- so the 0.28 that MERGE_FRAC*NEW_DIST was
+# designed to produce ("ONE scale for create AND consolidate", :MERGE_FRAC) had never once run. Creation used 0.35
+# while consolidation used 0.12: a 3x mismatch, so domains were created far more readily than they could be joined.
+# Measured on the 4 MB GPU run, long segments, everything else fixed:
+#     MANAGE_MERGE   live   purity   homogeneity   completeness    V     fragmentation
+#         0.12         25    0.97       0.90          0.60        0.72       8x
+#         0.45          4    0.97       0.89          0.89        0.89       1x  <- bijection with the 4 corpora
+# It reaches the true count while HOLDING purity and homogeneity at the 25-domain run's values, i.e. it consolidates
+# siblings rather than smearing corpora. The falsification test matters as much as the result -- CPU, same config,
+# pushing further:
+#     0.45 -> 7 live, purity 0.96, hom 0.88     0.80 -> 4 live, purity 0.71, hom 0.60   <- COUNTERFEIT 4
+#     0.60 -> 6 live, purity 0.88, hom 0.78     1.00 -> 5 live, purity 0.60, hom 0.52
+# Beyond 0.45 the count still falls but purity collapses, so "4 domains" can be reached two ways and the COUNT
+# ALONE CANNOT TELL THEM APART -- read purity/homogeneity alongside it, always. And note 0.45 yields 7 on CPU and 4
+# on GPU: the threshold is a scale, not a target, and the count is a property of the data.
+# NOT the final form. The natural consolidation scale is the MEASURED radius (pooled 0.29-0.62 across these runs),
+# not a constant -- two domains should merge when their acceptance balls substantially overlap. That is a design
+# change, unmeasured, and deliberately left undone here.
+MANAGE_MERGE = _f("MANAGE_MERGE", 0.45)
 # --- domain population control. The old rules disagreed about what a domain IS: create at NEW_DIST=0.35 but
 # merge at 0.12 (3x tighter, so everything between was permanent); `size` cumulative so anything reaching
 # MANAGE_MIN was immortal; and no cap at all -- domains were the only population without a slot pool. The
