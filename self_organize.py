@@ -1907,14 +1907,24 @@ def main():
     print(f"  >> {genuine}/{len(live)} live domains GENUINE (size>={MIN_SIZE} AND silhouette>={SIL_MIN}) | "
           f"mean cohesion {_mc:.2f} sep {sum(seps)/max(1,len(seps)):.2f}/{sum(sepms)/max(1,len(sepms)):.2f} "
           f"sil {_ms:+.2f} / median {_mm:+.2f}")
-    # Random unit vectors in SIG_D dimensions sit at cosine distance 1.0 +/- 1/sqrt(SIG_D). If the MEDIAN centroid
-    # separation is far below that, the encoder is mapping everything into a narrow cone and the assign rule is not
-    # the thing to fix -- no partition of a collapsed space is a good partition.
-    _rnd = 1.0 / (SIG_D ** 0.5); _z = (sum(sepms)/max(1,len(sepms)) - 1.0) / _rnd
-    print(f"  >> COLLAPSE CHECK: median centroid separation {sum(sepms)/max(1,len(sepms)):.2f} vs {1.0:.2f}+/-{_rnd:.2f} "
-          f"for random unit vectors in {SIG_D}-d = {_z:+.1f} sigma. "
-          + ("signature space is COLLAPSED -- fix the ENCODER, not the assign rule" if _z < -3 else
-             "centroids span the space; separation is a clustering question, not a collapse"))
+    # SPREAD CHECK. An earlier version of this compared the median centroid separation against a RANDOM-UNIT-VECTOR
+    # null (1.0 +/- 1/sqrt(SIG_D)) and declared the space "COLLAPSED" below -3 sigma. That null is wrong and the
+    # verdict was worthless: centroids of related text are nowhere near orthogonal, so a MEASURED-HEALTHY encoder
+    # (true-label silhouette +0.25, 1-NN corpus accuracy 0.90) also scores -4.8 sigma -- against -5.2 for the run
+    # that prompted the check. The test could not separate the two cases it existed to separate.
+    # What IS scale-free is the median silhouette itself: it compares separation against this domain's OWN scatter,
+    # so it needs no null. And note what neither number can settle -- both are computed between the centroids the
+    # assembler PRODUCED, so a fragmented population is crowded by construction and says nothing about the encoder.
+    # Only the true labels can settle that, which is what probe_ckpt_geometry.py is for.
+    _rnd = 1.0 / (SIG_D ** 0.5)
+    print(f"  >> SPREAD: median silhouette {_mm:+.2f} (cohesion {_mc:.2f} vs median separation "
+          f"{sum(sepms)/max(1,len(sepms)):.2f}); random unit vectors in {SIG_D}-d would sit at 1.00+/-{_rnd:.2f}, but "
+          f"real centroids sit FAR below that even when healthy -- do not read the gap as collapse.")
+    _sv = ("domains ARE separated relative to their own scatter" if _mm > 0.10 else
+           "domains are NOT separated relative to their own scatter -- the space may be poor OR the population may be"
+           " fragmented, and this report CANNOT tell which")
+    print(f"  >> {_sv}. To settle it: python3 probe_ckpt_geometry.py CKPT=<your SAVE_CKPT>"
+          f"  (separability of the TRUE corpora, using the encoder this run trained)")
     print(f"  ({len(by)-len(live)} domains merged/culled by management; {sum(1 for d in live if sizes[d] < MIN_SIZE)} live tiny)")
 
     # ---- fixed eval windows per process: SAME windows before and after the delete (the old version redrew random
