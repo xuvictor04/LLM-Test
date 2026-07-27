@@ -1422,6 +1422,20 @@ def main():
         _warn.append("EXPERTS=1 AND FABRIC=1 -> the expert bank is a NO-OP. The forward pass is an elif chain "
                      "(FABRIC wins), so the adapters never receive gradient, yet the end-of-run report still prints "
                      "expert counts. Use one or the other.")
+    # SEGMENT LENGTH vs ANALYSIS WINDOW -- the guard that would have saved the most wasted tuning in this project.
+    # Domain assembly is a SEQUENTIAL problem: detect a shift, then settle into the new domain. Detection alone costs
+    # SUSTAIN windows. If a splice segment is not many windows long there is no settled interior left to assign from,
+    # and purity/homogeneity measure the transition rather than the domain. SEG_MIN/SEG_MAX (700/1800 bytes, mean
+    # ~1250) were set when WIN was ~96 BYTES -- 13 windows per segment, a sane regime. At WIN=256 TOKENS the window
+    # is ~490 bytes, so a segment is 2.6 windows, SUSTAIN=2 consumes two of them, and under one clean window per
+    # segment remains. That is not a domain stream, it is a transition stream, and no assign rule fixes it.
+    _bpt = (sum(TOK.bytes_per_id[:TOK.vocab_size]) / max(1, TOK.vocab_size)) if (USE_TOK and TOK is not None) else 1.0
+    _winb = WIN * max(1.0, _bpt); _segb = 0.5 * (_i("SEG_MIN", 700) + _i("SEG_MAX", 1800))
+    if DATA_MODE == "real" and _segb / _winb < 8:
+        _warn.append(f"SEGMENT/WINDOW = {_segb:.0f}B / {_winb:.0f}B = {_segb/_winb:.1f} windows per splice segment "
+                     f"(SUSTAIN={SUSTAIN} of those are spent DETECTING the boundary, leaving "
+                     f"{max(0.0, _segb/_winb - SUSTAIN):.1f}). Clustering scores here describe the TRANSITIONS, not "
+                     f"the domains. Raise SEG_MIN/SEG_MAX (>= {int(8*_winb)}/{int(20*_winb)}) or lower WIN.")
     if _warn:
         print("\n".join(["!! CONFIG WARNING: " + w for w in _warn]) + "\n")
     # LIVE RATE METER: the [probe] extrapolates from a SYNTHETIC LM-only step, so its ETA has always been optimistic --

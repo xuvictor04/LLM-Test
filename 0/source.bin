@@ -10,42 +10,7 @@
     return ix;
 }
 
-/* Like _PyDictKeys_StringLookup() but only works on split keys.  Note
- * that in free-threaded builds this locks the keys object as required.
- */
-Py_ssize_t
-_PyDictKeys_StringLookupSplit(PyDictKeysObject* dk, PyObject *key)
-{
-    assert(dk->dk_kind == DICT_KEYS_SPLIT);
-    assert(PyUnicode_CheckExact(key));
-    Py_hash_t hash = unicode_get_hash(key);
-    if (hash == -1) {
-        hash = PyUnicode_Type.tp_hash(key);
-        if (hash == -1) {
-            PyErr_Clear();
-            return DKIX_ERROR;
-        }
-    }
-    return unicodekeys_lookup_split(dk, key, hash);
-}
-
-/*
-The basic lookup function used by all operations.
-This is based on Algorithm D from Knuth Vol. 3, Sec. 6.4.
-Open addressing is preferred over chaining since the link overhead for
-chaining would be substantial (100% with typical malloc overhead).
-
-The initial probe index is computed as hash mod the table size. Subsequent
-probe indices are computed as explained earlier.
-
-All arithmetic on hash should ignore overflow.
-
-_Py_dict_lookup() is general-purpose, and may return DKIX_ERROR if (and only if) a
-comparison raises an exception.
-When the key isn't found a DKIX_EMPTY is returned.
-*/
-Py_ssize_t
-_Py_dict_lookup(PyDictObject *mp, PyObject *key, Py_ha,6130.22,1763.50,7441.34
+/* Like _PyDictKeys_StringLookup() but only works on split keys.  ,6130.22,1763.50,7441.34
 2392.58,7208.84,3073.03,1459.18,4689.55,9005.64
 4096.42,9652.81,8623.29,983.63,1341.34,5996.65
 9598.02,3650.56,7599.63,3135.52,4888.05,6155.52
@@ -54,35 +19,7 @@ _Py_dict_lookup(PyDictObject *mp, PyObject *key, Py_ha,6130.22,1763.50,7441.34
 3373.13,8290.80,1453.42,1054.92,1360.30,5403.21
 540.49,7991.47,4709.96,6538.21,382.43,1294.15
 826.42,5431.82,5630.65,4586.46,6177.02,1272.81
-8779.42,3238.19,297.77,5140.48,2049.02,6363.01
-3588.41,7712.54,6999.09,7978.71,5089.90,6.54
-5596.18,8234.96,8049.08,2555.64,9888.76,3551.46
-6827.35,3944.43,7148.64,1469.28,246.27,7347.75
-6311.52,3117.24,7678.45,8591.71,6483.73,3775.47
-4110.42,8000.58,9687.79,8647.79,7914.29,5134.36
-6755.64,9933.14,6731.05,6908.61,1765.20,5532.95
-2518.46,2238.69,6156.02,4188.97,7131.93,555.51
-1923.81,7118.02,4403.05,7970.58,7023.42,8645.44
-5057.54,9501.42,9266.07,3167.38,8264.35,6456.82
-3308.45,2397.77,4266.25,5352.86,7269.18,2882.99
-6615.87,5782.59,402.32,1189.05,9704.78,9471.31
-2796.28,7559.95,3701.54,605.79,7776.75,968.27
-2435.60,8381.04,6784.01,9268.66,9306.51,2380.06
-107.96,4154.58,4537.65,6796.63,3796.53,5818.01
-7199.67,6372.19,5054.70,7594.13,7693.42,9889.87
-8667.70,4530.61,9603.69,3377.83,7818.68,3330.37
-7631.80,2388.55,2483.72,9077.13,3487.05,3938.34
-9236.40,7328.82,3531.26,3700.91,9481.08,7708.21
-6488.62,9018.24,5541.56,5904.76,70.64,2432.12
-63.01,8137.17,2011.63,9886.35,6260.30,1730.79
-297.78,3973.58,4650.16,7284.52,6566.97,3303.20
-3512.12,1895.04,4383.49,8730.75,8302.07,9886.67
-1024.21,1897.68,5751.08,1931.28,9185.16,9551.67
-369.60,8274.32,4839.04,9343.37,2432.67,3114.25
-3722.12,2420.07,2938.71,149.05,5281.11,2606.70
-8434.55,6564.26,9151.39,982.31,6234.68,7857.35
-7964.25,7835.77,2713.15,5790.34,965.53,5698.30
-1864.71,4844.64,613r_t chars[2];
+8779.42,3238.19,297.77,5140.48,2049.02r_t chars[2];
         int charsize;
         if (ch < 0x10000) {
             chars[0] = (wchar_t)ch;
@@ -94,111 +31,25 @@ _Py_dict_lookup(PyDictObject *mp, PyObject *key, Py_ha,6130.22,1763.50,7441.34
             charsize = 2;
         }
 
-        outsize = WideCharToMultiByte(code_page, flags,
-                                      chars, charsize,
-                                      buffer, Py_ARRAY_LENGTH(buffer),
-                                      NULL, pusedDefaultChar);
-        if (outsize > 0) {
-            if (pusedDefaultChar == NULL || !(*pusedDefaultChar))
-            {
-                pos++;
-                memcpy(out, buffer, outsize);
-                out += outsize;
-                continue;
-            }
-        }
-        else if (GetLastError() != ERROR_NO_UNICODE_TRANSLATION) {
-            PyErr_SetFromWindowsErr(0);
-            goto error;
-        }
-
-        rep = unicode_encode_call_errorhandler(
-                  errors, &errorHandler, encoding, reason,
-                  unicode, &exc,
-                  pos, pos + 1, &newpos);
-        if (rep == NULL)
-            goto error;
-
-        Py_ssize_t morebytes = pos - newpos;
-        if (PyBytes_Check(rep)) {
-            outsize = PyBytes_GET_SIZE(rep);
-            morebytes += 095.07,9597.89,9885.13,5825.81
+        outsize = WideCharToMultiByte(co095.07,9597.89,9885.13,5825.81
 8817.79,2144.55,1626.28,9083.70,4466.48,8097.83
 7130.75,8619.22,1500.18,1996.12,980.62,8768.32
 5871.96,3823.43,579.75,1332.85,9511.12,6014.80
 8618.04,4370.10,4677.17,8681.78,9386.08,2217.56
 8924.82,6490.79,9249.73,3369.08,4789.21,1059.62
-4610.49,47.37,6094.19,7280.95,416.90,6300.80
-4461.83,5741.18,598.08,6385.72,3213.49,6676.27
-9230.48,6571.87,6760.37,8915.43,573.33,3332.05
-9038.11,4746.21,9297.82,2340.61,3254.89,1328.15
-3809.43,8784.01,9055.79,5275.94,2547.80,611.94
-8050.81,7288.14,9065.54,902.65,5220.79,4107.84
-548.97,3452.40,1840.76,5076.36,6264.87,9117.99
-5965.57,3106.09,3236.83,4076.46,2731.47,1463.54
-158.06,4269.51,6006.49,6809.67,7679.94,677.58
-6009.26,7726.57,1042.53,4757.70,6906.31,4339.95
-3795.92,3314.87,8427.22,7478.69,7461.41,4649.28
-3316.89,198.68,2712.59,2246.57,6797.06,1520.23
-1548.78,2985.86,2139.46,6365.79,9172.41,2038.73
-4814.77,5907.90,683.63,4941.85,6210.00,3825.33
-1278.51,3013.51,7864.53,4459.69,3134.76,9564.16
-4516.46,1775.83,1536.78,9041.10,5961.01,4379.84
-8785.60,4739.55,1973.46,370.95,7495.43,8837.18
-2729.45,1296.01,9635.71,7818.96,345.35,4458.22
-3075.87,1609.05,2459.86,3553
+4610.49,47.37,6094.19,
             if not hasattr(namespace, _UNRECOGNIZED_ARGS_ATTR):
                 setattr(namespace, _UNRECOGNIZED_ARGS_ATTR, [])
             getattr(namespace, _UNRECOGNIZED_ARGS_ATTR).extend(arg_strings)
 
 class _ExtendAction(_AppendAction):
     def __call__(self, parser, namespace, values, option_string=None):
-        items = getattr(namespace, self.dest, None)
-        items = _copy_items(items)
-        items.extend(values)
-        setattr(namespace, self.dest, items)
-
-# ==============
-# Type classes
-# ==============
-
-class FileType(object):
-    """Deprecated factory for creating file object types
-
-    Instances of FileType are typically passed as type= arguments to the
-    ArgumentParser add_argument() method.
-
-    Keyword Arguments:
-        - mode -- A string indicating how the file is to be opened. Accepts the
-            same values as the builtin open() function.
-        - bufsize -- The file's desired buffer size. Accepts the same values as
-            the builtin open() function.
-        - encoding -- The file's encoding. Accepts the same values as the
-            builtin open() function.
-        - errors -- A string indicating how encoding and decoding errors are to
-            be handled. Accepts the same value as the builtin open() function.
-    ed to him
+        iteed to him
 as nothing. It looks like religious mania, and he will soon think that
 he himself is God. These infinitesimal distinctions between man and man
 are too paltry for an Omnipotent Being. How these madmen give themselves
 away! The real God taketh heed lest a sparrow fall; but the God created
-from human vanity sees no difference between an eagle and a sparrow. Oh,
-if men only knew!
-
-For half an hour or more Renfield kept getting excited in greater and
-greater degree. I did not pretend to be watching him, but I kept strict
-observation all the same. All at once that shifty look came into his
-eyes which we always see when a madman has seized an idea, and with it
-the shifty movement of the head and back which asylum attendants come to
-know so well. He became quite quiet, and went and sat on the edge of his
-bed resignedly, and looked into space with lack-lustre eyes. I thought I
-would find out if his apathy were real or only assumed, and tried to
-lead him to talk of his pets, a theme which had never failed to excite
-his attention. At first he made no reply, but at length said testily:--
-
-"Bother them all! I don't care a pin about them."
-
-"What?" I said. "You don't mean to te>= 0:
+from >= 0:
             c *= 10**k
         else:
             c = _div_nearest(c, 10**-k)
@@ -209,109 +60,25 @@ his attention. At first he made no reply, but at length said testily:--
         log_tenpower = f*M # exact
     else:
         log_d = 0  # error < 2.31
-        log_tenpower = _div_nearest(f, 10**-p) # error < 0.5
-
-    return _div_nearest(log_tenpower+log_d, 100)
-
-def _dlog(c, e, p):
-    """Given integers c, e and p with c > 0, compute an integer
-    approximation to 10**p * log(c*10**e), with an absolute error of
-    at most 1.  Assumes that c*10**e is not exactly 1."""
-
-    # Increase precision by 2. The precision increase is compensated
-    # for at the end with a division by 100.
-    p += 2
-
-    # rewrite c*10**e as d*10**f with either f >= 0 and 1 <= d <= 10,
-    # or f <= 0 and 0.1 <= d <= 1.  Then we can compute 10**p * log(c*10**e)
-    # as 10**p * log(d) + 10**p*f * log(10).
-    l = len(str(c))
-    f = e+l - (e+l >= 1)
-
-    # compute approximation to 10**p*log(d), with error < 27
-    if p > 0:
-        k = e+p-f
-        if k >= 0:
-            c *= 10**k
-        else:
-            c = _div_nearest(c, 10**-k)  # error of <= 0.5 in c
-
-        # _ilog magnifies existing error in c by a factor of at most 10
-        log_d = _ilog(c, 10**p) # error < 5 + 22 = 27
-  lf forward, and shouted in a voice laden with menace:--
+        log_tenpower = _div_nearelf forward, and shouted in a voice laden with menace:--
 
 "Monster, give me my child!"
 
 She threw herself on her knees, and raising up her hands, cried the same
 words in tones which wrung my heart. Then she tore her hair and beat her
 breast, and abandoned herself to all the violences of extravagant
-emotion. Finally, she threw herself forward, and, though I could not see
-her, I could hear the beating of her naked hands against the door.
-
-Somewhere high overhead, probably on the tower, I heard the voice of the
-Count calling in his harsh, metallic whisper. His call seemed to be
-answered from far and wide by the howling of wolves. Before many minutes
-had passed a pack of them poured, like a pent-up dam when liberated,
-through the wide entrance into the courtyard.
-
-There was no cry from the woman, and the howling of the wolves was but
-short. Before long they streamed away singly, licking their lips.
-
-I could not pity her, for I knew now what had become of her child, and
-she was better dead.
-
-What shall I do? what can I do? How can I escape from this dreadful
-thing of night and gloom and fear?
-
-       *       *       *       *       *
-
-_25 June, morning._--No man knows till he has suffered from the night
-how sweet and how dear to his heart and eye the morning can be. When the
-sun grew so high this morning that it struck the top of t note of some salient point, and found that this was
+emotion. Finally, she threw herself forward note of some salient point, and found that this was
 so. I would have liked to have asked the driver what this all meant, but
 I really feared to do so, for I thought that, placed as I was, any
 protest would have had no effect in case there had been an intention to
 delay. By-and-by, however, as I was curious to know how time was
-passing, I struck a match, and by its flame looked at my watch; it was
-within a few minutes of midnight. This gave me a sort of shock, for I
-suppose the general superstition about midnight was increased by my
-recent experiences. I waited with a sick feeling of suspense.
-
-Then a dog began to howl somewhere in a farmhouse far down the road--a
-long, agonised wailing, as if from fear. The sound was taken up by
-another dog, and then another and another, till, borne on the wind which
-now sighed softly through the Pass, a wild howling began, which seemed
-to come from all over the country, as far as the imagination could grasp
-it through the gloom of the night. At the first howl the horses began to
-strain and rear, but the driver spoke to them soothingly, and they
-quieted down, but shivered and sweated as though after a runaway from
-sudden fright. Then, far off in the distance, from the mountains on each
-side of us began a louder and a sharper howling--that of wolves--which
-affected both the horses and myself in the same way--for I was minded to
-jump from the calec0,4199.21,2390.88,2214.68,3401.35,4746.58
+passing, I struck a match,0,4199.21,2390.88,2214.68,3401.35,4746.58
 686.34,5605.90,6372.45,9247.76,5883.96,4519.12
 3584.55,8654.16,4955.45,2130.89,8911.15,8344.01
 9736.70,4938.48,3425.57,1185.89,3959.24,3828.56
 2791.86,2313.80,1873.96,6659.03,4209.77,8068.72
 3553.42,3795.20,4903.09,5864.69,1062.61,8046.89
-6723.28,6107.76,6647.33,2752.95,9051.59,919.99
-2756.72,5721.09,5651.18,1475.78,2036.31,9591.18
-3918.59,7687.14,158.97,2121.46,28.52,679.32
-5351.88,6765.10,6028.43,5546.61,857.85,8337.63
-4795.72,6581.18,4202.21,4869.91,9045.79,4610.11
-8967.40,2753.36,3818.67,1114.22,8421.49,8897.17
-4553.69,8762.19,8672.13,7034.63,6646.45,7279.74
-4037.69,6265.10,5485.86,9489.89,189.51,8582.15
-1358.21,267.69,9436.09,2780.06,9870.16,5576.09
-9144.90,8607.68,1810.05,4788.65,281.67,6411.80
-5046.89,6887.86,1348.89,6300.95,348.85,3915.78
-2865.91,20.50,4916.14,2445.88,5108.73,6793.64
-1041.44,5780.00,9998.05,363.24,7372.85,8739.08
-770.15,5963.90,3509.76,6404.56,328.36,1300.59
-4016.45,4297.79,5029.13,9283.91,7797.59,2638.21
-9148.42,5110.76,8626.26,5560.84,60.36,2564.43
-5369.62,2675.40,279.46,7410.46,9094.82,1978.26
-9954.36,2856.17,7038.56,5768.38,4371.31de_RichCompare(PyObject *left, PyObject *right, int op)
+672de_RichCompare(PyObject *left, PyObject *right, int op)
 {
     int result;
 
@@ -327,167 +94,36 @@ jump from the calec0,4199.21,2390.88,2214.68,3401.35,4746.58
             Py_RETURN_TRUE;
         case Py_NE:
         case Py_LT:
-        case Py_GT:
-            Py_RETURN_FALSE;
-        default:
-            PyErr_BadArgument();
-            return NULL;
-        }
-    }
-    else if (op == Py_EQ || op == Py_NE) {
-        result = unicode_eq(left, right);
-        result ^= (op == Py_NE);
-        return PyBool_FromLong(result);
-    }
-    else {
-        result = unicode_compare(left, right);
-        Py_RETURN_RICHCOMPARE(result, 0, op);
-    }
-}
-
-int
-PyUnicode_Contains(PyObject *str, PyObject *substr)
-{
-    int kind1, kind2;
-    const void *buf1, *buf2;
-    Py_ssize_t len1, len2;
-    int result;
-
-    if (!PyUnicode_Check(substr)) {
-        PyErr_Format(PyExc_TypeError,
-                     "'in <string>' requires string as left operand, not %.100s",
-                     Py_TYPE(substr)->tp_name);
-        return -1;
-    }
-    if (ensure_unicode(str) < 0)
-        return -1;
-
-    kind1 = PyUnicode_KIND(str);
-    kind2 = PyUnicode_KIND(substr);
-    if (kind1 < kind2)
-        return 0;
-    len1 = PyUnicode_GET_LENGTH(str);
-    len2 = PyUnicode_GET_LENGTH(substr);
-    if (len1 < len2)
-        return 0;
-    buf1 = PyUnicode_DATA(str);
-    buf2 = PyUnicode_DATA(substr);
-    if (len2 == 1) {
-        Py_UCS4 ch = PyUnicode_READ(kind2, buf2,.31,3245.10,221.87
+        case Py_.31,3245.10,221.87
 7717.10,6792.83,3013.19,9570.33,9092.51,2687.15
 5228.22,2503.44,4356.41,7774.93,2910.97,3774.72
 955.87,7522.22,7021.29,3955.39,9717.01,9909.48
 7857.18,9728.78,1189.73,5047.99,1691.96,7777.57
-940.45,1744.94,761.63,6988.52,3309.15,9029.02
-5208.41,4731.26,9087.29,2343.95,7286.39,8216.21
-9423.05,8479.63,8884.66,3206.81,7162.40,1900.21
-9475.66,1949.77,2211.54,3994.48,46.99,8609.43
-4703.23,3071.59,3589.43,7503.04,7688.97,161.88
-7905.76,9637.68,799.04,7175.75,1597.63,518.46
-7726.64,9533.12,1415.07,5043.52,8040.77,4069.89
-6825.99,7072.06,7698.45,1484.87,964.86,4977.23
-9152.76,8580.07,2443.41,6167.62,1259.57,4764.41
-6238.07,8563.77,4487.27,8111.45,5588.56,3276.34
-2891.31,8685.44,3420.32,3741.05,2244.68,2728.55
-8632.64,2762.28,1749.95,5616.74,9145.04,9213.94
-8800.91,5259.35,7022.07,7520.03,9885.39,2713.55
-1
+9
 down on the edge of the bed, with Godalming beside him; we all watched
 in patience.
 
 "We shall wait," said Van Helsing, "just long enough to fix the best
-spot for trephining, so that we may most quickly and perfectly remove
-the blood clot; for it is evident that the haemorrhage is increasing."
-
-The minutes during which we waited passed with fearful slowness. I had a
-horrible sinking in my heart, and from Van Helsing's face I gathered
-that he felt some fear or apprehension as to what was to come. I dreaded
-the words that Renfield might speak. I was positively afraid to think;
-but the conviction of what was coming was on me, as I have read of men
-who have heard the death-watch. The poor man's breathing came in
-uncertain gasps. Each instant he seemed as though he would open his eyes
-and speak; but then would follow a prolonged stertorous breath, and he
-would relapseplace))
+spot for trephining, so that we may most quickly and perfectly removplace))
         return -1;
 
     if (item == NULL) {
         /* not found => default to 1:1 mapping */
         if (_PyUnicodeWriter_WriteCharInline(writer, ch) < 0) {
-            return -1;
-        }
-        return 1;
-    }
-
-    if (item == Py_None) {
-        Py_DECREF(item);
-        return 0;
-    }
-
-    if (PyLong_Check(item)) {
-        if (_PyUnicodeWriter_WriteCharInline(writer, replace) < 0) {
-            Py_DECREF(item);
-            return -1;
-        }
-        Py_DECREF(item);
-        return 1;
-    }
-
-    if (!PyUnicode_Check(item)) {
-        Py_DECREF(item);
-        return -1;
-    }
-
-    if (_PyUnicodeWriter_WriteStr(writer, item) < 0) {
-        Py_DECREF(item);
-        return -1;
-    }
-03.54
+            re03.54
 7531.98,4675.37,5388.13,6425.51,4250.63,246.89
 6852.93,7557.50,3915.50,4590.07,6193.06,1204.64
 8078.43,9424.28,7262.01,2576.86,7568.87,734.28
 1820.46,5846.88,7116.80,7921.59,4227.26,2459.43
 9945.52,6499.52,2563.92,3276.51,7462.03,6613.22
 8313.43,8342.88,4582.92,4376.70,7758.89,1781.78
-1249.23,5683.07,3077.45,8346.05,4995.17,1509.81
-9052.38,2475.34,1241.69,3050.21,7831.27,7808.59
-3072.10,7852.29,8389.08,6855.70,5194.46,3684.70
-5994.91,3128.12,8189.03,4871.88,2392.60,6741.32
-6172.12,384.30,3056.81,5884.72,5459.56,8001.77
-6203.82,1736.44,6496.05,1061.90,9899.70,8364.07
-3809.52,5749.56,5601.91,8510.36,6919.59,175.53
-2524.58,8234.41,13.88,3173.45,7786.52,1263.74
-6666.50,2833.34,9207.06,7306.01,8184.48,9487.81
-7703.43,8688.58,7441.00,4842.15,755.30,5178.06
-9471.18,2122.29,9114.21,2544.66,5008.83,8538.79
-6202.76,2452.41,1500.54,9506.52,4716.94,1038.53
-3208.29,8256.56,8404.62,7130.30,6096.29,7405.82
-7874.52,7877.57,4007.15,3362.55,2630.74,7232.74
-8017.65,2578.44,1729.55,2506.93,2449.76,8063.94
-5116.10,7749.77,6129.07,5230.29,8066.45,7355.31
-5944.47,9189.87,6217.20,9764.69,4765.96,1411.54
-9566.36,1700.47,5146.91,2719.08,5964.94,3191.75
-8860.14,8033.45,5607.85,2889.53,1168.64,1710.27
-ooked on the poor face with the same
+1249.23,5683ooked on the poor face with the same
 awful, waxen pallor as before. He wore a look of stern sadness and
 infinite pity.
 
 "As I expected," he murmured, with that hissing inspiration of his which
 meant so much. Without a word he went and locked the door, and then
-began to set out on the little table the instruments for yet another
-operation of transfusion of blood. I had long ago recognised the
-necessity, and begun to take off my coat, but he stopped me with a
-warning hand. "No!" he said. "To-day you must operate. I shall provide.
-You are weakened already." As he spoke he took off his coat and rolled
-up his shirt-sleeve.
-
-Again the operation; again the narcotic; again some return of colour to
-the ashy cheeks, and the regular breathing of healthy sleep. This time I
-watched whilst Van Helsing recruited himself and rested.
-
-Presently he took an opportunity of telling Mrs. Westenra that she must
-not remove anything from Lucy's room without consulting him; that the
-flowers were of medicinal value, and that the breathing of their odour
-was a part of the system of ._registries[registry_name].get(value, default)
+began to s._registries[registry_name].get(value, default)
 
     # ==================================
     # Namespace default accessor methods
@@ -496,69 +132,13 @@ was a part of the system of ._registries[registry_name].get(value, default)
     def set_defaults(self, **kwargs):
         self._defaults.update(kwargs)
 
-        # if these defaults match any existing arguments, replace
-        # the previous default on the object with the new one
-        for action in self._actions:
-            if action.dest in kwargs:
-                action.default = kwargs[action.dest]
-
-    def get_default(self, dest):
-        for action in self._actions:
-            if action.dest == dest and action.default is not None:
-                return action.default
-        return self._defaults.get(dest, None)
-
-
-    # =======================
-    # Adding argument actions
-    # =======================
-
-    def add_argument(self, *args, **kwargs):
-        """
-        add_argument(dest, ..., name=value, ...)
-        add_argument(option_string, option_string, ..., name=value, ...)
-        """
-
-        # if no positional args are supplied or only one is supplied and
-        # it doesn't look like an option string, parse a positional
-        # argument
-        chars = if (err == 0) {
+        # if these defaults match any existing argum if (err == 0) {
                 err = insertdict(mp, Py_NewRef(key), hash, Py_NewRef(value));
             }
             else if (err > 0) {
                 if (dupkey != NULL) {
                     *dupkey = key;
-                    Py_DECREF(value);
-                    return -2;
-                }
-                err = 0;
-            }
-        }
-        Py_DECREF(value);
-        Py_DECREF(key);
-        if (err != 0)
-            return -1;
-
-        if (orig_size != other->ma_used) {
-            PyErr_SetString(PyExc_RuntimeError,
-                    "dict mutated during update");
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static int
-dict_merge(PyObject *a, PyObject *b, int override, PyObject **dupkey)
-{
-    assert(a != NULL);
-    assert(b != NULL);
-    assert(0 <= override && override <= 2);
-
-    PyDictObject *mp = _PyAnyDict_CAST(a);
-
-    int res = 0;
-    if 37,2026.00,2199.94,5686.35,5078.03,8912.73
+            37,2026.00,2199.94,5686.35,5078.03,8912.73
 9159.14,9008.21,3305.26,303.00,3119.23,2763.37
 9954.82,2155.02,5841.81,591.06,9642.70,7203.07
 6961.06,5955.38,109.00,8034.50,8331.28,7276.38
@@ -567,100 +147,29 @@ dict_merge(PyObject *a, PyObject *b, int override, PyObject **dupkey)
 5520.28,8623.09,5127.36,3918.97,7982.24,3035.16
 6983.80,3881.26,8351.50,4773.61,6400.11,7530.15
 5224.75,1503.96,2226.23,6688.23,5871.01,9104.37
-3567.71,6382.15,8336.39,9659.89,9123.73,3647.93
-7449.71,5654.87,6195.90,3963.99,5170.30,8056.31
-927.70,3327.30,8165.73,4674.05,9373.90,4025.92
-6370.88,3954.73,8689.54,3559.09,6596.61,6667.11
-5900.34,5183.96,5632.16,1436.85,5127.35,1822.54
-4620.25,6297.92,6126.32,8968.78,5687.95,5371.41
-5989.09,8803.71,4588.46,3601.59,2142.59,5377.30
-1559.49,5902.55,4505.38,1305.17,926.02,4407.02
-1825.98,5678.08,5895.96,8513.82,3002.67,905.99
-2905.09,5369.60,5800.73,4130.67,3613.80,4646.95
-3963.55,5606.34,8580.86,1753.81,6963.30,6595.66
-4236.64,7361.87,8395.00,1880.56,3040.40,3794.41
-5233.97,9259.32,7665.03,7183.35,3797.42,3528.59
-9928.89,3723.63,1577.81,5742.85,9494.75,6072.69
-195.04,2762.42,4006.72,8133.28,6662.20,9034.05
-1391.03,3790.11,9053.32,4712.19,8168.30,380.07
-8940.47,2104.39,3946.05,3957.97,8281.05,6068.92
-4053.36,3460.72,948.54,9812.37,131.44,2992.72
-218.17,9737.45,9299.78,9688.31,915.06,6858.57
-331.92,7531.91,6932.37,1308.94,8731.93,7597.83
-9278.34,2574.26,623.94,9241.92,5698.73,9742.03
-8774.90,972.47,9832.58,3775.37,2512.38,4374.91
-8852.74,9235.47,7350.65,5454.17,3798.85,1869.10
-4636.61,4307.45,6596.59,8245.27,7752.24,3585.34
-4235.14,589.58,8548.35,5884.23,745.69,686.87
-3102.52,6599.38,8498.92,9406.46,464.46,8695.78
-9606.49,2857.85,499.97,5174.07,5164.54,724.87
-9459.86,2761.25,3095.35,6755.14,8178.9same way. "I have for myself thoughts at the present. Later I shall
+3567.71,6382.15,same way. "I have for myself thoughts at the present. Later I shall
 unfold to you."
 
 "Why not now?" I asked. "It may do some good; we may arrive at some
 decision." He stopped and looked at me, and said:--
 
 "My friend John, when the corn is grown, even before it has
-ripened--while the milk of its mother-earth is in him, and the sunshine
-has not yet begun to paint him with his gold, the husbandman he pull the
-ear and rub him between his rough hands, and blow away the green chaff,
-and say to you: 'Look! he's good corn; he will make good crop when the
-time comes.'" I did not see the application, and told him so. For reply
-he reached over and took my ear in his hand and pulled it playfully, as
-he used long ago to do at lectures, and said: "The good husbandman tell
-you so then because he knows, but not till then. But you do not find the
-good husbandman dig up his planted corn to see if he grow; that is for
-the children who play at husbandry, and not for those who take it as of
-the work of their life. See you now, friend John? I have sown my corn,
-and Nature has her work to do in making it sprout; if he sprout at all,
-there's some promise; and I wait till the ear begins to swell." He broke
-off, for he evidently saw that I understood. Then he went on, and very
-gravely:--
-
-"You were5,3318.15
+ripened--while the milk of its mother-earth is in him, and th5,3318.15
 8352.63,7134.33,4475.49,952.49,8872.44,1512.71
 4806.48,6398.59,9590.54,9949.29,2824.54,8115.13
 5143.44,7653.82,2041.33,8538.10,3839.19,4227.92
 3649.01,9598.30,8141.51,5776.93,7931.36,1766.11
-9296.21,8077.49,7532.15,8849.35,6882.22,9934.47
-3088.58,476.04,6061.86,6630.16,920.92,6669.70
-2111.63,5818.92,5744.00,8946.04,8042.81,7018.51
-6739.60,2307.67,3715.56,3816.25,4790.25,7160.74
-9476.67,6699.91,5712.50,2500.67,519.70,4178.90
-3044.38,1378.57,9650.42,8514.35,1482.48,9506.10
-3111.43,3598.27,304.61,8713.38,3409.27,9245.82
-8299.15,2328.62,8322.16,4641.75,9412.40,5995.39
-2395.29,92.89,3825.41,4277.10,7987.69,7461.63
-3879.08,7954.94,7853.14,8721.36,7466.64,9309.63
-4552.56,5633.62,5985.89,8066.76,375.64,3333.07
-3270.07,3734.77,7559.46,9510.85,6767.22,3509.78
-7091.74,5503.77,7916.29,5437.73,4028.00,6324.75
-9484.18,2070.39,4536.08,5578.69,551.47,4706.43
-5596.80,9314.51,4899.01,2660.23,3060.48,9841.27
-7122.37,3862.09,776.55,6978.88,3162.24,4482306.32,9030.03,5723.07,7399.97,7324.86
-5816.38,6445.67,5854.51,906.34,9071.90,1790.86
-4357.25,4610.47,9604.44,1022.85,3525.53,1232.09
-516.81,7390.50,7752.41,8474.35,5111.57,4712.22
-1074.45,5268.76,8274.72,1009.54,5070.15,5630.56
-8691.84,408.92,1036.39,3462.30,8741.74,2755.80
-9687.99,8936.51,7003.95,4958.89,9097.74,1159.09
-4784.12,8981.99,3339.12,3118.17,8109.25,56.04
-5397.42,4736.00,2642.09,9561.51,3468.24,2722.80
-5924.50,7379.58,8719.74,2125.30,8572.68,6604.51
-970.96,1194.47,2756.60,7603.73,6763.22,3273.19
-8877.60,3945.09,9067.90,8692.22,3957.60,6048.68
-642.38,9843.88,4069.97,4333.49,6744.54,427.58
-2198.58,1065.67,6821.63,159.51,4206.80,2889.16
-3421.11,3900.26,2970.30,2807.17,8270.56,1751.79
-8457.64,3756.56,5359.28,9693.16,8580.00,1006.41
-2179.86,2519.01,6509.24,236.35,561.69,9091.51
-6376.33,2992.19,6310.47,287.90,1258.71,2604.56
-5246.80,756.04,2173.34,2501.74,3441.52,4306.47
-6477.19,4361.24,9592.14,8638.13,2933.75,4591.00
-9410.60,8510.67,201.44,3062.34,7703.43,5362.39
-4771.82,2300.79,1828.58,4061.47,5806.71,1302.77
-1489.72,3755.70,1328.61,5306.50,8771.05,7928.17
-4320.60,8797.69,7737.56,9015.30,1921,5930.84,9570.27,2673.59,5453.31
+9296.21,8077.49,7532.15,8849.35,6882.22,99
+1551.91,7153.65,1739.84,3107.98,9780.51,3630.51
+1279.55,6098.56,7324.87,8970.53,9924.13,7235.01
+8902.84,7099.04,971.51,923.83,7413.54,5574.07
+9674.79,7293.63,4308.87,7028.84,7980.89,2762.73
+9590.11,2084.41,1322.50,3925.06,4078.43,4935.84
+3478.47,7233.93,3108.64,3413.15,1813.34,6919.80
+6877.80,4983.31,2063.35,4385.30,246.15,749.99
+5480.66,2211.12,7464.76,5279.74,4231.08,9765.28
+4866.84,6699.38,2720.23,4767.31,2823.18,3676.59
+7823.47,165.73,5576.50,778.21,5930.84,9570.27,2673.59,5453.31
 4681.04,1167.26,1013.90,3057.28,3647.30,6482.24
 5040.14,7082.01,3986.58,2890.05,4406.79,7633.36
 4003.79,4199.38,2209.12,1481.93,1129.36,3707.92
@@ -668,33 +177,7 @@ gravely:--
 1786.96,2698.87,4064.64,2581.52,8414.33,4613.48
 1358.07,190.04,4654.35,7764.65,4171.85,853.18
 6819.20,128.96,7761.60,5484.76,6372.28,2460.13
-6670.37,4363.29,6981.61,625.57,237.46,1286.28
-6951.14,3060.89,3936.88,5101.97,3825.59,3454.47
-5545.97,8658.66,7553.49,6935.23,1031.30,8481.80
-4137.34,7147.12,5253.36,6476.50,6712.29,8274.39
-7030.58,7384.26,3535.29,7706.42,7432.87,7912.27
-3306.74,8696.08,71.39,8777.84,8321.13,1459.09
-8194.83,4696.65,5851.87,2369.88,5977.27,9509.88
-5092.06,2199.24,3856.72,4005.96,3931.62,4762.29
-6814.42,2590.71,3730.28,9071.52,6476.10,524.28
-1016.93,7389.49,5709.03,2731.84,1523.80,283.71
-7873.89,7172.11,1536.85,3658.08,1231.09,9390.29
-2689.03,1570.05,557.96,3452.75,5445.19,4456.90
-5850.46,7583.52,5419.64,2333.08,783.29,8808.07
-5791.90,3507.45,9616.94,7634.42,75.08,751.57
-3162.51,5663.29,1667.36,2028.47,7167.16,9612.34
-2981.83,9111.76,1180.03,2712.90,6481.96,342.16
-4050.12,7711.50,3331.92,6020.20,7731.47,6047.28
-6964.41,2801.96,2786.69,4851.18,8676.44,1323.90
-2025.65,9011.09,8997.31,2676.69,8207.18,1533.31
-6648.42,1705.95,7679.86,8752.40,3582.58,6225.01
-972.39,4884.71,451.77,554.34,2757.24,6965.57
-4452.76,2112.37,9536.35,4052.66,7292.15,8103.33
-8209.32,9288.96,4174.87,9091.84,1923.26,70.17
-3152.77,4554.49,6292.97,7807.82,8402.74,3586.71
-9835.97,6500.49,5498.56,1791.51,2580.12,3760.43
-7980.41,9085.10,7349.54,6368.03,4324.61,4030.54
-6297.09,994.ong int */
+6670.37,4363.29,6981.61,625.57,237.46,1ong int */
 
 PyObject *
 PyLong_FromUnsignedLong(unsigned long ival)
@@ -710,69 +193,15 @@ PyLong_FromUnsignedLongLong(unsigned long long ival)
     PYLONG_FROM_UINT(unsigned long long, ival);
 }
 
-/* Create a new int object from a C size_t. */
-
-PyObject *
-PyLong_FromSize_t(size_t ival)
-{
-    PYLONG_FROM_UINT(size_t, ival);
-}
-
-/* Create a new int object from a C double */
-
-PyObject *
-PyLong_FromDouble(double dval)
-{
-    /* Try to get out cheap if this fits in a long. When a finite value of real
-     * floating type is converted to an integer type, the value is truncated
-     * toward zero. If the value of the integral part cannot be represented by
-     * the integer type, the behavior is undefined. Thus, we must check that
-     * value is in range (LONG_MIN - 1, LONG_MAX + 1). If a long has more bits
-     * of precision than a double, casting LONG_MIN - 1 to double may yield an
-     * approximation, but LONG_MAX + 1 is a power of two and can be represented
-     * as double exactly (assuming FLT_RADIX is 2 or 16), so for simplicity
-     * check against [-(LONG_MAX + 1), LONG_MAX + 1).
-     */
-    const double int_max = (unsigned long)LONG_MAX + 1;
-    if (-int_max < dval && dval < int_max) {
-        return PyLong_FromLong((long)dval5547.82,4893.61
+/* Create a new int object from a C size_t. */5547.82,4893.61
 9411.64,3853.97,3490.36,2019.98,9337.01,600.79
 5167.11,8655.83,2925.58,8859.10,6713.92,2298.69
 710.91,2296.40,5876.57,3121.51,7595.10,6460.46
 160.36,3466.74,5833.47,122.12,7296.97,6640.39
 2839.38,3592.95,5406.42,3470.05,834.02,2981.76
-7576.41,601.34,9726.67,4448.08,4094.01,2130.96
-6771.44,4423.63,639.49,1815.39,6868.96,4066.29
-8485.74,7143.72,4325.01,95.19,7781.90,2443.44
-1271.76,4054.71,9015.19,2174.51,2274.78,5409.24
-2121.17,9961.88,1908.16,547.76,4558.34,5774.00
-2381.89,142.08,7474.91,7091.91,6514.39,2190.50
-6980.96,5898.57,5731.37,7785.23,4406.01,5103.29
-870.63,977.00,1296.76,7589.00,4021.16,6423.94
-6364.28,9724.79,4535.23,3574.20,1484.42,5683.11
-1998.71,3780.26,5383.71,8788.57,1356.55,9365.45
-2704.23,1665.45,3026.87,8081.78,1298.58,7067.27
-1038.08,4123.42,6423.47,9528.41,7050.66,9808.83
-1158.24,6744.44,8630.94,8146.44,1955.57,5395.01
-3690.38,6731.85,2292.24,4556.90,8339.78,757.20
-9503.39,933.84,1822.34,9656.14,2944.90,9145.57
-9336.31,7676.55,894.18,8074.46,8241.37,6150.11
-9272.55,2127.87,8337.29,7012.62,1026.75,5926.68
-8530.23,1015.90,3342  return Signature([Parameter('new_class_name', Parameter.POSITIONAL_ONLY),
+7576.41,601.34,9726.67,  return Signature([Parameter('new_class_name', Parameter.POSITIONAL_ONLY),
                               Parameter('names', Parameter.POSITIONAL_OR_KEYWORD),
-                              Parameter('module', Parameter.KEYWORD_ONLY, default=None),
-                              Parameter('qualname', Parameter.KEYWORD_ONLY, default=None),
-                              Parameter('type', Parameter.KEYWORD_ONLY, default=None),
-                              Parameter('start', Parameter.KEYWORD_ONLY, default=1),
-                              Parameter('boundary', Parameter.KEYWORD_ONLY, default=None)])
-
-
-EnumMeta = EnumType         # keep EnumMeta name for backwards compatibility
-
-
-class Enum(metaclass=EnumType):
-    """
-    Create a collection of name/value pairs_impl(PyDictObject *self)
+                              Paramet_impl(PyDictObject *self)
 /*[clinic end generated code: output=e65fcb04420d230d input=ef28b4da5f0f762e]*/
 {
     assert(can_modify_dict(self));
@@ -780,20 +209,7 @@ class Enum(metaclass=EnumType):
     Py_ssize_t i, j;
     PyObject *res;
 
-    /* Allocate the result tuple before checking the size.  Believe it
-     * or not, this allocation could trigger a garbage collection which
-     * could empty the dict, so if we checked the size first and that
-     * happened, the result would be an infinite loop (searching for an
-     * entry that no longer exists).  Note that the usual popitem()
-     * idiom is "while d: k, v = d.popitem()". so needing to throw the
-     * tuple away if the dict *is* empty isn't a significant
-     * inefficiency -- possible, but unlikely in practice.
-     */
-    res = PyTuple_New(2);
-    if (res == NULL)
-        return NULL;
-    if (self->ma_used == 0) {
-      zeros)
+    /* Allocate the result tupzeros)
 
     def __pow__(self, other, modulo=None, context=None):
         """Return self ** other [ % modulo].
@@ -801,286 +217,58 @@ class Enum(metaclass=EnumType):
         With two arguments, compute self**other.
 
         With three arguments, compute (self**other) % modulo.  For the
-        three argument form, the following restrictions on the
-        arguments hold:
+        three argument fn
+existing sanity. "I appeal to your friends," he said, "they will,
+perhaps, not mind sitting in judgment on my case. By the way, you have
+not introduced me." I was so much astonished, that the oddness of
+introducing a madman in an asylum did not strike me at the moment; and,
+besides, there was a certain dignity in the man's manner, so much of
+the habit of equality, that I at once made the introduction: "Lord
+Godalming; Professor Van Helsing; Mrincluding decimal!) use
+the simple quadratic-time algorithm below, complicated by some speed tricks.
 
-         - all three arguments must be integral
-         - other must be nonnegative
-         - either self or other (or both) must be nonzero
-         - modulo must be nonzero and must have at most p digits,
-           where p is the context precision.
+First some math:  the largest integer that can be expressed in N base-B digits
+is B**N-1.  Consequently, if we have an N-digit input in base B, the worst-
+case number of Python digits needed to hold it is the smallest integer n s.t.
 
-        If any of these restrictions is violated the InvalidOperation
-        flag is raised.
-
-        The result of pow(self, other, modulo) is identical to the
-        result that would be obtained by computing (self**other) %
-        modulo with unbounded precision, but is computed more
-        efficiently.  It is always exact.
-        """
-
-        if modulo is not None:
-            return self._power_modulo(other, modulo, cd by
-your equipment.
-
-1.F.2.  LIMITED WARRANTY, DISCLAIMER OF DAMAGES - Except for the "Right
-of Replacement or Refund" described in paragraph 1.F.3, the Project
-Gutenberg Literary Archive Foundation, the owner of the Project
-Gutenberg-tm trademark, and any other party distributing a Project
-Gutenberg-tm electronic work under this agreement, disclaim all
-liability to you for damages, costs and expenses, including legal
-fees.  YOU AGREE THAT YOU HAVE NO REMEDIES FOR NEGLIGENCE, STRICT
-LIABILITY, BREACH OF WARRANTY OR BREACH OF CONTRACT EXCEPT THOSE
-PROVIDED IN PARAGRAPH 1.F.3.  YOU AGREE THAT THE FOUNDATION, THE
-TRADEMARK OWNER, AND ANY DISTRIBUTOR UNDER THIS AGREEMENT WILL NOT BE
-LIABLE TO YOU FOR ACTUAL, DIRECT, INDIRECT, CONSEQUENTIAL, PUNITIVE OR
-INCIDENTAL DAMAGES EVEN IF YOU GIVE NOTICE OF THE POSSIBILITY OF SUCH
-DAMAGE.
-
-1.F.3.  LIMITED RIGHT OF REPLACEMENT OR REFUND - If you discover a
-defect in this electronic work within 90 days of receiving it, you can
-receive a refund of the money (if any) you paid for it by sending a
-written explanation to the person you received the work from.  If you
-received the work on a physical medium, you must return the medium with
-your written explanation.  The person or entity that provided you with
-the defective work may elect to provide a replacement copy in lieu of a
-refund.  If you received the work electronically, the person or entity
-providing it to you may choose to give you a second opportunity to
-receive1873.04
-2702.68,5440.53,5949.53,8330.91,10.78,6173.46
-7381.64,1897.22,4549.46,6991.10,1675.20,1668.80
-5445.65,9650.70,9603.07,9202.81,42.26,9974.88
-7555.71,805.14,8735.64,8666.98,7318.89,7233.77
-4465.47,1739.60,294.66,6385.05,1304.69,7802.44
-8521.27,5248.14,6204.03,9791.46,4569.33,9062.92
-6715.23,4253.70,7689.98,607.98,9016.60,5939.63
-1985.21,8531.42,3494.22,4718.69,3471.11,763.76
-385.96,6093.53,142.96,5124.49,6030.30,7486.94
-4020.08,9991.51,5819.71,542.23,2717.57,5886.58
-9447.58,5431.64,8590.98,6774.11,1958.51,9443.75
-323.37,7877.69,1866.34,8238.09,660.25,2666.71
-6774.28,2823.59,4260.18,9661.02,6145.99,1331.77
-6751.86,8073.93,8390.41,3310.62,8201.45,602.81
-9470.58,4012.94,1864.54,5432.16,9912.65,7692.51
-3708.22,6142.02,2990.82,9075.13,2202.21,4991.25
-2994.85,7651.11,5819.43,2766.53,3652.98,9814.61
-9948.31,5805.84,3871.52,5272.05,5003.59,1868.84
-2032.64,6432.92,2181.49,4866.99,8357.60,1474.65
-8400.97,9164.96,8230.32,1985.93,7291.82,1663.82
-8057.21,472.90,4049.80,1986.79,8359.62,9400.03
-767.91,4316.53,1387.15,4339.48,2631.22,6919.86
-7206.09,9807.48,51.65,4353.11,7537.28,5379.33
-9535.10,9858.62,529.47,9071.29,189.65,2924.72
-426.06,917.32,717.32,6361.64,5934.70,5377.62
-1374.52,5100.62,5880.30,6840.92,9623.29,9459.42
-6668.92,1481.34,8944.71,1648.21,515.57,8822.12
-9405.34,6995.31,6942.98,5338.64,270.73,6254.77
-4273.33,4926.47,1730.78,8109.33,8157.18,1937.81
-6758.60,5116.01,8806.69,1884.54,4110.40,8760.67
-7444.82,2609.03,5031.45,7568.08,4265.18,6202.80
-2472.00,4686.98,1638.78,435.40,1789.47,5536.01
-6022.67,1052.88,2322.00,7916.50,3604.84,2902.87
-5245.01,300.32,7914.49,3767.98,399.50,1192.80
-2091.18,7016.99,8278.04,176.66,5830.21,5527.35
-2690.51,9298.48,5574.04,586.89,4836.63,6417.67
-5683.95,1203.46,5309.76,6529.75,3513.26,9205.42
-3341.64,3202.8num(StrEnum)
-class EnumCheck:
-    """
-    various conditions to check an enumeration for
-    """
-    CONTINUOUS = "no skipped integer values"
-    NAMED_FLAGS = "multi-flag aliases may not contain unnamed flags"
-    UNIQUE = "one name per value"
-CONTINUOUS, NAMED_FLAGS, UNIQUE = EnumCheck
-
-
-class verify:
-    """
-    Check an enumeration for various constraints. (see EnumCheck)
-    """
-    def __init__(self, *checks):
-        self.checks = checks
-    def __call__(self, enumeration):
-        checks = self.checks
-        cls_name = enumeration.__name__
-        if Flag is not None and issubclass(enumeration, Flag):
-            enum_type = 'flag'
-        elif issubclass(enumeration, Enum):
-            enum_type = 'enum'
-        else:
-            raise TypeError("the 'verify' decorator only works with Enum and Flag")
-        for check in checks:
-            if check is UNIQUE:
-                # check for duplicate names
-                duplicates = []
-                for name, member in enumeration.__members__.items():
-                    if name != member.name:
-                        duplicates.append((name, member.name))
-                if duplicates:
-                    alias_details = ', '.join(
-                            ["%s -> %s" % (alias, name) for (alias, name) in duplicates])
-                    raise ValueError('aliases found in %r: %s' %
-                            (enumeration, alias_details))
-            elif check is CONTINUOUS:
-                values = set(e.value for e in enumeration)
-                if len(values) < 2:                    /* closing quote must be followed by a space or
-                         * nothing at all. */
-                        if (*(p+1) && !isspace(*(p+1))) goto err;
-                        done=1;
-                    } else if (!*p) {
-                        /* unterminated quotes */
-                        goto err;
-                    } else {
-                        current = sdscatlen(current,p,1);
-                    }
-                } else {
-                    switch(*p) {
-                    case ' ':
-                    case '\n':
-                    case '\r':
-                    case '\t':
-                    case '\0':
-                        done=1;
-                        break;
-                    case '"':
-                        inq=1;
-                        break;
-                    case '\'':
-                        insq=1;
-                        break;
-                    default:
-                        current = sdscatlen(current,p,1);
-                        break;
-                    }
-                }
-                if (*p) p++;
-            }
-            /* add the token to the vector */
-            vector = s_realloc(vector,((*argc)+1)*sizeof(char*));
-            vector[*argc] = current;
-            (*argc)++;
-            current = NULL;
-        } else {
-            /* Even on empty input string return something not NULL. */
-            if (vector == NULL) vector = s_malloc(sizeof(void*));
-            return vector;
-        }
-    }
-
-err:
-    while((*argc)--)
-        sdsfree(vector[*argc]);
-    s_free(vector);
-    if (current) sdsfree(current);
-    *argc = 0;
-    return NULL;
-}
-
-/* Modify the string substituting all the occurrences of being away that a "bloofer lady" had asked him to
-come for a walk, the others had picked up the phrase and used it as
-occasion served. This is the more natural as the favourite game of the
-little ones at present is luring each other away by wiles. A
-correspondent writes us that to see some of the tiny tots pretending to
-be the "bloofer lady" is supremely funny. Some of our caricaturists
-might, he says, take a lesson in the irony of grotesque by comparing the
-reality and the picture. It is only in accordance with general
-principles of human nature that the "bloofer lady" should be the popular
-role at these _al fresco_ performances. Our correspondent naively says
-that even Ellen Terry could not be so winningly attractive as some of
-these grubby-faced little children pretend--and even imagine
-themselves--to be.
-
-There is, however, possibly a serious side to the question, for some of
-the children, indeed all who have been missed at night, have been
-slightly torn or wounded in the throat. The wounds seem such as might be
-made by a rat or a small dog, and although of not much importance
-individually, would tend to show that whatever animal inflicts them has
-a system or method of its own. The police of the division have been
-instructed to keep a sharp look-out for straying children, especially
-when very young, in and around Hamsleep she looked stronger, although more
+    BASE**n-1 >= B**N-1  [or, adding 1 to both sides]
+    BASE**n >= B**N      [taking logs to base BASE]
+    n mail.python.org/pipermail/python-bugs-list/2001-January/003752.html
+        ## for Ivan Frohne's insightful analysis of why the original implementation:
+        ##
+        ##    def betavariate(self, alpha, beta):
+        ##        # Discrete Event Simulation in C, pp 87-88.
+        ##
+   
+6198.50,4740.10,102.06,8344.80,6728.32,8678.77
+2004.67,1518.67,171.34,8261.12,7055.58,1861.86
+7775.64,6171.03,2484.17,9966.73,2355.88,7366.93
+2730.67,3134.32,9683.78,422.93,8693.86,733.41
+9325.27,5771.74,5276.20,2754.72,3800.03,1202.40
+341.37,2567.94,7311.31,2097.78,4389.29,874.06
+7123.95,2941.73,2518.65,370.06,4318.34,6372.17
+3465.66,3787.47,5794.68,9900.77,6450.40,1435.69
+6009.43,1.25,9780.37,9846.09,521.49,6687.68,1350.24,8798.19,5265.39,5604.15
+2005.05,7047.88,9502.14,9985.82,455.19,6112.04
+1158.28,1827.08,4021.37,5376.76,2973.08,3167.92
+9516.31,324.06,5800.75,7349.32,4234.44,9933.26
+9227.70,7884.65,6834.50,4694.02,6733sleep she looked stronger, although more
 haggard, and her breathing was softer; her open mouth showed the pale
 gums drawn back from the teeth, which thus looked positively longer and
 sharper than usual; when she woke the softness of her eyes evidently
 changed the expression, for she looked her own self, although a dying
 one. In the afternoon she asked for Arthur, and we telegraphed for him.
-Quincey went off to meet him at the station.
-
-When he arrived it was nearly six o'clock, and the sun was setting full
-and warm, and the red light streamed in through the window and gave more
-colour to the pale cheeks. When he saw her, Arthur was simply choking
-with emotion, and none of us could speak. In the hours that had passed,
-the fits of sleep, or the comatose condition that passed for it, had
-grown more frequent, so that the pauses when conversation was possible
-were shortened. Arthur's presence, however, seemed to act as a
-stimulant; she rallied a little, and spoke to him more brightly than she
-had done since we arrived. He too pulled himself together, and spoke as
-cheerily as he could, so that the best was made of everything.
-
-It was now nearly one o'clock, and he and Van Helsing are sitting with
-her. I am to relieve them in a quarter of an hour, and I am entering
-this on Lucy's phonograph. Until six o'clock they are to try to rest. I
-fear that to-morrow will end our watching, for the shock has been too
-great; the poor child cannot rally. God help us all.
-
-
-_Letter, Mina Harker to Lucy Westenra._
-
-(Unopened by her.)
-
-"_17 September._
-
-"My dearest Lucy,--
-
-"It seems _an age_ since I heard from you, or indeed since I wrote. You
-will pardon m0
+Quincey went off to meet him 0
 9272.24,4393.21,1202.12,8679.27,3867.50,7634.62
 2698.42,9630.52,4751.22,4547.34,4127.77,2704.18
 3064.60,2749.09,9232.12,8327.86,9594.71,103.98
 4246.74,5849.86,2753.02,1636.88,2519.26,5360.58
 5666.53,1029.19,4136.09,6044.36,9185.11,4029.92
-8596.01,1793.40,177.52,3077.05,2435.68,6806.48
-3545.51,9371.81,2064.15,2183.01,9106.06,1562.82
-1817.69,391.45,3602.91,1110.00,8134.77,1704.34
-3207.72,5481.06,1343.21,5309.12,9792.28,4249.88
-9854.93,9768.46,5717.53,3026.99,759.76,312.95
-4414.66,8450.32,9829.19,9957.47,1347.52,3435.40
-9924.63,9401.95,5079.54,4687.32,1195.54,3207.05
-3631.31,327.85,8093.02,3235.49,2345.59,1283.38
-32.46,391.73,7116.84,5750.85,9139.56,4285.02
-6635.45,6381.34,8774.28,4414.50,2525.83,2558.08
-6953.78,7304.31,2423.03,10.98,8428.38,3008.72
-9433.74,641.03,3675.66,4348.14,6094.46,2764.02
-7089.67,401.92,2347.00,2647.81,9252.32,5313.53
-4997.75,8766.23,5279.75,3262.62,3434.84,7104.39
-9782.38,3787.44,960.65,880.46,4384.20,758.28
-4025.03,3911.53,8361.01,1633.49,1740.41,4027.04
-8908.19,3559.59,3986.19,4676.85,7982.18,896.69
-8868.33,7228.86,4704.74,8666.70,648.54,4467.76
-3cuum produced inside by the condensation of the steam. I shew
+8596.01,1793.40,177.52,3077.05,2435.cuum produced inside by the condensation of the steam. I shew
 you these experiments for the purpose of pointing out that in all these
 occurrences there is nothing that changes the water into any other
 thing--it still remains water; and so the vessel is obliged to give way,
-and is crushed inwards, as in the other case, by the further application
-of heat, it would have been blown outwards.
-
-[Illustration: Fig. 12.]
-
-And what do you think the bulk of that water is when it assumes the
-vaporous condition? You see that cube [pointing to a cubic foot]. There,
-by its side, is a cubic inch, exactly the same shape as the cubic foot,
-and that bulk of water [the cubic inch] is sufficient to expand into that
-bulk [the cubic foot] of steam; and, on the contrary, the application of
-cold will contract that large quantity of steam into this small quantity
-of water.
-
-[Illustration: Fig. 13.]
-
-[One of the iron bottles burst at that moment.] Ah! There is one of our
-bottles burst, and here you see is a crack down one side an eighth of an
-inch in width. [The other now exploded, sending the freezing mixture in
-all directions.] This other bottle is also broken; although the iron was
-nearly half-an-inch thick, the ice has burst it asunde (default len(a)) bound the
+and is crushed inwards, as in the other  (default len(a)) bound the
     slice of a to be searched.
 
     A custom key function can be supplied to customize the sort order.
@@ -1093,45 +281,7 @@ nearly half-an-inch thick, the ice has burst it asunde (default len(a)) bound th
     a.insert(lo, x)
 
 def bisect_left(a, x, lo=0, hi=None, *, key=None):
-    """Return the index where to insert item x in list a, assuming a is sorted.
-
-    The return value i is such that all e in a[:i] have e < x, and all e in
-    a[i:] have e >= x.  So if x already appears in the list, a.insert(i, x) will
-    insert just before the leftmost x already there.
-
-    Optional args lo (default 0) and hi (default len(a)) bound the
-    slice of a to be searched.
-
-    A custom key function can be supplied to customize the sort order.
-    """
-
-    if lo < 0:
-        raise ValueError('lo must be non-negative')
-    if hi is None:
-        hi = len(a)
-    # Note, the comparison uses "<" to match the
-    # __lt__() logic in list.sort() and in heapq.
-    if key is None:
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if a[mid] < x:
-                lo = mid + 1
-            else:
-                hi = mid
-    else:
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if key(a[mid]) < x:
-                lo = mid + 1
-            else:
-                hi = mid
-    return lo
-
-
-# Overwrite above definitions with a fast C implementation
-try:
-    from _bisect import *
-58,7389.74,31.45,6975.51
+    """Return the index where to ins58,7389.74,31.45,6975.51
 5703.88,3596.88,284.05,3675.61,2260.93,6391.38
 9257.31,956.65,2699.69,6663.25,1452.83,8254.40
 6941.54,5642.57,5107.40,9919.11,1408.62,8566.13
@@ -1139,210 +289,50 @@ try:
 5799.23,9063.15,667.89,8232.92,9254.11,6080.06
 5033.23,43.56,1087.13,570.26,518.94,6807.05
 2836.76,5733.02,1566.81,7311.05,2602.71,355.92
-7753.46,5341.67,5872.72,18.98,5211.58,5283.40
-2085.71,929.25,1443.80,1236.82,4719.09,4003.55
-5548.90,3579.32,9702.58,3294.21,7124.86,8429.81
-3098.89,1061.21,828.85,2544.38,3966.88,1242.96
-2372.32,8471.61,9559.42,8956.82,4458.47,7301.73
-5673.40,6861.12,8781.85,1620.47,4318.35,1921.52
-587.00,6788.46,1124.78,2706.06,4744.11,5287.13
-2472.96,2864.91,794.12,4566.75,4486.61,1003.50
-3492.29,8061.10,1113.72,9479.87,3459.25,5885.30
-6941.93,1913.61,2525.38,6943.42,1430.01,6693.36
-1629.17,7559.14,2056.66,1917.86,2680.05,2057.66
-4580.36,3673.67,4338.94,5403.46,6153.35,1204.74
-2454.83,2529.09,8067.35,6348.41,7528.11,7158.11
-433.11,6777.27,3591.28,8132.60,1478.58,4245.85
-6765.70,6183.52,3588.76,2431.79,9560.35,3956.24
-5646.98,5862.56,3882.84,2635.26,3438.09,110.35
-3417.03,9197.35,4281.53,3047.61,1853.12,453.09
-3705.33,2036.38,531.27,1317.24,8833.71,661.80
-1734.40,9195.59,2200.31,9182.33,8418.76,6363.78
-2378.59,8159.43,9592.50,7304.62,7882.26,4195.26
-7168.79,8194.35,6760.34,3094.28,7734.23,3618.90
-67.77,9534.79,389.40,8235.34,1420.40,1713.13
-2974.15,5694.86,6105.44,3425.23,8204.56,3854.68
-3744.16,1048.33,3326.50,233.07,4995.00,6397.64
-7763.39,927.89,6985.06,4317.06,8200.58,2849.16
-6277.16,4479.79,9251.26,4435.81,590ve the power of
+7753.46,5341.67,5872.72,18.98,5211.58,5283.40ve the power of
 elevating his soul from earth.  Such a man has a double existence:  he
 may suffer misery and be overwhelmed by disappointments, yet when he
 has retired into himself, he will be like a celestial spirit that has a
-halo around him, within whose circle no grief or folly ventures.
-
-Will you smile at the enthusiasm I express concerning this divine
-wanderer?  You would not if you saw him.  You have been tutored and
-refined by books and retirement from the world, and you are therefore
-somewhat fastidious; but this only renders you the more fit to
-appreciate the extraordinary merits of this wonderful man.  Sometimes I
-have endeavoured to discover what quality it is which he possesses that
-elevates him so immeasurably above any other person I ever knew.  I
-believe it to be an intuitive discernment, a quick but never-failing
-power of judgment, a penetration into the causes of things, unequalled
-for clearness and precision; add to this a facility of expression and arand's sign to the first one.
+halo around him, withirand's sign to the first one.
 
         In detail, it returns a copy of the first operand with the sign
         equal to the sign of the second operand.
 
-        >>> ExtendedContext.copy_sign(Decimal( '1.50'), Decimal('7.33'))
-        Decimal('1.50')
-        >>> ExtendedContext.copy_sign(Decimal('-1.50'), Decimal('7.33'))
-        Decimal('1.50')
-        >>> ExtendedContext.copy_sign(Decimal( '1.50'), Decimal('-7.33'))
-        Decimal('-1.50')
-        >>> ExtendedContext.copy_sign(Decimal('-1.50'), Decimal('-7.33'))
-        Decimal('-1.50')
-        >>> ExtendedContext.copy_sign(1, -2)
-        Decimal('-1')
-        >>> ExtendedContext.copy_sign(Decimal(1), -2)
-        Decimal('-1')
-        >>> ExtendedContext.copy_sign(1, Decimal(-2))
-        Decimal('-1')
-        """
-        a = _con, and I could not see where the figure disappeared. I heard the
+        >>> ExtendedContext.copy_sign(Decimal( '1., and I could not see where the figure disappeared. I heard the
 rustle of actual movement where I had first seen the white figure, and
 coming over, found the Professor holding in his arms a tiny child. When
-he saw me he held it out to me, and said:--
-
-"Are you satisfied now?"
-
-"No," I said, in a way that I felt was aggressive.
-
-"Do you not see the child?"
-
-"Yes, it is a child, but who brought it here? And is it wounded?" I
-asked.
-
-"We shall see," said the Professor, and with one impulse we took our way
-out of the churchyard, he carrying the sleeping child.
-
-When we had got some little distance away, we went into a clump of
-trees, and struck a match, and looked at the child's throat. It was
-without a scratch or scar of any kind.
-
-"Was I right?" I asked triumphantly.
-
-"We were just in time," said the Professor thankfully.
-
-We had now to decide what we were to do with the child, and so consulted
-about it. If we were tn separate lines.
+he saw me he held it out to me, an separate lines.
 
         If *quote_annotation_strings* is False, annotations
         in the signature are displayed without opening and closing quotation
         marks. This is useful when the signature was created with the
-        STRING format or when ``from __future__ import annotations`` was used.
-        """
-        result = []
-        render_pos_only_separator = False
-        render_kw_only_separator = True
-        for param in self.parameters.values():
-            formatted = param._format(quote_annotation_strings=quote_annotation_strings)
-
-            kind = param.kind
-
-            if kind == _POSITIONAL_ONLY:
-                render_pos_only_separator = True
-            elif render_pos_only_separator:
-                # It's not a positional-only parameter, and the flag
-                # is set to 'True' (there were pos-only params before.)
-                result.append('/')
-                render_pos_only_separator = False
+        STRING e
 terms of this agreement, you may obtain a refund from the person or
 entity to whom you paid the fee as set forth in paragraph 1.E.8.
 
 1.B.  "Project Gutenberg" is a registered trademark.  It may only be
 used on or associated in any way with an electronic work by people who
 agree to be bound by the terms of this agreement.  There are a few
-things that you can do with most Project Gutenberg-tm electronic works
-even without complying with the full terms of this agreement.  See
-paragraph 1.C below.  There are a lot of things you can do with Project
-Gutenberg-tm electronic works if you follow the terms of this agreement
-and help preserve free future access to Project Gutenberg-tm electronic
-works.  See paragraph 1.E below.
-
-1.C.  The Project Gutenberg Literary Archive Foundation ("the Foundation"
-or PGLAF), owns a compilation copyright in the collection of Project
-Gutenberg-tm electronic works.  Nearly all the individual works in the
-collection are in the public domain in the United States.  If an
-individual work is in the public domain in the United States and you are
-located in the United States, we do not claim a right to prevent you from
-copying, distributing, performing, displaying or creating derivative
-works based on the work as long as all references to Project Gutenberg
-are removed.  Of course, we hope that you will support the Project
-Gutenberg-tm mission of promoting free access to electronic works by
-fthem
+things that you canthem
 safe. No word shall be lost; and in the good time I shall give them back
 to you. It's a hard thing I ask, but you will do it, will you not, for
 Lucy's sake?"
 
-Arthur spoke out heartily, like his old self:--
-
-"Dr. Van Helsing, you may do what you will. I feel that in saying this I
-am doing what my dear one would have approved. I shall not trouble you
-with questions till the time comes."
-
-The old Professor stood up as he said solemnly:--
-
-"And you are right. There will be pain for us all; but it will not be
-all pain, nor will this pain be the last. We and you too--you most of
-all, my dear boy--will have to pass through the bitter water before we
-reach the sweet. But we must be brave of heart and unselfish, and do our
-duty, and all will be well!pelling the heated current upon the metals.
+Arthur spoke out heartily, lipelling the heated current upon the metals.
 
 I have two or three rough drawings here, representing the kind of furnaces
 which he employs. They are larger, however, than the actual furnaces he
 uses. Even the furnace in which he carries on that most serious operation
-of fusing fifty pounds of platinum at once is not much more than half the
-size of the drawing. It is made of a piece of lime below and a piece of
-lime above. You see how beautifully lime sustains heat without altering in
-shape; and you may have thought how beautifully it prevents the
-dissipation of the heat by its very bad conducting powers.
-
-[Illustration: Fig. 38]
-
-While the front part of the lime which you saw here was so highly ignited,
-I could at any moment touch the back of it without feeling any annoyance
-from the heat So, by having a chamber of lime of this sort, he is able to
-get a vessel to contain these metals with scarcely any loss of heat. He
-puts the blowpipes through these apertures, and sends down these gases
-upon the metals, which are gradually melted. He then puts in more metal
-througed with what I have done of him, or that his beauty is such
+of fusined with what I have done of him, or that his beauty is such
 that art cannot express it.  There is nothing that art cannot express,
 and I know that the work I have done, since I met Dorian Gray, is good
 work, is the best work of my life.  But in some curious way--I wonder
 will you understand me?--his personality has suggested to me an
 entirely new manner in art, an entirely new mode of style.  I see
-things differently, I think of them differently.  I can now recreate
-life in a way that was hidden from me before.  'A dream of form in days
-of thought'--who is it who says that?  I forget; but it is what Dorian
-Gray has been to me.  The merely visible presence of this lad--for he
-seems to me little more than a lad, though he is really over
-twenty--his merely visible presence--ah!  I wonder can you realize all
-that that means?  Unconsciously he defines for me the lines of a fresh
-school, a school that is to have in it all the passion of the romantic
-spirit, all the perfection of the spirit that is Greek.  The harmony of
-soul and body--how much that is!  We in our madness have separated the
-two, and have invented a realism that is vulgar, an ideality that is
-void.  Harry! if you only knew what Dorian Gray is to me!  You remember
-that landscape of mine, for which Agnew offered me such a huge price
-but which I would not part with?  It is one of the best things I have
-ever done.  And why is it so?  Because, while I was painting it, Dorian
-Gray sat beside me.  Some subtle influence passed from him to me, and
-for the first time in my life I saw in the plain woodland the wonder I
-had always looked for and always missed."
-
-"Basil, this is ext
+things differentl
 returned. I am in doubt, and so have done the best thing I know of; I
 have written to my old friend and master, Professor Van Helsing, of
-Amsterdam, who knows as much about obscure diseases as any one in the
-world. I have asked him to come over, and as you told me that all things
-were to be at your charge, I have mentioned to him who you are and your
-relations to Miss Westenra. This, my dear fellow, is in obedience to
-your wishes, for I am only too proud and happy to do anything I can for
-her. Van Helsing would, I know, do anything for me for a personal
-reason, so, no matter on what ground he comes, we must accept his
-wishes. He is a seemingly arbitrary man, but this is because he knows
-what he is talking about better than aEOF_SIZE_T
+Amsterdam, who knows as much about obscure diseasEOF_SIZE_T
         Py_ssize_t tmp = _PyLong_CompactValue(v);
         if (tmp < LLONG_MIN) {
             *overflow = -1;
@@ -1350,18 +340,28 @@ what he is talking about better than aEOF_SIZE_T
         }
         else if (tmp > LLONG_MAX) {
             *overflow = 1;
-            res = -1;
-        }
-        else {
-            res = (long long)tmp;
-        }
-#else
-        res = _PyLong_CompactValue(v);
-#endif
-    }
-    else {
-        i = _PyLong_DigitCount(v);
-        sign = _PyLong_NonCompactSign(v);
+            res a pack of cards!'
+
+At this the whole pack rose up into the air, and came flying down upon
+her: she gave a little scream, half of fright and half of anger, and
+tried to beat them off, and found herself lying on the bank, with her
+head in the lap of her sister, who was gently brushing away,1845.14,2115.07,820.45,3097.42,5042.91
+3907.86,5120.35,7969.15,917.78,6298.57,3720.72
+2317.75,4493.24,9902.88,377.12,9294.82,2391.81
+2693.68,9707.31,3202.60,2792.00,5754.83,6118.21
+7981.24,9855.86,8329.18,7115.62,2590.75,929.19
+8466.12,9337.73,7256.23,9168.94,9914.73,1497.82
+7643.76,6274.08,1158.03,4196.92,2303.15,2263.31
+9231.54,1943.86,3019.30,5370.13,34ect_type_parameters((T, Callable[P, T]))
+        (~T, ~P)
+        >>> _collect_type_parameters((list[T], Generic[P, T]))
+        (~P, ~T)
+
+    """
+    # required type parameter cannot appear after parameter with. Not a thing seemed to be
+stirring, but all to be grim and fixed as death or fate; so that a thin
+streak of white mist, that crept with almost imperceptible slowness
+across the grass towards the house, seemed to have a sentienc(v);
         unsigned long long x = unroll_digits_ulong(v, &i);
         while (--i >= 0) {
             if (x > ULLONG_MAX >> PyLong_SHIFT) {
@@ -1369,29 +369,1067 @@ what he is talking about better than aEOF_SIZE_T
                 res = -1;
                 goto exit;
             }
-            x = (x << PyLong_SHIFT) + v->long_value.ob_digit[i];
+            x = (x << PyLong_SHIFT) + v-.64,4619.11,480.94,1481.24,4127.88
+4102.00,4231.76,5808.87,6358.02,6982.98,5078.93
+5710.13,5078.73,5603.75,3697.09,3755.33,4565.08
+8354.52,8008.29,487.52,6127.05,7164.94,1563.66
+8206.63,8793.53,984.89,4276.02,7699.95,8808.16
+396.95,3710.15,4762.03,1562.00,7843.14,1593.07
+8909.75,2716.80,928.69,185.77,3361.71,3458.95
+6986.92,9441.29,1031.73,1699.85,6955.75,8066.53
+9522.23,356.59,4321.42,2285.89,4309.07,2887.64
+5328.59 context = getcontext()
+
+        other = _convert_other(other, raiseit=True)
+
+        if not self._islogical() or not other._islogical():
+            return context._raise_error(InvalidOperation)
+
+        # fill to context.prec
+        (opa, opb) = self._fill_logical(context, self._id this attribute (a class).
+
+        3. The object as obtained by calling getattr; if this fails, or if the
+           resulting object does not live anywhere in the class' mro (including
+           metaclasses) then the object is looked up in the defining class,1974.39,7682.80,9136.95,2535.20
+2524.29,252.74,7277.54,8323.55,3867.67,5770.54
+5783.55,2243.65,3262.00,3782.03,2032.53,1324.27
+8877.94,8333.19,4466.24,7996.75,8832.92,7609.52
+70.17,520.42,9530.75,6825.94,1916.24,2195.69
+9243.07,8857.45,574in the form "\n\r\a...." or "\x<hex-number>".
+ *
+ * After the call, the modified sds string is no longer valid and all the
+ * references must be substituted with the new pointer returned by the call. */
+sds sdscatrepr(sds s, const char *p, size_t len) {
+    s = sdscatl          return ucs2lib_split_whitespace(
+                self,  PyUnicode_2BYTE_DATA(self),
+                len1, maxcount
+                );
+        case PyUnicode_4BYTE_KIND:
+            return ucs4lib_split_whitespace(
+                self,  PyUnicode_4BYTE_DATA(self),
+                len1, maxcount
+                );
+        default:
+            Py_UNREACHABLE();
         }
-        /* Haven't lost any bits, but casting to long requires extra
-         * care (see comment above).
+    }
+
+
+9964.89,857.57,6320.32,4962.46,4598.67,4350.82
+7595.54,8531.91,762.26,7312.52,3871.39,487.92
+4041.10,4629.10,7575.07,7283.76,7541.61,2772.50
+3172.31,2877.58,7516.73,3106.99,9985.14,7244.46
+4160.11,312.14,9574.90,7326.91,6444.19,6919.21
+8843.70,1202.85,2795.82,3254.58,4846.44,5832.28
+551.15,3346.96,2752.59,2264.41,1407.97,9779.06
+1386.27,9611.95,8867.39,1216.255.47,9784.11,7382.94
+5144.06,5845.10,2943.83,8445.34,9797.73,1186.09
+8812.45,9853.23,67.89,3746.21,9299.90,2699.36
+5815.36,5371.29,7505.86,3965.13,2138.56,842.82
+2660.06,972.22,2463.30,9376.05,2606.66,2882.32
+6650.60,2696.94,5919.42,2740.85,117.85,1858.01
+5 Sacred Wafer in the
+name of the Father, the Son, and----"
+
+There was a fearful scream which almost froze our hearts to hear. As he
+had placed the Wafer on Mina's forehead, it had seared it--had burned
+into the flesh as though it had been a piece of white-hot metal. My poor
+darling's brain had told her the significance of the fact as quickly as
+her nerves received the pain of it; and the two so overwhelmapital idea to have all
+ready in case we want to go horsebacking; but don't you think that one
+of your snappy carriages with its heraldic adornments in a byway of
+Walworth or Mile End would attract too much attention for our purposes?
+It seems to me that we ought to take cabs when we go south or east; and
+even leave them somewhere near the neig lived.  I
+thought that it was all true.  I was Rosalind one night and Portia the
+other.  The joy of Beatrice was my joy, and the sorrows of Cordelia
+were mine also.  I believed in everything.  The common people who acted
+with me seemed to me to be godlike.  The painted scenes were my world.
+I knew nothing but shadows, and I thought them real.  You came--oh, my
+beautiful love!--and you freed my soul from prison.  You taught me what
+reality really placement,
+        *([fillarg]*(plen - right - left - typevartuple_index - 1)),
+        *args[alen - right:],
+    )
+
+
+def _paramspec_subst(self, arg):
+    if isinstance(arg, (list, tuple)):
+        arg = tuple(_type_check(a, "Expected a type.") for a in arg)
+    elif not _is_param_expr(arg):
+        r448.21,5868.45
+4561.53,7861.07,6858.88,9735.12,1284.17,1720.55
+8767.10,8494.02,1645.01,6451.56,5184.95,2634.81
+7847.42,9546.17,4892.60,7454.87,649.73,8071.91
+8182.77,7914.14,6765.87,2076.58,6378.67,4008.11
+8554.35,3267.68,4940.95,630.06,3774.80,8016.61
+8921.99,9888.69,9258.59,8884.55,5693.73,6453.84
+5490.08,8714.68,559.67,743s start parsing
+                        # kwargs
+                        break
+                    elif param.name in kwargs:
+                        if param.kind == _POSITIONAL_ONLY:
+                            if param.default is _empty:
+                                msg = f'missing a required positional-only argument: {param.name!0 at the
+ * end of the string. However the string is binary safe and can contain
+ * \0 characters in the middle, as the length is stored in the sds header. */
+sds sdsnewlen(const void *init, size_t initlen) {
+    void *sh     isinstance(action.default, str) and
+                        hasattr(namespace, action.dest) and
+                        action.default is getattr(namespace, action.dest)):
+                        setattr(namespace, action.dest,
+                                self._get_value(action, action.default))
+
+        if required_actions:
+            raium.
+        total = sum(Fraction(n, d) for d, n in partials.items())
+
+    T = reduce(_coerce, types, int)  # or raise TypeError
+    return (T, total, count)
+
+
+def _ss(data, c=None):
+    """Return the exact mean and sum of square deviations of sequence data.
+
+    Calculations are done in a sing 0, /* dk_log2_size */
+        3, /* dk_log2_index_bytes */
+        DICT_KEYS_UNICODE, /* dk_kind */
+#ifdef Py_GIL_DISABLED
+        {0}, /* dk_mutex */
+#endif
+        1, /* dk_version */
+        0, /* dk_usable (immutable) */
+        0, /* dk_nentries */
+        {DKIX_EMPTY, DKIX_EMPTY, DKIX_EMPTY, DKIX_EMPTY,
+         DKIX_EMPTY, DKIX_EMPTY, DKIX_EMPTY, DKIX_EMPTY}, /* dk_indices */
+};
+
+#PyDictKeysObject *dk = _Py_atomic_load_ptr_acquire(&mp->ma_keys);
+    if (dk->dk_kind == DICT_KEYS_UNICODE && PyUnicode_CheckExact(key)) {
+        Py_ssize_t ix = lookup_threadsafe_unicode(dk, key, hash, value_addr);
+        if (ix != DKIX_KEY_CHANGED) {
+            return ix;
+        }
+    }
+
+    PyObject *obj;
+    Py_ssize_t ix = _Py_dict_lookup_threadsafe(mp, key, hash, &obj);
+    if (ix  body += '%'
+            return _format_align(sign, body, spec)
+
+        # a type of None defaults to 'g' or 'G', depending on context
+        if spec['type'] is None:
+            spec['type'] = ['g', 'G'][context.capitals]
+
+        # if type is '%', adjust exponent of self accordingly
+        if spec['type'] == '%':
+            self = _dec_from_triple(self._sign, self._int, self._exp+2)
+
+        # round 5252.34
+1916.68,2553.79,3819.64,1374.06,1871.33,5542.05
+9317.97,5772.46,2796.57,6093.80,2436.24,3526.34
+8267.83,3393.95,3297.58,9320.34,3531.33,5095.74
+5393.73,6760.49,78.09,7437.13,6879.52,7377.61
+3985.20,4175.05,7788.90,2315.24,5287.88,3895.17
+9030.43,7155.0(PyDictUnicodeEntry *)ep0)[ix];
+    PyObject *ep_key = FT_ATOMIC_LOAD_PTR_CONSUME(ep->me_key);
+    assert(ep_key != NULL);
+    assert(PyUnicode_CheckExact(ep_key));
+    if (ep_key  if x<0 return negative output */
+
+    PyLongObject *z = NULL;  /* accumulated result */
+    Py_ssize_t i, j;             /* counters */
+    PyLongObject *temp = NULL;
+    PyLongObject *a2 = NULL; /* may temporarily hold a**2 % c */
+
+    /* k-ary values.  If the exponent is large enough, table is
+     * precomputed so that table[i] == a**(2*i+11,
+            "encoder %s returned bytearray instead of bytes; "
+            "use codecs.encode() to encode to arbitrary types",
+            encoding);
+        if (error) {
+            Py_DECREF(v);
+     l('1')
+        >>> ExtendedContext.min_mag(Decimal(1), -2)
+        Decimal('1')
+        >>> ExtendedContext.min_mag(1, Decimal(-2))
+        Decimal('1')
+        """
+        a = _convert_other(a, raiseit=True)
+        return a.min_mag(b, context=self)
+
+    def minus(self, a):
+        """Minus corresponds to unary prefix minus in Python.
+
+        The operation is evaluated using the same rules as subtract; the
+        operation minus(a) is calculated as subttify_all()
+            self.unfinished_tasks = unfinished
+
+    def join(self):
+        '''Blocks until all items in the Queue have been gotten and processed.
+
+        The count of unfinissh = (char*)s-sdsHdrSize(oldtype);
+    reqlen = newlen = (len+addlen);
+    if (newlen < SDS_MAX_PREALLOC)
+        newlen *= 2;
+    else
+        newlen += SDS_MAX_PREALLOC;
+
+    type = sdsReqType(newlen);
+
+    /* Don't use type 5: the user is appending to the string and type 5 is
+     * not able to remember empty space, so sdsMakeRoomFor() > 0
+    0 ** 0
+    x ** (non-integer)
+    x ** (+-)INF
+    An operand is invalid
+
+    The result of the operation after this is a quiet positive NaN,
+    except when the cause is a signal beautiful metal does: but
+they act upon the water in the same manner generally as this potassium. I
+want you to put these different facts together in your minds. I have
+another metal here [zinc], and when we examined it with regard to the
+solid substance produced by its c  method,
+                            "checked -> %r" % (checked_method, ),
+                            "simple -> %r" % (simple_method, ),
+                            ))
+            else:
+                # if the method existed in only one of the enums, it will have been caught
+                # in the first checks above
+          ecialForm
+def TypeAlias(self, parameters):
+    """Special form for marking type aliases.
+
+    TypeAlias can be used to indicate that an assignment should
+    be recognized as a proper type alias definition by type
+    checkers.
+
+  o more than 5 active entries; experiments suggested
+ * this suffices for the majority of dicts (consisting mostly of usually-small
+ * dicts created to pass keyword arguments).
+ * Making this 8, rather than 4 reduces the n21.26
+5217.27,4243.95,5521.07,1258.19,8565.51,4291.50
+564.17,7109.75,6390.46,6455.71,1848.51,2832.50
+9415.73,7335.12,8949.28,9147.42,8785.55,9893.30
+6619.49,7256.37,5456.25,2359.78,4102.49,9522.54
+550.12,7527.18,2849.82,2968.02,5619.02,1730.35
+1228.47,176.77,5162.55,1583.54,5713.00,2901.56
+5405.46,3586.24,8235.02,2945.89,5302.55,8247.53
+2723.33,3275.25,4101.15,8550.29,8958.94,5644.38
+9484.19,6287.78,8777.82,87.64,7525.41,6319.40,6393.99,9108.10
+9085.45,2689.92,2614.53,6853.38,6125.49,610.79
+8748.80,2174.32,7136.38,1060.49,1309.27,8.96
+1036.38,4287.15,1157.11,3405.77,8928.38,8582.72
+5473.11,6196.37,2698.15,8518.83,797.30,8717.39
+9324.67,5528.69,6018.42056.57,8821.73,7433.14
+9264.08,5242.47,2587.90,7516.10,8165.08,729.87
+8828.57,9506.50,6419.85,7606.81,6314.16,5770.54
+9828.59,9566.43,3399.57,3732.94,378.34,8709.83
+8749.17,2923.63,8471.01,2590.44,3627.77,4977.35
+3914.12,5433.73,8225.84,31.64,9040.22,15.67,324.53
+8250.20,7090.43,8128.09,114.58,1395.26,9313.39
+4053.06,7209.23,2944.41,2281.40,3671.98,2550.96
+4686.89,3100.09,8561.31,925.41,8918.13,5314.87
+8481.69,4297.70,455.9ettle what we do. We have here much data, and we must
+proceed to lay out our campaign. We know from the inquiry of Jonathan
+that from the castle to Whitby came fifty boxes of earth, all of which
+were delivered at Carfax; we also know that at least some of these boxes
+have been rem44.96
+7499.81,8223.76,2056.09,3586.76,5470.50,9185.12
+1329.26,414.46,83.55,9552.11,5470.85,1714.94
+4311.81,7234.55,7549.29,8928.76,7842.79,9644.91
+8582.64,1029.59,1875.53,3040.01,9410.09,8240.18
+6980.31,151.14,1315.95,8728.84,2970.74,8824.58
+2859.38,5422.70,8286.61,1786.86,4624.53,7286.08
+7903.80,3845.38,3112.68,417.35,2164.23,7863.59
+2312 speak to him. He was sulky, and so I came away.
+
+Later in the day he sent for me. Ordinarily I would not have come
+without special reason, but just at present I am so interested in him
+that I would gladly make an effort. Besides, I am glad to have anything
+to help to pass the time. Harker is out, following up clues; and so are
+Lord Godalming and Quincey. Van Helsing sits in my study poring over the
+record prepared by the case SSTATE_INTERNED_MORTAL:
+            CHECK(!ascii->state.statically_allocated);
+            CHECK_IF_GIL(!_Py_IsImmortal(op));
+            break;
+        case SSTATE_INTERNED_IMMORTAL:
+            CHECK(!ascii->state.statically_allocated);
+            CHECK_IF_FT(_Py_IsImmortal(op));
+            break;
+        case SSTATE_INTERNED_IMMORTAL_STATIC:
+            CHECK(ascii->state.statically_allocaet__', _sentinel)
+    if get is _sentinel:
+        return descriptor
+    return get(descriptor, obj, type(obj))
+
+
+def _signature_from_callable(obj, *,
+                             follow_wrapper_chains=True,
+                             skip_bound_arg=True,
+                            2.76
+734.49,3845.62,2752.32,8331.14,4264.77,4826.73
+5324.19,6705.46,3936.21,9675.50,7648.38,4286.82
+9041.26,1152.96,6001.07,6550.37,465.90,9492.89
+4680.12,99.14,9798.93,2897.33,9554.27ENDED",
+    "CO_ASYNC_GENERATOR",
+    "CO_COROUTINE",
+    "CO_GENERATOR",
+    "CO_ITERABLE_COROUTINE",
+    "CO_NESTED",
+    "CO_NEWLOCALS",
+    "CO_NOFREE",
+    "CO_OPTIMIZED",
+    "CO_VARARGS",
+    "CO_VARKEYWORDS",
+    "CO_HAS_DOCSTRING",
+    "CO_METHOD",
+    "ClassFoundException",
+    "ClosureVars",
+    "EndOfBloc27.37,7769.41,5343.42
+9904.79,7035.75,4184.56,335.62,6690.11,6144.18
+9331.44,5717.29,3066.82,6704.29,8064.62,1176.64
+2947.77,6993.52,295.14,2992.78,3428.13,1751.31
+2370.84,8551.01,2962.42,9912.67,2629.80,9972.57
+6023.87,1052.58,2494.11,432.90,1821.50,1531.30
+2062.02,3311.95,8051.24,1809.37,4632.19,9894.88
+2015.53,2834.02,457.62,3813.21,5737.91,6901.90
+4549.54,2922.1
+5365.16,5242.75,4839.65,3967.56,4629.52,244.63
+163.46,7753.96,8853.17,6292.93,6413.55,918.15
+5254.08,4819.01,6486.10,9079.74,8216.05,6536.69
+2975.18,4048.49,4732.66,4882.52,4474.52,7888.18
+8973.45,1475.00
+9370.15,9241.70,7915.47,7017.33,8864.52,2805.02
+9007.32,6564.04,4122.45,3408.18,2691.21,7297.38
+4645.39,1891.11,6136.45,1092.61,126.76,5485.04
+600.41,8534.96,811.83,8698.14,271.41,7259.70
+2424.52,984.15,806.56,4253.91,1857.58,208.11
+8149.67,724.54,4426.034.82,9513.05,9644.77
+358.13,4465.98,6144.01,74.00,6734.26,6831.08
+1860.57,6522.51,8651.54,4813.01,696.47,1741.26
+5521.03,1694.23,8506.45,3116.24,3166.99,6303.59
+1799.10,1910.32,2128.88,154.16,5150.63,5562.14
+1164.18,1003.32,1097.39,4779.45,3993.42,673.00
+1873.40,2493.31,7935.08,9996.27,4862.51,5148.19
+6656.13,2495.43,1910.60,2386.03,3655.25,788.09
+5857.17,3249.0ing or testing)."""
+            _reset_caches(cls)
+
+
+def update_abstractmethods(cls):
+    """Recalculate the set of abstract methods of an abstract class.
+
+    If a class has had one of its abstract methods implemented after the
+    class was created, the method will not be considered implemented until
+    this function is callet */
+    if (((PyDictObject *)dict)->ma_keys->dk_kind != DICT_KEYS_GENERAL)
+        return 1;
+    while (PyDict_Next(dict, &pos, &key, &value))
+        if (!PyUnicode_Check(key))
+            return 0;
+    return 1;
+}
+
+void
+_PyDict_EnablePerThreadRefcounting(PyObject *op)
+{
+    assert(PyDict_Check(op))85.50,1020.17
+4635.81,883.49,8732.79,6911.68,8668.80,833.17
+1654.07,4155.71,2011.38,9768.19,4591.39,8534.68
+2053.66,4740.04,3610.41,4655.78,1723.99,9269.87
+5248.88,8702.57,1347.86,6729.77,9087.17,6521.15
+4787.48,6777.43,5067.92,3144.28,277.16,2783.76
+2518.81,9882.06,2468't be so serious.  What have
+you or I to do with the superstitions of our age?  No:  we have given
+up our belief in the soul.  Play me something.  Play me a nocturne,
+Dorian, and, as you play, tell me, in a low voice, how you have kept
+your youth.  You must have some secret.  I am only ten years older than
+you are, and I am wri
+1803.85,4328.27,5368.02,8039.33,5823.67,4365.32
+7310.78,9839.25,4411.62,9544.68,882.92,9052.44
+62.44,9183.61,6773.72,7778.61,2971.71,5277.89
+806.74,7520.85,522.15,9499.81,2498.38,6169.26
+5281.72,5164.96,3287.60,3345.45,160.87,30.62
+8154.57,3902.01,3722.62,4517.04,2861.70,3795.26
+9.08,9673.62,3790.13,5450.01,5705.37,5576.17
+1661.13lay, we began the operation. After a time--it did
+not seem a short time either, for the draining away of one's blood, no
+matter how willingly it be given, is a terrible feeling--Van Helsing
+held up a warning finger. "Do not sti  PyObject_GenericGetAttr,                    /* tp_getattro */
+    0,                                          /* tp_setattro */
+    0,                                          /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
+        Py_TPFLAGS_LONG_SUBCLASS |
+        _Py_TPFLAGS_MATCH_SELF,               /* tp_flags */
+    long_doc,                                   /* tp_doc */
+    0,               49,6530.65,3444.99,1090.09,1086.43
+1708.42,7391.80,394.12,629.79,6624.71,5342.16
+9252.39,409.47,202.62,2091.96,839.25,5241.97
+3568.22,8637.00,1012.46,5240.17,1147.93,893.00
+6908.08,1563.65,9776.06,345.48,6021.47,5859.85
+1333.07,2759.69,734.07,n excited
+state that she seemed to have lost her grip of what German she knew, and
+mixed it all up with some other language which I did not know at all. I
+was just able to follow her by asking many questions. When I told her
+that I must go at once, and that I was engaged on important business,
+she asked again:
+
+"Do you know what day it is?" I answered that it was the fourth of May.
+She shook her head as she said again:
+
+
+leave his guests and rush back to town to see that the door had not
+been tampered with and that the picture was still there.  What if it
+should be stolen?  The mere thought made him cold with horror.  Surely
+the world would know his secret then.  Perhaps the world already
+suspected it.
+
+For, while he fascinated many, there weescriptor), '__get__', _sentinel)
+    if get is _sentinel:
+        return descriptor
+    return get(descriptor, obj, type(obj))
+
+
+def _signature_from_callable(obj, *,
+                             follow_wrapper_chains=True,
+                             skip_bound_anough apart to
+make steaming, even in the dark, easy enough. Lord Godalming tells me to
+sleep for a while, as it is enough for the present for one to be on
+watch. But I cannot sleep--how can I with the terribleMina. Think you, how her pain would be
+doubled, did she but hear your wild words. Do not fear any of us, we are
+all devoted to this cause, and to-day shall see the end. The time is
+coming for action; to-day this Vampire is limit to the powers of man,
+and till sunset he may notSignature:
+    """A Signature object represents the overall signature of a function.
+    It stores a Parameter object for each parameter accepted by the
+    function, as well as information specific to the functous!"
+
+"Yes, it was very curious.  I don't know what made me say it.  Some
+whim, I suppose.  It looked the loveliest of little live things.  But I
+am sorry they told you about the man.  It is a hideous subject."
+
+"It is an a8,3728.38,6771.27
+9615.13,8817.70,1428.55,1619.51,9236.70,2152.75
+6900.36,2970.02,3212.09,3738.64,9745.01,6469.88
+3930.26,7434.49,9669.59,9824.15,1954.44,6156.32
+669.05,5231.31,7573.29,2160.46,2162.09,1370.47
+7248.11,9257.20,7553.16,8528.46,5474.81,6434.79
+3716.41,2415.96,292.85,3596.10,2327.73,517.77
+7858.89,6921.87,8991.19,211.52,7244.75,4342.29
+1129.91,5965.86,9078.46,3416.10,9166.09,2992.76
+2583.85,333
+        operation minus(a) is calculated as subtract('0', a) where the '0'
+        has the same exponent as the operand.
+
+        >>> ExtendedContext.minus(Decimal('1.3'))
+        Decimal('-1.3')
+        >>> ExtendedContext.minus(Decimal('-1.3'))
+        Decimal('1.3')
+        >>> ExtendedContext.minus(1)
+        Decimal('-1')
+        """
+        a = _convert_other(a, raiseit=True)
+        re89,1355.50,7532.04,644.86,7413.58
+4962.66,1023.86,3650.07,9393.47,1707.27,1161.88
+999.08,4991.55,5262.24,3344.15,6842.25,4172.81
+9959.65,6539.79,678.80,9785.08,4120.16,7655.26
+2955.06,3453.61,6912.35,9447.31,5374.50,5644.48
+9892.47,2431.24,3280.71,5213.31,2397.38,4937.12
+6408.63,7516.77,5810 have this behavior). But do this only if the exception wrapped
+                # by the RuntimeError is actually Stop(Async)Iteration (see
+                # issue29692).
+                if (
+                    isinstance(value, (StopIteration, StopAsyncIteration))
+                    and exc.__cause__ is value
+                ):
+                    value.__traceback__ = traceback
+               .17,8899.02,9012.05,5396.26
+483.61,9783.13,2869.73,1137.33,4223.63,5793.24
+4872.39,2469.13,6989.39,8084.88,8057.90,710.45
+3479.20,7633.42,5017.85,1988.36,2157.86,6324.84
+1379.87,6813.52,5101.26,1408.50,1004.11,7142.71
+2918.57,6348.23,9286er, the conviction had come to me
+that I was helpless I sat down quietly--as quietly as I have ever done
+anything in my life--and began to think over what was best to be done. I
+am thinking still, and as yet have come to no definite conclusion. Of
+one thing only am I certain; that it is no use making my ideas known to
+the Count. He knows well that I am imprisoned; and as he has done it
+himself, and has doubtless his own motives for it, he o as not to slow down the import of typing.py
+    # Cache the result so we don't slow down _ProtocolMeta.__instancecheck__ unnecessarily
+    from inspect import getattr_static
+    return getattr_static
+
+
+_cleanups.append(_lazy_load_getattr_ssb.values = ms->a.values + nb - 1;
+    sortslice_advance(&ssa, na - 1);
+
+    sortslice_copy_decr(&dest, &ssa);
+    --na;
+    if (na == 0)
+        goto Succeed;
+    if (nb == 1)
+        goto CopyA;
+
+    min_gallop = ms->min_gallop;
+    for (;;) {
+        Py_ssize_t acount = 0;          /* # of times A won in aty of the whole thing that knocked me over. I felt impotent, and in
+the dark, and distrustful. But, now that I _know_, I am not afraid, even
+of the Count. He has succeeded after all, then, in his design in getting
+to London, and it was he I saw. He has got younger, and how? Van Helsingit_wrapper(exc_type, exc, tb):
+            await callback(*args, **kwds)
+        return _exit_wrapper
+
+    async def enter_async_context(self, cm):
+        """Enters the supplied async context manager.
+
+        If successful, also pu     p[j] = 'A'+j;
+                }
+                sdsIncrLen(x,step);
+            }
+            test_cond("sdsMakeRoomFor() content",
+                memcmp("0ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",x,101) == 0);
+            test_cond("sdsMakeRoomFor() final length",sdslen(x)==101);
+
+            sdsfree(x);__args__ for __getitem__.
+
+        For example, suppose we had:
+          T1 = TypeVar('T1')
+          T2 = TypeVar('T2')
+          class A(Generic[T1, T2]): pass
+          T3 = TypeVar('T3')
+          B = A[int, T3]
+          C = B[ lognormvariate, (0.0, 1.0))
+    _test_generator(N, vonmisesvariate, (0.0, 1.0))
+    _test_generator(N, binomialvariate, (15, 0.60))
+    _test_generator(N, binomialvariate, (100, 0.75))
+    _test_generator(N, gammavariate, (0.01, 1.0))
+    _test_generator(N, gammavariate, (0.1, 1.0))
+    _test_generator(N, gammavariate, (0.1, 2.0))
+    _test_generator(N, gammavariate, (0.5, 1.0))
+    CII(s1) && PyUnicode_IS_ASCII(s2))
+                result = asciilib_find_slice(buf1, len1, buf2, len2, start, end);
+            else
+                result = ucs1lib_find_slice(buf1, len1, buf2, len2, start, end);
+            break;
+        case PyUnicode_2BYTE_KIND:
+            result = ucs2lib_find_slice(buf1, len1, buf2, len2, start, end);means no limit.
+
+Return a list of the substrings in the string, using sep as the separator string.
+
+Splitting starts at the front of the string and works to the end.
+
+Note, str.split() is mainly useful for data that has been
+intentionally delimited.  With natural text that includes
+            or isfunction(object)
+            or ismethod(object)
+            or ismethoddescriptor(object)
+            or ismethodwrapper(object)
+            or isinstance(object, fun
+9284.67,3455.27,1012.67,6182.60,4669.06,1843.63
+9371.05,2755.15,8593.67,7541.98,5099.05,6232.92
+5744.44,6236.35,6208.59,4037.60,4022.76,4682.68
+6745.48,2806.15,1428.81,249.06,8304.87,3423.79
+8714.38,1902.75,3879.88,9586.22,6448.08,4813.27
+1993.13,6762.87,8325.89,459.98,2959.61,4596.77
+5421.42,6460.76,9680.41,2421.75,8199.43,2981.89
+839.92,58      if (
+                        arg_count == 0
+                        and option_string[1] not in chars
+                        and explicit_arg != ''
+                    ):
+                        if sep or explicit_arg[0] in chars:
+                            msg = _('ignored explicit argument %r')
+          /* For some code pages (e.g. UTF-7) flags must be set to 0. */
+        flags = 0;
+    }
+
+    /* Extend a wchar_t* buffer */
+    Py_ssize_t n = *bufsize;   /* Get the current length */
+    if (widechar_resize(buf, bufsize, n + outsize) < 0) {
+        return -1;
+    }
+    out = *buf + n;
+
+    /* Do the conversion */
+    outsip
+this bottle may be found, and those who find it may understand; if not,
+... well, then all men shall know that I have been true to my trust. God
+and the Blessed Virgin and the saints help a poor ignorant soul trying
+twas to make his soul would mar his body.  He would become
+dreadful, hideous, and uncouth.
+
+As he thought of it, a sharp pang of pain struck through him like a
+knife and made each delicate fibre of his nature q__(self, memo):
+        if type(self) == Fraction:
+            return self     # My components are also immutable
+        return self.__class__(self._numerator, self._denominator)
+"""functools.py - Toexander VI, visited Louis XII of
+France, his horse was loaded with gold leaves, according to Brantome,
+and his cap had double rows of rubies that threw out a great light.
+Charles of England had ridden in stirrups hung with four hundred and
+twenty-one diamonds.  Richard II had a coat, valued at thirty thousand
+marks, which was covered with balas rubies.  Hall described Henry VIII,
+on his way to the To''.join(cur_line))
+                else:
+                    while cur_line:
+                        if (cur_line[-1].strip() and
+                            cur_len + len(self.placeholder) <= width):
+                            cur_line.append(self.placeh5489.33,2829.50,6061.52,1419.09,1238.12
+6702.86,6393.04,3677.24,3810.90,6032.38,6083.87
+1437.63,9195.21,941.58,6059.21,4032.99,2349.41
+7402.73,7909.30,5755.74,3970.20,2412.30,3542.81
+7619.72,3220.35,9330.04,336.97,2553.25,1560.37
+8266.52,5650.48,7107.62,9483.60,7696.92,1110.63
+1500.89,4118.09,1016.14,9138.13,2485.42,9987.99
+2674.42,8459.72,1536.37,2602.72,4837.74,9135.20
+2629.24,5425.33,1693.12,4200.96,4718.62,1127.27
+8028.09,2414.39, Even more, we have seen amongst us that he can even grow
+younger; that his vital faculties grow strenuous, and seem as though
+they refresh themselves when his special pabulum is plenty. But he
+cannot flourish without this sumption and rash ignorance
+which I had let loose upon the world?
+
+We were soon joined by Elizabeth.  Time had altered her since I last
+beheld her; it had endowed her with loveliness surpassing the beauty of
+her childish years.  There was the same candour, the same vivacity, but
+it was allied to an expression more full of sensibility and intellect.
+She welcomed me with the greatest affectmentation of step 4.
+
+        random = self.random
+        if kappa <= 1e-6:
+            return TWOPI * random()
+
+        s = 0.5 / kappa
+        r = s + _sqrt(1.0 + s * s)
+
+        while True:
+            u1 = random()
+            z = _cos(_pi * u1)
+
+            d = z / (r + z)
+            u2 = random()
+            if u2 < 1.RELAXED(it->it_index, index - 1);
+        return item;
+    }
+    FT_ATOMIC_STORE_SSIZE_RELAXED(it->it_index, -1);
+#ifndef Py_GIL_DISABLED
+    it->it_seq = NULL;
+    Py_DECREF(seq);
+#endif
+    return NULL;
+}
+
+static PyObject *
+listreviter_len(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    listreviterobject *it = (listreviterobject *)self;
+    Py_ssize_t index = FT_ATOMIC_efore her face, and
+shuddered whilst she moaned. Van Helsing had not intended to recall her
+frightful experience. He had simply lost sight of her and her part in
+the affair in hnum members.
+
+        A simple assignment to the class namespace only changes one of the
+        several possible ways to get an Enum member from the Enum class,
+        resulting in an inconsistent Enumeration.
+        """
+        member_map = cls.__dict__.get('_member_map_', {})
+        if name in member_map:
+            raise Att.89
+902.68,4674.83,3281.53,6261.16,1716.11,3398.70
+1815.34,2111.70,2791.90,4159.17,6440.97,6527.31
+1119.78,7041.40,886.07,2800.38,1259.35,8545.13
+5020.30,1466.56,6135.25,6369.66,8665.85,9129.40
+4012.54,3230.02,630.01,56.23,4544.40,9668.23
+735.13,6409.52,4828.55,6612.75,6257.73,6702.48
+9236.77,4185.23,7471.77,3578.50,6592.42,3674.60
+3480.98,814.09,2409.23,2072.25,3422.96,8807.18
+1761.67,3368.75,1809.71,7786.30,1895.34,9994.99
+5505.00,3883.90,2113.47,5186.06,1622.00,7725.18
+4218.94,3116.05,4284.49,1299.96,7962.49,8950.09
+5778.20,94.31,8135.19,6izing that might be necessary */
+    return insertdict(mp, key, hash, value);
+}
+
+static int
+setitem_take2_lock_held(PyDictObject *mp, PyObject *key, PyObject *value)
+{
+    Py_hash_t hash = _PyObject_HashDictKey(key);
+    if (hash == -1) {
+        dict_unhashable_type((PyObject*)mp, key);
+        Py_DECREF(key);
+        Py_DECREF(value);
+        return -1;
+    }
+
+    return  specified with replace()')
+            changes[f.name] = getattr(self, f.name)
+
+    # Create the new object, which calls __init__() and
+    # __post_init__() (if defined), using all of the init fields we've
+    # added and/or left in 'changes'.5,9381.79,23.93,4411.09,737.79
+2975.58,4625.92,4450.50,6084.08,2292.25,900.21
+3129.83,2332.05,3293.79,9618.45,9523.99,8536.40
+3081.90,1260.12,158.16,1911.68,1652.15,7005.61
+3131.68,8660.15,2428.71,4668.41,9716.29,2421.55
+727.60,3882.15,7920.94,4412.67,4345.44,7096.40
+2340.78,6881.21,878.70,1829.68,8175.45,7579.39
+932.02,4058.22,1923.52,7050.03,1375.lity of any
+provision of this agreement shall not void the remaining provisions.
+
+1.F.6.  INDEMNITY - You agree to indemnify and hold the Foundation, the
+trademark owner, any agent or employee of the Foundation, anyone
+providing copies of Project Gutenberg-tm electronic works in accordance
+with this agreement, and any volunteers associated with the production,
+promotion and distribution of Project Gutenberg-tm electl('0')
+        >>> ExtendedContext.logical_xor(Decimal('0'), Decimal('1'))
+        Decimal('1')
+        >>> ExtendedContext.logical_xor(Decimal('1'), Decimal('0'))
+        Decimal('1')
+        >>> ExtendedContext.logical_xor(Decimal('1'), Decimal('1'))
+        Decimal('0')
+        >>> ExtendedContext.logical_xor(Decimal('1100'), Decimal('1010'))
+        Decimal('110')
+        >>> ExtendedContext.logical_xor(Decimal('1111'), Dec    return _floor(r * maxsize) % n
+
+    _randbelow = _randbelow_with_getrandbits
+
+
+    ## --------------------------------------------------------
+    ## ---- Methods below this point generate custom distributions
+    ## ---- based on the methods defined above.  They do not
+    ## ---- directly touch the underlying generator and only
+    ## ---- access randod for a moment.  Then he threw his head back and
+laughed.  "I always agree with Harry, Duchess."
+
+"Even when he is wrong?"
+
+"Harry is never wrong, Duchess."
+
+"And does his philosophy make you happy?"
+
+"I have never searched for happiness.  Who wants happiness?  I have
+searched for pleasure."
+
+"And found it, Mr. Gray?"
+
+"Often.  Too often."
+
+The duchess sighed.  "I am searching for peace," she said,  0,                                          /* tp_doc */
+    dictiter_traverse,                          /* tp_traverse */
+    0,                                          /* tp_clear */
+    0,           d here:
+* https://mail.python.org/pipermail/python-dev/2012-December/123028.html
+* https://morepypy.blogspot.com/2015/01/faster-more-memory-efficient-and-more.html
+
+layout:
+
++---------------------+
+| dk_refcnt           |
+| dk_log2_size        |
+| dk_log2_i
+said. "Madness were easy to bear compared with truth like this. Oh, my
+friend, why, think you, did I go so far round, why take so long to tell
+you so simple a thing? Was it because I hate you and have hated you all
+my life? Was it because I wi50.64,6377.47,9210.63,6583.20,4729.68
+7803.39,2431.64,8694.57,750.25,1820.30,540.71
+9074.50,5175.49,9202.73,3165.30,9659.74,4028.06
+2403.82,7361.33,4249.40,7250.62,8197.41,5996.46
+2603.44,7139.63,1069.19,6323.37,8976.23,9824.68
+2350.34,703.88,3508.47,2524.37,3810.03
+3221.66,7433.54,884.75,5091.90,3224.01,3803.98
+5411.49,3040.07,5567.06,1628.70,1588.23,1582.21
+5503.27,4074.56,4040.23,8214.34,6492.49,6911.73
+2945.79,2590.37,6559.54,4979.54,7151.33,3450.68
+3929.19,1589.05,8776.65,6931.41,6999.42,7150.21
+5590.5bject *op, PyObject *key)
+{
+    Py_ssize_t ix; (void)ix;
+    Py_hash_t hash;
+    PyDictObject*mp = (PyDictObject *)op;
+    PyObject *value;
+
+    if (!PyAnyDict_Check(op)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+   ead creating the dict
+        goto exit;
+    }
+#endif
+    dict = _PyObject_MaterializeManagedDict_LockHeld(obj);
+
+#ifdef Py_GIL_DISABLED
+exit:
+#endif
+    Py_END_CRITICAL_SECTION();
+    return dict;
+}
+
+int
+_PyDict_SetItem_LockHeld(PyDictObject *dict, PyObject *name, PyObject *value)
+{
+    if (!PyDict_Check(dict)) {
+        if (PyFrozenDict_Check(dict)7852.14
+7515.10,7095.18,6163.26,1939.75,1809.53,9705.60
+8816.89,9823.38,4215.71,2874.07,5159.94,2558.66
+5825.41,314.18,3009.67,8123.48,2909.01,7667.85
+5253.80,2828.60,2743.98,6427.40,2971.72,6457.40
+7619.78,8720.38,2598.25,8344.48,4387.89,4305.5.65,7880.28
+8298.88,7255.74,1673.65,8088.88,1153.84,5244.75
+2732.05,57.49,3225.10,2716.96,3973.91,7502.02
+8831.27,9453.88,5306.97,253.87,9207.53,8909.80
+6570.20,7237.42,7783.23,8856.03,7890.86,3982.30
+9918.44,9770.97,1613.32,5076.36,4776.90,7only_separator:
+            # There were only positional-only parameters, hence the
+            # flag was not reset to 'False'
+            result.append('/')
+
+        rendered = '({})'.format(', '.jE_PTR_RELEASE(*dest, key);
+        dest++;
+    }
+    Py_SET_SIZE(self, r);
+    return 0;
+}
+
+static int
+list_extend_dict(PyListObject *self, PyDictObject *dict, int which_item)
+{
+    // which_item: 0 for keys and 1 for values
+    Py_ssize_t m = Py_SIZE(self);
+    Py_ssize_t n = PyDict_GET_SIZE(dict);
+    Py_ssize_t r = m + n;
+    if (r == 0) {
+        return 0;
+    }
+ ver, this shouldn't normally happen.
          */
-        if (x <= (unsignea pack of cards!'
+        Py_DECREF(v);
+        goto again;
+    }
 
-At this the whole pack rose up into the air, and came flying down upon
-her: she gave a little scream, half of fright and half of anger, and
-tried to beat them off, and found herself lying on the bank, with her
-head in the lap of her sister, who was gently brushing away some dead
-leaves that had fluttered down from the trees upon her face.
+    /* Nothing we do below makes any function calls. */
+    Py_ssize_t j = 0, pos = 0;
+    PyObject *key;
+    while (_PyDict_Next((PyObject*)mp, &pos, &key, NULL, NULL)) {
+        assert(j < n);
+        PyList_SET_ITEM(v, j, Py_NewRef(key));
+        j++;
+    }
+    I
+wasn't broken to harness at all yet. Then he said that he had spoken in
+a light manner, and he hoped that if he had made a mistake in doing so
+on so grave, so momentous, an occasion for him, I w96,9136.26,8962.96
+9320.08,8875.60,6069.06,449.81,5727.34,6201.33
+3305.29,3509.78,4587.43,9527.73,353.62,2256.70
+9292.28,7735.08,4891.28,538.36,7459.11,5296.92
+467.05,6936.74,151.17,6622.09,334l('-0')
+        >>> ExtendedContext.sqrt(Decimal('0.39'))
+        Decimal('0.624499800')
+        >>> ExtendedContext.sqrt(Decimal('100'))
+        Decimal('10')
+        >>> ExtendedContext.sqrt(Decimal('1'))
+        Decimal('1')
+        >>> ExtendedContext.sqrt(Decimal('1.0'))
+        Decimal('1.0(pmod);
+    if (_PyLong_DigitCount(v) == 1 && _PyLong_DigitCount(w) == 1) {
+        /* Fast path for single-digit longs */
+        *pmod = (PyLongObject *)fast_mod(v, w);
+        return -(*pmod == NULL);
+    }
+    if (long_rem(v, w, &mod) < 0)
+        return -1;
+    if ((_PyLong_IsNegative(mod) && _PyLong_IsPositive(w)) ||
+        (_PyLong_IsPositive(mod) && _PyLong_IsNegative(w))) {
+        PyLongObject *temp;
+        temp = long_add(one, and that you
+     will enjoy your stay in my beautiful land.
 
-'Wake up, Alice dear!' said her sister; 'Why, what a long sleep you've
-had!'
+"Your friend,
 
-'Oh, I've had such a curious dream!' said Alice, and she told her
-sister, as well as she could remember them, all these strange Adventures
-of hers that you have just been reading about; and when she had
-finished, her sister kissed her, and said, 'It WAS a curious dream,
-dear, certainly: but now run in to your tea; it's getting late.' So
-Alice got up and ran off, thinking while she ran, as well she might,
-what a wonderful dream it had been.
+"DRACULA."
 
-But her sister sat still just as she left her, leaning her head on her
-hand, watchi
+
+_4 May._--I found that my landlord had got a letter from the Count,
+directing him to secure the best place on the coach for me; but on
+making inquiri/or value from the provided locations and if successful
+// returns them with an increased reference count.  If either one is unsuccessful
+// nothing is incref'd and returns -1.
+static int
+acquire_key_value(PyObject **key_lo= (dictiterobject *)self;
+    Py_VISIT(di->di_dict);
+    Py_VISIT(di->di_result);
+    return 0;
+}
+
+static PyObject *
+dictiter_len(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    dictiterobject *di = (dictiterine uint8_t
+calculate_log2_keysize(Py_ssize_t minsize)
+{
+#if SIZEOF_LONG == SIZEOF_SIZE_T
+    minsize = Py_MAX(minsize, PyDict_MINSIZE);
+    return _Py_bit_length(minsize - 1);
+#elif defined(_MSC_VER)
+    // On 64bit Windows, sizeof(long) == 4. We cannot use      NULL);
+    }
+#ifndef _Py_FORCE_UTF8_FS_ENCODING
+    else if (fs_codec->encoding) {
+        return PyUnicode_Decode(s, size,
+                                fs_codec->encoding,
+                                fs_codec->errors);
+    }
+#endif
+    else {
+        /* Before _PyUnicode_InitEncodings() is called, the Python codec
+           machinery is not ready and so cannot be used:
+           use
+to become one among those whose names are recorded in story as the
+gallant and adventurous benefactors of our species.  The saintly soul
+of Elizabeth shone like a shrine-dedicated lamp in our peaceful home.
+Her sympathy was ours; her smile, her soft voice, the sweet glance of
+her celestial eyes, were ever there to bless and animate us.  She was
+the living spirit of love to soften and attract; I might have become
+sullen in 584.42,351.09
+1350.38,8478.00,6819.31,3194.79,9362.48,5468.59
+1982.16,3963.62,5152.10,2685.64,8411.87,139.78
+6962.57,4138.65,4377.91,7550.22,1962.00,5811.61
+7687.44,3541.84,4224.17,6778.99,3052.89,2839.75
+1190.43,9883.29,2716.75,827.00,2895.23,4615.06
+6895.07,2087.92,9566.66,1977.81,8719.14,3420.67
+8242.64,66.34,9347.36
+3235.70,6620.23,2878.04,7436.38,9284.14,1667.18
+7805.93,9444.98,4214.98,1877.92,3748.53,7543.47
+4348.33,501.76,7894.92,5674.03,1816.47,1139.19
+4377.24,830.65,751.66,6797.24,7812.68,5403.98
+5497.15,5145.7,3269.63,1783.29
+3592.54,6198.47,5000.16,6017.35,857.33,7240.90
+2160.77,4616.41,7293.69,6074.32,8019.87,2013.28
+5149.32,4442.68,5232.96,2849.69,8672.07,7512.88
+6116.71,1380.76,6960.84,8219.05,3341.29,6407.00,971.98
+1642.17,9807.42,9237.21,317.05,8745.20,9492.19
+1286.17,2475.70,3058.52,6372.02,6049.36,5640.99
+9232.97,261.30,9636.01,6022.99,6018.43,1413.73
+6077.46,1060.52,3075.46,9423.32,2462.27,8591.23
+9835.17,8283.14,5221.74,9547.71,1573.78,2711.45
+4184.59,4297.the same as using the
+        minus operation on the operand.  Otherwise, the result is the same
+        as using the plus operation on the operand.
+
+        >>> ExtendedContext.abs(Decimal('2.1'))
+        Decimal('2.1')
+        >>> ExtendedContext.abs(Decimal('-100'))
+        Decimal('100')
+        >>> ExtendedContext.abs(Decimal('101.5'))
+        Decimal('101.5')n, ZeroDivisionError):
+    """Undefined result of division.
+
+    This occurs and signals invalid-operation if division by zero was
+    attempted (during a divide-integer, divide, or remainder operation), and
+    the dividend is also zero.  The result is [0,qNaN].
+    """
+
+    def handlalcontext(ExtendedContext):
+    ...     print(getcontext().prec)
+    ...
+    9
+    >>> print(getcontext().prec)
+    28
+    """
+    if ctx is None:
+        ctx = getcontext()
+    ctx_manager = _ContextManager(ctx)
+    for key, value in kwargs.i.50,6757.80,8713.00
+5671.98,9932.67,8772.72,8222.48,2307.61,992.79
+3516.80,6222.74,4498.23,6977.92,7862.04,7586.63
+1490.80,410.66,9521.44,2631.42,5436.99,7602.47
+2104.51,6792.18,905.99,6661.40,928.93,9645.64
+7810.81,8997.57,2318.13,2505.51,1888.44,9710.28
+199.47,411.13,8197.90,8710.46,8308.45,736.69
+6933.34,5974.76,7089.12,1541.20,5695.77,5685.53
+1880.55,1898.71,118         "chdir"]
+
+
+class AbstractContextManager(abc.ABC):
+
+    """An abstract base class for context managers."""
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+    __slots__ = ()
+
+    def __enter__(self):
+        """Return `self` upon entering t;
+            chars[1] = Py_UNICODE_LOW_SURROGATE(ch);
+            charsize = 2;
+        }
+
+        outsize = WideCharToMultiByte(code_page, flags,
+                                      chars, charsize,
+                                  .42,5139.40,8346.59
+2296.08,5313.77,9768.13,2743.67,2025.64,9152.91
+2926.23,5083.41,37.57,4463.57,1519.33,1802.49
+8414.72,9367.94,7350.16,1101.15,9765.25,9384.29
+1804.31,9867.66,9893.97,6778.35,8233.69,390.73
+2356.26,8581.00,4858.27,8673.07,1018.89,1912.33
+3325.77,5436.06,4227.93,2797.24,9675.47,3583.34
+904.70,rror.  You may know terror yourself some
+day.  No! don't think of that.  Look at the matter purely from the
+scientific point of view.  You don't inquire where the dead things on
+which you experiment come from.  Don't inquire now.  I have told you
+too much as it is.  But I beg of yo6400.45,5044.21,6358.76,7778.74,8905.74
+314.05,5844.76,6389.79,6739.18,2524.34,548.51
+2410.46,9737.93,20.13,4647.51,5412.53,7651.90
+6935.53,5618.19,8381.57,9097.66,5658.79,8814.13
+4017.31,7887.93,8465.44,6588.51,4808.19,4298.95
+7671.14,7965.50,5089.12,7775.45,3958.65,3693.18
+1611.37,1933.18,673.03,5011.74,8333.58,725.70
+9289.84,361.74,847.45,9154.79,6728.57,9244.50
+8643.26,9720.63,7643.22,5050.00,5917.10,6690.91
+8346.4,59.91,1980.25
+9219.48,7897.69,3779.34,617.81,2748.85,9082.64
+3819.52,4484.98,6900.51,4456.63,1601.85,2123.23
+9167.02,7437.96,734.62,3511.50,8825.43,3989.12
+1263.86,698.54,7238.24,2838.76,8224.24,8351.49
+8549.46,3228.29,5893.84,9601.96,1056.43,848.58
+724.78,2896.18,4678.60,705.74,8209.08,9264.50
+1507.51,8384.73,4936.50,4389.45,7710.06,9047.61
+28e bride-maidens rejoice the eyes that wait the coming of the bride;
+but when the bride draweth nigh, then the maidens shine not to the eyes
+that are filled."
+
+He would not explain himself, but remained obstinately seated on his 1.12,6003.45,8836.45,5169.72
+6432.83,5983.77,4786.24,2234.23,8196.84,3786.00
+9717.45,1950.08,3848.07,8908.99,7281.94,3190.57
+5243.26,1363.30,5110.18,4143.77,4913.78,3649.08
+7954.89,2769.37,3044.90,7160.56,2896.88,1418.63
+8162.06,1342.37,6299.93,5309.49,4465.52
+# from the signature of its __init__ method on demand.
+# The primary reason is to be able to lazy import `inspect` module.
+class _AutoDocstring:
+
+    def __get__(self, _obj, cls):
+        try:
+            # In some cases fetching a signature i03,8946.51,9879.03,9567.90,2348.78
+6052.24,1893.35,6835.31,4238.04,1759.85,293.80
+5444.87,8222.88,6902.21,1346.67,6156.68,2189.21
+1173.20,7293.97,3879.42,5739.99,5194.48,3467.21
+935.42,7839.52,8617.80,3703.28,4625.07,1614.53
+1769.66,1211.59,3746.40,644.59,7828.77,9545.11
+1632.75,4735.76,8097.69,857.55,2034.83,2642.49
+5713.00,8117.34,4970.39,6394.15,3954.13,7577.26
+4130.00,9335.28,5795.12,3802.60,3451.64,6066.00
+9272.24,4393.21,1202.12,8))
+        trailing = separator + frac_part + suffix
+
+        # Do zero padding if required.
+        if zeropad:
+            min_leading = minimumwidth - len(sign) - len(trailing)
+            # When adding thousands separators, they'll be added to the
+            # zero-pad8,8046.13,8392.70,2326.60
+158.04,7825.11,4675.29,6402.58,6046.09,8299.27
+1894.95,8435.03,5071.60,5602.00,4850.37,6034.36
+4094.97,6303.71,9093.97,7959.56,157.38,9830.83
+4577.94,8086.47,8308.20,8136.61,4384.05,1414.54
+6858.23,6133.93,6958.35,44

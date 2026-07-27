@@ -90,7 +90,9 @@ print(f"  d_within {d_in:.3f} | d_between {d_bt:.3f} | ratio {d_bt/max(1e-9,d_in
 print(f"  vs random unit vectors in {SIG_D}-d (1.00 +/- {rnd:.2f}): {z:+.1f} sigma")
 print("\n  VERDICT: " + (
     "the encoder SEPARATES the true kinds. A low separation in the run's genuineness report is then a\n"
-    "           statement about OVER-FRAGMENTATION, not about the encoder -- fix the CREATION rule."
+    "           statement about the ASSEMBLER or about the STREAM, not about the encoder. Check the\n"
+    "           SEGMENT/WINDOW config warning first: if a splice segment is only a few analysis windows\n"
+    "           long, the clustering scores describe transitions and no assign rule will move them."
     if msil > 0.10 else
     "the encoder does NOT separate the true kinds even with perfect labels. No assign rule can\n"
     "           recover a partition the representation does not contain -- fix the ENCODER."
