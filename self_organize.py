@@ -546,7 +546,26 @@ class ExpertRouter:
 # by the optimizer every single step, while the encoder is 70% of wall clock. It is NOT always 256: with
 # TOKENIZER=1 TOK_ONLINE=0 the corpora themselves are tokenized, so ENC_SEQ really does carry ids up to
 # TOK.vocab_size. Size it by which of those two streams this configuration feeds it.
-ENC_V = V if (USE_TOK and not TOK_ONLINE) else 256
+# WHAT THE SIGNATURE ENCODER READS. Two independent choices, both default to the historical behaviour.
+#
+# SIG_SPACE=bytes (default): the signature window is raw bytes. This is a STABILITY choice, not a quality one --
+#   with TOK_ONLINE the vocabulary grows mid-run and _retok re-segments the stream, so the same text maps to
+#   different token sequences over time, while domain centroids persist for the WHOLE run and memory provenance is
+#   keyed by domain id. Bytes are a fixed alphabet, so the coordinate system cannot shift underneath the assembler.
+# SIG_SPACE=tokens: read the LM's token window instead. NOT a frozen vocabulary -- DynamicTokenizer minting is
+#   append-only, so an id never changes meaning; only the SEGMENTATION of text changes as new tokens are minted,
+#   and rekey() already re-encodes every reservoir on a cadence, which is exactly the mechanism for tracking that
+#   drift. New ids are warm-started from their two constituents (the trick the LM already uses at :WARMSTART), so
+#   the encoder inherits what it knows about "th" and "e" when "the" is minted rather than relearning from noise.
+#   The signature space grows with the vocabulary instead of being pinned to it.
+# SIG_WIN: byte width of the signature window when in byte space. 0 = WIN, the historical value -- which is a
+#   WIDTH in bytes against a loop STRIDE of WIN tokens, so the encoder has been seeing only WIN/(WIN*bytes_per_
+#   token) of the stream (~53% at 1.9 B/token) and that fraction DRIFTS as compression improves. Nobody chose
+#   that. Set SIG_WIN to about WIN*bytes_per_token to cover the same text the LM step consumed.
+SIG_SPACE = os.environ.get("SIG_SPACE", "bytes").strip().lower()
+if SIG_SPACE not in ("bytes", "tokens"): sys.exit(f"SIG_SPACE must be bytes|tokens, got {SIG_SPACE!r}")
+SIG_WIN = _i("SIG_WIN", 0)
+ENC_V = V if (USE_TOK and (not TOK_ONLINE or SIG_SPACE == "tokens")) else 256
 class SigEncoder(nn.Module):                               # LEARNED, LIVE domain-signature encoder (stays GRU regardless of LM)
     def __init__(s, d, sd):
         super().__init__(); s.emb = nn.Embedding(ENC_V, d); s.gru = nn.GRU(d, d, batch_first=True); s.proj = nn.Linear(d, sd)
@@ -1083,7 +1102,9 @@ def main():
         _b, _l, _sw = build_stream()                       #   disk so each epoch draws NEW data from the larger-than-RAM corpus
         if ONLINE:
             _s, _t, _lab = _retok(_b, _l)
-            return _s, _b, _l, _t, _lab, _b, _sw           # stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw
+            # ENC_SEQ is what contrastive_step TRAINS on, so it must be the same space the signature is READ in --
+            # training the encoder on bytes and then querying it with token ids would index a table it never saw.
+            return _s, _b, _l, _t, _lab, (_s if SIG_SPACE == "tokens" else _b), _sw
         return _b, None, _l, None, _l, _b, _sw
     stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
     set_enc_tensor(ENC_SEQ)
@@ -1438,6 +1459,19 @@ def main():
     # is ~490 bytes, so a segment is 2.6 windows, SUSTAIN=2 consumes two of them, and under one clean window per
     # segment remains. That is not a domain stream, it is a transition stream, and no assign rule fixes it.
     _bpt = (sum(TOK.bytes_per_id[:TOK.vocab_size]) / max(1, TOK.vocab_size)) if (USE_TOK and TOK is not None) else 1.0
+    # SIGNATURE WINDOW WIDTH vs LOOP STRIDE. In byte space the width is a byte count while the loop advances WIN
+    # TOKENS, so the encoder sees width/(WIN*bytes_per_token) of the stream -- and that fraction SHRINKS as the
+    # tokenizer compresses better. Report it, because it was never a decision anyone made.
+    _sigw = SIG_WIN if SIG_WIN > 0 else WIN
+    if ONLINE and SIG_SPACE == "bytes":
+        _stride_b = WIN * max(1.0, _bpt)
+        _cov = min(1.0, _sigw / _stride_b)
+        print(f"[signature] space=bytes | window {_sigw} B | loop stride {_stride_b:.0f} B ({WIN} tok x {_bpt:.2f}) "
+              f"-> covers {_cov*100:.0f}% of the stream"
+              + ("" if _cov >= 0.99 else f"; SIG_WIN={int(_stride_b)} would cover it all"))
+    elif SIG_SPACE == "tokens":
+        print(f"[signature] space=TOKENS | window {WIN} tok (~{WIN*_bpt:.0f} B) | encoder vocab {ENC_V}, live {TOK.vocab_size if USE_TOK else 256}"
+              f" | new ids warm-started from their constituents; centroids re-encoded every REKEY_EVERY={REKEY_EVERY}")
     _winb = WIN * max(1.0, _bpt); _segb = 0.5 * (_i("SEG_MIN", 700) + _i("SEG_MAX", 1800))
     if DATA_MODE == "real" and _segb / _winb < 8:
         _warn.append(f"SEGMENT/WINDOW = {_segb:.0f}B / {_winb:.0f}B = {_segb/_winb:.1f} windows per splice segment "
@@ -1522,10 +1556,13 @@ def main():
                 PH_SNAP.append(_snap)
                 print(f"  [PHASE {_p}] active processes {PHASE_SCHED[_p]} | domains {_snap[1]} | vocab {_snap[2]}"
                       f" | fabric nodes {_snap[3]} | memory {_snap[4]}")
-        ew = list(byte_stream[bpos:bpos + WIN]) if ONLINE else list(w[:-1])   # SIGNATURE window: BYTES when online (tokenization-invariant)
+        # SIGNATURE window. Bytes when online (tokenization-invariant -- see SIG_SPACE), else the token window.
+        # _sigw is the byte WIDTH; the loop STRIDE is WIN tokens, so width < stride means the encoder skips text.
+        ew = list(byte_stream[bpos:bpos + _sigw]) if (ONLINE and SIG_SPACE == "bytes") else list(w[:-1])
         _enc_cad = ENC_EVERY if (step - _last_boundary) < ENC_SHIFT_WIN else ENC_EVERY_IDLE   # shift-gated: dense near a boundary, throttled when stable
         if SIG_MODE == "learned" and step % _enc_cad == 0:
-            with _T("encoder(contrastive)"): contrastive_step(enc, oe, ENC_SEQ, bpos, asm)   # LIVE encoder on the STABLE sequence
+            with _T("encoder(contrastive)"): contrastive_step(enc, oe, ENC_SEQ, (i if SIG_SPACE == "tokens" else bpos), asm)   # `seen` must be
+            #   an index INTO ENC_SEQ: bpos counts bytes, i counts tokens, and ENC_SEQ is whichever SIG_SPACE says
         with _T("sig_of"):
             if not (SIG_BATCH and SIG_MODE == "learned"):
                 sig = sig_of(ew, enc)
@@ -1540,12 +1577,12 @@ def main():
                     _ws = [ew]
                     for _k in range(1, _H):                 # the SAME byte windows the later steps would build
                         _j = i + _k * WIN
-                        if ONLINE:
+                        if ONLINE and SIG_SPACE == "bytes":
                             if _j >= len(tok_bs): break
-                            _b0 = tok_bs[_j]; _w = list(byte_stream[_b0:_b0 + WIN])
-                        else:
-                            _w = list(stream[_j:_j + WIN])
-                        if len(_w) != WIN: break
+                            _b0 = tok_bs[_j]; _w = list(byte_stream[_b0:_b0 + _sigw])   # _sigw, not WIN: the
+                        else:                                                            #   lookahead must build the
+                            _w = list(stream[_j:_j + WIN])                               #   SAME width as `ew`, or
+                        if len(_w) != (_sigw if (ONLINE and SIG_SPACE == "bytes") else WIN): break   # the batch is ragged
                         _ws.append(_w)
                     _sigq = list(sig_of_batch(_ws, enc)) if len(_ws) > 1 else [sig_of(ew, enc)]
                 sig = _sigq.pop(0)
@@ -1713,6 +1750,11 @@ def main():
                             model.head.weight[nid] = 0.5 * (model.head.weight[a] + model.head.weight[b])
                             if model.head.bias is not None:
                                 model.head.bias[nid] = 0.5 * (model.head.bias[a] + model.head.bias[b])
+                            if SIG_SPACE == "tokens" and nid < enc.emb.num_embeddings:
+                                # The signature encoder needs this MORE than the LM does: a domain centroid is a mean
+                                # of encodings, so one freshly-random token id inside a window perturbs every
+                                # signature that contains it, and the assembler reads those as a domain shift.
+                                enc.emb.weight[nid] = 0.5 * (enc.emb.weight[a] + enc.emb.weight[b])
         _t1("tokenizer (mint/tally)", _ptok)
         _bx = []; _by = []; _bg = []; _bd = []; _bp = []
         i += WIN; step += 1
@@ -1733,6 +1775,8 @@ def main():
             else:
                 stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
             _sigq = []                                       # re-tokenized -> window boundaries moved, queue is stale
+            if SIG_SPACE == "tokens":                        # the encoder reads the TOKEN stream, which was just rebuilt
+                ENC_SEQ = stream; set_enc_tensor(ENC_SEQ)    #   -> re-point it, or it trains on a stale segmentation
             if FABRIC and fabgrow is not None: fabgrow.note_shift(step)   # the loss jump after a retok is OURS, not a shift
             print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; +{TOK.vocab_size - _last_vsz} since last retok)")
             _last_vsz = TOK.vocab_size
