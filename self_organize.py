@@ -1934,6 +1934,40 @@ def main():
             print(f"  >> gap < ~0.3 = UNDERFIT, keep training / add data (regularization would HURT)")
             print(f"     gap > ~0.5 = MEMORIZING, now turn on DROPOUT=0.1-0.2 and WEIGHT_DECAY=0.01")
             print(f"  currently: {'MEMORIZING -> enable DROPOUT/WEIGHT_DECAY' if _gap > 0.5 else 'UNDERFIT -> more data/passes, not regularization'}")
+            # ---- ANCHORS. A bits/byte number alone is uninterpretable: 2.9 could be excellent or worthless. -----
+            # These are computed on the SAME held-out material, in the SAME units, so the model's score can be read
+            # against something. If the model does not clearly beat ORDER-1, none of the architecture is doing work
+            # that a two-line frequency table could not -- and that is a result worth being unable to avoid seeing.
+            try:
+                from collections import Counter                # imported locally: the module-level import of
+                #   Counter happens further down, in the clustering report, and this block runs before it
+                _cat = []
+                for _p in range(len(VALC)):
+                    _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+                    _cat += _v[:20000]
+                _trn = []                                   # FIT the baselines on TRAIN, score them on HELD-OUT.
+                for _p in range(len(CORP)):                 # Measuring a bigram's entropy ON the text it is scored
+                    _s2 = CORP[_p][:min(SEG_LEN[_p], 200000)]   # on makes it a model that has seen the answers --
+                    _trn += (TOK.segment(_s2, count=False) if USE_TOK else list(_s2))[:20000]   # an unfairly strong
+                if len(_cat) > 256 and len(_trn) > 256:     # anchor, which is the opposite of the mistake to make.
+                    _nb = sum(TOK.bytes_per_id[t] for t in _cat) if USE_TOK else len(_cat)
+                    _sc = len(_cat) / _nb                   # tokens per byte: bits/token -> bits/byte
+                    _VS = TOK.vocab_size if USE_TOK else 256
+                    _k = 0.1                                # add-k smoothing, so unseen pairs cost finite bits
+                    _c1 = Counter(_trn); _N1 = len(_trn)
+                    _c2 = Counter(zip(_trn[:-1], _trn[1:])); _ctx = Counter(_trn[:-1])
+                    _b0 = -sum(math.log2((_c1[t] + _k) / (_N1 + _k * _VS)) for t in _cat) / len(_cat)
+                    _b1 = -sum(math.log2((_c2[(a, b2)] + _k) / (_ctx[a] + _k * _VS))
+                               for a, b2 in zip(_cat[:-1], _cat[1:])) / max(1, len(_cat) - 1)
+                    _u = math.log2(_VS)
+                    print(f"  ANCHORS -- fitted on TRAIN, scored on the SAME held-out text (bits/byte):")
+                    print(f"    uniform {_u * _sc:.3f} | order-0 {_b0 * _sc:.3f} | order-1 {_b1 * _sc:.3f} | "
+                          f"THIS MODEL {_va:.3f}")
+                    _o1 = _b1 * _sc
+                    print(f"  >> {'beats order-1 by ' + format(_o1 - _va, '+.3f') + ' bits/byte' if _va < _o1 else 'DOES NOT BEAT ORDER-1 (' + format(_o1 - _va, '+.3f') + ') -- a two-line frequency table does as well'}"
+                          f". GPT-2-small sits near 1.0-1.2 b/B on comparable text, for scale.")
+            except Exception as _e:
+                print(f"  [anchors skipped: {type(_e).__name__}: {_e}]")
         # === RETENTION: is the system still good at what it saw FIRST? =======================================
         # THE central continual-learning question, and until now nothing measured it on a default run. The
         # forgetting test that did exist (PHASED=1) is off by default and had never been executed; when finally
@@ -2315,6 +2349,7 @@ def main():
 
     # ---- can it actually produce COMPREHENSIBLE TEXT? model alone vs model+memory, seeded from real text ----
     if _i("GENERATE", 1):
+        _gen_keep = []
         print("\n=== GENERATION: model ALONE vs model+MEMORY (seed = real text; does memory make it more coherent?) ===")
         for p in sorted(set(labels))[:_i("GEN_PROCS", 4)]:
             starts = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p]
@@ -2331,6 +2366,62 @@ def main():
             print(f"\n-- process {p} | seed ...{_dec(seed[-44:])}")
             print(f"   MODEL ONLY: {_dec(gno)}")
             print(f"   MODEL+MEM : {_dec(gme)}")
+            _gen_keep.append((p, seed, gno, gme))
+        # ---- COHERENCE, AS A NUMBER. ----------------------------------------------------------------------------
+        # Generation has always been printed and eyeballed, which is how "it is producing code" got claimed for
+        # output that merely contained code-shaped tokens. The visible failure in these samples is DRIFT: a
+        # continuation seeded with prose slides into C within a few dozen tokens. That is measurable with machinery
+        # already here -- encode successive windows of the CONTINUATION and ask which true-corpus centroid each is
+        # nearest. Staying in the seed's corpus is coherence; wandering is not.
+        # Bracketed by a floor and a ceiling, because the raw fraction means nothing on its own:
+        #   CEILING = REAL text from that corpus scored the same way (the encoder is not perfect, so this is < 1)
+        #   FLOOR   = chance, 1/NP, what a generator ignorant of the seed would get
+        try:
+            if _gen_keep and SIG_MODE == "learned" and len(set(labels)) > 1:
+                _cent = {}
+                for _p in sorted(set(labels)):             # true-corpus centroids from REAL data, not from domains
+                    _st = [s for s in range(0, len(stream) - WIN - 1, WIN) if labels[s] == _p]
+                    if len(_st) < 8: continue
+                    random.shuffle(_st)
+                    _bs = [(tok_bs[s] if ONLINE else s) for s in _st[:64]]
+                    with torch.no_grad():
+                        _Z = enc(torch.tensor([list(ENC_SEQ[b:b + WIN]) for b in _bs
+                                               if b + WIN <= len(ENC_SEQ)], device=DEV))
+                    if _Z.numel(): _cent[_p] = F.normalize(_Z.mean(0), dim=0)
+                if len(_cent) > 1:
+                    _ks = sorted(_cent); _C = torch.stack([_cent[k] for k in _ks])
+                    def _stay(units, home):                # fraction of windows nearest the HOME corpus centroid
+                        _txt = TOK.decode(units) if USE_TOK else bytes(units)
+                        _by = list(_txt.encode("utf-8", "replace") if isinstance(_txt, str) else _txt)
+                        _w = [_by[a:a + WIN] for a in range(0, max(0, len(_by) - WIN + 1), WIN // 2)]
+                        _w = [x for x in _w if len(x) == WIN]
+                        if not _w: return None
+                        with torch.no_grad(): _Z = enc(torch.tensor(_w, device=DEV))
+                        return float((torch.tensor(_ks, device=DEV)[(_C @ _Z.t()).argmax(0)] == home).float().mean())
+                    _rn, _rm, _rr = [], [], []
+                    for _p, _sd, _a, _b in _gen_keep:
+                        if _p not in _cent: continue
+                        for _acc, _u in ((_rn, _a), (_rm, _b)):
+                            _v = _stay(_u, _p)
+                            if _v is not None: _acc.append(_v)
+                        _st = [s for s in range(0, len(stream) - WIN - 1, WIN) if labels[s] == _p]
+                        if _st:                            # CEILING: real text of the same corpus, same measurement
+                            _v = _stay(list(stream[_st[0]:_st[0] + _i("GEN_LEN", 200)]), _p)
+                            if _v is not None: _rr.append(_v)
+                    if _rn and _rm:
+                        _mn, _mm = sum(_rn) / len(_rn), sum(_rm) / len(_rm)
+                        _ceil = sum(_rr) / len(_rr) if _rr else float("nan")
+                        _floor = 1.0 / len(_cent)
+                        print(f"\n=== COHERENCE: does a continuation STAY in the domain of its seed? ===")
+                        print(f"  model ALONE {_mn:.2f}  |  model+MEMORY {_mm:.2f}  |  REAL text (ceiling) {_ceil:.2f}"
+                              f"  |  chance (floor) {_floor:.2f}")
+                        print(f"  >> fraction of generated windows whose nearest true-corpus centroid is the SEED's."
+                              f" Drift out of the seed's domain is the failure these samples show by eye.")
+                        _best = max(_mn, _mm)
+                        print(f"  >> {'ON-TOPIC -- close to what real text of this corpus scores' if _best >= _ceil - 0.15 else ('PARTIAL -- better than chance but wanders well before real text does' if _best > _floor + 0.10 else 'INCOHERENT -- indistinguishable from ignoring the seed entirely')}"
+                              f"; memory {'HELPS' if _mm > _mn + 0.02 else ('HURTS' if _mn > _mm + 0.02 else 'is neutral')} here.")
+        except Exception as _e:
+            print(f"[coherence check skipped: {type(_e).__name__}: {_e}]")
 
     # UNLEARN a whole true process: delete EVERY self-domain that is really about it. This is what real unlearning
     # looks like ("forget everything about X"), AND it's a big enough delete to expose cross-domain retrieval leakage
