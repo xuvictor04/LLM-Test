@@ -222,12 +222,25 @@ else:
     PROCS = [make_proc(s, ALPHA[s % len(ALPHA)]) for s in range(NP)]
     def seg_from(p, L): return PROCS[p](L)
 
-PHASED = bool(_i("PHASED", 0))                             # NON-STATIONARY stream: processes ENTER and FADE over time
+# NON-STATIONARY BY DEFAULT, because that is the only stream that tests the thesis. A stationary i.i.d. splice of
+# N corpora does not require continual learning at all -- it is ordinary training with extra machinery, and every
+# number this project has reported was measured on it. PHASED shipped in the first commit defaulted to 0, sat
+# alongside the ablation flags, and was never once turned on; when finally run it showed faded material +0.65
+# bits/byte worse than a stationary control with 100% of its memory evicted, and the "unlearn a faded process"
+# arm skipping itself as vacuous. Leaving it off is now the deliberate ablation (PHASED=0), not the default.
+# Safe at any NP: the per-phase active set is filtered to existing processes and falls back to all of them, so a
+# single-corpus run degenerates to stationary on its own.
+PHASED = bool(_i("PHASED", 1))                             # NON-STATIONARY stream: processes ENTER and FADE over time
 PHASE_SCHED = [[0, 1], [0, 1, 2], [1, 2, 3], [2, 3]]      # who is active in each quarter (2 enters, 0 fades, 3 enters, 1 fades)
 PH_BOUNDS = []                                             # stream positions where each phase starts
 def build_stream():
     buf = []; lab = []; sw = []; pos = 0
     if PHASED:                                             # NON-STATIONARY: each phase has a different ACTIVE set
+        PH_BOUNDS.clear()                                  # REBUILT, not appended: build_stream runs once PER EPOCH
+        #   under DISK_STREAM, and this list is read as `sum(1 for b in PH_BOUNDS if bpos >= b) - 1` to get the
+        #   current phase. Accumulating gave 4 entries per epoch, so by epoch 3 that index read 8 for a position
+        #   whose phase was 2 -- straight past the end of PHASE_SCHED. PHASED=1 would have failed in exactly the
+        #   multi-epoch configuration it exists for.
         per = STREAM_LEN // len(PHASE_SCHED)
         for pi, act in enumerate(PHASE_SCHED):
             PH_BOUNDS.append(pos); act = [a for a in act if a < NP] or list(range(NP))
@@ -1530,6 +1543,11 @@ def main():
     if os.environ.get("SAVE_CKPT") and not CKPT_EVERY:
         _warn.append("SAVE_CKPT set but CKPT_EVERY=0 -> the ONLY save is at the very end (plus SIGUSR1). "
                      "A crash loses the whole run. Set CKPT_EVERY.")
+    if not PHASED and NP > 1:
+        _warn.append("PHASED=0 -> the stream is STATIONARY: every process is present throughout, in i.i.d. "
+                     "proportion. Nothing ever has to be retained across a distribution shift, so this run does "
+                     "NOT test continual learning -- it is ordinary training. The RETENTION and NON-STATIONARY "
+                     "sections below will look good for that reason alone. Use PHASED=1 (the default) to test it.")
     if EXPERTS and FABRIC:
         _warn.append("EXPERTS=1 AND FABRIC=1 -> the expert bank is a NO-OP. The forward pass is an elif chain "
                      "(FABRIC wins), so the adapters never receive gradient, yet the end-of-run report still prints "
@@ -1926,29 +1944,41 @@ def main():
         # throughout, so its first fifth and its last fifth are statistically identical. Both were TRAINED on, so
         # a gap is not generalisation -- it is forgetting. Memory is included because retention is a property of
         # the whole system, weights plus store, and the store is bounded and evicts.
-        _early = _late = None
+        # MUST BE COMPARED PER PROCESS. The first version of this took the first fifth against the last fifth and
+        # asserted they were "statistically identical material" -- true only when the stream is STATIONARY. Under
+        # PHASED (now the default) phase 0 is processes [0,1] and phase 3 is [2,3], an EMPTY intersection, so that
+        # comparison was measuring which corpora are intrinsically harder, exactly the confound that had to be
+        # corrected by hand when the non-stationary test was first run. Condition on the label: for each process,
+        # its EARLIEST windows against its LATEST windows. Same material either side, so a gap is drift in the
+        # model, not a difference in the text.
         try:
-            _lo = [a for a in range(0, len(stream) // 5 - WIN - 2, WIN)]
-            _hi = [a for a in range(4 * len(stream) // 5, len(stream) - WIN - 2, WIN)]
-            _nE = min(64, len(_lo), len(_hi))
-            if _nE >= 8:
-                random.shuffle(_lo); random.shuffle(_hi)
-                def _bpb_at(starts):
-                    _X = torch.tensor([list(stream[a:a + WIN]) for a in starts[:_nE]], device=DEV)
-                    _Y = torch.tensor([list(stream[a + 1:a + WIN + 1]) for a in starts[:_nE]], device=DEV)
-                    with torch.no_grad():
-                        _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
-                        _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
-                    return -(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y)
-                _early, _late = _bpb_at(_lo), _bpb_at(_hi)
-                _d = _early - _late
-                print(f"\n=== RETENTION: does it still know what it saw FIRST? (label-free, no PHASED needed) ===")
-                print(f"  first fifth of the stream {_early:.3f}  |  last fifth {_late:.3f}  |  "
-                      f"forgetting {_d:+.3f} bits/byte")
-                print(f"  >> both were TRAINED on and are statistically identical material, so a positive gap is "
+            def _bpb_at(starts):
+                _X = torch.tensor([list(stream[a:a + WIN]) for a in starts], device=DEV)
+                _Y = torch.tensor([list(stream[a + 1:a + WIN + 1]) for a in starts], device=DEV)
+                with torch.no_grad():
+                    _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                    _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
+                return -(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y)
+            _rows = []
+            for _p in sorted(set(labels)):
+                _at = [a for a in range(0, len(stream) - WIN - 2, WIN) if labels[a] == _p]
+                if len(_at) < 32: continue                 # need enough of it at BOTH ends to say anything
+                _k = min(48, len(_at) // 3)
+                _rows.append((_p, _bpb_at(_at[:_k]), _bpb_at(_at[-_k:]), len(_at)))
+            if _rows:
+                print(f"\n=== RETENTION: does it still know what it saw FIRST? (per process -- like for like) ===")
+                for _p, _e, _l, _n in _rows:
+                    print(f"  process {_p}: earliest windows {_e:.3f}  ->  latest {_l:.3f}   "
+                          f"drift {_e - _l:+.3f} bits/byte  ({_n} windows)")
+                _d = sum(e - l for _, e, l, _n in _rows) / len(_rows)
+                print(f"  mean drift {_d:+.3f} bits/byte over {len(_rows)} process(es)")
+                print(f"  >> both ends were TRAINED on and are the SAME material, so a positive number is "
                       f"FORGETTING, not generalisation.")
-                print(f"  >> {'RETAINED -- early material is as well modelled as recent' if _d < 0.10 else ('DRIFTING -- early material is measurably worse' if _d < 0.40 else 'CATASTROPHIC -- the system has largely moved on from what it saw first')}"
-                      f". This is the metric the continual-learning claim rests on; the domain scores are not.")
+                print(f"  >> {'RETAINED -- what it saw first is modelled as well as what it saw last' if _d < 0.10 else ('DRIFTING -- earlier material is measurably worse' if _d < 0.40 else 'CATASTROPHIC -- it has largely moved on from what it saw first')}"
+                      f". This is what the continual-learning claim rests on; the domain scores are not.")
+                if not PHASED:
+                    print(f"  >> NOTE: PHASED=0, so nothing ever left the stream. Retention is easy here by "
+                          f"construction -- read this number only alongside a PHASED=1 run.")
         except Exception as _e:
             print(f"[retention check skipped: {type(_e).__name__}: {_e}]")
         model.train()
