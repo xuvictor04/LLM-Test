@@ -1413,6 +1413,7 @@ def main():
                 print(f"  !! ENC_WARMUP_MIN ({_wfloor}) >= ENC_WARMUP ({wu}) makes the plateau test unreachable -- "
                       f"the adaptive stop was OFF for this run. Lower ENC_WARMUP_MIN to enable it.")
     assigns = []; bounds = []; i = 0; step = _resume_step; _cur_ph = -1; PH_SNAP = []
+    _CURVE = []; _VALT = {}; _CURVE_ERR = []; _BL = {}                                 # (step, process, bits/byte, was_active) + tokenised-val cache
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
@@ -1621,6 +1622,46 @@ def main():
     _total_steps = EPOCHS * (len(stream) // WIN)
     _bpw = WIN * (len(byte_stream) / max(1, len(stream))) if ONLINE else WIN     # BYTES of corpus consumed per step
     while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
+        # ---- PER-PROCESS LEARNING CURVE: the other half of continual learning. -----------------------------------
+        # Retention says whether old material survives. This says how FAST new material is picked up, and it is the
+        # half nothing measured: a process ENTERS at a phase boundary and we never asked how many steps it took to
+        # model it, nor watched its cost climb again once it FADED. Held-out text per process, on the rate cadence,
+        # so the cost is one small eval every RATE_EVERY steps rather than anything in the hot path.
+        if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark and VALC:
+            try:
+                model.eval()
+                for _p in range(len(VALC)):
+                    _v = _VALT.get(_p)
+                    if _v is None:
+                        _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+                        _VALT[_p] = _v
+                    if len(_v) < WIN + 2: continue
+                    _rs = random.Random(1234 + _p)          # SAME windows every time -> the curve is comparable
+                    _st = [_rs.randint(0, len(_v) - WIN - 2) for _ in range(16)]
+                    with torch.no_grad():
+                        _X = torch.tensor([_v[a:a + WIN] for a in _st], device=DEV)
+                        _Y = torch.tensor([_v[a + 1:a + WIN + 1] for a in _st], device=DEV)
+                        _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                        _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
+                    # nbytes() is unusable mid-run: it reads BLEN, which is None until the final re-tokenization
+                    # whenever TOK_ONLINE is set. Build the byte denominator from the LIVE tokenizer, cached per
+                    # vocab size since the vocabulary grows underneath us.
+                    if USE_TOK:
+                        _bl = _BL.get(TOK.vocab_size)
+                        if _bl is None:
+                            _bl = torch.tensor(TOK.bytes_per_id[:TOK.vocab_size], dtype=torch.float, device=DEV)
+                            _BL.clear(); _BL[TOK.vocab_size] = _bl
+                        _den = float(_bl[_Y.clamp(max=TOK.vocab_size - 1)].sum())
+                    else:
+                        _den = float(_Y.numel())
+                    _CURVE.append((step, _p, -(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / max(1.0, _den),
+                                   _p in (PHASE_SCHED[min(_cur_ph, len(PHASE_SCHED) - 1)] if (PHASED and _cur_ph >= 0)
+                                          else list(range(NP)))))
+                model.train()
+            except Exception as _e:                        # never swallow: a silent except here hid the whole
+                model.train()                              #   learning curve, printing nothing at all
+                if not _CURVE_ERR:
+                    _CURVE_ERR.append(1); print(f"  [learning-curve sample failed: {type(_e).__name__}: {_e}]")
         if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark:
             _now = _time.time(); _rate = (step - _s_mark) / max(1e-9, _now - _t_mark)      # steps/sec over the last window
             _left = max(0, _total_steps - (step - _resume_step))
@@ -2015,6 +2056,38 @@ def main():
                           f"construction -- read this number only alongside a PHASED=1 run.")
         except Exception as _e:
             print(f"[retention check skipped: {type(_e).__name__}: {_e}]")
+        # === LEARNING CURVE: how fast does it pick a process UP, and how fast does it lose it? ==================
+        # The sample-efficiency half of continual learning. Retention asks whether old material survives; this asks
+        # what happens at the two transitions -- the step a process ENTERS the stream, and the step it FADES out.
+        try:
+            if _CURVE and len(set(p for _s, p, _b, _a in _CURVE)) > 0:
+                _byp = {}
+                for _s, _p, _b, _a in _CURVE: _byp.setdefault(_p, []).append((_s, _b, _a))
+                print(f"\n=== LEARNING CURVE: bits/byte per process over training (A=active, .=absent) ===")
+                _steps = sorted(set(s for s, _p, _b, _a in _CURVE))
+                print(f"  step:      " + " ".join(f"{s:>7}" for s in _steps))
+                for _p in sorted(_byp):
+                    _m = {s: (b, a) for s, b, a in _byp[_p]}
+                    print(f"  process {_p}: " + " ".join(
+                        (f"{_m[s][0]:6.2f}{'A' if _m[s][1] else '.'}" if s in _m else "      -") for s in _steps))
+                _gain = _loss = 0.0; _ng = _nl = 0
+                for _p, _rows in _byp.items():
+                    _rows = sorted(_rows)
+                    for _k in range(1, len(_rows)):
+                        _d = _rows[_k - 1][1] - _rows[_k][1]          # positive = improved over this window
+                        if _rows[_k][2]: _gain += _d; _ng += 1        # measured while ACTIVE  -> acquisition
+                        else: _loss += _d; _nl += 1                   # measured while ABSENT  -> retention/decay
+                if _ng: print(f"  mean change per {RATE_EVERY} steps while a process is ACTIVE:  {_gain/_ng:+.3f} bits/byte  (positive = learning)")
+                if _nl: print(f"  mean change per {RATE_EVERY} steps while a process is ABSENT:  {_loss/_nl:+.3f} bits/byte  (negative = forgetting)")
+                if _ng and _nl:
+                    print(f"  >> acquisition {_gain/_ng:+.3f} vs decay-while-absent {_loss/_nl:+.3f}. "
+                          + ("it LEARNS faster than it forgets" if _gain/_ng > -(_loss/_nl) else
+                             "it FORGETS absent material faster than it learns present material -- the store and the"
+                             " weights are not holding what leaves the stream"))
+                elif not _nl:
+                    print(f"  >> nothing ever left the stream, so the ABSENT column is empty. Only PHASED=1 fills it.")
+        except Exception as _e:
+            print(f"[learning curve skipped: {type(_e).__name__}: {_e}]")
         model.train()
     except Exception as _e:
         print(f"[memorization check skipped: {type(_e).__name__}: {_e}]")
