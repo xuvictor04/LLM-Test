@@ -304,7 +304,18 @@ def build_lm():
     if MODEL_TYPE == "transformer":
         return TinyTransformer(D, layers=_i("LAYERS", 4), heads=_i("HEADS", 8), maxlen=_i("MAXLEN", 512))
     return MiniLM(D, layers=_i("LAYERS", 1))
-FABRIC = bool(_i("FABRIC", 0))                             # FABRIC=1: the routed expert population
+# ON by default. It was 0, nobody set it, and so the routed expert population -- the core of the architecture --
+# was ABSENT from every run of this project: "fabric nodes 0" in every phase table, no FABRIC section in any
+# report, and every conclusion about domains, coherence and bits/byte drawn from a system missing its routing
+# layer. Same failure class as PHASED=0, MANAGE_MERGE=0.12 and the BATCH_W cadences.
+# Measured, English, 120 kB, everything else identical:
+#   FABRIC=0  held-out 3.543  -> LOSES to order-1 (3.495) by 0.048
+#   FABRIC=1  held-out 3.441  -> BEATS order-1 by 0.054;  fabric contributes +0.709 bits/byte
+# +0.709 is four times what the memory contributes and the largest single component effect measured here.
+# Read with the caveat the FABRIC section itself prints: at these settings the router HALTs 90% of the time
+# and mean routed depth is 0.10 of 4 steps, so the gain is the population being PRESENT, not the routing
+# working. Fixing the router is a separate question from having one at all.
+FABRIC = bool(_i("FABRIC", 1))                             # FABRIC=1: the routed expert population
 ENS_K = _i("ENS_K", 2)                                     # how many experts are ensembled at the output layer
 SOCIETY = bool(_i("SOCIETY", 1))                           # 1 = independent experts blended at a router (default)
                                                            # 0 = the old chained mixture (entangles every expert)
