@@ -1401,12 +1401,18 @@ def main():
         # ADAPTIVE WARMUP: stop once separation PLATEAUS instead of always running the full (30k) budget -- the #1 startup
         # cost. Probe periodically; stop when the trailing relative gain < eps, with a min floor so we never underfit it.
         curve = []; _wfloor = min(_i("ENC_WARMUP_MIN", 3000), wu); _weps = _f("ENC_WARMUP_EPS", 0.015); _probe_ev = max(1, _i("ENC_WARMUP_PROBE", 500))
-        _prev_sep = None; _stop = wu; _plateau = False
+        _prev_sep = None; _stop = wu; _plateau = False; _smax = 0.0
         for t in range(wu):
             l = contrastive_step(enc, oe, ENC_SEQ, len(ENC_SEQ))
             if t % _probe_ev == 0 or t == wu - 1:
                 _sep = _sep_probe(); curve.append((t, l if l is not None else 0.0, _sep))
-                if t >= _wfloor and _prev_sep is not None and _sep <= _prev_sep * (1 + _weps):   # separation flat -> converged, stop
+                _smax = max(_smax, _sep)
+                # `_sep <= _prev_sep*(1+eps)` is true when separation is FLAT and equally true when it is
+                # COLLAPSING, and the stop could not tell them apart. On a single-corpus stream separation ran
+                # 0.16 -> 0.05, a 69% collapse, and this reported a converged plateau and stopped -- after which
+                # SHIFT_DIST never fired, the run found 0 boundaries and 1 domain, and the entire domain apparatus
+                # sat inert while every report line still printed. Detect the difference.
+                if t >= _wfloor and _prev_sep is not None and _sep <= _prev_sep * (1 + _weps):
                     _stop = t + 1; _plateau = True; break
                 _prev_sep = _sep
         if wu:
@@ -1421,6 +1427,15 @@ def main():
             if not _plateau and _wfloor >= wu:
                 print(f"  !! ENC_WARMUP_MIN ({_wfloor}) >= ENC_WARMUP ({wu}) makes the plateau test unreachable -- "
                       f"the adaptive stop was OFF for this run. Lower ENC_WARMUP_MIN to enable it.")
+            _sfin = curve[-1][2] if curve else 0.0
+            if _smax > 0 and (_sfin < 0.7 * _smax or _sfin < 0.15):
+                print(f"  !! ENCODER COLLAPSE: signature separation ended at {_sfin:.2f} against a peak of "
+                      f"{_smax:.2f}. The encoder is mapping everything to nearly one point, so SHIFT_DIST "
+                      f"({SHIFT_DIST}) will rarely or never fire and domain assembly will be INERT -- expect ~0 "
+                      f"boundaries and 1 domain, with every downstream domain metric technically valid and "
+                      f"meaningless. This is the expected failure on a HOMOGENEOUS corpus: InfoNCE has no "
+                      f"cross-kind negatives, so nothing stops the representation shrinking. Widen the material, "
+                      f"or use ENC_PROTO/SIG_SPACE to change what the encoder is asked to tell apart.")
     assigns = []; bounds = []; i = 0; step = _resume_step; _cur_ph = -1; PH_SNAP = []
     _CURVE = []; _VALT = {}; _CURVE_ERR = []; _BL = {}                                 # (step, process, bits/byte, was_active) + tokenised-val cache
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok

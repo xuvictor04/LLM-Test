@@ -63,6 +63,16 @@ print("=== STABILITY: do two independent runs find the SAME structure? ===")
 encA, CA, winA, nvA = load("A", A_CK)
 encB, CB, winB, nvB = load("B", B_CK)
 if winA != winB: sys.exit(f"WIN differs ({winA} vs {winB}) -- the two runs are not comparable")
+if CA.size(0) < 2 or CB.size(0) < 2:
+    # A run that assembled ONE domain has no partition to agree about, and NMI over a constant labelling is 0 by
+    # construction -- which would print as "no more than chance" and read as a finding rather than as an absent
+    # experiment. Say what actually happened instead.
+    sys.exit(f"\n  CANNOT BE MEASURED: A has {CA.size(0)} domain(s), B has {CB.size(0)}. Stability compares two\n"
+             f"  PARTITIONS; a run with a single domain did not partition anything, so there is nothing to agree\n"
+             f"  about and NMI would be 0 whatever the data.\n"
+             f"  >> check the run logs for '!! ENCODER COLLAPSE' and for '0 boundaries'. On a homogeneous corpus\n"
+             f"     the signature encoder shrinks to a point (InfoNCE has no cross-kind negatives), SHIFT_DIST\n"
+             f"     never fires, and the assembler is inert. That is the result -- not a stability score.")
 WIN = winA
 
 random.seed(0); torch.manual_seed(0)
