@@ -40,6 +40,17 @@ D = _i("D_MODEL", _i("D_MODEL_B", 128))                    # D_MODEL_B accepted 
 WIN = _i("WIN", 128); NP = _i("N_PROCESSES", 4); STREAM_LEN = _i("STREAM_LEN", 120000)
 SUSTAIN = _i("SUSTAIN", 2); NEW_DIST = _f("NEW_DIST", 0.35); SHIFT_DIST = _f("SHIFT_DIST", 0.30)
 SIG_MODE = os.environ.get("SIG_MODE", "learned"); SIG_D = _i("SIG_D", 64); SIG_DIM = _i("SIG_DIM", 512)
+# EVERY SUBSYSTEM ON BY DEFAULT. The audit that found FABRIC=0 found five more: the expanding tokenizer, the
+# world model and its growth and feedback, and the per-expert memory partition were all off, so the "full
+# system" this project has been measuring was the base LM plus memory plus domains and nothing else. A flag
+# that defaults off is a decision nobody makes and everybody inherits -- the same failure as PHASED=0,
+# MANAGE_MERGE=0.12, SEG_MIN/WIN and the BATCH_W cadences. Off is now the deliberate ablation.
+# STILL OFF, for reasons rather than by oversight:
+#   EXPERTS      mutually exclusive with FABRIC -- the forward pass is an elif chain and FABRIC wins, so
+#                turning both on makes the expert bank a silent no-op. Exclusivity is arguably a bug; until
+#                it composes, FABRIC is the one that carries the routing.
+#   DISK_STREAM  a data-source choice, not a subsystem, and it fails without corpora on disk.
+#   DOM_ADAPTIVE, DOM_RELATIVE, SHIFT_REL   each MEASURED worse than the constant they replace.
 SELF_ORG = bool(_i("SELF_ORG", 1))                         # 0 = DISABLE domain self-assembly (standstill): one bucket, no provenance,
 #   no management. Domains only give editing-by-provenance (NOT prediction), so a language-capability run can turn them off.
 #   NOTE: the SigEncoder ALSO feeds fabric routing, so to remove ITS cost use SIG_MODE=bigram or the adaptive warmup -- separate lever.
@@ -141,7 +152,7 @@ DOM_PRIOR = _f("DOM_PRIOR", 0.15)
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
-USE_TOK = bool(_i("TOKENIZER", 0)); TOK_ONLINE = bool(_i("TOK_ONLINE", 0)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
+USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
 # TF32: on by default for cuDNN but NOT for matmul in current torch, so the fp32 path leaves most of an H100's matmul
@@ -1261,11 +1272,11 @@ def main():
     recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
     # WORLD MODEL (first brick, gated off by default): reads OBSERVATION EMBEDDINGS (the lowest layer = the point where
     # new SENSES plug in) and learns to predict how that observed world EVOLVES in latent space (physics-like, modality-agnostic).
-    WORLD_MODEL = bool(_i("WORLD_MODEL", 0)); WLAT = _i("WORLD_LAT", 32); WORLD_W = _f("WORLD_W", 0.1); WORLD_K = max(1, _i("WORLD_K", 1)); WHID = _i("WORLD_HID", 128)
+    WORLD_MODEL = bool(_i("WORLD_MODEL", 1)); WLAT = _i("WORLD_LAT", 32); WORLD_W = _f("WORLD_W", 0.1); WORLD_K = max(1, _i("WORLD_K", 1)); WHID = _i("WORLD_HID", 128)
     WORLD_VAR = _f("WORLD_VAR", 1.0)                     # anti-collapse (variance+decorrelation) weight -- applied at FULL strength,
     #   NOT scaled by WORLD_W (scaling it by 0.1 let the latent collapse to std 0.24; the standalone probe uses full strength).
-    WORLD_GROW = bool(_i("WORLD_GROW", 0))               # opt-in: also GROW-on-plateau + soft-cull the dynamics population (like experts)
-    WORLD_FEEDBACK = bool(_i("WORLD_FEEDBACK", 0))       # THE LINK THAT MAKES IT MATTER: wire the world model's forecast BACK to
+    WORLD_GROW = bool(_i("WORLD_GROW", 1))               # opt-in: also GROW-on-plateau + soft-cull the dynamics population (like experts)
+    WORLD_FEEDBACK = bool(_i("WORLD_FEEDBACK", 1))       # THE LINK THAT MAKES IT MATTER: wire the world model's forecast BACK to
     #   condition the base LM -- generation is now informed by where the world model predicts the world is going, not a side-head.
     world_enc = WorldEncoder(D, WLAT, WHID).to(DEV) if WORLD_MODEL else None
     world_fwd = DynamicsPopulation(WLAT, _i("WORLD_N0", 3), _i("WORLD_NMAX", 6), WHID, _i("WORLD_ROUTE", 24)).to(DEV) if WORLD_MODEL else None  # SEPARATED: a routed society of dynamics predictors
@@ -1378,7 +1389,7 @@ def main():
     #   32 owners x 64    -> memory contributes -0.652 b/B
     # The partition costs 0.555 b/B at the scale tested, so it does not become the default path until it is shown to
     # help. (Memory being slightly net-negative even globally is a separate, pre-existing finding.)
-    MEM_PER_EXPERT = bool(_i("MEM_PER_EXPERT", 0)) and FABRIC and SOCIETY
+    MEM_PER_EXPERT = bool(_i("MEM_PER_EXPERT", 1)) and FABRIC and SOCIETY
     MEM_QUOTA = _i("MEM_QUOTA", 128)
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
