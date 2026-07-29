@@ -1079,7 +1079,16 @@ def compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=64):
     # restriction, which isolates whether the LABEL means anything.
     _own = mem.src[vi]                                    # provenance of every retrievable entry
     _doms = sorted(set(_own.tolist()))
-    if len(_doms) >= 2:
+    if len(_doms) < 2:
+        # SAY WHY, rather than vanishing. This section disappearing silently is itself the signal: it needs at
+        # least two domains with surviving entries, and a bounded store under a NON-STATIONARY stream can evict
+        # everything except the most recent one. Observed at MEM_CAP=6000 with PHASED=1: p0=0 p1=0 p2=4976 p3=0.
+        print(f"\n=== IS THE PARTITION INFORMATIVE? -- CANNOT BE MEASURED ===")
+        print(f"  only {len(_doms)} domain(s) still hold retrievable entries out of a {mem.cap}-entry store, so "
+              f"there is no 'other domain' to compare against.")
+        print(f"  >> that is the answer to a different question: the store has EVICTED everything but the most "
+              f"recent material. Raise MEM_CAP, or shorten the run, before reading any per-domain memory result.")
+    else:
         def _own_vs_foreign(prov):
             """bits/byte with retrieval restricted to the query's OWN domain, and to a RANDOM OTHER one."""
             _ds = sorted(set(prov.tolist())); _dm = {d: k for k, d in enumerate(_ds)}
