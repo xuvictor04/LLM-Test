@@ -1135,18 +1135,27 @@ def compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=64):
         # would win on a partition made of coin flips. Re-run the identical comparison on a RANDOM PERMUTATION of
         # the provenance tags: same sizes, same top-1 advantage, no information. The permuted gap is the floor;
         # only the excess over it is evidence that the partition means anything.
-        _perm = _own[torch.randperm(_own.numel(), generator=torch.Generator().manual_seed(0)).to(DEV)]
-        bo2, bf2 = _own_vs_foreign(_perm)
-        _real, _null = bf - bo, bf2 - bo2
+        # SEVERAL permutations, not one. With a single draw the null has no error bar, and the verdict then turns
+        # on a hard threshold that can sit inside the noise: two runs of the SAME configuration on one corpus came
+        # back at excess +0.010 and +0.013 against a cutoff of 0.010, and printed opposite conclusions. An excess
+        # is only evidence if it clears the spread of the null it is measured against.
+        _nl = []
+        for _s in range(_i("INFO_NULLS", 5)):
+            _pm2 = _own[torch.randperm(_own.numel(), generator=torch.Generator().manual_seed(_s)).to(DEV)]
+            _b1, _b2 = _own_vs_foreign(_pm2); _nl.append(_b2 - _b1)
+        _real = bf - bo
+        _null = sum(_nl) / len(_nl)
+        _sd = (sum((x - _null) ** 2 for x in _nl) / max(1, len(_nl) - 1)) ** 0.5
         print(f"\n=== IS THE PARTITION INFORMATIVE? (label-free -- the seeded corpora play no part) ===")
         print(f"  OWN domain {bo:.3f}  vs  a RANDOM OTHER domain {bf:.3f}   -> gap {_real:+.3f} bits/byte "
               f"over {len(_doms)} domains present in memory")
-        print(f"  SHUFFLED-provenance control (same sizes, no information)   -> gap {_null:+.3f}  [the floor]")
-        print(f"  >> EXCESS OVER THE NULL {_real - _null:+.3f} bits/byte. "
-              + ("the partition CARRIES INFORMATION beyond the top-1 artifact" if _real - _null > 0.01 else
-                 "NOT distinguishable from a random partition of the same shape -- the domain labels are not"
-                 " earning their keep for prediction (they may still be earning it for EDITING, which this"
-                 " test does not measure)"))
+        print(f"  SHUFFLED-provenance control (same sizes, no information)   -> gap {_null:+.3f} +/- {_sd:.3f} "
+              f"over {len(_nl)} permutations  [the floor]")
+        print(f"  >> EXCESS OVER THE NULL {_real - _null:+.3f} bits/byte, against a null spread of +/-{_sd:.3f}. "
+              + ("the partition CARRIES INFORMATION beyond the top-1 artifact" if _real - _null > 2 * _sd + 1e-9 else
+                 "NOT distinguishable from a random partition of the same shape (excess is within 2 sigma of"
+                 " the null) -- the domain labels are not earning their keep for prediction. They may still be"
+                 " earning it for EDITING, which this test does not measure."))
 
 def _dec(units):                                           # bytes OR token IDs -> printable one-liner
     txt = TOK.decode(units) if USE_TOK else bytes(units).decode("utf-8", "replace")
