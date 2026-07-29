@@ -135,6 +135,9 @@ DOM_FOLD_MULT = _f("DOM_FOLD_MULT", 1.5)   # refuse to fold further than this x 
 # the mechanism switched off by arithmetic. The expert and world cadences are left where they are -- their costs
 # and their grace periods are tuned to 500 -- because this is a domain problem, not a shared-cadence problem.
 DOM_MANAGE_EVERY = _i("DOM_MANAGE_EVERY", 100)
+# DOM_PRIOR: accumulate a token histogram per domain and blend it into the prediction. 0 disables the
+# accounting entirely (no cost); >0 is the blend weight actually used at eval. Measured before adopted.
+DOM_PRIOR = _f("DOM_PRIOR", 0.15)
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 KW = _i("KEY_WIN", 8); V = 256
@@ -846,6 +849,7 @@ class DomainAssembler:
         s._dh = []                                                        # recent assign distances -> the adaptive spawn threshold
         s._sh = []                                                        # recent adjacent-window distances -> scale-free shift test
         s.rad = {}; s._radp = None                                        # per-domain radius + POOLED radius (young domains)
+        s.tokc = {}                                                       # domain -> token counts (the PREDICTIVE prior)
         s.visits = {}; s.bornb = {}; s.nb = 0                             # recurrence: separate entries, BOUNDARY clock
         s.created = 0; s.capped = 0; s.folded = 0
     def _dirty(s): s._C = None
@@ -992,13 +996,15 @@ class DomainAssembler:
         s.cent[a] = F.normalize((s.cent[a] * na + s.cent[b] * nb) / max(1, na + nb), dim=0)
         s.size[a] += nb; s.act[a] = s.act.get(a, 0.0) + s.act.get(b, 0.0)
         s.visits[a] = s.visits.get(a, 0) + s.visits.get(b, 0)
+        if b in s.tokc:                                                   # counts follow the merge, like memory does
+            s.tokc[a] = s.tokc[a] + s.tokc[b] if a in s.tokc else s.tokc[b]
         pool = s.wins[a] + s.wins[b]                                      # SAMPLE the union (was [:40], which kept only the
         s.wins[a] = random.sample(pool, DOM_WINS) if len(pool) > DOM_WINS else pool   # survivor's -> next rekey UNDID the merge).
         #   It also matters for the fold specifically: pooling is what gives the survivor a SECOND segment, which is
         #   what turns a segment prototype into a domain prototype.
         s.last[a] = max(s.last[a], s.last[b]); s.born[a] = min(s.born[a], s.born[b])
         s.bornb[a] = min(s.bornb.get(a, s.nb), s.bornb.get(b, s.nb)); s.rad[a] = None   # re-measure at the next rekey
-        for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s.rad, s.visits, s.bornb): _D.pop(b, None)
+        for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s.rad, s.visits, s.bornb, s.tokc): _D.pop(b, None)
         s.merged[b] = a; s._dirty()
     def manage(s, step, mem, merge_dist, min_size, stale):
         merged = culled = 0
@@ -1036,7 +1042,7 @@ class DomainAssembler:
                 if step - s.born.get(d, step) < DOM_GRACE: continue
                 if not (s.act.get(d, 0.0) < min_size and step - s.last[d] > stale): continue
                 if mem is not None: mem.delete_src(d)                     # CULL -> memory follows (direct prune)
-                for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s.rad, s.visits, s.bornb): _D.pop(d, None)
+                for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s.rad, s.visits, s.bornb, s.tokc): _D.pop(d, None)
                 culled += 1; s._dirty()
         for i in s.act: s.act[i] *= DOM_DECAY                             # DECAY -> `act` reflects RECENT use, so a domain
         return merged, culled                                             #   that stops being fed becomes cullable
@@ -1808,6 +1814,16 @@ def main():
         # particular is destroyed by subsampling, since it counts maximal consecutive runs). The tokenizer pair
         # tally was under-counted by the same factor, on top of never being acted on.
         assigns.append((bpos, did, byte_labels[min(bpos, len(byte_labels) - 1)] if ONLINE else labels[i]))
+        # PER-DOMAIN TOKEN COUNTS -- the one route by which a domain could pay for itself in PREDICTION.
+        # Conditioning RETRIEVAL on the domain is already measured dead: restricting to the query's own domain beats
+        # a foreign domain by no more than a shuffled-provenance null, i.e. the label carries nothing the memory keys
+        # do not. A prior is a different claim -- not "which stored entry is similar" but "in this kind of text,
+        # which tokens are likely at all" -- and the anchors say a global order-0 model is worth something (3.86 b/B
+        # on English), so a SHARPER per-domain one is worth something more, IF the domains are real.
+        if DOM_PRIOR > 0.0:
+            _c = asm.tokc.get(did)
+            if _c is None: _c = asm.tokc[did] = torch.zeros(V, device=DEV)
+            _c.index_add_(0, torch.tensor(w[:-1], device=DEV), torch.ones(len(w) - 1, device=DEV))
         if ONLINE:
             for a, b in zip(w[:-1], w[1:]): TOK.pair[(a, b)] += 1   # ONGOING minting: tally THIS window's pairs
         if len(_bx) < BATCH_W:                              # accumulate a batch of windows first
@@ -2138,6 +2154,67 @@ def main():
                     print(f"  >> nothing ever left the stream, so the ABSENT column is empty. Only PHASED=1 fills it.")
         except Exception as _e:
             print(f"[learning curve skipped: {type(_e).__name__}: {_e}]")
+        # === CAN A DOMAIN PREDICT? ==============================================================================
+        # Four arms on HELD-OUT text -- held-out because a per-domain histogram would trivially win on the training
+        # windows it counted. Each eval window is assigned to a domain the way the assembler actually does it
+        # (encode, nearest centroid), never by which memory entry happens to be closest.
+        #   model alone            what the weights predict
+        #   + GLOBAL prior         one histogram over all domains: what a bare order-0 model is worth here
+        #   + OWN-domain prior     the claim -- a sharper histogram, IF domains are real
+        #   + RANDOM-domain prior  the null -- same machinery, wrong domain
+        # OWN must beat GLOBAL to show the PARTITION adds anything over frequency, and must beat RANDOM to show the
+        # LABEL is doing it rather than the blend.
+        try:
+            if DOM_PRIOR > 0.0 and asm.tokc and len(asm.cent) >= 2 and VALC:
+                _ids = [k for k in asm.cent if k in asm.tokc]
+                if len(_ids) >= 2:
+                    _P = torch.stack([asm.tokc[k] for k in _ids])                # (D, V) raw counts
+                    _P = (_P + 0.5) / (_P.sum(1, keepdim=True) + 0.5 * V)        # add-k smoothed
+                    _G = torch.stack([asm.tokc[k] for k in _ids]).sum(0)
+                    _G = (_G + 0.5) / (_G.sum() + 0.5 * V)                       # one global histogram
+                    _C = torch.stack([asm.cent[k] for k in _ids])
+                    _xs, _ys, _ds = [], [], []
+                    _rs = random.Random(7)
+                    for _p in range(len(VALC)):
+                        _vb = VALC[_p]
+                        _v = TOK.segment(_vb, count=False) if USE_TOK else list(_vb)
+                        if len(_v) < WIN + 2: continue
+                        _cum = [0]
+                        for _t2 in _v: _cum.append(_cum[-1] + (TOK.bytes_per_id[_t2] if USE_TOK else 1))
+                        for _ in range(min(48, _i("EVAL_N", 64))):
+                            _a = _rs.randint(0, len(_v) - WIN - 2)
+                            _b0 = _cum[_a]
+                            if _b0 + WIN > len(_vb): continue
+                            _xs.append(_v[_a:_a + WIN]); _ys.append(_v[_a + 1:_a + WIN + 1])
+                            _ds.append(list(_vb[_b0:_b0 + WIN]))                 # BYTE window -> signature
+                    if len(_xs) >= 16:
+                        _X = torch.tensor(_xs, device=DEV); _Y = torch.tensor(_ys, device=DEV)
+                        with torch.no_grad():
+                            _sg = enc(torch.tensor(_ds, device=DEV))
+                            _own = (_C @ _sg.t()).argmax(0)                      # the assembler's own rule
+                            _pm = F.softmax(fab_logits(model, fab if FABRIC else None, model.encode(_X)), -1)
+                        _rnd = (_own + torch.randint(1, len(_ids), _own.shape, device=DEV)) % len(_ids)
+                        _den = nbytes(_Y)
+                        def _sc(mix):
+                            _q = _pm if mix is None else (1 - DOM_PRIOR) * _pm + DOM_PRIOR * mix.unsqueeze(1)
+                            _pp = _q.gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
+                            return -(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / _den
+                        _a0, _ag = _sc(None), _sc(_G.expand(len(_xs), -1))
+                        _ao, _ar = _sc(_P[_own]), _sc(_P[_rnd])
+                        print(f"\n=== CAN A DOMAIN PREDICT? (held-out, blend weight {DOM_PRIOR}) ===")
+                        print(f"  model alone {_a0:.3f} | + GLOBAL prior {_ag:.3f} | + OWN-domain prior {_ao:.3f} | "
+                              f"+ RANDOM-domain prior {_ar:.3f}   ({len(_ids)} domains)")
+                        print(f"  >> own vs global {_ag - _ao:+.3f} (does the PARTITION beat plain frequency?) | "
+                              f"own vs random {_ar - _ao:+.3f} (is it the LABEL, or just the blend?)")
+                        print(f"  >> " + ("DOMAINS PREDICT: the own-domain histogram beats both a global one and a "
+                                          "wrong-domain one, so the partition is carrying predictive information"
+                                          if (_ag - _ao) > 0.01 and (_ar - _ao) > 0.01 else
+                                          "NOT YET: " + ("the partition does not beat a single global histogram"
+                                                         if (_ag - _ao) <= 0.01 else
+                                                         "the gain is the blend, not the label -- a wrong domain does "
+                                                         "as well")))
+        except Exception as _e:
+            print(f"[domain-prior check skipped: {type(_e).__name__}: {_e}]")
         model.train()
     except Exception as _e:
         print(f"[memorization check skipped: {type(_e).__name__}: {_e}]")
