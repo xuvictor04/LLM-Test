@@ -160,7 +160,10 @@ names = ["D_MODEL","D_MODEL_B","MODEL","LAYERS","HEADS","WIN","BATCH_W","ACCUM",
          "AMP","TF32","PROFILE","RATE_EVERY","BENCH","SEED","DEVICE","DATA_MODE","DATA_DIR","DOMAINS","ENC_WARMUP",
          # domain self-assembly: on by default now, so a run that does NOT set them still depends on them existing
          "MAX_DOMAINS","DOM_RADIUS","DOM_RQ","DOM_RMULT","DOM_RCAP","DOM_RECUR","DOM_MIN_VISITS",
-         "DOM_RECUR_HORIZON","DOM_FOLD_MULT","ENC_FLOOR_K","ENC_PROTO"]
+         "DOM_RECUR_HORIZON","DOM_FOLD_MULT","ENC_FLOOR_K","ENC_PROTO",
+         # everything the all-subsystems-on audit touched, so an unread one cannot hide again
+         "PHASED","DOM_MANAGE_EVERY","MANAGE_MERGE","ENC_VREG","ENC_CREG","DOM_PRIOR","SIG_SPACE","SIG_WIN",
+         "WORLD_GROW","WORLD_FEEDBACK","MEM_QUOTA","MEM_PER_EXPERT","SEG_MIN","SEG_MAX","INFO_NULLS","GEN_LEN"]
 missing = [n for n in names if not re.search(r'["\']' + n + r'["\']', src)]
 print("  " + ("all %d documented knobs are READ by self_organize.py" % len(names)) if not missing
       else "  UNREAD KNOBS (setting these does NOTHING): " + ", ".join(missing))

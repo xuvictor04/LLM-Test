@@ -1622,6 +1622,13 @@ def main():
     if os.environ.get("SAVE_CKPT") and not CKPT_EVERY:
         _warn.append("SAVE_CKPT set but CKPT_EVERY=0 -> the ONLY save is at the very end (plus SIGUSR1). "
                      "A crash loses the whole run. Set CKPT_EVERY.")
+    if MEM_PER_EXPERT and mem.cap != _i("MEM_CAP", 200000):
+        _want = _i("MEM_CAP", 200000)
+        _warn.append(f"MEM_CAP={_want} was OVERRIDDEN: the per-expert partition derives the store size as "
+                     f"n_own x quota = {mem.n_own} x {mem.quota} = {mem.cap} slots (memory.py: 'cap is DERIVED from "
+                     f"the partition'), a {_want/max(1,mem.cap):.1f}x reduction. Every memory result scales with "
+                     f"this. To keep {_want} slots at {mem.n_own} owners set MEM_QUOTA={_want//max(1,mem.n_own)}; "
+                     f"to keep a small per-expert quota, accept the smaller store deliberately; or MEM_PER_EXPERT=0.")
     if not PHASED and NP > 1:
         _warn.append("PHASED=0 -> the stream is STATIONARY: every process is present throughout, in i.i.d. "
                      "proportion. Nothing ever has to be retained across a distribution shift, so this run does "
