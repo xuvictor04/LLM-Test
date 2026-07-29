@@ -767,6 +767,23 @@ def contrastive_step(enc, opt, stream, seen, asm=None):    # InfoNCE: nearby win
         za, zp = enc(A), enc(P)                            #   not bit-for-bit. ENC_FUSE=0 restores the two-pass form.
     logits = za @ zp.t() / TEMP
     loss = F.cross_entropy(logits, torch.arange(ENC_BATCH, device=DEV))
+    # ANTI-COLLAPSE. InfoNCE draws its negatives from the same stream, so on HOMOGENEOUS material there are no
+    # cross-kind negatives and the trivial solution -- emit one constant vector -- is reachable. Its loss is exactly
+    # ln(ENC_BATCH), and a single-corpus 4 MB run plateaued at 3.83 against ln(48)=3.871 while separation fell
+    # 0.16 -> 0.05 and the assembler found 0 boundaries. The 4-corpus run reached 2.10 on the same code: the other
+    # corpora were not throwing the system off, they were the only thing PREVENTING the collapse.
+    # _var_cov is the project's existing VICReg-style remedy (world_model.py), used for the dynamics population and
+    # never applied to the encoder that actually collapses. Its variance hinge targets std>=1, which is impossible
+    # for L2-NORMALISED outputs -- a uniform unit vector in SIG_D dims has per-dim std 1/sqrt(SIG_D) -- so scale by
+    # sqrt(SIG_D) first, which puts a well-spread signature space exactly at the hinge.
+    # ON by default. The realistic target is ONE large corpus, where collapse is not a risk but a certainty,
+    # and the cost on mixed material is small: 4 corpora scored V 0.56 -> 0.52 and 4.322 -> 4.384 bits/byte
+    # with it on, against 1-2 inert domains -> 13-24 working ones on a single corpus. 5.0 is the value that
+    # actually restores an orthogonal-ish space (separation 0.97); 1.0 leaves it half-collapsed at 0.44.
+    _vw = _f("ENC_VREG", 5.0); _cw = _f("ENC_CREG", 0.0)
+    if _vw > 0.0 or _cw > 0.0:
+        _v, _c = _var_cov(torch.cat([za, zp], 0) * (SIG_D ** 0.5))
+        loss = loss + _vw * _v + _cw * _c
     # LOSS FLOOR -- the single largest measured lever on domain identity, and the one that says the ASSIGN RULE was
     # never the main problem. Freezing the encoder is not an option in a continual system; new material has to be
     # able to move it. But training it to convergence is actively HARMFUL: 1-NN corpus accuracy PEAKS at ~1000-4000
