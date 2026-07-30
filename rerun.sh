@@ -61,8 +61,14 @@ go () {   # go <label> <extra env...>
 if [ "$WHICH" = smoke ]; then
   # Same FLAGS as the real grid, tiny everything else. Asserts only "it reaches the report without a traceback" --
   # the numbers here are meaningless at 40 KB and are deliberately not printed, so nobody reads them as results.
-  TINY="DATA_MODE=real DATA_DIR=data DOMAINS=eng,py,num,c STREAM_LEN=40000 D_MODEL=64 WIN=64 BATCH_W=4 \
-DEVICE=${DEVICE:-cpu} MANAGE_EVERY=20 DOM_MANAGE_EVERY=20 ENC_WARMUP=50 ENC_WARMUP_MIN=20 SAVE_CKPT=0"
+  # SIZED FROM A MEASUREMENT, NOT A GUESS. At the first cut (40 KB, forced CPU) one arm cost 51 s and the grid cost
+  # more than the 4 MB GPU grid it was protecting -- a gate nobody would run. Splitting the cost: BENCH=1 (skip the
+  # eval battery) took an arm from 51 s to 19 s, so two thirds is the report. The report STAYS: the sig_tokens bug
+  # crashed there and BENCH=1 would have passed it. Shrink the stream instead, and use the GPU if there is one.
+  SMDEV=${DEVICE:-$(python3 -c "import torch;print('cuda' if torch.cuda.is_available() else 'cpu')" 2>/dev/null || echo cpu)}
+  TINY="DATA_MODE=real DATA_DIR=data DOMAINS=eng,py,num,c STREAM_LEN=${SMOKE_LEN:-12000} D_MODEL=64 WIN=64 BATCH_W=4 \
+DEVICE=$SMDEV MANAGE_EVERY=20 DOM_MANAGE_EVERY=20 ENC_WARMUP=50 ENC_WARMUP_MIN=20 SAVE_CKPT=0"
+  echo "smoke: 10 arms on $SMDEV, ${SMOKE_LEN:-12000} B each. Asserting only that every arm REACHES THE REPORT."
   bad=0
   for arm in "full:" "no_fabric:FABRIC=0" "no_world:WORLD_MODEL=0" "no_perexp:MEM_PER_EXPERT=0" \
              "no_tok:TOKENIZER=0" "no_domains:SELF_ORG=0" "no_phased:PHASED=0" "no_experts:EXPERTS=0" \
