@@ -11,6 +11,12 @@
 #   bash rerun.sh mix        # just the 4-corpus run
 #   bash rerun.sh eng        # just the single-corpus run
 #   bash rerun.sh ablate     # what each subsystem is worth, one at a time
+#   bash rerun.sh smoke      # RUN THIS FIRST. Every arm at toy scale on CPU, ~2 min, exit codes only.
+#
+# smoke exists because the first rerun lost the ab_no_world arm to a crash: WORLD_GROW defaults ON and its step
+# hook dereferenced world_fwd OUTSIDE the `if WORLD_MODEL:` block, so WORLD_MODEL=0 died at the first
+# MANAGE_EVERY. An ablation flag is the least-exercised path in the file -- the one arm nobody runs until the
+# night it matters. Two CPU minutes buys the whole grid.
 #
 # READ IN THIS ORDER. The first two speak to proper language; the rest explain why they moved.
 #   ANCHORS          does the model beat order-1 on the same held-out text? the only unmoored-number check
@@ -52,11 +58,35 @@ go () {   # go <label> <extra env...>
   echo
 }
 
+if [ "$WHICH" = smoke ]; then
+  # Same FLAGS as the real grid, tiny everything else. Asserts only "it reaches the report without a traceback" --
+  # the numbers here are meaningless at 40 KB and are deliberately not printed, so nobody reads them as results.
+  TINY="DATA_MODE=real DATA_DIR=data DOMAINS=eng,py,num,c STREAM_LEN=40000 D_MODEL=64 WIN=64 BATCH_W=4 \
+DEVICE=${DEVICE:-cpu} MANAGE_EVERY=20 DOM_MANAGE_EVERY=20 ENC_WARMUP=50 ENC_WARMUP_MIN=20 SAVE_CKPT=0"
+  bad=0
+  for arm in "full:" "no_fabric:FABRIC=0" "no_world:WORLD_MODEL=0" "no_perexp:MEM_PER_EXPERT=0" \
+             "no_tok:TOKENIZER=0" "no_domains:SELF_ORG=0" "no_phased:PHASED=0" "no_experts:EXPERTS=0" \
+             "no_manage:MANAGE=0" "sig_tokens:SIG_SPACE=tokens"; do
+    L=${arm%%:*}; E=${arm#*:}
+    env $TINY $E python3 self_organize.py > "$OUT/smoke_$L.log" 2>&1
+    rc=$?; tb=$(grep -ac Traceback "$OUT/smoke_$L.log")
+    [ "$rc" = 0 ] && [ "$tb" = 0 ] || { bad=1; printf "  FAIL %-12s exit %s | %s tracebacks\n" "$L" "$rc" "$tb"
+      grep -a -A4 Traceback "$OUT/smoke_$L.log" | tail -4 | sed 's/^/       /'; }
+    [ "$rc" = 0 ] && [ "$tb" = 0 ] && printf "  ok   %s\n" "$L"
+  done
+  echo; [ $bad = 0 ] && echo "all arms run. safe to spend the GPU." || echo "FIX THE ABOVE before launching the real grid."
+  exit $bad
+fi
+
 case "$WHICH" in
   all|mix) go mix_4corpora DOMAINS=eng,py,num,c SEG_MIN=8000 SEG_MAX=20000 ;;
 esac
 case "$WHICH" in
-  all|eng) go eng_only DOMAINS=eng ;;
+  # SEG_MIN/SEG_MAX matter on ONE corpus too, and the first rerun missed it. seg_from() draws each segment from a
+  # RANDOM OFFSET in the corpus, so at the 700/1800 default the English stream jumps somewhere else in English every
+  # ~1250 bytes = 3.3 analysis windows. That is a stream of discontinuities, not a stream of English, and the 71
+  # domains it assembled are partly a count of the splices we introduced. Same widening as the 4-corpus arm.
+  all|eng) go eng_only DOMAINS=eng SEG_MIN=8000 SEG_MAX=20000 ;;
 esac
 case "$WHICH" in
   all|ablate)
@@ -71,6 +101,26 @@ case "$WHICH" in
     ;;
 esac
 
+# THE ONE TABLE THAT MATTERS. Each arm's report carries its own caveat that "model ALONE" is an eval-time KNOCKOUT
+# of a component the model TRAINED WITH, so it overstates. The honest comparison is across arms: this run's
+# "+FABRIC+MEMORY" against the FABRIC=0 run's "model+MEMORY". Print it, because reading it off six logs by hand is
+# how a knockout number got used to justify a default in the first place.
+if [ -n "$(ls "$OUT"/ab_*.log 2>/dev/null)" ]; then
+  echo "=== ABLATION TABLE (bits/byte on held-out text, lower=better; order-1 is the same-text anchor) ==="
+  printf "  %-14s %8s %8s %8s   %s\n" arm order-1 MODEL "+mem" "domains / notes"
+  for f in "$OUT"/ab_*.log; do
+    L=$(basename "$f" .log)
+    a1=$(grep -a -oE "order-1 [0-9.]+" "$f" | head -1 | awk '{print $2}')
+    mm=$(grep -a -oE "THIS MODEL [0-9.]+" "$f" | head -1 | awk '{print $3}')
+    fm=$(grep -a -oE "MEMORY [0-9.]+" "$f" | tail -1 | awk '{print $2}')
+    nd=$(grep -a -oE "SELF-ASSEMBLED [0-9]+ LIVE" "$f" | head -1 | awk '{print $2}')
+    printf "  %-14s %8s %8s %8s   %s\n" "${L#ab_}" "${a1:--}" "${mm:--}" "${fm:--}" "${nd:--} domains"
+  done
+  echo "  read DOWN the MODEL column against ab_full. A subsystem that moves it by less than the run-to-run"
+  echo "  spread is not paying for itself on bits/byte -- check COHERENCE and RETENTION in its log before"
+  echo "  concluding it does nothing, since those are what the fabric and memory actually moved."
+  echo
+fi
 echo "logs + checkpoints under $OUT"
 echo
 echo "next, on whichever checkpoint you want to interrogate:"

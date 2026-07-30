@@ -1267,6 +1267,23 @@ def main():
         return _b, None, _l, None, _l, _b, _sw
     stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
     set_enc_tensor(ENC_SEQ)
+    def encpos(s):
+        """Loop index (a TOKEN index under ONLINE) -> an index INTO ENC_SEQ. The one place this conversion lives.
+        ENC_SEQ is bytes under SIG_SPACE=bytes and the token stream under SIG_SPACE=tokens, so the translation
+        through tok_bs is right in one case and wrong in the other. The training loop got this right inline
+        (`i if SIG_SPACE == "tokens" else bpos`); every EVAL site did `tok_bs[s]` unconditionally, which under
+        SIG_SPACE=tokens scales a token index by ~2.5 and reads a window from the wrong place -- silently, until
+        the offset ran off the end of ENC_SEQ and `torch.tensor` raised on a zero-length slice. The smoke grid
+        caught it as a crash; the crash was the visible tail of a misread that had no symptom before it."""
+        if not ONLINE or SIG_SPACE == "tokens": return s
+        return tok_bs[s] if s < len(tok_bs) else (tok_bs[-1] if tok_bs else s)
+    def encwin(b):
+        """A WIN-long window of ENC_SEQ starting at b, always. Slicing past the end returns a SHORT list and
+        torch.tensor then raises on the ragged batch -- an exception whose message ('expected sequence of length
+        64, got 0') names neither ENC_SEQ nor the tail. Clamp the start, pad the remainder."""
+        b = max(0, min(int(b), max(0, len(ENC_SEQ) - 1)))
+        w = list(ENC_SEQ[b:b + WIN])
+        return w if len(w) == WIN else (w + [0] * (WIN - len(w)))
     route_at = torch.full(((len(ENC_SEQ) if ONLINE else len(stream)) + WIN + 2,), -1, dtype=torch.int16) if EXPERTS else None
     model = build_lm().to(DEV); enc = SigEncoder(D, SIG_D).to(DEV)
     recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
@@ -1275,7 +1292,11 @@ def main():
     WORLD_MODEL = bool(_i("WORLD_MODEL", 1)); WLAT = _i("WORLD_LAT", 32); WORLD_W = _f("WORLD_W", 0.1); WORLD_K = max(1, _i("WORLD_K", 1)); WHID = _i("WORLD_HID", 128)
     WORLD_VAR = _f("WORLD_VAR", 1.0)                     # anti-collapse (variance+decorrelation) weight -- applied at FULL strength,
     #   NOT scaled by WORLD_W (scaling it by 0.1 let the latent collapse to std 0.24; the standalone probe uses full strength).
-    WORLD_GROW = bool(_i("WORLD_GROW", 1))               # opt-in: also GROW-on-plateau + soft-cull the dynamics population (like experts)
+    WORLD_GROW = bool(_i("WORLD_GROW", 1)) and WORLD_MODEL   # GROW-on-plateau + soft-cull the dynamics population (like experts).
+    #   `and WORLD_MODEL` is load-bearing: WORLD_GROW defaults ON and its step hook calls world_fwd.n() OUTSIDE the
+    #   `if WORLD_MODEL:` block, so WORLD_MODEL=0 crashed on None at the first MANAGE_EVERY. That is why the
+    #   ab_no_world arm of the rerun exited 1 with a traceback and produced no data -- the one ablation that would
+    #   have told us what the world model is worth was the one that could not run.
     WORLD_FEEDBACK = bool(_i("WORLD_FEEDBACK", 1))       # THE LINK THAT MAKES IT MATTER: wire the world model's forecast BACK to
     #   condition the base LM -- generation is now informed by where the world model predicts the world is going, not a side-head.
     world_enc = WorldEncoder(D, WLAT, WHID).to(DEV) if WORLD_MODEL else None
@@ -2419,15 +2440,15 @@ def main():
             Y = torch.tensor([list(stream[s + 1:s + WIN + 1]) for s in ii], device=DEV)
             h = model.encode(X)
             if use_fab and FABRIC:
-                bps = [(tok_bs[s] if ONLINE else s) for s in ii]
-                EW = torch.tensor([list(ENC_SEQ[b:b + WIN]) for b in bps], device=DEV)
+                bps = [encpos(s) for s in ii]
+                EW = torch.tensor([encwin(x) for x in bps], device=DEV)
                 pm = F.softmax(fab_logits(model, fab, h, enc(EW)), -1); h = None
             elif use_exp and EXPERTS:
-                bps = [(tok_bs[s] if ONLINE else s) for s in ii]
+                bps = [encpos(s) for s in ii]
                 if pin:                                    # PINNED: the expert this span actually trained with
                     sl = torch.tensor([int(route_at[min(b, route_at.numel() - 1)]) for b in bps], device=DEV)
                 else:                                      # ROUTED: nearest centroid at eval time (what inference does)
-                    EW = torch.tensor([list(ENC_SEQ[b:b + WIN]) for b in bps], device=DEV)
+                    EW = torch.tensor([encwin(x) for x in bps], device=DEV)
                     sg = enc(EW); sl = torch.tensor([router.route(sg[k], 0, create=False) for k in range(sg.size(0))], device=DEV)
                 mk = (sl >= 0) & (sl < experts.A.size(0))
                 if mk.any(): h = h.clone(); h[mk] = experts.batch(h[mk], sl[mk])
@@ -2588,8 +2609,8 @@ def main():
             _gg = None
             if FABRIC:                                     # generation must run the SAME path the model trained with
                 with torch.no_grad():
-                    _b0 = tok_bs[s0] if ONLINE else s0
-                    _gg = enc(torch.tensor([list(ENC_SEQ[_b0:_b0 + WIN])], device=DEV))
+                    _b0 = encpos(s0)
+                    _gg = enc(torch.tensor([encwin(_b0)], device=DEV))
             gno = generate(model, mem, seed, _i("GEN_LEN", 200), False, DEV, temp=_f("GEN_TEMP", 0.7), vlim=_vl, fab=fab, gist=_gg)
             gme = generate(model, mem, seed, _i("GEN_LEN", 200), True, DEV, temp=_f("GEN_TEMP", 0.7), vlim=_vl, fab=fab, gist=_gg)
             print(f"\n-- process {p} | seed ...{_dec(seed[-44:])}")
@@ -2612,10 +2633,9 @@ def main():
                     _st = [s for s in range(0, len(stream) - WIN - 1, WIN) if labels[s] == _p]
                     if len(_st) < 8: continue
                     random.shuffle(_st)
-                    _bs = [(tok_bs[s] if ONLINE else s) for s in _st[:64]]
+                    _bs = [encpos(s) for s in _st[:64]]
                     with torch.no_grad():
-                        _Z = enc(torch.tensor([list(ENC_SEQ[b:b + WIN]) for b in _bs
-                                               if b + WIN <= len(ENC_SEQ)], device=DEV))
+                        _Z = enc(torch.tensor([encwin(b) for b in _bs], device=DEV))
                     if _Z.numel(): _cent[_p] = F.normalize(_Z.mean(0), dim=0)
                 if len(_cent) > 1:
                     _ks = sorted(_cent); _C = torch.stack([_cent[k] for k in _ks])
