@@ -33,7 +33,15 @@ import torch, torch.nn as nn, torch.nn.functional as F
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import self_organize as S
 
-path = CKPT if CKPT.endswith(".pt") and os.path.isfile(CKPT) else os.path.join(CKPT, "ckpt.pt")
+# PREFER THE PROBE SIDECAR. probe.pt holds exactly the four things this script reads (encoder, centroids, SIG_D,
+# WIN) at tens of MB; ckpt.pt holds those plus the memory store and both optimizers' moments, at gigabytes. Pointing
+# CKPT= at a run directory picks the small one automatically, so this runs on a laptop against a GPU run's output.
+def _resolve(c):
+    if c.endswith(".pt") and os.path.isfile(c): return c
+    for _n in ("probe.pt", "ckpt.pt"):
+        if os.path.isfile(os.path.join(c, _n)): return os.path.join(c, _n)
+    return os.path.join(c, "ckpt.pt")
+path = _resolve(CKPT)
 if not os.path.isfile(path): sys.exit(f"no checkpoint at {path}")
 d = torch.load(path, map_location=S.DEV, weights_only=False)
 SIG_D = int(d.get("sig_d", S.SIG_D)); WIN = int(d.get("win", S.WIN))

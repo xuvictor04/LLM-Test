@@ -1620,6 +1620,17 @@ def main():
         #   ckpt.pt and destroy the only copy, together with the tokenizer that decodes it.
         with open(f"{ck}/source.bin", "wb") as _srcf:             # the corpus text retrieval points INTO
             _srcf.write(bytes(byte_stream) if ONLINE else (bytes(src_stream) if not USE_TOK else TOK.decode(src_stream).encode("utf-8", "replace")))
+        # PROBE SIDECAR. ckpt.pt carries the memory store (MEM_CAP x KW floats) and both optimizers' moments, so at
+        # D=768/MEM_CAP=200000 it runs to gigabytes -- fine on the machine that wrote it, impractical to move off a
+        # rented GPU box. probe_ckpt_geometry and probe_stability need FOUR things: the signature encoder, the domain
+        # centroids, SIG_D and WIN. That is tens of MB. Written every save so the geometry and stability questions
+        # can be asked anywhere, on any machine, long after the GPU is returned.
+        torch.save({"enc": enc.state_dict(), "sig_d": SIG_D, "win": WIN, "step": step,
+                    "cent": {int(k): v.cpu() for k, v in asm.cent.items()}, "size": dict(asm.size),
+                    "sig_space": SIG_SPACE, "domains": os.environ.get("DOMAINS", ""), "enc_v": ENC_V,
+                    "use_tok": USE_TOK, "tok_path": (os.environ.get("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None)},
+                   f"{ck}/probe.pt.tmp")
+        os.replace(f"{ck}/probe.pt.tmp", f"{ck}/probe.pt")
         if not quiet:
             print(f"[saved checkpoint -> {ck}/ckpt.pt | {int(act.sum())} memory entries{', fabric ' + str(len(fab.bodies)) + 'n' if FABRIC else ''} | prompt it: python3 prompt.py CKPT={ck}]")
 

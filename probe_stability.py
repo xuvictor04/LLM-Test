@@ -48,9 +48,14 @@ class Enc(nn.Module):
 
 
 def load(tag, path):
-    p = path if path.endswith(".pt") and os.path.isfile(path) else os.path.join(path, "ckpt.pt")
+    # probe.pt first: it is the same encoder and the same centroids at tens of MB instead of gigabytes, so two runs
+    # can be compared on a machine that never touched the GPU they were trained on. Falls back to ckpt.pt.
+    p = path if path.endswith(".pt") and os.path.isfile(path) else next(
+        (os.path.join(path, n) for n in ("probe.pt", "ckpt.pt") if os.path.isfile(os.path.join(path, n))),
+        os.path.join(path, "ckpt.pt"))
     if not os.path.isfile(p): sys.exit(f"no checkpoint at {p}")
     d = torch.load(p, map_location=S.DEV, weights_only=False)
+    if "cent" in d and "asm" not in d: d = dict(d, asm={"cent": d["cent"]})   # sidecar stores centroids at top level
     if not d.get("asm") or not d["asm"].get("cent"): sys.exit(f"{p} has no domain centroids")
     nv, dm = d["enc"]["emb.weight"].shape
     e = Enc(nv, dm, int(d.get("sig_d", S.SIG_D))).to(S.DEV); e.load_state_dict(d["enc"]); e.eval()
