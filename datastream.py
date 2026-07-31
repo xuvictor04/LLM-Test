@@ -66,7 +66,14 @@ def open_corpus(data_dir, domains, cap=None, disk=False):
     """Return a per-domain corpus list. disk=True -> mmap-backed (disk-paged); else read-all-into-RAM (the original)."""
     out = []
     for d in domains:
-        paths = sorted(glob.glob(f"{data_dir}/train/{d}/*"))
+        # `*` used to mean literally everything in the directory, including fetch_big.py's _fetch_manifest.json --
+        # which would be spliced into the corpus and trained on as if it were English. Harmless at 300 bytes, but it
+        # is corpus contamination that nothing downstream could detect, and a 40 GB pull writes one per domain.
+        paths = [p for p in sorted(glob.glob(f"{data_dir}/train/{d}/*"))
+                 if not os.path.basename(p).startswith("_") and not p.endswith(".json")]
+        if not paths: raise SystemExit(
+            f"no corpus files in {data_dir}/train/{d}/ -- DOMAINS names a domain with no data. "
+            f"Pull one with: python3 fetch_big.py --dataset fineweb-edu --domain {d} --gb <n> --out {data_dir}")
         if disk:
             out.append(MmapConcat(paths, cap=cap))
         else:

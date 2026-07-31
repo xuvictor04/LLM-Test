@@ -1424,7 +1424,18 @@ def main():
     asm = DomainAssembler()
     if _RD is not None:                                    # part 2 of RESUME: optimizer moments, memory store, domains
         try: om.load_state_dict(_RD["opt_m"]); oe.load_state_dict(_RD["opt_e"])
-        except (KeyError, ValueError) as e: print(f"[resume] optimizer state not restored ({e}) -- weights still loaded")
+        except (KeyError, ValueError) as e:
+            # KNOWN AND BOUNDED, not a mystery. Growth (world predictors, fabric nodes, experts) calls
+            # om.add_param_group DURING training, so a checkpoint taken after any growth has more param groups than
+            # the optimizer rebuilt at resume, which puts every parameter in group 0. The SET of parameters is the
+            # same; only the grouping differs, and remapping moments across a different flattening would silently
+            # attach them to the wrong tensors -- worse than restarting them. So they restart: Adam re-accumulates
+            # its moments over roughly 1/(1-beta2) ~ 1000 steps, about 20 seconds at the observed rate. Weights,
+            # memory, domains and the recurrence clock all restore exactly; this costs a brief transient, not a run.
+            print(f"[resume] optimizer MOMENTS not restored ({type(e).__name__}: {e}).\n"
+                  f"         Expected after growth -- the checkpoint has more param groups than a fresh optimizer.\n"
+                  f"         Weights/memory/domains ARE restored; Adam re-warms over ~1000 steps. Watch the first\n"
+                  f"         [rate] line after a resume: a brief bump in bits/byte is this, and it should recover.")
         _mk = _RD["mem_keys"]; _mn = _mk.size(0)
         if _mn > 0:
             _mn = min(_mn, mem.cap)
@@ -1462,7 +1473,14 @@ def main():
             asm.nb = int(_a.get("nb", 0))
             asm.rad = {int(k): (None if v is None else float(v)) for k, v in _a.get("rad", {}).items()}
             asm._radp = _a.get("radp")                     # radii re-measure at the first rekey; the pooled one carries
-            for _i2 in asm.cent: asm.visits.setdefault(_i2, 0); asm.bornb.setdefault(_i2, asm.nb); asm.rad.setdefault(_i2, None)
+            # born/act: absent from checkpoints written before this was found, so default rather than KeyError --
+            # born to the resume step (a restored domain is treated as newly born, which only makes DOM_GRACE
+            # protect it a little longer), act to its recorded size so nothing looks unused on the first manage().
+            asm.born = {int(k): int(v) for k, v in _a.get("born", {}).items()}
+            asm.act = {int(k): float(v) for k, v in _a.get("act", {}).items()}
+            for _i2 in asm.cent:
+                asm.visits.setdefault(_i2, 0); asm.bornb.setdefault(_i2, asm.nb); asm.rad.setdefault(_i2, None)
+                asm.born.setdefault(_i2, _resume_step); asm.act.setdefault(_i2, float(asm.size.get(_i2, 1)))
         print(f"[RESUME] {RESUME} -> step {_resume_step} | {mem.n} memory entries | {len(asm.cent)} domains"
               + (f" | fabric {len(fab.bodies)}n" if FABRIC else "") + (f" | {world_fwd.n()} dynamics predictors" if WORLD_MODEL else "")
               + "  (encoder warmup skipped: already trained)")
@@ -1604,6 +1622,12 @@ def main():
                     "asm": {"cent": {int(k): v.cpu() for k, v in asm.cent.items()}, "size": dict(asm.size),
                             "last": dict(asm.last), "next_id": asm.next_id, "merged": dict(asm.merged), "cur": asm.cur,
                             "visits": dict(asm.visits), "bornb": dict(asm.bornb), "nb": asm.nb,
+                            # born and act were the two fields nothing saved. _absorb reads s.born[a] with NO
+                            # default, so the first domain merge after ANY resume died on KeyError -- i.e. every
+                            # resumed run crashed within DOM_MANAGE_EVERY steps, which is the whole recovery path
+                            # for a multi-day run. act is the DECAYED use that drives culling; restoring it empty
+                            # makes every domain look unused and invites a mass cull on the first manage().
+                            "born": dict(asm.born), "act": dict(asm.act),
                             "rad": dict(asm.rad), "radp": asm._radp},
                     "experts": (experts.state_dict() if EXPERTS else None),
                     "fab": (fab.state_dict() if FABRIC else None),
