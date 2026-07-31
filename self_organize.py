@@ -242,10 +242,34 @@ else:
 # alongside the ablation flags, and was never once turned on; when finally run it showed faded material +0.65
 # bits/byte worse than a stationary control with 100% of its memory evicted, and the "unlearn a faded process"
 # arm skipping itself as vacuous. Leaving it off is now the deliberate ablation (PHASED=0), not the default.
-# Safe at any NP: the per-phase active set is filtered to existing processes and falls back to all of them, so a
-# single-corpus run degenerates to stationary on its own.
 PHASED = bool(_i("PHASED", 1))                             # NON-STATIONARY stream: processes ENTER and FADE over time
-PHASE_SCHED = [[0, 1], [0, 1, 2], [1, 2, 3], [2, 3]]      # who is active in each quarter (2 enters, 0 fades, 3 enters, 1 fades)
+
+
+def _phases(n):
+    """Who is active in each quarter, DERIVED FROM NP rather than hard-coded for four processes.
+
+    The old fixed [[0,1],[0,1,2],[1,2,3],[2,3]] was filtered to existing processes inside build_stream, with an
+    `or list(range(NP))` fallback when the filter emptied it. On a TWO-process run -- which is exactly the
+    English-first configuration -- that produces [0,1], [0,1], [1], and then [] -> ALL, so the final "fade" phase
+    was the LEAST non-stationary of the four and process 0 never faded at all.
+    Worse, the filtering happened only in build_stream while five other places read PHASE_SCHED raw:
+      - the phase banner printed "active processes [2, 3]" for processes that did not exist
+      - the learning curve's was_active flag was wrong for every NP < 4
+      - the UNLEARN test takes `faded = [p for p in labels if p not in PHASE_SCHED[-1]]`, which at NP=2 marks
+        EVERY process as faded and deletes the whole store
+    Deriving it once here means every reader sees the same, correct schedule."""
+    if n <= 1: return [[0]] * 4                            # one corpus genuinely is stationary; say so consistently
+    # NP=2 ends with 0 GONE, not with everything back on. The last phase is what `faded` is computed from
+    # (faded = processes absent from PHASE_SCHED[-1]), so a schedule ending [0,1] leaves nothing faded and the
+    # whole unlearn-a-faded-process test skips itself as vacuous -- which is how that test came to be reported
+    # as passing without ever running. This shape is also the experiment being asked for: learn one thing,
+    # add a second, take the first away, measure what survived.
+    if n == 2: return [[0], [0, 1], [0, 1], [1]]           # 0 alone -> 1 enters -> both -> 0 FADES
+    if n == 3: return [[0, 1], [0, 1, 2], [1, 2], [0, 2]]
+    return [[0, 1], [0, 1, 2], [1, 2, 3], [2, 3]]          # 2 enters, 0 fades, 3 enters, 1 fades
+
+
+PHASE_SCHED = _phases(NP)                                  # rebuilt after NP is known on the real-data path (below)
 PH_BOUNDS = []                                             # stream positions where each phase starts
 def build_stream():
     buf = []; lab = []; sw = []; pos = 0

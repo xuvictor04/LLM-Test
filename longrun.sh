@@ -2,6 +2,8 @@
 # ---------------------------------------------------------------------------------------------------------------
 # longrun.sh -- the multi-day run. Everything before this measured a system inside its own warmup.
 #
+#   bash longrun.sh pilot     MB PROOF OF CONCEPT first: 2 x 30 MB, 8 epochs, ~15-20 min. Run this before the GB run.
+#   bash longrun.sh pilot-add py <hf-dataset> 0.03    add an area at MB scale and measure what it cost
 #   bash longrun.sh fetch     pull 20 GB of ENGLISH across two registers (hours; resumable)
 #   bash longrun.sh add NAME DATASET GB    add a NEW area to the trained system and measure what it costs
 #   bash longrun.sh run       launch. survives disconnect. writes runs/long/
@@ -82,6 +84,56 @@ run|resume)
   echo "  bash longrun.sh resume     # after a crash or reboot"
   ;;
 
+pilot)
+  # THE MB PROOF OF CONCEPT, before 20 GB of anything. Same two domains, same code path, ~1/300th the data.
+  # Sized so it is a real test rather than a toy: STREAM_LEN 4 MB x 8 epochs = 32 MB consumed, which at
+  # ~6,500 steps per epoch is ~52,000 steps -- the FIRST configuration in this project to pass PONDER_WARM=8000
+  # and BAL_WARM=4000, so the fabric schedule completes here too. ~15-20 min on a GH200.
+  P_DD=${PILOT_DIR:-data_pilot}
+  for d in eng web; do
+    if [ -z "$(ls "$P_DD/train/$d"/part*.txt 2>/dev/null)" ]; then
+      python3 -c "import datasets" 2>/dev/null || { echo "need: pip install datasets (throwaway venv -- see preflight.sh)"; exit 1; }
+      case $d in eng) SRC=fineweb-edu ;; web) SRC=openwebtext ;; esac
+      python3 fetch_big.py --dataset $SRC --domain $d --gb 0.03 --out "$P_DD" --resume || exit 1
+    fi
+  done
+  mkdir -p "$OUT"
+  P_SL=${STREAM_LEN:-4000000}; P_EP=${EPOCHS:-8}
+  # Report the ACTUAL settings, not the defaults -- a banner that lies when overridden is how a run gets filed
+  # under the wrong description weeks later.
+  echo "pilot: 2 domains | $((P_SL/1000)) kB/epoch x $P_EP epochs = $((P_SL*P_EP/1000)) kB consumed | ~$((P_SL*P_EP/614)) steps"
+  env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng,web DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
+      CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
+      WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
+      ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
+      CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 \
+      SAVE_CKPT="$OUT/pilot" python3 self_organize.py 2>&1 | tee "$OUT/pilot.log"
+  echo
+  echo "READ IN THIS ORDER -- expectations are in the README section of this file:"
+  echo "  ANCHORS      must beat order-1. If it does not, nothing below is worth reading."
+  echo "  GENERATION   the samples you judge by eye. This is the real instrument at 2 domains."
+  echo "  COHERENCE    chance floor is 0.50 here (1/2 corpora), not 0.25 -- a narrow band, read it with the +/-."
+  echo "  ACROSS THE RUN BOUNDARY  empty on a first run; it is the baseline the NEXT run compares against."
+  echo
+  echo "then add an area and see what it costs:  bash longrun.sh pilot-add py bigcode/the-stack-dedup 0.03"
+  ;;
+
+pilot-add)
+  NAME=${2:-}; DS=${3:-}; GB=${4:-0.03}; P_DD=${PILOT_DIR:-data_pilot}
+  [ -n "$NAME" ] && [ -n "$DS" ] || { echo "usage: bash longrun.sh pilot-add <name> <hf-dataset> [gb]"; exit 1; }
+  [ -f "$OUT/pilot/ckpt.pt" ] || { echo "!! no pilot checkpoint at $OUT/pilot/ckpt.pt -- run 'bash longrun.sh pilot' first"; exit 1; }
+  if [ -z "$(ls "$P_DD/train/$NAME"/part*.txt 2>/dev/null)" ]; then
+    python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume || exit 1
+  fi
+  env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,web,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
+      CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
+      WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
+      ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
+      CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 RESUME="$OUT/pilot" \
+      SAVE_CKPT="$OUT/pilot_$NAME" python3 self_organize.py 2>&1 | tee "$OUT/pilot_$NAME.log"
+  echo; echo ">> the number this run exists for is in ACROSS THE RUN BOUNDARY: what adding $NAME did to eng and web."
+  ;;
+
 add)
   # ADD A NEW AREA to the system that already learned English. This is the continual-learning claim, run as an
   # experiment rather than asserted: pull the new corpus, resume from the trained checkpoint with the new domain
@@ -115,5 +167,5 @@ watch)
   echo; echo "=== live"; tail -3 "$OUT/run.log"
   ;;
 
-*) echo "usage: bash longrun.sh [fetch|run|resume|add <name> <hf-dataset> [gb]|watch]"; exit 1 ;;
+*) echo "usage: bash longrun.sh [pilot|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
 esac
