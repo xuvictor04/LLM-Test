@@ -431,7 +431,10 @@ class Fabric(nn.Module):
         s.qproj = nn.ModuleList([nn.Linear(sig_d, dk) for _ in range(n0)])
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
         s.comp = {}                                        # COMPETENCE per node: EMA bits/window on what it wins.
-        #   Not a Parameter and not in state_dict -- it is a selection statistic, re-earned after a resume.
+        s.contrib = {}                                     # MARGINAL CONTRIBUTION: EMA of (loss WITHOUT this node
+        #   minus loss WITH it). Positive = the system is worse without it. This is the SELECTION signal; `comp`
+        #   is the cheap per-step correlate, kept as a cross-check because it can be fooled by easy material.
+        #   Neither is a Parameter or in state_dict -- selection statistics, re-earned after a resume.
         s.q_entry = nn.Linear(sig_d, dk); s.nov = nn.Linear(1, dk); s.ctrl = nn.Linear(3, dk)
         s.norm = nn.LayerNorm(d); s.grown = 0
         s.norm_only = norm_only                             # ABLATION: normalization only, no nodes, no routing
@@ -675,8 +678,11 @@ class ExpertRouter:
                     # bottom of this ranking is "rarely called", which a niche expert and a dead one share. Spare
                     # the ones that model their own material better than the population does.
                     if COMP_PROTECT and s.comp_of is not None:
+                        # CONTRIBUTION first (counterfactual: is the system worse without it?), competence EMA only
+                        # as a fallback where no contribution has been measured yet. The EMA can be fooled by easy
+                        # material; the counterfactual cannot, and cannot be gamed by a loud message either.
                         _c, _g = s.comp_of(i)
-                        if _c is not None and _g is not None and _c < _g:
+                        if _c is not None and _g is not None and (_c > 0 if _g == "contrib" else _c < _g):
                             s.spared = getattr(s, "spared", 0) + 1; continue
                     s._drop(i); s.removed += 1
         else:                                                 # legacy mean-threshold rule
@@ -2065,7 +2071,8 @@ def main():
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull + fold
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
         if EXPERTS and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
-            router.comp_of = (lambda i: (fab.comp.get(i), asm.comp_glob)) if FABRIC else (lambda i: (None, None))
+            router.comp_of = ((lambda i: (fab.contrib[i], "contrib") if i in fab.contrib
+                               else (fab.comp.get(i), asm.comp_glob)) if FABRIC else (lambda i: (None, None)))
             router.manage(step)   # experts: create/replicate/cull (their own selective force)
         if WORLD_GROW and step % MANAGE_EVERY == 0 and step > 0:                                    # world-model SELECTION (same cadence as experts/domains)
             if world_fwd.n() < world_fwd.nmax and _wl_ema is not None and _winv > 0.9 * _wl_ema and step - _wl_lastgrow > 4 * MANAGE_EVERY:
@@ -2102,7 +2109,7 @@ def main():
         _plm = _t0()
         if _AC is not None: _AC.__enter__()                     # autocast the LM step (entered/exited explicitly rather
         #   than as a `with` block purely to avoid re-indenting the whole step); backward runs OUTSIDE it, as recommended.
-        _w = _oid = None                                        # defined on EVERY path: competence attribution reads them
+        _w = _oid = None; _hd = {}                              # defined on EVERY path: competence attribution reads them
         _sl = router.route(sig, step) if EXPERTS else -1        # route by SIGNATURE to the expert population (coarser than domains)
         if EXPERTS and _sl >= 0: route_at[bpos:bpos + WIN] = _sl   # remember WHICH expert trained on this span
         h = model.encode(x)                                      # includes the world-model feedback when enabled (wrapped above)
@@ -2160,6 +2167,31 @@ def main():
                     for _r in range(min(_plw.size(0), _wn.numel())):
                         _n = int(_wn[_r]); _v = float(_plw[_r])
                         fab.comp[_n] = _v if _n not in fab.comp else (1 - COMP_EMA) * fab.comp[_n] + COMP_EMA * _v
+            # === MARGINAL CONTRIBUTION: what the system LOSES without this expert =================================
+            # The EMA above has a flaw that matters for a rule deciding who lives. It credits a node with the loss
+            # on the windows it WINS, against the population's loss on ALL material -- so a node that happens to
+            # win easy windows scores well even if any node would do as well on them. It measures the material as
+            # much as the expert.
+            # The counterfactual does not have that problem: drop the expert, recombine, ask what the loss does.
+            # It also cannot be gamed by producing a large or noisy message, which is the failure mode a
+            # contribution-magnitude signal would have -- a noisy expert makes the blend WORSE when present, so
+            # removing it IMPROVES the loss and its contribution goes NEGATIVE. Only being useful scores.
+            # Nearly free, and only because society() returns per-expert outputs separately: every _hd[j] is
+            # already computed for the forward pass, so leave-one-out is a re-weighted sum of tensors in hand
+            # rather than k extra forward passes. Run on the manage cadence -> 1-in-MANAGE_EVERY cross_entropy.
+            if (FABRIC and SOCIETY and MANAGE_ON and len(_hd) > 1 and step % MANAGE_EVERY == 0 and step > 0):
+                _kk2 = sorted(_hd)
+                for _j2 in _kk2:
+                    _keep = [q for q in _kk2 if q != _j2]
+                    _w2 = _w[:, _oid[torch.tensor(_keep, device=_w.device)]].mean(0)
+                    _w2 = _w2 / _w2.sum().clamp_min(1e-9)
+                    _lg2 = None
+                    for _t2, _q2 in enumerate(_keep):
+                        _lg2 = _hd[_q2] * _w2[_t2] if _lg2 is None else _lg2 + _hd[_q2] * _w2[_t2]
+                    _d2 = float(F.cross_entropy(_lg2.reshape(-1, V), y.reshape(-1)) - loss)
+                    _nid = int(_oid[_j2])                      # + means the system is WORSE without it
+                    fab.contrib[_nid] = _d2 if _nid not in fab.contrib else \
+                        (1 - COMP_EMA) * fab.contrib[_nid] + COMP_EMA * _d2
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
         tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0)  # nodes have had a chance to be useful
@@ -2898,6 +2930,42 @@ def main():
                 print(f"  COMPETENCE PROTECTION [{'on' if COMP_PROTECT else 'OFF (pure-utilization ablation)'}]: "
                       f"spared {_spd} unit(s) that utilization ranked for culling but that model their own material "
                       f"better than the population (COMP_PROTECT=0 to compare).")
+                # === IS THE POPULATION SUFFICIENT WHERE NO MEMBER IS? =============================================
+                # The design claim is that no expert suffices alone but together they do. That is a claim about
+                # OUTCOMES, so measure it on the outcome: the ensemble's bits/byte against the best that any
+                # SINGLE expert manages on the same windows. If the best member matches the population, the
+                # population is not buying anything and the selective story has a hole in it whatever the
+                # culling does.
+                try:
+                    with torch.no_grad():
+                        _Xs = torch.tensor(_ex, device=DEV); _Ys = torch.tensor(_ey, device=DEV)
+                        _hs = model.encode(_Xs)
+                        _ws, _Os, _os = fab.society(_hs, _G, torch.zeros(_Xs.size(0), device=DEV), k=max(ENS_K, 2))
+                        _wk2 = _ws[:, _os[torch.arange(min(ENS_K, _Os.size(1)), device=DEV)]].mean(0)
+                        _wk2 = _wk2 / _wk2.sum().clamp_min(1e-9)
+                        _heads = [model.head(fab.norm(_Os[:, j])) for j in range(min(ENS_K, _Os.size(1)))]
+                        _lgp = sum(_heads[j] * _wk2[j] for j in range(len(_heads)))
+                        _den2 = (BLEN[_Ys].sum() if (USE_TOK and BLEN is not None) else float(_Ys.numel()))
+                        def _bpb2(_l):
+                            return float(F.cross_entropy(_l.reshape(-1, V), _Ys.reshape(-1), reduction="sum")
+                                         / math.log(2) / max(1.0, float(_den2)))
+                        _pop = _bpb2(_lgp); _solo = [(_bpb2(_heads[j]), int(_os[j])) for j in range(len(_heads))]
+                        _best, _bid = min(_solo)
+                    print(f"\n=== SUFFICIENCY: does the POPULATION beat its best single member? ===")
+                    print(f"  population ({len(_heads)} experts blended) {_pop:.3f} bits/byte | "
+                          f"best single expert (node {_bid}) {_best:.3f} | population buys {_best - _pop:+.3f}")
+                    print(f"  >> " + ("AGGREGATE: no member is sufficient alone, together they are -- which is the "
+                                      "design claim, measured on the outcome rather than assumed."
+                                      if _best - _pop > 0.02 else
+                                      "NOT AGGREGATE: the best single expert does as well as the whole blend, so the "
+                                      "population is redundant here. Expect this while the nodes are interchangeable."))
+                except Exception as _e:
+                    print(f"[sufficiency check skipped: {type(_e).__name__}: {_e}]")
+                if fab.contrib:
+                    _pos = [n for n, v in fab.contrib.items() if v > 0]
+                    print(f"  marginal contribution measured for {len(fab.contrib)} nodes; {len(_pos)} are "
+                          f"LOAD-BEARING (system worse without them). Selection protects these regardless of how "
+                          f"rarely they are called.")
                 if asm.comp_glob is not None and asm.comp:
                     _bet = [d for d, v in asm.comp.items() if v < asm.comp_glob]
                     print(f"  {len(_bet)} of {len(asm.comp)} live domains beat the population EMA "
