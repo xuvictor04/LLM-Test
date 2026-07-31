@@ -231,7 +231,30 @@ if DATA_MODE == "real":
             CORP = [TOK.segment(c, count=False) for c in CORP]             # final deterministic tokenization of each corpus
             V = TOK.vocab_size; BLEN = torch.tensor(TOK.bytes_per_id, dtype=torch.float, device=DEV)
             print(f"[tokenizer] vocab {V} | corpora -> tokens ({sum(len(c) for c in CORP)} total, ~{sum(len(c) for c in CORP)//max(1,len(CORP))}/domain)")
-    def seg_from(p, L): s = random.randint(0, SEG_LEN[p] - L - 1); return CORP[p][s:s + L]   # SEG_LEN bounds sampling to the train head
+    # HOW A SEGMENT IS DRAWN. Random-offset was the only mode, and on a MULTI-corpus splice that is right: each
+    # phase should sample fresh material from whichever corpora are active. On a SINGLE corpus it is wrong, and
+    # quietly so. seg_from seeks to a random point every SEG_MIN..SEG_MAX bytes, so an English-only stream jumps
+    # elsewhere in English every 8-20 KB -- discontinuities WE manufacture, at a spacing WE choose. The assembler
+    # then discovers domains at our seek points. That is how eng_only reported 71 domains at SEG_MIN=700: it was
+    # partly counting our splices.
+    # CONTIGUOUS reading removes them. The corpus is read in order, so the only boundaries left are the ones in
+    # the text -- document ends, topic changes, register shifts -- which is what "domains appear organically in
+    # English" has to mean. Default: contiguous when there is ONE corpus, random when there are several (that is
+    # the splice experiment, and changing it would silently invalidate every earlier comparison).
+    SEG_CONTIG = bool(_i("SEG_CONTIG", 1 if NP == 1 else 0))
+    _CUR = [0] * NP                                        # read cursor per corpus; persists ACROSS epochs, so epoch
+    #   N+1 continues where N stopped instead of re-reading the same head -- which is also how a 20 GB corpus gets
+    #   streamed in order rather than seek-sampled.
+    def seg_from(p, L):
+        if not SEG_CONTIG:
+            s = random.randint(0, SEG_LEN[p] - L - 1); return CORP[p][s:s + L]   # SEG_LEN bounds sampling to the train head
+        s = _CUR[p]
+        if s + L >= SEG_LEN[p]: s = 0                      # wrap at the end of the training head
+        _CUR[p] = s + L
+        return CORP[p][s:s + L]
+    if SEG_CONTIG:
+        print(f"[stream] CONTIGUOUS read: the corpus is consumed in order, so segment boundaries are the TEXT's, "
+              f"not seek points we chose. SEG_CONTIG=0 for the random-offset splice.")
 else:
     PROCS = [make_proc(s, ALPHA[s % len(ALPHA)]) for s in range(NP)]
     def seg_from(p, L): return PROCS[p](L)
