@@ -18,8 +18,8 @@
 # FOUR DISTINCT SOURCES, not one big one. PHASED tests catastrophic forgetting by having processes enter and fade,
 # which needs >= 2 processes that are genuinely different -- a single-corpus run degenerates to stationary and the
 # forgetting test becomes vacuous. 40 GB of fineweb into `eng` alone would have bought scale and thrown away the
-# experiment. These four are different registers (web / encyclopedic / dialogue / mixed-incl-code), so a domain
-# boundary is a real distribution change rather than a change of paragraph.
+# experiment. These four are different registers (curated web / encyclopedic / mixed-incl-code / raw web), so a
+# domain boundary is a real distribution change rather than a change of paragraph.
 set -u
 
 WHICH=${1:-run}
@@ -35,18 +35,25 @@ EP=${EPOCHS:-1250}
 case "$WHICH" in
 fetch)
   python3 -c "import datasets" 2>/dev/null || { echo "need: pip install datasets  (use a THROWAWAY venv -- upgrading numpy under an NGC torch breaks its ABI; see preflight.sh)"; exit 1; }
+  # BALANCED ON PURPOSE. build_stream picks each segment with random.choice(act) -- UNIFORM over the active
+  # domains, never weighted by corpus size -- so all four contribute the SAME stream volume however much text they
+  # have. An unbalanced pull does not give the big domain more attention; it gives the SMALL one more REPETITION.
+  # The first draft here was 20/8/10/1, which over a 40 GB stream is one half-pass of fineweb against ~100 passes
+  # of oasst1: the dialogue domain would have been memorised while the web domain was barely read.
+  # oasst1 is dropped for the same reason -- it is far too small to hold up a quarter of the stream. Dialogue is
+  # worth having, but as a domain it has to be comparable in size to the others, not a rounding error against them.
   set -x
-  python3 fetch_big.py --dataset fineweb-edu --domain eng  --gb 20 --out "$DD" --resume
-  python3 fetch_big.py --dataset wikipedia   --domain wiki --gb  8 --out "$DD" --resume
+  python3 fetch_big.py --dataset fineweb-edu --domain eng  --gb 10 --out "$DD" --resume
+  python3 fetch_big.py --dataset wikipedia   --domain wiki --gb 10 --out "$DD" --resume
   python3 fetch_big.py --dataset pile        --domain mix  --gb 10 --out "$DD" --resume
-  python3 fetch_big.py --dataset oasst1      --domain chat --gb  1 --out "$DD" --resume
+  python3 fetch_big.py --dataset openwebtext --domain web  --gb 10 --out "$DD" --resume
   set +x
   echo; echo "on disk:"; du -sh "$DD"/train/* 2>/dev/null
   echo "re-run 'bash longrun.sh fetch' to continue any pull that stopped short -- --resume skips what it already has."
   ;;
 
 run|resume)
-  for d in eng wiki mix chat; do
+  for d in eng wiki mix web; do
     [ -n "$(ls "$DD/train/$d"/part*.txt 2>/dev/null)" ] || { echo "!! $DD/train/$d is empty -- run 'bash longrun.sh fetch' first"; exit 1; }
   done
   mkdir -p "$OUT"
@@ -58,7 +65,7 @@ run|resume)
   fi
   # CKPT_EVERY at ~50k steps is roughly half-hourly at the observed ~54 steps/s. Two generations are kept
   # (ckpt.pt + ckpt.prev.pt), so budget ~2x the checkpoint size; the memory store dominates it at MEM_CAP=200000.
-  env DATA_MODE=real DATA_DIR="$DD" DOMAINS=eng,wiki,mix,chat DEVICE=cuda DISK_STREAM=1 \
+  env DATA_MODE=real DATA_DIR="$DD" DOMAINS=eng,wiki,mix,web DEVICE=cuda DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=$SL EPOCHS=$EP D_MODEL=${D_MODEL:-768} WIN=256 BATCH_W=16 \
       VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
