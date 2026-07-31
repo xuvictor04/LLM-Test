@@ -1382,6 +1382,8 @@ def main():
     # optimizers are built so their params are in the param groups and their Adam moments restore.
     KEY_PREGATE = bool(_i("KEY_PREGATE", 1))              # encode memory keys AFTER the surprise gate (see the write call)
     KEY_BATCH = bool(_i("KEY_BATCH", 1))                  # ...and encode the whole BATCH_W batch in ONE call (KEY_BATCH=0 = per-window)
+    _hb, _hbs = {}, 0                                      # held-out probe carried in from a RESUME (empty otherwise).
+    #   Declared BEFORE the resume block: sitting after it, this line clobbered the value resume had just loaded.
     RESUME = os.environ.get("RESUME", "")
     _RD, _resume_step = None, 0
     if RESUME:
@@ -1481,6 +1483,7 @@ def main():
             for _i2 in asm.cent:
                 asm.visits.setdefault(_i2, 0); asm.bornb.setdefault(_i2, asm.nb); asm.rad.setdefault(_i2, None)
                 asm.born.setdefault(_i2, _resume_step); asm.act.setdefault(_i2, float(asm.size.get(_i2, 1)))
+        _hb, _hbs = _RD.get("holdout") or {}, int(_RD.get("holdout_step", _resume_step))
         print(f"[RESUME] {RESUME} -> step {_resume_step} | {mem.n} memory entries | {len(asm.cent)} domains"
               + (f" | fabric {len(fab.bodies)}n" if FABRIC else "") + (f" | {world_fwd.n()} dynamics predictors" if WORLD_MODEL else "")
               + "  (encoder warmup skipped: already trained)")
@@ -1531,6 +1534,89 @@ def main():
                       f"or use ENC_PROTO/SIG_SPACE to change what the encoder is asked to tell apart.")
     assigns = []; bounds = []; i = 0; step = _resume_step; _cur_ph = -1; PH_SNAP = []
     _CURVE = []; _VALT = {}; _CURVE_ERR = []; _BL = {}                                 # (step, process, bits/byte, was_active) + tokenised-val cache
+
+    def _namehash(nm):                                     # deterministic: hash() is SALTED per process, so using it
+        h = 0                                              #   would draw different probe windows every run and make
+        for ch in nm.encode(): h = (h * 131 + ch) % 1000003 #   the whole comparison meaningless
+        return h
+
+    def holdout_bpb():
+        """Per-DOMAIN bits/byte on the HELD-OUT tail, on windows fixed by domain NAME.
+
+        THE MEASUREMENT THAT LETS AREAS BE ADDED LATER. Every existing metric is computed on the CURRENT stream, so
+        the moment a new domain is introduced the question that matters -- did adding it damage what was already
+        known? -- is unanswerable: both old and new material are in the new stream and both were just trained on.
+        RETENTION compares a process's earliest windows to its latest WITHIN one stream, which cannot see across a
+        run boundary at all.
+        Keyed by NAME rather than by index on purpose: adding a domain shifts every index after it, so an
+        index-keyed probe would silently compare `eng` against `py`. The window draw is seeded from the name too,
+        so a domain is scored on exactly the same held-out text whatever position it now occupies."""
+        out = {}
+        model.eval()
+        try:
+            for _p in range(len(VALC)):
+                nm = DN[_p] if _p < len(DN) else str(_p)
+                _v = _VALT.get(_p)
+                if _v is None:
+                    _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+                    _VALT[_p] = _v
+                if len(_v) < WIN + 2: continue
+                _rs = random.Random(_namehash(nm))
+                _st = [_rs.randint(0, len(_v) - WIN - 2) for _ in range(_i("HOLDOUT_N", 32))]
+                with torch.no_grad():
+                    _X = torch.tensor([_v[a:a + WIN] for a in _st], device=DEV)
+                    _Y = torch.tensor([_v[a + 1:a + WIN + 1] for a in _st], device=DEV)
+                    _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                    _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
+                # PER WINDOW, not pooled, so the number carries an error bar. A pooled sum-over-all-windows gives
+                # one figure with no way to tell a real change from sampling noise -- which is exactly how the
+                # coherence metric went wrong, and there is no excuse for repeating it one section later.
+                if USE_TOK:                                # same live-vocabulary denominator as the learning curve
+                    _bl = _BL.get(TOK.vocab_size)
+                    if _bl is None:
+                        _bl = torch.tensor(TOK.bytes_per_id[:TOK.vocab_size], dtype=torch.float, device=DEV)
+                        _BL.clear(); _BL[TOK.vocab_size] = _bl
+                    _dw = _bl[_Y.clamp(max=TOK.vocab_size - 1)].sum(-1)
+                else:
+                    _dw = torch.full((_Y.size(0),), float(_Y.size(1)), device=DEV)
+                _nw = -(torch.log(_pp.clamp_min(1e-9)).sum(-1)) / math.log(2) / _dw.clamp_min(1.0)
+                _mu = float(_nw.mean())
+                _se = float(_nw.std(unbiased=True) / (_nw.numel() ** 0.5)) if _nw.numel() > 1 else 0.0
+                out[nm] = (_mu, _se)
+        except Exception as _e:
+            print(f"[holdout probe skipped: {type(_e).__name__}: {_e}]")
+        finally:
+            model.train()
+        return out
+
+    def report_holdout(prev, prev_step, title):
+        """prev = the probe stored in the checkpoint we resumed from. Anything present then and now is a RETENTION
+        number that spans the run boundary; anything only now is a domain this run is seeing for the first time."""
+        now = holdout_bpb()
+        if not now: return now
+        print(f"\n=== {title} (held-out, per domain, bits/byte -- lower is better) ===")
+        def _ms(v): return v if isinstance(v, (tuple, list)) else (float(v), 0.0)   # tolerate older checkpoints
+        if not prev:
+            for k in sorted(now):
+                _m, _e = _ms(now[k]); print(f"  {k:<10} {_m:.3f} +/- {_e:.3f}   (no earlier probe to compare against)")
+            return now
+        _kept = [k for k in sorted(now) if k in prev]
+        for k in sorted(now):
+            _m, _e = _ms(now[k])
+            if k in prev:
+                _pm, _pe = _ms(prev[k]); _d = _m - _pm; _ed = (_e ** 2 + _pe ** 2) ** 0.5
+                print(f"  {k:<10} was {_pm:.3f} @ step {prev_step}  ->  now {_m:.3f}   {_d:+.3f} +/- {_ed:.3f}  "
+                      f"{'WORSE (forgetting)' if _d > 2 * _ed else ('better' if -_d > 2 * _ed else 'HELD (inside the noise)')}")
+            else:
+                print(f"  {k:<10} {_m:.3f} +/- {_e:.3f}   NEW this run -- no baseline, nothing to forget yet")
+        if _kept:
+            _m = sum(_ms(now[k])[0] - _ms(prev[k])[0] for k in _kept) / len(_kept)
+            _em = (sum(_ms(now[k])[1] ** 2 + _ms(prev[k])[1] ** 2 for k in _kept) ** 0.5) / len(_kept)
+            print(f"  mean change on the {len(_kept)} domain(s) that existed before: {_m:+.3f} +/- {_em:.3f} bits/byte"
+                  + ("" if abs(_m) > 2 * _em else "  -- inside the noise, do not read this as forgetting"))
+            print(f"  >> this is the ONLY number that spans the run boundary. Every other retention figure is")
+            print(f"     computed on the current stream and cannot see what was known before this run started.")
+        return now
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
@@ -1608,6 +1694,11 @@ def main():
                     "mem_own": mem.own[act].cpu(), "mem_last": mem.last[act].cpu(),         # per-expert partition + LRU clock
                     "mem_n_own": mem.n_own, "mem_quota": mem.quota, "mem_tick": mem.tick,
                     "sig_d": SIG_D, "win": WIN, "enc": enc.state_dict(),          # encoder -> gist for fabric routing
+                    # HELD-OUT PROBE, keyed by domain NAME. This is what makes "add a new area later" measurable:
+                    # the next run scores the SAME held-out windows and reports what changed on the domains that
+                    # already existed. Cheap (HOLDOUT_N windows per domain) and the only figure that survives a
+                    # run boundary.
+                    "holdout": holdout_bpb(), "holdout_step": step,
                     # WORLD MODEL: with WORLD_FEEDBACK the base LM is TRAINED with `h += world_proj(forecast)`. Omitting
                     # it from the checkpoint made generation run a DIFFERENT network than training -> the coherence test
                     # would have been invalid. Saved with its grown population size so it reconstructs exactly.
@@ -2160,6 +2251,9 @@ def main():
                           f". GPT-2-small sits near 1.0-1.2 b/B on comparable text, for scale.")
             except Exception as _e:
                 print(f"  [anchors skipped: {type(_e).__name__}: {_e}]")
+        # Cross-run first: it is the only retention figure that can see past the start of this run, so it should
+        # be read before the within-stream one that cannot.
+        report_holdout(_hb, _hbs, "ACROSS THE RUN BOUNDARY: what did this run do to what was already known?")
         # === RETENTION: is the system still good at what it saw FIRST? =======================================
         # THE central continual-learning question, and until now nothing measured it on a default run. The
         # forgetting test that did exist (PHASED=1) is off by default and had never been executed; when finally
