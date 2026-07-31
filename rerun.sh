@@ -4,8 +4,12 @@
 #
 # Every result this project produced before commit 51889b7 was measured on the base LM + memory + domains, with
 # the routed expert population, the expanding tokenizer, the world model and the per-expert memory partition all
-# absent. FABRIC alone is worth +0.709 bits/byte and flips English from LOSING to order-1 to beating it, so those
-# results describe a different system. This re-measures on the whole one.
+# absent, so those results describe a different system. This re-measures on the whole one.
+#
+# The +0.709 for FABRIC that this file used to quote is RETRACTED. It was the report's own
+# "model ALONE -> +FABRIC" figure, which is an eval-time KNOCKOUT of a component the model TRAINED with, and the
+# report itself prints a caveat saying it overstates. The retrained ablation is the honest test and says 3.089 vs
+# 3.090: no bits/byte at all. The largest retrained effect measured so far is the WORLD MODEL (+0.103).
 #
 #   bash rerun.sh            # all of it (~15 min on a GH200)
 #   bash rerun.sh mix        # just the 4-corpus run
@@ -18,15 +22,25 @@
 # MANAGE_EVERY. An ablation flag is the least-exercised path in the file -- the one arm nobody runs until the
 # night it matters. Two CPU minutes buys the whole grid.
 #
-# READ IN THIS ORDER. The first two speak to proper language; the rest explain why they moved.
-#   ANCHORS          does the model beat order-1 on the same held-out text? the only unmoored-number check
-#   COHERENCE        does a continuation stay in its seed's domain? floor = chance, ceiling = real text
-#   RETENTION        is what it saw first still modelled as well as what it saw last?
-#   LEARNING CURVE   how fast it picks a process up, and what happens once that process leaves
-#   FABRIC           what the routed population contributes, and whether the router HALTs instead of routing
-#   CAN A DOMAIN PREDICT   own-domain prior vs a global one AND vs a wrong one
-# Domain counts, purity, silhouette and V-measure are DIAGNOSTICS. They explain movement in the above; they are
-# not targets, and steering by them is what produced most of this file's history.
+# READ IN THIS ORDER. It is the order of what the project is FOR, and nothing else earns a place above it:
+#
+#   1. THE OUTPUT
+#      GENERATION       read the samples. This is the deliverable; every number below is a proxy for it.
+#      ANCHORS          does the model beat order-1 on the same held-out text? the one unmoored-number check
+#      COHERENCE        does a continuation stay in its seed's domain? read WITH its +/- and its floor
+#
+#   2. CONTINUAL LEARNING WITHOUT EXORBITANT FORGETTING
+#      ACROSS THE RUN BOUNDARY  what this run did to what was already known. The only figure that spans runs.
+#      RETENTION        is what it saw first still modelled as well as what it saw last?
+#      LEARNING CURVE   how fast a process is picked up, and what happens once it leaves
+#
+#   3. THE MACHINERY, only insofar as it moves 1 and 2
+#      EXPERTS          is the population specialized, or evenly loaded and interchangeable? how many nodes UNUSED?
+#      FABRIC           what the routed population contributes, and whether the router HALTs instead of routing
+#
+# DIAGNOSTICS, NOT TARGETS: domain counts, purity, silhouette, V-measure, CAN A DOMAIN PREDICT. They exist to
+# explain movement in 1 and 2. Steering by them is what produced most of this file's history, and a domain count
+# going up is not a result. If a diagnostic disagrees with 1 and 2, the diagnostic is what needs re-examining.
 set -u
 
 WHICH=${1:-all}

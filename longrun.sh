@@ -48,10 +48,10 @@ fetch)
   # it has. An unbalanced pull does not give the big domain more attention; it gives the SMALL one more REPETITION.
   # That is also why `add` takes a --gb comparable to these: a 100 MB new area against 10 GB of English is not a
   # small addition, it is the same fraction of the stream read a hundred times over.
-  # ENGLISH FIRST. Two registers of English prose and nothing else: curated educational web, and raw web. The
-  # abstract and structured material (code, maths, encyclopedic, dialogue) is deliberately NOT here -- it gets
-  # ADDED LATER, to a system that has already learned English, which is the actual continual-learning claim.
-  # Front-loading every domain would have tested "can it learn four things at once", a question nobody asked.
+  # ENGLISH FIRST, and English is ONE corpus. The abstract and structured material (code, maths, dialogue) is
+  # deliberately NOT here -- it gets ADDED LATER, to a system that has already learned English, which is the
+  # actual continual-learning claim. Front-loading every domain would have tested "can it learn four things at
+  # once", a question nobody asked.
   set -x
   python3 fetch_big.py --dataset ${ENG_SRC:-fineweb-edu} --domain eng --gb ${ENG_GB:-20} --out "$DD" --resume
   set +x
@@ -109,12 +109,15 @@ pilot)
       CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 \
       SAVE_CKPT="$OUT/pilot" python3 self_organize.py 2>&1 | tee "$OUT/pilot.log"
   echo
-  echo "READ IN THIS ORDER -- expectations are in the README section of this file:"
+  echo "READ IN THIS ORDER -- what the project is FOR, in order:"
+  echo "  GENERATION   the samples. THE deliverable -- everything else is a proxy for these."
   echo "  ANCHORS      must beat order-1. If it does not, nothing below is worth reading."
   echo "  GENERATION   the samples you judge by eye. This is the real instrument at 2 domains."
   echo "  COHERENCE    [SELF-ASSEMBLED reference] on one corpus: floor is 1/n_domains. Weaker evidence -- read it"
   echo "               next to the samples, not instead of them."
   echo "  ACROSS THE RUN BOUNDARY  empty on a first run; it is the baseline the NEXT run compares against."
+  echo "  EXPERTS      specialized or interchangeable, and how many nodes the router never calls on."
+  echo "  (domain counts and clustering scores are DIAGNOSTICS -- they explain the above, they are not targets)"
   echo
   echo "then add an area and see what it costs:  bash longrun.sh pilot-add py bigcode/the-stack-dedup 0.03"
   ;;

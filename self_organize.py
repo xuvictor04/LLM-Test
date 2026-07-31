@@ -2778,6 +2778,69 @@ def main():
         print(f"  NOTE: 'model ALONE' here is an ABLATION of a component the model TRAINED WITH (it also removes the")
         print(f"   fabric's LayerNorm), so it overstates the fabric's contribution. The honest comparison is this run's")
         print(f"   '+ FABRIC + MEMORY' against a FABRIC=0 run's 'model + MEMORY'.")
+    # === ARE THE EXPERTS GOOD AT ANYTHING? ====================================================================
+    # The fabric block above reports node MASS -- how routing load is spread. Load is not competence. A population
+    # can spread mass perfectly and have every node do the same undifferentiated job, which is precisely what
+    # DIV_W=0 permits after BAL_WARM decays. What was never asked: does the material each node WINS get modelled
+    # better by that node than by the population at large?
+    # Answered against a null, because per-node bits/byte differences are mostly material difficulty: the same
+    # windows are re-scored with the node assignment SHUFFLED. Excess over that shuffle is specialization; no
+    # excess means the nodes are interchangeable however evenly the mass is spread.
+    if FABRIC and fab is not None and not getattr(fab, "norm_only", False) and len(fab.bodies) > 1:
+        try:
+            _N = len(fab.bodies)
+            _ew, _ex, _ey = [], [], []
+            for _q in sorted(set(labels)):
+                for _s0 in eval_win.get(_q, [])[:32]:
+                    _ew.append(encwin(encpos(_s0)))
+                    _ex.append(list(stream[_s0:_s0 + WIN])); _ey.append(list(stream[_s0 + 1:_s0 + WIN + 1]))
+            if len(_ew) >= 8:
+                with torch.no_grad():
+                    _G = enc(torch.tensor(_ew, device=DEV))
+                    _K = torch.stack(list(fab.keys) + [fab.halt_key], 0)
+                    _nb = fab.nov(torch.zeros(_G.size(0), 1, device=DEV))
+                    _c = torch.softmax(((fab.q_entry(_G) + _nb) @ _K.t()) / max(1e-3, fab.route_t), -1)
+                    _win = _c[:, :_N].argmax(-1)           # the node that takes this window at ENTRY
+                    _X = torch.tensor(_ex, device=DEV); _Y = torch.tensor(_ey, device=DEV)
+                    _pp = F.softmax(fab_logits(model, fab, model.encode(_X), _G), -1) \
+                            .gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
+                    _den = (BLEN[_Y].sum(-1) if (USE_TOK and BLEN is not None) else
+                            torch.full((_Y.size(0),), float(_Y.size(1)), device=DEV))
+                    _bw = -(torch.log(_pp.clamp_min(1e-9)).sum(-1)) / math.log(2) / _den.clamp_min(1.0)
+                _used = sorted(set(_win.tolist()))
+                _per = {int(n): [float(_bw[i]) for i in range(len(_bw)) if int(_win[i]) == n] for n in _used}
+                _tot = float(_bw.mean())
+                # NULL: same windows, same per-node group SIZES, assignment shuffled. Run several times because a
+                # single shuffle is itself noisy, and report the spread.
+                _nulls = []
+                _rr = random.Random(0)
+                for _ in range(_i("EXPERT_NULLS", 20)):
+                    _sh = _win.tolist(); _rr.shuffle(_sh)
+                    _g = {}
+                    for i, n in enumerate(_sh): _g.setdefault(n, []).append(float(_bw[i]))
+                    _nulls.append(sum(abs(sum(v) / len(v) - _tot) for v in _g.values()) / len(_g))
+                _spread = sum(abs(sum(v) / len(v) - _tot) for v in _per.values()) / len(_per)
+                _nm = sum(_nulls) / len(_nulls)
+                _nsd = (sum((x - _nm) ** 2 for x in _nulls) / max(1, len(_nulls) - 1)) ** 0.5
+                print(f"\n=== EXPERTS: is the population SPECIALIZED, or just evenly loaded? ===")
+                print(f"  {_N} nodes, {len(_used)} of them win at least one of {len(_bw)} held-back windows"
+                      f" | population mean {_tot:.3f} bits/byte")
+                for n in sorted(_per, key=lambda k: -len(_per[k]))[:8]:
+                    _v = _per[n]
+                    print(f"    node {n:<3} wins {len(_v):>4} windows ({100*len(_v)/len(_bw):4.1f}%) | "
+                          f"{sum(_v)/len(_v):.3f} bits/byte on them ({sum(_v)/len(_v) - _tot:+.3f} vs population)")
+                if len(_per) > 8: print(f"    ... and {len(_per)-8} more")
+                print(f"  SPECIALIZATION (mean |node - population|)  {_spread:.3f}")
+                print(f"  shuffled-assignment null                   {_nm:.3f} +/- {_nsd:.3f}")
+                print(f"  >> " + ("SPECIALIZED: the material a node wins really is material it models differently."
+                                  if _spread > _nm + 2 * _nsd else
+                                  "INTERCHANGEABLE: nodes differ no more than a random split of the same windows "
+                                  "would. Routing load is spread, competence is not -- see DIV_W (0.0 by default, "
+                                  "and BAL_WARM decays the only other pressure to 0 by step 4000)."))
+                print(f"  ({len(_used)} of {_N} nodes used: unused nodes are capacity the router never calls on.)")
+        except Exception as _e:
+            print(f"[expert specialization check skipped: {type(_e).__name__}: {_e}]")
+
     if EXPERTS:                                            # do the per-domain experts specialize? (isolate the expert effect)
         _ps = sorted(set(labels))
         _b  = sum(bpb_true(q, use_exp=False, use_mem=False) for q in _ps) / max(1, len(_ps))
