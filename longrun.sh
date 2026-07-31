@@ -2,9 +2,9 @@
 # ---------------------------------------------------------------------------------------------------------------
 # longrun.sh -- the multi-day run. Everything before this measured a system inside its own warmup.
 #
-#   bash longrun.sh pilot     MB PROOF OF CONCEPT first: 2 x 30 MB, 8 epochs, ~15-20 min. Run this before the GB run.
-#   bash longrun.sh pilot-add py <hf-dataset> 0.03    add an area at MB scale and measure what it cost
-#   bash longrun.sh fetch     pull 20 GB of ENGLISH across two registers (hours; resumable)
+#   bash longrun.sh pilot     MB PROOF OF CONCEPT first: 60 MB English, 8 epochs, ~15-20 min. Run before the GB run.
+#   bash longrun.sh pilot-add py <hf-dataset> 0.06    add an area at MB scale and measure what it cost
+#   bash longrun.sh fetch     pull 20 GB of English (hours; resumable)
 #   bash longrun.sh add NAME DATASET GB    add a NEW area to the trained system and measure what it costs
 #   bash longrun.sh run       launch. survives disconnect. writes runs/long/
 #   bash longrun.sh resume    continue from the last checkpoint after a crash or a reboot
@@ -18,11 +18,12 @@
 # measurements of the fabric. They were measurements of a warmup that never completed. Both knobs are LEFT ALONE
 # here on purpose: the point is to run long enough that the designed schedule finishes, not to change the schedule.
 #
-# ENGLISH FIRST, THEN ADD. The point of a continual learner is that new areas arrive AFTER it has learned
-# something, so the four-domain splice was answering the wrong question -- "can it learn four things at once".
-# This starts on two registers of English (>= 2 because PHASED needs processes that enter and fade; one corpus
-# degenerates to stationary and the forgetting test becomes vacuous), then `add` introduces code, maths or
-# dialogue to the ALREADY TRAINED system.
+# ENGLISH FIRST, THEN ADD -- and English is ONE corpus, not two.
+# Splitting English into `eng` and `web` was us imposing a partition on material that has none, and then scoring
+# the system against our own split. Every domain in an English-only run is DISCOVERED by the assembler; nothing
+# here tells it where the boundaries are. A single corpus does mean the spliced phase schedule degenerates to
+# stationary -- and that is honest, because the non-stationarity that matters is not a splice we manufactured.
+# It is a genuinely new area ARRIVING, which is what `add` does to an already-trained system.
 # What makes that measurable is the held-out probe keyed by domain NAME, stored in every checkpoint. Every other
 # retention figure is computed on the CURRENT stream, so the moment a new domain appears it cannot answer the one
 # question that matters -- did adding it damage the English? The cross-boundary section reports exactly that,
@@ -52,15 +53,14 @@ fetch)
   # ADDED LATER, to a system that has already learned English, which is the actual continual-learning claim.
   # Front-loading every domain would have tested "can it learn four things at once", a question nobody asked.
   set -x
-  python3 fetch_big.py --dataset fineweb-edu --domain eng --gb 10 --out "$DD" --resume
-  python3 fetch_big.py --dataset openwebtext --domain web --gb 10 --out "$DD" --resume
+  python3 fetch_big.py --dataset ${ENG_SRC:-fineweb-edu} --domain eng --gb ${ENG_GB:-20} --out "$DD" --resume
   set +x
   echo; echo "on disk:"; du -sh "$DD"/train/* 2>/dev/null
   echo "re-run 'bash longrun.sh fetch' to continue any pull that stopped short -- --resume skips what it already has."
   ;;
 
 run|resume)
-  for d in eng web; do
+  for d in eng; do
     [ -n "$(ls "$DD/train/$d"/part*.txt 2>/dev/null)" ] || { echo "!! $DD/train/$d is empty -- run 'bash longrun.sh fetch' first"; exit 1; }
   done
   mkdir -p "$OUT"
@@ -72,7 +72,7 @@ run|resume)
   fi
   # CKPT_EVERY at ~50k steps is roughly half-hourly at the observed ~54 steps/s. Two generations are kept
   # (ckpt.pt + ckpt.prev.pt), so budget ~2x the checkpoint size; the memory store dominates it at MEM_CAP=200000.
-  env DATA_MODE=real DATA_DIR="$DD" DOMAINS=eng,web DEVICE=cuda DISK_STREAM=1 \
+  env DATA_MODE=real DATA_DIR="$DD" DOMAINS=eng DEVICE=cuda DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=$SL EPOCHS=$EP D_MODEL=${D_MODEL:-768} WIN=256 BATCH_W=16 \
       VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
@@ -85,25 +85,25 @@ run|resume)
   ;;
 
 pilot)
-  # THE MB PROOF OF CONCEPT, before 20 GB of anything. Same two domains, same code path, ~1/300th the data.
+  # THE MB PROOF OF CONCEPT, before 20 GB of anything. Same corpus, same code path, ~1/300th the data.
   # Sized so it is a real test rather than a toy: STREAM_LEN 4 MB x 8 epochs = 32 MB consumed, which at
   # ~6,500 steps per epoch is ~52,000 steps -- the FIRST configuration in this project to pass PONDER_WARM=8000
   # and BAL_WARM=4000, so the fabric schedule completes here too. ~15-20 min on a GH200.
   P_DD=${PILOT_DIR:-data_pilot}
-  for d in eng web; do
-    if [ -z "$(ls "$P_DD/train/$d"/part*.txt 2>/dev/null)" ]; then
-      python3 -c "import datasets" 2>/dev/null || { echo "need: pip install datasets (throwaway venv -- see preflight.sh)"; exit 1; }
-      case $d in eng) SRC=fineweb-edu ;; web) SRC=openwebtext ;; esac
-      python3 fetch_big.py --dataset $SRC --domain $d --gb 0.03 --out "$P_DD" --resume || exit 1
-    fi
-  done
+  # ONE corpus. English is English -- splitting it into `eng` and `web` was us imposing a partition on material
+  # that has none, and then measuring the system against our own split. The domains in an English-only run come
+  # from the ASSEMBLER, discovered in the stream. Nothing here tells it where the boundaries are.
+  if [ -z "$(ls "$P_DD/train/eng"/part*.txt 2>/dev/null)" ]; then
+    python3 -c "import datasets" 2>/dev/null || { echo "need: pip install datasets (throwaway venv -- see preflight.sh)"; exit 1; }
+    python3 fetch_big.py --dataset ${PILOT_SRC:-fineweb-edu} --domain eng --gb ${PILOT_GB:-0.06} --out "$P_DD" --resume || exit 1
+  fi
   mkdir -p "$OUT"
   P_SL=${STREAM_LEN:-4000000}; P_EP=${EPOCHS:-8}
   # Report the ACTUAL settings, not the defaults -- a banner that lies when overridden is how a run gets filed
   # under the wrong description weeks later.
-  echo "pilot: 2 domains | $((P_SL/1000)) kB/epoch x $P_EP epochs = $((P_SL*P_EP/1000)) kB consumed | ~$((P_SL*P_EP/614)) steps"
-  env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng,web DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
-      CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
+  echo "pilot: ONE English corpus, domains self-assembled | $((P_SL/1000)) kB/epoch x $P_EP epochs = $((P_SL*P_EP/1000)) kB consumed | ~$((P_SL*P_EP/614)) steps"
+  env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
+      CORPUS_CAP=100000000000 STREAM_LEN=$P_SL EPOCHS=$P_EP D_MODEL=${D_MODEL:-768} \
       WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 \
@@ -112,7 +112,8 @@ pilot)
   echo "READ IN THIS ORDER -- expectations are in the README section of this file:"
   echo "  ANCHORS      must beat order-1. If it does not, nothing below is worth reading."
   echo "  GENERATION   the samples you judge by eye. This is the real instrument at 2 domains."
-  echo "  COHERENCE    chance floor is 0.50 here (1/2 corpora), not 0.25 -- a narrow band, read it with the +/-."
+  echo "  COHERENCE    [SELF-ASSEMBLED reference] on one corpus: floor is 1/n_domains. Weaker evidence -- read it"
+  echo "               next to the samples, not instead of them."
   echo "  ACROSS THE RUN BOUNDARY  empty on a first run; it is the baseline the NEXT run compares against."
   echo
   echo "then add an area and see what it costs:  bash longrun.sh pilot-add py bigcode/the-stack-dedup 0.03"
@@ -125,7 +126,7 @@ pilot-add)
   if [ -z "$(ls "$P_DD/train/$NAME"/part*.txt 2>/dev/null)" ]; then
     python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume || exit 1
   fi
-  env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,web,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
+  env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
       WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
@@ -150,14 +151,14 @@ add)
     echo "$DD/train/$NAME already has data -- skipping the pull"
   fi
   mkdir -p "$OUT"
-  env DATA_MODE=real DATA_DIR="$DD" DOMAINS="eng,web,$NAME" DEVICE=cuda DISK_STREAM=1 \
+  env DATA_MODE=real DATA_DIR="$DD" DOMAINS="eng,$NAME" DEVICE=cuda DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=$SL EPOCHS=$EP D_MODEL=${D_MODEL:-768} WIN=256 BATCH_W=16 \
       VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=${CKPT_EVERY:-50000} RATE_EVERY=5000 PROFILE=0 RESUME="$OUT/ck" \
       SAVE_CKPT="$OUT/ck_$NAME" nohup python3 self_organize.py >> "$OUT/add_$NAME.log" 2>&1 &
   echo "pid $! -> $OUT/add_$NAME.log   (new checkpoint at $OUT/ck_$NAME, the English one is left intact)"
-  echo "  read the ACROSS THE RUN BOUNDARY section: eng/web carry baselines, $NAME will show as NEW."
+  echo "  read the ACROSS THE RUN BOUNDARY section: eng carries a baseline, $NAME will show as NEW."
   ;;
 
 watch)

@@ -245,31 +245,50 @@ else:
 PHASED = bool(_i("PHASED", 1))                             # NON-STATIONARY stream: processes ENTER and FADE over time
 
 
-def _phases(n):
-    """Who is active in each quarter, DERIVED FROM NP rather than hard-coded for four processes.
+def _phases(n, p=None, w=None):
+    """Who is active in each phase -- GENERATED FROM A RULE, not looked up in a table.
 
-    The old fixed [[0,1],[0,1,2],[1,2,3],[2,3]] was filtered to existing processes inside build_stream, with an
-    `or list(range(NP))` fallback when the filter emptied it. On a TWO-process run -- which is exactly the
-    English-first configuration -- that produces [0,1], [0,1], [1], and then [] -> ALL, so the final "fade" phase
-    was the LEAST non-stationary of the four and process 0 never faded at all.
-    Worse, the filtering happened only in build_stream while five other places read PHASE_SCHED raw:
-      - the phase banner printed "active processes [2, 3]" for processes that did not exist
-      - the learning curve's was_active flag was wrong for every NP < 4
-      - the UNLEARN test takes `faded = [p for p in labels if p not in PHASE_SCHED[-1]]`, which at NP=2 marks
-        EVERY process as faded and deletes the whole store
-    Deriving it once here means every reader sees the same, correct schedule."""
-    if n <= 1: return [[0]] * 4                            # one corpus genuinely is stationary; say so consistently
-    # NP=2 ends with 0 GONE, not with everything back on. The last phase is what `faded` is computed from
-    # (faded = processes absent from PHASE_SCHED[-1]), so a schedule ending [0,1] leaves nothing faded and the
-    # whole unlearn-a-faded-process test skips itself as vacuous -- which is how that test came to be reported
-    # as passing without ever running. This shape is also the experiment being asked for: learn one thing,
-    # add a second, take the first away, measure what survived.
-    if n == 2: return [[0], [0, 1], [0, 1], [1]]           # 0 alone -> 1 enters -> both -> 0 FADES
-    if n == 3: return [[0, 1], [0, 1, 2], [1, 2], [0, 2]]
-    return [[0, 1], [0, 1, 2], [1, 2, 3], [2, 3]]          # 2 enters, 0 fades, 3 enters, 1 fades
+    A sliding window of `w` processes over `n`, across `p` phases. Every process enters, is active for a
+    contiguous stretch, and fades; the last phase excludes at least one process whenever n > 1, which matters
+    because `faded` is computed from PHASE_SCHED[-1] and a schedule ending with everything active makes the
+    unlearn-a-faded-process test skip itself as vacuous.
+
+    This replaced a per-n lookup table, which replaced a single fixed 4-process list. Both were arbitrary in
+    exactly the way the splice itself is arbitrary: WE chose who was active when, and then measured the system
+    against our choice. A rule at least applies the same shape at any n, and PHASE_SCHED= overrides it outright
+    when a specific schedule is wanted:
+        PHASE_SCHED="0|0,1|0,1|1"      explicit, pipe-separated phases
+        PHASES=6 PHASE_W=2             six phases, two processes live at a time
+    n <= 1 is genuinely stationary and says so: one corpus cannot have processes enter and fade. On that
+    configuration the non-stationarity has to come from ADDING an area later, which is the real test anyway --
+    a spliced phase schedule is our scaffold, a new corpus arriving is not."""
+    p = p or max(2, _i("PHASES", 4))
+    if n <= 1: return [[0] if n else []] * p
+    w = w or max(1, min(n, _i("PHASE_W", (n + 1) // 2)))
+    if w >= n: w = n - 1                                   # never all-active: something must be able to fade
+    out = []
+    for i in range(p):
+        lo = round(i * (n - w) / max(1, p - 1))             # window slides from the first process to the last
+        out.append(list(range(lo, lo + w)))
+    return out
 
 
-PHASE_SCHED = _phases(NP)                                  # rebuilt after NP is known on the real-data path (below)
+def _phases_env(n):
+    """PHASE_SCHED= wins over the generator. Parsed here so a bad value fails loudly at startup rather than
+    producing a silently different experiment."""
+    raw = os.environ.get("PHASE_SCHED", "").strip()
+    if not raw: return _phases(n)
+    try:
+        sched = [[int(x) for x in ph.split(",") if x != ""] for ph in raw.split("|")]
+        if not sched or any(not ph for ph in sched): raise ValueError("empty phase")
+        if any(j < 0 or j >= n for ph in sched for j in ph): raise ValueError(f"process id outside 0..{n-1}")
+        return sched
+    except ValueError as e:
+        raise SystemExit(f"PHASE_SCHED={raw!r} is not usable ({e}). Format: \"0|0,1|0,1|1\" -- "
+                         f"pipe-separated phases, comma-separated process ids in 0..{n-1}.")
+
+
+PHASE_SCHED = _phases_env(NP)                                  # rebuilt after NP is known on the real-data path (below)
 PH_BOUNDS = []                                             # stream positions where each phase starts
 def build_stream():
     buf = []; lab = []; sw = []; pos = 0
@@ -2780,7 +2799,16 @@ def main():
         #   CEILING = REAL text from that corpus scored the same way (the encoder is not perfect, so this is < 1)
         #   FLOOR   = chance, 1/NP, what a generator ignorant of the seed would get
         try:
-            if _gen_keep and SIG_MODE == "learned" and len(set(labels)) > 1:
+            # WHICH CENTROIDS? With >= 2 spliced corpora, the true-corpus centroids are the stricter reference:
+            # they are OURS, so agreeing with them cannot be self-confirming. On a SINGLE corpus there are no
+            # true-corpus centroids to use and this section used to skip itself entirely -- which is exactly the
+            # configuration an English-only run has, and it would have removed the one metric that speaks to
+            # "is this proper language". Fall back to the SELF-ASSEMBLED domains: does a continuation stay in the
+            # domain the system itself put its seed in? That is a weaker claim (the partition being scored is the
+            # system's own) and it is labelled as such, but it is a real question and it is the only one available
+            # when nothing was spliced.
+            _self_ref = False
+            if _gen_keep and SIG_MODE == "learned":
                 _cent = {}
                 for _p in sorted(set(labels)):             # true-corpus centroids from REAL data, not from domains
                     _st = [s for s in range(0, len(stream) - WIN - 1, WIN) if labels[s] == _p]
@@ -2790,6 +2818,9 @@ def main():
                     with torch.no_grad():
                         _Z = enc(torch.tensor([encwin(b) for b in _bs], device=DEV))
                     if _Z.numel(): _cent[_p] = F.normalize(_Z.mean(0), dim=0)
+                if len(_cent) < 2 and asm is not None and len(asm.cent) > 1:
+                    _self_ref = True                        # single corpus -> score against what the system assembled
+                    _cent = {int(k): F.normalize(v.to(DEV), dim=0) for k, v in asm.cent.items()}
                 if len(_cent) > 1:
                     _ks = sorted(_cent); _C = torch.stack([_cent[k] for k in _ks])
                     def _stay(units, home):                # fraction of windows nearest the HOME corpus centroid
@@ -2811,15 +2842,30 @@ def main():
                     # a difference inside it cannot be read as a result.
                     _cn, _cl = _i("COH_N", 16), _i("COH_LEN", 384)
                     _rn, _rm, _rr = [], [], []
+                    # Seeds: one per corpus in rotation when corpora were spliced; anywhere in the stream when
+                    # they were not. HOME is what the continuation is asked to stay in -- the seed's corpus in the
+                    # spliced case, and the self-assembled domain the seed actually lands in otherwise. The second
+                    # has to be MEASURED per seed (encode it, take the nearest centroid) rather than looked up,
+                    # because on one corpus there is no label to look up.
                     _cps = [p for p in sorted(set(labels)) if p in _cent]
+                    _allst = [s for s in range(0, len(stream) - (WIN + 1), WIN)]
                     for _k in range(_cn):
-                        _p = _cps[_k % len(_cps)]
-                        _sts = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == _p]
-                        if not _sts: continue
-                        _s0 = random.choice(_sts); _sd2 = list(stream[_s0:_s0 + WIN])
+                        if _self_ref:
+                            if not _allst: continue
+                            _s0 = random.choice(_allst)
+                        else:
+                            if not _cps: continue
+                            _p = _cps[_k % len(_cps)]
+                            _sts = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == _p]
+                            if not _sts: continue
+                            _s0 = random.choice(_sts)
+                        _sd2 = list(stream[_s0:_s0 + WIN])
                         _g2 = None
-                        if FABRIC:
+                        if FABRIC or _self_ref:
                             with torch.no_grad(): _g2 = enc(torch.tensor([encwin(encpos(_s0))], device=DEV))
+                        if _self_ref:
+                            _p = int(_ks[int((_C @ _g2[0]).argmax())])   # the domain the system put this seed in
+                        if not FABRIC: _g2 = None
                         for _acc, _um in ((_rn, False), (_rm, True)):
                             _v = _stay(generate(model, mem, _sd2, _cl, _um, DEV, temp=_f("GEN_TEMP", 0.7),
                                                 vlim=(TOK.vocab_size if USE_TOK else None), fab=fab, gist=_g2), _p)
@@ -2835,10 +2881,18 @@ def main():
                         _ceil = sum(_rr) / len(_rr) if _rr else float("nan")
                         _floor = 1.0 / len(_cent)
                         _d = _mm - _mn; _ed = (_en ** 2 + _em ** 2) ** 0.5
-                        print(f"\n=== COHERENCE: does a continuation STAY in the domain of its seed? ===")
+                        print(f"\n=== COHERENCE: does a continuation STAY in the domain of its seed?"
+                              + (" [SELF-ASSEMBLED reference] ===" if _self_ref else " ===")) 
+                        if _self_ref:
+                            print(f"  reference = the {len(_cent)} domains the SYSTEM assembled, not corpora we spliced in."
+                                  f" Weaker evidence: the partition being scored is the system's own, so a tidy score"
+                                  f" could mean the encoder is self-consistent rather than that the text is coherent."
+                                  f" Read the GENERATION samples above alongside it.")
                         print(f"  model ALONE {_mn:.2f} +/- {_en:.2f}  |  model+MEMORY {_mm:.2f} +/- {_em:.2f}  |  "
                               f"REAL text (ceiling) {_ceil:.2f}  |  chance (floor) {_floor:.2f}")
-                        print(f"  >> fraction of generated windows whose nearest true-corpus centroid is the SEED's,"
+                        print(f"  >> fraction of generated windows whose nearest "
+                              + ("self-assembled domain" if _self_ref else "true-corpus")
+                              + f" centroid is the SEED's,"
                               f" over {len(_rn)} continuations of {_cl} tokens (COH_N/COH_LEN).")
                         _best = max(_mn, _mm)
                         print(f"  >> {'ON-TOPIC -- close to what real text of this corpus scores' if _best >= _ceil - 0.15 else ('PARTIAL -- better than chance but wanders well before real text does' if _best > _floor + 0.10 else 'INCOHERENT -- indistinguishable from ignoring the seed entirely')}"
