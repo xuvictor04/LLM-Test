@@ -151,6 +151,9 @@ DOM_MANAGE_EVERY = _i("DOM_MANAGE_EVERY", 100)
 DOM_PRIOR = _f("DOM_PRIOR", 0.15)
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
+COMP_EMA = _f("COMP_EMA", 0.02)            # EMA rate for per-domain / per-node COMPETENCE (bits on the material it wins)
+COMP_PROTECT = bool(_i("COMP_PROTECT", 1))  # protect a unit that BEATS the population on its own material from culling,
+#   however rarely it is used. COMP_PROTECT=0 restores pure-utilization selection (the ablation).
 KW = _i("KEY_WIN", 8); V = 256
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
@@ -427,6 +430,8 @@ class Fabric(nn.Module):
         s.keys = nn.ParameterList([nn.Parameter(torch.randn(dk) * 0.1) for _ in range(n0)])
         s.qproj = nn.ModuleList([nn.Linear(sig_d, dk) for _ in range(n0)])
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
+        s.comp = {}                                        # COMPETENCE per node: EMA bits/window on what it wins.
+        #   Not a Parameter and not in state_dict -- it is a selection statistic, re-earned after a resume.
         s.q_entry = nn.Linear(sig_d, dk); s.nov = nn.Linear(1, dk); s.ctrl = nn.Linear(3, dk)
         s.norm = nn.LayerNorm(d); s.grown = 0
         s.norm_only = norm_only                             # ABLATION: normalization only, no nodes, no routing
@@ -618,7 +623,9 @@ class ExpertRouter:
         s.grace = grace                                       # min age before an expert may be culled -- without it,
         s.mode = mode                                         #   selection kills experts before they can specialize
         s.cull_rank = cull_rank; s.pressure_on = pressure_on; s.merge_dist = merge_dist; s.fit_win = fit_win
-        s.created = 0; s.replicated = 0; s.removed = 0; s.merged = 0
+        s.created = 0; s.replicated = 0; s.removed = 0; s.merged = 0; s.spared = 0
+        s.comp_of = None                                      # set by the loop: expert id -> (its competence EMA,
+        #   the population's). Injected rather than computed here because the router does not see the LM loss.
     def route(s, sig, step, create=True):                     # -> expert slot (or -1)
         sig = sig.detach()
         if s.cent:
@@ -664,6 +671,13 @@ class ExpertRouter:
                 for i in order[:max(1, int(s.cull_rank * len(s.cent)))]:
                     if len(s.cent) <= 2: break
                     if step - s.born.get(i, step) < s.grace: continue
+                    # COMPETENCE PROTECTION, same principle as the domains: `fit` here is use-per-unit-time, so the
+                    # bottom of this ranking is "rarely called", which a niche expert and a dead one share. Spare
+                    # the ones that model their own material better than the population does.
+                    if COMP_PROTECT and s.comp_of is not None:
+                        _c, _g = s.comp_of(i)
+                        if _c is not None and _g is not None and _c < _g:
+                            s.spared = getattr(s, "spared", 0) + 1; continue
                     s._drop(i); s.removed += 1
         else:                                                 # legacy mean-threshold rule
             mean = sum(s.use.get(i, 0) for i in s.cent) / len(s.cent)
@@ -932,6 +946,9 @@ class DomainAssembler:
     def __init__(s):
         s.run_sig = None; s.cent = {}; s.wins = {}; s.size = {}; s.last = {}
         s.act = {}; s.born = {}                                           # act: DECAYED use (cull); size: cumulative (reporting)
+        s.comp = {}; s.comp_glob = None                                   # COMPETENCE: EMA bits/window on the material
+        #   this domain wins, against the population's own EMA. Selection was utilization-only; this is the term
+        #   that lets a rarely-fed domain survive on being GOOD at what it does get.
         s.cur = -1; s.run = 0; s.next_id = 0; s.merged = {}               # merged[b]=a: b was folded into a (for scoring)
         s._ids = []; s._C = None; s._pend = []                            # cached (N,SIG_D) centroid matrix + pending run sigs
         s._dh = []                                                        # recent assign distances -> the adaptive spawn threshold
@@ -1129,10 +1146,16 @@ class DomainAssembler:
                 if len(s.cent) <= 1: break
                 if step - s.born.get(d, step) < DOM_GRACE: continue
                 if not (s.act.get(d, 0.0) < min_size and step - s.last[d] > stale): continue
+                # COMPETENCE PROTECTION. Rare and stale is exactly what a niche domain looks like from a
+                # utilization-only vantage point, and it is also what a dead one looks like. The difference is
+                # whether the material it does get is modelled BETTER than the population manages on average.
+                if COMP_PROTECT and s.comp_glob is not None and d in s.comp and s.comp[d] < s.comp_glob:
+                    s.protected = getattr(s, "protected", 0) + 1; continue
                 if mem is not None: mem.delete_src(d)                     # CULL -> memory follows (direct prune)
                 for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s.rad, s.visits, s.bornb, s.tokc): _D.pop(d, None)
                 culled += 1; s._dirty()
         for i in s.act: s.act[i] *= DOM_DECAY                             # DECAY -> `act` reflects RECENT use, so a domain
+        s.comp = {i: v for i, v in s.comp.items() if i in s.cent}         # competence follows the population
         return merged, culled                                             #   that stops being fed becomes cullable
 
 @torch.no_grad()
@@ -2041,7 +2064,9 @@ def main():
         if SELF_ORG and MANAGE_ON and step % DOM_MANAGE_EVERY == 0 and step > 0:                    # MANAGE the domain set
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull + fold
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
-        if EXPERTS and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0: router.manage(step)   # experts: create/replicate/cull (their own selective force)
+        if EXPERTS and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
+            router.comp_of = (lambda i: (fab.comp.get(i), asm.comp_glob)) if FABRIC else (lambda i: (None, None))
+            router.manage(step)   # experts: create/replicate/cull (their own selective force)
         if WORLD_GROW and step % MANAGE_EVERY == 0 and step > 0:                                    # world-model SELECTION (same cadence as experts/domains)
             if world_fwd.n() < world_fwd.nmax and _wl_ema is not None and _winv > 0.9 * _wl_ema and step - _wl_lastgrow > 4 * MANAGE_EVERY:
                 _newp = world_fwd.grow(_wz.reshape(-1, WLAT).detach())   # plateau (no improvement) -> add a dynamics predictor, cloned from the fittest
@@ -2077,6 +2102,7 @@ def main():
         _plm = _t0()
         if _AC is not None: _AC.__enter__()                     # autocast the LM step (entered/exited explicitly rather
         #   than as a `with` block purely to avoid re-indenting the whole step); backward runs OUTSIDE it, as recommended.
+        _w = _oid = None                                        # defined on EVERY path: competence attribution reads them
         _sl = router.route(sig, step) if EXPERTS else -1        # route by SIGNATURE to the expert population (coarser than domains)
         if EXPERTS and _sl >= 0: route_at[bpos:bpos + WIN] = _sl   # remember WHICH expert trained on this span
         h = model.encode(x)                                      # includes the world-model feedback when enabled (wrapped above)
@@ -2105,7 +2131,35 @@ def main():
                 lg = _hd[_j] * _wk[_q] if lg is None else lg + _hd[_j] * _wk[_q]
         else:
             lg = model.head(h)
-        loss = F.cross_entropy(lg.reshape(-1, V), y.reshape(-1))
+        # PER-WINDOW loss, then the mean. Same arithmetic, same cost -- reduction='none' and .mean() is exactly
+        # what cross_entropy does internally -- but it leaves the per-window numbers available, and COMPETENCE
+        # cannot be tracked without them.
+        _plw = F.cross_entropy(lg.reshape(-1, V), y.reshape(-1), reduction="none").reshape(y.size(0), -1).mean(-1)
+        loss = _plw.mean()
+        # === COMPETENCE, the term selection was missing ==========================================================
+        # Every cull rule in this system ranks on UTILIZATION: fabric soft_cull on routing mass, ExpertRouter on
+        # use-per-unit-time, domains on decayed `act`. Utilization is the right resource -- it is what the
+        # population competes for -- but on its own it cannot tell a niche expert that is excellent when called
+        # from a dead one, because both are called rarely. The protections that existed were all TIME-based
+        # (grace for the newborn, an AND-clause on staleness, bounded rank turnover): they protect the NEW and
+        # they bound the RATE of death. Nothing protected the USEFUL-BUT-RARE.
+        # So track, online and free, how well the material each domain and each node WINS is actually modelled,
+        # as an EMA against the population's own EMA. A unit that beats the population on its own material is
+        # earning its place however seldom it is called, and the cull rules now check that before dropping it.
+        with torch.no_grad():
+            _cg = float(loss)
+            asm.comp_glob = _cg if asm.comp_glob is None else (1 - COMP_EMA) * asm.comp_glob + COMP_EMA * _cg
+            for _r, _dd in enumerate(_bd[:_plw.size(0)]):
+                _v = float(_plw[_r])
+                asm.comp[_dd] = _v if _dd not in asm.comp else (1 - COMP_EMA) * asm.comp[_dd] + COMP_EMA * _v
+            if FABRIC and SOCIETY and _w is not None and _w.dim() == 2:
+                # _w is indexed by GLOBAL node id (the code below reads it as _w[:, _oid[rank]]), so argmax over it
+                # is already the node id. Indexing _oid with it treated a global id as a rank and went out of bounds.
+                _wn = _w.argmax(-1)                                      # the expert each window leans on most
+                if _wn is not None:
+                    for _r in range(min(_plw.size(0), _wn.numel())):
+                        _n = int(_wn[_r]); _v = float(_plw[_r])
+                        fab.comp[_n] = _v if _n not in fab.comp else (1 - COMP_EMA) * fab.comp[_n] + COMP_EMA * _v
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
         tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0)  # nodes have had a chance to be useful
@@ -2838,6 +2892,16 @@ def main():
                                   "would. Routing load is spread, competence is not -- see DIV_W (0.0 by default, "
                                   "and BAL_WARM decays the only other pressure to 0 by step 4000)."))
                 print(f"  ({len(_used)} of {_N} nodes used: unused nodes are capacity the router never calls on.)")
+                # WHAT PROTECTION ACTUALLY DID. A selection change that reports nothing is a change nobody can
+                # audit, and this one deliberately keeps units that the utilization ranking wanted dead.
+                _spd = getattr(asm, "protected", 0) + getattr(router, "spared", 0) if EXPERTS else getattr(asm, "protected", 0)
+                print(f"  COMPETENCE PROTECTION [{'on' if COMP_PROTECT else 'OFF (pure-utilization ablation)'}]: "
+                      f"spared {_spd} unit(s) that utilization ranked for culling but that model their own material "
+                      f"better than the population (COMP_PROTECT=0 to compare).")
+                if asm.comp_glob is not None and asm.comp:
+                    _bet = [d for d, v in asm.comp.items() if v < asm.comp_glob]
+                    print(f"  {len(_bet)} of {len(asm.comp)} live domains beat the population EMA "
+                          f"({asm.comp_glob:.3f} bits/window) on their own material.")
         except Exception as _e:
             print(f"[expert specialization check skipped: {type(_e).__name__}: {_e}]")
 

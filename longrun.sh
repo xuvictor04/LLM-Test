@@ -102,12 +102,25 @@ pilot)
   # Report the ACTUAL settings, not the defaults -- a banner that lies when overridden is how a run gets filed
   # under the wrong description weeks later.
   echo "pilot: ONE English corpus, domains self-assembled | $((P_SL/1000)) kB/epoch x $P_EP epochs = $((P_SL*P_EP/1000)) kB consumed | ~$((P_SL*P_EP/614)) steps"
-  env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
+  # BOTH ARCHITECTURES. The base LM is a GRU by default and every number this project has produced is a GRU
+  # number; MODEL=transformer (4 layers, 8 heads, causal) has never been run here. If proper language is the goal
+  # then the 1-layer GRU may be the ceiling rather than the system, and the only way to know which is to run both
+  # on the identical stream. ~2x the time, and it settles how much of the bits/byte gap is architecture.
+  for ARCH in ${PILOT_ARCH:-gru transformer}; do
+  echo; echo "################  base LM: $ARCH  ################"
+  env MODEL=$ARCH LAYERS=$([ "$ARCH" = transformer ] && echo ${TF_LAYERS:-4} || echo 1) HEADS=${HEADS:-8} \
+      DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=$P_SL EPOCHS=$P_EP D_MODEL=${D_MODEL:-768} \
       WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 \
-      SAVE_CKPT="$OUT/pilot" python3 self_organize.py 2>&1 | tee "$OUT/pilot.log"
+      SAVE_CKPT="$OUT/pilot_$ARCH" python3 self_organize.py 2>&1 | tee "$OUT/pilot_$ARCH.log"
+  done
+  echo
+  echo "=== SIDE BY SIDE (the only number that compares them directly) ==="
+  for ARCH in ${PILOT_ARCH:-gru transformer}; do
+    printf "  %-12s %s\n" "$ARCH" "$(grep -a -oE 'order-1 [0-9.]+ \| THIS MODEL [0-9.]+' "$OUT/pilot_$ARCH.log" 2>/dev/null | head -1)"
+  done
   echo
   echo "READ IN THIS ORDER -- what the project is FOR, in order:"
   echo "  GENERATION   the samples. THE deliverable -- everything else is a proxy for these."
@@ -125,7 +138,8 @@ pilot)
 pilot-add)
   NAME=${2:-}; DS=${3:-}; GB=${4:-0.03}; P_DD=${PILOT_DIR:-data_pilot}
   [ -n "$NAME" ] && [ -n "$DS" ] || { echo "usage: bash longrun.sh pilot-add <name> <hf-dataset> [gb]"; exit 1; }
-  [ -f "$OUT/pilot/ckpt.pt" ] || { echo "!! no pilot checkpoint at $OUT/pilot/ckpt.pt -- run 'bash longrun.sh pilot' first"; exit 1; }
+  PA=${PILOT_ADD_ARCH:-gru}
+  [ -f "$OUT/pilot_$PA/ckpt.pt" ] || { echo "!! no pilot checkpoint at $OUT/pilot_$PA/ckpt.pt -- run 'bash longrun.sh pilot' first (PILOT_ADD_ARCH=gru|transformer)"; exit 1; }
   if [ -z "$(ls "$P_DD/train/$NAME"/part*.txt 2>/dev/null)" ]; then
     python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume || exit 1
   fi
@@ -133,8 +147,8 @@ pilot-add)
       CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
       WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
-      CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 RESUME="$OUT/pilot" \
-      SAVE_CKPT="$OUT/pilot_$NAME" python3 self_organize.py 2>&1 | tee "$OUT/pilot_$NAME.log"
+      CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 RESUME="$OUT/pilot_$PA" MODEL=$PA LAYERS=$([ "$PA" = transformer ] && echo ${TF_LAYERS:-4} || echo 1) \
+      SAVE_CKPT="$OUT/pilot_${PA}_$NAME" python3 self_organize.py 2>&1 | tee "$OUT/pilot_$NAME.log"
   echo; echo ">> the number this run exists for is in ACROSS THE RUN BOUNDARY: what adding $NAME did to eng and web."
   ;;
 
