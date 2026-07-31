@@ -67,7 +67,12 @@ if [ "$WHICH" = smoke ]; then
   # crashed there and BENCH=1 would have passed it. Shrink the stream instead, and use the GPU if there is one.
   SMDEV=${DEVICE:-$(python3 -c "import torch;print('cuda' if torch.cuda.is_available() else 'cpu')" 2>/dev/null || echo cpu)}
   TINY="DATA_MODE=real DATA_DIR=data DOMAINS=eng,py,num,c STREAM_LEN=${SMOKE_LEN:-12000} D_MODEL=64 WIN=64 BATCH_W=4 \
-DEVICE=$SMDEV MANAGE_EVERY=20 DOM_MANAGE_EVERY=20 ENC_WARMUP=50 ENC_WARMUP_MIN=20 SAVE_CKPT=0"
+DEVICE=$SMDEV MANAGE_EVERY=20 DOM_MANAGE_EVERY=20 ENC_WARMUP=50 ENC_WARMUP_MIN=20 SAVE_CKPT=0 \
+COH_N=2 COH_LEN=96"
+  # COH_N/COH_LEN pinned DOWN here on purpose. The real defaults (16 x 384) are 32 autoregressive generations per
+  # arm; dropping them into the gate took an arm from 25 s to 3.3 min and blew the grid straight back past the run
+  # it protects. The gate asks "does this arm reach the report", which 2 short continuations answer as well as 32.
+  # Resolution is the MEASUREMENT's job, and the measurement runs on the GPU.
   echo "smoke: 10 arms on $SMDEV, ${SMOKE_LEN:-12000} B each. Asserting only that every arm REACHES THE REPORT."
   bad=0
   for arm in "full:" "no_fabric:FABRIC=0" "no_world:WORLD_MODEL=0" "no_perexp:MEM_PER_EXPERT=0" \
@@ -118,7 +123,11 @@ if [ -n "$(ls "$OUT"/ab_*.log 2>/dev/null)" ]; then
     L=$(basename "$f" .log)
     a1=$(grep -a -oE "order-1 [0-9.]+" "$f" | head -1 | awk '{print $2}')
     mm=$(grep -a -oE "THIS MODEL [0-9.]+" "$f" | head -1 | awk '{print $3}')
-    fm=$(grep -a -oE "MEMORY [0-9.]+" "$f" | tail -1 | awk '{print $2}')
+    # ANCHOR ON "FABRIC + MEMORY". Matching bare "MEMORY [0-9.]+" also hits the COHERENCE line's "model+MEMORY 0.50",
+    # and `tail -1` then picked whichever came last in that arm's log -- so the first table printed 0.50 (a coherence
+    # FRACTION) for five arms and 2.618 (bits/byte) for the sixth, in one column, with no units. Two different
+    # quantities under one heading is worse than a missing column.
+    fm=$(grep -a -oE "FABRIC \+ MEMORY [0-9.]+" "$f" | tail -1 | awk '{print $4}')
     nd=$(grep -a -oE "SELF-ASSEMBLED [0-9]+ LIVE" "$f" | head -1 | awk '{print $2}')
     printf "  %-14s %8s %8s %8s   %s\n" "${L#ab_}" "${a1:--}" "${mm:--}" "${fm:--}" "${nd:--} domains"
   done

@@ -2658,28 +2658,51 @@ def main():
                         if not _w: return None
                         with torch.no_grad(): _Z = enc(torch.tensor(_w, device=DEV))
                         return float((torch.tensor(_ks, device=DEV)[(_C @ _Z.t()).argmax(0)] == home).float().mean())
+                    # MEASURED ON ITS OWN SAMPLE, NOT ON THE FOUR PRINTED ONES. The printed generations exist to be
+                    # read by eye; scoring them made coherence a mean over GEN_PROCS=4 samples of a ~200-token
+                    # continuation, which at WIN=256 and stride WIN//2 is about TWO windows each. Every coherence
+                    # number this project ever printed landed exactly on 0.25/0.50/0.75/1.00 -- the signature of a
+                    # four-sample mean -- and its standard error there is 0.25. "memory HELPS (0.50 -> 0.75)" and
+                    # "the fabric buys coherence (0.75 vs 0.50)" are both ONE SAMPLE flipping. They were reported as
+                    # findings, including by me, twice, in opposite directions on consecutive runs.
+                    # COH_N seeds x COH_LEN tokens instead: ~10x the decisions, and the standard error is PRINTED so
+                    # a difference inside it cannot be read as a result.
+                    _cn, _cl = _i("COH_N", 16), _i("COH_LEN", 384)
                     _rn, _rm, _rr = [], [], []
-                    for _p, _sd, _a, _b in _gen_keep:
-                        if _p not in _cent: continue
-                        for _acc, _u in ((_rn, _a), (_rm, _b)):
-                            _v = _stay(_u, _p)
+                    _cps = [p for p in sorted(set(labels)) if p in _cent]
+                    for _k in range(_cn):
+                        _p = _cps[_k % len(_cps)]
+                        _sts = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == _p]
+                        if not _sts: continue
+                        _s0 = random.choice(_sts); _sd2 = list(stream[_s0:_s0 + WIN])
+                        _g2 = None
+                        if FABRIC:
+                            with torch.no_grad(): _g2 = enc(torch.tensor([encwin(encpos(_s0))], device=DEV))
+                        for _acc, _um in ((_rn, False), (_rm, True)):
+                            _v = _stay(generate(model, mem, _sd2, _cl, _um, DEV, temp=_f("GEN_TEMP", 0.7),
+                                                vlim=(TOK.vocab_size if USE_TOK else None), fab=fab, gist=_g2), _p)
                             if _v is not None: _acc.append(_v)
-                        _st = [s for s in range(0, len(stream) - WIN - 1, WIN) if labels[s] == _p]
-                        if _st:                            # CEILING: real text of the same corpus, same measurement
-                            _v = _stay(list(stream[_st[0]:_st[0] + _i("GEN_LEN", 200)]), _p)
-                            if _v is not None: _rr.append(_v)
+                        _v = _stay(list(stream[_s0:_s0 + _cl]), _p)   # CEILING: real text, same length, same measure
+                        if _v is not None: _rr.append(_v)
+                    def _msd(a):                           # mean and STANDARD ERROR OF THE MEAN -- the resolution
+                        _m = sum(a) / len(a)               #   of the number, which is what was missing
+                        _v = sum((x - _m) ** 2 for x in a) / max(1, len(a) - 1)
+                        return _m, (_v / len(a)) ** 0.5
                     if _rn and _rm:
-                        _mn, _mm = sum(_rn) / len(_rn), sum(_rm) / len(_rm)
+                        (_mn, _en), (_mm, _em) = _msd(_rn), _msd(_rm)
                         _ceil = sum(_rr) / len(_rr) if _rr else float("nan")
                         _floor = 1.0 / len(_cent)
+                        _d = _mm - _mn; _ed = (_en ** 2 + _em ** 2) ** 0.5
                         print(f"\n=== COHERENCE: does a continuation STAY in the domain of its seed? ===")
-                        print(f"  model ALONE {_mn:.2f}  |  model+MEMORY {_mm:.2f}  |  REAL text (ceiling) {_ceil:.2f}"
-                              f"  |  chance (floor) {_floor:.2f}")
-                        print(f"  >> fraction of generated windows whose nearest true-corpus centroid is the SEED's."
-                              f" Drift out of the seed's domain is the failure these samples show by eye.")
+                        print(f"  model ALONE {_mn:.2f} +/- {_en:.2f}  |  model+MEMORY {_mm:.2f} +/- {_em:.2f}  |  "
+                              f"REAL text (ceiling) {_ceil:.2f}  |  chance (floor) {_floor:.2f}")
+                        print(f"  >> fraction of generated windows whose nearest true-corpus centroid is the SEED's,"
+                              f" over {len(_rn)} continuations of {_cl} tokens (COH_N/COH_LEN).")
                         _best = max(_mn, _mm)
                         print(f"  >> {'ON-TOPIC -- close to what real text of this corpus scores' if _best >= _ceil - 0.15 else ('PARTIAL -- better than chance but wanders well before real text does' if _best > _floor + 0.10 else 'INCOHERENT -- indistinguishable from ignoring the seed entirely')}"
-                              f"; memory {'HELPS' if _mm > _mn + 0.02 else ('HURTS' if _mn > _mm + 0.02 else 'is neutral')} here.")
+                              f"; memory {'HELPS' if _d > 2 * _ed else ('HURTS' if -_d > 2 * _ed else 'is NEUTRAL')} here"
+                              f" ({_d:+.2f} +/- {_ed:.2f}"
+                              + ("" if abs(_d) > 2 * _ed else "; inside the noise -- do not read this as a result") + ").")
         except Exception as _e:
             print(f"[coherence check skipped: {type(_e).__name__}: {_e}]")
 
