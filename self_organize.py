@@ -1891,7 +1891,19 @@ def main():
     # SIGNATURE WINDOW WIDTH vs LOOP STRIDE. In byte space the width is a byte count while the loop advances WIN
     # TOKENS, so the encoder sees width/(WIN*bytes_per_token) of the stream -- and that fraction SHRINKS as the
     # tokenizer compresses better. Report it, because it was never a decision anyone made.
-    _sigw = SIG_WIN if SIG_WIN > 0 else WIN
+    # SIGNATURE WIDTH must track the LOOP STRIDE, which grows as the tokenizer compresses better.
+    # SIG_WIN=0 meant "use WIN", i.e. 256 BYTES -- while the loop advances WIN TOKENS. Early in a run one token is
+    # about one byte and that matches; by the time the vocabulary has grown to ~2.4 bytes/token the loop strides
+    # 614 bytes and the signature encoder is characterising the first 256 of them. The domain encoder was reading
+    # 42% of the stream and nothing downstream could tell, because every window still produced A signature -- just
+    # one computed from the opening fragment of the material it claims to describe.
+    # Recomputed live from the tokenizer rather than pinned, because the stride is not constant across a run.
+    def _sigwidth():
+        if SIG_WIN > 0: return SIG_WIN                      # explicit setting always wins
+        if not (ONLINE and SIG_SPACE == "bytes"): return WIN
+        _b = (sum(TOK.bytes_per_id[:TOK.vocab_size]) / max(1, TOK.vocab_size)) if (USE_TOK and TOK is not None) else 1.0
+        return max(WIN, int(WIN * max(1.0, _b)))            # never narrower than the stride the loop takes
+    _sigw = _sigwidth()
     if ONLINE and SIG_SPACE == "bytes":
         _stride_b = WIN * max(1.0, _bpt)
         _cov = min(1.0, _sigw / _stride_b)
@@ -1954,6 +1966,7 @@ def main():
         # half nothing measured: a process ENTERS at a phase boundary and we never asked how many steps it took to
         # model it, nor watched its cost climb again once it FADED. Held-out text per process, on the rate cadence,
         # so the cost is one small eval every RATE_EVERY steps rather than anything in the hot path.
+        if RATE_EVERY and step % RATE_EVERY == 0 and step > 0: _sigw = _sigwidth()   # vocabulary grew -> stride grew
         if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark and VALC:
             try:
                 model.eval()
