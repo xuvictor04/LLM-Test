@@ -149,7 +149,7 @@ pilot-add)
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MAX_DOMAINS=1000000 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 RESUME="$OUT/pilot_$PA" MODEL=$PA LAYERS=$([ "$PA" = transformer ] && echo ${TF_LAYERS:-4} || echo 1) \
       SAVE_CKPT="$OUT/pilot_${PA}_$NAME" python3 self_organize.py 2>&1 | tee "$OUT/pilot_$NAME.log"
-  echo; echo ">> the number this run exists for is in ACROSS THE RUN BOUNDARY: what adding $NAME did to eng and web."
+  echo; echo ">> the number this run exists for is in ACROSS THE RUN BOUNDARY: what adding $NAME did to the English."
   ;;
 
 add)
