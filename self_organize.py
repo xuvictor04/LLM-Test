@@ -1079,6 +1079,11 @@ class DomainAssembler:
         ids = [i for i in s.cent if s.wins[i]]
         if not ids: return
         flat = [w for i in ids for w in s.wins[i]]                        # ONE batched encode for ALL domains (was N
+        _L = len(flat[0]) if flat else 0                                  # DEFENSIVE: one ragged window used to kill
+        if any(len(w) != _L for w in flat):                               #   the whole run here. Normalise instead --
+            flat = [(list(w[:_L]) + [0] * (_L - len(w))) if len(w) != _L else w for w in flat]   # a truncated or
+            print(f"  [rekey] normalised {sum(1 for w in s.wins.values() for _ in w)} sample windows to width {_L} "
+                  f"-- widths should not differ within a run; report this if it appears.")
         with torch.no_grad():                                             #   sequential GRU passes: N*128 serial launches)
             Z = torch.cat([enc(torch.tensor(flat[a:a + chunk], device=DEV)) for a in range(0, len(flat), chunk)])
         o = 0; _all = []
@@ -1897,7 +1902,14 @@ def main():
     # 614 bytes and the signature encoder is characterising the first 256 of them. The domain encoder was reading
     # 42% of the stream and nothing downstream could tell, because every window still produced A signature -- just
     # one computed from the opening fragment of the material it claims to describe.
-    # Recomputed live from the tokenizer rather than pinned, because the stride is not constant across a run.
+    # FIXED FOR THE LIFETIME OF THE RUN. I first made this recompute live as the tokenizer grew, which crashed both
+    # pilot arms at the first rekey: asm.wins still held windows captured at the OLD width, rekey concatenates them
+    # into one batch, and a ragged batch is a ValueError. The crash was the lesser problem. Domain centroids ARE
+    # means of encoded windows, so changing the width mid-run makes signatures taken before and after the change
+    # incomparable -- every centroid, radius and boundary test would silently straddle two different measurements.
+    # A width that moves is wrong in principle, not just in implementation.
+    # Fixed means it cannot track a growing stride, so SIG_PROJ says what the coverage will be once the vocabulary
+    # has grown, and SIG_WIN= sets it outright if you want full coverage at the END rather than at the start.
     def _sigwidth():
         if SIG_WIN > 0: return SIG_WIN                      # explicit setting always wins
         if not (ONLINE and SIG_SPACE == "bytes"): return WIN
@@ -1907,9 +1919,18 @@ def main():
     if ONLINE and SIG_SPACE == "bytes":
         _stride_b = WIN * max(1.0, _bpt)
         _cov = min(1.0, _sigw / _stride_b)
-        print(f"[signature] space=bytes | window {_sigw} B | loop stride {_stride_b:.0f} B ({WIN} tok x {_bpt:.2f}) "
-              f"-> covers {_cov*100:.0f}% of the stream"
-              + ("" if _cov >= 0.99 else f"; SIG_WIN={int(_stride_b)} would cover it all"))
+        # PROJECTED, not just current. The width is fixed for the run but the STRIDE grows as the vocabulary
+        # compresses better, so a window that covers 100% at step 0 covers less every hour. Saying only the
+        # starting number is how "covers 100%" gets believed for a run that ends at 60%.
+        _bpt_end = _f("SIG_PROJ_BPT", 2.4)                  # rough end-of-run bytes/token at VMAX~2048 byte-BPE
+        _stride_end = WIN * max(1.0, _bpt_end); _cov_end = min(1.0, _sigw / _stride_end)
+        print(f"[signature] space=bytes | window {_sigw} B (FIXED for the run) | loop stride now {_stride_b:.0f} B "
+              f"({WIN} tok x {_bpt:.2f}) -> covers {_cov*100:.0f}% now"
+              + (f", ~{_cov_end*100:.0f}% once the vocabulary has grown (~{_bpt_end:.1f} B/tok)"
+                 if _cov_end < _cov - 0.01 else "")
+              + ("" if min(_cov, _cov_end) >= 0.99 else
+                 f"; SIG_WIN={int(_stride_end)} covers it throughout (wider than one loop window early on, which "
+                 f"means consecutive signatures overlap -- a real trade, not a free fix)"))
     elif SIG_SPACE == "tokens":
         print(f"[signature] space=TOKENS | window {WIN} tok (~{WIN*_bpt:.0f} B) | encoder vocab {ENC_V}, live {TOK.vocab_size if USE_TOK else 256}"
               f" | new ids warm-started from their constituents; centroids re-encoded every REKEY_EVERY={REKEY_EVERY}")
@@ -1966,7 +1987,6 @@ def main():
         # half nothing measured: a process ENTERS at a phase boundary and we never asked how many steps it took to
         # model it, nor watched its cost climb again once it FADED. Held-out text per process, on the rate cadence,
         # so the cost is one small eval every RATE_EVERY steps rather than anything in the hot path.
-        if RATE_EVERY and step % RATE_EVERY == 0 and step > 0: _sigw = _sigwidth()   # vocabulary grew -> stride grew
         if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark and VALC:
             try:
                 model.eval()

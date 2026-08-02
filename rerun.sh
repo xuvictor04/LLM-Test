@@ -83,15 +83,20 @@ if [ "$WHICH" = smoke ]; then
   TINY="DATA_MODE=real DATA_DIR=data DOMAINS=eng,py,num,c STREAM_LEN=${SMOKE_LEN:-12000} D_MODEL=64 WIN=64 BATCH_W=4 \
 DEVICE=$SMDEV MANAGE_EVERY=20 DOM_MANAGE_EVERY=20 ENC_WARMUP=50 ENC_WARMUP_MIN=20 SAVE_CKPT=0 \
 COH_N=2 COH_LEN=96"
+  # vocab_growth is the arm that would have caught the signature-width regression: it grows the vocabulary and
+  # re-keys repeatedly inside one short run. Every other arm runs 12 kB, where the vocabulary barely moves, the
+  # stride stays put, and asm.wins never holds two widths -- so the gate passed a change that killed BOTH pilot
+  # arms at their first rekey. A gate only covers what it exercises.
   # COH_N/COH_LEN pinned DOWN here on purpose. The real defaults (16 x 384) are 32 autoregressive generations per
   # arm; dropping them into the gate took an arm from 25 s to 3.3 min and blew the grid straight back past the run
   # it protects. The gate asks "does this arm reach the report", which 2 short continuations answer as well as 32.
   # Resolution is the MEASUREMENT's job, and the measurement runs on the GPU.
-  echo "smoke: 10 arms on $SMDEV, ${SMOKE_LEN:-12000} B each. Asserting only that every arm REACHES THE REPORT."
+  echo "smoke: 11 arms on $SMDEV, ${SMOKE_LEN:-12000} B each. Asserting only that every arm REACHES THE REPORT."
   bad=0
   for arm in "full:" "no_fabric:FABRIC=0" "no_world:WORLD_MODEL=0" "no_perexp:MEM_PER_EXPERT=0" \
              "no_tok:TOKENIZER=0" "no_domains:SELF_ORG=0" "no_phased:PHASED=0" "no_experts:EXPERTS=0" \
-             "no_manage:MANAGE=0" "sig_tokens:SIG_SPACE=tokens"; do
+             "no_manage:MANAGE=0" "sig_tokens:SIG_SPACE=tokens" \
+             "vocab_growth:VMAX=1024 GROW_EVERY=20 GROW_BURST=8 REKEY_EVERY=200 STREAM_LEN=200000"; do
     L=${arm%%:*}; E=${arm#*:}
     env $TINY $E python3 self_organize.py > "$OUT/smoke_$L.log" 2>&1
     rc=$?; tb=$(grep -ac Traceback "$OUT/smoke_$L.log")
