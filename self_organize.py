@@ -155,6 +155,8 @@ DOM_MANAGE_EVERY = _i("DOM_MANAGE_EVERY", 100)
 # accounting entirely (no cost); >0 is the blend weight actually used at eval. Measured before adopted.
 DOM_PRIOR = _f("DOM_PRIOR", 0.15)
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
+DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memory and NO windows, without waiting
+#   for the act/stale conjunction that an empty domain can fail forever.
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 COMP_EMA = _f("COMP_EMA", 0.02)            # EMA rate for per-domain / per-node COMPETENCE (bits on the material it wins)
 COMP_PROTECT = bool(_i("COMP_PROTECT", 1))  # protect a unit that BEATS the population on its own material from culling,
@@ -459,6 +461,14 @@ class Fabric(nn.Module):
         # what every attention mechanism does.
         s.q_route = nn.Linear(sig_d, dk)
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
+        # BREADTH CAP: how many DOMAINS one expert may serve, as a fraction of the live domain population.
+        # Without it a handful of experts absorb everything -- which is exactly what the affiliation map showed when
+        # hundreds of domains routed through 64 experts. A percentage rather than a count because the domain
+        # population is itself grown and culled: a fixed ceiling would be permissive early and crushing later.
+        s.dom_of = {}                                      # expert -> set of domains it has actually served
+        s.breadth = float(os.environ.get("EXP_DOM_FRAC", 0.10))
+        s.breadth_min = int(os.environ.get("EXP_DOM_MIN", 4))   # never squeeze below this, or a small population
+        #   cannot route at all (10% of 8 domains is 0 and every expert would be banned from everything).
         s.comp = {}                                        # COMPETENCE per node: EMA bits/window on what it wins.
         s.contrib = {}                                     # MARGINAL CONTRIBUTION: EMA of (loss WITHOUT this node
         #   minus loss WITH it). Positive = the system is worse without it. This is the SELECTION signal; `comp`
@@ -507,7 +517,23 @@ class Fabric(nn.Module):
         s.n_live += 1; s.grown += 1
         return []                                           # rows of EXISTING Parameters -- already in the optimizer,
         #   which is the whole reason for preallocating. Nothing to add_param_group.
-    def route_w(s, gist, nov):
+    def dom_ban(s, did, n_domains):
+        """Experts already serving their share of the domain population, EXCLUDING this domain if they already have
+        it. Returns a bool mask over the live population, or None when nothing is capped.
+        Breadth is checked at ROUTING time rather than fixed up afterwards: an expert that cannot win this domain
+        never accumulates mass on it, so the cap shapes the population instead of just reporting on it."""
+        if s.breadth <= 0 or not s.dom_of: return None
+        lim = max(s.breadth_min, int(s.breadth * max(1, n_domains)))
+        over = [e for e, ds in s.dom_of.items() if len(ds) >= lim and did not in ds and e < s.n_live]
+        if not over: return None
+        m = torch.zeros(s.n_live, dtype=torch.bool)
+        m[torch.tensor(over, dtype=torch.long)] = True
+        return m
+
+    def note_dom(s, e, did):
+        s.dom_of.setdefault(int(e), set()).add(int(did))
+
+    def route_w(s, gist, nov, ban=None):
         """Routing weights over the N experts. Two terms, both kept:
           GROUNDED  cosine of the signature to each expert's owned REGION (centroid, EMA'd under no_grad).
           LEARNED   qproj[i](gist).keys[i] -- a per-expert bilinear score. This revives parameters that were
@@ -523,6 +549,7 @@ class Fabric(nn.Module):
                 # (B,sig_d) x (N,sig_d,dk) -> (B,N,dk), then contract with the per-expert key. Two einsums at any
                 # N, where this used to be N Linear calls and an N-element torch.stack every step.
                 logits = logits + (s.q_route(gist) @ s.K[:N].t()) + s.nov(nov[:, None]).sum(-1, keepdim=True)
+            if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
             w = torch.softmax(logits, -1)
             with torch.no_grad():                                              # the winner's region moves toward this signature
                 j = int(w.mean(0).argmax())
@@ -530,11 +557,14 @@ class Fabric(nn.Module):
                                         + s.cent_m * F.normalize(gist, dim=-1).mean(0), dim=-1).cpu()
         else:
             K = torch.cat([s.K[:N], s.halt_key[None]], 0)
-            c = torch.softmax(((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t), -1)
+            _lg = ((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t)
+            if ban is not None:
+                _lg[:, :N] = _lg[:, :N].masked_fill(ban.to(_lg.device)[None], float("-inf"))
+            c = torch.softmax(_lg, -1)
             w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)      # router weights over experts
         return w
 
-    def society(s, h, gist, nov, k=None):
+    def society(s, h, gist, nov, k=None, ban=None):
         """SOCIETY OF EXPERTS: every expert maps the SAME base representation to its OWN output -- no chaining, so
         expert i's output never depends on expert j's.
 
@@ -544,7 +574,7 @@ class Fabric(nn.Module):
         the selection that was already happening, which is what makes a LARGE expert population affordable.
         Returns (w_full, O_k, idx) where idx maps O_k's columns back to global expert ids."""
         N = s.n_live
-        w = s.route_w(gist, nov)
+        w = s.route_w(gist, nov, ban=ban)
         kk = N if k is None else int(min(max(1, k), N))
         idx = w.mean(0).topk(kk).indices if kk < N else torch.arange(N, device=w.device)
         # BATCHED low-rank apply for the selected k: h + (h @ A_i) @ B_i, all k at once. This was k separate
@@ -567,6 +597,8 @@ class Fabric(nn.Module):
                 if last in _D: _D[j] = _D.pop(last)
         else:
             for _D in (s.comp, s.contrib): _D.pop(j, None)
+        s.dom_of.pop(j, None)
+        if last in s.dom_of: s.dom_of[j] = s.dom_of.pop(last)   # the swapped-in expert keeps ITS affiliations
         s.n_live = last
     def seed_key(s, gist):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
@@ -1205,6 +1237,23 @@ class DomainAssembler:
                 # domain, which is far worse than folding late.
                 if not s._radp or 1 - float(sm[k]) > DOM_FOLD_MULT * s._radp: ds.discard(b); continue
                 s._absorb(keep[k], b, mem); s.folded += 1
+        # === EMPTY DOMAINS ARE CULLED, unconditionally =============================================================
+        # The existing cull needs `act < min_size AND unseen > stale` -- a conjunction that a domain holding NOTHING
+        # can still fail, because `act` decays toward zero rather than reaching it and `last` only moves when the
+        # domain is fed. So an empty domain sat in the population indefinitely, counted in every domain total, and
+        # took a share of the routing softmax. The pilot log shows the symptom: zero culls for the first 1000 steps
+        # against 5-8 merges per manage -- domains consolidated but were never selected OUT.
+        # Empty means exactly that: no memory entries carry its provenance and it holds no sample windows. Nothing
+        # is lost by removing it, so it does not need the staleness conjunction, only enough grace to have been
+        # filled in the first place.
+        if DOM_CULL_EMPTY:
+            for d in [i for i in list(s.cent) if not s.wins.get(i)]:
+                if len(s.cent) <= 1: break
+                if step - s.born.get(d, step) < DOM_GRACE: continue        # newborns have not had a chance yet
+                if mem is not None and int((mem.src == int(d)).sum()) > 0: continue   # still owns memory -> not empty
+                for _D in (s.cent, s.wins, s.size, s.last, s.act, s.born, s.rad, s.visits, s.bornb, s.tokc, s.comp):
+                    _D.pop(d, None)
+                culled += 1; s.emptied = getattr(s, "emptied", 0) + 1; s._dirty()
         md = merge_dist if merge_dist > 0 else MERGE_FRAC * NEW_DIST      # ONE scale for create AND consolidate
         while len(s.cent) > 1:                                            # merge every pair under md, ONE matmul per merge
             ids, C = s._mat(); n = len(ids)
@@ -2218,7 +2267,10 @@ def main():
         if FABRIC and SOCIETY:
             # SPARSE: compute only the experts whose outputs are actually consumed below. The dense blend that used
             # to be assigned to h here was never read -- the logits come from _O -- so it was pure waste.
-            _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K))
+            _ban = fab.dom_ban(did, len(asm.cent)) if SELF_ORG else None
+            _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K), ban=_ban)
+            with torch.no_grad():                          # record the affiliation the cap is computed from
+                fab.note_dom(int(_w[0].argmax()), did)
             _dep = h.new_zeros(()); _bal = fab_bal(_w)
             _wd = _w[0].detach()                           # which experts serve THIS domain, and how much. Kept ON DEVICE:
             #   `.cpu()` here forced a full GPU->CPU synchronization EVERY step for a number that is only read once, in
@@ -2995,7 +3047,7 @@ def main():
             if len(_ew) >= 8:
                 with torch.no_grad():
                     _G = enc(torch.tensor(_ew, device=DEV))
-                    _K = torch.stack(list(fab.keys) + [fab.halt_key], 0)
+                    _K = torch.cat([fab.K[:_N], fab.halt_key[None]], 0)
                     _nb = fab.nov(torch.zeros(_G.size(0), 1, device=DEV))
                     _c = torch.softmax(((fab.q_entry(_G) + _nb) @ _K.t()) / max(1e-3, fab.route_t), -1)
                     _win = _c[:, :_N].argmax(-1)           # the node that takes this window at ENTRY
@@ -3036,6 +3088,15 @@ def main():
                                   "would. Routing load is spread, competence is not -- see DIV_W (0.0 by default, "
                                   "and BAL_WARM decays the only other pressure to 0 by step 4000)."))
                 print(f"  ({len(_used)} of {_N} nodes used: unused nodes are capacity the router never calls on.)")
+                if fab.dom_of:
+                    _lim = max(fab.breadth_min, int(fab.breadth * max(1, len(asm.cent))))
+                    _br = sorted((len(v) for v in fab.dom_of.values()), reverse=True)
+                    _at = sum(1 for v in _br if v >= _lim)
+                    print(f"  BREADTH: an expert may serve <= {_lim} domains ({fab.breadth:.0%} of {len(asm.cent)}, "
+                          f"floor {fab.breadth_min}). widest {_br[0] if _br else 0} | {_at} expert(s) at the cap | "
+                          f"median {_br[len(_br)//2] if _br else 0}")
+                    print(f"  (at the cap an expert is masked OUT of the routing softmax for domains it does not "
+                          f"already serve, so breadth shapes the population rather than being reported after it.)")
                 # WHAT PROTECTION ACTUALLY DID. A selection change that reports nothing is a change nobody can
                 # audit, and this one deliberately keeps units that the utilization ranking wanted dead.
                 _spd = getattr(asm, "protected", 0) + getattr(router, "spared", 0) if EXPERTS else getattr(asm, "protected", 0)
@@ -3083,7 +3144,12 @@ def main():
                     print(f"  {len(_bet)} of {len(asm.comp)} live domains beat the population EMA "
                           f"({asm.comp_glob:.3f} bits/window) on their own material.")
         except Exception as _e:
+            import traceback as _tb
             print(f"[expert specialization check skipped: {type(_e).__name__}: {_e}]")
+            print("  " + _tb.format_exc().strip().replace("\n", "\n  "))
+            #   THE TRACEBACK, not just the message. This except swallowed an AttributeError on fab.keys -- a stale
+            #   reference left by the tensor refactor -- and the whole EXPERTS and SUFFICIENCY output vanished from
+            #   the report with no indication it had ever been attempted. A bare message would not have located it.
 
     if EXPERTS:                                            # do the per-domain experts specialize? (isolate the expert effect)
         _ps = sorted(set(labels))

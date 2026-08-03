@@ -66,75 +66,24 @@ class SigEncoder(nn.Module):
     def forward(s, x): h, _ = s.gru(s.emb(x)); return F.normalize(s.proj(h[:, -1]), dim=-1)
 
 
-class FabricNode(nn.Module):
-    def __init__(s, dd, hid):
-        super().__init__(); s.net = nn.Sequential(nn.Linear(dd, hid), nn.GELU(), nn.Linear(hid, dd))
-    def forward(s, x): return x + s.net(x)
+# THE FABRIC IS IMPORTED, NOT REIMPLEMENTED. This file used to carry its own copy of FabricNode/Fabric, and the
+# copy went stale the moment self_organize's population became tensors: load_state_dict failed with 300 missing
+# keys and prompt.py -- the tool you read GENERATIONS with, i.e. the deliverable -- stopped working entirely,
+# silently, until someone tried it. Duplicated model code guarantees that failure recurs on every change.
+# Importing costs a corpus build, so BENCH=1 and the heavy subsystems are defaulted off first; the Fabric class
+# itself is what is wanted.
+import os as _os
+for _k, _v in (("DATA_MODE", "real"), ("DATA_DIR", "data"), ("DOMAINS", "eng"), ("STREAM_LEN", "20000"),
+               ("TOKENIZER", "0"), ("ENC_WARMUP", "0"), ("WORLD_MODEL", "0"), ("FABRIC", "0"), ("EXPERTS", "0")):
+    _os.environ.setdefault(_k, _v)
+_os.environ["BENCH"] = "1"
+if FAB_CFG:                                            # size the preallocated population to the checkpoint's
+    _os.environ["FAB_NMAX"] = str(int(FAB_CFG.get("cap", FAB_CFG.get("n", 4096))))
+    _os.environ["FAB_RANK"] = str(int(FAB_CFG.get("rank", 8)))
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from self_organize import Fabric, SigEncoder as _SO_SigEncoder     # ONE definition, the one that trains
 
-
-class Fabric(nn.Module):
-    def __init__(s, dd, sig_d, dk, n, alpha, max_steps, hid_mult, min_steps, norm_only):
-        super().__init__()
-        s.d, s.dk, s.alpha, s.max_steps, s.hid = dd, dk, alpha, max_steps, int(hid_mult * dd)
-        s.min_steps, s.norm_only = min_steps, norm_only
-        s.bodies = nn.ModuleList([FabricNode(dd, s.hid) for _ in range(n)])
-        s.keys = nn.ParameterList([nn.Parameter(torch.randn(dk) * 0.1) for _ in range(n)])
-        s.qproj = nn.ModuleList([nn.Linear(sig_d, dk) for _ in range(n)])
-        s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
-        s.q_entry = nn.Linear(sig_d, dk); s.nov = nn.Linear(1, dk); s.ctrl = nn.Linear(3, dk)
-        s.norm = nn.LayerNorm(dd)
-        s.register_buffer("cent", F.normalize(torch.randn(n, sig_d), dim=-1))
-        s.grounded = True; s.route_t = 0.1; s.route_learn = True   # overwritten from fab_cfg below
-    def society(s, h, gist, nov, k=None):
-        """MUST match self_organize.Fabric.society/route_w. It previously used the NON-grounded q_entry path while
-        training routed by centroid, so every generation was routed by a different function than the one trained --
-        on parameters that receive no gradient in grounded mode. That is why generation looked incoherent even when
-        training was fine."""
-        N = len(s.bodies)
-        if s.grounded:
-            C = F.normalize(s.cent[:N].to(gist.device), dim=-1)
-            logits = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
-            if s.route_learn:
-                Q = torch.stack([q(gist) for q in s.qproj], 1)
-                Kn = torch.stack(list(s.keys), 0)
-                logits = logits + (Q * Kn[None]).sum(-1) + s.nov(nov[:, None]).sum(-1, keepdim=True)
-            w = torch.softmax(logits, -1)
-        else:
-            K = torch.stack(list(s.keys) + [s.halt_key], 0)
-            c = torch.softmax(((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t), -1)
-            w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)
-        kk = N if k is None else int(min(max(1, k), N))
-        idx = w.mean(0).topk(kk).indices if kk < N else torch.arange(N, device=w.device)
-        O = torch.stack([s.bodies[int(i)](h) for i in idx], 1)
-        return w, O, idx
-    def forward(s, h, gist, nov):
-        N = len(s.bodies); HALT = N
-        steps = max(1, min(s.max_steps, 2 + N // 2))
-        if s.norm_only:
-            for _ in range(steps): h = s.norm(h)
-            return h
-        K = torch.stack(list(s.keys) + [s.halt_key], 0)
-        nb = s.nov(nov[:, None])
-        c = torch.softmax((s.q_entry(gist) + nb) @ K.t(), -1)
-        for _t_ in range(steps):
-            if _t_ < s.min_steps:
-                c = torch.cat([c[:, :N], torch.zeros_like(c[:, N:])], -1)
-                c = c / c.sum(-1, keepdim=True).clamp_min(1e-9)
-            nm = c[:, :N]
-            Bo = torch.stack([b(h) for b in s.bodies], 1)
-            h = s.norm(h + s.alpha * ((nm[:, :, None, None] * Bo).sum(1) - h))
-            ent = -(c.clamp_min(1e-9).log() * c).sum(-1)
-            bias = nb + s.ctrl(torch.stack([nm.sum(-1), c[:, HALT], ent], -1))
-            Q = torch.stack([q(gist) for q in s.qproj], 1) + bias[:, None, :]
-            R = torch.softmax(torch.einsum('bnk,mk->bnm', Q, K), -1)
-            nxt = torch.einsum('bn,bnm->bm', nm, R).clone()
-            nxt[:, HALT] = nxt[:, HALT] + c[:, HALT]
-            c = nxt / nxt.sum(-1, keepdim=True).clamp_min(1e-9)
-        return h
-
-
-# ---- WORLD MODEL (the model was TRAINED with `h += world_proj(forecast)` when WORLD_FEEDBACK=1; running without it
-# generates from a DIFFERENT network than the one that was trained, which silently invalidates any coherence judgement) ----
 WCFG = d.get("world_cfg"); WENC = WFWD = WPROJ = None
 if WCFG and d.get("world_enc") is not None:
     from world_model import WorldEncoder, DynamicsPopulation
@@ -186,8 +135,9 @@ def _recall(msg, k=3, span=220):
 
 FAB = ENC = None
 if FAB_CFG and d.get("fab") is not None:
-    FAB = Fabric(D, SIG_D, FAB_CFG["dk"], FAB_CFG["n"], FAB_CFG["alpha"], FAB_CFG["max_steps"],
-                 FAB_CFG["hid_mult"], FAB_CFG["min_steps"], FAB_CFG["norm_only"]).to(DEV)
+    FAB = Fabric(D, SIG_D, FAB_CFG["dk"], max(1, int(FAB_CFG["n"])), FAB_CFG["alpha"], FAB_CFG["max_steps"],
+                 FAB_CFG.get("hid_mult", 2), FAB_CFG.get("min_steps", 0), FAB_CFG.get("norm_only", False)).to(DEV)
+    FAB.n_live = int(FAB_CFG["n"])                     # rows exist already; only the LIVE count is checkpoint state
     # honour the ROUTING MODE the checkpoint was trained with, rather than assuming one
     FAB.grounded = bool(FAB_CFG.get("grounded", True))
     FAB.route_t = float(FAB_CFG.get("route_t", 0.1))
