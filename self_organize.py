@@ -422,13 +422,37 @@ class Fabric(nn.Module):
                                                             #   the router's OWN light-touch routing (mass ~0.1) beat
                                                             #   forcing node use (2.034 vs 2.176). Only raise this if
                                                             #   node mass is ~0 AND the fabric is underperforming.
-        s.bodies = nn.ModuleList([FabricNode(d, s.hid) for _ in range(n0)])
-        s.register_buffer("cent", F.normalize(torch.randn(n0, sig_d), dim=-1))   # one region per expert. BUFFER, not a
+        # === THE POPULATION, AS TENSORS =========================================================================
+        # Three things capped this at 64, and none of them was a design decision.
+        #   PARAMETERS. A FabricNode was a full residual MLP d -> 2d -> d: 2.36M parameters at d=768. A thousand
+        #     experts is 2.36B parameters (9.5 GB fp32); a million is 9.4 TB. The low-rank form d -> r -> d that
+        #     ExpertBank already uses is 12.3k at r=8 -- a million experts is 12.3B (49 GB), which is reachable.
+        #     Each expert is individually far weaker, which is the point: no single one is meant to suffice.
+        #   PYTHON. keys was a ParameterList and qproj a ModuleList, so every step ran
+        #     torch.stack(list(s.keys)) and [q(gist) for q in s.qproj] -- O(N) Python object iteration per step.
+        #     Invisible at 64, dominant at 10,000. They are single tensors now, so routing is two matmuls at any N.
+        #   SLOTS. Growth appends, which reallocates, which invalidates the optimizer's parameter references.
+        #     Preallocating to FAB_NMAX avoids that entirely: the tensors never change identity, only `n` grows.
+        #     Unused rows are zero in B, i.e. exact identities, so they cost memory and nothing else.
+        # Cost is 2*NMAX*d*r floats: 0.5 GB at NMAX=10k, 49 GB at 1M. That is the number to size against.
+        s.r = max(1, int(os.environ.get("FAB_RANK", 8)))
+        cap = max(n0, int(os.environ.get("FAB_NMAX", 4096)))
+        s.cap = cap; s.n_live = n0
+        s.A = nn.Parameter(torch.randn(cap, d, s.r) * (d ** -0.5))
+        s.B = nn.Parameter(torch.zeros(cap, s.r, d))        # zero -> every expert is born an IDENTITY, so adding one
+        #   never disrupts what already works. Same principle the full-MLP node used with its zero-init second layer.
+        s.register_buffer("cent", F.normalize(torch.randn(cap, sig_d), dim=-1))   # one region per expert. BUFFER, not a
         #   plain attribute: as an attribute it was absent from state_dict(), so the GROUNDED router's centroids -- which
         #   ARE the routing function when ROUTE_GROUNDED=1 (the default) -- were never saved, never resumed, and never
         #   moved to the GPU. prompt.py therefore routed every generation with untrained centroids.
-        s.keys = nn.ParameterList([nn.Parameter(torch.randn(dk) * 0.1) for _ in range(n0)])
-        s.qproj = nn.ModuleList([nn.Linear(sig_d, dk) for _ in range(n0)])
+        s.K = nn.Parameter(torch.randn(cap, dk) * 0.1)                          # was a ParameterList
+        # SHARED query projection, per-expert KEY -- i.e. actual attention over the population. Giving every expert
+        # its own sig_d x dk query matrix made scoring O(N*sig_d*dk): measured 1.7 ms at N=64 but 345 ms at N=65536,
+        # so the population was affordable in PARAMETERS and unaffordable in TIME. One shared projection makes it
+        # O(N*dk) -- and it also drops per-expert parameters by a third, since QW was 2048 of the 6208 floats an
+        # expert cost at d=256. The score is still bilinear and still per-expert; only the query is shared, which is
+        # what every attention mechanism does.
+        s.q_route = nn.Linear(sig_d, dk)
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
         s.comp = {}                                        # COMPETENCE per node: EMA bits/window on what it wins.
         s.contrib = {}                                     # MARGINAL CONTRIBUTION: EMA of (loss WITHOUT this node
@@ -451,6 +475,15 @@ class Fabric(nn.Module):
         s.route_learn = bool(int(os.environ.get("ROUTE_LEARN", 1)))   # add the learned bilinear term (see route_w)
         s.birth_jitter = float(os.environ.get("BIRTH_JITTER", 0.15))
         s.cent_m = float(os.environ.get("CENT_EMA", 0.02))
+    @property
+    def bodies(s):
+        """COMPATIBILITY: the population is tensors now, but `len(fab.bodies)` is read in eight places (the probe
+        line, the resume replay, the phase snapshot, the growth cap, the checkpoint, the report). range(n) makes
+        every one of them keep working without a rewrite, and len() is all any of them ever wanted."""
+        return range(s.n_live)
+
+    def n(s): return s.n_live
+
     def grow(s, gist=None):                                 # add an expert; returns its new params
         dev = s.halt_key.device
         _ng = (F.normalize(gist.detach().mean(0, keepdim=True).cpu()
@@ -459,12 +492,16 @@ class Fabric(nn.Module):
         #   JITTER: a burst grows several experts at ONE signature, so without it they are born as exact clones with
         #   identical regions and can never differentiate. Small enough to keep the newborn in the region that
         #   triggered its birth, large enough that the routing EMA can pull them apart.
-        s.cent = torch.cat([s.cent.cpu(), _ng], 0)          # the newborn OWNS the region that triggered its birth
-        b = FabricNode(s.d, s.hid).to(dev)                  # IDENTITY at birth -> inherits the CURRENT base's competence
-        k = nn.Parameter(s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
-        q = nn.Linear(s.sig_d, s.dk).to(dev)
-        s.bodies.append(b); s.keys.append(k); s.qproj.append(q); s.grown += 1
-        return list(b.parameters()) + [k] + list(q.parameters())
+        if s.n_live >= s.cap: return []                     # at capacity: growth is a no-op, not an error
+        j = s.n_live
+        with torch.no_grad():
+            s.cent[j] = _ng.to(s.cent.device)[0]            # the newborn OWNS the region that triggered its birth
+            s.A[j].normal_(0, s.d ** -0.5); s.B[j].zero_()  # IDENTITY at birth (B=0) -> inherits the base's competence
+            s.K[j] = (s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
+
+        s.n_live += 1; s.grown += 1
+        return []                                           # rows of EXISTING Parameters -- already in the optimizer,
+        #   which is the whole reason for preallocating. Nothing to add_param_group.
     def route_w(s, gist, nov):
         """Routing weights over the N experts. Two terms, both kept:
           GROUNDED  cosine of the signature to each expert's owned REGION (centroid, EMA'd under no_grad).
@@ -473,21 +510,21 @@ class Fabric(nn.Module):
                     detached signature, so keys/qproj/q_entry/nov/ctrl/halt_key received NO gradient at all and
                     routing could not learn. `gist` is still detached (sig_of is no_grad), so the gradient reaches
                     the router's own parameters but never back into the SigEncoder -- which is the intent."""
-        N = len(s.bodies)
+        N = s.n_live
         if s.grounded:
             C = F.normalize(s.cent[:N].to(gist.device), dim=-1)
             logits = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
             if s.route_learn:
-                Q = torch.stack([q(gist) for q in s.qproj], 1)                 # (B,N,dk)
-                Kn = torch.stack(list(s.keys), 0)                              # (N,dk)
-                logits = logits + (Q * Kn[None]).sum(-1) + s.nov(nov[:, None]).sum(-1, keepdim=True)
+                # (B,sig_d) x (N,sig_d,dk) -> (B,N,dk), then contract with the per-expert key. Two einsums at any
+                # N, where this used to be N Linear calls and an N-element torch.stack every step.
+                logits = logits + (s.q_route(gist) @ s.K[:N].t()) + s.nov(nov[:, None]).sum(-1, keepdim=True)
             w = torch.softmax(logits, -1)
             with torch.no_grad():                                              # the winner's region moves toward this signature
                 j = int(w.mean(0).argmax())
                 s.cent[j] = F.normalize((1 - s.cent_m) * s.cent[j].to(gist.device)
                                         + s.cent_m * F.normalize(gist, dim=-1).mean(0), dim=-1).cpu()
         else:
-            K = torch.stack(list(s.keys) + [s.halt_key], 0)
+            K = torch.cat([s.K[:N], s.halt_key[None]], 0)
             c = torch.softmax(((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t), -1)
             w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)      # router weights over experts
         return w
@@ -501,34 +538,43 @@ class Fabric(nn.Module):
         every expert beyond the k-th was computed, unused, and un-gradiented. Computing k of N makes the cost match
         the selection that was already happening, which is what makes a LARGE expert population affordable.
         Returns (w_full, O_k, idx) where idx maps O_k's columns back to global expert ids."""
-        N = len(s.bodies)
+        N = s.n_live
         w = s.route_w(gist, nov)
         kk = N if k is None else int(min(max(1, k), N))
         idx = w.mean(0).topk(kk).indices if kk < N else torch.arange(N, device=w.device)
-        O = torch.stack([s.bodies[int(i)](h) for i in idx], 1)                 # (B,kk,L,d) INDEPENDENT outputs
+        # BATCHED low-rank apply for the selected k: h + (h @ A_i) @ B_i, all k at once. This was k separate
+        # module calls; it is now two einsums whose cost is k, not N -- which is what makes N large affordable.
+        _A = s.A[idx]; _B = s.B[idx]                                           # (kk,d,r) (kk,r,d)
+        O = h.unsqueeze(1) + torch.einsum('bklr,krd->bkld', torch.einsum('bld,kdr->bklr', h, _A), _B)
         return w, O, idx
     def remove(s, j):
         """DELETE an expert outright: its parameters are gone. In a society this should cost roughly that expert's
         own contribution; in an entangled mixture it damages everyone (the weights-unlearn failure mode)."""
-        keep = [i for i in range(len(s.bodies)) if i != j]
-        s.bodies = nn.ModuleList([s.bodies[i] for i in keep])
-        s.keys = nn.ParameterList([s.keys[i] for i in keep])
-        s.qproj = nn.ModuleList([s.qproj[i] for i in keep])
-        s.cent = s.cent[keep].clone()                       # PRUNE THE CENTROID TOO. Without this, society() reads
-        #   cent[:N] against the SHIFTED body list, so after deleting expert j every expert above j is routed by its
-        #   neighbour's region -- silently misrouting the whole population and corrupting the independence test.
+        # SWAP-WITH-LAST rather than rebuild: O(1) and the tensors stay dense. The centroid moves WITH its expert,
+        # which the list version had to be fixed to do -- reading cent[:N] against a shifted body list routed every
+        # expert above j by its neighbour's region.
+        last = s.n_live - 1
+        if j != last:
+            with torch.no_grad():
+                for _T in (s.A, s.B, s.K, s.cent): _T[j] = _T[last]
+            for _D in (s.comp, s.contrib):
+                _D.pop(j, None)
+                if last in _D: _D[j] = _D.pop(last)
+        else:
+            for _D in (s.comp, s.contrib): _D.pop(j, None)
+        s.n_live = last
     def seed_key(s, gist):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
         random. A randomly-keyed expert receives no traffic, gets no gradient, and stays dead (measured: 12/17 idle)."""
         with torch.no_grad(): return s.q_entry(gist).detach().squeeze(0).clone()
     def forward(s, h, gist, nov):
-        N = len(s.bodies); HALT = N
+        N = s.n_live; HALT = N
         if s.norm_only:                                                       # control arm: just the normalization
             steps = max(1, min(s.max_steps, 2 + N // 2))
             for _ in range(steps): h = s.norm(h)
             z = h.new_zeros(())
             return h, z, torch.zeros(N + 1, device=h.device), z
-        K = torch.stack(list(s.keys) + [s.halt_key], 0)                       # (N+1, dk) operator keys
+        K = torch.cat([s.K[:N], s.halt_key[None]], 0)                         # (N+1, dk) operator keys
         nb = s.nov(nov[:, None])                                              # surprise -> routing bias
         c = torch.softmax(((s.q_entry(gist) + nb) @ K.t()) / max(1e-3, s.route_t), -1)   # (B,N+1) ENTRY distribution
         #   route_t applied HERE TOO. It was only ever applied on the society path, so the chaining path kept the
@@ -542,14 +588,18 @@ class Fabric(nn.Module):
                 c = c / c.sum(-1, keepdim=True).clamp_min(1e-9)
             nm = c[:, :N]
             bal = bal + N * (nm.mean(0) ** 2).sum()                            # load balance: spread mass across nodes
-            Bo = torch.stack([b(h) for b in s.bodies], 1)                     # (B,N,L,d) EVERY node computes
+            # (B,N,L,d): EVERY node computes on the chaining path -- which is why SOCIETY=1 is required at scale.
+            # Batched low-rank, but the cost is still O(N) in FLOPs, so a chained fabric of 10,000 experts is not a
+            # thing you want. The society path computes top-k and is the one the defaults use.
+            Bo = h.unsqueeze(1) + torch.einsum('bklr,krd->bkld',
+                                               torch.einsum('bld,kdr->bklr', h, s.A[:N]), s.B[:N])
             upd = (nm[:, :, None, None] * Bo).sum(1)                          # soft mixture of node outputs
             h = s.norm(h + s.alpha * (upd - h))                               # residual fabric step
             depth = depth + (1 - c[:, HALT]).mean(); mass = mass + c.mean(0).detach()
             ent = -(c.clamp_min(1e-9).log() * c).sum(-1)
             summ = torch.stack([nm.sum(-1), c[:, HALT], ent], -1)             # recurrent control summary
             bias = nb + s.ctrl(summ)
-            Q = torch.stack([q(gist) for q in s.qproj], 1) + bias[:, None, :] # (B,N,dk) per-node routing queries
+            Q = s.q_route(gist)[:, None, :] + bias[:, None, :]                # (B,1,dk) shared query + per-node bias
             R = torch.softmax(torch.einsum('bnk,mk->bnm', Q, K) / max(1e-3, s.route_t), -1)   # (B,N,N+1) TRANSITION
             nxt = torch.einsum('bn,bnm->bm', nm, R)                           # propagate mass node -> operator
             nxt = nxt.clone(); nxt[:, HALT] = nxt[:, HALT] + c[:, HALT]       # HALT absorbs
@@ -1415,12 +1465,16 @@ def main():
             return _h + world_proj(_p)
         model.encode = _encode_wf
     _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
+    os.environ.setdefault("FAB_NMAX", str(_i("FAB_NMAX", 4096)))   # Fabric preallocates from it
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _f("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
                             _f("FAB_Z", 4.0), _i("FAB_BURST", 3), _i("FAB_RAMP", 4000),
                             _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000)) if FABRIC else None
-    FAB_NMAX = _i("FAB_NMAX", 64); PONDER = _f("PONDER", 0.01)   # raised from 8: with sparse top-k the cost of a
+    # 64 was never a design decision, it was a default nothing pushed against -- and the population saturated it at
+    # step 1295 of the pilot, after which "selection" is merge/cull churn over a full bank. With low-rank experts the
+    # ceiling is memory: 2*NMAX*d*r floats, so 4096 experts costs 0.2 GB at d=768/r=8, 10k costs 0.5 GB, 1M costs 49.
+    FAB_NMAX = _i("FAB_NMAX", 4096); PONDER = _f("PONDER", 0.01)   # raised from 8: with sparse top-k the cost of a
     #   LARGE population is the k it computes, not N, so the old cap (3 growth events, all spent in the first
     #   minute) was limiting the population for a reason that no longer applies.
     _fab_nov = torch.full((), 0.5, device=DEV)
@@ -1489,7 +1543,7 @@ def main():
     if RESUME:
         _RD = torch.load(RESUME if RESUME.endswith(".pt") else f"{RESUME}/ckpt.pt", map_location=DEV, weights_only=False)
         if FABRIC and _RD.get("fab_cfg"):
-            while len(fab.bodies) < _RD["fab_cfg"]["n"]: fab.grow()
+            fab.n_live = max(fab.n_live, min(int(_RD["fab_cfg"]["n"]), fab.cap))   # rows already exist
         if WORLD_MODEL and _RD.get("world_cfg"):
             while world_fwd.n() < _RD["world_cfg"]["n"]: world_fwd.grow()
         model.load_state_dict(_RD["model"]); _load_enc(enc, _RD["enc"])
@@ -1519,7 +1573,7 @@ def main():
                          adaptive_gate=bool(_i("WRITE_ADAPTIVE", 0)), gate_target=_f("WRITE_TARGET", 0.5),
                          evict=os.environ.get("EVICT", "recency"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
                          quantile_gate=bool(_i("WRITE_QUANTILE", 1)),   # WRITE_QUANTILE=0 restores the old additive controller
-                         n_own=(_i("FAB_NMAX", 64) if MEM_PER_EXPERT else 1), quota=(MEM_QUOTA if MEM_PER_EXPERT else None))
+                         n_own=(min(_i("FAB_NMAX", 4096), _i("MEM_OWNERS", 64)) if MEM_PER_EXPERT else 1), quota=(MEM_QUOTA if MEM_PER_EXPERT else None))
     if MEM_PER_EXPERT:
         print(f"[memory] PER-EXPERT: {mem.n_own} owners x {mem.quota} entries = {mem.cap} slots, LRU by last USE "
               f"(writes partitioned by routed expert; reads global so information still mixes)")
@@ -1822,7 +1876,7 @@ def main():
                             "rad": dict(asm.rad), "radp": asm._radp},
                     "experts": (experts.state_dict() if EXPERTS else None),
                     "fab": (fab.state_dict() if FABRIC else None),
-                    "fab_cfg": ({"n": len(fab.bodies), "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
+                    "fab_cfg": ({"n": fab.n(), "rank": fab.r, "cap": fab.cap, "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _f("FAB_HID_MULT", 2),
                                  "min_steps": _i("FAB_MIN_STEPS", 0), "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
                                  "society": SOCIETY, "grounded": fab.grounded, "route_t": fab.route_t,
@@ -2293,7 +2347,11 @@ def main():
                 # OWNER = the argmax-routed expert for this batch. Writes are compartmentalized per expert (each gets
                 # its own quota, evicted by LRU); READS stay global, so knowledge is owned but not walled off.
                 _own = None if not (FABRIC and SOCIETY and MEM_PER_EXPERT) else \
-                    [int(_w[min(_b, _w.size(0) - 1)].argmax()) for _b in range(x.size(0))]
+                    [int(_w[min(_b, _w.size(0) - 1)].argmax()) % max(1, mem.n_own) for _b in range(x.size(0))]
+                #   FOLDED into the owner count. The store has MEM_OWNERS partitions (64) while expert ids now run to
+                #   FAB_NMAX (4096+), so an unfolded id indexes past the partition table. Owners are a memory-eviction
+                #   scheme, not an identity: several experts sharing one LRU block is fine, an out-of-range write
+                #   is not. Sizing owners to FAB_NMAX instead would have given 200000/4096 = 48 entries per expert.
                 mem.write_batch([(y[_b], _bd[_b], surprise[_b],   # BATCH_W separate tiny encodes -- the measured
                                   _C[_b * _n1:(_b + 1) * _n1],    # bottleneck was CALL COUNT, not FLOPs
                                   _posv(_b, _n1))
@@ -2865,8 +2923,15 @@ def main():
                                     torch.zeros(1, device=DEV), k=1)
         _j2 = int(_w2[0].argmax())
         _pre = {p: bpb_true(p, use_mem=False) for p in _ps2}
-        import copy as _copy
-        _fab_bak = _copy.deepcopy(fab)                     # RESTORE AFTERWARDS: this ablation deletes the BUSIEST
+        # RESTORE AFTERWARDS: this ablation deletes the BUSIEST expert, and every eval below it -- including the
+        # generation samples used to judge coherence -- must run on the INTACT model. remove() is now a
+        # swap-with-last on preallocated tensors, so the backup is the affected ROWS plus the live count, not a
+        # deepcopy of the whole population (which at FAB_NMAX=4096 would clone 0.2 GB of parameters to undo one
+        # deletion).
+        _last = fab.n_live - 1
+        _bak = {nm: getattr(fab, nm)[[_j2, _last]].detach().clone()
+                for nm in ("A", "B", "K", "cent")}
+        _bak_n = fab.n_live
         fab.remove(_j2)                                    # <- the expert's parameters are deleted
         _post = {p: bpb_true(p, use_mem=False) for p in _ps2}
         _d2 = sum(_post[p] - _pre[p] for p in _ps2) / max(1, len(_ps2))
@@ -2874,9 +2939,9 @@ def main():
         print(f"  deleted expert {_j2} (busiest, routing mass {float(_w2[0, _j2]):.2f})")
         for p in _ps2: print(f"    process {p}: {_pre[p]:.3f}->{_post[p]:.3f} ({_post[p] - _pre[p]:+.4f})")
         print(f"  mean collateral {_d2:+.4f}  ->  {'INDEPENDENT (society survives losing a member)' if abs(_d2) < 0.3 else 'ENTANGLED (the population depended on it)'}")
-        # restore by swapping the containers back -- load_state_dict cannot repopulate a ModuleList that remove()
-        # shrank (its keys are gone from the live module), so reassign the four things remove() rebuilds.
-        fab.bodies = _fab_bak.bodies; fab.keys = _fab_bak.keys; fab.qproj = _fab_bak.qproj; fab.cent = _fab_bak.cent
+        with torch.no_grad():                              # put the two swapped rows back and restore the count
+            for nm, _v in _bak.items(): getattr(fab, nm)[[_j2, _last]] = _v
+        fab.n_live = _bak_n
         print("  (expert restored -- GENERATION and the remaining evals run on the INTACT model; before this fix every"
               " eval after this point, including the generation samples used to judge coherence, ran on the mutilated one)")
         print(f"  reference points: memory-delete collateral ~0.02-0.03 | weights gradient-ascent ~22-25 bits")
