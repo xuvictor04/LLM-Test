@@ -159,6 +159,8 @@ DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memo
 #   for the act/stale conjunction that an empty domain can fail forever.
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 COMP_EMA = _f("COMP_EMA", 0.02)            # EMA rate for per-domain / per-node COMPETENCE (bits on the material it wins)
+FAB_DISCOVER = _f("FAB_DISCOVER", 0.35)   # cosine distance beyond which a signature counts as material NOTHING owns,
+#   and is handed to the least-used expert rather than the nearest incumbent. 0 disables discovery-by-novelty.
 FAB_REPLICATE = bool(_i("FAB_REPLICATE", 1))   # grow by CLONING the fittest expert (+jitter) rather than minting a
 #   blank identity. A blank cannot earn traffic and so can never become competent -- see Fabric.grow.
 COMP_PROTECT = bool(_i("COMP_PROTECT", 1))  # protect a unit that BEATS the population on its own material from culling,
@@ -480,6 +482,9 @@ class Fabric(nn.Module):
         s.mut_big = float(os.environ.get("FAB_MUT_BIG", 6.0))   # heavy tail: occasional large jump
         s.mut_big_p = float(os.environ.get("FAB_MUT_BIG_P", 0.1))
         s.mutscale = {}
+        s.discovered = 0; s.crossed = 0; s.explored = 0
+        s.explore = float(os.environ.get("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
+        s.xover = float(os.environ.get("FAB_XOVER", 0.35))       # fraction of births assembled from SEVERAL parents
         s.born = {}                                        # expert -> step it was created (grace before culling)
         s.removed = 0; s.spared = 0
         s.breadth = float(os.environ.get("EXP_DOM_FRAC", 0.10))
@@ -575,8 +580,22 @@ class Fabric(nn.Module):
                 # Without the tail a population converges on its founder however many members it has.
                 _sa = float(s.A[_par].std()) or 1.0; _sb = float(s.B[_par].std()) or (s.d ** -0.5)
                 _m = s.mut * (s.mut_big if random.random() < s.mut_big_p else 1.0)
-                s.A[j] = s.A[_par] + _m * _sa * torch.randn_like(s.A[_par])
-                s.B[j] = s.B[_par] + _m * _sb * torch.randn_like(s.B[_par])
+                s.A[j] = s.A[_par].clone(); s.B[j] = s.B[_par].clone()
+                # CROSSOVER: take whole RANK SLICES from other parents. A low-rank expert is a sum of r rank-1
+                # maps A[:,i] (x) B[i,:], so slice i is a self-contained piece of function -- the natural
+                # "connected section" to inherit. Recombination lets a newborn hold a piece of one lineage and a
+                # piece of another, which mutation alone cannot produce: mutation explores AROUND a parent,
+                # crossover reaches BETWEEN them. Parents are drawn from the same relevance shortlist, so the
+                # pieces come from experts that serve the same region.
+                if s.xover > 0 and s.r > 1 and len(_cand) > 1 and random.random() < s.xover:
+                    _nsl = random.randint(1, max(1, s.r // 2))
+                    for _sl2 in random.sample(range(s.r), _nsl):
+                        _o = random.choice([c for c in _cand if c != _par])
+                        s.A[j][:, _sl2] = s.A[_o][:, _sl2]
+                        s.B[j][_sl2, :] = s.B[_o][_sl2, :]
+                    s.crossed += 1
+                s.A[j] += _m * _sa * torch.randn_like(s.A[j])   # mutation on TOP of whatever was inherited
+                s.B[j] += _m * _sb * torch.randn_like(s.B[j])
                 s.parent[j] = int(_par); s.replicated += 1
                 s.mutscale[j] = _m
             s.K[j] = (s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
@@ -649,10 +668,31 @@ class Fabric(nn.Module):
                 logits = logits + (s.q_route(gist) @ s.K[:N].t()) + s.nov(nov[:, None]).sum(-1, keepdim=True)
             if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
             w = torch.softmax(logits, -1)
-            with torch.no_grad():                                              # the winner's region moves toward this signature
-                j = int(w.mean(0).argmax())
-                s.cent[j] = F.normalize((1 - s.cent_m) * s.cent[j].to(gist.device)
-                                        + s.cent_m * F.normalize(gist, dim=-1).mean(0), dim=-1).cpu()
+            with torch.no_grad():
+                # EVERY EXPERT THAT SERVED THIS SIGNATURE MOVES TOWARD IT, in proportion to how much it served.
+                # This used to update the ARGMAX WINNER ONLY, which makes discovery structurally impossible: the
+                # winner drifts toward every region it wins and so becomes closer still, while every other
+                # centroid stays frozen at its initialisation. A newcomer cannot win because its region never
+                # moved, and its region never moves because it never wins. That is rich-get-richer with no path
+                # in, and it is why 4096 experts produced ONE used node.
+                _wm = w.mean(0)
+                _topm = min(_i("FAB_CENT_TOPK", 8), N)
+                _iv, _ii = _wm.topk(_topm)
+                _g1 = F.normalize(gist, dim=-1).mean(0)
+                _share = _iv / _iv.sum().clamp_min(1e-9)
+                for _q5 in range(_topm):
+                    _jj = int(_ii[_q5]); _rate = s.cent_m * float(_share[_q5])
+                    s.cent[_jj] = F.normalize((1 - _rate) * s.cent[_jj].to(gist.device) + _rate * _g1, dim=-1).cpu()
+                # NOVELTY -> DISCOVERY. If this signature is far from EVERY centroid, it is material nothing owns.
+                # Hand it to the least-used expert instead of to the nearest incumbent: that is what makes an
+                # unused expert become a used one, and it is the mechanism by which new material recruits new
+                # capacity rather than being absorbed by whoever is already largest.
+                if FAB_DISCOVER > 0 and N > 1:
+                    _best = float((F.normalize(s.cent[:N], dim=-1).to(gist.device) @ _g1).max())
+                    if 1.0 - _best > FAB_DISCOVER:
+                        _cold = min(range(N), key=lambda i: s.use.get(i, 0.0))
+                        s.cent[_cold] = F.normalize(0.5 * s.cent[_cold].to(gist.device) + 0.5 * _g1, dim=-1).cpu()
+                        s.discovered += 1
         else:
             K = torch.cat([s.K[:N], s.halt_key[None]], 0)
             _lg = ((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t)
@@ -675,6 +715,16 @@ class Fabric(nn.Module):
         w = s.route_w(gist, nov, ban=ban)
         kk = N if k is None else int(min(max(1, k), N))
         idx = w.mean(0).topk(kk).indices if kk < N else torch.arange(N, device=w.device)
+        # EXPLORATION. top-k is on-policy: only experts the router already prefers are ever COMPUTED, so only they
+        # receive gradient. An expert outside the top-k is not merely unused -- it is frozen, and can never improve
+        # into contention. Swap one slot for an expert sampled toward LOW USE, so untried capacity gets both
+        # traffic and gradient. This is the difference between a population and a leaderboard.
+        if s.explore > 0 and kk >= 2 and N > kk and random.random() < s.explore:
+            _cold2 = sorted(range(N), key=lambda i: s.use.get(i, 0.0))[:max(8, N // 16)]
+            _pick = random.choice(_cold2)
+            if _pick not in idx.tolist():
+                idx = torch.cat([idx[:-1], torch.tensor([_pick], device=idx.device)])
+                s.explored = getattr(s, "explored", 0) + 1
         # BATCHED low-rank apply for the selected k: h + (h @ A_i) @ B_i, all k at once. This was k separate
         # module calls; it is now two einsums whose cost is k, not N -- which is what makes N large affordable.
         _A = s.A[idx]; _B = s.B[idx]                                           # (kk,d,r) (kk,r,d)
@@ -3256,6 +3306,12 @@ def main():
                                   "would. Routing load is spread, competence is not -- see DIV_W (0.0 by default, "
                                   "and BAL_WARM decays the only other pressure to 0 by step 4000)."))
                 print(f"  ({len(_used)} of {_N} nodes used: unused nodes are capacity the router never calls on.)")
+                print(f"  DISCOVERY: {getattr(fab,'discovered',0)} signature(s) too far from every centroid were "
+                      f"handed to the LEAST-USED expert (novelty > {FAB_DISCOVER:.2f} cosine) | "
+                      f"{getattr(fab,'explored',0)} off-policy routings forced so unused experts got gradient | "
+                      f"{getattr(fab,'crossed',0)} births assembled from MULTIPLE parents (rank-slice crossover)")
+                print(f"  (top-{_i('FAB_CENT_TOPK', 8)} centroids move toward each signature they serve, weighted by "
+                      f"share -- updating only the argmax winner is what made discovery impossible)")
                 if fab.dom_of:
                     _lim = max(fab.breadth_min, int(fab.breadth * max(1, len(asm.cent))))
                     _br = sorted((len(v) for v in fab.dom_of.values()), reverse=True)
