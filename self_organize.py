@@ -159,6 +159,8 @@ DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memo
 #   for the act/stale conjunction that an empty domain can fail forever.
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 COMP_EMA = _f("COMP_EMA", 0.02)            # EMA rate for per-domain / per-node COMPETENCE (bits on the material it wins)
+FAB_REPLICATE = bool(_i("FAB_REPLICATE", 1))   # grow by CLONING the fittest expert (+jitter) rather than minting a
+#   blank identity. A blank cannot earn traffic and so can never become competent -- see Fabric.grow.
 COMP_PROTECT = bool(_i("COMP_PROTECT", 1))  # protect a unit that BEATS the population on its own material from culling,
 #   however rarely it is used. COMP_PROTECT=0 restores pure-utilization selection (the ablation).
 KW = _i("KEY_WIN", 8); V = 256
@@ -471,6 +473,9 @@ class Fabric(nn.Module):
         # population is itself grown and culled: a fixed ceiling would be permissive early and crushing later.
         s.dom_of = {}                                      # expert -> set of domains it has actually served
         s.use = {}                                         # expert -> windows won (UTILIZATION)
+        s.parent = {}                                      # expert -> the expert it was replicated FROM
+        s.replicated = 0
+        s.clone_jitter = float(os.environ.get("FAB_CLONE_JITTER", 0.02))
         s.born = {}                                        # expert -> step it was created (grace before culling)
         s.removed = 0; s.spared = 0
         s.breadth = float(os.environ.get("EXP_DOM_FRAC", 0.10))
@@ -516,9 +521,29 @@ class Fabric(nn.Module):
         #   triggered its birth, large enough that the routing EMA can pull them apart.
         if s.n_live >= s.cap: return []                     # at capacity: growth is a no-op, not an error
         j = s.n_live
+        # REPLICATE THE FITTEST, do not mint a blank. Identity birth (B=0) was chosen so that adding a node could
+        # never disrupt what already works -- but it also means the newborn computes NOTHING, has no competence,
+        # and so attracts no routing mass; and it cannot acquire competence because it gets no traffic. That is a
+        # trap with no exit, and the pilot shows where it leads: 4096 experts, ONE of them carrying 75% of the
+        # mass, 4095 blank identities that never competed for anything.
+        # Selection needs variation of something that WORKS. The newborn inherits the fittest expert's adapter plus
+        # a perturbation, so it starts competent and differentiates from there -- the same clone-and-perturb the
+        # world model already uses ("cloned from the fittest") and that ExpertBank had in the dead legacy path.
+        # Fitness = marginal contribution where measured (the system is worse without it), utilization otherwise.
+        _par = None
+        if FAB_REPLICATE and s.n_live > 0:
+            if s.contrib: _par = max(s.contrib, key=s.contrib.get)
+            elif s.use:   _par = max(s.use, key=s.use.get)
+            if _par is not None and not (0 <= _par < s.n_live): _par = None
         with torch.no_grad():
             s.cent[j] = _ng.to(s.cent.device)[0]            # the newborn OWNS the region that triggered its birth
-            s.A[j].normal_(0, s.d ** -0.5); s.B[j].zero_()  # IDENTITY at birth (B=0) -> inherits the base's competence
+            if _par is None:
+                s.A[j].normal_(0, s.d ** -0.5); s.B[j].zero_()   # no parent yet -> identity, as before
+            else:
+                _jit = s.clone_jitter
+                s.A[j] = s.A[_par] + _jit * torch.randn_like(s.A[_par])
+                s.B[j] = s.B[_par] + _jit * torch.randn_like(s.B[_par])
+                s.parent[j] = int(_par); s.replicated += 1
             s.K[j] = (s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
 
         s.born[j] = int(step) if step is not None else 0    # GRACE is measured from here
@@ -1526,7 +1551,7 @@ def main():
     print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
           f"The legacy ExpertBank (EXPERTS={_i('EXPERTS', 0)}) is {'ON' if EXPERTS else 'off'} and is mutually "
           f"exclusive with it -- with the fabric on, that flag being 0 is CORRECT, not a missing subsystem.")
-    print(f"[config] SELECTION   competence protection {_on(COMP_PROTECT)} | cull-empty domains "
+    print(f"[config] SELECTION   replicate-fittest {_on(FAB_REPLICATE)} | competence protection {_on(COMP_PROTECT)} | cull-empty domains "
           f"{_on(DOM_CULL_EMPTY)} | expert breadth cap {_f('EXP_DOM_FRAC', 0.10):.0%} of domains "
           f"(floor {_i('EXP_DOM_MIN', 4)}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
           f"{_f('FAB_RAMP_TO', 1.0):.0%} of cap")
@@ -3290,6 +3315,37 @@ def main():
             print(f"   MODEL ONLY: {_dec(gno)}")
             print(f"   MODEL+MEM : {_dec(gme)}")
             _gen_keep.append((p, seed, gno, gme))
+        # === IS IT COMPOSING WORDS, OR EMITTING MEMORISED CHUNKS? ================================================
+        # Word-shaped output at 2 bits/byte invites a fair objection: a tokenizer that minted whole words would let
+        # the model emit one token and look like it had spelled something. That is a measurable difference, not an
+        # argument. TOKENS PER WORD > 1 means the model chose a SEQUENCE of pieces and the spelling is its doing;
+        # ~1.0 would mean the vocabulary is doing the work. Reported next to how many generated words actually
+        # exist in the training text, which separates composition from recall.
+        try:
+            if _gen_keep and USE_TOK:
+                _bpt2 = sum(TOK.bytes_per_id[:TOK.vocab_size]) / max(1, TOK.vocab_size)
+                _voc = set()
+                for _c2 in CORP[:1]:
+                    _voc = set(bytes(_c2[:4_000_000]).decode("utf-8", "replace").split())
+                _gw = []
+                for _p3, _sd3, _a3, _b3 in _gen_keep:
+                    _t3 = TOK.decode(_a3)
+                    _gw += (_t3 if isinstance(_t3, str) else bytes(_t3).decode("utf-8", "replace")).split()
+                if _gw:
+                    _real = sum(1 for w in _gw if w.strip(".,;:!?()'\"") in _voc)
+                    _tpw = sum(len(TOK.segment(w.encode(), count=False)) for w in _gw[:400]) / max(1, len(_gw[:400]))
+                    print(f"\n=== IS IT COMPOSING? (generated text vs the vocabulary it had) ===")
+                    print(f"  vocabulary {TOK.vocab_size} tokens, mean {_bpt2:.2f} bytes each | "
+                          f"{len(_gw)} generated words")
+                    print(f"  TOKENS PER GENERATED WORD {_tpw:.2f}  -> " +
+                          ("the model is SPELLING: each word is a sequence it chose, not one unit it looked up"
+                           if _tpw > 1.5 else
+                           "close to one token per word -- the VOCABULARY is doing the spelling, not the model"))
+                    print(f"  {100*_real/len(_gw):.0f}% of generated words appear in the training text "
+                          f"({_real}/{len(_gw)}) -- the rest are word-SHAPED but novel, which is the interesting half")
+        except Exception as _e:
+            print(f"[composition check skipped: {type(_e).__name__}: {_e}]")
+
         # ---- COHERENCE, AS A NUMBER. ----------------------------------------------------------------------------
         # Generation has always been printed and eyeballed, which is how "it is producing code" got claimed for
         # output that merely contained code-shaped tokens. The visible failure in these samples is DRIFT: a
