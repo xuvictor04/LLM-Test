@@ -28,27 +28,26 @@ D, V, KW, KEY_SRC = d["D"], d["V"], d["KW"], d["KEY_SRC"]
 MT = d.get("model_type", "gru"); LAYERS = d.get("layers", 1); HEADS = d.get("heads", 8); MAXLEN = d.get("maxlen", 512)
 
 
-class MiniLM(nn.Module):
-    def __init__(s):
-        super().__init__(); s.emb = nn.Embedding(V, D); s.gru = nn.GRU(D, D, num_layers=LAYERS, batch_first=True); s.head = nn.Linear(D, V)
-    def encode(s, x): h, _ = s.gru(s.emb(x)); return h
-    def forward(s, x): h = s.encode(x); return s.head(h), h
+# THE MODEL CLASSES ARE IMPORTED, NOT REIMPLEMENTED. prompt.py used to define its own MiniLM, TinyTransformer,
+# SigEncoder and Fabric. The Fabric copy went stale when the population became tensors and this file -- the tool
+# GENERATIONS are read with, i.e. the deliverable -- died silently for several commits. The other three had not
+# drifted yet, which is luck rather than safety. One definition, in the file that trains them.
+# The env is set from the CHECKPOINT before importing, because self_organize sizes its models from module globals.
+import os as _os
+_os.environ.update(D_MODEL=str(D), VMAX=str(V), MODEL=MT, LAYERS=str(LAYERS), HEADS=str(HEADS), MAXLEN=str(MAXLEN))
+for _k, _v in (("DATA_MODE", "real"), ("DATA_DIR", "data"), ("DOMAINS", "eng"), ("STREAM_LEN", "20000"),
+               ("TOKENIZER", "0"), ("ENC_WARMUP", "0"), ("WORLD_MODEL", "0"), ("FABRIC", "0"), ("EXPERTS", "0")):
+    _os.environ.setdefault(_k, _v)
+_os.environ["BENCH"] = "1"
+_FC = d.get("fab_cfg")
+if _FC:                                                # size the preallocated population to the checkpoint's
+    _os.environ["FAB_NMAX"] = str(int(_FC.get("cap", _FC.get("n", 4096))))
+    _os.environ["FAB_RANK"] = str(int(_FC.get("rank", 8)))
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from self_organize import build_lm, Fabric, SigEncoder
 
-
-class TinyTransformer(nn.Module):
-    def __init__(s):
-        super().__init__(); s.emb = nn.Embedding(V, D); s.pos = nn.Embedding(MAXLEN, D); s.maxlen = MAXLEN
-        lyr = nn.TransformerEncoderLayer(D, HEADS, dim_feedforward=4 * D, batch_first=True, dropout=0.0, activation="gelu", norm_first=True)
-        s.tr = nn.TransformerEncoder(lyr, LAYERS, norm=nn.LayerNorm(D), enable_nested_tensor=False)   # MUST match
-        s.head = nn.Linear(D, V)                                                                     # self_organize
-    def encode(s, x):
-        L = x.size(1); p = torch.arange(L, device=x.device).clamp(max=s.maxlen - 1)
-        h = s.emb(x) + s.pos(p); m = torch.triu(torch.ones(L, L, device=x.device), 1).bool()
-        return s.tr(h, mask=m)
-    def forward(s, x): h = s.encode(x); return s.head(h), h
-
-
-model = (TinyTransformer() if MT == "transformer" else MiniLM()).to(DEV)
+model = build_lm(nv=V).to(DEV)                        # same constructor the trainer used, checkpoint's vocab
 model.load_state_dict(d["model"]); model.eval()
 
 # ---- ROUTER FABRIC (the model was TRAINED with it; running without it gives the crippled path) ----
@@ -57,32 +56,8 @@ FAB_SOC = bool(FAB_CFG.get("society", True)) if FAB_CFG else False
 ENS_K = int(FAB_CFG.get("ens_k", 2)) if FAB_CFG else 2
 
 
-class SigEncoder(nn.Module):
-    # Sized from the CHECKPOINT, not from V. The trainer now sizes the encoder embedding to the stream it actually
-    # reads (bytes in online-tokenizer mode), so its width no longer tracks the LM's vocab -- and a generator that
-    # guessed the width would either fail to load or, worse, load a shifted table. Read it off the saved tensor.
-    def __init__(s, dd, sd, nv=None):
-        super().__init__(); s.emb = nn.Embedding(nv or V, dd); s.gru = nn.GRU(dd, dd, batch_first=True); s.proj = nn.Linear(dd, sd)
-    def forward(s, x): h, _ = s.gru(s.emb(x)); return F.normalize(s.proj(h[:, -1]), dim=-1)
 
 
-# THE FABRIC IS IMPORTED, NOT REIMPLEMENTED. This file used to carry its own copy of FabricNode/Fabric, and the
-# copy went stale the moment self_organize's population became tensors: load_state_dict failed with 300 missing
-# keys and prompt.py -- the tool you read GENERATIONS with, i.e. the deliverable -- stopped working entirely,
-# silently, until someone tried it. Duplicated model code guarantees that failure recurs on every change.
-# Importing costs a corpus build, so BENCH=1 and the heavy subsystems are defaulted off first; the Fabric class
-# itself is what is wanted.
-import os as _os
-for _k, _v in (("DATA_MODE", "real"), ("DATA_DIR", "data"), ("DOMAINS", "eng"), ("STREAM_LEN", "20000"),
-               ("TOKENIZER", "0"), ("ENC_WARMUP", "0"), ("WORLD_MODEL", "0"), ("FABRIC", "0"), ("EXPERTS", "0")):
-    _os.environ.setdefault(_k, _v)
-_os.environ["BENCH"] = "1"
-if FAB_CFG:                                            # size the preallocated population to the checkpoint's
-    _os.environ["FAB_NMAX"] = str(int(FAB_CFG.get("cap", FAB_CFG.get("n", 4096))))
-    _os.environ["FAB_RANK"] = str(int(FAB_CFG.get("rank", 8)))
-import sys as _sys
-_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-from self_organize import Fabric                       # ONE definition, the one that trains
 
 WCFG = d.get("world_cfg"); WENC = WFWD = WPROJ = None
 if WCFG and d.get("world_enc") is not None:
@@ -143,7 +118,7 @@ if FAB_CFG and d.get("fab") is not None:
     FAB.route_t = float(FAB_CFG.get("route_t", 0.1))
     FAB.route_learn = bool(FAB_CFG.get("route_learn", True))
     FAB.load_state_dict(d["fab"]); FAB.eval()          # loads `cent` too, now that it is a registered buffer
-    ENC = SigEncoder(D, SIG_D, d["enc"]["emb.weight"].size(0)).to(DEV); ENC.load_state_dict(d["enc"]); ENC.eval()
+    ENC = SigEncoder(D, SIG_D, nv=d["enc"]["emb.weight"].size(0)).to(DEV); ENC.load_state_dict(d["enc"]); ENC.eval()
 
 # ---- tokenizer (or raw bytes) ----
 if d["use_tok"]:

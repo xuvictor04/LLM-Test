@@ -350,21 +350,23 @@ DROPOUT = _f("DROPOUT", 0.0)                               # ANTI-OVERFIT, defau
 WEIGHT_DECAY = _f("WEIGHT_DECAY", 0.0)                     # UNDERFIT (more passes keep helping), so these would only
                                                            # handicap it. Turn them on when val-vs-train shows a gap.
 class MiniLM(nn.Module):                                   # base LM (GRU, optionally multi-layer)
-    def __init__(s, d, layers=1):
-        super().__init__(); s.emb = nn.Embedding(V, d); s.drop = nn.Dropout(DROPOUT)
+    def __init__(s, d, layers=1, nv=None):
+        super().__init__(); s._V = nv or V
+        s.emb = nn.Embedding(s._V, d); s.drop = nn.Dropout(DROPOUT)
         s.gru = nn.GRU(d, d, num_layers=layers, batch_first=True, dropout=(DROPOUT if layers > 1 else 0.0))
-        s.head = nn.Linear(d, V)
+        s.head = nn.Linear(d, s._V)
     def encode(s, x): h, _ = s.gru(s.drop(s.emb(x))); return s.drop(h)   # (B,L,D) hidden -- also the memory-key source
     def forward(s, x): h = s.encode(x); return s.head(h), h
 class TinyTransformer(nn.Module):                          # decoder-only Transformer (causal) -- the H100-scale option
-    def __init__(s, d, layers=4, heads=8, maxlen=512):
-        super().__init__(); s.emb = nn.Embedding(V, d); s.pos = nn.Embedding(maxlen, d); s.maxlen = maxlen
+    def __init__(s, d, layers=4, heads=8, maxlen=512, nv=None):
+        super().__init__(); s._V = nv or V
+        s.emb = nn.Embedding(s._V, d); s.pos = nn.Embedding(maxlen, d); s.maxlen = maxlen
         lyr = nn.TransformerEncoderLayer(d, heads, dim_feedforward=4 * d, batch_first=True, dropout=0.0, activation="gelu", norm_first=True)
         # norm=LayerNorm(d): with norm_first=True the FINAL sublayer output is never normalised, which is fine at
         # L1-L4 and progressively worse with depth -- GPT-2 has this final norm. prompt.py MUST match or every
         # saved checkpoint loads into a different network.
         s.tr = nn.TransformerEncoder(lyr, layers, norm=nn.LayerNorm(d), enable_nested_tensor=False)
-        s.head = nn.Linear(d, V)
+        s.head = nn.Linear(d, s._V)
     def _mask(s, L, dev):
         # cache the causal mask: it is rebuilt on EVERY encode, and _model_key calls encode thousands of times per
         # step on tiny KW-length windows, so the allocate+triu is pure per-call overhead there.
@@ -387,10 +389,12 @@ class TinyTransformer(nn.Module):                          # decoder-only Transf
             h = _l(h, src_mask=m)
         return h
     def forward(s, x): h = s.encode(x); return s.head(h), h
-def build_lm():
+def build_lm(nv=None):
+    """nv OVERRIDES the module-level vocabulary so a loader can size the model from a CHECKPOINT. Without it every
+    consumer had to reimplement these classes, which is exactly how prompt.py went stale and stopped working."""
     if MODEL_TYPE == "transformer":
-        return TinyTransformer(D, layers=_i("LAYERS", 4), heads=_i("HEADS", 8), maxlen=_i("MAXLEN", 512))
-    return MiniLM(D, layers=_i("LAYERS", 1))
+        return TinyTransformer(D, layers=_i("LAYERS", 4), heads=_i("HEADS", 8), maxlen=_i("MAXLEN", 512), nv=nv)
+    return MiniLM(D, layers=_i("LAYERS", 1), nv=nv)
 # ON by default. It was 0, nobody set it, and so the routed expert population -- the core of the architecture --
 # was ABSENT from every run of this project: "fabric nodes 0" in every phase table, no FABRIC section in any
 # report, and every conclusion about domains, coherence and bits/byte drawn from a system missing its routing
@@ -816,8 +820,11 @@ if SIG_SPACE not in ("bytes", "tokens"): sys.exit(f"SIG_SPACE must be bytes|toke
 SIG_WIN = _i("SIG_WIN", 0)
 ENC_V = V if (USE_TOK and (not TOK_ONLINE or SIG_SPACE == "tokens")) else 256
 class SigEncoder(nn.Module):                               # LEARNED, LIVE domain-signature encoder (stays GRU regardless of LM)
-    def __init__(s, d, sd):
-        super().__init__(); s.emb = nn.Embedding(ENC_V, d); s.gru = nn.GRU(d, d, batch_first=True); s.proj = nn.Linear(d, sd)
+    def __init__(s, d, sd, nv=None):
+        # nv OVERRIDES ENC_V so a loader can size the table from a CHECKPOINT rather than from this run's env.
+        # Without it prompt.py had to keep its own copy of this class, and a duplicated model class is what left
+        # prompt.py dead for several commits when the fabric changed underneath it.
+        super().__init__(); s.emb = nn.Embedding(nv or ENC_V, d); s.gru = nn.GRU(d, d, batch_first=True); s.proj = nn.Linear(d, sd)
     def forward(s, x): h, _ = s.gru(s.emb(x)); return F.normalize(s.proj(h[:, -1]), dim=-1)
 
 def _load_enc(enc, sd):
@@ -1599,6 +1606,7 @@ def main():
     # optimizers are built so their params are in the param groups and their Adam moments restore.
     KEY_PREGATE = bool(_i("KEY_PREGATE", 1))              # encode memory keys AFTER the surprise gate (see the write call)
     KEY_BATCH = bool(_i("KEY_BATCH", 1))                  # ...and encode the whole BATCH_W batch in ONE call (KEY_BATCH=0 = per-window)
+    _regrown = []                                          # param groups re-created by a RESUME's growth replay
     _hb, _hbs = {}, 0                                      # held-out probe carried in from a RESUME (empty otherwise).
     #   Declared BEFORE the resume block: sitting after it, this line clobbered the value resume had just loaded.
     RESUME = os.environ.get("RESUME", "")
@@ -1608,7 +1616,14 @@ def main():
         if FABRIC and _RD.get("fab_cfg"):
             fab.n_live = max(fab.n_live, min(int(_RD["fab_cfg"]["n"]), fab.cap))   # rows already exist
         if WORLD_MODEL and _RD.get("world_cfg"):
-            while world_fwd.n() < _RD["world_cfg"]["n"]: world_fwd.grow()
+            # REPLAY THE PARAM GROUPS, not just the population size. Growth calls om.add_param_group DURING
+            # training, so a checkpoint taken after any growth has more groups than a freshly built optimizer --
+            # and load_state_dict then refuses the whole thing, discarding every moment. Capturing what each
+            # replayed grow() returns lets the optimizer below be rebuilt with the SAME group structure, in the
+            # same order, so the moments load exactly. This was the last "known broken, reported not fixed" item.
+            while world_fwd.n() < _RD["world_cfg"]["n"]:
+                _np2 = world_fwd.grow()
+                if _np2: _regrown.append(_np2)
         model.load_state_dict(_RD["model"]); _load_enc(enc, _RD["enc"])
         if FABRIC and _RD.get("fab") is not None: fab.load_state_dict(_RD["fab"])
         if EXPERTS and _RD.get("experts") is not None: experts.load_state_dict(_RD["experts"])
@@ -1616,11 +1631,19 @@ def main():
             world_enc.load_state_dict(_RD["world_enc"]); world_fwd.load_state_dict(_RD["world_fwd"])
             if world_proj is not None and _RD.get("world_proj") is not None: world_proj.load_state_dict(_RD["world_proj"])
         _resume_step = int(_RD.get("step", 0))
-    om = torch.optim.AdamW(list(model.parameters()) + (list(experts.parameters()) if EXPERTS else [])
+    # PARAM-GROUP STRUCTURE MUST MATCH THE CHECKPOINT. Anything the resume replayed as a grow() was originally its
+    # OWN group (add_param_group during training), so it is excluded from the base group and re-added below in the
+    # same order. Without this the optimizer had one group where the checkpoint had several, load_state_dict threw,
+    # and every Adam moment was silently discarded on every resume.
+    _rg_ids = {id(_x) for _g in _regrown for _x in _g}
+    _base = [_x for _x in (list(model.parameters()) + (list(experts.parameters()) if EXPERTS else [])
                            + (list(fab.parameters()) if FABRIC else [])
                            + (list(recon.parameters()) if recon is not None else [])
                            + (list(world_enc.parameters()) + list(world_fwd.parameters()) if WORLD_MODEL else [])
-                           + (list(world_proj.parameters()) if world_proj is not None else []), lr=2e-3, weight_decay=WD)
+                           + (list(world_proj.parameters()) if world_proj is not None else []))
+             if id(_x) not in _rg_ids]
+    om = torch.optim.AdamW(_base, lr=2e-3, weight_decay=WD)
+    for _g in _regrown: om.add_param_group({"params": _g})   # same groups, same order as the original run
     oe = torch.optim.AdamW(enc.parameters(), lr=2e-3, weight_decay=WD)
     # PER-EXPERT MEMORY: each expert owns MEM_QUOTA entries, evicted by LRU on last USE. Sized to FAB_NMAX so the
     # partition does not have to be rebuilt as the population grows. MEM_PER_EXPERT=0 keeps the single global store.
@@ -2382,7 +2405,12 @@ def main():
             _nb = fabgrow.step(_lf, step, fab.n(), FAB_NMAX)    # 0, or HOW MANY to grow (burst on an unexpected regression)
             _nb = min(_nb, FAB_NMAX - fab.n())
             for _g in range(max(0, _nb)):                       # each newborn is keyed at the CURRENT signature, so a
-                om.add_param_group({"params": fab.grow(sig[None, :] if SOCIETY else None)})   # burst owns this region
+                _fp = fab.grow(sig[None, :] if SOCIETY else None)   # burst owns this region
+                if _fp: om.add_param_group({"params": _fp})
+                #   EMPTY GROUPS ARE NOT FREE. Since the population became preallocated tensors, grow() returns []
+                #   -- the rows are already in the optimizer. Adding a group anyway appended an EMPTY param group
+                #   per growth event, so a checkpoint after 60 growths had 60 phantom groups, load_state_dict
+                #   refused the count mismatch, and every Adam moment was discarded on every resume.
             if _nb > 0:
                 print(f"  [fabric @ {step}] {fabgrow.why} -> grew {_nb} -> {len(fab.bodies)}/{FAB_NMAX} experts")
         _pmem = _t0()
