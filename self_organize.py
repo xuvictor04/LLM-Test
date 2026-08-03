@@ -91,7 +91,12 @@ MANAGE_MERGE = _f("MANAGE_MERGE", 0.28)
 # merge at 0.12 (3x tighter, so everything between was permanent); `size` cumulative so anything reaching
 # MANAGE_MIN was immortal; and no cap at all -- domains were the only population without a slot pool. The
 # result was ~1 domain per SPLICE SEGMENT (96 for 4 corpora), with manage() O(N^2) doubling wall-clock at N~300.
-MAX_DOMAINS = _i("MAX_DOMAINS", 64)        # hard cap, mirroring the expert bank's fixed slot pool
+# MIRRORS THE EXPERT BANK -- and that invariant was broken by every launcher, which set MAX_DOMAINS=1000000 while
+# leaving FAB_NMAX at its default 64. The two populations meant to be duals ran 15,625x apart: hundreds of domains
+# routed through 64 experts, so expert granularity was coarser than domain granularity by more than two orders of
+# magnitude and dom_exp affiliation was mapping many domains onto each expert. Defaulting to FAB_NMAX keeps them
+# tied unless someone deliberately unties them.
+MAX_DOMAINS = _i("MAX_DOMAINS", _i("FAB_NMAX", 4096))      # hard cap, mirroring the expert bank's slot pool
 MERGE_FRAC = _f("MERGE_FRAC", 0.8)         # merge threshold = MERGE_FRAC*NEW_DIST -> ONE scale for create+merge
 DOM_DECAY = _f("DOM_DECAY", 0.9)           # per-manage decay of the activity counter (ExpertRouter's rule)
 DOM_GRACE = _i("DOM_GRACE", 500)           # min age before a domain may be culled
@@ -622,12 +627,18 @@ class PlateauGrowth:
                  would otherwise re-trigger immediately; this is the "not resetting till stall" the design calls for.
                  Leaves RECOVER only once improvement has flattened (the ORIGINAL plateau test), or after rmax steps.
     Returns an INT (how many to grow), 0 for none."""
-    def __init__(s, rel=0.002, cooldown=1500, warmup=2000, z=4.0, burst=3, ramp=0, rmin=600, rmax=20000):
+    def __init__(s, rel=0.002, cooldown=1500, warmup=2000, z=4.0, burst=3, ramp=0, rmin=600, rmax=20000,
+                 rate=0.10, ramp_to=1.0):
         s.fast = s.slow = None; s.rel = rel; s.cool = cooldown; s.warm = warmup; s.last = -10**9
         s.z = z; s.burst = max(1, burst); s.ramp = ramp; s.rmin = rmin; s.rmax = rmax
         s.dev = 0.0; s.n = 0; s.state = "W"; s.t0 = 0; s.blackout = -10**9; s.why = ""
+        s.rate = max(0.0, rate); s.ramp_to = ramp_to      # GEOMETRIC ramp: grow a FRACTION of the population, not a
+        #   fixed count. +3 every 50 steps reaches ~240 experts by the end of a 4000-step ramp window and then stops,
+        #   because afterwards growth needs a plateau or a regression and those are rare. A population of thousands is
+        #   unreachable by addition; 3 -> 4096 at +10% per event is ~76 events. The ramp also ends on POPULATION SIZE
+        #   rather than on a step number, so it does not quietly expire before the population is built.
     def note_shift(s, t): s.blackout = t          # retok / resample: the loss jump is OURS, not the data's
-    def step(s, loss, t):
+    def step(s, loss, t, n=None, cap=None):
         s.fast = loss if s.fast is None else 0.98 * s.fast + 0.02 * loss
         s.slow = loss if s.slow is None else 0.998 * s.slow + 0.002 * loss
         s.n += 1
@@ -638,8 +649,10 @@ class PlateauGrowth:
         # recover-until-stall rule (rmin=600) is far longer than the ramp cadence, so gating the ramp behind it let
         # the ramp fire exactly once. During the ramp the population is still forming, so there is no progress to
         # protect; RECOVER starts mattering after it.
-        if s.ramp and t < s.ramp and t - s.last >= max(1, s.cool // 8):
-            s.last = t; s.why = "ramp"; return s.burst
+        _ramping = (t < s.ramp) if (n is None or cap is None) else (n < s.ramp_to * cap)
+        if s.ramp and _ramping and t - s.last >= max(1, s.cool // 8):
+            s.last = t; s.why = "ramp"
+            return max(s.burst, int(s.rate * n)) if n else s.burst
         if s.state == "R":                                                   # RECOVER: wait for the stall
             if t - s.t0 >= s.rmin and (improving < s.rel or t - s.t0 > s.rmax): s.state = "W"
             return 0
@@ -1470,7 +1483,8 @@ def main():
                  _f("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
                             _f("FAB_Z", 4.0), _i("FAB_BURST", 3), _i("FAB_RAMP", 4000),
-                            _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000)) if FABRIC else None
+                            _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000),
+                            _f("FAB_RAMP_RATE", 0.10), _f("FAB_RAMP_TO", 1.0)) if FABRIC else None
     # 64 was never a design decision, it was a default nothing pushed against -- and the population saturated it at
     # step 1295 of the pilot, after which "selection" is merge/cull churn over a full bank. With low-rank experts the
     # ceiling is memory: 2*NMAX*d*r floats, so 4096 experts costs 0.2 GB at d=768/r=8, 10k costs 0.5 GB, 1M costs 49.
@@ -2313,8 +2327,8 @@ def main():
         if _due("lmcurve", max(1, (STREAM_LEN // WIN) // 8)) and _lm_run:
             _lm_curve.append((step, sum(_lm_run[-2000:]) / len(_lm_run[-2000:]))); _lm_run = _lm_run[-2000:]
         if FABRIC and not fab.norm_only:
-            _nb = fabgrow.step(_lf, step)                       # 0, or HOW MANY to grow (burst on an unexpected regression)
-            _nb = min(_nb, FAB_NMAX - len(fab.bodies))
+            _nb = fabgrow.step(_lf, step, fab.n(), FAB_NMAX)    # 0, or HOW MANY to grow (burst on an unexpected regression)
+            _nb = min(_nb, FAB_NMAX - fab.n())
             for _g in range(max(0, _nb)):                       # each newborn is keyed at the CURRENT signature, so a
                 om.add_param_group({"params": fab.grow(sig[None, :] if SOCIETY else None)})   # burst owns this region
             if _nb > 0:
