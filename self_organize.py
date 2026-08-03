@@ -1470,7 +1470,32 @@ def selfcheck(model, mem, fab=None):                       # entry -- tens of Gi
 
 def main():
     global model, BLEN
-    print(f"self-organize | d{D} | {NP} hidden processes | stream {STREAM_LEN} | win {WIN} | SIG_MODE={SIG_MODE} | data {DATA_MODE}\n")
+    print(f"self-organize | d{D} | {NP} hidden processes | stream {STREAM_LEN} | win {WIN} | SIG_MODE={SIG_MODE} | data {DATA_MODE}")
+    # === WHAT IS ACTUALLY ON ==================================================================================
+    # Printed because this project's largest single error was not a bug: it was SIX subsystems silently defaulting
+    # OFF, so every result described a system that was missing its routing fabric, its world model, its expanding
+    # tokenizer, its per-expert memory and its non-stationary stream. Nothing in the output said so. A run that
+    # cannot be read back as "here is the system this measured" is a run that will be misfiled later.
+    # This is the whole-system check, in the log, on every run.
+    def _on(b): return "ON " if b else "off"
+    print(f"[config] SUBSYSTEMS  fabric {_on(FABRIC)} ({_i('FAB_NMAX', 4096)} slots, rank {_i('FAB_RANK', 8)}) | "
+          f"world {_on(bool(_i('WORLD_MODEL', 1)))} (grow {_on(bool(_i('WORLD_GROW', 1)))}, "
+          f"feedback {_on(bool(_i('WORLD_FEEDBACK', 1)))}) | domains {_on(SELF_ORG)} (cap {MAX_DOMAINS}) | "
+          f"manage {_on(MANAGE_ON)} | tokenizer {_on(USE_TOK)} (online {_on(TOK_ONLINE)}) | "
+          f"per-expert memory {_on(bool(_i('MEM_PER_EXPERT', 1)))} | phased {_on(PHASED)} | experts {_on(EXPERTS)}")
+    print(f"[config] SELECTION   competence protection {_on(COMP_PROTECT)} | cull-empty domains "
+          f"{_on(DOM_CULL_EMPTY)} | expert breadth cap {_f('EXP_DOM_FRAC', 0.10):.0%} of domains "
+          f"(floor {_i('EXP_DOM_MIN', 4)}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
+          f"{_f('FAB_RAMP_TO', 1.0):.0%} of cap")
+    print(f"[config] OFF ON PURPOSE  DIV_W={_f('DIV_W', 0.0)} (expert distinctness reward) | "
+          f"ENC_CREG={_f('ENC_CREG', 0.0)} (encoder decorrelation; ENC_VREG={_f('ENC_VREG', 5.0)} IS on) | "
+          f"DROPOUT={_f('DROPOUT', 0.0)} | RECON_W={_f('RECON_W', 0.0)} | FAB_MIN_STEPS={_i('FAB_MIN_STEPS', 0)}")
+    if EXPERTS and FABRIC:
+        print("[config] !! EXPERTS and FABRIC are mutually exclusive (FABRIC wins the elif chain) -- experts are a NO-OP")
+    if NP < 2 and PHASED:
+        print("[config] note: PHASED with ONE corpus degenerates to a stationary stream. The non-stationarity that "
+              "matters comes from ADDING an area later (longrun.sh add/pilot-add), not from a splice.")
+    print()
     ONLINE = USE_TOK and TOK_ONLINE
     def _retok(bstream, blabels, start=0):                 # tokenize given bytes with the LIVE vocab -> (ids, byte-pos, labels)
         ids = TOK.segment(bytes(bstream[start:]) if start else bytes(bstream), count=False); bs, off = [], start
