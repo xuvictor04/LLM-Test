@@ -82,7 +82,7 @@ if FAB_CFG:                                            # size the preallocated p
     _os.environ["FAB_RANK"] = str(int(FAB_CFG.get("rank", 8)))
 import sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-from self_organize import Fabric, SigEncoder as _SO_SigEncoder     # ONE definition, the one that trains
+from self_organize import Fabric                       # ONE definition, the one that trains
 
 WCFG = d.get("world_cfg"); WENC = WFWD = WPROJ = None
 if WCFG and d.get("world_enc") is not None:

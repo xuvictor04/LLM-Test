@@ -83,6 +83,10 @@ if [ "$WHICH" = smoke ]; then
   TINY="DATA_MODE=real DATA_DIR=data DOMAINS=eng,py,num,c STREAM_LEN=${SMOKE_LEN:-12000} D_MODEL=64 WIN=64 BATCH_W=4 \
 DEVICE=$SMDEV MANAGE_EVERY=20 DOM_MANAGE_EVERY=20 ENC_WARMUP=50 ENC_WARMUP_MIN=20 SAVE_CKPT=0 \
 COH_N=2 COH_LEN=96"
+  # `no_experts:EXPERTS=0` was REMOVED: EXPERTS is mutually exclusive with FABRIC, which wins the forward pass's
+  # elif chain, so with FABRIC on (the default) that arm changed nothing and passed vacuously in every gate run
+  # since it was added. `expert_bank:EXPERTS=1 FABRIC=0` replaces it and exercises the ExpertBank/ExpertRouter path
+  # that is otherwise never run at all.
   # vocab_growth is the arm that would have caught the signature-width regression: it grows the vocabulary and
   # re-keys repeatedly inside one short run. Every other arm runs 12 kB, where the vocabulary barely moves, the
   # stride stays put, and asm.wins never holds two widths -- so the gate passed a change that killed BOTH pilot
@@ -91,11 +95,12 @@ COH_N=2 COH_LEN=96"
   # arm; dropping them into the gate took an arm from 25 s to 3.3 min and blew the grid straight back past the run
   # it protects. The gate asks "does this arm reach the report", which 2 short continuations answer as well as 32.
   # Resolution is the MEASUREMENT's job, and the measurement runs on the GPU.
-  echo "smoke: 11 arms on $SMDEV, ${SMOKE_LEN:-12000} B each. Asserting only that every arm REACHES THE REPORT."
+  echo "smoke: 11 arms + checkpoint read-back on $SMDEV, ${SMOKE_LEN:-12000} B each. Asserting only that every arm REACHES THE REPORT."
   bad=0
   for arm in "full:" "no_fabric:FABRIC=0" "no_world:WORLD_MODEL=0" "no_perexp:MEM_PER_EXPERT=0" \
-             "no_tok:TOKENIZER=0" "no_domains:SELF_ORG=0" "no_phased:PHASED=0" "no_experts:EXPERTS=0" \
+             "no_tok:TOKENIZER=0" "no_domains:SELF_ORG=0" "no_phased:PHASED=0" \
              "no_manage:MANAGE=0" "sig_tokens:SIG_SPACE=tokens" \
+             "expert_bank:EXPERTS=1 FABRIC=0" \
              "vocab_growth:VMAX=1024 GROW_EVERY=20 GROW_BURST=8 REKEY_EVERY=200 STREAM_LEN=200000"; do
     L=${arm%%:*}; E=${arm#*:}
     env $TINY $E python3 self_organize.py > "$OUT/smoke_$L.log" 2>&1
@@ -104,6 +109,19 @@ COH_N=2 COH_LEN=96"
       grep -a -A4 Traceback "$OUT/smoke_$L.log" | tail -4 | sed 's/^/       /'; }
     [ "$rc" = 0 ] && [ "$tb" = 0 ] && printf "  ok   %s\n" "$L"
   done
+  # CHECKPOINT READ-BACK. prompt.py is how GENERATIONS are read -- the deliverable -- and it was completely dead
+  # for several commits because it carried a duplicated Fabric that went stale when the population became tensors.
+  # Nothing noticed, because no gate ever loaded a checkpoint back. Save one, prompt it, require exit 0.
+  env $TINY SAVE_CKPT="$OUT/smoke_ck" python3 self_organize.py > "$OUT/smoke_readback_train.log" 2>&1
+  if [ -f "$OUT/smoke_ck/ckpt.pt" ]; then
+    python3 prompt.py CKPT="$OUT/smoke_ck" PROMPT="The " N=16 > "$OUT/smoke_readback.log" 2>&1
+    rc=$?; tb=$(grep -ac Traceback "$OUT/smoke_readback.log")
+    [ "$rc" = 0 ] && [ "$tb" = 0 ] && printf "  ok   readback (prompt.py loads a checkpoint)\n" || {
+      bad=1; printf "  FAIL readback     exit %s | %s tracebacks\n" "$rc" "$tb"
+      grep -a -A4 Traceback "$OUT/smoke_readback.log" | tail -4 | sed 's/^/       /'; }
+  else
+    bad=1; printf "  FAIL readback     no checkpoint was written\n"
+  fi
   echo; [ $bad = 0 ] && echo "all arms run. safe to spend the GPU." || echo "FIX THE ABOVE before launching the real grid."
   exit $bad
 fi
