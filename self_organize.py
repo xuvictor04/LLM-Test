@@ -475,7 +475,11 @@ class Fabric(nn.Module):
         s.use = {}                                         # expert -> windows won (UTILIZATION)
         s.parent = {}                                      # expert -> the expert it was replicated FROM
         s.replicated = 0
-        s.clone_jitter = float(os.environ.get("FAB_CLONE_JITTER", 0.02))
+        s.parent_k = int(os.environ.get("FAB_PARENT_K", 8))     # shortlist size: how many region-owners compete to breed
+        s.mut = float(os.environ.get("FAB_MUT", 0.25))          # mutation as a FRACTION of the parent's own std
+        s.mut_big = float(os.environ.get("FAB_MUT_BIG", 6.0))   # heavy tail: occasional large jump
+        s.mut_big_p = float(os.environ.get("FAB_MUT_BIG_P", 0.1))
+        s.mutscale = {}
         s.born = {}                                        # expert -> step it was created (grace before culling)
         s.removed = 0; s.spared = 0
         s.breadth = float(os.environ.get("EXP_DOM_FRAC", 0.10))
@@ -530,20 +534,51 @@ class Fabric(nn.Module):
         # a perturbation, so it starts competent and differentiates from there -- the same clone-and-perturb the
         # world model already uses ("cloned from the fittest") and that ExpertBank had in the dead legacy path.
         # Fitness = marginal contribution where measured (the system is worse without it), utilization otherwise.
+        # PARENT = RELEVANT first, fit second, and sampled rather than argmaxed.
+        # Cloning the globally fittest is the wrong rule: growth is triggered BY A REGION (the signature `gist`),
+        # and the expert that matters for that region is whichever already serves it -- which may be a niche
+        # expert with low global utilization and high local value. A global argmax hands every birth to the same
+        # incumbent, which is how a population converges on one lineage. So: shortlist by RELEVANCE (nearest
+        # centroids to the birth signature), then SAMPLE within that shortlist with probability proportional to
+        # fitness. Sampling matters as much as the shortlist -- an argmax over the shortlist would still let one
+        # local incumbent monopolise every birth in its region.
         _par = None
         if FAB_REPLICATE and s.n_live > 0:
-            if s.contrib: _par = max(s.contrib, key=s.contrib.get)
-            elif s.use:   _par = max(s.use, key=s.use.get)
-            if _par is not None and not (0 <= _par < s.n_live): _par = None
+            _fit = {i: (s.contrib[i] if i in s.contrib else 0.0) for i in range(s.n_live)}
+            if gist is not None:
+                _q = F.normalize(gist.detach().mean(0), dim=-1).to(s.cent.device)
+                _sim = (F.normalize(s.cent[:s.n_live], dim=-1) @ _q)
+                _k = min(max(1, s.parent_k), s.n_live)
+                _cand = _sim.topk(_k).indices.tolist()      # the experts that OWN this region
+            else:
+                _cand = list(range(s.n_live))
+            #   fitness -> non-negative weights. contrib can be negative (the system is BETTER without that expert),
+            #   and a negative-contribution parent should be able to reproduce only rarely, not never: shifting to
+            #   a floor keeps the tail alive, which is the whole point of not using an argmax.
+            _w8 = [max(1e-3, _fit.get(i, 0.0) - min(_fit.get(c, 0.0) for c in _cand) + 1e-3) for i in _cand]
+            _tot = sum(_w8)
+            _r = random.random() * _tot
+            for _i4, _c4 in enumerate(_cand):
+                _r -= _w8[_i4]
+                if _r <= 0: _par = _c4; break
+            if _par is None: _par = _cand[-1]
+            if not (0 <= _par < s.n_live): _par = None
         with torch.no_grad():
             s.cent[j] = _ng.to(s.cent.device)[0]            # the newborn OWNS the region that triggered its birth
             if _par is None:
                 s.A[j].normal_(0, s.d ** -0.5); s.B[j].zero_()   # no parent yet -> identity, as before
             else:
-                _jit = s.clone_jitter
-                s.A[j] = s.A[_par] + _jit * torch.randn_like(s.A[_par])
-                s.B[j] = s.B[_par] + _jit * torch.randn_like(s.B[_par])
+                # MUTATION, scaled to the parent rather than absolute. A fixed 0.02 is a rounding error against a
+                # weight whose own scale is unknown, so a clone was effectively an exact copy and the population
+                # explored nothing. Scale by the parent's own std, and give it a heavy tail: most offspring stay
+                # near the parent, a few (FAB_MUT_BIG) jump far enough to reach somewhere the lineage has not been.
+                # Without the tail a population converges on its founder however many members it has.
+                _sa = float(s.A[_par].std()) or 1.0; _sb = float(s.B[_par].std()) or (s.d ** -0.5)
+                _m = s.mut * (s.mut_big if random.random() < s.mut_big_p else 1.0)
+                s.A[j] = s.A[_par] + _m * _sa * torch.randn_like(s.A[_par])
+                s.B[j] = s.B[_par] + _m * _sb * torch.randn_like(s.B[_par])
                 s.parent[j] = int(_par); s.replicated += 1
+                s.mutscale[j] = _m
             s.K[j] = (s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
 
         s.born[j] = int(step) if step is not None else 0    # GRACE is measured from here
@@ -1551,7 +1586,10 @@ def main():
     print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
           f"The legacy ExpertBank (EXPERTS={_i('EXPERTS', 0)}) is {'ON' if EXPERTS else 'off'} and is mutually "
           f"exclusive with it -- with the fabric on, that flag being 0 is CORRECT, not a missing subsystem.")
-    print(f"[config] SELECTION   replicate-fittest {_on(FAB_REPLICATE)} | competence protection {_on(COMP_PROTECT)} | cull-empty domains "
+    print(f"[config] SELECTION   replicate {_on(FAB_REPLICATE)} (parent: sampled by fitness among the "
+          f"{_i('FAB_PARENT_K', 8)} nearest region-owners; mutation {_f('FAB_MUT', 0.25):.0%} of parent std, "
+          f"{_f('FAB_MUT_BIG_P', 0.1):.0%} of births x{_f('FAB_MUT_BIG', 6.0):.0f})"
+          f" | competence protection {_on(COMP_PROTECT)} | cull-empty domains "
           f"{_on(DOM_CULL_EMPTY)} | expert breadth cap {_f('EXP_DOM_FRAC', 0.10):.0%} of domains "
           f"(floor {_i('EXP_DOM_MIN', 4)}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
           f"{_f('FAB_RAMP_TO', 1.0):.0%} of cap")
