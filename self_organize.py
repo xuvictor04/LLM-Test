@@ -470,6 +470,9 @@ class Fabric(nn.Module):
         # hundreds of domains routed through 64 experts. A percentage rather than a count because the domain
         # population is itself grown and culled: a fixed ceiling would be permissive early and crushing later.
         s.dom_of = {}                                      # expert -> set of domains it has actually served
+        s.use = {}                                         # expert -> windows won (UTILIZATION)
+        s.born = {}                                        # expert -> step it was created (grace before culling)
+        s.removed = 0; s.spared = 0
         s.breadth = float(os.environ.get("EXP_DOM_FRAC", 0.10))
         s.breadth_min = int(os.environ.get("EXP_DOM_MIN", 4))   # never squeeze below this, or a small population
         #   cannot route at all (10% of 8 domains is 0 and every expert would be banned from everything).
@@ -503,7 +506,7 @@ class Fabric(nn.Module):
 
     def n(s): return s.n_live
 
-    def grow(s, gist=None):                                 # add an expert; returns its new params
+    def grow(s, gist=None, step=None):                      # add an expert; returns its new params
         dev = s.halt_key.device
         _ng = (F.normalize(gist.detach().mean(0, keepdim=True).cpu()
                            + s.birth_jitter * torch.randn(1, s.sig_d), dim=-1) if gist is not None
@@ -518,6 +521,8 @@ class Fabric(nn.Module):
             s.A[j].normal_(0, s.d ** -0.5); s.B[j].zero_()  # IDENTITY at birth (B=0) -> inherits the base's competence
             s.K[j] = (s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
 
+        s.born[j] = int(step) if step is not None else 0    # GRACE is measured from here
+        s.use.pop(j, None); s.comp.pop(j, None); s.contrib.pop(j, None)     # a reused slot starts clean
         s.n_live += 1; s.grown += 1
         return []                                           # rows of EXISTING Parameters -- already in the optimizer,
         #   which is the whole reason for preallocating. Nothing to add_param_group.
@@ -536,6 +541,35 @@ class Fabric(nn.Module):
 
     def note_dom(s, e, did):
         s.dom_of.setdefault(int(e), set()).add(int(did))
+        s.use[int(e)] = s.use.get(int(e), 0.0) + 1.0       # UTILIZATION: the resource the population competes for
+
+    def manage(s, step, grace=3000, cull_frac=0.08, pressure=0.75, protect=True, comp_glob=None):
+        """SELECTION for the fabric population. There was NONE.
+
+        router.manage() -- create/replicate/cull -- is gated on `EXPERTS`, which is mutually exclusive with FABRIC
+        and therefore 0 in every default run. fab.remove() is called only by the independence TEST, which restores
+        immediately after. So the fabric was GROW-ONLY: it ramped to its cap and nothing ever removed a node. A
+        population that only grows is not under selection, whatever the growth rule is, and the competence
+        protection wired into router.manage sat on a code path that never executed (hence `spared 0`, every run).
+
+        Mirrors the domain manager deliberately: cull only under CAPACITY PRESSURE, only the bottom rank fraction
+        by utilization, never a newborn, and never a node that EARNS its place -- a positive marginal contribution
+        (the system is measurably worse without it) or, failing that, a competence better than the population's.
+        That is the protection for the useful-but-rare: rarely called is the bottom of a utilization ranking, and
+        it is also what a niche expert looks like."""
+        if s.n_live <= 2 or (s.n_live / max(1, s.cap)) < pressure: return 0, 0
+        order = sorted(range(s.n_live), key=lambda i: s.use.get(i, 0.0))
+        culled = spared = 0
+        for i in list(order[:max(1, int(cull_frac * s.n_live))]):
+            if s.n_live <= 2: break
+            if step - s.born.get(i, step) < grace: continue
+            if protect:
+                _c = s.contrib.get(i)
+                if _c is not None and _c > 0: spared += 1; continue        # load-bearing: worse without it
+                if _c is None and comp_glob is not None and s.comp.get(i, 1e9) < comp_glob:
+                    spared += 1; continue                                   # better than the population on its own
+            s.remove(i); culled += 1
+        return culled, spared
 
     def route_w(s, gist, nov, ban=None):
         """Routing weights over the N experts. Two terms, both kept:
@@ -596,6 +630,9 @@ class Fabric(nn.Module):
         if j != last:
             with torch.no_grad():
                 for _T in (s.A, s.B, s.K, s.cent): _T[j] = _T[last]
+            for _D in (s.use, s.born):
+                _D.pop(j, None)
+                if last in _D: _D[j] = _D.pop(last)
             for _D in (s.comp, s.contrib):
                 _D.pop(j, None)
                 if last in _D: _D[j] = _D.pop(last)
@@ -1482,7 +1519,13 @@ def main():
           f"world {_on(bool(_i('WORLD_MODEL', 1)))} (grow {_on(bool(_i('WORLD_GROW', 1)))}, "
           f"feedback {_on(bool(_i('WORLD_FEEDBACK', 1)))}) | domains {_on(SELF_ORG)} (cap {MAX_DOMAINS}) | "
           f"manage {_on(MANAGE_ON)} | tokenizer {_on(USE_TOK)} (online {_on(TOK_ONLINE)}) | "
-          f"per-expert memory {_on(bool(_i('MEM_PER_EXPERT', 1)))} | phased {_on(PHASED)} | experts {_on(EXPERTS)}")
+          f"per-expert memory {_on(bool(_i('MEM_PER_EXPERT', 1)))} | phased {_on(PHASED)}")
+    # NAMING, because the first version of this banner printed "experts off" while the expert population was ON.
+    # The EXPERTS flag names the LEGACY ExpertBank path; the live population is the fabric. Saying "experts off"
+    # about a run with 4096 routed experts is worse than saying nothing.
+    print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
+          f"The legacy ExpertBank (EXPERTS={_i('EXPERTS', 0)}) is {'ON' if EXPERTS else 'off'} and is mutually "
+          f"exclusive with it -- with the fabric on, that flag being 0 is CORRECT, not a missing subsystem.")
     print(f"[config] SELECTION   competence protection {_on(COMP_PROTECT)} | cull-empty domains "
           f"{_on(DOM_CULL_EMPTY)} | expert breadth cap {_f('EXP_DOM_FRAC', 0.10):.0%} of domains "
           f"(floor {_i('EXP_DOM_MIN', 4)}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
@@ -2268,6 +2311,15 @@ def main():
         if SELF_ORG and MANAGE_ON and step % DOM_MANAGE_EVERY == 0 and step > 0:                    # MANAGE the domain set
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull + fold
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
+        if FABRIC and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
+            _fc, _fs = fab.manage(step, grace=_i("FAB_GRACE", 3000), cull_frac=_f("FAB_CULL_FRAC", 0.08),
+                                  pressure=_f("FAB_PRESSURE", 0.75), protect=COMP_PROTECT,
+                                  comp_glob=asm.comp_glob)
+            fab.removed += _fc; fab.spared += _fs
+            if _fc or _fs:
+                print(f"  [experts @ {step}] culled {_fc} spared {_fs} -> {fab.n()} live "
+                      f"(cull under capacity pressure, bottom {_f('FAB_CULL_FRAC', 0.08):.0%} by utilization; "
+                      f"spared = load-bearing or better than the population on its own material)")
         if EXPERTS and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
             router.comp_of = ((lambda i: (fab.contrib[i], "contrib") if i in fab.contrib
                                else (fab.comp.get(i), asm.comp_glob)) if FABRIC else (lambda i: (None, None)))
@@ -2430,7 +2482,7 @@ def main():
             _nb = fabgrow.step(_lf, step, fab.n(), FAB_NMAX)    # 0, or HOW MANY to grow (burst on an unexpected regression)
             _nb = min(_nb, FAB_NMAX - fab.n())
             for _g in range(max(0, _nb)):                       # each newborn is keyed at the CURRENT signature, so a
-                _fp = fab.grow(sig[None, :] if SOCIETY else None)   # burst owns this region
+                _fp = fab.grow(sig[None, :] if SOCIETY else None, step=step)   # burst owns this region
                 if _fp: om.add_param_group({"params": _fp})
                 #   EMPTY GROUPS ARE NOT FREE. Since the population became preallocated tensors, grow() returns []
                 #   -- the rows are already in the optimizer. Adding a group anyway appended an EMPTY param group
