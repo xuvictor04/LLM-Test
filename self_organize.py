@@ -3050,6 +3050,29 @@ def main():
           f"{asm.nb} boundaries | radius {sum(1 for i in asm.cent if asm.rad.get(i) is not None)}/{n_self} measured"
           f"{f', pooled {asm._radp:.3f}' if asm._radp else ''}")
     print(f"  ENTRIES per live domain {_ent[:12]} | recurrent (>= {DOM_MIN_VISITS} entries) {_rec}/{n_self}")
+    if FABRIC:
+        # === DO THE EXPERTS CHAIN? ============================================================================
+        # Asked because it was assumed. The fabric has TWO forward paths and only one of them chains:
+        #   SOCIETY=1 (default)  society()  -- every expert maps the SAME h to its own output and the outputs are
+        #                                     blended. Expert i never sees expert j. Depth is identically 0.
+        #   SOCIETY=0            forward()  -- routing mass flows node -> node through a learned transition
+        #                                     matrix, HALT absorbs, depth is adaptive and charged for (ponder).
+        # Every run of this project has used the first. So the transition matrix, HALT, FAB_STEPS, PONDER and
+        # PONDER_WARM are all inert on the default path -- including the "the fabric's warmup never completes"
+        # argument that justified running the pilot longer. The depth and halt figures printed below come from a
+        # SEPARATE probe call to forward() made here at report time, not from anything that trained.
+        print(f"\n=== CHAINING: do experts compose, or only vote? ===")
+        print(f"  SOCIETY={int(SOCIETY)} -> " + (
+            "NO CHAINING. Experts are independent and blended at the router; each sees the base representation "
+            "only. The composition machinery (transition matrix, HALT, adaptive depth, ponder) is present but "
+            "NEVER RUNS. SOCIETY=0 to enable it -- and note the depth/halt numbers below are then real rather "
+            "than a report-time probe of a path the run did not use."
+            if SOCIETY else
+            "CHAINING ACTIVE. Mass flows expert -> expert through the transition matrix over multiple hops, "
+            "HALT absorbing, so an expert CAN build on another's output. Depth below is what actually ran."))
+        if SOCIETY:
+            print(f"  (ponder cost this run: 0 by construction -- _dep is zeros on the society path, so PONDER="
+                  f"{PONDER} and PONDER_WARM={PONDER_WARM} had no effect on training whatsoever)")
     if FABRIC: print(f"FABRIC{' [NORM-ONLY CONTROL: no nodes, no routing]' if fab.norm_only else ''}: {len(fab.bodies)} nodes ({fab.grown} grown on plateau from {_i('FAB_N0',3)}) | depth budget {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps | soft routing + transition matrix + HALT")
     if EXPERTS: print(f"EXPERTS (separate population, dual selection): {router.created} created, {router.replicated} replicated, {router.merged} merged, {router.removed} removed -> {len(router.cent)} live | rank {_i('EXPERT_R',4)} | churn {router.removed/max(1,router.created):.0%} (merge preserves learning; high churn destroys it)")
     tol = WIN * 3 if (USE_TOK and TOK_ONLINE) else WIN * 2   # byte-coord positions when online
