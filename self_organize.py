@@ -462,7 +462,7 @@ class Fabric(nn.Module):
         #   plain attribute: as an attribute it was absent from state_dict(), so the GROUNDED router's centroids -- which
         #   ARE the routing function when ROUTE_GROUNDED=1 (the default) -- were never saved, never resumed, and never
         #   moved to the GPU. prompt.py therefore routed every generation with untrained centroids.
-        s.K = nn.Parameter(torch.randn(cap, dk) * 0.1)                          # was a ParameterList
+
         # SHARED query projection, per-expert KEY -- i.e. actual attention over the population. Giving every expert
         # its own sig_d x dk query matrix made scoring O(N*sig_d*dk): measured 1.7 ms at N=64 but 345 ms at N=65536,
         # so the population was affordable in PARAMETERS and unaffordable in TIME. One shared projection makes it
@@ -478,7 +478,22 @@ class Fabric(nn.Module):
         # made R identical for every source: verified directly, all mass on expert 0 and all mass on expert 4 give
         # the SAME next distribution. The chain kept composing in h and stopped being a chain in the routing.
         # A dk-vector per expert restores per-source routing at O(N.dk) -- 32 floats each instead of a matrix.
-        s.SRC = nn.Parameter(torch.randn(cap, dk) * 0.1)
+        # EXPERT EMBEDDERS: routing identity is DERIVED FROM THE EXPERT'S OWN WEIGHTS, in their entirety.
+        # K and SRC were free parameters -- they described an expert without being derived from it, so what an
+        # expert DOES and where it is ROUTED drifted independently: an expert could learn something new and keep
+        # the key that sent it the old material, or keep a key nothing matched while its weights were fine.
+        # Running the full adapter (A and B flattened, 2*d*r numbers, nothing summarised) through a dedicated
+        # embedder makes identity a function of function. Consequences that fall out rather than being coded:
+        # a replicated child is near its parent in routing space because its WEIGHTS are near; an expert that
+        # mutates moves its own key; a culled slot cannot leave a stale identity behind.
+        # A SEPARATE embedder, used only for experts -- it is not the SigEncoder and never sees the stream.
+        s.eemb = nn.Sequential(nn.Linear(2 * d * s.r, int(os.environ.get("FAB_EMB_HID", 128))), nn.GELU(),
+                               nn.Linear(int(os.environ.get("FAB_EMB_HID", 128)), 2 * dk))
+        s.emb_every = int(os.environ.get("FAB_EMB_EVERY", 50))   # recompute cadence: O(N * 2*d*r * hid) is real
+        s._kc = None; s._kstep = -10**9; s._kn = -1
+        s.derive_ids = bool(int(os.environ.get("FAB_DERIVE_IDS", 1)))
+        s.SRC_p = nn.Parameter(torch.randn(cap, dk) * 0.1)       # fallback identities when FAB_DERIVE_IDS=0
+        s.K_p = nn.Parameter(torch.randn(cap, dk) * 0.1)
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
         # BREADTH CAP: how many DOMAINS one expert may serve, as a fraction of the live domain population.
         # Without it a handful of experts absorb everything -- which is exactly what the affiliation map showed when
@@ -531,6 +546,31 @@ class Fabric(nn.Module):
         s.route_learn = bool(int(os.environ.get("ROUTE_LEARN", 1)))   # add the learned bilinear term (see route_w)
         s.birth_jitter = float(os.environ.get("BIRTH_JITTER", 0.15))
         s.cent_m = float(os.environ.get("CENT_EMA", 0.02))
+    def _ids(s, N, step=None):
+        """(K, SRC) for the N live experts, embedded from their full weights. Cached on a cadence: the embed is
+        O(N * 2*d*r * hid) and at N=4096, d=768, r=8 that is a real cost to pay every step for something that
+        moves slowly. Between refreshes the cached values are used as-is, so gradient reaches the embedder on
+        refresh steps -- which is what trains it."""
+        if not s.derive_ids: return s.K_p[:N], s.SRC_p[:N]
+        if s._kc is not None and s._kn == N and step is not None and step - s._kstep < s.emb_every:
+            return s._kc
+        W = torch.cat([s.A[:N].reshape(N, -1), s.B[:N].reshape(N, -1)], -1)   # FULL weights, not a summary
+        e = s.eemb(W)
+        out = (e[:, :s.dk], e[:, s.dk:])
+        s._kc, s._kn = out, N
+        if step is not None: s._kstep = step
+        return out
+
+    @property
+    def K(s):
+        """COMPATIBILITY: several sites index s.K[j] to write a newborn's key. With identities derived from
+        weights there is nothing to write -- the key follows the weights -- so those writes go to the fallback
+        parameter and are simply unused while FAB_DERIVE_IDS=1."""
+        return s.K_p
+
+    @property
+    def SRC(s): return s.SRC_p
+
     @property
     def bodies(s):
         """COMPATIBILITY: the population is tensors now, but `len(fab.bodies)` is read in eight places (the probe
@@ -714,7 +754,7 @@ class Fabric(nn.Module):
             s.remove(i); culled += 1
         return culled, spared
 
-    def route_w(s, gist, nov, ban=None):
+    def route_w(s, gist, nov, ban=None, step=None):
         """Routing weights over the N experts. Two terms, both kept:
           GROUNDED  cosine of the signature to each expert's owned REGION (centroid, EMA'd under no_grad).
           LEARNED   qproj[i](gist).keys[i] -- a per-expert bilinear score. This revives parameters that were
@@ -742,8 +782,9 @@ class Fabric(nn.Module):
                 # size the number is 1-vs-3 out of 32 windows, which is noise. Shipping it as a fix would be the
                 # fourth unvalidated router change in a row. It is a flag so the pilot can A/B it at a size where
                 # the answer means something.
-                _lrn = ((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(s.K[:N], dim=-1).t())
-                        / max(1e-3, s.route_t)) if FAB_KEY_NORM else (s.q_route(gist) @ s.K[:N].t())
+                _Kd, _ = s._ids(N, step)                       # identity embedded from the experts' own weights
+                _lrn = ((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(_Kd, dim=-1).t())
+                        / max(1e-3, s.route_t)) if FAB_KEY_NORM else (s.q_route(gist) @ _Kd.t())
                 logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)
             if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
             w = torch.softmax(logits, -1)
@@ -773,7 +814,7 @@ class Fabric(nn.Module):
                         s.cent[_cold] = F.normalize(0.5 * s.cent[_cold].to(gist.device) + 0.5 * _g1, dim=-1).cpu()
                         s.discovered += 1
         else:
-            K = torch.cat([s.K[:N], s.halt_key[None]], 0)
+            K = torch.cat([s._ids(N, step)[0], s.halt_key[None]], 0)
             _lg = ((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t)
             if ban is not None:
                 _lg[:, :N] = _lg[:, :N].masked_fill(ban.to(_lg.device)[None], float("-inf"))
@@ -781,7 +822,7 @@ class Fabric(nn.Module):
             w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)      # router weights over experts
         return w
 
-    def society(s, h, gist, nov, k=None, ban=None):
+    def society(s, h, gist, nov, k=None, ban=None, step=None):
         """SOCIETY OF EXPERTS: every expert maps the SAME base representation to its OWN output -- no chaining, so
         expert i's output never depends on expert j's.
 
@@ -791,7 +832,7 @@ class Fabric(nn.Module):
         the selection that was already happening, which is what makes a LARGE expert population affordable.
         Returns (w_full, O_k, idx) where idx maps O_k's columns back to global expert ids."""
         N = s.n_live
-        w = s.route_w(gist, nov, ban=ban)
+        w = s.route_w(gist, nov, ban=ban, step=step)
         kk = N if k is None else int(min(max(1, k), N))
         # PER WINDOW, not per batch. This was w.mean(0).topk -- ONE expert set and one weight vector for all
         # BATCH_W windows, so every window in a batch was served by the same experts however different its
@@ -845,14 +886,15 @@ class Fabric(nn.Module):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
         random. A randomly-keyed expert receives no traffic, gets no gradient, and stays dead (measured: 12/17 idle)."""
         with torch.no_grad(): return s.q_entry(gist).detach().squeeze(0).clone()
-    def forward(s, h, gist, nov):
+    def forward(s, h, gist, nov, step=None):
         N = s.n_live; HALT = N
         if s.norm_only:                                                       # control arm: just the normalization
             steps = max(1, min(s.max_steps, 2 + N // 2))
             for _ in range(steps): h = s.norm(h)
             z = h.new_zeros(())
             return h, z, torch.zeros(N + 1, device=h.device), z
-        K = torch.cat([s.K[:N], s.halt_key[None]], 0)                         # (N+1, dk) operator keys
+        _Kd, _SRCd = s._ids(N, step)                                          # both embedded from full weights
+        K = torch.cat([_Kd, s.halt_key[None]], 0)                             # (N+1, dk) operator keys
         nb = s.nov(nov[:, None])                                              # surprise -> routing bias
         c = torch.softmax(((s.q_entry(gist) + nb) @ K.t()) / max(1e-3, s.route_t), -1)   # (B,N+1) ENTRY distribution
         #   route_t applied HERE TOO. It was only ever applied on the society path, so the chaining path kept the
@@ -888,7 +930,7 @@ class Fabric(nn.Module):
             bias = nb + s.ctrl(summ)
             # PER-SOURCE, and only for the sources that actually hold mass. The full (B,N,N+1) transition is
             # 1.07 GB at N=4096 alone; the top-k sources hold essentially all of it, so R is built for those.
-            Q = (s.q_route(gist)[:, None, :] + s.SRC[_ci]                      # (B,k,dk): + the HOLDER's own mark
+            Q = (s.q_route(gist)[:, None, :] + _SRCd[_ci]                      # (B,k,dk): + the HOLDER's own mark
                  + bias[:, None, :])
             R = torch.softmax(torch.einsum('bkd,md->bkm', Q, K) / max(1e-3, s.route_t), -1)   # (B,k,N+1)
             _cvn = _cv / _cv.sum(-1, keepdim=True).clamp_min(1e-9)
@@ -3442,7 +3484,7 @@ def main():
             if len(_ew) >= 8:
                 with torch.no_grad():
                     _G = enc(torch.tensor(_ew, device=DEV))
-                    _K = torch.cat([fab.K[:_N], fab.halt_key[None]], 0)
+                    _K = torch.cat([fab._ids(_N)[0], fab.halt_key[None]], 0)
                     _nb = fab.nov(torch.zeros(_G.size(0), 1, device=DEV))
                     _c = torch.softmax(((fab.q_entry(_G) + _nb) @ _K.t()) / max(1e-3, fab.route_t), -1)
                     _win = _c[:, :_N].argmax(-1)           # the node that takes this window at ENTRY
