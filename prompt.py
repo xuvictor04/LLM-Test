@@ -117,7 +117,14 @@ if FAB_CFG and d.get("fab") is not None:
     FAB.grounded = bool(FAB_CFG.get("grounded", True))
     FAB.route_t = float(FAB_CFG.get("route_t", 0.1))
     FAB.route_learn = bool(FAB_CFG.get("route_learn", True))
-    FAB.load_state_dict(d["fab"]); FAB.eval()          # loads `cent` too, now that it is a registered buffer
+    # HALT: generation must complete the way training did. A checkpoint trained with the router owning the
+    # WHETHER decision and sampled without it is a different model.
+    FAB.halt_on = bool(FAB_CFG.get("halt_on", False))  # absent = pre-HALT checkpoint -> off, not on
+    FAB.halt_max = float(FAB_CFG.get("halt_max", 0.9))
+    _mk = FAB.load_state_dict(d["fab"], strict=False)  # loads `cent` too, now that it is a registered buffer
+    if _mk.missing_keys or _mk.unexpected_keys:
+        print(f"[fab] partial match -- missing {list(_mk.missing_keys)}, unexpected {list(_mk.unexpected_keys)}")
+    FAB.eval()
     ENC = SigEncoder(D, SIG_D, nv=d["enc"]["emb.weight"].size(0)).to(DEV); ENC.load_state_dict(d["enc"]); ENC.eval()
 
 # ---- tokenizer (or raw bytes) ----

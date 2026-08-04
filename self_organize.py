@@ -515,6 +515,22 @@ class Fabric(nn.Module):
         s.SRC_p = nn.Parameter(torch.randn(cap, dk) * 0.1)       # fallback identities when FAB_DERIVE_IDS=0
         s.K_p = nn.Parameter(torch.randn(cap, dk) * 0.1)
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
+        # HALT ON THE SOCIETY PATH. HALT used to exist only inside the chaining loop, where it is an ABSORBING
+        # operator that ends the walk. On the society path it was COMPUTED AND THROWN AWAY: the learned branch of
+        # route_w built a distribution over N+1 operators and then sliced off column N, and the grounded branch had
+        # no HALT operator at all. So the router could choose WHICH experts answer but never WHETHER they should --
+        # every window went through the population whether or not the population had anything to add, and the base
+        # model's own head was unreachable except by ablation.
+        # HALT is now a real operator in both branches. Its mass says "no expert is needed here"; the caller spends
+        # that mass on model.head(h) directly, so the router owns the completion decision on both paths.
+        s.halt_b = nn.Parameter(torch.zeros(1))            # prior on halting, learned; 0 = whatever the query says
+        s.halt_on = bool(int(os.environ.get("FAB_HALT", 1)))
+        s.halt_max = float(os.environ.get("FAB_HALT_MAX", 0.9))   # BARRIER, not a preference. At halt=1 the experts
+        #   receive no gradient at all, and an expert that receives no gradient can never become worth routing to --
+        #   the same trap top-k exploration exists to avoid. Clamping leaves >=10% of the blend on the population,
+        #   so a bad early halt is recoverable rather than absorbing.
+        s.halt_ema = None                                  # running mean halt mass, for the report (kept on device)
+        s._halt = None                                     # (B,1) halt mass from the last route_w call
         # BREADTH CAP: how many DOMAINS one expert may serve, as a fraction of the live domain population.
         # Without it a handful of experts absorb everything -- which is exactly what the affiliation map showed when
         # hundreds of domains routed through 64 experts. A percentage rather than a count because the domain
@@ -859,7 +875,7 @@ class Fabric(nn.Module):
                         / max(1e-3, s.route_t)) if FAB_KEY_NORM else (s.q_route(gist) @ _Kd.t())
                 logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)
             if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
-            w = torch.softmax(logits, -1)
+            w = s._with_halt(logits, gist, N)
             with torch.no_grad():
                 # EVERY EXPERT THAT SERVED THIS SIGNATURE MOVES TOWARD IT, in proportion to how much it served.
                 # This used to update the ARGMAX WINNER ONLY, which makes discovery structurally impossible: the
@@ -891,8 +907,38 @@ class Fabric(nn.Module):
             if ban is not None:
                 _lg[:, :N] = _lg[:, :N].masked_fill(ban.to(_lg.device)[None], float("-inf"))
             c = torch.softmax(_lg, -1)
+            s._record_halt(c[:, N:N + 1])
             w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)      # router weights over experts
         return w
+
+    def _with_halt(s, logits, gist, N):
+        """Append HALT to the grounded branch's operator set and return the renormalised weights over experts.
+
+        The grounded branch scores experts by cosine of the signature to their region; HALT owns no region, so its
+        logit comes from the SAME place the learned expert term does -- the router's query in identity space,
+        matched against halt_key -- plus a learned scalar prior. That keeps it on one scale with the terms it is
+        competing against, which is the bug that made the raw-dot learned key a winner-take-all amplifier."""
+        if not s.halt_on:
+            s._halt = None
+            return torch.softmax(logits, -1)
+        _qh = s.q_route(gist)
+        _hl = ((_qh @ s.halt_key[:, None]) if (s.route_learn and not FAB_KEY_NORM)
+               else (F.normalize(_qh, dim=-1) @ F.normalize(s.halt_key, dim=-1)[:, None]) / max(1e-3, s.route_t))
+        c = torch.softmax(torch.cat([logits, _hl + s.halt_b], -1), -1)
+        s._record_halt(c[:, N:N + 1])
+        w = c[:, :N]
+        return w / w.sum(-1, keepdim=True).clamp_min(1e-9)
+
+    def _record_halt(s, hm):
+        """Store the halt mass for the caller and keep a running mean for the report. Clamped at halt_max so the
+        population always keeps a share of the blend -- see halt_max in __init__ for why that is a barrier and not
+        a preference. Kept ON DEVICE: a float() here would be a GPU sync every step for a reporting number."""
+        if not s.halt_on:
+            s._halt = None; return
+        s._halt = hm.clamp(max=s.halt_max)
+        with torch.no_grad():
+            _m = s._halt.mean().detach()
+            s.halt_ema = _m if s.halt_ema is None else 0.99 * s.halt_ema + 0.01 * _m
 
     def society(s, h, gist, nov, k=None, ban=None, step=None):
         """SOCIETY OF EXPERTS: every expert maps the SAME base representation to its OWN output -- no chaining, so
@@ -1830,7 +1876,18 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     for j in range(O.size(1)):
         lj = model.head(fab.norm(O[:, j])) * ww[:, j][:, None, None]
         out = lj if out is None else out + lj
-    return out
+    return halt_blend(model, fab, h, out)
+
+
+def halt_blend(model, fab, h, out):
+    """Spend the router's HALT mass on the base model's own head. The society path is one-shot, so HALT cannot mean
+    "stop walking" the way it does in the chaining loop -- it means "no expert is needed for this window", and the
+    only honest way to honour that is to let the base representation complete it directly.
+    Same operator, same key, same softmax on both paths; only what the halted mass BUYS differs."""
+    hm = getattr(fab, "_halt", None)
+    if hm is None: return out
+    hm = hm[:, :, None]                                    # (B,1,1) broadcast over positions and vocab
+    return (1 - hm) * out + hm * model.head(h)
 
 
 @torch.no_grad()                                           # was building a full autograd graph over every stored
@@ -1876,6 +1933,11 @@ def main():
           f"{_on(DOM_CULL_EMPTY)} | expert breadth cap {_f('EXP_DOM_FRAC', 0.10):.0%} of domains "
           f"(floor {_i('EXP_DOM_MIN', 4)}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
           f"{_f('FAB_RAMP_TO', 1.0):.0%} of cap")
+    print(f"[config] ROUTING     {'grounded region + learned bilinear' if bool(_i('ROUTE_GROUNDED', 1)) else 'learned only'}"
+          f" | HALT {_on(bool(_i('FAB_HALT', 1)))} on BOTH paths (cap {_f('FAB_HALT_MAX', 0.9):.2f}): the router "
+          f"decides WHETHER the population answers, not only which experts do -- halted mass goes to the base head"
+          + (f" | chaining hops {_i('FAB_STEPS', 4)}, HALT blocked for {_i('FAB_MIN_STEPS', 2)}" if not SOCIETY
+             else " | SOCIETY: one hop, no chaining"))
     print(f"[config] OFF ON PURPOSE  DIV_W={_f('DIV_W', 0.0)} (expert distinctness reward) | "
           f"ENC_CREG={_f('ENC_CREG', 0.0)} (encoder decorrelation; ENC_VREG={_f('ENC_VREG', 5.0)} IS on) | "
           f"DROPOUT={_f('DROPOUT', 0.0)} | RECON_W={_f('RECON_W', 0.0)} | FAB_MIN_STEPS={_i('FAB_MIN_STEPS', 0)}")
@@ -2045,7 +2107,16 @@ def main():
                 _np2 = world_fwd.grow()
                 if _np2: _regrown.append(_np2)
         model.load_state_dict(_RD["model"]); _load_enc(enc, _RD["enc"])
-        if FABRIC and _RD.get("fab") is not None: fab.load_state_dict(_RD["fab"])
+        if FABRIC and _RD.get("fab") is not None:
+            # TOLERANT, AND LOUD ABOUT IT. A checkpoint written before a router parameter existed (halt_b is the
+            # current example) is missing that key, and a strict load throws away the ENTIRE fabric -- every
+            # expert, every centroid -- over one freshly-initialised scalar. Load non-strict so a resume across a
+            # code change works, and PRINT what did not match, because silently absorbing a mismatch is how a
+            # resume quietly loads a different model than the one that was saved.
+            _mk = fab.load_state_dict(_RD["fab"], strict=False)
+            if _mk.missing_keys or _mk.unexpected_keys:
+                print(f"  [resume] fabric state partially matched -- missing {list(_mk.missing_keys)} "
+                      f"(left at init), unexpected {list(_mk.unexpected_keys)} (ignored)")
         if EXPERTS and _RD.get("experts") is not None: experts.load_state_dict(_RD["experts"])
         if WORLD_MODEL and _RD.get("world_enc") is not None:
             world_enc.load_state_dict(_RD["world_enc"]); world_fwd.load_state_dict(_RD["world_fwd"])
@@ -2386,7 +2457,8 @@ def main():
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _f("FAB_HID_MULT", 2),
                                  "min_steps": _i("FAB_MIN_STEPS", 0), "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
                                  "society": SOCIETY, "grounded": fab.grounded, "route_t": fab.route_t,
-                                 "route_learn": fab.route_learn, "ens_k": ENS_K} if FABRIC else None)},
+                                 "route_learn": fab.route_learn, "ens_k": ENS_K,
+                                 "halt_on": fab.halt_on, "halt_max": fab.halt_max} if FABRIC else None)},
                    f"{ck}/ckpt.pt.tmp")
         if os.path.exists(f"{ck}/ckpt.pt"):                       # keep ONE previous generation: a corrupt or
             try: os.replace(f"{ck}/ckpt.pt", f"{ck}/ckpt.prev.pt")   # interrupted write is then always recoverable
@@ -2754,6 +2826,10 @@ def main():
                 _hd[_j] = model.head(fab.norm(_O[:, _j]))
                 _cw = _wk[:, _q][:, None, None]
                 lg = _hd[_j] * _cw if lg is None else lg + _hd[_j] * _cw
+            # THE ROUTER DECIDES WHETHER THE POPULATION ANSWERS AT ALL. Its HALT mass buys the base head directly;
+            # the rest buys the ensemble. This is the term that lets "no expert fits this" be a routing OUTCOME
+            # rather than something only an ablation flag could express.
+            lg = halt_blend(model, fab, h, lg)
         else:
             lg = model.head(h)
         # PER-WINDOW loss, then the mean. Same arithmetic, same cost -- reduction='none' and .mean() is exactly
@@ -2809,6 +2885,10 @@ def main():
                     for _t2, _q2 in enumerate(_keep):
                         _cw2 = _w2[:, _t2][:, None, None]
                         _lg2 = _hd[_q2] * _cw2 if _lg2 is None else _lg2 + _hd[_q2] * _cw2
+                    #   Blend the same way the real forward pass did, or the counterfactual is measured against a
+                    #   different function than the one that produced `loss` and every contribution is offset by
+                    #   whatever HALT was spending on the base head.
+                    _lg2 = halt_blend(model, fab, h, _lg2)
                     _d2 = float(F.cross_entropy(_lg2.reshape(-1, V), y.reshape(-1)) - loss)
                     #   ROW 0's expert for this rank slot: with per-window routing a slot no longer names ONE
                     #   expert across the batch, so attribute to the most common holder of that slot.
@@ -3248,14 +3328,19 @@ def main():
                                    "as HALT absorbs, updates shrink to zero and the state settles -- the loop "
                                    "counter is only an upper bound."
                                    if not SOCIETY else
-                                   "ONE-SHOT. Experts compute once and go straight to the head; there is no HALT "
-                                   "and nothing for the router to complete. SOCIETY=0 is the path where the "
-                                   "router decides when the computation is done."))
+                                   ("the ROUTER decides, on this path too. One hop, but HALT is a real operator in "
+                                    "the same softmax as the experts, and its mass is spent on the base head "
+                                    "instead of on the population -- so 'no expert is needed here' is a routing "
+                                    "OUTCOME, not something only an ablation flag could say."
+                                    if fab.halt_on else
+                                    "ONE-SHOT, HALT DISABLED (FAB_HALT=0). Experts compute once and go straight to "
+                                    "the head; the halt mass is computed and discarded, so the router chooses WHICH "
+                                    "experts answer but never WHETHER they should.")))
         print(f"  SOCIETY={int(SOCIETY)} -> " + (
             "NO CHAINING. Experts are independent and blended at the router; each sees the base representation "
-            "only. The composition machinery (transition matrix, HALT, adaptive depth, ponder) is present but "
-            "NEVER RUNS. SOCIETY=0 to enable it -- and note the depth/halt numbers below are then real rather "
-            "than a report-time probe of a path the run did not use."
+            "only. The composition machinery specific to chaining (transition matrix, adaptive depth, ponder) is "
+            "present but NEVER RUNS -- HALT is the exception and now runs on both paths. SOCIETY=0 to enable the "
+            "rest, and note the DEPTH figure below is a report-time probe of a path this run did not use."
             if SOCIETY else
             "CHAINING ACTIVE. Mass flows expert -> expert through the transition matrix over multiple hops, "
             "HALT absorbing, so an expert CAN build on another's output. Depth below is what actually ran."))
@@ -3265,6 +3350,17 @@ def main():
         if SOCIETY:
             print(f"  (ponder cost this run: 0 by construction -- _dep is zeros on the society path, so PONDER="
                   f"{PONDER} and PONDER_WARM={PONDER_WARM} had no effect on training whatsoever)")
+        # SOCIETY only: on the chaining path route_w never runs, so halt_ema is None and this would print nan.
+        # That path reports its own halt mass in the FABRIC probe line below, where HALT means "the walk ended".
+        if fab.halt_on and SOCIETY and fab.halt_ema is not None:
+            _hv = float(fab.halt_ema)
+            print(f"  HALT MASS (running mean over the run): {_hv:.3f} -- the share of the prediction the router "
+                  f"handed to the BASE HEAD rather than to the expert population, capped at {fab.halt_max:.2f} "
+                  f"(FAB_HALT_MAX) so the experts always keep a share of the gradient.")
+            print(f"   read it as: ~0 = the router wants the population on every window (it has not learned that "
+                  f"some material needs no expert, or none does); ~{fab.halt_max:.2f} = it is routing around the "
+                  f"population, which means the experts are not earning their place and the barrier is the only "
+                  f"thing keeping them alive; in between = a real WHETHER decision, per window.")
     if FABRIC: print(f"FABRIC{' [NORM-ONLY CONTROL: no nodes, no routing]' if fab.norm_only else ''}: {len(fab.bodies)} nodes ({fab.grown} grown on plateau from {_i('FAB_N0',3)}) | depth budget {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps | soft routing + transition matrix + HALT")
     if EXPERTS: print(f"EXPERTS (separate population, dual selection): {router.created} created, {router.replicated} replicated, {router.merged} merged, {router.removed} removed -> {len(router.cent)} live | rank {_i('EXPERT_R',4)} | churn {router.removed/max(1,router.created):.0%} (merge preserves learning; high churn destroys it)")
     tol = WIN * 3 if (USE_TOK and TOK_ONLINE) else WIN * 2   # byte-coord positions when online
@@ -3734,11 +3830,27 @@ def main():
                         def _bpb2(_l):
                             return float(F.cross_entropy(_l.reshape(-1, V), _Ys.reshape(-1), reduction="sum")
                                          / math.log(2) / max(1.0, float(_den2)))
-                        _pop = _bpb2(_lgp); _solo = [(_bpb2(_heads[j]), int(_os[j])) for j in range(len(_heads))]
+                        # _os is (B,kk) since routing went PER WINDOW: `int(_os[j])` was int() of a whole row and
+                        # threw ValueError every run, so this entire section has been silently swallowed by the
+                        # except below ever since -- the one measurement that asks whether the population beats its
+                        # own best member has not printed once. Rank slot j is now labelled by its MODAL holder,
+                        # the same attribution the marginal-contribution loop uses.
+                        _pop = _bpb2(_lgp)
+                        _solo = [(_bpb2(_heads[j]), int(torch.mode(_os[:, j]).values)) for j in range(len(_heads))]
                         _best, _bid = min(_solo)
+                        # The comparison above is EXPERTS ONLY, deliberately -- mixing the base head into it would
+                        # confound "the population aggregates" with "the base model is good". This is what the
+                        # router actually emitted on the same windows, HALT included.
+                        _fullb = _bpb2(halt_blend(model, fab, _hs, _lgp)) if fab.halt_on else None
                     print(f"\n=== SUFFICIENCY: does the POPULATION beat its best single member? ===")
                     print(f"  population ({len(_heads)} experts blended) {_pop:.3f} bits/byte | "
-                          f"best single expert (node {_bid}) {_best:.3f} | population buys {_best - _pop:+.3f}")
+                          f"best single rank-slot (modal holder node {_bid}) {_best:.3f} | "
+                          f"population buys {_best - _pop:+.3f}")
+                    print(f"   (a 'rank slot' is one expert per window -- each window's own k-th choice -- since "
+                          f"routing is per window. That is a STRONGER baseline than one fixed expert for everything.)")
+                    if _fullb is not None:
+                        print(f"  as the router actually emitted it (HALT mass spent on the base head): {_fullb:.3f} "
+                              f"bits/byte | HALT changes the answer by {_fullb - _pop:+.3f} vs experts alone")
                     print(f"  >> " + ("AGGREGATE: no member is sufficient alone, together they are -- which is the "
                                       "design claim, measured on the outcome rather than assumed."
                                       if _best - _pop > 0.02 else
