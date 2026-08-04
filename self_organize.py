@@ -514,8 +514,11 @@ class Fabric(nn.Module):
         #   (every identity identical -> typ = 0) cannot spawn on every single query
         s._spawn_gap = s._spawn_typ = 0.0
         s.spawned = 0
-        s.emb_every = int(os.environ.get("FAB_EMB_EVERY", 50))   # recompute cadence: O(N * 2*d*r * hid) is real
-        s._kc = None; s._kstep = -10**9; s._kn = -1
+        # DEFAULT 1 (was 50, and inert on the society path because that path never passed step=). >1 makes the
+        # routing keys stale AND throttles the identity gradient channel to 1-in-N steps -- see _ids. Raise it only
+        # if the embed is measured to be the bottleneck, and read GRADIENT REACH in the report when you do.
+        s.emb_every = max(1, int(os.environ.get("FAB_EMB_EVERY", 1)))   # recompute cadence: O(N * 2*d*r * hid) is real
+        s._kc = None; s._kcl = None; s._kstep = -10**9; s._kn = -1
         s.derive_ids = bool(int(os.environ.get("FAB_DERIVE_IDS", 1)))
         s.SRC_p = nn.Parameter(torch.randn(cap, dk) * 0.1)       # fallback identities when FAB_DERIVE_IDS=0
         s.K_p = nn.Parameter(torch.randn(cap, dk) * 0.1)
@@ -593,18 +596,26 @@ class Fabric(nn.Module):
         moves slowly. Between refreshes the cached values are used as-is, so gradient reaches the embedder on
         refresh steps -- which is what trains it."""
         if not s.derive_ids: return s.K_p[:N], s.SRC_p[:N]
-        if s._kc is not None and s._kn == N and step is not None and step - s._kstep < s.emb_every:
-            return s._kc
+        # TWO KINDS OF REUSE, and conflating them was the bug.
+        #   SAME STEP  -- return the LIVE tensors. _ids can be called more than once in a step (route_w, forward,
+        #                 spawn_from), and every one of those consumers must sit on the same graph or the second
+        #                 one silently trains nothing.
+        #   LATER STEP -- return DETACHED copies. This used to hand back the live tensors, whose graph the previous
+        #                 backward had already freed: "Trying to backward through the graph a second time". It only
+        #                 never fired because the society path calls _ids WITHOUT step=, so the cadence test always
+        #                 failed. That made emb_every dead code on one path and live on the other -- and since the
+        #                 identity channel is the ONLY one that reaches every expert (routing computes k of N, but
+        #                 eemb reads ALL N weights), a stale cache cuts the one gradient the rest of the population
+        #                 ever sees by a factor of emb_every. DEFAULT 1: pay the embed, keep the channel.
+        if s._kc is not None and s._kn == N and step is not None:
+            if step == s._kstep and s._kcl is not None: return s._kcl
+            if step - s._kstep < s.emb_every:
+                s._kcl = None                             # release the old graph; it can never be returned again
+                return s._kc
         W = torch.cat([s.A[:N].reshape(N, -1), s.B[:N].reshape(N, -1)], -1)   # FULL weights, not a summary
         e = s.eemb(W)
         out = (e[:, :s.dk], e[:, s.dk:])
-        # CACHE DETACHED. This stored the LIVE tensors, so a cache hit on the next step handed back a node whose
-        # graph had already been freed by that step's backward -- "Trying to backward through the graph a second
-        # time". It never fired only because the training loop calls society() WITHOUT step=, so the cadence test
-        # `step is not None` always failed and the embed was recomputed every single step: the O(N * 2*d*r * hid)
-        # cost this cache exists to amortize was being paid in full, 50x more often than intended, at N=4096.
-        # Detaching makes the cache do what its docstring already claimed -- gradient reaches eemb on REFRESH steps
-        # (and from ae_loss every step, which is what actually trains it), stale values in between.
+        s._kcl = out                                                          # live, this step only
         s._kc, s._kn = (out[0].detach(), out[1].detach()), N
         if step is not None: s._kstep = step
         return out
@@ -1030,6 +1041,10 @@ class Fabric(nn.Module):
         K = torch.cat([_Kd, s.halt_key[None]], 0)                             # (N+1, dk) operator keys
         nb = s.nov(nov[:, None])                                              # surprise -> routing bias
         _elg = ((s.q_entry(gist) + nb) @ K.t()) / max(1e-3, s.route_t)
+        # THE LEARNED HALT PRIOR APPLIES HERE TOO. halt_b was added for the society path and measured DEAD on this
+        # one -- an optimizer parameter with an identically-zero gradient on what is now the default path. HALT is
+        # one operator with one key; it should have one prior as well.
+        if s.halt_on: _elg = _elg + F.pad(s.halt_b.expand(1, 1), (N, 0))
         if ban1 is not None: _elg[:, ban1] = float("-inf")                     # held out of the ENTRY distribution
         c = torch.softmax(_elg, -1)                                           # (B,N+1) ENTRY distribution
         #   route_t applied HERE TOO. It was only ever applied on the society path, so the chaining path kept the
@@ -1103,6 +1118,7 @@ class Fabric(nn.Module):
             Q = (s.q_route(gist)[:, None, :] + _SRCd[_ci]                      # (B,k,dk): + the HOLDER's own mark
                  + bias[:, None, :])
             _rlg = torch.einsum('bkd,md->bkm', Q, K) / max(1e-3, s.route_t)
+            if s.halt_on: _rlg = _rlg + F.pad(s.halt_b.expand(1, 1, 1), (N, 0))   # same prior on every transition
             if ban1 is not None: _rlg[:, :, ban1] = float("-inf")              # ...and out of every TRANSITION
             R = torch.softmax(_rlg, -1)                                        # (B,k,N+1)
             _cvn = _cv / _cv.sum(-1, keepdim=True).clamp_min(1e-9)
@@ -2100,6 +2116,7 @@ def main():
                                                               #   model impractical to train.
     ACCUM = max(1, _i("ACCUM", 1))                            # accumulate grads over K windows: batch-1 online training
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
+    _rlive, _rseen = set(), set()                             # router parameters that DID / could receive gradient
     _lm_run = []; _lm_curve = []                              #   has very noisy gradients; this fixes that WITHOUT
                                                               #   breaking the stream. Also track the LM loss curve --
                                                               #   we had no way to see whether the LM had converged.
@@ -2870,7 +2887,7 @@ def main():
             # SPARSE: compute only the experts whose outputs are actually consumed below. The dense blend that used
             # to be assigned to h here was never read -- the logits come from _O -- so it was pure waste.
             _ban = fab.dom_ban(did, len(asm.cent)) if SELF_ORG else None
-            _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K), ban=_ban)
+            _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K), ban=_ban, step=step)
             _dep = h.new_zeros(()); _bal = fab_bal(_w)
         elif FABRIC:
             h, _dep, _mass, _bal = fab(h, sigb, _fab_nov.expand(x.size(0)), step=step)
@@ -3036,6 +3053,18 @@ def main():
         if FABRIC and not fab.norm_only and _nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0 and fab.A.grad is not None:
             with torch.no_grad():
                 _gn = int((fab.A.grad[:fab.n_live].abs().sum(dim=(1, 2)) > 0).sum())
+                # WHICH ROUTER PARAMETERS ARE ACTUALLY BEING TRAINED. This project has shipped a dead router
+                # parameter more than once -- keys/qproj/q_entry/nov/ctrl/halt_key all received exactly zero
+                # gradient under grounded routing until it was noticed, and halt_b was dead on the chaining path
+                # the day chaining became the default. A parameter that is allocated, optimized and decayed but
+                # never gradiented is indistinguishable from a working one in every other line of the report.
+                for _rn in ("q_entry", "q_route", "nov", "ctrl", "halt_key", "halt_b", "eemb", "edec"):
+                    _rm = getattr(fab, _rn, None)
+                    if _rm is None: continue
+                    _rp = list(_rm.parameters()) if isinstance(_rm, nn.Module) else [_rm]
+                    if any(p.grad is not None and bool(p.grad.abs().sum() > 0) for p in _rp):
+                        _rlive.add(_rn)
+                    _rseen.add(_rn)
             _greach.append(_gn)
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
         _t1("lm fwd+bwd (incl. fabric/world)", _plm)
@@ -3902,10 +3931,22 @@ def main():
                     print(f"    every other expert was FROZEN that step -- not merely unused. An expert outside "
                           f"the computed set gets no gradient, so it cannot improve into contention; that is what "
                           f"exploration (FAB_EXPLORE={_f('FAB_EXPLORE', 0.15):.0%}) exists to break.")
-                    print(f"    the spikes toward {max(_greach)} are the identity refresh (FAB_EMB_EVERY="
-                          f"{_i('FAB_EMB_EVERY', 50)}): eemb reads the FULL weights of every live expert, so on "
-                          f"those steps gradient scatters to all of them -- but it is 'shape your weights so "
-                          f"routing can tell you apart', not 'predict the text better'.")
+                    _ee = fab.emb_every
+                    print(f"    the high end is the identity channel: eemb reads the FULL weights of every live "
+                          f"expert to build the routing keys, so the LM loss scatters gradient to ALL of them -- "
+                          f"but it teaches 'be an expert routing can tell apart', not 'predict the text better'. "
+                          + (f"FAB_EMB_EVERY={_ee} throttles that channel to 1 step in {_ee} AND routes on keys up "
+                             f"to {_ee} steps stale." if _ee > 1 else
+                             "FAB_EMB_EVERY=1: keys are recomputed every step, so the channel is never throttled "
+                             "and the router never scores on stale weights."))
+                if _rseen:
+                    _rdead = sorted(_rseen - _rlive)
+                    print(f"  ROUTER LEARNING: trained this run -> {', '.join(sorted(_rlive)) or 'NOTHING'}")
+                    print(f"    never gradiented -> {', '.join(_rdead) if _rdead else '(none)'}"
+                          + ("  [edec is LM-dead BY DESIGN -- it is used at BIRTH, far too rarely to shape it, and "
+                             "is trained by ae_loss instead]" if _rdead == ['edec'] else ""))
+                    print(f"    a parameter that is allocated, optimized and decayed but never gradiented reads as "
+                          f"a working subsystem everywhere else in this report. That is why it is printed.")
                 print(f"  IDENTITY SPACE: {fab.n_live} experts | nearest-neighbour distance median "
                       f"{float(_nn.median()):.4f} (min {float(_nn.min()):.4f}) | mean pairwise "
                       f"{float(_off2.mean()):.4f}")
