@@ -484,7 +484,15 @@ class Fabric(nn.Module):
         s.mut_big = float(os.environ.get("FAB_MUT_BIG", 6.0))   # heavy tail: occasional large jump
         s.mut_big_p = float(os.environ.get("FAB_MUT_BIG_P", 0.1))
         s.mutscale = {}
-        s.discovered = 0; s.crossed = 0; s.explored = 0
+        s.discovered = 0; s.crossed = 0; s.explored = 0; s.failed_out = 0
+        s.ef = {}; s.es = {}                               # per-expert FAST / SLOW error EMAs
+        s.ef_a = float(os.environ.get("FAB_ERR_FAST", 0.05))
+        s.es_a = float(os.environ.get("FAB_ERR_SLOW", 0.005))
+        s.shift_tol = float(os.environ.get("FAB_SHIFT_TOL", 0.05))   # fast above slow by this -> adapting, protect
+        s.fail_tol = float(os.environ.get("FAB_FAIL_TOL", 0.15))     # both ends above the population -> failing
+        s.births = {}                                      # parent -> recent births (sliding, halved when full)
+        s.births_win = int(os.environ.get("FAB_BIRTH_WIN", 256))
+        s.parent_max = float(os.environ.get("FAB_PARENT_MAX", 0.20))  # max share of recent births per parent
         s.explore = float(os.environ.get("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
         s.xover = float(os.environ.get("FAB_XOVER", 0.35))       # fraction of births assembled from SEVERAL parents
         s.born = {}                                        # expert -> step it was created (grace before culling)
@@ -562,6 +570,12 @@ class Fabric(nn.Module):
             #   fitness -> non-negative weights. contrib can be negative (the system is BETTER without that expert),
             #   and a negative-contribution parent should be able to reproduce only rarely, not never: shifting to
             #   a floor keeps the tail alive, which is the whole point of not using an argmax.
+            # PARENT QUOTA. The incumbent wins the routing, so it is in every relevance shortlist AND it is the
+            # fittest -- so every birth is its child, and the population becomes one lineage wearing 4096 hats.
+            # Diversity of the POPULATION is not the same as diversity of its ANCESTRY. Cap how many of the recent
+            # births any one expert may parent; once at quota it is skipped and the next candidate breeds.
+            _recent = sum(s.births.values()) or 1
+            _cand = [c for c in _cand if s.births.get(c, 0) / _recent < s.parent_max] or _cand
             _w8 = [max(1e-3, _fit.get(i, 0.0) - min(_fit.get(c, 0.0) for c in _cand) + 1e-3) for i in _cand]
             _tot = sum(_w8)
             _r = random.random() * _tot
@@ -600,6 +614,10 @@ class Fabric(nn.Module):
                 s.B[j] += _m * _sb * torch.randn_like(s.B[j])
                 s.parent[j] = int(_par); s.replicated += 1
                 s.mutscale[j] = _m
+                s.births[_par] = s.births.get(_par, 0) + 1
+                if sum(s.births.values()) > s.births_win:   # sliding window: decay so an old monopoly expires
+                    for _bk in list(s.births): s.births[_bk] *= 0.5
+                    s.births = {k: v for k, v in s.births.items() if v >= 1}
             s.K[j] = (s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
 
         s.born[j] = int(step) if step is not None else 0    # GRACE is measured from here
@@ -624,6 +642,26 @@ class Fabric(nn.Module):
         s.dom_of.setdefault(int(e), set()).add(int(did))
         s.use[int(e)] = s.use.get(int(e), 0.0) + 1.0       # UTILIZATION: the resource the population competes for
 
+    def note_err(s, e, v):
+        """Per-expert FAST and SLOW error EMAs. The pair is the whole point: their DIFFERENCE separates an expert
+        that cannot model its material from one whose material just changed.
+          fast ~= slow, both high  -> persistent incompetence. Cull.
+          fast >> slow             -> a SHIFT is in progress and the expert is adapting. Protect: this is exactly
+                                      the case where old news changes, and culling here would destroy the
+                                      learning we are trying to measure.
+        Utilization cannot see either of these -- it only knows how OFTEN an expert was called, never whether it
+        was any good when it was."""
+        e = int(e)
+        s.ef[e] = v if e not in s.ef else (1 - s.ef_a) * s.ef[e] + s.ef_a * v
+        s.es[e] = v if e not in s.es else (1 - s.es_a) * s.es[e] + s.es_a * v
+
+    def failing(s, e, pop):
+        """True only for SUSTAINED elevation against the population. Returns False during a spike by construction:
+        a spike makes fast exceed slow, and that is the adaptation case."""
+        if e not in s.ef or e not in s.es or pop is None: return False
+        if s.ef[e] > s.es[e] * (1 + s.shift_tol): return False      # rising fast -> shift, not failure
+        return min(s.ef[e], s.es[e]) > pop * (1 + s.fail_tol)       # both ends above the population
+
     def manage(s, step, grace=3000, cull_frac=0.08, pressure=0.75, protect=True, comp_glob=None):
         """SELECTION for the fabric population. There was NONE.
 
@@ -638,9 +676,21 @@ class Fabric(nn.Module):
         (the system is measurably worse without it) or, failing that, a competence better than the population's.
         That is the protection for the useful-but-rare: rarely called is the bottom of a utilization ranking, and
         it is also what a niche expert looks like."""
-        if s.n_live <= 2 or (s.n_live / max(1, s.cap)) < pressure: return 0, 0
-        order = sorted(range(s.n_live), key=lambda i: s.use.get(i, 0.0))
+        # TWO ROUTES OUT, not one. Utilization-based culling only fires under capacity pressure -- correct for
+        # "the bank is full, drop the least used" but blind to an expert that is CALLED OFTEN AND BAD. The
+        # sustained-error route runs at ANY occupancy, because a failing expert is worth removing whether or not
+        # the population is full.
         culled = spared = 0
+        if protect is not None and comp_glob is not None:
+            for i in list(range(s.n_live)):
+                if s.n_live <= 2: break
+                if step - s.born.get(i, step) < grace: continue
+                if not s.failing(i, comp_glob): continue
+                if protect and s.contrib.get(i, 0.0) > 0:            # load-bearing despite the error -> keep
+                    spared += 1; continue
+                s.remove(i); culled += 1; s.failed_out += 1
+        if s.n_live <= 2 or (s.n_live / max(1, s.cap)) < pressure: return culled, spared
+        order = sorted(range(s.n_live), key=lambda i: s.use.get(i, 0.0))
         for i in list(order[:max(1, int(cull_frac * s.n_live))]):
             if s.n_live <= 2: break
             if step - s.born.get(i, step) < grace: continue
@@ -768,7 +818,7 @@ class Fabric(nn.Module):
         if j != last:
             with torch.no_grad():
                 for _T in (s.A, s.B, s.K, s.cent): _T[j] = _T[last]
-            for _D in (s.use, s.born):
+            for _D in (s.use, s.born, s.ef, s.es, s.births):
                 _D.pop(j, None)
                 if last in _D: _D[j] = _D.pop(last)
             for _D in (s.comp, s.contrib):
@@ -2566,6 +2616,7 @@ def main():
                     for _r in range(min(_plw.size(0), _wn.numel())):
                         _n = int(_wn[_r]); _v = float(_plw[_r])
                         fab.comp[_n] = _v if _n not in fab.comp else (1 - COMP_EMA) * fab.comp[_n] + COMP_EMA * _v
+                        fab.note_err(_n, _v)               # fast+slow pair -> sustained-vs-transient discrimination
             # === MARGINAL CONTRIBUTION: what the system LOSES without this expert =================================
             # The EMA above has a flaw that matters for a rule deciding who lives. It credits a node with the loss
             # on the windows it WINS, against the population's loss on ALL material -- so a node that happens to
@@ -3375,6 +3426,14 @@ def main():
                                   "would. Routing load is spread, competence is not -- see DIV_W (0.0 by default, "
                                   "and BAL_WARM decays the only other pressure to 0 by step 4000)."))
                 print(f"  ({len(_used)} of {_N} nodes used: unused nodes are capacity the router never calls on.)")
+                _lin = sorted(fab.births.values(), reverse=True)
+                print(f"  SELECTION OUT: {getattr(fab,'removed',0)} culled total, of which "
+                      f"{getattr(fab,'failed_out',0)} for SUSTAINED error (fast~=slow AND both above the "
+                      f"population; a SPIKE is read as adaptation and protected, never culled) | "
+                      f"{getattr(fab,'spared',0)} spared as load-bearing")
+                print(f"  LINEAGE: {len(fab.births)} distinct parents in the recent-birth window | largest share "
+                      f"{(100*_lin[0]/max(1,sum(_lin))) if _lin else 0:.0f}% (cap {100*fab.parent_max:.0f}%) "
+                      f"-- one lineage wearing N hats is not N experts")
                 print(f"  DISCOVERY: {getattr(fab,'discovered',0)} signature(s) too far from every centroid were "
                       f"handed to the LEAST-USED expert (novelty > {FAB_DISCOVER:.2f} cosine) | "
                       f"{getattr(fab,'explored',0)} off-policy routings forced so unused experts got gradient | "

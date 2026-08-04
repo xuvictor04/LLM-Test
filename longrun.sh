@@ -113,7 +113,10 @@ pilot)
   # number; MODEL=transformer (4 layers, 8 heads, causal) has never been run here. If proper language is the goal
   # then the 1-layer GRU may be the ceiling rather than the system, and the only way to know which is to run both
   # on the identical stream. ~2x the time, and it settles how much of the bits/byte gap is architecture.
-  for ARCH in ${PILOT_ARCH:-gru transformer}; do
+  # GRU ONLY by default. The architecture question is ANSWERED: GRU beat the transformer on both pilots,
+  # 2.064/2.200 vs 2.130/2.184 bits/byte and coherence 0.17 vs 0.02. Running both again costs an hour and
+  # buys nothing. PILOT_ARCH="gru transformer" to re-open it.
+  for ARCH in ${PILOT_ARCH:-gru}; do
   echo; echo "################  base LM: $ARCH  ################"
   env MODEL=$ARCH LAYERS=$([ "$ARCH" = transformer ] && echo ${TF_LAYERS:-4} || echo 1) HEADS=${HEADS:-8} \
       DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
@@ -126,7 +129,10 @@ pilot)
   done
   echo
   echo "=== SIDE BY SIDE (the only number that compares them directly) ==="
-  for ARCH in ${PILOT_ARCH:-gru transformer}; do
+  # GRU ONLY by default. The architecture question is ANSWERED: GRU beat the transformer on both pilots,
+  # 2.064/2.200 vs 2.130/2.184 bits/byte and coherence 0.17 vs 0.02. Running both again costs an hour and
+  # buys nothing. PILOT_ARCH="gru transformer" to re-open it.
+  for ARCH in ${PILOT_ARCH:-gru}; do
     printf "  %-12s %s\n" "$ARCH" "$(grep -a -oE 'order-1 [0-9.]+ \| THIS MODEL [0-9.]+' "$OUT/pilot_$ARCH.log" 2>/dev/null | head -1)"
   done
   echo
