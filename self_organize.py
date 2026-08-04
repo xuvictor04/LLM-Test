@@ -470,6 +470,15 @@ class Fabric(nn.Module):
         # expert cost at d=256. The score is still bilinear and still per-expert; only the query is shared, which is
         # what every attention mechanism does.
         s.q_route = nn.Linear(sig_d, dk)
+        # OUTGOING SIGNATURE, one per expert. K[m] is where a message may be SENT; SRC[n] is the mark expert n puts
+        # on a message it emits. Together they make the transition depend on WHO IS HOLDING THE MASS:
+        #     R[n -> m] = softmax( (q_route(gist) + SRC[n] + ctrl(summary)) . K[m] )
+        # The original carried this as a per-expert Linear(sig_d, dk) -- a full matrix each -- which is O(N.sig_d.dk)
+        # to evaluate and was the 345 ms at N=65536 that made me collapse it to ONE shared query. That collapse
+        # made R identical for every source: verified directly, all mass on expert 0 and all mass on expert 4 give
+        # the SAME next distribution. The chain kept composing in h and stopped being a chain in the routing.
+        # A dk-vector per expert restores per-source routing at O(N.dk) -- 32 floats each instead of a matrix.
+        s.SRC = nn.Parameter(torch.randn(cap, dk) * 0.1)
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
         # BREADTH CAP: how many DOMAINS one expert may serve, as a fraction of the live domain population.
         # Without it a handful of experts absorb everything -- which is exactly what the affiliation map showed when
@@ -620,6 +629,8 @@ class Fabric(nn.Module):
                     for _bk in list(s.births): s.births[_bk] *= 0.5
                     s.births = {k: v for k, v in s.births.items() if v >= 1}
             s.K[j] = (s.seed_key(gist) if gist is not None else torch.randn(s.dk, device=dev) * 0.1)
+            s.SRC[j] = (s.SRC[_par] + 0.1 * torch.randn(s.dk, device=dev)) if _par is not None \
+                else torch.randn(s.dk, device=dev) * 0.1   # a child inherits WHERE ITS PARENT SENDS, perturbed
 
         s.born[j] = int(step) if step is not None else 0    # GRACE is measured from here
         s.use.pop(j, None); s.comp.pop(j, None); s.contrib.pop(j, None)     # a reused slot starts clean
@@ -818,7 +829,7 @@ class Fabric(nn.Module):
         last = s.n_live - 1
         if j != last:
             with torch.no_grad():
-                for _T in (s.A, s.B, s.K, s.cent): _T[j] = _T[last]
+                for _T in (s.A, s.B, s.K, s.SRC, s.cent): _T[j] = _T[last]
             for _D in (s.use, s.born, s.ef, s.es, s.births):
                 _D.pop(j, None)
                 if last in _D: _D[j] = _D.pop(last)
@@ -875,9 +886,13 @@ class Fabric(nn.Module):
             ent = -(c.clamp_min(1e-9).log() * c).sum(-1)
             summ = torch.stack([nm.sum(-1), c[:, HALT], ent], -1)             # recurrent control summary
             bias = nb + s.ctrl(summ)
-            Q = s.q_route(gist)[:, None, :] + bias[:, None, :]                # (B,1,dk) shared query + per-node bias
-            R = torch.softmax(torch.einsum('bnk,mk->bnm', Q, K) / max(1e-3, s.route_t), -1)   # (B,N,N+1) TRANSITION
-            nxt = torch.einsum('bn,bnm->bm', nm, R)                           # propagate mass node -> operator
+            # PER-SOURCE, and only for the sources that actually hold mass. The full (B,N,N+1) transition is
+            # 1.07 GB at N=4096 alone; the top-k sources hold essentially all of it, so R is built for those.
+            Q = (s.q_route(gist)[:, None, :] + s.SRC[_ci]                      # (B,k,dk): + the HOLDER's own mark
+                 + bias[:, None, :])
+            R = torch.softmax(torch.einsum('bkd,md->bkm', Q, K) / max(1e-3, s.route_t), -1)   # (B,k,N+1)
+            _cvn = _cv / _cv.sum(-1, keepdim=True).clamp_min(1e-9)
+            nxt = torch.einsum('bk,bkm->bm', _cvn * nm.sum(-1, keepdim=True), R)   # mass moves FROM each holder
             nxt = nxt.clone(); nxt[:, HALT] = nxt[:, HALT] + c[:, HALT]       # HALT absorbs
             c = nxt / nxt.sum(-1, keepdim=True).clamp_min(1e-9)
         return h, depth / steps, mass / steps, bal / steps
@@ -3344,7 +3359,7 @@ def main():
         # deletion).
         _last = fab.n_live - 1
         _bak = {nm: getattr(fab, nm)[[_j2, _last]].detach().clone()
-                for nm in ("A", "B", "K", "cent")}
+                for nm in ("A", "B", "K", "SRC", "cent")}
         _bak_n = fab.n_live
         fab.remove(_j2)                                    # <- the expert's parameters are deleted
         _post = {p: bpb_true(p, use_mem=False) for p in _ps2}
