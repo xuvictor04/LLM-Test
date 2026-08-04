@@ -714,21 +714,32 @@ class Fabric(nn.Module):
         N = s.n_live
         w = s.route_w(gist, nov, ban=ban)
         kk = N if k is None else int(min(max(1, k), N))
-        idx = w.mean(0).topk(kk).indices if kk < N else torch.arange(N, device=w.device)
+        # PER WINDOW, not per batch. This was w.mean(0).topk -- ONE expert set and one weight vector for all
+        # BATCH_W windows, so every window in a batch was served by the same experts however different its
+        # material. Specialization was impossible by construction: an expert cannot come to own a kind of text if
+        # it is never selected FOR that text, only for the batch average that happens to contain it. That is why
+        # discovery, crossover and exploration all fired thousands of times and moved nothing -- they change WHICH
+        # expert is chosen, not the fact that 16 windows shared one choice.
+        # Costs nothing: einsum('bld,kdr->bklr') already computed every b x k pair, so per-window indexing is the
+        # same arithmetic with a batch dimension on the gather.
+        idx = (w.topk(kk, dim=-1).indices if kk < N
+               else torch.arange(N, device=w.device)[None].expand(w.size(0), N))
         # EXPLORATION. top-k is on-policy: only experts the router already prefers are ever COMPUTED, so only they
         # receive gradient. An expert outside the top-k is not merely unused -- it is frozen, and can never improve
         # into contention. Swap one slot for an expert sampled toward LOW USE, so untried capacity gets both
         # traffic and gradient. This is the difference between a population and a leaderboard.
-        if s.explore > 0 and kk >= 2 and N > kk and random.random() < s.explore:
+        if s.explore > 0 and kk >= 2 and N > kk:
             _cold2 = sorted(range(N), key=lambda i: s.use.get(i, 0.0))[:max(8, N // 16)]
-            _pick = random.choice(_cold2)
-            if _pick not in idx.tolist():
-                idx = torch.cat([idx[:-1], torch.tensor([_pick], device=idx.device)])
-                s.explored = getattr(s, "explored", 0) + 1
+            _rows = [r for r in range(idx.size(0)) if random.random() < s.explore]
+            if _rows:
+                idx = idx.clone()
+                for _r5 in _rows:                          # per ROW: exploration is a property of a window, not a batch
+                    idx[_r5, -1] = random.choice(_cold2)
+                s.explored = getattr(s, "explored", 0) + len(_rows)
         # BATCHED low-rank apply for the selected k: h + (h @ A_i) @ B_i, all k at once. This was k separate
         # module calls; it is now two einsums whose cost is k, not N -- which is what makes N large affordable.
-        _A = s.A[idx]; _B = s.B[idx]                                           # (kk,d,r) (kk,r,d)
-        O = h.unsqueeze(1) + torch.einsum('bklr,krd->bkld', torch.einsum('bld,kdr->bklr', h, _A), _B)
+        _A = s.A[idx]; _B = s.B[idx]                                           # (B,kk,d,r) (B,kk,r,d)
+        O = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld', torch.einsum('bld,bkdr->bklr', h, _A), _B)
         return w, O, idx
     def remove(s, j):
         """DELETE an expert outright: its parameters are gone. In a society this should cost roughly that expert's
@@ -1592,7 +1603,8 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     if not SOCIETY: return model.head(fab(h, gist, nov)[0])
     kk = int(k or ENS_K)
     w, O, oid = fab.society(h, gist, nov, k=kk)               # SPARSE: computes only the kk it is about to use
-    ww = w[:, oid]; ww = ww / ww.sum(-1, keepdim=True).clamp_min(1e-9)
+    ww = w.gather(1, oid)                                     # oid is (B,kk): each row's OWN experts and weights
+    ww = ww / ww.sum(-1, keepdim=True).clamp_min(1e-9)
     out = None
     for j in range(O.size(1)):
         lj = model.head(fab.norm(O[:, j])) * ww[:, j][:, None, None]
@@ -2496,12 +2508,16 @@ def main():
             h = experts.one(h, _sl)
         if FABRIC and SOCIETY:                             # ENSEMBLE the experts' OUTPUTS (not their hidden states)
             _ki = torch.arange(min(ENS_K, _O.size(1)), device=_O.device)   # _O is ALREADY the top-k, in rank order
-            _wk = _w[:, _oid[_ki]].mean(0); _wk = _wk / _wk.sum().clamp_min(1e-9)
+            # PER-ROW ensemble weights: _oid is (B,kk) now, so each window is blended with ITS OWN experts at ITS
+            # OWN weights. gather rather than index -- _w[:, _oid] would broadcast the whole batch against itself.
+            _wk = _w.gather(1, _oid[:, _ki])                                   # (B,ens_k)
+            _wk = _wk / _wk.sum(-1, keepdim=True).clamp_min(1e-9)
             _hd = {}                                       # cache: ENS_K and IND_K overlap, so share the head passes
             lg = None
             for _q, _j in enumerate(_ki.tolist()):
                 _hd[_j] = model.head(fab.norm(_O[:, _j]))
-                lg = _hd[_j] * _wk[_q] if lg is None else lg + _hd[_j] * _wk[_q]
+                _cw = _wk[:, _q][:, None, None]
+                lg = _hd[_j] * _cw if lg is None else lg + _hd[_j] * _cw
         else:
             lg = model.head(h)
         # PER-WINDOW loss, then the mean. Same arithmetic, same cost -- reduction='none' and .mean() is exactly
@@ -2549,13 +2565,17 @@ def main():
                 _kk2 = sorted(_hd)
                 for _j2 in _kk2:
                     _keep = [q for q in _kk2 if q != _j2]
-                    _w2 = _w[:, _oid[torch.tensor(_keep, device=_w.device)]].mean(0)
-                    _w2 = _w2 / _w2.sum().clamp_min(1e-9)
+                    _kt = torch.tensor(_keep, device=_w.device)
+                    _w2 = _w.gather(1, _oid[:, _kt])           # (B,keep) -- per row, like the forward pass
+                    _w2 = _w2 / _w2.sum(-1, keepdim=True).clamp_min(1e-9)
                     _lg2 = None
                     for _t2, _q2 in enumerate(_keep):
-                        _lg2 = _hd[_q2] * _w2[_t2] if _lg2 is None else _lg2 + _hd[_q2] * _w2[_t2]
+                        _cw2 = _w2[:, _t2][:, None, None]
+                        _lg2 = _hd[_q2] * _cw2 if _lg2 is None else _lg2 + _hd[_q2] * _cw2
                     _d2 = float(F.cross_entropy(_lg2.reshape(-1, V), y.reshape(-1)) - loss)
-                    _nid = int(_oid[_j2])                      # + means the system is WORSE without it
+                    #   ROW 0's expert for this rank slot: with per-window routing a slot no longer names ONE
+                    #   expert across the batch, so attribute to the most common holder of that slot.
+                    _nid = int(torch.mode(_oid[:, _j2]).values)
                     fab.contrib[_nid] = _d2 if _nid not in fab.contrib else \
                         (1 - COMP_EMA) * fab.contrib[_nid] + COMP_EMA * _d2
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
@@ -2571,7 +2591,7 @@ def main():
                 if _lj is None: _lj = model.head(fab.norm(_O[:, _j]))   #   a DECOMPOSITION, which does not
                 #   `.detach()` instead of `float()`: numerically identical (both stop the gradient) but stays on device,
                 #   where `float()` forced a GPU->CPU sync per expert per step.
-                tot = tot + IND_W * _w[:, _oid[_j]].mean().detach() * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
+                tot = tot + IND_W * _w.gather(1, _oid[:, _j:_j + 1]).mean().detach() * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
         if recon is not None and RECON_W > 0:                    # VERIFICATION: train the Reconstructor on GENUINE (key, token)
             tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # guard RECON_W>0: skips a redundant key-encode
         #   that was computed then multiplied by 0.0 on the default VERIFY=recon path (workflow finding)
@@ -3338,10 +3358,11 @@ def main():
                         _Xs = torch.tensor(_ex, device=DEV); _Ys = torch.tensor(_ey, device=DEV)
                         _hs = model.encode(_Xs)
                         _ws, _Os, _os = fab.society(_hs, _G, torch.zeros(_Xs.size(0), device=DEV), k=max(ENS_K, 2))
-                        _wk2 = _ws[:, _os[torch.arange(min(ENS_K, _Os.size(1)), device=DEV)]].mean(0)
-                        _wk2 = _wk2 / _wk2.sum().clamp_min(1e-9)
-                        _heads = [model.head(fab.norm(_Os[:, j])) for j in range(min(ENS_K, _Os.size(1)))]
-                        _lgp = sum(_heads[j] * _wk2[j] for j in range(len(_heads)))
+                        _kn = min(ENS_K, _Os.size(1))
+                        _wk2 = _ws.gather(1, _os[:, :_kn])
+                        _wk2 = _wk2 / _wk2.sum(-1, keepdim=True).clamp_min(1e-9)
+                        _heads = [model.head(fab.norm(_Os[:, j])) for j in range(_kn)]
+                        _lgp = sum(_heads[j] * _wk2[:, j][:, None, None] for j in range(_kn))
                         _den2 = (BLEN[_Ys].sum() if (USE_TOK and BLEN is not None) else float(_Ys.numel()))
                         def _bpb2(_l):
                             return float(F.cross_entropy(_l.reshape(-1, V), _Ys.reshape(-1), reduction="sum")

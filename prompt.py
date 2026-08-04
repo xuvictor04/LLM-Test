@@ -45,7 +45,7 @@ if _FC:                                                # size the preallocated p
     _os.environ["FAB_RANK"] = str(int(_FC.get("rank", 8)))
 import sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-from self_organize import build_lm, Fabric, SigEncoder
+from self_organize import build_lm, Fabric, SigEncoder, fab_logits
 
 model = build_lm(nv=V).to(DEV)                        # same constructor the trainer used, checkpoint's vocab
 model.load_state_dict(d["model"]); model.eval()
@@ -179,14 +179,12 @@ def generate(seed, n, temp):
             # ENSEMBLE AT THE OUTPUT, exactly as training does: logits are a routing-weighted sum of each expert's
             # OWN head output. Blending hidden states instead produces a representation no expert was trained to
             # emit. society() now returns (w, O, idx) and computes only the top-k, matching self_organize.
-            _n0 = torch.zeros(1, device=DEV)
-            _w, _O, _oid = FAB.society(_h, GIST, _n0, k=ENS_K)
-            _wk = _w[:, _oid]; _wk = _wk / _wk.sum(-1, keepdim=True).clamp_min(1e-9)
-            _lg = None
-            for _j in range(_O.size(1)):
-                _t = model.head(FAB.norm(_O[:, _j])) * _wk[:, _j][:, None, None]
-                _lg = _t if _lg is None else _lg + _t
-            logits = _lg[0, -1]
+            # ONE path, imported. This block used to reimplement the ensemble -- and when routing became
+            # per-WINDOW (idx is (B,k) now, not (k,)) the copy kept the batch-level `_w[:, _oid]` and broke.
+            # That is the same failure as the duplicated Fabric class, one level down: importing the CLASSES is
+            # not enough while the LOGIC that uses them is still copied. fab_logits is the path the trainer uses.
+            _n0 = torch.zeros(_h.size(0), device=DEV)
+            logits = fab_logits(model, FAB, _h, GIST, _n0, k=ENS_K)[0, -1]
         else:
             if FAB is not None and GIST is not None:
                 _h = FAB(_h, GIST, torch.zeros(1, device=DEV))
