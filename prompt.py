@@ -45,6 +45,7 @@ if _FC:                                                # size the preallocated p
     _os.environ["FAB_RANK"] = str(int(_FC.get("rank", 8)))
 import sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import self_organize as _so
 from self_organize import build_lm, Fabric, SigEncoder, fab_logits
 
 model = build_lm(nv=V).to(DEV)                        # same constructor the trainer used, checkpoint's vocab
@@ -53,6 +54,10 @@ model.load_state_dict(d["model"]); model.eval()
 # ---- ROUTER FABRIC (the model was TRAINED with it; running without it gives the crippled path) ----
 FAB_CFG = d.get("fab_cfg"); SIG_D = d.get("sig_d"); WIN = d.get("win", 96)
 FAB_SOC = bool(FAB_CFG.get("society", True)) if FAB_CFG else False
+# THE CHECKPOINT DECIDES WHICH PATH, NOT THE ENVIRONMENT. fab_logits branches on self_organize.SOCIETY, which is
+# read from the env at import -- so a checkpoint trained as a society would be generated as a chain (or the
+# reverse) purely because the default changed since it was saved. That is a different model, silently.
+if FAB_CFG: _so.SOCIETY = FAB_SOC
 ENS_K = int(FAB_CFG.get("ens_k", 2)) if FAB_CFG else 2
 
 
@@ -182,7 +187,7 @@ def generate(seed, n, temp):
     for _ in range(n):
         x = torch.tensor([seq[-256:]], device=DEV)
         _h = _world_h(x, model.encode(x))                           # world-model forecast conditions h (as in training)
-        if FAB is not None and GIST is not None and FAB_SOC:
+        if FAB is not None and GIST is not None:
             # ENSEMBLE AT THE OUTPUT, exactly as training does: logits are a routing-weighted sum of each expert's
             # OWN head output. Blending hidden states instead produces a representation no expert was trained to
             # emit. society() now returns (w, O, idx) and computes only the top-k, matching self_organize.
@@ -190,11 +195,14 @@ def generate(seed, n, temp):
             # per-WINDOW (idx is (B,k) now, not (k,)) the copy kept the batch-level `_w[:, _oid]` and broke.
             # That is the same failure as the duplicated Fabric class, one level down: importing the CLASSES is
             # not enough while the LOGIC that uses them is still copied. fab_logits is the path the trainer uses.
+            # ONE call for BOTH paths. The chaining branch used to live in the `else` below as
+            #     _h = FAB(_h, GIST, torch.zeros(1, device=DEV))
+            # which assigns the whole (h, depth, mass, bal) TUPLE to _h and then hands a tuple to model.head --
+            # a guaranteed TypeError the instant a chaining checkpoint was ever sampled. fab_logits already
+            # branches on SOCIETY and takes [0] correctly; the copy is what was wrong, again.
             _n0 = torch.zeros(_h.size(0), device=DEV)
             logits = fab_logits(model, FAB, _h, GIST, _n0, k=ENS_K)[0, -1]
         else:
-            if FAB is not None and GIST is not None:
-                _h = FAB(_h, GIST, torch.zeros(1, device=DEV))
             logits = model.head(_h)[0, -1]
         if VLIM is not None and VLIM < logits.numel(): logits = logits.clone(); logits[VLIM:] = float('-inf')
         if REP_PEN != 1.0:                                          # repetition penalty on recently-used tokens (anti-degeneracy)

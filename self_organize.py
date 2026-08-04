@@ -418,8 +418,13 @@ def build_lm(nv=None):
 # working. Fixing the router is a separate question from having one at all.
 FABRIC = bool(_i("FABRIC", 1))                             # FABRIC=1: the routed expert population
 ENS_K = _i("ENS_K", 2)                                     # how many experts are ensembled at the output layer
-SOCIETY = bool(_i("SOCIETY", 1))                           # 1 = independent experts blended at a router (default)
-                                                           # 0 = the old chained mixture (entangles every expert)
+# DEFAULT: CHAINING. 0 = experts COMPOSE -- routing mass flows expert -> expert through a learned transition over
+# multiple hops, HALT absorbing, so expert i can build on expert j's output. 1 = the society: independent experts
+# blended at the prediction level, one hop, nobody sees anybody.
+# This default was 1 for every run this project has made, which meant the composition machinery was written,
+# debugged and reported on while never once running in a training step. Composition is the point of the design, so
+# it is what runs unless SOCIETY=1 says otherwise.
+SOCIETY = bool(_i("SOCIETY", 0))
 class FabricNode(nn.Module):
     """A fabric node: residual MLP (d -> hid -> d). Born as an IDENTITY (second layer zero-init) so adding a node
     never disrupts what already works -- the same principle as the adapter's zero-init B."""
@@ -593,7 +598,14 @@ class Fabric(nn.Module):
         W = torch.cat([s.A[:N].reshape(N, -1), s.B[:N].reshape(N, -1)], -1)   # FULL weights, not a summary
         e = s.eemb(W)
         out = (e[:, :s.dk], e[:, s.dk:])
-        s._kc, s._kn = out, N
+        # CACHE DETACHED. This stored the LIVE tensors, so a cache hit on the next step handed back a node whose
+        # graph had already been freed by that step's backward -- "Trying to backward through the graph a second
+        # time". It never fired only because the training loop calls society() WITHOUT step=, so the cadence test
+        # `step is not None` always failed and the embed was recomputed every single step: the O(N * 2*d*r * hid)
+        # cost this cache exists to amortize was being paid in full, 50x more often than intended, at N=4096.
+        # Detaching makes the cache do what its docstring already claimed -- gradient reaches eemb on REFRESH steps
+        # (and from ae_loss every step, which is what actually trains it), stale values in between.
+        s._kc, s._kn = (out[0].detach(), out[1].detach()), N
         if step is not None: s._kstep = step
         return out
 
@@ -1004,7 +1016,10 @@ class Fabric(nn.Module):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
         random. A randomly-keyed expert receives no traffic, gets no gradient, and stays dead (measured: 12/17 idle)."""
         with torch.no_grad(): return s.q_entry(gist).detach().squeeze(0).clone()
-    def forward(s, h, gist, nov, step=None):
+    def forward(s, h, gist, nov, step=None, ban1=None):
+        """ban1: a single expert id to hold OUT of this walk entirely -- the counterfactual the marginal-contribution
+        rule needs. On the society path leave-one-out is free (per-expert logits are already separate); here the
+        walk itself changes when an expert is removed, so the only honest answer is to run it again without them."""
         N = s.n_live; HALT = N
         if s.norm_only:                                                       # control arm: just the normalization
             steps = max(1, min(s.max_steps, 2 + N // 2))
@@ -1014,12 +1029,15 @@ class Fabric(nn.Module):
         _Kd, _SRCd = s._ids(N, step)                                          # both embedded from full weights
         K = torch.cat([_Kd, s.halt_key[None]], 0)                             # (N+1, dk) operator keys
         nb = s.nov(nov[:, None])                                              # surprise -> routing bias
-        c = torch.softmax(((s.q_entry(gist) + nb) @ K.t()) / max(1e-3, s.route_t), -1)   # (B,N+1) ENTRY distribution
+        _elg = ((s.q_entry(gist) + nb) @ K.t()) / max(1e-3, s.route_t)
+        if ban1 is not None: _elg[:, ban1] = float("-inf")                     # held out of the ENTRY distribution
+        c = torch.softmax(_elg, -1)                                           # (B,N+1) ENTRY distribution
         #   route_t applied HERE TOO. It was only ever applied on the society path, so the chaining path kept the
         #   flat T=1.0 distribution -- with N+1 near-equal logits, HALT starts with ~1/(N+1) and, being ABSORBING,
         #   accumulates every step. That is a large part of the measured 'halt 0.76, mean routed depth 0.24 of 4'.
         steps = max(1, min(s.max_steps, 2 + N // 2))                          # adaptive depth budget
         depth = h.new_zeros(()); mass = torch.zeros(N + 1, device=h.device); bal = h.new_zeros(())
+        wacc = None                                                           # (B,N) per-window mass over all hops
         for _t_ in range(steps):
             if _t_ < s.min_steps:                                             # block HALT early: force the nodes to be used
                 c = torch.cat([c[:, :N], torch.zeros_like(c[:, N:])], -1)
@@ -1036,13 +1054,32 @@ class Fabric(nn.Module):
             # alive in the graph for the backward pass.
             _ck = min(s.chain_k, N)
             _cv, _ci = nm.topk(_ck, dim=-1)                                   # (B,k) per WINDOW, not per batch
+            # EXPLORATION, which this path did not have. society() swaps one slot per window for a low-use expert
+            # precisely because top-k is on-policy: an expert outside the k is not merely unused, it is FROZEN, and
+            # cannot improve into contention. Chaining had no such mechanism, and it is worse off without one --
+            # measured on a 1024 population over 60 steps, the compute path reached 25% of the experts under
+            # society and 8% under chaining, because mass CONCENTRATES as it flows: each hop's top-k is drawn from
+            # a distribution the previous hop already sharpened. More hops did not mean more experts learning.
+            if s.explore > 0 and _ck >= 2 and N > _ck and ban1 is None:
+                _cold3 = sorted(range(N), key=lambda i: s.use.get(i, 0.0))[:max(8, N // 16)]
+                _rows3 = [r for r in range(_ci.size(0)) if random.random() < s.explore]
+                if _rows3:
+                    _ci = _ci.clone(); _cv = _cv.clone()
+                    for _r3 in _rows3:
+                        _ci[_r3, -1] = random.choice(_cold3)
+                        _cv[_r3, -1] = nm[_r3, _ci[_r3, -1]]                  # its REAL mass, not the displaced one's
+                    s.explored = getattr(s, "explored", 0) + len(_rows3)
             # RECORD UTILIZATION HERE TOO. use[] was only written on the society path, so under SOCIETY=0 the
             # table stayed EMPTY -- and everything that reads it ran blind: culling ranks the bottom fraction by
             # utilization (all zero, so it culled arbitrarily), the breadth cap counts domains per expert, and the
             # discovery rule hands novel material to the "least-used" expert. A chaining run had none of that
             # information. Cheap to fix and it silently disabled three selection mechanisms.
-            with torch.no_grad():
-                for _uu in _ci[:, 0].tolist(): s.use[_uu] = s.use.get(_uu, 0.0) + 1.0
+            # ...but a COUNTERFACTUAL walk must not record anything: it did not happen, and letting it write
+            # utilization would have the leave-one-out probe inflate the use counts of the experts it is measuring.
+            if ban1 is None:
+                with torch.no_grad():
+                    for _uu in _ci[:, 0].tolist(): s.use[_uu] = s.use.get(_uu, 0.0) + 1.0
+                    wacc = nm.detach() if wacc is None else wacc + nm.detach()   # per-window mass, over all hops
             _cA = s.A[_ci]; _cB = s.B[_ci]                                    # (B,k,d,r) (B,k,r,d)
             Bo = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
                                                torch.einsum('bld,bkdr->bklr', h, _cA), _cB)
@@ -1065,11 +1102,22 @@ class Fabric(nn.Module):
             # 1.07 GB at N=4096 alone; the top-k sources hold essentially all of it, so R is built for those.
             Q = (s.q_route(gist)[:, None, :] + _SRCd[_ci]                      # (B,k,dk): + the HOLDER's own mark
                  + bias[:, None, :])
-            R = torch.softmax(torch.einsum('bkd,md->bkm', Q, K) / max(1e-3, s.route_t), -1)   # (B,k,N+1)
+            _rlg = torch.einsum('bkd,md->bkm', Q, K) / max(1e-3, s.route_t)
+            if ban1 is not None: _rlg[:, :, ban1] = float("-inf")              # ...and out of every TRANSITION
+            R = torch.softmax(_rlg, -1)                                        # (B,k,N+1)
             _cvn = _cv / _cv.sum(-1, keepdim=True).clamp_min(1e-9)
             nxt = torch.einsum('bk,bkm->bm', _cvn * nm.sum(-1, keepdim=True), R)   # mass moves FROM each holder
             nxt = nxt.clone(); nxt[:, HALT] = nxt[:, HALT] + c[:, HALT]       # HALT absorbs
             c = nxt / nxt.sum(-1, keepdim=True).clamp_min(1e-9)
+        # PER-WINDOW EXPERT UTILIZATION, the chaining twin of society()'s `w`. Everything that attributes an
+        # OUTCOME to an EXPERT reads a (B,N) table -- competence EMAs, the fast/slow error pair the sustained-error
+        # cull rule needs, the domain affiliation map, per-expert memory ownership. All of it was gated on SOCIETY
+        # and therefore dead under chaining, so a chaining run had exactly one live cull route (utilization under
+        # capacity pressure) and no idea which expert was responsible for anything.
+        # Integrated over hops rather than taken at entry: an expert that receives mass on hop 3 served the window
+        # just as much as the one that took it at hop 0.
+        if ban1 is None:
+            s._wrun = (wacc / wacc.sum(-1, keepdim=True).clamp_min(1e-9)) if wacc is not None else None
         return h, depth / steps, mass / steps, bal / steps
 
 class PlateauGrowth:
@@ -1933,14 +1981,28 @@ def main():
           f"{_on(DOM_CULL_EMPTY)} | expert breadth cap {_f('EXP_DOM_FRAC', 0.10):.0%} of domains "
           f"(floor {_i('EXP_DOM_MIN', 4)}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
           f"{_f('FAB_RAMP_TO', 1.0):.0%} of cap")
+    print(f"[config] PATH        {'CHAINING (default)' if not SOCIETY else 'SOCIETY (SOCIETY=1)'} -- "
+          + (f"experts COMPOSE: mass flows expert -> expert through the transition matrix for up to "
+             f"{_i('FAB_STEPS', 4)} hops ({_i('FAB_CHAIN_K', 8)} computed per hop), HALT blocked for the first "
+             f"{_i('FAB_MIN_STEPS', 2)}. SOCIETY=1 for the one-shot blend."
+             if not SOCIETY else
+             f"independent experts, ONE hop, blended at the prediction level; nobody sees anybody. Nothing "
+             f"composes on this path. Unset SOCIETY for the chaining default."))
     print(f"[config] ROUTING     {'grounded region + learned bilinear' if bool(_i('ROUTE_GROUNDED', 1)) else 'learned only'}"
           f" | HALT {_on(bool(_i('FAB_HALT', 1)))} on BOTH paths (cap {_f('FAB_HALT_MAX', 0.9):.2f}): the router "
-          f"decides WHETHER the population answers, not only which experts do -- halted mass goes to the base head"
-          + (f" | chaining hops {_i('FAB_STEPS', 4)}, HALT blocked for {_i('FAB_MIN_STEPS', 2)}" if not SOCIETY
-             else " | SOCIETY: one hop, no chaining"))
+          f"decides WHETHER the population answers, not only which experts do"
+          f" | exploration {_f('FAB_EXPLORE', 0.15):.0%} of windows swap a slot for a low-use expert (both paths)")
+    # WHAT THIS PATH DOES NOT RUN. Both paths now carry utilization, competence, the fast/slow error pair, marginal
+    # contribution, affiliation, per-expert memory and exploration. These two terms are the remainder, and they are
+    # named rather than left to be discovered later in a diff.
+    if FABRIC and not SOCIETY:
+        print(f"[config] not on CHAINING: IND_W={_f('IND_W', 0.5)} (each expert must solve the task ALONE) and "
+              f"DIV_W={_f('DIV_W', 0.0)} (distinctness) both need SEPARABLE per-expert logits, which a composed "
+              f"walk does not have. Marginal contribution IS measured here, by re-walking without each candidate.")
     print(f"[config] OFF ON PURPOSE  DIV_W={_f('DIV_W', 0.0)} (expert distinctness reward) | "
           f"ENC_CREG={_f('ENC_CREG', 0.0)} (encoder decorrelation; ENC_VREG={_f('ENC_VREG', 5.0)} IS on) | "
-          f"DROPOUT={_f('DROPOUT', 0.0)} | RECON_W={_f('RECON_W', 0.0)} | FAB_MIN_STEPS={_i('FAB_MIN_STEPS', 0)}")
+          f"DROPOUT={_f('DROPOUT', 0.0)} | RECON_W={_f('RECON_W', 0.0)} | "
+          f"FAB_MIN_STEPS={_i('FAB_MIN_STEPS', 0 if SOCIETY else 2)}")
     if EXPERTS and FABRIC:
         print("[config] !! EXPERTS and FABRIC are mutually exclusive (FABRIC wins the elif chain) -- experts are a NO-OP")
     if NP < 2 and PHASED:
@@ -2037,6 +2099,7 @@ def main():
                                                               #   the batch-1 throughput ceiling that made a large
                                                               #   model impractical to train.
     ACCUM = max(1, _i("ACCUM", 1))                            # accumulate grads over K windows: batch-1 online training
+    _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
     _lm_run = []; _lm_curve = []                              #   has very noisy gradients; this fixes that WITHOUT
                                                               #   breaking the stream. Also track the LM loss curve --
                                                               #   we had no way to see whether the LM had converged.
@@ -2143,7 +2206,10 @@ def main():
     #   32 owners x 64    -> memory contributes -0.652 b/B
     # The partition costs 0.555 b/B at the scale tested, so it does not become the default path until it is shown to
     # help. (Memory being slightly net-negative even globally is a separate, pre-existing finding.)
-    MEM_PER_EXPERT = bool(_i("MEM_PER_EXPERT", 1)) and FABRIC and SOCIETY
+    # NOT society-only any more. Ownership needs one thing -- a (B,N) table saying which expert served which
+    # window -- and the chaining path now produces exactly that (fab._wrun). Gating it on SOCIETY meant flipping
+    # to chaining silently turned per-expert memory OFF, which is the failure mode the [config] banner exists for.
+    MEM_PER_EXPERT = bool(_i("MEM_PER_EXPERT", 1)) and FABRIC
     MEM_QUOTA = _i("MEM_QUOTA", 128)
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
@@ -2788,30 +2854,40 @@ def main():
         if EXPERTS and _sl >= 0: route_at[bpos:bpos + WIN] = _sl   # remember WHICH expert trained on this span
         h = model.encode(x)                                      # includes the world-model feedback when enabled (wrapped above)
         _wz = world_enc(model.emb(x)) if WORLD_MODEL else None   # world latent per position (also used by the world loss)
-        if FABRIC and SOCIETY:
-            # SPARSE: compute only the experts whose outputs are actually consumed below. The dense blend that used
-            # to be assigned to h here was never read -- the logits come from _O -- so it was pure waste.
+        if FABRIC:
             # DISCOVERY BY SPECIFICATION. The router's query for THIS signature is a point in identity space;
             # if nothing live is near it, the expert it is asking for does not exist -- so build it. Cheap enough
             # to try on the manage cadence rather than every step, and bounded by FAB_NMAX like any other growth.
+            # NOT society-only: q_route is the chaining path's transition query too, so "the router asked for an
+            # expert that does not exist" is exactly as meaningful there, and it was simply never asked.
             if FAB_SPAWN and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
                 with torch.no_grad(): _q6 = fab.q_route(sigb[:1])
                 _new6 = fab.spawn_from(_q6, step=step)
                 if _new6 is not None:
                     print(f"  [expert @ {step}] router asked for an expert nothing served -> DECODED it into "
                           f"slot {_new6} ({fab.n()} live, {fab.spawned} spawned this way)")
+        if FABRIC and SOCIETY:
+            # SPARSE: compute only the experts whose outputs are actually consumed below. The dense blend that used
+            # to be assigned to h here was never read -- the logits come from _O -- so it was pure waste.
             _ban = fab.dom_ban(did, len(asm.cent)) if SELF_ORG else None
             _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K), ban=_ban)
+            _dep = h.new_zeros(()); _bal = fab_bal(_w)
+        elif FABRIC:
+            h, _dep, _mass, _bal = fab(h, sigb, _fab_nov.expand(x.size(0)), step=step)
+            # THE SAME (B,N) ATTRIBUTION TABLE THE SOCIETY PATH PRODUCES, so everything downstream that asks
+            # "which expert served this window" works here too instead of being skipped.
+            _w = fab._wrun
+            if _w is not None: _oid = _w.topk(min(max(ENS_K, 1), _w.size(-1)), dim=-1).indices
+        if FABRIC and _w is not None:
+            # AFFILIATION, on both paths. This drives the breadth cap (how many domains one expert may serve) and
+            # the end-of-run affiliation map; under chaining neither had any data at all.
             with torch.no_grad():                          # record the affiliation the cap is computed from
                 fab.note_dom(int(_w[0].argmax()), did)
-            _dep = h.new_zeros(()); _bal = fab_bal(_w)
-            _wd = _w[0].detach()                           # which experts serve THIS domain, and how much. Kept ON DEVICE:
-            #   `.cpu()` here forced a full GPU->CPU synchronization EVERY step for a number that is only read once, in
-            #   the end-of-run affiliation report. Accumulate on device; move to host when reporting.
-            if did in dom_exp and dom_exp[did].numel() == _wd.numel(): dom_exp[did] += _wd
-            else: dom_exp[did] = _wd.clone()
-        elif FABRIC:
-            h, _dep, _mass, _bal = fab(h, sigb, _fab_nov.expand(x.size(0)))
+                _wd = _w[0].detach()                       # which experts serve THIS domain, and how much. Kept ON DEVICE:
+                #   `.cpu()` here forced a full GPU->CPU synchronization EVERY step for a number that is only read once, in
+                #   the end-of-run affiliation report. Accumulate on device; move to host when reporting.
+                if did in dom_exp and dom_exp[did].numel() == _wd.numel(): dom_exp[did] += _wd
+                else: dom_exp[did] = _wd.clone()
         elif _sl >= 0:
             h = experts.one(h, _sl)
         if FABRIC and SOCIETY:                             # ENSEMBLE the experts' OUTPUTS (not their hidden states)
@@ -2853,7 +2929,11 @@ def main():
             for _r, _dd in enumerate(_bd[:_plw.size(0)]):
                 _v = float(_plw[_r])
                 asm.comp[_dd] = _v if _dd not in asm.comp else (1 - COMP_EMA) * asm.comp[_dd] + COMP_EMA * _v
-            if FABRIC and SOCIETY and _w is not None and _w.dim() == 2:
+            # BOTH PATHS. This was society-only, so a chaining run tracked no per-expert competence and no
+            # fast/slow error pair -- which means the sustained-error cull route (the one that distinguishes an
+            # expert that is FAILING from one that is ADAPTING) had no inputs and never fired, leaving utilization
+            # under capacity pressure as the only way an expert could ever die.
+            if FABRIC and _w is not None and _w.dim() == 2:
                 # _w is indexed by GLOBAL node id (the code below reads it as _w[:, _oid[rank]]), so argmax over it
                 # is already the node id. Indexing _oid with it treated a global id as a rank and went out of bounds.
                 _wn = _w.argmax(-1)                                      # the expert each window leans on most
@@ -2895,6 +2975,19 @@ def main():
                     _nid = int(torch.mode(_oid[:, _j2]).values)
                     fab.contrib[_nid] = _d2 if _nid not in fab.contrib else \
                         (1 - COMP_EMA) * fab.contrib[_nid] + COMP_EMA * _d2
+            # CHAINING gets the same signal, at the cost the path implies. There are no separable per-expert logits
+            # to recombine here -- removing an expert changes the WALK, so the counterfactual has to be walked. That
+            # is one extra fabric forward per candidate, under no_grad, on the manage cadence: at MANAGE_EVERY=500
+            # and FAB_CHAIN_K=8 it is 8 forwards per 500 steps. Without it, chaining culls on utilization alone,
+            # which cannot tell a niche expert that is excellent from a dead one -- both are called rarely.
+            elif (FABRIC and MANAGE_ON and _w is not None and _oid is not None
+                  and step % MANAGE_EVERY == 0 and step > 0):
+                _cand = sorted({int(v) for v in _oid.reshape(-1).tolist()})[:fab.chain_k]
+                for _n3 in _cand:
+                    _h3 = fab(model.encode(x), sigb, _fab_nov.expand(x.size(0)), step=step, ban1=_n3)[0]
+                    _d3 = float(F.cross_entropy(model.head(_h3).reshape(-1, V), y.reshape(-1)) - loss)
+                    fab.contrib[_n3] = _d3 if _n3 not in fab.contrib else \
+                        (1 - COMP_EMA) * fab.contrib[_n3] + COMP_EMA * _d3
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
         # EVERY STEP, not on the embed cadence. The refresh cadence exists because RE-READING identities is
@@ -2929,6 +3022,21 @@ def main():
                 _wl_ema = _winv if _wl_ema is None else 0.98 * _wl_ema + 0.02 * _winv
         if _AC is not None: _AC.__exit__(None, None, None)
         (tot / ACCUM).backward()                                 # gradient accumulation over ACCUM windows
+        # === HOW MANY EXPERTS ACTUALLY LEARN THIS STEP? ==========================================================
+        # The population is selected sparsely, so only the experts the router COMPUTED appear in the graph -- the
+        # rest have an exactly-zero gradient row and are frozen, not merely unused. That number is the ceiling on
+        # how fast a large population can become differentiated, and nothing was measuring it: a run could report
+        # 4096 experts while a few dozen did all the learning, and the report would look identical.
+        # Counted straight off the gradient, on the manage cadence, before the step clears it.
+        # Cadence on a counter of BACKWARD passes, not on `step`. `step` counts WINDOWS and this block only runs on
+        # the 1-in-BATCH_W steps where the batch flushes, so `step % MANAGE_EVERY == 0` samples the intersection of
+        # two unrelated cadences -- at BATCH_W=4, MANAGE_EVERY=20 that intersection is EMPTY and the measurement
+        # silently never fired. Exactly the class of bug this measurement exists to catch, one level up.
+        _nbwd += 1
+        if FABRIC and not fab.norm_only and _nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0 and fab.A.grad is not None:
+            with torch.no_grad():
+                _gn = int((fab.A.grad[:fab.n_live].abs().sum(dim=(1, 2)) > 0).sum())
+            _greach.append(_gn)
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
         _t1("lm fwd+bwd (incl. fabric/world)", _plm)
         _lf = float(loss.detach())                               # ONE host sync per step (was two: the curve and the
@@ -2939,7 +3047,9 @@ def main():
             _nb = fabgrow.step(_lf, step, fab.n(), FAB_NMAX)    # 0, or HOW MANY to grow (burst on an unexpected regression)
             _nb = min(_nb, FAB_NMAX - fab.n())
             for _g in range(max(0, _nb)):                       # each newborn is keyed at the CURRENT signature, so a
-                _fp = fab.grow(sig[None, :] if SOCIETY else None, step=step)   # burst owns this region
+                _fp = fab.grow(sig[None, :], step=step)      # burst owns the CURRENT region, on either path:
+                #   a newborn keyed at random receives no traffic, gets no gradient and stays dead, and that is
+                #   as true of a chaining walk's entry distribution as it is of the society's router.
                 if _fp: om.add_param_group({"params": _fp})
                 #   EMPTY GROUPS ARE NOT FREE. Since the population became preallocated tensors, grow() returns []
                 #   -- the rows are already in the optimizer. Adding a group anyway appended an EMPTY param group
@@ -2974,7 +3084,7 @@ def main():
             if _pre and KEY_BATCH:                          # ONE key encode for the whole BATCH_W batch instead of
                 # OWNER = the argmax-routed expert for this batch. Writes are compartmentalized per expert (each gets
                 # its own quota, evicted by LRU); READS stay global, so knowledge is owned but not walled off.
-                _own = None if not (FABRIC and SOCIETY and MEM_PER_EXPERT) else \
+                _own = None if not (FABRIC and MEM_PER_EXPERT and _w is not None) else \
                     [int(_w[min(_b, _w.size(0) - 1)].argmax()) % max(1, mem.n_own) for _b in range(x.size(0))]
                 #   FOLDED into the owner count. The store has MEM_OWNERS partitions (64) while expert ids now run to
                 #   FAB_NMAX (4096+), so an unfolded id indexes past the partition table. Owners are a memory-eviction
@@ -3309,14 +3419,13 @@ def main():
     if FABRIC:
         # === DO THE EXPERTS CHAIN? ============================================================================
         # Asked because it was assumed. The fabric has TWO forward paths and only one of them chains:
-        #   SOCIETY=1 (default)  society()  -- every expert maps the SAME h to its own output and the outputs are
-        #                                     blended. Expert i never sees expert j. Depth is identically 0.
-        #   SOCIETY=0            forward()  -- routing mass flows node -> node through a learned transition
+        #   SOCIETY=0 (DEFAULT)  forward()  -- routing mass flows node -> node through a learned transition
         #                                     matrix, HALT absorbs, depth is adaptive and charged for (ponder).
-        # Every run of this project has used the first. So the transition matrix, HALT, FAB_STEPS, PONDER and
-        # PONDER_WARM are all inert on the default path -- including the "the fabric's warmup never completes"
-        # argument that justified running the pilot longer. The depth and halt figures printed below come from a
-        # SEPARATE probe call to forward() made here at report time, not from anything that trained.
+        #   SOCIETY=1            society()  -- every expert maps the SAME h to its own output and the outputs are
+        #                                     blended. Expert i never sees expert j. Depth is identically 0.
+        # The default was the SOCIETY for every run this project made before now, which is why this section exists:
+        # the transition matrix, FAB_STEPS, PONDER and PONDER_WARM were all inert, and the depth figures came from
+        # a report-time probe of a path nothing had trained. Under the current default they are what ran.
         print(f"\n=== CHAINING: do experts compose, or only vote? ===")
         print(f"  ROUTER INPUTS: signature (detached SigEncoder summary of the raw window) + novelty scalar"
               + (" + the SOURCE's identity, embedded from that expert's FULL WEIGHTS (SRC), + a control summary "
@@ -3337,13 +3446,13 @@ def main():
                                     "the head; the halt mass is computed and discarded, so the router chooses WHICH "
                                     "experts answer but never WHETHER they should.")))
         print(f"  SOCIETY={int(SOCIETY)} -> " + (
-            "NO CHAINING. Experts are independent and blended at the router; each sees the base representation "
-            "only. The composition machinery specific to chaining (transition matrix, adaptive depth, ponder) is "
-            "present but NEVER RUNS -- HALT is the exception and now runs on both paths. SOCIETY=0 to enable the "
-            "rest, and note the DEPTH figure below is a report-time probe of a path this run did not use."
+            "NO CHAINING (non-default: SOCIETY=1 was set). Experts are independent and blended at the router; each "
+            "sees the base representation only. The composition machinery specific to chaining (transition matrix, "
+            "adaptive depth, ponder) is present but NEVER RUNS -- HALT is the exception and runs on both paths. "
+            "The DEPTH figure below is a report-time probe of a path this run did not use."
             if SOCIETY else
-            "CHAINING ACTIVE. Mass flows expert -> expert through the transition matrix over multiple hops, "
-            "HALT absorbing, so an expert CAN build on another's output. Depth below is what actually ran."))
+            "CHAINING ACTIVE (the default). Mass flows expert -> expert through the transition matrix over multiple "
+            "hops, HALT absorbing, so an expert CAN build on another's output. Depth below is what actually ran."))
         if not SOCIETY:
             print(f"  HALT blocked for the first {_i('FAB_MIN_STEPS', 2)} hop(s) (FAB_MIN_STEPS). At 0 the router "
                   f"halts immediately and depth is 0.00 of {_i('FAB_STEPS', 4)} -- chaining ON and nothing chained.")
@@ -3566,7 +3675,7 @@ def main():
 
     # ---- do the segments WORK TOGETHER across boundaries? (retrieval composition) ----
     compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=_i("EVAL_N", 64))
-    if FABRIC and SOCIETY and dom_exp:                     # === AFFILIATION: which experts serve which domains? ===
+    if FABRIC and dom_exp:                                 # === AFFILIATION: which experts serve which domains? ===
       try:                                                 # a DIAGNOSTIC must never kill a run (this one did once)
         dom_exp = {_k: _v.cpu() for _k, _v in dom_exp.items()}   # accumulated on device (no per-step sync) -> host ONCE, here
         _NE = max(v.numel() for v in dom_exp.values())     # population GREW mid-run -> vectors differ in length
@@ -3598,13 +3707,17 @@ def main():
             print(f"     traffic and is removed by the EXISTING cull; a shared expert keeps serving the others.")
       except Exception as _e:
         print(f"\n[affiliation report skipped: {type(_e).__name__}: {_e}]")
-    if FABRIC and SOCIETY and len(fab.bodies) > 1:         # === INDEPENDENCE: what does deleting ONE expert cost? ===
+    if FABRIC and len(fab.bodies) > 1:                     # === INDEPENDENCE: what does deleting ONE expert cost? ===
         _ps2 = sorted(set(labels))
         with torch.no_grad():                              # find the busiest expert (the one worth deleting)
             _sg2 = enc(torch.tensor([list(ENC_SEQ[WIN * 3:WIN * 4])], device=DEV))
-            _w2, _, _ = fab.society(model.encode(torch.tensor([list(stream[:WIN])], device=DEV)), _sg2,
-                                    torch.zeros(1, device=DEV), k=1)
-        _j2 = int(_w2[0].argmax())
+            _h2b = model.encode(torch.tensor([list(stream[:WIN])], device=DEV))
+            if SOCIETY:
+                _w2, _, _ = fab.society(_h2b, _sg2, torch.zeros(1, device=DEV), k=1)
+            else:                                          # chaining exposes the same table -- see Fabric.forward
+                fab(_h2b, _sg2, torch.zeros(1, device=DEV))
+                _w2 = fab._wrun
+        _j2 = int(_w2[0].argmax()) if _w2 is not None else max(fab.use, key=fab.use.get, default=0)
         _pre = {p: bpb_true(p, use_mem=False) for p in _ps2}
         # RESTORE AFTERWARDS: this ablation deletes the BUSIEST expert, and every eval below it -- including the
         # generation samples used to judge coherence -- must run on the INTACT model. remove() is now a
@@ -3776,6 +3889,23 @@ def main():
                           f"window | top expert took {100*_uv[0]/_ut:.1f}% | half the traffic went to {_c50} expert(s)")
                 print(f"    (the 'N of 4096 used' line above is 32 EVAL windows -- a probe, not the run. These two "
                       f"answer different questions and only this one says whether the router ever chose variety.)")
+                # === GRADIENT REACH: how many experts LEARN per step? =========================================
+                # Distinct from utilization. `use` says who WON a window at some point in the run; this says how
+                # many experts were in the graph on a single step, i.e. how many were being trained at once.
+                # It is the ceiling on differentiation speed and it does NOT grow with the population: selection
+                # computes k per window, so the number is set by BATCH_W x k, not by how many experts exist.
+                if _greach:
+                    _gm = sum(_greach) / len(_greach)
+                    print(f"  GRADIENT REACH: {_gm:.0f} of {fab.n_live} experts received a nonzero gradient on a "
+                          f"typical step ({_gm/max(1,fab.n_live):.1%}), sampled {len(_greach)}x | "
+                          f"min {min(_greach)} max {max(_greach)}")
+                    print(f"    every other expert was FROZEN that step -- not merely unused. An expert outside "
+                          f"the computed set gets no gradient, so it cannot improve into contention; that is what "
+                          f"exploration (FAB_EXPLORE={_f('FAB_EXPLORE', 0.15):.0%}) exists to break.")
+                    print(f"    the spikes toward {max(_greach)} are the identity refresh (FAB_EMB_EVERY="
+                          f"{_i('FAB_EMB_EVERY', 50)}): eemb reads the FULL weights of every live expert, so on "
+                          f"those steps gradient scatters to all of them -- but it is 'shape your weights so "
+                          f"routing can tell you apart', not 'predict the text better'.")
                 print(f"  IDENTITY SPACE: {fab.n_live} experts | nearest-neighbour distance median "
                       f"{float(_nn.median()):.4f} (min {float(_nn.min()):.4f}) | mean pairwise "
                       f"{float(_off2.mean()):.4f}")
