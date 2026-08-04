@@ -159,6 +159,8 @@ DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memo
 #   for the act/stale conjunction that an empty domain can fail forever.
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 COMP_EMA = _f("COMP_EMA", 0.02)            # EMA rate for per-domain / per-node COMPETENCE (bits on the material it wins)
+FAB_KEY_NORM = bool(_i("FAB_KEY_NORM", 0))   # normalise the LEARNED routing term so it cannot swamp the grounded
+#   region term. Principled but UNVALIDATED -- see Fabric.route_w. FAB_KEY_NORM=1 to A/B it.
 FAB_DISCOVER = _f("FAB_DISCOVER", 0.35)   # cosine distance beyond which a signature counts as material NOTHING owns,
 #   and is handed to the least-used expert rather than the nearest incumbent. 0 disables discovery-by-novelty.
 FAB_REPLICATE = bool(_i("FAB_REPLICATE", 1))   # grow by CLONING the fittest expert (+jitter) rather than minting a
@@ -665,7 +667,22 @@ class Fabric(nn.Module):
             if s.route_learn:
                 # (B,sig_d) x (N,sig_d,dk) -> (B,N,dk), then contract with the per-expert key. Two einsums at any
                 # N, where this used to be N Linear calls and an N-element torch.stack every step.
-                logits = logits + (s.q_route(gist) @ s.K[:N].t()) + s.nov(nov[:, None]).sum(-1, keepdim=True)
+                # BOTH TERMS ARE COSINES, ON THE SAME SCALE. This was a RAW dot product of two unconstrained
+                # trained vectors added to a bounded cosine: an expert whose key norm grew large scored high for
+                # EVERY input with any positive projection, regardless of its region, and nothing bounded it.
+                # Gradient descent grows one key because that lowers loss fastest early, so the learned term
+                # becomes a winner-take-all amplifier bolted onto a working region router. Measured: the encoder
+                # separates the material (mean pairwise distance 0.871) and 50 distinct experts are the NEAREST
+                # CENTROID for some window -- yet 1-3 are used. The gap between those two numbers is this line.
+                # FAB_KEY_NORM decides which of the two forms runs, and it defaults to the ORIGINAL because I do
+                # not know which is right. The normalized form is the principled one -- both terms bounded, on one
+                # scale -- but measured on a 100 kB toy it went the WRONG way (3 used experts -> 1), and at that
+                # size the number is 1-vs-3 out of 32 windows, which is noise. Shipping it as a fix would be the
+                # fourth unvalidated router change in a row. It is a flag so the pilot can A/B it at a size where
+                # the answer means something.
+                _lrn = ((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(s.K[:N], dim=-1).t())
+                        / max(1e-3, s.route_t)) if FAB_KEY_NORM else (s.q_route(gist) @ s.K[:N].t())
+                logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)
             if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
             w = torch.softmax(logits, -1)
             with torch.no_grad():
@@ -3266,6 +3283,38 @@ def main():
         print(f"  NOTE: 'model ALONE' here is an ABLATION of a component the model TRAINED WITH (it also removes the")
         print(f"   fabric's LayerNorm), so it overstates the fabric's contribution. The honest comparison is this run's")
         print(f"   '+ FABRIC + MEMORY' against a FABRIC=0 run's 'model + MEMORY'.")
+    # === IS THE SIGNATURE SPACE A SPACE, OR A POINT? ==========================================================
+    # The question every routing result depends on and that nothing measured. Routing sends a window to the expert
+    # whose centroid is nearest its SIGNATURE. If the encoder maps all material to nearly the same signature, then
+    # there is one region, one nearest centroid, and one used expert -- and no routing rule, temperature, or
+    # discovery mechanism can spread traffic across a blob. Diagnosing that from the OUTSIDE cost a separate probe
+    # script and a surviving checkpoint; it belongs here, in the run that produced the routing.
+    if FABRIC and SIG_MODE == "learned":
+        try:
+            _sw2 = [encwin(encpos(a)) for a in range(0, min(len(stream) - WIN - 2, 200 * WIN), WIN)][:200]
+            if len(_sw2) >= 16:
+                with torch.no_grad(): _Zs = enc(torch.tensor(_sw2, device=DEV))
+                _Dm = 1 - _Zs @ _Zs.t()
+                _off = _Dm[~torch.eye(_Zs.size(0), dtype=torch.bool, device=DEV)]
+                _ev = torch.linalg.svdvals(_Zs - _Zs.mean(0, keepdim=True)) ** 2
+                _pr = float((_ev.sum() ** 2) / (_ev ** 2).sum().clamp_min(1e-12))   # participation ratio
+                _near = (F.normalize(fab.cent[:fab.n_live], dim=-1).to(DEV) @ _Zs.t()).argmax(0)
+                _du = len(set(_near.tolist()))
+                print(f"\n=== SIGNATURE SPACE: can the router tell this material apart at all? ===")
+                print(f"  {len(_sw2)} held-back windows | mean pairwise cosine distance {float(_off.mean()):.3f} "
+                      f"(0 = every window has the same signature) | spread {float(_off.std()):.3f}")
+                print(f"  effective dimensions {_pr:.1f} of {SIG_D} | distinct nearest-experts {_du} of "
+                      f"{fab.n_live} live")
+                print(f"  >> " + (
+                    "DEGENERATE: the encoder maps this material to essentially ONE point, so there is one region "
+                    "to route to. No routing rule can spread traffic across a blob -- the lever is the ENCODER "
+                    "(ENC_CREG is 0.0) or the material, not ROUTE_T."
+                    if float(_off.mean()) < 0.10 or _pr < 2.0 else
+                    "SEPARABLE: the encoder does distinguish this material, so concentration of routing is the "
+                    "ROUTER's doing rather than the representation's. ROUTE_T and DIV_W are then the levers."))
+        except Exception as _e:
+            print(f"[signature-space check skipped: {type(_e).__name__}: {_e}]")
+
     # === ARE THE EXPERTS GOOD AT ANYTHING? ====================================================================
     # The fabric block above reports node MASS -- how routing load is spread. Load is not competence. A population
     # can spread mass perfectly and have every node do the same undifferentiated job, which is precisely what
