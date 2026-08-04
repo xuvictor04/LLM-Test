@@ -990,12 +990,27 @@ class Fabric(nn.Module):
             # alive in the graph for the backward pass.
             _ck = min(s.chain_k, N)
             _cv, _ci = nm.topk(_ck, dim=-1)                                   # (B,k) per WINDOW, not per batch
+            # RECORD UTILIZATION HERE TOO. use[] was only written on the society path, so under SOCIETY=0 the
+            # table stayed EMPTY -- and everything that reads it ran blind: culling ranks the bottom fraction by
+            # utilization (all zero, so it culled arbitrarily), the breadth cap counts domains per expert, and the
+            # discovery rule hands novel material to the "least-used" expert. A chaining run had none of that
+            # information. Cheap to fix and it silently disabled three selection mechanisms.
+            with torch.no_grad():
+                for _uu in _ci[:, 0].tolist(): s.use[_uu] = s.use.get(_uu, 0.0) + 1.0
             _cA = s.A[_ci]; _cB = s.B[_ci]                                    # (B,k,d,r) (B,k,r,d)
             Bo = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
                                                torch.einsum('bld,bkdr->bklr', h, _cA), _cB)
             _cw = _cv / _cv.sum(-1, keepdim=True).clamp_min(1e-9)
             upd = (_cw[:, :, None, None] * Bo).sum(1)                         # soft mixture of the computed nodes
-            h = s.norm(h + s.alpha * (upd - h))                               # residual fabric step
+            # HALT NOW ACTUALLY HALTS. This renormalised over the top-k and applied the step at FULL strength no
+            # matter how much mass had already halted -- so the loop ran its full depth and h kept changing after
+            # the router had decided to stop. HALT accumulated mass and charged ponder cost while changing
+            # nothing about when the computation ended: the router was answering "how much" and never "when".
+            # Scaling the residual by the mass still routing makes the decision real -- as HALT absorbs, updates
+            # shrink to zero and h settles, which is the router determining completion rather than the loop
+            # counter determining it.
+            _alive = nm.sum(-1, keepdim=True)[:, :, None]                     # (B,1,1) mass NOT yet halted
+            h = s.norm(h + s.alpha * _alive * (upd - h))                      # residual fabric step, gated by HALT
             depth = depth + (1 - c[:, HALT]).mean(); mass = mass + c.mean(0).detach()
             ent = -(c.clamp_min(1e-9).log() * c).sum(-1)
             summ = torch.stack([nm.sum(-1), c[:, HALT], ent], -1)             # recurrent control summary
@@ -3223,6 +3238,19 @@ def main():
         # argument that justified running the pilot longer. The depth and halt figures printed below come from a
         # SEPARATE probe call to forward() made here at report time, not from anything that trained.
         print(f"\n=== CHAINING: do experts compose, or only vote? ===")
+        print(f"  ROUTER INPUTS: signature (detached SigEncoder summary of the raw window) + novelty scalar"
+              + (" + the SOURCE's identity, embedded from that expert's FULL WEIGHTS (SRC), + a control summary "
+                 "(routed mass, halted mass, entropy). Provenance is in the routing query: the transition depends "
+                 "on WHICH expert is holding the state." if not SOCIETY else
+                 ". No source term exists on this path -- there is no holder, because nothing is passed between "
+                 "experts."))
+        print(f"  COMPLETION: " + ("the ROUTER decides. The residual step is scaled by the mass still routing, so "
+                                   "as HALT absorbs, updates shrink to zero and the state settles -- the loop "
+                                   "counter is only an upper bound."
+                                   if not SOCIETY else
+                                   "ONE-SHOT. Experts compute once and go straight to the head; there is no HALT "
+                                   "and nothing for the router to complete. SOCIETY=0 is the path where the "
+                                   "router decides when the computation is done."))
         print(f"  SOCIETY={int(SOCIETY)} -> " + (
             "NO CHAINING. Experts are independent and blended at the router; each sees the base representation "
             "only. The composition machinery (transition matrix, HALT, adaptive depth, ponder) is present but "
@@ -3640,12 +3668,16 @@ def main():
                 # question that was being asked and that nothing reported.
                 _uv = sorted((v for v in fab.use.values() if v > 0), reverse=True)
                 _ut = sum(_uv) or 1
+                if not _uv:
+                    print("  ROUTER SELECTION: no utilization recorded -- fab.use is empty. If this is a chaining "
+                          "run that means selection ran blind (see below); otherwise it is a bug.")
                 _c50 = 0; _acc = 0.0
                 for _u in _uv:
                     _acc += _u; _c50 += 1
                     if _acc >= 0.5 * _ut: break
-                print(f"  ROUTER SELECTION over the whole run: {len(_uv)} distinct experts won at least one window "
-                      f"| top expert took {100*_uv[0]/_ut:.1f}% | half the traffic went to {_c50} expert(s)")
+                if _uv:
+                    print(f"  ROUTER SELECTION over the whole run: {len(_uv)} distinct experts won at least one "
+                          f"window | top expert took {100*_uv[0]/_ut:.1f}% | half the traffic went to {_c50} expert(s)")
                 print(f"    (the 'N of 4096 used' line above is 32 EVAL windows -- a probe, not the run. These two "
                       f"answer different questions and only this one says whether the router ever chose variety.)")
                 print(f"  IDENTITY SPACE: {fab.n_live} experts | nearest-neighbour distance median "
