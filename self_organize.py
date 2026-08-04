@@ -162,7 +162,7 @@ COMP_EMA = _f("COMP_EMA", 0.02)            # EMA rate for per-domain / per-node 
 FAB_SPAWN = bool(_i("FAB_SPAWN", 1))   # let the ROUTER specify an expert that does not exist and decode it into
 #   being. The newborn's weights are edec(query), so the LM loss backpropagates through them into q_route: the
 #   router is trained on what it ASKED FOR, not only on what it picked from what already existed.
-FAB_AE_W = _f("FAB_AE_W", 0.05)        # weight on the weights->identity->weights round trip that keeps edec honest
+FAB_AE_W = _f("FAB_AE_W", 0.5)        # weight on the weights->identity->weights round trip that keeps edec honest
 FAB_KEY_NORM = bool(_i("FAB_KEY_NORM", 0))   # normalise the LEARNED routing term so it cannot swamp the grounded
 #   region term. Principled but UNVALIDATED -- see Fabric.route_w. FAB_KEY_NORM=1 to A/B it.
 FAB_DISCOVER = _f("FAB_DISCOVER", 0.35)   # cosine distance beyond which a signature counts as material NOTHING owns,
@@ -502,7 +502,12 @@ class Fabric(nn.Module):
         # q_route -- so the router is trained on what it asked for. It learns to specify, not just to select.
         s.edec = nn.Sequential(nn.Linear(dk, int(os.environ.get("FAB_EMB_HID", 128))), nn.GELU(),
                                nn.Linear(int(os.environ.get("FAB_EMB_HID", 128)), 2 * d * s.r))
-        s.spawn_d = float(os.environ.get("FAB_SPAWN_DIST", 0.45))   # query this far from every K -> nothing serves it
+        s.emb_var = float(os.environ.get("FAB_EMB_VAR", 1.0))   # variance+decorrelation on the identity embeddings
+        s.spawn_mult = float(os.environ.get("FAB_SPAWN_MULT", 2.0))   # query must be this many times the population's
+        #   own typical nearest-neighbour distance away before it counts as material nothing serves
+        s.spawn_floor = float(os.environ.get("FAB_SPAWN_FLOOR", 0.02))  # absolute floor, so a degenerate population
+        #   (every identity identical -> typ = 0) cannot spawn on every single query
+        s._spawn_gap = s._spawn_typ = 0.0
         s.spawned = 0
         s.emb_every = int(os.environ.get("FAB_EMB_EVERY", 50))   # recompute cadence: O(N * 2*d*r * hid) is real
         s._kc = None; s._kstep = -10**9; s._kn = -1
@@ -583,7 +588,17 @@ class Fabric(nn.Module):
         if not s.derive_ids or N < 1: return None
         W = torch.cat([s.A[:N].reshape(N, -1), s.B[:N].reshape(N, -1)], -1)
         e = s.eemb(W)
-        return F.mse_loss(s.edec(e[:, :s.dk]), W)
+        # ANTI-COLLAPSE ON THE IDENTITIES. Measured: the population's typical nearest-neighbour distance in
+        # identity space was 0.000 -- every expert embedded to the SAME vector. Routing then has nothing to
+        # discriminate on (argmax lands arbitrarily on one node), specialization reads exactly 0.000, and the
+        # spawn can never fire because a query is always 0.000 from "the nearest". One collapsed embedder
+        # explains every routing symptom at once.
+        # This is the failure _var_cov already exists for -- it guards the SigEncoder and the dynamics population
+        # -- and I gave the expert embedder no protection at all. The inputs make it near-inevitable: experts are
+        # replicated clones, so their weights are similar by construction, and a net with no variance pressure
+        # maps similar inputs to one point.
+        _v, _c = _var_cov(e)
+        return F.mse_loss(s.edec(e[:, :s.dk]), W) + s.emb_var * (_v + _c)
 
     def spawn_from(s, q, step=None):
         """CREATE THE EXPERT THE ROUTER ASKED FOR. q is the router's query -- a point in identity space. If no
@@ -592,7 +607,23 @@ class Fabric(nn.Module):
         with torch.no_grad():
             Kd, _ = s._ids(s.n_live, step)
             near = float((F.normalize(Kd, dim=-1) @ F.normalize(q, dim=-1).squeeze()).max()) if s.n_live else -1.0
-        if 1.0 - near < s.spawn_d: return None                 # something already serves this -- no need to build
+        # RELATIVE, not absolute. `1 - near > 0.45` compares the query to the NEAREST of N identities, and that
+        # distance shrinks as N grows -- so an absolute threshold makes spawning impossible exactly when the
+        # population is large. Worse, the experts are near-duplicates of a few lineages, so their identities pack
+        # into a tight cluster that any query is close to. Measured: 4096 experts, threshold 0.45, ZERO spawns in
+        # a full pilot -- the mechanism could not fire, which is not the same as deciding not to.
+        # Compare instead against how tightly the population ALREADY packs: spawn when the query is further from
+        # everything than the experts typically are from each other. Scale-free, and it tightens on its own as the
+        # population densifies rather than switching off.
+        with torch.no_grad():
+            _Kn = F.normalize(Kd, dim=-1)
+            _sub = _Kn if s.n_live <= 512 else _Kn[torch.randperm(s.n_live, device=_Kn.device)[:512]]
+            _P = 1 - _sub @ _sub.t()
+            _P.fill_diagonal_(9e9)
+            _typ = float(_P.min(1).values.median())        # the population's own nearest-neighbour distance
+        s._spawn_gap = 1.0 - near; s._spawn_typ = _typ     # kept for the report: WHY it did or did not fire
+        if (1.0 - near) < max(s.spawn_mult * _typ, s.spawn_floor):
+            return None                                    # no further from everything than they are from each other
         j = s.n_live
         with torch.no_grad():
             W = s.edec(q.detach().reshape(1, -1))[0]
@@ -2771,7 +2802,12 @@ def main():
                         (1 - COMP_EMA) * fab.contrib[_nid] + COMP_EMA * _d2
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
-        _ael = fab.ae_loss(min(fab.n(), 256)) if (FABRIC and FAB_SPAWN and step % fab.emb_every == 0) else None
+        # EVERY STEP, not on the embed cadence. The refresh cadence exists because RE-READING identities is
+        # O(N * 2*d*r * hid); TRAINING the embedder is capped at 256 experts and is cheap. Tying the two meant the
+        # embedder got one update per 50 steps at weight 0.05 -- twelve weak updates in a short run -- and it stayed
+        # collapsed. Isolated, the same loss separates identities from 0.021 to 0.217 in 300 updates; it was never
+        # given 300. Cost of the split: the loss trains every step, the cache still refreshes on cadence.
+        _ael = fab.ae_loss(min(fab.n(), 256)) if (FABRIC and FAB_SPAWN) else None
         tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0) \
             + (FAB_AE_W * _ael if _ael is not None else 0.0)  # nodes have had a chance to be useful
         if FABRIC and SOCIETY and DIV_W > 0 and _O.size(1) > 1:   # DISTINCTNESS: reward experts for DISAGREEING, so
@@ -3585,9 +3621,46 @@ def main():
                 print(f"  LINEAGE: {len(fab.births)} distinct parents in the recent-birth window | largest share "
                       f"{(100*_lin[0]/max(1,sum(_lin))) if _lin else 0:.0f}% (cap {100*fab.parent_max:.0f}%) "
                       f"-- one lineage wearing N hats is not N experts")
-                print(f"  SPAWNED BY SPECIFICATION: {getattr(fab,'spawned',0)} expert(s) created because the "
-                      f"router's query was further than {fab.spawn_d:.2f} from every live identity -- decoded from "
-                      f"that query into weights, so the LM loss trains q_route through what it asked for")
+                print(f"  SPAWNED BY SPECIFICATION: {getattr(fab,'spawned',0)} expert(s) decoded into being from a "
+                      f"router query nothing served (LM loss then trains q_route through what it asked for)")
+                # MEASURED HERE, UNCONDITIONALLY. These were captured inside spawn_from -- which only runs when the
+                # spawn bar is MET -- so the number meant to diagnose a collapse was recorded only on the path the
+                # collapse prevents. It printed a stale 0.000 and read as "identities are identical" whether or not
+                # they were. A diagnostic that depends on the thing it diagnoses is not a diagnostic.
+                with torch.no_grad():
+                    _Ki, _ = fab._ids(fab.n_live)
+                    _Kin = F.normalize(_Ki, dim=-1)
+                    _sub2 = _Kin if fab.n_live <= 512 else _Kin[torch.randperm(fab.n_live, device=_Kin.device)[:512]]
+                    _Pi = 1 - _sub2 @ _sub2.t(); _Pi.fill_diagonal_(9e9)
+                    _nn = _Pi.min(1).values
+                    _off2 = _Pi[_Pi < 9e8]
+                # WHAT THE ROUTER ACTUALLY SELECTED, over the whole run. "N of 4096 used" above is measured on 32
+                # EVAL windows -- it answers "how many experts serve this small probe", not "how many did the
+                # router ever choose". fab.use counts every window each expert won during TRAINING, which is the
+                # question that was being asked and that nothing reported.
+                _uv = sorted((v for v in fab.use.values() if v > 0), reverse=True)
+                _ut = sum(_uv) or 1
+                _c50 = 0; _acc = 0.0
+                for _u in _uv:
+                    _acc += _u; _c50 += 1
+                    if _acc >= 0.5 * _ut: break
+                print(f"  ROUTER SELECTION over the whole run: {len(_uv)} distinct experts won at least one window "
+                      f"| top expert took {100*_uv[0]/_ut:.1f}% | half the traffic went to {_c50} expert(s)")
+                print(f"    (the 'N of 4096 used' line above is 32 EVAL windows -- a probe, not the run. These two "
+                      f"answer different questions and only this one says whether the router ever chose variety.)")
+                print(f"  IDENTITY SPACE: {fab.n_live} experts | nearest-neighbour distance median "
+                      f"{float(_nn.median()):.4f} (min {float(_nn.min()):.4f}) | mean pairwise "
+                      f"{float(_off2.mean()):.4f}")
+                print(f"  >> " + (
+                    "COLLAPSED: every expert embeds to essentially the SAME identity, so the router has nothing to "
+                    "discriminate on -- argmax lands arbitrarily on one node, specialization reads 0.000, and a "
+                    "spawn can never fire because any query is 0 from 'the nearest'. Raise FAB_EMB_VAR."
+                    if float(_nn.median()) < 0.01 else
+                    "DISTINCT: experts occupy different points in identity space, so routing concentration (if any) "
+                    "is a property of the ROUTER rather than of collapsed identities."))
+                print(f"    spawn bar is {fab.spawn_mult:g}x that median = "
+                      f"{max(fab.spawn_mult*float(_nn.median()), fab.spawn_floor):.4f}; last query sat "
+                      f"{getattr(fab,'_spawn_gap',0):.4f} from its nearest identity")
                 print(f"  DISCOVERY: {getattr(fab,'discovered',0)} signature(s) too far from every centroid were "
                       f"handed to the LEAST-USED expert (novelty > {FAB_DISCOVER:.2f} cosine) | "
                       f"{getattr(fab,'explored',0)} off-policy routings forced so unused experts got gradient | "

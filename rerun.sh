@@ -95,7 +95,13 @@ COH_N=2 COH_LEN=96"
   # arm; dropping them into the gate took an arm from 25 s to 3.3 min and blew the grid straight back past the run
   # it protects. The gate asks "does this arm reach the report", which 2 short continuations answer as well as 32.
   # Resolution is the MEASUREMENT's job, and the measurement runs on the GPU.
-  echo "smoke: 11 arms + checkpoint read-back on $SMDEV, ${SMOKE_LEN:-12000} B each. Asserting only that every arm REACHES THE REPORT."
+  # PARALLEL ARMS. Each arm is small-tensor work dominated by Python overhead, not by BLAS -- it never saturated
+  # the box, so running twelve of them one after another wasted three cores for the whole gate. Run SMOKE_JOBS at
+  # once with OMP_NUM_THREADS=1 each so they do not fight over threads. Measured on a 4-core box: ~700 s -> ~250 s.
+  # SMOKE_JOBS=1 restores serial if a failure needs clean interleaved output.
+  JOBS=${SMOKE_JOBS:-$(nproc 2>/dev/null || echo 4)}
+  TINY="$TINY OMP_NUM_THREADS=1 MKL_NUM_THREADS=1"
+  echo "smoke: 11 arms ($JOBS at a time) + checkpoint read-back on $SMDEV, ${SMOKE_LEN:-12000} B each. Asserting only that every arm REACHES THE REPORT."
   bad=0
   for arm in "full:" "no_fabric:FABRIC=0" "no_world:WORLD_MODEL=0" "no_perexp:MEM_PER_EXPERT=0" \
              "no_tok:TOKENIZER=0" "no_domains:SELF_ORG=0" "no_phased:PHASED=0" \
@@ -103,8 +109,20 @@ COH_N=2 COH_LEN=96"
              "expert_bank:EXPERTS=1 FABRIC=0" \
              "vocab_growth:VMAX=1024 GROW_EVERY=20 GROW_BURST=8 REKEY_EVERY=200 STREAM_LEN=200000"; do
     L=${arm%%:*}; E=${arm#*:}
-    env $TINY $E python3 self_organize.py > "$OUT/smoke_$L.log" 2>&1
-    rc=$?; tb=$(grep -ac Traceback "$OUT/smoke_$L.log")
+    ( env $TINY $E python3 self_organize.py > "$OUT/smoke_$L.log" 2>&1; echo $? > "$OUT/smoke_$L.rc" ) &
+    while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || break; done
+  done
+  wait
+  for arm in "full:" "no_fabric:FABRIC=0" "no_world:WORLD_MODEL=0" "no_perexp:MEM_PER_EXPERT=0" \
+             "no_tok:TOKENIZER=0" "no_domains:SELF_ORG=0" "no_phased:PHASED=0" \
+             "no_manage:MANAGE=0" "sig_tokens:SIG_SPACE=tokens" \
+             "expert_bank:EXPERTS=1 FABRIC=0" \
+             "vocab_growth:VMAX=1024 GROW_EVERY=20 GROW_BURST=8 REKEY_EVERY=200 STREAM_LEN=200000"; do
+    L=${arm%%:*}
+    rc=$(cat "$OUT/smoke_$L.rc" 2>/dev/null); rc=${rc:-99}
+    # grep -c EXITS NON-ZERO when the count is 0, so `|| echo 1` fired ON TOP of grep's own "0" and tb became
+    # the two-line string "0\n1" -- every arm then compared unequal to "0" and reported FAIL at exit 0.
+    tb=$(grep -ac Traceback "$OUT/smoke_$L.log" 2>/dev/null); tb=${tb:-1}
     [ "$rc" = 0 ] && [ "$tb" = 0 ] || { bad=1; printf "  FAIL %-12s exit %s | %s tracebacks\n" "$L" "$rc" "$tb"
       grep -a -A4 Traceback "$OUT/smoke_$L.log" | tail -4 | sed 's/^/       /'; }
     [ "$rc" = 0 ] && [ "$tb" = 0 ] && printf "  ok   %s\n" "$L"
