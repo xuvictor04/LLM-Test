@@ -159,6 +159,10 @@ DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memo
 #   for the act/stale conjunction that an empty domain can fail forever.
 MANAGE_MIN = _i("MANAGE_MIN", 15); MANAGE_STALE = _i("MANAGE_STALE", 500)        #   cull domains < MIN windows unseen for STALE
 COMP_EMA = _f("COMP_EMA", 0.02)            # EMA rate for per-domain / per-node COMPETENCE (bits on the material it wins)
+FAB_SPAWN = bool(_i("FAB_SPAWN", 1))   # let the ROUTER specify an expert that does not exist and decode it into
+#   being. The newborn's weights are edec(query), so the LM loss backpropagates through them into q_route: the
+#   router is trained on what it ASKED FOR, not only on what it picked from what already existed.
+FAB_AE_W = _f("FAB_AE_W", 0.05)        # weight on the weights->identity->weights round trip that keeps edec honest
 FAB_KEY_NORM = bool(_i("FAB_KEY_NORM", 0))   # normalise the LEARNED routing term so it cannot swamp the grounded
 #   region term. Principled but UNVALIDATED -- see Fabric.route_w. FAB_KEY_NORM=1 to A/B it.
 FAB_DISCOVER = _f("FAB_DISCOVER", 0.35)   # cosine distance beyond which a signature counts as material NOTHING owns,
@@ -489,6 +493,17 @@ class Fabric(nn.Module):
         # A SEPARATE embedder, used only for experts -- it is not the SigEncoder and never sees the stream.
         s.eemb = nn.Sequential(nn.Linear(2 * d * s.r, int(os.environ.get("FAB_EMB_HID", 128))), nn.GELU(),
                                nn.Linear(int(os.environ.get("FAB_EMB_HID", 128)), 2 * dk))
+        # THE DECODER: identity -> weights. With eemb the router can RECOGNISE an expert by what it is; with edec
+        # it can SPECIFY one. The router already emits a query in identity space (q_route(gist)) that is matched
+        # against every K. Read that query as "the expert I want": route to the nearest if one is close, and if
+        # NOTHING is close, decode the query into actual weights and create the expert that was asked for.
+        # Discovery stops being "hand the odd material to whoever is idle" and becomes "build what was specified".
+        # And because the newborn's weights ARE edec(query), the LM loss backpropagates through those weights into
+        # q_route -- so the router is trained on what it asked for. It learns to specify, not just to select.
+        s.edec = nn.Sequential(nn.Linear(dk, int(os.environ.get("FAB_EMB_HID", 128))), nn.GELU(),
+                               nn.Linear(int(os.environ.get("FAB_EMB_HID", 128)), 2 * d * s.r))
+        s.spawn_d = float(os.environ.get("FAB_SPAWN_DIST", 0.45))   # query this far from every K -> nothing serves it
+        s.spawned = 0
         s.emb_every = int(os.environ.get("FAB_EMB_EVERY", 50))   # recompute cadence: O(N * 2*d*r * hid) is real
         s._kc = None; s._kstep = -10**9; s._kn = -1
         s.derive_ids = bool(int(os.environ.get("FAB_DERIVE_IDS", 1)))
@@ -560,6 +575,32 @@ class Fabric(nn.Module):
         s._kc, s._kn = out, N
         if step is not None: s._kstep = step
         return out
+
+    def ae_loss(s, N):
+        """Autoencoder tie. edec is only meaningful as an inverse of eemb, and nothing else would train it: the
+        decoder is used at BIRTH, which is rare, so its gradient signal is far too sparse to shape it. This makes
+        the round trip weights -> identity -> weights the thing that keeps the two consistent."""
+        if not s.derive_ids or N < 1: return None
+        W = torch.cat([s.A[:N].reshape(N, -1), s.B[:N].reshape(N, -1)], -1)
+        e = s.eemb(W)
+        return F.mse_loss(s.edec(e[:, :s.dk]), W)
+
+    def spawn_from(s, q, step=None):
+        """CREATE THE EXPERT THE ROUTER ASKED FOR. q is the router's query -- a point in identity space. If no
+        live expert is near it, decode it into weights and instantiate. Returns the new slot or None."""
+        if s.n_live >= s.cap: return None
+        with torch.no_grad():
+            Kd, _ = s._ids(s.n_live, step)
+            near = float((F.normalize(Kd, dim=-1) @ F.normalize(q, dim=-1).squeeze()).max()) if s.n_live else -1.0
+        if 1.0 - near < s.spawn_d: return None                 # something already serves this -- no need to build
+        j = s.n_live
+        with torch.no_grad():
+            W = s.edec(q.detach().reshape(1, -1))[0]
+            s.A[j] = W[:s.d * s.r].reshape(s.d, s.r); s.B[j] = W[s.d * s.r:].reshape(s.r, s.d)
+        s.born[j] = int(step) if step is not None else 0
+        for _D in (s.use, s.comp, s.contrib, s.ef, s.es): _D.pop(j, None)
+        s.n_live += 1; s.grown += 1; s.spawned += 1; s._kc = None
+        return j
 
     @property
     def K(s):
@@ -2632,6 +2673,15 @@ def main():
         if FABRIC and SOCIETY:
             # SPARSE: compute only the experts whose outputs are actually consumed below. The dense blend that used
             # to be assigned to h here was never read -- the logits come from _O -- so it was pure waste.
+            # DISCOVERY BY SPECIFICATION. The router's query for THIS signature is a point in identity space;
+            # if nothing live is near it, the expert it is asking for does not exist -- so build it. Cheap enough
+            # to try on the manage cadence rather than every step, and bounded by FAB_NMAX like any other growth.
+            if FAB_SPAWN and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
+                with torch.no_grad(): _q6 = fab.q_route(sigb[:1])
+                _new6 = fab.spawn_from(_q6, step=step)
+                if _new6 is not None:
+                    print(f"  [expert @ {step}] router asked for an expert nothing served -> DECODED it into "
+                          f"slot {_new6} ({fab.n()} live, {fab.spawned} spawned this way)")
             _ban = fab.dom_ban(did, len(asm.cent)) if SELF_ORG else None
             _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K), ban=_ban)
             with torch.no_grad():                          # record the affiliation the cap is computed from
@@ -2721,7 +2771,9 @@ def main():
                         (1 - COMP_EMA) * fab.contrib[_nid] + COMP_EMA * _d2
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
-        tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0)  # nodes have had a chance to be useful
+        _ael = fab.ae_loss(min(fab.n(), 256)) if (FABRIC and FAB_SPAWN and step % fab.emb_every == 0) else None
+        tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0) \
+            + (FAB_AE_W * _ael if _ael is not None else 0.0)  # nodes have had a chance to be useful
         if FABRIC and SOCIETY and DIV_W > 0 and _O.size(1) > 1:   # DISTINCTNESS: reward experts for DISAGREEING, so
             _t2 = _w.mean(0).topk(min(2, _O.size(1))).indices          #   they carry different competence instead of
             _a = _O[:, _t2[0]].reshape(-1); _b = _O[:, _t2[1]].reshape(-1)   #   converging on the same generalist function
@@ -3533,6 +3585,9 @@ def main():
                 print(f"  LINEAGE: {len(fab.births)} distinct parents in the recent-birth window | largest share "
                       f"{(100*_lin[0]/max(1,sum(_lin))) if _lin else 0:.0f}% (cap {100*fab.parent_max:.0f}%) "
                       f"-- one lineage wearing N hats is not N experts")
+                print(f"  SPAWNED BY SPECIFICATION: {getattr(fab,'spawned',0)} expert(s) created because the "
+                      f"router's query was further than {fab.spawn_d:.2f} from every live identity -- decoded from "
+                      f"that query into weights, so the LM loss trains q_route through what it asked for")
                 print(f"  DISCOVERY: {getattr(fab,'discovered',0)} signature(s) too far from every centroid were "
                       f"handed to the LEAST-USED expert (novelty > {FAB_DISCOVER:.2f} cosine) | "
                       f"{getattr(fab,'explored',0)} off-policy routings forced so unused experts got gradient | "
