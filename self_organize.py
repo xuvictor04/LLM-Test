@@ -493,6 +493,7 @@ class Fabric(nn.Module):
         s.births = {}                                      # parent -> recent births (sliding, halved when full)
         s.births_win = int(os.environ.get("FAB_BIRTH_WIN", 256))
         s.parent_max = float(os.environ.get("FAB_PARENT_MAX", 0.20))  # max share of recent births per parent
+        s.chain_k = int(os.environ.get("FAB_CHAIN_K", 8))   # experts COMPUTED per chaining hop (was: all of them)
         s.explore = float(os.environ.get("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
         s.xover = float(os.environ.get("FAB_XOVER", 0.35))       # fraction of births assembled from SEVERAL parents
         s.born = {}                                        # expert -> step it was created (grace before culling)
@@ -854,12 +855,21 @@ class Fabric(nn.Module):
                 c = c / c.sum(-1, keepdim=True).clamp_min(1e-9)
             nm = c[:, :N]
             bal = bal + N * (nm.mean(0) ** 2).sum()                            # load balance: spread mass across nodes
-            # (B,N,L,d): EVERY node computes on the chaining path -- which is why SOCIETY=1 is required at scale.
-            # Batched low-rank, but the cost is still O(N) in FLOPs, so a chained fabric of 10,000 experts is not a
-            # thing you want. The society path computes top-k and is the one the defaults use.
-            Bo = h.unsqueeze(1) + torch.einsum('bklr,krd->bkld',
-                                               torch.einsum('bld,kdr->bklr', h, s.A[:N]), s.B[:N])
-            upd = (nm[:, :, None, None] * Bo).sum(1)                          # soft mixture of node outputs
+            # SPARSE PER HOP. This computed EVERY node at every hop: Bo is (B,N,L,d), which at N=972, B=16,
+            # L=256, d=768 is 12 GB for ONE hop -- times the depth budget, times the autograd graph. That is the
+            # OOM, and it is why chaining could not be run at population scale at all.
+            # Only the top-k by CURRENT routing mass are computed. The semantics are unchanged in the part that
+            # matters -- mass still flows expert -> expert through the transition below, so an expert still builds
+            # on another's output -- but a hop now costs k experts instead of N. Everything outside the top-k
+            # contributed a weight of ~0 to the mixture anyway; it was computed, multiplied by nothing, and kept
+            # alive in the graph for the backward pass.
+            _ck = min(s.chain_k, N)
+            _cv, _ci = nm.topk(_ck, dim=-1)                                   # (B,k) per WINDOW, not per batch
+            _cA = s.A[_ci]; _cB = s.B[_ci]                                    # (B,k,d,r) (B,k,r,d)
+            Bo = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
+                                               torch.einsum('bld,bkdr->bklr', h, _cA), _cB)
+            _cw = _cv / _cv.sum(-1, keepdim=True).clamp_min(1e-9)
+            upd = (_cw[:, :, None, None] * Bo).sum(1)                         # soft mixture of the computed nodes
             h = s.norm(h + s.alpha * (upd - h))                               # residual fabric step
             depth = depth + (1 - c[:, HALT]).mean(); mass = mass + c.mean(0).detach()
             ent = -(c.clamp_min(1e-9).log() * c).sum(-1)
@@ -1796,7 +1806,13 @@ def main():
     _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
     os.environ.setdefault("FAB_NMAX", str(_i("FAB_NMAX", 4096)))   # Fabric preallocates from it
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
-                 _f("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0), bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
+                 _f("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0 if SOCIETY else 2),
+                 bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
+    # FAB_MIN_STEPS DEFAULTS BY PATH. On the society path HALT is unused and 0 is right. On the CHAINING path 0
+    # means HALT can absorb on the very first hop -- measured: mean routed depth 0.00 of 4, i.e. chaining switched
+    # on and nothing chained. Blocking HALT for two hops forces experts to actually compose before the router is
+    # allowed to stop: depth 0.00 -> 0.60 on the same config. A composition mechanism that is enabled but never
+    # entered is worse than one that is off, because it reads as tested.
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
                             _f("FAB_Z", 4.0), _i("FAB_BURST", 3), _i("FAB_RAMP", 4000),
                             _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000),
@@ -3070,6 +3086,9 @@ def main():
             if SOCIETY else
             "CHAINING ACTIVE. Mass flows expert -> expert through the transition matrix over multiple hops, "
             "HALT absorbing, so an expert CAN build on another's output. Depth below is what actually ran."))
+        if not SOCIETY:
+            print(f"  HALT blocked for the first {_i('FAB_MIN_STEPS', 2)} hop(s) (FAB_MIN_STEPS). At 0 the router "
+                  f"halts immediately and depth is 0.00 of {_i('FAB_STEPS', 4)} -- chaining ON and nothing chained.")
         if SOCIETY:
             print(f"  (ponder cost this run: 0 by construction -- _dep is zeros on the society path, so PONDER="
                   f"{PONDER} and PONDER_WARM={PONDER_WARM} had no effect on training whatsoever)")
