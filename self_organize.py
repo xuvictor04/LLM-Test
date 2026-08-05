@@ -600,13 +600,16 @@ class Fabric(nn.Module):
         s.state_q = bool(int(os.environ.get("CHAIN_STATE_Q", 0)))   # transition query sees the CURRENT state
         s.curric = bool(int(os.environ.get("CHAIN_CURRIC", 0)))
         s.depth_now = int(os.environ.get("CHAIN_DEPTH0", 1)) if s.curric else max_steps
-        s.dp_best = None; s.dp_wait = 0
+        s.dp_best = None; s.dp_wait = 0; s.dp_seen = 0
+        s.dp_stage_max = int(os.environ.get("CHAIN_STAGE_MAX", 40))   # checks before a stage ends regardless
         s.dp_patience = int(os.environ.get("CHAIN_PATIENCE", 6))   # plateau checks before adding a hop
         s.dp_eps = float(os.environ.get("CHAIN_EPS", 0.01))        # improvement that counts as progress
         s.deepened = []                                            # (step, new depth) for the report
         s.sup_w = float(os.environ.get("CHAIN_SUP", 0.0))          # per-hop deep supervision weight
         s._hops = []                                               # per-hop hidden states, for that supervision
         s._hopq = []                                               # per-hop router queries, for per-hop spawn
+        s._rmix = []; s._sample_mix = False    # (grounded spread, weight-prediction spread) samples
+        s._ord = []                            # (hop0, hop1) expert pairs, for H(hop1 | hop0)
         s.explore = float(os.environ.get("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
         s.xover = float(os.environ.get("FAB_XOVER", 0.35))       # fraction of births assembled from SEVERAL parents
         s.born = {}                                        # expert -> step it was created (grace before culling)
@@ -952,6 +955,7 @@ class Fabric(nn.Module):
         because it WAS on: for the path that was not running."""
         C = F.normalize(s.cent[:N].to(gist.device), dim=-1)
         logits = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
+        _gterm = logits
         if s.route_learn:
             # BOTH TERMS ARE COSINES, ON THE SAME SCALE when FAB_KEY_NORM=1. The raw form is a dot product of two
             # unconstrained trained vectors added to a bounded cosine: an expert whose key norm grows large scores
@@ -961,6 +965,16 @@ class Fabric(nn.Module):
             _lrn = ((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(_Kd, dim=-1).t())
                     / max(1e-3, s.route_t)) if FAB_KEY_NORM else (s.q_route(gist) @ _Kd.t())
             logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)
+            # WHICH ROUTER IS ACTUALLY DECIDING? This branch's premise is that the router PREDICTS THE WEIGHTS of
+            # the expert it wants (q_route -> identity space, matched against eemb of every expert's full weights,
+            # and decoded into a real expert by edec when nothing is near). The grounded term is the OLDER
+            # signature-region router, and summing them means one can silently dominate the other. Only the SPREAD
+            # across experts matters -- a constant shift cancels in the softmax -- so compare standard deviations.
+            # Sampled on a cadence the caller sets, because these are two host syncs.
+            if getattr(s, "_sample_mix", False):
+                with torch.no_grad():
+                    s._rmix.append((float(_gterm.std()), float(_lrn.std())))
+                s._sample_mix = False
         if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
         return logits
 
@@ -1068,10 +1082,18 @@ class Fabric(nn.Module):
         Deliberately keyed on the SLOW loss and a patience counter rather than on a single step: the population is
         also growing, and a burst of new experts causes a transient worsening that must not read as a plateau."""
         if not s.curric or s.depth_now >= s.max_steps: return None
-        if s.dp_best is None or lf < s.dp_best - s.dp_eps:
-            s.dp_best = lf if s.dp_best is None else min(s.dp_best, lf); s.dp_wait = 0; return None
-        s.dp_wait += 1
-        if s.dp_wait < s.dp_patience: return None
+        s.dp_seen += 1
+        # A PLATEAU TEST ALONE CANNOT FIRE ON AN UNDERFIT MODEL, and this model is underfit by its own report
+        # (train-vs-held-out gap -0.035, "UNDERFIT -> more data/passes"). The first version of this waited for the
+        # loss to stop improving and so sat at depth 1 for the whole run -- which I then reported as "staged depth
+        # did not help". It had not run. A stage also ends after CHAIN_STAGE_MAX checks, so depth advances on a
+        # still-falling loss rather than never.
+        _plateau = not (s.dp_best is None or lf < s.dp_best - s.dp_eps)
+        if s.dp_best is None or lf < s.dp_best: s.dp_best = lf
+        if not _plateau: s.dp_wait = 0
+        else: s.dp_wait += 1
+        if s.dp_wait < s.dp_patience and s.dp_seen < s.dp_stage_max: return None
+        s.dp_seen = 0
         s.depth_now += 1; s.dp_wait = 0; s.dp_best = lf
         s.deepened.append((step, s.depth_now))
         return s.depth_now
@@ -1184,8 +1206,12 @@ class Fabric(nn.Module):
                 with torch.no_grad():
                     for _uu in _ci[:, 0].tolist(): s.use[_uu] = s.use.get(_uu, 0.0) + 1.0
                     wacc = nm.detach() if wacc is None else wacc + nm.detach()   # per-window mass, over all hops
-            # TRACE HOOK, off unless a caller sets fab._trace = []. Zero cost otherwise, and it is the instrument
-            # that produced the ordering measurements in __init__ -- keep it so the next attempt can re-measure.
+            # ORDERING, RECORDED IN THE REAL RUN. The question "can the chain vary its SECOND move for the same
+            # first move" was only ever asked on a 24-expert synthetic toy, which is not the system. Recording the
+            # (hop0, hop1) pair here costs two small int lists on a cadence and answers it at whatever scale the
+            # run actually uses, against real material.
+            if ban1 is None and getattr(s, "_sample_ord", False) and _t_ < 2:
+                s._ord.append((_t_, _ci[:, 0].tolist()))
             if getattr(s, '_trace', None) is not None: s._trace.append(_ci[:, 0].tolist())
             _cA = s.A[_ci]; _cB = s.B[_ci]                                    # (B,k,d,r) (B,k,r,d)
             Bo = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
@@ -2992,6 +3018,13 @@ def main():
         if EXPERTS and _sl >= 0: route_at[bpos:bpos + WIN] = _sl   # remember WHICH expert trained on this span
         h = model.encode(x)                                      # includes the world-model feedback when enabled (wrapped above)
         _wz = world_enc(model.emb(x)) if WORLD_MODEL else None   # world latent per position (also used by the world loss)
+        # CADENCE ON THE BACKWARD COUNTER, not on `step`. `step` counts WINDOWS and this block runs only on the
+        # 1-in-BATCH_W flush steps, so `step % MANAGE_EVERY == 0` samples the intersection of two unrelated
+        # cadences -- at BATCH_W=4, MANAGE_EVERY=20 that intersection is EMPTY and the instrument silently never
+        # fires. This is the second time in this file; _greach had the same bug and the same fix.
+        if FABRIC:
+            _armed = (_nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0)
+            fab._sample_mix = _armed; fab._sample_ord = _armed
         if FABRIC:
             # DISCOVERY BY SPECIFICATION. The router's query for THIS signature is a point in identity space;
             # if nothing live is near it, the expert it is asking for does not exist -- so build it. Cheap enough
@@ -3207,7 +3240,11 @@ def main():
         _lm_run.append(_lf)                                      #   plateau detector each pulled the same scalar back)
         if _due("lmcurve", max(1, (STREAM_LEN // WIN) // 8)) and _lm_run:
             _lm_curve.append((step, sum(_lm_run[-2000:]) / len(_lm_run[-2000:]))); _lm_run = _lm_run[-2000:]
-        if FABRIC and not fab.norm_only and not SOCIETY and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
+        # ...and the same cadence fix again. `step % MANAGE_EVERY == 0` never coincides with a flush step at
+        # BATCH_W=4, so maybe_deepen was NEVER CALLED in a real run. I reported "staged depth did not help" off
+        # the back of that. It had not run. Only the synthetic probe, which called it directly, tested it at all.
+        if (FABRIC and not fab.norm_only and not SOCIETY and MANAGE_ON and _nbwd > 0
+                and _nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0):
             _nd = fab.maybe_deepen(_lf, step)
             if _nd is not None:
                 print(f"  [chain @ {step}] depth {_nd - 1} stopped paying -> {_nd} hop(s) of {fab.max_steps}. "
@@ -4108,6 +4145,49 @@ def main():
                              f"to {_ee} steps stale." if _ee > 1 else
                              "FAB_EMB_EVERY=1: keys are recomputed every step, so the channel is never throttled "
                              "and the router never scores on stale weights."))
+                # === WHICH ROUTER IS DECIDING? ===============================================================
+                if fab._rmix:
+                    _gs = sum(a for a, _ in fab._rmix) / len(fab._rmix)
+                    _ws = sum(b for _, b in fab._rmix) / len(fab._rmix)
+                    _tot2 = _gs + _ws
+                    print(f"  ROUTING MIX over {len(fab._rmix)} samples: signature-region term spread {_gs:.3f} "
+                          f"({_gs / max(1e-9, _tot2):.0%}) vs WEIGHT-PREDICTION term spread {_ws:.3f} "
+                          f"({_ws / max(1e-9, _tot2):.0%})")
+                    print(f"    the weight-prediction term IS this branch's premise: q_route emits a point in "
+                          f"identity space, every expert's FULL WEIGHTS are embedded into the same space by eemb, "
+                          f"and edec decodes the query into a real expert when nothing is near. The region term is "
+                          f"the older signature router, summed on top. Only the SPREAD across experts decides "
+                          f"anything (a constant shift cancels in the softmax), so these two numbers are the split.")
+                    if _ws / max(1e-9, _tot2) < 0.2:
+                        print(f"    >> the weight prediction is NOT driving routing -- the region term is. "
+                              f"ROUTE_GROUNDED=0 to run on predicted weights alone.")
+                    elif _gs / max(1e-9, _tot2) < 0.2:
+                        print(f"    >> routing is essentially ALL weight-prediction; the region term is decoration. "
+                              f"FAB_KEY_NORM={int(FAB_KEY_NORM)} -- at 0 that term is an UNBOUNDED raw dot against "
+                              f"a bounded cosine, which is how it comes to dominate.")
+                # === CAN THE CHAIN VARY ITS SECOND MOVE? =====================================================
+                # H(hop1 | hop0) in bits. 0 = hop 1 is a fixed successor of hop 0, i.e. the chain makes ONE
+                # decision and then follows a rail, however many hops it runs. This is the measurement that was
+                # missing: the earlier attempt used I(domain; pair) vs I(domain; hop0), which saturates whenever
+                # hop 0 already identifies the domain and so cannot distinguish "collapsed" from "correct".
+                if fab._ord:
+                    from collections import Counter as _Ct
+                    _h0 = [v for t, v in fab._ord if t == 0]; _h1 = [v for t, v in fab._ord if t == 1]
+                    _pr = [(a, b) for r0, r1 in zip(_h0, _h1) for a, b in zip(r0, r1)]
+                    if _pr:
+                        _jt = _Ct(_pr); _m0 = _Ct(a for a, _ in _pr); _n2 = len(_pr)
+                        _hc = -sum((c / _n2) * math.log2((c / _n2) / (_m0[a] / _n2)) for (a, _), c in _jt.items())
+                        _succ = {}
+                        for a, b in _pr: _succ.setdefault(a, set()).add(b)
+                        _fixed = sum(1 for v in _succ.values() if len(v) == 1)
+                        print(f"  CHAIN ORDER: H(hop1 | hop0) = {_hc:.3f} bits over {_n2} transitions | "
+                              f"{len(_succ)} distinct hop-0 experts, {_fixed} of which ALWAYS hand to the same "
+                              f"successor")
+                        print(f"    0 bits = the chain makes ONE decision and then follows a rail: however many "
+                              f"hops run, only the entry choice carries information. >0 = the second move genuinely "
+                              f"depends on more than the first, which is what composition requires.")
+                elif not SOCIETY:
+                    print(f"  CHAIN ORDER: not measured -- fewer than 2 hops ran (depth_now={fab.depth_now}).")
                 if _rseen:
                     _rdead = sorted(_rseen - _rlive)
                     print(f"  ROUTER LEARNING: trained this run -> {', '.join(sorted(_rlive)) or 'NOTHING'}")
