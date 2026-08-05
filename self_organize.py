@@ -2573,9 +2573,30 @@ def main():
                            + (list(world_enc.parameters()) + list(world_fwd.parameters()) if WORLD_MODEL else [])
                            + (list(world_proj.parameters()) if world_proj is not None else []))
              if id(_x) not in _rg_ids]
-    om = torch.optim.AdamW(_base, lr=2e-3, weight_decay=WD)
+    # === LEARNING RATE ======================================================================================
+    # There was NO SCHEDULE: lr=2e-3, constant, for the whole run. Every pilot in this project -- 17 of them,
+    # GRU and transformer, fabric and FABRIC=0, every routing variant -- bottoms in held-out bits/byte at ~2.4
+    # around step 6000 and rises to ~3.8-4.1 by 48000. A cause common to all of them cannot be the fabric, the
+    # router or the blend rule. A constant 2e-3 on AdamW for 48k steps is exactly that shape: fast early progress,
+    # then the optimizer bounces around a minimum it can no longer settle into, and slowly degrades.
+    # This is a hypothesis, not a proof -- but unlike the tokenizer theory it explains the transformer arms too,
+    # and it is one flag to test. LR_SCHED=none restores the old behaviour exactly.
+    LR = _f("LR", 2e-3); LR_SCHED = _env("LR_SCHED", "cosine")
+    LR_WARMUP = _i("LR_WARMUP", 1000); LR_MIN_FRAC = _f("LR_MIN_FRAC", 0.05)
+    om = torch.optim.AdamW(_base, lr=LR, weight_decay=WD)
     for _g in _regrown: om.add_param_group({"params": _g})   # same groups, same order as the original run
-    oe = torch.optim.AdamW(enc.parameters(), lr=2e-3, weight_decay=WD)
+    oe = torch.optim.AdamW(enc.parameters(), lr=LR, weight_decay=WD)
+    def _lr_at(st, total):
+        """Linear warmup, then cosine to LR_MIN_FRAC of peak. Never returns 0: this is a continual-learning
+        system and a schedule that anneals to nothing cannot learn anything that arrives late."""
+        if LR_SCHED == "none": return LR
+        # WARMUP CANNOT EXCEED THE RUN. At LR_WARMUP=1000 a 360-step run never leaves warmup and trains at a
+        # third of the peak rate throughout -- which looks like the schedule hurting when it is the schedule
+        # never having run. Clamped to a tenth of the total.
+        _w = min(LR_WARMUP, max(1, total // 10))
+        if st < _w: return LR * (st + 1) / _w
+        _p = min(1.0, (st - _w) / max(1, total - _w))
+        return LR * (LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _p)))
     # PER-EXPERT MEMORY: each expert owns MEM_QUOTA entries, evicted by LRU on last USE. Sized to FAB_NMAX so the
     # partition does not have to be rebuilt as the population grows. MEM_PER_EXPERT=0 keeps the single global store.
     # DEFAULT OFF, on measurement: same seed, same config, only the store differs --
@@ -3132,6 +3153,8 @@ def main():
             ("DIV_W",          DIV_W),                   ("IND_W",          IND_W if SOCIETY else 0.0),
             ("DROPOUT",        DROPOUT),                 ("WEIGHT_DECAY",   WD),
             ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
+            ("LR",             LR),                      ("LR_SCHED",       LR_SCHED),
+            ("LR_WARMUP",      LR_WARMUP),               ("LR_MIN_FRAC",    LR_MIN_FRAC),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
         ]
         if _F0 is not None: _EFF += [
@@ -3642,6 +3665,10 @@ def main():
                         _rlive.add(_rn)
                     _rseen.add(_rn)
             _greach.append(_gn)
+        if LR_SCHED != "none":
+            _lrv = _lr_at(step, max(1, _total_steps))
+            for _g in om.param_groups: _g["lr"] = _lrv
+            for _g in oe.param_groups: _g["lr"] = _lrv
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
         _t1("lm fwd+bwd (incl. fabric/world)", _plm)
         _lf = float(loss.detach())                               # ONE host sync per step (was two: the curve and the
