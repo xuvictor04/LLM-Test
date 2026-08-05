@@ -3848,6 +3848,15 @@ def main():
             else:
                 stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
             _sigq = []                                       # re-tokenized -> window boundaries moved, queue is stale
+            # THE HELD-OUT CURVE'S CACHE MUST DIE WITH THE SEGMENTATION. _VALT tokenises the validation text ONCE
+            # and never invalidated it, so after the first mint the curve compared a model trained on the CURRENT
+            # segmentation against validation text frozen in an OLD one -- and the mismatch grew with every mint.
+            # That is not a comparison across time; the reference moves out from under it.
+            # It explains the shape exactly: the curve degrades over the MINTING window (steps ~3000-21000) and
+            # goes flat the moment minting stops (vocab caps at 21056, +0 tokens after), which is the behaviour of
+            # a drifting yardstick, not of a model that suddenly stops getting worse. It also explains why "best"
+            # lands at ~6000 in every arm at every seed: that is the last sample where the cache still matched.
+            _VALT.clear(); _BL.clear()
             if SIG_SPACE == "tokens":                        # the encoder reads the TOKEN stream, which was just rebuilt
                 ENC_SEQ = stream; set_enc_tensor(ENC_SEQ)    #   -> re-point it, or it trains on a stale segmentation
             if FABRIC and fabgrow is not None: fabgrow.note_shift(step)   # the loss jump after a retok is OURS, not a shift
