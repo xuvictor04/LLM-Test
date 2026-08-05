@@ -2890,7 +2890,7 @@ def main():
 
     def _save_ckpt(src_stream, quiet=False, suffix=""):    # persist model+tokenizer+memory so `prompt.py` can load it
         ck = _env("SAVE_CKPT")
-        if not ck: return
+        if not ck: return False                            # RETURNS whether it saved: the caller used to assume it did
         ck = ck + suffix                                   # suffix=".best" writes the best-by-held-out snapshot
         os.makedirs(ck, exist_ok=True)
         if USE_TOK: TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
@@ -2960,9 +2960,12 @@ def main():
         os.replace(f"{ck}/probe.pt.tmp", f"{ck}/probe.pt")
         if not quiet:
             print(f"[saved checkpoint -> {ck}/ckpt.pt | {int(act.sum())} memory entries{', fabric ' + str(len(fab.bodies)) + 'n' if FABRIC else ''} | prompt it: python3 prompt.py CKPT={ck}]")
+        return True                                        # saved, and the caller may say so
+
 
     import signal as _signal                               # CHECKPOINT-ON-DEMAND: `kill -USR1 <pid>` sets a flag and the
     _ckpt_req = {"on": False}                              #   loop saves at the next SAFE point (never torch.save inside a
+
     def _on_usr1(*_): _ckpt_req["on"] = True              #   handler -- reentrancy). Pause+dump without killing the run.
     try: _signal.signal(_signal.SIGUSR1, _on_usr1)
     except (ValueError, OSError): pass                     # not the main thread / unsupported platform -> silently skip
@@ -3334,8 +3337,7 @@ def main():
                 if _best_bpb[0] is None or _cm < _best_bpb[0] - 1e-6:
                     _best_bpb[0] = _cm; _best_bpb[1] = step
                     try:
-                        _save_ckpt(stream, quiet=True, suffix=".best")
-                        _best_bpb[2] = True
+                        _best_bpb[2] = bool(_save_ckpt(stream, quiet=True, suffix=".best"))
                     except Exception as _e:
                         print(f"  [best-ckpt save failed: {type(_e).__name__}: {_e}]")
         if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark:
@@ -4903,6 +4905,8 @@ def main():
             _fin = None
             _lastc = [b for st, _p, b, _a in _CURVE if st == max(st2 for st2, _, _, _ in _CURVE)]
             if _lastc: _fin = sum(_lastc) / len(_lastc)
+            # SAY "not saved" WHEN IT WAS NOT SAVED. This printed "saved to None.best" on a run with SAVE_CKPT
+            # off, because _save_ckpt returned early without saying so and the caller assumed success.
             print(f"  SAMPLED FROM: the FINAL model, step ~{_total_steps}"
                   + (f" ({_fin:.3f} held-out bits/byte)" if _fin else "")
                   + f" -- NOT the best. Best was {_best_bpb[0]:.3f} at step {_best_bpb[1]}"

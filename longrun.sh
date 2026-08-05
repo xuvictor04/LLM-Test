@@ -406,7 +406,8 @@ seeds)
         WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
         SIG_WIN=${SIG_WIN:-614} ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 \
         MEM_QUOTA=${MEM_QUOTA:-3125} CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 PROBE_WAIT=0 \
-        SAVE_CKPT=0 python3 self_organize.py > "$LOG" 2>&1
+        SAVE_CKPT=$([ "${SEED_CKPT:-0}" = 1 ] && _reserve "$SD/${TAG}_seed$SEED.ckpt" || echo 0) \
+        python3 self_organize.py > "$LOG" 2>&1
     echo "== seed $SEED: rc=$?"
     set -e 2>/dev/null || true
   done
