@@ -612,6 +612,7 @@ class Fabric(nn.Module):
         # DIV_W is a LOCAL in main(), so Fabric.forward could not see it -- a NameError on the first chaining hop
         # that would have killed every chaining arm. Read it here, from the same env var and the same default.
         s.div_w = float(os.environ.get("DIV_W", 0.0))
+        s._mass_ema = None                     # training-time HALT mass on the chaining path
         s._div = None                          # distinctness penalty from the last chaining walk
         s._rmix = []; s._sample_mix = False    # (grounded spread, weight-prediction spread) samples
         s._ord = []                            # (hop0, hop1) expert pairs, for H(hop1 | hop0)
@@ -1258,6 +1259,10 @@ class Fabric(nn.Module):
             # curriculum's stopping test meaningful, since depth-1 then has a loss of its own.
             if ban1 is None and s.sup_w > 0: s._hops.append(h)
             depth = depth + (1 - c[:, HALT]).mean(); mass = mass + c.mean(0).detach()
+            if ban1 is None:
+                with torch.no_grad():                     # the HALT column, as it actually was during training
+                    _hh = c[:, HALT].mean().detach()
+                    s._mass_ema = _hh if s._mass_ema is None else 0.99 * s._mass_ema + 0.01 * _hh
             ent = -(c.clamp_min(1e-9).log() * c).sum(-1)
             summ = torch.stack([nm.sum(-1), c[:, HALT], ent], -1)             # recurrent control summary
             bias = nb + s.ctrl(summ)
@@ -2079,11 +2084,12 @@ def generate(model, mem, seed, n, use_mem, DEV, temp=0.7, vlim=None, fab=None, g
     """Autoregressively sample n units (bytes or tokens) after `seed`. If use_mem, interpolate with the
     memory retrieval (same gating as scoring) at every step -- so we can see, in plain text, what the memory adds.
     vlim caps sampling to valid token ids (online: model is sized to VMAX but the vocab grew to fewer)."""
-    seq = list(seed)
+    seq = list(seed); _bad = [0]
     for _ in range(n):
         x = torch.tensor([seq[-256:]], device=DEV)
         lg = (fab_logits(model, fab, model.encode(x), gist)[0, -1] if fab is not None
               else model(x)[0][0, -1])
+        lg = torch.nan_to_num(lg, nan=-1e4, posinf=1e4, neginf=-1e4)
         if vlim is not None and vlim < lg.numel(): lg = lg.clone(); lg[vlim:] = float("-inf")   # never sample untrained ids
         pm = F.softmax(lg / temp, -1)
         if use_mem:
@@ -2093,7 +2099,22 @@ def generate(model, mem, seed, n, use_mem, DEV, temp=0.7, vlim=None, fab=None, g
             p = (p / p.sum().clamp_min(1e-9))
         else:
             p = pm
+        # SANITIZE BEFORE SAMPLING. multinomial raises a device-side CUDA assert on any NaN/inf/negative entry or
+        # an all-zero row, and it does so INSIDE the report -- which is how four arms of an 18-arm grid finished
+        # training and then lost their entire report to a bad sample. A diverged run produces exactly that: the
+        # logits go non-finite, softmax yields NaN, and the run is destroyed at the last step.
+        # Generation is a DIAGNOSTIC of a model that may already be broken. It must survive one.
+        if not bool(torch.isfinite(p).all()) or float(p.sum()) <= 0:
+            p = torch.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
+            if float(p.sum()) <= 0:                       # nothing survived: fall back to uniform over the live vocab
+                _n = p.numel() if vlim is None else min(vlim, p.numel())
+                p = torch.zeros_like(p); p[:_n] = 1.0 / max(1, _n)
+            _bad[0] = _bad[0] + 1
         seq.append(int(torch.multinomial(p, 1)))
+    if _bad[0]:
+        print(f"  [generate] {_bad[0]} of {n} sampling steps had a non-finite distribution and were repaired -- "
+              f"the model's logits are not finite, which is a REAL failure of the run, not of the sampler. "
+              f"Read the generated text as evidence of that, not as output.")
     return seq[len(seed):]
 
 @torch.no_grad()
@@ -3763,6 +3784,15 @@ def main():
                   f"{PONDER} and PONDER_WARM={PONDER_WARM} had no effect on training whatsoever)")
         # SOCIETY only: on the chaining path route_w never runs, so halt_ema is None and this would print nan.
         # That path reports its own halt mass in the FABRIC probe line below, where HALT means "the walk ended".
+        # CHAINING REPORTS ITS TRAINING HALT TOO. This was gated to SOCIETY, so on the default path the only halt
+        # figure in the report came from the report-time probe -- and every chaining arm printed "halt 0.00" with
+        # no way to tell whether that was the run or the probe. It is the run: depth 1.00 of 4 means the walk ran
+        # its full length at full strength on every window, so the router never once chose to stop.
+        if fab.halt_on and not SOCIETY and fab._mass_ema is not None:
+            _hm2 = float(fab._mass_ema)
+            print(f"  HALT MASS during TRAINING (running mean): {_hm2:.4f}. At ~0 the router never stops early, so "
+                  f"all {fab.max_steps} hops run at full strength on every window regardless of whether the "
+                  f"material needs them -- PONDER={PONDER} charges for depth and still could not lift it.")
         if fab.halt_on and SOCIETY and fab.halt_ema is not None:
             _hv = float(fab.halt_ema)
             print(f"  HALT MASS (running mean over the run): {_hv:.3f} -- the share of the prediction the router "
@@ -4276,8 +4306,8 @@ def main():
                 # decision and then follows a rail, however many hops it runs. This is the measurement that was
                 # missing: the earlier attempt used I(domain; pair) vs I(domain; hop0), which saturates whenever
                 # hop 0 already identifies the domain and so cannot distinguish "collapsed" from "correct".
-                if fab._ord:
-                    from collections import Counter as _Ct
+                if fab._ord and not SOCIETY:      # on the society path forward() only runs in the report probe,
+                    from collections import Counter as _Ct   # so this would report a 1-sample artifact as a finding
                     _h0 = [v for t, v in fab._ord if t == 0]; _h1 = [v for t, v in fab._ord if t == 1]
                     _pr = [(a, b) for r0, r1 in zip(_h0, _h1) for a, b in zip(r0, r1)]
                     if _pr:
