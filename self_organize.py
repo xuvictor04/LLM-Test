@@ -1129,7 +1129,7 @@ class Fabric(nn.Module):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
         random. A randomly-keyed expert receives no traffic, gets no gradient, and stays dead (measured: 12/17 idle)."""
         with torch.no_grad(): return s.q_entry(gist).detach().squeeze(0).clone()
-    def forward(s, h, gist, nov, step=None, ban1=None):
+    def forward(s, h, gist, nov, step=None, ban1=None, ban=None):
         """ban1: a single expert id to hold OUT of this walk entirely -- the counterfactual the marginal-contribution
         rule needs. On the society path leave-one-out is free (per-expert logits are already separate); here the
         walk itself changes when an expert is removed, so the only honest answer is to run it again without them."""
@@ -1146,7 +1146,11 @@ class Fabric(nn.Module):
         # and no centroid update, i.e. a different and strictly weaker router than the society path's, on the path
         # that is now the default. See entry_logits for the measurement: I(domain; expert) was 0.000 here.
         if s.grounded:
-            _nlg = s.entry_logits(gist, nov, N, step=step)
+            # BREADTH CAP, which never reached this path. dom_ban bans experts already serving more than their
+            # share of domains, and it was computed in the society branch of the training loop and simply not
+            # passed to forward() -- so on the DEFAULT path the cap was inert and a handful of experts could and
+            # did absorb everything (top expert 79.5% of traffic in the last pilot).
+            _nlg = s.entry_logits(gist, nov, N, step=step, ban=ban)
         else:
             _nlg = ((s.q_entry(gist) + nb) @ _Kd.t()) / max(1e-3, s.route_t)
         # THE LEARNED HALT PRIOR APPLIES HERE TOO. halt_b was added for the society path and measured DEAD on this
@@ -1253,6 +1257,8 @@ class Fabric(nn.Module):
             # mid-walk would resize the very tensors being indexed.
             if ban1 is None: s._hopq.append(Q[:1, 0].detach())
             _rlg = torch.einsum('bkd,md->bkm', Q, K) / max(1e-3, s.route_t)
+            if ban is not None:                                                # ...and out of every TRANSITION too
+                _rlg[:, :, :N] = _rlg[:, :, :N].masked_fill(ban.to(_rlg.device)[None, None], float("-inf"))
             if s.halt_on: _rlg = _rlg + F.pad(s.halt_b.expand(1, 1, 1), (N, 0))   # same prior on every transition
             if ban1 is not None: _rlg[:, :, ban1] = float("-inf")              # ...and out of every TRANSITION
             R = torch.softmax(_rlg, -1)                                        # (B,k,N+1)
@@ -1292,6 +1298,7 @@ class PlateauGrowth:
         s.fast = s.slow = None; s.rel = rel; s.cool = cooldown; s.warm = warmup; s.last = -10**9
         s.z = z; s.burst = max(1, burst); s.ramp = ramp; s.rmin = rmin; s.rmax = rmax
         s.dev = 0.0; s.n = 0; s.state = "W"; s.t0 = 0; s.blackout = -10**9; s.why = ""
+        s.ramp_done = False; s.n_ramp = 0; s.n_stall = 0; s.n_regr = 0   # why growth fired, for the report
         s.rate = max(0.0, rate); s.ramp_to = ramp_to      # GEOMETRIC ramp: grow a FRACTION of the population, not a
         #   fixed count. +3 every 50 steps reaches ~240 experts by the end of a 4000-step ramp window and then stops,
         #   because afterwards growth needs a plateau or a regression and those are rare. A population of thousands is
@@ -1309,9 +1316,23 @@ class PlateauGrowth:
         # recover-until-stall rule (rmin=600) is far longer than the ramp cadence, so gating the ramp behind it let
         # the ramp fire exactly once. During the ramp the population is still forming, so there is no progress to
         # protect; RECOVER starts mattering after it.
-        _ramping = (t < s.ramp) if (n is None or cap is None) else (n < s.ramp_to * cap)
+        # THE RAMP MUST LATCH OFF, and it did not. The condition was `n < ramp_to * cap` -- CURRENT population
+        # below the target -- and culling keeps the population just under the cap indefinitely, so the ramp stayed
+        # armed for the whole run and re-fired every cool//8 = 187 steps.
+        # The arithmetic, since the obvious reading is wrong: growth is clamped by FAB_NMAX - n, so at the cap the
+        # ramp adds NOTHING. What it does is REFILL, immediately, whatever the last cull removed. Across three
+        # pilots: ~10062 grown = ~4093 building the population once + ~5969 refilling 5969 culls. The population
+        # reads as a stable 4096 while being replaced about 1.5x over, so a tenth of it is freshly-initialised at
+        # any moment -- and the identity space that every eemb key and every centroid is defined over is exactly
+        # that churning set. All three runs diverged shortly after the population first reached the cap.
+        # This is NOT the loss-driven feedback loop guessed at earlier: the ramp never reads the loss. It is a
+        # cull-refill cycle that selection cannot win, because whatever it removes is replaced within 187 steps.
+        # Latch on FIRST arrival: the ramp exists to BUILD the population, and it is built once. After that,
+        # growth must come from a REGRESSION or a stall -- i.e. from evidence that more capacity is needed.
+        if n is not None and cap is not None and n >= s.ramp_to * cap: s.ramp_done = True
+        _ramping = (t < s.ramp) if (n is None or cap is None) else not s.ramp_done
         if s.ramp and _ramping and t - s.last >= max(1, s.cool // 8):
-            s.last = t; s.why = "ramp"
+            s.last = t; s.why = "ramp"; s.n_ramp += 1
             return max(s.burst, int(s.rate * n)) if n else s.burst
         if s.state == "R":                                                   # RECOVER: wait for the stall
             if t - s.t0 >= s.rmin and (improving < s.rel or t - s.t0 > s.rmax): s.state = "W"
@@ -1320,6 +1341,8 @@ class PlateauGrowth:
         unexpected = (loss - s.slow) > s.z * max(1e-6, s.dev)                 # a REGRESSION we did not cause
         if unexpected or (t >= s.warm and improving < s.rel):
             s.last = t; s.t0 = t; s.state = "R"; s.why = "REGRESSION" if unexpected else "stall"
+            if unexpected: s.n_regr += 1
+            else: s.n_stall += 1
             return s.burst if unexpected else 1                               # burst on shift, single node on a stall
         return 0
 
@@ -3060,7 +3083,8 @@ def main():
             _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K), ban=_ban, step=step)
             _dep = h.new_zeros(()); _bal = fab_bal(_w)
         elif FABRIC:
-            h, _dep, _mass, _bal = fab(h, sigb, _fab_nov.expand(x.size(0)), step=step)
+            _ban = fab.dom_ban(did, len(asm.cent)) if SELF_ORG else None
+            h, _dep, _mass, _bal = fab(h, sigb, _fab_nov.expand(x.size(0)), step=step, ban=_ban)
             # THE SAME (B,N) ATTRIBUTION TABLE THE SOCIETY PATH PRODUCES, so everything downstream that asks
             # "which expert served this window" works here too instead of being skipped.
             _w = fab._wrun
@@ -3721,6 +3745,29 @@ def main():
                   f"some material needs no expert, or none does); ~{fab.halt_max:.2f} = it is routing around the "
                   f"population, which means the experts are not earning their place and the barrier is the only "
                   f"thing keeping them alive; in between = a real WHETHER decision, per window.")
+    if FABRIC and not fab.norm_only:
+        # POPULATION CHURN. "4096 nodes (10062 grown)" was the only trace of this and it reads as healthy growth.
+        # It is not: 10062 grown against 5969 culled to hold a steady 4096 means the population was REPLACED about
+        # 1.5x over, continuously, and a tenth of it was freshly-initialised noise at any moment -- while the
+        # centroids and eemb keys are all defined over exactly that churning set.
+        _net = fab.n() - _i("FAB_N0", 3)
+        _chn = (fab.grown - max(0, _net)) / max(1, fab.grown)
+        print(f"\n=== POPULATION CHURN: how much of the growth was NET? ===")
+        print(f"  {fab.grown} grown, {fab.removed} removed, net {_net:+d} -> {fab.n()} live of {fab.cap} | "
+              f"{_chn:.0%} of all growth was replaced rather than added")
+        print(f"  growth fired: {fabgrow.n_ramp}x on the RAMP (population-building), {fabgrow.n_regr}x on a "
+              f"REGRESSION, {fabgrow.n_stall}x on a stall")
+        if _chn > 0.5:
+            print(f"  >> CHURNING. More than half of everything grown was later culled, so capacity is being "
+                  f"rebuilt rather than accumulated. Every newborn is untrained, and the identity space the "
+                  f"router scores in is defined over the population -- so a high churn rate keeps moving the "
+                  f"ground the router stands on.")
+        if fabgrow.ramp_done:
+            print(f"  (the ramp has LATCHED OFF -- the population reached {_f('FAB_RAMP_TO', 1.0):.0%} of cap and "
+                  f"the ramp does not re-arm when culling drops it back below)")
+        elif fabgrow.n_ramp > 50:
+            print(f"  >> the RAMP is still firing after {fabgrow.n_ramp} events. It should have latched off once "
+                  f"the population was built; if it has not, growth is not reading the loss at all.")
     if FABRIC: print(f"FABRIC{' [NORM-ONLY CONTROL: no nodes, no routing]' if fab.norm_only else ''}: {len(fab.bodies)} nodes ({fab.grown} grown on plateau from {_i('FAB_N0',3)}) | depth budget {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps | soft routing + transition matrix + HALT")
     if EXPERTS: print(f"EXPERTS (separate population, dual selection): {router.created} created, {router.replicated} replicated, {router.merged} merged, {router.removed} removed -> {len(router.cent)} live | rank {_i('EXPERT_R',4)} | churn {router.removed/max(1,router.created):.0%} (merge preserves learning; high churn destroys it)")
     tol = WIN * 3 if (USE_TOK and TOK_ONLINE) else WIN * 2   # byte-coord positions when online
@@ -4174,6 +4221,22 @@ def main():
                           f"and edec decodes the query into a real expert when nothing is near. The region term is "
                           f"the older signature router, summed on top. Only the SPREAD across experts decides "
                           f"anything (a constant shift cancels in the softmax), so these two numbers are the split.")
+                    print(f"    EVERYTHING that reaches the expert ranking, so the mix above is not read as more "
+                          f"exclusive than it is:")
+                    print(f"      1. signature-region cosine    x{fab.region_w:g}   (0 = off)")
+                    print(f"      2. weight prediction: q_route(signature) vs eemb(every expert's full weights)"
+                          f"{'  [cosine/route_t]' if FAB_KEY_NORM else '  [RAW dot -- ~50x smaller, see above]'}")
+                    print(f"      3. novelty: a per-window CONSTANT added to all N expert logits, so it cancels in "
+                          f"the softmax and cannot change WHICH expert wins -- it only shifts experts against HALT")
+                    print(f"      4. breadth-cap ban: a hard -inf mask on experts already serving >"
+                          f"{fab.breadth:.0%} of domains {'[ON]' if SELF_ORG else '[off: SELF_ORG=0]'}")
+                    print(f"      5. exploration: AFTER ranking, {fab.explore:.0%} of windows have one top-k slot "
+                          f"replaced by a low-use expert outright")
+                    if not SOCIETY:
+                        print(f"      6. hops 2+ only -- the transition query is q_route(signature) + SRC[holder] "
+                              f"+ novelty + control-summary, matched against the same weight embeddings. SRC is "
+                              f"weight-derived; novelty and the control summary are NOT, and ROUTE_REGION_W does "
+                              f"not touch them because the transition never had a region term.")
                     if _ws / max(1e-9, _tot2) < 0.2:
                         print(f"    >> the weight prediction is NOT driving routing -- the region term is. "
                               f"ROUTE_GROUNDED=0 to run on predicted weights alone.")
