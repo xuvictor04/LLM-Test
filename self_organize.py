@@ -1240,7 +1240,7 @@ class Fabric(nn.Module):
         # looks at where the computation actually is and decides whether to answer or go round again.
         if s.loop_soc:
             _alive_p = torch.ones(h.size(0), device=h.device)
-            _lgv = None; _last = None
+            _lgv = None; _last = None; _dacc2 = None
             _dep2 = h.new_zeros(()); _mass2 = torch.zeros(N + 1, device=h.device)
             _wsum = None
             for _t2_ in range(steps):
@@ -1273,6 +1273,13 @@ class Fabric(nn.Module):
                 _O2 = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
                                                     torch.einsum('bld,bkdr->bklr', h, s.A[_i2]), s.B[_i2])
                 _cw2 = _v2 / _v2.sum(-1, keepdim=True).clamp_min(1e-9)
+                # DISTINCTNESS. This branch RETURNS EARLY, before the transition path's DIV_W term, so setting
+                # DIV_W with CHAIN_ROUTE=soc was a silent no-op -- a pilot ran 20 minutes with DIV_W=0.05 and
+                # came back byte-identical to the DIV_W=0 run on every metric.
+                if s.div_w > 0 and _k2 >= 2 and ban1 is None:
+                    _dq = F.cosine_similarity(_O2[:, 0].reshape(_O2.size(0), -1),
+                                              _O2[:, 1].reshape(_O2.size(0), -1), dim=-1).clamp_min(0.0).mean()
+                    _dacc2 = _dq if _dacc2 is None else _dacc2 + _dq
                 if head is not None:
                     _vk2 = min(ENS_K, _k2)
                     _vw2 = _cw2[:, :_vk2] / _cw2[:, :_vk2].sum(-1, keepdim=True).clamp_min(1e-9)
@@ -1289,6 +1296,7 @@ class Fabric(nn.Module):
                 _lgv = _lgv + _alive_p[:, None, None] * _last                   # never stopped -> the last round
                 s._votelg = _lgv
             if ban1 is None:
+                s._div = (_dacc2 / steps) if _dacc2 is not None else None
                 s._wrun = _wsum / _wsum.sum(-1, keepdim=True).clamp_min(1e-9)
                 with torch.no_grad():
                     _hm3 = (1.0 - _alive_p).mean().detach()
@@ -2445,6 +2453,14 @@ def main():
                                                               #   the batch-1 throughput ceiling that made a large
                                                               #   model impractical to train.
     ACCUM = max(1, _i("ACCUM", 1))                            # accumulate grads over K windows: batch-1 online training
+    # DID EACH LOSS TERM ACTUALLY FIRE? The config audit verifies a knob's VALUE was read; it cannot see whether
+    # the code path that uses it was ever reached. DIV_W was set to 0.05 on a path that returns before the
+    # distinctness term is computed, and the run came back identical to DIV_W=0 with nothing saying so. Counting
+    # the steps each auxiliary term contributed to `tot` catches that whole class.
+    _termfired = {}
+    def _term(nm, v):
+        if v is not None: _termfired[nm] = _termfired.get(nm, 0) + 1
+        return v
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
     _rlive, _rseen = set(), set()                             # router parameters that DID / could receive gradient
     _lm_run = []; _lm_curve = []                              #   has very noisy gradients; this fixes that WITHOUT
@@ -3054,6 +3070,16 @@ def main():
             print(f"[config-audit] set and read, but not verified against a live value: {', '.join(_unreg)}")
         if not _typo and not _unreg:
             print(f"\n[config-audit] all {len(_ENV_ASKED)} environment settings were read and accounted for.")
+        # A KNOB CAN BE READ, REGISTERED, AND STILL UNREACHABLE. This is the check the value-level audit cannot
+        # do: did the loss term the knob controls ever actually contribute?
+        for _tn, _tv in (("DIV_W", DIV_W), ("IND_W", IND_W if SOCIETY else 0.0),
+                         ("CHAIN_SUP", fab.sup_w if FABRIC else 0.0)):
+            if _tv > 0 and not _termfired.get(_tn):
+                print(f"[config-audit] !! {_tn}={_tv} was ON and its loss term NEVER FIRED -- the code path that "
+                      f"applies it was not reached on this configuration. This run is identical to {_tn}=0.")
+        if _termfired:
+            print(f"[config-audit] auxiliary loss terms that fired: "
+                  + ", ".join(f"{k} x{v}" for k, v in sorted(_termfired.items())))
     def _banner():
         """WHAT IS ACTUALLY ON. Printed because this project's largest single error was not a bug: it was SIX
         subsystems silently defaulting OFF, and nothing in the output said so.
@@ -3541,9 +3567,9 @@ def main():
         _ael = fab.ae_loss(min(fab.n(), 256)) if (FABRIC and FAB_SPAWN) else None
         tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0) \
             + (FAB_AE_W * _ael if _ael is not None else 0.0) \
-            + (fab.sup_w * _sup if _sup is not None else 0.0)  # nodes have had a chance to be useful
+            + (fab.sup_w * _term("CHAIN_SUP", _sup) if _sup is not None else 0.0)  # nodes have had a chance
         if FABRIC and not SOCIETY and DIV_W > 0 and getattr(fab, "_div", None) is not None:
-            tot = tot + DIV_W * fab._div          # same pressure, computed from the per-hop expert outputs
+            tot = tot + DIV_W * _term("DIV_W", fab._div)   # same pressure, from the per-hop expert outputs
         if FABRIC and SOCIETY and DIV_W > 0 and _O.size(1) > 1:   # DISTINCTNESS: reward experts for DISAGREEING, so
             #   RANK SLOTS, not global ids. `_w.mean(0).topk(...)` returns GLOBAL expert ids while `_O` is indexed
             #   by RANK -- so this indexed a rank slot with an expert id and raised IndexError the first time
@@ -3551,14 +3577,15 @@ def main():
             #   rewards experts for DIFFERING has been un-runnable since routing went per-window, and silently.
             #   _O is already returned in rank order, so slots 0 and 1 ARE the top two by routing mass.
             _a = _O[:, 0].reshape(-1); _b = _O[:, 1].reshape(-1)   # they carry different competence instead of
-            tot = tot + DIV_W * F.cosine_similarity(_a, _b, dim=0).clamp_min(0.0)
+            tot = tot + DIV_W * _term("DIV_W", F.cosine_similarity(_a, _b, dim=0).clamp_min(0.0))
         if FABRIC and SOCIETY and IND_W > 0:                # INDEPENDENCE: each expert must solve the task ALONE
             for _j in range(min(IND_K, _O.size(1))):          #   (weighted by its routing mass) -- makes the population
                 _lj = _hd.get(_j)                             #   an ENSEMBLE, which survives member removal, rather than
                 if _lj is None: _lj = model.head(fab.norm(_O[:, _j]))   #   a DECOMPOSITION, which does not
                 #   `.detach()` instead of `float()`: numerically identical (both stop the gradient) but stays on device,
                 #   where `float()` forced a GPU->CPU sync per expert per step.
-                tot = tot + IND_W * _w.gather(1, _oid[:, _j:_j + 1]).mean().detach() * F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1))
+                tot = tot + IND_W * _w.gather(1, _oid[:, _j:_j + 1]).mean().detach() * _term(
+                    "IND_W", F.cross_entropy(_lj.reshape(-1, V), y.reshape(-1)))
         if recon is not None and RECON_W > 0:                    # VERIFICATION: train the Reconstructor on GENUINE (key, token)
             tot = tot + RECON_W * recon_loss(recon, mem_key(x), y.reshape(-1))   # guard RECON_W>0: skips a redundant key-encode
         #   that was computed then multiplied by 0.0 on the default VERIFY=recon path (workflow finding)
