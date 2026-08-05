@@ -371,6 +371,67 @@ grid)
   echo "  logs: $GRID/*.log   status: $GRID/_status.tsv"
   ;;
 
+seeds)
+  # === THE SAME ARM ACROSS SEEDS =============================================================================
+  # Every architecture claim in this project was made from ONE run per arm. Paired pilots at SEED=0 and SEED=1
+  # measured the seed spread for the first time: 0.060 b/B for the society arm and 0.174 for the chained society,
+  # against a 0.06 b/B band separating the four best architectures. The spread is larger than the effect, so a
+  # single run cannot rank two arms -- and two claims made off single runs (specialisation 0.132, a flat curve)
+  # did not survive a second seed.
+  # Runs are deterministic given (config, commit, SEED), so this is pure seed variance, not run-to-run jitter.
+  #   bash longrun.sh seeds 3 SOCIETY=1        # 3 seeds of one arm
+  #   SEEDS="0 1 2 3" bash longrun.sh seeds -- CHAIN_ROUTE=soc
+  N=${2:-3}
+  case "$N" in ''|*[!0-9]*) N=3;; esac
+  shift $([ "${2:-}" = "$N" ] && echo 2 || echo 1) 2>/dev/null || true
+  [ "${1:-}" = "--" ] && shift
+  ARMFLAGS="$*"
+  SEEDLIST=${SEEDS:-$(seq 0 $((N-1)))}
+  SD=${SEED_DIR:-runs/seeds}
+  mkdir -p "$SD"
+  TAG=$(echo "${ARMFLAGS:-default}" | tr ' =' '__' | cut -c1-40)
+  echo "seeds: arm [${ARMFLAGS:-defaults}] over seeds [$(echo $SEEDLIST | tr '\n' ' ')] -> $SD"
+  for SEED in $SEEDLIST; do
+    LOG="$SD/${TAG}_seed$SEED.log"
+    if _done "$LOG"; then echo "== seed $SEED: already complete, skipping"; continue; fi
+    [ -f "$LOG" ] && { _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done; mv "$LOG" "$LOG.partial-$_pn"; }
+    echo; echo "################  seed $SEED  ${ARMFLAGS:-(defaults)}  ################"
+    set +e
+    env $ARMFLAGS SEED=$SEED \
+        MODEL=gru LAYERS=1 DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng \
+        DEVICE=${DEVICE:-cuda} DISK_STREAM=1 CORPUS_CAP=100000000000 \
+        STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
+        WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
+        SIG_WIN=${SIG_WIN:-614} ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 \
+        MEM_QUOTA=${MEM_QUOTA:-3125} CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 PROBE_WAIT=0 \
+        SAVE_CKPT=0 python3 self_organize.py > "$LOG" 2>&1
+    echo "== seed $SEED: rc=$?"
+    set -e 2>/dev/null || true
+  done
+  echo; echo "=== SEEDS SUMMARY: [${ARMFLAGS:-defaults}] ==="
+  python3 - "$SD" "$TAG" <<'PY'
+import sys, glob, re, statistics as st
+sd, tag = sys.argv[1], sys.argv[2]
+rows = []
+for f in sorted(glob.glob(f"{sd}/{tag}_seed*.log")):
+    b = open(f, errors="ignore").read()
+    def g(p):
+        m = re.search(p, b)
+        return float(m.group(1)) if m else None
+    rows.append((re.search(r"seed(\d+)", f).group(1), g(r"held-out ([0-9.]+)"),
+                 g(r"beats order-1 by \+([0-9.]+)"), g(r"SPECIALIZATION[^0-9]*([0-9.]+)")))
+print(f"  {'seed':>4}  {'held-out':>9}  {'vs order-1':>11}  {'spec':>7}")
+for s, h, o, sp in rows:
+    print(f"  {s:>4}  {h if h else '-':>9}  {o if o else '-':>11}  {sp if sp is not None else '-':>7}")
+hs = [h for _, h, _, _ in rows if h]
+if len(hs) > 1:
+    print(f"\n  held-out: mean {st.mean(hs):.3f}  spread {max(hs)-min(hs):.3f}  "
+          f"sd {st.pstdev(hs):.3f}  over {len(hs)} seeds")
+    print(f"  >> an architecture difference SMALLER than the spread is not a result. The four best arms in this")
+    print(f"     project sit inside 0.06 b/B of each other; measured seed spread has reached 0.174.")
+PY
+  ;;
+
 watch)
   [ -f "$OUT/run.log" ] || { echo "no $OUT/run.log yet"; exit 1; }
   echo "=== last progress"; grep -a -E "\[rate\]|\[epoch |\[PHASE |\[saved checkpoint" "$OUT/run.log" | tail -12
@@ -378,5 +439,5 @@ watch)
   echo; echo "=== live"; tail -3 "$OUT/run.log"
   ;;
 
-*) echo "usage: bash longrun.sh [pilot|grid|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
+*) echo "usage: bash longrun.sh [pilot|grid|seeds <n> [FLAGS]|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
 esac
