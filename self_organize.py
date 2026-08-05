@@ -645,6 +645,17 @@ class Fabric(nn.Module):
         # mass that halts AT HOP t selects hop t's prediction, so stopping early is rewarded exactly when later
         # hops are worse. The accumulation is a convex combination by construction: entry-halt + sum of newly
         # halted per hop + never-halted = 1.
+        # HOW EACH HOP PICKS ITS EXPERTS.
+        #   "transition"  the learned transition matrix: route FROM the current holder, via its SRC mark. This is
+        #                 what "chaining" has always meant here, and it is where the rail comes from --
+        #                 H(hop1 | hop0) measured 0.007-0.058 bits in every arm, i.e. one decision then a fixed
+        #                 successor, because the query is dominated by the holder's identity and a signature that
+        #                 does not change between hops.
+        #   "soc"         re-route from scratch every iteration with the SOCIETY router -- the same grounded +
+        #                 weight-prediction scoring society uses -- with the CURRENT STATE in the query. No
+        #                 transition matrix and no SRC. This is "run the society, feed the result back in, run it
+        #                 again", which is a different architecture from chaining and has never been run.
+        s.loop_soc = (_env("CHAIN_ROUTE", "transition") == "soc")
         s.vote = bool(int(_env("CHAIN_VOTE", 0)))
         s._votelg = None; s._vchk = 0
         # ONE SOURCE OF TRUTH FOR min_steps. Forcing it off inside forward() with a local conditional left
@@ -983,7 +994,7 @@ class Fabric(nn.Module):
             w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)      # router weights over experts
         return w
 
-    def entry_logits(s, gist, nov, N, step=None, ban=None):
+    def entry_logits(s, gist, nov, N, step=None, ban=None, qextra=None):
         """WHERE DOES THIS MATERIAL BELONG? Scores the N live experts for a signature. ONE implementation, called
         by BOTH forward paths.
 
@@ -1013,8 +1024,9 @@ class Fabric(nn.Module):
             # high for EVERY input with any positive projection, regardless of its region. It remains the default
             # only because the normalized form has not been A/B'd at a size where the answer means anything.
             _Kd, _ = s._ids(N, step)                       # identity embedded from the experts' own weights
-            _lrn = ((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(_Kd, dim=-1).t())
-                    / max(1e-3, s.route_t)) if FAB_KEY_NORM else (s.q_route(gist) @ _Kd.t())
+            _qq = s.q_route(gist) if qextra is None else s.q_route(gist) + qextra
+            _lrn = ((F.normalize(_qq, dim=-1) @ F.normalize(_Kd, dim=-1).t())
+                    / max(1e-3, s.route_t)) if FAB_KEY_NORM else (_qq @ _Kd.t())
             logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)
             # WHICH ROUTER IS ACTUALLY DECIDING? This branch's premise is that the router PREDICTS THE WEIGHTS of
             # the expert it wants (q_route -> identity space, matched against eemb of every expert's full weights,
@@ -1216,6 +1228,71 @@ class Fabric(nn.Module):
         # CURRICULUM DEPTH. depth_now is 1 until the loss plateaus, then grows toward max_steps -- see the block
         # in __init__ for why the order is learned one position at a time rather than all at once.
         steps = max(1, min(s.depth_now, s.max_steps, 2 + N // 2))             # adaptive depth budget
+        # === SOCIETY, LOOPED ===================================================================================
+        # Run the society; feed its result back in; run it again. Each iteration re-routes FROM SCRATCH with the
+        # society's own router, with the current state in the query, so the second choice is not a successor of
+        # the first -- there is no transition matrix and no SRC here at all.
+        # The stop decision is a per-iteration PROBABILITY rather than an absorbing mass, which makes the mixture
+        # convex by construction: alive starts at 1, each iteration takes alive * p_stop and passes on
+        # alive * (1 - p_stop). That is also the honest reading of "when am I done": at each round the router
+        # looks at where the computation actually is and decides whether to answer or go round again.
+        if s.loop_soc:
+            _alive_p = torch.ones(h.size(0), device=h.device)
+            _lgv = None; _last = None
+            _dep2 = h.new_zeros(()); _mass2 = torch.zeros(N + 1, device=h.device)
+            _wsum = None
+            for _t2_ in range(steps):
+                _lgr = s.entry_logits(gist, nov, N, step=step, ban=ban,
+                                      qextra=s.hproj(h.mean(1)))               # WHERE THE COMPUTATION IS NOW
+                _hlr = (((F.normalize(s.q_route(gist) + s.hproj(h.mean(1)), dim=-1)
+                          @ F.normalize(s.halt_key, dim=-1)[:, None]) / max(1e-3, s.route_t)) + s.halt_b
+                        if s.halt_on else torch.full((h.size(0), 1), -1e4, device=h.device))
+                _cc = torch.softmax(torch.cat([_lgr, _hlr], -1), -1)            # (B,N+1)
+                _ph = _cc[:, N].clamp(max=s.halt_max) if s.halt_on else torch.zeros(h.size(0), device=h.device)
+                _wn = _cc[:, :N] / _cc[:, :N].sum(-1, keepdim=True).clamp_min(1e-9)
+                _mass2 = _mass2 + _cc.mean(0).detach(); _dep2 = _dep2 + (1 - _ph).mean()
+                _wsum = _wn.detach() if _wsum is None else _wsum + _wn.detach()
+                if s.grounded and ban1 is None: s.ground_update(gist, _wn, N)
+                _k2 = min(s.chain_k, N)
+                _v2, _i2 = _wn.topk(_k2, dim=-1)
+                if s.explore > 0 and _k2 >= 2 and N > _k2 and ban1 is None:
+                    _cold = sorted(range(N), key=lambda i: s.use.get(i, 0.0))[:max(8, N // 16)]
+                    _rw = [r for r in range(_i2.size(0)) if random.random() < s.explore]
+                    if _rw:
+                        _i2 = _i2.clone(); _v2 = _v2.clone()
+                        for _r in _rw:
+                            _i2[_r, -1] = random.choice(_cold); _v2[_r, -1] = _wn[_r, _i2[_r, -1]]
+                        s.explored = getattr(s, "explored", 0) + len(_rw)
+                if ban1 is None:
+                    with torch.no_grad():
+                        for _u in _i2[:, 0].tolist(): s.use[_u] = s.use.get(_u, 0.0) + 1.0
+                        if _t2_ < 2: 
+                            if getattr(s, "_sample_ord", False): s._ord.append((_t2_, _i2[:, 0].tolist()))
+                _O2 = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
+                                                    torch.einsum('bld,bkdr->bklr', h, s.A[_i2]), s.B[_i2])
+                _cw2 = _v2 / _v2.sum(-1, keepdim=True).clamp_min(1e-9)
+                if head is not None:
+                    _vk2 = min(ENS_K, _k2)
+                    _vw2 = _cw2[:, :_vk2] / _cw2[:, :_vk2].sum(-1, keepdim=True).clamp_min(1e-9)
+                    _l2 = None
+                    for _q2 in range(_vk2):
+                        _p2 = head(s.norm(_O2[:, _q2])) * _vw2[:, _q2][:, None, None]
+                        _l2 = _p2 if _l2 is None else _l2 + _p2
+                    _take = (_alive_p * _ph)[:, None, None]
+                    _lgv = _take * _l2 if _lgv is None else _lgv + _take * _l2
+                    _last = _l2
+                _alive_p = _alive_p * (1 - _ph)
+                h = s.norm(h + s.alpha * (_cw2[:, :, None, None] * _O2).sum(1) - s.alpha * h)
+            if head is not None and _last is not None:
+                _lgv = _lgv + _alive_p[:, None, None] * _last                   # never stopped -> the last round
+                s._votelg = _lgv
+            if ban1 is None:
+                s._wrun = _wsum / _wsum.sum(-1, keepdim=True).clamp_min(1e-9)
+                with torch.no_grad():
+                    _hm3 = (1.0 - _alive_p).mean().detach()
+                    s._mass_ema = _hm3 if s._mass_ema is None else 0.99 * s._mass_ema + 0.01 * _hm3
+            return h, _dep2 / steps, _mass2 / steps, h.new_zeros(())
+
         depth = h.new_zeros(()); mass = torch.zeros(N + 1, device=h.device); bal = h.new_zeros(())
         wacc = None                                                           # (B,N) per-window mass over all hops
         dacc = None                                                           # DISTINCTNESS penalty, accumulated

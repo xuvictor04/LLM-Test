@@ -279,12 +279,14 @@ grid)
   #   vote_soc  the same at depth 1 -- which IS the society path, and so isolates depth from the blend rule.
   #   noban     CHAIN_BAN=0 and nolatch FAB_RAMP_LATCH=0: the two changes that landed between pilot 6 (+1.438)
   #             and grid base (+2.287) and were never separated.
-  GRID_ARMS_DEFAULT="vote vote_w society base noban nolatch vote_soc weights nofabric \
+  GRID_ARMS_DEFAULT="socloop socloop_w vote vote_w society base noban nolatch vote_soc weights nofabric \
                      balance keynorm divw smallpop curric wt_bal chainsup explore kitchen"
   _flags_for() {
     case "$1" in
       base)      echo "" ;;
       vote)      echo "CHAIN_VOTE=1" ;;
+      socloop)   echo "CHAIN_ROUTE=soc CHAIN_VOTE=1" ;;
+      socloop_w) echo "CHAIN_ROUTE=soc CHAIN_VOTE=1 ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
       vote_w)    echo "CHAIN_VOTE=1 ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
       vote_soc)  echo "CHAIN_VOTE=1 FAB_STEPS=1" ;;
       noban)     echo "CHAIN_BAN=0" ;;
