@@ -23,10 +23,21 @@ from world_model import WorldEncoder, DynamicsPopulation, pop_loss, _var_cov   #
 try: sys.stdout.reconfigure(line_buffering=True)          # stream progress even when piped through tee (no -u needed)
 except Exception: pass
 
-def _i(k, d): return int(os.environ.get(k, d))
-def _f(k, d): return float(os.environ.get(k, d))
-DEV = os.environ.get("DEVICE", "cpu")
-VERIFY = os.environ.get("VERIFY", "selfcon")               # "selfcon" (old B, default, unchanged) or "recon" (Verification)
+# === CONFIG PROVENANCE =======================================================================================
+# Every knob is read through _i/_f, and every read is RECORDED here: what the environment asked for, and whether
+# it asked at all. The banner then compares that against the value the LIVE OBJECT ended up with and reports any
+# divergence automatically, instead of a human remembering to keep a printf in sync with an `and` clause.
+# This exists because the banner has lied three separate times -- "per-expert memory ON " for a whole 48k-step run
+# where it was off from step 0, "grounded region + learned bilinear" on a path with no region term, and
+# FAB_MIN_STEPS=2 while the code ran 0 -- and each was fixed individually while the next one was already there.
+_ENV_ASKED = {}                                            # name -> the value the environment explicitly set
+def _env(k, d=None):
+    if k in os.environ: _ENV_ASKED[k] = os.environ[k]
+    return os.environ.get(k, d)
+def _i(k, d): return int(_env(k, d))
+def _f(k, d): return float(_env(k, d))
+DEV = _env("DEVICE", "cpu")
+VERIFY = _env("VERIFY", "selfcon")               # "selfcon" (old B, default, unchanged) or "recon" (Verification)
 RECON_W = _f("RECON_W", 0.0)                               # joint Reconstructor training during the loop: OFF by default --
 #   it trained on the churning (re-tokenized, re-keyed) store and failed (0.3% precision). Verification now FITS post-hoc
 #   on the final settled store (VERIFY_FIT). Set RECON_W>0 only to also nudge the base keys to be reconstructable.
@@ -39,7 +50,7 @@ D = _i("D_MODEL", _i("D_MODEL_B", 128))                    # D_MODEL_B accepted 
 #   instead of the intended 28.7M/53.9M) and the pilot command. Accepting both names removes the silent failure.
 WIN = _i("WIN", 128); NP = _i("N_PROCESSES", 4); STREAM_LEN = _i("STREAM_LEN", 120000)
 SUSTAIN = _i("SUSTAIN", 2); NEW_DIST = _f("NEW_DIST", 0.35); SHIFT_DIST = _f("SHIFT_DIST", 0.30)
-SIG_MODE = os.environ.get("SIG_MODE", "learned"); SIG_D = _i("SIG_D", 64); SIG_DIM = _i("SIG_DIM", 512)
+SIG_MODE = _env("SIG_MODE", "learned"); SIG_D = _i("SIG_D", 64); SIG_DIM = _i("SIG_DIM", 512)
 # EVERY SUBSYSTEM ON BY DEFAULT. The audit that found FABRIC=0 found five more: the expanding tokenizer, the
 # world model and its growth and feedback, and the per-expert memory partition were all off, so the "full
 # system" this project has been measuring was the base LM plus memory plus domains and nothing else. A flag
@@ -180,7 +191,7 @@ torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # scaling and no GradScaler), which is the standard training precision on H100-class hardware.
 if bool(_i("TF32", 1)):
     torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
-AMP = os.environ.get("AMP", "off").lower()                 # "off" (default) | "bf16" | "fp16"
+AMP = _env("AMP", "off").lower()                 # "off" (default) | "bf16" | "fp16"
 
 
 # ---------------- latent processes + the mixed, unlabeled stream ----------------
@@ -201,16 +212,16 @@ def make_proc(seed, alphabet, order=2):
     return gen
 
 ALPHA = [list(range(65, 80)), list(range(97, 112)), list(range(48, 58)), list(range(80, 95)), list(range(112, 123))]
-DATA_MODE = os.environ.get("DATA_MODE", "synthetic")
+DATA_MODE = _env("DATA_MODE", "synthetic")
 if USE_TOK and DATA_MODE != "real":
     raise SystemExit("TOKENIZER=1 requires DATA_MODE=real -- the tokenizer is only built on the real-data path,\n"
                      "  so the synthetic path leaves TOK=None and dies later inside _retok with a bare\n"
                      "  AttributeError. Add DATA_MODE=real (and DATA_DIR=...) to your command.")
 if DATA_MODE == "real":
-    DN = os.environ.get("DOMAINS", "eng,py,num,c").split(",")
+    DN = _env("DOMAINS", "eng,py,num,c").split(",")
     DISK_STREAM = bool(_i("DISK_STREAM", 0))              # mmap the corpus (disk-paged) so training data can EXCEED RAM (GPT-2 scale)
     from datastream import open_corpus
-    CORP = open_corpus(os.environ.get("DATA_DIR", "data"), DN, cap=_i("CORPUS_CAP", 2000000), disk=DISK_STREAM)
+    CORP = open_corpus(_env("DATA_DIR", "data"), DN, cap=_i("CORPUS_CAP", 2000000), disk=DISK_STREAM)
     CORP = [c for c in CORP if len(c) > 5000]; NP = len(CORP)
     VAL_FRAC = _f("VAL_FRAC", 0.05)                        # HELD-OUT tail of each corpus, never sampled into the training stream.
     if DISK_STREAM:                                        # mmap: do NOT slice CORP (would copy the whole thing into RAM) --
@@ -222,11 +233,11 @@ if DATA_MODE == "real":
         SEG_LEN = [len(c) for c in CORP]
     if USE_TOK:                                            # EXPANDING SUBWORD MODE: an online byte-BPE that GROWS its vocab
         from tokenizer import DynamicTokenizer             #   by mint-on-repetition as it reads the stream (byte-grounded)
-        _tp = os.environ.get("TOKENIZER_PATH", "data/dyntok.json")
+        _tp = _env("TOKENIZER_PATH", "data/dyntok.json")
         VMAX = _i("VMAX", 4096)
         _target = _i("SEED_VOCAB", 512) if TOK_ONLINE else VMAX            # online: only SEED here; keep minting during training
         _passes = _i("SEED_PASSES", 2) if TOK_ONLINE else _i("GROW_PASSES", 8)
-        if os.path.exists(_tp) and (not TOK_ONLINE or os.environ.get("RESUME")):
+        if os.path.exists(_tp) and (not TOK_ONLINE or _env("RESUME")):
             TOK = DynamicTokenizer.load(_tp)               # RESUME must reuse the SAVED vocab: a fresh online seed would
             #   re-mint different ids, so the restored embedding table would be indexed by a DIFFERENT vocabulary.
         else:
@@ -319,7 +330,7 @@ def _phases(n, p=None, w=None):
 def _phases_env(n):
     """PHASE_SCHED= wins over the generator. Parsed here so a bad value fails loudly at startup rather than
     producing a silently different experiment."""
-    raw = os.environ.get("PHASE_SCHED", "").strip()
+    raw = _env("PHASE_SCHED", "").strip()
     if not raw: return _phases(n)
     try:
         sched = [[int(x) for x in ph.split(",") if x != ""] for ph in raw.split("|")]
@@ -355,8 +366,10 @@ def build_stream():
 
 
 # ---------------- base LM + LEARNED signature encoder ----------------
-MODEL_TYPE = os.environ.get("MODEL", "gru")               # "gru" (default) or "transformer" (scales to H100)
+MODEL_TYPE = _env("MODEL", "gru")               # "gru" (default) or "transformer" (scales to H100)
 DROPOUT = _f("DROPOUT", 0.0)                               # ANTI-OVERFIT, default OFF. The model is currently badly
+ENC_VREG = _f("ENC_VREG", 5.0); ENC_CREG = _f("ENC_CREG", 0.0)   # read ONCE, at module level, so the
+#   banner and the encoder loss cannot disagree about what regularisation ran.
 WEIGHT_DECAY = _f("WEIGHT_DECAY", 0.0)                     # UNDERFIT (more passes keep helping), so these would only
                                                            # handicap it. Turn them on when val-vs-train shows a gap.
 class MiniLM(nn.Module):                                   # base LM (GRU, optionally multi-layer)
@@ -461,8 +474,8 @@ class Fabric(nn.Module):
         #     Preallocating to FAB_NMAX avoids that entirely: the tensors never change identity, only `n` grows.
         #     Unused rows are zero in B, i.e. exact identities, so they cost memory and nothing else.
         # Cost is 2*NMAX*d*r floats: 0.5 GB at NMAX=10k, 49 GB at 1M. That is the number to size against.
-        s.r = max(1, int(os.environ.get("FAB_RANK", 8)))
-        cap = max(n0, int(os.environ.get("FAB_NMAX", 4096)))
+        s.r = max(1, int(_env("FAB_RANK", 8)))
+        cap = max(n0, int(_env("FAB_NMAX", 4096)))
         s.cap = cap; s.n_live = n0
         s.A = nn.Parameter(torch.randn(cap, d, s.r) * (d ** -0.5))
         s.B = nn.Parameter(torch.zeros(cap, s.r, d))        # zero -> every expert is born an IDENTITY, so adding one
@@ -503,8 +516,8 @@ class Fabric(nn.Module):
         # a replicated child is near its parent in routing space because its WEIGHTS are near; an expert that
         # mutates moves its own key; a culled slot cannot leave a stale identity behind.
         # A SEPARATE embedder, used only for experts -- it is not the SigEncoder and never sees the stream.
-        s.eemb = nn.Sequential(nn.Linear(2 * d * s.r, int(os.environ.get("FAB_EMB_HID", 128))), nn.GELU(),
-                               nn.Linear(int(os.environ.get("FAB_EMB_HID", 128)), 2 * dk))
+        s.eemb = nn.Sequential(nn.Linear(2 * d * s.r, int(_env("FAB_EMB_HID", 128))), nn.GELU(),
+                               nn.Linear(int(_env("FAB_EMB_HID", 128)), 2 * dk))
         # THE DECODER: identity -> weights. With eemb the router can RECOGNISE an expert by what it is; with edec
         # it can SPECIFY one. The router already emits a query in identity space (q_route(gist)) that is matched
         # against every K. Read that query as "the expert I want": route to the nearest if one is close, and if
@@ -512,21 +525,21 @@ class Fabric(nn.Module):
         # Discovery stops being "hand the odd material to whoever is idle" and becomes "build what was specified".
         # And because the newborn's weights ARE edec(query), the LM loss backpropagates through those weights into
         # q_route -- so the router is trained on what it asked for. It learns to specify, not just to select.
-        s.edec = nn.Sequential(nn.Linear(dk, int(os.environ.get("FAB_EMB_HID", 128))), nn.GELU(),
-                               nn.Linear(int(os.environ.get("FAB_EMB_HID", 128)), 2 * d * s.r))
-        s.emb_var = float(os.environ.get("FAB_EMB_VAR", 1.0))   # variance+decorrelation on the identity embeddings
-        s.spawn_mult = float(os.environ.get("FAB_SPAWN_MULT", 2.0))   # query must be this many times the population's
+        s.edec = nn.Sequential(nn.Linear(dk, int(_env("FAB_EMB_HID", 128))), nn.GELU(),
+                               nn.Linear(int(_env("FAB_EMB_HID", 128)), 2 * d * s.r))
+        s.emb_var = float(_env("FAB_EMB_VAR", 1.0))   # variance+decorrelation on the identity embeddings
+        s.spawn_mult = float(_env("FAB_SPAWN_MULT", 2.0))   # query must be this many times the population's
         #   own typical nearest-neighbour distance away before it counts as material nothing serves
-        s.spawn_floor = float(os.environ.get("FAB_SPAWN_FLOOR", 0.02))  # absolute floor, so a degenerate population
+        s.spawn_floor = float(_env("FAB_SPAWN_FLOOR", 0.02))  # absolute floor, so a degenerate population
         #   (every identity identical -> typ = 0) cannot spawn on every single query
         s._spawn_gap = s._spawn_typ = 0.0
         s.spawned = 0
         # DEFAULT 1 (was 50, and inert on the society path because that path never passed step=). >1 makes the
         # routing keys stale AND throttles the identity gradient channel to 1-in-N steps -- see _ids. Raise it only
         # if the embed is measured to be the bottleneck, and read GRADIENT REACH in the report when you do.
-        s.emb_every = max(1, int(os.environ.get("FAB_EMB_EVERY", 1)))   # recompute cadence: O(N * 2*d*r * hid) is real
+        s.emb_every = max(1, int(_env("FAB_EMB_EVERY", 1)))   # recompute cadence: O(N * 2*d*r * hid) is real
         s._kc = None; s._kcl = None; s._kstep = -10**9; s._kn = -1
-        s.derive_ids = bool(int(os.environ.get("FAB_DERIVE_IDS", 1)))
+        s.derive_ids = bool(int(_env("FAB_DERIVE_IDS", 1)))
         s.SRC_p = nn.Parameter(torch.randn(cap, dk) * 0.1)       # fallback identities when FAB_DERIVE_IDS=0
         s.K_p = nn.Parameter(torch.randn(cap, dk) * 0.1)
         s.halt_key = nn.Parameter(torch.randn(dk) * 0.1)
@@ -539,8 +552,8 @@ class Fabric(nn.Module):
         # HALT is now a real operator in both branches. Its mass says "no expert is needed here"; the caller spends
         # that mass on model.head(h) directly, so the router owns the completion decision on both paths.
         s.halt_b = nn.Parameter(torch.zeros(1))            # prior on halting, learned; 0 = whatever the query says
-        s.halt_on = bool(int(os.environ.get("FAB_HALT", 1)))
-        s.halt_max = float(os.environ.get("FAB_HALT_MAX", 0.9))   # BARRIER, not a preference. At halt=1 the experts
+        s.halt_on = bool(int(_env("FAB_HALT", 1)))
+        s.halt_max = float(_env("FAB_HALT_MAX", 0.9))   # BARRIER, not a preference. At halt=1 the experts
         #   receive no gradient at all, and an expert that receives no gradient can never become worth routing to --
         #   the same trap top-k exploration exists to avoid. Clamping leaves >=10% of the blend on the population,
         #   so a bad early halt is recoverable rather than absorbing.
@@ -554,21 +567,21 @@ class Fabric(nn.Module):
         s.use = {}                                         # expert -> windows won (UTILIZATION)
         s.parent = {}                                      # expert -> the expert it was replicated FROM
         s.replicated = 0
-        s.parent_k = int(os.environ.get("FAB_PARENT_K", 8))     # shortlist size: how many region-owners compete to breed
-        s.mut = float(os.environ.get("FAB_MUT", 0.25))          # mutation as a FRACTION of the parent's own std
-        s.mut_big = float(os.environ.get("FAB_MUT_BIG", 6.0))   # heavy tail: occasional large jump
-        s.mut_big_p = float(os.environ.get("FAB_MUT_BIG_P", 0.1))
+        s.parent_k = int(_env("FAB_PARENT_K", 8))     # shortlist size: how many region-owners compete to breed
+        s.mut = float(_env("FAB_MUT", 0.25))          # mutation as a FRACTION of the parent's own std
+        s.mut_big = float(_env("FAB_MUT_BIG", 6.0))   # heavy tail: occasional large jump
+        s.mut_big_p = float(_env("FAB_MUT_BIG_P", 0.1))
         s.mutscale = {}
         s.discovered = 0; s.crossed = 0; s.explored = 0; s.failed_out = 0
         s.ef = {}; s.es = {}                               # per-expert FAST / SLOW error EMAs
-        s.ef_a = float(os.environ.get("FAB_ERR_FAST", 0.05))
-        s.es_a = float(os.environ.get("FAB_ERR_SLOW", 0.005))
-        s.shift_tol = float(os.environ.get("FAB_SHIFT_TOL", 0.05))   # fast above slow by this -> adapting, protect
-        s.fail_tol = float(os.environ.get("FAB_FAIL_TOL", 0.15))     # both ends above the population -> failing
+        s.ef_a = float(_env("FAB_ERR_FAST", 0.05))
+        s.es_a = float(_env("FAB_ERR_SLOW", 0.005))
+        s.shift_tol = float(_env("FAB_SHIFT_TOL", 0.05))   # fast above slow by this -> adapting, protect
+        s.fail_tol = float(_env("FAB_FAIL_TOL", 0.15))     # both ends above the population -> failing
         s.births = {}                                      # parent -> recent births (sliding, halved when full)
-        s.births_win = int(os.environ.get("FAB_BIRTH_WIN", 256))
-        s.parent_max = float(os.environ.get("FAB_PARENT_MAX", 0.20))  # max share of recent births per parent
-        s.chain_k = int(os.environ.get("FAB_CHAIN_K", 8))   # experts COMPUTED per chaining hop (was: all of them)
+        s.births_win = int(_env("FAB_BIRTH_WIN", 256))
+        s.parent_max = float(_env("FAB_PARENT_MAX", 0.20))  # max share of recent births per parent
+        s.chain_k = int(_env("FAB_CHAIN_K", 8))   # experts COMPUTED per chaining hop (was: all of them)
         # === STAGED DEPTH ===================================================================================
         # THE ORDER PROBLEM, and THREE ATTEMPTS AT IT THAT DID NOT WORK. All three default OFF. They are kept as
         # flags, not deleted, because the problem is real and the next attempt should start from what was measured
@@ -601,22 +614,22 @@ class Fabric(nn.Module):
         # breadth-cap ban began masking the chaining path's logits, and the growth ramp started latching off.
         # Both are scoring/selection changes, both are plausible causes of that regression, and both are now
         # flags rather than facts so one grid can tell them apart.
-        s.chain_ban = bool(int(os.environ.get("CHAIN_BAN", 1)))     # dom_ban applied on the chaining path
-        s.region_w = float(os.environ.get("ROUTE_REGION_W", 1.0))   # 0 = route on PREDICTED WEIGHTS ONLY
-        s.state_q = bool(int(os.environ.get("CHAIN_STATE_Q", 0)))   # transition query sees the CURRENT state
-        s.curric = bool(int(os.environ.get("CHAIN_CURRIC", 0)))
-        s.depth_now = int(os.environ.get("CHAIN_DEPTH0", 1)) if s.curric else max_steps
+        s.chain_ban = bool(int(_env("CHAIN_BAN", 1)))     # dom_ban applied on the chaining path
+        s.region_w = float(_env("ROUTE_REGION_W", 1.0))   # 0 = route on PREDICTED WEIGHTS ONLY
+        s.state_q = bool(int(_env("CHAIN_STATE_Q", 0)))   # transition query sees the CURRENT state
+        s.curric = bool(int(_env("CHAIN_CURRIC", 0)))
+        s.depth_now = int(_env("CHAIN_DEPTH0", 1)) if s.curric else max_steps
         s.dp_best = None; s.dp_wait = 0; s.dp_seen = 0
-        s.dp_stage_max = int(os.environ.get("CHAIN_STAGE_MAX", 40))   # checks before a stage ends regardless
-        s.dp_patience = int(os.environ.get("CHAIN_PATIENCE", 6))   # plateau checks before adding a hop
-        s.dp_eps = float(os.environ.get("CHAIN_EPS", 0.01))        # improvement that counts as progress
+        s.dp_stage_max = int(_env("CHAIN_STAGE_MAX", 40))   # checks before a stage ends regardless
+        s.dp_patience = int(_env("CHAIN_PATIENCE", 6))   # plateau checks before adding a hop
+        s.dp_eps = float(_env("CHAIN_EPS", 0.01))        # improvement that counts as progress
         s.deepened = []                                            # (step, new depth) for the report
-        s.sup_w = float(os.environ.get("CHAIN_SUP", 0.0))          # per-hop deep supervision weight
+        s.sup_w = float(_env("CHAIN_SUP", 0.0))          # per-hop deep supervision weight
         s._hops = []                                               # per-hop hidden states, for that supervision
         s._hopq = []                                               # per-hop router queries, for per-hop spawn
         # DIV_W is a LOCAL in main(), so Fabric.forward could not see it -- a NameError on the first chaining hop
         # that would have killed every chaining arm. Read it here, from the same env var and the same default.
-        s.div_w = float(os.environ.get("DIV_W", 0.0))
+        s.div_w = float(_env("DIV_W", 0.0))
         # === SOCIETY x CHAINING: multi-hop, but blended at the PREDICTION level =============================
         # The two paths differ in TWO independent ways and the grid only ever tested them together:
         #   depth      one hop (society) vs many (chaining)
@@ -632,7 +645,7 @@ class Fabric(nn.Module):
         # mass that halts AT HOP t selects hop t's prediction, so stopping early is rewarded exactly when later
         # hops are worse. The accumulation is a convex combination by construction: entry-halt + sum of newly
         # halted per hop + never-halted = 1.
-        s.vote = bool(int(os.environ.get("CHAIN_VOTE", 0)))
+        s.vote = bool(int(_env("CHAIN_VOTE", 0)))
         s._votelg = None; s._vchk = 0
         # ONE SOURCE OF TRUTH FOR min_steps. Forcing it off inside forward() with a local conditional left
         # s.min_steps reading 2 while the effective value was 0 -- and the [config] banner, the CHAINING report
@@ -643,12 +656,12 @@ class Fabric(nn.Module):
         s._div = None                          # distinctness penalty from the last chaining walk
         s._rmix = []; s._sample_mix = False    # (grounded spread, weight-prediction spread) samples
         s._ord = []                            # (hop0, hop1) expert pairs, for H(hop1 | hop0)
-        s.explore = float(os.environ.get("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
-        s.xover = float(os.environ.get("FAB_XOVER", 0.35))       # fraction of births assembled from SEVERAL parents
+        s.explore = float(_env("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
+        s.xover = float(_env("FAB_XOVER", 0.35))       # fraction of births assembled from SEVERAL parents
         s.born = {}                                        # expert -> step it was created (grace before culling)
         s.removed = 0; s.spared = 0
-        s.breadth = float(os.environ.get("EXP_DOM_FRAC", 0.10))
-        s.breadth_min = int(os.environ.get("EXP_DOM_MIN", 4))   # never squeeze below this, or a small population
+        s.breadth = float(_env("EXP_DOM_FRAC", 0.10))
+        s.breadth_min = int(_env("EXP_DOM_MIN", 4))   # never squeeze below this, or a small population
         #   cannot route at all (10% of 8 domains is 0 and every expert would be banned from everything).
         s.comp = {}                                        # COMPETENCE per node: EMA bits/window on what it wins.
         s.contrib = {}                                     # MARGINAL CONTRIBUTION: EMA of (loss WITHOUT this node
@@ -658,7 +671,7 @@ class Fabric(nn.Module):
         s.q_entry = nn.Linear(sig_d, dk); s.nov = nn.Linear(1, dk); s.ctrl = nn.Linear(3, dk)
         s.norm = nn.LayerNorm(d); s.grown = 0
         s.norm_only = norm_only                             # ABLATION: normalization only, no nodes, no routing
-        s.route_t = float(os.environ.get("ROUTE_T", 0.1))   # <1 sharpens routing -> mass concentrates -> specialization.
+        s.route_t = float(_env("ROUTE_T", 0.1))   # <1 sharpens routing -> mass concentrates -> specialization.
         #   DEFAULT LOWERED 1.0 -> 0.1: signature and centroid are unit vectors in SIG_D=64, so cosine logits have
         #   std ~1/sqrt(64) = 0.125. At T=1.0 the top-vs-mean weight ratio is ~1.37x REGARDLESS of N -- at N=64 that
         #   is w ~= 0.016 +/- 12%, i.e. very nearly uniform, so top-k picks noise and no expert can specialize.
@@ -667,10 +680,10 @@ class Fabric(nn.Module):
         # differentiate: purity 0.92). Free learned keys start symmetric, and with every expert trained to solve the
         # whole task there is no gradient that breaks the symmetry -> uniform generalists. A centroid EMA'd toward the
         # signatures it actually serves acquires a constituency, so its traffic becomes distinct and it specializes.
-        s.grounded = bool(int(os.environ.get("ROUTE_GROUNDED", 1)))
-        s.route_learn = bool(int(os.environ.get("ROUTE_LEARN", 1)))   # add the learned bilinear term (see route_w)
-        s.birth_jitter = float(os.environ.get("BIRTH_JITTER", 0.15))
-        s.cent_m = float(os.environ.get("CENT_EMA", 0.02))
+        s.grounded = bool(int(_env("ROUTE_GROUNDED", 1)))
+        s.route_learn = bool(int(_env("ROUTE_LEARN", 1)))   # add the learned bilinear term (see route_w)
+        s.birth_jitter = float(_env("BIRTH_JITTER", 0.15))
+        s.cent_m = float(_env("CENT_EMA", 0.02))
     def _ids(s, N, step=None):
         """(K, SRC) for the N live experts, embedded from their full weights. Cached on a cadence: the embed is
         O(N * 2*d*r * hid) and at N=4096, d=768, r=8 that is a real cost to pay every step for something that
@@ -1386,7 +1399,7 @@ class PlateauGrowth:
         s.fast = s.slow = None; s.rel = rel; s.cool = cooldown; s.warm = warmup; s.last = -10**9
         s.z = z; s.burst = max(1, burst); s.ramp = ramp; s.rmin = rmin; s.rmax = rmax
         s.dev = 0.0; s.n = 0; s.state = "W"; s.t0 = 0; s.blackout = -10**9; s.why = ""
-        s.latch = bool(int(os.environ.get("FAB_RAMP_LATCH", 1)))          # 0 restores the never-terminating ramp
+        s.latch = bool(int(_env("FAB_RAMP_LATCH", 1)))          # 0 restores the never-terminating ramp
         s.ramp_done = False; s.n_ramp = 0; s.n_stall = 0; s.n_regr = 0   # why growth fired, for the report
         s.rate = max(0.0, rate); s.ramp_to = ramp_to      # GEOMETRIC ramp: grow a FRACTION of the population, not a
         #   fixed count. +3 every 50 steps reaches ~240 experts by the end of a 4000-step ramp window and then stops,
@@ -1551,7 +1564,7 @@ class ExpertRouter:
 #   WIDTH in bytes against a loop STRIDE of WIN tokens, so the encoder has been seeing only WIN/(WIN*bytes_per_
 #   token) of the stream (~53% at 1.9 B/token) and that fraction DRIFTS as compression improves. Nobody chose
 #   that. Set SIG_WIN to about WIN*bytes_per_token to cover the same text the LM step consumed.
-SIG_SPACE = os.environ.get("SIG_SPACE", "bytes").strip().lower()
+SIG_SPACE = _env("SIG_SPACE", "bytes").strip().lower()
 if SIG_SPACE not in ("bytes", "tokens"): sys.exit(f"SIG_SPACE must be bytes|tokens, got {SIG_SPACE!r}")
 SIG_WIN = _i("SIG_WIN", 0)
 ENC_V = V if (USE_TOK and (not TOK_ONLINE or SIG_SPACE == "tokens")) else 256
@@ -1583,7 +1596,7 @@ def key_frozen(x):
 #                 so a query from one process stops retrieving another's entries (the cross-domain contamination
 #                 that made 'deleting one domain' perturb the others). Re-keyed periodically as the model drifts.
 # KEY_SRC=frozen: static byte-statistic key -- TESTING BASELINE ONLY.
-KEY_SRC = os.environ.get("KEY_SRC", "model")
+KEY_SRC = _env("KEY_SRC", "model")
 def _windows(x, W): return F.pad(x, (W - 1, 0)).unfold(1, W, 1)             # (B,L) -> (B,L,W)
 KEY_LAYERS = _i("KEY_LAYERS", 0)                                            # >0: memory keys use only the first N
 #   transformer blocks (see TinyTransformer.encode). 0 = full stack, i.e. unchanged. No effect on the GRU.
@@ -1729,7 +1742,7 @@ def contrastive_step(enc, opt, stream, seen, asm=None):    # InfoNCE: nearby win
     # and the cost on mixed material is small: 4 corpora scored V 0.56 -> 0.52 and 4.322 -> 4.384 bits/byte
     # with it on, against 1-2 inert domains -> 13-24 working ones on a single corpus. 5.0 is the value that
     # actually restores an orthogonal-ish space (separation 0.97); 1.0 leaves it half-collapsed at 0.44.
-    _vw = _f("ENC_VREG", 5.0); _cw = _f("ENC_CREG", 0.0)
+    _vw = ENC_VREG; _cw = ENC_CREG
     if _vw > 0.0 or _cw > 0.0:
         _v, _c = _var_cov(torch.cat([za, zp], 0) * (SIG_D ** 0.5))
         loss = loss + _vw * _v + _cw * _c
@@ -2236,6 +2249,21 @@ def selfcheck(model, mem, fab=None):                       # entry -- tens of Gi
 
 def main():
     global model, BLEN
+    # WHICH CODE PRODUCED THIS LOG. Arms are compared across days and commits; without this, "pilot 6 vs the
+    # grid" is a comparison between two things nobody can identify later. Printed first, before anything can fail.
+    def _git(*a):
+        try:
+            import subprocess
+            return subprocess.run(("git",) + a, cwd=os.path.dirname(os.path.abspath(__file__)),
+                                  capture_output=True, text=True, timeout=5).stdout.strip()
+        except Exception:
+            return ""
+    _br = _git("rev-parse", "--abbrev-ref", "HEAD") or "?"
+    _sha = _git("rev-parse", "--short=10", "HEAD") or "?"
+    _dirty = "DIRTY -- uncommitted changes, this log is NOT reproducible from the commit"
+    _dirty = _dirty if _git("status", "--porcelain") else "clean"
+    _desc = _git("log", "-1", "--format=%cs %s")
+    print(f"[build] branch {_br} | commit {_sha} | {_dirty}" + (f" | {_desc}" if _desc else ""))
     print(f"self-organize | d{D} | {NP} hidden processes | stream {STREAM_LEN} | win {WIN} | SIG_MODE={SIG_MODE} | data {DATA_MODE}")
     # === WHAT IS ACTUALLY ON ===================================================================================
     # DEFERRED until every object exists -- see _banner() below, called after construction. This used to print
@@ -2348,7 +2376,7 @@ def main():
     def fab_bal(w): return w.size(1) * (w.mean(0) ** 2).sum()
     experts = ExpertBank(_i("MAX_EXPERTS", 256), D, _i("EXPERT_R", 4)).to(DEV) if EXPERTS else None
     router = ExpertRouter(experts, _f("EXPERT_NEW_DIST", 0.5), _i("EXPERT_CULL_STALE", 1000), _f("EXPERT_REP_MULT", 2.5),
-                          _f("EXPERT_CULL_FRAC", 0.25), _i("EXPERT_GRACE", 3000), os.environ.get("CULL_MODE", "rank"),
+                          _f("EXPERT_CULL_FRAC", 0.25), _i("EXPERT_GRACE", 3000), _env("CULL_MODE", "rank"),
                           _f("EXPERT_CULL_RANK", 0.08), _f("EXPERT_PRESSURE", 0.75), _f("EXPERT_MERGE_DIST", 0.10),
                           _i("EXPERT_FIT_WIN", 4000)) if EXPERTS else None
     if _i("PROBE", 1):                                     # measure actual step cost + extrapolate BEFORE the long run
@@ -2393,7 +2421,7 @@ def main():
     _regrown = []                                          # param groups re-created by a RESUME's growth replay
     _hb, _hbs = {}, 0                                      # held-out probe carried in from a RESUME (empty otherwise).
     #   Declared BEFORE the resume block: sitting after it, this line clobbered the value resume had just loaded.
-    RESUME = os.environ.get("RESUME", "")
+    RESUME = _env("RESUME", "")
     _RD, _resume_step = None, 0
     if RESUME:
         _RD = torch.load(RESUME if RESUME.endswith(".pt") else f"{RESUME}/ckpt.pt", map_location=DEV, weights_only=False)
@@ -2453,7 +2481,7 @@ def main():
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
                          adaptive_gate=bool(_i("WRITE_ADAPTIVE", 0)), gate_target=_f("WRITE_TARGET", 0.5),
-                         evict=os.environ.get("EVICT", "recency"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
+                         evict=_env("EVICT", "recency"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
                          quantile_gate=bool(_i("WRITE_QUANTILE", 1)),   # WRITE_QUANTILE=0 restores the old additive controller
                          n_own=(min(_i("FAB_NMAX", 4096), _i("MEM_OWNERS", 64)) if MEM_PER_EXPERT else 1), quota=(MEM_QUOTA if MEM_PER_EXPERT else None))
     if MEM_PER_EXPERT:
@@ -2711,18 +2739,18 @@ def main():
     # fired, os.makedirs("0") ran, and the run wrote ckpt.pt/source.bin into a directory literally named `0` in the
     # repo root. It is not covered by .gitignore (source.bin is not *.pt and `0/` is not `runs/`), so it got
     # committed. Normalise the disabled spellings once, here, so all four call sites see a clean value.
-    if os.environ.get("SAVE_CKPT", "").strip().lower() in ("0", "", "off", "no", "none", "false"):
+    if _env("SAVE_CKPT", "").strip().lower() in ("0", "", "off", "no", "none", "false"):
         os.environ.pop("SAVE_CKPT", None)
 
     def _save_ckpt(src_stream, quiet=False):               # persist model+tokenizer+memory so `prompt.py` can load it
-        ck = os.environ.get("SAVE_CKPT")
+        ck = _env("SAVE_CKPT")
         if not ck: return
         os.makedirs(ck, exist_ok=True)
-        if USE_TOK: TOK.save(os.environ.get("TOKENIZER_PATH", "data/dyntok.json"))
+        if USE_TOK: TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
         act = mem.active
         torch.save({"model": model.state_dict(), "D": D, "V": V, "KW": KW, "KEY_SRC": KEY_SRC,
                     "model_type": MODEL_TYPE, "layers": _i("LAYERS", 4 if MODEL_TYPE=="transformer" else 1), "heads": _i("HEADS", 8), "maxlen": _i("MAXLEN", 512),
-                    "use_tok": USE_TOK, "tok_path": (os.environ.get("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None),
+                    "use_tok": USE_TOK, "tok_path": (_env("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None),
                     "mem_keys": mem.keys[act].cpu(), "mem_tok": mem.tok[act].cpu(), "mem_src": mem.src[act].cpu(),
                     "mem_ctx": (mem.ctx[act].cpu() if mem.ctx_w > 0 else None), "topk": mem.topk,
                     "mem_pos": mem.pos[act].cpu(),                     # -> source passages for grounded answers
@@ -2779,8 +2807,8 @@ def main():
         # can be asked anywhere, on any machine, long after the GPU is returned.
         torch.save({"enc": enc.state_dict(), "sig_d": SIG_D, "win": WIN, "step": step,
                     "cent": {int(k): v.cpu() for k, v in asm.cent.items()}, "size": dict(asm.size),
-                    "sig_space": SIG_SPACE, "domains": os.environ.get("DOMAINS", ""), "enc_v": ENC_V,
-                    "use_tok": USE_TOK, "tok_path": (os.environ.get("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None)},
+                    "sig_space": SIG_SPACE, "domains": _env("DOMAINS", ""), "enc_v": ENC_V,
+                    "use_tok": USE_TOK, "tok_path": (_env("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None)},
                    f"{ck}/probe.pt.tmp")
         os.replace(f"{ck}/probe.pt.tmp", f"{ck}/probe.pt")
         if not quiet:
@@ -2791,7 +2819,7 @@ def main():
     def _on_usr1(*_): _ckpt_req["on"] = True              #   handler -- reentrancy). Pause+dump without killing the run.
     try: _signal.signal(_signal.SIGUSR1, _on_usr1)
     except (ValueError, OSError): pass                     # not the main thread / unsupported platform -> silently skip
-    if os.environ.get("SAVE_CKPT"):
+    if _env("SAVE_CKPT"):
         print(f"[pid {os.getpid()}] checkpoint-on-demand: kill -USR1 {os.getpid()}  ->  saves to {os.environ['SAVE_CKPT']} at the next step"
               + (f" (auto every {CKPT_EVERY} steps)" if CKPT_EVERY else " (no periodic auto-save; set CKPT_EVERY to enable)"))
     EPOCHS = max(1, _i("EPOCHS", 1)); _epoch = 0            # multi-EPOCH: reset to the stream start EPOCHS times (clean passes,
@@ -2803,7 +2831,7 @@ def main():
     if _i("CORPUS_CAP", 2000000) <= 2000000 and DATA_MODE == "real":
         _warn.append(f"CORPUS_CAP={_i('CORPUS_CAP', 2000000)} bytes -> each domain is capped at ~2MB regardless of how "
                      f"much data is on disk. A multi-day run would see 2MB of text. Set CORPUS_CAP to the real size.")
-    if os.environ.get("SAVE_CKPT") and not CKPT_EVERY:
+    if _env("SAVE_CKPT") and not CKPT_EVERY:
         _warn.append("SAVE_CKPT set but CKPT_EVERY=0 -> the ONLY save is at the very end (plus SIGUSR1). "
                      "A crash loses the whole run. Set CKPT_EVERY.")
     if MEM_PER_EXPERT and mem.cap != _i("MEM_CAP", 200000):
@@ -2936,25 +2964,82 @@ def main():
               f" | per-expert memory {_on(MEM_PER_EXPERT)}"
               + (f" ({mem.n_own} owners x {mem.quota})" if MEM_PER_EXPERT else "")
               + f" | phased {_on(PHASED)}")
-        # OVERRIDDEN, NAMED. If what ran differs from what was asked for, say which flag did it -- silence here is
-        # how "per-expert memory ON" survived a whole pilot in which it was off.
-        for _nm, _asked, _got, _why in (
-                ("MEM_PER_EXPERT", bool(_i("MEM_PER_EXPERT", 1)), MEM_PER_EXPERT, "FABRIC=0, so there are no experts to own memory"),
-                ("WORLD_GROW",     bool(_i("WORLD_GROW", 1)),     WORLD_GROW,     "WORLD_MODEL=0, so there is nothing to grow"),
-                ("WORLD_FEEDBACK", bool(_i("WORLD_FEEDBACK", 1)), world_proj is not None, "WORLD_MODEL=0, so there is no forecast to feed back"),
-                ("EXPERTS",        bool(_i("EXPERTS", 0)),        bool(EXPERTS and not FABRIC), "FABRIC wins the elif chain -- the ExpertBank never runs")):
-            if _asked and not _got:
-                print(f"[config] OVERRIDDEN: {_nm}=1 was asked for but did NOT run -- {_why}.")
+        # === EFFECTIVE CONFIG, DERIVED ==========================================================================
+        # One declarative table: env name -> the LIVE value that actually ran. Everything below is computed from
+        # it, so a knob cannot be printed with a value the code is not using, and a knob whose effective value is
+        # an AND with something else reports the AND rather than the request. Adding a flag means adding a row.
+        _F0 = fab if FABRIC else None
+        _G0 = fabgrow if (FABRIC and fabgrow is not None) else None
+        _EFF = [
+            ("FABRIC",         FABRIC),                  ("SOCIETY",        SOCIETY),
+            ("SELF_ORG",       SELF_ORG),                ("MANAGE",         MANAGE_ON),
+            ("TOKENIZER",      USE_TOK),                 ("TOK_ONLINE",     USE_TOK and TOK_ONLINE),
+            ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
+            ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
+            ("WORLD_FEEDBACK", world_proj is not None),  ("MEM_PER_EXPERT", MEM_PER_EXPERT),
+            ("MEM_CAP",        mem.cap, "rounded up to owners x quota"),
+            ("MEM_OWNERS",     mem.n_own),
+            ("MEM_QUOTA",      mem.quota if MEM_PER_EXPERT else mem.cap,
+                               "no per-expert partition, so one global quota = the whole store"),
+            ("MAX_DOMAINS",    MAX_DOMAINS),
+            ("EXPERTS",        bool(EXPERTS and not FABRIC)),
+            ("DIV_W",          DIV_W),                   ("IND_W",          IND_W if SOCIETY else 0.0),
+            ("DROPOUT",        DROPOUT),                 ("WEIGHT_DECAY",   WD),
+            ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
+            ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
+        ]
+        if _F0 is not None: _EFF += [
+            ("FAB_NMAX",       _F0.cap),                 ("FAB_RANK",       _F0.r),
+            ("FAB_STEPS",      _F0.max_steps),           ("FAB_MIN_STEPS",  _F0.min_steps),
+            ("FAB_CHAIN_K",    _F0.chain_k),             ("FAB_EXPLORE",    _F0.explore),
+            ("FAB_HALT",       _F0.halt_on),             ("FAB_HALT_MAX",   _F0.halt_max),
+            ("FAB_EMB_EVERY",  _F0.emb_every),           ("FAB_DERIVE_IDS", _F0.derive_ids),
+            ("ROUTE_T",        _F0.route_t),             ("ROUTE_GROUNDED", _F0.grounded),
+            ("ROUTE_LEARN",    _F0.route_learn),         ("ROUTE_REGION_W", _F0.region_w),
+            ("FAB_KEY_NORM",   FAB_KEY_NORM),            ("CHAIN_VOTE",     _F0.vote),
+            ("CHAIN_BAN",      _F0.chain_ban),           ("CHAIN_CURRIC",   _F0.curric),
+            ("CHAIN_SUP",      _F0.sup_w),               ("CHAIN_STATE_Q",  _F0.state_q),
+            ("EXP_DOM_FRAC",   _F0.breadth),             ("EXP_DOM_MIN",    _F0.breadth_min),
+        ]
+        if _G0 is not None: _EFF += [("FAB_RAMP_LATCH", _G0.latch), ("FAB_RAMP_TO", _G0.ramp_to)]
+        _EFF = [(r[0], r[1], (r[2] if len(r) > 2 else None)) for r in _EFF]
+        def _norm(v):
+            if isinstance(v, bool): return "1" if v else "0"
+            if isinstance(v, float): return f"{v:g}"
+            return str(v)
+        # ASKED FOR BUT NOT RUN, detected rather than remembered. Anything the environment set explicitly whose
+        # live value disagrees is printed. This is the check that would have caught all three past banner lies.
+        _bad, _adj = [], []
+        for _n, _v, _note in _EFF:
+            _a = _ENV_ASKED.get(_n)
+            if _a is None: continue
+            try:
+                _same = (abs(float(_a) - float(_v)) < 1e-9) if not isinstance(_v, str) else (_a == _v)
+            except (TypeError, ValueError):
+                _same = (_norm(_a) == _norm(_v))
+            if _same: continue
+            (_adj if _note else _bad).append((_n, _a, _norm(_v), _note))
+        # `!!` is reserved for a divergence NOBODY REGISTERED -- i.e. a surprise. A known, benign adjustment
+        # (a rounding, a partition collapsing to a global store) reports plainly, or the loud marker stops
+        # meaning anything and gets skimmed past, which is how the last three lies survived.
+        for _n, _a, _v, _ in _bad:
+            print(f"[config] !! OVERRIDDEN: {_n}={_a} was asked for, {_n}={_v} is what RAN.")
+        for _n, _a, _v, _note in _adj:
+            print(f"[config] adjusted: {_n} {_a} -> {_v} ({_note})")
+        if not _bad:
+            print(f"[config] no unexplained overrides: every one of the {len(_ENV_ASKED)} environment settings "
+                  f"took effect as given" + (f" ({len(_adj)} adjusted as noted above)." if _adj else "."))
+        print("[config] EFFECTIVE  " + "  ".join(f"{_n}={_norm(_v)}" for _n, _v, _ in _EFF))
         print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
-              f"The legacy ExpertBank (EXPERTS={_i('EXPERTS', 0)}) is {'ON' if EXPERTS else 'off'} and is mutually "
+              f"The legacy ExpertBank (EXPERTS={int(bool(EXPERTS))}) is {'ON' if EXPERTS else 'off'} and is mutually "
               f"exclusive with it -- with the fabric on, that flag being 0 is CORRECT, not a missing subsystem.")
         if _F:
             print(f"[config] SELECTION   replicate {_on(FAB_REPLICATE)} (parent: sampled by fitness among the "
                   f"{_F.parent_k} nearest region-owners; mutation {_F.mut:.0%} of parent std, "
                   f"{_F.mut_big_p:.0%} of births x{_F.mut_big:.0f}) | competence protection {_on(COMP_PROTECT)}"
                   f" | cull-empty domains {_on(DOM_CULL_EMPTY)} | expert breadth cap {_F.breadth:.0%} of domains "
-                  f"(floor {_F.breadth_min}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
-                  f"{_f('FAB_RAMP_TO', 1.0):.0%} of cap")
+                  f"(floor {_F.breadth_min}) | ramp {fabgrow.rate:.0%}/event to {fabgrow.ramp_to:.0%} of cap"
+                  f"{' [latch off: the ramp will re-arm forever]' if not fabgrow.latch else ''}")
             print(f"[config] PATH        {'CHAINING (default)' if not SOCIETY else 'SOCIETY (SOCIETY=1)'} -- "
                   + (f"experts COMPOSE: mass flows expert -> expert through the transition matrix for up to "
                      f"{_F.max_steps} hops ({_F.chain_k} computed per hop), HALT blocked for the first "
@@ -2990,7 +3075,7 @@ def main():
                       f"measured here, by re-walking without each candidate. DIV_W={DIV_W} IS applied on this path "
                       f"({'ON' if DIV_W > 0 else 'off at 0'}), from the per-hop expert OUTPUTS.")
         print(f"[config] OFF ON PURPOSE  DIV_W={DIV_W} (expert distinctness reward) | "
-              f"ENC_CREG={_f('ENC_CREG', 0.0)} (encoder decorrelation; ENC_VREG={_f('ENC_VREG', 5.0)} IS on) | "
+              f"ENC_CREG={ENC_CREG} (encoder decorrelation; ENC_VREG={ENC_VREG} IS on) | "
               f"DROPOUT={DROPOUT} | RECON_W={RECON_W} | WEIGHT_DECAY={WD}")
         if EXPERTS and FABRIC:
             print("[config] !! EXPERTS and FABRIC are mutually exclusive (FABRIC wins the elif chain) -- experts are a NO-OP")
@@ -3507,7 +3592,7 @@ def main():
         i += WIN; step += 1
         if (CKPT_EVERY and _due("ckpt", CKPT_EVERY)) or _ckpt_req["on"]:   # periodic OR on-demand (kill -USR1) save
             _why = "SIGUSR1" if _ckpt_req["on"] else f"every {CKPT_EVERY}"; _ckpt_req["on"] = False
-            _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {os.environ.get('SAVE_CKPT')}]"); model.train()
+            _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {_env('SAVE_CKPT')}]"); model.train()
         if ONLINE and _due("retok", RETOK_EVERY):          # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
             if RETOK_TAIL:
@@ -3542,7 +3627,7 @@ def main():
     if ONLINE:                                             # freeze + final tokenization for eval + persist the grown vocab
         stream, tok_bs, labels = _retok(byte_stream, byte_labels)
         BLEN = torch.tensor(TOK.bytes_per_id, dtype=torch.float, device=DEV)
-        TOK.save(os.environ.get("TOKENIZER_PATH", "data/dyntok.json"))
+        TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
         print(f"[tokenizer] ONLINE: minted throughout -> grew 256 -> {TOK.vocab_size} during training; final re-tokenization for eval")
 
     _save_ckpt(stream)                                               # final save (also runs mid-run if CKPT_EVERY>0)
@@ -3859,7 +3944,7 @@ def main():
         if not SOCIETY:
             print(f"  HALT blocked for the first {fab.min_steps} hop(s) (FAB_MIN_STEPS"
                   + (", forced to 0 by CHAIN_VOTE" if fab.vote else "") + f"). At 0 the router "
-                  f"halts immediately and depth is 0.00 of {_i('FAB_STEPS', 4)} -- chaining ON and nothing chained.")
+                  f"halts immediately and depth is 0.00 of {fab.max_steps} -- chaining ON and nothing chained.")
         if SOCIETY:
             print(f"  (ponder cost this run: 0 by construction -- _dep is zeros on the society path, so PONDER="
                   f"{PONDER} and PONDER_WARM={PONDER_WARM} had no effect on training whatsoever)")
@@ -3901,7 +3986,7 @@ def main():
                   f"router scores in is defined over the population -- so a high churn rate keeps moving the "
                   f"ground the router stands on.")
         if fabgrow.ramp_done:
-            print(f"  (the ramp has LATCHED OFF -- the population reached {_f('FAB_RAMP_TO', 1.0):.0%} of cap and "
+            print(f"  (the ramp has LATCHED OFF -- the population reached {fabgrow.ramp_to:.0%} of cap and "
                   f"the ramp does not re-arm when culling drops it back below)")
         elif fabgrow.n_ramp > 50:
             print(f"  >> the RAMP is still firing after {fabgrow.n_ramp} events. It should have latched off once "
@@ -4337,7 +4422,7 @@ def main():
                           f"min {min(_greach)} max {max(_greach)}")
                     print(f"    every other expert was FROZEN that step -- not merely unused. An expert outside "
                           f"the computed set gets no gradient, so it cannot improve into contention; that is what "
-                          f"exploration (FAB_EXPLORE={_f('FAB_EXPLORE', 0.15):.0%}) exists to break.")
+                          f"exploration (FAB_EXPLORE={fab.explore:.0%}) exists to break.")
                     _ee = fab.emb_every
                     print(f"    the high end is the identity channel: eemb reads the FULL weights of every live "
                           f"expert to build the routing keys, so the LM loss scatters gradient to ALL of them -- "
