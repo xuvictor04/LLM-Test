@@ -37,6 +37,24 @@
 # with an error bar, and says HELD when the change is inside it.
 set -u
 
+# === NEVER OVERWRITE ANYTHING UNDER runs/ ====================================================================
+# Every subcommand here used to write $OUT/<name>.log and SAVE_CKPT=$OUT/<name> directly, so re-running a pilot
+# silently destroyed the previous one -- including the checkpoint that `pilot-add` and the ACROSS THE RUN BOUNDARY
+# section need as their baseline. Results are the expensive part of this project; they are now append-only.
+# _reserve <path> echoes a path that does not exist yet, suffixing -2, -3, ... if it has to.
+_reserve() {
+  _rp="$1"
+  if [ ! -e "$_rp" ]; then echo "$_rp"; return; fi
+  _rn=2
+  while [ -e "${_rp%.log}-$_rn.log" ] || [ -e "$_rp-$_rn" ]; do _rn=$((_rn+1)); done
+  case "$_rp" in
+    *.log) echo "${_rp%.log}-$_rn.log" ;;
+    *)     echo "$_rp-$_rn" ;;
+  esac
+}
+# _done <log> -- true if that log reached the end of a run (the final line every complete report prints).
+_done() { [ -f "$1" ] && grep -aq "SIG_MODE=learned -- learned = the unfrozen product path" "$1"; }
+
 WHICH=${1:-run}
 OUT=${OUT:-runs/long}
 DD=${DATA_DIR:-data_big}
@@ -125,7 +143,8 @@ pilot)
       SIG_WIN=${SIG_WIN:-614} \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 \
-      SAVE_CKPT="$OUT/pilot_$ARCH" python3 self_organize.py 2>&1 | tee "$OUT/pilot_$ARCH.log"
+      SAVE_CKPT="$(_reserve "$OUT/pilot_$ARCH")" PROBE_WAIT=${PROBE_WAIT:-12} \
+      python3 self_organize.py 2>&1 | tee "$(_reserve "$OUT/pilot_$ARCH.log")"
   done
   echo
   echo "=== SIDE BY SIDE (the only number that compares them directly) ==="
@@ -193,6 +212,97 @@ add)
   echo "  read the ACROSS THE RUN BOUNDARY section: eng carries a baseline, $NAME will show as NEW."
   ;;
 
+grid)
+  # === UNATTENDED ARM GRID =====================================================================================
+  # Built for `sleep 2h && git pull && bash longrun.sh grid`, so: nothing interactive, one arm at a time, an arm
+  # that dies does not take the grid with it, and RE-RUNNING IT RESUMES rather than repeats or overwrites. Every
+  # completed arm is skipped on a second invocation, so the same command can be fired repeatedly and safely.
+  #
+  # Nothing under runs/ is ever overwritten. Each arm writes $GRID/<arm>.log; if a log exists and is COMPLETE the
+  # arm is skipped, and if it exists but is partial (a kill, an OOM) it is MOVED ASIDE to <arm>.log.partial-N
+  # before the retry. Checkpoints go to $GRID/<arm>/ and are reserved the same way.
+  GRID=${GRID_DIR:-runs/grid}
+  P_DD=${PILOT_DIR:-data_pilot}
+  mkdir -p "$GRID"
+  # THE ARMS. name:overrides. Ordered so that stopping the grid early still leaves a readable comparison: the two
+  # that answer the current question come first, and each later arm is a control for a different explanation.
+  #   weights  -- routing decided ENTIRELY by predicted weights (this branch's premise; measured at 2% before)
+  #   base     -- the control at HEAD. Answers on its own whether the growth-ramp latch fixed the divergence,
+  #               since every pilot so far bottomed early and rose for the rest of the run.
+  #   keynorm  -- region AND weight prediction on ONE scale (66/34 rather than 98/2). The middle position.
+  #   society  -- SOCIETY=1 with every fix. The path control: how much of any change is chaining vs the fixes.
+  #   curric   -- staged depth, which has never actually run (it sat behind a cadence that never fired).
+  GRID_ARMS_DEFAULT="weights base keynorm society curric"
+  _flags_for() {
+    case "$1" in
+      weights) echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
+      base)    echo "" ;;
+      keynorm) echo "FAB_KEY_NORM=1" ;;
+      society) echo "SOCIETY=1" ;;
+      curric)  echo "CHAIN_CURRIC=1" ;;
+      *)       echo "" ;;
+    esac
+  }
+  if [ -z "$(ls "$P_DD/train/eng"/part*.txt 2>/dev/null)" ]; then
+    python3 -c "import datasets" 2>/dev/null || { echo "need: pip install datasets (throwaway venv -- see preflight.sh)"; exit 1; }
+    python3 fetch_big.py --dataset ${PILOT_SRC:-fineweb-edu} --domain eng --gb ${PILOT_GB:-0.06} --out "$P_DD" --resume || exit 1
+  fi
+  G_SL=${STREAM_LEN:-4000000}; G_EP=${EPOCHS:-8}
+  ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT}
+  echo "grid -> $GRID | arms: $ARMS | $((G_SL/1000)) kB/epoch x $G_EP epochs each"
+  echo "  (re-running this command SKIPS completed arms and never overwrites a finished log)"
+  trap 'echo; echo "grid interrupted -- completed arms are kept; re-run the same command to continue"; exit 130' INT TERM
+  for ARM in $ARMS; do
+    LOG="$GRID/$ARM.log"
+    if _done "$LOG"; then echo "== $ARM: already complete, skipping"; continue; fi
+    if [ -f "$LOG" ]; then
+      _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done
+      mv "$LOG" "$LOG.partial-$_pn"
+      echo "== $ARM: previous attempt was incomplete -> kept as $LOG.partial-$_pn"
+    fi
+    FLAGS="$(_flags_for "$ARM")"
+    echo; echo "################  arm: $ARM  ${FLAGS:-(defaults)}  ################"
+    _t_start=$(date +%s)
+    # set +e around the arm: one crash must not end the grid. SAVE_CKPT is reserved, so a retry cannot stomp a
+    # checkpoint an earlier attempt left behind.
+    set +e
+    env $FLAGS \
+        MODEL=gru LAYERS=1 HEADS=${HEADS:-8} \
+        DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
+        CORPUS_CAP=100000000000 STREAM_LEN=$G_SL EPOCHS=$G_EP D_MODEL=${D_MODEL:-768} \
+        WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
+        SIG_WIN=${SIG_WIN:-614} ENC_WARMUP=2000 ENC_WARMUP_MIN=500 \
+        MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
+        CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 PROBE_WAIT=0 \
+        SAVE_CKPT="$([ "${GRID_CKPT:-1}" = 1 ] && _reserve "$GRID/$ARM" || echo 0)" \
+        python3 self_organize.py > "$LOG" 2>&1
+    _rc=$?
+    set -e 2>/dev/null || true
+    _t_end=$(date +%s)
+    printf "%s\trc=%s\t%ss\n" "$ARM" "$_rc" "$((_t_end-_t_start))" >> "$GRID/_status.tsv"
+    if [ "$_rc" = 0 ] && _done "$LOG"; then echo "== $ARM: OK ($((_t_end-_t_start))s)"
+    else echo "== $ARM: FAILED rc=$_rc after $((_t_end-_t_start))s -- see $LOG (grid continues)"; fi
+  done
+  echo; echo "=== GRID SUMMARY ==="
+  printf "  %-9s %-7s %-13s %-11s %-9s %-22s %s\n" arm held-out vs-order-1 curve experts top-share routing-mix
+  for ARM in $ARMS; do
+    L="$GRID/$ARM.log"; [ -f "$L" ] || continue
+    _ho=$(grep -a -oE "held-out [0-9.]+" "$L" | head -1 | awk '{print $2}')
+    _o1=$(grep -a -oE "beats order-1 by \+[0-9.]+" "$L" | head -1 | awk '{print $NF}')
+    _cv=$(grep -a -oE "since the minimum [-+][0-9.]+" "$L" | head -1 | awk '{print $NF}')
+    _ex=$(grep -a -oE "[0-9]+ distinct experts won" "$L" | head -1 | awk '{print $1}')
+    _tp=$(grep -a -oE "top expert took [0-9.]+%" "$L" | head -1 | awk '{print $NF}')
+    _mx=$(grep -a -oE "spread [0-9.]+ \([0-9]+%\) vs WEIGHT-PREDICTION term spread [0-9.]+ \([0-9]+%\)" "$L" | head -1 | sed -E 's/spread [0-9.]+ \(([0-9]+%)\).*\(([0-9]+%)\)/region \1 weight \2/')
+    printf "  %-9s %-7s %-13s %-11s %-9s %-22s %s\n" "$ARM" "${_ho:--}" "${_o1:--}" "${_cv:--}" "${_ex:--}" "${_tp:--}" "${_mx:--}"
+  done
+  echo
+  echo "  curve = change SINCE THE MINIMUM. Positive means the run got worse after its best point; every pilot so"
+  echo "  far has been +1.1 to +1.4, and whether the growth-ramp latch fixed that is what 'base' answers."
+  echo "  Also worth grepping in each log: POPULATION CHURN, CHAIN ORDER, ROUTING MIX, GRADIENT REACH."
+  echo
+  echo "  logs: $GRID/*.log   status: $GRID/_status.tsv"
+  ;;
+
 watch)
   [ -f "$OUT/run.log" ] || { echo "no $OUT/run.log yet"; exit 1; }
   echo "=== last progress"; grep -a -E "\[rate\]|\[epoch |\[PHASE |\[saved checkpoint" "$OUT/run.log" | tail -12
@@ -200,5 +310,5 @@ watch)
   echo; echo "=== live"; tail -3 "$OUT/run.log"
   ;;
 
-*) echo "usage: bash longrun.sh [pilot|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
+*) echo "usage: bash longrun.sh [pilot|grid|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
 esac

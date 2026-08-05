@@ -2265,10 +2265,12 @@ def main():
         per = (_t.time() - t0) / 15; steps = STREAM_LEN // WIN
         print(f"[probe] {MODEL_TYPE} d{D} L{_i('LAYERS', 4 if MODEL_TYPE=='transformer' else 1)}{f' + FABRIC {len(fab.bodies)}n' if FABRIC else ''} | ~{per*1000:.1f} ms/step x {steps} steps "
               f"= ~{per*steps/60:.1f} min train (+ tokenizer build, {_i('ENC_WARMUP',800)} warmup steps, re-keys, tests). "
-              f"{'Ctrl-C in 12s to abort/resize.' if DEV=='cuda' else ''}")
+              f"{f'Ctrl-C in {_i(chr(80)+chr(82)+chr(79)+chr(66)+chr(69)+chr(95)+chr(87)+chr(65)+chr(73)+chr(84), 12)}s to abort/resize.' if (DEV=='cuda' and _i('PROBE_WAIT', 12) > 0) else ''}")
         print("  [probe is a LOWER BOUND -- it times ONLY the LM forward/backward. The real step also pays sig_of, the "
               "live contrastive encoder, the amortized re-key, domain assembly and memory. Trust the [rate] lines below.]")
-        if DEV == "cuda": _t.sleep(12)
+        # PROBE_WAIT=0 for unattended runs. The pause exists so a human can Ctrl-C after reading the size
+        # estimate; with nobody watching it is dead time per arm and the message is a lie.
+        if DEV == "cuda" and _i("PROBE_WAIT", 12) > 0: _t.sleep(_i("PROBE_WAIT", 12))
     # WEIGHT DECAY was implicit (AdamW defaults to 0.01). Decoupled decay is applied EVERY step to EVERY parameter
     # regardless of gradient, so a dormant expert loses ~71% of its magnitude over a 62.5k-step run -- an UNCONTROLLED
     # forgetting term inside a system whose whole point is CONTROLLED forgetting. Now explicit; 0 disables it.
