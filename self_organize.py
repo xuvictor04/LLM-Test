@@ -875,57 +875,12 @@ class Fabric(nn.Module):
                     the router's own parameters but never back into the SigEncoder -- which is the intent."""
         N = s.n_live
         if s.grounded:
-            C = F.normalize(s.cent[:N].to(gist.device), dim=-1)
-            logits = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
-            if s.route_learn:
-                # (B,sig_d) x (N,sig_d,dk) -> (B,N,dk), then contract with the per-expert key. Two einsums at any
-                # N, where this used to be N Linear calls and an N-element torch.stack every step.
-                # BOTH TERMS ARE COSINES, ON THE SAME SCALE. This was a RAW dot product of two unconstrained
-                # trained vectors added to a bounded cosine: an expert whose key norm grew large scored high for
-                # EVERY input with any positive projection, regardless of its region, and nothing bounded it.
-                # Gradient descent grows one key because that lowers loss fastest early, so the learned term
-                # becomes a winner-take-all amplifier bolted onto a working region router. Measured: the encoder
-                # separates the material (mean pairwise distance 0.871) and 50 distinct experts are the NEAREST
-                # CENTROID for some window -- yet 1-3 are used. The gap between those two numbers is this line.
-                # FAB_KEY_NORM decides which of the two forms runs, and it defaults to the ORIGINAL because I do
-                # not know which is right. The normalized form is the principled one -- both terms bounded, on one
-                # scale -- but measured on a 100 kB toy it went the WRONG way (3 used experts -> 1), and at that
-                # size the number is 1-vs-3 out of 32 windows, which is noise. Shipping it as a fix would be the
-                # fourth unvalidated router change in a row. It is a flag so the pilot can A/B it at a size where
-                # the answer means something.
-                _Kd, _ = s._ids(N, step)                       # identity embedded from the experts' own weights
-                _lrn = ((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(_Kd, dim=-1).t())
-                        / max(1e-3, s.route_t)) if FAB_KEY_NORM else (s.q_route(gist) @ _Kd.t())
-                logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)
-            if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
+            logits = s.entry_logits(gist, nov, N, step=step, ban=ban)
             w = s._with_halt(logits, gist, N)
-            with torch.no_grad():
-                # EVERY EXPERT THAT SERVED THIS SIGNATURE MOVES TOWARD IT, in proportion to how much it served.
-                # This used to update the ARGMAX WINNER ONLY, which makes discovery structurally impossible: the
-                # winner drifts toward every region it wins and so becomes closer still, while every other
-                # centroid stays frozen at its initialisation. A newcomer cannot win because its region never
-                # moved, and its region never moves because it never wins. That is rich-get-richer with no path
-                # in, and it is why 4096 experts produced ONE used node.
-                _wm = w.mean(0)
-                _topm = min(_i("FAB_CENT_TOPK", 8), N)
-                _iv, _ii = _wm.topk(_topm)
-                _g1 = F.normalize(gist, dim=-1).mean(0)
-                _share = _iv / _iv.sum().clamp_min(1e-9)
-                for _q5 in range(_topm):
-                    _jj = int(_ii[_q5]); _rate = s.cent_m * float(_share[_q5])
-                    s.cent[_jj] = F.normalize((1 - _rate) * s.cent[_jj].to(gist.device) + _rate * _g1, dim=-1).cpu()
-                # NOVELTY -> DISCOVERY. If this signature is far from EVERY centroid, it is material nothing owns.
-                # Hand it to the least-used expert instead of to the nearest incumbent: that is what makes an
-                # unused expert become a used one, and it is the mechanism by which new material recruits new
-                # capacity rather than being absorbed by whoever is already largest.
-                if FAB_DISCOVER > 0 and N > 1:
-                    _best = float((F.normalize(s.cent[:N], dim=-1).to(gist.device) @ _g1).max())
-                    if 1.0 - _best > FAB_DISCOVER:
-                        _cold = min(range(N), key=lambda i: s.use.get(i, 0.0))
-                        s.cent[_cold] = F.normalize(0.5 * s.cent[_cold].to(gist.device) + 0.5 * _g1, dim=-1).cpu()
-                        s.discovered += 1
+            s.ground_update(gist, w, N)
         else:
-            K = torch.cat([s._ids(N, step)[0], s.halt_key[None]], 0)
+            _Kd, _ = s._ids(N, step)
+            K = torch.cat([_Kd, s.halt_key[None]], 0)
             _lg = ((s.q_entry(gist) + s.nov(nov[:, None])) @ K.t()) / max(1e-3, s.route_t)
             if ban is not None:
                 _lg[:, :N] = _lg[:, :N].masked_fill(ban.to(_lg.device)[None], float("-inf"))
@@ -933,6 +888,65 @@ class Fabric(nn.Module):
             s._record_halt(c[:, N:N + 1])
             w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)      # router weights over experts
         return w
+
+    def entry_logits(s, gist, nov, N, step=None, ban=None):
+        """WHERE DOES THIS MATERIAL BELONG? Scores the N live experts for a signature. ONE implementation, called
+        by BOTH forward paths.
+
+        It used to be duplicated, and the two copies had drifted into different routers. route_w (society) scored a
+        GROUNDED cosine to each expert's owned REGION plus a learned key term. Fabric.forward (chaining) had only
+        `q_entry(gist) @ K.t()` -- free learned keys, no region, and no centroid update anywhere in the path. That
+        is exactly the design this class's own comment calls out as unable to specialize: near-identical experts
+        give near-identical keys, route_t=0.1 amplifies the noise between them, whoever wins first collects the
+        gradient and becomes more distinct, and nothing ever gives anyone else a constituency. Rich-get-richer
+        with no path in.
+        Measured, on a task where 8 domains each need their OWN map and the signatures are separable by
+        construction, so any failure is the router's: I(domain; chosen expert)/H(domain) was 0.34-0.87 on the
+        society path and EXACTLY 0.000 on chaining -- 1 expert of 32 taking 100% of the traffic, both seeds. The
+        router could not learn where anything belonged. ROUTE_GROUNDED reported ON in the banner throughout,
+        because it WAS on: for the path that was not running."""
+        C = F.normalize(s.cent[:N].to(gist.device), dim=-1)
+        logits = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
+        if s.route_learn:
+            # BOTH TERMS ARE COSINES, ON THE SAME SCALE when FAB_KEY_NORM=1. The raw form is a dot product of two
+            # unconstrained trained vectors added to a bounded cosine: an expert whose key norm grows large scores
+            # high for EVERY input with any positive projection, regardless of its region. It remains the default
+            # only because the normalized form has not been A/B'd at a size where the answer means anything.
+            _Kd, _ = s._ids(N, step)                       # identity embedded from the experts' own weights
+            _lrn = ((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(_Kd, dim=-1).t())
+                    / max(1e-3, s.route_t)) if FAB_KEY_NORM else (s.q_route(gist) @ _Kd.t())
+            logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)
+        if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
+        return logits
+
+    def ground_update(s, gist, w, N):
+        """The other half of grounded routing, and just as absent from the chaining path: an expert's REGION moves
+        toward the signatures it actually served. Without this the centroids sit at their initialisation forever
+        and the cosine term in entry_logits is scoring against noise."""
+        with torch.no_grad():
+            # EVERY EXPERT THAT SERVED THIS SIGNATURE MOVES TOWARD IT, in proportion to how much it served.
+            # Updating the ARGMAX WINNER ONLY makes discovery structurally impossible: the winner drifts toward
+            # every region it wins and so becomes closer still, while every other centroid stays frozen at its
+            # initialisation. A newcomer cannot win because its region never moved, and its region never moves
+            # because it never wins.
+            _wm = w.mean(0)
+            _topm = min(_i("FAB_CENT_TOPK", 8), N)
+            _iv, _ii = _wm.topk(_topm)
+            _g1 = F.normalize(gist, dim=-1).mean(0)
+            _share = _iv / _iv.sum().clamp_min(1e-9)
+            for _q5 in range(_topm):
+                _jj = int(_ii[_q5]); _rate = s.cent_m * float(_share[_q5])
+                s.cent[_jj] = F.normalize((1 - _rate) * s.cent[_jj].to(gist.device) + _rate * _g1, dim=-1).cpu()
+            # NOVELTY -> DISCOVERY. If this signature is far from EVERY centroid, it is material nothing owns.
+            # Hand it to the LEAST-USED expert instead of to the nearest incumbent: that is the mechanism by which
+            # new material recruits new capacity rather than being absorbed by whoever is already largest.
+            if FAB_DISCOVER > 0 and N > 1:
+                _best = float((F.normalize(s.cent[:N], dim=-1).to(gist.device) @ _g1).max())
+                if 1.0 - _best > FAB_DISCOVER:
+                    _cold = min(range(N), key=lambda i: s.use.get(i, 0.0))
+                    s.cent[_cold] = F.normalize(0.5 * s.cent[_cold].to(gist.device) + 0.5 * _g1, dim=-1).cpu()
+                    s.discovered += 1
+
 
     def _with_halt(s, logits, gist, N):
         """Append HALT to the grounded branch's operator set and return the renormalised weights over experts.
@@ -1040,13 +1054,25 @@ class Fabric(nn.Module):
         _Kd, _SRCd = s._ids(N, step)                                          # both embedded from full weights
         K = torch.cat([_Kd, s.halt_key[None]], 0)                             # (N+1, dk) operator keys
         nb = s.nov(nov[:, None])                                              # surprise -> routing bias
-        _elg = ((s.q_entry(gist) + nb) @ K.t()) / max(1e-3, s.route_t)
+        # ENTRY USES THE SHARED ROUTER. This was `q_entry(gist) @ K.t()` -- free learned keys with no region term
+        # and no centroid update, i.e. a different and strictly weaker router than the society path's, on the path
+        # that is now the default. See entry_logits for the measurement: I(domain; expert) was 0.000 here.
+        if s.grounded:
+            _nlg = s.entry_logits(gist, nov, N, step=step)
+        else:
+            _nlg = ((s.q_entry(gist) + nb) @ _Kd.t()) / max(1e-3, s.route_t)
         # THE LEARNED HALT PRIOR APPLIES HERE TOO. halt_b was added for the society path and measured DEAD on this
         # one -- an optimizer parameter with an identically-zero gradient on what is now the default path. HALT is
         # one operator with one key; it should have one prior as well.
-        if s.halt_on: _elg = _elg + F.pad(s.halt_b.expand(1, 1), (N, 0))
+        _hlg = (((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(s.halt_key, dim=-1)[:, None])
+                 / max(1e-3, s.route_t)) + s.halt_b if s.halt_on
+                else (s.q_entry(gist) + nb) @ s.halt_key[:, None])
+        _elg = torch.cat([_nlg, _hlg], -1)
         if ban1 is not None: _elg[:, ban1] = float("-inf")                     # held out of the ENTRY distribution
         c = torch.softmax(_elg, -1)                                           # (B,N+1) ENTRY distribution
+        # ...and the regions MOVE toward what they served, which the chaining path never did either. Without it
+        # the cosine term scores against centroids frozen at initialisation and grounding buys nothing.
+        if s.grounded and ban1 is None: s.ground_update(gist, c[:, :N], N)
         #   route_t applied HERE TOO. It was only ever applied on the society path, so the chaining path kept the
         #   flat T=1.0 distribution -- with N+1 near-equal logits, HALT starts with ~1/(N+1) and, being ABSORBING,
         #   accumulates every step. That is a large part of the measured 'halt 0.76, mean routed depth 0.24 of 4'.
@@ -1972,68 +1998,12 @@ def selfcheck(model, mem, fab=None):                       # entry -- tens of Gi
 def main():
     global model, BLEN
     print(f"self-organize | d{D} | {NP} hidden processes | stream {STREAM_LEN} | win {WIN} | SIG_MODE={SIG_MODE} | data {DATA_MODE}")
-    # === WHAT IS ACTUALLY ON ==================================================================================
-    # Printed because this project's largest single error was not a bug: it was SIX subsystems silently defaulting
-    # OFF, so every result described a system that was missing its routing fabric, its world model, its expanding
-    # tokenizer, its per-expert memory and its non-stationary stream. Nothing in the output said so. A run that
-    # cannot be read back as "here is the system this measured" is a run that will be misfiled later.
-    # This is the whole-system check, in the log, on every run.
-    def _on(b): return "ON " if b else "off"
-    print(f"[config] SUBSYSTEMS  fabric {_on(FABRIC)} ({_i('FAB_NMAX', 4096)} slots, rank {_i('FAB_RANK', 8)}) | "
-          f"world {_on(bool(_i('WORLD_MODEL', 1)))} (grow {_on(bool(_i('WORLD_GROW', 1)) and bool(_i('WORLD_MODEL', 1)))}, "
-          f"feedback {_on(bool(_i('WORLD_FEEDBACK', 1)))}) | domains {_on(SELF_ORG)} (cap {MAX_DOMAINS}) | "
-          f"manage {_on(MANAGE_ON)} | tokenizer {_on(USE_TOK)} (online {_on(TOK_ONLINE)}) | "
-          f"per-expert memory {_on(bool(_i('MEM_PER_EXPERT', 1)) and FABRIC)} | phased {_on(PHASED)}")
-    # EFFECTIVE VALUES, NOT ENV VALUES. This banner exists so a log can be read back as "here is the system this
-    # measured", and it was printing the raw environment variable for two flags whose effective value is an AND
-    # with something else. A whole 48k-step chaining pilot logged "per-expert memory ON " while MEM_PER_EXPERT was
-    # `... and SOCIETY` and therefore OFF for the entire run. A banner that can lie is worse than no banner.
-    if bool(_i("MEM_PER_EXPERT", 1)) and not FABRIC:
-        print("[config] note: MEM_PER_EXPERT=1 but FABRIC=0 -- there are no experts to own memory, so the store is "
-              "GLOBAL. Shown as off above because off is what it is.")
-    if bool(_i("WORLD_GROW", 1)) and not bool(_i("WORLD_MODEL", 1)):
-        print("[config] note: WORLD_GROW=1 but WORLD_MODEL=0 -- nothing to grow.")
-    # NAMING, because the first version of this banner printed "experts off" while the expert population was ON.
-    # The EXPERTS flag names the LEGACY ExpertBank path; the live population is the fabric. Saying "experts off"
-    # about a run with 4096 routed experts is worse than saying nothing.
-    print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
-          f"The legacy ExpertBank (EXPERTS={_i('EXPERTS', 0)}) is {'ON' if EXPERTS else 'off'} and is mutually "
-          f"exclusive with it -- with the fabric on, that flag being 0 is CORRECT, not a missing subsystem.")
-    print(f"[config] SELECTION   replicate {_on(FAB_REPLICATE)} (parent: sampled by fitness among the "
-          f"{_i('FAB_PARENT_K', 8)} nearest region-owners; mutation {_f('FAB_MUT', 0.25):.0%} of parent std, "
-          f"{_f('FAB_MUT_BIG_P', 0.1):.0%} of births x{_f('FAB_MUT_BIG', 6.0):.0f})"
-          f" | competence protection {_on(COMP_PROTECT)} | cull-empty domains "
-          f"{_on(DOM_CULL_EMPTY)} | expert breadth cap {_f('EXP_DOM_FRAC', 0.10):.0%} of domains "
-          f"(floor {_i('EXP_DOM_MIN', 4)}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
-          f"{_f('FAB_RAMP_TO', 1.0):.0%} of cap")
-    print(f"[config] PATH        {'CHAINING (default)' if not SOCIETY else 'SOCIETY (SOCIETY=1)'} -- "
-          + (f"experts COMPOSE: mass flows expert -> expert through the transition matrix for up to "
-             f"{_i('FAB_STEPS', 4)} hops ({_i('FAB_CHAIN_K', 8)} computed per hop), HALT blocked for the first "
-             f"{_i('FAB_MIN_STEPS', 2)}. SOCIETY=1 for the one-shot blend."
-             if not SOCIETY else
-             f"independent experts, ONE hop, blended at the prediction level; nobody sees anybody. Nothing "
-             f"composes on this path. Unset SOCIETY for the chaining default."))
-    print(f"[config] ROUTING     {'grounded region + learned bilinear' if bool(_i('ROUTE_GROUNDED', 1)) else 'learned only'}"
-          f" | HALT {_on(bool(_i('FAB_HALT', 1)))} on BOTH paths (cap {_f('FAB_HALT_MAX', 0.9):.2f}): the router "
-          f"decides WHETHER the population answers, not only which experts do"
-          f" | exploration {_f('FAB_EXPLORE', 0.15):.0%} of windows swap a slot for a low-use expert (both paths)")
-    # WHAT THIS PATH DOES NOT RUN. Both paths now carry utilization, competence, the fast/slow error pair, marginal
-    # contribution, affiliation, per-expert memory and exploration. These two terms are the remainder, and they are
-    # named rather than left to be discovered later in a diff.
-    if FABRIC and not SOCIETY:
-        print(f"[config] not on CHAINING: IND_W={_f('IND_W', 0.5)} (each expert must solve the task ALONE) and "
-              f"DIV_W={_f('DIV_W', 0.0)} (distinctness) both need SEPARABLE per-expert logits, which a composed "
-              f"walk does not have. Marginal contribution IS measured here, by re-walking without each candidate.")
-    print(f"[config] OFF ON PURPOSE  DIV_W={_f('DIV_W', 0.0)} (expert distinctness reward) | "
-          f"ENC_CREG={_f('ENC_CREG', 0.0)} (encoder decorrelation; ENC_VREG={_f('ENC_VREG', 5.0)} IS on) | "
-          f"DROPOUT={_f('DROPOUT', 0.0)} | RECON_W={_f('RECON_W', 0.0)} | "
-          f"FAB_MIN_STEPS={_i('FAB_MIN_STEPS', 0 if SOCIETY else 2)}")
-    if EXPERTS and FABRIC:
-        print("[config] !! EXPERTS and FABRIC are mutually exclusive (FABRIC wins the elif chain) -- experts are a NO-OP")
-    if NP < 2 and PHASED:
-        print("[config] note: PHASED with ONE corpus degenerates to a stationary stream. The non-stationarity that "
-              "matters comes from ADDING an area later (longrun.sh add/pilot-add), not from a splice.")
-    print()
+    # === WHAT IS ACTUALLY ON ===================================================================================
+    # DEFERRED until every object exists -- see _banner() below, called after construction. This used to print
+    # HERE, before model/fab/mem were built, which forced it to re-read os.environ for everything. That is a
+    # PARALLEL DESCRIPTION of the system rather than a reading of it, and a parallel description drifts: it printed
+    # "per-expert memory ON " for a 48k-step run where the effective value was `... and SOCIETY` on a SOCIETY=0
+    # run, i.e. off from step 0. Reading the live objects makes that class of lie impossible rather than fixed.
     ONLINE = USE_TOK and TOK_ONLINE
     def _retok(bstream, blabels, start=0):                 # tokenize given bytes with the LIVE vocab -> (ids, byte-pos, labels)
         ids = TOK.segment(bytes(bstream[start:]) if start else bytes(bstream), count=False); bs, off = [], start
@@ -2703,6 +2673,71 @@ def main():
         if t is None: return
         if DEV == "cuda": torch.cuda.synchronize()
         _prof[k] = _prof.get(k, 0.0) + (_time.time() - t)
+
+    def _banner():
+        """WHAT IS ACTUALLY ON. Printed because this project's largest single error was not a bug: it was SIX
+        subsystems silently defaulting OFF, and nothing in the output said so.
+
+        EVERY VALUE HERE IS READ FROM THE LIVE OBJECT OR THE COMPUTED VARIABLE -- never re-read from os.environ.
+        An env var is what was ASKED FOR; these are what RAN, and the two differ whenever an effective value is an
+        AND with something else (MEM_PER_EXPERT and FABRIC; WORLD_GROW and WORLD_MODEL; FAB_MIN_STEPS defaulting
+        by path). Each of those printed the env var and each of them lied in a real log."""
+        def _on(b): return "ON " if b else "off"
+        _F = fab if FABRIC else None
+        print(f"[config] SUBSYSTEMS  fabric {_on(FABRIC)}"
+              + (f" ({_F.cap} slots, rank {_F.r}, {_F.n()} live now)" if _F else "")
+              + f" | world {_on(WORLD_MODEL)} (grow {_on(WORLD_GROW)}, "
+                f"feedback {_on(world_proj is not None)})"
+              f" | domains {_on(SELF_ORG)} (cap {MAX_DOMAINS}) | manage {_on(MANAGE_ON)}"
+              f" | tokenizer {_on(USE_TOK)} (online {_on(TOK_ONLINE)})"
+              f" | per-expert memory {_on(MEM_PER_EXPERT)}"
+              + (f" ({mem.n_own} owners x {mem.quota})" if MEM_PER_EXPERT else "")
+              + f" | phased {_on(PHASED)}")
+        # OVERRIDDEN, NAMED. If what ran differs from what was asked for, say which flag did it -- silence here is
+        # how "per-expert memory ON" survived a whole pilot in which it was off.
+        for _nm, _asked, _got, _why in (
+                ("MEM_PER_EXPERT", bool(_i("MEM_PER_EXPERT", 1)), MEM_PER_EXPERT, "FABRIC=0, so there are no experts to own memory"),
+                ("WORLD_GROW",     bool(_i("WORLD_GROW", 1)),     WORLD_GROW,     "WORLD_MODEL=0, so there is nothing to grow"),
+                ("WORLD_FEEDBACK", bool(_i("WORLD_FEEDBACK", 1)), world_proj is not None, "WORLD_MODEL=0, so there is no forecast to feed back"),
+                ("EXPERTS",        bool(_i("EXPERTS", 0)),        bool(EXPERTS and not FABRIC), "FABRIC wins the elif chain -- the ExpertBank never runs")):
+            if _asked and not _got:
+                print(f"[config] OVERRIDDEN: {_nm}=1 was asked for but did NOT run -- {_why}.")
+        print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
+              f"The legacy ExpertBank (EXPERTS={_i('EXPERTS', 0)}) is {'ON' if EXPERTS else 'off'} and is mutually "
+              f"exclusive with it -- with the fabric on, that flag being 0 is CORRECT, not a missing subsystem.")
+        if _F:
+            print(f"[config] SELECTION   replicate {_on(FAB_REPLICATE)} (parent: sampled by fitness among the "
+                  f"{_F.parent_k} nearest region-owners; mutation {_F.mut:.0%} of parent std, "
+                  f"{_F.mut_big_p:.0%} of births x{_F.mut_big:.0f}) | competence protection {_on(COMP_PROTECT)}"
+                  f" | cull-empty domains {_on(DOM_CULL_EMPTY)} | expert breadth cap {_F.breadth:.0%} of domains "
+                  f"(floor {_F.breadth_min}) | ramp {_f('FAB_RAMP_RATE', 0.10):.0%}/event to "
+                  f"{_f('FAB_RAMP_TO', 1.0):.0%} of cap")
+            print(f"[config] PATH        {'CHAINING (default)' if not SOCIETY else 'SOCIETY (SOCIETY=1)'} -- "
+                  + (f"experts COMPOSE: mass flows expert -> expert through the transition matrix for up to "
+                     f"{_F.max_steps} hops ({_F.chain_k} computed per hop), HALT blocked for the first "
+                     f"{_F.min_steps}. SOCIETY=1 for the one-shot blend."
+                     if not SOCIETY else
+                     f"independent experts, ONE hop, top-{max(ENS_K, IND_K)} computed, blended at the prediction "
+                     f"level; nobody sees anybody. Nothing composes. Unset SOCIETY for the chaining default."))
+            print(f"[config] ROUTING     {'grounded region + learned bilinear' if _F.grounded else 'learned only'}"
+                  f" | HALT {_on(_F.halt_on)} on BOTH paths (cap {_F.halt_max:.2f})"
+                  f" | exploration {_F.explore:.0%} of windows swap a slot for a low-use expert"
+                  f" | identities {'from FULL WEIGHTS' if _F.derive_ids else 'free parameters (FAB_DERIVE_IDS=0)'}"
+                  f", refreshed every {_F.emb_every} step(s) | route_t {_F.route_t}")
+            if not SOCIETY:
+                print(f"[config] not on CHAINING: IND_W={IND_W} (each expert must solve the task ALONE) and "
+                      f"DIV_W={DIV_W} (distinctness) both need SEPARABLE per-expert logits, which a composed walk "
+                      f"does not have. Marginal contribution IS measured here, by re-walking without each candidate.")
+        print(f"[config] OFF ON PURPOSE  DIV_W={DIV_W} (expert distinctness reward) | "
+              f"ENC_CREG={_f('ENC_CREG', 0.0)} (encoder decorrelation; ENC_VREG={_f('ENC_VREG', 5.0)} IS on) | "
+              f"DROPOUT={DROPOUT} | RECON_W={RECON_W} | WEIGHT_DECAY={WD}")
+        if EXPERTS and FABRIC:
+            print("[config] !! EXPERTS and FABRIC are mutually exclusive (FABRIC wins the elif chain) -- experts are a NO-OP")
+        if NP < 2 and PHASED:
+            print("[config] note: PHASED with ONE corpus degenerates to a stationary stream. The non-stationarity that "
+                  "matters comes from ADDING an area later (longrun.sh add/pilot-add), not from a splice.")
+        print()
+    _banner()
     _total_steps = EPOCHS * (len(stream) // WIN)
     _bpw = WIN * (len(byte_stream) / max(1, len(stream))) if ONLINE else WIN     # BYTES of corpus consumed per step
     while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
