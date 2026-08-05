@@ -4096,7 +4096,17 @@ def main():
             if _fl - _bl > 0.05 and _bpb_dir[0] <= 0.05:
                 print(f"  >> NOT DIVERGING -- the per-token rise is the growing vocabulary, not the model. "
                       f"Judge this run on bits/byte.")
-        if _fl - _bl > 0.05 and _bi < len(_lm_curve) - 2 and (_bpb_dir is None or _bpb_dir[0] > 0.05):
+            elif _bpb_dir[1] <= 0.05:
+                # PLATEAU IS NOT DIVERGENCE. Measuring only from the global minimum cannot tell "climbed early
+                # then settled" from "still climbing", and it called a run DIVERGING whose last two thirds were
+                # flat to -0.007. The slope over the recent stretch is the one that says whether it is STILL
+                # getting worse, which is the question.
+                print(f"  >> PLATEAUED, not diverging. It rose {_bpb_dir[0]:+.3f} from its minimum early on and "
+                      f"has been flat since ({_bpb_dir[1]:+.3f} over the last two thirds). What to explain is the "
+                      f"EARLY transition, not the tail -- more steps at this setting will not help either, but "
+                      f"nothing is degrading.")
+        if (_fl - _bl > 0.05 and _bi < len(_lm_curve) - 2
+                and (_bpb_dir is None or (_bpb_dir[0] > 0.05 and _bpb_dir[1] > 0.05))):
             print(f"  >> DIVERGING on BOTH the per-token and the bits/byte curve. The loss bottomed at step {_bs} "
                   f"and has been RISING for the "
                   f"{_fs - _bs} steps since -- {100 * (len(_lm_curve) - 1 - _bi) / max(1, len(_lm_curve) - 1):.0f}% "
