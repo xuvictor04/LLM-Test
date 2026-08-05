@@ -291,6 +291,8 @@ grid)
       vote_soc)  echo "CHAIN_VOTE=1 FAB_STEPS=1" ;;
       noban)     echo "CHAIN_BAN=0" ;;
       nolatch)   echo "FAB_RAMP_LATCH=0" ;;
+      nogrow)    echo "FAB_GROW=0 FAB_N0=1024" ;;
+      nogrow_s)  echo "SOCIETY=1 FAB_GROW=0 FAB_N0=1024" ;;
       weights)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
       nofabric)  echo "FABRIC=0" ;;
       balance)   echo "BAL_WARM=100000000" ;;

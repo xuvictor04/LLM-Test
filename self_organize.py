@@ -917,8 +917,14 @@ class Fabric(nn.Module):
         return m
 
     def note_dom(s, e, did):
+        """Record that expert e served domain did. AFFILIATION ONLY -- it used to also bump `use`, which conflated
+        two different measurements and made them impossible to sample at different rates."""
         s.dom_of.setdefault(int(e), set()).add(int(did))
-        s.use[int(e)] = s.use.get(int(e), 0.0) + 1.0       # UTILIZATION: the resource the population competes for
+
+    def note_use(s, ids):
+        """UTILIZATION: the resource the population competes for. Culling ranks on it, exploration picks its cold
+        set from it, and discovery hands novel material to its minimum."""
+        for _e in ids: s.use[int(_e)] = s.use.get(int(_e), 0.0) + 1.0
 
     def note_err(s, e, v):
         """Per-expert FAST and SLOW error EMAs. The pair is the whole point: their DIFFERENCE separates an expert
@@ -1494,6 +1500,12 @@ class PlateauGrowth:
         s.fast = s.slow = None; s.rel = rel; s.cool = cooldown; s.warm = warmup; s.last = -10**9
         s.z = z; s.burst = max(1, burst); s.ramp = ramp; s.rmin = rmin; s.rmax = rmax
         s.dev = 0.0; s.n = 0; s.state = "W"; s.t0 = 0; s.blackout = -10**9; s.why = ""
+        # FAB_GROW=0 freezes the population at FAB_N0 for the whole run: no ramp, no regression burst, no stall
+        # growth. Nothing else changes -- culling, routing, selection and replication all still run, so this
+        # isolates GROWTH from everything else the fabric does. The 2.4 -> 3.5 climb between steps 6k and 12k is
+        # the largest remaining loss in every arm at every seed, and it coincides with the ramp building the
+        # population; this is the arm that says whether those two facts are related.
+        s.grow_on = bool(int(_env("FAB_GROW", 1)))
         s.latch = bool(int(_env("FAB_RAMP_LATCH", 1)))          # 0 restores the never-terminating ramp
         s.ramp_done = False; s.n_ramp = 0; s.n_stall = 0; s.n_regr = 0   # why growth fired, for the report
         s.rate = max(0.0, rate); s.ramp_to = ramp_to      # GEOMETRIC ramp: grow a FRACTION of the population, not a
@@ -1503,6 +1515,7 @@ class PlateauGrowth:
         #   rather than on a step number, so it does not quietly expire before the population is built.
     def note_shift(s, t): s.blackout = t          # retok / resample: the loss jump is OURS, not the data's
     def step(s, loss, t, n=None, cap=None):
+        if not s.grow_on: return 0                                           # population frozen at FAB_N0
         s.fast = loss if s.fast is None else 0.98 * s.fast + 0.02 * loss
         s.slow = loss if s.slow is None else 0.998 * s.slow + 0.002 * loss
         s.n += 1
@@ -3159,6 +3172,7 @@ def main():
         ]
         if _F0 is not None: _EFF += [
             ("FAB_NMAX",       _F0.cap),                 ("FAB_RANK",       _F0.r),
+            ("FAB_N0",         _i("FAB_N0", 3)),
             ("FAB_STEPS",      _F0.max_steps),           ("FAB_MIN_STEPS",  _F0.min_steps),
             ("FAB_CHAIN_K",    _F0.chain_k),             ("FAB_EXPLORE",    _F0.explore),
             ("FAB_HALT",       _F0.halt_on),             ("FAB_HALT_MAX",   _F0.halt_max),
@@ -3171,7 +3185,8 @@ def main():
             ("CHAIN_SUP",      _F0.sup_w),               ("CHAIN_STATE_Q",  _F0.state_q),
             ("EXP_DOM_FRAC",   _F0.breadth),             ("EXP_DOM_MIN",    _F0.breadth_min),
         ]
-        if _G0 is not None: _EFF += [("FAB_RAMP_LATCH", _G0.latch), ("FAB_RAMP_TO", _G0.ramp_to)]
+        if _G0 is not None: _EFF += [("FAB_RAMP_LATCH", _G0.latch), ("FAB_RAMP_TO", _G0.ramp_to),
+                                     ("FAB_GROW", _G0.grow_on)]
         _EFF = [(r[0], r[1], (r[2] if len(r) > 2 else None)) for r in _EFF]
         _known = {r[0] for r in _EFF}
         def _norm(v):
@@ -3474,8 +3489,20 @@ def main():
         if FABRIC and _w is not None:
             # AFFILIATION, on both paths. This drives the breadth cap (how many domains one expert may serve) and
             # the end-of-run affiliation map; under chaining neither had any data at all.
-            with torch.no_grad():                          # record the affiliation the cap is computed from
-                fab.note_dom(int(_w[0].argmax()), did)
+            with torch.no_grad():
+                # EVERY WINDOW IN THE BATCH, not row 0. This recorded ONE expert per step, from the first row --
+                # so at BATCH_W=16, fifteen of every sixteen windows' experts were never recorded as serving
+                # anything. Measured consequence: "experts serving none: 4053" of 4096, an affiliation map built
+                # from a 1-in-16 sample of one row. dom_ban reads that table, so the percentage breadth cap could
+                # only ever ban the ~30 experts that happened to land in it.
+                _tops = _w.argmax(-1).tolist() if _w.dim() == 2 else [int(_w.argmax())]
+                for _e5 in _tops: fab.note_dom(_e5, did)
+                # ...and utilization ONLY on the society path here, because the chaining paths already record it
+                # per row inside forward(). Society recorded it nowhere else, so its `use` table was that same
+                # 1-per-step sample while chaining's was BATCH_W per step -- the two paths were measuring
+                # utilization at rates differing by BATCH_W, and their ROUTER SELECTION figures were compared
+                # to each other throughout this branch as if they meant the same thing.
+                if SOCIETY: fab.note_use(_tops)
                 _wd = _w[0].detach()                       # which experts serve THIS domain, and how much. Kept ON DEVICE:
                 #   `.cpu()` here forced a full GPU->CPU synchronization EVERY step for a number that is only read once, in
                 #   the end-of-run affiliation report. Accumulate on device; move to host when reporting.
