@@ -18,6 +18,11 @@ data/dyntok_*.json
 data/tok_*.json
 env/
 runs/
+# Fetched corpora. longrun.sh pilot writes data_pilot/ and run writes data_big/; without these a
+# working tree is untracked-dirty the moment anyone runs a pilot.
+data_pilot/
+data_big/
+data_grid/
 venv/
 
 # accidental checkpoint dirs from SAVE_CKPT=<falsy> (now normalised to OFF, kept so old trees stay clean)

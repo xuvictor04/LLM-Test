@@ -2260,8 +2260,13 @@ def main():
             return ""
     _br = _git("rev-parse", "--abbrev-ref", "HEAD") or "?"
     _sha = _git("rev-parse", "--short=10", "HEAD") or "?"
-    _dirty = "DIRTY -- uncommitted changes, this log is NOT reproducible from the commit"
-    _dirty = _dirty if _git("status", "--porcelain") else "clean"
+    # TRACKED modifications only. `git status --porcelain` also lists UNTRACKED files, and a working tree that
+    # has ever run a pilot is full of them -- fetched corpora, checkpoints, logs. Counting those as "uncommitted
+    # changes" marks a freshly-pulled clean checkout as DIRTY, which is a false alarm about the one thing this
+    # line exists to certify: whether the CODE matches the commit.
+    _mods = _git("status", "--porcelain", "--untracked-files=no")
+    _dirty = (f"DIRTY -- {len([l for l in _mods.splitlines() if l.strip()])} tracked file(s) modified, this log is "
+              f"NOT reproducible from the commit") if _mods else "clean"
     _desc = _git("log", "-1", "--format=%cs %s")
     print(f"[build] branch {_br} | commit {_sha} | {_dirty}" + (f" | {_desc}" if _desc else ""))
     print(f"self-organize | d{D} | {NP} hidden processes | stream {STREAM_LEN} | win {WIN} | SIG_MODE={SIG_MODE} | data {DATA_MODE}")
