@@ -479,6 +479,13 @@ class Fabric(nn.Module):
         # expert cost at d=256. The score is still bilinear and still per-expert; only the query is shared, which is
         # what every attention mechanism does.
         s.q_route = nn.Linear(sig_d, dk)
+        # WHAT THE ROUTER CANNOT SEE. The transition query is q_route(gist) + SRC[holder] + ctrl(summary). `gist`
+        # is the INPUT signature -- identical at every hop -- SRC says WHICH expert holds the state but nothing
+        # about what it produced, and ctrl is three scalars. So the hop-2 query is very nearly a fixed function of
+        # the hop-1 holder, and the router has no way to ask "given what the computation looks like NOW, what
+        # next?". Measured: I(domain; (hop0,hop1) pair) equalled I(domain; hop0) to three decimals on every seed,
+        # i.e. the second choice carried zero independent information. hproj puts the CURRENT STATE in the query.
+        s.hproj = nn.Linear(d, dk)
         # OUTGOING SIGNATURE, one per expert. K[m] is where a message may be SENT; SRC[n] is the mark expert n puts
         # on a message it emits. Together they make the transition depend on WHO IS HOLDING THE MASS:
         #     R[n -> m] = softmax( (q_route(gist) + SRC[n] + ctrl(summary)) . K[m] )
@@ -562,6 +569,44 @@ class Fabric(nn.Module):
         s.births_win = int(os.environ.get("FAB_BIRTH_WIN", 256))
         s.parent_max = float(os.environ.get("FAB_PARENT_MAX", 0.20))  # max share of recent births per parent
         s.chain_k = int(os.environ.get("FAB_CHAIN_K", 8))   # experts COMPUTED per chaining hop (was: all of them)
+        # === STAGED DEPTH ===================================================================================
+        # THE ORDER PROBLEM, and THREE ATTEMPTS AT IT THAT DID NOT WORK. All three default OFF. They are kept as
+        # flags, not deleted, because the problem is real and the next attempt should start from what was measured
+        # rather than repeat it.
+        #
+        # The structural facts are not in doubt. A depth-D chain over N experts has N^D orderings; the only loss is
+        # one cross-entropy at the END of the walk, diluted back through every later hop's LayerNorm and mixture;
+        # and topk's INDICES are not differentiable, so the gradient can say "weight the expert you already picked
+        # more or less" but never "you should have gone somewhere else".
+        #
+        # Measured on a task where each domain needs an ORDERED pair of transforms (6 domains, 24 experts, depth 4,
+        # 3 seeds), uniform-guess loss 3.871:
+        #     baseline                          loss 2.52 / 3.00 / 2.72
+        #     CHAIN_SUP=0.3  (per-hop loss)     loss 3.17 / 3.50 / 3.64   consistently WORSE
+        #     CHAIN_CURRIC=1 (staged depth)     depth rarely left 1; where it reached 2, worse
+        #     CHAIN_STATE_Q=1 (state in query)  loss 2.79 / 2.71 / 2.74   neutral
+        #
+        # A CORRECTION ON THE DIAGNOSIS. The observation that prompted this was I(domain; (hop0,hop1)) equalling
+        # I(domain; hop0) to three decimals, read as "the second hop carries zero information". That reading is
+        # wrong: I(dom; pair) >= I(dom; hop0) always, and when hop0 already identifies the domain at ~0.83 the
+        # metric is saturated, so equality is what CORRECT behaviour looks like too. If the domain determines the
+        # right pair, hop1 being a deterministic function of hop0 is the answer, not the failure. The metric that
+        # would actually settle it is H(hop1 | hop0, domain) -- whether the chain can vary its second move for the
+        # same first move when the material calls for it -- and that has not been measured.
+        #
+        # So: the concentration is real and measured (25 distinct experts against society's 487 in the pilot); the
+        # claim that per-hop credit assignment is what causes it is NOT established, and these three interventions
+        # are evidence against it.
+        s.state_q = bool(int(os.environ.get("CHAIN_STATE_Q", 0)))   # transition query sees the CURRENT state
+        s.curric = bool(int(os.environ.get("CHAIN_CURRIC", 0)))
+        s.depth_now = int(os.environ.get("CHAIN_DEPTH0", 1)) if s.curric else max_steps
+        s.dp_best = None; s.dp_wait = 0
+        s.dp_patience = int(os.environ.get("CHAIN_PATIENCE", 6))   # plateau checks before adding a hop
+        s.dp_eps = float(os.environ.get("CHAIN_EPS", 0.01))        # improvement that counts as progress
+        s.deepened = []                                            # (step, new depth) for the report
+        s.sup_w = float(os.environ.get("CHAIN_SUP", 0.0))          # per-hop deep supervision weight
+        s._hops = []                                               # per-hop hidden states, for that supervision
+        s._hopq = []                                               # per-hop router queries, for per-hop spawn
         s.explore = float(os.environ.get("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
         s.xover = float(os.environ.get("FAB_XOVER", 0.35))       # fraction of births assembled from SEVERAL parents
         s.born = {}                                        # expert -> step it was created (grace before culling)
@@ -1016,6 +1061,21 @@ class Fabric(nn.Module):
         _A = s.A[idx]; _B = s.B[idx]                                           # (B,kk,d,r) (B,kk,r,d)
         O = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld', torch.einsum('bld,bkdr->bklr', h, _A), _B)
         return w, O, idx
+    def maybe_deepen(s, lf, step):
+        """ONE MORE HOP, once this depth has stopped paying. The user-facing rule: train the chain at its current
+        length until the loss stops improving, then extend it by one. Returns the new depth if it grew.
+
+        Deliberately keyed on the SLOW loss and a patience counter rather than on a single step: the population is
+        also growing, and a burst of new experts causes a transient worsening that must not read as a plateau."""
+        if not s.curric or s.depth_now >= s.max_steps: return None
+        if s.dp_best is None or lf < s.dp_best - s.dp_eps:
+            s.dp_best = lf if s.dp_best is None else min(s.dp_best, lf); s.dp_wait = 0; return None
+        s.dp_wait += 1
+        if s.dp_wait < s.dp_patience: return None
+        s.depth_now += 1; s.dp_wait = 0; s.dp_best = lf
+        s.deepened.append((step, s.depth_now))
+        return s.depth_now
+
     def remove(s, j):
         """DELETE an expert outright: its parameters are gone. In a society this should cost roughly that expert's
         own contribution; in an entangled mixture it damages everyone (the weights-unlearn failure mode)."""
@@ -1076,9 +1136,12 @@ class Fabric(nn.Module):
         #   route_t applied HERE TOO. It was only ever applied on the society path, so the chaining path kept the
         #   flat T=1.0 distribution -- with N+1 near-equal logits, HALT starts with ~1/(N+1) and, being ABSORBING,
         #   accumulates every step. That is a large part of the measured 'halt 0.76, mean routed depth 0.24 of 4'.
-        steps = max(1, min(s.max_steps, 2 + N // 2))                          # adaptive depth budget
+        # CURRICULUM DEPTH. depth_now is 1 until the loss plateaus, then grows toward max_steps -- see the block
+        # in __init__ for why the order is learned one position at a time rather than all at once.
+        steps = max(1, min(s.depth_now, s.max_steps, 2 + N // 2))             # adaptive depth budget
         depth = h.new_zeros(()); mass = torch.zeros(N + 1, device=h.device); bal = h.new_zeros(())
         wacc = None                                                           # (B,N) per-window mass over all hops
+        if ban1 is None: s._hops = []; s._hopq = []
         for _t_ in range(steps):
             if _t_ < s.min_steps:                                             # block HALT early: force the nodes to be used
                 c = torch.cat([c[:, :N], torch.zeros_like(c[:, N:])], -1)
@@ -1121,6 +1184,9 @@ class Fabric(nn.Module):
                 with torch.no_grad():
                     for _uu in _ci[:, 0].tolist(): s.use[_uu] = s.use.get(_uu, 0.0) + 1.0
                     wacc = nm.detach() if wacc is None else wacc + nm.detach()   # per-window mass, over all hops
+            # TRACE HOOK, off unless a caller sets fab._trace = []. Zero cost otherwise, and it is the instrument
+            # that produced the ordering measurements in __init__ -- keep it so the next attempt can re-measure.
+            if getattr(s, '_trace', None) is not None: s._trace.append(_ci[:, 0].tolist())
             _cA = s.A[_ci]; _cB = s.B[_ci]                                    # (B,k,d,r) (B,k,r,d)
             Bo = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
                                                torch.einsum('bld,bkdr->bklr', h, _cA), _cB)
@@ -1135,6 +1201,11 @@ class Fabric(nn.Module):
             # counter determining it.
             _alive = nm.sum(-1, keepdim=True)[:, :, None]                     # (B,1,1) mass NOT yet halted
             h = s.norm(h + s.alpha * _alive * (upd - h))                      # residual fabric step, gated by HALT
+            # PER-HOP STATE, kept for DEEP SUPERVISION. With a single loss at the end of the walk, hop t's router
+            # learns only through the chain rule from D-t hops away; scoring head(h_t) directly gives that hop --
+            # and the expert it chose -- a local answer to "did this move help?". It is also what makes the
+            # curriculum's stopping test meaningful, since depth-1 then has a loss of its own.
+            if ban1 is None and s.sup_w > 0: s._hops.append(h)
             depth = depth + (1 - c[:, HALT]).mean(); mass = mass + c.mean(0).detach()
             ent = -(c.clamp_min(1e-9).log() * c).sum(-1)
             summ = torch.stack([nm.sum(-1), c[:, HALT], ent], -1)             # recurrent control summary
@@ -1142,7 +1213,13 @@ class Fabric(nn.Module):
             # PER-SOURCE, and only for the sources that actually hold mass. The full (B,N,N+1) transition is
             # 1.07 GB at N=4096 alone; the top-k sources hold essentially all of it, so R is built for those.
             Q = (s.q_route(gist)[:, None, :] + _SRCd[_ci]                      # (B,k,dk): + the HOLDER's own mark
-                 + bias[:, None, :])
+                 + bias[:, None, :]
+                 + (s.hproj(h.mean(1))[:, None, :] if s.state_q else 0))       # ...+ what the state looks like NOW
+            # THE QUERY IS A REQUEST, AND IT MAY HAVE NO ANSWER. Spawn-by-specification ran at ENTRY only, so the
+            # case the router hits at hop 2 -- "given where I am, I want an expert like THIS" with nothing near it
+            # -- could never create anything. Kept for the caller to act on after the walk: growing the population
+            # mid-walk would resize the very tensors being indexed.
+            if ban1 is None: s._hopq.append(Q[:1, 0].detach())
             _rlg = torch.einsum('bkd,md->bkm', Q, K) / max(1e-3, s.route_t)
             if s.halt_on: _rlg = _rlg + F.pad(s.halt_b.expand(1, 1, 1), (N, 0))   # same prior on every transition
             if ban1 is not None: _rlg[:, :, ban1] = float("-inf")              # ...and out of every TRANSITION
@@ -3049,6 +3126,19 @@ def main():
                     _d3 = float(F.cross_entropy(model.head(_h3).reshape(-1, V), y.reshape(-1)) - loss)
                     fab.contrib[_n3] = _d3 if _n3 not in fab.contrib else \
                         (1 - COMP_EMA) * fab.contrib[_n3] + COMP_EMA * _d3
+        # === DEEP SUPERVISION: give every hop its own answer ====================================================
+        # The chain's only loss was at the END of the walk. Hop t's router therefore learned through the chain rule
+        # from D-t hops away, and since topk's INDICES carry no gradient, that signal could only re-weight experts
+        # already chosen -- never say "you should have gone elsewhere". Measured consequence: on a task where each
+        # domain needs an ORDERED pair of transforms, I(domain; hop-1 choice) equalled I(domain; hop-0 choice) to
+        # three decimals on every seed. The second hop carried no information at all.
+        # Scoring the state after EACH hop gives that hop, and the expert it picked, a local "did this help?".
+        _sup = None
+        if FABRIC and not SOCIETY and fab.sup_w > 0 and len(getattr(fab, "_hops", [])) > 1:
+            for _hh in fab._hops[:-1]:                          # the last hop IS the main loss; don't double-count
+                _sl = F.cross_entropy(model.head(_hh).reshape(-1, V), y.reshape(-1))
+                _sup = _sl if _sup is None else _sup + _sl
+            _sup = _sup / max(1, len(fab._hops) - 1)
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
         # EVERY STEP, not on the embed cadence. The refresh cadence exists because RE-READING identities is
@@ -3058,7 +3148,8 @@ def main():
         # given 300. Cost of the split: the loss trains every step, the cache still refreshes on cadence.
         _ael = fab.ae_loss(min(fab.n(), 256)) if (FABRIC and FAB_SPAWN) else None
         tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0) \
-            + (FAB_AE_W * _ael if _ael is not None else 0.0)  # nodes have had a chance to be useful
+            + (FAB_AE_W * _ael if _ael is not None else 0.0) \
+            + (fab.sup_w * _sup if _sup is not None else 0.0)  # nodes have had a chance to be useful
         if FABRIC and SOCIETY and DIV_W > 0 and _O.size(1) > 1:   # DISTINCTNESS: reward experts for DISAGREEING, so
             _t2 = _w.mean(0).topk(min(2, _O.size(1))).indices          #   they carry different competence instead of
             _a = _O[:, _t2[0]].reshape(-1); _b = _O[:, _t2[1]].reshape(-1)   #   converging on the same generalist function
@@ -3116,6 +3207,19 @@ def main():
         _lm_run.append(_lf)                                      #   plateau detector each pulled the same scalar back)
         if _due("lmcurve", max(1, (STREAM_LEN // WIN) // 8)) and _lm_run:
             _lm_curve.append((step, sum(_lm_run[-2000:]) / len(_lm_run[-2000:]))); _lm_run = _lm_run[-2000:]
+        if FABRIC and not fab.norm_only and not SOCIETY and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
+            _nd = fab.maybe_deepen(_lf, step)
+            if _nd is not None:
+                print(f"  [chain @ {step}] depth {_nd - 1} stopped paying -> {_nd} hop(s) of {fab.max_steps}. "
+                      f"The order is learned one position at a time; hop {_nd} now chooses in the context of a "
+                      f"settled hop {_nd - 1}.")
+            # PER-HOP SPAWN. The hop-2 query is a request that may have no answer, and spawn-by-specification only
+            # ever ran at entry. Ask on the deepest hop that actually ran.
+            if FAB_SPAWN and fab._hopq:
+                _nw = fab.spawn_from(fab._hopq[-1], step=step)
+                if _nw is not None:
+                    print(f"  [expert @ {step}] a MID-CHAIN query had no near match -> decoded it into slot {_nw} "
+                          f"(hop {len(fab._hopq)}, {fab.n()} live)")
         if FABRIC and not fab.norm_only:
             _nb = fabgrow.step(_lf, step, fab.n(), FAB_NMAX)    # 0, or HOW MANY to grow (burst on an unexpected regression)
             _nb = min(_nb, FAB_NMAX - fab.n())
