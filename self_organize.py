@@ -634,6 +634,11 @@ class Fabric(nn.Module):
         # halted per hop + never-halted = 1.
         s.vote = bool(int(os.environ.get("CHAIN_VOTE", 0)))
         s._votelg = None; s._vchk = 0
+        # ONE SOURCE OF TRUTH FOR min_steps. Forcing it off inside forward() with a local conditional left
+        # s.min_steps reading 2 while the effective value was 0 -- and the [config] banner, the CHAINING report
+        # section and the CHECKPOINT all print or save it. That is the same class of lie the banner rewrite was
+        # supposed to make impossible; a value that is overridden must be overridden where it lives.
+        if s.vote: s.min_steps = 0
         s._mass_ema = None                     # training-time HALT mass on the chaining path
         s._div = None                          # distinctness penalty from the last chaining walk
         s._rmix = []; s._sample_mix = False    # (grounded spread, weight-prediction spread) samples
@@ -1215,7 +1220,7 @@ class Fabric(nn.Module):
             # stop the router writing the experts off before they can learn, and under voting that reasoning
             # inverts: HALT now SELECTS which hop answers rather than switching the fabric off, so forcing it to
             # keep walking is forcing it to keep a worse answer.
-            if _t_ < (0 if _vote else s.min_steps):                            # block HALT early: force the nodes to be used
+            if _t_ < s.min_steps:                                             # block HALT early: force the nodes to be used
                 c = torch.cat([c[:, :N], torch.zeros_like(c[:, N:])], -1)
                 c = c / c.sum(-1, keepdim=True).clamp_min(1e-9)
             nm = c[:, :N]
@@ -2755,7 +2760,7 @@ def main():
                     "fab": (fab.state_dict() if FABRIC else None),
                     "fab_cfg": ({"n": fab.n(), "rank": fab.r, "cap": fab.cap, "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _f("FAB_HID_MULT", 2),
-                                 "min_steps": _i("FAB_MIN_STEPS", 0), "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
+                                 "min_steps": fab.min_steps, "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
                                  "society": SOCIETY, "grounded": fab.grounded, "route_t": fab.route_t,
                                  "route_learn": fab.route_learn, "ens_k": ENS_K,
                                  "halt_on": fab.halt_on, "halt_max": fab.halt_max} if FABRIC else None)},
@@ -2953,7 +2958,14 @@ def main():
             print(f"[config] PATH        {'CHAINING (default)' if not SOCIETY else 'SOCIETY (SOCIETY=1)'} -- "
                   + (f"experts COMPOSE: mass flows expert -> expert through the transition matrix for up to "
                      f"{_F.max_steps} hops ({_F.chain_k} computed per hop), HALT blocked for the first "
-                     f"{_F.min_steps}. SOCIETY=1 for the one-shot blend."
+                     f"{_F.min_steps}"
+                     + (". BLEND: experts vote on the PREDICTION at every hop (CHAIN_VOTE=1), so the mass that "
+                        "HALTS at a hop selects that hop's answer -- min_steps is forced to 0 because blocking "
+                        "HALT here blocks the thing choosing the answer."
+                        if _F.vote else
+                        ". BLEND: experts are mixed in the HIDDEN STATE and decoded once at the end; HALT only "
+                        "scales the update, which is why it measures ~0. CHAIN_VOTE=1 for per-hop voting.")
+                     + " SOCIETY=1 for the one-shot blend."
                      if not SOCIETY else
                      f"independent experts, ONE hop, top-{max(ENS_K, IND_K)} computed, blended at the prediction "
                      f"level; nobody sees anybody. Nothing composes. Unset SOCIETY for the chaining default."))
@@ -3845,7 +3857,8 @@ def main():
             "CHAINING ACTIVE (the default). Mass flows expert -> expert through the transition matrix over multiple "
             "hops, HALT absorbing, so an expert CAN build on another's output. Depth below is what actually ran."))
         if not SOCIETY:
-            print(f"  HALT blocked for the first {_i('FAB_MIN_STEPS', 2)} hop(s) (FAB_MIN_STEPS). At 0 the router "
+            print(f"  HALT blocked for the first {fab.min_steps} hop(s) (FAB_MIN_STEPS"
+                  + (", forced to 0 by CHAIN_VOTE" if fab.vote else "") + f"). At 0 the router "
                   f"halts immediately and depth is 0.00 of {_i('FAB_STEPS', 4)} -- chaining ON and nothing chained.")
         if SOCIETY:
             print(f"  (ponder cost this run: 0 by construction -- _dep is zeros on the society path, so PONDER="
