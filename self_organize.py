@@ -31,7 +31,9 @@ except Exception: pass
 # where it was off from step 0, "grounded region + learned bilinear" on a path with no region term, and
 # FAB_MIN_STEPS=2 while the code ran 0 -- and each was fixed individually while the next one was already there.
 _ENV_ASKED = {}                                            # name -> the value the environment explicitly set
+_ENV_READ = set()                                          # every key the code ever ASKED FOR, set or not
 def _env(k, d=None):
+    _ENV_READ.add(k)
     if k in os.environ: _ENV_ASKED[k] = os.environ[k]
     return os.environ.get(k, d)
 def _i(k, d): return int(_env(k, d))
@@ -3027,6 +3029,31 @@ def main():
         if DEV == "cuda": torch.cuda.synchronize()
         _prof[k] = _prof.get(k, 0.0) + (_time.time() - t)
 
+    s_cfg_known = set()
+    def _config_audit():
+        """RUN AT THE END, when every _env() call in the file has actually happened. Two questions the log could
+        not answer before: was a knob I set never verified against a live value, and was a knob I set never READ
+        AT ALL. The second is the dangerous one on an unattended grid -- a typo trains for twenty minutes on the
+        default while the command line implies otherwise, and nothing says so.
+        It has to be here rather than in the banner: several knobs (FAB_CULL_FRAC, FAB_CENT_TOPK) are read only
+        inside the report, so at banner time they look exactly like typos."""
+        _plumb = {"DEVICE", "DATA_MODE", "DATA_DIR", "DOMAINS", "STREAM_LEN", "WIN", "BATCH_W", "D_MODEL",
+                  "MODEL", "LAYERS", "HEADS", "SAVE_CKPT", "RESUME", "CKPT_EVERY", "RATE_EVERY", "PROFILE",
+                  "SEED", "DISK_STREAM", "CORPUS_CAP", "SIG_WIN", "SIG_MODE", "SIG_D", "VMAX", "PROBE_WAIT",
+                  "GEN_LEN", "GEN_TEMP", "COH_N", "COH_LEN", "MANAGE_EVERY", "DOM_MANAGE_EVERY", "ENC_WARMUP",
+                  "ENC_WARMUP_MIN", "SEG_MIN", "SEG_MAX", "GROW_EVERY", "GROW_BURST", "VERIFY", "OUT", "EPOCHS"}
+        _unreg = sorted(set(_ENV_ASKED) - s_cfg_known - _plumb)
+        _pfx = ("FAB_", "ROUTE_", "CHAIN_", "SOCIETY", "DIV_W", "IND_", "ENS_", "MEM_", "DOM_", "ENC_",
+                "WORLD_", "TOK", "EXPERT", "EXP_", "BAL_", "PONDER", "CENT_", "SHIFT_", "WRITE_", "SELF_ORG")
+        _typo = sorted(k for k in os.environ if k.startswith(_pfx) and k not in _ENV_READ)
+        if _typo:
+            print(f"\n[config-audit] !! NOTHING READ THESE: {', '.join(_typo)} -- set in the environment but no "
+                  f"code path ever asked for them. Almost certainly a typo; this run used the DEFAULTS for "
+                  f"whatever was meant, and every number above describes that run, not the intended one.")
+        if _unreg:
+            print(f"[config-audit] set and read, but not verified against a live value: {', '.join(_unreg)}")
+        if not _typo and not _unreg:
+            print(f"\n[config-audit] all {len(_ENV_ASKED)} environment settings were read and accounted for.")
     def _banner():
         """WHAT IS ACTUALLY ON. Printed because this project's largest single error was not a bug: it was SIX
         subsystems silently defaulting OFF, and nothing in the output said so.
@@ -3079,12 +3106,14 @@ def main():
             ("ROUTE_T",        _F0.route_t),             ("ROUTE_GROUNDED", _F0.grounded),
             ("ROUTE_LEARN",    _F0.route_learn),         ("ROUTE_REGION_W", _F0.region_w),
             ("FAB_KEY_NORM",   FAB_KEY_NORM),            ("CHAIN_VOTE",     _F0.vote),
+            ("CHAIN_ROUTE",    "soc" if _F0.loop_soc else "transition"),
             ("CHAIN_BAN",      _F0.chain_ban),           ("CHAIN_CURRIC",   _F0.curric),
             ("CHAIN_SUP",      _F0.sup_w),               ("CHAIN_STATE_Q",  _F0.state_q),
             ("EXP_DOM_FRAC",   _F0.breadth),             ("EXP_DOM_MIN",    _F0.breadth_min),
         ]
         if _G0 is not None: _EFF += [("FAB_RAMP_LATCH", _G0.latch), ("FAB_RAMP_TO", _G0.ramp_to)]
         _EFF = [(r[0], r[1], (r[2] if len(r) > 2 else None)) for r in _EFF]
+        _known = {r[0] for r in _EFF}
         def _norm(v):
             if isinstance(v, bool): return "1" if v else "0"
             if isinstance(v, float): return f"{v:g}"
@@ -3108,9 +3137,10 @@ def main():
             print(f"[config] !! OVERRIDDEN: {_n}={_a} was asked for, {_n}={_v} is what RAN.")
         for _n, _a, _v, _note in _adj:
             print(f"[config] adjusted: {_n} {_a} -> {_v} ({_note})")
-        if not _bad:
-            print(f"[config] no unexplained overrides: every one of the {len(_ENV_ASKED)} environment settings "
-                  f"took effect as given" + (f" ({len(_adj)} adjusted as noted above)." if _adj else "."))
+        # (the two integrity checks that need EVERY read to have happened live at the end of the run, in
+        #  _config_audit -- at banner time the report's own reads have not occurred yet and every one of them
+        #  looks like a typo. Verified: FAB_CULL_FRAC, read only inside the report, was flagged from here.)
+        s_cfg_known.update(_known)
         print("[config] EFFECTIVE  " + "  ".join(f"{_n}={_norm(_v)}" for _n, _v, _ in _EFF))
         print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
               f"The legacy ExpertBank (EXPERTS={int(bool(EXPERTS))}) is {'ON' if EXPERTS else 'off'} and is mutually "
@@ -4905,6 +4935,7 @@ def main():
     print(f"  target process {bt:.3f}->{at:.3f} (rises=forgotten, Δ {at-bt:+.4f})")
     print(f"  other processes {bo:.3f}->{ao:.3f} (Δ {abs(ao-bo):.4f} = {'LOCAL' if abs(ao-bo) < 0.05 else 'LEAKED'})  [fixed {EVAL_N}-window eval]")
     for p in others: print(f"    process {p}: {bo_each[p]:.3f}->{ao_each[p]:.3f} ({ao_each[p]-bo_each[p]:+.4f})")
+    _config_audit()
     print("\n(SIG_MODE={} -- learned = the unfrozen product path; deltas + purity + locality are what matter.)".format(SIG_MODE))
 
 
