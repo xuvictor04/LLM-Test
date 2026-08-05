@@ -597,6 +597,7 @@ class Fabric(nn.Module):
         # So: the concentration is real and measured (25 distinct experts against society's 487 in the pilot); the
         # claim that per-hop credit assignment is what causes it is NOT established, and these three interventions
         # are evidence against it.
+        s.region_w = float(os.environ.get("ROUTE_REGION_W", 1.0))   # 0 = route on PREDICTED WEIGHTS ONLY
         s.state_q = bool(int(os.environ.get("CHAIN_STATE_Q", 0)))   # transition query sees the CURRENT state
         s.curric = bool(int(os.environ.get("CHAIN_CURRIC", 0)))
         s.depth_now = int(os.environ.get("CHAIN_DEPTH0", 1)) if s.curric else max_steps
@@ -953,9 +954,14 @@ class Fabric(nn.Module):
         society path and EXACTLY 0.000 on chaining -- 1 expert of 32 taking 100% of the traffic, both seeds. The
         router could not learn where anything belonged. ROUTE_GROUNDED reported ON in the banner throughout,
         because it WAS on: for the path that was not running."""
+        # ROUTE_REGION_W scales the SIGNATURE-REGION term. At 0 the router runs on PREDICTED WEIGHTS ALONE:
+        # q_route emits a point in identity space, every expert's full weights are embedded into that same space
+        # by eemb, and the nearest wins -- with edec decoding the query into a real expert when nothing is near.
+        # That is this branch's whole design, and until it was measured it was contributing 2% of the decision.
+        # NOT the same as ROUTE_GROUNDED=0, which drops to the OLD q_entry key router and skips this path entirely.
         C = F.normalize(s.cent[:N].to(gist.device), dim=-1)
-        logits = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
-        _gterm = logits
+        _gterm = (F.normalize(gist, dim=-1) @ C.t()) / max(1e-3, s.route_t)
+        logits = s.region_w * _gterm
         if s.route_learn:
             # BOTH TERMS ARE COSINES, ON THE SAME SCALE when FAB_KEY_NORM=1. The raw form is a dot product of two
             # unconstrained trained vectors added to a bounded cosine: an expert whose key norm grows large scores
@@ -973,7 +979,7 @@ class Fabric(nn.Module):
             # Sampled on a cadence the caller sets, because these are two host syncs.
             if getattr(s, "_sample_mix", False):
                 with torch.no_grad():
-                    s._rmix.append((float(_gterm.std()), float(_lrn.std())))
+                    s._rmix.append((float((s.region_w * _gterm).std()), float(_lrn.std())))
                 s._sample_mix = False
         if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
         return logits
@@ -2822,11 +2828,21 @@ def main():
                      if not SOCIETY else
                      f"independent experts, ONE hop, top-{max(ENS_K, IND_K)} computed, blended at the prediction "
                      f"level; nobody sees anybody. Nothing composes. Unset SOCIETY for the chaining default."))
-            print(f"[config] ROUTING     {'grounded region + learned bilinear' if _F.grounded else 'learned only'}"
-                  f" | HALT {_on(_F.halt_on)} on BOTH paths (cap {_F.halt_max:.2f})"
+            print(f"[config] ROUTING     "
+                  + ("PREDICTED WEIGHTS ONLY (ROUTE_REGION_W=0) -- the signature-region term is off; routing is "
+                     "q_route's point in identity space against every expert's embedded FULL WEIGHTS"
+                     if (_F.grounded and _F.region_w == 0) else
+                     f"region x{_F.region_w:g} + weight-prediction" if _F.grounded else
+                     "learned q_entry keys only (ROUTE_GROUNDED=0 -- NOT the weight-prediction path)")
+                  + f" | HALT {_on(_F.halt_on)} on BOTH paths (cap {_F.halt_max:.2f})"
                   f" | exploration {_F.explore:.0%} of windows swap a slot for a low-use expert"
                   f" | identities {'from FULL WEIGHTS' if _F.derive_ids else 'free parameters (FAB_DERIVE_IDS=0)'}"
                   f", refreshed every {_F.emb_every} step(s) | route_t {_F.route_t}")
+            if _F.grounded and _F.region_w == 0 and not FAB_KEY_NORM:
+                print("[config] !! ROUTE_REGION_W=0 with FAB_KEY_NORM=0: the weight-prediction term is a RAW dot "
+                      "whose spread across experts measured 0.075, against a region term at 3.7. With the region "
+                      "term removed the logits are nearly UNIFORM and routing is close to random. Set "
+                      "FAB_KEY_NORM=1 so that term is a cosine over route_t and actually has dynamic range.")
             if not SOCIETY:
                 print(f"[config] not on CHAINING: IND_W={IND_W} (each expert must solve the task ALONE) and "
                       f"DIV_W={DIV_W} (distinctness) both need SEPARABLE per-expert logits, which a composed walk "
