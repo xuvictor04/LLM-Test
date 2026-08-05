@@ -2484,6 +2484,16 @@ def main():
         return v
     TOK_MINT_UNTIL = _i("TOK_MINT_UNTIL", 0)                  # freeze the vocabulary after this step; 0 = never
     _mint_frozen = [False]
+    def _inherit_opt(opt, param, nid, a, b):
+        """Give a newly minted token the Adam moments of the two tokens it was minted from. Without this its
+        second moment is 0 and its first update is Adam's maximum step, which overwrites the warm start."""
+        st = opt.state.get(param)
+        if not st: return
+        with torch.no_grad():
+            for _k in ("exp_avg", "exp_avg_sq"):
+                _t = st.get(_k)
+                if _t is not None and _t.dim() >= 1 and nid < _t.size(0):
+                    _t[nid] = 0.5 * (_t[a] + _t[b])
     BEST_TRACK = bool(_i("BEST_TRACK", 1))                    # keep the best-by-held-out checkpoint, not just the last
     _best_bpb = [None, -1, False]                             # [best mean bits/byte, step, saved?]
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
@@ -3159,7 +3169,8 @@ def main():
             ("FABRIC",         FABRIC),                  ("SOCIETY",        SOCIETY),
             ("SELF_ORG",       SELF_ORG),                ("MANAGE",         MANAGE_ON),
             ("TOKENIZER",      USE_TOK),                 ("TOK_ONLINE",     USE_TOK and TOK_ONLINE),
-            ("TOK_MINT_UNTIL", TOK_MINT_UNTIL),
+            ("TOK_MINT_UNTIL", TOK_MINT_UNTIL),         ("WARMSTART",      bool(_i("WARMSTART", 1))),
+            ("WARMSTART_OPT",  bool(_i("WARMSTART_OPT", 0))),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
             ("WORLD_FEEDBACK", world_proj is not None),  ("MEM_PER_EXPERT", MEM_PER_EXPERT),
@@ -3820,6 +3831,22 @@ def main():
                     if g is None: break
                     if _i("WARMSTART", 1):                 # init the new token "ab" from (emb[a]+emb[b])/2 instead of random
                         nid, a, b = g                      #   -> the LM doesn't relearn it from scratch (cuts moving-target cost)
+                        # OPTIMIZER-STATE INHERITANCE, OFF BY DEFAULT because the reason for it did not survive
+                        # being checked. The argument was: a row that never received gradient has Adam v = 0, so
+                        # its first update is lr * sign(g) -- the maximum step -- which would overwrite the warm
+                        # start we just placed. That is wrong. Adam's step counter is PER-TENSOR, not per-row, so
+                        # by the time a token is minted the bias correction already reflects thousands of steps
+                        # and DAMPS a fresh row rather than amplifying it. Measured on a 5-step toy: the new row's
+                        # first update was 5.4e-4 with v=0 and 1.0e-3 with inherited moments -- inheritance makes
+                        # the first step LARGER, the opposite of the motivation.
+                        # Kept as a flag, off, because "start the new token moving the way its parents were
+                        # moving" may still be right for a different reason; it just is not the one I had.
+                        if _i("WARMSTART_OPT", 0):
+                            _inherit_opt(om, model.emb.weight, nid, a, b)
+                            _inherit_opt(om, model.head.weight, nid, a, b)
+                            if model.head.bias is not None: _inherit_opt(om, model.head.bias, nid, a, b)
+                            if SIG_SPACE == "tokens" and nid < enc.emb.num_embeddings:
+                                _inherit_opt(oe, enc.emb.weight, nid, a, b)
                         with torch.no_grad():
                             model.emb.weight[nid] = 0.5 * (model.emb.weight[a] + model.emb.weight[b])
                             model.head.weight[nid] = 0.5 * (model.head.weight[a] + model.head.weight[b])
