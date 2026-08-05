@@ -657,8 +657,16 @@ class Fabric(nn.Module):
         #                 weight-prediction scoring society uses -- with the CURRENT STATE in the query. No
         #                 transition matrix and no SRC. This is "run the society, feed the result back in, run it
         #                 again", which is a different architecture from chaining and has never been run.
-        s.loop_soc = (_env("CHAIN_ROUTE", "transition") == "soc")
-        s.vote = bool(int(_env("CHAIN_VOTE", 0)))
+        # DEFAULT: soc. The society, looped. It is the only configuration that has produced real multi-hop
+        # routing -- H(hop1 | hop0) = 0.533 bits over 202k transitions against 0.005-0.058 for every arm that used
+        # the transition matrix -- and it restores society-class stability (+0.683 since minimum, against +2.287
+        # for transition chaining). CHAIN_ROUTE=transition for the old learned-successor walk.
+        s.loop_soc = (_env("CHAIN_ROUTE", "soc") == "soc")
+        # DEFAULT ON, and it has to be: soc-loop routes each round from the current state and lets HALT choose
+        # when to answer, which only means anything if each round's experts actually VOTE on the output. With
+        # CHAIN_VOTE=0 the rounds are mixed in the hidden state and decoded once, and HALT measured 0.0000 in all
+        # 18 grid arms because stopping early bought it nothing.
+        s.vote = bool(int(_env("CHAIN_VOTE", 1)))
         s._votelg = None; s._vchk = 0
         # ONE SOURCE OF TRUTH FOR min_steps. Forcing it off inside forward() with a local conditional left
         # s.min_steps reading 2 while the effective value was 0 -- and the [config] banner, the CHAINING report
@@ -2461,6 +2469,8 @@ def main():
     def _term(nm, v):
         if v is not None: _termfired[nm] = _termfired.get(nm, 0) + 1
         return v
+    TOK_MINT_UNTIL = _i("TOK_MINT_UNTIL", 0)                  # freeze the vocabulary after this step; 0 = never
+    _mint_frozen = [False]
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
     _rlive, _rseen = set(), set()                             # router parameters that DID / could receive gradient
     _lm_run = []; _lm_curve = []                              #   has very noisy gradients; this fixes that WITHOUT
@@ -3109,6 +3119,7 @@ def main():
             ("FABRIC",         FABRIC),                  ("SOCIETY",        SOCIETY),
             ("SELF_ORG",       SELF_ORG),                ("MANAGE",         MANAGE_ON),
             ("TOKENIZER",      USE_TOK),                 ("TOK_ONLINE",     USE_TOK and TOK_ONLINE),
+            ("TOK_MINT_UNTIL", TOK_MINT_UNTIL),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
             ("WORLD_FEEDBACK", world_proj is not None),  ("MEM_PER_EXPERT", MEM_PER_EXPERT),
@@ -3178,20 +3189,24 @@ def main():
                   f" | cull-empty domains {_on(DOM_CULL_EMPTY)} | expert breadth cap {_F.breadth:.0%} of domains "
                   f"(floor {_F.breadth_min}) | ramp {fabgrow.rate:.0%}/event to {fabgrow.ramp_to:.0%} of cap"
                   f"{' [latch off: the ramp will re-arm forever]' if not fabgrow.latch else ''}")
-            print(f"[config] PATH        {'CHAINING (default)' if not SOCIETY else 'SOCIETY (SOCIETY=1)'} -- "
-                  + (f"experts COMPOSE: mass flows expert -> expert through the transition matrix for up to "
-                     f"{_F.max_steps} hops ({_F.chain_k} computed per hop), HALT blocked for the first "
-                     f"{_F.min_steps}"
-                     + (". BLEND: experts vote on the PREDICTION at every hop (CHAIN_VOTE=1), so the mass that "
-                        "HALTS at a hop selects that hop's answer -- min_steps is forced to 0 because blocking "
-                        "HALT here blocks the thing choosing the answer."
-                        if _F.vote else
-                        ". BLEND: experts are mixed in the HIDDEN STATE and decoded once at the end; HALT only "
-                        "scales the update, which is why it measures ~0. CHAIN_VOTE=1 for per-hop voting.")
-                     + " SOCIETY=1 for the one-shot blend."
-                     if not SOCIETY else
-                     f"independent experts, ONE hop, top-{max(ENS_K, IND_K)} computed, blended at the prediction "
-                     f"level; nobody sees anybody. Nothing composes. Unset SOCIETY for the chaining default."))
+            print(f"[config] PATH        "
+                  + ("SOCIETY (SOCIETY=1) -- independent experts, ONE round, blended at the prediction level; "
+                     "nobody sees anybody and nothing composes." if SOCIETY else
+                     (f"CHAINED SOCIETY (default) -- the society run {_F.max_steps} times over. Each round "
+                      f"re-routes FROM SCRATCH with the society's own router, with the CURRENT STATE in the "
+                      f"query; the round's experts vote on the OUTPUT; and the state carries into the next round, "
+                      f"so composition survives. No transition matrix, no SRC. HALT is a per-round STOP "
+                      f"PROBABILITY: alive starts at 1, each round takes alive x p_stop and passes on "
+                      f"alive x (1-p_stop), so 'when am I done' is asked against where the computation actually "
+                      f"is. CHAIN_ROUTE=transition for the old learned-successor walk."
+                      if _F.loop_soc else
+                      f"CHAINING, TRANSITION-ROUTED (CHAIN_ROUTE=transition) -- mass flows expert -> expert "
+                      f"through the learned transition matrix for up to {_F.max_steps} hops ({_F.chain_k} "
+                      f"computed per hop), HALT blocked for the first {_F.min_steps}. This is the path whose "
+                      f"H(hop1|hop0) measured 0.005-0.058 bits: one decision, then a fixed successor."
+                      + (" Experts vote on the PREDICTION each hop (CHAIN_VOTE=1)." if _F.vote else
+                         " Experts are mixed in the HIDDEN STATE and decoded once (CHAIN_VOTE=0); HALT measured "
+                         "0.0000 in all 18 grid arms because stopping bought it nothing."))))
             print(f"[config] ROUTING     "
                   + ("PREDICTED WEIGHTS ONLY (ROUTE_REGION_W=0) -- the signature-region term is off; routing is "
                      "q_route's point in identity space against every expert's embedded FULL WEIGHTS"
@@ -3384,7 +3399,8 @@ def main():
             if _c is None: _c = asm.tokc[did] = torch.zeros(V, device=DEV)
             _c.index_add_(0, torch.tensor(w[:-1], device=DEV), torch.ones(len(w) - 1, device=DEV))
         if ONLINE:
-            for a, b in zip(w[:-1], w[1:]): TOK.pair[(a, b)] += 1   # ONGOING minting: tally THIS window's pairs
+            if not _mint_frozen[0]:
+                for a, b in zip(w[:-1], w[1:]): TOK.pair[(a, b)] += 1   # ONGOING minting: tally THIS window's pairs
         if len(_bx) < BATCH_W:                              # accumulate a batch of windows first
             i += WIN; step += 1; continue
         model.train()
@@ -3709,7 +3725,19 @@ def main():
                               pos=_posv(_b, _n1))
         _t1("memory key+write", _pmem)
         _ptok = _t0()
-        if ONLINE:                                         # ONGOING minting: mint from the tally accumulated above
+        # STOP MINTING EVENTUALLY. Minting re-tokenizes the stream, so the SAME text acquires new ids and the
+        # embeddings and head rows learned for the old segmentation are invalidated -- continuously, for the whole
+        # run. Measured on the society pilot: held-out bits/byte MODEL-ALONE bottoms at 2.40 around step 6000 and
+        # rises to 3.62 by 48000, while the memory store masks it in the end-of-run figure. That is the project's
+        # own continual-learning failure mode, caused by our tokenizer rather than by any new domain.
+        # TOK_MINT_UNTIL freezes the vocabulary after a warmup: keep the benefit of a learned segmentation early,
+        # stop moving the target once the model has to actually fit it. 0 = never freeze (the old behaviour).
+        if ONLINE and TOK_MINT_UNTIL and step >= TOK_MINT_UNTIL and not _mint_frozen[0]:
+            _mint_frozen[0] = True
+            print(f"  [tokenizer @ {step}] MINTING FROZEN at vocab {TOK.vocab_size} (TOK_MINT_UNTIL={TOK_MINT_UNTIL}). "
+                  f"The segmentation stops moving here; everything learned after this point is learned against a "
+                  f"fixed vocabulary.")
+        if ONLINE and not _mint_frozen[0]:                 # ONGOING minting: mint from the tally accumulated above
             if _due("grow", GROW_EVERY):
                 for _ in range(_i("GROW_BURST", 6)):       # mint several of the current top pairs per grow event
                     g = TOK.maybe_grow()
@@ -4021,8 +4049,29 @@ def main():
         _d8 = (_lm_curve[-2][1] - _lm_curve[-1][1]) if len(_lm_curve) > 1 else 0.0
         print(f"  best {_bl:.2f} @ step {_bs} | final {_fl:.2f} @ step {_fs} | since the minimum {_fl - _bl:+.3f}"
               f" | last segment {'-' if _d8 > 0 else '+'}{abs(_d8):.3f} ({'improving' if _d8 > 0 else 'worsening'})")
-        if _fl - _bl > 0.05 and _bi < len(_lm_curve) - 2:
-            print(f"  >> DIVERGING. The loss bottomed at step {_bs} and has been RISING for the "
+        # CROSS-CHECK AGAINST THE UNIT-STABLE CURVE BEFORE CALLING IT DIVERGENCE. This curve is per-TOKEN
+        # cross-entropy, and the tokenizer mints throughout a run (256 -> 2048 here), so each token comes to carry
+        # more bytes and the per-token loss rises MECHANICALLY even when the model is improving per byte. _CURVE
+        # is bits/byte on held-out text and is not subject to that. Reporting "DIVERGING" off the per-token curve
+        # alone was reading a unit change as a failure, and I have been quoting it for many turns.
+        _bpb_dir = None
+        try:
+            _bp = sorted({st: b for st, _p, b, _a in _CURVE}.items())
+            if len(_bp) >= 6:
+                _bmin = min(v for _, v in _bp)
+                _bpb_dir = (_bp[-1][1] - _bmin, _bp[-1][1] - _bp[len(_bp) // 3][1])
+        except Exception:
+            _bpb_dir = None
+        if _bpb_dir is not None:
+            print(f"  UNIT-STABLE CROSS-CHECK (held-out bits/byte, the curve above): {_bpb_dir[0]:+.3f} since its "
+                  f"own minimum, {_bpb_dir[1]:+.3f} over the last two thirds. Per-token loss can rise purely "
+                  f"because minted tokens got longer; this cannot.")
+            if _fl - _bl > 0.05 and _bpb_dir[0] <= 0.05:
+                print(f"  >> NOT DIVERGING -- the per-token rise is the growing vocabulary, not the model. "
+                      f"Judge this run on bits/byte.")
+        if _fl - _bl > 0.05 and _bi < len(_lm_curve) - 2 and (_bpb_dir is None or _bpb_dir[0] > 0.05):
+            print(f"  >> DIVERGING on BOTH the per-token and the bits/byte curve. The loss bottomed at step {_bs} "
+                  f"and has been RISING for the "
                   f"{_fs - _bs} steps since -- {100 * (len(_lm_curve) - 1 - _bi) / max(1, len(_lm_curve) - 1):.0f}% "
                   f"of the run was spent getting worse. More steps will NOT help; this needs diagnosing.")
             print(f"     things that change on that timescale: the fabric hitting FAB_NMAX (growth fires on "
