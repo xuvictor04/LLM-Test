@@ -2484,6 +2484,8 @@ def main():
         return v
     TOK_MINT_UNTIL = _i("TOK_MINT_UNTIL", 0)                  # freeze the vocabulary after this step; 0 = never
     _mint_frozen = [False]
+    BEST_TRACK = bool(_i("BEST_TRACK", 1))                    # keep the best-by-held-out checkpoint, not just the last
+    _best_bpb = [None, -1, False]                             # [best mean bits/byte, step, saved?]
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
     _rlive, _rseen = set(), set()                             # router parameters that DID / could receive gradient
     _lm_run = []; _lm_curve = []                              #   has very noisy gradients; this fixes that WITHOUT
@@ -2886,9 +2888,10 @@ def main():
     if _env("SAVE_CKPT", "").strip().lower() in ("0", "", "off", "no", "none", "false"):
         os.environ.pop("SAVE_CKPT", None)
 
-    def _save_ckpt(src_stream, quiet=False):               # persist model+tokenizer+memory so `prompt.py` can load it
+    def _save_ckpt(src_stream, quiet=False, suffix=""):    # persist model+tokenizer+memory so `prompt.py` can load it
         ck = _env("SAVE_CKPT")
         if not ck: return
+        ck = ck + suffix                                   # suffix=".best" writes the best-by-held-out snapshot
         os.makedirs(ck, exist_ok=True)
         if USE_TOK: TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
         act = mem.active
@@ -3318,6 +3321,23 @@ def main():
                 model.train()                              #   learning curve, printing nothing at all
                 if not _CURVE_ERR:
                     _CURVE_ERR.append(1); print(f"  [learning-curve sample failed: {type(_e).__name__}: {_e}]")
+        # === KEEP THE BEST MODEL =========================================================================
+        # Generation and every end-of-run number came from the LIVE model at step ~47000 -- and in every
+        # arm of every seed that model is 1.1-1.3 bits/byte WORSE than the one that existed around step
+        # 6000. There was no best-checkpoint tracking anywhere: ckpt.pt is written on a cadence and
+        # overwritten, so the saved artifact is the LAST state, not the best one. Every text sample judged
+        # in this project was drawn from the degraded model.
+        if BEST_TRACK and _CURVE:
+            _cs = [b for st, _p, b, _a in _CURVE if st == step]
+            if _cs:
+                _cm = sum(_cs) / len(_cs)
+                if _best_bpb[0] is None or _cm < _best_bpb[0] - 1e-6:
+                    _best_bpb[0] = _cm; _best_bpb[1] = step
+                    try:
+                        _save_ckpt(stream, quiet=True, suffix=".best")
+                        _best_bpb[2] = True
+                    except Exception as _e:
+                        print(f"  [best-ckpt save failed: {type(_e).__name__}: {_e}]")
         if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark:
             _now = _time.time(); _rate = (step - _s_mark) / max(1e-9, _now - _t_mark)      # steps/sec over the last window
             _left = max(0, _total_steps - (step - _resume_step))
@@ -4867,6 +4887,21 @@ def main():
     if _i("GENERATE", 1):
         _gen_keep = []
         print("\n=== GENERATION: model ALONE vs model+MEMORY (seed = real text; does memory make it more coherent?) ===")
+        # WHICH MODEL THIS IS. The samples below come from the LIVE model at the END of training. In every arm of
+        # every seed so far that is 1.1-1.3 bits/byte worse than the model that existed around step 6000, so the
+        # text being judged is the degraded one. Say so, and say where the good one went.
+        if BEST_TRACK and _best_bpb[0] is not None:
+            _fin = None
+            _lastc = [b for st, _p, b, _a in _CURVE if st == max(st2 for st2, _, _, _ in _CURVE)]
+            if _lastc: _fin = sum(_lastc) / len(_lastc)
+            print(f"  SAMPLED FROM: the FINAL model, step ~{_total_steps}"
+                  + (f" ({_fin:.3f} held-out bits/byte)" if _fin else "")
+                  + f" -- NOT the best. Best was {_best_bpb[0]:.3f} at step {_best_bpb[1]}"
+                  + (f", saved to {_env('SAVE_CKPT')}.best" if _best_bpb[2] else " (not saved: SAVE_CKPT is off)")
+                  + (f". The final model is {_fin - _best_bpb[0]:+.3f} bits/byte worse than it; read the text below "
+                     f"as the END of the run, not its best." if _fin else "."))
+            if _best_bpb[2]:
+                print(f"  to sample the BEST model instead:  python3 prompt.py CKPT={_env('SAVE_CKPT')}.best")
         for p in sorted(set(labels))[:_i("GEN_PROCS", 4)]:
             starts = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p]
             if not starts: continue
