@@ -270,11 +270,25 @@ grid)
   #   wt_bal     weights + balance: the two most likely individual wins together.
   #   wt_div     weights + DIV_W: best routing plus the only distinctness pressure.
   #   kitchen    weights + balance + DIV_W + softroute.
-  GRID_ARMS_DEFAULT="base weights nofabric balance frozvocab softroute keynorm divw \
-                     smallpop curric society stateq wt_bal wt_div nomem chainsup explore kitchen"
+  # ROUND 2. The first grid answered its question: chaining loses to FABRIC=0 and society wins outright. These
+  # arms test the hybrid that the two paths' difference implies, and separate the two changes that regressed base.
+  #   vote      CHAIN_VOTE=1 -- multi-hop, but experts blended at the PREDICTION level at every hop. The society's
+  #             combination rule with chaining's depth, and the only configuration in which HALT has a job:
+  #             the mass that halts at hop t SELECTS hop t's answer. Measured 0.0000 -> 0.2213 immediately.
+  #   vote_w    the same, routing on predicted weights alone (best specialization of any chaining arm).
+  #   vote_soc  the same at depth 1 -- which IS the society path, and so isolates depth from the blend rule.
+  #   noban     CHAIN_BAN=0 and nolatch FAB_RAMP_LATCH=0: the two changes that landed between pilot 6 (+1.438)
+  #             and grid base (+2.287) and were never separated.
+  GRID_ARMS_DEFAULT="vote vote_w society base noban nolatch vote_soc weights nofabric \
+                     balance keynorm divw smallpop curric wt_bal chainsup explore kitchen"
   _flags_for() {
     case "$1" in
       base)      echo "" ;;
+      vote)      echo "CHAIN_VOTE=1" ;;
+      vote_w)    echo "CHAIN_VOTE=1 ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
+      vote_soc)  echo "CHAIN_VOTE=1 FAB_STEPS=1" ;;
+      noban)     echo "CHAIN_BAN=0" ;;
+      nolatch)   echo "FAB_RAMP_LATCH=0" ;;
       weights)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
       nofabric)  echo "FABRIC=0" ;;
       balance)   echo "BAL_WARM=100000000" ;;

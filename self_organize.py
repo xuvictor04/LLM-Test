@@ -597,6 +597,11 @@ class Fabric(nn.Module):
         # So: the concentration is real and measured (25 distinct experts against society's 487 in the pilot); the
         # claim that per-hop credit assignment is what causes it is NOT established, and these three interventions
         # are evidence against it.
+        # TWO CHANGES LANDED BETWEEN PILOT 6 (+1.438) AND THE GRID (+2.287) AND WERE NEVER SEPARATED: the
+        # breadth-cap ban began masking the chaining path's logits, and the growth ramp started latching off.
+        # Both are scoring/selection changes, both are plausible causes of that regression, and both are now
+        # flags rather than facts so one grid can tell them apart.
+        s.chain_ban = bool(int(os.environ.get("CHAIN_BAN", 1)))     # dom_ban applied on the chaining path
         s.region_w = float(os.environ.get("ROUTE_REGION_W", 1.0))   # 0 = route on PREDICTED WEIGHTS ONLY
         s.state_q = bool(int(os.environ.get("CHAIN_STATE_Q", 0)))   # transition query sees the CURRENT state
         s.curric = bool(int(os.environ.get("CHAIN_CURRIC", 0)))
@@ -612,6 +617,23 @@ class Fabric(nn.Module):
         # DIV_W is a LOCAL in main(), so Fabric.forward could not see it -- a NameError on the first chaining hop
         # that would have killed every chaining arm. Read it here, from the same env var and the same default.
         s.div_w = float(os.environ.get("DIV_W", 0.0))
+        # === SOCIETY x CHAINING: multi-hop, but blended at the PREDICTION level =============================
+        # The two paths differ in TWO independent ways and the grid only ever tested them together:
+        #   depth      one hop (society) vs many (chaining)
+        #   where the experts are combined -- at the PREDICTION (society: sum_i w_i * head(o_i)) or in the
+        #              HIDDEN STATE (chaining: h <- mix of expert outputs, decoded once at the end)
+        # Society won the grid outright and chaining lost to FABRIC=0 entirely. This runs the multi-hop structure
+        # with the society's combination rule: at every hop the experts vote on the OUTPUT, and h still carries
+        # each hop's result into the next, so composition survives.
+        #
+        # IT IS ALSO THE ONLY THING THAT GIVES HALT A JOB. Today _alive merely scales the residual update and only
+        # h_final is decoded, so HALT's gradient answers "how much fabric do I want at all" and never "when am I
+        # done" -- PONDER=0.01 is the sole pressure toward stopping and it measured 0.0000 in all 18 arms. Here the
+        # mass that halts AT HOP t selects hop t's prediction, so stopping early is rewarded exactly when later
+        # hops are worse. The accumulation is a convex combination by construction: entry-halt + sum of newly
+        # halted per hop + never-halted = 1.
+        s.vote = bool(int(os.environ.get("CHAIN_VOTE", 0)))
+        s._votelg = None; s._vchk = 0
         s._mass_ema = None                     # training-time HALT mass on the chaining path
         s._div = None                          # distinctness penalty from the last chaining walk
         s._rmix = []; s._sample_mix = False    # (grounded spread, weight-prediction spread) samples
@@ -1134,7 +1156,7 @@ class Fabric(nn.Module):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
         random. A randomly-keyed expert receives no traffic, gets no gradient, and stays dead (measured: 12/17 idle)."""
         with torch.no_grad(): return s.q_entry(gist).detach().squeeze(0).clone()
-    def forward(s, h, gist, nov, step=None, ban1=None, ban=None):
+    def forward(s, h, gist, nov, step=None, ban1=None, ban=None, head=None):
         """ban1: a single expert id to hold OUT of this walk entirely -- the counterfactual the marginal-contribution
         rule needs. On the society path leave-one-out is free (per-expert logits are already separate); here the
         walk itself changes when an expert is removed, so the only honest answer is to run it again without them."""
@@ -1179,9 +1201,21 @@ class Fabric(nn.Module):
         depth = h.new_zeros(()); mass = torch.zeros(N + 1, device=h.device); bal = h.new_zeros(())
         wacc = None                                                           # (B,N) per-window mass over all hops
         dacc = None                                                           # DISTINCTNESS penalty, accumulated
+        _vote = s.vote and head is not None and ban1 is None
+        s._votelg = None
+        lgacc = None; _hbase = h; _hsum = None
+        if _vote:                                                             # mass that halted BEFORE any hop ran
+            lgacc = c[:, HALT][:, None, None] * head(_hbase)
+            _hsum = c[:, HALT]
         if ban1 is None: s._hops = []; s._hopq = []
         for _t_ in range(steps):
-            if _t_ < s.min_steps:                                             # block HALT early: force the nodes to be used
+            # MIN_STEPS IS OFF UNDER CHAIN_VOTE, and must be. It zeroes the accumulated HALT column at the top of
+            # each early hop, so an increment counted as "halted at hop t" would be discarded a hop later and the
+            # accumulator would stop being a convex combination -- mass counted twice, or lost. It also exists to
+            # stop the router writing the experts off before they can learn, and under voting that reasoning
+            # inverts: HALT now SELECTS which hop answers rather than switching the fabric off, so forcing it to
+            # keep walking is forcing it to keep a worse answer.
+            if _t_ < (0 if _vote else s.min_steps):                            # block HALT early: force the nodes to be used
                 c = torch.cat([c[:, :N], torch.zeros_like(c[:, N:])], -1)
                 c = c / c.sum(-1, keepdim=True).clamp_min(1e-9)
             nm = c[:, :N]
@@ -1233,6 +1267,17 @@ class Fabric(nn.Module):
             Bo = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
                                                torch.einsum('bld,bkdr->bklr', h, _cA), _cB)
             _cw = _cv / _cv.sum(-1, keepdim=True).clamp_min(1e-9)
+            _hb = c[:, HALT]                                                  # halted mass BEFORE this hop settles
+            if _vote:
+                # SOCIETY'S RULE, AT THIS HOP: every computed expert decodes its OWN output and they are blended
+                # as PREDICTIONS. Only the top ENS_K are decoded -- the rest carry ~0 weight and decoding all of
+                # chain_k would hold k x (B,L,V) in the graph per hop.
+                _vk = min(ENS_K, _ck)
+                _vwn = _cw[:, :_vk] / _cw[:, :_vk].sum(-1, keepdim=True).clamp_min(1e-9)
+                _lgt = None
+                for _q7 in range(_vk):
+                    _l7 = head(s.norm(Bo[:, _q7])) * _vwn[:, _q7][:, None, None]
+                    _lgt = _l7 if _lgt is None else _lgt + _l7
             # DISTINCTNESS ON THE CHAINING PATH. DIV_W was gated on SOCIETY because it needs per-expert outputs and
             # a composed walk has no separable per-expert LOGITS -- but it does have separable per-expert OUTPUTS,
             # right here in Bo, one set per hop. Penalising agreement between the two experts a hop actually leans
@@ -1286,6 +1331,23 @@ class Fabric(nn.Module):
             nxt = torch.einsum('bk,bkm->bm', _cvn * nm.sum(-1, keepdim=True), R)   # mass moves FROM each holder
             nxt = nxt.clone(); nxt[:, HALT] = nxt[:, HALT] + c[:, HALT]       # HALT absorbs
             c = nxt / nxt.sum(-1, keepdim=True).clamp_min(1e-9)
+            if _vote:
+                # WHAT HALTED HERE TAKES THIS HOP'S ANSWER. This is the term that makes HALT mean "done".
+                _dh = (c[:, HALT] - _hb).clamp_min(0.0)
+                lgacc = lgacc + _dh[:, None, None] * _lgt
+                _hsum = _hsum + _dh
+                _lglast = _lgt
+        if _vote:
+            _rem = (1.0 - c[:, HALT]).clamp_min(0.0)                          # never halted -> the last hop's answer
+            lgacc = lgacc + _rem[:, None, None] * _lglast
+            if s._vchk < 3:                                                    # CHECK THE INVARIANT, first few steps
+                with torch.no_grad():
+                    _tw = float((_hsum + _rem).mean())
+                    if abs(_tw - 1.0) > 1e-3:
+                        print(f"  [chain-vote] !! hop weights sum to {_tw:.4f}, not 1 -- the per-hop blend is no "
+                              f"longer a convex combination and the logits are mis-scaled.")
+                s._vchk += 1
+            s._votelg = lgacc                                                  # weights sum to 1 by construction
         # PER-WINDOW EXPERT UTILIZATION, the chaining twin of society()'s `w`. Everything that attributes an
         # OUTCOME to an EXPERT reads a (B,N) table -- competence EMAs, the fast/slow error pair the sustained-error
         # cull rule needs, the domain affiliation map, per-expert memory ownership. All of it was gated on SOCIETY
@@ -1319,6 +1381,7 @@ class PlateauGrowth:
         s.fast = s.slow = None; s.rel = rel; s.cool = cooldown; s.warm = warmup; s.last = -10**9
         s.z = z; s.burst = max(1, burst); s.ramp = ramp; s.rmin = rmin; s.rmax = rmax
         s.dev = 0.0; s.n = 0; s.state = "W"; s.t0 = 0; s.blackout = -10**9; s.why = ""
+        s.latch = bool(int(os.environ.get("FAB_RAMP_LATCH", 1)))          # 0 restores the never-terminating ramp
         s.ramp_done = False; s.n_ramp = 0; s.n_stall = 0; s.n_regr = 0   # why growth fired, for the report
         s.rate = max(0.0, rate); s.ramp_to = ramp_to      # GEOMETRIC ramp: grow a FRACTION of the population, not a
         #   fixed count. +3 every 50 steps reaches ~240 experts by the end of a 4000-step ramp window and then stops,
@@ -1350,7 +1413,7 @@ class PlateauGrowth:
         # cull-refill cycle that selection cannot win, because whatever it removes is replaced within 187 steps.
         # Latch on FIRST arrival: the ramp exists to BUILD the population, and it is built once. After that,
         # growth must come from a REGRESSION or a stall -- i.e. from evidence that more capacity is needed.
-        if n is not None and cap is not None and n >= s.ramp_to * cap: s.ramp_done = True
+        if s.latch and n is not None and cap is not None and n >= s.ramp_to * cap: s.ramp_done = True
         _ramping = (t < s.ramp) if (n is None or cap is None) else not s.ramp_done
         if s.ramp and _ramping and t - s.last >= max(1, s.cool // 8):
             s.last = t; s.why = "ramp"; s.n_ramp += 1
@@ -2126,7 +2189,9 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     if fab is None: return model.head(h)
     if gist is None: gist = torch.zeros(h.size(0), fab.q_entry.in_features, device=h.device)
     if nov is None: nov = torch.zeros(h.size(0), device=h.device)
-    if not SOCIETY: return model.head(fab(h, gist, nov)[0])
+    if not SOCIETY:
+        _hh = fab(h, gist, nov, head=(model.head if fab.vote else None))[0]
+        return fab._votelg if fab._votelg is not None else model.head(_hh)
     kk = int(k or ENS_K)
     w, O, oid = fab.society(h, gist, nov, k=kk)               # SPARSE: computes only the kk it is about to use
     ww = w.gather(1, oid)                                     # oid is (B,kk): each row's OWN experts and weights
@@ -3125,8 +3190,9 @@ def main():
             _w, _O, _oid = fab.society(h, sigb, _fab_nov.expand(x.size(0)), k=max(ENS_K, IND_K), ban=_ban, step=step)
             _dep = h.new_zeros(()); _bal = fab_bal(_w)
         elif FABRIC:
-            _ban = fab.dom_ban(did, len(asm.cent)) if SELF_ORG else None
-            h, _dep, _mass, _bal = fab(h, sigb, _fab_nov.expand(x.size(0)), step=step, ban=_ban)
+            _ban = fab.dom_ban(did, len(asm.cent)) if (SELF_ORG and fab.chain_ban) else None
+            h, _dep, _mass, _bal = fab(h, sigb, _fab_nov.expand(x.size(0)), step=step, ban=_ban,
+                                       head=(model.head if fab.vote else None))
             # THE SAME (B,N) ATTRIBUTION TABLE THE SOCIETY PATH PRODUCES, so everything downstream that asks
             # "which expert served this window" works here too instead of being skipped.
             _w = fab._wrun
@@ -3159,6 +3225,8 @@ def main():
             # the rest buys the ensemble. This is the term that lets "no expert fits this" be a routing OUTCOME
             # rather than something only an ablation flag could express.
             lg = halt_blend(model, fab, h, lg)
+        elif FABRIC and fab.vote and fab._votelg is not None:
+            lg = fab._votelg                       # the hybrid already produced logits, one vote per hop
         else:
             lg = model.head(h)
         # PER-WINDOW loss, then the mean. Same arithmetic, same cost -- reduction='none' and .mean() is exactly
