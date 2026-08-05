@@ -232,15 +232,67 @@ grid)
   #   keynorm  -- region AND weight prediction on ONE scale (66/34 rather than 98/2). The middle position.
   #   society  -- SOCIETY=1 with every fix. The path control: how much of any change is chaining vs the fixes.
   #   curric   -- staged depth, which has never actually run (it sat behind a cadence that never fired).
-  GRID_ARMS_DEFAULT="weights base keynorm society curric"
+  # ORDERED BY INFORMATION VALUE, so stopping the grid at any point leaves the most informative set that fits.
+  # Roughly 20 min per arm on a GH200; the whole list is ~6 h.
+  #
+  # -- the control, first, because every other arm is read against it -----------------------------------------
+  #   base       defaults at HEAD. On its own it answers whether the growth-ramp latch fixed the divergence that
+  #              every pilot so far has shown (bottom at ~step 5900, then +1.1 to +1.6 for the rest of the run).
+  #   weights    ROUTE_REGION_W=0 -- routing decided ENTIRELY by predicted weights. Best selection result so far
+  #              (specialization 0.094 vs 0.000, top expert 44.5% vs 79.5%) but measured on a diverging run.
+  #
+  # -- WHY DOES IT DIVERGE? each arm removes one suspect ------------------------------------------------------
+  #   nofabric   FABRIC=0. THE partition: if the bare GRU diverges too, none of the expert machinery is the
+  #              cause and every routing arm here is measuring something downstream of the real problem.
+  #   balance    BAL_WARM huge -- load-balance pressure never decays. It currently decays to 0 by step 4000 and
+  #              the loss turns at ~5900, which is the closest coincidence in the whole timeline.
+  #   frozvocab  TOK_ONLINE=0. Per-TOKEN loss rises mechanically as minted tokens get longer, so part of the
+  #              "divergence" may be a units artifact. Freezing the vocabulary makes the curve unit-stable.
+  #   smallpop   FAB_NMAX=256. Does the turn track reaching the CAP rather than a step number?
+  #   nomem      MEM_PER_EXPERT=0. The store fills to MEM_CAP early; this removes the partitioned-write path.
+  #
+  # -- the chain makes ONE decision and then follows a rail (H(hop1|hop0) = 0.018 bits, measured) -------------
+  #   softroute  ROUTE_T=0.3. A sharp transition iterated over hops is a power iteration and converges on one
+  #              successor; softening it is the most direct counter to the rail.
+  #   curric     staged depth -- never actually ran before (it sat behind a cadence that never fired).
+  #   stateq     the transition query sees the CURRENT state, not just the input signature + who holds it.
+  #   chainsup   per-hop deep supervision. Measured WORSE on a 24-expert toy, which is not this system.
+  #
+  # -- specialization and scale -------------------------------------------------------------------------------
+  #   keynorm    both routing terms on ONE scale (66/34 rather than 98/2). The middle position.
+  #   divw       DIV_W=0.05 -- the only term that rewards experts for DIFFERING, never once switched on.
+  #   society    SOCIETY=1 path control, with every fix, to separate chaining from the fixes.
+  #   explore    FAB_EXPLORE=0.40. Exploration is the mechanism meant to break concentration and it has only
+  #              ever run at 0.15; if the rail and the top-expert share are breakable by off-policy traffic,
+  #              this is the arm that shows it.
+  #
+  # -- combinations, blind but cheap --------------------------------------------------------------------------
+  #   wt_bal     weights + balance: the two most likely individual wins together.
+  #   wt_div     weights + DIV_W: best routing plus the only distinctness pressure.
+  #   kitchen    weights + balance + DIV_W + softroute.
+  GRID_ARMS_DEFAULT="base weights nofabric balance frozvocab softroute keynorm divw \
+                     smallpop curric society stateq wt_bal wt_div nomem chainsup explore kitchen"
   _flags_for() {
     case "$1" in
-      weights) echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
-      base)    echo "" ;;
-      keynorm) echo "FAB_KEY_NORM=1" ;;
-      society) echo "SOCIETY=1" ;;
-      curric)  echo "CHAIN_CURRIC=1" ;;
-      *)       echo "" ;;
+      base)      echo "" ;;
+      weights)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
+      nofabric)  echo "FABRIC=0" ;;
+      balance)   echo "BAL_WARM=100000000" ;;
+      frozvocab) echo "TOK_ONLINE=0" ;;
+      softroute) echo "ROUTE_T=0.3" ;;
+      keynorm)   echo "FAB_KEY_NORM=1" ;;
+      divw)      echo "DIV_W=0.05" ;;
+      smallpop)  echo "FAB_NMAX=256" ;;
+      curric)    echo "CHAIN_CURRIC=1" ;;
+      society)   echo "SOCIETY=1" ;;
+      stateq)    echo "CHAIN_STATE_Q=1" ;;
+      chainsup)  echo "CHAIN_SUP=0.3" ;;
+      nomem)     echo "MEM_PER_EXPERT=0" ;;
+      explore)   echo "FAB_EXPLORE=0.40" ;;
+      wt_bal)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000" ;;
+      wt_div)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 DIV_W=0.05" ;;
+      kitchen)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000 DIV_W=0.05 ROUTE_T=0.3" ;;
+      *)         echo "" ;;
     esac
   }
   if [ -z "$(ls "$P_DD/train/eng"/part*.txt 2>/dev/null)" ]; then

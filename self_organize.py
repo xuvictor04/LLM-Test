@@ -609,6 +609,10 @@ class Fabric(nn.Module):
         s.sup_w = float(os.environ.get("CHAIN_SUP", 0.0))          # per-hop deep supervision weight
         s._hops = []                                               # per-hop hidden states, for that supervision
         s._hopq = []                                               # per-hop router queries, for per-hop spawn
+        # DIV_W is a LOCAL in main(), so Fabric.forward could not see it -- a NameError on the first chaining hop
+        # that would have killed every chaining arm. Read it here, from the same env var and the same default.
+        s.div_w = float(os.environ.get("DIV_W", 0.0))
+        s._div = None                          # distinctness penalty from the last chaining walk
         s._rmix = []; s._sample_mix = False    # (grounded spread, weight-prediction spread) samples
         s._ord = []                            # (hop0, hop1) expert pairs, for H(hop1 | hop0)
         s.explore = float(os.environ.get("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
@@ -1173,6 +1177,7 @@ class Fabric(nn.Module):
         steps = max(1, min(s.depth_now, s.max_steps, 2 + N // 2))             # adaptive depth budget
         depth = h.new_zeros(()); mass = torch.zeros(N + 1, device=h.device); bal = h.new_zeros(())
         wacc = None                                                           # (B,N) per-window mass over all hops
+        dacc = None                                                           # DISTINCTNESS penalty, accumulated
         if ban1 is None: s._hops = []; s._hopq = []
         for _t_ in range(steps):
             if _t_ < s.min_steps:                                             # block HALT early: force the nodes to be used
@@ -1227,6 +1232,16 @@ class Fabric(nn.Module):
             Bo = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
                                                torch.einsum('bld,bkdr->bklr', h, _cA), _cB)
             _cw = _cv / _cv.sum(-1, keepdim=True).clamp_min(1e-9)
+            # DISTINCTNESS ON THE CHAINING PATH. DIV_W was gated on SOCIETY because it needs per-expert outputs and
+            # a composed walk has no separable per-expert LOGITS -- but it does have separable per-expert OUTPUTS,
+            # right here in Bo, one set per hop. Penalising agreement between the two experts a hop actually leans
+            # on is the same pressure the society path applies, computed where this path has the tensors.
+            # It matters now because specialization finally moved off the floor (0.094 vs a 0.000 null) and DIV_W
+            # is the only term in the system that rewards experts for DIFFERING. It has never once been on.
+            if s.div_w > 0 and _ck >= 2 and ban1 is None:
+                _da = Bo[:, 0].reshape(Bo.size(0), -1); _db = Bo[:, 1].reshape(Bo.size(0), -1)
+                _dv = F.cosine_similarity(_da, _db, dim=-1).clamp_min(0.0).mean()
+                dacc = _dv if dacc is None else dacc + _dv
             upd = (_cw[:, :, None, None] * Bo).sum(1)                         # soft mixture of the computed nodes
             # HALT NOW ACTUALLY HALTS. This renormalised over the top-k and applied the step at FULL strength no
             # matter how much mass had already halted -- so the loop ran its full depth and h kept changing after
@@ -1274,6 +1289,7 @@ class Fabric(nn.Module):
         # Integrated over hops rather than taken at entry: an expert that receives mass on hop 3 served the window
         # just as much as the one that took it at hop 0.
         if ban1 is None:
+            s._div = (dacc / steps) if dacc is not None else None
             s._wrun = (wacc / wacc.sum(-1, keepdim=True).clamp_min(1e-9)) if wacc is not None else None
         return h, depth / steps, mass / steps, bal / steps
 
@@ -2234,8 +2250,10 @@ def main():
     IND_W = _f("IND_W", 0.5); IND_K = _i("IND_K", 2)          # independence-loss weight / how many experts get it
     BAL_WARM = _i("BAL_WARM", 4000)                           # load-balance pressure DECAYS to 0 over this many steps:
     DIV_W = _f("DIV_W", 0.0)                                  #   it exists to stop early collapse, but equal load and
-    ROUTE_T = _f("ROUTE_T", 1.0)                              #   specialization are directly opposed. DIV_W rewards
-                                                              #   experts for DISAGREEING (distinct competence).
+    # (a module-level ROUTE_T = _f("ROUTE_T", 1.0) used to sit here: assigned, never read by anything, and with a
+    #  DIFFERENT default from the one that actually routes -- Fabric.route_t reads ROUTE_T with default 0.1. Two
+    #  names for one env var with disagreeing defaults is how a config gets misread. The live one is Fabric's.)
+    #   DIV_W rewards experts for DISAGREEING (distinct competence); balance and specialization are opposed.
     def fab_bal(w): return w.size(1) * (w.mean(0) ** 2).sum()
     experts = ExpertBank(_i("MAX_EXPERTS", 256), D, _i("EXPERT_R", 4)).to(DEV) if EXPERTS else None
     router = ExpertRouter(experts, _f("EXPERT_NEW_DIST", 0.5), _i("EXPERT_CULL_STALE", 1000), _f("EXPERT_REP_MULT", 2.5),
@@ -2869,9 +2887,10 @@ def main():
                       "term removed the logits are nearly UNIFORM and routing is close to random. Set "
                       "FAB_KEY_NORM=1 so that term is a cosine over route_t and actually has dynamic range.")
             if not SOCIETY:
-                print(f"[config] not on CHAINING: IND_W={IND_W} (each expert must solve the task ALONE) and "
-                      f"DIV_W={DIV_W} (distinctness) both need SEPARABLE per-expert logits, which a composed walk "
-                      f"does not have. Marginal contribution IS measured here, by re-walking without each candidate.")
+                print(f"[config] not on CHAINING: IND_W={IND_W} (each expert must solve the task ALONE) needs "
+                      f"SEPARABLE per-expert LOGITS, which a composed walk does not have. Marginal contribution IS "
+                      f"measured here, by re-walking without each candidate. DIV_W={DIV_W} IS applied on this path "
+                      f"({'ON' if DIV_W > 0 else 'off at 0'}), from the per-hop expert OUTPUTS.")
         print(f"[config] OFF ON PURPOSE  DIV_W={DIV_W} (expert distinctness reward) | "
               f"ENC_CREG={_f('ENC_CREG', 0.0)} (encoder decorrelation; ENC_VREG={_f('ENC_VREG', 5.0)} IS on) | "
               f"DROPOUT={DROPOUT} | RECON_W={RECON_W} | WEIGHT_DECAY={WD}")
@@ -3225,9 +3244,15 @@ def main():
         tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0) \
             + (FAB_AE_W * _ael if _ael is not None else 0.0) \
             + (fab.sup_w * _sup if _sup is not None else 0.0)  # nodes have had a chance to be useful
+        if FABRIC and not SOCIETY and DIV_W > 0 and getattr(fab, "_div", None) is not None:
+            tot = tot + DIV_W * fab._div          # same pressure, computed from the per-hop expert outputs
         if FABRIC and SOCIETY and DIV_W > 0 and _O.size(1) > 1:   # DISTINCTNESS: reward experts for DISAGREEING, so
-            _t2 = _w.mean(0).topk(min(2, _O.size(1))).indices          #   they carry different competence instead of
-            _a = _O[:, _t2[0]].reshape(-1); _b = _O[:, _t2[1]].reshape(-1)   #   converging on the same generalist function
+            #   RANK SLOTS, not global ids. `_w.mean(0).topk(...)` returns GLOBAL expert ids while `_O` is indexed
+            #   by RANK -- so this indexed a rank slot with an expert id and raised IndexError the first time
+            #   anyone set DIV_W > 0. Nobody ever had: it defaults to 0, so the one term in this system that
+            #   rewards experts for DIFFERING has been un-runnable since routing went per-window, and silently.
+            #   _O is already returned in rank order, so slots 0 and 1 ARE the top two by routing mass.
+            _a = _O[:, 0].reshape(-1); _b = _O[:, 1].reshape(-1)   # they carry different competence instead of
             tot = tot + DIV_W * F.cosine_similarity(_a, _b, dim=0).clamp_min(0.0)
         if FABRIC and SOCIETY and IND_W > 0:                # INDEPENDENCE: each expert must solve the task ALONE
             for _j in range(min(IND_K, _O.size(1))):          #   (weighted by its routing mass) -- makes the population
