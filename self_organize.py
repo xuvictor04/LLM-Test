@@ -1980,10 +1980,19 @@ def main():
     # This is the whole-system check, in the log, on every run.
     def _on(b): return "ON " if b else "off"
     print(f"[config] SUBSYSTEMS  fabric {_on(FABRIC)} ({_i('FAB_NMAX', 4096)} slots, rank {_i('FAB_RANK', 8)}) | "
-          f"world {_on(bool(_i('WORLD_MODEL', 1)))} (grow {_on(bool(_i('WORLD_GROW', 1)))}, "
+          f"world {_on(bool(_i('WORLD_MODEL', 1)))} (grow {_on(bool(_i('WORLD_GROW', 1)) and bool(_i('WORLD_MODEL', 1)))}, "
           f"feedback {_on(bool(_i('WORLD_FEEDBACK', 1)))}) | domains {_on(SELF_ORG)} (cap {MAX_DOMAINS}) | "
           f"manage {_on(MANAGE_ON)} | tokenizer {_on(USE_TOK)} (online {_on(TOK_ONLINE)}) | "
-          f"per-expert memory {_on(bool(_i('MEM_PER_EXPERT', 1)))} | phased {_on(PHASED)}")
+          f"per-expert memory {_on(bool(_i('MEM_PER_EXPERT', 1)) and FABRIC)} | phased {_on(PHASED)}")
+    # EFFECTIVE VALUES, NOT ENV VALUES. This banner exists so a log can be read back as "here is the system this
+    # measured", and it was printing the raw environment variable for two flags whose effective value is an AND
+    # with something else. A whole 48k-step chaining pilot logged "per-expert memory ON " while MEM_PER_EXPERT was
+    # `... and SOCIETY` and therefore OFF for the entire run. A banner that can lie is worse than no banner.
+    if bool(_i("MEM_PER_EXPERT", 1)) and not FABRIC:
+        print("[config] note: MEM_PER_EXPERT=1 but FABRIC=0 -- there are no experts to own memory, so the store is "
+              "GLOBAL. Shown as off above because off is what it is.")
+    if bool(_i("WORLD_GROW", 1)) and not bool(_i("WORLD_MODEL", 1)):
+        print("[config] note: WORLD_GROW=1 but WORLD_MODEL=0 -- nothing to grow.")
     # NAMING, because the first version of this banner printed "experts off" while the expert population was ON.
     # The EXPERTS flag names the LEGACY ExpertBank path; the live population is the fabric. Saying "experts off"
     # about a run with 4096 routed experts is worse than saying nothing.
@@ -3434,9 +3443,30 @@ def main():
             print(f"[world-model eval skipped: {type(_e).__name__}: {_e}]")
     if _lm_curve:
         print("[LM training curve] step:loss -> " + "  ".join(f"{a}:{b:.2f}" for a, b in _lm_curve))
+        # THIS LINE USED TO READ THE SIGN BACKWARDS, AND ONLY LOOKED AT THE LAST TWO POINTS.
+        # _d8 is prev-minus-current, so NEGATIVE means the loss went UP -- and the text said "still FALLING =
+        # more passes/steps will help" whatever the sign. A pilot whose loss bottomed at step 5.9k and then rose
+        # for the next 42k steps printed "-0.059: still FALLING = more passes will help". Two points also cannot
+        # see a 40k-step trend. Measure against the MINIMUM of the whole curve and say the direction out loud.
+        _bi = min(range(len(_lm_curve)), key=lambda q: _lm_curve[q][1])
+        _bs, _bl = _lm_curve[_bi]; _fs, _fl = _lm_curve[-1]
         _d8 = (_lm_curve[-2][1] - _lm_curve[-1][1]) if len(_lm_curve) > 1 else 0.0
-        print(f"  (last segment change {_d8:+.3f}: still FALLING = more passes/steps will help;"
-              f" flat = the model has converged and needs more CAPACITY or more DATA, not more steps)")
+        print(f"  best {_bl:.2f} @ step {_bs} | final {_fl:.2f} @ step {_fs} | since the minimum {_fl - _bl:+.3f}"
+              f" | last segment {'-' if _d8 > 0 else '+'}{abs(_d8):.3f} ({'improving' if _d8 > 0 else 'worsening'})")
+        if _fl - _bl > 0.05 and _bi < len(_lm_curve) - 2:
+            print(f"  >> DIVERGING. The loss bottomed at step {_bs} and has been RISING for the "
+                  f"{_fs - _bs} steps since -- {100 * (len(_lm_curve) - 1 - _bi) / max(1, len(_lm_curve) - 1):.0f}% "
+                  f"of the run was spent getting worse. More steps will NOT help; this needs diagnosing.")
+            print(f"     things that change on that timescale: the fabric hitting FAB_NMAX (growth fires on "
+                  f"worsening, so a rising loss GROWS the population, which is a feedback loop), BAL_WARM "
+                  f"decaying the load-balance pressure to 0, the tokenizer still minting (per-TOKEN loss rises "
+                  f"mechanically as tokens get longer -- cross-check the per-process bits/byte curve above, which "
+                  f"is unit-stable), and the memory store reaching MEM_CAP.")
+        elif _fl - _bl > 0.05:
+            print(f"  >> turned upward at the very end -- too recent to call. Watch it.")
+        else:
+            print(f"  >> still improving or flat: falling = more passes/steps will help; flat = the model has "
+                  f"converged and needs more CAPACITY or more DATA, not more steps.")
     n_self = len(asm.cent); print(f"SELF-ASSEMBLED {n_self} LIVE domains after {'management' if MANAGE_ON else 'NO MANAGEMENT (ablation)'} (truth had {NP} processes)")
     _ent = sorted((asm.visits.get(i, 0) for i in asm.cent), reverse=True)
     _rec = sum(1 for v in _ent if v >= DOM_MIN_VISITS)
