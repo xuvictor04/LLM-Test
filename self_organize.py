@@ -3280,6 +3280,7 @@ def main():
             ("WARMSTART_MODE", _env("WARMSTART_MODE", "mean")),
             ("TOK_COMPOSE",    TOK_COMPOSE),            ("TOK_ANCHOR",     TOK_ANCHOR),
             ("TOK_ANCHOR_TAU", TOK_ANCHOR_TAU),
+            ("TOK_MINT_NOVEL", _f("TOK_MINT_NOVEL", 0.0)),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
             ("WORLD_FEEDBACK", world_proj is not None),  ("MEM_PER_EXPERT", MEM_PER_EXPERT),

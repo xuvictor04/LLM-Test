@@ -135,6 +135,10 @@ class DynamicTokenizer:
         self.dropout = dropout                 # P(skip a merge) -> preferential, not strict; 0 = strict greedy
         self.max_pairs = max_pairs             # cap the pair tally (keeps memory bounded on large corpora)
         self.pair = Counter()
+        # NOVELTY-WEIGHTED MINTING (see maybe_grow). novel=0 reproduces "mint the most frequent pair" exactly.
+        self.novel = float(os.environ.get("TOK_MINT_NOVEL", 0.0))
+        self.novel_k = int(os.environ.get("TOK_MINT_NOVEL_K", 32))
+        self.pair_seen = Counter()             # each candidate pair's count when we last considered it
         self.bytes_per_id = [1] * 256
         self.mlbf = [1] * 256                  # max token byte-length starting with each byte (prunes segment's L-loop)
 
@@ -160,13 +164,33 @@ class DynamicTokenizer:
         return ids
 
     def maybe_grow(self):
-        """Mint the most-frequent pair if it crosses threshold. Returns (new_id, a, b) or None.
+        """Mint a pair if it crosses threshold. Returns (new_id, a, b) or None.
         Locked so a background batch-prefetch thread can tally `pair` concurrently without racing most_common()."""
         with self.lock:
             if len(self.pair) > self.max_pairs:                    # bound memory: drop the rare-pair long tail
                 self.pair = Counter(dict(self.pair.most_common(self.max_pairs // 2)))
             if self.vocab_size >= self.vmax or not self.pair: return None
-            (a, b), cnt = self.pair.most_common(1)[0]
+            # WHICH PAIR TO MINT, and it matters more than the threshold does.
+            # most_common(1) takes the GLOBALLY most frequent pair -- which, by construction, is one that appears
+            # everywhere. Re-segmenting it therefore changes the representation of ALL existing material at once,
+            # which is the most disruptive mint available. In a system whose point is continual learning, that is
+            # backwards: a new area arriving should buy vocabulary for ITSELF, not rewrite how everything already
+            # learned is spelled.
+            # novel > 0 re-ranks the top candidates by how much a pair has grown SINCE WE LAST LOOKED, relative to
+            # how much of it we had already seen: recent / (1 + seen)^novel. A pair that has been common all along
+            # scores low however frequent it is; a pair that has just started appearing scores high. So minting
+            # follows NEW material, and the text the model has already fitted keeps its spelling.
+            _top = self.pair.most_common(max(1, self.novel_k) if self.novel > 0 else 1)
+            if self.novel > 0:
+                _sc = []
+                for _pr, _c in _top:
+                    _seen = self.pair_seen.get(_pr, 0)
+                    _sc.append((_c - _seen) / (1.0 + _seen) ** self.novel)
+                _i = max(range(len(_top)), key=lambda k: _sc[k])
+                (a, b), cnt = _top[_i]
+                for _pr, _c in _top: self.pair_seen[_pr] = _c     # only what we actually considered
+            else:
+                (a, b), cnt = _top[0]
             if cnt < self.min_pair: return None
             self.pair[(a, b)] = 0
             ns = self.id2bytes[a] + self.id2bytes[b]
