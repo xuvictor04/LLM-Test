@@ -293,8 +293,17 @@ grid)
       nolatch)   echo "FAB_RAMP_LATCH=0" ;;
       bytes)     echo "TOKENIZER=0" ;;
       mintinit)  echo "WARMSTART_MODE=last/first" ;;
-      compose)   echo "TOK_COMPOSE=1" ;;
-      mintnovel) echo "TOK_MINT_NOVEL=0.5" ;;
+      # --- TOKEN PARAMETERISATION. TOK_COMPOSE is now ON by default, so every arm below states BOTH knobs
+      # explicitly. pilot_gru_8 ran compose AND mintnovel together and cannot be attributed to either; these
+      # four arms are the 2x2 that separates them, plus the anchor.
+      nocompose) echo "TOK_COMPOSE=0 TOK_MINT_NOVEL=0" ;;    # neither -- the control the good runs were on
+      compose)   echo "TOK_COMPOSE=1 TOK_MINT_NOVEL=0" ;;    # composed table alone
+      mintnovel) echo "TOK_COMPOSE=0 TOK_MINT_NOVEL=0.5" ;;  # novelty-ranked minting alone
+      composenov) echo "TOK_COMPOSE=1 TOK_MINT_NOVEL=0.5" ;; # both -- reproduces pilot_gru_8
+      noanchor)  echo "TOK_COMPOSE=1 TOK_ANCHOR=0 TOK_MINT_NOVEL=0" ;;  # composer without the residual anchor
+      # --- FABRIC SATURATION. pilot_gru_8 turned upward at ~step 36k, which is when the population reached
+      # 100% of FAB_NMAX, the ramp latched off, and culling-under-capacity-pressure started.
+      bigpop)    echo "FAB_NMAX=16384" ;;                    # does the turn track hitting the CAP?
       freeze6k)  echo "TOK_MINT_UNTIL=6000" ;;
       freeze20k) echo "TOK_MINT_UNTIL=20000" ;;
       nogrow)    echo "FAB_GROW=0 FAB_N0=1024" ;;
@@ -324,7 +333,16 @@ grid)
     python3 fetch_big.py --dataset ${PILOT_SRC:-fineweb-edu} --domain eng --gb ${PILOT_GB:-0.06} --out "$P_DD" --resume || exit 1
   fi
   G_SL=${STREAM_LEN:-4000000}; G_EP=${EPOCHS:-8}
-  ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT}
+  # NAMED PRESETS: `bash longrun.sh grid ablate` runs just the set that answers the current question, in the
+  # order that leaves the most informative partial result if it is stopped early.
+  case "${2:-}" in
+    ablate)  ARMS="nocompose composenov compose mintnovel noanchor nogrow bigpop" ;;
+    tokens)  ARMS="nocompose compose mintnovel composenov noanchor" ;;
+    fabric)  ARMS="nogrow bigpop nofabric smallpop" ;;
+    "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
+    *)       ARMS="$2" ;;
+  esac
+  ARMS=${GRID_ARMS:-$ARMS}
   echo "grid -> $GRID | arms: $ARMS | $((G_SL/1000)) kB/epoch x $G_EP epochs each"
   echo "  (re-running this command SKIPS completed arms and never overwrites a finished log)"
   trap 'echo; echo "grid interrupted -- completed arms are kept; re-run the same command to continue"; exit 130' INT TERM
