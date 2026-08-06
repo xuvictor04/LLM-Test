@@ -3404,6 +3404,19 @@ def main():
     _banner()
     _total_steps = EPOCHS * (len(stream) // WIN)
     _bpw = WIN * (len(byte_stream) / max(1, len(stream))) if ONLINE else WIN     # BYTES of corpus consumed per step
+    # === THE RUN IS SHORTER THAN THIS NUMBER WHENEVER THE VOCABULARY GROWS ====================================
+    # _total_steps is EPOCHS x (tokens // WIN) measured ONCE, at the seed vocabulary. Under TOK_ONLINE the stream
+    # is re-tokenized as tokens are minted, and minted tokens are LONGER, so the same bytes become fewer tokens
+    # and every later epoch is shorter than the first. pilot_gru_8: _total_steps said 81840, the run ended at
+    # ~48800 -- a 40% overestimate, and it grows with how much the vocabulary grows.
+    # Everything downstream of it was therefore wrong: the ETA, the "SAMPLED FROM step ~N" label, and (the one
+    # that matters) the cosine LR schedule, which was stretched over a horizon the run never reached and so never
+    # annealed. _proj_steps() re-projects from where the run actually is: the steps already spent, plus the
+    # epochs still to come at the CURRENT token length.
+    _ep_start = 0                                          # step at which the current epoch began
+    def _proj_steps(step):
+        _per = max(1, len(stream) // WIN)                  # steps per epoch AT THE CURRENT VOCABULARY
+        return max(step + 1, _ep_start + (EPOCHS - _epoch) * _per)
     while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
         # ---- PER-PROCESS LEARNING CURVE: the other half of continual learning. -----------------------------------
         # Retention says whether old material survives. This says how FAST new material is picked up, and it is the
@@ -3463,7 +3476,10 @@ def main():
                         print(f"  [best-ckpt save failed: {type(_e).__name__}: {_e}]")
         if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark:
             _now = _time.time(); _rate = (step - _s_mark) / max(1e-9, _now - _t_mark)      # steps/sec over the last window
-            _left = max(0, _total_steps - (step - _resume_step))
+            # bytes-per-step moves with the vocabulary too, so kB/s and GB/day were quoted at the SEED vocabulary
+            # for the whole run. Both are two len() calls; recompute them here rather than report a stale number.
+            _bpw = WIN * (len(byte_stream) / max(1, len(stream))) if ONLINE else WIN
+            _left = max(0, _proj_steps(step) - (step - _resume_step))
             print(f"  [rate @ {step}] {_rate*60:.0f} steps/min | {_rate*_bpw/1e3:.1f} kB/s of corpus | "
                   f"elapsed {(_now-_t_start)/60:.0f} min | ~{_left/max(1e-9,_rate)/3600:.1f} h left ({_left} steps) | "
                   f"{_rate*_bpw*86400/1e9:.2f} GB of text per DAY at this rate | "
@@ -3484,7 +3500,8 @@ def main():
                 stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
                 set_enc_tensor(ENC_SEQ); _sigq = []          # stream replaced -> queued lookahead windows are stale
                 if FABRIC and fabgrow is not None: fabgrow.note_shift(step)
-            i = 0; print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
+            i = 0; _ep_start = step
+            print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
             continue
         w = stream[i:i + WIN + 1]
         x = torch.tensor([list(w[:-1])], device=DEV); y = torch.tensor([list(w[1:])], device=DEV)
@@ -5116,7 +5133,10 @@ def main():
             if _lastc: _fin = sum(_lastc) / len(_lastc)
             # SAY "not saved" WHEN IT WAS NOT SAVED. This printed "saved to None.best" on a run with SAVE_CKPT
             # off, because _save_ckpt returned early without saying so and the caller assumed success.
-            print(f"  SAMPLED FROM: the FINAL model, step ~{_total_steps}"
+            # the REAL last step, not the projection. This said "step ~81840" on a run that ended at ~48800,
+            # because _total_steps was measured at the seed vocabulary and minted tokens made every later epoch
+            # shorter. `step` is the number the loop actually stopped on.
+            print(f"  SAMPLED FROM: the FINAL model, step {step}"
                   + (f" ({_fin:.3f} held-out bits/byte)" if _fin else "")
                   + f" -- NOT the best. Best was {_best_bpb[0]:.3f} at step {_best_bpb[1]}"
                   + (f", saved to {_env('SAVE_CKPT')}.best" if _best_bpb[2] else " (not saved: SAVE_CKPT is off)")
