@@ -185,7 +185,13 @@ FAB_REPLICATE = bool(_i("FAB_REPLICATE", 1))   # grow by CLONING the fittest exp
 COMP_PROTECT = bool(_i("COMP_PROTECT", 1))  # protect a unit that BEATS the population on its own material from culling,
 #   however rarely it is used. COMP_PROTECT=0 restores pure-utilization selection (the ablation).
 KW = _i("KEY_WIN", 8); V = 256
-TOK_COMPOSE = bool(_i("TOK_COMPOSE", 1))                    # token vector = composite(bytes) + learned residual
+# DEFAULT OFF, on measurement. The goal it serves is real -- a minted token should start with parameters, at its
+# composite, so the mint is a handover rather than a fresh random row -- and the mechanism does what it says. But
+# the one run of it (pilot_gru_8, with TOK_MINT_NOVEL=0.5 also on) landed at 5.360 held-out against a 2.0-2.2 band
+# that eleven runs across five commits sit in, with or without minting. That is ~20x the measured seed spread and
+# the only change that has ever moved the LEVEL rather than the shape of the curve. It stays available and stays
+# off until an isolating run (longrun.sh grid tokens) says which of the two flags did it and why.
+TOK_COMPOSE = bool(_i("TOK_COMPOSE", 0))                    # token vector = composite(bytes) + learned residual
 TOK_ANCHOR = _f("TOK_ANCHOR", 0.05)                        # hold a new token near its composite, decaying
 TOK_ANCHOR_TAU = _f("TOK_ANCHOR_TAU", 4000.0)              #   over this many steps of the TOKEN's own life
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
