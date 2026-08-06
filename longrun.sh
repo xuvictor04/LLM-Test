@@ -404,7 +404,11 @@ seeds)
   # against a 0.06 b/B band separating the four best architectures. The spread is larger than the effect, so a
   # single run cannot rank two arms -- and two claims made off single runs (specialisation 0.132, a flat curve)
   # did not survive a second seed.
-  # Runs are deterministic given (config, commit, SEED), so this is pure seed variance, not run-to-run jitter.
+  # THIS NEXT SENTENCE USED TO BE ASSERTED HERE AND WAS NEVER TESTED: "runs are deterministic given
+  # (config, commit, SEED), so this is pure seed variance, not run-to-run jitter." Nothing verified it, and a
+  # cuDNN GRU backward plus atomic scatters are not bit-reproducible on GPU. If it is false, every spread this
+  # project has attributed to SEED is really seed variance PLUS run-to-run jitter, and the two have never been
+  # separated. `longrun.sh repeat` separates them: same seed, N runs.
   #   bash longrun.sh seeds 3 SOCIETY=1        # 3 seeds of one arm
   #   SEEDS="0 1 2 3" bash longrun.sh seeds -- CHAIN_ROUTE=soc
   N=${2:-3}
@@ -456,6 +460,88 @@ if len(hs) > 1:
           f"sd {st.pstdev(hs):.3f}  over {len(hs)} seeds")
     print(f"  >> an architecture difference SMALLER than the spread is not a result. The four best arms in this")
     print(f"     project sit inside 0.06 b/B of each other; measured seed spread has reached 0.174.")
+PY
+  ;;
+
+repeat)
+  # === THE SAME SEED, N TIMES -- IS THIS SYSTEM EVEN REPRODUCIBLE? ============================================
+  # Every comparison in this project assumes a run is a function of (config, commit, SEED). That assumption has
+  # never been tested, and it is now load-bearing: two runs at the SAME default config and the SAME seed, twelve
+  # commits apart, came out 2.275 and 3.694 held-out -- and an exhaustive per-commit review found nothing in
+  # between that touches the optimised computation at those defaults. Either the review missed something, or
+  # runs at a fixed seed simply do not land in the same place.
+  #
+  # This answers it directly and it is the cheapest decisive test available:
+  #   spread << 0.2  -> runs are reproducible, the +1.42 is real and owned by code, keep bisecting
+  #   spread ~ 1.4   -> runs are NOT reproducible at fixed seed, and no single-run comparison in this project
+  #                     has ever measured what it claimed to measure, including every architecture ranking
+  #
+  #   bash longrun.sh repeat 3                 # 3 runs of HEAD defaults at SEED=0
+  #   SEED=1 bash longrun.sh repeat 3          # ... at SEED=1
+  #   bash longrun.sh repeat 3 SOCIETY=1       # 3 runs of one arm
+  N=${2:-3}
+  case "$N" in ''|*[!0-9]*) N=3;; esac
+  shift $([ "${2:-}" = "$N" ] && echo 2 || echo 1) 2>/dev/null || true
+  [ "${1:-}" = "--" ] && shift
+  ARMFLAGS="$*"
+  RSEED=${SEED:-0}
+  RD=${REPEAT_DIR:-runs/repeat}
+  mkdir -p "$RD"
+  TAG=$(echo "${ARMFLAGS:-default}" | tr ' =' '__' | cut -c1-40)
+  echo "repeat: arm [${ARMFLAGS:-defaults}] at SEED=$RSEED x $N runs -> $RD"
+  echo "  (re-running SKIPS completed runs and never overwrites a finished log)"
+  trap 'echo; echo "repeat interrupted -- completed runs are kept; re-run to continue"; exit 130' INT TERM
+  for R in $(seq 1 "$N"); do
+    LOG="$RD/${TAG}_seed${RSEED}_run$R.log"
+    if _done "$LOG"; then echo "== run $R: already complete, skipping"; continue; fi
+    [ -f "$LOG" ] && { _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done; mv "$LOG" "$LOG.partial-$_pn"; }
+    echo; echo "################  run $R/$N  SEED=$RSEED  ${ARMFLAGS:-(defaults)}  ################"
+    set +e
+    env $ARMFLAGS SEED=$RSEED \
+        MODEL=gru LAYERS=1 DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng \
+        DEVICE=${DEVICE:-cuda} DISK_STREAM=1 CORPUS_CAP=100000000000 \
+        STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
+        WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
+        SIG_WIN=${SIG_WIN:-614} ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 \
+        MEM_QUOTA=${MEM_QUOTA:-3125} CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 PROBE_WAIT=0 \
+        SAVE_CKPT=0 \
+        python3 self_organize.py > "$LOG" 2>&1
+    echo "== run $R: rc=$?"
+    set -e 2>/dev/null || true
+  done
+  echo; echo "=== REPEAT SUMMARY: [${ARMFLAGS:-defaults}] at SEED=$RSEED ==="
+  python3 - "$RD" "$TAG" "$RSEED" <<'PY'
+import sys, glob, re, statistics as st
+rd, tag, sd = sys.argv[1], sys.argv[2], sys.argv[3]
+rows = []
+for f in sorted(glob.glob(f"{rd}/{tag}_seed{sd}_run*.log")):
+    b = open(f, errors="ignore").read()
+    def g(p):
+        m = re.search(p, b)
+        return float(m.group(1)) if m else None
+    rows.append((re.search(r"run(\d+)\.log", f).group(1),
+                 g(r"held-out ([0-9.]+)"),          # the fresh end-of-run number
+                 g(r"model ALONE ([0-9.]+)  ->  \+ FABRIC"),   # base model, fabric ablated
+                 g(r"top expert took ([0-9.]+)%")))
+print(f"  {'run':>4}  {'held-out':>9}  {'model ALONE':>12}  {'top-expert%':>12}")
+for r, h, m, t in rows:
+    print(f"  {r:>4}  {h if h else '-':>9}  {m if m else '-':>12}  {t if t else '-':>12}")
+hs = [h for _, h, _, _ in rows if h]
+ms = [m for _, _, m, _ in rows if m]
+if len(hs) > 1:
+    sp = max(hs) - min(hs)
+    print(f"\n  held-out    mean {st.mean(hs):.3f}  spread {sp:.3f}  sd {st.pstdev(hs):.3f}  over {len(hs)} runs")
+    if ms and len(ms) > 1:
+        print(f"  model ALONE mean {st.mean(ms):.3f}  spread {max(ms)-min(ms):.3f}  (fabric ablated -- "
+              f"a base-model spread means the instability is NOT in the routing)")
+    print()
+    if sp < 0.2:
+        print(f"  >> REPRODUCIBLE at fixed seed (spread {sp:.3f}). The 2.275 -> 3.694 gap is real and owned by")
+        print(f"     code; keep bisecting. Every past single-run comparison remains as valid as its seed spread.")
+    else:
+        print(f"  >> NOT REPRODUCIBLE at fixed seed (spread {sp:.3f}). Same config, same seed, same commit.")
+        print(f"     No single-run comparison in this project has measured what it claimed to, and the whole")
+        print(f"     architecture ranking has to be re-established from repeated runs, not from one run per arm.")
 PY
   ;;
 
