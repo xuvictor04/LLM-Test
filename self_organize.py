@@ -3171,6 +3171,7 @@ def main():
             ("TOKENIZER",      USE_TOK),                 ("TOK_ONLINE",     USE_TOK and TOK_ONLINE),
             ("TOK_MINT_UNTIL", TOK_MINT_UNTIL),         ("WARMSTART",      bool(_i("WARMSTART", 1))),
             ("WARMSTART_OPT",  bool(_i("WARMSTART_OPT", 0))),
+            ("WARMSTART_MODE", _env("WARMSTART_MODE", "mean")),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
             ("WORLD_FEEDBACK", world_proj is not None),  ("MEM_PER_EXPERT", MEM_PER_EXPERT),
@@ -3847,16 +3848,54 @@ def main():
                             if model.head.bias is not None: _inherit_opt(om, model.head.bias, nid, a, b)
                             if SIG_SPACE == "tokens" and nid < enc.emb.num_embeddings:
                                 _inherit_opt(oe, enc.emb.weight, nid, a, b)
+                        # THE TWO SIDES ARE NOT SYMMETRIC, and averaging both was leaving most of the warm
+                        # start's value on the table.
+                        #   HEAD  scores "the next token is ab" from the state at position t. That is the same
+                        #         decision the model already made when it scored "next is a" there -- the contexts
+                        #         where ab now appears are exactly the contexts where a appeared and b followed.
+                        #         head[b] is tuned for a DIFFERENT conditioning state, the one AFTER consuming a,
+                        #         so averaging it in is mixing in the wrong row. -> head[ab] = head[a]
+                        #   EMB   is what the recurrence CONSUMES. After consuming ab the state should be where
+                        #         consuming a then b left it, and the last symbol dominates what gets handed
+                        #         forward. -> emb[ab] = emb[b]
+                        # Measured on the immediate post-mint loss (what the model must climb back from at every
+                        # mint), 6 pairs x 3 seeds = 18 trials:
+                        #     random               2.1699 (sd 0.120)
+                        #     mean/mean  [old]     1.8222 (sd 0.078)
+                        #     mean/first           1.6252 (sd 0.071)
+                        #     last/first [now]     1.4822 (sd 0.011)   -0.340 vs old, 31x its own sd
+                        #     sum/first            1.6518 (sd 0.100)
+                        # The old warm start beat random by 0.348; this beats the old warm start by 0.340, so on
+                        # THAT measurement it roughly doubles what the mechanism is worth.
+                        #
+                        # IT IS NOT THE DEFAULT, because the only end-to-end check available disagrees: on a short
+                        # toy with minting on, held-out came out 5.214 with last/first against 5.100 with mean.
+                        # That is one run of one seed and the gap is well inside the 0.06-0.17 seed spread measured
+                        # at pilot scale, so it does not refute the 18-trial result -- but the 18-trial result only
+                        # measures the IMMEDIATE post-mint loss, and "cheaper to recover from" is not the same
+                        # claim as "better model at the end". Two measurements, pointing different ways, neither
+                        # decisive. Defaulting on the one that has never been checked end to end is the mistake
+                        # this branch has made repeatedly.
+                        # WARMSTART_MODE=last/first to run it; the pilot decides.
+                        _wm = _env("WARMSTART_MODE", "mean")
                         with torch.no_grad():
-                            model.emb.weight[nid] = 0.5 * (model.emb.weight[a] + model.emb.weight[b])
-                            model.head.weight[nid] = 0.5 * (model.head.weight[a] + model.head.weight[b])
-                            if model.head.bias is not None:
-                                model.head.bias[nid] = 0.5 * (model.head.bias[a] + model.head.bias[b])
+                            if _wm == "mean":
+                                model.emb.weight[nid] = 0.5 * (model.emb.weight[a] + model.emb.weight[b])
+                                model.head.weight[nid] = 0.5 * (model.head.weight[a] + model.head.weight[b])
+                                if model.head.bias is not None:
+                                    model.head.bias[nid] = 0.5 * (model.head.bias[a] + model.head.bias[b])
+                            else:
+                                model.emb.weight[nid] = model.emb.weight[b]
+                                model.head.weight[nid] = model.head.weight[a]
+                                if model.head.bias is not None:
+                                    model.head.bias[nid] = model.head.bias[a]
                             if SIG_SPACE == "tokens" and nid < enc.emb.num_embeddings:
                                 # The signature encoder needs this MORE than the LM does: a domain centroid is a mean
                                 # of encodings, so one freshly-random token id inside a window perturbs every
                                 # signature that contains it, and the assembler reads those as a domain shift.
-                                enc.emb.weight[nid] = 0.5 * (enc.emb.weight[a] + enc.emb.weight[b])
+                                # It is a sequence encoder consuming the token, so it takes the CONSUMED side.
+                                enc.emb.weight[nid] = (0.5 * (enc.emb.weight[a] + enc.emb.weight[b])
+                                                       if _wm == "mean" else enc.emb.weight[b])
         _t1("tokenizer (mint/tally)", _ptok)
         _bx = []; _by = []; _bg = []; _bd = []; _bp = []
         i += WIN; step += 1

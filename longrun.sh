@@ -292,6 +292,7 @@ grid)
       noban)     echo "CHAIN_BAN=0" ;;
       nolatch)   echo "FAB_RAMP_LATCH=0" ;;
       bytes)     echo "TOKENIZER=0" ;;
+      mintinit)  echo "WARMSTART_MODE=last/first" ;;
       freeze6k)  echo "TOK_MINT_UNTIL=6000" ;;
       freeze20k) echo "TOK_MINT_UNTIL=20000" ;;
       nogrow)    echo "FAB_GROW=0 FAB_N0=1024" ;;
