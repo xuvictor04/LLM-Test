@@ -185,7 +185,9 @@ FAB_REPLICATE = bool(_i("FAB_REPLICATE", 1))   # grow by CLONING the fittest exp
 COMP_PROTECT = bool(_i("COMP_PROTECT", 1))  # protect a unit that BEATS the population on its own material from culling,
 #   however rarely it is used. COMP_PROTECT=0 restores pure-utilization selection (the ablation).
 KW = _i("KEY_WIN", 8); V = 256
-TOK_COMPOSE = bool(_i("TOK_COMPOSE", 0))                    # token vectors COMPUTED from their bytes
+TOK_COMPOSE = bool(_i("TOK_COMPOSE", 1))                    # token vector = composite(bytes) + learned residual
+TOK_ANCHOR = _f("TOK_ANCHOR", 0.05)                        # hold a new token near its composite, decaying
+TOK_ANCHOR_TAU = _f("TOK_ANCHOR_TAU", 4000.0)              #   over this many steps of the TOKEN's own life
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
@@ -401,8 +403,22 @@ class ByteComposer(nn.Module):
         s.pos = nn.Embedding(maxb, d)                      # WHERE in the token a byte sits: "ab" != "ba"
         s.length = nn.Embedding(maxb + 1, d)
         s.proj = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, d))
-        s.bias = nn.Linear(d, 1)                           # the per-token output bias, also composed
+        s.bias = nn.Linear(d, 1)                           # the composed part of the per-token output bias
+        # === PER-TOKEN PARAMETERS, STARTING AT THE COMPOSITE ==================================================
+        # The composition is the STARTING POINT, not the whole representation. Each token also owns a free
+        # residual, zero-initialised, so at the instant "ab" is minted its vector is exactly what its bytes
+        # compose to -- and its bytes are its parts -- and from there it learns its own identity by moving away.
+        # That is the transition this is for: mint is continuous, because a token begins as its composite and
+        # becomes itself gradually, instead of appearing as a fresh row that has to be guessed at.
+        s.delta = nn.Parameter(torch.zeros(int(_env("VMAX", 2048)), d))
+        s.dbias = nn.Parameter(torch.zeros(int(_env("VMAX", 2048))))
+        s.born = None                                      # per-token birth step, for the anchor below
         s._idx = None; s._msk = None; s._cache = None; s._v = -1
+    def note_born(s, ids, step):
+        if s.born is not None:
+            for _i in ids:
+                if 0 <= _i < s.born.numel() and int(s.born[_i]) < 0: s.born[_i] = step
+
     def set_vocab(s, id2bytes, dev, vmax=None):
         """Called whenever the vocabulary changes. Builds the (V, maxb) byte-index tensor once per change.
         SIZED TO VMAX, not to the live vocabulary: the table has no per-token parameters, so the unused rows cost
@@ -417,6 +433,10 @@ class ByteComposer(nn.Module):
             if b:
                 idx[i, :len(b)] = torch.tensor(list(b), dtype=torch.long)
                 msk[i, :len(b)] = 1.0
+        _prev = 0 if s.born is None else int(s._v)
+        _b = torch.full((_V,), -10**9, dtype=torch.long)
+        if s.born is not None: _b[:min(_prev, _V)] = s.born[:min(_prev, _V)].cpu()
+        s.born = _b.to(dev)
         s._idx = idx.to(dev); s._msk = msk.to(dev)
         s._len = s._msk.sum(-1).long().clamp(max=s.maxb).to(dev)
         s._v = _V; s._cache = None
@@ -425,8 +445,22 @@ class ByteComposer(nn.Module):
         m = s._msk[:, :, None]
         e = (s.byte(s._idx) + s.pos.weight[None, :s.maxb, :]) * m
         pooled = e.sum(1) / m.sum(1).clamp_min(1.0)
-        w = s.proj(pooled + s.length(s._len))
-        return w, s.bias(w).squeeze(-1)
+        _c = s.proj(pooled + s.length(s._len))
+        _n = _c.size(0)
+        w = _c + s.delta[:_n]                              # composite + what this token has learned to be
+        return w, (s.bias(_c).squeeze(-1) + s.dbias[:_n])
+
+    def anchor(s, step, tau):
+        """HOLD A NEW TOKEN NEAR ITS COMPOSITE, then let go. A freshly minted token has delta=0, so it IS its
+        composite; without this it is free to be dragged anywhere by the first gradients it sees, which is the
+        same discontinuity the old fresh-random row had, just starting from a better place. Penalising its
+        residual with a weight that decays over `tau` steps of the token's own life makes the handover gradual:
+        strongly anchored while it is new, free once it has seen enough of its own material to deserve to be."""
+        if s.born is None or s._v <= 0: return None
+        _age = (step - s.born[:s._v]).clamp_min(0).float()
+        _w = torch.exp(-_age / max(1.0, tau))
+        if float(_w.max()) < 1e-3: return None             # nothing young enough to hold
+        return (_w[:, None] * s.delta[:s._v].pow(2)).sum(-1).mean()
 
 class MiniLM(nn.Module):                                   # base LM (GRU, optionally multi-layer)
     def __init__(s, d, layers=1, nv=None):
@@ -2560,8 +2594,11 @@ def main():
     if TOK_COMPOSE and USE_TOK and getattr(model, "compose", None) is not None:
         model.compose.set_vocab(TOK.id2bytes, DEV, VMAX)   # the table exists from step 0, sized to VMAX
         print(f"[tokenizer] TOK_COMPOSE: token vectors are COMPUTED from their bytes -- no per-token embedding or "
-              f"head row exists, so a minted token needs no initialisation and the vocabulary can grow without "
-              f"adding parameters. {model.compose.byte.num_embeddings} byte embeddings serve all "
+              f"head row is guessed at. Each token is composite(its bytes) + a learned residual that starts at "
+              f"ZERO, so at the instant it is minted it IS its composite, and it becomes itself from there. "
+              f"TOK_ANCHOR={TOK_ANCHOR} holds that residual near 0 for ~{TOK_ANCHOR_TAU:.0f} steps of the "
+              f"token's own life, so the mint is a handover rather than a jump. No VMAX ceiling on the "
+              f"composite. {model.compose.byte.num_embeddings} byte embeddings underlie all "
               f"{TOK.vocab_size} tokens.")
     BEST_TRACK = bool(_i("BEST_TRACK", 1))                    # keep the best-by-held-out checkpoint, not just the last
     _best_bpb = [None, -1, False]                             # [best mean bits/byte, step, saved?]
@@ -3241,7 +3278,8 @@ def main():
             ("TOK_MINT_UNTIL", TOK_MINT_UNTIL),         ("WARMSTART",      bool(_i("WARMSTART", 1))),
             ("WARMSTART_OPT",  bool(_i("WARMSTART_OPT", 0))),
             ("WARMSTART_MODE", _env("WARMSTART_MODE", "mean")),
-            ("TOK_COMPOSE",    TOK_COMPOSE),
+            ("TOK_COMPOSE",    TOK_COMPOSE),            ("TOK_ANCHOR",     TOK_ANCHOR),
+            ("TOK_ANCHOR_TAU", TOK_ANCHOR_TAU),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
             ("WORLD_FEEDBACK", world_proj is not None),  ("MEM_PER_EXPERT", MEM_PER_EXPERT),
@@ -3727,6 +3765,11 @@ def main():
                 _sl = F.cross_entropy(model.head(_hh).reshape(-1, V), y.reshape(-1))
                 _sup = _sl if _sup is None else _sup + _sl
             _sup = _sup / max(1, len(fab._hops) - 1)
+        # NEW TOKENS ARE TRAINED WITH THE LOSS, held to their composite while young. This is the term that makes
+        # the mint a HANDOVER rather than a jump: the residual is penalised in proportion to how recently the
+        # token was minted, so it behaves as its composite at birth and is progressively released.
+        _anc = model.compose.anchor(step, TOK_ANCHOR_TAU) if (TOK_COMPOSE and TOK_ANCHOR > 0
+                                                              and getattr(model, "compose", None) is not None) else None
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
         # EVERY STEP, not on the embed cadence. The refresh cadence exists because RE-READING identities is
@@ -3737,7 +3780,8 @@ def main():
         _ael = fab.ae_loss(min(fab.n(), 256)) if (FABRIC and FAB_SPAWN) else None
         tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0) \
             + (FAB_AE_W * _ael if _ael is not None else 0.0) \
-            + (fab.sup_w * _term("CHAIN_SUP", _sup) if _sup is not None else 0.0)  # nodes have had a chance
+            + (fab.sup_w * _term("CHAIN_SUP", _sup) if _sup is not None else 0.0) \
+            + (TOK_ANCHOR * _term("TOK_ANCHOR", _anc) if _anc is not None else 0.0)  # nodes have had a chance
         if FABRIC and not SOCIETY and DIV_W > 0 and getattr(fab, "_div", None) is not None:
             tot = tot + DIV_W * _term("DIV_W", fab._div)   # same pressure, from the per-hop expert outputs
         if FABRIC and SOCIETY and DIV_W > 0 and _O.size(1) > 1:   # DISTINCTNESS: reward experts for DISAGREEING, so
@@ -3951,6 +3995,7 @@ def main():
                             # NOTHING TO INITIALISE. The new token's vector is already determined by its bytes;
                             # all that is needed is to tell the composer the vocabulary grew.
                             model.compose.set_vocab(TOK.id2bytes, DEV, VMAX)
+                            model.compose.note_born([nid], step)   # its residual is held near 0 while it is new
                             continue
                         _wm = _env("WARMSTART_MODE", "mean")
                         with torch.no_grad():
