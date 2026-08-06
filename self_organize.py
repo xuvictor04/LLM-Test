@@ -185,6 +185,7 @@ FAB_REPLICATE = bool(_i("FAB_REPLICATE", 1))   # grow by CLONING the fittest exp
 COMP_PROTECT = bool(_i("COMP_PROTECT", 1))  # protect a unit that BEATS the population on its own material from culling,
 #   however rarely it is used. COMP_PROTECT=0 restores pure-utilization selection (the ablation).
 KW = _i("KEY_WIN", 8); V = 256
+TOK_COMPOSE = bool(_i("TOK_COMPOSE", 0))                    # token vectors COMPUTED from their bytes
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
@@ -374,14 +375,76 @@ ENC_VREG = _f("ENC_VREG", 5.0); ENC_CREG = _f("ENC_CREG", 0.0)   # read ONCE, at
 #   banner and the encoder loss cannot disagree about what regularisation ran.
 WEIGHT_DECAY = _f("WEIGHT_DECAY", 0.0)                     # UNDERFIT (more passes keep helping), so these would only
                                                            # handicap it. Turn them on when val-vs-train shows a gap.
+
+# === TOKENS AS THEIR OWN CONTENT ==============================================================================
+# A minted token currently gets an arbitrary sequential id and a FRESH ROW in the embedding and the head, which
+# somebody then has to initialise -- that is the whole WARMSTART machinery, and it is why every mint costs the
+# model something to recover from.
+# Literal integer-valued ids (id = the token's bytes read as an integer) cannot index a table: max_tok=16 makes
+# that a 128-bit number. But the property that makes the idea good survives without them. If the id determines
+# the BYTES -- which it already does, via TOK.id2bytes -- then the token's representation can be COMPUTED from
+# those bytes instead of stored. A new token then has no parameters of its own, so:
+#   nothing to initialise, so no warm start and no WARMSTART_MODE question
+#   no new parameters appear mid-run, so minting stops being a moving target for the optimizer
+#   no VMAX: the vocabulary can grow as far as the tokenizer wants
+#   a token that shares bytes with known tokens starts out near them, automatically
+# The cost is that every token's row is now a function of 256 byte embeddings, so tokens can no longer be
+# arbitrarily unrelated to each other -- which is the point, not a limitation.
+class ByteComposer(nn.Module):
+    """token id -> vector, computed from the token's BYTES. 256 byte embeddings plus a length term, pooled and
+    projected. The output doubles as the input embedding table and (tied) the output head, so a vocabulary of any
+    size costs the same parameters."""
+    def __init__(s, d, maxb=16):
+        super().__init__()
+        s.d = d; s.maxb = maxb
+        s.byte = nn.Embedding(256, d)
+        s.pos = nn.Embedding(maxb, d)                      # WHERE in the token a byte sits: "ab" != "ba"
+        s.length = nn.Embedding(maxb + 1, d)
+        s.proj = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, d))
+        s.bias = nn.Linear(d, 1)                           # the per-token output bias, also composed
+        s._idx = None; s._msk = None; s._cache = None; s._v = -1
+    def set_vocab(s, id2bytes, dev, vmax=None):
+        """Called whenever the vocabulary changes. Builds the (V, maxb) byte-index tensor once per change.
+        SIZED TO VMAX, not to the live vocabulary: the table has no per-token parameters, so the unused rows cost
+        nothing, and sizing it to the live count means any lag between a mint and this call is an IndexError on
+        the training stream. Unassigned ids get an all-zero mask and never appear in the stream anyway."""
+        _V = max(len(id2bytes), int(vmax or 0))
+        id2bytes = list(id2bytes) + [b""] * (_V - len(id2bytes))
+        idx = torch.zeros(_V, s.maxb, dtype=torch.long)
+        msk = torch.zeros(_V, s.maxb)
+        for i, bs in enumerate(id2bytes):
+            b = bs[:s.maxb]
+            if b:
+                idx[i, :len(b)] = torch.tensor(list(b), dtype=torch.long)
+                msk[i, :len(b)] = 1.0
+        s._idx = idx.to(dev); s._msk = msk.to(dev)
+        s._len = s._msk.sum(-1).long().clamp(max=s.maxb).to(dev)
+        s._v = _V; s._cache = None
+    def table(s):
+        """(V, d) -- every token's vector, and the bias. Recomputed each call so gradient reaches the bytes."""
+        m = s._msk[:, :, None]
+        e = (s.byte(s._idx) + s.pos.weight[None, :s.maxb, :]) * m
+        pooled = e.sum(1) / m.sum(1).clamp_min(1.0)
+        w = s.proj(pooled + s.length(s._len))
+        return w, s.bias(w).squeeze(-1)
+
 class MiniLM(nn.Module):                                   # base LM (GRU, optionally multi-layer)
     def __init__(s, d, layers=1, nv=None):
         super().__init__(); s._V = nv or V
+        s.compose = ByteComposer(d) if TOK_COMPOSE else None
         s.emb = nn.Embedding(s._V, d); s.drop = nn.Dropout(DROPOUT)
         s.gru = nn.GRU(d, d, num_layers=layers, batch_first=True, dropout=(DROPOUT if layers > 1 else 0.0))
         s.head = nn.Linear(d, s._V)
-    def encode(s, x): h, _ = s.gru(s.drop(s.emb(x))); return s.drop(h)   # (B,L,D) hidden -- also the memory-key source
-    def forward(s, x): h = s.encode(x); return s.head(h), h
+    def _tbl(s):
+        if s.compose is None or s.compose._idx is None: return None
+        return s.compose.table()
+    def encode(s, x):
+        _t = s._tbl()
+        _e = (_t[0][x] if _t is not None else s.emb(x))     # composed table indexes exactly like an Embedding
+        h, _ = s.gru(s.drop(_e)); return s.drop(h)          # (B,L,D) hidden -- also the memory-key source
+    def forward(s, x):
+        h = s.encode(x); _t = s._tbl()
+        return ((h @ _t[0].t() + _t[1]) if _t is not None else s.head(h)), h
 class TinyTransformer(nn.Module):                          # decoder-only Transformer (causal) -- the H100-scale option
     def __init__(s, d, layers=4, heads=8, maxlen=512, nv=None):
         super().__init__(); s._V = nv or V
@@ -2494,6 +2557,12 @@ def main():
                 _t = st.get(_k)
                 if _t is not None and _t.dim() >= 1 and nid < _t.size(0):
                     _t[nid] = 0.5 * (_t[a] + _t[b])
+    if TOK_COMPOSE and USE_TOK and getattr(model, "compose", None) is not None:
+        model.compose.set_vocab(TOK.id2bytes, DEV, VMAX)   # the table exists from step 0, sized to VMAX
+        print(f"[tokenizer] TOK_COMPOSE: token vectors are COMPUTED from their bytes -- no per-token embedding or "
+              f"head row exists, so a minted token needs no initialisation and the vocabulary can grow without "
+              f"adding parameters. {model.compose.byte.num_embeddings} byte embeddings serve all "
+              f"{TOK.vocab_size} tokens.")
     BEST_TRACK = bool(_i("BEST_TRACK", 1))                    # keep the best-by-held-out checkpoint, not just the last
     _best_bpb = [None, -1, False]                             # [best mean bits/byte, step, saved?]
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
@@ -3172,6 +3241,7 @@ def main():
             ("TOK_MINT_UNTIL", TOK_MINT_UNTIL),         ("WARMSTART",      bool(_i("WARMSTART", 1))),
             ("WARMSTART_OPT",  bool(_i("WARMSTART_OPT", 0))),
             ("WARMSTART_MODE", _env("WARMSTART_MODE", "mean")),
+            ("TOK_COMPOSE",    TOK_COMPOSE),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
             ("WORLD_FEEDBACK", world_proj is not None),  ("MEM_PER_EXPERT", MEM_PER_EXPERT),
@@ -3877,6 +3947,11 @@ def main():
                         # decisive. Defaulting on the one that has never been checked end to end is the mistake
                         # this branch has made repeatedly.
                         # WARMSTART_MODE=last/first to run it; the pilot decides.
+                        if TOK_COMPOSE:
+                            # NOTHING TO INITIALISE. The new token's vector is already determined by its bytes;
+                            # all that is needed is to tell the composer the vocabulary grew.
+                            model.compose.set_vocab(TOK.id2bytes, DEV, VMAX)
+                            continue
                         _wm = _env("WARMSTART_MODE", "mean")
                         with torch.no_grad():
                             if _wm == "mean":
