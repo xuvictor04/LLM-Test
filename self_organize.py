@@ -4333,6 +4333,28 @@ def main():
                 _bpb_dir = (_bp[-1][1] - _bmin, _bp[-1][1] - _bp[len(_bp) // 3][1])
         except Exception:
             _bpb_dir = None
+        # IS IT STILL LEARNING? The single most-asked question about this curve, and it was never answered
+        # directly: "best" and "since the minimum" describe the whole run, and a run can be flat for its second
+        # half while still showing a good minimum somewhere early. The SLOPE over the second half says whether
+        # more steps at this setting would buy anything.
+        try:
+            _bp2 = sorted({st: b for st, _p, b, _a in _CURVE}.items())
+            if len(_bp2) >= 8:
+                _hh = _bp2[len(_bp2) // 2:]
+                _mx = sum(a for a, _ in _hh) / len(_hh); _my = sum(b for _, b in _hh) / len(_hh)
+                _sl = (sum((a - _mx) * (b - _my) for a, b in _hh)
+                       / max(1e-9, sum((a - _mx) ** 2 for a, _ in _hh))) * 10000
+                print(f"  STILL LEARNING? over the SECOND HALF of the run: {_hh[0][1]:.2f} -> {_hh[-1][1]:.2f}, "
+                      f"slope {_sl:+.4f} bits/byte per 10k steps.")
+                print("    " + ("clearly still improving -- more steps at this setting will buy more."
+                                if _sl < -0.02 else
+                                "FLAT: the second half bought nothing. The model is not learning at this setting "
+                                "any more, whatever its minimum was earlier -- look at what is disrupting it "
+                                "rather than at how long it ran."
+                                if abs(_sl) <= 0.02 else
+                                "getting WORSE through the second half, not merely flat."))
+        except Exception:
+            pass
         if _bpb_dir is not None:
             print(f"  UNIT-STABLE CROSS-CHECK (held-out bits/byte, the curve above): {_bpb_dir[0]:+.3f} since its "
                   f"own minimum, {_bpb_dir[1]:+.3f} over the last two thirds. Per-token loss can rise purely "
