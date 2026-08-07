@@ -2724,6 +2724,21 @@ def generate(model, mem, seed, n, use_mem, DEV, temp=0.7, vlim=None, fab=None, g
     return seq[len(seed):]
 
 @torch.no_grad()
+def _units(TOK, USE_TOK, text):
+    """Text -> the units the model is trained on: tokens if the tokenizer is on, raw bytes if not.
+    Written out inline in eight places, every one of them the same conditional.
+    count=False matters and is easy to drop: counting would tally the pair statistics that drive MINTING, so an
+    EVALUATION pass would silently steer the vocabulary."""
+    return TOK.segment(text, count=False) if USE_TOK else list(text)
+
+
+def _eval_logits(model, fab, FABRIC, x):
+    """Logits for x through the SAME path the model trained with -- the one line that must never drift between
+    the six evaluation sites that use it. `fab if FABRIC else None` is the whole of it, and getting that wrong
+    scores the base model while claiming to score the system."""
+    return fab_logits(model, fab if FABRIC else None, model.encode(x))
+
+
 def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     """THE single path from hidden state to logits. In SOCIETY mode the experts are ENSEMBLED AT THE PREDICTION
     LEVEL (sum of w_i * head(o_i)), not by averaging their hidden states -- averaging hiddens produces a
@@ -3209,7 +3224,7 @@ def main():
                 nm = DN[_p] if _p < len(DN) else str(_p)
                 _v = _VALT.get(_p)
                 if _v is None:
-                    _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+                    _v = _units(TOK, USE_TOK, VALC[_p])
                     _VALT[_p] = _v
                 if len(_v) < WIN + 2: continue
                 _rs = random.Random(_namehash(nm))
@@ -3217,7 +3232,7 @@ def main():
                 with torch.no_grad():
                     _X = torch.tensor([_v[a:a + WIN] for a in _st], device=DEV)
                     _Y = torch.tensor([_v[a + 1:a + WIN + 1] for a in _st], device=DEV)
-                    _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                    _lg = _eval_logits(model, fab, FABRIC, _X)
                     _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
                 # PER WINDOW, not pooled, so the number carries an error bar. A pooled sum-over-all-windows gives
                 # one figure with no way to tell a real change from sampling noise -- which is exactly how the
@@ -3770,7 +3785,7 @@ def main():
                 for _p in range(len(VALC)):
                     _v = _VALT.get(_p)
                     if _v is None:
-                        _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+                        _v = _units(TOK, USE_TOK, VALC[_p])
                         _VALT[_p] = _v
                     if len(_v) < WIN + 2: continue
                     _rs = random.Random(1234 + _p)          # SAME windows every time -> the curve is comparable
@@ -3778,7 +3793,7 @@ def main():
                     with torch.no_grad():
                         _X = torch.tensor([_v[a:a + WIN] for a in _st], device=DEV)
                         _Y = torch.tensor([_v[a + 1:a + WIN + 1] for a in _st], device=DEV)
-                        _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                        _lg = _eval_logits(model, fab, FABRIC, _X)
                         _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
                     # nbytes() is unusable mid-run: it reads BLEN, which is None until the final re-tokenization
                     # whenever TOK_ONLINE is set. Build the byte denominator from the LIVE tokenizer, cached per
@@ -4434,25 +4449,25 @@ def main():
         model.eval()
         _vb = []
         for _p in range(len(VALC)):
-            _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+            _v = _units(TOK, USE_TOK, VALC[_p])
             if len(_v) < WIN + 2: continue
             _st = [random.randint(0, len(_v) - WIN - 2) for _ in range(min(24, _i("EVAL_N", 64)))]
             with torch.no_grad():
                 _X = torch.tensor([_v[a:a + WIN] for a in _st], device=DEV)
                 _Y = torch.tensor([_v[a + 1:a + WIN + 1] for a in _st], device=DEV)
-                _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                _lg = _eval_logits(model, fab, FABRIC, _X)
                 _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
                 _vb.append(-(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y))
         _tb = []
         for _p in range(len(CORP)):                        # same measurement on TRAIN data, for a like-for-like gap
             _src = CORP[_p][max(0, SEG_LEN[_p] - len(VALC[_p])):SEG_LEN[_p]]   # tail of the TRAIN region (disk: CORP still holds val, so bound by SEG_LEN)
-            _t = TOK.segment(_src, count=False) if USE_TOK else list(_src)
+            _t = _units(TOK, USE_TOK, _src)
             if len(_t) < WIN + 2: continue
             _st = [random.randint(0, len(_t) - WIN - 2) for _ in range(min(24, _i("EVAL_N", 64)))]
             with torch.no_grad():
                 _X = torch.tensor([_t[a:a + WIN] for a in _st], device=DEV)
                 _Y = torch.tensor([_t[a + 1:a + WIN + 1] for a in _st], device=DEV)
-                _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                _lg = _eval_logits(model, fab, FABRIC, _X)
                 _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
                 _tb.append(-(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y))
         if _vb and _tb:
@@ -4471,12 +4486,12 @@ def main():
                 #   Counter happens further down, in the clustering report, and this block runs before it
                 _cat = []
                 for _p in range(len(VALC)):
-                    _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+                    _v = _units(TOK, USE_TOK, VALC[_p])
                     _cat += _v[:20000]
                 _trn = []                                   # FIT the baselines on TRAIN, score them on HELD-OUT.
                 for _p in range(len(CORP)):                 # Measuring a bigram's entropy ON the text it is scored
                     _s2 = CORP[_p][:min(SEG_LEN[_p], 200000)]   # on makes it a model that has seen the answers --
-                    _trn += (TOK.segment(_s2, count=False) if USE_TOK else list(_s2))[:20000]   # an unfairly strong
+                    _trn += (_units(TOK, USE_TOK, _s2))[:20000]   # an unfairly strong
                 if len(_cat) > 256 and len(_trn) > 256:     # anchor, which is the opposite of the mistake to make.
                     _nb = sum(TOK.bytes_per_id[t] for t in _cat) if USE_TOK else len(_cat)
                     _sc = len(_cat) / _nb                   # tokens per byte: bits/token -> bits/byte
@@ -4521,7 +4536,7 @@ def main():
                 _X = torch.tensor([list(stream[a:a + WIN]) for a in starts], device=DEV)
                 _Y = torch.tensor([list(stream[a + 1:a + WIN + 1]) for a in starts], device=DEV)
                 with torch.no_grad():
-                    _lg = fab_logits(model, fab if FABRIC else None, model.encode(_X))
+                    _lg = _eval_logits(model, fab, FABRIC, _X)
                     _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
                 return -(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y)
             _rows = []
@@ -4601,7 +4616,7 @@ def main():
                     _rs = random.Random(7)
                     for _p in range(len(VALC)):
                         _vb = VALC[_p]
-                        _v = TOK.segment(_vb, count=False) if USE_TOK else list(_vb)
+                        _v = _units(TOK, USE_TOK, _vb)
                         if len(_v) < WIN + 2: continue
                         _cum = [0]
                         for _t2 in _v: _cum.append(_cum[-1] + (TOK.bytes_per_id[_t2] if USE_TOK else 1))
@@ -4616,7 +4631,7 @@ def main():
                         with torch.no_grad():
                             _sg = enc(torch.tensor(_ds, device=DEV))
                             _own = (_C @ _sg.t()).argmax(0)                      # the assembler's own rule
-                            _pm = F.softmax(fab_logits(model, fab if FABRIC else None, model.encode(_X)), -1)
+                            _pm = F.softmax(_eval_logits(model, fab, FABRIC, _X), -1)
                         _rnd = (_own + torch.randint(1, len(_ids), _own.shape, device=DEV)) % len(_ids)
                         _den = nbytes(_Y)
                         def _sc(mix):
@@ -4647,7 +4662,7 @@ def main():
             world_enc.eval(); world_fwd.eval()
             _wm, _pm, _sd = [], [], []
             for _p in range(len(VALC)):
-                _v = TOK.segment(VALC[_p], count=False) if USE_TOK else list(VALC[_p])
+                _v = _units(TOK, USE_TOK, VALC[_p])
                 if len(_v) < WIN + 2: continue
                 _st = [random.randint(0, len(_v) - WIN - 2) for _ in range(min(24, _i("EVAL_N", 64)))]
                 with torch.no_grad():
