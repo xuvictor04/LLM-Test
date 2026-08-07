@@ -360,8 +360,11 @@ grid)
     # set +e around the arm: one crash must not end the grid. SAVE_CKPT is reserved, so a retry cannot stomp a
     # checkpoint an earlier attempt left behind.
     set +e
-    env $FLAGS \
-        MODEL=gru LAYERS=1 HEADS=${HEADS:-8} \
+    # ARM FLAGS LAST, SO THEY WIN. `env A=1 A=2` keeps the LAST assignment, and $FLAGS used to come FIRST --
+    # so every knob hardcoded below (VMAX, WIN, BATCH_W, RATE_EVERY, CKPT_EVERY, GROW_*, SEG_*, DATA_DIR, ...)
+    # silently DISCARDED an arm flag of the same name. `grid 3 VMAX=512` ran at 2048 and labelled the log 512.
+    # The loop's own SEED stays after the flags: varying it is the whole point of the subcommand.
+    env MODEL=gru LAYERS=1 HEADS=${HEADS:-8} \
         DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
         CORPUS_CAP=100000000000 STREAM_LEN=$G_SL EPOCHS=$G_EP D_MODEL=${D_MODEL:-768} \
         WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
@@ -369,6 +372,7 @@ grid)
         MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
         CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 PROBE_WAIT=0 \
         SAVE_CKPT="$([ "${GRID_CKPT:-1}" = 1 ] && _reserve "$GRID/$ARM" || echo 0)" \
+        $FLAGS \
         python3 self_organize.py > "$LOG" 2>&1
     _rc=$?
     set -e 2>/dev/null || true
@@ -427,14 +431,18 @@ seeds)
     [ -f "$LOG" ] && { _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done; mv "$LOG" "$LOG.partial-$_pn"; }
     echo; echo "################  seed $SEED  ${ARMFLAGS:-(defaults)}  ################"
     set +e
-    env $ARMFLAGS SEED=$SEED \
-        MODEL=gru LAYERS=1 DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng \
+    # ARM FLAGS LAST, SO THEY WIN. `env A=1 A=2` keeps the LAST assignment, and $FLAGS used to come FIRST --
+    # so every knob hardcoded below (VMAX, WIN, BATCH_W, RATE_EVERY, CKPT_EVERY, GROW_*, SEG_*, DATA_DIR, ...)
+    # silently DISCARDED an arm flag of the same name. `grid 3 VMAX=512` ran at 2048 and labelled the log 512.
+    # The loop's own SEED stays after the flags: varying it is the whole point of the subcommand.
+    env MODEL=gru LAYERS=1 DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng \
         DEVICE=${DEVICE:-cuda} DISK_STREAM=1 CORPUS_CAP=100000000000 \
         STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
         WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
         SIG_WIN=${SIG_WIN:-614} ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 \
         MEM_QUOTA=${MEM_QUOTA:-3125} CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 PROBE_WAIT=0 \
         SAVE_CKPT=$([ "${SEED_CKPT:-0}" = 1 ] && _reserve "$SD/${TAG}_seed$SEED.ckpt" || echo 0) \
+        $ARMFLAGS SEED=$SEED \
         python3 self_organize.py > "$LOG" 2>&1
     echo "== seed $SEED: rc=$?"
     set -e 2>/dev/null || true
@@ -497,14 +505,18 @@ repeat)
     [ -f "$LOG" ] && { _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done; mv "$LOG" "$LOG.partial-$_pn"; }
     echo; echo "################  run $R/$N  SEED=$RSEED  ${ARMFLAGS:-(defaults)}  ################"
     set +e
-    env $ARMFLAGS SEED=$RSEED \
-        MODEL=gru LAYERS=1 DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng \
+    # ARM FLAGS LAST, SO THEY WIN. `env A=1 A=2` keeps the LAST assignment, and $FLAGS used to come FIRST --
+    # so every knob hardcoded below (VMAX, WIN, BATCH_W, RATE_EVERY, CKPT_EVERY, GROW_*, SEG_*, DATA_DIR, ...)
+    # silently DISCARDED an arm flag of the same name. `grid 3 VMAX=512` ran at 2048 and labelled the log 512.
+    # The loop's own SEED stays after the flags: varying it is the whole point of the subcommand.
+    env MODEL=gru LAYERS=1 DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng \
         DEVICE=${DEVICE:-cuda} DISK_STREAM=1 CORPUS_CAP=100000000000 \
         STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
         WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
         SIG_WIN=${SIG_WIN:-614} ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 \
         MEM_QUOTA=${MEM_QUOTA:-3125} CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 PROBE_WAIT=0 \
         SAVE_CKPT=0 \
+        $ARMFLAGS SEED=$RSEED \
         python3 self_organize.py > "$LOG" 2>&1
     echo "== run $R: rc=$?"
     set -e 2>/dev/null || true

@@ -1089,7 +1089,7 @@ class Fabric(nn.Module):
             s.remove(i); culled += 1
         return culled, spared
 
-    def route_w(s, gist, nov, ban=None, step=None):
+    def route_w(s, gist, nov, ban=None, step=None, learn_regions=True):
         """Routing weights over the N experts. Two terms, both kept:
           GROUNDED  cosine of the signature to each expert's owned REGION (centroid, EMA'd under no_grad).
           LEARNED   qproj[i](gist).keys[i] -- a per-expert bilinear score. This revives parameters that were
@@ -1101,7 +1101,11 @@ class Fabric(nn.Module):
         if s.grounded:
             logits = s.entry_logits(gist, nov, N, step=step, ban=ban)
             w = s._with_halt(logits, gist, N)
-            s.ground_update(gist, w, N)
+            # AN EVAL PASS MUST NOT MOVE THE REGIONS. See fab_logits: every eval path (learning curve, holdout
+            # probe, bpb_true, generation) called this with a FABRICATED ZERO gist, and F.normalize(0) is 0, so
+            # each one dragged the top-FAB_CENT_TOPK experts' centroids toward the ORIGIN. Measured cost of the
+            # extra copies a checkpoint adds: 1.594 bits/byte. learn_regions=False on every non-training caller.
+            if learn_regions: s.ground_update(gist, w, N)
         else:
             _Kd, _ = s._ids(N, step)
             K = torch.cat([_Kd, s.halt_key[None]], 0)
@@ -1218,7 +1222,7 @@ class Fabric(nn.Module):
             _m = s._halt.mean().detach()
             s.halt_ema = _m if s.halt_ema is None else 0.99 * s.halt_ema + 0.01 * _m
 
-    def society(s, h, gist, nov, k=None, ban=None, step=None):
+    def society(s, h, gist, nov, k=None, ban=None, step=None, learn_regions=True):
         """SOCIETY OF EXPERTS: every expert maps the SAME base representation to its OWN output -- no chaining, so
         expert i's output never depends on expert j's.
 
@@ -1228,7 +1232,7 @@ class Fabric(nn.Module):
         the selection that was already happening, which is what makes a LARGE expert population affordable.
         Returns (w_full, O_k, idx) where idx maps O_k's columns back to global expert ids."""
         N = s.n_live
-        w = s.route_w(gist, nov, ban=ban, step=step)
+        w = s.route_w(gist, nov, ban=ban, step=step, learn_regions=learn_regions)
         kk = N if k is None else int(min(max(1, k), N))
         # PER WINDOW, not per batch. This was w.mean(0).topk -- ONE expert set and one weight vector for all
         # BATCH_W windows, so every window in a batch was served by the same experts however different its
@@ -1305,7 +1309,7 @@ class Fabric(nn.Module):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
         random. A randomly-keyed expert receives no traffic, gets no gradient, and stays dead (measured: 12/17 idle)."""
         with torch.no_grad(): return s.q_entry(gist).detach().squeeze(0).clone()
-    def forward(s, h, gist, nov, step=None, ban1=None, ban=None, head=None):
+    def forward(s, h, gist, nov, step=None, ban1=None, ban=None, head=None, learn_regions=True):
         """ban1: a single expert id to hold OUT of this walk entirely -- the counterfactual the marginal-contribution
         rule needs. On the society path leave-one-out is free (per-expert logits are already separate); here the
         walk itself changes when an expert is removed, so the only honest answer is to run it again without them."""
@@ -1340,7 +1344,7 @@ class Fabric(nn.Module):
         c = torch.softmax(_elg, -1)                                           # (B,N+1) ENTRY distribution
         # ...and the regions MOVE toward what they served, which the chaining path never did either. Without it
         # the cosine term scores against centroids frozen at initialisation and grounding buys nothing.
-        if s.grounded and ban1 is None: s.ground_update(gist, c[:, :N], N)
+        if s.grounded and ban1 is None and learn_regions: s.ground_update(gist, c[:, :N], N)
         #   route_t applied HERE TOO. It was only ever applied on the society path, so the chaining path kept the
         #   flat T=1.0 distribution -- with N+1 near-equal logits, HALT starts with ~1/(N+1) and, being ABSORBING,
         #   accumulates every step. That is a large part of the measured 'halt 0.76, mean routed depth 0.24 of 4'.
@@ -1371,7 +1375,7 @@ class Fabric(nn.Module):
                 _wn = _cc[:, :N] / _cc[:, :N].sum(-1, keepdim=True).clamp_min(1e-9)
                 _mass2 = _mass2 + _cc.mean(0).detach(); _dep2 = _dep2 + (1 - _ph).mean()
                 _wsum = _wn.detach() if _wsum is None else _wsum + _wn.detach()
-                if s.grounded and ban1 is None: s.ground_update(gist, _wn, N)
+                if s.grounded and ban1 is None and learn_regions: s.ground_update(gist, _wn, N)
                 _k2 = min(s.chain_k, N)
                 _v2, _i2 = _wn.topk(_k2, dim=-1)
                 if s.explore > 0 and _k2 >= 2 and N > _k2 and ban1 is None:
@@ -2416,13 +2420,18 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     representation no expert was ever trained to emit, which decodes badly. Blending OUTPUTS is what makes the
     population an ensemble that degrades gracefully when a member is deleted."""
     if fab is None: return model.head(h)
+    # THIS IS THE EVAL PATH, AND IT MUST NOT TRAIN THE ROUTER'S REGIONS. The zero gist below is a placeholder so
+    # the routing arithmetic has the right shape -- it is NOT a signature. ground_update normalises it (zero) and
+    # moves every top-ranked expert's centroid toward the origin, which is how a diagnostic's sampling frequency
+    # came to change the final model by 1.594 bits/byte. learn_regions=False makes an eval pass read-only.
+    # Training does not come through here: it calls fab.society()/fab() directly with a real signature.
     if gist is None: gist = torch.zeros(h.size(0), fab.q_entry.in_features, device=h.device)
     if nov is None: nov = torch.zeros(h.size(0), device=h.device)
     if not SOCIETY:
-        _hh = fab(h, gist, nov, head=(model.head if fab.vote else None))[0]
+        _hh = fab(h, gist, nov, head=(model.head if fab.vote else None), learn_regions=False)[0]
         return fab._votelg if fab._votelg is not None else model.head(_hh)
     kk = int(k or ENS_K)
-    w, O, oid = fab.society(h, gist, nov, k=kk)               # SPARSE: computes only the kk it is about to use
+    w, O, oid = fab.society(h, gist, nov, k=kk, learn_regions=False)   # SPARSE: only the kk it is about to use
     ww = w.gather(1, oid)                                     # oid is (B,kk): each row's OWN experts and weights
     ww = ww / ww.sum(-1, keepdim=True).clamp_min(1e-9)
     out = None
@@ -2633,12 +2642,12 @@ def main():
             h = model.encode(xb)
             if FABRIC:
                 _g0 = torch.zeros(1, SIG_D, device=DEV); _n0 = torch.zeros(1, device=DEV)
-                if SOCIETY:
-                    _w0, _O0, _ = fab.society(h, _g0, _n0, k=ENS_K)
+                if SOCIETY:                                # timing probe: zero gist, so read-only (see fab_logits)
+                    _w0, _O0, _ = fab.society(h, _g0, _n0, k=ENS_K, learn_regions=False)
                     model.head(fab.norm(_O0[:, 0])).sum().backward(); model.zero_grad()
                     if FABRIC: fab.zero_grad()
                     return
-                h = fab(h, _g0, _n0)[0]
+                h = fab(h, _g0, _n0, learn_regions=False)[0]
             model.head(h).sum().backward(); model.zero_grad()
             if FABRIC: fab.zero_grad()
         for _ in range(3): _one()
@@ -3419,10 +3428,26 @@ def main():
     # that matters) the cosine LR schedule, which was stretched over a horizon the run never reached and so never
     # annealed. _proj_steps() re-projects from where the run actually is: the steps already spent, plus the
     # epochs still to come at the CURRENT token length.
+    # MEASURED, on four runs at one seed with everything else identical:
+    #   E8  minting   projected  63,024   ran  48,130   over 31%   cosine reached p=0.760, LR floor never touched
+    #   E12 minting   projected  94,536   ran  70,368   over 34%   p=0.742
+    #   E18 minting   projected 141,804   ran 103,805   over 37%   p=0.730, ended at 21% of peak LR
+    #   FROZEN vocab  projected 118,776   ran 118,743   over  0%   p=1.000, ended at 5% of peak -- as designed
+    # The frozen-vocabulary run is the only one that ever annealed, and only because a vocabulary that does not
+    # grow makes the projection exact. That made "frozen tokenizer" and "schedule that anneals" the same
+    # experiment, and neither could be credited. It also means EPOCHS was never just run length: at step 48,130
+    # the E18 schedule was at 1.52e-3 and the E8 schedule at 3.58e-4, a 4.3x difference on the same step.
     _ep_start = 0                                          # step at which the current epoch began
+    _proj = [10 ** 9]                                      # monotone NON-INCREASING: see below
     def _proj_steps(step):
         _per = max(1, len(stream) // WIN)                  # steps per epoch AT THE CURRENT VOCABULARY
-        return max(step + 1, _ep_start + (EPOCHS - _epoch) * _per)
+        _p = max(step + 1, _ep_start + (EPOCHS - _epoch) * _per)
+        # The projection only ever shrinks in truth (minting makes tokens longer, so later epochs are shorter),
+        # but len(stream) jitters with each epoch's resample. Clamping to the running minimum keeps the cosine's
+        # progress monotone, so the LR falls and never steps back UP mid-run -- a schedule that reverses is worse
+        # than one that is merely wrong.
+        _proj[0] = min(_proj[0], _p)
+        return max(step + 1, _proj[0])
     while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
         # ---- PER-PROCESS LEARNING CURVE: the other half of continual learning. -----------------------------------
         # Retention says whether old material survives. This says how FAST new material is picked up, and it is the
@@ -3865,7 +3890,7 @@ def main():
                     _rseen.add(_rn)
             _greach.append(_gn)
         if LR_SCHED != "none":
-            _lrv = _lr_at(step, max(1, _total_steps))
+            _lrv = _lr_at(step, max(1, _proj_steps(step)))   # the LIVE horizon, not the seed-vocabulary guess
             for _g in om.param_groups: _g["lr"] = _lrv
             for _g in oe.param_groups: _g["lr"] = _lrv
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
@@ -4749,9 +4774,9 @@ def main():
             _sg2 = enc(torch.tensor([list(ENC_SEQ[WIN * 3:WIN * 4])], device=DEV))
             _h2b = model.encode(torch.tensor([list(stream[:WIN])], device=DEV))
             if SOCIETY:
-                _w2, _, _ = fab.society(_h2b, _sg2, torch.zeros(1, device=DEV), k=1)
+                _w2, _, _ = fab.society(_h2b, _sg2, torch.zeros(1, device=DEV), k=1, learn_regions=False)
             else:                                          # chaining exposes the same table -- see Fabric.forward
-                fab(_h2b, _sg2, torch.zeros(1, device=DEV))
+                fab(_h2b, _sg2, torch.zeros(1, device=DEV), learn_regions=False)
                 _w2 = fab._wrun
         _j2 = int(_w2[0].argmax()) if _w2 is not None else max(fab.use, key=fab.use.get, default=0)
         _pre = {p: bpb_true(p, use_mem=False) for p in _ps2}
@@ -4784,7 +4809,8 @@ def main():
         _fm = sum(bpb_true(q, use_fab=True, use_mem=True) for q in _ps) / max(1, len(_ps))
         with torch.no_grad():
             _sg = enc(torch.tensor([list(ENC_SEQ[WIN * 3:WIN * 4])], device=DEV))
-            _, _d, _m, _ = fab(model.encode(torch.tensor([list(stream[:WIN])], device=DEV)), _sg, torch.zeros(1, device=DEV))
+            _, _d, _m, _ = fab(model.encode(torch.tensor([list(stream[:WIN])], device=DEV)), _sg,
+                               torch.zeros(1, device=DEV), learn_regions=False)
         print(f"\n=== FABRIC: does the routed node population help? (bits/byte, lower=better) ===")
         print(f"  model ALONE {_b:.3f}  ->  + FABRIC {_f2:.3f} (fabric {_b - _f2:+.3f})  ->  + FABRIC + MEMORY {_fm:.3f}")
         print(f"  nodes {len(fab.bodies)} | mean routed depth {float(_d):.2f} of {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps"
@@ -5057,7 +5083,8 @@ def main():
                     with torch.no_grad():
                         _Xs = torch.tensor(_ex, device=DEV); _Ys = torch.tensor(_ey, device=DEV)
                         _hs = model.encode(_Xs)
-                        _ws, _Os, _os = fab.society(_hs, _G, torch.zeros(_Xs.size(0), device=DEV), k=max(ENS_K, 2))
+                        _ws, _Os, _os = fab.society(_hs, _G, torch.zeros(_Xs.size(0), device=DEV),
+                                                    k=max(ENS_K, 2), learn_regions=False)
                         _kn = min(ENS_K, _Os.size(1))
                         _wk2 = _ws.gather(1, _os[:, :_kn])
                         _wk2 = _wk2 / _wk2.sum(-1, keepdim=True).clamp_min(1e-9)
