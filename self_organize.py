@@ -3237,7 +3237,7 @@ def main():
         _plumb = {"DEVICE", "DATA_MODE", "DATA_DIR", "DOMAINS", "STREAM_LEN", "WIN", "BATCH_W", "D_MODEL",
                   "MODEL", "LAYERS", "HEADS", "SAVE_CKPT", "RESUME", "CKPT_EVERY", "RATE_EVERY", "PROFILE",
                   "SEED", "DISK_STREAM", "CORPUS_CAP", "SIG_WIN", "SIG_MODE", "SIG_D", "VMAX", "PROBE_WAIT",
-                  "GEN_LEN", "GEN_TEMP", "COH_N", "COH_LEN", "MANAGE_EVERY", "DOM_MANAGE_EVERY", "ENC_WARMUP",
+                  "GEN_LEN", "GEN_TEMP", "GEN_N", "GEN_PROCS", "COH_N", "COH_LEN", "MANAGE_EVERY", "DOM_MANAGE_EVERY", "ENC_WARMUP",
                   "ENC_WARMUP_MIN", "SEG_MIN", "SEG_MAX", "GROW_EVERY", "GROW_BURST", "VERIFY", "OUT", "EPOCHS"}
         _unreg = sorted(set(_ENV_ASKED) - s_cfg_known - _plumb)
         _pfx = ("FAB_", "ROUTE_", "CHAIN_", "SOCIETY", "DIV_W", "IND_", "ENS_", "MEM_", "DOM_", "ENC_",
@@ -5177,22 +5177,32 @@ def main():
                      f"as the END of the run, not its best." if _fin else "."))
             if _best_bpb[2]:
                 print(f"  to sample the BEST model instead:  python3 prompt.py CKPT={_env('SAVE_CKPT')}.best")
+        # MORE THAN ONE SAMPLE PER PROCESS. GEN_PROCS caps how many DOMAINS get sampled, and this project runs ONE
+        # corpus, so every text judgement in it has rested on a SINGLE 200-token continuation. The composing check
+        # below is the clearest cost: it scored "% of generated words that appear in the training text" on 64-91
+        # words, so 91% and 71% were three or four words apart and the difference between them was not resolvable.
+        # GEN_N draws several DISTINCT seed passages per process -- random.sample, not repeated random.choice, so
+        # the same passage cannot be drawn twice and the samples are not secretly correlated.
+        # Cost: GEN_N x 2 x GEN_LEN single-token forwards (4 x 2 x 200 = 1600), seconds, once, after training.
+        _gn = max(1, _i("GEN_N", 4))
         for p in sorted(set(labels))[:_i("GEN_PROCS", 4)]:
             starts = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p]
             if not starts: continue
-            s0 = random.choice(starts); seed = list(stream[s0:s0 + WIN])
             _vl = TOK.vocab_size if USE_TOK else None
-            _gg = None
-            if FABRIC:                                     # generation must run the SAME path the model trained with
-                with torch.no_grad():
-                    _b0 = encpos(s0)
-                    _gg = enc(torch.tensor([encwin(_b0)], device=DEV))
-            gno = generate(model, mem, seed, _i("GEN_LEN", 200), False, DEV, temp=_f("GEN_TEMP", 0.7), vlim=_vl, fab=fab, gist=_gg)
-            gme = generate(model, mem, seed, _i("GEN_LEN", 200), True, DEV, temp=_f("GEN_TEMP", 0.7), vlim=_vl, fab=fab, gist=_gg)
-            print(f"\n-- process {p} | seed ...{_dec(seed[-44:])}")
-            print(f"   MODEL ONLY: {_dec(gno)}")
-            print(f"   MODEL+MEM : {_dec(gme)}")
-            _gen_keep.append((p, seed, gno, gme))
+            _nsamp = min(_gn, len(starts))
+            for _si, s0 in enumerate(random.sample(starts, _nsamp)):
+                seed = list(stream[s0:s0 + WIN])
+                _gg = None
+                if FABRIC:                                 # generation must run the SAME path the model trained with
+                    with torch.no_grad():
+                        _b0 = encpos(s0)
+                        _gg = enc(torch.tensor([encwin(_b0)], device=DEV))
+                gno = generate(model, mem, seed, _i("GEN_LEN", 200), False, DEV, temp=_f("GEN_TEMP", 0.7), vlim=_vl, fab=fab, gist=_gg)
+                gme = generate(model, mem, seed, _i("GEN_LEN", 200), True, DEV, temp=_f("GEN_TEMP", 0.7), vlim=_vl, fab=fab, gist=_gg)
+                print(f"\n-- process {p} | sample {_si + 1}/{_nsamp} | seed ...{_dec(seed[-44:])}")
+                print(f"   MODEL ONLY: {_dec(gno)}")
+                print(f"   MODEL+MEM : {_dec(gme)}")
+                _gen_keep.append((p, seed, gno, gme))
         # === IS IT COMPOSING WORDS, OR EMITTING MEMORISED CHUNKS? ================================================
         # Word-shaped output at 2 bits/byte invites a fair objection: a tokenizer that minted whole words would let
         # the model emit one token and look like it had spelled something. That is a measurable difference, not an
