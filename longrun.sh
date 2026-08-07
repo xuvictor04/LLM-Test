@@ -55,6 +55,27 @@ _reserve() {
 # _done <log> -- true if that log reached the end of a run (the final line every complete report prints).
 _done() { [ -f "$1" ] && grep -aq "SIG_MODE=learned -- learned = the unfrozen product path" "$1"; }
 
+# _pilot_corpus [dir] -- guarantee <dir>/train/eng has text, pulling it if it does not.
+# EVERY pilot-scale subcommand needs this and it used to be copy-pasted into `pilot` and `grid` only. `seeds`
+# and `repeat` were added later without it, so they set up a whole run, printed their banner, and then died
+# inside the model on "no corpus files in data_pilot/train/eng/" -- a setup failure reported as a config error,
+# after the harness had already claimed it was starting. One definition, called by all four.
+_pilot_corpus() {
+  _pc="${1:-data_pilot}"
+  [ -n "$(ls "$_pc/train/eng"/part*.txt 2>/dev/null)" ] && return 0
+  echo "[corpus] $_pc/train/eng is empty -> pulling ${PILOT_GB:-0.06} GB of ${PILOT_SRC:-fineweb-edu} (resumable)"
+  python3 -c "import datasets" 2>/dev/null || {
+    echo "!! need: pip install datasets   (use a THROWAWAY venv -- upgrading numpy under an NGC torch breaks"
+    echo "   its ABI; see preflight.sh). Or pull it yourself, then re-run this command:"
+    echo "     python3 fetch_big.py --dataset ${PILOT_SRC:-fineweb-edu} --domain eng --gb ${PILOT_GB:-0.06} --out $_pc --resume"
+    exit 1; }
+  python3 fetch_big.py --dataset ${PILOT_SRC:-fineweb-edu} --domain eng --gb ${PILOT_GB:-0.06} --out "$_pc" --resume || exit 1
+  # A pull that "succeeds" but writes nothing is the failure that wasted the setup in the first place.
+  [ -n "$(ls "$_pc/train/eng"/part*.txt 2>/dev/null)" ] || {
+    echo "!! fetch_big.py exited 0 but $_pc/train/eng is still empty -- nothing to train on"; exit 1; }
+  echo "[corpus] ready: $(du -sh "$_pc/train/eng" 2>/dev/null | cut -f1) in $_pc/train/eng"
+}
+
 WHICH=${1:-run}
 OUT=${OUT:-runs/long}
 DD=${DATA_DIR:-data_big}
@@ -118,10 +139,7 @@ pilot)
   # ONE corpus. English is English -- splitting it into `eng` and `web` was us imposing a partition on material
   # that has none, and then measuring the system against our own split. The domains in an English-only run come
   # from the ASSEMBLER, discovered in the stream. Nothing here tells it where the boundaries are.
-  if [ -z "$(ls "$P_DD/train/eng"/part*.txt 2>/dev/null)" ]; then
-    python3 -c "import datasets" 2>/dev/null || { echo "need: pip install datasets (throwaway venv -- see preflight.sh)"; exit 1; }
-    python3 fetch_big.py --dataset ${PILOT_SRC:-fineweb-edu} --domain eng --gb ${PILOT_GB:-0.06} --out "$P_DD" --resume || exit 1
-  fi
+  _pilot_corpus "$P_DD"
   mkdir -p "$OUT"
   P_SL=${STREAM_LEN:-4000000}; P_EP=${EPOCHS:-8}
   # Report the ACTUAL settings, not the defaults -- a banner that lies when overridden is how a run gets filed
@@ -328,10 +346,7 @@ grid)
       *)         echo "" ;;
     esac
   }
-  if [ -z "$(ls "$P_DD/train/eng"/part*.txt 2>/dev/null)" ]; then
-    python3 -c "import datasets" 2>/dev/null || { echo "need: pip install datasets (throwaway venv -- see preflight.sh)"; exit 1; }
-    python3 fetch_big.py --dataset ${PILOT_SRC:-fineweb-edu} --domain eng --gb ${PILOT_GB:-0.06} --out "$P_DD" --resume || exit 1
-  fi
+  _pilot_corpus "$P_DD"
   G_SL=${STREAM_LEN:-4000000}; G_EP=${EPOCHS:-8}
   # NAMED PRESETS: `bash longrun.sh grid ablate` runs just the set that answers the current question, in the
   # order that leaves the most informative partial result if it is stopped early.
@@ -421,6 +436,7 @@ seeds)
   [ "${1:-}" = "--" ] && shift
   ARMFLAGS="$*"
   SEEDLIST=${SEEDS:-$(seq 0 $((N-1)))}
+  _pilot_corpus "${PILOT_DIR:-data_pilot}"
   SD=${SEED_DIR:-runs/seeds}
   mkdir -p "$SD"
   TAG=$(echo "${ARMFLAGS:-default}" | tr ' =' '__' | cut -c1-40)
@@ -493,6 +509,7 @@ repeat)
   [ "${1:-}" = "--" ] && shift
   ARMFLAGS="$*"
   RSEED=${SEED:-0}
+  _pilot_corpus "${PILOT_DIR:-data_pilot}"
   RD=${REPEAT_DIR:-runs/repeat}
   mkdir -p "$RD"
   TAG=$(echo "${ARMFLAGS:-default}" | tr ' =' '__' | cut -c1-40)
