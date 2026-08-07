@@ -38,80 +38,6 @@ def _env(k, d=None):
     return os.environ.get(k, d)
 def _i(k, d): return int(_env(k, d))
 def _f(k, d): return float(_env(k, d))
-
-# === COMPOSITE LEVERS ========================================================================================
-# The knobs below are the PRIMITIVES and none of them change. What was missing is a layer that says what you
-# actually mean, because several ideas in this system need three or four primitives set consistently and
-# getting one wrong fails silently. Measured examples, all of them real:
-#   TOK_MINT_UNTIL=1 freezes MINTING but leaves RETOK_EVERY firing -> 39 no-op re-tokenisations in one run,
-#     each dropping the lookahead queue and blacking out fabric growth for FAB_COOLDOWN steps.
-#   SOCIETY / CHAIN_ROUTE / CHAIN_VOTE together pick ONE of three forward paths, and CHAIN_VOTE also forces
-#     FAB_MIN_STEPS to 0, so "which path am I on" is spread over four flags and one hidden override.
-#   ROUTE_REGION_W and FAB_KEY_NORM together decide whether routing is weight-prediction only, or two terms on
-#     wildly different scales (13%/87% measured), or two terms on comparable ones.
-#
-# A lever is UNSET BY DEFAULT. Unset writes nothing, so the primitives read their own defaults and behaviour is
-# byte-identical to before this block existed -- that is the point, and CONFIG_DUMP=1 lets you prove it without
-# a GPU. When a lever IS set it writes the primitives it implies into the environment BEFORE anything reads
-# them, and an explicit setting always beats a lever, so `TOKENIZER_MODE=frozen RETOK_EVERY=3000` does what it
-# says. Every write is recorded and printed, so a lever can never quietly do something you did not ask for.
-_MODE_SET = {}                                             # primitive -> (value, which lever set it, overridden?)
-_MODE_NOTES = []
-
-def _imply(lever, **kv):
-    for k, v in sorted(kv.items()):
-        if k in os.environ:                                # explicit wins; say so rather than silently losing it
-            _MODE_SET[k] = (os.environ[k], lever, str(v))
-        else:
-            os.environ[k] = str(v); _MODE_SET[k] = (str(v), lever, None)
-
-def _resolve_modes():
-    _m = (os.environ.get("TOKENIZER_MODE", "") or "").strip().lower()
-    if _m:
-        if _m == "bytes":                                  # no tokenizer at all -- byte-level LM
-            _imply("TOKENIZER_MODE=bytes", TOKENIZER=0)
-        elif _m == "frozen":                               # seed vocabulary, then NOTHING moves: no minting AND
-            _imply("TOKENIZER_MODE=frozen",                #   no re-tokenisation, which is the pairing that gets missed
-                   TOKENIZER=1, TOK_ONLINE=1, TOK_MINT_UNTIL=1, RETOK_EVERY=0)
-        elif _m == "mint":                                 # mint for the whole run (the historical default)
-            _imply("TOKENIZER_MODE=mint", TOKENIZER=1, TOK_ONLINE=1, TOK_MINT_UNTIL=0)
-        elif _m.startswith("mint:"):                       # mint, then freeze minting at step N
-            _imply("TOKENIZER_MODE=" + _m, TOKENIZER=1, TOK_ONLINE=1, TOK_MINT_UNTIL=int(_m.split(":", 1)[1]))
-            _MODE_NOTES.append("TOKENIZER_MODE=%s freezes MINTING at that step but RETOK_EVERY keeps firing "
-                               "afterwards -- identical segmentation, but it still drops the lookahead queue and "
-                               "blacks out growth. Set RETOK_EVERY=0 too if that matters; it is left alone here "
-                               "because turning it off mid-run is a behaviour change, not a config one." % _m)
-        elif _m == "static":                               # build offline to VMAX, never mint during training
-            _imply("TOKENIZER_MODE=static", TOKENIZER=1, TOK_ONLINE=0)
-            _MODE_NOTES.append("TOKENIZER_MODE=static reads TOKENIZER_PATH if it exists, so a vocabulary left by "
-                               "an EARLIER run is inherited. Give each run its own TOKENIZER_PATH to keep them "
-                               "independent.")
-        else: _MODE_NOTES.append("!! TOKENIZER_MODE=%s is not a mode -- ignored. "
-                                 "bytes | frozen | mint | mint:N | static" % _m)
-
-    _p = (os.environ.get("PATH_MODE", "") or "").strip().lower()
-    if _p:
-        if _p == "society":            _imply("PATH_MODE=society", SOCIETY=1)
-        elif _p in ("chain", "chain_soc"):
-            _imply("PATH_MODE=chain", SOCIETY=0, CHAIN_ROUTE="soc")
-        elif _p == "chain_transition": _imply("PATH_MODE=chain_transition", SOCIETY=0, CHAIN_ROUTE="transition")
-        else: _MODE_NOTES.append("!! PATH_MODE=%s is not a mode -- ignored. "
-                                 "society | chain | chain_transition" % _p)
-
-    _r = (os.environ.get("ROUTE_SCORE", "") or "").strip().lower()
-    if _r:
-        if _r == "weights":            _imply("ROUTE_SCORE=weights", ROUTE_REGION_W=0)
-        elif _r == "mixed":            _imply("ROUTE_SCORE=mixed", ROUTE_REGION_W=1, FAB_KEY_NORM=0)
-        elif _r == "balanced":         _imply("ROUTE_SCORE=balanced", ROUTE_REGION_W=1, FAB_KEY_NORM=1)
-        else: _MODE_NOTES.append("!! ROUTE_SCORE=%s is not a mode -- ignored. weights | mixed | balanced "
-                                 "(there is no region-only: the weight-prediction term has no off switch)" % _r)
-
-    _g = (os.environ.get("POP_MODE", "") or "").strip().lower()
-    if _g:
-        if _g == "grow":               _imply("POP_MODE=grow", FAB_GROW=1)
-        elif _g.startswith("fixed:"):  _imply("POP_MODE=" + _g, FAB_GROW=0, FAB_N0=int(_g.split(":", 1)[1]))
-        else: _MODE_NOTES.append("!! POP_MODE=%s is not a mode -- ignored. grow | fixed:N" % _g)
-_resolve_modes()
 DEV = _env("DEVICE", "cpu")
 VERIFY = _env("VERIFY", "selfcon")               # "selfcon" (old B, default, unchanged) or "recon" (Verification)
 RECON_W = _f("RECON_W", 0.0)                               # joint Reconstructor training during the loop: OFF by default --
@@ -3311,8 +3237,7 @@ def main():
         _plumb = {"DEVICE", "DATA_MODE", "DATA_DIR", "DOMAINS", "STREAM_LEN", "WIN", "BATCH_W", "D_MODEL",
                   "MODEL", "LAYERS", "HEADS", "SAVE_CKPT", "RESUME", "CKPT_EVERY", "RATE_EVERY", "PROFILE",
                   "SEED", "DISK_STREAM", "CORPUS_CAP", "SIG_WIN", "SIG_MODE", "SIG_D", "VMAX", "PROBE_WAIT",
-                  "GEN_LEN", "GEN_TEMP", "GEN_N", "GEN_PROCS", "COH_N", "CONFIG_DUMP",
-                  "TOKENIZER_MODE", "PATH_MODE", "ROUTE_SCORE", "POP_MODE", "COH_LEN", "MANAGE_EVERY", "DOM_MANAGE_EVERY", "ENC_WARMUP",
+                  "GEN_LEN", "GEN_TEMP", "GEN_N", "GEN_PROCS", "COH_N", "COH_LEN", "MANAGE_EVERY", "DOM_MANAGE_EVERY", "ENC_WARMUP",
                   "ENC_WARMUP_MIN", "SEG_MIN", "SEG_MAX", "GROW_EVERY", "GROW_BURST", "VERIFY", "OUT", "EPOCHS"}
         _unreg = sorted(set(_ENV_ASKED) - s_cfg_known - _plumb)
         _pfx = ("FAB_", "ROUTE_", "CHAIN_", "SOCIETY", "DIV_W", "IND_", "ENS_", "MEM_", "DOM_", "ENC_",
@@ -3492,21 +3417,6 @@ def main():
                   "matters comes from ADDING an area later (longrun.sh add/pilot-add), not from a splice.")
         print()
     _banner()
-    # COMPOSITE LEVERS: say what each one set, and where an explicit setting beat it. A lever that quietly did
-    # something you did not ask for would be exactly the class of bug this layer exists to remove.
-    if _MODE_SET or _MODE_NOTES:
-        _byl = {}
-        for _k, (_v, _lev, _want) in sorted(_MODE_SET.items()): _byl.setdefault(_lev, []).append((_k, _v, _want))
-        for _lev, _items in _byl.items():
-            print(f"[config] LEVER {_lev} -> " + "  ".join(
-                (f"{_k}={_v}" if _w is None else f"{_k}={_v} (EXPLICIT, lever wanted {_w})") for _k, _v, _w in _items))
-        for _n in _MODE_NOTES: print(f"[config] {_n}")
-    # CONFIG_DUMP=1: print the resolved configuration and STOP, before a single training step. Two commits can
-    # then be shown to be configured identically by diffing text, with no GPU and no run -- which is what a
-    # "nothing changed" claim actually needs, and what eyeballing a banner does not give you.
-    if _i("CONFIG_DUMP", 0):
-        print("[config] CONFIG_DUMP=1 -- resolved configuration printed above; stopping before training.")
-        return
     _total_steps = EPOCHS * (len(stream) // WIN)
     _bpw = WIN * (len(byte_stream) / max(1, len(stream))) if ONLINE else WIN     # BYTES of corpus consumed per step
     # === THE RUN IS SHORTER THAN THIS NUMBER WHENEVER THE VOCABULARY GROWS ====================================
