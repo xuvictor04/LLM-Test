@@ -32,8 +32,318 @@ except Exception: pass
 # FAB_MIN_STEPS=2 while the code ran 0 -- and each was fixed individually while the next one was already there.
 _ENV_ASKED = {}                                            # name -> the value the environment explicitly set
 _ENV_READ = set()                                          # every key the code ever ASKED FOR, set or not
+# === THE KNOB REGISTRY =======================================================================================
+# EVERY environment knob this file reads, in one place, with its type and default. Before this existed the
+# 274 knobs were read inline at their point of use across 5,500 lines, so there was nowhere to look to see
+# the configuration surface -- and five of them were read with DIFFERENT DEFAULTS in different places:
+#   VMAX      the tokenizer targeted 4096 while ByteComposer sized its per-token tables to 2048, so an
+#             unset VMAX indexed past the end of delta/dbias.
+#   DOMAINS   the checkpoint recorded _env("DOMAINS", "") -- an empty domain list on any run that did not
+#             set it, which is what report_holdout keys its retention probe on.
+#   RESUME, SAVE_CKPT  None in some places, "" in others; both falsy, so this one was only ever cosmetic.
+#   LAYERS    genuinely context-dependent (4 for transformer, 1 for gru) and is EXEMPT below rather than
+#             forced to one value.
+# _env now checks every read against this table and stops the run on a mismatch, so a default can never
+# again disagree with itself. The table is the declaration; the call sites are uses.
+# EXEMPT: their default is computed from another knob, so it cannot live in a table of literals. They are
+# still LISTED in _SPEC (with None) so the registry stays the complete inventory -- just not enforced.
+_SPEC_FREE = {"LAYERS", "FAB_MIN_STEPS", "SEG_CONTIG", "SIG_LOOK", "ENC_POS_MAX"}
+_SPEC = {
+    # --- data: corpus, stream and phase schedule ---------------------------------------------------
+    "CORPUS_CAP": ("i", 2000000),                         # data
+    "DATA_DIR": ("env", "data"),                          # data
+    "DATA_MODE": ("env", "synthetic"),                    # data
+    "DISK_STREAM": ("i", 0),                              # data
+    "DOMAINS": ("env", "eng,py,num,c"),                   # data
+    "EPOCHS": ("i", 1),                                   # data
+    "PHASED": ("i", 1),                                   # data
+    "PHASES": ("i", 4),                                   # data
+    "PHASE_SCHED": ("env", ""),                           # data
+    "STREAM_LEN": ("i", 120000),                          # data
+    "VAL_FRAC": ("f", 0.05),                              # data
+    "WIN": ("i", 128),                                    # data
+    # --- tokenizer: vocabulary: build, mint, freeze, re-segment ------------------------------------
+    "GROW_PASSES": ("i", 8),                              # tokenizer
+    "MAX_TOK": ("i", 16),                                 # tokenizer
+    "MIN_PAIR": ("i", 50),                                # tokenizer
+    "RETOK_EVERY": ("i", 3000),                           # tokenizer
+    "RETOK_TAIL": ("i", 1),                               # tokenizer
+    "SEED_PASSES": ("i", 2),                              # tokenizer
+    "SEED_VOCAB": ("i", 512),                             # tokenizer
+    "TOKENIZER": ("i", 1),                                # tokenizer
+    "TOKENIZER_PATH": ("env", "data/dyntok.json"),        # tokenizer
+    "TOK_ANCHOR": ("f", 0.05),                            # tokenizer
+    "TOK_ANCHOR_TAU": ("f", 4000.0),                      # tokenizer
+    "TOK_COMPOSE": ("i", 0),                              # tokenizer
+    "TOK_DROPOUT": ("f", 0.0),                            # tokenizer
+    "TOK_GROW_CAP": ("i", 1000000),                       # tokenizer
+    "TOK_MINT_NOVEL": ("f", 0.0),                         # tokenizer
+    "TOK_MINT_UNTIL": ("i", 0),                           # tokenizer
+    "TOK_ONLINE": ("i", 1),                               # tokenizer
+    "VMAX": ("i", 4096),                                  # tokenizer
+    "WARMSTART": ("i", 1),                                # tokenizer
+    "WARMSTART_MODE": ("env", "mean"),                    # tokenizer
+    "WARMSTART_OPT": ("i", 0),                            # tokenizer
+    # --- fabric: the routed expert population, its routing and its growth --------------------------
+    "AFF_MIN": ("f", 0.10),                               # fabric
+    "CHAIN_BAN": ("env", 1),                              # fabric
+    "CHAIN_CURRIC": ("env", 0),                           # fabric
+    "CHAIN_DEPTH0": ("env", 1),                           # fabric
+    "CHAIN_EPS": ("env", 0.01),                           # fabric
+    "CHAIN_PATIENCE": ("env", 6),                         # fabric
+    "CHAIN_ROUTE": ("env", "soc"),                        # fabric
+    "CHAIN_STAGE_MAX": ("env", 40),                       # fabric
+    "CHAIN_STATE_Q": ("env", 0),                          # fabric
+    "CHAIN_SUP": ("env", 0.0),                            # fabric
+    "CHAIN_VOTE": ("env", 1),                             # fabric
+    "DIV_W": ("env", 0.0),                                # fabric
+    "ENS_K": ("i", 2),                                    # fabric
+    "EXPERTS": ("i", 0),                                  # fabric
+    "EXPERT_R": ("i", 4),                                 # fabric
+    "EXPERT_REP_MULT": ("f", 2.5),                        # fabric
+    "EXP_DOM_FRAC": ("env", 0.10),                        # fabric
+    "EXP_DOM_MIN": ("env", 4),                            # fabric
+    "FAB_AE_W": ("f", 0.5),                               # fabric
+    "FAB_ALPHA": ("f", 0.5),                              # fabric
+    "FAB_BALANCE": ("f", 0.01),                           # fabric
+    "FAB_BIRTH_WIN": ("env", 256),                        # fabric
+    "FAB_BURST": ("i", 3),                                # fabric
+    "FAB_CENT_TOPK": ("i", 8),                            # fabric
+    "FAB_CHAIN_K": ("env", 8),                            # fabric
+    "FAB_COOLDOWN": ("i", 400),                           # fabric
+    "FAB_CULL_FRAC": ("f", 0.08),                         # fabric
+    "FAB_DERIVE_IDS": ("env", 1),                         # fabric
+    "FAB_DISCOVER": ("f", 0.35),                          # fabric
+    "FAB_DK": ("i", 32),                                  # fabric
+    "FAB_EMB_EVERY": ("env", 1),                          # fabric
+    "FAB_EMB_HID": ("env", 128),                          # fabric
+    "FAB_EMB_VAR": ("env", 1.0),                          # fabric
+    "FAB_ERR_FAST": ("env", 0.05),                        # fabric
+    "FAB_ERR_SLOW": ("env", 0.005),                       # fabric
+    "FAB_EXPLORE": ("env", 0.15),                         # fabric
+    "FAB_FAIL_TOL": ("env", 0.15),                        # fabric
+    "FAB_GRACE": ("i", 3000),                             # fabric
+    "FAB_GROW": ("env", 1),                               # fabric
+    "FAB_HALT": ("env", 1),                               # fabric
+    "FAB_HALT_MAX": ("env", 0.9),                         # fabric
+    "FAB_HID_MULT": ("f", 2),                             # fabric
+    "FAB_KEY_NORM": ("i", 0),                             # fabric
+    "FAB_MIN_STEPS": ("i", None),                         # DEFAULT IS COMPUTED: 0 if SOCIETY else 2
+    "FAB_MUT": ("env", 0.25),                             # fabric
+    "FAB_MUT_BIG": ("env", 6.0),                          # fabric
+    "FAB_MUT_BIG_P": ("env", 0.1),                        # fabric
+    "FAB_N0": ("i", 3),                                   # fabric
+    "FAB_NMAX": ("i", 4096),                              # fabric
+    "FAB_NORM_ONLY": ("i", 0),                            # fabric
+    "FAB_PARENT_K": ("env", 8),                           # fabric
+    "FAB_PARENT_MAX": ("env", 0.20),                      # fabric
+    "FAB_PLATEAU": ("f", 0.002),                          # fabric
+    "FAB_PRESSURE": ("f", 0.75),                          # fabric
+    "FAB_RAMP": ("i", 4000),                              # fabric
+    "FAB_RAMP_LATCH": ("env", 1),                         # fabric
+    "FAB_RAMP_RATE": ("f", 0.10),                         # fabric
+    "FAB_RAMP_TO": ("f", 1.0),                            # fabric
+    "FAB_RANK": ("env", 8),                               # fabric
+    "FAB_RECOVER_MAX": ("i", 20000),                      # fabric
+    "FAB_RECOVER_MIN": ("i", 600),                        # fabric
+    "FAB_REPLICATE": ("i", 1),                            # fabric
+    "FAB_SHIFT_TOL": ("env", 0.05),                       # fabric
+    "FAB_SPAWN": ("i", 1),                                # fabric
+    "FAB_SPAWN_FLOOR": ("env", 0.02),                     # fabric
+    "FAB_SPAWN_MULT": ("env", 2.0),                       # fabric
+    "FAB_STEPS": ("i", 4),                                # fabric
+    "FAB_WARMUP": ("i", 300),                             # fabric
+    "FAB_XOVER": ("env", 0.35),                           # fabric
+    "FAB_Z": ("f", 4.0),                                  # fabric
+    "IND_K": ("i", 2),                                    # fabric
+    "IND_W": ("f", 0.5),                                  # fabric
+    "MAX_EXPERTS": ("i", 256),                            # fabric
+    "PONDER": ("f", 0.01),                                # fabric
+    "PONDER_WARM": ("i", 8000),                           # fabric
+    "ROUTE_GROUNDED": ("env", 1),                         # fabric
+    "ROUTE_LEARN": ("env", 1),                            # fabric
+    "ROUTE_REGION_W": ("env", 1.0),                       # fabric
+    "ROUTE_T": ("env", 0.1),                              # fabric
+    "SOCIETY": ("i", 0),                                  # fabric
+    # --- domains: self-assembled domains and their management --------------------------------------
+    "DOM_ADAPTIVE": ("i", 0),                             # domains
+    "DOM_CULL_EMPTY": ("i", 1),                           # domains
+    "DOM_CULL_FRAC": ("f", 0.10),                         # domains
+    "DOM_DECAY": ("f", 0.9),                              # domains
+    "DOM_FOLD_MULT": ("f", 1.5),                          # domains
+    "DOM_GRACE": ("i", 500),                              # domains
+    "DOM_MANAGE_EVERY": ("i", 100),                       # domains
+    "DOM_MARGIN": ("f", 0.75),                            # domains
+    "DOM_MIN_VISITS": ("i", 2),                           # domains
+    "DOM_PRIOR": ("f", 0.15),                             # domains
+    "DOM_RADIUS": ("i", 1),                               # domains
+    "DOM_RCAP": ("f", 2.0),                               # domains
+    "DOM_RECUR": ("i", 1),                                # domains
+    "DOM_RECUR_HORIZON": ("i", 32),                       # domains
+    "DOM_RELATIVE": ("i", 0),                             # domains
+    "DOM_RMULT": ("f", 1.2),                              # domains
+    "DOM_RQ": ("f", 0.85),                                # domains
+    "DOM_SPAWN_K": ("f", 3.0),                            # domains
+    "DOM_WINS": ("i", 40),                                # domains
+    "MANAGE": ("i", 1),                                   # domains
+    "MANAGE_EVERY": ("i", 500),                           # domains
+    "MANAGE_MERGE": ("f", 0.28),                          # domains
+    "MANAGE_MIN": ("i", 15),                              # domains
+    "MANAGE_STALE": ("i", 500),                           # domains
+    "MERGE_FRAC": ("f", 0.8),                             # domains
+    "NEW_DIST": ("f", 0.35),                              # domains
+    "SEG_CONTIG": ("i", None),                            # DEFAULT IS COMPUTED: 1 if NP == 1 else 0
+    "SEG_MAX": ("i", 1800),                               # domains
+    "SEG_MIN": ("i", 700),                                # domains
+    "SELF_ORG": ("i", 1),                                 # domains
+    "SHIFT_DIST": ("f", 0.30),                            # domains
+    "SHIFT_MULT": ("f", 1.5),                             # domains
+    "SHIFT_Q": ("f", 0.50),                               # domains
+    "SHIFT_REL": ("i", 0),                                # domains
+    "SUSTAIN": ("i", 2),                                  # domains
+    # --- memory: the retrieval store and its keys --------------------------------------------------
+    "KEY_BATCH": ("i", 1),                                # memory
+    "KEY_LAYERS": ("i", 0),                               # memory
+    "KEY_PREGATE": ("i", 1),                              # memory
+    "KEY_SRC": ("env", "model"),                          # memory
+    "KEY_WIN": ("i", 8),                                  # memory
+    "MEM_CAP": ("i", 200000),                             # memory
+    "MEM_CONF0": ("f", 0.3),                              # memory
+    "MEM_GATE": ("i", 1),                                 # memory
+    "MEM_OWNERS": ("i", 64),                              # memory
+    "MEM_PER_EXPERT": ("i", 1),                           # memory
+    "MEM_QUOTA": ("i", 128),                              # memory
+    "MEM_W": ("f", 0.5),                                  # memory
+    "RECON_W": ("f", 0.0),                                # memory
+    "REKEY_AMORTIZED": ("i", 1),                          # memory
+    "REKEY_CHUNK": ("i", 1),                              # memory
+    "REKEY_EVERY": ("i", 200),                            # memory
+    "VERIFY": ("env", "selfcon"),                         # memory
+    "VERIFY_FIT": ("i", 3000),                            # memory
+    "VERIFY_SWEEP": ("i", 0),                             # memory
+    # --- encoder: signature encoder and signature space --------------------------------------------
+    "ENC_BATCH": ("i", 48),                               # encoder
+    "ENC_CREG": ("f", 0.0),                               # encoder
+    "ENC_EVERY": ("i", 1),                                # encoder
+    "ENC_FLOOR_K": ("i", 8),                              # encoder
+    "ENC_FUSE": ("i", 1),                                 # encoder
+    "ENC_POS_MAX": ("i", None),                           # DEFAULT IS COMPUTED: 2 * WIN
+    "ENC_PROTO": ("f", 0.0),                              # encoder
+    "ENC_SHIFT_WIN": ("i", 400),                          # encoder
+    "ENC_VREG": ("f", 5.0),                               # encoder
+    "ENC_WARMUP": ("i", 800),                             # encoder
+    "ENC_WARMUP_EPS": ("f", 0.015),                       # encoder
+    "ENC_WARMUP_MIN": ("i", 3000),                        # encoder
+    "ENC_WARMUP_PROBE": ("i", 500),                       # encoder
+    "SIG_BATCH": ("i", 1),                                # encoder
+    "SIG_D": ("i", 64),                                   # encoder
+    "SIG_DIM": ("i", 512),                                # encoder
+    "SIG_LOOK": ("i", None),                              # DEFAULT IS COMPUTED: ENC_EVERY_IDLE
+    "SIG_MODE": ("env", "learned"),                       # encoder
+    "SIG_PROJ_BPT": ("f", 2.4),                           # encoder
+    "SIG_SPACE": ("env", "bytes"),                        # encoder
+    "SIG_WIN": ("i", 0),                                  # encoder
+    # --- world: world model / forward dynamics -----------------------------------------------------
+    "WORLD_FEEDBACK": ("i", 1),                           # world
+    "WORLD_GROW": ("i", 1),                               # world
+    "WORLD_HID": ("i", 128),                              # world
+    "WORLD_K": ("i", 1),                                  # world
+    "WORLD_LAT": ("i", 32),                               # world
+    "WORLD_MODEL": ("i", 1),                              # world
+    "WORLD_N0": ("i", 3),                                 # world
+    "WORLD_NMAX": ("i", 6),                               # world
+    "WORLD_ROUTE": ("i", 24),                             # world
+    "WORLD_VAR": ("f", 1.0),                              # world
+    "WORLD_W": ("f", 0.1),                                # world
+    # --- optim: optimiser, schedule and regularisation ---------------------------------------------
+    "ACCUM": ("i", 1),                                    # optim
+    "AMP": ("env", "off"),                                # optim
+    "BAL_WARM": ("i", 4000),                              # optim
+    "BATCH_W": ("i", 1),                                  # optim
+    "DROPOUT": ("f", 0.0),                                # optim
+    "LR": ("f", 2e-3),                                    # optim
+    "LR_MIN_FRAC": ("f", 0.05),                           # optim
+    "LR_SCHED": ("env", "cosine"),                        # optim
+    "LR_WARMUP": ("i", 1000),                             # optim
+    "SEED": ("i", 0),                                     # optim
+    "TF32": ("i", 1),                                     # optim
+    "WEIGHT_DECAY": ("f", 0.0),                           # optim
+    # --- report: end-of-run measurement only -- nothing here changes training ----------------------
+    "BENCH": ("i", 0),                                    # report
+    "BEST_TRACK": ("i", 1),                               # report
+    "COH_LEN": ("i", 384),                                # report
+    "COH_N": ("i", 16),                                   # report
+    "EVAL_N": ("i", 64),                                  # report
+    "GEN_LEN": ("i", 200),                                # report
+    "GEN_N": ("i", 4),                                    # report
+    "GEN_PROCS": ("i", 4),                                # report
+    "GEN_TEMP": ("f", 0.7),                               # report
+    "HOLDOUT_N": ("i", 32),                               # report
+    "PROBE": ("i", 1),                                    # report
+    "PROBE_WAIT": ("i", 12),                              # report
+    "PROFILE": ("i", 0),                                  # report
+    "RATE_EVERY": ("i", 2000),                            # report
+    # --- plumbing: paths, device, checkpointing ----------------------------------------------------
+    "CKPT_EVERY": ("i", 0),                               # plumbing
+    "DEVICE": ("env", "cpu"),                             # plumbing
+    "D_MODEL_B": ("i", 128),                              # plumbing
+    "HEADS": ("i", 8),                                    # plumbing
+    "LAYERS": ("i", None),                                # DEFAULT IS COMPUTED: 4 transformer / 1 gru
+    "MAXLEN": ("i", 512),                                 # plumbing
+    "MODEL": ("env", "gru"),                              # plumbing
+    "RESUME": ("env", ""),                                # plumbing
+    "SAVE_CKPT": ("env", ""),                             # plumbing
+    # --- misc: not yet grouped ---------------------------------------------------------------------
+    "BIRTH_JITTER": ("env", 0.15),                        # misc
+    "CENT_EMA": ("env", 0.02),                            # misc
+    "COMP_EMA": ("f", 0.02),                              # misc
+    "COMP_PROTECT": ("i", 1),                             # misc
+    "CULL_MODE": ("env", "rank"),                         # misc
+    "DECAY_EVERY": ("i", 20000),                          # misc
+    "EVICT": ("env", "recency"),                          # misc
+    "EXPERT_CULL_FRAC": ("f", 0.25),                      # misc
+    "EXPERT_CULL_RANK": ("f", 0.08),                      # misc
+    "EXPERT_CULL_STALE": ("i", 1000),                     # misc
+    "EXPERT_FIT_WIN": ("i", 4000),                        # misc
+    "EXPERT_GRACE": ("i", 3000),                          # misc
+    "EXPERT_MERGE_DIST": ("f", 0.10),                     # misc
+    "EXPERT_NEW_DIST": ("f", 0.5),                        # misc
+    "EXPERT_NULLS": ("i", 20),                            # misc
+    "EXPERT_PRESSURE": ("f", 0.75),                       # misc
+    "FABRIC": ("i", 1),                                   # misc
+    "GENERATE": ("i", 1),                                 # misc
+    "GENUINE_MIN": ("i", 20),                             # misc
+    "GENUINE_SIL": ("f", 0.10),                           # misc
+    "GROW_BURST": ("i", 6),                               # misc
+    "GROW_EVERY": ("i", 200),                             # misc
+    "INFO_NULLS": ("i", 5),                               # misc
+    "N_PROCESSES": ("i", 4),                              # misc
+    "RECON_HID": ("i", 64),                               # misc
+    "RECON_TOK": ("i", 32),                               # misc
+    "TEMP": ("f", 0.1),                                   # misc
+    "TOPK": ("i", 8),                                     # misc
+    "USE_DECAY": ("f", 0.98),                             # misc
+    "VAL_CAP": ("i", 4000000),                            # misc
+    "WRITE_ADAPTIVE": ("i", 0),                           # misc
+    "WRITE_GATE": ("f", 0.3),                             # misc
+    "WRITE_QUANTILE": ("i", 1),                           # misc
+    "WRITE_TARGET": ("f", 0.5),                           # misc
+    "WRONG_CHECK": ("i", 1),                              # misc
+    "WRONG_INJECT": ("i", 8),                             # misc
+    "WRONG_MARGIN": ("f", 1.5),                           # misc
+    "WRONG_MIN_N": ("i", 3),                              # misc
+    "WRONG_SWEEP": ("i", 0),                              # misc
+    "WRONG_THRESH": ("f", 1.0),                           # misc
+}
+
 def _env(k, d=None):
     _ENV_READ.add(k)
+    # THE DECLARATION IS THE TABLE. A call site that disagrees with it is a bug -- it means the same knob means
+    # two things depending on which code path reached it first, which is exactly how VMAX came to size one
+    # tensor for 4096 tokens and another for 2048. Fail loudly at the read rather than quietly at the index.
+    if k in _SPEC and k not in _SPEC_FREE and _SPEC[k][1] != d:
+        raise SystemExit(f"[config] {k} is read with default {d!r} here but the registry declares "
+                         f"{_SPEC[k][1]!r}. Change one of them; they cannot both be right.")
     if k in os.environ: _ENV_ASKED[k] = os.environ[k]
     return os.environ.get(k, d)
 def _i(k, d): return int(_env(k, d))
@@ -248,7 +558,7 @@ if DATA_MODE == "real":
         VMAX = _i("VMAX", 4096)
         _target = _i("SEED_VOCAB", 512) if TOK_ONLINE else VMAX            # online: only SEED here; keep minting during training
         _passes = _i("SEED_PASSES", 2) if TOK_ONLINE else _i("GROW_PASSES", 8)
-        if os.path.exists(_tp) and (not TOK_ONLINE or _env("RESUME")):
+        if os.path.exists(_tp) and (not TOK_ONLINE or _env("RESUME", "")):
             TOK = DynamicTokenizer.load(_tp)               # RESUME must reuse the SAVED vocab: a fresh online seed would
             #   re-mint different ids, so the restored embedding table would be indexed by a DIFFERENT vocabulary.
         else:
@@ -416,8 +726,8 @@ class ByteComposer(nn.Module):
         # compose to -- and its bytes are its parts -- and from there it learns its own identity by moving away.
         # That is the transition this is for: mint is continuous, because a token begins as its composite and
         # becomes itself gradually, instead of appearing as a fresh row that has to be guessed at.
-        s.delta = nn.Parameter(torch.zeros(int(_env("VMAX", 2048)), d))
-        s.dbias = nn.Parameter(torch.zeros(int(_env("VMAX", 2048))))
+        s.delta = nn.Parameter(torch.zeros(int(_env("VMAX", 4096)), d))
+        s.dbias = nn.Parameter(torch.zeros(int(_env("VMAX", 4096))))
         s.born = None                                      # per-token birth step, for the anchor below
         s._idx = None; s._msk = None; s._cache = None; s._v = -1
     def note_born(s, ids, step):
@@ -3020,7 +3330,7 @@ def main():
         os.environ.pop("SAVE_CKPT", None)
 
     def _save_ckpt(src_stream, quiet=False, suffix=""):    # persist model+tokenizer+memory so `prompt.py` can load it
-        ck = _env("SAVE_CKPT")
+        ck = _env("SAVE_CKPT", "")
         if not ck: return False                            # RETURNS whether it saved: the caller used to assume it did
         ck = ck + suffix                                   # suffix=".best" writes the best-by-held-out snapshot
         os.makedirs(ck, exist_ok=True)
@@ -3085,7 +3395,7 @@ def main():
         # can be asked anywhere, on any machine, long after the GPU is returned.
         torch.save({"enc": enc.state_dict(), "sig_d": SIG_D, "win": WIN, "step": step,
                     "cent": {int(k): v.cpu() for k, v in asm.cent.items()}, "size": dict(asm.size),
-                    "sig_space": SIG_SPACE, "domains": _env("DOMAINS", ""), "enc_v": ENC_V,
+                    "sig_space": SIG_SPACE, "domains": _env("DOMAINS", "eng,py,num,c"), "enc_v": ENC_V,
                     "use_tok": USE_TOK, "tok_path": (_env("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None)},
                    f"{ck}/probe.pt.tmp")
         os.replace(f"{ck}/probe.pt.tmp", f"{ck}/probe.pt")
@@ -3100,7 +3410,7 @@ def main():
     def _on_usr1(*_): _ckpt_req["on"] = True              #   handler -- reentrancy). Pause+dump without killing the run.
     try: _signal.signal(_signal.SIGUSR1, _on_usr1)
     except (ValueError, OSError): pass                     # not the main thread / unsupported platform -> silently skip
-    if _env("SAVE_CKPT"):
+    if _env("SAVE_CKPT", ""):
         print(f"[pid {os.getpid()}] checkpoint-on-demand: kill -USR1 {os.getpid()}  ->  saves to {os.environ['SAVE_CKPT']} at the next step"
               + (f" (auto every {CKPT_EVERY} steps)" if CKPT_EVERY else " (no periodic auto-save; set CKPT_EVERY to enable)"))
     EPOCHS = max(1, _i("EPOCHS", 1)); _epoch = 0            # multi-EPOCH: reset to the stream start EPOCHS times (clean passes,
@@ -3112,7 +3422,7 @@ def main():
     if _i("CORPUS_CAP", 2000000) <= 2000000 and DATA_MODE == "real":
         _warn.append(f"CORPUS_CAP={_i('CORPUS_CAP', 2000000)} bytes -> each domain is capped at ~2MB regardless of how "
                      f"much data is on disk. A multi-day run would see 2MB of text. Set CORPUS_CAP to the real size.")
-    if _env("SAVE_CKPT") and not CKPT_EVERY:
+    if _env("SAVE_CKPT", "") and not CKPT_EVERY:
         _warn.append("SAVE_CKPT set but CKPT_EVERY=0 -> the ONLY save is at the very end (plus SIGUSR1). "
                      "A crash loses the whole run. Set CKPT_EVERY.")
     if MEM_PER_EXPERT and mem.cap != _i("MEM_CAP", 200000):
@@ -4070,7 +4380,7 @@ def main():
         i += WIN; step += 1
         if (CKPT_EVERY and _due("ckpt", CKPT_EVERY)) or _ckpt_req["on"]:   # periodic OR on-demand (kill -USR1) save
             _why = "SIGUSR1" if _ckpt_req["on"] else f"every {CKPT_EVERY}"; _ckpt_req["on"] = False
-            _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {_env('SAVE_CKPT')}]"); model.train()
+            _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {_env('SAVE_CKPT', '')}]"); model.train()
         if ONLINE and _due("retok", RETOK_EVERY):          # refresh the token stream with the grown vocab; remap position by byte
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
             if RETOK_TAIL:
@@ -5172,11 +5482,11 @@ def main():
             print(f"  SAMPLED FROM: the FINAL model, step {step}"
                   + (f" ({_fin:.3f} held-out bits/byte)" if _fin else "")
                   + f" -- NOT the best. Best was {_best_bpb[0]:.3f} at step {_best_bpb[1]}"
-                  + (f", saved to {_env('SAVE_CKPT')}.best" if _best_bpb[2] else " (not saved: SAVE_CKPT is off)")
+                  + (f", saved to {_env('SAVE_CKPT', '')}.best" if _best_bpb[2] else " (not saved: SAVE_CKPT is off)")
                   + (f". The final model is {_fin - _best_bpb[0]:+.3f} bits/byte worse than it; read the text below "
                      f"as the END of the run, not its best." if _fin else "."))
             if _best_bpb[2]:
-                print(f"  to sample the BEST model instead:  python3 prompt.py CKPT={_env('SAVE_CKPT')}.best")
+                print(f"  to sample the BEST model instead:  python3 prompt.py CKPT={_env('SAVE_CKPT', '')}.best")
         # MORE THAN ONE SAMPLE PER PROCESS. GEN_PROCS caps how many DOMAINS get sampled, and this project runs ONE
         # corpus, so every text judgement in it has rested on a SINGLE 200-token continuation. The composing check
         # below is the clearest cost: it scored "% of generated words that appear in the training text" on 64-91
