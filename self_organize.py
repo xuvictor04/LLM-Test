@@ -841,9 +841,10 @@ def build_lm(nv=None):
 # layer. Same failure class as PHASED=0, MANAGE_MERGE=0.12 and the BATCH_W cadences.
 # Measured, English, 120 kB, everything else identical -- A TOY, kept for the sign not the magnitude:
 #   FABRIC=0  held-out 3.543  -> LOSES to order-1 (3.495) by 0.048
-# At pilot scale the fabric's marginal contribution is much smaller than that toy implies: +0.213 b/B on the
-# best run to date (base, held-out 1.962, model ALONE 2.200). It is a positive contribution, not a decisive one,
-# and it tracks how DAMAGED the base model is -- on a run whose base model was wrecked it read +1.325.
+# Treat that as a sign, not a magnitude: it is a toy, and at pilot scale the fabric's marginal contribution has
+# come out far smaller. The report prints 'model ALONE -> + FABRIC' every run; use that number, not this one.
+# One structural caveat that does NOT go stale: that ablation removes the fabric LayerNorm too, and its size
+# tracks how damaged the base model is, so it is not a clean measure of what the routing is worth.
 #   FABRIC=1  held-out 3.441  -> BEATS order-1 by 0.054;  fabric contributes +0.709 bits/byte
 # +0.709 is four times what the memory contributes and the largest single component effect measured here.
 # Read with the caveat the FABRIC section itself prints: at these settings the router HALTs 90% of the time
@@ -1419,13 +1420,11 @@ class Fabric(nn.Module):
             # AN EVAL PASS MUST NOT MOVE THE REGIONS. See fab_logits: every eval path (learning curve, holdout
             # probe, bpb_true, generation) called this with a FABRICATED ZERO gist, and F.normalize(0) is 0, so
             # each one dragged the top-FAB_CENT_TOPK experts' centroids toward the ORIGIN.
-            # HOW MUCH THAT COSTS IS NOT ESTABLISHED, and an earlier version of this comment claimed it was.
-            # Two runs with byte-identical model code and the same seed, differing only in whether SAVE_CKPT was
-            # set (which gates the extra holdout_bpb passes), read 3.694 and 2.100. That difference is real. But
-            # the extra passes are ~125 centroid nudges against ~240,650 from training -- 0.05% -- which cannot
-            # ACCUMULATE to 1.6 bits/byte. What it shows is that this system is chaotically sensitive: a 0.05%
-            # perturbation lands the run somewhere else entirely. The fix is right on its own terms -- an eval
-            # pass must not mutate training state -- not because it recovers a measured 1.594.
+            # The correctness argument is the whole argument: a measurement must not mutate the thing it
+            # measures. Do not attach a bits/byte figure to this -- an earlier version of this comment did, and
+            # the arithmetic does not support one. The eval passes are a fraction of a percent of the centroid
+            # updates a run performs, so any observed difference is the system's sensitivity to perturbation, not
+            # accumulation from these writes.
             if learn_regions: s.ground_update(gist, w, N)
         else:
             _Kd, _ = s._ids(N, step)
@@ -1657,9 +1656,8 @@ class Fabric(nn.Module):
         # THE LEARNED HALT PRIOR APPLIES HERE TOO. halt_b was added for the society path and measured DEAD on this
         # one -- an optimizer parameter with an identically-zero gradient on what is now the default path. HALT is
         # one operator with one key; it should have one prior as well.
-        # WORTH KNOWING THAT THIS DID NOT ACHIEVE ITS GOAL. The prior now receives gradient on both paths, but
-        # HALT MASS still reads 0.0000 on the chaining path in every arm of the six-arm pilot. Giving the operator
-        # a trainable prior was necessary and was not sufficient; why it never learns to stop is still open.
+        # Whether the operator then LEARNS to stop is a property of the run, not of this code: HALT MASS is
+        # reported every run and varies widely across configurations. Read it there.
         _hlg = (((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(s.halt_key, dim=-1)[:, None])
                  / max(1e-3, s.route_t)) + s.halt_b if s.halt_on
                 else (s.q_entry(gist) + nb) @ s.halt_key[:, None])
@@ -1965,10 +1963,10 @@ class PlateauGrowth:
         # pilots: ~10062 grown = ~4093 building the population once + ~5969 refilling 5969 culls. The population
         # reads as a stable 4096 while being replaced about 1.5x over, so a tenth of it is freshly-initialised at
         # any moment -- and the identity space that every eemb key and every centroid is defined over is exactly
-        # that churning set. When this was written, all three runs diverged shortly after the population first
-        # reached the cap -- but divergence has since been traced to the LR schedule and the eval-pass centroid
-        # corruption, both fixed, and the six-arm pilot reaches the cap without diverging. The cull-refill
-        # dynamic below is real and still worth understanding; the divergence it was blamed for is not.
+        # that churning set. Divergence after the cap was once blamed on this and later traced elsewhere (the LR
+        # horizon, and eval passes moving the routing centroids), so do not read the cull-refill dynamic as its
+        # cause. The dynamic itself is structural and described below; whether any given run diverges is in that
+        # run's report.
         # This is NOT the loss-driven feedback loop guessed at earlier: the ramp never reads the loss. It is a
         # cull-refill cycle that selection cannot win, because whatever it removes is replaced within 187 steps.
         # Latch on FIRST arrival: the ramp exists to BUILD the population, and it is built once. After that,
@@ -4259,11 +4257,11 @@ def main():
     # FAB_MIN_STEPS DEFAULTS BY PATH. On the society path HALT is unused and 0 is right. On the CHAINING path 0
     # lets HALT absorb on the very first hop, which once measured as mean routed depth 0.00 of 4 -- chaining
     # switched on and nothing chained. Blocking HALT for two hops moved that to 0.60 on the same config.
-    # BOTH OF THOSE NUMBERS ARE OLD. Current runs read mean routed depth 1.00 of 4 with FAB_MIN_STEPS=0, because
-    # CHAIN_VOTE forces it to 0 (see Fabric.__init__) and CHAIN_VOTE is now the default. What has NOT changed is
-    # the thing worth watching: HALT MASS still reads 0.0000 on the chaining path in every arm of the six-arm
-    # pilot, so the router is not making a stopping decision at all -- it is running every hop. A composition
-    # mechanism that is enabled but never entered is worse than one that is off, because it reads as tested.
+    # Those depth figures came from particular runs and should not be read as current -- check the report of the
+    # run in front of you. The DEPENDENCY is the durable part: CHAIN_VOTE forces this to 0 inside Fabric.__init__,
+    # so on the default path the declared default here is not what runs. A composition mechanism that is enabled
+    # but never entered is worse than one that is off, because it reads as tested -- which is why the report
+    # prints HALT MASS and mean routed depth rather than leaving it to a comment.
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
                             _f("FAB_Z", 4.0), _i("FAB_BURST", 3), _i("FAB_RAMP", 4000),
                             _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000),
@@ -5059,25 +5057,25 @@ def main():
         # The registry gives one declared place for all 274 knobs, but a declaration cannot show that setting one
         # of them silently moves another. Three do, and each has cost this project real time:
         #   CHAIN_VOTE forces FAB_MIN_STEPS to 0, inside Fabric.__init__, where nobody reading the config finds it.
-        #   TOK_MINT_UNTIL stops MINTING and leaves RETOK_EVERY firing -- they were run together once, the result
-        #     came back 1.4 b/B worse, and there was no way to tell which knob did it until they were separated.
+        #   TOK_MINT_UNTIL stops MINTING and leaves RETOK_EVERY firing -- two knobs, one idea, and setting only
+        #     the obvious one leaves half the behaviour in place.
         #   SOCIETY + CHAIN_ROUTE together choose one of three forward paths; neither alone tells you which.
         # Nothing here CHANGES a value. It prints what the run is actually doing, with the measurement attached
         # where there is one, so a coupling cannot be discovered again by losing a day to it.
         _cpl = []
         if FABRIC and not SOCIETY and bool(_i("CHAIN_VOTE", 1)):
             _cpl.append(f"CHAIN_VOTE=1 -> FAB_MIN_STEPS={fab.min_steps} (forced; the declared default is "
-                        f"{0 if SOCIETY else 2}). HALT may absorb on hop 1, and it does: HALT MASS reads ~0 on "
-                        f"this path in every arm measured so far.")
+                        f"{0 if SOCIETY else 2}), so HALT may absorb on the first hop. What it actually did is "
+                        f"in this run's HALT MASS and mean-routed-depth lines.")
         if USE_TOK and TOK_MINT_UNTIL and _i("RETOK_EVERY", 3000) > 0:
             _cpl.append(f"TOK_MINT_UNTIL={TOK_MINT_UNTIL} stops MINTING at that step, but RETOK_EVERY="
-                        f"{_i('RETOK_EVERY', 3000)} keeps RE-SEGMENTING for the whole run. Each retok then "
-                        f"produces an identical stream while still clearing the lookahead queue and blacking out "
-                        f"fabric growth. Measured: leaving it ON is BETTER (frozen 2.072 vs frozen_nr 2.365), so "
-                        f"this is the right pairing, not an oversight.")
+                        f"{_i('RETOK_EVERY', 3000)} keeps RE-SEGMENTING for the whole run. After the freeze each "
+                        f"retok rebuilds an identical stream while still clearing the lookahead queue and "
+                        f"blacking out fabric growth. Set RETOK_EVERY=0 to stop that too -- the two knobs are "
+                        f"independent and neither implies the other.")
         if USE_TOK and TOK_MINT_UNTIL and _i("RETOK_EVERY", 3000) == 0:
-            _cpl.append("TOK_MINT_UNTIL is set AND RETOK_EVERY=0, so nothing about the segmentation moves after "
-                        "the freeze. Measured WORSE than leaving retok on (2.365 vs 2.072).")
+            _cpl.append("TOK_MINT_UNTIL is set AND RETOK_EVERY=0: nothing about the segmentation moves after "
+                        "the freeze, and fabric growth is never blacked out by a retok.")
         for _c in _cpl: print(f"[config] COUPLING    {_c}")
         print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
               f"The legacy ExpertBank (EXPERTS={int(bool(EXPERTS))}) is {'ON' if EXPERTS else 'off'} and is mutually "
@@ -5214,12 +5212,9 @@ def main():
         # state, not the best one. When this was added, the last state was 1.1-1.3 bits/byte worse than the model
         # around step 6000 in every arm of every seed, so every text sample the project had judged came from a
         # degraded model.
-        # THAT IS NO LONGER TRUE, and the tracking is what shows it. Once the LR schedule read a horizon the run
-        # actually reaches and eval passes stopped moving the routing centroids, the early-peak-then-rise pattern
-        # disappeared: in the six-arm pilot, FIVE of six arms ended at `+0.000 since its own minimum`, i.e. the
-        # final model IS the best one. The exception was DROPOUT+WEIGHT_DECAY together, which still diverges
-        # (+1.216). Keep the tracking -- it is how we would notice the pattern coming back -- but do not read the
-        # old claim as current.
+        # Whether that still happens is a property of the run, and the report answers it directly: 'since its own
+        # minimum' is printed every time. Keep the tracking regardless -- it is what makes the question answerable,
+        # and it costs one comparison per curve sample.
         if BEST_TRACK and _CURVE:
             _cs = [b for st, _p, b, _a in _CURVE if st == step]
             if _cs:
@@ -5705,14 +5700,10 @@ def main():
         # re-tokenizes the stream, so the same text acquires new ids and the rows learned for the old segmentation
         # are invalidated continuously. On that reasoning this knob was believed to fix "the project's own
         # continual-learning failure mode".
-        # MEASURED, AND IT IS THE OTHER WAY ROUND. Six arms, one seed, identical harness, at 707f1af:
-        #     base       (mint the whole run)                held-out 1.962
-        #     frozen     (TOK_MINT_UNTIL=1)                  held-out 2.072
-        #     frozen_nr  (TOK_MINT_UNTIL=1 RETOK_EVERY=0)    held-out 2.365
-        # Minting for the whole run is BEST. The earlier result that made freezing look good was measuring the LR
-        # schedule: a vocabulary that never grows makes _total_steps accurate, which was the only way the cosine
-        # ever annealed. Fix the schedule and the advantage inverts. 0 = never freeze, and 0 is the default for a
-        # reason.
+        # THE ARGUMENT ABOVE IS NOT SETTLED, and the comment that used to sit here asserted it was. One thing to
+        # keep in mind when comparing a frozen vocabulary against a growing one: a vocabulary that never grows
+        # also makes _total_steps accurate, and _total_steps sets the LR schedule's horizon. The two are not
+        # independent, so a frozen-vocabulary run is never only a tokenizer experiment. 0 = never freeze.
         if ONLINE and TOK_MINT_UNTIL and step >= TOK_MINT_UNTIL and not _mint_frozen[0]:
             _mint_frozen[0] = True
             print(f"  [tokenizer @ {step}] MINTING FROZEN at vocab {TOK.vocab_size} (TOK_MINT_UNTIL={TOK_MINT_UNTIL}). "
