@@ -38,7 +38,13 @@ for r in "$A" "$B"; do
   git -C "$ROOT" rev-parse --verify -q "$r^{commit}" >/dev/null || { echo "!! not a commit: $r"; exit 1; }
 done
 SA=$(git -C "$ROOT" rev-parse --short "$A"); SB=$(git -C "$ROOT" rev-parse --short "$B")
-[ "$SA" != "$SB" ] || { echo "!! $A and $B are the same commit ($SA)"; exit 1; }
+# SAME COMMIT TWICE = A DETERMINISM SELF-TEST, not an error. This matters before trusting any verdict on GPU:
+# the comparison assumes a run is a function of (config, commit, seed), and cuDNN's GRU backward plus atomic
+# scatters are not bit-reproducible in general. If the machine is nondeterministic, equiv reports DIFFERS for
+# two commits that are actually identical -- so run this first on any new device and believe nothing until it
+# comes back IDENTICAL.
+SELFTEST=0
+if [ "$SA" = "$SB" ]; then SELFTEST=1; echo "SELF-TEST: same commit twice -- asking whether THIS MACHINE is deterministic."; fi
 
 DEV=${DEVICE:-$(python3 -c "import torch;print('cuda' if torch.cuda.is_available() else 'cpu')" 2>/dev/null || echo cpu)}
 case "${SCALE:-fast}" in
@@ -87,32 +93,45 @@ run_side() {                                              # run_side <sha> <logf
   echo "  $_sha: reached the report"
 }
 
-run_side "$SA" "$OUT/$SA.log" || exit 1
-run_side "$SB" "$OUT/$SB.log" || exit 1
+LA=$OUT/$SA.log; LB=$OUT/$SB.log
+[ "$SELFTEST" = 1 ] && { LA=$OUT/${SA}_run1.log; LB=$OUT/${SB}_run2.log; }
+run_side "$SA" "$LA" || exit 1
+run_side "$SB" "$LB" || exit 1
 
 # Strip only what genuinely varies between two runs of the same code: wall-clock, throughput, pids, temp paths,
 # and the build banner (which names the commit, and so differs BY CONSTRUCTION).
 _norm() { grep -av -E '\[rate @|elapsed|steps/min|kB/s|GB of text|\[pid |ms/step|\[build\]|h left|checkpoint-on-demand|/tmp/equiv_' "$1"; }
-_norm "$OUT/$SA.log" > "$OUT/$SA.norm"; _norm "$OUT/$SB.log" > "$OUT/$SB.norm"
+_norm "$LA" > "$OUT/a.norm"; _norm "$LB" > "$OUT/b.norm"
 
 echo
-if diff -q "$OUT/$SA.norm" "$OUT/$SB.norm" >/dev/null; then
+if diff -q "$OUT/a.norm" "$OUT/b.norm" >/dev/null; then
   echo "  ================================================================"
   echo "   IDENTICAL -- every number in both reports matches."
-  echo "   $SB is behaviourally inert with respect to $SA at scale=${SCALE:-fast}."
+  if [ "$SELFTEST" = 1 ]; then
+    echo "   This machine is DETERMINISTIC at scale=${SCALE:-fast}. Verdicts from equiv.sh can be trusted here."
+  else
+    echo "   $SB is behaviourally inert with respect to $SA at scale=${SCALE:-fast}."
+  fi
+  echo ""
   echo "  ================================================================"
   echo "   Caveat worth keeping: this is a small model. If the change touched anything"
   echo "   width- or population-dependent, confirm with SCALE=deep before trusting it."
   exit 0
 else
-  _n=$(diff "$OUT/$SA.norm" "$OUT/$SB.norm" | grep -c '^[<>]')
+  _n=$(diff "$OUT/a.norm" "$OUT/b.norm" | grep -c '^[<>]')
   echo "  ================================================================"
-  echo "   DIFFERS -- $_n changed lines. $SB is NOT inert with respect to $SA."
+  echo "   DIFFERS -- $_n changed lines."
+  if [ "$SELFTEST" = 1 ]; then
+    echo "   THIS MACHINE IS NOT DETERMINISTIC. Two runs of the SAME commit disagree, so a DIFFERS verdict"
+    echo "   between two different commits would prove nothing here. Fix this before trusting any comparison."
+  else
+    echo "   $SB is NOT inert with respect to $SA."
+  fi
   echo "  ================================================================"
   echo "   first differences:"
-  diff "$OUT/$SA.norm" "$OUT/$SB.norm" | head -24 | sed 's/^/     /'
+  diff "$OUT/a.norm" "$OUT/b.norm" | head -24 | sed 's/^/     /'
   echo
-  echo "   full logs:  $OUT/$SA.log   $OUT/$SB.log"
-  echo "   full diff:  diff $OUT/$SA.norm $OUT/$SB.norm"
+  echo "   full logs:  $LA   $LB"
+  echo "   full diff:  diff $OUT/a.norm $OUT/b.norm"
   exit 2
 fi
