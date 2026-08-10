@@ -15,8 +15,8 @@ separate SELF-CONSISTENCY check on stored entries.
 
   python3 self_organize.py [DEVICE=cuda DATA_MODE=real DOMAINS=eng,py,num,c D_MODEL=256 SIG_MODE=learned ...]
 """
-import os
-from types import SimpleNamespace, math, random, glob, sys
+import os, math, random, glob, sys
+from types import SimpleNamespace
 import torch, torch.nn as nn, torch.nn.functional as F
 from memory import EditableMemory
 from verification import Reconstructor, recon_loss, verify as verify_mem   # Verification (renamed from B): reconstruction, not surprise
