@@ -839,8 +839,11 @@ def build_lm(nv=None):
 # was ABSENT from every run of this project: "fabric nodes 0" in every phase table, no FABRIC section in any
 # report, and every conclusion about domains, coherence and bits/byte drawn from a system missing its routing
 # layer. Same failure class as PHASED=0, MANAGE_MERGE=0.12 and the BATCH_W cadences.
-# Measured, English, 120 kB, everything else identical:
+# Measured, English, 120 kB, everything else identical -- A TOY, kept for the sign not the magnitude:
 #   FABRIC=0  held-out 3.543  -> LOSES to order-1 (3.495) by 0.048
+# At pilot scale the fabric's marginal contribution is much smaller than that toy implies: +0.213 b/B on the
+# best run to date (base, held-out 1.962, model ALONE 2.200). It is a positive contribution, not a decisive one,
+# and it tracks how DAMAGED the base model is -- on a run whose base model was wrecked it read +1.325.
 #   FABRIC=1  held-out 3.441  -> BEATS order-1 by 0.054;  fabric contributes +0.709 bits/byte
 # +0.709 is four times what the memory contributes and the largest single component effect measured here.
 # Read with the caveat the FABRIC section itself prints: at these settings the router HALTs 90% of the time
@@ -1654,6 +1657,9 @@ class Fabric(nn.Module):
         # THE LEARNED HALT PRIOR APPLIES HERE TOO. halt_b was added for the society path and measured DEAD on this
         # one -- an optimizer parameter with an identically-zero gradient on what is now the default path. HALT is
         # one operator with one key; it should have one prior as well.
+        # WORTH KNOWING THAT THIS DID NOT ACHIEVE ITS GOAL. The prior now receives gradient on both paths, but
+        # HALT MASS still reads 0.0000 on the chaining path in every arm of the six-arm pilot. Giving the operator
+        # a trainable prior was necessary and was not sufficient; why it never learns to stop is still open.
         _hlg = (((F.normalize(s.q_route(gist), dim=-1) @ F.normalize(s.halt_key, dim=-1)[:, None])
                  / max(1e-3, s.route_t)) + s.halt_b if s.halt_on
                 else (s.q_entry(gist) + nb) @ s.halt_key[:, None])
@@ -4251,10 +4257,13 @@ def main():
                  _f("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0 if SOCIETY else 2),
                  bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     # FAB_MIN_STEPS DEFAULTS BY PATH. On the society path HALT is unused and 0 is right. On the CHAINING path 0
-    # means HALT can absorb on the very first hop -- measured: mean routed depth 0.00 of 4, i.e. chaining switched
-    # on and nothing chained. Blocking HALT for two hops forces experts to actually compose before the router is
-    # allowed to stop: depth 0.00 -> 0.60 on the same config. A composition mechanism that is enabled but never
-    # entered is worse than one that is off, because it reads as tested.
+    # lets HALT absorb on the very first hop, which once measured as mean routed depth 0.00 of 4 -- chaining
+    # switched on and nothing chained. Blocking HALT for two hops moved that to 0.60 on the same config.
+    # BOTH OF THOSE NUMBERS ARE OLD. Current runs read mean routed depth 1.00 of 4 with FAB_MIN_STEPS=0, because
+    # CHAIN_VOTE forces it to 0 (see Fabric.__init__) and CHAIN_VOTE is now the default. What has NOT changed is
+    # the thing worth watching: HALT MASS still reads 0.0000 on the chaining path in every arm of the six-arm
+    # pilot, so the router is not making a stopping decision at all -- it is running every hop. A composition
+    # mechanism that is enabled but never entered is worse than one that is off, because it reads as tested.
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
                             _f("FAB_Z", 4.0), _i("FAB_BURST", 3), _i("FAB_RAMP", 4000),
                             _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000),
@@ -5046,6 +5055,30 @@ def main():
         #  looks like a typo. Verified: FAB_CULL_FRAC, read only inside the report, was flagged from here.)
         s_cfg_known.update(_known)
         print("[config] EFFECTIVE  " + "  ".join(f"{_n}={_norm(_v)}" for _n, _v, _ in _EFF))
+        # === COUPLINGS: knobs whose EFFECTIVE value was decided by ANOTHER knob ================================
+        # The registry gives one declared place for all 274 knobs, but a declaration cannot show that setting one
+        # of them silently moves another. Three do, and each has cost this project real time:
+        #   CHAIN_VOTE forces FAB_MIN_STEPS to 0, inside Fabric.__init__, where nobody reading the config finds it.
+        #   TOK_MINT_UNTIL stops MINTING and leaves RETOK_EVERY firing -- they were run together once, the result
+        #     came back 1.4 b/B worse, and there was no way to tell which knob did it until they were separated.
+        #   SOCIETY + CHAIN_ROUTE together choose one of three forward paths; neither alone tells you which.
+        # Nothing here CHANGES a value. It prints what the run is actually doing, with the measurement attached
+        # where there is one, so a coupling cannot be discovered again by losing a day to it.
+        _cpl = []
+        if FABRIC and not SOCIETY and bool(_i("CHAIN_VOTE", 1)):
+            _cpl.append(f"CHAIN_VOTE=1 -> FAB_MIN_STEPS={fab.min_steps} (forced; the declared default is "
+                        f"{0 if SOCIETY else 2}). HALT may absorb on hop 1, and it does: HALT MASS reads ~0 on "
+                        f"this path in every arm measured so far.")
+        if USE_TOK and TOK_MINT_UNTIL and _i("RETOK_EVERY", 3000) > 0:
+            _cpl.append(f"TOK_MINT_UNTIL={TOK_MINT_UNTIL} stops MINTING at that step, but RETOK_EVERY="
+                        f"{_i('RETOK_EVERY', 3000)} keeps RE-SEGMENTING for the whole run. Each retok then "
+                        f"produces an identical stream while still clearing the lookahead queue and blacking out "
+                        f"fabric growth. Measured: leaving it ON is BETTER (frozen 2.072 vs frozen_nr 2.365), so "
+                        f"this is the right pairing, not an oversight.")
+        if USE_TOK and TOK_MINT_UNTIL and _i("RETOK_EVERY", 3000) == 0:
+            _cpl.append("TOK_MINT_UNTIL is set AND RETOK_EVERY=0, so nothing about the segmentation moves after "
+                        "the freeze. Measured WORSE than leaving retok on (2.365 vs 2.072).")
+        for _c in _cpl: print(f"[config] COUPLING    {_c}")
         print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
               f"The legacy ExpertBank (EXPERTS={int(bool(EXPERTS))}) is {'ON' if EXPERTS else 'off'} and is mutually "
               f"exclusive with it -- with the fabric on, that flag being 0 is CORRECT, not a missing subsystem.")
