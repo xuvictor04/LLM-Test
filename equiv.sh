@@ -77,9 +77,14 @@ if [ "$(cat "$PDIR/train/eng"/part*.txt 2>/dev/null | wc -c)" -lt 50000 ]; then
   exit 1
 fi
 
+# THE COMPLETION MARKER MUST BE THE LAST LINE A RUN PRINTS, NOT ANY LINE. This first matched
+# "SIG_MODE=learned", which is on line 8 of EVERY log ("self-organize | ... | SIG_MODE=learned | data real").
+# So a run that died at startup counted as having reached the report, and a partial log counted as "already
+# done, reusing" and was never re-run. Either yields a verdict from logs that were never comparable. Use the
+# full sentence -- the same one longrun.sh's _done() uses.
 run_side() {                                              # run_side <sha> <logfile>
   _sha=$1; _log=$2
-  if [ -s "$_log" ] && grep -aq "SIG_MODE=learned" "$_log"; then echo "  $_sha: already done, reusing"; return 0; fi
+  if [ -s "$_log" ] && grep -aq "SIG_MODE=learned -- learned = the unfrozen product path" "$_log"; then echo "  $_sha: already done, reusing"; return 0; fi
   _wt=$(mktemp -d "/tmp/equiv_${_sha}_XXXX")
   git -C "$ROOT" worktree add -q --detach "$_wt" "$_sha" || { echo "  !! worktree failed for $_sha"; return 1; }
   echo "  $_sha: running in $_wt"
@@ -87,7 +92,7 @@ run_side() {                                              # run_side <sha> <logf
   _rc=$?
   # The log lives in $OUT, never in $_wt, so removing the worktree cannot destroy the result.
   git -C "$ROOT" worktree remove --force "$_wt" 2>/dev/null
-  if [ "$_rc" != 0 ] || ! grep -aq "SIG_MODE=learned" "$_log"; then
+  if [ "$_rc" != 0 ] || ! grep -aq "SIG_MODE=learned -- learned = the unfrozen product path" "$_log"; then
     echo "  !! $_sha did not reach the report (rc=$_rc). Last lines:"; tail -6 "$_log" | sed 's/^/       /'; return 1
   fi
   echo "  $_sha: reached the report"
