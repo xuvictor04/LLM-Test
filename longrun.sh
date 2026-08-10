@@ -310,6 +310,19 @@ grid)
       noban)     echo "CHAIN_BAN=0" ;;
       nolatch)   echo "FAB_RAMP_LATCH=0" ;;
       bytes)     echo "TOKENIZER=0" ;;
+      # --- THE PILOT BUNDLE. Every arm here is read against `base`, and the three tokenizer arms are SEPARATED
+      # on purpose: the last round ran TOK_MINT_UNTIL=1 and RETOK_EVERY=0 together, so when the result came back
+      # 1.4 b/B worse there was no way to tell which did it. They are not the same idea. TOK_MINT_UNTIL stops
+      # MINTING; RETOK_EVERY stops RE-SEGMENTING, and a re-segmentation that produces an identical stream is
+      # still not a no-op -- it clears the lookahead queue and blacks out fabric growth for FAB_COOLDOWN steps.
+      frozen)    echo "TOK_MINT_UNTIL=1" ;;                      # vocabulary frozen at the seed; retok still fires
+      frozen_nr) echo "TOK_MINT_UNTIL=1 RETOK_EVERY=0" ;;        # ...and re-segmentation off too
+      # --- REGULARISATION. Every run so far reports UNDERFIT with a NEGATIVE gap (held-out scoring better than
+      # train), so the expectation is that these cost rather than help. Worth measuring anyway: DROPOUT also
+      # perturbs the hidden state the router reads, so it is an expert-dynamics lever, not only a generalisation one.
+      drop)      echo "DROPOUT=0.1" ;;
+      wdecay)    echo "WEIGHT_DECAY=0.01" ;;
+      reg)       echo "DROPOUT=0.1 WEIGHT_DECAY=0.01" ;;
       mintinit)  echo "WARMSTART_MODE=last/first" ;;
       # --- TOKEN PARAMETERISATION. TOK_COMPOSE is now ON by default, so every arm below states BOTH knobs
       # explicitly. pilot_gru_8 ran compose AND mintnovel together and cannot be attributed to either; these
@@ -351,6 +364,9 @@ grid)
   # NAMED PRESETS: `bash longrun.sh grid ablate` runs just the set that answers the current question, in the
   # order that leaves the most informative partial result if it is stopped early.
   case "${2:-}" in
+    # ORDERED BY INFORMATION VALUE, so stopping the block early still leaves the most useful subset: the control
+    # first, then the tokenizer question, then the two changes that were confounded, then regularisation.
+    pilots)  ARMS="base frozen frozen_nr drop wdecay reg" ;;
     ablate)  ARMS="nocompose composenov compose mintnovel noanchor nogrow bigpop" ;;
     tokens)  ARMS="nocompose compose mintnovel composenov noanchor" ;;
     fabric)  ARMS="nogrow bigpop nofabric smallpop" ;;
