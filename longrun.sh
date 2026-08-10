@@ -439,11 +439,13 @@ seeds)
   # against a 0.06 b/B band separating the four best architectures. The spread is larger than the effect, so a
   # single run cannot rank two arms -- and two claims made off single runs (specialisation 0.132, a flat curve)
   # did not survive a second seed.
-  # THIS NEXT SENTENCE USED TO BE ASSERTED HERE AND WAS NEVER TESTED: "runs are deterministic given
-  # (config, commit, SEED), so this is pure seed variance, not run-to-run jitter." Nothing verified it, and a
-  # cuDNN GRU backward plus atomic scatters are not bit-reproducible on GPU. If it is false, every spread this
-  # project has attributed to SEED is really seed variance PLUS run-to-run jitter, and the two have never been
-  # separated. `longrun.sh repeat` separates them: same seed, N runs.
+  # DETERMINISM: asserted here for a long time without a test, then tested. Three runs at the same seed and
+  # config came back byte-identical in every reported number, and `equiv.sh` reproduces that across commits. So
+  # the spreads below ARE seed variance, not run-to-run jitter, and `repeat` has served its purpose -- it is kept
+  # as a regression check for after a driver or GPU change, not as a routine measurement.
+  # What determinism does NOT buy is robustness: a run reproduces itself exactly, while ANY difference between
+  # two runs -- including ones that should not matter -- can move the result by more than a bit/byte. n=1 is
+  # enough to reproduce a config; it is not enough to attribute a difference BETWEEN two configs.
   #   bash longrun.sh seeds 3 SOCIETY=1        # 3 seeds of one arm
   #   SEEDS="0 1 2 3" bash longrun.sh seeds -- CHAIN_ROUTE=soc
   N=${2:-3}

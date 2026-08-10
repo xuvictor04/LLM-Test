@@ -497,10 +497,11 @@ COMP_PROTECT = bool(_i("COMP_PROTECT", 1))  # protect a unit that BEATS the popu
 KW = _i("KEY_WIN", 8); V = 256
 # DEFAULT OFF, on measurement. The goal it serves is real -- a minted token should start with parameters, at its
 # composite, so the mint is a handover rather than a fresh random row -- and the mechanism does what it says. But
-# the one run of it (pilot_gru_8, with TOK_MINT_NOVEL=0.5 also on) landed at 5.360 held-out against a 2.0-2.2 band
-# that eleven runs across five commits sit in, with or without minting. That is ~20x the measured seed spread and
-# the only change that has ever moved the LEVEL rather than the shape of the curve. It stays available and stays
-# off until an isolating run (longrun.sh grid tokens) says which of the two flags did it and why.
+# the one run of it (pilot_gru_8, with TOK_MINT_NOVEL=0.5 also on) landed at 5.360 held-out, far outside the
+# 2.0-2.4 band everything else sits in. TWO CAVEATS THE EARLIER VERSION OF THIS COMMENT DID NOT CARRY: that is
+# ONE run with TWO flags on, so it convicts neither; and the band it was compared against was assembled from runs
+# in DIFFERENT harness modes (pilot checkpoints, seeds does not), which we later found shifts a result by more
+# than a bit/byte on its own. It stays available and stays off until an isolating run says which flag did it.
 TOK_COMPOSE = bool(_i("TOK_COMPOSE", 0))                    # token vector = composite(bytes) + learned residual
 TOK_ANCHOR = _f("TOK_ANCHOR", 0.05)                        # hold a new token near its composite, decaying
 TOK_ANCHOR_TAU = _f("TOK_ANCHOR_TAU", 4000.0)              #   over this many steps of the TOKEN's own life
@@ -1413,8 +1414,14 @@ class Fabric(nn.Module):
             w = s._with_halt(logits, gist, N)
             # AN EVAL PASS MUST NOT MOVE THE REGIONS. See fab_logits: every eval path (learning curve, holdout
             # probe, bpb_true, generation) called this with a FABRICATED ZERO gist, and F.normalize(0) is 0, so
-            # each one dragged the top-FAB_CENT_TOPK experts' centroids toward the ORIGIN. Measured cost of the
-            # extra copies a checkpoint adds: 1.594 bits/byte. learn_regions=False on every non-training caller.
+            # each one dragged the top-FAB_CENT_TOPK experts' centroids toward the ORIGIN.
+            # HOW MUCH THAT COSTS IS NOT ESTABLISHED, and an earlier version of this comment claimed it was.
+            # Two runs with byte-identical model code and the same seed, differing only in whether SAVE_CKPT was
+            # set (which gates the extra holdout_bpb passes), read 3.694 and 2.100. That difference is real. But
+            # the extra passes are ~125 centroid nudges against ~240,650 from training -- 0.05% -- which cannot
+            # ACCUMULATE to 1.6 bits/byte. What it shows is that this system is chaotically sensitive: a 0.05%
+            # perturbation lands the run somewhere else entirely. The fix is right on its own terms -- an eval
+            # pass must not mutate training state -- not because it recovers a measured 1.594.
             if learn_regions: s.ground_update(gist, w, N)
         else:
             _Kd, _ = s._ids(N, step)
@@ -1951,7 +1958,10 @@ class PlateauGrowth:
         # pilots: ~10062 grown = ~4093 building the population once + ~5969 refilling 5969 culls. The population
         # reads as a stable 4096 while being replaced about 1.5x over, so a tenth of it is freshly-initialised at
         # any moment -- and the identity space that every eemb key and every centroid is defined over is exactly
-        # that churning set. All three runs diverged shortly after the population first reached the cap.
+        # that churning set. When this was written, all three runs diverged shortly after the population first
+        # reached the cap -- but divergence has since been traced to the LR schedule and the eval-pass centroid
+        # corruption, both fixed, and the six-arm pilot reaches the cap without diverging. The cull-refill
+        # dynamic below is real and still worth understanding; the divergence it was blamed for is not.
         # This is NOT the loss-driven feedback loop guessed at earlier: the ramp never reads the loss. It is a
         # cull-refill cycle that selection cannot win, because whatever it removes is replaced within 187 steps.
         # Latch on FIRST arrival: the ramp exists to BUILD the population, and it is built once. After that,
@@ -2748,7 +2758,9 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     # THIS IS THE EVAL PATH, AND IT MUST NOT TRAIN THE ROUTER'S REGIONS. The zero gist below is a placeholder so
     # the routing arithmetic has the right shape -- it is NOT a signature. ground_update normalises it (zero) and
     # moves every top-ranked expert's centroid toward the origin, which is how a diagnostic's sampling frequency
-    # came to change the final model by 1.594 bits/byte. learn_regions=False makes an eval pass read-only.
+    # came to change the final model at all. learn_regions=False makes an eval pass read-only.
+    # The size of that change is NOT attributable to accumulation here -- see route_w -- it is chaotic
+    # sensitivity. The correctness argument stands on its own: a diagnostic must not train the router.
     # Training does not come through here: it calls fab.society()/fab() directly with a real signature.
     if gist is None: gist = torch.zeros(h.size(0), fab.q_entry.in_features, device=h.device)
     if nov is None: nov = torch.zeros(h.size(0), device=h.device)
@@ -3815,11 +3827,16 @@ def main():
                 if not _CURVE_ERR:
                     _CURVE_ERR.append(1); print(f"  [learning-curve sample failed: {type(_e).__name__}: {_e}]")
         # === KEEP THE BEST MODEL =========================================================================
-        # Generation and every end-of-run number came from the LIVE model at step ~47000 -- and in every
-        # arm of every seed that model is 1.1-1.3 bits/byte WORSE than the one that existed around step
-        # 6000. There was no best-checkpoint tracking anywhere: ckpt.pt is written on a cadence and
-        # overwritten, so the saved artifact is the LAST state, not the best one. Every text sample judged
-        # in this project was drawn from the degraded model.
+        # WHY THIS EXISTS: ckpt.pt is written on a cadence and overwritten, so the saved artifact is the LAST
+        # state, not the best one. When this was added, the last state was 1.1-1.3 bits/byte worse than the model
+        # around step 6000 in every arm of every seed, so every text sample the project had judged came from a
+        # degraded model.
+        # THAT IS NO LONGER TRUE, and the tracking is what shows it. Once the LR schedule read a horizon the run
+        # actually reaches and eval passes stopped moving the routing centroids, the early-peak-then-rise pattern
+        # disappeared: in the six-arm pilot, FIVE of six arms ended at `+0.000 since its own minimum`, i.e. the
+        # final model IS the best one. The exception was DROPOUT+WEIGHT_DECAY together, which still diverges
+        # (+1.216). Keep the tracking -- it is how we would notice the pattern coming back -- but do not read the
+        # old claim as current.
         if BEST_TRACK and _CURVE:
             _cs = [b for st, _p, b, _a in _CURVE if st == step]
             if _cs:
@@ -4301,13 +4318,18 @@ def main():
                               pos=_posv(_b, _n1))
         _t1("memory key+write", _pmem)
         _ptok = _t0()
-        # STOP MINTING EVENTUALLY. Minting re-tokenizes the stream, so the SAME text acquires new ids and the
-        # embeddings and head rows learned for the old segmentation are invalidated -- continuously, for the whole
-        # run. Measured on the society pilot: held-out bits/byte MODEL-ALONE bottoms at 2.40 around step 6000 and
-        # rises to 3.62 by 48000, while the memory store masks it in the end-of-run figure. That is the project's
-        # own continual-learning failure mode, caused by our tokenizer rather than by any new domain.
-        # TOK_MINT_UNTIL freezes the vocabulary after a warmup: keep the benefit of a learned segmentation early,
-        # stop moving the target once the model has to actually fit it. 0 = never freeze (the old behaviour).
+        # STOP MINTING EVENTUALLY -- an option, NOT a recommendation. The argument for it was that minting
+        # re-tokenizes the stream, so the same text acquires new ids and the rows learned for the old segmentation
+        # are invalidated continuously. On that reasoning this knob was believed to fix "the project's own
+        # continual-learning failure mode".
+        # MEASURED, AND IT IS THE OTHER WAY ROUND. Six arms, one seed, identical harness, at 707f1af:
+        #     base       (mint the whole run)                held-out 1.962
+        #     frozen     (TOK_MINT_UNTIL=1)                  held-out 2.072
+        #     frozen_nr  (TOK_MINT_UNTIL=1 RETOK_EVERY=0)    held-out 2.365
+        # Minting for the whole run is BEST. The earlier result that made freezing look good was measuring the LR
+        # schedule: a vocabulary that never grows makes _total_steps accurate, which was the only way the cosine
+        # ever annealed. Fix the schedule and the advantage inverts. 0 = never freeze, and 0 is the default for a
+        # reason.
         if ONLINE and TOK_MINT_UNTIL and step >= TOK_MINT_UNTIL and not _mint_frozen[0]:
             _mint_frozen[0] = True
             print(f"  [tokenizer @ {step}] MINTING FROZEN at vocab {TOK.vocab_size} (TOK_MINT_UNTIL={TOK_MINT_UNTIL}). "
