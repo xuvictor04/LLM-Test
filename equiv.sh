@@ -108,6 +108,25 @@ run_side "$SB" "$LB" || exit 1
 _norm() { grep -av -E '\[rate @|elapsed|steps/min|kB/s|GB of text|\[pid |ms/step|\[build\]|h left|checkpoint-on-demand|/tmp/equiv_' "$1"; }
 _norm "$LA" > "$OUT/a.norm"; _norm "$LB" > "$OUT/b.norm"
 
+# KNOWN-NOISY LINES. Training is bit-reproducible on the GPUs measured, but the MEMORY store's retrieval is
+# not -- a self-test on CUDA differs on 'model + MEMORY', 'flagged N implausible' and the figures derived from
+# them, while every model-only and model+fabric number matches exactly. A comparison that just says DIFFERS
+# because of that is useless. So: the self-test WRITES the set of line-patterns that vary run-to-run on this
+# machine, and a later comparison SUBTRACTS them and judges on what is left.
+NOISE=$ROOT/runs/equiv_noise_${DEV}.txt
+if [ "$SELFTEST" = 1 ]; then
+  diff "$OUT/a.norm" "$OUT/b.norm" | grep '^[<>]' | sed 's/^[<>] //' | sed -E 's/[0-9]+\.[0-9]+/NUM/g; s/[0-9]+/N/g' \
+    | sort -u > "$NOISE"
+  echo "  noise baseline for $DEV written: $(wc -l < "$NOISE") pattern(s) -> $NOISE"
+fi
+_strip_noise() {                                          # drop diff lines whose shape matches the baseline
+  if [ -s "$NOISE" ]; then
+    diff "$OUT/a.norm" "$OUT/b.norm" | grep '^[<>]' | sed 's/^[<>] //' \
+      | sed -E 's/[0-9]+\.[0-9]+/NUM/g; s/[0-9]+/N/g' | sort -u | comm -23 - "$NOISE"
+  else
+    diff "$OUT/a.norm" "$OUT/b.norm" | grep '^[<>]' | sed 's/^[<>] //' | sort -u
+  fi
+}
 echo
 if diff -q "$OUT/a.norm" "$OUT/b.norm" >/dev/null; then
   echo "  ================================================================"
@@ -124,6 +143,16 @@ if diff -q "$OUT/a.norm" "$OUT/b.norm" >/dev/null; then
   exit 0
 else
   _n=$(diff "$OUT/a.norm" "$OUT/b.norm" | grep -c '^[<>]')
+  _real=$(_strip_noise | grep -c . || true)
+  if [ "$SELFTEST" != 1 ] && [ -s "$NOISE" ] && [ "$_real" = 0 ]; then
+    echo "  ================================================================"
+    echo "   INERT -- $_n lines differ, but every one of them matches a pattern this machine varies on"
+    echo "   run-to-run (see $NOISE, written by 'equiv.sh HEAD HEAD')."
+    echo "   $SB is behaviourally inert with respect to $SA at scale=${SCALE:-fast}."
+    echo "  ================================================================"
+    diff "$OUT/a.norm" "$OUT/b.norm" | head -12 | sed 's/^/     /'
+    exit 0
+  fi
   echo "  ================================================================"
   echo "   DIFFERS -- $_n changed lines."
   if [ "$SELFTEST" = 1 ]; then

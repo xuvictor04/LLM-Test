@@ -310,6 +310,11 @@ grid)
       noban)     echo "CHAIN_BAN=0" ;;
       nolatch)   echo "FAB_RAMP_LATCH=0" ;;
       bytes)     echo "TOKENIZER=0" ;;
+      # UNCAPPED VOCABULARY. VMAX is the model's vocab DIMENSION and the tokenizer's ceiling; nothing has run
+      # above 2048. Reachable as an arm flag only since the precedence fix -- before it, the hardcoded VMAX=2048
+      # below silently won and the log was named after a value that never took effect.
+      vmax8k)    echo "VMAX=8192" ;;
+      vmax4k)    echo "VMAX=4096" ;;
       # --- THE PILOT BUNDLE. Every arm here is read against `base`, and the three tokenizer arms are SEPARATED
       # on purpose: the last round ran TOK_MINT_UNTIL=1 and RETOK_EVERY=0 together, so when the result came back
       # 1.4 b/B worse there was no way to tell which did it. They are not the same idea. TOK_MINT_UNTIL stops
