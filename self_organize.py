@@ -2822,6 +2822,17 @@ def _report(R):
     wrong across 1,239 lines. equiv.sh is what proves that claim rather than this comment.
     """
     BEST_TRACK = R.BEST_TRACK
+    CORP = R.CORP
+    SEG_LEN = R.SEG_LEN
+    VALC = R.VALC
+    VAL_FRAC = R.VAL_FRAC
+    _config_audit = R._config_audit
+    _retok = R._retok
+    _save_ckpt = R._save_ckpt
+    _time = R._time
+    encpos = R.encpos
+    encwin = R.encwin
+    report_holdout = R.report_holdout
     ENC_SEQ = R.ENC_SEQ
     ONLINE = R.ONLINE
     PH_SNAP = R.PH_SNAP
@@ -5822,7 +5833,7 @@ def main():
             _last_vsz = TOK.vocab_size
 
     # hand the training half's finished objects to the measurement half -- see _report
-    _report(SimpleNamespace(BEST_TRACK=BEST_TRACK, ENC_SEQ=ENC_SEQ, ONLINE=ONLINE, PH_SNAP=PH_SNAP, PONDER=PONDER, PONDER_WARM=PONDER_WARM, PROFILE=PROFILE, RATE_EVERY=RATE_EVERY, WLAT=WLAT, WORLD_K=WORLD_K, WORLD_MODEL=WORLD_MODEL, _CURVE=_CURVE, _best_bpb=_best_bpb, _bpw=_bpw, _greach=_greach, _hb=_hb, _hbs=_hbs, _lm_curve=_lm_curve, _prof=_prof, _resume_step=_resume_step, _rlive=_rlive, _rseen=_rseen, _t_start=_t_start, asm=asm, bounds=bounds, byte_labels=byte_labels, byte_stream=byte_stream, enc=enc, experts=experts, fabgrow=fabgrow, mem=mem, model=model, recon=recon, route_at=route_at, router=router, step=step, true_sw=true_sw, world_enc=world_enc, world_fwd=world_fwd))
+    _report(SimpleNamespace(BEST_TRACK=BEST_TRACK, ENC_SEQ=ENC_SEQ, ONLINE=ONLINE, PH_SNAP=PH_SNAP, PONDER=PONDER, PONDER_WARM=PONDER_WARM, PROFILE=PROFILE, RATE_EVERY=RATE_EVERY, WLAT=WLAT, WORLD_K=WORLD_K, WORLD_MODEL=WORLD_MODEL, _CURVE=_CURVE, _best_bpb=_best_bpb, _bpw=_bpw, _greach=_greach, _hb=_hb, _hbs=_hbs, _lm_curve=_lm_curve, _prof=_prof, _resume_step=_resume_step, _rlive=_rlive, _rseen=_rseen, _t_start=_t_start, asm=asm, bounds=bounds, byte_labels=byte_labels, byte_stream=byte_stream, enc=enc, experts=experts, fabgrow=fabgrow, mem=mem, model=model, recon=recon, route_at=route_at, router=router, step=step, true_sw=true_sw, world_enc=world_enc, world_fwd=world_fwd, CORP=CORP, SEG_LEN=SEG_LEN, VALC=VALC, VAL_FRAC=VAL_FRAC, _config_audit=_config_audit, _retok=_retok, _save_ckpt=_save_ckpt, _time=_time, encpos=encpos, encwin=encwin, report_holdout=report_holdout))
 
 
 if __name__ == "__main__":
