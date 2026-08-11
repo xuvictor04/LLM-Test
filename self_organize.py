@@ -598,6 +598,8 @@ if DATA_MODE == "real":
         else:
             TOK = DynamicTokenizer(vmax=VMAX, min_pair=_i("MIN_PAIR", 50), max_tok=_i("MAX_TOK", 16), dropout=_f("TOK_DROPOUT", 0.0))
             TOK.pmin = TOK_MINT_PMIN          # predictability gate; read from env in __init__ too, set here so
+            TOK.gate_k = _i("TOK_MINT_GATE_K", 1024)   # ...and so BOTH are read through _env, or the config
+            #   audit reports a knob that is declared in the registry and never read
             #   a tokenizer LOADED from disk (which reconstructs from the saved json) picks it up as well
             gb = b"".join(c[:_i("TOK_GROW_CAP", 1000000)] for c in CORP)   # bytes the tokenizer grows on
             curve = []

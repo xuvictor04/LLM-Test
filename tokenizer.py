@@ -156,6 +156,9 @@ class DynamicTokenizer:
         # frequency bias. H is still computed and REPORTED, because it is the informative diagnostic for
         # choosing a threshold; it just is not the gate.
         self.pmin = float(os.environ.get("TOK_MINT_PMIN", 0.10))   # 0 = off, mint on frequency alone
+        # Read through os.environ here because the tokenizer has no access to _env, and MIRRORED from
+        # self_organize (as TOK.pmin / TOK.gate_k) so the registry sees the read and the config audit
+        # does not report a declared-but-never-read knob.
         self.gate_k = int(os.environ.get("TOK_MINT_GATE_K", 1024)) # how far down the ranking the gate may look
         #   GENEROUS ON PURPOSE, so that TOK_MINT_PMIN is the only lever that decides what gets minted.
         #   At 64 the window itself starved minting -- measured at pmin=0.10 the vocabulary reached 419 of
@@ -271,7 +274,14 @@ class DynamicTokenizer:
             # statistic is recomputed over the CURRENT segmentation rather than over bytes.
             _pick = None
             for _pr, _c in _top:
-                if _c < self.min_pair: break                       # the list is frequency-ordered: none below
+                if _c < self.min_pair:
+                    # BREAKING HERE ASSUMES THE LIST IS FREQUENCY-ORDERED, and after a novelty re-sort it is
+                    # not: the score is (c - seen)/(1+seen)^novel, so a rarely-seen pair at count 30 can
+                    # outrank a worked-over one at count 500, and stopping at the first sub-threshold entry
+                    # would discard every viable candidate below it. Frequency order still permits the early
+                    # exit and it is worth keeping -- gate_k is 1024 entries.
+                    if self.novel > 0: continue
+                    break
                 if self.pmin > 0 and not self._predictable(*_pr):
                     self.h_block += 1
                     continue

@@ -384,9 +384,14 @@ grid)
       # with frequency -- a common left token is common because many things follow it -- so an entropy gate
       # rejects the useful merges first. p(b|a) asks the same question scale-free. Measured vocabulary reached,
       # 1024-cap, 400 kB, 4 passes:  pmin 0.10 -> 1010,  0.15 -> 623,  0.25 -> 353.
-      pgate)     echo "TOK_MINT_PMIN=0.10" ;;                  # gentle: trims only the least predictable merges
-      pgate_t)   echo "TOK_MINT_PMIN=0.15" ;;                  # tighter -- roughly halves the vocabulary
-      pgate_c)   echo "TOK_MINT_PMIN=0.10 TOK_COMPOSE=1" ;;    # gate + the composed table it complements
+      # 0.10 IS NOW THE DEFAULT, so `pgate` would have been an alias for `base` -- an arm that changes nothing
+      # while reading as though it tests something. The informative arm is the one that turns the gate OFF.
+      nogate)    echo "TOK_MINT_PMIN=0" ;;                     # the pre-gate baseline; reproduces old vocabularies
+      pgate_t)   echo "TOK_MINT_PMIN=0.15" ;;                  # tighter than default
+      pgate_c)   echo "TOK_COMPOSE=1" ;;                       # default gate + the composed table it complements
+      # --- PROBATION. Mint provisionally, judge once the token has been trained, un-merge on failure.
+      prob_use)  echo "TOK_PROBATION=200" ;;                          # earn 200 appearances or be retired
+      prob_emb)  echo "TOK_PROBATION=200 TOK_PROBATION_BY=embed TOK_COMPOSE=1" ;;   # ||delta||/||composite||
       # --- TOKEN PARAMETERISATION. TOK_COMPOSE is now ON by default, so every arm below states BOTH knobs
       # explicitly. pilot_gru_8 ran compose AND mintnovel together and cannot be attributed to either; these
       # four arms are the 2x2 that separates them, plus the anchor.
