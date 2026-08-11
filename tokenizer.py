@@ -155,7 +155,7 @@ class DynamicTokenizer:
         # p(b|a) is the same question -- does `a` reliably predict `b`? -- asked scale-free and without the
         # frequency bias. H is still computed and REPORTED, because it is the informative diagnostic for
         # choosing a threshold; it just is not the gate.
-        self.pmin = float(os.environ.get("TOK_MINT_PMIN", 0.10))   # 0 = off, mint on frequency alone
+        self.pmin = float(os.environ.get("TOK_MINT_PMIN", 0.0))    # 0 = off, mint on frequency alone
         # Read through os.environ here because the tokenizer has no access to _env, and MIRRORED from
         # self_organize (as TOK.pmin / TOK.gate_k) so the registry sees the read and the config audit
         # does not report a declared-but-never-read knob.
@@ -166,6 +166,7 @@ class DynamicTokenizer:
         self._scache = {}                      # a -> (total successors, H(next|a)), rebuilt per grow event
         self._sstamp = -1                      # len(self.pair) when _scache was built
         self.h_pass = self.h_block = 0         # how the gate ruled, for the run report
+        self.gate_forced = 0                   # mints the gate blocked but could not afford to
         self.h_pmin_seen = []                  # p(b|a) of the candidates it judged, for the report
         self.prov = {}                         # id -> (a, b) for tokens minted but not yet judged
         self.retired = set()                   # ids un-merged after failing probation
@@ -288,7 +289,23 @@ class DynamicTokenizer:
                 _pick = (_pr, _c)
                 if self.pmin > 0: self.h_pass += 1
                 break
-            if _pick is None: return None                          # nothing frequent AND predictable enough
+            # FAIL OPEN. Returning None here means "mint nothing this event", and when the gate rejects the
+            # whole window that is not a pause -- it is a PERMANENT shortfall, because the cap is never reached
+            # and every unminted row sits in the softmax at its initialisation for the rest of the run.
+            # Measured at the project's standard config (VMAX=2048, 4 MB stream, 8 epochs): minting decelerated
+            # 878 -> 1091 -> 1211 -> 1284 -> 1331 -> 1379 -> 1439 and stopped, leaving 609 rows (29.7% of the
+            # width) never minted, and the run scored 3.600 b/B where the ungated baseline is ~1.96. Dead rows
+            # are the worst failure this system has; a QUALITY filter that creates them is strictly worse than
+            # no filter at all.
+            #   So the gate may REORDER what gets minted and may never PREVENT minting. If nothing in the
+            # window passes, take the most frequent candidate clearing min_pair -- exactly what the ungated
+            # path would have chosen. gate_forced counts those, so a gate that has stopped discriminating is
+            # visible in the report instead of being inferred afterwards from a vocabulary that came up short.
+            if _pick is None:
+                for _pr, _c in _top:
+                    if _c >= self.min_pair:
+                        _pick = (_pr, _c); self.gate_forced += 1; break
+            if _pick is None: return None                          # genuinely nothing above min_pair
             (a, b), cnt = _pick
             self.pair[(a, b)] = 0
             ns = self.id2bytes[a] + self.id2bytes[b]

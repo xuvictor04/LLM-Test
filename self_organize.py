@@ -91,7 +91,7 @@ _SPEC = {
     "TOK_ANCHOR": ("f", 0.05),                            # tokenizer
     "TOK_ANCHOR_TAU": ("f", 4000.0),                      # tokenizer
     "TOK_ANCHOR_USES": ("f", 400.0),                      # tokenizer -- >0 = release by APPEARANCES, not steps
-    "TOK_MINT_PMIN": ("f", 0.10),                         # tokenizer -- min p(b|a) to allow a merge; 0 = off
+    "TOK_MINT_PMIN": ("f", 0.0),                          # tokenizer -- min p(b|a) to allow a merge; 0 = off
     "TOK_PROBATION": ("i", 0),                            # tokenizer -- appearances to earn the slot; 0 = off
     "TOK_PROBATION_STEPS": ("i", 5000),                   # tokenizer -- deadline to reach them
     "TOK_PROBATION_BY": ("env", "use"),                   # tokenizer -- "use" | "embed"
@@ -537,7 +537,7 @@ TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 400.0)             #   ...or over this m
 # THE DEFAULT IS APPEARANCES, NOT STEPS. A step count releases a token on a clock that has nothing to do with
 # whether it was ever trained on, and the two are anti-correlated: a token minted late is rare BY CONSTRUCTION
 # -- that is why it was minted late -- so it gets the fewest appearances in the same number of steps.
-TOK_MINT_PMIN = _f("TOK_MINT_PMIN", 0.10)                  # predictability gate on minting; 0 = off
+TOK_MINT_PMIN = _f("TOK_MINT_PMIN", 0.0)                   # predictability gate on minting; 0 = off
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
@@ -4865,7 +4865,8 @@ def main():
         # had to look, not of how much vocabulary was denied.
         print(f"[vocab] predictability gate TOK_MINT_PMIN={TOK_MINT_PMIN:g}: {_gp} merges minted, {_gb} "
               f"candidates rejected on the way ({_gb/max(1,_gp):.1f} per mint) | median p(b|a) of everything "
-              f"judged {_md:.3f}")
+              f"judged {_md:.3f} | {getattr(TOK, 'gate_forced', 0)} mints FORCED because nothing in the window "
+              f"passed -- the gate reorders, it can no longer starve the vocabulary")
     try:
         _seen = torch.zeros(int(V), dtype=torch.bool)
         for _c0 in range(0, len(stream), 1 << 20):

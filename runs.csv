@@ -12,3 +12,4 @@ frozen_8ep_707f1af,(no log),,8,8,0,2048,,1,0,,,,,,,,,2.072,,,,,,,"SOURCE: self_o
 frozen_nr_8ep_707f1af,(no log),,8,8,0,2048,,1,0,,,,,,,,,2.365,,,,,,,"SOURCE: self_organize.py:4624 comment, 6-arm pilot at 707f1af; log not retained"
 fabric_off,(no log),,,,,,,,,,,,,,,,,3.543,,,,3.495,,,SOURCE: self_organize.py:928 comment; log not retained
 fabric_on,(no log),,,,,,,,,,,,,,,,,3.441,,,,3.495,,,SOURCE: self_organize.py:929 comment; fabric contributes +0.709 b/B
+base_8ep_gate_starved,136461cdcd,2026-08-11,8,8,1,2048,512,0,0.1,0,0,0,4096,51617,2048,1439,609,3.600,3.642,-0.042,3.927,3.316,33,+0.910,gate at 0.10 starved minting to 1439/2048 = 29.7% dead rows; caused the fail-open fix
