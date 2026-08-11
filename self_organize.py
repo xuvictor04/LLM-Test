@@ -4765,14 +4765,19 @@ def main():
     # Neither is otherwise anywhere in the log, so a run spreading its loss over rows that index nothing reads
     # exactly like one that is simply bad. Print-only; nothing below depends on it.
     if USE_TOK and TOK_MINT_PMIN > 0:
-        _hp, _hb = getattr(TOK, "h_pass", 0), getattr(TOK, "h_block", 0)
+        # NAMES ARE NOT FREE IN A 3000-LINE FUNCTION. This block first used _hp/_hb, and _hb is the held-out
+        # probe dict carried in from a RESUME (assigned ~line 3121 and read by report_holdout far below). The
+        # int written here replaced it, and report_holdout died on `k in prev` with the whole MEMORIZATION
+        # CHECK / ANCHORS / ACROSS THE RUN BOUNDARY block swallowed by its own try/except -- i.e. the retention
+        # measurement the continual-learning claim rests on, gone, reported only as a one-line TypeError.
+        _gp, _gb = getattr(TOK, "h_pass", 0), getattr(TOK, "h_block", 0)
         _sn = getattr(TOK, "h_pmin_seen", [])
         _md = sorted(_sn)[len(_sn) // 2] if _sn else float("nan")
         # `rejected` counts CANDIDATES EXAMINED and refused, not distinct pairs permanently refused: the gate
         # walks the ranking until one passes, so a single mint can reject many. It is a measure of how far it
         # had to look, not of how much vocabulary was denied.
-        print(f"[vocab] predictability gate TOK_MINT_PMIN={TOK_MINT_PMIN:g}: {_hp} merges minted, {_hb} "
-              f"candidates rejected on the way ({_hb/max(1,_hp):.1f} per mint) | median p(b|a) of everything "
+        print(f"[vocab] predictability gate TOK_MINT_PMIN={TOK_MINT_PMIN:g}: {_gp} merges minted, {_gb} "
+              f"candidates rejected on the way ({_gb/max(1,_gp):.1f} per mint) | median p(b|a) of everything "
               f"judged {_md:.3f}")
     try:
         _seen = torch.zeros(int(V), dtype=torch.bool)
