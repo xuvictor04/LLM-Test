@@ -90,6 +90,7 @@ _SPEC = {
     "TOKENIZER_PATH": ("env", "data/dyntok.json"),        # tokenizer
     "TOK_ANCHOR": ("f", 0.05),                            # tokenizer
     "TOK_ANCHOR_TAU": ("f", 4000.0),                      # tokenizer
+    "TOK_ANCHOR_USES": ("f", 0.0),                        # tokenizer -- >0 = release by APPEARANCES, not steps
     "TOK_COMPOSE": ("i", 0),                              # tokenizer
     "TOK_DROPOUT": ("f", 0.0),                            # tokenizer
     "TOK_GROW_CAP": ("i", 1000000),                       # tokenizer
@@ -525,6 +526,7 @@ KW = _i("KEY_WIN", 8); V = 256
 TOK_COMPOSE = bool(_i("TOK_COMPOSE", 0))                    # token vector = composite(bytes) + learned residual
 TOK_ANCHOR = _f("TOK_ANCHOR", 0.05)                        # hold a new token near its composite, decaying
 TOK_ANCHOR_TAU = _f("TOK_ANCHOR_TAU", 4000.0)              #   over this many steps of the TOKEN's own life
+TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 0.0)               #   ...or over this many APPEARANCES (0 = use steps)
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
@@ -750,11 +752,21 @@ class ByteComposer(nn.Module):
         s.delta = nn.Parameter(torch.zeros(int(_env("VMAX", 4096)), d))
         s.dbias = nn.Parameter(torch.zeros(int(_env("VMAX", 4096))))
         s.born = None                                      # per-token birth step, for the anchor below
+        s.seen = None                                      # per-token APPEARANCES, for the anchor below
         s._idx = None; s._msk = None; s._cache = None; s._v = -1
     def note_born(s, ids, step):
         if s.born is not None:
             for _i in ids:
                 if 0 <= _i < s.born.numel() and int(s.born[_i]) < 0: s.born[_i] = step
+
+    def note_seen(s, ids):
+        """Count APPEARANCES of each token in the material actually trained on. `ids` is the (B, WIN) input
+        batch. Called once per optimizer step, so the count is 'how many times has the model been shown this
+        token', which is the thing the anchor should be released against. Cheap: one index_add_ over ids."""
+        if s.seen is None: return
+        _f = ids.reshape(-1)
+        _f = _f[_f < s.seen.numel()]
+        if _f.numel(): s.seen.index_add_(0, _f, torch.ones_like(_f, dtype=s.seen.dtype))
 
     def set_vocab(s, id2bytes, dev, vmax=None):
         """Called whenever the vocabulary changes. Builds the (V, maxb) byte-index tensor once per change.
@@ -774,6 +786,12 @@ class ByteComposer(nn.Module):
         _b = torch.full((_V,), -10**9, dtype=torch.long)
         if s.born is not None: _b[:min(_prev, _V)] = s.born[:min(_prev, _V)].cpu()
         s.born = _b.to(dev)
+        # THE APPEARANCE COUNT IS CARRIED FORWARD THE SAME WAY, and must be: this is called on every mint, so
+        # reallocating without the copy would reset every token's count to zero at each mint and no token would
+        # ever finish its anchor. New rows start at 0 appearances, which is correct -- they have not been seen.
+        _s = torch.zeros(_V, dtype=torch.float)
+        if s.seen is not None: _s[:min(_prev, _V)] = s.seen[:min(_prev, _V)].cpu()
+        s.seen = _s.to(dev)
         s._idx = idx.to(dev); s._msk = msk.to(dev)
         s._len = s._msk.sum(-1).long().clamp(max=s.maxb).to(dev)
         s._v = _V; s._cache = None
@@ -787,15 +805,42 @@ class ByteComposer(nn.Module):
         w = _c + s.delta[:_n]                              # composite + what this token has learned to be
         return w, (s.bias(_c).squeeze(-1) + s.dbias[:_n])
 
-    def anchor(s, step, tau):
+    def anchor(s, step, tau, uses=0.0):
         """HOLD A NEW TOKEN NEAR ITS COMPOSITE, then let go. A freshly minted token has delta=0, so it IS its
         composite; without this it is free to be dragged anywhere by the first gradients it sees, which is the
-        same discontinuity the old fresh-random row had, just starting from a better place. Penalising its
-        residual with a weight that decays over `tau` steps of the token's own life makes the handover gradual:
-        strongly anchored while it is new, free once it has seen enough of its own material to deserve to be."""
-        if s.born is None or s._v <= 0: return None
-        _age = (step - s.born[:s._v]).clamp_min(0).float()
-        _w = torch.exp(-_age / max(1.0, tau))
+        same discontinuity the old fresh-random row had, just starting from a better place. The residual is
+        penalised with a weight that decays as the token matures, so the handover is gradual.
+
+        WHAT "MATURES" MEANS IS THE CHOICE, and STEPS is the wrong unit for it.
+          uses=0 (default): decay over `tau` STEPS since the token was minted. The docstring for this used to
+        say "free once it has seen enough of its own material", which steps do not measure. A token minted at
+        the start of a run appears constantly and is thoroughly trained within tau; one minted late is rare by
+        construction -- that is WHY it was minted late -- and may appear a handful of times in the same tau.
+        Both are released on the same schedule, so the release is anti-correlated with how ready the token is.
+        Worse, tau interacts with everything that changes the steps-to-appearances ratio: the learning-rate
+        horizon, the epoch count, and RETOK_EVERY, which re-segments the stream underneath a token that is
+        still anchored.
+          uses>0: decay over APPEARANCES instead -- exp(-seen/uses) -- so a token is held near its composite
+        until it has actually been TRAINED that many times, whenever that happens. A rare token is held
+        longer, in wall-clock, precisely because it needs longer. This also makes the anchor independent of
+        re-segmentation by construction: `seen` only advances when the token appears in a training batch, so a
+        retok cannot move it, and the two schedules cannot interfere.
+        """
+        if s._v <= 0: return None
+        if uses and uses > 0:
+            if s.seen is None: return None
+            _w = torch.exp(-s.seen[:s._v] / max(1.0, float(uses)))
+        else:
+            if s.born is None: return None
+            _age = (step - s.born[:s._v]).clamp_min(0).float()
+            _w = torch.exp(-_age / max(1.0, tau))
+        # NEVER-MINTED ROWS ARE NOT YOUNG, THEY ARE ABSENT. born is -1e9 for an id that has not been minted, so
+        # the age branch already gives them weight ~0. The appearances branch cannot tell "minted, not yet seen"
+        # from "does not exist" -- both have seen=0 and would be held at full weight. Their delta is zeros and
+        # stays zeros (no gradient reaches an id that never appears), so the term they contribute is exactly 0
+        # either way; they dilute the mean but cannot pull the loss. Masking them out keeps the reported
+        # magnitude comparable between the two rules.
+        if s.born is not None: _w = _w * (s.born[:s._v] > -10 ** 8).float()
         if float(_w.max()) < 1e-3: return None             # nothing young enough to hold
         return (_w[:, None] * s.delta[:s._v].pow(2)).sum(-1).mean()
 
@@ -2982,8 +3027,14 @@ def main():
         print(f"[tokenizer] TOK_COMPOSE: token vectors are COMPUTED from their bytes -- no per-token embedding or "
               f"head row is guessed at. Each token is composite(its bytes) + a learned residual that starts at "
               f"ZERO, so at the instant it is minted it IS its composite, and it becomes itself from there. "
-              f"TOK_ANCHOR={TOK_ANCHOR} holds that residual near 0 for ~{TOK_ANCHOR_TAU:.0f} steps of the "
-              f"token's own life, so the mint is a handover rather than a jump. No VMAX ceiling on the "
+              # STATE THE RULE THAT IS ACTUALLY RUNNING. This said "~TAU steps" unconditionally, so a run
+              # releasing on APPEARANCES still advertised a step count that nothing read.
+              + (f"TOK_ANCHOR={TOK_ANCHOR} holds that residual near 0 until the token has APPEARED "
+                 f"~{TOK_ANCHOR_USES:.0f} times (TOK_ANCHOR_USES; TOK_ANCHOR_TAU is unused), "
+                 if TOK_ANCHOR_USES > 0 else
+                 f"TOK_ANCHOR={TOK_ANCHOR} holds that residual near 0 for ~{TOK_ANCHOR_TAU:.0f} steps of the "
+                 f"token's own life, ")
+              + f"so the mint is a handover rather than a jump. No VMAX ceiling on the "
               f"composite. {model.compose.byte.num_embeddings} byte embeddings underlie all "
               f"{TOK.vocab_size} tokens.")
     BEST_TRACK = bool(_i("BEST_TRACK", 1))                    # keep the best-by-held-out checkpoint, not just the last
@@ -3665,7 +3716,7 @@ def main():
             ("WARMSTART_OPT",  bool(_i("WARMSTART_OPT", 0))),
             ("WARMSTART_MODE", _env("WARMSTART_MODE", "mean")),
             ("TOK_COMPOSE",    TOK_COMPOSE),            ("TOK_ANCHOR",     TOK_ANCHOR),
-            ("TOK_ANCHOR_TAU", TOK_ANCHOR_TAU),
+            ("TOK_ANCHOR_TAU", TOK_ANCHOR_TAU),         ("TOK_ANCHOR_USES", TOK_ANCHOR_USES),
             ("TOK_MINT_NOVEL", _f("TOK_MINT_NOVEL", 0.0)),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
@@ -3753,6 +3804,25 @@ def main():
                    f"LR_EPOCHS={_lre}: the cosine is shaped over {_lre} epochs and then holds at the "
                    f"LR_MIN_FRAC={LR_MIN_FRAC:g} floor for the remaining {max(0, EPOCHS - _lre)}, so the LR at "
                    f"each step matches an EPOCHS={_lre} run and only the length differs."))
+        # THE ANCHOR LIVES ON ByteComposer, WHICH ONLY EXISTS UNDER TOK_COMPOSE. TOK_ANCHOR and its release
+        # knobs are read unconditionally and printed on the EFFECTIVE line, so every run so far has advertised
+        # TOK_ANCHOR=0.05 TOK_ANCHOR_TAU=4000 while model.compose was None and the term never reached the loss.
+        if TOK_ANCHOR > 0 and not TOK_COMPOSE:
+            _cpl.append(f"TOK_ANCHOR={TOK_ANCHOR} and TOK_ANCHOR_TAU={TOK_ANCHOR_TAU:g}/TOK_ANCHOR_USES="
+                        f"{TOK_ANCHOR_USES:g} appear on the EFFECTIVE line but have NO EFFECT in this run: the "
+                        f"anchor is a method of ByteComposer, which is constructed only when TOK_COMPOSE=1 and "
+                        f"is 0 here, so model.compose is None and the anchor term never enters the loss.")
+        if TOK_COMPOSE and TOK_ANCHOR > 0:
+            _cpl.append(
+                (f"TOK_ANCHOR_USES={TOK_ANCHOR_USES:g}: a new token is held near its composite until it has "
+                 f"APPEARED that many times in training, so TOK_ANCHOR_TAU={TOK_ANCHOR_TAU:g} is unused and "
+                 f"the anchor is independent of RETOK_EVERY -- the count advances only when the token is in a "
+                 f"batch, which a re-segmentation cannot do."
+                 if TOK_ANCHOR_USES > 0 else
+                 f"TOK_ANCHOR_TAU={TOK_ANCHOR_TAU:g} releases a new token after that many STEPS of its own "
+                 f"life, whether or not it was ever trained on in them -- and RETOK_EVERY="
+                 f"{_i('RETOK_EVERY', 3000)} re-segments the stream inside that window. Set TOK_ANCHOR_USES>0 "
+                 f"to release on APPEARANCES instead, which separates the two."))
         if FABRIC and not SOCIETY and bool(_i("CHAIN_VOTE", 1)):
             _cpl.append(f"CHAIN_VOTE=1 -> FAB_MIN_STEPS={fab.min_steps} (forced; the declared default is "
                         f"{0 if SOCIETY else 2}), so HALT may absorb on the first hop. What it actually did is "
@@ -4115,6 +4185,9 @@ def main():
         model.train()
         with _T("batch->tensor"):
             x = torch.tensor(_bx, device=DEV); y = torch.tensor(_by, device=DEV)   # (BATCH_W, WIN)
+            # APPEARANCES, counted on the batch the model is about to be trained on -- not on the stream, not
+            # on a re-segmentation. This is the quantity TOK_ANCHOR_USES releases against.
+            if TOK_COMPOSE and getattr(model, "compose", None) is not None: model.compose.note_seen(x)
             sigb = torch.stack(_bg)
         _plm = _t0()
         if _AC is not None: _AC.__enter__()                     # autocast the LM step (entered/exited explicitly rather
@@ -4297,7 +4370,7 @@ def main():
         # NEW TOKENS ARE TRAINED WITH THE LOSS, held to their composite while young. This is the term that makes
         # the mint a HANDOVER rather than a jump: the residual is penalised in proportion to how recently the
         # token was minted, so it behaves as its composite at birth and is progressively released.
-        _anc = model.compose.anchor(step, TOK_ANCHOR_TAU) if (TOK_COMPOSE and TOK_ANCHOR > 0
+        _anc = model.compose.anchor(step, TOK_ANCHOR_TAU, TOK_ANCHOR_USES) if (TOK_COMPOSE and TOK_ANCHOR > 0
                                                               and getattr(model, "compose", None) is not None) else None
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
