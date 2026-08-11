@@ -77,6 +77,140 @@ _pilot_corpus() {
   echo "[corpus] ready: $(du -sh "$_pc/train/eng" 2>/dev/null | cut -f1) in $_pc/train/eng"
 }
 
+# === WHAT EACH ARM IS, IN ONE PLACE ==========================================================================
+# Defined at TOP LEVEL, not inside `grid)`. A function defined in one case branch does not exist in another,
+# so `smoke` calling _flags_for while it lived under grid) would have run every arm with an EMPTY flag set --
+# seven identical runs reported as seven passing arms. Verified: `case smoke in grid) f(){...};; smoke) type f`
+# reports UNDEFINED. Both grid and smoke resolve arms through this, so they cannot describe different runs.
+_flags_for() {
+  case "$1" in
+    base)      echo "" ;;
+    vote)      echo "CHAIN_VOTE=1" ;;
+    socloop)   echo "CHAIN_ROUTE=soc CHAIN_VOTE=1" ;;
+    socloop_w) echo "CHAIN_ROUTE=soc CHAIN_VOTE=1 ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
+    vote_w)    echo "CHAIN_VOTE=1 ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
+    vote_soc)  echo "CHAIN_VOTE=1 FAB_STEPS=1" ;;
+    noban)     echo "CHAIN_BAN=0" ;;
+    nolatch)   echo "FAB_RAMP_LATCH=0" ;;
+    bytes)     echo "TOKENIZER=0" ;;
+    # UNCAPPED VOCABULARY. VMAX is the model's vocab DIMENSION and the tokenizer's ceiling; nothing has run
+    # above 2048. Reachable as an arm flag only since the precedence fix -- before it, the hardcoded VMAX=2048
+    # below silently won and the log was named after a value that never took effect.
+    #
+    # RAISING VMAX ALONE DOES NOT RAISE THE VOCABULARY: minting is rate-limited, not threshold-limited. One
+    # grow event every GROW_EVERY=100 steps, GROW_BURST=12 per event, ~5.7k steps/epoch = ~540 tokens per
+    # epoch, so 8192 from a 512 seed needs ~14 epochs. Under EPOCHS=8, vmax8k reached only 4823.
+    #
+    # FOUR RUNS, AS A 2x2 (held-out bits/byte, and the dead fraction from the [vocab] line):
+    #                    EPOCHS=8              EPOCHS=18
+    #     VMAX=4096    2.140  ( 0% dead)     3.250  ( 0% dead)      +1.110 for the extra 10 epochs
+    #     VMAX=8192    3.561  (41% dead)     4.383  ( 0% dead)      +0.822
+    #                 +1.421 for 2x VMAX    +1.133
+    #
+    # DEAD ROWS ARE NOT WHAT DRIVES THIS, and the hypothesis that they were is falsified here rather than
+    # quietly dropped. vmax8k@18ep filled its vocabulary COMPLETELY -- 8192/8192, 0% never minted, 1.3%
+    # ordinary turnover -- and is the WORST of the four: 4.383 b/B against a uniform anchor of 3.305, i.e.
+    # about 4 bits/token WORSE than assigning equal probability to every token. 19% real words. It is the
+    # only run of any arm with a POSITIVE train/held-out gap (+0.267; every other run underfits), and the
+    # only one whose held-out curve is still RISING at the end (+0.194 b/B per 10k steps through the second
+    # half). Its loss bottomed at step 3935 and rose for the remaining 82656 steps. The dead-row instrument
+    # earned its place by ruling itself out; do not read the [vocab] line as an explanation of a bad number.
+    #
+    # TWO CELLS ARE UNCONTAMINATED (both vocabularies completely filled):
+    #     vmax4k@8  vs vmax4k@18    +1.110    differ in EPOCHS -- and therefore in the LR schedule
+    #     vmax4k@18 vs vmax8k@18    +1.133    differ in VMAX ONLY
+    # The second is the clean one: at 18 epochs, doubling a FULL vocabulary from 4096 to 8192 costs +1.133
+    # b/B with no dead rows on either side. The first is confounded until LR_EPOCHS pins the schedule --
+    # EPOCHS moved the LR 11x between these two runs (see the LR_EPOCHS block in self_organize.py).
+    #
+    # SO THE NEXT GRID FIXES THE SCHEDULE AND VARIES ONE THING AT A TIME:
+    #     GRID_CKPT=0 GRID_DIR=runs/vmax_lr EPOCHS=18 LR_EPOCHS=8 bash longrun.sh grid "vmax4k vmax8k"
+    # vmax4k@18/LR8 against vmax4k@8 (2.140) isolates run length at a fixed schedule; vmax4k@18/LR8 against
+    # vmax8k@18/LR8 isolates VMAX at fixed length AND fixed schedule.
+    #
+    # These arms carry NO growth and NO schedule knobs -- pass EPOCHS/LR_EPOCHS on the command line, so the
+    # arm name never implies a schedule it does not set. self_organize.py predicts a minting shortfall in a
+    # [config] COUPLING line BEFORE training starts; its estimate is measured at the seed vocabulary and runs
+    # ~25% optimistic on this data, so treat it as a floor. Read the [vocab] line before the held-out number:
+    # its first gap (width vs minted) can invalidate a comparison, the second (minted vs used) is ordinary
+    # turnover and ran 1-2% on every filled run here.
+    vmax8k)    echo "VMAX=8192" ;;
+    vmax4k)    echo "VMAX=4096" ;;
+    # --- THE PILOT BUNDLE. Every arm here is read against `base`, and the three tokenizer arms are SEPARATED
+    # on purpose: the last round ran TOK_MINT_UNTIL=1 and RETOK_EVERY=0 together, so when the result came back
+    # 1.4 b/B worse there was no way to tell which did it. They are not the same idea. TOK_MINT_UNTIL stops
+    # MINTING; RETOK_EVERY stops RE-SEGMENTING, and a re-segmentation that produces an identical stream is
+    # still not a no-op -- it clears the lookahead queue and blacks out fabric growth for FAB_COOLDOWN steps.
+    frozen)    echo "TOK_MINT_UNTIL=1" ;;                      # vocabulary frozen at the seed; retok still fires
+    # `frozen` freezes at SEED_VOCAB=512, so it conflates two different ideas: a FIXED vocabulary, and a TINY
+    # one. At 512 the model has almost no whole-word units and must spell everything -- measured 3.07 tokens
+    # per generated word against base's 2.52. These freeze at a seed the size base ENDS at, so the comparison
+    # is fixed-vs-growing rather than small-vs-large.
+    frozen2k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=2048" ;;
+    frozen1k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=1024" ;;
+    frozen_nr) echo "TOK_MINT_UNTIL=1 RETOK_EVERY=0" ;;        # ...and re-segmentation off too
+    # --- REGULARISATION. Every run so far reports UNDERFIT with a NEGATIVE gap (held-out scoring better than
+    # train), so the expectation is that these cost rather than help. Worth measuring anyway: DROPOUT also
+    # perturbs the hidden state the router reads, so it is an expert-dynamics lever, not only a generalisation one.
+    drop)      echo "DROPOUT=0.1" ;;
+    wdecay)    echo "WEIGHT_DECAY=0.01" ;;
+    reg)       echo "DROPOUT=0.1 WEIGHT_DECAY=0.01" ;;
+    mintinit)  echo "WARMSTART_MODE=last/first" ;;
+    # --- THE MEANING GATE ON MINTING. Frequency alone cannot tell a UNIT ("th"+"e") from a pair that
+    # straddles a boundary everything crosses ("e"+" "). H(next|a) can: low means `a` reliably predicts
+    # what follows, so there is no boundary to glue across. Measured on a constructed case, H(next|"t")
+    # = 1.32 bits against H(next|"e") = 2.05, which is the separation the threshold sits in.
+    # These arms change WHICH TOKENS EXIST, so read them against `base` on vocabulary size and on the
+    # [vocab] gate line (how many candidates were rejected), not on held-out alone.
+    # The threshold is p(b|a), not an entropy. An absolute H(next|a) cut-off does not survive real text:
+    # over 400 kB of English at the byte level H has median 3.48 bits and p90 4.39, and it is ANTI-correlated
+    # with frequency -- a common left token is common because many things follow it -- so an entropy gate
+    # rejects the useful merges first. p(b|a) asks the same question scale-free. Measured vocabulary reached,
+    # 1024-cap, 400 kB, 4 passes:  pmin 0.10 -> 1010,  0.15 -> 623,  0.25 -> 353.
+    # 0.10 IS NOW THE DEFAULT, so `pgate` would have been an alias for `base` -- an arm that changes nothing
+    # while reading as though it tests something. The informative arm is the one that turns the gate OFF.
+    nogate)    echo "TOK_MINT_PMIN=0" ;;                     # the pre-gate baseline; reproduces old vocabularies
+    pgate_t)   echo "TOK_MINT_PMIN=0.15" ;;                  # tighter than default
+    pgate_c)   echo "TOK_COMPOSE=1" ;;                       # default gate + the composed table it complements
+    # --- PROBATION. Mint provisionally, judge once the token has been trained, un-merge on failure.
+    prob_use)  echo "TOK_PROBATION=200" ;;                          # earn 200 appearances or be retired
+    prob_emb)  echo "TOK_PROBATION=200 TOK_PROBATION_BY=embed TOK_COMPOSE=1" ;;   # ||delta||/||composite||
+    # --- TOKEN PARAMETERISATION. TOK_COMPOSE is now ON by default, so every arm below states BOTH knobs
+    # explicitly. pilot_gru_8 ran compose AND mintnovel together and cannot be attributed to either; these
+    # four arms are the 2x2 that separates them, plus the anchor.
+    nocompose) echo "TOK_COMPOSE=0 TOK_MINT_NOVEL=0" ;;    # neither -- the control the good runs were on
+    compose)   echo "TOK_COMPOSE=1 TOK_MINT_NOVEL=0" ;;    # composed table alone
+    mintnovel) echo "TOK_COMPOSE=0 TOK_MINT_NOVEL=0.5" ;;  # novelty-ranked minting alone
+    composenov) echo "TOK_COMPOSE=1 TOK_MINT_NOVEL=0.5" ;; # both -- reproduces pilot_gru_8
+    noanchor)  echo "TOK_COMPOSE=1 TOK_ANCHOR=0 TOK_MINT_NOVEL=0" ;;  # composer without the residual anchor
+    # --- FABRIC SATURATION. pilot_gru_8 turned upward at ~step 36k, which is when the population reached
+    # 100% of FAB_NMAX, the ramp latched off, and culling-under-capacity-pressure started.
+    bigpop)    echo "FAB_NMAX=16384" ;;                    # does the turn track hitting the CAP?
+    freeze6k)  echo "TOK_MINT_UNTIL=6000" ;;
+    freeze20k) echo "TOK_MINT_UNTIL=20000" ;;
+    nogrow)    echo "FAB_GROW=0 FAB_N0=1024" ;;
+    nogrow_s)  echo "SOCIETY=1 FAB_GROW=0 FAB_N0=1024" ;;
+    weights)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
+    nofabric)  echo "FABRIC=0" ;;
+    balance)   echo "BAL_WARM=100000000" ;;
+    frozvocab) echo "TOK_ONLINE=0" ;;
+    softroute) echo "ROUTE_T=0.3" ;;
+    keynorm)   echo "FAB_KEY_NORM=1" ;;
+    divw)      echo "DIV_W=0.05" ;;
+    smallpop)  echo "FAB_NMAX=256" ;;
+    curric)    echo "CHAIN_CURRIC=1" ;;
+    society)   echo "SOCIETY=1" ;;
+    stateq)    echo "CHAIN_STATE_Q=1" ;;
+    chainsup)  echo "CHAIN_SUP=0.3" ;;
+    nomem)     echo "MEM_PER_EXPERT=0" ;;
+    explore)   echo "FAB_EXPLORE=0.40" ;;
+    wt_bal)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000" ;;
+    wt_div)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 DIV_W=0.05" ;;
+    kitchen)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000 DIV_W=0.05 ROUTE_T=0.3" ;;
+    *)         echo "" ;;
+  esac
+}
+
 WHICH=${1:-run}
 OUT=${OUT:-runs/long}
 DD=${DATA_DIR:-data_big}
@@ -300,134 +434,6 @@ grid)
   #             and grid base (+2.287) and were never separated.
   GRID_ARMS_DEFAULT="socloop socloop_w vote vote_w society base noban nolatch vote_soc weights nofabric \
                      balance keynorm divw smallpop curric wt_bal chainsup explore kitchen"
-  _flags_for() {
-    case "$1" in
-      base)      echo "" ;;
-      vote)      echo "CHAIN_VOTE=1" ;;
-      socloop)   echo "CHAIN_ROUTE=soc CHAIN_VOTE=1" ;;
-      socloop_w) echo "CHAIN_ROUTE=soc CHAIN_VOTE=1 ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
-      vote_w)    echo "CHAIN_VOTE=1 ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
-      vote_soc)  echo "CHAIN_VOTE=1 FAB_STEPS=1" ;;
-      noban)     echo "CHAIN_BAN=0" ;;
-      nolatch)   echo "FAB_RAMP_LATCH=0" ;;
-      bytes)     echo "TOKENIZER=0" ;;
-      # UNCAPPED VOCABULARY. VMAX is the model's vocab DIMENSION and the tokenizer's ceiling; nothing has run
-      # above 2048. Reachable as an arm flag only since the precedence fix -- before it, the hardcoded VMAX=2048
-      # below silently won and the log was named after a value that never took effect.
-      #
-      # RAISING VMAX ALONE DOES NOT RAISE THE VOCABULARY: minting is rate-limited, not threshold-limited. One
-      # grow event every GROW_EVERY=100 steps, GROW_BURST=12 per event, ~5.7k steps/epoch = ~540 tokens per
-      # epoch, so 8192 from a 512 seed needs ~14 epochs. Under EPOCHS=8, vmax8k reached only 4823.
-      #
-      # FOUR RUNS, AS A 2x2 (held-out bits/byte, and the dead fraction from the [vocab] line):
-      #                    EPOCHS=8              EPOCHS=18
-      #     VMAX=4096    2.140  ( 0% dead)     3.250  ( 0% dead)      +1.110 for the extra 10 epochs
-      #     VMAX=8192    3.561  (41% dead)     4.383  ( 0% dead)      +0.822
-      #                 +1.421 for 2x VMAX    +1.133
-      #
-      # DEAD ROWS ARE NOT WHAT DRIVES THIS, and the hypothesis that they were is falsified here rather than
-      # quietly dropped. vmax8k@18ep filled its vocabulary COMPLETELY -- 8192/8192, 0% never minted, 1.3%
-      # ordinary turnover -- and is the WORST of the four: 4.383 b/B against a uniform anchor of 3.305, i.e.
-      # about 4 bits/token WORSE than assigning equal probability to every token. 19% real words. It is the
-      # only run of any arm with a POSITIVE train/held-out gap (+0.267; every other run underfits), and the
-      # only one whose held-out curve is still RISING at the end (+0.194 b/B per 10k steps through the second
-      # half). Its loss bottomed at step 3935 and rose for the remaining 82656 steps. The dead-row instrument
-      # earned its place by ruling itself out; do not read the [vocab] line as an explanation of a bad number.
-      #
-      # TWO CELLS ARE UNCONTAMINATED (both vocabularies completely filled):
-      #     vmax4k@8  vs vmax4k@18    +1.110    differ in EPOCHS -- and therefore in the LR schedule
-      #     vmax4k@18 vs vmax8k@18    +1.133    differ in VMAX ONLY
-      # The second is the clean one: at 18 epochs, doubling a FULL vocabulary from 4096 to 8192 costs +1.133
-      # b/B with no dead rows on either side. The first is confounded until LR_EPOCHS pins the schedule --
-      # EPOCHS moved the LR 11x between these two runs (see the LR_EPOCHS block in self_organize.py).
-      #
-      # SO THE NEXT GRID FIXES THE SCHEDULE AND VARIES ONE THING AT A TIME:
-      #     GRID_CKPT=0 GRID_DIR=runs/vmax_lr EPOCHS=18 LR_EPOCHS=8 bash longrun.sh grid "vmax4k vmax8k"
-      # vmax4k@18/LR8 against vmax4k@8 (2.140) isolates run length at a fixed schedule; vmax4k@18/LR8 against
-      # vmax8k@18/LR8 isolates VMAX at fixed length AND fixed schedule.
-      #
-      # These arms carry NO growth and NO schedule knobs -- pass EPOCHS/LR_EPOCHS on the command line, so the
-      # arm name never implies a schedule it does not set. self_organize.py predicts a minting shortfall in a
-      # [config] COUPLING line BEFORE training starts; its estimate is measured at the seed vocabulary and runs
-      # ~25% optimistic on this data, so treat it as a floor. Read the [vocab] line before the held-out number:
-      # its first gap (width vs minted) can invalidate a comparison, the second (minted vs used) is ordinary
-      # turnover and ran 1-2% on every filled run here.
-      vmax8k)    echo "VMAX=8192" ;;
-      vmax4k)    echo "VMAX=4096" ;;
-      # --- THE PILOT BUNDLE. Every arm here is read against `base`, and the three tokenizer arms are SEPARATED
-      # on purpose: the last round ran TOK_MINT_UNTIL=1 and RETOK_EVERY=0 together, so when the result came back
-      # 1.4 b/B worse there was no way to tell which did it. They are not the same idea. TOK_MINT_UNTIL stops
-      # MINTING; RETOK_EVERY stops RE-SEGMENTING, and a re-segmentation that produces an identical stream is
-      # still not a no-op -- it clears the lookahead queue and blacks out fabric growth for FAB_COOLDOWN steps.
-      frozen)    echo "TOK_MINT_UNTIL=1" ;;                      # vocabulary frozen at the seed; retok still fires
-      # `frozen` freezes at SEED_VOCAB=512, so it conflates two different ideas: a FIXED vocabulary, and a TINY
-      # one. At 512 the model has almost no whole-word units and must spell everything -- measured 3.07 tokens
-      # per generated word against base's 2.52. These freeze at a seed the size base ENDS at, so the comparison
-      # is fixed-vs-growing rather than small-vs-large.
-      frozen2k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=2048" ;;
-      frozen1k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=1024" ;;
-      frozen_nr) echo "TOK_MINT_UNTIL=1 RETOK_EVERY=0" ;;        # ...and re-segmentation off too
-      # --- REGULARISATION. Every run so far reports UNDERFIT with a NEGATIVE gap (held-out scoring better than
-      # train), so the expectation is that these cost rather than help. Worth measuring anyway: DROPOUT also
-      # perturbs the hidden state the router reads, so it is an expert-dynamics lever, not only a generalisation one.
-      drop)      echo "DROPOUT=0.1" ;;
-      wdecay)    echo "WEIGHT_DECAY=0.01" ;;
-      reg)       echo "DROPOUT=0.1 WEIGHT_DECAY=0.01" ;;
-      mintinit)  echo "WARMSTART_MODE=last/first" ;;
-      # --- THE MEANING GATE ON MINTING. Frequency alone cannot tell a UNIT ("th"+"e") from a pair that
-      # straddles a boundary everything crosses ("e"+" "). H(next|a) can: low means `a` reliably predicts
-      # what follows, so there is no boundary to glue across. Measured on a constructed case, H(next|"t")
-      # = 1.32 bits against H(next|"e") = 2.05, which is the separation the threshold sits in.
-      # These arms change WHICH TOKENS EXIST, so read them against `base` on vocabulary size and on the
-      # [vocab] gate line (how many candidates were rejected), not on held-out alone.
-      # The threshold is p(b|a), not an entropy. An absolute H(next|a) cut-off does not survive real text:
-      # over 400 kB of English at the byte level H has median 3.48 bits and p90 4.39, and it is ANTI-correlated
-      # with frequency -- a common left token is common because many things follow it -- so an entropy gate
-      # rejects the useful merges first. p(b|a) asks the same question scale-free. Measured vocabulary reached,
-      # 1024-cap, 400 kB, 4 passes:  pmin 0.10 -> 1010,  0.15 -> 623,  0.25 -> 353.
-      # 0.10 IS NOW THE DEFAULT, so `pgate` would have been an alias for `base` -- an arm that changes nothing
-      # while reading as though it tests something. The informative arm is the one that turns the gate OFF.
-      nogate)    echo "TOK_MINT_PMIN=0" ;;                     # the pre-gate baseline; reproduces old vocabularies
-      pgate_t)   echo "TOK_MINT_PMIN=0.15" ;;                  # tighter than default
-      pgate_c)   echo "TOK_COMPOSE=1" ;;                       # default gate + the composed table it complements
-      # --- PROBATION. Mint provisionally, judge once the token has been trained, un-merge on failure.
-      prob_use)  echo "TOK_PROBATION=200" ;;                          # earn 200 appearances or be retired
-      prob_emb)  echo "TOK_PROBATION=200 TOK_PROBATION_BY=embed TOK_COMPOSE=1" ;;   # ||delta||/||composite||
-      # --- TOKEN PARAMETERISATION. TOK_COMPOSE is now ON by default, so every arm below states BOTH knobs
-      # explicitly. pilot_gru_8 ran compose AND mintnovel together and cannot be attributed to either; these
-      # four arms are the 2x2 that separates them, plus the anchor.
-      nocompose) echo "TOK_COMPOSE=0 TOK_MINT_NOVEL=0" ;;    # neither -- the control the good runs were on
-      compose)   echo "TOK_COMPOSE=1 TOK_MINT_NOVEL=0" ;;    # composed table alone
-      mintnovel) echo "TOK_COMPOSE=0 TOK_MINT_NOVEL=0.5" ;;  # novelty-ranked minting alone
-      composenov) echo "TOK_COMPOSE=1 TOK_MINT_NOVEL=0.5" ;; # both -- reproduces pilot_gru_8
-      noanchor)  echo "TOK_COMPOSE=1 TOK_ANCHOR=0 TOK_MINT_NOVEL=0" ;;  # composer without the residual anchor
-      # --- FABRIC SATURATION. pilot_gru_8 turned upward at ~step 36k, which is when the population reached
-      # 100% of FAB_NMAX, the ramp latched off, and culling-under-capacity-pressure started.
-      bigpop)    echo "FAB_NMAX=16384" ;;                    # does the turn track hitting the CAP?
-      freeze6k)  echo "TOK_MINT_UNTIL=6000" ;;
-      freeze20k) echo "TOK_MINT_UNTIL=20000" ;;
-      nogrow)    echo "FAB_GROW=0 FAB_N0=1024" ;;
-      nogrow_s)  echo "SOCIETY=1 FAB_GROW=0 FAB_N0=1024" ;;
-      weights)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
-      nofabric)  echo "FABRIC=0" ;;
-      balance)   echo "BAL_WARM=100000000" ;;
-      frozvocab) echo "TOK_ONLINE=0" ;;
-      softroute) echo "ROUTE_T=0.3" ;;
-      keynorm)   echo "FAB_KEY_NORM=1" ;;
-      divw)      echo "DIV_W=0.05" ;;
-      smallpop)  echo "FAB_NMAX=256" ;;
-      curric)    echo "CHAIN_CURRIC=1" ;;
-      society)   echo "SOCIETY=1" ;;
-      stateq)    echo "CHAIN_STATE_Q=1" ;;
-      chainsup)  echo "CHAIN_SUP=0.3" ;;
-      nomem)     echo "MEM_PER_EXPERT=0" ;;
-      explore)   echo "FAB_EXPLORE=0.40" ;;
-      wt_bal)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000" ;;
-      wt_div)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 DIV_W=0.05" ;;
-      kitchen)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000 DIV_W=0.05 ROUTE_T=0.3" ;;
-      *)         echo "" ;;
-    esac
-  }
   _pilot_corpus "$P_DD"
   G_SL=${STREAM_LEN:-4000000}; G_EP=${EPOCHS:-8}
   # NAMED PRESETS: `bash longrun.sh grid ablate` runs just the set that answers the current question, in the
@@ -679,15 +685,11 @@ smoke)
   echo "  reading them as a result is how a smoke test turns into a wasted day."
   _fail=0
   for ARM in ${SMOKE_ARMS:-base nogate frozen pgate_t prob_use prob_emb compose}; do
-    case "$ARM" in
-      base)     SX="" ;;
-      nogate)   SX="TOK_MINT_PMIN=0" ;;
-      frozen)   SX="TOK_MINT_UNTIL=1" ;;
-      pgate_t)  SX="TOK_MINT_PMIN=0.15" ;;
-      prob_use) SX="TOK_PROBATION=150 TOK_PROBATION_STEPS=1500" ;;
-      prob_emb) SX="TOK_PROBATION=150 TOK_PROBATION_STEPS=1500 TOK_PROBATION_BY=embed TOK_COMPOSE=1" ;;
-      compose)  SX="TOK_COMPOSE=1" ;;
-    esac
+    # ONE DEFINITION OF WHAT AN ARM IS. This case block used to repeat _flags_for's contents, and they had
+    # already drifted apart within the hour: smoke ran TOK_PROBATION=150 where the grid runs 200, and its
+    # `compose` was missing TOK_MINT_NOVEL=0. A smoke test that greenlights a configuration the grid does not
+    # run is worse than no smoke test, because it reports confidence about something nobody will execute.
+    SX=$(_flags_for "$ARM")
     rm -f "$SMK/$ARM.dyntok.json"
     set +e
     env DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng DISK_STREAM=1 \
@@ -698,6 +700,8 @@ smoke)
         FAB_NMAX=32 FAB_N0=3 MEM_CAP=4800 MEM_QUOTA=150 \
         MANAGE_EVERY=50 DOM_MANAGE_EVERY=50 ENC_WARMUP=60 ENC_WARMUP_MIN=30 SIG_WIN=64 \
         RATE_EVERY=500 GEN_LEN=20 GEN_N=1 EVAL_N=4 COH_N=2 COH_LEN=32 HOLDOUT_N=4 \
+        TOK_PROBATION_STEPS=1500 \
+        \
         TOKENIZER_PATH="$SMK/$ARM.dyntok.json" \
         $SX python3 self_organize.py > "$SMK/$ARM.log" 2>&1
     _rc=$?
