@@ -373,6 +373,15 @@ grid)
       wdecay)    echo "WEIGHT_DECAY=0.01" ;;
       reg)       echo "DROPOUT=0.1 WEIGHT_DECAY=0.01" ;;
       mintinit)  echo "WARMSTART_MODE=last/first" ;;
+      # --- THE MEANING GATE ON MINTING. Frequency alone cannot tell a UNIT ("th"+"e") from a pair that
+      # straddles a boundary everything crosses ("e"+" "). H(next|a) can: low means `a` reliably predicts
+      # what follows, so there is no boundary to glue across. Measured on a constructed case, H(next|"t")
+      # = 1.32 bits against H(next|"e") = 2.05, which is the separation the threshold sits in.
+      # These arms change WHICH TOKENS EXIST, so read them against `base` on vocabulary size and on the
+      # [vocab] gate line (how many candidates were rejected), not on held-out alone.
+      hgate)     echo "TOK_MINT_HMAX=1.5" ;;                  # permissive: blocks only clear boundaries
+      hgate_t)   echo "TOK_MINT_HMAX=1.0" ;;                  # tighter
+      hgate_c)   echo "TOK_MINT_HMAX=1.5 TOK_COMPOSE=1" ;;    # gate + the composed table it complements
       # --- TOKEN PARAMETERISATION. TOK_COMPOSE is now ON by default, so every arm below states BOTH knobs
       # explicitly. pilot_gru_8 ran compose AND mintnovel together and cannot be attributed to either; these
       # four arms are the 2x2 that separates them, plus the anchor.

@@ -13,7 +13,7 @@ and `bytes_per_id` lets evaluation report true bits/BYTE for apples-to-apples wi
     python tokenizer.py            # build data/tokenizer.json from data/train/**, print stats
     VOCAB=4096 python tokenizer.py # target vocab size
 """
-import os, json, glob, time, random
+import os, json, glob, time, random, math
 from collections import Counter
 
 
@@ -139,6 +139,19 @@ class DynamicTokenizer:
         self.novel = float(os.environ.get("TOK_MINT_NOVEL", 0.0))
         self.novel_k = int(os.environ.get("TOK_MINT_NOVEL_K", 32))
         self.pair_seen = Counter()             # each candidate pair's count when we last considered it
+        # BRANCHING ENTROPY: IS THIS MERGE A UNIT, OR JUST A FREQUENT COLLISION?
+        # Frequency alone cannot tell "th" inside "the" from "e " at the end of every word. The statistic that
+        # can is how PREDICTABLE the successor is: if `a` is almost always followed by `b`, the boundary after
+        # `a` is not a real boundary and `ab` is one unit; if `a` is followed by many different things, `a`
+        # ENDS somewhere and merging past it glues across a boundary. That is right-branching entropy,
+        #     H(next | a) = -SUM_b p(b|a) log2 p(b|a),
+        # the standard unsupervised-segmentation criterion, and `pair` already IS the joint distribution -- it
+        # needs only to be read by left token instead of as a flat ranking.
+        self.hmax = float(os.environ.get("TOK_MINT_HMAX", 0.0))    # 0 = off, mint on frequency alone
+        self.left = Counter()                  # occurrences of each id as the LEFT half of a pair
+        self._hcache = {}                      # a -> H(next|a), rebuilt at most once per grow event
+        self._hstamp = -1                      # len(self.pair) when _hcache was built
+        self.h_pass = self.h_block = 0         # how the gate ruled, for the run report
         self.bytes_per_id = [1] * 256
         self.mlbf = [1] * 256                  # max token byte-length starting with each byte (prunes segment's L-loop)
 
@@ -161,7 +174,43 @@ class DynamicTokenizer:
             ids.append(chosen[0]); i += chosen[1]
         if count:
             for a, b in zip(ids, ids[1:]): self.pair[(a, b)] += 1
+            if self.hmax > 0:
+                for a in ids[:-1]: self.left[a] += 1            # denominator of p(b|a); one dict op per pair
         return ids
+
+    def branch_entropy(self, a):
+        """H(next | a) in BITS over the current pair tally: how unpredictable a's successor is.
+
+        Rebuilt at most once per change in the tally's size, because maybe_grow is called in bursts and the
+        distribution cannot move between calls in the same burst. One pass over `pair` (bounded by max_pairs)
+        amortised across the burst, rather than a scan per candidate."""
+        if self._hstamp != len(self.pair):
+            succ = {}
+            for (x, y), c in self.pair.items():
+                if c > 0: succ.setdefault(x, []).append(c)
+            _h = {}
+            for x, cs in succ.items():
+                t = float(sum(cs))
+                if t <= 0: continue
+                _h[x] = -sum((c / t) * math.log2(c / t) for c in cs)
+            self._hcache = _h; self._hstamp = len(self.pair)
+        return self._hcache.get(a)
+
+    def _predictable(self, a, b):
+        """Does `a` reliably predict `b`? Gate for minting (a, b).
+
+        Two conditions, and the second is what makes the first safe:
+          H(next|a) <= hmax          -- a's successor is predictable AT ALL, so a does not end a boundary
+          p(b|a) is the argmax       -- and b is what it predicts, not some other successor that carries the
+                                        low entropy while (a, b) rides along on raw frequency
+        An `a` never seen as a left half has no distribution to judge; it is allowed through rather than
+        blocked, since blocking on absence of evidence would stall minting at the start of a run."""
+        h = self.branch_entropy(a)
+        if h is None: return True
+        if h > self.hmax: return False
+        n = self.left.get(a, 0)
+        if n <= 0: return True
+        return self.pair[(a, b)] >= 0.5 * n          # b takes at least half of a's successor mass
 
     def maybe_grow(self):
         """Mint a pair if it crosses threshold. Returns (new_id, a, b) or None.
@@ -192,6 +241,20 @@ class DynamicTokenizer:
             else:
                 (a, b), cnt = _top[0]
             if cnt < self.min_pair: return None
+            # THE MEANING GATE, applied AFTER frequency and BEFORE the merge becomes permanent. A pair can be
+            # frequent for two different reasons: it is a unit ("th" + "e"), or it straddles a boundary that
+            # everything crosses ("e" + " "). Only the first deserves a token. H(next|a) tells them apart --
+            # low means `a` reliably predicts what follows it, so there is no boundary to glue across.
+            #   Candidates on BOTH sides may themselves be minted tokens, so this composes: a merge that
+            # passed the gate can be the left half of the next one, and the statistic is recomputed over the
+            # CURRENT segmentation each time, not over bytes.
+            #   Rejection does NOT zero the pair's count. A pair blocked here is not spent -- it may become
+            # predictable later as the segmentation around it settles -- so it stays in the tally and is simply
+            # skipped. It is pushed out of the running by returning None, which ends this grow burst.
+            if self.hmax > 0 and not self._predictable(a, b):
+                self.h_block += 1
+                return None
+            if self.hmax > 0: self.h_pass += 1
             self.pair[(a, b)] = 0
             ns = self.id2bytes[a] + self.id2bytes[b]
             if len(ns) > self.max_tok or ns in self.seq2id: return None

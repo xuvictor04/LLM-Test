@@ -90,7 +90,8 @@ _SPEC = {
     "TOKENIZER_PATH": ("env", "data/dyntok.json"),        # tokenizer
     "TOK_ANCHOR": ("f", 0.05),                            # tokenizer
     "TOK_ANCHOR_TAU": ("f", 4000.0),                      # tokenizer
-    "TOK_ANCHOR_USES": ("f", 0.0),                        # tokenizer -- >0 = release by APPEARANCES, not steps
+    "TOK_ANCHOR_USES": ("f", 400.0),                      # tokenizer -- >0 = release by APPEARANCES, not steps
+    "TOK_MINT_HMAX": ("f", 0.0),                          # tokenizer -- max H(next|a) in bits to allow a merge
     "TOK_COMPOSE": ("i", 0),                              # tokenizer
     "TOK_DROPOUT": ("f", 0.0),                            # tokenizer
     "TOK_GROW_CAP": ("i", 1000000),                       # tokenizer
@@ -281,7 +282,7 @@ _SPEC = {
     "BATCH_W": ("i", 1),                                  # optim
     "DROPOUT": ("f", 0.0),                                # optim
     "LR": ("f", 2e-3),                                    # optim
-    "LR_EPOCHS": ("i", 0),                                # optim -- cosine horizon in epochs; 0 = follow EPOCHS
+    "LR_EPOCHS": ("i", 8),                                # optim -- cosine WAVELENGTH in epochs; 0 = follow EPOCHS
     "LR_MIN_FRAC": ("f", 0.05),                           # optim
     "LR_SCHED": ("env", "cosine"),                        # optim
     "LR_WARMUP": ("i", 1000),                             # optim
@@ -526,7 +527,11 @@ KW = _i("KEY_WIN", 8); V = 256
 TOK_COMPOSE = bool(_i("TOK_COMPOSE", 0))                    # token vector = composite(bytes) + learned residual
 TOK_ANCHOR = _f("TOK_ANCHOR", 0.05)                        # hold a new token near its composite, decaying
 TOK_ANCHOR_TAU = _f("TOK_ANCHOR_TAU", 4000.0)              #   over this many steps of the TOKEN's own life
-TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 0.0)               #   ...or over this many APPEARANCES (0 = use steps)
+TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 400.0)             #   ...or over this many APPEARANCES (0 = use steps)
+# THE DEFAULT IS APPEARANCES, NOT STEPS. A step count releases a token on a clock that has nothing to do with
+# whether it was ever trained on, and the two are anti-correlated: a token minted late is rare BY CONSTRUCTION
+# -- that is why it was minted late -- so it gets the fewest appearances in the same number of steps.
+TOK_MINT_HMAX = _f("TOK_MINT_HMAX", 0.0)                   # branching-entropy gate on minting; 0 = off
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
@@ -586,6 +591,8 @@ if DATA_MODE == "real":
             #   re-mint different ids, so the restored embedding table would be indexed by a DIFFERENT vocabulary.
         else:
             TOK = DynamicTokenizer(vmax=VMAX, min_pair=_i("MIN_PAIR", 50), max_tok=_i("MAX_TOK", 16), dropout=_f("TOK_DROPOUT", 0.0))
+            TOK.hmax = TOK_MINT_HMAX          # branching-entropy gate; read from env in __init__ too, set here so
+            #   a tokenizer LOADED from disk (which reconstructs from the saved json) picks it up as well
             gb = b"".join(c[:_i("TOK_GROW_CAP", 1000000)] for c in CORP)   # bytes the tokenizer grows on
             curve = []
             for _p in range(_passes):                      # iterative: tally pairs at current granularity, mint the frequent ones
@@ -3729,6 +3736,7 @@ def main():
             ("WARMSTART_MODE", _env("WARMSTART_MODE", "mean")),
             ("TOK_COMPOSE",    TOK_COMPOSE),            ("TOK_ANCHOR",     TOK_ANCHOR),
             ("TOK_ANCHOR_TAU", TOK_ANCHOR_TAU),         ("TOK_ANCHOR_USES", TOK_ANCHOR_USES),
+            ("TOK_MINT_HMAX",  TOK_MINT_HMAX),
             ("TOK_MINT_NOVEL", _f("TOK_MINT_NOVEL", 0.0)),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
@@ -3810,9 +3818,9 @@ def main():
                 f"EPOCHS={EPOCHS} sets run length AND the cosine horizon, so it changes the LR at EVERY step, "
                 f"not only how many steps there are -- two runs differing only in EPOCHS are two different "
                 f"schedules, and on the vmax4k pair they were 11x apart by step 44000. "
-                + (f"LR_EPOCHS is unset, so the horizon follows EPOCHS={EPOCHS} and this run is NOT comparable "
-                   f"at fixed LR to a run at another EPOCHS."
-                   if not _lre else
+                + (f"LR_EPOCHS=0 was set explicitly, so the horizon follows EPOCHS={EPOCHS} and this run is NOT "
+                   f"comparable at fixed LR to a run at another EPOCHS."
+                   if _lre == 0 and "LR_EPOCHS" in _ENV_ASKED else
                    f"LR_EPOCHS={_lre}: the cosine is shaped over {_lre} epochs and then holds at the "
                    f"LR_MIN_FRAC={LR_MIN_FRAC:g} floor for the remaining {max(0, EPOCHS - _lre)}, so the LR at "
                    f"each step matches an EPOCHS={_lre} run and only the length differs."))
@@ -3979,7 +3987,17 @@ def main():
     # for the first 8 epochs and then holds at the LR_MIN_FRAC floor (_lr_at clamps its progress at 1.0), which
     # is what a continual-learning system wants anyway: anneal, then keep a small non-zero rate for whatever
     # arrives later. Any remaining difference is then attributable to run length alone.
-    LR_EPOCHS = _i("LR_EPOCHS", 0) or EPOCHS               # 0 = follow EPOCHS
+    # THE WAVELENGTH IS FIXED; THE RUN LENGTH IS NOT. Defaulting the horizon to EPOCHS made the cosine STRETCH
+    # with the run, so EPOCHS silently set the learning rate at every step -- 11x apart between an 8- and an
+    # 18-epoch run at step 44000, which is what dragged E18. A fixed wavelength removes that by construction:
+    # any two runs of at least this many epochs now have the SAME lr at the same step, and a longer run simply
+    # spends longer at the LR_MIN_FRAC floor (_lr_at clamps its progress at 1.0, so the cosine saturates rather
+    # than turning back up -- a schedule that reverses is worse than one that is merely wrong).
+    #   Clamped to EPOCHS so it can never exceed the run. Without that a 3-epoch pilot would anneal over 8 and
+    # end near 76% of peak -- the ORIGINAL never-anneals bug, reintroduced as a default. min() keeps short runs
+    # completing their cosine exactly as before while long runs stop stretching.
+    #   LR_EPOCHS=0 restores the old behaviour (horizon follows EPOCHS) for reproducing earlier results.
+    LR_EPOCHS = min(_i("LR_EPOCHS", 8) or EPOCHS, EPOCHS)
     _ep_start = 0                                          # step at which the current epoch began
     # TWO CONSUMERS, TWO PROJECTIONS. One function served both the ETA and the LR horizon, so they could not
     # be given different horizons without one silently taking the other's. They also need SEPARATE monotone
@@ -4720,6 +4738,11 @@ def main():
     #     ordinary vocabulary turnover; the row was trained while it was in use.
     # Neither is otherwise anywhere in the log, so a run spreading its loss over rows that index nothing reads
     # exactly like one that is simply bad. Print-only; nothing below depends on it.
+    if USE_TOK and TOK_MINT_HMAX > 0:
+        _hp, _hb = getattr(TOK, "h_pass", 0), getattr(TOK, "h_block", 0)
+        print(f"[vocab] branching-entropy gate TOK_MINT_HMAX={TOK_MINT_HMAX:g} bits: {_hp} merges allowed, "
+              f"{_hb} blocked ({100*_hb/max(1,_hp+_hb):.0f}% of candidates rejected as boundary-crossing "
+              f"rather than unit-forming)")
     try:
         _seen = torch.zeros(int(V), dtype=torch.bool)
         for _c0 in range(0, len(stream), 1 << 20):
