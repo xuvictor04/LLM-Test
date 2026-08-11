@@ -262,6 +262,7 @@ _SPEC = {
     "BATCH_W": ("i", 1),                                  # optim
     "DROPOUT": ("f", 0.0),                                # optim
     "LR": ("f", 2e-3),                                    # optim
+    "LR_EPOCHS": ("i", 0),                                # optim -- cosine horizon in epochs; 0 = follow EPOCHS
     "LR_MIN_FRAC": ("f", 0.05),                           # optim
     "LR_SCHED": ("env", "cosine"),                        # optim
     "LR_WARMUP": ("i", 1000),                             # optim
@@ -3647,6 +3648,7 @@ def main():
             ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
             ("LR",             LR),                      ("LR_SCHED",       LR_SCHED),
             ("LR_WARMUP",      LR_WARMUP),               ("LR_MIN_FRAC",    LR_MIN_FRAC),
+            ("LR_EPOCHS",      _i("LR_EPOCHS", 0) or EPOCHS),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
         ]
         if _F0 is not None: _EFF += [
@@ -3706,6 +3708,18 @@ def main():
         # Nothing here CHANGES a value. It prints what the run is actually doing, so a coupling cannot be
         # discovered again by losing a day to it.
         _cpl = []
+        if LR_SCHED != "none":
+            _lre = _i("LR_EPOCHS", 0)
+            _cpl.append(
+                f"EPOCHS={EPOCHS} sets run length AND the cosine horizon, so it changes the LR at EVERY step, "
+                f"not only how many steps there are -- two runs differing only in EPOCHS are two different "
+                f"schedules, and on the vmax4k pair they were 11x apart by step 44000. "
+                + (f"LR_EPOCHS is unset, so the horizon follows EPOCHS={EPOCHS} and this run is NOT comparable "
+                   f"at fixed LR to a run at another EPOCHS."
+                   if not _lre else
+                   f"LR_EPOCHS={_lre}: the cosine is shaped over {_lre} epochs and then holds at the "
+                   f"LR_MIN_FRAC={LR_MIN_FRAC:g} floor for the remaining {max(0, EPOCHS - _lre)}, so the LR at "
+                   f"each step matches an EPOCHS={_lre} run and only the length differs."))
         if FABRIC and not SOCIETY and bool(_i("CHAIN_VOTE", 1)):
             _cpl.append(f"CHAIN_VOTE=1 -> FAB_MIN_STEPS={fab.min_steps} (forced; the declared default is "
                         f"{0 if SOCIETY else 2}), so HALT may absorb on the first hop. What it actually did is "
@@ -3823,17 +3837,44 @@ def main():
     # grow makes the projection exact. That made "frozen tokenizer" and "schedule that anneals" the same
     # experiment, and neither could be credited. It also means EPOCHS was never just run length: at step 48,130
     # the E18 schedule was at 1.52e-3 and the E8 schedule at 3.58e-4, a 4.3x difference on the same step.
+    # === EPOCHS WAS TWO LEVERS: HOW LONG THE RUN IS, AND HOW THE LEARNING RATE FALLS =========================
+    # The cosine is shaped over the projected END of the run, and EPOCHS sets that end, so changing EPOCHS
+    # changes the LR at EVERY step -- not just how many steps there are. Two runs that differ only in EPOCHS
+    # are not the same run measured at two lengths; they are two different schedules. Measured on the vmax4k
+    # pair (identical config, identical vocabulary trajectory, both reaching 4096 near step 40k):
+    #     step   E8 lr      E18 lr     ratio
+    #     20000  1.263e-03  1.807e-03    1.4x
+    #     40000  1.683e-04  1.275e-03    7.6x
+    #     44000  1.046e-04  1.148e-03   11.0x     <- E8's best held-out (2.059) is at this step
+    # By the end of E8 the two schedules are an order of magnitude apart. E8 is consolidating at the floor
+    # where E18 is still near peak, so "8 epochs beat 18 epochs" and "a low LR beat a high one" are the same
+    # observation, and neither run can be credited.
+    #
+    # LR_EPOCHS separates them: it is the horizon the cosine is SHAPED over, in epochs, defaulting to EPOCHS
+    # so nothing changes unless it is set. EPOCHS=18 LR_EPOCHS=8 reproduces the 8-epoch run's LR at every step
+    # for the first 8 epochs and then holds at the LR_MIN_FRAC floor (_lr_at clamps its progress at 1.0), which
+    # is what a continual-learning system wants anyway: anneal, then keep a small non-zero rate for whatever
+    # arrives later. Any remaining difference is then attributable to run length alone.
+    LR_EPOCHS = _i("LR_EPOCHS", 0) or EPOCHS               # 0 = follow EPOCHS
     _ep_start = 0                                          # step at which the current epoch began
-    _proj = [10 ** 9]                                      # monotone NON-INCREASING: see below
-    def _proj_steps(step):
+    # TWO CONSUMERS, TWO PROJECTIONS. One function served both the ETA and the LR horizon, so they could not
+    # be given different horizons without one silently taking the other's. They also need SEPARATE monotone
+    # clamps: a shared running minimum would let the shorter horizon drag the longer one down with it.
+    def _project(step, horizon_epochs, state):
         _per = max(1, len(stream) // WIN)                  # steps per epoch AT THE CURRENT VOCABULARY
-        _p = max(step + 1, _ep_start + (EPOCHS - _epoch) * _per)
+        _p = max(step + 1, _ep_start + (horizon_epochs - _epoch) * _per)
         # The projection only ever shrinks in truth (minting makes tokens longer, so later epochs are shorter),
         # but len(stream) jitters with each epoch's resample. Clamping to the running minimum keeps the cosine's
         # progress monotone, so the LR falls and never steps back UP mid-run -- a schedule that reverses is worse
         # than one that is merely wrong.
-        _proj[0] = min(_proj[0], _p)
-        return max(step + 1, _proj[0])
+        state[0] = min(state[0], _p)
+        return max(step + 1, state[0])
+    _proj = [10 ** 9]                                      # monotone NON-INCREASING: see above
+    _proj_lr = [10 ** 9]
+    def _proj_steps(step):                                 # WORK REMAINING -- the ETA. Always the real end.
+        return _project(step, EPOCHS, _proj)
+    def _lr_total(step):                                   # SCHEDULE HORIZON -- what the cosine is shaped over.
+        return _project(step, LR_EPOCHS, _proj_lr)
     while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
         # ---- PER-PROCESS LEARNING CURVE: the other half of continual learning. -----------------------------------
         # Retention says whether old material survives. This says how FAST new material is picked up, and it is the
@@ -3923,7 +3964,13 @@ def main():
                 set_enc_tensor(ENC_SEQ); _sigq = []          # stream replaced -> queued lookahead windows are stale
                 if FABRIC and fabgrow is not None: fabgrow.note_shift(step)
             i = 0; _ep_start = step
-            print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)}]")
+            # LR ON THE EPOCH LINE. The schedule was not observable anywhere in a log, which is how a lever that
+            # moves the LR 11x between two runs stayed invisible across every comparison we made. Printed as a
+            # fraction of peak so it reads without arithmetic: 100% = untouched, 5% = at the LR_MIN_FRAC floor.
+            _lrn = _lr_at(step, max(1, _lr_total(step)))
+            print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | "
+                  f"vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)} | "
+                  f"lr {_lrn:.2e} ({_lrn / max(1e-12, LR) * 100:.0f}% of peak)]")
             continue
         w = stream[i:i + WIN + 1]
         x = torch.tensor([list(w[:-1])], device=DEV); y = torch.tensor([list(w[1:])], device=DEV)
@@ -4281,7 +4328,7 @@ def main():
                     _rseen.add(_rn)
             _greach.append(_gn)
         if LR_SCHED != "none":
-            _lrv = _lr_at(step, max(1, _proj_steps(step)))   # the LIVE horizon, not the seed-vocabulary guess
+            _lrv = _lr_at(step, max(1, _lr_total(step)))     # the LIVE horizon, not the seed-vocabulary guess
             for _g in om.param_groups: _g["lr"] = _lrv
             for _g in oe.param_groups: _g["lr"] = _lrv
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
