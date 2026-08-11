@@ -4582,7 +4582,18 @@ def main():
             if SIG_SPACE == "tokens":                        # the encoder reads the TOKEN stream, which was just rebuilt
                 ENC_SEQ = stream; set_enc_tensor(ENC_SEQ)    #   -> re-point it, or it trains on a stale segmentation
             if FABRIC and fabgrow is not None: fabgrow.note_shift(step)   # the loss jump after a retok is OURS, not a shift
-            print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; +{TOK.vocab_size - _last_vsz} since last retok)")
+            # WHAT IT ACTUALLY MINTED, not just how many. The count says the vocabulary grew; it cannot say
+            # whether the growth was worth having, and a run that ends up spelling in fragments looks identical
+            # here to one minting whole words. A sample of the newest ids costs nothing and makes the DRIFT
+            # visible while the run is still going -- early cohorts are short and word-like, and the question is
+            # what the late ones look like. `vocab.py` reads the whole list afterwards from TOKENIZER_PATH.
+            _new = []
+            for _t in range(max(256, _last_vsz), TOK.vocab_size):
+                _s = TOK.id2bytes[_t].decode("utf-8", "replace")
+                _new.append("·" + _s[1:] if _s.startswith(" ") else _s)
+            print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; "
+                  f"+{TOK.vocab_size - _last_vsz} since last retok)"
+                  + (f" newest: {'  '.join(repr(_x) for _x in _new[-8:])}" if _new else ""))
             _last_vsz = TOK.vocab_size
 
     if bool(_i("BENCH", 0)):                               # THROUGHPUT BENCH: stop after the training loop. The eval
