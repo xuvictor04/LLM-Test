@@ -774,6 +774,18 @@ class ByteComposer(nn.Module):
         nothing, and sizing it to the live count means any lag between a mint and this call is an IndexError on
         the training stream. Unassigned ids get an all-zero mask and never appear in the stream anyway."""
         _V = max(len(id2bytes), int(vmax or 0))
+        # THE RESIDUAL TABLES ARE SIZED FROM env VMAX AT CONSTRUCTION; THE VOCABULARY IS NOT. DynamicTokenizer
+        # .load restores the vmax SAVED IN THE FILE, so resuming against a tokenizer written by a larger-VMAX
+        # run gives len(id2bytes) > delta.size(0). _V then exceeds the residual rows and both table() and
+        # anchor() index delta[:_V] on a shorter tensor -- a bare shape error thousands of lines from the cause.
+        # It is not recoverable by clamping either: the LM head is sized to VMAX too, so the extra ids have
+        # nowhere to be predicted. Fail here, where the mismatch is legible.
+        if _V > s.delta.size(0):
+            raise SystemExit(f"[config] the tokenizer supplies {len(id2bytes)} tokens but this model was built "
+                             f"for VMAX={s.delta.size(0)} (the composer's residual table and the LM head are "
+                             f"both that wide). A saved tokenizer keeps its OWN vmax, so resuming a run at a "
+                             f"smaller VMAX than the one that wrote TOKENIZER_PATH cannot work. Set "
+                             f"VMAX>={len(id2bytes)}, or point TOKENIZER_PATH at a tokenizer from this VMAX.")
         id2bytes = list(id2bytes) + [b""] * (_V - len(id2bytes))
         idx = torch.zeros(_V, s.maxb, dtype=torch.long)
         msk = torch.zeros(_V, s.maxb)
@@ -4551,6 +4563,17 @@ def main():
                 for _ in range(_i("GROW_BURST", 6)):       # mint several of the current top pairs per grow event
                     g = TOK.maybe_grow()
                     if g is None: break
+                    # TELLING THE COMPOSER THE VOCABULARY GREW IS CORRECTNESS, NOT WARM-STARTING, and it used to
+                    # sit inside the WARMSTART block below. With WARMSTART=0 and TOK_COMPOSE=1 the mint still
+                    # happened -- maybe_grow appends to id2bytes/seq2id, so the id becomes emittable and the next
+                    # retok feeds it into training -- but set_vocab was never called, so the composer's byte
+                    # table had no row for it: an all-zero mask, hence the composite proj(length(0)), IDENTICAL
+                    # for every token minted that way. That is precisely the fresh-indistinguishable-row the
+                    # ByteComposer exists to abolish, reintroduced by an ablation flag about something else.
+                    # note_born went with it, so born stayed -1e9 and the anchor held nothing either.
+                    if TOK_COMPOSE and getattr(model, "compose", None) is not None:
+                        model.compose.set_vocab(TOK.id2bytes, DEV, VMAX)
+                        model.compose.note_born([g[0]], step)
                     if _i("WARMSTART", 1):                 # init the new token "ab" from (emb[a]+emb[b])/2 instead of random
                         nid, a, b = g                      #   -> the LM doesn't relearn it from scratch (cuts moving-target cost)
                         # OPTIMIZER-STATE INHERITANCE, OFF BY DEFAULT because the reason for it did not survive
@@ -4599,10 +4622,9 @@ def main():
                         # this branch has made repeatedly.
                         # WARMSTART_MODE=last/first to run it; the pilot decides.
                         if TOK_COMPOSE:
-                            # NOTHING TO INITIALISE. The new token's vector is already determined by its bytes;
-                            # all that is needed is to tell the composer the vocabulary grew.
-                            model.compose.set_vocab(TOK.id2bytes, DEV, VMAX)
-                            model.compose.note_born([nid], step)   # its residual is held near 0 while it is new
+                            # NOTHING TO INITIALISE. The new token's vector is already determined by its bytes,
+                            # and the composer was told about it above -- unconditionally, so that this remains
+                            # true when WARMSTART is off.
                             continue
                         _wm = _env("WARMSTART_MODE", "mean")
                         with torch.no_grad():
