@@ -3753,7 +3753,7 @@ def main():
             ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
             ("LR",             LR),                      ("LR_SCHED",       LR_SCHED),
             ("LR_WARMUP",      LR_WARMUP),               ("LR_MIN_FRAC",    LR_MIN_FRAC),
-            ("LR_EPOCHS",      _i("LR_EPOCHS", 0) or EPOCHS),
+            ("LR_EPOCHS",      min(_i("LR_EPOCHS", 8) or EPOCHS, EPOCHS)),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
         ]
         if _F0 is not None: _EFF += [
@@ -3814,14 +3814,14 @@ def main():
         # discovered again by losing a day to it.
         _cpl = []
         if LR_SCHED != "none":
-            _lre = _i("LR_EPOCHS", 0)
+            _lre = min(_i("LR_EPOCHS", 8) or EPOCHS, EPOCHS)   # what the schedule will ACTUALLY use
             _cpl.append(
                 f"EPOCHS={EPOCHS} sets run length AND the cosine horizon, so it changes the LR at EVERY step, "
                 f"not only how many steps there are -- two runs differing only in EPOCHS are two different "
                 f"schedules, and on the vmax4k pair they were 11x apart by step 44000. "
-                + (f"LR_EPOCHS=0 was set explicitly, so the horizon follows EPOCHS={EPOCHS} and this run is NOT "
-                   f"comparable at fixed LR to a run at another EPOCHS."
-                   if _lre == 0 and "LR_EPOCHS" in _ENV_ASKED else
+                + (f"LR_EPOCHS=0 was set explicitly, so the wavelength follows EPOCHS={EPOCHS} and this run is "
+                   f"NOT comparable at fixed LR to a run at another EPOCHS."
+                   if _ENV_ASKED.get("LR_EPOCHS", "").strip() == "0" else
                    f"LR_EPOCHS={_lre}: the cosine is shaped over {_lre} epochs and then holds at the "
                    f"LR_MIN_FRAC={LR_MIN_FRAC:g} floor for the remaining {max(0, EPOCHS - _lre)}, so the LR at "
                    f"each step matches an EPOCHS={_lre} run and only the length differs."))
