@@ -109,6 +109,8 @@ def main(argv):
     ap.add_argument("--from", dest="start", type=int, default=None, metavar="ID",
                     help="with --list: start at this token id (default: the newest N)")
     ap.add_argument("--cohorts", type=int, default=8)
+    ap.add_argument("--tree", action="store_true",
+                    help="structural audit from the merge tree alone -- needs no corpus")
     a = ap.parse_args(argv)
 
     if not os.path.exists(a.path):
@@ -161,6 +163,56 @@ def main(argv):
             row += (f" {u:10d} {100*u/max(1,tot_u):7.1f}% {100*cv/max(1,tot_c):6.1f}% "
                     f"{100*nz/len(grp):6.0f}%")
         print(row)
+
+    if a.tree:
+        # STRUCTURE, WITHOUT A CORPUS. The cohort table above needs text to say what a cohort covers, and the
+        # text is not always to hand -- a tokenizer file travels on its own. The merge tree carries a different
+        # and in some ways sharper signal: where a token sits relative to WORD BOUNDARIES, how deep a merge it
+        # is, and whether the vocabulary is spending slots walking one word out a byte at a time.
+        #   prefix-of-another is the waste measure. A token that is a proper prefix of some other token may be
+        # pure scaffolding -- 'accou' existing only so 'accoun' and 'account' could be built. Early cohorts are
+        # SUPPOSED to look like that; a late cohort that does is minting ladders instead of units.
+        import bisect as _bs
+        srt = sorted(id2bytes)
+
+        def ext(b):                       # is b a proper prefix of some other token?
+            j = _bs.bisect_right(srt, b)
+            return j < len(srt) and srt[j].startswith(b) and srt[j] != b
+
+        par, dep = {}, [0] * V
+        for k, (x, y) in enumerate(d["merges"]):
+            par[256 + k] = (x, y)
+            dep[256 + k] = 1 + max(dep[x], dep[y])
+
+        def edge(b):
+            s = b.decode("utf-8", "replace")
+            lead, trail = s[:1] == " ", s[-1:] == " "
+            if lead and trail: return "·word·"
+            if lead: return "·word"
+            if trail: return "word·"
+            if len(s) > 2 and " " in s[1:-1]: return "multi"
+            return "interior"
+
+        mint = list(range(256, V))
+        print(f"\n=== MERGE-TREE STRUCTURE (no corpus needed) ===")
+        print(f"  proper prefix of another token: {sum(1 for i in mint if ext(id2bytes[i]))} "
+              f"({100*sum(1 for i in mint if ext(id2bytes[i]))/len(mint):.0f}% of minted) | "
+              f"merge depth mean {sum(dep[i] for i in mint)/len(mint):.2f}, max {max(dep)} | "
+              f"longest {maxlen}B against max_tok {d.get('max_tok','?')}")
+        print(f"  {'cohort':<8}{'meanB':>6}{'depth':>7}{'prefix-of':>10}{'·word':>7}{'word·':>7}"
+              f"{'·word·':>7}{'multi':>7}{'interior':>9}")
+        for c0 in range(256, V, step):
+            g = list(range(c0, min(V, c0 + step)))
+            e = [edge(id2bytes[i]) for i in g]
+            print(f"  {f'{c0-255}-{min(V,c0+step)-256}':<8}"
+                  f"{sum(len(id2bytes[i]) for i in g)/len(g):6.2f}{sum(dep[i] for i in g)/len(g):7.2f}"
+                  f"{100*sum(1 for i in g if ext(id2bytes[i]))/len(g):9.0f}%"
+                  f"{100*e.count('·word')/len(g):6.0f}%{100*e.count('word·')/len(g):6.0f}%"
+                  f"{100*e.count('·word·')/len(g):6.0f}%{100*e.count('multi')/len(g):6.0f}%"
+                  f"{100*e.count('interior')/len(g):8.0f}%")
+        print("  ·word / word· / ·word· = the token carries a leading / trailing / both word boundary.")
+        print("  multi = a space INSIDE it, so it spans more than one word ('within the', 'versity of ').")
+        print("  A late cohort holding its boundary structure is minting units, not running out of them.")
 
     if use:
         print("\n  %tokens = share of the segmented stream this cohort produced.")
