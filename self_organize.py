@@ -92,6 +92,10 @@ _SPEC = {
     "TOK_ANCHOR_TAU": ("f", 4000.0),                      # tokenizer
     "TOK_ANCHOR_USES": ("f", 400.0),                      # tokenizer -- >0 = release by APPEARANCES, not steps
     "TOK_MINT_PMIN": ("f", 0.10),                         # tokenizer -- min p(b|a) to allow a merge; 0 = off
+    "TOK_PROBATION": ("i", 0),                            # tokenizer -- appearances to earn the slot; 0 = off
+    "TOK_PROBATION_STEPS": ("i", 5000),                   # tokenizer -- deadline to reach them
+    "TOK_PROBATION_BY": ("env", "use"),                   # tokenizer -- "use" | "embed"
+    "TOK_PROBATION_MIN": ("f", 0.10),                     # tokenizer -- embed: min ||delta||/||composite||
     "TOK_MINT_GATE_K": ("i", 1024),                       # tokenizer -- how far down the ranking the gate looks
     "TOK_COMPOSE": ("i", 0),                              # tokenizer
     "TOK_DROPOUT": ("f", 0.0),                            # tokenizer
@@ -761,21 +765,11 @@ class ByteComposer(nn.Module):
         s.delta = nn.Parameter(torch.zeros(int(_env("VMAX", 4096)), d))
         s.dbias = nn.Parameter(torch.zeros(int(_env("VMAX", 4096))))
         s.born = None                                      # per-token birth step, for the anchor below
-        s.seen = None                                      # per-token APPEARANCES, for the anchor below
         s._idx = None; s._msk = None; s._cache = None; s._v = -1
     def note_born(s, ids, step):
         if s.born is not None:
             for _i in ids:
                 if 0 <= _i < s.born.numel() and int(s.born[_i]) < 0: s.born[_i] = step
-
-    def note_seen(s, ids):
-        """Count APPEARANCES of each token in the material actually trained on. `ids` is the (B, WIN) input
-        batch. Called once per optimizer step, so the count is 'how many times has the model been shown this
-        token', which is the thing the anchor should be released against. Cheap: one index_add_ over ids."""
-        if s.seen is None: return
-        _f = ids.reshape(-1)
-        _f = _f[_f < s.seen.numel()]
-        if _f.numel(): s.seen.index_add_(0, _f, torch.ones_like(_f, dtype=s.seen.dtype))
 
     def set_vocab(s, id2bytes, dev, vmax=None):
         """Called whenever the vocabulary changes. Builds the (V, maxb) byte-index tensor once per change.
@@ -807,12 +801,6 @@ class ByteComposer(nn.Module):
         _b = torch.full((_V,), -10**9, dtype=torch.long)
         if s.born is not None: _b[:min(_prev, _V)] = s.born[:min(_prev, _V)].cpu()
         s.born = _b.to(dev)
-        # THE APPEARANCE COUNT IS CARRIED FORWARD THE SAME WAY, and must be: this is called on every mint, so
-        # reallocating without the copy would reset every token's count to zero at each mint and no token would
-        # ever finish its anchor. New rows start at 0 appearances, which is correct -- they have not been seen.
-        _s = torch.zeros(_V, dtype=torch.float)
-        if s.seen is not None: _s[:min(_prev, _V)] = s.seen[:min(_prev, _V)].cpu()
-        s.seen = _s.to(dev)
         s._idx = idx.to(dev); s._msk = msk.to(dev)
         s._len = s._msk.sum(-1).long().clamp(max=s.maxb).to(dev)
         s._v = _V; s._cache = None
@@ -826,7 +814,7 @@ class ByteComposer(nn.Module):
         w = _c + s.delta[:_n]                              # composite + what this token has learned to be
         return w, (s.bias(_c).squeeze(-1) + s.dbias[:_n])
 
-    def anchor(s, step, tau, uses=0.0):
+    def anchor(s, step, tau, uses=0.0, seen=None):
         """HOLD A NEW TOKEN NEAR ITS COMPOSITE, then let go. A freshly minted token has delta=0, so it IS its
         composite; without this it is free to be dragged anywhere by the first gradients it sees, which is the
         same discontinuity the old fresh-random row had, just starting from a better place. The residual is
@@ -849,8 +837,8 @@ class ByteComposer(nn.Module):
         """
         if s._v <= 0: return None
         if uses and uses > 0:
-            if s.seen is None: return None
-            _w = torch.exp(-s.seen[:s._v] / max(1.0, float(uses)))
+            if seen is None: return None                   # the counter lives in the training loop, not here:
+            _w = torch.exp(-seen[:s._v] / max(1.0, float(uses)))   # probation needs it too, with TOK_COMPOSE=0
         else:
             if s.born is None: return None
             _age = (step - s.born[:s._v]).clamp_min(0).float()
@@ -2500,6 +2488,10 @@ class DomainAssembler:
             if s.cur != _prev: s.visits[s.cur] = s.visits.get(s.cur, 0) + 1   # a SEPARATE entry (not a re-confirmation)
         s.size[s.cur] += 1; s.act[s.cur] = s.act.get(s.cur, 0.0) + 1.0; s.last[s.cur] = step
         w = s.wins[s.cur]
+        # ONE LENGTH PER RESERVOIR. A window whose length differs from what this domain already holds cannot be
+        # stacked with the others, and after a retirement re-segments the stream finer they genuinely differ.
+        # Dropping the odd one out costs a sample; keeping it costs the whole report.
+        if w and len(window) != len(w[0]): return s.cur, boundary
         if len(w) < DOM_WINS: w.append(window)                             # RESERVOIR (was: first-40-only, which pinned the
         elif random.random() < DOM_WINS / float(s.size[s.cur]):            #   centroid to the domain's BIRTH forever, so rekey
             w[random.randrange(DOM_WINS)] = window                         #   kept undoing both the EMA drift and every merge)
@@ -4050,6 +4042,31 @@ def main():
     # move in and a fresh anneal to consolidate it. LR_RESTARTS=0 restores the hold, which is what the 2.023
     # run did, so earlier results stay reproducible.
     LR_RESTARTS = bool(_i("LR_RESTARTS", 1))
+    _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
+    # === PROBATION: MINT PROVISIONALLY, JUDGE ON EVIDENCE ====================================================
+    # TOK_MINT_PMIN decides from co-occurrence BEFORE the model has seen the token once. That is the most
+    # statistics alone can do and less than we can do: a token can be minted, TRAINED, and then judged on what
+    # it turned out to be worth. A token that fails is un-merged -- soft, from the match table only, because
+    # ids are positional and renumbering would invalidate every embedding row and every checkpoint.
+    #   BRANCHING ENTROPY CANNOT BE THE POST-PROBATION TEST, and it is worth saying why rather than offering
+    # it and having it fail quietly. Minting DESTROYS the evidence that criterion reads: greedy longest-match
+    # consumes a+b into the merged token, so the pair never occurs again and p(b|a) is 0 from the instant of
+    # the merge onward. Measured directly -- mint 't'+'h', then read the pair count after forty more passes of
+    # the same text: 0. A re-test would retire 100% of candidates, which is exactly what it did. Entropy is a
+    # PRE-mint criterion by nature, and that is where it already is (TOK_MINT_PMIN).
+    #   TOK_PROBATION_BY picks between the two tests that CAN see something after the merge:
+    #     use   -- did the token earn its slot? It must reach TOK_PROBATION appearances within
+    #              TOK_PROBATION_STEPS of being minted. A merge taken on a transient burst never gets there.
+    #              This is the evidence retire_stale was written for and never given.
+    #     embed -- does the whole exceed the sum of its parts? Each token's vector is composite(its bytes) plus
+    #              a free residual that starts at ZERO, so ||delta|| / ||composite|| is exactly "how much this
+    #              token had to become that its parts did not already say". Near zero means the parts explain
+    #              it and the slot is wasted. Requires TOK_COMPOSE=1, which is what builds that table.
+    TOK_PROBATION = _i("TOK_PROBATION", 0)                 # appearances to earn the slot; 0 = probation off
+    TOK_PROBATION_STEPS = _i("TOK_PROBATION_STEPS", 5000)  # deadline to reach them
+    TOK_PROBATION_BY = _env("TOK_PROBATION_BY", "use")
+    TOK_PROBATION_MIN = _f("TOK_PROBATION_MIN", 0.10)
+    _prob = [0, 0]                                         # [kept, retired]
     _ep_start = 0                                          # step at which the current epoch began
     # TWO CONSUMERS, TWO PROJECTIONS. One function served both the ETA and the LR horizon, so they could not
     # be given different horizons without one silently taking the other's. They also need SEPARATE monotone
@@ -4272,8 +4289,10 @@ def main():
         with _T("batch->tensor"):
             x = torch.tensor(_bx, device=DEV); y = torch.tensor(_by, device=DEV)   # (BATCH_W, WIN)
             # APPEARANCES, counted on the batch the model is about to be trained on -- not on the stream, not
-            # on a re-segmentation. This is the quantity TOK_ANCHOR_USES releases against.
-            if TOK_COMPOSE and getattr(model, "compose", None) is not None: model.compose.note_seen(x)
+            # on a re-segmentation. Two things read it and neither can be trusted to a schedule of steps: the
+            # anchor releases a token once it has been TRAINED enough, and probation judges it once it has been
+            # SEEN enough. One counter, one increment, sized to VMAX so no mint ever reallocates it.
+            _tok_seen.index_add_(0, x.reshape(-1), torch.ones(x.numel(), device=DEV))
             sigb = torch.stack(_bg)
         _plm = _t0()
         if _AC is not None: _AC.__enter__()                     # autocast the LM step (entered/exited explicitly rather
@@ -4456,7 +4475,7 @@ def main():
         # NEW TOKENS ARE TRAINED WITH THE LOSS, held to their composite while young. This is the term that makes
         # the mint a HANDOVER rather than a jump: the residual is penalised in proportion to how recently the
         # token was minted, so it behaves as its composite at birth and is progressively released.
-        _anc = model.compose.anchor(step, TOK_ANCHOR_TAU, TOK_ANCHOR_USES) if (TOK_COMPOSE and TOK_ANCHOR > 0
+        _anc = model.compose.anchor(step, TOK_ANCHOR_TAU, TOK_ANCHOR_USES, _tok_seen) if (TOK_COMPOSE and TOK_ANCHOR > 0
                                                               and getattr(model, "compose", None) is not None) else None
         _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
@@ -4632,11 +4651,42 @@ def main():
             print(f"  [tokenizer @ {step}] MINTING FROZEN at vocab {TOK.vocab_size} (TOK_MINT_UNTIL={TOK_MINT_UNTIL}). "
                   f"The segmentation stops moving here; everything learned after this point is learned against a "
                   f"fixed vocabulary.")
+        # === JUDGE WHAT PROBATION HAS SEEN ENOUGH OF ==========================================================
+        # On the grow cadence, because that is when the vocabulary is already being touched and the cost is one
+        # host copy of the counter. A token is judged ONCE: kept (probation ends) or retired (un-merged).
+        if ONLINE and TOK_PROBATION > 0 and TOK.prov and _due("grow", GROW_EVERY):
+            _sv = _tok_seen.tolist()
+            # A token is judged when it has either EARNED its slot or run out of time to. Judging only on
+            # reaching the threshold can never retire anything -- the ones that fail are precisely the ones
+            # that never get there, so the deadline IS the test.
+            _ready = [t for t in TOK.prov
+                      if t < len(_sv) and (_sv[t] >= TOK_PROBATION
+                                           or step - TOK.prov[t][2] >= TOK_PROBATION_STEPS)]
+            if _ready:
+                _emb = None
+                if TOK_PROBATION_BY == "embed" and TOK_COMPOSE and getattr(model, "compose", None) is not None:
+                    with torch.no_grad():                  # ||delta|| / ||composite||, computed ONCE per pass
+                        _wt, _ = model.compose.table()
+                        _dl = model.compose.delta[:_wt.size(0)]
+                        _emb = (_dl.norm(dim=-1) / (_wt - _dl).norm(dim=-1).clamp_min(1e-6)).tolist()
+                for _t in _ready:
+                    _earned = _sv[_t] >= TOK_PROBATION
+                    if _emb is not None:
+                        # the embedding test still requires the token to have been TRAINED: a residual that
+                        # is near zero because the token was never seen says nothing about the merge.
+                        _keep = _earned and _t < len(_emb) and _emb[_t] >= TOK_PROBATION_MIN
+                    else:
+                        _keep = _earned
+                    if _keep:
+                        TOK.prov.pop(_t, None); _prob[0] += 1
+                    elif TOK.retire(_t):
+                        _prob[1] += 1
         if ONLINE and not _mint_frozen[0]:                 # ONGOING minting: mint from the tally accumulated above
             if _due("grow", GROW_EVERY):
                 for _ in range(_i("GROW_BURST", 6)):       # mint several of the current top pairs per grow event
                     g = TOK.maybe_grow()
                     if g is None: break
+                    if g[0] in TOK.prov: TOK.prov[g[0]] = (g[1], g[2], step)   # stamp the birth step
                     # TELLING THE COMPOSER THE VOCABULARY GREW IS CORRECTNESS, NOT WARM-STARTING, and it used to
                     # sit inside the WARMSTART block below. With WARMSTART=0 and TOK_COMPOSE=1 the mint still
                     # happened -- maybe_grow appends to id2bytes/seq2id, so the id becomes emittable and the next
@@ -4794,6 +4844,11 @@ def main():
     #     ordinary vocabulary turnover; the row was trained while it was in use.
     # Neither is otherwise anywhere in the log, so a run spreading its loss over rows that index nothing reads
     # exactly like one that is simply bad. Print-only; nothing below depends on it.
+    if USE_TOK and TOK_PROBATION > 0:
+        print(f"[vocab] probation TOK_PROBATION={TOK_PROBATION} appearances, judged by {TOK_PROBATION_BY}: "
+              f"{_prob[0]} kept, {_prob[1]} un-merged, {len(TOK.prov)} still on probation at the end "
+              f"({100*_prob[1]/max(1,sum(_prob)):.0f}% of those judged failed). A retired token keeps its id "
+              f"and its row -- only the match table drops it -- so its text re-segments to its parts.")
     if USE_TOK and TOK_MINT_PMIN > 0:
         # NAMES ARE NOT FREE IN A 3000-LINE FUNCTION. This block first used _hp/_hb, and _hb is the held-out
         # probe dict carried in from a RESUME (assigned ~line 3121 and read by report_holdout far below). The
@@ -5326,12 +5381,24 @@ def main():
     # centroids, which asks instead whether this domain sits anywhere distinct in the space at all. Read them
     # together: sil < 0 with silm > 0 means "crowded by a near neighbour but globally placed" (fragmentation, which
     # merging fixes); BOTH negative means the signature space has no cluster structure and no assign rule can help.
-    genuine = 0; cohs = []; seps = []; sils = []; sepms = []; silms = []
+    genuine = 0; cohs = []; seps = []; sils = []; sepms = []; silms = []; _ragged = [0]
     with torch.no_grad():
         for d in sorted(live, key=lambda k: -sizes[k]):
             if not asm.wins[d]: continue
-            W = torch.tensor([w for w in asm.wins[d]], device=DEV)
-            sg = enc(W) if SIG_MODE == "learned" else torch.stack([sig_of(list(w), enc) for w in asm.wins[d]])
+            # THE RESERVOIR CAN HOLD WINDOWS OF DIFFERENT LENGTHS, and torch.tensor on a ragged list raises.
+            # It became reachable when tokens started being RETIRED: un-merging re-segments the text FINER,
+            # which is the first thing in this system that makes the stream longer rather than shorter, so a
+            # window stored before a retirement need not match one stored after. A DIAGNOSTIC MUST NOT END A
+            # RUN -- least of all this one, which is the last section before the report finishes. Keep the
+            # modal length and say how many were dropped rather than dying on the stack.
+            _byl = {}
+            for _w in asm.wins[d]: _byl.setdefault(len(_w), []).append(_w)
+            _keep = max(_byl.values(), key=len)
+            _drop = len(asm.wins[d]) - len(_keep)
+            if _drop: _ragged[0] += _drop
+            if not _keep: continue
+            W = torch.tensor(_keep, device=DEV)
+            sg = enc(W) if SIG_MODE == "learned" else torch.stack([sig_of(list(w), enc) for w in _keep])
             coh = F.cosine_similarity(sg, asm.cent[d].unsqueeze(0)).mean().item()
             _o = sorted(1 - F.cosine_similarity(asm.cent[d].unsqueeze(0), asm.cent[o].unsqueeze(0)).item()
                         for o in asm.cent if o != d)

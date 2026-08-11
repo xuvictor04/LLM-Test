@@ -164,6 +164,8 @@ class DynamicTokenizer:
         self._sstamp = -1                      # len(self.pair) when _scache was built
         self.h_pass = self.h_block = 0         # how the gate ruled, for the run report
         self.h_pmin_seen = []                  # p(b|a) of the candidates it judged, for the report
+        self.prov = {}                         # id -> (a, b) for tokens minted but not yet judged
+        self.retired = set()                   # ids un-merged after failing probation
         self.bytes_per_id = [1] * 256
         self.mlbf = [1] * 256                  # max token byte-length starting with each byte (prunes segment's L-loop)
 
@@ -285,6 +287,12 @@ class DynamicTokenizer:
             self.id2bytes.append(ns); self.seq2id[ns] = nid; self.merges.append((a, b))
             self.maxlen = max(self.maxlen, len(ns)); self.bytes_per_id.append(len(ns))
             self.mlbf[ns[0]] = max(self.mlbf[ns[0]], len(ns))
+            # PROVISIONAL UNTIL IT HAS EARNED THE SLOT. The gate above judges a merge on co-occurrence BEFORE
+            # the model has seen the token even once, which is the most it can do from statistics alone and
+            # less than we can do. A token minted here is recorded as on probation; the caller trains it, and
+            # once it has actually APPEARED enough times to have been learned, judges it on evidence and either
+            # keeps it or calls retire(). Nothing here decides that -- the tokenizer records the candidacy.
+            self.prov[nid] = (a, b, -1)        # birth step filled in by the caller, which knows it
             return (nid, a, b)
 
     @property
@@ -319,6 +327,20 @@ class DynamicTokenizer:
     def track_usage(self, on=True):
         self._track_use = on
         if on and not hasattr(self, "_tok_use"): self._tok_use = {}
+
+    def retire(self, tid):
+        """UN-MERGE ONE TOKEN: drop it from the match table so segmentation stops producing it and the text
+        re-segments to its parts. SOFT, and it has to be: ids are positional -- merges[] is replayed in order
+        by load() and every later token is built on this one's index -- so removing the id would renumber the
+        vocabulary and invalidate every embedding row and every saved checkpoint. The row simply stops being
+        indexed. Returns True if it was live."""
+        if tid < 256 or tid >= len(self.id2bytes): return False
+        gone = self.seq2id.pop(self.id2bytes[tid], None) is not None
+        self.prov.pop(tid, None)
+        if gone:
+            self.retired.add(tid)
+            if getattr(self, "_use_fuzzy", False): self.build_fuzzy_index()
+        return gone
 
     def retire_stale(self, min_use=3.0):
         """UN-MERGE: drop merged tokens unused since the last check from the match table -> they re-segment to their
