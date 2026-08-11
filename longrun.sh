@@ -8,6 +8,7 @@
 #   bash longrun.sh add NAME DATASET GB    add a NEW area to the trained system and measure what it costs
 #   bash longrun.sh run       launch. survives disconnect. writes runs/long/
 #   bash longrun.sh resume    continue from the last checkpoint after a crash or a reboot
+#   bash longrun.sh smoke     does every pilot arm still REACH ITS REPORT? minutes, run before any grid
 #   bash longrun.sh watch     what it is doing right now
 #
 # WHY THIS RUN EXISTS, in one number. `step` counts WINDOWS, so a 4 MB stream at WIN=256 is ~6,500 steps. Two
@@ -661,6 +662,57 @@ if len(hs) > 1:
         print(f"     No single-run comparison in this project has measured what it claimed to, and the whole")
         print(f"     architecture ranking has to be re-established from repeated runs, not from one run per arm.")
 PY
+  ;;
+
+smoke)
+  # === DOES THE CODE STILL RUN? ==============================================================================
+  # Not "is it good" -- that is what the pilot is for. This asserts only that every configuration the pilot
+  # will use REACHES ITS REPORT, which is the failure this project actually keeps hitting: a knob that crashes
+  # a diagnostic, a name collision that swallows the metrics, a gate that starves the vocabulary. Each arm is
+  # a few minutes on a GPU. Run it before spending hours.
+  #   Deliberately tiny AND deliberately NOT a quality measurement: at 40 kB the held-out numbers are noise,
+  # and reading them as a result is how a smoke test turns into a wasted day.
+  _pilot_corpus "${PILOT_DIR:-data_pilot}"
+  SMK=${SMOKE_DIR:-runs/smoke}; mkdir -p "$SMK" || exit 1
+  echo "smoke: ${SMOKE_ARMS:-every pilot arm} at 40 kB / 3 epochs on ${DEVICE:-cuda}."
+  echo "  Asserting only that each REACHES ITS REPORT. The held-out numbers at this size are noise --"
+  echo "  reading them as a result is how a smoke test turns into a wasted day."
+  _fail=0
+  for ARM in ${SMOKE_ARMS:-base nogate frozen pgate_t prob_use prob_emb compose}; do
+    case "$ARM" in
+      base)     SX="" ;;
+      nogate)   SX="TOK_MINT_PMIN=0" ;;
+      frozen)   SX="TOK_MINT_UNTIL=1" ;;
+      pgate_t)  SX="TOK_MINT_PMIN=0.15" ;;
+      prob_use) SX="TOK_PROBATION=150 TOK_PROBATION_STEPS=1500" ;;
+      prob_emb) SX="TOK_PROBATION=150 TOK_PROBATION_STEPS=1500 TOK_PROBATION_BY=embed TOK_COMPOSE=1" ;;
+      compose)  SX="TOK_COMPOSE=1" ;;
+    esac
+    rm -f "$SMK/$ARM.dyntok.json"
+    set +e
+    env DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng DISK_STREAM=1 \
+        CORPUS_CAP=100000000000 MODEL=gru LAYERS=1 DEVICE=${DEVICE:-cuda} SEED=0 \
+        SAVE_CKPT=0 PROBE_WAIT=0 PROFILE=0 CKPT_EVERY=0 \
+        D_MODEL=64 WIN=32 BATCH_W=4 STREAM_LEN=40000 EPOCHS=3 \
+        VMAX=512 SEED_VOCAB=256 GROW_EVERY=20 GROW_BURST=8 RETOK_EVERY=200 \
+        FAB_NMAX=32 FAB_N0=3 MEM_CAP=4800 MEM_QUOTA=150 \
+        MANAGE_EVERY=50 DOM_MANAGE_EVERY=50 ENC_WARMUP=60 ENC_WARMUP_MIN=30 SIG_WIN=64 \
+        RATE_EVERY=500 GEN_LEN=20 GEN_N=1 EVAL_N=4 COH_N=2 COH_LEN=32 HOLDOUT_N=4 \
+        TOKENIZER_PATH="$SMK/$ARM.dyntok.json" \
+        $SX python3 self_organize.py > "$SMK/$ARM.log" 2>&1
+    _rc=$?
+    set -e 2>/dev/null || true
+    if [ "$_rc" = 0 ] && _done "$SMK/$ARM.log"; then
+      printf "  ok    %-9s %s\n" "$ARM" "$(grep -aoE 'train [0-9.]+ \| held-out [0-9.]+' "$SMK/$ARM.log" | head -1)"
+    else
+      _fail=1
+      printf "  FAIL  %-9s rc=%s -- %s\n" "$ARM" "$_rc" "$SMK/$ARM.log"
+      grep -a -E "Traceback|Error|!! " "$SMK/$ARM.log" | tail -3 | sed 's/^/          /'
+    fi
+  done
+  echo
+  if [ "$_fail" = 0 ]; then echo "all arms reached the report. safe to spend the GPU."
+  else echo "!! at least one arm did not finish -- fix that before the pilot."; exit 1; fi
   ;;
 
 watch)
