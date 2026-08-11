@@ -34,7 +34,7 @@ _ENV_ASKED = {}                                            # name -> the value t
 _ENV_READ = set()                                          # every key the code ever ASKED FOR, set or not
 # === THE KNOB REGISTRY =======================================================================================
 # EVERY environment knob this file reads, in one place, with its type and default. Before this existed the
-# 274 knobs were read inline at their point of use across 5,500 lines, so there was nowhere to look to see
+# 279 knobs were read inline at their point of use across 5,500 lines, so there was nowhere to look to see
 # the configuration surface -- and five of them were read with DIFFERENT DEFAULTS in different places:
 #   VMAX      the tokenizer targeted 4096 while ByteComposer sized its per-token tables to 2048, so an
 #             unset VMAX indexed past the end of delta/dbias.
@@ -47,7 +47,22 @@ _ENV_READ = set()                                          # every key the code 
 # again disagree with itself. The table is the declaration; the call sites are uses.
 # EXEMPT: their default is computed from another knob, so it cannot live in a table of literals. They are
 # still LISTED in _SPEC (with None) so the registry stays the complete inventory -- just not enforced.
-_SPEC_FREE = {"LAYERS", "FAB_MIN_STEPS", "SEG_CONTIG", "SIG_LOOK", "ENC_POS_MAX"}
+# KNOBS WHOSE DEFAULT IS COMPUTED FROM ANOTHER KNOB. _env cannot check these against a literal, because the
+# literal does not exist -- the default IS an expression. They are exempt from that check and declared in
+# _DERIVED below instead, which records WHICH knob each one follows. levers.py re-derives both sets from the
+# AST and fails if either has drifted from the source, so this cannot silently go stale.
+_DERIVED = {                    # derived knob -> the knob(s) its DEFAULT is read from
+    "D_MODEL":        ("D_MODEL_B",),      # an ALIAS, not a coupling: same quantity under the other name
+    "ENC_EVERY_IDLE": ("ENC_EVERY",),      # idle cadence follows the active one
+    "ENC_POS_MAX":    ("WIN",),            # positional table sized to the window
+    "FAB_MIN_STEPS":  ("SOCIETY",),        # HALT is unused on the society path, so 0 there and 2 on chaining
+    "LAYERS":         ("MODEL",),          # 4 for transformer, 1 for gru
+    "MAX_DOMAINS":    ("FAB_NMAX",),       # the domain cap mirrors the expert slot pool
+    "PHASE_W":        ("PHASES",),         # window width follows the phase count
+    "SEG_CONTIG":     ("DOMAINS",),        # contiguous when ONE corpus, random when several
+    "SIG_LOOK":       ("ENC_EVERY_IDLE",), # TWO HOPS: SIG_LOOK <- ENC_EVERY_IDLE <- ENC_EVERY
+}
+_SPEC_FREE = set(_DERIVED)
 _SPEC = {
     # --- data: corpus, stream and phase schedule ---------------------------------------------------
     "CORPUS_CAP": ("i", 2000000),                         # data
@@ -59,6 +74,7 @@ _SPEC = {
     "PHASED": ("i", 1),                                   # data
     "PHASES": ("i", 4),                                   # data
     "PHASE_SCHED": ("env", ""),                           # data
+    "PHASE_W": ("i", None),                               # data -- DEFAULT IS COMPUTED: (n_phases + 1) // 2
     "STREAM_LEN": ("i", 120000),                          # data
     "VAL_FRAC": ("f", 0.05),                              # data
     "WIN": ("i", 128),                                    # data
@@ -173,6 +189,7 @@ _SPEC = {
     "DOM_FOLD_MULT": ("f", 1.5),                          # domains
     "DOM_GRACE": ("i", 500),                              # domains
     "DOM_MANAGE_EVERY": ("i", 100),                       # domains
+    "MAX_DOMAINS": ("i", None),                           # domains -- DEFAULT IS COMPUTED: FAB_NMAX
     "DOM_MARGIN": ("f", 0.75),                            # domains
     "DOM_MIN_VISITS": ("i", 2),                           # domains
     "DOM_PRIOR": ("f", 0.15),                             # domains
@@ -225,6 +242,7 @@ _SPEC = {
     "ENC_BATCH": ("i", 48),                               # encoder
     "ENC_CREG": ("f", 0.0),                               # encoder
     "ENC_EVERY": ("i", 1),                                # encoder
+    "ENC_EVERY_IDLE": ("i", None),                        # encoder -- DEFAULT IS COMPUTED: max(ENC_EVERY*6, 12)
     "ENC_FLOOR_K": ("i", 8),                              # encoder
     "ENC_FUSE": ("i", 1),                                 # encoder
     "ENC_POS_MAX": ("i", None),                           # DEFAULT IS COMPUTED: 2 * WIN
@@ -287,6 +305,7 @@ _SPEC = {
     # --- plumbing: paths, device, checkpointing ----------------------------------------------------
     "CKPT_EVERY": ("i", 0),                               # plumbing
     "DEVICE": ("env", "cpu"),                             # plumbing
+    "D_MODEL": ("i", None),                               # plumbing -- DEFAULT IS COMPUTED: D_MODEL_B (alias)
     "D_MODEL_B": ("i", 128),                              # plumbing
     "HEADS": ("i", 8),                                    # plumbing
     "LAYERS": ("i", None),                                # DEFAULT IS COMPUTED: 4 transformer / 1 gru
@@ -1087,7 +1106,21 @@ class Fabric(nn.Module):
         # s.min_steps reading 2 while the effective value was 0 -- and the [config] banner, the CHAINING report
         # section and the CHECKPOINT all print or save it. That is the same class of lie the banner rewrite was
         # supposed to make impossible; a value that is overridden must be overridden where it lives.
-        if s.vote: s.min_steps = 0
+        # ...AND IT IS AN OVERRIDE, NOT A DEFAULT. Under CHAIN_VOTE the hop that halts SELECTS that hop's
+        # answer, so "block HALT for the first N hops" has no meaning and 0 is the only coherent value. But
+        # CHAIN_VOTE defaults to 1, so an explicit FAB_MIN_STEPS=2 was accepted, printed in the banner, saved
+        # to the checkpoint -- and discarded. A knob that cannot be set must say so rather than agree and then
+        # do something else. Refused on the same contract as a registry default mismatch: they cannot both be
+        # right. Nothing that has run sets both, so this refuses no configuration anyone has used.
+        if s.vote:
+            _fms = os.environ.get("FAB_MIN_STEPS", "")
+            if _fms.strip() not in ("", "0") and min_steps:
+                raise SystemExit(
+                    f"[config] FAB_MIN_STEPS={_fms} is set AND CHAIN_VOTE=1. Under CHAIN_VOTE the halting hop "
+                    f"selects that hop's answer, so blocking HALT for the first {min_steps} hop(s) has no "
+                    f"meaning and the value would be forced to 0. Set CHAIN_VOTE=0 to use FAB_MIN_STEPS, or "
+                    f"drop FAB_MIN_STEPS; they cannot both be right.")
+            s.min_steps = 0
         s._mass_ema = None                     # training-time HALT mass on the chaining path
         s._div = None                          # distinctness penalty from the last chaining walk
         s._rmix = []; s._sample_mix = False    # (grounded spread, weight-prediction spread) samples
@@ -3699,7 +3732,7 @@ def main():
         s_cfg_known.update(_known)
         print("[config] EFFECTIVE  " + "  ".join(f"{_n}={_norm(_v)}" for _n, _v, _ in _EFF))
         # === COUPLINGS: knobs whose EFFECTIVE value was decided by ANOTHER knob ================================
-        # The registry gives one declared place for all 274 knobs, but a declaration cannot show that setting one
+        # The registry gives one declared place for every knob, but a declaration cannot show that setting one
         # of them silently moves another. Three do:
         #   CHAIN_VOTE forces FAB_MIN_STEPS to 0, inside Fabric.__init__, where nobody reading the config finds it.
         #   TOK_MINT_UNTIL stops MINTING and leaves RETOK_EVERY firing -- two knobs, one idea, and setting only
@@ -3759,6 +3792,15 @@ def main():
                             f"GROW_BURST would also cover it, but it changes how large a segmentation shift each "
                             f"grow event is, which is a different experiment.")
         for _c in _cpl: print(f"[config] COUPLING    {_c}")
+        # DERIVED KNOBS. A knob left unset whose default is computed FOLLOWS another knob, so changing the
+        # other one moves it too. That is fine and often right, but it was only visible by reading the read
+        # site, which is how FAB_NMAX quietly setting MAX_DOMAINS and ENC_EVERY quietly setting SIG_LOOK (two
+        # hops, through ENC_EVERY_IDLE) stayed unstated. _DERIVED declares every one of them and levers.py
+        # fails if that declaration and the source disagree, so this list cannot go stale.
+        _drv = [f"{_k}<-{'+'.join(_DERIVED[_k])}" for _k in sorted(_DERIVED) if _k not in _ENV_ASKED]
+        _set = [_k for _k in sorted(_DERIVED) if _k in _ENV_ASKED]
+        print(f"[config] DERIVED     following another knob: {'  '.join(_drv) if _drv else '(none)'}"
+              + (f" | set explicitly, so following nothing: {', '.join(_set)}" if _set else ""))
         print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
               f"The legacy ExpertBank (EXPERTS={int(bool(EXPERTS))}) is {'ON' if EXPERTS else 'off'} and is mutually "
               f"exclusive with it -- with the fabric on, that flag being 0 is CORRECT, not a missing subsystem.")
