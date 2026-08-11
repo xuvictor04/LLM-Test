@@ -314,18 +314,32 @@ grid)
       # above 2048. Reachable as an arm flag only since the precedence fix -- before it, the hardcoded VMAX=2048
       # below silently won and the log was named after a value that never took effect.
       #
-      # RAISING VMAX ALONE DOES NOT RAISE THE VOCABULARY. Minting is rate-limited, not threshold-limited, at
-      # this scale: one grow event every GROW_EVERY=100 steps, GROW_BURST=12 tokens per event. An 8-epoch pilot
-      # is ~48k steps -> ~481 events -> at most ~5.8k mints from a 512 seed, i.e. a ceiling near 6.3k. VMAX=8192
-      # therefore cannot be filled at the grid's cadence, and the rows it cannot fill are never a target: they
-      # take only the push-down half of the cross-entropy gradient and sit in the denominator at their
-      # initialisation for the whole run. That is the same shape as the `frozen` arm's 512-of-2048, and it would
-      # arrive labelled "wider vocabulary is worse". GROW_BURST=24 doubles the tokens per event while leaving
-      # the event CADENCE identical to base, so the arm differs from base in vocabulary size and mint rate, not
-      # in when minting happens. VMAX=4096 needs ~3.6k mints and already fits, so it is left alone.
-      # The `[vocab]` line at the end of every log reports width / minted / present-in-stream: read it before
-      # reading the held-out number.
-      vmax8k)    echo "VMAX=8192 GROW_BURST=24" ;;
+      # RAISING VMAX ALONE DOES NOT RAISE THE VOCABULARY, AND THE MISSING LEVER IS EPOCHS. Minting is rate-
+      # limited here, not threshold-limited: one grow event every GROW_EVERY=100 steps, GROW_BURST=12 tokens
+      # per event. Measured on the 8-epoch pilot (~5.7k steps/epoch), minting delivers ~540 tokens per epoch.
+      # Both arms were run at EPOCHS=8:
+      #     vmax4k   4096/4096 filled    held-out 2.140   87% real words   best == final
+      #     vmax8k   4823/8192 filled    held-out 3.561   31% real words   +0.659 past its own minimum
+      # vmax8k is worse than its own uniform anchor (3.463). 3369 rows -- 41% of the width -- were never
+      # minted, so they were never a target: they held their initialisation in the loss denominator for the
+      # whole run. That is the frozen arm's failure (512-of-2048, 75% dead) at a smaller dose, and the dead
+      # fraction orders the three results 0% -> 41% -> 75% against 2.140 -> 3.561 -> 4.672.
+      #   vmax4k is the best pilot on record: it beats base@8ep (2.239, 75% real words) on both metrics, so a
+      # larger vocabulary DOES help -- when it is actually filled.
+      #   To fill 8192 from a 512 seed takes 7680 mints, ~14 epochs at the measured rate. Raise EPOCHS, not
+      # GROW_BURST: GROW_BURST changes the SHAPE of minting -- how many tokens land at once, and so how large a
+      # segmentation shift each grow event is -- while EPOCHS changes only how much of the identical process
+      # runs. Same cadence, same burst, same per-step dynamics as base; only the length differs. EPOCHS=18
+      # clears 8192 with margin and lands on a comparison that already exists: base@18ep = 1.985 b/B.
+      #   These arms therefore carry NO growth knobs:
+      #     GRID_CKPT=0 GRID_DIR=runs/vmax EPOCHS=18 bash longrun.sh grid "vmax4k vmax8k"
+      # self_organize.py now predicts the shortfall in a [config] COUPLING line BEFORE training starts, so this
+      # does not have to be discovered from a finished log again. Its estimate is measured at the seed
+      # vocabulary and so runs ~25% optimistic on this data; treat it as a floor on the shortfall.
+      # Read the `[vocab]` line at the end of the log before the held-out number. Its first gap (width vs
+      # minted) is the one that invalidates a comparison; the second (minted vs used) is ordinary vocabulary
+      # turnover and a modest figure there is expected.
+      vmax8k)    echo "VMAX=8192" ;;
       vmax4k)    echo "VMAX=4096" ;;
       # --- THE PILOT BUNDLE. Every arm here is read against `base`, and the three tokenizer arms are SEPARATED
       # on purpose: the last round ran TOK_MINT_UNTIL=1 and RETOK_EVERY=0 together, so when the result came back

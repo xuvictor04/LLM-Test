@@ -3719,6 +3719,31 @@ def main():
         if USE_TOK and TOK_MINT_UNTIL and _i("RETOK_EVERY", 3000) == 0:
             _cpl.append("TOK_MINT_UNTIL is set AND RETOK_EVERY=0: nothing about the segmentation moves after "
                         "the freeze, and fabric growth is never blacked out by a retok.")
+        # VMAX IS TWO LEVERS UNDER ONE NAME: the model's softmax width, fixed here and now, and the tokenizer's
+        # ceiling, which is only reached if minting has the BUDGET to reach it. The budget is EPOCHS, through
+        # GROW_EVERY and GROW_BURST -- and raising VMAX does not raise it. Every row minting cannot reach is a
+        # row no window ever carries as a target: it holds its initialisation and sits in the loss denominator
+        # for the whole run, which is the same shape as freezing the vocabulary far below the width. That is
+        # worth knowing BEFORE the GPU time is spent, not from the [vocab] line afterwards.
+        # The step count is deliberately the optimistic one: it is measured at the CURRENT vocabulary, and the
+        # stream shortens as tokens are minted, so the real run has FEWER steps than this. A shortfall reported
+        # here is therefore a floor on the real shortfall.
+        if ONLINE and not TOK_MINT_UNTIL:
+            _gb        = _i("GROW_BURST", 6)
+            _ep_steps  = max(1, len(stream) // WIN)              # steps in ONE epoch at the current vocabulary
+            _ep_mints  = max(1, (_ep_steps // max(1, GROW_EVERY)) * _gb)     # mints ONE epoch can pay for
+            _need      = VMAX - TOK.vocab_size                   # mints to fill the width from where we are
+            _reach     = min(VMAX, TOK.vocab_size + EPOCHS * _ep_mints)
+            _ep_needed = -(-_need // _ep_mints)                  # ceil: epochs that would cover _need
+            if _reach < VMAX:
+                _cpl.append(f"VMAX={VMAX} sizes the softmax NOW, but minting cannot fill it: GROW_EVERY="
+                            f"{GROW_EVERY} x GROW_BURST={_gb} pays for ~{_ep_mints} mints per epoch, so "
+                            f"EPOCHS={EPOCHS} reaches ~{_reach} at best from a {TOK.vocab_size}-token seed -- "
+                            f"leaving >={VMAX - _reach} rows ({(VMAX - _reach) / max(1, VMAX) * 100:.0f}% of the "
+                            f"width) that are never a target. EPOCHS is the lever that buys mints without "
+                            f"changing how minting behaves: ~{_ep_needed} epochs covers the {_need} needed here. "
+                            f"GROW_BURST would also cover it, but it changes how large a segmentation shift each "
+                            f"grow event is, which is a different experiment.")
         for _c in _cpl: print(f"[config] COUPLING    {_c}")
         print(f"[config] EXPERT POPULATION  the FABRIC is the expert population ({'ON' if FABRIC else 'OFF'}). "
               f"The legacy ExpertBank (EXPERTS={int(bool(EXPERTS))}) is {'ON' if EXPERTS else 'off'} and is mutually "
@@ -4490,19 +4515,27 @@ def main():
 
     # === SOFTMAX WIDTH vs THE VOCABULARY THAT EXISTS =========================================================
     # V is the row count the LM loss normalises over. Under ONLINE it is VMAX, fixed before training starts,
-    # while the vocabulary is whatever the tokenizer reaches. A row no window ever carries as a target appears
-    # only in the denominator: it receives the push-down half of the cross-entropy gradient and never the
-    # push-up half, and it entered training at its initialisation. The two numbers are cheap and are not
-    # otherwise anywhere in the log, so a run whose loss is spread over rows that index nothing reads the same
-    # as one that is simply bad. Print-only; nothing below depends on it.
+    # while the vocabulary is whatever the tokenizer reaches. Rows the stream never carries as a target appear
+    # only in the denominator -- they take the push-down half of the cross-entropy gradient and never the
+    # push-up half -- but they get there two different ways, and the two do not mean the same thing:
+    #   NEVER MINTED (width - minted): the id was never assigned to any byte sequence. The row holds its
+    #     initialisation for the entire run. This gap is set by configuration, not by the data, and a run with a
+    #     large one is not measuring what its VMAX says it is.
+    #   MINTED THEN UNUSED (minted - used): the id existed and lost its occurrences to later merges. This is
+    #     ordinary vocabulary turnover; the row was trained while it was in use.
+    # Neither is otherwise anywhere in the log, so a run spreading its loss over rows that index nothing reads
+    # exactly like one that is simply bad. Print-only; nothing below depends on it.
     try:
         _seen = torch.zeros(int(V), dtype=torch.bool)
         for _c0 in range(0, len(stream), 1 << 20):
             _seen[torch.as_tensor(list(stream[_c0:_c0 + (1 << 20)]), dtype=torch.long)] = True
-        _nlive = int(_seen.sum()); _ndead = int(V) - _nlive
-        print(f"[vocab] softmax width {int(V)} rows | minted {TOK.vocab_size if USE_TOK else 256} | "
-              f"present in the training stream {_nlive} | never a target: {_ndead} rows "
-              f"({_ndead / max(1, int(V)) * 100:.1f}%)")
+        _nused = int(_seen.sum()); _nmint = TOK.vocab_size if USE_TOK else 256
+        _nnever = int(V) - _nmint; _nturn = _nmint - _nused
+        print(f"[vocab] softmax width {int(V)} | minted {_nmint} | used in the training stream {_nused}")
+        print(f"[vocab]   never minted     {_nnever:6d}  ({_nnever / max(1, int(V)) * 100:5.1f}% of width)  "
+              f"-- rows at their initialisation, in the denominator for the whole run")
+        print(f"[vocab]   minted, unused   {_nturn:6d}  ({_nturn / max(1, int(V)) * 100:5.1f}% of width)  "
+              f"-- trained while in use, then lost to later merges")
     except Exception as _e:                                          # an instrument must not be able to end a run
         print(f"[vocab] width-vs-live check skipped: {type(_e).__name__}: {_e}")
 
@@ -4871,9 +4904,10 @@ def main():
             "CHAINING ACTIVE (the default). Mass flows expert -> expert through the transition matrix over multiple "
             "hops, HALT absorbing, so an expert CAN build on another's output. Depth below is what actually ran."))
         if not SOCIETY:
-            print(f"  HALT blocked for the first {fab.min_steps} hop(s) (FAB_MIN_STEPS"
-                  + (", forced to 0 by CHAIN_VOTE" if fab.vote else "") + f"). At 0 the router "
-                  f"halts immediately and depth is 0.00 of {fab.max_steps} -- chaining ON and nothing chained.")
+            print(f"  HALT blocked for the first {fab.min_steps} hop(s) of {fab.max_steps} (FAB_MIN_STEPS"
+                  + (", forced to 0 by CHAIN_VOTE" if fab.vote else "")
+                  + "). At 0 nothing stops the router halting on the first hop; the depth it actually reached "
+                    "is the mean-routed-depth figure in this section.")
         if SOCIETY:
             print(f"  (ponder cost this run: 0 by construction -- _dep is zeros on the society path, so PONDER="
                   f"{PONDER} and PONDER_WARM={PONDER_WARM} had no effect on training whatsoever)")
