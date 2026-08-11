@@ -155,7 +155,7 @@ class DynamicTokenizer:
         # p(b|a) is the same question -- does `a` reliably predict `b`? -- asked scale-free and without the
         # frequency bias. H is still computed and REPORTED, because it is the informative diagnostic for
         # choosing a threshold; it just is not the gate.
-        self.pmin = float(os.environ.get("TOK_MINT_PMIN", 0.0))    # 0 = off, mint on frequency alone
+        self.pmin = float(os.environ.get("TOK_MINT_PMIN", 0.10))   # 0 = off, mint on frequency alone
         self.gate_k = int(os.environ.get("TOK_MINT_GATE_K", 1024)) # how far down the ranking the gate may look
         #   GENEROUS ON PURPOSE, so that TOK_MINT_PMIN is the only lever that decides what gets minted.
         #   At 64 the window itself starved minting -- measured at pmin=0.10 the vocabulary reached 419 of

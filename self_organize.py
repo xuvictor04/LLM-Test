@@ -91,7 +91,7 @@ _SPEC = {
     "TOK_ANCHOR": ("f", 0.05),                            # tokenizer
     "TOK_ANCHOR_TAU": ("f", 4000.0),                      # tokenizer
     "TOK_ANCHOR_USES": ("f", 400.0),                      # tokenizer -- >0 = release by APPEARANCES, not steps
-    "TOK_MINT_PMIN": ("f", 0.0),                          # tokenizer -- min p(b|a) to allow a merge; 0 = off
+    "TOK_MINT_PMIN": ("f", 0.10),                         # tokenizer -- min p(b|a) to allow a merge; 0 = off
     "TOK_MINT_GATE_K": ("i", 1024),                       # tokenizer -- how far down the ranking the gate looks
     "TOK_COMPOSE": ("i", 0),                              # tokenizer
     "TOK_DROPOUT": ("f", 0.0),                            # tokenizer
@@ -533,7 +533,7 @@ TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 400.0)             #   ...or over this m
 # THE DEFAULT IS APPEARANCES, NOT STEPS. A step count releases a token on a clock that has nothing to do with
 # whether it was ever trained on, and the two are anti-correlated: a token minted late is rare BY CONSTRUCTION
 # -- that is why it was minted late -- so it gets the fewest appearances in the same number of steps.
-TOK_MINT_PMIN = _f("TOK_MINT_PMIN", 0.0)                   # predictability gate on minting; 0 = off
+TOK_MINT_PMIN = _f("TOK_MINT_PMIN", 0.10)                  # predictability gate on minting; 0 = off
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
@@ -3175,7 +3175,7 @@ def main():
     om = torch.optim.AdamW(_base, lr=LR, weight_decay=WD)
     for _g in _regrown: om.add_param_group({"params": _g})   # same groups, same order as the original run
     oe = torch.optim.AdamW(enc.parameters(), lr=LR, weight_decay=WD)
-    def _lr_at(st, total):
+    def _lr_at(st, total, _run_end=None):
         """Linear warmup, then cosine to LR_MIN_FRAC of peak. Never returns 0: this is a continual-learning
         system and a schedule that anneals to nothing cannot learn anything that arrives late."""
         if LR_SCHED == "none": return LR
@@ -3191,8 +3191,29 @@ def main():
         #   This keeps the property that made a fixed wavelength worth having: the rate at step N depends only
         # on where N falls inside a cycle, so it is the same in an 8-, 18- or 30-epoch run. EPOCHS no longer
         # sets the learning rate, which is what dragged E18.
-        _prog = (st - _w) / max(1, total - _w)
-        _p = (_prog % 1.0) if LR_RESTARTS else min(1.0, _prog)
+        _span = max(1, total - _w)
+        _prog = (st - _w) / _span
+        # ONLY WRAP INSIDE CYCLES THAT ACTUALLY FIT, and never end the run mid-cycle. Two failures otherwise:
+        #   at EPOCHS == LR_EPOCHS the wavelength IS the run, _prog reaches 1.0, and 1.0 % 1.0 == 0.0 -- the
+        # rate jumps back to PEAK on the last steps of every 8-epoch run, which is precisely the configuration
+        # that has to reproduce earlier results;
+        #   and a run of 2.4 wavelengths would otherwise stop 40% into a cycle, leaving the model at ~60% of
+        # peak with no anneal to consolidate what the last cycle moved.
+        # Whole cycles wrap; the remainder holds at the LR_MIN_FRAC floor. At EPOCHS == LR_EPOCHS that is one
+        # cycle and no wrapping at all, so the schedule is IDENTICAL to LR_RESTARTS=0.
+        if LR_RESTARTS and _run_end is not None:
+            # FIT A WHOLE NUMBER OF CYCLES TO THE RUN. Truncating instead (floor, then hold) left a 30-epoch
+            # run with 2 cycles and a THIRD of its length parked at the floor -- the same wasted tail the
+            # restarts exist to remove. Rounding to the nearest count and stretching the period to divide the
+            # run exactly means every cycle completes, the run always ENDS annealed rather than mid-cycle, and
+            # nothing is spent idling.
+            #   The period moves by at most ~1/(2n) from nominal, a few percent -- against the 11x that
+            # EPOCHS-stretching caused, which is what this whole change is about. At EPOCHS == LR_EPOCHS the
+            # count is 1 and the period is the run, so the schedule is bit-identical to LR_RESTARTS=0.
+            _n = max(1, round((_run_end - _w) / _span))
+            _p = (((st - _w) / ((_run_end - _w) / _n)) % 1.0) if st < _run_end else 1.0
+        else:
+            _p = min(1.0, _prog)
         return LR * (LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _p)))
     # PER-EXPERT MEMORY: each expert owns MEM_QUOTA entries, evicted by LRU on last USE. Sized to FAB_NMAX so the
     # partition does not have to be rebuilt as the population grows. MEM_PER_EXPERT=0 keeps the single global store.
@@ -3704,11 +3725,21 @@ def main():
             print(f"\n[config-audit] all {len(_ENV_ASKED)} environment settings were read and accounted for.")
         # A KNOB CAN BE READ, REGISTERED, AND STILL UNREACHABLE. This is the check the value-level audit cannot
         # do: did the loss term the knob controls ever actually contribute?
+        # EVERY KNOB THAT WEIGHTS A LOSS TERM, not a hand-picked three. TOK_ANCHOR was missing from this list,
+        # and that is exactly how TOK_ANCHOR=0.05 came to be printed on the EFFECTIVE line of every run in this
+        # project while contributing nothing: its term is gated on TOK_COMPOSE, which defaults to 0, so _anc was
+        # always None and _term was never called for it. The audit that would have said so covered DIV_W, IND_W
+        # and CHAIN_SUP. Any weight that reaches the loss through _term belongs here; the cost is one dict
+        # lookup at report time, and the alternative is another knob that reads as on for years.
         for _tn, _tv in (("DIV_W", DIV_W), ("IND_W", IND_W if SOCIETY else 0.0),
-                         ("CHAIN_SUP", fab.sup_w if FABRIC else 0.0)):
+                         ("CHAIN_SUP", fab.sup_w if FABRIC else 0.0),
+                         ("TOK_ANCHOR", TOK_ANCHOR)):
             if _tv > 0 and not _termfired.get(_tn):
-                print(f"[config-audit] !! {_tn}={_tv} was ON and its loss term NEVER FIRED -- the code path that "
-                      f"applies it was not reached on this configuration. This run is identical to {_tn}=0.")
+                _why = (" -- it is gated on TOK_COMPOSE, which is 0 here, so model.compose is None and the term "
+                        "never enters the loss" if _tn == "TOK_ANCHOR" and not TOK_COMPOSE else
+                        " -- the code path that applies it was not reached on this configuration")
+                print(f"[config-audit] !! {_tn}={_tv} was ON and its loss term NEVER FIRED{_why}. "
+                      f"This run is identical to {_tn}=0.")
         if _termfired:
             print(f"[config-audit] auxiliary loss terms that fired: "
                   + ", ".join(f"{k} x{v}" for k, v in sorted(_termfired.items())))
@@ -4135,7 +4166,7 @@ def main():
             # LR ON THE EPOCH LINE. The schedule was not observable anywhere in a log, which is how a lever that
             # moves the LR 11x between two runs stayed invisible across every comparison we made. Printed as a
             # fraction of peak so it reads without arithmetic: 100% = untouched, 5% = at the LR_MIN_FRAC floor.
-            _lrn = _lr_at(step, max(1, _lr_total(step)))
+            _lrn = _lr_at(step, max(1, _lr_total(step)), _proj_steps(step))
             print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | "
                   f"vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)} | "
                   f"lr {_lrn:.2e} ({_lrn / max(1e-12, LR) * 100:.0f}% of peak)]")
@@ -4499,7 +4530,7 @@ def main():
                     _rseen.add(_rn)
             _greach.append(_gn)
         if LR_SCHED != "none":
-            _lrv = _lr_at(step, max(1, _lr_total(step)))     # the LIVE horizon, not the seed-vocabulary guess
+            _lrv = _lr_at(step, max(1, _lr_total(step)), _proj_steps(step))   # live wavelength AND live run end
             for _g in om.param_groups: _g["lr"] = _lrv
             for _g in oe.param_groups: _g["lr"] = _lrv
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
