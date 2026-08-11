@@ -4488,6 +4488,24 @@ def main():
         TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
         print(f"[tokenizer] ONLINE: minted throughout -> grew 256 -> {TOK.vocab_size} during training; final re-tokenization for eval")
 
+    # === SOFTMAX WIDTH vs THE VOCABULARY THAT EXISTS =========================================================
+    # V is the row count the LM loss normalises over. Under ONLINE it is VMAX, fixed before training starts,
+    # while the vocabulary is whatever the tokenizer reaches. A row no window ever carries as a target appears
+    # only in the denominator: it receives the push-down half of the cross-entropy gradient and never the
+    # push-up half, and it entered training at its initialisation. The two numbers are cheap and are not
+    # otherwise anywhere in the log, so a run whose loss is spread over rows that index nothing reads the same
+    # as one that is simply bad. Print-only; nothing below depends on it.
+    try:
+        _seen = torch.zeros(int(V), dtype=torch.bool)
+        for _c0 in range(0, len(stream), 1 << 20):
+            _seen[torch.as_tensor(list(stream[_c0:_c0 + (1 << 20)]), dtype=torch.long)] = True
+        _nlive = int(_seen.sum()); _ndead = int(V) - _nlive
+        print(f"[vocab] softmax width {int(V)} rows | minted {TOK.vocab_size if USE_TOK else 256} | "
+              f"present in the training stream {_nlive} | never a target: {_ndead} rows "
+              f"({_ndead / max(1, int(V)) * 100:.1f}%)")
+    except Exception as _e:                                          # an instrument must not be able to end a run
+        print(f"[vocab] width-vs-live check skipped: {type(_e).__name__}: {_e}")
+
     _save_ckpt(stream)                                               # final save (also runs mid-run if CKPT_EVERY>0)
 
     assigns = [(i, asm.resolve(d), t) for i, d, t in assigns]        # follow merges -> the surviving domain

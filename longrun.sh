@@ -313,7 +313,19 @@ grid)
       # UNCAPPED VOCABULARY. VMAX is the model's vocab DIMENSION and the tokenizer's ceiling; nothing has run
       # above 2048. Reachable as an arm flag only since the precedence fix -- before it, the hardcoded VMAX=2048
       # below silently won and the log was named after a value that never took effect.
-      vmax8k)    echo "VMAX=8192" ;;
+      #
+      # RAISING VMAX ALONE DOES NOT RAISE THE VOCABULARY. Minting is rate-limited, not threshold-limited, at
+      # this scale: one grow event every GROW_EVERY=100 steps, GROW_BURST=12 tokens per event. An 8-epoch pilot
+      # is ~48k steps -> ~481 events -> at most ~5.8k mints from a 512 seed, i.e. a ceiling near 6.3k. VMAX=8192
+      # therefore cannot be filled at the grid's cadence, and the rows it cannot fill are never a target: they
+      # take only the push-down half of the cross-entropy gradient and sit in the denominator at their
+      # initialisation for the whole run. That is the same shape as the `frozen` arm's 512-of-2048, and it would
+      # arrive labelled "wider vocabulary is worse". GROW_BURST=24 doubles the tokens per event while leaving
+      # the event CADENCE identical to base, so the arm differs from base in vocabulary size and mint rate, not
+      # in when minting happens. VMAX=4096 needs ~3.6k mints and already fits, so it is left alone.
+      # The `[vocab]` line at the end of every log reports width / minted / present-in-stream: read it before
+      # reading the held-out number.
+      vmax8k)    echo "VMAX=8192 GROW_BURST=24" ;;
       vmax4k)    echo "VMAX=4096" ;;
       # --- THE PILOT BUNDLE. Every arm here is read against `base`, and the three tokenizer arms are SEPARATED
       # on purpose: the last round ran TOK_MINT_UNTIL=1 and RETOK_EVERY=0 together, so when the result came back
