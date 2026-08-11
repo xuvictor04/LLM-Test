@@ -925,8 +925,7 @@ def build_lm(nv=None):
 # report, and every conclusion about domains, coherence and bits/byte drawn from a system missing its routing
 # layer. Same failure class as PHASED=0, MANAGE_MERGE=0.12 and the BATCH_W cadences.
 # Measured, English, 120 kB, everything else identical:
-#   FABRIC=0  held-out 3.543  -> LOSES to order-1 (3.495) by 0.048
-#   FABRIC=1  held-out 3.441  -> BEATS order-1 by 0.054;  fabric contributes +0.709 bits/byte
+#   FABRIC=0 loses to order-1; FABRIC=1 beats it. Numbers in runs.csv (`python3 runs.py list --arm fabric`).
 # +0.709 is four times what the memory contributes and the largest single component effect measured here.
 # Read with the caveat the FABRIC section itself prints: at these settings the router HALTs 90% of the time
 # and mean routed depth is 0.10 of 4 steps, so the gain is the population being PRESENT, not the routing
@@ -4620,14 +4619,14 @@ def main():
         # re-tokenizes the stream, so the same text acquires new ids and the rows learned for the old segmentation
         # are invalidated continuously. On that reasoning this knob was believed to fix "the project's own
         # continual-learning failure mode".
-        # MEASURED, AND IT IS THE OTHER WAY ROUND. Six arms, one seed, identical harness, at 707f1af:
-        #     base       (mint the whole run)                held-out 1.962
-        #     frozen     (TOK_MINT_UNTIL=1)                  held-out 2.072
-        #     frozen_nr  (TOK_MINT_UNTIL=1 RETOK_EVERY=0)    held-out 2.365
-        # Minting for the whole run is BEST. The earlier result that made freezing look good was measuring the LR
-        # schedule: a vocabulary that never grows makes _total_steps accurate, which was the only way the cosine
-        # ever annealed. Fix the schedule and the advantage inverts. 0 = never freeze, and 0 is the default for a
-        # reason.
+        # MEASURED, AND IT IS THE OTHER WAY ROUND: minting for the whole run beats freezing. The numbers live
+        # in runs.csv (`python3 runs.py list --arm 707f1af`), not here -- a comment cannot say which knobs
+        # produced it, and cannot be re-checked when a default moves, which is exactly what happened to these.
+        #   WHY FREEZING EVER LOOKED GOOD, which is the part worth keeping in the code: a vocabulary that never
+        # grows makes _total_steps ACCURATE, and under the old schedule that was the only way the cosine ever
+        # annealed. Every growing-vocabulary arm overestimated its horizon by 31-37% and ended near 20% of peak.
+        # So "freeze the tokenizer" was measuring the learning-rate schedule through the tokenizer. Fix the
+        # schedule -- _proj_steps, then a fixed wavelength -- and the advantage inverts. 0 = never freeze.
         if ONLINE and TOK_MINT_UNTIL and step >= TOK_MINT_UNTIL and not _mint_frozen[0]:
             _mint_frozen[0] = True
             print(f"  [tokenizer @ {step}] MINTING FROZEN at vocab {TOK.vocab_size} (TOK_MINT_UNTIL={TOK_MINT_UNTIL}). "

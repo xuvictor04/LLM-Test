@@ -1,0 +1,14 @@
+tag,commit,date,epochs,lr_epochs,lr_restarts,vmax,seed_vocab,tok_mint_until,tok_mint_pmin,tok_compose,dropout,weight_decay,fab_nmax,steps,vocab,minted,never_minted,held_out,train,gap,uniform,order1,words_pct,past_min,notes
+vmax4k_8ep,a21a72191d,2026-08-11,8,,,4096,512,0,,0,0,0,4096,45391,,,,2.140,2.189,-0.049,3.522,3.352,87,+0.000,
+vmax8k_8ep,a21a72191d,2026-08-11,8,,,8192,512,0,,0,0,0,4096,45299,,,,3.561,3.561,-0.000,3.463,3.321,31,+0.659,41% dead rows
+vmax4k_18ep_oldLR,2c705c7f8d,2026-08-11,18,,,4096,512,0,,0,0,0,4096,93025,4096,4096,0,3.250,3.389,-0.139,3.523,3.352,43,+0.439,
+vmax8k_18ep_oldLR,2c705c7f8d,2026-08-11,18,,,8192,512,0,,0,0,0,4096,88151,8192,8192,0,4.383,4.116,+0.267,3.305,3.228,19,+1.152,
+vmax4k_18ep_lr8,f279fd0252,2026-08-11,18,8,,4096,512,0,,0,0,0,4096,93027,4096,4096,0,2.023,2.102,-0.080,3.522,3.352,89,+0.000,best on record
+vmax8k_18ep_lr8,5239ebb5aa,2026-08-11,18,8,,8192,512,0,,0,0,0,4096,88160,8192,8192,0,3.377,3.345,+0.031,3.308,3.230,33,+0.436,
+vmax8k_30ep_lr8,ec9813effb,2026-08-11,30,8,,8192,512,0,,0,0,0,4096,137676,8192,8192,0,3.368,3.306,+0.062,3.308,3.230,58,+0.373,12 extra epochs bought 0.009
+frozen512_18ep_oldLR,ec9813effb,2026-08-11,18,18,,512,512,1,,0,0,0,4096,152725,512,512,0,5.540,5.439,+0.101,4.819,3.525,37,+2.875,freeze at step 1
+base_8ep_707f1af,(no log),,8,8,0,2048,,,0,,,,,,,,,1.962,,,,,,,"SOURCE: self_organize.py:4624 comment, 6-arm pilot at 707f1af; log not retained"
+frozen_8ep_707f1af,(no log),,8,8,0,2048,,1,0,,,,,,,,,2.072,,,,,,,"SOURCE: self_organize.py:4624 comment, 6-arm pilot at 707f1af; log not retained"
+frozen_nr_8ep_707f1af,(no log),,8,8,0,2048,,1,0,,,,,,,,,2.365,,,,,,,"SOURCE: self_organize.py:4624 comment, 6-arm pilot at 707f1af; log not retained"
+fabric_off,(no log),,,,,,,,,,,,,,,,,3.543,,,,3.495,,,SOURCE: self_organize.py:928 comment; log not retained
+fabric_on,(no log),,,,,,,,,,,,,,,,,3.441,,,,3.495,,,SOURCE: self_organize.py:929 comment; fabric contributes +0.709 b/B
