@@ -284,6 +284,7 @@ _SPEC = {
     "DROPOUT": ("f", 0.0),                                # optim
     "LR": ("f", 2e-3),                                    # optim
     "LR_EPOCHS": ("i", 8),                                # optim -- cosine WAVELENGTH in epochs; 0 = follow EPOCHS
+    "LR_RESTARTS": ("i", 1),                              # optim -- repeat the cosine; 0 = anneal once, hold
     "LR_MIN_FRAC": ("f", 0.05),                           # optim
     "LR_SCHED": ("env", "cosine"),                        # optim
     "LR_WARMUP": ("i", 1000),                             # optim
@@ -3183,7 +3184,15 @@ def main():
         # never having run. Clamped to a tenth of the total.
         _w = min(LR_WARMUP, max(1, total // 10))
         if st < _w: return LR * (st + 1) / _w
-        _p = min(1.0, (st - _w) / max(1, total - _w))
+        # `total` IS ONE WAVELENGTH, not the run. Under LR_RESTARTS the cosine REPEATS: progress past 1.0 wraps,
+        # so the rate falls to the LR_MIN_FRAC floor over LR_EPOCHS epochs and then returns to peak and does it
+        # again, for as long as the run lasts. Warmup is paid ONCE, at the start, not per cycle -- the point of
+        # warmup is that the optimizer state is cold, which is only true the first time.
+        #   This keeps the property that made a fixed wavelength worth having: the rate at step N depends only
+        # on where N falls inside a cycle, so it is the same in an 8-, 18- or 30-epoch run. EPOCHS no longer
+        # sets the learning rate, which is what dragged E18.
+        _prog = (st - _w) / max(1, total - _w)
+        _p = (_prog % 1.0) if LR_RESTARTS else min(1.0, _prog)
         return LR * (LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _p)))
     # PER-EXPERT MEMORY: each expert owns MEM_QUOTA entries, evicted by LRU on last USE. Sized to FAB_NMAX so the
     # partition does not have to be rebuilt as the population grows. MEM_PER_EXPERT=0 keeps the single global store.
@@ -3754,6 +3763,7 @@ def main():
             ("LR",             LR),                      ("LR_SCHED",       LR_SCHED),
             ("LR_WARMUP",      LR_WARMUP),               ("LR_MIN_FRAC",    LR_MIN_FRAC),
             ("LR_EPOCHS",      min(_i("LR_EPOCHS", 8) or EPOCHS, EPOCHS)),
+            ("LR_RESTARTS",    bool(_i("LR_RESTARTS", 1))),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
         ]
         if _F0 is not None: _EFF += [
@@ -3822,9 +3832,14 @@ def main():
                 + (f"LR_EPOCHS=0 was set explicitly, so the wavelength follows EPOCHS={EPOCHS} and this run is "
                    f"NOT comparable at fixed LR to a run at another EPOCHS."
                    if _ENV_ASKED.get("LR_EPOCHS", "").strip() == "0" else
-                   f"LR_EPOCHS={_lre}: the cosine is shaped over {_lre} epochs and then holds at the "
-                   f"LR_MIN_FRAC={LR_MIN_FRAC:g} floor for the remaining {max(0, EPOCHS - _lre)}, so the LR at "
-                   f"each step matches an EPOCHS={_lre} run and only the length differs."))
+                   (f"LR_EPOCHS={_lre} is the cosine WAVELENGTH and LR_RESTARTS=1, so the rate falls to the "
+                    f"LR_MIN_FRAC={LR_MIN_FRAC:g} floor over {_lre} epochs, returns to peak, and repeats "
+                    f"~{max(1, EPOCHS // max(1, _lre))}x across this run. The rate at a given step depends only "
+                    f"on where it falls inside a cycle, so it is the same at any EPOCHS."
+                    if bool(_i("LR_RESTARTS", 1)) else
+                    f"LR_EPOCHS={_lre}: the cosine is shaped over {_lre} epochs and then HOLDS at the "
+                    f"LR_MIN_FRAC={LR_MIN_FRAC:g} floor for the remaining {max(0, EPOCHS - _lre)} "
+                    f"(LR_RESTARTS=0).")))
         # THE ANCHOR LIVES ON ByteComposer, WHICH ONLY EXISTS UNDER TOK_COMPOSE. TOK_ANCHOR and its release
         # knobs are read unconditionally and printed on the EFFECTIVE line, so every run so far has advertised
         # TOK_ANCHOR=0.05 TOK_ANCHOR_TAU=4000 while model.compose was None and the term never reached the loss.
@@ -3999,6 +4014,12 @@ def main():
     # completing their cosine exactly as before while long runs stop stretching.
     #   LR_EPOCHS=0 restores the old behaviour (horizon follows EPOCHS) for reproducing earlier results.
     LR_EPOCHS = min(_i("LR_EPOCHS", 8) or EPOCHS, EPOCHS)
+    # REPEAT, DO NOT HOLD. With the wavelength fixed, a run longer than it has to do something at the end of
+    # the cycle. Holding at the LR_MIN_FRAC floor spends every later epoch at 5% of peak -- measured, 12 extra
+    # epochs bought 0.009 b/B that way. Restarting the cosine gives each later cycle a fresh high-rate phase to
+    # move in and a fresh anneal to consolidate it. LR_RESTARTS=0 restores the hold, which is what the 2.023
+    # run did, so earlier results stay reproducible.
+    LR_RESTARTS = bool(_i("LR_RESTARTS", 1))
     _ep_start = 0                                          # step at which the current epoch began
     # TWO CONSUMERS, TWO PROJECTIONS. One function served both the ETA and the LR horizon, so they could not
     # be given different horizons without one silently taking the other's. They also need SEPARATE monotone
@@ -4016,8 +4037,12 @@ def main():
     _proj_lr = [10 ** 9]
     def _proj_steps(step):                                 # WORK REMAINING -- the ETA. Always the real end.
         return _project(step, EPOCHS, _proj)
-    def _lr_total(step):                                   # SCHEDULE HORIZON -- what the cosine is shaped over.
-        return _project(step, LR_EPOCHS, _proj_lr)
+    def _lr_total(step):                                   # ONE WAVELENGTH -- what the cosine is shaped over.
+        _project(step, LR_EPOCHS, _proj_lr)                # keep the projection current
+        # THE PERIOD IS LATCHED, not re-read. _project returns max(step+1, latched) so that the HOLD-at-floor
+        # form saturates once the horizon passes; under restarts that would make the wavelength grow with the
+        # step and the cycles get longer and longer. The latched minimum is the wavelength, so read it directly.
+        return _proj_lr[0] if LR_RESTARTS else _project(step, LR_EPOCHS, _proj_lr)
     while True:                                             #   memory-efficient -- build the stream ONCE, iterate; step keeps counting)
         # ---- PER-PROCESS LEARNING CURVE: the other half of continual learning. -----------------------------------
         # Retention says whether old material survives. This says how FAST new material is picked up, and it is the
