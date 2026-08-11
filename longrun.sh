@@ -321,6 +321,12 @@ grid)
       # MINTING; RETOK_EVERY stops RE-SEGMENTING, and a re-segmentation that produces an identical stream is
       # still not a no-op -- it clears the lookahead queue and blacks out fabric growth for FAB_COOLDOWN steps.
       frozen)    echo "TOK_MINT_UNTIL=1" ;;                      # vocabulary frozen at the seed; retok still fires
+      # `frozen` freezes at SEED_VOCAB=512, so it conflates two different ideas: a FIXED vocabulary, and a TINY
+      # one. At 512 the model has almost no whole-word units and must spell everything -- measured 3.07 tokens
+      # per generated word against base's 2.52. These freeze at a seed the size base ENDS at, so the comparison
+      # is fixed-vs-growing rather than small-vs-large.
+      frozen2k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=2048" ;;
+      frozen1k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=1024" ;;
       frozen_nr) echo "TOK_MINT_UNTIL=1 RETOK_EVERY=0" ;;        # ...and re-segmentation off too
       # --- REGULARISATION. Every run so far reports UNDERFIT with a NEGATIVE gap (held-out scoring better than
       # train), so the expectation is that these cost rather than help. Worth measuring anyway: DROPOUT also
