@@ -4906,11 +4906,16 @@ def main():
                        / max(1e-9, sum((a - _mx) ** 2 for a, _ in _hh))) * 10000
                 print(f"  STILL LEARNING? over the SECOND HALF of the run: {_hh[0][1]:.2f} -> {_hh[-1][1]:.2f}, "
                       f"slope {_sl:+.4f} bits/byte per 10k steps.")
+                # SAY WHAT IT MOVED, NOT WHAT THAT MEANS. This read "the second half bought nothing. The model
+                # is not learning at this setting any more" for any |slope| <= 0.02 -- printed directly beside
+                # its own numbers showing 2.04 -> 1.97, i.e. 0.07 b/B that it did buy. The threshold is a
+                # reasonable place to stop caring; the sentence was asserting more than the threshold knows.
+                _d2 = _hh[-1][1] - _hh[0][1]
                 print("    " + ("clearly still improving -- more steps at this setting will buy more."
                                 if _sl < -0.02 else
-                                "FLAT: the second half bought nothing. The model is not learning at this setting "
-                                "any more, whatever its minimum was earlier -- look at what is disrupting it "
-                                "rather than at how long it ran."
+                                f"NEARLY FLAT: {_d2:+.3f} b/B over the whole second half, |slope| <= 0.02 per "
+                                f"10k steps. At this rate more steps buy little -- read that against the seed "
+                                f"spread before calling it converged."
                                 if abs(_sl) <= 0.02 else
                                 "getting WORSE through the second half, not merely flat."))
         except Exception:
@@ -4942,8 +4947,14 @@ def main():
                   f"decaying the load-balance pressure to 0, the tokenizer still minting (per-TOKEN loss rises "
                   f"mechanically as tokens get longer -- cross-check the per-process bits/byte curve above, which "
                   f"is unit-stable), and the memory store reaching MEM_CAP.")
-        elif _fl - _bl > 0.05:
-            print(f"  >> turned upward at the very end -- too recent to call. Watch it.")
+        elif _fl - _bl > 0.05 and _bpb_dir is None:
+            # ONLY WHEN THERE IS NO UNIT-STABLE CURVE TO ASK. This fired on the PER-TOKEN rise alone, so a run
+            # that had just been told "NOT DIVERGING -- the per-token rise is the growing vocabulary, not the
+            # model. Judge this run on bits/byte" was told six lines later that it "turned upward at the very
+            # end -- watch it", on the strength of the very curve it had been told to ignore. When _bpb_dir
+            # exists, one of the three branches above has already given the verdict from the stable units.
+            print(f"  >> the PER-TOKEN curve turned upward at the end -- too recent to call, and there is no "
+                  f"unit-stable curve this run to check it against. Watch it.")
         else:
             print(f"  >> still improving or flat: falling = more passes/steps will help; flat = the model has "
                   f"converged and needs more CAPACITY or more DATA, not more steps.")
