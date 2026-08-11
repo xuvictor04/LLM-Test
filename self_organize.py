@@ -91,7 +91,8 @@ _SPEC = {
     "TOK_ANCHOR": ("f", 0.05),                            # tokenizer
     "TOK_ANCHOR_TAU": ("f", 4000.0),                      # tokenizer
     "TOK_ANCHOR_USES": ("f", 400.0),                      # tokenizer -- >0 = release by APPEARANCES, not steps
-    "TOK_MINT_HMAX": ("f", 0.0),                          # tokenizer -- max H(next|a) in bits to allow a merge
+    "TOK_MINT_PMIN": ("f", 0.0),                          # tokenizer -- min p(b|a) to allow a merge; 0 = off
+    "TOK_MINT_GATE_K": ("i", 1024),                       # tokenizer -- how far down the ranking the gate looks
     "TOK_COMPOSE": ("i", 0),                              # tokenizer
     "TOK_DROPOUT": ("f", 0.0),                            # tokenizer
     "TOK_GROW_CAP": ("i", 1000000),                       # tokenizer
@@ -531,7 +532,7 @@ TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 400.0)             #   ...or over this m
 # THE DEFAULT IS APPEARANCES, NOT STEPS. A step count releases a token on a clock that has nothing to do with
 # whether it was ever trained on, and the two are anti-correlated: a token minted late is rare BY CONSTRUCTION
 # -- that is why it was minted late -- so it gets the fewest appearances in the same number of steps.
-TOK_MINT_HMAX = _f("TOK_MINT_HMAX", 0.0)                   # branching-entropy gate on minting; 0 = off
+TOK_MINT_PMIN = _f("TOK_MINT_PMIN", 0.0)                   # predictability gate on minting; 0 = off
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
@@ -591,7 +592,7 @@ if DATA_MODE == "real":
             #   re-mint different ids, so the restored embedding table would be indexed by a DIFFERENT vocabulary.
         else:
             TOK = DynamicTokenizer(vmax=VMAX, min_pair=_i("MIN_PAIR", 50), max_tok=_i("MAX_TOK", 16), dropout=_f("TOK_DROPOUT", 0.0))
-            TOK.hmax = TOK_MINT_HMAX          # branching-entropy gate; read from env in __init__ too, set here so
+            TOK.pmin = TOK_MINT_PMIN          # predictability gate; read from env in __init__ too, set here so
             #   a tokenizer LOADED from disk (which reconstructs from the saved json) picks it up as well
             gb = b"".join(c[:_i("TOK_GROW_CAP", 1000000)] for c in CORP)   # bytes the tokenizer grows on
             curve = []
@@ -3736,7 +3737,7 @@ def main():
             ("WARMSTART_MODE", _env("WARMSTART_MODE", "mean")),
             ("TOK_COMPOSE",    TOK_COMPOSE),            ("TOK_ANCHOR",     TOK_ANCHOR),
             ("TOK_ANCHOR_TAU", TOK_ANCHOR_TAU),         ("TOK_ANCHOR_USES", TOK_ANCHOR_USES),
-            ("TOK_MINT_HMAX",  TOK_MINT_HMAX),
+            ("TOK_MINT_PMIN",  TOK_MINT_PMIN),
             ("TOK_MINT_NOVEL", _f("TOK_MINT_NOVEL", 0.0)),
             ("PHASED",         PHASED),                  ("EPOCHS",         EPOCHS),
             ("WORLD_MODEL",    WORLD_MODEL),             ("WORLD_GROW",     WORLD_GROW),
@@ -4738,11 +4739,16 @@ def main():
     #     ordinary vocabulary turnover; the row was trained while it was in use.
     # Neither is otherwise anywhere in the log, so a run spreading its loss over rows that index nothing reads
     # exactly like one that is simply bad. Print-only; nothing below depends on it.
-    if USE_TOK and TOK_MINT_HMAX > 0:
+    if USE_TOK and TOK_MINT_PMIN > 0:
         _hp, _hb = getattr(TOK, "h_pass", 0), getattr(TOK, "h_block", 0)
-        print(f"[vocab] branching-entropy gate TOK_MINT_HMAX={TOK_MINT_HMAX:g} bits: {_hp} merges allowed, "
-              f"{_hb} blocked ({100*_hb/max(1,_hp+_hb):.0f}% of candidates rejected as boundary-crossing "
-              f"rather than unit-forming)")
+        _sn = getattr(TOK, "h_pmin_seen", [])
+        _md = sorted(_sn)[len(_sn) // 2] if _sn else float("nan")
+        # `rejected` counts CANDIDATES EXAMINED and refused, not distinct pairs permanently refused: the gate
+        # walks the ranking until one passes, so a single mint can reject many. It is a measure of how far it
+        # had to look, not of how much vocabulary was denied.
+        print(f"[vocab] predictability gate TOK_MINT_PMIN={TOK_MINT_PMIN:g}: {_hp} merges minted, {_hb} "
+              f"candidates rejected on the way ({_hb/max(1,_hp):.1f} per mint) | median p(b|a) of everything "
+              f"judged {_md:.3f}")
     try:
         _seen = torch.zeros(int(V), dtype=torch.bool)
         for _c0 in range(0, len(stream), 1 << 20):

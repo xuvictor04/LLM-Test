@@ -147,11 +147,23 @@ class DynamicTokenizer:
         #     H(next | a) = -SUM_b p(b|a) log2 p(b|a),
         # the standard unsupervised-segmentation criterion, and `pair` already IS the joint distribution -- it
         # needs only to be read by left token instead of as a flat ranking.
-        self.hmax = float(os.environ.get("TOK_MINT_HMAX", 0.0))    # 0 = off, mint on frequency alone
-        self.left = Counter()                  # occurrences of each id as the LEFT half of a pair
-        self._hcache = {}                      # a -> H(next|a), rebuilt at most once per grow event
-        self._hstamp = -1                      # len(self.pair) when _hcache was built
+        # THE THRESHOLD IS A PROBABILITY, NOT AN ENTROPY, AND THAT MATTERS. An absolute H(next|a) cut-off does
+        # not survive contact with real text: measured over 400 kB of English at the byte level, H(next|a) has
+        # median 3.48 bits and p90 4.39, so a 1.5-bit gate rejects 81% of left tokens -- and rejects the useful
+        # merges FIRST, because H is anti-correlated with frequency: a common left token is common precisely
+        # because many things follow it. It is also scale-dependent, since H shrinks as the vocabulary merges.
+        # p(b|a) is the same question -- does `a` reliably predict `b`? -- asked scale-free and without the
+        # frequency bias. H is still computed and REPORTED, because it is the informative diagnostic for
+        # choosing a threshold; it just is not the gate.
+        self.pmin = float(os.environ.get("TOK_MINT_PMIN", 0.0))    # 0 = off, mint on frequency alone
+        self.gate_k = int(os.environ.get("TOK_MINT_GATE_K", 1024)) # how far down the ranking the gate may look
+        #   GENEROUS ON PURPOSE, so that TOK_MINT_PMIN is the only lever that decides what gets minted.
+        #   At 64 the window itself starved minting -- measured at pmin=0.10 the vocabulary reached 419 of
+        #   1024 at gate_k=64 and 1010 at gate_k=1024, i.e. the CAP, not the threshold, was deciding.
+        self._scache = {}                      # a -> (total successors, H(next|a)), rebuilt per grow event
+        self._sstamp = -1                      # len(self.pair) when _scache was built
         self.h_pass = self.h_block = 0         # how the gate ruled, for the run report
+        self.h_pmin_seen = []                  # p(b|a) of the candidates it judged, for the report
         self.bytes_per_id = [1] * 256
         self.mlbf = [1] * 256                  # max token byte-length starting with each byte (prunes segment's L-loop)
 
@@ -174,43 +186,44 @@ class DynamicTokenizer:
             ids.append(chosen[0]); i += chosen[1]
         if count:
             for a, b in zip(ids, ids[1:]): self.pair[(a, b)] += 1
-            if self.hmax > 0:
-                for a in ids[:-1]: self.left[a] += 1            # denominator of p(b|a); one dict op per pair
         return ids
 
-    def branch_entropy(self, a):
-        """H(next | a) in BITS over the current pair tally: how unpredictable a's successor is.
+    def _succ(self, a):
+        """(total successors of a, H(next|a) in bits) over the current pair tally.
 
-        Rebuilt at most once per change in the tally's size, because maybe_grow is called in bursts and the
-        distribution cannot move between calls in the same burst. One pass over `pair` (bounded by max_pairs)
-        amortised across the burst, rather than a scan per candidate."""
-        if self._hstamp != len(self.pair):
-            succ = {}
+        Rebuilt at most once per change in the tally's size: maybe_grow is called in bursts and the
+        distribution cannot move between calls in the same burst, so this costs ONE pass over `pair`
+        (bounded by max_pairs) amortised across the burst rather than a scan per candidate."""
+        if self._sstamp != len(self.pair):
+            agg = {}
             for (x, y), c in self.pair.items():
-                if c > 0: succ.setdefault(x, []).append(c)
-            _h = {}
-            for x, cs in succ.items():
+                if c > 0: agg.setdefault(x, []).append(c)
+            _s = {}
+            for x, cs in agg.items():
                 t = float(sum(cs))
                 if t <= 0: continue
-                _h[x] = -sum((c / t) * math.log2(c / t) for c in cs)
-            self._hcache = _h; self._hstamp = len(self.pair)
-        return self._hcache.get(a)
+                _s[x] = (t, -sum((c / t) * math.log2(c / t) for c in cs))
+            self._scache = _s; self._sstamp = len(self.pair)
+        return self._scache.get(a)
+
+    def branch_entropy(self, a):
+        """H(next|a) in bits, or None if a has never been seen as a left half. Reported, not gated on."""
+        r = self._succ(a)
+        return None if r is None else r[1]
 
     def _predictable(self, a, b):
-        """Does `a` reliably predict `b`? Gate for minting (a, b).
+        """Does `a` reliably predict `b`? The gate for minting (a, b).
 
-        Two conditions, and the second is what makes the first safe:
-          H(next|a) <= hmax          -- a's successor is predictable AT ALL, so a does not end a boundary
-          p(b|a) is the argmax       -- and b is what it predicts, not some other successor that carries the
-                                        low entropy while (a, b) rides along on raw frequency
-        An `a` never seen as a left half has no distribution to judge; it is allowed through rather than
-        blocked, since blocking on absence of evidence would stall minting at the start of a run."""
-        h = self.branch_entropy(a)
-        if h is None: return True
-        if h > self.hmax: return False
-        n = self.left.get(a, 0)
-        if n <= 0: return True
-        return self.pair[(a, b)] >= 0.5 * n          # b takes at least half of a's successor mass
+        p(b|a) = count(a,b) / SUM_b' count(a,b'), against self.pmin. Scale-free, so one threshold means the
+        same thing at the byte level and at a 8k vocabulary, and unbiased by frequency, which an absolute
+        entropy cut-off is not. A left token never seen has no distribution to judge and is allowed through:
+        blocking on absence of evidence would stall minting at the start of a run, when `pair` is nearly empty.
+        """
+        r = self._succ(a)
+        if r is None or r[0] <= 0: return True
+        _p = self.pair[(a, b)] / r[0]
+        self.h_pmin_seen.append(_p)
+        return _p >= self.pmin
 
     def maybe_grow(self):
         """Mint a pair if it crosses threshold. Returns (new_id, a, b) or None.
@@ -229,32 +242,42 @@ class DynamicTokenizer:
             # how much of it we had already seen: recent / (1 + seen)^novel. A pair that has been common all along
             # scores low however frequent it is; a pair that has just started appearing scores high. So minting
             # follows NEW material, and the text the model has already fitted keeps its spelling.
-            _top = self.pair.most_common(max(1, self.novel_k) if self.novel > 0 else 1)
+            # HOW WIDE TO LOOK. Frequency ranking alone needs only the single top pair. Either re-ranking --
+            # novelty, or the predictability gate -- needs a CANDIDATE LIST to choose from, because both work
+            # by rejecting the top pair in favour of a better one further down.
+            _k = 1
+            if self.novel > 0: _k = max(_k, self.novel_k)
+            if self.pmin > 0: _k = max(_k, self.gate_k)
+            _top = self.pair.most_common(_k)
             if self.novel > 0:
                 _sc = []
                 for _pr, _c in _top:
                     _seen = self.pair_seen.get(_pr, 0)
                     _sc.append((_c - _seen) / (1.0 + _seen) ** self.novel)
-                _i = max(range(len(_top)), key=lambda k: _sc[k])
-                (a, b), cnt = _top[_i]
+                _top = [_top[i] for i in sorted(range(len(_top)), key=lambda k: -_sc[k])]
                 for _pr, _c in _top: self.pair_seen[_pr] = _c     # only what we actually considered
-            else:
-                (a, b), cnt = _top[0]
-            if cnt < self.min_pair: return None
             # THE MEANING GATE, applied AFTER frequency and BEFORE the merge becomes permanent. A pair can be
             # frequent for two different reasons: it is a unit ("th" + "e"), or it straddles a boundary that
-            # everything crosses ("e" + " "). Only the first deserves a token. H(next|a) tells them apart --
-            # low means `a` reliably predicts what follows it, so there is no boundary to glue across.
-            #   Candidates on BOTH sides may themselves be minted tokens, so this composes: a merge that
-            # passed the gate can be the left half of the next one, and the statistic is recomputed over the
-            # CURRENT segmentation each time, not over bytes.
-            #   Rejection does NOT zero the pair's count. A pair blocked here is not spent -- it may become
-            # predictable later as the segmentation around it settles -- so it stays in the tally and is simply
-            # skipped. It is pushed out of the running by returning None, which ends this grow burst.
-            if self.hmax > 0 and not self._predictable(a, b):
-                self.h_block += 1
-                return None
-            if self.hmax > 0: self.h_pass += 1
+            # everything crosses (" " + " "). Only the first deserves a token, and p(b|a) tells them apart.
+            #   IT FILTERS, IT DOES NOT ABORT. Returning None on a rejected candidate ended the whole grow
+            # burst, and since the highest-frequency pair is exactly the one most likely to straddle a
+            # boundary, that stopped minting almost entirely: measured, the vocabulary reached 257 of 1024.
+            # Walking down the candidate list instead is what makes it a gate rather than an off switch.
+            #   A rejected pair is NOT zeroed. It is not spent -- it may become predictable as the
+            # segmentation around it settles -- so it stays in the tally at full count and is reconsidered.
+            #   Candidates on either side may themselves be minted tokens, so the gate composes, and the
+            # statistic is recomputed over the CURRENT segmentation rather than over bytes.
+            _pick = None
+            for _pr, _c in _top:
+                if _c < self.min_pair: break                       # the list is frequency-ordered: none below
+                if self.pmin > 0 and not self._predictable(*_pr):
+                    self.h_block += 1
+                    continue
+                _pick = (_pr, _c)
+                if self.pmin > 0: self.h_pass += 1
+                break
+            if _pick is None: return None                          # nothing frequent AND predictable enough
+            (a, b), cnt = _pick
             self.pair[(a, b)] = 0
             ns = self.id2bytes[a] + self.id2bytes[b]
             if len(ns) > self.max_tok or ns in self.seq2id: return None

@@ -379,9 +379,14 @@ grid)
       # = 1.32 bits against H(next|"e") = 2.05, which is the separation the threshold sits in.
       # These arms change WHICH TOKENS EXIST, so read them against `base` on vocabulary size and on the
       # [vocab] gate line (how many candidates were rejected), not on held-out alone.
-      hgate)     echo "TOK_MINT_HMAX=1.5" ;;                  # permissive: blocks only clear boundaries
-      hgate_t)   echo "TOK_MINT_HMAX=1.0" ;;                  # tighter
-      hgate_c)   echo "TOK_MINT_HMAX=1.5 TOK_COMPOSE=1" ;;    # gate + the composed table it complements
+      # The threshold is p(b|a), not an entropy. An absolute H(next|a) cut-off does not survive real text:
+      # over 400 kB of English at the byte level H has median 3.48 bits and p90 4.39, and it is ANTI-correlated
+      # with frequency -- a common left token is common because many things follow it -- so an entropy gate
+      # rejects the useful merges first. p(b|a) asks the same question scale-free. Measured vocabulary reached,
+      # 1024-cap, 400 kB, 4 passes:  pmin 0.10 -> 1010,  0.15 -> 623,  0.25 -> 353.
+      pgate)     echo "TOK_MINT_PMIN=0.10" ;;                  # gentle: trims only the least predictable merges
+      pgate_t)   echo "TOK_MINT_PMIN=0.15" ;;                  # tighter -- roughly halves the vocabulary
+      pgate_c)   echo "TOK_MINT_PMIN=0.10 TOK_COMPOSE=1" ;;    # gate + the composed table it complements
       # --- TOKEN PARAMETERISATION. TOK_COMPOSE is now ON by default, so every arm below states BOTH knobs
       # explicitly. pilot_gru_8 ran compose AND mintnovel together and cannot be attributed to either; these
       # four arms are the 2x2 that separates them, plus the anchor.
