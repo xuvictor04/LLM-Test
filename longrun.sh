@@ -314,31 +314,43 @@ grid)
       # above 2048. Reachable as an arm flag only since the precedence fix -- before it, the hardcoded VMAX=2048
       # below silently won and the log was named after a value that never took effect.
       #
-      # RAISING VMAX ALONE DOES NOT RAISE THE VOCABULARY, AND THE MISSING LEVER IS EPOCHS. Minting is rate-
-      # limited here, not threshold-limited: one grow event every GROW_EVERY=100 steps, GROW_BURST=12 tokens
-      # per event. Measured on the 8-epoch pilot (~5.7k steps/epoch), minting delivers ~540 tokens per epoch.
-      # Both arms were run at EPOCHS=8:
-      #     vmax4k   4096/4096 filled    held-out 2.140   87% real words   best == final
-      #     vmax8k   4823/8192 filled    held-out 3.561   31% real words   +0.659 past its own minimum
-      # vmax8k is worse than its own uniform anchor (3.463). 3369 rows -- 41% of the width -- were never
-      # minted, so they were never a target: they held their initialisation in the loss denominator for the
-      # whole run. That is the frozen arm's failure (512-of-2048, 75% dead) at a smaller dose, and the dead
-      # fraction orders the three results 0% -> 41% -> 75% against 2.140 -> 3.561 -> 4.672.
-      #   vmax4k is the best pilot on record: it beats base@8ep (2.239, 75% real words) on both metrics, so a
-      # larger vocabulary DOES help -- when it is actually filled.
-      #   To fill 8192 from a 512 seed takes 7680 mints, ~14 epochs at the measured rate. Raise EPOCHS, not
-      # GROW_BURST: GROW_BURST changes the SHAPE of minting -- how many tokens land at once, and so how large a
-      # segmentation shift each grow event is -- while EPOCHS changes only how much of the identical process
-      # runs. Same cadence, same burst, same per-step dynamics as base; only the length differs. EPOCHS=18
-      # clears 8192 with margin and lands on a comparison that already exists: base@18ep = 1.985 b/B.
-      #   These arms therefore carry NO growth knobs:
-      #     GRID_CKPT=0 GRID_DIR=runs/vmax EPOCHS=18 bash longrun.sh grid "vmax4k vmax8k"
-      # self_organize.py now predicts the shortfall in a [config] COUPLING line BEFORE training starts, so this
-      # does not have to be discovered from a finished log again. Its estimate is measured at the seed
-      # vocabulary and so runs ~25% optimistic on this data; treat it as a floor on the shortfall.
-      # Read the `[vocab]` line at the end of the log before the held-out number. Its first gap (width vs
-      # minted) is the one that invalidates a comparison; the second (minted vs used) is ordinary vocabulary
-      # turnover and a modest figure there is expected.
+      # RAISING VMAX ALONE DOES NOT RAISE THE VOCABULARY: minting is rate-limited, not threshold-limited. One
+      # grow event every GROW_EVERY=100 steps, GROW_BURST=12 per event, ~5.7k steps/epoch = ~540 tokens per
+      # epoch, so 8192 from a 512 seed needs ~14 epochs. Under EPOCHS=8, vmax8k reached only 4823.
+      #
+      # FOUR RUNS, AS A 2x2 (held-out bits/byte, and the dead fraction from the [vocab] line):
+      #                    EPOCHS=8              EPOCHS=18
+      #     VMAX=4096    2.140  ( 0% dead)     3.250  ( 0% dead)      +1.110 for the extra 10 epochs
+      #     VMAX=8192    3.561  (41% dead)     4.383  ( 0% dead)      +0.822
+      #                 +1.421 for 2x VMAX    +1.133
+      #
+      # DEAD ROWS ARE NOT WHAT DRIVES THIS, and the hypothesis that they were is falsified here rather than
+      # quietly dropped. vmax8k@18ep filled its vocabulary COMPLETELY -- 8192/8192, 0% never minted, 1.3%
+      # ordinary turnover -- and is the WORST of the four: 4.383 b/B against a uniform anchor of 3.305, i.e.
+      # about 4 bits/token WORSE than assigning equal probability to every token. 19% real words. It is the
+      # only run of any arm with a POSITIVE train/held-out gap (+0.267; every other run underfits), and the
+      # only one whose held-out curve is still RISING at the end (+0.194 b/B per 10k steps through the second
+      # half). Its loss bottomed at step 3935 and rose for the remaining 82656 steps. The dead-row instrument
+      # earned its place by ruling itself out; do not read the [vocab] line as an explanation of a bad number.
+      #
+      # TWO CELLS ARE UNCONTAMINATED (both vocabularies completely filled):
+      #     vmax4k@8  vs vmax4k@18    +1.110    differ in EPOCHS -- and therefore in the LR schedule
+      #     vmax4k@18 vs vmax8k@18    +1.133    differ in VMAX ONLY
+      # The second is the clean one: at 18 epochs, doubling a FULL vocabulary from 4096 to 8192 costs +1.133
+      # b/B with no dead rows on either side. The first is confounded until LR_EPOCHS pins the schedule --
+      # EPOCHS moved the LR 11x between these two runs (see the LR_EPOCHS block in self_organize.py).
+      #
+      # SO THE NEXT GRID FIXES THE SCHEDULE AND VARIES ONE THING AT A TIME:
+      #     GRID_CKPT=0 GRID_DIR=runs/vmax_lr EPOCHS=18 LR_EPOCHS=8 bash longrun.sh grid "vmax4k vmax8k"
+      # vmax4k@18/LR8 against vmax4k@8 (2.140) isolates run length at a fixed schedule; vmax4k@18/LR8 against
+      # vmax8k@18/LR8 isolates VMAX at fixed length AND fixed schedule.
+      #
+      # These arms carry NO growth and NO schedule knobs -- pass EPOCHS/LR_EPOCHS on the command line, so the
+      # arm name never implies a schedule it does not set. self_organize.py predicts a minting shortfall in a
+      # [config] COUPLING line BEFORE training starts; its estimate is measured at the seed vocabulary and runs
+      # ~25% optimistic on this data, so treat it as a floor. Read the [vocab] line before the held-out number:
+      # its first gap (width vs minted) can invalidate a comparison, the second (minted vs used) is ordinary
+      # turnover and ran 1-2% on every filled run here.
       vmax8k)    echo "VMAX=8192" ;;
       vmax4k)    echo "VMAX=4096" ;;
       # --- THE PILOT BUNDLE. Every arm here is read against `base`, and the three tokenizer arms are SEPARATED
