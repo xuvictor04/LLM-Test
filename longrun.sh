@@ -85,6 +85,14 @@ _pilot_corpus() {
 _flags_for() {
   case "$1" in
     base)      echo "" ;;
+    # RETOK OFF, ON A GROWING VOCABULARY -- not the same experiment as frozen_nr. There the vocabulary was
+    # fixed, so re-segmentation was a provable no-op and turning it off cost nothing. Here minting runs the
+    # whole way, so the question is real: does re-segmenting MID-EPOCH earn its side effects?
+    #   RETOK_EVERY=0 does NOT stop re-segmentation. _resample() rebuilds the stream at every epoch boundary
+    # and calls _retok itself, firing the same lookahead flush and fabric-growth blackout. So this arm moves
+    # re-segmentation from every 3000 steps to once per ~6000-step epoch; newly minted tokens still reach the
+    # stream, just up to one epoch later than they would have.
+    base_nr)   echo "RETOK_EVERY=0" ;;
     vote)      echo "CHAIN_VOTE=1" ;;
     socloop)   echo "CHAIN_ROUTE=soc CHAIN_VOTE=1" ;;
     socloop_w) echo "CHAIN_ROUTE=soc CHAIN_VOTE=1 ROUTE_REGION_W=0 FAB_KEY_NORM=1" ;;
