@@ -3424,6 +3424,7 @@ def main():
             print(f"     computed on the current stream and cannot see what was known before this run started.")
         return now
     _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
+    _retok_noop = [0]; _retok_skipped = [False]           # retoks refused because the vocabulary had not moved
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
     # CADENCES BELOW THE BATCH EARLY-OUT MUST BE THRESHOLDS, NOT MODULO. Everything after the
@@ -4791,7 +4792,28 @@ def main():
         if (CKPT_EVERY and _due("ckpt", CKPT_EVERY)) or _ckpt_req["on"]:   # periodic OR on-demand (kill -USR1) save
             _why = "SIGUSR1" if _ckpt_req["on"] else f"every {CKPT_EVERY}"; _ckpt_req["on"] = False
             _save_ckpt(stream, quiet=True); print(f"  [checkpoint @ {step} ({_why}) -> {_env('SAVE_CKPT', '')}]"); model.train()
-        if ONLINE and _due("retok", RETOK_EVERY):          # refresh the token stream with the grown vocab; remap position by byte
+        # === A RETOK ON AN UNCHANGED VOCABULARY IS PURE DAMAGE ================================================
+        # Re-segmenting exists because MINTING moved the segmentation. If nothing has been minted since the last
+        # retok, greedy longest-match over the same vocabulary produces a byte-identical stream -- so the work
+        # is a no-op, but the SIDE EFFECTS are not: the lookahead queue is discarded, the held-out token caches
+        # are dropped, and fabric growth is blacked out for FAB_COOLDOWN steps. All cost, no content change.
+        #   MEASURED, and it is the largest single effect in this project's records. Two arms with IDENTICAL
+        # vocabularies (512 minted, 441 used, 0% dead), differing only in whether retok fires:
+        #     frozen     RETOK_EVERY=3000   held-out 4.364   26% real words   best at step 2000, then +1.533
+        #     frozen_nr  RETOK_EVERY=0      held-out 2.175   94% real words   best IS final
+        # 23 retoks fired in the first, 22 of them adding zero tokens. That is 2.189 b/B and 68 points of word
+        # quality destroyed by rebuilding a stream that was already correct.
+        #   The guard is not a coupling of two knobs: RETOK_EVERY still controls the cadence whenever the
+        # vocabulary is actually moving. It refuses only the case where re-segmentation provably cannot change
+        # anything -- which includes every run AFTER minting saturates VMAX, not just the frozen arms.
+        if ONLINE and _due("retok", RETOK_EVERY) and USE_TOK and TOK.vocab_size == _last_vsz:
+            if not _retok_skipped[0]:
+                _retok_skipped[0] = True
+                print(f"  [tokenizer @ {step}] retok SKIPPED: no token minted since the last one, so the stream "
+                      f"would be rebuilt identical. Suppressed from here until the vocabulary moves again -- "
+                      f"the rebuild is free to skip, the lookahead flush and fabric-growth blackout are not.")
+            _retok_noop[0] += 1
+        elif ONLINE and _due("retok", RETOK_EVERY):
             cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
             if RETOK_TAIL:
                 # TAIL-ONLY RETOK: re-segment just the UNCONSUMED remainder. The old code re-tokenized the whole
@@ -4865,6 +4887,10 @@ def main():
               f"{_prob[0]} kept, {_prob[1]} un-merged, {len(TOK.prov)} still on probation at the end "
               f"({100*_prob[1]/max(1,sum(_prob)):.0f}% of those judged failed). A retired token keeps its id "
               f"and its row -- only the match table drops it -- so its text re-segments to its parts.")
+    if USE_TOK and _retok_noop[0]:
+        print(f"[vocab] {_retok_noop[0]} retok(s) skipped because no token had been minted since the previous "
+              f"one -- the stream would have been rebuilt byte-identical while discarding the lookahead queue "
+              f"and blacking out fabric growth each time.")
     if USE_TOK and TOK_MINT_PMIN > 0:
         # NAMES ARE NOT FREE IN A 3000-LINE FUNCTION. This block first used _hp/_hb, and _hb is the held-out
         # probe dict carried in from a RESUME (assigned ~line 3121 and read by report_holdout far below). The
