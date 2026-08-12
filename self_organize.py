@@ -3905,6 +3905,20 @@ def main():
         # The step count is deliberately the optimistic one: it is measured at the CURRENT vocabulary, and the
         # stream shortens as tokens are minted, so the real run has FEWER steps than this. A shortfall reported
         # here is therefore a floor on the real shortfall.
+        # A FROZEN VOCABULARY IS THE CERTAIN CASE, NOT THE EXEMPT ONE. This was guarded `not TOK_MINT_UNTIL`,
+        # so the prediction was skipped for exactly the arms whose shortfall is known EXACTLY in advance:
+        # minting stops at a fixed step, so the final vocabulary is the seed plus whatever that step buys, and
+        # nothing after can change it. The frozen arm ran at VMAX=2048 with 512 tokens -- 75% of the softmax
+        # never a target -- and this block, written to catch precisely that before the GPU time, printed
+        # nothing. It scored 6.114 b/B against base's 2.239.
+        if ONLINE and TOK_MINT_UNTIL:
+            _fz = VMAX - TOK.vocab_size
+            if _fz > 0:
+                _cpl.append(f"TOK_MINT_UNTIL={TOK_MINT_UNTIL} freezes the vocabulary at {TOK.vocab_size} "
+                            f"while VMAX={VMAX} sizes the softmax, so {_fz} rows ({_fz / max(1, VMAX) * 100:.0f}% "
+                            f"of the width) can NEVER be a target: they hold their initialisation in the loss "
+                            f"denominator for the whole run. Set VMAX={TOK.vocab_size} to measure a frozen "
+                            f"vocabulary rather than a mostly-dead softmax.")
         if ONLINE and not TOK_MINT_UNTIL:
             _gb        = _i("GROW_BURST", 6)
             _ep_steps  = max(1, len(stream) // WIN)              # steps in ONE epoch at the current vocabulary

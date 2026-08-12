@@ -134,21 +134,30 @@ _flags_for() {
     # ~25% optimistic on this data, so treat it as a floor. Read the [vocab] line before the held-out number:
     # its first gap (width vs minted) can invalidate a comparison, the second (minted vs used) is ordinary
     # turnover and ran 1-2% on every filled run here.
-    vmax8k)    echo "VMAX=8192" ;;
+    # Filling 8192 from a 512 seed needs ~7680 mints, ~14 epochs at the measured ~540/epoch, so at the grid's
+    # default EPOCHS=8 this arm ran 4823/8192 = 41% dead and scored 3.561. Arm flags come LAST in the env
+    # line, so this EPOCHS wins over the grid's. EPOCHS is the right lever, not GROW_BURST (see above).
+    vmax8k)    echo "VMAX=8192 EPOCHS=18" ;;
     vmax4k)    echo "VMAX=4096" ;;
     # --- THE PILOT BUNDLE. Every arm here is read against `base`, and the three tokenizer arms are SEPARATED
     # on purpose: the last round ran TOK_MINT_UNTIL=1 and RETOK_EVERY=0 together, so when the result came back
     # 1.4 b/B worse there was no way to tell which did it. They are not the same idea. TOK_MINT_UNTIL stops
     # MINTING; RETOK_EVERY stops RE-SEGMENTING, and a re-segmentation that produces an identical stream is
     # still not a no-op -- it clears the lookahead queue and blacks out fabric growth for FAB_COOLDOWN steps.
-    frozen)    echo "TOK_MINT_UNTIL=1" ;;                      # vocabulary frozen at the seed; retok still fires
+    # VMAX MUST MATCH THE VOCABULARY THE ARM WILL ACTUALLY HAVE. Freezing minting does not narrow the
+    # softmax: the grid hardcodes VMAX=2048, so TOK_MINT_UNTIL=1 alone leaves 1536 rows (75%) that are never
+    # a target, sitting in the cross-entropy denominator at their initialisation for the whole run.
+    # MEASURED, and not subtly: that arm scored 6.114 b/B with 4% real words, against 2.239 and 75% for base
+    # on the same corpus and the same commit. It was not measuring a frozen tokenizer -- it was measuring the
+    # dead-row failure at the largest dose recorded here. Pinning VMAX makes the arm mean what its name says.
+    frozen)    echo "TOK_MINT_UNTIL=1 VMAX=512" ;;             # vocabulary frozen at the seed; retok still fires
     # `frozen` freezes at SEED_VOCAB=512, so it conflates two different ideas: a FIXED vocabulary, and a TINY
     # one. At 512 the model has almost no whole-word units and must spell everything -- measured 3.07 tokens
     # per generated word against base's 2.52. These freeze at a seed the size base ENDS at, so the comparison
     # is fixed-vs-growing rather than small-vs-large.
-    frozen2k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=2048" ;;
-    frozen1k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=1024" ;;
-    frozen_nr) echo "TOK_MINT_UNTIL=1 RETOK_EVERY=0" ;;        # ...and re-segmentation off too
+    frozen2k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=2048" ;;             # already equals VMAX=2048: 0% dead
+    frozen1k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=1024 VMAX=1024" ;;   # was 50% dead without the VMAX
+    frozen_nr) echo "TOK_MINT_UNTIL=1 RETOK_EVERY=0 VMAX=512" ;;   # ...and re-segmentation off too
     # --- REGULARISATION. Every run so far reports UNDERFIT with a NEGATIVE gap (held-out scoring better than
     # train), so the expectation is that these cost rather than help. Worth measuring anyway: DROPOUT also
     # perturbs the hidden state the router reads, so it is an expert-dynamics lever, not only a generalisation one.
@@ -186,7 +195,9 @@ _flags_for() {
     # --- FABRIC SATURATION. pilot_gru_8 turned upward at ~step 36k, which is when the population reached
     # 100% of FAB_NMAX, the ramp latched off, and culling-under-capacity-pressure started.
     bigpop)    echo "FAB_NMAX=16384" ;;                    # does the turn track hitting the CAP?
-    freeze6k)  echo "TOK_MINT_UNTIL=6000" ;;
+    # Freezing at step 6000 buys only ~570-720 mints on top of the 512 seed, landing near 1100 of 2048 --
+    # about 45% dead. VMAX=1024 binds before the freeze does, so width == vocabulary.
+    freeze6k)  echo "TOK_MINT_UNTIL=6000 VMAX=1024" ;;
     freeze20k) echo "TOK_MINT_UNTIL=20000" ;;
     nogrow)    echo "FAB_GROW=0 FAB_N0=1024" ;;
     nogrow_s)  echo "SOCIETY=1 FAB_GROW=0 FAB_N0=1024" ;;
@@ -207,7 +218,11 @@ _flags_for() {
     wt_bal)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000" ;;
     wt_div)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 DIV_W=0.05" ;;
     kitchen)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000 DIV_W=0.05 ROUTE_T=0.3" ;;
-    *)         echo "" ;;
+    # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
+    # under the misspelled arm's log name -- a result filed against an experiment that never happened, which is
+    # the most expensive quiet failure available here. base is a real arm at the top of this case; anything
+    # that reaches the wildcard is a mistake, and the callers refuse it.
+    *)         echo "__UNKNOWN_ARM__" ;;
   esac
 }
 
@@ -461,6 +476,7 @@ grid)
       echo "== $ARM: previous attempt was incomplete -> kept as $LOG.partial-$_pn"
     fi
     FLAGS="$(_flags_for "$ARM")"
+    case "$FLAGS" in __UNKNOWN_ARM__) echo "!! unknown arm '$ARM' -- not in _flags_for. Nothing run."; exit 1 ;; esac
     echo; echo "################  arm: $ARM  ${FLAGS:-(defaults)}  ################"
     _t_start=$(date +%s)
     # set +e around the arm: one crash must not end the grid. SAVE_CKPT is reserved, so a retry cannot stomp a
@@ -690,6 +706,7 @@ smoke)
     # `compose` was missing TOK_MINT_NOVEL=0. A smoke test that greenlights a configuration the grid does not
     # run is worse than no smoke test, because it reports confidence about something nobody will execute.
     SX=$(_flags_for "$ARM")
+    case "$SX" in __UNKNOWN_ARM__) echo "!! unknown arm '$ARM' -- not in _flags_for. Nothing run."; exit 1 ;; esac
     rm -f "$SMK/$ARM.dyntok.json"
     set +e
     env DATA_MODE=real DATA_DIR="${PILOT_DIR:-data_pilot}" DOMAINS=eng DISK_STREAM=1 \
