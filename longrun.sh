@@ -150,14 +150,17 @@ _flags_for() {
     # MEASURED, and not subtly: that arm scored 6.114 b/B with 4% real words, against 2.239 and 75% for base
     # on the same corpus and the same commit. It was not measuring a frozen tokenizer -- it was measuring the
     # dead-row failure at the largest dose recorded here. Pinning VMAX makes the arm mean what its name says.
-    frozen)    echo "TOK_MINT_UNTIL=1 VMAX=512" ;;             # vocabulary frozen at the seed; retok still fires
+    # BOTH ENDS PINNED, not just VMAX. Setting VMAX=512 alone assumes SEED_VOCAB is 512, which is only the
+    # self_organize default -- the smoke harness sets 256, and the arm was straight back to 50% dead rows.
+    # An arm has to state the whole configuration it tests, or a harness default silently redefines it.
+    frozen)    echo "TOK_MINT_UNTIL=1 SEED_VOCAB=512 VMAX=512" ;;   # frozen at the seed; retok still fires
     # `frozen` freezes at SEED_VOCAB=512, so it conflates two different ideas: a FIXED vocabulary, and a TINY
     # one. At 512 the model has almost no whole-word units and must spell everything -- measured 3.07 tokens
     # per generated word against base's 2.52. These freeze at a seed the size base ENDS at, so the comparison
     # is fixed-vs-growing rather than small-vs-large.
-    frozen2k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=2048" ;;             # already equals VMAX=2048: 0% dead
+    frozen2k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=2048 VMAX=2048" ;;   # VMAX stated, not inherited
     frozen1k)  echo "TOK_MINT_UNTIL=1 SEED_VOCAB=1024 VMAX=1024" ;;   # was 50% dead without the VMAX
-    frozen_nr) echo "TOK_MINT_UNTIL=1 RETOK_EVERY=0 VMAX=512" ;;   # ...and re-segmentation off too
+    frozen_nr) echo "TOK_MINT_UNTIL=1 SEED_VOCAB=512 VMAX=512 RETOK_EVERY=0" ;;   # ...and re-segmentation off
     # --- REGULARISATION. Every run so far reports UNDERFIT with a NEGATIVE gap (held-out scoring better than
     # train), so the expectation is that these cost rather than help. Worth measuring anyway: DROPOUT also
     # perturbs the hidden state the router reads, so it is an expert-dynamics lever, not only a generalisation one.
