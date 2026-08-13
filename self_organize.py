@@ -4806,52 +4806,60 @@ def main():
         #   The guard is not a coupling of two knobs: RETOK_EVERY still controls the cadence whenever the
         # vocabulary is actually moving. It refuses only the case where re-segmentation provably cannot change
         # anything -- which includes every run AFTER minting saturates VMAX, not just the frozen arms.
-        if ONLINE and _due("retok", RETOK_EVERY) and USE_TOK and TOK.vocab_size == _last_vsz:
-            if not _retok_skipped[0]:
-                _retok_skipped[0] = True
-                print(f"  [tokenizer @ {step}] retok SKIPPED: no token minted since the last one, so the stream "
-                      f"would be rebuilt identical. Suppressed from here until the vocabulary moves again -- "
-                      f"the rebuild is free to skip, the lookahead flush and fabric-growth blackout are not.")
-            _retok_noop[0] += 1
-        elif ONLINE and _due("retok", RETOK_EVERY):
-            cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
-            if RETOK_TAIL:
-                # TAIL-ONLY RETOK: re-segment just the UNCONSUMED remainder. The old code re-tokenized the whole
-                # byte_stream every RETOK_EVERY steps, so the cost scaled with STREAM_LEN and taxed throughput ~x0.77
-                # at a 10MB stream and ~x0.25 at 100MB -- for work that is pure waste, since the consumed prefix is
-                # never read again this epoch. Safe because DynamicTokenizer minting is APPEND-ONLY: existing ids keep
-                # their meaning, so a stream whose prefix uses the older vocab still decodes correctly (which is what
-                # _save_ckpt's source.bin needs). `i` is unchanged because the prefix is preserved verbatim.
-                _ti, _tb, _tl = _retok(byte_stream, byte_labels, cur_byte)
-                stream = stream[:i] + _ti; tok_bs = tok_bs[:i] + _tb; labels = labels[:i] + _tl
+        # ONE _due CALL. _due is not a predicate -- it RECORDS the step and returns True, so asking it twice in
+        # one if/elif CONSUMES the event: the first call fired, the vocabulary test failed, and the second call
+        # then returned False because _fired had just been set. The retok never ran; _last_vsz is written only
+        # inside the retok body, so it stayed at the seed value and the skip branch could never fire either.
+        # BOTH paths were dead. Three 18-epoch runs trained with no mid-epoch re-segmentation at all and said
+        # nothing about it -- and their held-out CURVE was then measured against a _VALT cache that only a retok
+        # clears, so it drifted 1.6 b/B from the end-of-run check.
+        if ONLINE and _due("retok", RETOK_EVERY):
+            if USE_TOK and TOK.vocab_size == _last_vsz:
+                if not _retok_skipped[0]:
+                    _retok_skipped[0] = True
+                    print(f"  [tokenizer @ {step}] retok SKIPPED: no token minted since the last one, so the stream "
+                          f"would be rebuilt identical. Suppressed from here until the vocabulary moves again -- "
+                          f"the rebuild is free to skip, the lookahead flush and fabric-growth blackout are not.")
+                _retok_noop[0] += 1
             else:
-                stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
-            _sigq = []                                       # re-tokenized -> window boundaries moved, queue is stale
-            # THE HELD-OUT CURVE'S CACHE MUST DIE WITH THE SEGMENTATION. _VALT tokenises the validation text ONCE
-            # and never invalidated it, so after the first mint the curve compared a model trained on the CURRENT
-            # segmentation against validation text frozen in an OLD one -- and the mismatch grew with every mint.
-            # That is not a comparison across time; the reference moves out from under it.
-            # It explains the shape exactly: the curve degrades over the MINTING window (steps ~3000-21000) and
-            # goes flat the moment minting stops (vocab caps at 21056, +0 tokens after), which is the behaviour of
-            # a drifting yardstick, not of a model that suddenly stops getting worse. It also explains why "best"
-            # lands at ~6000 in every arm at every seed: that is the last sample where the cache still matched.
-            _VALT.clear(); _BL.clear()
-            if SIG_SPACE == "tokens":                        # the encoder reads the TOKEN stream, which was just rebuilt
-                ENC_SEQ = stream; set_enc_tensor(ENC_SEQ)    #   -> re-point it, or it trains on a stale segmentation
-            if FABRIC and fabgrow is not None: fabgrow.note_shift(step)   # the loss jump after a retok is OURS, not a shift
-            # WHAT IT ACTUALLY MINTED, not just how many. The count says the vocabulary grew; it cannot say
-            # whether the growth was worth having, and a run that ends up spelling in fragments looks identical
-            # here to one minting whole words. A sample of the newest ids costs nothing and makes the DRIFT
-            # visible while the run is still going -- early cohorts are short and word-like, and the question is
-            # what the late ones look like. `vocab.py` reads the whole list afterwards from TOKENIZER_PATH.
-            _new = []
-            for _t in range(max(256, _last_vsz), TOK.vocab_size):
-                _s = TOK.id2bytes[_t].decode("utf-8", "replace")
-                _new.append("·" + _s[1:] if _s.startswith(" ") else _s)
-            print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; "
-                  f"+{TOK.vocab_size - _last_vsz} since last retok)"
-                  + (f" newest: {'  '.join(repr(_x) for _x in _new[-8:])}" if _new else ""))
-            _last_vsz = TOK.vocab_size
+                cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
+                if RETOK_TAIL:
+                    # TAIL-ONLY RETOK: re-segment just the UNCONSUMED remainder. The old code re-tokenized the whole
+                    # byte_stream every RETOK_EVERY steps, so the cost scaled with STREAM_LEN and taxed throughput ~x0.77
+                    # at a 10MB stream and ~x0.25 at 100MB -- for work that is pure waste, since the consumed prefix is
+                    # never read again this epoch. Safe because DynamicTokenizer minting is APPEND-ONLY: existing ids keep
+                    # their meaning, so a stream whose prefix uses the older vocab still decodes correctly (which is what
+                    # _save_ckpt's source.bin needs). `i` is unchanged because the prefix is preserved verbatim.
+                    _ti, _tb, _tl = _retok(byte_stream, byte_labels, cur_byte)
+                    stream = stream[:i] + _ti; tok_bs = tok_bs[:i] + _tb; labels = labels[:i] + _tl
+                else:
+                    stream, tok_bs, labels = _retok(byte_stream, byte_labels); i = _bisect.bisect_left(tok_bs, cur_byte)
+                _sigq = []                                       # re-tokenized -> window boundaries moved, queue is stale
+                # THE HELD-OUT CURVE'S CACHE MUST DIE WITH THE SEGMENTATION. _VALT tokenises the validation text ONCE
+                # and never invalidated it, so after the first mint the curve compared a model trained on the CURRENT
+                # segmentation against validation text frozen in an OLD one -- and the mismatch grew with every mint.
+                # That is not a comparison across time; the reference moves out from under it.
+                # It explains the shape exactly: the curve degrades over the MINTING window (steps ~3000-21000) and
+                # goes flat the moment minting stops (vocab caps at 21056, +0 tokens after), which is the behaviour of
+                # a drifting yardstick, not of a model that suddenly stops getting worse. It also explains why "best"
+                # lands at ~6000 in every arm at every seed: that is the last sample where the cache still matched.
+                _VALT.clear(); _BL.clear()
+                if SIG_SPACE == "tokens":                        # the encoder reads the TOKEN stream, which was just rebuilt
+                    ENC_SEQ = stream; set_enc_tensor(ENC_SEQ)    #   -> re-point it, or it trains on a stale segmentation
+                if FABRIC and fabgrow is not None: fabgrow.note_shift(step)   # the loss jump after a retok is OURS, not a shift
+                # WHAT IT ACTUALLY MINTED, not just how many. The count says the vocabulary grew; it cannot say
+                # whether the growth was worth having, and a run that ends up spelling in fragments looks identical
+                # here to one minting whole words. A sample of the newest ids costs nothing and makes the DRIFT
+                # visible while the run is still going -- early cohorts are short and word-like, and the question is
+                # what the late ones look like. `vocab.py` reads the whole list afterwards from TOKENIZER_PATH.
+                _new = []
+                for _t in range(max(256, _last_vsz), TOK.vocab_size):
+                    _s = TOK.id2bytes[_t].decode("utf-8", "replace")
+                    _new.append("·" + _s[1:] if _s.startswith(" ") else _s)
+                print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; "
+                      f"+{TOK.vocab_size - _last_vsz} since last retok)"
+                      + (f" newest: {'  '.join(repr(_x) for _x in _new[-8:])}" if _new else ""))
+                _last_vsz = TOK.vocab_size
 
     if bool(_i("BENCH", 0)):                               # THROUGHPUT BENCH: stop after the training loop. The eval
         _el = _time.time() - _t_start                      #   battery (final re-tokenization, memorization check,
