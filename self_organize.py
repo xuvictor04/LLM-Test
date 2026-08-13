@@ -2210,9 +2210,19 @@ def _load_enc(enc, sd):
         print(f"  [resume] encoder embedding {w.size(0)} -> {ENC_V} rows (ids >= {ENC_V} were never indexable)")
     enc.load_state_dict(sd)
 
-FROZEN = torch.randn(V, D, device=DEV) * (D ** -0.5)       # (testing-only byte baselines + memory retrieval key)
+# ALLOCATED LAZILY, BECAUSE ITS SIZE DEPENDS ON VMAX AND ITS EXISTENCE DID NOT. This was an unconditional
+# torch.randn(V, D) at module scope, so it drew V*D numbers from the global generator before anything else was
+# built -- and V is VMAX. Changing VMAX therefore SHIFTED THE RNG STREAM for every module constructed after it,
+# including the ones that are not VMAX-shaped at all: the signature encoder and the fabric's routing centroids.
+# Three runs "differing only in VMAX" were three different random initialisations of the whole system.
+# It is also dead weight by default: key_frozen is reached only when KEY_SRC="frozen", and the default is
+# "model", so at VMAX=8192 this was an 8192xD tensor allocated on device and never read.
+_FROZEN = [None]
+def _frozen_tbl():
+    if _FROZEN[0] is None: _FROZEN[0] = torch.randn(V, D, device=DEV) * (D ** -0.5)
+    return _FROZEN[0]
 def key_frozen(x):
-    e = FROZEN[x]; cs = e.cumsum(1); k = cs.clone(); k[:, KW:] = cs[:, KW:] - cs[:, :-KW]
+    e = _frozen_tbl()[x]; cs = e.cumsum(1); k = cs.clone(); k[:, KW:] = cs[:, KW:] - cs[:, :-KW]
     den = torch.arange(1, x.size(1) + 1, device=DEV).clamp(max=KW).view(1, -1, 1); return k / den
 
 # ---- MEMORY RETRIEVAL KEY (product path = the model's OWN representation, unfrozen + re-keyed) ----
@@ -2959,6 +2969,14 @@ def main():
         w = list(ENC_SEQ[b:b + WIN])
         return w if len(w) == WIN else (w + [0] * (WIN - len(w)))
     route_at = torch.full(((len(ENC_SEQ) if ONLINE else len(stream)) + WIN + 2,), -1, dtype=torch.int16) if EXPERTS else None
+    # RE-SEED SO THE INITIALISATION IS INDEPENDENT OF VMAX. Everything above this line that draws from the
+    # global generator does so in a VMAX-dependent amount (the embedding and head are legitimately V-sized),
+    # which shifted the stream for every module built afterwards. Two runs meant to differ only in VMAX then
+    # differed in every weight in the signature encoder, the fabric and the world model as well. Re-seeding
+    # here makes those modules identical across VMAX, so the comparison measures the vocabulary width and not
+    # a fresh draw. It does NOT make the system insensitive -- see the note at ground_update, where a 0.05%
+    # perturbation moved a run by 1.594 b/B -- it removes one large, unintended perturbation.
+    torch.manual_seed(_i("SEED", 0))
     model = build_lm().to(DEV); enc = SigEncoder(D, SIG_D).to(DEV)
     recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
     # WORLD MODEL (first brick, gated off by default): reads OBSERVATION EMBEDDINGS (the lowest layer = the point where
@@ -4679,7 +4697,12 @@ def main():
         # === JUDGE WHAT PROBATION HAS SEEN ENOUGH OF ==========================================================
         # On the grow cadence, because that is when the vocabulary is already being touched and the cost is one
         # host copy of the counter. A token is judged ONCE: kept (probation ends) or retired (un-merged).
-        if ONLINE and TOK_PROBATION > 0 and TOK.prov and _due("grow", GROW_EVERY):
+        # NOT _due("grow") -- THE SAME MISTAKE THAT KILLED RETOK. _due records the step and returns True, so
+        # asking it here CONSUMES the grow event and the minting block below never fires: the vocabulary stops
+        # filling VMAX and the run gets dead rows, the worst failure this system has. It is inert today only
+        # because TOK_PROBATION defaults to 0 and short-circuits before _due is reached -- i.e. it is armed and
+        # waiting for the first probation run. Probation judges on its own cadence instead.
+        if ONLINE and TOK_PROBATION > 0 and TOK.prov and _due("probation", GROW_EVERY):
             _sv = _tok_seen.tolist()
             # A token is judged when it has either EARNED its slot or run out of time to. Judging only on
             # reaching the threshold can never retire anything -- the ones that fail are precisely the ones
