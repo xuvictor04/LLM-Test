@@ -265,7 +265,7 @@ _SPEC = {
     "SIG_DIM": ("i", 512),                                # encoder
     "SIG_LOOK": ("i", None),                              # DEFAULT IS COMPUTED: ENC_EVERY_IDLE
     "SIG_MODE": ("env", "learned"),                       # encoder
-    "SIG_PROJ_BPT": ("f", 2.4),                           # encoder
+    "SIG_PROJ_BPT": ("f", 0.0),                           # encoder -- 0 = estimate from VMAX
     "SIG_SPACE": ("env", "bytes"),                        # encoder
     "SIG_WIN": ("i", 0),                                  # encoder
     # --- world: world model / forward dynamics -----------------------------------------------------
@@ -3634,7 +3634,15 @@ def main():
         # PROJECTED, not just current. The width is fixed for the run but the STRIDE grows as the vocabulary
         # compresses better, so a window that covers 100% at step 0 covers less every hour. Saying only the
         # starting number is how "covers 100%" gets believed for a run that ends at 60%.
-        _bpt_end = _f("SIG_PROJ_BPT", 2.4)                  # rough end-of-run bytes/token at VMAX~2048 byte-BPE
+        # PROJECT FROM VMAX, NOT FROM A CONSTANT. This was pinned at 2.4 -- the end-of-run bytes/token for a
+        # VMAX~2048 byte-BPE -- and used for EVERY vocabulary size, so the projected coverage came out at
+        # 614/614 = 100% whatever VMAX was and the warning clause below was suppressed. Three 18-epoch runs
+        # printed "covers 100% now" and nothing else while actually ending at 82%, 70% and 61% of the loop
+        # window: the signature encoder was labelling material it never read, and the line said it was fine.
+        #   0.5*log2(V) - 2.59 fits the three measured points to within 0.02 B/token (2048 -> 2.91, 4096 ->
+        # 3.41, 8192 -> 3.93). It is an estimate from three runs on one corpus, not a law; SIG_PROJ_BPT still
+        # overrides it, and the number it produces only affects this WARNING, never the run.
+        _bpt_end = _f("SIG_PROJ_BPT", 0.0) or (0.5 * math.log2(max(256, V)) - 2.59 if USE_TOK else 1.0)
         _stride_end = WIN * max(1.0, _bpt_end); _cov_end = min(1.0, _sigw / _stride_end)
         print(f"[signature] space=bytes | window {_sigw} B (FIXED for the run) | loop stride now {_stride_b:.0f} B "
               f"({WIN} tok x {_bpt:.2f}) -> covers {_cov*100:.0f}% now"
