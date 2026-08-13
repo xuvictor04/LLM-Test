@@ -2976,8 +2976,15 @@ def main():
     # here makes those modules identical across VMAX, so the comparison measures the vocabulary width and not
     # a fresh draw. It does NOT make the system insensitive -- see the note at ground_update, where a 0.05%
     # perturbation moved a run by 1.594 b/B -- it removes one large, unintended perturbation.
-    torch.manual_seed(_i("SEED", 0))
-    model = build_lm().to(DEV); enc = SigEncoder(D, SIG_D).to(DEV)
+    # A SEED PER MODULE, so no module's initialisation depends on how much RNG another one consumed. Seeding
+    # once before this line was not enough: build_lm() draws V*d + d*V + V numbers for the embedding and head,
+    # and V is VMAX, so the encoder built on the SAME LINE still moved with the vocabulary size. Measured after
+    # that first attempt, encoder step-0 loss was still 7.20 at VMAX=2048 and 6.93 at 4096 -- the encoder is
+    # not VMAX-shaped and must not move at all. Offsets are arbitrary but fixed; what matters is that each
+    # module starts from a stream that nothing before it can shift.
+    _sd = _i("SEED", 0)
+    torch.manual_seed(_sd);       model = build_lm().to(DEV)
+    torch.manual_seed(_sd + 101); enc = SigEncoder(D, SIG_D).to(DEV)
     recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
     # WORLD MODEL (first brick, gated off by default): reads OBSERVATION EMBEDDINGS (the lowest layer = the point where
     # new SENSES plug in) and learns to predict how that observed world EVOLVES in latent space (physics-like, modality-agnostic).
@@ -2991,6 +2998,7 @@ def main():
     #   have told us what the world model is worth was the one that could not run.
     WORLD_FEEDBACK = bool(_i("WORLD_FEEDBACK", 1))       # THE LINK THAT MAKES IT MATTER: wire the world model's forecast BACK to
     #   condition the base LM -- generation is now informed by where the world model predicts the world is going, not a side-head.
+    torch.manual_seed(_sd + 202)                           # see the per-module seeding note above
     world_enc = WorldEncoder(D, WLAT, WHID).to(DEV) if WORLD_MODEL else None
     world_fwd = DynamicsPopulation(WLAT, _i("WORLD_N0", 3), _i("WORLD_NMAX", 6), WHID, _i("WORLD_ROUTE", 24)).to(DEV) if WORLD_MODEL else None  # SEPARATED: a routed society of dynamics predictors
     world_proj = nn.Linear(WLAT, D).to(DEV) if (WORLD_MODEL and WORLD_FEEDBACK) else None   # forecast -> hidden-state conditioning
@@ -3008,6 +3016,7 @@ def main():
         model.encode = _encode_wf
     _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
     os.environ.setdefault("FAB_NMAX", str(_i("FAB_NMAX", 4096)))   # Fabric preallocates from it
+    torch.manual_seed(_sd + 303)                           # see the per-module seeding note above
     fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _f("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0 if SOCIETY else 2),
                  bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
@@ -3441,7 +3450,7 @@ def main():
             print(f"  >> this is the ONLY number that spans the run boundary. Every other retention figure is")
             print(f"     computed on the current stream and cannot see what was known before this run started.")
         return now
-    _last_vsz = TOK.vocab_size if USE_TOK else 256         # for the live tokenizer-growth report at each retok
+    _last_vsz = (TOK.vocab_size, len(TOK.seq2id)) if USE_TOK else (256, 256)   # vocab AND match table
     _retok_noop = [0]; _retok_skipped = [False]           # retoks refused because the vocabulary had not moved
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
     GROW_EVERY = _i("GROW_EVERY", 200); RETOK_EVERY = _i("RETOK_EVERY", 3000)
@@ -3454,7 +3463,13 @@ def main():
     # BATCH_W=16 run showed: "vocab 512/16384 (minting live; +0 since last retok)", a model sized for 16384 ids
     # running on the 512 the SEED passes had already produced. CKPT_EVERY sat in the same block, so a long run
     # would also never have checkpointed. Elapsed-since-last-fire is phase-independent and resume-safe.
-    _fired = {"grow": step, "retok": step, "ckpt": step, "lmcurve": step}
+    # ONE ENTRY PER CADENCE KEY, and _due indexes it UNGUARDED -- a key that is not here is a KeyError, not a
+    # missed tick. "probation" was added as a cadence and not added here, so the first run with
+    # TOK_PROBATION>0 would have died on KeyError('probation') with no try/except around it. Use a default dict
+    # so a new cadence can never crash a run: an unknown key simply starts un-fired.
+    from collections import defaultdict as _dd
+    _fired = _dd(lambda: step, {"grow": step, "retok": step, "ckpt": step, "lmcurve": step,
+                                "probation": step})
     def _due(_k, _n):                                      # True at most once per _n steps, whatever the batch phase
         if _n <= 0 or step - _fired[_k] < _n: return False
         _fired[_k] = step; return True
@@ -4086,6 +4101,7 @@ def main():
     # run did, so earlier results stay reproducible.
     LR_RESTARTS = bool(_i("LR_RESTARTS", 1))
     _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
+    _lr_prev = [0.0]                                       # last applied rate, to detect a cosine restart
     # === PROBATION: MINT PROVISIONALLY, JUDGE ON EVIDENCE ====================================================
     # TOK_MINT_PMIN decides from co-occurrence BEFORE the model has seen the token once. That is the most
     # statistics alone can do and less than we can do: a token can be minted, TRAINED, and then judged on what
@@ -4254,7 +4270,14 @@ def main():
             else:
                 if not _sigq:                               # refill: one encoder call for the whole frozen run
                     _H = min(_sig_horizon(step, _last_boundary), SIG_LOOK, (len(stream) - 1 - i) // WIN)
-                    if ONLINE: _H = min(_H, RETOK_EVERY - (step - _fired["retok"]))   # stream is rebuilt at retok
+                    # RETOK_EVERY<=0 MEANS THERE IS NO RETOK TO BOUND AGAINST, not "bound to nothing".
+                    # _due returns False on n<=0 BEFORE recording, so _fired["retok"] stays at its -1e9 init
+                    # and this clamp evaluated to about -step: _H floored to 1 and the lookahead batch
+                    # collapsed to ONE window for the entire run. That silently turned SIG_BATCH off in every
+                    # RETOK_EVERY=0 arm -- so frozen_nr differed from frozen in TWO ways, not one, and the
+                    # 4.364-vs-2.175 pair is not the clean single-knob comparison it was read as.
+                    if ONLINE and RETOK_EVERY > 0:
+                        _H = min(_H, RETOK_EVERY - (step - _fired["retok"]))   # stream is rebuilt at retok
                     #   -> stop the lookahead there. Must track the SAME threshold retok now fires on: reading a
                     #   modulo here while retok fires on elapsed-since-last would queue windows built from a stream
                     #   that gets rebuilt underneath them.
@@ -4592,6 +4615,19 @@ def main():
             _greach.append(_gn)
         if LR_SCHED != "none":
             _lrv = _lr_at(step, max(1, _lr_total(step)), _proj_steps(step))   # live wavelength AND live run end
+            # A RESTART IS OUR LOSS JUMP, EXACTLY LIKE A RETOK. note_shift exists for "the jump is OURS, not
+            # the data's" and is called for retok and for the epoch resample -- but not here, and a restart is
+            # the largest self-inflicted jump in a multi-cycle run: the rate goes from the LR_MIN_FRAC floor to
+            # full peak in ONE step (5% -> 100%, a 20x jump, with no per-cycle warmup by design). Unmarked,
+            # PlateauGrowth reads the resulting regression as `unexpected`, fires a growth burst, and can enter
+            # a RECOVER lockout of up to FAB_RECOVER_MAX steps; maybe_deepen resets dp_wait on the same spike.
+            # Detected by the rate RISING, which only a restart does -- the cosine is otherwise monotone down.
+            if _lrv > _lr_prev[0] * 1.5 and FABRIC and fabgrow is not None:
+                fabgrow.note_shift(step)
+                print(f"  [lr @ {step}] cosine restart: {_lr_prev[0]:.2e} -> {_lrv:.2e} "
+                      f"({_lrv / max(1e-12, LR) * 100:.0f}% of peak). Marked as self-inflicted so the fabric "
+                      f"does not read the loss jump as a regression to grow on.")
+            _lr_prev[0] = _lrv
             for _g in om.param_groups: _g["lr"] = _lrv
             for _g in oe.param_groups: _g["lr"] = _lrv
         if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
@@ -4845,7 +4881,13 @@ def main():
         # nothing about it -- and their held-out CURVE was then measured against a _VALT cache that only a retok
         # clears, so it drifted 1.6 b/B from the end-of-run check.
         if ONLINE and _due("retok", RETOK_EVERY):
-            if USE_TOK and TOK.vocab_size == _last_vsz:
+            # vocab_size IS THE WRONG INVARIANT. retire() pops from seq2id and deliberately leaves id2bytes
+            # alone (ids are positional), so a retirement changes the greedy MATCH TABLE -- and therefore the
+            # segmentation -- while vocab_size is unchanged. Skipping on vocab_size alone would defer a retok
+            # that genuinely does move the stream. Stamp the match table itself. Latent today (probation is
+            # the only thing that retires, and it defaults off) but wrong, and wrong in the direction that
+            # produces a stale held-out cache.
+            if USE_TOK and (TOK.vocab_size, len(TOK.seq2id)) == _last_vsz:
                 if not _retok_skipped[0]:
                     _retok_skipped[0] = True
                     print(f"  [tokenizer @ {step}] retok SKIPPED: no token minted since the last one, so the stream "
@@ -4853,6 +4895,8 @@ def main():
                           f"the rebuild is free to skip, the lookahead flush and fabric-growth blackout are not.")
                 _retok_noop[0] += 1
             else:
+                _retok_skipped[0] = False                  # the message promises "until the vocabulary moves
+                #   again"; without this the next quiet stretch is silent and the log stops matching the text
                 cur_byte = tok_bs[i] if i < len(tok_bs) else len(byte_stream)
                 if RETOK_TAIL:
                     # TAIL-ONLY RETOK: re-segment just the UNCONSUMED remainder. The old code re-tokenized the whole
@@ -4883,14 +4927,15 @@ def main():
                 # here to one minting whole words. A sample of the newest ids costs nothing and makes the DRIFT
                 # visible while the run is still going -- early cohorts are short and word-like, and the question is
                 # what the late ones look like. `vocab.py` reads the whole list afterwards from TOKENIZER_PATH.
+                _prev_v = _last_vsz[0]                     # _last_vsz is (vocab_size, len(seq2id)) -- see the guard
                 _new = []
-                for _t in range(max(256, _last_vsz), TOK.vocab_size):
+                for _t in range(max(256, _prev_v), TOK.vocab_size):
                     _s = TOK.id2bytes[_t].decode("utf-8", "replace")
                     _new.append("·" + _s[1:] if _s.startswith(" ") else _s)
                 print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; "
-                      f"+{TOK.vocab_size - _last_vsz} since last retok)"
+                      f"+{TOK.vocab_size - _prev_v} since last retok)"
                       + (f" newest: {'  '.join(repr(_x) for _x in _new[-8:])}" if _new else ""))
-                _last_vsz = TOK.vocab_size
+                _last_vsz = (TOK.vocab_size, len(TOK.seq2id))
 
     if bool(_i("BENCH", 0)):                               # THROUGHPUT BENCH: stop after the training loop. The eval
         _el = _time.time() - _t_start                      #   battery (final re-tokenization, memorization check,
