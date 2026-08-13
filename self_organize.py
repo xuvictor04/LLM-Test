@@ -15,7 +15,7 @@ separate SELF-CONSISTENCY check on stored entries.
 
   python3 self_organize.py [DEVICE=cuda DATA_MODE=real DOMAINS=eng,py,num,c D_MODEL=256 SIG_MODE=learned ...]
 """
-import os, math, random, glob, sys
+import os, math, random, glob, sys, contextlib, functools
 import torch, torch.nn as nn, torch.nn.functional as F
 from memory import EditableMemory
 from verification import Reconstructor, recon_loss, verify as verify_mem   # Verification (renamed from B): reconstruction, not surprise
@@ -540,6 +540,46 @@ TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 400.0)             #   ...or over this m
 TOK_MINT_PMIN = _f("TOK_MINT_PMIN", 0.0)                   # predictability gate on minting; 0 = off
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
+
+
+@contextlib.contextmanager
+def frozen_rng():
+    """A DIAGNOSTIC MAY NOT MOVE THE RUN. Saves the global random and torch generator states on entry and puts
+    them back on exit, so nothing drawn inside advances the stream training draws from.
+
+    The specific failure this closes, which cost this project months of unreadable comparisons: `build_stream()`
+    picks each segment's length with `random.randint(SEG_MIN, SEG_MAX)` and `seg_from` advances its read cursor by
+    exactly that length. The stream is rebuilt EVERY EPOCH. So the bytes epoch 2 trains on are a function of where
+    the global generator happened to be standing when `_resample()` was called -- and every diagnostic in this
+    file was drawing from that same generator on its own cadence. Two runs with the same seed, the same code and
+    the same corpus, differing only in HOW OFTEN OR HOW WIDELY THEY MEASURED, read different text. That is not
+    chaos and it is not a seed effect; it is the instrument wired into the circuit it is measuring.
+
+    Fixing the biggest consumer alone (expert exploration, see Fabric.society) is not enough to make the rule
+    hold, because the probes also draw directly: eval-window shuffles, the coherence probe's process pair,
+    generation's sampling. One guard at the entry points covers those and, more importantly, covers the ones
+    added later by someone who does not know this rule exists.
+
+    torch's generator is saved too: generate() samples with multinomial, and the report draws randperm."""
+    _rs = random.getstate()
+    _ts = torch.get_rng_state()
+    _cs = (torch.cuda.get_rng_state_all()
+           if (torch.cuda.is_available() and torch.cuda.is_initialized()) else None)
+    try:
+        yield
+    finally:
+        random.setstate(_rs)
+        torch.set_rng_state(_ts)
+        if _cs is not None: torch.cuda.set_rng_state_all(_cs)
+
+
+def no_rng_drift(fn):
+    """frozen_rng as a decorator, for whole diagnostic functions."""
+    @functools.wraps(fn)
+    def _w(*a, **k):
+        with frozen_rng(): return fn(*a, **k)
+    return _w
+
 # ---- GPU PRECISION (no functionality is removed by either knob; both only change how matmuls are executed) ----
 # TF32: on by default for cuDNN but NOT for matmul in current torch, so the fp32 path leaves most of an H100's matmul
 # throughput unused. AMP=bf16 additionally runs the LM step in bfloat16 -- same exponent range as fp32 (so no loss
@@ -577,7 +617,17 @@ if DATA_MODE == "real":
     DISK_STREAM = bool(_i("DISK_STREAM", 0))              # mmap the corpus (disk-paged) so training data can EXCEED RAM (GPT-2 scale)
     from datastream import open_corpus
     CORP = open_corpus(_env("DATA_DIR", "data"), DN, cap=_i("CORPUS_CAP", 2000000), disk=DISK_STREAM)
+    _nraw = len(CORP)
     CORP = [c for c in CORP if len(c) > 5000]; NP = len(CORP)
+    # SAY SO HERE. With every corpus under 5000 bytes this leaves NP=0, and the run then died ~700 lines later
+    # inside build_stream on `random.choice([])` -> "IndexError: Cannot choose from an empty sequence", which names
+    # neither the directory nor the reason. A placeholder part0.txt is exactly how that happens.
+    if NP == 0:
+        raise SystemExit(
+            f"no usable corpus: {_env('DATA_DIR', 'data')} yielded {_nraw} domain(s) for DOMAINS="
+            f"{_env('DOMAINS', 'eng,py,num,c')}, none over the 5000-byte minimum.\n"
+            f"  Expecting {_env('DATA_DIR', 'data')}/train/<domain>/part*.txt with real text in it.\n"
+            f"  Fetch it with: python3 fetch_big.py --domain eng --gb 0.06 --out {_env('DATA_DIR', 'data')} --resume")
     VAL_FRAC = _f("VAL_FRAC", 0.05)                        # HELD-OUT tail of each corpus, never sampled into the training stream.
     if DISK_STREAM:                                        # mmap: do NOT slice CORP (would copy the whole thing into RAM) --
         SEG_LEN = [int(len(c) * (1 - VAL_FRAC)) for c in CORP]   #   bound sampling to the training HEAD; keep CORP the full mmap.
@@ -637,7 +687,7 @@ if DATA_MODE == "real":
     #   streamed in order rather than seek-sampled.
     def seg_from(p, L):
         if not SEG_CONTIG:
-            s = random.randint(0, SEG_LEN[p] - L - 1); return CORP[p][s:s + L]   # SEG_LEN bounds sampling to the train head
+            s = _SRNG[0].randint(0, SEG_LEN[p] - L - 1); return CORP[p][s:s + L]   # SEG_LEN bounds sampling to the train head
         s = _CUR[p]
         if s + L >= SEG_LEN[p]: s = 0                      # wrap at the end of the training head
         _CUR[p] = s + L
@@ -703,7 +753,30 @@ def _phases_env(n):
 
 PHASE_SCHED = _phases_env(NP)                                  # rebuilt after NP is known on the real-data path (below)
 PH_BOUNDS = []                                             # stream positions where each phase starts
+_STREAM_EPOCH = [0]                                        # which epoch's stream is being built; see _srng below
+_SRNG = [random.Random(0)]                                 # re-seeded at the top of every build_stream()
+
+
+def _srng():
+    """THE STREAM GETS ITS OWN GENERATOR, seeded from (SEED, epoch).
+
+    What text a run trains on must depend on the SEED and the EPOCH and nothing else. Drawing segment lengths from
+    the global stream made it depend on every other draw taken first, and `seg_from` turns a length into a read
+    CURSOR (`_CUR[p] += L`), so a different draw history means a different region of the corpus -- from epoch 2
+    onward, silently.
+
+    That is what made single-knob A/B comparisons unreadable. Two arms differing only in, say, a probation
+    threshold take different numbers of draws during epoch 1 (growth events, mutation, crossover, exploration all
+    draw, and how many depends on the loss), so epoch 2 hands them DIFFERENT TEXT. The knob under test and the
+    training data both changed, and the arm difference we then reported was partly a data difference.
+
+    Seeded per epoch rather than once, so the corpus is also the same across a RESUME: a run continued at epoch 5
+    reads what an uninterrupted run would have read at epoch 5, instead of whatever the fresh generator produced."""
+    return random.Random((_i("SEED", 0) * 1000003) ^ (_STREAM_EPOCH[0] * 2654435761))
+
+
 def build_stream():
+    _SRNG[0] = _srng(); _rs = _SRNG[0]
     buf = []; lab = []; sw = []; pos = 0
     if PHASED:                                             # NON-STATIONARY: each phase has a different ACTIVE set
         PH_BOUNDS.clear()                                  # REBUILT, not appended: build_stream runs once PER EPOCH
@@ -715,11 +788,11 @@ def build_stream():
         for pi, act in enumerate(PHASE_SCHED):
             PH_BOUNDS.append(pos); act = [a for a in act if a < NP] or list(range(NP))
             while pos < min((pi + 1) * per, STREAM_LEN) and pos < STREAM_LEN:
-                p = random.choice(act); L = random.randint(_i("SEG_MIN", 700), _i("SEG_MAX", 1800))
+                p = _rs.choice(act); L = _rs.randint(_i("SEG_MIN", 700), _i("SEG_MAX", 1800))
                 seg = list(seg_from(p, L)); buf += seg; lab += [p] * len(seg); sw.append(pos); pos += len(seg)
     else:
         while pos < STREAM_LEN:
-            p = random.randrange(NP); L = random.randint(_i("SEG_MIN", 700), _i("SEG_MAX", 1800))
+            p = _rs.randrange(NP); L = _rs.randint(_i("SEG_MIN", 700), _i("SEG_MAX", 1800))
             seg = list(seg_from(p, L)); buf += seg; lab += [p] * len(seg); sw.append(pos); pos += len(seg)
     return buf[:STREAM_LEN], lab[:STREAM_LEN], set(x for x in sw if x < STREAM_LEN)
 
@@ -1500,7 +1573,7 @@ class Fabric(nn.Module):
         N = s.n_live
         if s.grounded:
             logits = s.entry_logits(gist, nov, N, step=step, ban=ban)
-            w = s._with_halt(logits, gist, N)
+            w = s._with_halt(logits, gist, N, learn=learn_regions)
             # AN EVAL PASS MUST NOT MOVE THE REGIONS. See fab_logits: every eval path (learning curve, holdout
             # probe, bpb_true, generation) called this with a FABRICATED ZERO gist, and F.normalize(0) is 0, so
             # each one dragged the top-FAB_CENT_TOPK experts' centroids toward the ORIGIN.
@@ -1519,7 +1592,7 @@ class Fabric(nn.Module):
             if ban is not None:
                 _lg[:, :N] = _lg[:, :N].masked_fill(ban.to(_lg.device)[None], float("-inf"))
             c = torch.softmax(_lg, -1)
-            s._record_halt(c[:, N:N + 1])
+            s._record_halt(c[:, N:N + 1], learn=learn_regions)
             w = c[:, :N]; w = w / w.sum(-1, keepdim=True).clamp_min(1e-9)      # router weights over experts
         return w
 
@@ -1599,7 +1672,7 @@ class Fabric(nn.Module):
                     s.discovered += 1
 
 
-    def _with_halt(s, logits, gist, N):
+    def _with_halt(s, logits, gist, N, learn=True):
         """Append HALT to the grounded branch's operator set and return the renormalised weights over experts.
 
         The grounded branch scores experts by cosine of the signature to their region; HALT owns no region, so its
@@ -1613,17 +1686,24 @@ class Fabric(nn.Module):
         _hl = ((_qh @ s.halt_key[:, None]) if (s.route_learn and not FAB_KEY_NORM)
                else (F.normalize(_qh, dim=-1) @ F.normalize(s.halt_key, dim=-1)[:, None]) / max(1e-3, s.route_t))
         c = torch.softmax(torch.cat([logits, _hl + s.halt_b], -1), -1)
-        s._record_halt(c[:, N:N + 1])
+        s._record_halt(c[:, N:N + 1], learn=learn)
         w = c[:, :N]
         return w / w.sum(-1, keepdim=True).clamp_min(1e-9)
 
-    def _record_halt(s, hm):
+    def _record_halt(s, hm, learn=True):
         """Store the halt mass for the caller and keep a running mean for the report. Clamped at halt_max so the
         population always keeps a share of the blend -- see halt_max in __init__ for why that is a barrier and not
-        a preference. Kept ON DEVICE: a float() here would be a GPU sync every step for a reporting number."""
+        a preference. Kept ON DEVICE: a float() here would be a GPU sync every step for a reporting number.
+
+        `learn` gates the EMA only -- `_halt` itself is this pass's own output and every caller needs it. The report
+        prints this number as "HALT MASS during TRAINING", and it was averaging eval passes in too, so the figure
+        described a mixture of training and held-out routing while claiming to describe training. It also made the
+        number move when nothing but the measurement cadence changed (0.3954 vs 0.3951 across two runs whose only
+        difference was HOLDOUT_N)."""
         if not s.halt_on:
             s._halt = None; return
         s._halt = hm.clamp(max=s.halt_max)
+        if not learn: return
         with torch.no_grad():
             _m = s._halt.mean().detach()
             s.halt_ema = _m if s.halt_ema is None else 0.99 * s.halt_ema + 0.01 * _m
@@ -1654,7 +1734,19 @@ class Fabric(nn.Module):
         # receive gradient. An expert outside the top-k is not merely unused -- it is frozen, and can never improve
         # into contention. Swap one slot for an expert sampled toward LOW USE, so untried capacity gets both
         # traffic and gradient. This is the difference between a population and a leaderboard.
-        if s.explore > 0 and kk >= 2 and N > kk:
+        # ...AND ONLY WHEN THIS PASS IS TRAINING. Exploration is a GRADIENT device: it exists so an expert outside
+        # the top-k still receives a backward pass. An evaluation pass has no backward pass, so exploring during
+        # one buys nothing and costs twice. It BIASES the measurement -- 15% of every scored window was routed to
+        # a deliberately sub-optimal cold expert, so every held-out bits/byte in this project's record was read
+        # through a randomly degraded router. And it DRAWS FROM THE GLOBAL RANDOM STREAM: one random() per row,
+        # plus a choice() per selected row, taken from the same generator build_stream() draws segment lengths
+        # from. Shifting that stream by a single draw changes which BYTES the next epoch reads (seg_from advances
+        # `_CUR` by L, and L is a global draw), which expert is born with which mutation, and every exploration
+        # decision thereafter -- so two runs differing only in HOW MUCH THEY MEASURED trained on different text.
+        # That is the whole of the "chaotic sensitivity" this file documents at route_w: not a 0.05% perturbation
+        # amplified by dynamics, but a diagnostic silently editing the run. `learn_regions` already means "this
+        # pass may change training state"; it was applied to the centroids alone and never to this.
+        if s.explore > 0 and kk >= 2 and N > kk and learn_regions:
             _cold2 = sorted(range(N), key=lambda i: s.use.get(i, 0.0))[:max(8, N // 16)]
             _rows = [r for r in range(idx.size(0)) if random.random() < s.explore]
             if _rows:
@@ -1784,7 +1876,7 @@ class Fabric(nn.Module):
                 if s.grounded and ban1 is None and learn_regions: s.ground_update(gist, _wn, N)
                 _k2 = min(s.chain_k, N)
                 _v2, _i2 = _wn.topk(_k2, dim=-1)
-                if s.explore > 0 and _k2 >= 2 and N > _k2 and ban1 is None:
+                if s.explore > 0 and _k2 >= 2 and N > _k2 and ban1 is None and learn_regions:
                     _cold = sorted(range(N), key=lambda i: s.use.get(i, 0.0))[:max(8, N // 16)]
                     _rw = [r for r in range(_i2.size(0)) if random.random() < s.explore]
                     if _rw:
@@ -1792,10 +1884,10 @@ class Fabric(nn.Module):
                         for _r in _rw:
                             _i2[_r, -1] = random.choice(_cold); _v2[_r, -1] = _wn[_r, _i2[_r, -1]]
                         s.explored = getattr(s, "explored", 0) + len(_rw)
-                if ban1 is None:
+                if ban1 is None and learn_regions:
                     with torch.no_grad():
                         for _u in _i2[:, 0].tolist(): s.use[_u] = s.use.get(_u, 0.0) + 1.0
-                        if _t2_ < 2: 
+                        if _t2_ < 2:
                             if getattr(s, "_sample_ord", False): s._ord.append((_t2_, _i2[:, 0].tolist()))
                 _O2 = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
                                                     torch.einsum('bld,bkdr->bklr', h, s.A[_i2]), s.B[_i2])
@@ -1825,9 +1917,10 @@ class Fabric(nn.Module):
             if ban1 is None:
                 s._div = (_dacc2 / steps) if _dacc2 is not None else None
                 s._wrun = _wsum / _wsum.sum(-1, keepdim=True).clamp_min(1e-9)
-                with torch.no_grad():
-                    _hm3 = (1.0 - _alive_p).mean().detach()
-                    s._mass_ema = _hm3 if s._mass_ema is None else 0.99 * s._mass_ema + 0.01 * _hm3
+                if learn_regions:                          # the report calls this "during TRAINING" -- so only train it
+                    with torch.no_grad():
+                        _hm3 = (1.0 - _alive_p).mean().detach()
+                        s._mass_ema = _hm3 if s._mass_ema is None else 0.99 * s._mass_ema + 0.01 * _hm3
             return h, _dep2 / steps, _mass2 / steps, h.new_zeros(())
 
         depth = h.new_zeros(()); mass = torch.zeros(N + 1, device=h.device); bal = h.new_zeros(())
@@ -1868,7 +1961,7 @@ class Fabric(nn.Module):
             # measured on a 1024 population over 60 steps, the compute path reached 25% of the experts under
             # society and 8% under chaining, because mass CONCENTRATES as it flows: each hop's top-k is drawn from
             # a distribution the previous hop already sharpened. More hops did not mean more experts learning.
-            if s.explore > 0 and _ck >= 2 and N > _ck and ban1 is None:
+            if s.explore > 0 and _ck >= 2 and N > _ck and ban1 is None and learn_regions:
                 _cold3 = sorted(range(N), key=lambda i: s.use.get(i, 0.0))[:max(8, N // 16)]
                 _rows3 = [r for r in range(_ci.size(0)) if random.random() < s.explore]
                 if _rows3:
@@ -1884,9 +1977,16 @@ class Fabric(nn.Module):
             # information. Cheap to fix and it silently disabled three selection mechanisms.
             # ...but a COUNTERFACTUAL walk must not record anything: it did not happen, and letting it write
             # utilization would have the leave-one-out probe inflate the use counts of the experts it is measuring.
+            # NEITHER MUST AN EVALUATION PASS, for exactly the same reason, and that half was missing: `use` ranks
+            # the cull, seeds the cold set exploration draws from, and names the expert discovery hands novel
+            # material to. A held-out probe was voting in all three -- so how OFTEN we measured decided which
+            # experts died.
             if ban1 is None:
                 with torch.no_grad():
-                    for _uu in _ci[:, 0].tolist(): s.use[_uu] = s.use.get(_uu, 0.0) + 1.0
+                    # `wacc` is a READ-OUT (fab._wrun, which the report reads back after an eval call), not
+                    # training state, so it accumulates on every real walk. `use` is training state, so it does not.
+                    if learn_regions:
+                        for _uu in _ci[:, 0].tolist(): s.use[_uu] = s.use.get(_uu, 0.0) + 1.0
                     wacc = nm.detach() if wacc is None else wacc + nm.detach()   # per-window mass, over all hops
             # ORDERING, RECORDED IN THE REAL RUN. The question "can the chain vary its SECOND move for the same
             # first move" was only ever asked on a 24-expert synthetic toy, which is not the system. Recording the
@@ -1936,8 +2036,8 @@ class Fabric(nn.Module):
             # curriculum's stopping test meaningful, since depth-1 then has a loss of its own.
             if ban1 is None and s.sup_w > 0: s._hops.append(h)
             depth = depth + (1 - c[:, HALT]).mean(); mass = mass + c.mean(0).detach()
-            if ban1 is None:
-                with torch.no_grad():                     # the HALT column, as it actually was during training
+            if ban1 is None and learn_regions:            # ...DURING TRAINING. An eval pass is not training, and
+                with torch.no_grad():                     #   the report labels this number exactly that way.
                     _hh = c[:, HALT].mean().detach()
                     s._mass_ema = _hh if s._mass_ema is None else 0.99 * s._mass_ema + 0.01 * _hh
             ent = -(c.clamp_min(1e-9).log() * c).sum(-1)
@@ -2798,6 +2898,7 @@ def _dec(units):                                           # bytes OR token IDs 
 def nbytes(y):                                             # true bits/BYTE denominator (a token spans >1 byte)
     return float(BLEN[y].sum()) if USE_TOK else y.numel()
 
+@no_rng_drift                                              # sampling is a DIAGNOSTIC: it must not move the run
 @torch.no_grad()
 def generate(model, mem, seed, n, use_mem, DEV, temp=0.7, vlim=None, fab=None, gist=None):
     """Autoregressively sample n units (bytes or tokens) after `seed`. If use_mem, interpolate with the
@@ -2892,6 +2993,7 @@ def halt_blend(model, fab, h, out):
     return (1 - hm) * out + hm * model.head(h)
 
 
+@no_rng_drift                                              # a wrongness sweep must not move the run
 @torch.no_grad()                                           # was building a full autograd graph over every stored
 def selfcheck(model, mem, fab=None):                       # entry -- tens of GiB at L12, and pure waste: nothing
     #                                                        here is ever backpropagated. WRONGNESS (B): is each
@@ -3098,21 +3200,45 @@ def main():
                           _f("EXPERT_CULL_FRAC", 0.25), _i("EXPERT_GRACE", 3000), _env("CULL_MODE", "rank"),
                           _f("EXPERT_CULL_RANK", 0.08), _f("EXPERT_PRESSURE", 0.75), _f("EXPERT_MERGE_DIST", 0.10),
                           _i("EXPERT_FIT_WIN", 4000)) if EXPERTS else None
-    if _i("PROBE", 1):                                     # measure actual step cost + extrapolate BEFORE the long run
+    # frozen_rng: a TIMING probe is the purest case of an instrument that must not move the run, and this one did.
+    # It draws xb from the torch generator and, before the learn_regions gate below, took 18 passes' worth of
+    # exploration draws off the global stream. So PROBE=1 and PROBE=0 were different experiments.
+    if _i("PROBE", 1):
+      with frozen_rng():                                   # measure actual step cost + extrapolate BEFORE the long run
         import time as _t
         xb = torch.randint(0, V, (1, WIN), device=DEV)
+        _pp = [p for p in (list(model.parameters()) + (list(fab.parameters()) if FABRIC else []))
+               if p.requires_grad]
+
+        def _bwd(out):
+            """torch.autograd.grad, NOT out.backward(). The difference is the whole bug this replaced.
+
+            `backward()` ACCUMULATES into every reachable parameter's .grad. The probe cleaned up after itself by
+            naming the modules it thought it had touched -- model.zero_grad(); fab.zero_grad() -- and that
+            enumeration went stale the day WORLD_FEEDBACK started wrapping model.encode. From then on
+            `model.encode(xb)` ran world_enc and world_fwd inside the graph, so 29 world-model parameters entered
+            the training loop holding gradients computed from a batch of RANDOM TOKENS, and the first optimizer
+            step folded that residue into the real update. Measured on a 1-epoch run: PROBE=1 and PROBE=0 have
+            byte-identical weights, stream and memory entering the loop, then split at the second logged step
+            (6.1199 vs 6.1125) and never rejoin -- different world-model growth steps, different memory
+            occupancy, 102 differing report lines. A TIMING PROBE decided the run.
+
+            autograd.grad RETURNS the gradients instead of accumulating them, so nothing is written to .grad and
+            there is no cleanup to keep in sync. Anything the graph passes through on the way to `_pp` -- the
+            world model included -- is still traversed, so the timing stays honest; it just leaves no residue.
+            allow_unused because on the SOCIETY branch the chaining-only parameters are not in this graph."""
+            torch.autograd.grad(out, _pp, allow_unused=True)
+
         def _one():                                        # time the REAL step incl. the fabric (or the estimate lies)
             h = model.encode(xb)
             if FABRIC:
                 _g0 = torch.zeros(1, SIG_D, device=DEV); _n0 = torch.zeros(1, device=DEV)
                 if SOCIETY:                                # timing probe: zero gist, so read-only (see fab_logits)
                     _w0, _O0, _ = fab.society(h, _g0, _n0, k=ENS_K, learn_regions=False)
-                    model.head(fab.norm(_O0[:, 0])).sum().backward(); model.zero_grad()
-                    if FABRIC: fab.zero_grad()
+                    _bwd(model.head(fab.norm(_O0[:, 0])).sum())
                     return
                 h = fab(h, _g0, _n0, learn_regions=False)[0]
-            model.head(h).sum().backward(); model.zero_grad()
-            if FABRIC: fab.zero_grad()
+            _bwd(model.head(h).sum())
         for _ in range(3): _one()
         if DEV == "cuda": torch.cuda.synchronize()
         t0 = _t.time()
@@ -3373,6 +3499,7 @@ def main():
         for ch in nm.encode(): h = (h * 131 + ch) % 1000003 #   the whole comparison meaningless
         return h
 
+    @no_rng_drift                                          # the held-out probe must not move the run
     def holdout_bpb():
         """Per-DOMAIN bits/byte on the HELD-OUT tail, on windows fixed by domain NAME.
 
@@ -4155,7 +4282,10 @@ def main():
         # half nothing measured: a process ENTERS at a phase boundary and we never asked how many steps it took to
         # model it, nor watched its cost climb again once it FADED. Held-out text per process, on the rate cadence,
         # so the cost is one small eval every RATE_EVERY steps rather than anything in the hot path.
+        # frozen_rng: this fires on the RATE_EVERY cadence, so without it the learning curve's own sampling rate
+        # would be one more knob that decides what the run trains on. See frozen_rng.
         if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark and VALC:
+          with frozen_rng():
             try:
                 model.eval()
                 for _p in range(len(VALC)):
@@ -4234,6 +4364,7 @@ def main():
             _epoch += 1
             if _epoch >= EPOCHS: break
             if DISK_STREAM:                                # draw FRESH data from the larger-than-RAM corpus each epoch
+                _STREAM_EPOCH[0] = _epoch                  # this epoch's text is a function of (SEED, epoch) -- see _srng
                 stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
                 set_enc_tensor(ENC_SEQ); _sigq = []          # stream replaced -> queued lookahead windows are stale
                 if FABRIC and fabgrow is not None: fabgrow.note_shift(step)
@@ -5008,9 +5139,31 @@ def main():
     _save_ckpt(stream)                                               # final save (also runs mid-run if CKPT_EVERY>0)
 
     assigns = [(i, asm.resolve(d), t) for i, d, t in assigns]        # follow merges -> the surviving domain
+    def _perwin(_pp, _Y):
+        """Per-WINDOW bits/byte, so the headline number can carry an error bar.
+
+        This line -- `train X | held-out Y` -- is the number every arm in this project has been compared on, and it
+        was printed bare. It is a mean over at most min(24, EVAL_N) windows: 24 windows of WIN=256 tokens is on the
+        order of 15 kB of text. Measured on the smoke, moving EVAL_N from 4 to 16 moved it 0.35 bits/byte on a run
+        that was otherwise BYTE-IDENTICAL -- so a chunk of what has been read as a difference between arms was the
+        sampling error of the instrument. Reporting +/- makes that visible instead of leaving it to be discovered
+        by re-running an arm and getting a different answer."""
+        if USE_TOK:                                        # same live-vocabulary byte denominator as holdout_bpb
+            _bl2 = torch.tensor(TOK.bytes_per_id[:TOK.vocab_size], dtype=torch.float, device=DEV)
+            _dw2 = _bl2[_Y.clamp(max=TOK.vocab_size - 1)].sum(-1)
+        else:
+            _dw2 = torch.full((_Y.size(0),), float(_Y.size(1)), device=DEV)
+        return (-(torch.log(_pp.clamp_min(1e-9)).sum(-1)) / math.log(2) / _dw2.clamp_min(1.0)).tolist()
+
+    def _mu_se(_xs):
+        if not _xs: return 0.0, 0.0
+        _m = sum(_xs) / len(_xs)
+        if len(_xs) < 2: return _m, 0.0
+        return _m, (sum((_x - _m) ** 2 for _x in _xs) / (len(_xs) - 1) / len(_xs)) ** 0.5
+
     try:                                                   # === MEMORIZATION CHECK: train vs HELD-OUT ===
         model.eval()
-        _vb = []
+        _vb = []; _vw = []                                 # ...and the PER-WINDOW values, for an error bar
         for _p in range(len(VALC)):
             _v = _units(TOK, USE_TOK, VALC[_p])
             if len(_v) < WIN + 2: continue
@@ -5021,7 +5174,8 @@ def main():
                 _lg = _eval_logits(model, fab, FABRIC, _X)
                 _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
                 _vb.append(-(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y))
-        _tb = []
+                _vw += _perwin(_pp, _Y)
+        _tb = []; _tw = []
         for _p in range(len(CORP)):                        # same measurement on TRAIN data, for a like-for-like gap
             _src = CORP[_p][max(0, SEG_LEN[_p] - len(VALC[_p])):SEG_LEN[_p]]   # tail of the TRAIN region (disk: CORP still holds val, so bound by SEG_LEN)
             _t = _units(TOK, USE_TOK, _src)
@@ -5033,10 +5187,17 @@ def main():
                 _lg = _eval_logits(model, fab, FABRIC, _X)
                 _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
                 _tb.append(-(torch.log(_pp.clamp_min(1e-9)).sum().item()) / math.log(2) / nbytes(_Y))
+                _tw += _perwin(_pp, _Y)
         if _vb and _tb:
             _tr = sum(_tb) / len(_tb); _va = sum(_vb) / len(_vb); _gap = _va - _tr
             print(f"\n=== MEMORIZATION CHECK: train vs HELD-OUT ({VAL_FRAC:.0%} of each corpus, never trained on) ===")
-            print(f"  train {_tr:.3f} | held-out {_va:.3f} | gap {_gap:+.3f} bits/byte")
+            _, _tse = _mu_se(_tw); _, _vse = _mu_se(_vw)
+            # THE ERROR BAR IS PART OF THE NUMBER. Two arms whose held-out figures differ by less than the sum of
+            # these are not distinguishable by this measurement, however different the printed means look.
+            print(f"  train {_tr:.3f} +/- {_tse:.3f} | held-out {_va:.3f} +/- {_vse:.3f} | gap {_gap:+.3f} bits/byte"
+                  f"   ({len(_tw)} train / {len(_vw)} held-out windows of {WIN})")
+            print(f"  >> a difference between two runs smaller than ~{2 * (_tse + _vse):.3f} b/B is inside this "
+                  f"instrument's noise. Raise EVAL_N (the sample is capped at 24 windows per domain) to shrink it.")
             print(f"  >> gap < ~0.3 = UNDERFIT, keep training / add data (regularization would HURT)")
             print(f"     gap > ~0.5 = MEMORIZING, now turn on DROPOUT=0.1-0.2 and WEIGHT_DECAY=0.01")
             print(f"  currently: {'MEMORIZING -> enable DROPOUT/WEIGHT_DECAY' if _gap > 0.5 else 'UNDERFIT -> more data/passes, not regularization'}")
@@ -5569,6 +5730,7 @@ def main():
     for p in set(labels):
         idx = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p]
         random.shuffle(idx); eval_win[p] = idx[:EVAL_N]
+    @no_rng_drift                                          # scoring a process must not move the run
     def bpb_true(p, use_exp=EXPERTS, use_mem=True, pin=True, use_fab=FABRIC):
         ii = eval_win.get(p, [])
         if not ii: return 0.0
