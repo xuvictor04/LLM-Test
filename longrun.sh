@@ -382,7 +382,22 @@ pilot-add)
   NAME=${2:-}; DS=${3:-}; GB=${4:-0.03}; P_DD=${PILOT_DIR:-data_pilot}
   [ -n "$NAME" ] && [ -n "$DS" ] || { echo "usage: bash longrun.sh pilot-add <name> <hf-dataset> [gb]"; exit 1; }
   PA=${PILOT_ADD_ARCH:-gru}
-  [ -f "$OUT/pilot_$PA/ckpt.pt" ] || { echo "!! no pilot checkpoint at $OUT/pilot_$PA/ckpt.pt -- run 'bash longrun.sh pilot' first (PILOT_ADD_ARCH=gru|transformer)"; exit 1; }
+  # RESUME FROM ANY CHECKPOINT, not only the one `pilot` happens to write. This was hardcoded to
+  # $OUT/pilot_$PA, so every checkpoint produced by `seeds`, `grid` or `repeat` -- which is now most of them,
+  # since SEED_CKPT=1 -- was unreachable, and continual learning could only be attempted from a run shape nobody
+  # was using. RESUME_FROM=<dir> points it anywhere.
+  FROM=${RESUME_FROM:-$OUT/pilot_$PA}
+  [ -f "$FROM/ckpt.pt" ] || { echo "!! no checkpoint at $FROM/ckpt.pt -- run 'bash longrun.sh pilot' first (PILOT_ADD_ARCH=gru|transformer), or set RESUME_FROM=<dir containing ckpt.pt>"; exit 1; }
+  # THE TOKENIZER TRAVELS WITH THE CHECKPOINT. The restored embedding is indexed by the vocabulary that trained
+  # it; pairing it with a different one is silent, because VMAX fixes the row count so every shape still matches.
+  # self_organize.py refuses on a vocabulary mismatch, and this finds the right file so it does not have to.
+  if [ -z "${TOKENIZER_PATH:-}" ]; then
+    for _tc in "$FROM.dyntok.json" "${FROM%.ckpt}.dyntok.json" "$(dirname "$FROM")/$(basename "$FROM" .ckpt).dyntok.json"; do
+      [ -f "$_tc" ] && { TOKENIZER_PATH="$_tc"; break; }
+    done
+  fi
+  [ -n "${TOKENIZER_PATH:-}" ] || { echo "!! cannot find the tokenizer that goes with $FROM -- set TOKENIZER_PATH=<the .dyntok.json saved beside it>"; exit 1; }
+  echo "pilot-add: resuming $FROM with vocabulary $TOKENIZER_PATH"
   if [ -z "$(ls "$P_DD/train/$NAME"/part*.txt 2>/dev/null)" ]; then
     python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume || exit 1
   fi
@@ -391,8 +406,9 @@ pilot-add)
       WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       SIG_WIN=${SIG_WIN:-614} \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
-      CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 RESUME="$OUT/pilot_$PA" MODEL=$PA LAYERS=$([ "$PA" = transformer ] && echo ${TF_LAYERS:-4} || echo 1) \
-      SAVE_CKPT="$OUT/pilot_${PA}_$NAME" python3 self_organize.py 2>&1 | tee "$OUT/pilot_$NAME.log"
+      CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 RESUME="$FROM" TOKENIZER_PATH="$TOKENIZER_PATH" \
+      MODEL=$PA LAYERS=$([ "$PA" = transformer ] && echo ${TF_LAYERS:-4} || echo 1) \
+      SAVE_CKPT="$(_reserve "$OUT/pilot_${PA}_$NAME")" python3 self_organize.py 2>&1 | tee "$(_reserve "$OUT/pilot_$NAME.log")"
   echo; echo ">> the number this run exists for is in ACROSS THE RUN BOUNDARY: what adding $NAME did to the English."
   ;;
 

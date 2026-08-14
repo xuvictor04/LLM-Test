@@ -3319,6 +3319,35 @@ def main():
     _RD, _resume_step = None, 0
     if RESUME:
         _RD = torch.load(RESUME if RESUME.endswith(".pt") else f"{RESUME}/ckpt.pt", map_location=DEV, weights_only=False)
+        # === THE RESTORED WEIGHTS AND THE LIVE VOCABULARY MUST BE THE SAME VOCABULARY =========================
+        # A checkpoint's embedding and head are indexed BY ITS TOKENIZER. The checkpoint has always recorded
+        # tok_path, and nothing ever read it back: resume paired the saved model with whatever TOKENIZER_PATH the
+        # new command happened to carry. Two ways that goes wrong, both silent, because VMAX fixes the row count
+        # so every shape still matches and load_state_dict is happy:
+        #   WRONG FILE  -- resume a runs/seeds/..._seed2.ckpt without setting TOKENIZER_PATH and you get the
+        #                  default data/dyntok.json, i.e. seed2's weights indexed by a different run's merges.
+        #   NO FILE     -- if that path does not exist, the branch at the tokenizer setup mints a FRESH 512-token
+        #                  seed vocabulary instead, and 2048 trained rows are then read with 512 ids' meanings.
+        # The comment at the tokenizer load already states the principle ("a fresh online seed would re-mint
+        # different ids, so the restored embedding table would be indexed by a DIFFERENT vocabulary"); the guard
+        # only forced a load to HAPPEN, never checked that what loaded was the right one.
+        if USE_TOK and _RD.get("use_tok"):
+            _ckv, _ckm = _RD.get("tok_vocab"), _RD.get("tok_merges")
+            _livep = _env("TOKENIZER_PATH", "data/dyntok.json")
+            if _ckv is not None and (TOK.vocab_size != _ckv or (_ckm is not None and len(TOK.merges) != _ckm)):
+                raise SystemExit(
+                    f"[resume] VOCABULARY MISMATCH -- refusing to load.\n"
+                    f"  checkpoint {RESUME} was trained with {_ckv} tokens ({_ckm} merges), saved at\n"
+                    f"    TOKENIZER_PATH={_RD.get('tok_path')}\n"
+                    f"  this run has {TOK.vocab_size} tokens ({len(TOK.merges)} merges) from\n"
+                    f"    TOKENIZER_PATH={_livep}\n"
+                    f"  The restored embedding rows would mean something different from what they were trained as,\n"
+                    f"  and every shape still matches, so nothing else would notice. Set TOKENIZER_PATH to the\n"
+                    f"  file this checkpoint was saved with.")
+            if _RD.get("tok_path") and _RD["tok_path"] != _livep:
+                print(f"  [resume] tokenizer path differs from the checkpoint's ({_RD['tok_path']} -> {_livep}) "
+                      f"but the vocabulary matches ({TOK.vocab_size} tokens, {len(TOK.merges)} merges), so this is "
+                      f"the same vocabulary under another name.")
         if FABRIC and _RD.get("fab_cfg"):
             fab.n_live = max(fab.n_live, min(int(_RD["fab_cfg"]["n"]), fab.cap))   # rows already exist
         if WORLD_MODEL and _RD.get("world_cfg"):
@@ -3704,6 +3733,10 @@ def main():
         torch.save({"model": model.state_dict(), "D": D, "V": V, "KW": KW, "KEY_SRC": KEY_SRC,
                     "model_type": MODEL_TYPE, "layers": _i("LAYERS", 4 if MODEL_TYPE=="transformer" else 1), "heads": _i("HEADS", 8), "maxlen": _i("MAXLEN", 512),
                     "use_tok": USE_TOK, "tok_path": (_env("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None),
+                    # THE VOCABULARY THIS MODEL'S EMBEDDING TABLE IS INDEXED BY. tok_path alone is a filename, and
+                    # a filename does not certify contents; these two do, and the resume check below reads them.
+                    "tok_vocab": (TOK.vocab_size if USE_TOK else None),
+                    "tok_merges": (len(TOK.merges) if USE_TOK else None),
                     "mem_keys": mem.keys[act].cpu(), "mem_tok": mem.tok[act].cpu(), "mem_src": mem.src[act].cpu(),
                     "mem_ctx": (mem.ctx[act].cpu() if mem.ctx_w > 0 else None), "topk": mem.topk,
                     "mem_pos": mem.pos[act].cpu(),                     # -> source passages for grounded answers
