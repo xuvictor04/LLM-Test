@@ -5475,6 +5475,15 @@ def main():
                             if _b0 + WIN > len(_vb): continue
                             _xs.append(_v[_a:_a + WIN]); _ys.append(_v[_a + 1:_a + WIN + 1])
                             _ds.append(list(_vb[_b0:_b0 + WIN]))                 # BYTE window -> signature
+                    # SAY WHY, rather than fall silent. This needs 16 held-out windows and draws min(48, EVAL_N)
+                    # per domain, so at EVAL_N=4 it collects 4 and produces NOTHING -- no section, no skip line,
+                    # no hint that DOM_PRIOR is being accumulated every window at a cost and never read. That is
+                    # the same shape as retire_stale and fuzzy_segment: present, paid for, never executed.
+                    if len(_xs) < 16:
+                        print(f"\n=== CAN A DOMAIN PREDICT? -- NOT RUN: {len(_xs)} held-out windows collected, "
+                              f"16 needed. It draws min(48, EVAL_N)={min(48, _i('EVAL_N', 64))} per domain over "
+                              f"{len(VALC)} domain(s); raise EVAL_N. The per-window asm.tokc histogram DOM_PRIOR="
+                              f"{DOM_PRIOR} accumulates is being paid for and not read.")
                     if len(_xs) >= 16:
                         _X = torch.tensor(_xs, device=DEV); _Y = torch.tensor(_ys, device=DEV)
                         with torch.no_grad():
