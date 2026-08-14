@@ -397,7 +397,21 @@ pilot-add)
     done
   fi
   [ -n "${TOKENIZER_PATH:-}" ] || { echo "!! cannot find the tokenizer that goes with $FROM -- set TOKENIZER_PATH=<the .dyntok.json saved beside it>"; exit 1; }
+  # $OUT MUST EXIST BEFORE tee OPENS ITS FILE. `pilot` mkdir -p's it, `pilot-add` never did -- and tee opens its
+  # output at process start, before python writes a byte. So on any box that has run `seeds` but not `pilot`,
+  # runs/long/ does not exist, tee fails instantly, and the entire report goes to a closed pipe. The run itself
+  # still finishes and still writes its checkpoint, which is the worst version: hours of GPU, a valid model, and
+  # no record of what it measured.
+  mkdir -p "$OUT" || exit 1
+  # ONE name for the checkpoint and its log. _reserve was called twice, independently, so a second add could put
+  # the checkpoint at pilot_gru_py-2 and its log at pilot_py.log -- a result filed under a name that does not
+  # match the model that produced it.
+  _PA_CK=$(_reserve "$OUT/pilot_${PA}_$NAME"); _PA_LOG="$_PA_CK.log"
   echo "pilot-add: resuming $FROM with vocabulary $TOKENIZER_PATH"
+  # SAY WHERE THE OUTPUT GOES, before spending the GPU. The log lands under $OUT, which is not where the
+  # checkpoint being RESUMED lives, and there is no way to guess that from the command line.
+  echo "           checkpoint -> $_PA_CK"
+  echo "           log        -> $_PA_LOG"
   if [ -z "$(ls "$P_DD/train/$NAME"/part*.txt 2>/dev/null)" ]; then
     # FETCH_ARGS passes anything else through to fetch_big.py -- notably --data-dir for datasets organised by
     # directory rather than config (the-stack: --data-dir data/python), and --token for gated ones.
@@ -411,8 +425,11 @@ pilot-add)
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 RESUME="$FROM" TOKENIZER_PATH="$TOKENIZER_PATH" \
       MODEL=$PA LAYERS=$([ "$PA" = transformer ] && echo ${TF_LAYERS:-4} || echo 1) \
-      SAVE_CKPT="$(_reserve "$OUT/pilot_${PA}_$NAME")" python3 self_organize.py 2>&1 | tee "$(_reserve "$OUT/pilot_$NAME.log")"
+      SAVE_CKPT="$_PA_CK" python3 self_organize.py 2>&1 | tee "$_PA_LOG"
   echo; echo ">> the number this run exists for is in ACROSS THE RUN BOUNDARY: what adding $NAME did to the English."
+  echo ">> log: $_PA_LOG"
+  echo ">> if that file is missing or truncated, the probe survives in the checkpoint itself:"
+  echo ">>   python3 holdout.py $FROM $_PA_CK"
   ;;
 
 add)
