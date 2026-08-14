@@ -53,6 +53,37 @@ _reserve() {
     *)     echo "$_rp-$_rn" ;;
   esac
 }
+# _cfgsig -- the RUN-SHAPING settings, as one line. A completed log is only interchangeable with a new run if
+# these match. TAG is derived from ARMFLAGS alone, so it is blind to every one of these, and the resume-skip below
+# compares only "did a log with this name finish". That combination silently answers the wrong question:
+#   EPOCHS=8  bash longrun.sh seeds 3      # runs, writes default_seed{0,1,2}.log
+#   EPOCHS=18 bash longrun.sh seeds 3      # SKIPS ALL THREE and re-prints the 8-epoch numbers as the 18-epoch result
+# Same for STREAM_LEN, D_MODEL, SIG_WIN, MEM_QUOTA, DEVICE, PILOT_DIR and the commit -- `seeds` reads all of them
+# from the environment and none of them reach the log's name. The SEEDS SUMMARY then globs those stale logs and
+# prints their held-out numbers under the new banner, so the wrong answer is not merely kept, it is REPORTED.
+_cfgsig() {
+  echo "commit=$(git rev-parse --short=10 HEAD 2>/dev/null || echo '?') \
+epochs=${EPOCHS:-} stream=${STREAM_LEN:-} d=${D_MODEL:-} sigwin=${SIG_WIN:-} memq=${MEM_QUOTA:-} \
+dev=${DEVICE:-cuda} data=${PILOT_DIR:-data_pilot} flags=${ARMFLAGS:-}"
+}
+# _reusable <log> -- a completed log MAY be reused only if it was produced by this same configuration. Anything
+# else stops the run with a message naming the difference, rather than being silently adopted or silently
+# overwritten: both of those turn a config change into a result nobody can trace.
+_reusable() {
+  _rl="$1"; _rc_file="$1.cfg"
+  if [ ! -f "$_rc_file" ]; then
+    echo "!! $_rl is complete but has no .cfg beside it, so the configuration that produced it is unknown."
+    echo "   It predates this check. Move it aside or point SEED_DIR/GRID_DIR/REPEAT_DIR at a fresh directory."
+    return 1
+  fi
+  if [ "$(cat "$_rc_file")" = "$(_cfgsig)" ]; then return 0; fi
+  echo "!! $_rl is complete but was produced by a DIFFERENT configuration:"
+  echo "     stored:  $(cat "$_rc_file")"
+  echo "     current: $(_cfgsig)"
+  echo "   Reusing it would report the stored run's numbers under this run's banner. Use a fresh output"
+  echo "   directory, or delete that log if you meant to replace it."
+  return 1
+}
 # _done <log> -- true if that log reached the end of a run (the final line every complete report prints).
 _done() { [ -f "$1" ] && grep -aq "SIG_MODE=learned -- learned = the unfrozen product path" "$1"; }
 
@@ -480,7 +511,7 @@ grid)
   trap 'echo; echo "grid interrupted -- completed arms are kept; re-run the same command to continue"; exit 130' INT TERM
   for ARM in $ARMS; do
     LOG="$GRID/$ARM.log"
-    if _done "$LOG"; then echo "== $ARM: already complete, skipping"; continue; fi
+    if _done "$LOG"; then _reusable "$LOG" || exit 1; echo "== $ARM: already complete, skipping"; continue; fi
     if [ -f "$LOG" ]; then
       _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done
       mv "$LOG" "$LOG.partial-$_pn"
@@ -564,7 +595,7 @@ seeds)
   echo "seeds: arm [${ARMFLAGS:-defaults}] over seeds [$(echo $SEEDLIST | tr '\n' ' ')] -> $SD"
   for SEED in $SEEDLIST; do
     LOG="$SD/${TAG}_seed$SEED.log"
-    if _done "$LOG"; then echo "== seed $SEED: already complete, skipping"; continue; fi
+    if _done "$LOG"; then _reusable "$LOG" || exit 1; echo "== seed $SEED: already complete, skipping"; continue; fi
     [ -f "$LOG" ] && { _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done; mv "$LOG" "$LOG.partial-$_pn"; }
     echo; echo "################  seed $SEED  ${ARMFLAGS:-(defaults)}  ################"
     set +e
@@ -582,7 +613,11 @@ seeds)
         SAVE_CKPT=$([ "${SEED_CKPT:-0}" = 1 ] && _reserve "$SD/${TAG}_seed$SEED.ckpt" || echo 0) \
         $ARMFLAGS SEED=$SEED \
         python3 self_organize.py > "$LOG" 2>&1
-    echo "== seed $SEED: rc=$?"
+    _rc=$?
+    # STAMP WHAT PRODUCED IT, next to it. Without this the resume-skip can only ask "did a log with this
+    # name finish", which is not the same question as "is this run interchangeable with the one I want".
+    if [ "$_rc" = 0 ] && _done "$LOG"; then _cfgsig > "$LOG.cfg"; fi
+    echo "== seed $SEED: rc=$_rc"
     set -e 2>/dev/null || true
   done
   echo; echo "=== SEEDS SUMMARY: [${ARMFLAGS:-defaults}] ==="
@@ -640,7 +675,7 @@ repeat)
   trap 'echo; echo "repeat interrupted -- completed runs are kept; re-run to continue"; exit 130' INT TERM
   for R in $(seq 1 "$N"); do
     LOG="$RD/${TAG}_seed${RSEED}_run$R.log"
-    if _done "$LOG"; then echo "== run $R: already complete, skipping"; continue; fi
+    if _done "$LOG"; then _reusable "$LOG" || exit 1; echo "== run $R: already complete, skipping"; continue; fi
     [ -f "$LOG" ] && { _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done; mv "$LOG" "$LOG.partial-$_pn"; }
     echo; echo "################  run $R/$N  SEED=$RSEED  ${ARMFLAGS:-(defaults)}  ################"
     set +e
@@ -658,7 +693,9 @@ repeat)
         SAVE_CKPT=0 \
         $ARMFLAGS SEED=$RSEED \
         python3 self_organize.py > "$LOG" 2>&1
-    echo "== run $R: rc=$?"
+    _rc=$?
+    if [ "$_rc" = 0 ] && _done "$LOG"; then _cfgsig > "$LOG.cfg"; fi
+    echo "== run $R: rc=$_rc"
     set -e 2>/dev/null || true
   done
   echo; echo "=== REPEAT SUMMARY: [${ARMFLAGS:-defaults}] at SEED=$RSEED ==="
