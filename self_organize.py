@@ -3526,6 +3526,7 @@ def main():
               + "  (encoder warmup skipped: already trained)")
     if SIG_MODE == "learned" and _RD is None:              # WARM UP the encoder first (unsupervised on the raw stream);
         wu = _i("ENC_WARMUP", 800)                         #   an undertrained encoder gives noisy (unseparated) signatures.
+        @no_rng_drift                                      # ENC_WARMUP_PROBE is a cadence, not a training knob
         def _sep_probe():                                  # mean pairwise distance of random-window encodings (global spread)
             with torch.no_grad():
                 st = [random.randint(0, len(ENC_SEQ) - WIN - 1) for _ in range(64)]

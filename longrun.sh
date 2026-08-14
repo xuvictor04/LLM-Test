@@ -598,6 +598,10 @@ seeds)
   # enough to reproduce a config; it is not enough to attribute a difference BETWEEN two configs.
   #   bash longrun.sh seeds 3 SOCIETY=1        # 3 seeds of one arm
   #   SEEDS="0 1 2 3" bash longrun.sh seeds -- CHAIN_ROUTE=soc
+  # CHECKPOINTS ON BY DEFAULT, matching `grid` (GRID_CKPT:-1). This defaulted to 0, so the sweep that produces
+  # the models worth continuing from was the one that threw them away -- and continual learning, the target,
+  # needs a checkpoint to resume. Roughly a GB per seed at MEM_CAP=200000 (the memory keys dominate);
+  # SEED_CKPT=0 opts out when the disk matters more than the ability to build on the result.
   N=${2:-3}
   case "$N" in ''|*[!0-9]*) N=3;; esac
   shift $([ "${2:-}" = "$N" ] && echo 2 || echo 1) 2>/dev/null || true
@@ -626,7 +630,7 @@ seeds)
         SIG_WIN=${SIG_WIN:-614} ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 \
         MEM_QUOTA=${MEM_QUOTA:-3125} CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 PROBE_WAIT=0 \
         TOKENIZER_PATH="$SD/${TAG}_seed$SEED.dyntok.json" \
-        SAVE_CKPT=$([ "${SEED_CKPT:-0}" = 1 ] && _reserve "$SD/${TAG}_seed$SEED.ckpt" || echo 0) \
+        SAVE_CKPT=$([ "${SEED_CKPT:-1}" = 1 ] && _reserve "$SD/${TAG}_seed$SEED.ckpt" || echo 0) \
         $ARMFLAGS SEED=$SEED \
         python3 self_organize.py > "$LOG" 2>&1
     _rc=$?
