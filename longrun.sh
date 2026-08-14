@@ -399,7 +399,10 @@ pilot-add)
   [ -n "${TOKENIZER_PATH:-}" ] || { echo "!! cannot find the tokenizer that goes with $FROM -- set TOKENIZER_PATH=<the .dyntok.json saved beside it>"; exit 1; }
   echo "pilot-add: resuming $FROM with vocabulary $TOKENIZER_PATH"
   if [ -z "$(ls "$P_DD/train/$NAME"/part*.txt 2>/dev/null)" ]; then
-    python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume || exit 1
+    # FETCH_ARGS passes anything else through to fetch_big.py -- notably --data-dir for datasets organised by
+    # directory rather than config (the-stack: --data-dir data/python), and --token for gated ones.
+    # shellcheck disable=SC2086
+    python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume ${FETCH_ARGS:-} || exit 1
   fi
   env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \

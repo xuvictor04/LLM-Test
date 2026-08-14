@@ -20,7 +20,14 @@ Presets (--dataset):
   wikipedia    wikimedia/wikipedia (en)    encyclopedic prose, very clean.
   oasst1       OpenAssistant/oasst1        DIALOGUE. Formats as turn-marked conversations.
   pile         monology/pile-uncopyrighted mixed-domain (books/code/papers/web).
+  the-stack    bigcode/the-stack           CODE, by language. GATED -- see below.
 Or pass any HF dataset id directly:  --dataset some/dataset --config en --field text
+
+GATED DATASETS (the-stack and friends) need the terms accepted in a browser AND a token:
+    1. sign in and accept at  https://huggingface.co/datasets/bigcode/the-stack
+    2. export HF_TOKEN=hf_...        (read scope is enough)   or   huggingface-cli login
+    3. python3 fetch_big.py --dataset the-stack --data-dir data/python --domain py --gb 0.03
+Step 1 is the one people skip; without it a perfectly valid token still returns 401/403.
 """
 import argparse, json, os, sys, time
 
@@ -31,6 +38,12 @@ PRESETS = {
     "wikipedia":   dict(path="wikimedia/wikipedia",       config="20231101.en", field="text", split="train"),
     "oasst1":      dict(path="OpenAssistant/oasst1",      config=None,          field="text", split="train"),
     "pile":        dict(path="monology/pile-uncopyrighted", config=None,        field="text", split="train"),
+    # CODE. Both are GATED: the terms must be accepted on the dataset page in a browser before any token works.
+    # Organised by LANGUAGE as directories, not configs, so pick one with --data-dir data/python. The text lives
+    # in `content`, not `text` -- with the default field this failed on a KeyError after authenticating, which
+    # reads like an auth problem and is not one.
+    "the-stack":     dict(path="bigcode/the-stack",       config=None, field="content", split="train"),
+    "the-stack-dedup": dict(path="bigcode/the-stack-dedup", config=None, field="content", split="train"),
 }
 
 
@@ -45,6 +58,12 @@ def main():
     ap.add_argument("--domain", default="eng", help="which DATA_DIR domain to fill (eng/py/num/c/...)")
     ap.add_argument("--shard-mb", type=int, default=512, help="split output into shards of this size")
     ap.add_argument("--min-chars", type=int, default=200, help="skip very short documents")
+    ap.add_argument("--data-dir", default=None,
+                    help="subdirectory within the dataset repo (the-stack: data/python, data/c, ...)")
+    ap.add_argument("--token", default=None,
+                    help="HF access token. Defaults to $HF_TOKEN / $HUGGINGFACE_HUB_TOKEN, then to whatever "
+                         "`huggingface-cli login` cached. Needed for GATED datasets -- and the terms must ALSO "
+                         "be accepted on the dataset page first; a token alone does not open a gated repo.")
     ap.add_argument("--resume", action="store_true",
                     help="continue a previous pull instead of overwriting it (see the manifest note below)")
     a = ap.parse_args()
@@ -65,7 +84,38 @@ def main():
 
     kw = dict(split=split, streaming=True)
     if config: kw["name"] = config
-    ds = load_dataset(path, **kw)
+    data_dir = a.data_dir or p.get("data_dir")
+    if data_dir: kw["data_dir"] = data_dir
+
+    # AUTH, EXPLICITLY. Relying on the ambient credential means "works on my machine" and an opaque 401 on
+    # anyone else's. Order: --token, then the environment, then whatever huggingface-cli cached (token=None lets
+    # the library find it). `token=` replaced `use_auth_token=` in datasets 2.14; accept both so an older pin
+    # still works rather than dying on an unexpected keyword.
+    tok = a.token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+    if tok: kw["token"] = tok
+    try:
+        ds = load_dataset(path, **kw)
+    except TypeError as e:
+        if tok and "token" in str(e):
+            kw.pop("token"); kw["use_auth_token"] = tok        # datasets < 2.14
+            ds = load_dataset(path, **kw)
+        else:
+            raise
+    except Exception as e:
+        # A GATED REPO AND A BAD TOKEN LOOK THE SAME from here, and the fix is different, so say both.
+        _m = str(e)
+        if any(k in _m for k in ("401", "403", "gated", "Gated", "restricted", "authenticated")):
+            sys.exit(
+                f"[fetch_big] cannot read {path}: {type(e).__name__}: {_m}\n"
+                f"  Gated datasets need TWO things, and a token is only one of them:\n"
+                f"    1. accept the terms, signed in, at  https://huggingface.co/datasets/{path}\n"
+                f"       (this is per-dataset and cannot be done from the CLI)\n"
+                f"    2. make the token visible here -- either\n"
+                f"         export HF_TOKEN=hf_...        (or pass --token hf_...)\n"
+                f"       or  huggingface-cli login\n"
+                f"  Token seen by this process: {'yes' if tok else 'NO -- neither --token nor $HF_TOKEN is set'}.\n"
+                f"  The token needs only READ scope.")
+        raise
 
     is_dialogue = a.dataset == "oasst1"
     # RESUME. A 40 GB pull is hours long and HF streaming has no seek, so a mid-way failure used to mean starting
