@@ -754,5 +754,5 @@ watch)
   echo; echo "=== live"; tail -3 "$OUT/run.log"
   ;;
 
-*) echo "usage: bash longrun.sh [pilot|grid|seeds <n> [FLAGS]|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
+*) echo "usage: bash longrun.sh [pilot|grid|seeds <n> [FLAGS]|repeat <n> [FLAGS]|smoke|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
 esac
