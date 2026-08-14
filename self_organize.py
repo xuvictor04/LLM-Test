@@ -201,6 +201,7 @@ _SPEC = {
     "DOM_MIN_VISITS": ("i", 2),                           # domains
     "DOM_PRIOR": ("f", 0.15),                             # domains
     "TOKC_DECAY": ("f", 0.5),                             # domains
+    "LOSS_MASK_DEAD": ("i", 0),                           # tokenizer
     "DOM_RADIUS": ("i", 1),                               # domains
     "DOM_RCAP": ("f", 2.0),                               # domains
     "DOM_RECUR": ("i", 1),                                # domains
@@ -512,6 +513,11 @@ DOM_PRIOR = _f("DOM_PRIOR", 0.15)
 # last couple of intervals, which is the vocabulary the end-of-run test actually scores against. 1.0 restores the
 # old cumulative-forever behaviour.
 TOKC_DECAY = _f("TOKC_DECAY", 0.5)
+# LOSS_MASK_DEAD: exclude never-minted ids from the softmax denominator. See the mask at the loss for why this is
+# the correct denominator rather than a trick, and why it is off by default. It is also the enabling change for a
+# VMAX that can be raised without paying for the width up front: with the mask on, unminted rows cost nothing, so
+# reserving headroom for a later domain stops being a tax on the current one.
+LOSS_MASK_DEAD = bool(_i("LOSS_MASK_DEAD", 0))
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memory and NO windows, without waiting
 #   for the act/stale conjunction that an empty domain can fail forever.
@@ -3002,12 +3008,29 @@ def _eval_logits(model, fab, FABRIC, x):
     return fab_logits(model, fab if FABRIC else None, model.encode(x))
 
 
+def mask_dead(lg):
+    """Take never-minted ids out of the distribution. See LOSS_MASK_DEAD.
+
+    APPLIED WHEREVER LOGITS BECOME A DISTRIBUTION, not only at the loss. Masking during training alone is worse
+    than not masking at all, and measurably so: the model is never taught to push the dead rows down, and every
+    eval path then scores it WITH those untrained rows in the denominator. Measured on a deliberately extreme
+    config (86.7% of the width never minted): unmasked 4.746, masked-at-the-loss-only 6.100. The mask was right
+    and its placement was wrong.
+    Training reaches the loss directly (fab.society()/fab()), eval reaches it through fab_logits, so masking in
+    those two places covers both without masking twice."""
+    if not (LOSS_MASK_DEAD and USE_TOK and TOK is not None): return lg
+    _v = TOK.vocab_size
+    if _v >= lg.size(-1): return lg
+    lg = lg.clone(); lg[..., _v:] = float("-inf")
+    return lg
+
+
 def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     """THE single path from hidden state to logits. In SOCIETY mode the experts are ENSEMBLED AT THE PREDICTION
     LEVEL (sum of w_i * head(o_i)), not by averaging their hidden states -- averaging hiddens produces a
     representation no expert was ever trained to emit, which decodes badly. Blending OUTPUTS is what makes the
     population an ensemble that degrades gracefully when a member is deleted."""
-    if fab is None: return model.head(h)
+    if fab is None: return mask_dead(model.head(h))
     # THIS IS THE EVAL PATH, AND IT MUST NOT TRAIN THE ROUTER'S REGIONS. The zero gist below is a placeholder so
     # the routing arithmetic has the right shape -- it is NOT a signature. ground_update normalises it (zero) and
     # moves every top-ranked expert's centroid toward the origin, which is how a diagnostic's sampling frequency
@@ -3019,7 +3042,7 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     if nov is None: nov = torch.zeros(h.size(0), device=h.device)
     if not SOCIETY:
         _hh = fab(h, gist, nov, head=(model.head if fab.vote else None), learn_regions=False)[0]
-        return fab._votelg if fab._votelg is not None else model.head(_hh)
+        return mask_dead(fab._votelg if fab._votelg is not None else model.head(_hh))
     kk = int(k or ENS_K)
     w, O, oid = fab.society(h, gist, nov, k=kk, learn_regions=False)   # SPARSE: only the kk it is about to use
     ww = w.gather(1, oid)                                     # oid is (B,kk): each row's OWN experts and weights
@@ -3028,7 +3051,7 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     for j in range(O.size(1)):
         lj = model.head(fab.norm(O[:, j])) * ww[:, j][:, None, None]
         out = lj if out is None else out + lj
-    return halt_blend(model, fab, h, out)
+    return mask_dead(halt_blend(model, fab, h, out))
 
 
 def halt_blend(model, fab, h, out):
@@ -4684,6 +4707,21 @@ def main():
         # PER-WINDOW loss, then the mean. Same arithmetic, same cost -- reduction='none' and .mean() is exactly
         # what cross_entropy does internally -- but it leaves the per-window numbers available, and COMPETENCE
         # cannot be tracked without them.
+        # === ROWS THAT INDEX NOTHING SHOULD NOT BE IN THE DENOMINATOR ==========================================
+        # V is VMAX -- the softmax WIDTH, fixed before training. The vocabulary is whatever the tokenizer has
+        # actually minted, and under TOK_ONLINE it starts at SEED_VOCAB and grows. Every id in between indexes no
+        # byte sequence, can never be a target, and so takes only the push-down half of the cross-entropy
+        # gradient -- while still taking probability mass off the tokens that CAN occur, for the whole run.
+        # Measured, dead fraction against held-out bits/byte: 0% -> ~2.2, 29.7% -> 3.600, 41% -> 3.561,
+        # 75% -> 6.114. That curve is the whole of why vmax8k "failed": at 8 epochs it minted 4823 of 8192, so
+        # 41% of the width indexed nothing, and the arm was retired for having too large a vocabulary when what
+        # it actually had was too much UNUSED width.
+        # Masking them is not a reweighting, it is the correct denominator: the model is asked for a distribution
+        # over the outcomes that exist. It also makes bits/byte comparable ACROSS VMAX, which it currently is not
+        # -- two arms differing only in VMAX are scored against differently-sized outcome spaces.
+        # Kept behind a knob and OFF by default because it changes every number in the log, and this project's
+        # record is already one instrument change deep. Turn it on as an ARM, measure it, then decide.
+        lg = mask_dead(lg)
         _plw = F.cross_entropy(lg.reshape(-1, V), y.reshape(-1), reduction="none").reshape(y.size(0), -1).mean(-1)
         loss = _plw.mean()
         # === COMPETENCE, the term selection was missing ==========================================================
