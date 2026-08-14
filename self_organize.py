@@ -200,6 +200,7 @@ _SPEC = {
     "DOM_MARGIN": ("f", 0.75),                            # domains
     "DOM_MIN_VISITS": ("i", 2),                           # domains
     "DOM_PRIOR": ("f", 0.15),                             # domains
+    "TOKC_DECAY": ("f", 0.5),                             # domains
     "DOM_RADIUS": ("i", 1),                               # domains
     "DOM_RCAP": ("f", 2.0),                               # domains
     "DOM_RECUR": ("i", 1),                                # domains
@@ -505,6 +506,12 @@ DOM_MANAGE_EVERY = _i("DOM_MANAGE_EVERY", 100)
 # DOM_PRIOR: accumulate a token histogram per domain and blend it into the prediction. 0 disables the
 # accounting entirely (no cost); >0 is the blend weight actually used at eval. Measured before adopted.
 DOM_PRIOR = _f("DOM_PRIOR", 0.15)
+# TOKC_DECAY: what a domain's token histogram keeps when the SEGMENTATION changes. The counts are over token ids,
+# and a retok makes the same text into different ids -- so counts banked before it are observations of a different
+# distribution, not stale observations of this one. Halving per retok leaves the histogram describing roughly the
+# last couple of intervals, which is the vocabulary the end-of-run test actually scores against. 1.0 restores the
+# old cumulative-forever behaviour.
+TOKC_DECAY = _f("TOKC_DECAY", 0.5)
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memory and NO windows, without waiting
 #   for the act/stale conjunction that an empty domain can fail forever.
@@ -2356,6 +2363,48 @@ def rekey_memory(mem):                                                      # re
     if ctx is None or ii.numel() == 0: return
     ks = [_model_key(ctx[s:s + 8192]) for s in range(0, ii.numel(), 8192)]
     mem.rekey(torch.cat(ks), ii)
+
+@torch.no_grad()
+def remap_mem_ctx(mem, TOK):
+    """RE-SEGMENT EVERY STORED CONTEXT INTO THE CURRENT VOCABULARY. Returns how many entries moved.
+
+    mem.ctx holds KW TOKEN IDS, captured under whatever segmentation was in force when the entry was written, and
+    it is the input to the whole drift-survival machinery: _rekey_amortized re-encodes keys from it on a cadence
+    precisely so keys track the model. That machinery was re-encoding a STALE TOKEN SEQUENCE. Meanwhile a query
+    builds its key from the CURRENT segmentation, so the same text on the two sides produced two different id
+    sequences and therefore two different keys, and the gap widened at every mint. The rekey pass could not close
+    it -- it was faithfully re-encoding the wrong input.
+
+    Measured on this corpus, growing the vocabulary 647 -> 1024 (ONE growth step; a pilot does ~16):
+    82.3% of stored contexts no longer match what the current tokenizer produces for the same bytes.
+
+    The remap is exact in id space because minting is APPEND-ONLY: id2bytes never changes meaning, so an entry's
+    bytes can always be recovered and re-segmented. 200,000 entries in 2.0s, on the retok cadence only -- about 30
+    seconds across a 48k-step run.
+
+    WHAT IT DOES NOT FIX, stated because the number will still not be perfect: a better vocabulary covers the same
+    bytes in FEWER tokens (measured: 75% of windows re-segment shorter), so the remapped window spans less TEXT
+    than a live query's KW-token window does, and is left-padded with 0 to width. The suffix -- which is what a
+    GRU final state is mostly reading -- is now right; the span is not. Fixing that properly means storing the
+    BYTES rather than the ids, which changes the checkpoint format, and RESUME is how continual learning is
+    supposed to work here, so that is not a change to make on the way into a test run."""
+    if not USE_TOK or TOK is None or mem.ctx_w <= 0: return 0
+    ii = mem.active.nonzero(as_tuple=True)[0]
+    if ii.numel() == 0: return 0
+    _idb = TOK.id2bytes; _nb = len(_idb); _W = mem.ctx_w
+    _rows = mem.ctx[ii].tolist(); _out = []; _ch = 0
+    for _r in _rows:
+        # count=False: tallying pairs here would let a MAINTENANCE pass steer what gets minted next.
+        _ns = TOK.segment(b"".join(_idb[t] for t in _r if 0 <= t < _nb), count=False)
+        # LAST KW, left-padded with 0 -- the same convention _windows uses at the start of the stream, so the
+        # encoder has seen this shape in training. The context is a SUFFIX ending at the predicted position, so
+        # the right edge is the part that must be preserved.
+        _ns = _ns[-_W:] if len(_ns) >= _W else [0] * (_W - len(_ns)) + _ns
+        if _ns != _r: _ch += 1
+        _out.append(_ns)
+    mem.ctx[ii] = torch.tensor(_out, dtype=torch.long, device=mem.ctx.device)
+    return _ch
+
 
 def sig_of(win, enc):                                      # win: list[int] -> signature vector
     if SIG_MODE == "learned":
@@ -5074,6 +5123,19 @@ def main():
                 _VALT.clear(); _BL.clear()
                 if SIG_SPACE == "tokens":                        # the encoder reads the TOKEN stream, which was just rebuilt
                     ENC_SEQ = stream; set_enc_tensor(ENC_SEQ)    #   -> re-point it, or it trains on a stale segmentation
+                # THE STORE IS RE-SEGMENTED TOO. mem.ctx feeds the rekey pass, and asm.tokc is a token histogram;
+                # both were accumulating across segmentations that do not mean the same thing. See remap_mem_ctx.
+                _mch = remap_mem_ctx(mem, TOK)
+                if _mch: _rk["ii"] = None; _rk["cur"] = 0        # rekey from the NEW ctx, whole store, from the top
+                # ...AND THE PER-DOMAIN HISTOGRAM DECAYS. asm.tokc counts token ids per domain and is read at the
+                # end against held-out text tokenised with the FINAL vocabulary. Counts banked under an older
+                # segmentation describe a different distribution over the same text -- not wrong observations, but
+                # observations of something else -- so the histogram was a mixture of every segmentation the run
+                # passed through. Halving at each segmentation change gives it a memory of a couple of retok
+                # intervals, which is the same discipline `use` and `act` already run on. TOKC_DECAY=1 keeps the
+                # old cumulative behaviour.
+                if DOM_PRIOR > 0.0 and TOKC_DECAY < 1.0:
+                    for _tk in asm.tokc: asm.tokc[_tk] *= TOKC_DECAY
                 if FABRIC and fabgrow is not None: fabgrow.note_shift(step)   # the loss jump after a retok is OURS, not a shift
                 # WHAT IT ACTUALLY MINTED, not just how many. The count says the vocabulary grew; it cannot say
                 # whether the growth was worth having, and a run that ends up spelling in fragments looks identical
@@ -5085,8 +5147,12 @@ def main():
                 for _t in range(max(256, _prev_v), TOK.vocab_size):
                     _s = TOK.id2bytes[_t].decode("utf-8", "replace")
                     _new.append("·" + _s[1:] if _s.startswith(" ") else _s)
+                # THE REMAP IS REPORTED, because an unmeasured maintenance pass is indistinguishable from one
+                # that silently stopped working -- which is how this file collected retire_stale, track_usage and
+                # fuzzy_segment, all defined and none of them ever called.
                 print(f"  [tokenizer @ {step}] vocab {TOK.vocab_size}/{TOK.vmax} (minting live; "
                       f"+{TOK.vocab_size - _prev_v} since last retok)"
+                      + (f" | re-segmented {_mch} stored contexts" if _mch else "")
                       + (f" newest: {'  '.join(repr(_x) for _x in _new[-8:])}" if _new else ""))
                 _last_vsz = (TOK.vocab_size, len(TOK.seq2id))
 
@@ -5117,6 +5183,15 @@ def main():
         if SIG_SPACE == "tokens":
             ENC_SEQ = stream; set_enc_tensor(ENC_SEQ)
         _VALT.clear(); _BL.clear()
+        # ...and the store, before ANY of the report battery reads it. Every memory number below -- the retrieval
+        # contribution, the siloed-vs-global comparison, the provenance test, the unlearn deltas -- is computed
+        # through keys re-encoded from mem.ctx, so leaving it in the pre-final segmentation would have the report
+        # measure a store queried in a language it was not written in.
+        _mchf = remap_mem_ctx(mem, TOK)
+        if _mchf: rekey_memory(mem)                        # one full re-encode: nothing is training now, so no spike to amortize
+        if mem.ctx_w > 0:
+            print(f"[tokenizer] final re-segmentation moved {_mchf} of {int(mem.active.sum())} stored contexts "
+                  f"into the final vocabulary")
         TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
         print(f"[tokenizer] ONLINE: minted throughout -> grew 256 -> {TOK.vocab_size} during training; final re-tokenization for eval")
 
@@ -5168,6 +5243,21 @@ def main():
               f"-- rows at their initialisation, in the denominator for the whole run")
         print(f"[vocab]   minted, unused   {_nturn:6d}  ({_nturn / max(1, int(V)) * 100:5.1f}% of width)  "
               f"-- trained while in use, then lost to later merges")
+        # THE HALF OF THE SEGMENTATION DRIFT THAT CANNOT BE REPAIRED, made countable instead of invisible.
+        # remap_mem_ctx re-segments each entry's stored CONTEXT, which is exact. Its stored VALUE -- "the next
+        # token was X" -- cannot be remapped: under the current vocabulary the stream would emit a longer merge
+        # covering X and whatever followed it, and what followed is not in the entry. So an old entry votes for a
+        # target the model is no longer trained to produce. mem.read() scatters those votes into a distribution
+        # over the live vocabulary, which is how a stale entry turns into confident noise.
+        # _seen is already computed above: it is exactly the set of ids the final stream carries.
+        if mem.n > 0:
+            _mt = mem.tok[mem.active]
+            _mt = _mt[(_mt >= 0) & (_mt < int(V))]
+            if _mt.numel():
+                _dead = int((~_seen.to(_mt.device)[_mt]).sum())
+                print(f"[vocab]   memory entries predicting an id the final stream never carries: "
+                      f"{_dead} of {_mt.numel()} ({_dead / _mt.numel() * 100:.1f}%)  -- these vote for a target "
+                      f"the model was retrained away from; not repairable from what an entry stores")
     except Exception as _e:                                          # an instrument must not be able to end a run
         print(f"[vocab] width-vs-live check skipped: {type(_e).__name__}: {_e}")
 
