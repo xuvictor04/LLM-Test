@@ -202,6 +202,15 @@ _SPEC = {
     "DOM_PRIOR": ("f", 0.15),                             # domains
     "TOKC_DECAY": ("f", 0.5),                             # domains
     "LOSS_MASK_DEAD": ("i", 0),                           # tokenizer
+    "GROW_CAP": ("i", 0),                                 # capacity
+    "GROW_CAP_FAB": ("i", 1),                             # capacity
+    "GROW_CAP_VOCAB": ("i", 1),                           # capacity
+    "GROW_LIFT": ("f", 2.0),                              # capacity
+    "GROW_CAP_PLATEAU": ("f", 0.002),                     # capacity
+    "GROW_CAP_EVERY": ("i", 2000),                        # capacity
+    "GROW_CAP_FAB0": ("i", 0),                            # capacity -- 0 = start at FAB_NMAX
+    "GROW_CAP_VOCAB0": ("i", 0),                          # capacity -- 0 = start at VMAX
+    "FAB_RESCUE": ("f", 0.0),                             # fabric
     "DOM_RADIUS": ("i", 1),                               # domains
     "DOM_RCAP": ("f", 2.0),                               # domains
     "DOM_RECUR": ("i", 1),                                # domains
@@ -518,6 +527,34 @@ TOKC_DECAY = _f("TOKC_DECAY", 0.5)
 # VMAX that can be raised without paying for the width up front: with the mask on, unminted rows cost nothing, so
 # reserving headroom for a later domain stops being a tax on the current one.
 LOSS_MASK_DEAD = bool(_i("LOSS_MASK_DEAD", 0))
+# ---- CAPACITY THAT IS EARNED, NOT DECLARED --------------------------------------------------------------------
+# Both populations are sized by a number chosen before the run: FAB_NMAX experts, VMAX vocabulary rows. Both are
+# then either wasted (never filled, and in the vocabulary's case sitting in the loss denominator) or binding (full
+# and unable to answer new material). Neither is a decision the run gets to revisit.
+#
+# A SOFT cap does. It starts where the run can actually use it, and lifts by GROW_LIFT only when BOTH: the
+# population is pinned against it, AND the loss has stopped improving. Pinned-but-improving means the capacity in
+# hand is still paying, so more would only dilute; plateaued-but-not-pinned means the limit is not what is
+# stopping it, so raising it would change nothing and only add dead rows. The conjunction is the whole rule.
+#
+# The HARD ceilings do not move: the fabric preallocates FAB_NMAX slots (unused rows are zero-B identities, i.e.
+# exact no-ops that cost memory only) and the model allocates VMAX embedding/head rows. Lifting a soft cap hands
+# out capacity that is already there, so no tensor is reallocated and no optimizer reference is invalidated --
+# which is what made this cheap enough to be worth doing at all.
+#
+# THE VOCABULARY LIFT IS ONLY HONEST WITH LOSS_MASK_DEAD=1. Reserving 8192 rows and minting 2048 means 6144 rows
+# in the softmax denominator that index nothing; masking is what makes reserved headroom free. Running
+# GROW_CAP_VOCAB=1 with the mask off is measuring the reservation, not the mechanism -- the banner says so.
+# FAB_RESCUE: how large a mutation an expert gets INSTEAD of being culled, the first time it comes up --
+# as a multiple of its own weight scale, the same units FAB_MUT uses for offspring. 0 = the old behaviour,
+# cull on first selection. See soft_cull for why a failing expert is where exploration is most worth doing.
+FAB_RESCUE = _f("FAB_RESCUE", 0.0)
+GROW_CAP = bool(_i("GROW_CAP", 0))                         # master switch for both soft caps
+GROW_CAP_FAB = bool(_i("GROW_CAP_FAB", 1))                 # ...experts   (under GROW_CAP)
+GROW_CAP_VOCAB = bool(_i("GROW_CAP_VOCAB", 1))             # ...vocabulary (under GROW_CAP)
+GROW_LIFT = _f("GROW_LIFT", 2.0)                           # multiply the soft cap by this when it is earned
+GROW_CAP_PLATEAU = _f("GROW_CAP_PLATEAU", 0.002)           # relative slow-loss improvement below which it counts as stalled
+GROW_CAP_EVERY = _i("GROW_CAP_EVERY", 2000)               # minimum steps between lifts, so one plateau lifts once
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memory and NO windows, without waiting
 #   for the act/stale conjunction that an empty domain can fail forever.
@@ -1142,6 +1179,8 @@ class Fabric(nn.Module):
         # population is itself grown and culled: a fixed ceiling would be permissive early and crushing later.
         s.dom_of = {}                                      # expert -> set of domains it has actually served
         s.use = {}                                         # expert -> windows won (UTILIZATION)
+        s.rescued = set()                                  # given a big mutation instead of being culled, once
+        s.n_rescued = 0                                    # how many times that fired, for the report
         s.parent = {}                                      # expert -> the expert it was replicated FROM
         s.replicated = 0
         s.parent_k = int(_env("FAB_PARENT_K", 8))     # shortlist size: how many region-owners compete to breed
@@ -1572,6 +1611,22 @@ class Fabric(nn.Module):
                 if _c is not None and _c > 0: spared += 1; continue        # load-bearing: worse without it
                 if _c is None and comp_glob is not None and s.comp.get(i, 1e9) < comp_glob:
                     spared += 1; continue                                   # better than the population on its own
+            # SELECTION PRESSURE RAISES THE MUTATION RATE, it does not only prune. An expert at the bottom of a
+            # utilization ranking is not necessarily bad -- it may be sitting in a basin the router never sends
+            # anything to, and culling it replaces it with a fresh random one that is no more likely to escape.
+            # Give it one large jump first, from where it already is, and restart its grace clock. If it comes
+            # back up for culling having still earned nothing, it goes. This is the same heavy-tailed mutation
+            # grow() uses for offspring (FAB_MUT_BIG), applied to an incumbent under threat rather than to a
+            # newborn -- the population explores hardest exactly where it is failing.
+            if FAB_RESCUE > 0.0 and i not in s.rescued:
+                with torch.no_grad():
+                    _sa = float(s.A[i].std()) or 1.0; _sb = float(s.B[i].std()) or (s.d ** -0.5)
+                    s.A[i] += FAB_RESCUE * _sa * torch.randn_like(s.A[i])
+                    s.B[i] += FAB_RESCUE * _sb * torch.randn_like(s.B[i])
+                s.rescued.add(i); s.born[i] = int(step)      # a rescued expert is a newborn for grace purposes
+                s.use[i] = s.use.get(i, 0.0)                 # ...but keeps its history, so it cannot hide forever
+                s.n_rescued += 1
+                continue
             s.remove(i); culled += 1
         return culled, spared
 
@@ -1815,6 +1870,10 @@ class Fabric(nn.Module):
             for _D in (s.comp, s.contrib): _D.pop(j, None)
         s.dom_of.pop(j, None)
         if last in s.dom_of: s.dom_of[j] = s.dom_of.pop(last)   # the swapped-in expert keeps ITS affiliations
+        # ...and so does its RESCUED flag. This is a set of slot INDICES and remove() renumbers slots, so without
+        # this a surviving expert inherits the removed one's "already had its chance" and is culled on sight.
+        s.rescued.discard(j)
+        if last in s.rescued: s.rescued.discard(last); s.rescued.add(j)
         s.n_live = last
     def seed_key(s, gist):
         """TARGETED BIRTH: put the new expert's key where the router will actually send this region, instead of at
@@ -3679,6 +3738,11 @@ def main():
             print(f"  >> this is the ONLY number that spans the run boundary. Every other retention figure is")
             print(f"     computed on the current stream and cannot see what was known before this run started.")
         return now
+    # SOFT CAPS. Start where the run was configured; GROW_CAP lifts them, nothing lowers them. With GROW_CAP off
+    # the fabric cap is FAB_NMAX and the vocabulary cap is TOK.vmax, i.e. exactly the previous behaviour.
+    _cap_fab = [int(_i("GROW_CAP_FAB0", 0)) or FAB_NMAX]
+    _cap_last = [-10 ** 9]; _resc_seen = [0]
+    if GROW_CAP and USE_TOK and _i("GROW_CAP_VOCAB0", 0): TOK.vmax = min(TOK.vmax, _i("GROW_CAP_VOCAB0", 0))
     _last_vsz = (TOK.vocab_size, len(TOK.seq2id)) if USE_TOK else (256, 256)   # vocab AND match table
     _retok_noop = [0]; _retok_skipped = [False]           # retoks refused because the vocabulary had not moved
     dom_exp = {}                                           # domain -> routing mass per expert (the AFFILIATION map)
@@ -4573,6 +4637,16 @@ def main():
                                   pressure=_f("FAB_PRESSURE", 0.75), protect=COMP_PROTECT,
                                   comp_glob=asm.comp_glob)
             fab.removed += _fc; fab.spared += _fs
+            # REPORT THE RESCUES. A maintenance path with no counter in the log is indistinguishable from one
+            # that silently stopped firing -- the failure mode this file has hit repeatedly (retire_stale,
+            # fuzzy_segment, the domain-prior section). n_rescued is cumulative, so it also says whether the
+            # mechanism is doing a little or carrying the whole population.
+            if _fc or _fs or fab.n_rescued != _resc_seen[0]:
+                if fab.n_rescued != _resc_seen[0]:
+                    print(f"  [experts @ {step}] {fab.n_rescued - _resc_seen[0]} rescued "
+                          f"(FAB_RESCUE={FAB_RESCUE} mutation instead of a cull; {fab.n_rescued} total) -> "
+                          f"{fab.n()} live")
+                    _resc_seen[0] = fab.n_rescued
             if _fc or _fs:
                 print(f"  [experts @ {step}] culled {_fc} spared {_fs} -> {fab.n()} live "
                       f"(cull under capacity pressure, bottom {_f('FAB_CULL_FRAC', 0.08):.0%} by utilization; "
@@ -4927,9 +5001,41 @@ def main():
                 if _nw is not None:
                     print(f"  [expert @ {step}] a MID-CHAIN query had no near match -> decoded it into slot {_nw} "
                           f"(hop {len(fab._hopq)}, {fab.n()} live)")
+        # === EARNED CAPACITY ===================================================================================
+        # PINNED **AND** STALLED. fabgrow already keeps the fast/slow EMA pair the plateau test needs, so this
+        # reads the same signal the growth machinery reads rather than inventing a second opinion about whether
+        # the run is improving.
+        # ...AND THE PLATEAU TEST MUST HAVE SOMETHING TO SAY. fast and slow are both seeded from the FIRST loss,
+        # so `improving` is exactly 0.0000 until they separate -- which passes any threshold. Without this the
+        # very first check always lifts, at step 7, on no evidence: observed as
+        #   [capacity @ 7] experts pinned at 6 and the loss has stalled (improving +0.0000 < 0.5)
+        # The EMAs are 0.98/0.998, so a few hundred observations is the point at which "not improving" is a
+        # reading rather than an initialisation.
+        if (GROW_CAP and fabgrow is not None and fabgrow.slow is not None
+                and fabgrow.n >= GROW_CAP_EVERY and step - _cap_last[0] >= GROW_CAP_EVERY):
+            _improving = (fabgrow.slow - fabgrow.fast) / max(1e-6, abs(fabgrow.slow))
+            if _improving < GROW_CAP_PLATEAU:
+                if GROW_CAP_FAB and FABRIC and fab.n() >= _cap_fab[0]:
+                    _was = _cap_fab[0]
+                    _cap_fab[0] = min(FAB_NMAX, max(_cap_fab[0] + 1, int(_cap_fab[0] * GROW_LIFT)))
+                    if _cap_fab[0] > _was:
+                        _cap_last[0] = step
+                        print(f"  [capacity @ {step}] experts pinned at {_was} and the loss has stalled "
+                              f"(improving {_improving:+.4f} < {GROW_CAP_PLATEAU}) -> soft cap {_was} -> "
+                              f"{_cap_fab[0]} (hard ceiling {FAB_NMAX})")
+                if GROW_CAP_VOCAB and USE_TOK and ONLINE and TOK.vocab_size >= TOK.vmax:
+                    _wasv = TOK.vmax
+                    TOK.vmax = min(int(V), max(TOK.vmax + 1, int(TOK.vmax * GROW_LIFT)))
+                    if TOK.vmax > _wasv:
+                        _cap_last[0] = step
+                        # Nested f-string expressions may not span lines before 3.12; build the clause first.
+                        _mnote = ("masked, so the reserved rows are free" if LOSS_MASK_DEAD else
+                                  "UNMASKED -- the newly reachable rows sit in the denominator until minted")
+                        print(f"  [capacity @ {step}] vocabulary saturated at {_wasv} and the loss has stalled "
+                              f"-> soft cap {_wasv} -> {TOK.vmax} (hard ceiling {int(V)}; {_mnote})")
         if FABRIC and not fab.norm_only:
-            _nb = fabgrow.step(_lf, step, fab.n(), FAB_NMAX)    # 0, or HOW MANY to grow (burst on an unexpected regression)
-            _nb = min(_nb, FAB_NMAX - fab.n())
+            _nb = fabgrow.step(_lf, step, fab.n(), _cap_fab[0])  # 0, or HOW MANY to grow (burst on an unexpected regression)
+            _nb = min(_nb, _cap_fab[0] - fab.n())
             for _g in range(max(0, _nb)):                       # each newborn is keyed at the CURRENT signature, so a
                 _fp = fab.grow(sig[None, :], step=step)      # burst owns the CURRENT region, on either path:
                 #   a newborn keyed at random receives no traffic, gets no gradient and stays dead, and that is
