@@ -3767,11 +3767,14 @@ def main():
     # BYTES PER TOKEN, WEIGHTED BY USE -- not a mean over the VOCABULARY. Every number below is about how far the
     # loop strides through the TEXT, and the loop strides through tokens in the proportions the stream uses them.
     # `sum(bytes_per_id) / vocab_size` weights a token minted once and never seen again exactly as heavily as one
-    # in every window, and the vocabulary's tail is long and rare BY CONSTRUCTION -- that is why those tokens were
-    # minted late. So the figure overstates, and the overstatement GROWS WITH VMAX, which is the one axis these
-    # runs were being compared along: the arm with the larger vocabulary got the larger claimed coverage for free.
-    # len(byte_stream)/len(stream) is the same quantity measured rather than estimated -- total bytes over total
-    # tokens of the same text -- and costs two len() calls.
+    # in every window, so the error it carries is a function of the vocabulary's SHAPE -- and THE SIGN FLIPS with
+    # vocabulary size, which is worse than a constant bias. At 512 tokens the 256 single-byte seeds dominate the
+    # count while the stream preferentially uses the longer merges, so it reads LOW: measured 1.50 unweighted
+    # against 1.85 as used. At pilot vocabularies most ENTRIES are long and rare (that is why they were minted
+    # late) while the tokens actually carried are the shorter common merges, so it reads HIGH. Either way it is
+    # not comparable across VMAX -- which is exactly the axis these runs were being compared along, and SIG_WIN=614
+    # was picked off it. len(byte_stream)/len(stream) is the same quantity measured rather than estimated -- total
+    # bytes over total tokens of the same text -- and costs two len() calls.
     _bpt = ((len(byte_stream) / max(1, len(stream))) if (USE_TOK and TOK is not None and byte_stream is not None)
             else 1.0)
     # SIGNATURE WINDOW WIDTH vs LOOP STRIDE. In byte space the width is a byte count while the loop advances WIN
@@ -6319,9 +6322,10 @@ def main():
             if _gen_keep and USE_TOK:
                 # TWO different means, and they are routinely confused. The first is a property of the
                 # VOCABULARY (how long an entry is, on average); the second is a property of the TEXT (how far one
-                # token carries you), and only the second is a compression figure. The unweighted one runs high
-                # because the tail is long and rare, and it runs higher the larger VMAX is -- so quoting it as
-                # "bytes per token" flattered exactly the arm with the biggest vocabulary.
+                # token carries you), and only the second is a compression figure. They disagree in a direction
+                # that DEPENDS ON VOCABULARY SIZE -- 1.50 vs 1.85 at 512 tokens, the other way round once the tail
+                # of long rare entries outweighs the single-byte seeds -- so the first cannot be quoted as
+                # compression and cannot be compared between two arms with different VMAX. Print both, labelled.
                 _bpt2 = sum(TOK.bytes_per_id[:TOK.vocab_size]) / max(1, TOK.vocab_size)
                 _bptu = (len(byte_stream) / max(1, len(stream))) if byte_stream is not None else 1.0
                 _voc = set()
