@@ -31,7 +31,7 @@ KNOBS = ["EPOCHS", "LR_EPOCHS", "LR_RESTARTS", "VMAX", "SEED_VOCAB", "TOK_MINT_U
          "TOK_MINT_PMIN", "TOK_COMPOSE", "DROPOUT", "WEIGHT_DECAY", "FAB_NMAX"]
 COLS = (["tag", "commit", "date"] + [k.lower() for k in KNOBS]
         + ["steps", "vocab", "minted", "never_minted", "held_out", "train", "gap",
-           "uniform", "order1", "words_pct", "past_min", "notes"])
+           "uniform", "order1", "words_pct", "past_min", "held_out_se", "notes"])
 
 
 def _grab(pat, text, cast=str, default=""):
@@ -64,8 +64,13 @@ def parse(path):
     row["vocab"] = _grab(r"^\[vocab\] softmax width (\d+)", t)
     row["minted"] = _grab(r"^\[vocab\] softmax width \d+ \| minted (\d+)", t)
     row["never_minted"] = _grab(r"never minted\s+(\d+)", t)
-    row["train"] = _grab(r"train ([\d.]+) \| held-out", t)
-    row["held_out"] = _grab(r"train [\d.]+ \| held-out ([\d.]+)", t)
+    # THE HEADLINE LINE NOW CARRIES AN ERROR BAR, and this parser predates it. `train X | held-out Y` became
+    # `train X +/- a | held-out Y +/- b (n train / m held-out windows of W)`, so every post-fix log failed to
+    # ingest with "did the run reach its report?" -- a registry that silently stops accepting new runs is worse
+    # than no registry. `(?: \+/- [\d.]+)?` matches both spellings, so old logs still parse.
+    row["train"] = _grab(r"train ([\d.]+)(?: \+/- [\d.]+)? \| held-out", t)
+    row["held_out"] = _grab(r"train [\d.]+(?: \+/- [\d.]+)? \| held-out ([\d.]+)", t)
+    row["held_out_se"] = _grab(r"\| held-out [\d.]+ \+/- ([\d.]+)", t) or ""
     row["gap"] = _grab(r"gap ([+-][\d.]+) bits/byte", t)
     row["uniform"] = _grab(r"uniform ([\d.]+) \|", t)
     row["order1"] = _grab(r"order-1 ([\d.]+) \|", t)
