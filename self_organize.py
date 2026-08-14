@@ -3764,7 +3764,16 @@ def main():
     # ~1250) were set when WIN was ~96 BYTES -- 13 windows per segment, a sane regime. At WIN=256 TOKENS the window
     # is ~490 bytes, so a segment is 2.6 windows, SUSTAIN=2 consumes two of them, and under one clean window per
     # segment remains. That is not a domain stream, it is a transition stream, and no assign rule fixes it.
-    _bpt = (sum(TOK.bytes_per_id[:TOK.vocab_size]) / max(1, TOK.vocab_size)) if (USE_TOK and TOK is not None) else 1.0
+    # BYTES PER TOKEN, WEIGHTED BY USE -- not a mean over the VOCABULARY. Every number below is about how far the
+    # loop strides through the TEXT, and the loop strides through tokens in the proportions the stream uses them.
+    # `sum(bytes_per_id) / vocab_size` weights a token minted once and never seen again exactly as heavily as one
+    # in every window, and the vocabulary's tail is long and rare BY CONSTRUCTION -- that is why those tokens were
+    # minted late. So the figure overstates, and the overstatement GROWS WITH VMAX, which is the one axis these
+    # runs were being compared along: the arm with the larger vocabulary got the larger claimed coverage for free.
+    # len(byte_stream)/len(stream) is the same quantity measured rather than estimated -- total bytes over total
+    # tokens of the same text -- and costs two len() calls.
+    _bpt = ((len(byte_stream) / max(1, len(stream))) if (USE_TOK and TOK is not None and byte_stream is not None)
+            else 1.0)
     # SIGNATURE WINDOW WIDTH vs LOOP STRIDE. In byte space the width is a byte count while the loop advances WIN
     # TOKENS, so the encoder sees width/(WIN*bytes_per_token) of the stream -- and that fraction SHRINKS as the
     # tokenizer compresses better. Report it, because it was never a decision anyone made.
@@ -4369,6 +4378,16 @@ def main():
                 set_enc_tensor(ENC_SEQ); _sigq = []          # stream replaced -> queued lookahead windows are stale
                 if FABRIC and fabgrow is not None: fabgrow.note_shift(step)
             i = 0; _ep_start = step
+            # THE PARTIAL BATCH DOES NOT SURVIVE THE BOUNDARY. This roll sits ABOVE the accumulator, so on any
+            # epoch whose last window lands mid-batch (BATCH_W=16: fifteen times in sixteen) up to BATCH_W-1
+            # windows of the OLD stream were still queued here -- and _bp holds (bpos, i) where `i` indexes the OLD
+            # tok_bs. _resample() replaces tok_bs, so _posv then read the new table at the old stream's indices and
+            # every one of those entries went into memory with provenance pointing at unrelated text (the
+            # short-slice padding hid it: no IndexError, just wrong bytes). prompt.py's grounded recall reads a
+            # 220-byte span around that position, so the passage it quotes was not the passage that was stored.
+            # Dropping them costs <=15 windows of ~15,000 per epoch; keeping them costs a corrupt batch and a
+            # corrupt provenance record.
+            _bx = []; _by = []; _bg = []; _bd = []; _bp = []
             # LR ON THE EPOCH LINE. The schedule was not observable anywhere in a log, which is how a lever that
             # moves the LR 11x between two runs stayed invisible across every comparison we made. Printed as a
             # fraction of peak so it reads without arithmetic: 100% = untouched, 5% = at the LR_MIN_FRAC floor.
@@ -5082,6 +5101,19 @@ def main():
     if ONLINE:                                             # freeze + final tokenization for eval + persist the grown vocab
         stream, tok_bs, labels = _retok(byte_stream, byte_labels)
         BLEN = torch.tensor(TOK.bytes_per_id, dtype=torch.float, device=DEV)
+        # EVERYTHING THE IN-LOOP RETOK INVALIDATES, THIS ONE INVALIDATES TOO -- and it was doing neither.
+        #   ENC_SEQ: under SIG_SPACE=tokens the encoder reads the TOKEN stream, and encpos() hands it the loop
+        #     index directly. The line above just replaced `stream` and left ENC_SEQ pointing at the previous
+        #     segmentation, so every signature in the report battery -- generation gists, the coherence probe, the
+        #     per-domain and per-expert sections, the unlearn tests -- indexed a stale table at the new stream's
+        #     offsets. Inert on the default path (SIG_SPACE=bytes leaves ENC_SEQ as the byte stream, which does not
+        #     move), which is exactly why it could sit here unnoticed.
+        #   _VALT / _BL: the tokenised-validation and bytes-per-id caches belong to a SEGMENTATION. The in-loop
+        #     retok clears them for that reason; the final one left the end-of-run held-out probe scoring
+        #     validation text tokenised with the pre-final vocabulary against a model that had moved past it.
+        if SIG_SPACE == "tokens":
+            ENC_SEQ = stream; set_enc_tensor(ENC_SEQ)
+        _VALT.clear(); _BL.clear()
         TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
         print(f"[tokenizer] ONLINE: minted throughout -> grew 256 -> {TOK.vocab_size} during training; final re-tokenization for eval")
 
@@ -6285,7 +6317,13 @@ def main():
         # exist in the training text, which separates composition from recall.
         try:
             if _gen_keep and USE_TOK:
+                # TWO different means, and they are routinely confused. The first is a property of the
+                # VOCABULARY (how long an entry is, on average); the second is a property of the TEXT (how far one
+                # token carries you), and only the second is a compression figure. The unweighted one runs high
+                # because the tail is long and rare, and it runs higher the larger VMAX is -- so quoting it as
+                # "bytes per token" flattered exactly the arm with the biggest vocabulary.
                 _bpt2 = sum(TOK.bytes_per_id[:TOK.vocab_size]) / max(1, TOK.vocab_size)
+                _bptu = (len(byte_stream) / max(1, len(stream))) if byte_stream is not None else 1.0
                 _voc = set()
                 for _c2 in CORP[:1]:
                     _voc = set(bytes(_c2[:4_000_000]).decode("utf-8", "replace").split())
@@ -6297,7 +6335,8 @@ def main():
                     _real = sum(1 for w in _gw if w.strip(".,;:!?()'\"") in _voc)
                     _tpw = sum(len(TOK.segment(w.encode(), count=False)) for w in _gw[:400]) / max(1, len(_gw[:400]))
                     print(f"\n=== IS IT COMPOSING? (generated text vs the vocabulary it had) ===")
-                    print(f"  vocabulary {TOK.vocab_size} tokens, mean {_bpt2:.2f} bytes each | "
+                    print(f"  vocabulary {TOK.vocab_size} tokens, mean {_bpt2:.2f} bytes per ENTRY | "
+                          f"{_bptu:.2f} bytes per token AS USED in the stream (the compression figure) | "
                           f"{len(_gw)} generated words")
                     print(f"  TOKENS PER GENERATED WORD {_tpw:.2f}  -> " +
                           ("the model is SPELLING: each word is a sequence it chose, not one unit it looked up"
