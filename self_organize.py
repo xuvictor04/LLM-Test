@@ -305,6 +305,7 @@ _SPEC = {
     "LR_DECAY": ("f", 0.0),                               # lr
     "FAB_LR_OWN": ("i", 0),                               # fabric
     "FAB_LR_MAXR": ("f", 4.0),                            # fabric
+    "FAB_LR_BOOST": ("f", 1.0),                           # fabric
     "FAB_LR_SPAN": ("i", 0),                              # fabric -- 0 = follow the global wavelength                              # optim -- repeat the cosine; 0 = anneal once, hold
     "LR_MIN_FRAC": ("f", 0.05),                           # optim
     "LR_SCHED": ("env", "cosine"),                        # optim
@@ -4519,6 +4520,7 @@ def main():
     LR_DECAY = _f("LR_DECAY", 0.0)                         # 0 = restarts return to full peak (previous behaviour)
     FAB_LR_OWN = bool(_i("FAB_LR_OWN", 0))                 # each expert on its own schedule, clocked from its birth
     FAB_LR_MAXR = _f("FAB_LR_MAXR", 4.0)                   # cap on own-rate / global-rate, see the step site
+    FAB_LR_BOOST = _f("FAB_LR_BOOST", 1.0)                 # multiply the own-rate for the cull-eligible bottom
     _lrown_said = [-1]
     _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
     _lr_prev = [0.0]                                       # last applied rate, to detect a cosine restart
@@ -5122,6 +5124,18 @@ def main():
                 _oa = LR * (LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + torch.cos(math.pi * _age)))
                 # ratio to what the optimizer is ABOUT to apply, clamped so a newborn at a late-run global rate
                 # cannot be handed an unbounded multiple of a step Adam sized for a different regime
+                # THE BOTTOM OF THE RANKING GETS MORE ROOM TO MOVE, not just a shorter life. An expert in the
+                # cull-eligible fraction is already failing; annealing it on the same curve as a thriving one
+                # spends its remaining life confirming that. FAB_LR_BOOST multiplies the own-rate for the bottom
+                # FAB_CULL_FRAC by utilization -- the same ranking the cull uses, so the two agree on who is in
+                # trouble, and the response to trouble is exploration before removal.
+                # Pairs with FAB_RESCUE, which does the same thing in weight space at the moment of the cull:
+                # this one acts continuously and earlier, that one is the last chance.
+                if FAB_LR_BOOST > 1.0 and _nl > 2:
+                    _rank = sorted(range(_nl), key=lambda i: fab.use.get(i, 0.0))
+                    _nb2 = max(1, int(_f("FAB_CULL_FRAC", 0.08) * _nl))
+                    _bidx = torch.tensor(_rank[:_nb2], device=_oa.device, dtype=torch.long)
+                    _oa = _oa.clone(); _oa[_bidx] = _oa[_bidx] * FAB_LR_BOOST
                 _own_lr = (_oa / _lrv).clamp(max=FAB_LR_MAXR)
                 _pa = fab.A.detach()[:_nl].clone(); _pb = fab.B.detach()[:_nl].clone()
             om.step(); om.zero_grad()

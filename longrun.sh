@@ -84,6 +84,17 @@ _reusable() {
   echo "   directory, or delete that log if you meant to replace it."
   return 1
 }
+# _stopped -- a sweep asked to stop cleanly. `touch runs/<dir>/STOP` (or STOP_FILE=<path>) and the loop finishes
+# the run it is on, then stops before starting the next. No signal, no Ctrl-C, no partial log: the run in flight
+# writes its report and its checkpoint exactly as it would have.
+#   Ctrl-C kills the CURRENT run too, losing however many hours it is into it, and killing the shell leaves the
+# python orphaned. Neither is what "stop after this one" means, and there was no third option.
+_stopped() {
+  _sf="${STOP_FILE:-$1/STOP}"
+  [ -e "$_sf" ] || return 1
+  echo; echo "== stop requested ($_sf) -- finishing here. Remove that file to run the rest."
+  return 0
+}
 # _done <log> -- true if that log reached the end of a run (the final line every complete report prints).
 _done() { [ -f "$1" ] && grep -aq "SIG_MODE=learned -- learned = the unfrozen product path" "$1"; }
 
@@ -550,6 +561,7 @@ grid)
   trap 'echo; echo "grid interrupted -- completed arms are kept; re-run the same command to continue"; exit 130' INT TERM
   for ARM in $ARMS; do
     LOG="$GRID/$ARM.log"
+    _stopped "$GRID" && break
     if _done "$LOG"; then _reusable "$LOG" || exit 1; echo "== $ARM: already complete, skipping"; continue; fi
     if [ -f "$LOG" ]; then
       _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done
@@ -638,6 +650,7 @@ seeds)
   echo "seeds: arm [${ARMFLAGS:-defaults}] over seeds [$(echo $SEEDLIST | tr '\n' ' ')] -> $SD"
   for SEED in $SEEDLIST; do
     LOG="$SD/${TAG}_seed$SEED.log"
+    _stopped "$SD" && break
     if _done "$LOG"; then _reusable "$LOG" || exit 1; echo "== seed $SEED: already complete, skipping"; continue; fi
     [ -f "$LOG" ] && { _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done; mv "$LOG" "$LOG.partial-$_pn"; }
     echo; echo "################  seed $SEED  ${ARMFLAGS:-(defaults)}  ################"
@@ -718,6 +731,7 @@ repeat)
   trap 'echo; echo "repeat interrupted -- completed runs are kept; re-run to continue"; exit 130' INT TERM
   for R in $(seq 1 "$N"); do
     LOG="$RD/${TAG}_seed${RSEED}_run$R.log"
+    _stopped "$RD" && break
     if _done "$LOG"; then _reusable "$LOG" || exit 1; echo "== run $R: already complete, skipping"; continue; fi
     [ -f "$LOG" ] && { _pn=1; while [ -e "$LOG.partial-$_pn" ]; do _pn=$((_pn+1)); done; mv "$LOG" "$LOG.partial-$_pn"; }
     echo; echo "################  run $R/$N  SEED=$RSEED  ${ARMFLAGS:-(defaults)}  ################"
