@@ -1471,6 +1471,19 @@ class Fabric(nn.Module):
         every one of them keep working without a rewrite, and len() is all any of them ever wanted."""
         return range(s.n_live)
 
+    def age(s, i, step):
+        """How long expert i has existed. ONE reader, and it fails toward OLD.
+
+        `s.born.get(i, step)` -- the previous idiom, in three places -- returns `step` for a missing entry, i.e.
+        reports the expert as newly born. Everything downstream protects the young: soft_cull skips anything
+        inside FAB_GRACE, the FAB_NEW_FRAC budget counts recent births, per-expert rates give newborns the high
+        rate. So a MISSING RECORD MADE AN EXPERT IMMORTAL, and the initial population had no records at all --
+        at FAB_N0=2048 that is the whole population, permanently exempt from selection.
+        Defaulting to 0 inverts the failure: an expert nobody recorded reads as maximally old, so it is
+        cullable, counted as established, and given the mature rate. Every one of those is the conservative
+        direction, and no future creation path that forgets to stamp a birthday can resurrect the bug."""
+        return step - s.born.get(i, 0)
+
     def n(s): return s.n_live
 
     def grow(s, gist=None, step=None):                      # add an expert; returns its new params
@@ -1635,7 +1648,7 @@ class Fabric(nn.Module):
         if protect is not None and comp_glob is not None:
             for i in list(range(s.n_live)):
                 if s.n_live <= 2: break
-                if step - s.born.get(i, step) < grace: continue
+                if s.age(i, step) < grace: continue
                 if not s.failing(i, comp_glob): continue
                 if protect and s.contrib.get(i, 0.0) > 0:            # load-bearing despite the error -> keep
                     spared += 1; continue
@@ -1644,7 +1657,7 @@ class Fabric(nn.Module):
         order = sorted(range(s.n_live), key=lambda i: s.use.get(i, 0.0))
         for i in list(order[:max(1, int(cull_frac * s.n_live))]):
             if s.n_live <= 2: break
-            if step - s.born.get(i, step) < grace: continue
+            if s.age(i, step) < grace: continue
             if protect:
                 _c = s.contrib.get(i)
                 if _c is not None and _c > 0: spared += 1; continue        # load-bearing: worse without it
@@ -3471,6 +3484,16 @@ def main():
                       f"the same vocabulary under another name.")
         if FABRIC and _RD.get("fab_cfg"):
             fab.n_live = max(fab.n_live, min(int(_RD["fab_cfg"]["n"]), fab.cap))   # rows already exist
+            # ...and their ages come back with them. Checkpoints written before fab_born existed have none, so
+            # backfill to 0: those experts are old, which is what they are, and which is the safe direction.
+            _fb = _RD.get("fab_born") or {}
+            fab.born = {int(_k): int(_v) for _k, _v in _fb.items()}
+            _missing = [i for i in range(fab.n_live) if i not in fab.born]
+            for i in _missing: fab.born[i] = 0
+            if _missing:
+                print(f"  [resume] {len(_missing)} of {fab.n_live} experts had no recorded birth step"
+                      f"{' (checkpoint predates fab_born)' if not _fb else ''} -- treated as born at step 0, so "
+                      f"they are subject to culling rather than exempt from it.")
         if WORLD_MODEL and _RD.get("world_cfg"):
             # REPLAY THE PARAM GROUPS, not just the population size. Growth calls om.add_param_group DURING
             # training, so a checkpoint taken after any growth has more groups than a freshly built optimizer --
@@ -3918,6 +3941,10 @@ def main():
                             "rad": dict(asm.rad), "radp": asm._radp},
                     "experts": (experts.state_dict() if EXPERTS else None),
                     "fab": (fab.state_dict() if FABRIC else None),
+                    # BIRTHDAYS TRAVEL WITH THE POPULATION. fab_cfg recorded how MANY experts there were and
+                    # nothing about when any of them arrived, so a resume restored 2048 experts whose ages all
+                    # read 0 -- the founder bug again, on the path continual learning depends on.
+                    "fab_born": (dict(fab.born) if FABRIC else None),
                     "fab_cfg": ({"n": fab.n(), "rank": fab.r, "cap": fab.cap, "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _f("FAB_HID_MULT", 2),
                                  "min_steps": fab.min_steps, "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
@@ -5089,7 +5116,7 @@ def main():
             if FAB_LR_OWN and FABRIC and fab is not None and fab.n_live > 0 and _lrv > 0:
                 _nl = fab.n_live
                 _span = max(1, _i("FAB_LR_SPAN", 0) or _lr_total(step))
-                _age = torch.tensor([min(1.0, (step - fab.born.get(_i2, step)) / _span) for _i2 in range(_nl)],
+                _age = torch.tensor([min(1.0, fab.age(_i2, step) / _span) for _i2 in range(_nl)],
                                     device=fab.A.device, dtype=fab.A.dtype)
                 # same shape as the global schedule: high, annealing to the floor, over the expert's own life
                 _oa = LR * (LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + torch.cos(math.pi * _age)))
