@@ -134,7 +134,7 @@ _SPEC = {
     "FAB_CENT_TOPK": ("i", 8),                            # fabric
     "FAB_CHAIN_K": ("env", 8),                            # fabric
     "FAB_COOLDOWN": ("i", 400),                           # fabric
-    "FAB_CULL_FRAC": ("f", 0.08),                         # fabric
+    "FAB_CULL_FRAC": ("f", 0.02),                         # fabric
     "FAB_DERIVE_IDS": ("env", 1),                         # fabric
     "FAB_DISCOVER": ("f", 0.35),                          # fabric
     "FAB_DK": ("i", 32),                                  # fabric
@@ -145,7 +145,10 @@ _SPEC = {
     "FAB_ERR_SLOW": ("env", 0.005),                       # fabric
     "FAB_EXPLORE": ("env", 0.15),                         # fabric
     "FAB_FAIL_TOL": ("env", 0.15),                        # fabric
-    "FAB_GRACE": ("i", 3000),                             # fabric
+    "FAB_GRACE": ("i", 48),                               # fabric -- IN SELECTIONS, not steps
+    "FAB_LR_AMIN": ("f", 0.05),                           # fabric
+    "FAB_LR_CYCLE": ("f", 24.0),                          # fabric
+    "FAB_LR_GAMMA": ("f", 0.5),                           # fabric
     "FAB_GROW": ("env", 1),                               # fabric
     "FAB_HALT": ("env", 1),                               # fabric
     "FAB_HALT_MAX": ("env", 0.9),                         # fabric
@@ -298,6 +301,7 @@ _SPEC = {
     # --- optim: optimiser, schedule and regularisation ---------------------------------------------
     "ACCUM": ("i", 1),                                    # optim
     "AMP": ("env", "off"),                                # optim
+    "BAL_FLOOR": ("f", 0.15),                             # optim
     "BAL_WARM": ("i", 4000),                              # optim
     "BATCH_W": ("i", 1),                                  # optim
     "DROPOUT": ("f", 0.0),                                # optim
@@ -305,10 +309,12 @@ _SPEC = {
     "LR_EPOCHS": ("i", 8),                                # optim -- cosine WAVELENGTH in epochs; 0 = follow EPOCHS
     "LR_RESTARTS": ("i", 1),
     "LR_DECAY": ("f", 0.0),                               # lr
-    "FAB_LR_OWN": ("i", 0),                               # fabric
+    "FAB_LR_OWN": ("i", 1),                               # fabric
     "FAB_LR_MAXR": ("f", 4.0),                            # fabric
-    "FAB_LR_BOOST": ("f", 1.0),                           # fabric
-    "FAB_LR_SPAN": ("i", 0),                              # fabric -- 0 = follow the global wavelength                              # optim -- repeat the cosine; 0 = anneal once, hold
+    "FAB_LR_BOOST": ("f", 2.0),                           # fabric
+    # (FAB_LR_SPAN is gone. It scaled a per-expert COSINE across a wall-clock lifetime; the schedule is now
+    #  Smith triangular2 clocked in SELECTIONS, so the wavelength is FAB_LR_CYCLE and a step-denominated span
+    #  has nothing to denominate. Leaving it declared-but-dead would have made it settable and silent.)
     "LR_MIN_FRAC": ("f", 0.05),                           # optim
     "LR_SCHED": ("env", "cosine"),                        # optim
     "LR_WARMUP": ("i", 1000),                             # optim
@@ -1350,7 +1356,22 @@ class Fabric(nn.Module):
         #   per-expert learning rates read age 0 and handed every founder the newborn rate for the whole run --
         #     which is how this was found: "experts 2.00e-03..2.00e-03 (x4.00..x4.00, clamped)".
         s.born = {i: 0 for i in range(n0)}                 # expert -> step it was created (grace before culling)
-        s.removed = 0; s.spared = 0
+        # USE-AGE: the expert's OWN clock, and it only ticks when the expert is SELECTED. Wall-clock age answers
+        # "how long has this existed", which is not the question any of its readers actually asks. Grace wants
+        # "has it had enough chances yet"; the per-expert learning rate wants "how far through its own learning is
+        # it". An expert the router never calls has had no chances and has learned nothing, and under a wall clock
+        # both of those read as fully-aged after FAB_GRACE steps of receiving no gradient -- so it is culled for
+        # failing at something it was never given, and annealed to the floor before it was ever trained.
+        # Under this clock it stays young until it is used, which is the point: age is EXPERIENCE, not elapsed time.
+        # This is what makes the population evolutionary rather than merely time-limited -- experts born at step
+        # 40000 get the same lifecycle as founders, just later in wall-clock.
+        # The counterpart risk is the exact inverse, and it is real: an expert NEVER selected never ages, never
+        # leaves grace, and can never be culled. That is what the balance-loss floor (BAL_FLOOR) is for -- it keeps
+        # a permanent, small pressure toward spreading routing mass, so every expert accrues use-age eventually and
+        # the population stays selectable. Balance and use-age are one mechanism; neither works alone.
+        s.uage = {i: 0.0 for i in range(n0)}               # expert -> SELECTIONS since birth/rescue
+        s.removed = 0; s.spared = 0; s.n_elig = 0          # experts past their USE-grace at the last manage pass
+        s.cull_ran = False                                 # did the utilization cull get past the pressure gate
         s.breadth = float(_env("EXP_DOM_FRAC", 0.10))
         s.breadth_min = int(_env("EXP_DOM_MIN", 4))   # never squeeze below this, or a small population
         #   cannot route at all (10% of 8 domains is 0 and every expert would be banned from everything).
@@ -1453,6 +1474,7 @@ class Fabric(nn.Module):
             W = s.edec(q.detach().reshape(1, -1))[0]
             s.A[j] = W[:s.d * s.r].reshape(s.d, s.r); s.B[j] = W[s.d * s.r:].reshape(s.r, s.d)
         s.born[j] = int(step) if step is not None else 0
+        s.uage[j] = 0.0                                     # a new expert has no EXPERIENCE, whatever the step is
         for _D in (s.use, s.comp, s.contrib, s.ef, s.es): _D.pop(j, None)
         s.n_live += 1; s.grown += 1; s.spawned += 1; s._kc = None
         return j
@@ -1486,6 +1508,21 @@ class Fabric(nn.Module):
         cullable, counted as established, and given the mature rate. Every one of those is the conservative
         direction, and no future creation path that forgets to stamp a birthday can resurrect the bug."""
         return step - s.born.get(i, 0)
+
+    def use_age(s, i):
+        """How much EXPERIENCE expert i has: selections since it was born or rescued. Same failure direction as
+        age() -- a missing record reads as maximally old, so it is cullable and gets the mature rate, and no
+        creation path that forgets to stamp can produce an immortal expert."""
+        return s.uage.get(int(i), 1e9)
+
+    def bump_use(s, ids):
+        """ONE place that credits a selection, so `use` (fitness, comparative) and `uage` (the expert's own clock,
+        monotone) can never drift apart. They were incremented at three separate sites, one of which was a loop
+        body written twice."""
+        for _e in ids:
+            _e = int(_e)
+            s.use[_e] = s.use.get(_e, 0.0) + 1.0
+            s.uage[_e] = s.uage.get(_e, 0.0) + 1.0
 
     def n(s): return s.n_live
 
@@ -1581,7 +1618,8 @@ class Fabric(nn.Module):
             s.SRC[j] = (s.SRC[_par] + 0.1 * torch.randn(s.dk, device=dev)) if _par is not None \
                 else torch.randn(s.dk, device=dev) * 0.1   # a child inherits WHERE ITS PARENT SENDS, perturbed
 
-        s.born[j] = int(step) if step is not None else 0    # GRACE is measured from here
+        s.born[j] = int(step) if step is not None else 0    # wall-clock birthday (reporting, FAB_NEW_FRAC budget)
+        s.uage[j] = 0.0                                     # ...and GRACE is measured from HERE: zero experience
         s.use.pop(j, None); s.comp.pop(j, None); s.contrib.pop(j, None)     # a reused slot starts clean
         s.n_live += 1; s.grown += 1
         return []                                           # rows of EXISTING Parameters -- already in the optimizer,
@@ -1607,7 +1645,7 @@ class Fabric(nn.Module):
     def note_use(s, ids):
         """UTILIZATION: the resource the population competes for. Culling ranks on it, exploration picks its cold
         set from it, and discovery hands novel material to its minimum."""
-        for _e in ids: s.use[int(_e)] = s.use.get(int(_e), 0.0) + 1.0
+        s.bump_use(ids)
 
     def note_err(s, e, v):
         """Per-expert FAST and SLOW error EMAs. The pair is the whole point: their DIFFERENCE separates an expert
@@ -1647,20 +1685,40 @@ class Fabric(nn.Module):
         # "the bank is full, drop the least used" but blind to an expert that is CALLED OFTEN AND BAD. The
         # sustained-error route runs at ANY occupancy, because a failing expert is worth removing whether or not
         # the population is full.
+        # GRACE IS MEASURED IN SELECTIONS, NOT STEPS. `grace` here is a use-age: how many times the router has to
+        # have chosen an expert before it is answerable for the result. Under the wall clock this asked the wrong
+        # question -- at 2048 experts an expert is selected a handful of times in a whole run, so FAB_GRACE=3000
+        # STEPS elapsed while it received almost no gradient, and it was then culled for failing at a job it had
+        # barely been given. Counted in selections, the protection is what it claims to be.
         culled = spared = 0
+        # COUNTED BEFORE THE EARLY RETURN, or the number is a lie. It used to be set after the capacity-pressure
+        # gate, so a population below pressure never updated it and the log reported "0 past their grace" while
+        # experts sat at use-age 4287 -- and reported it in the same line as a successful cull, which came from
+        # the sustained-error route below. A diagnostic that contradicts itself is worse than no diagnostic.
+        s.n_elig = sum(1 for i in range(s.n_live) if s.use_age(i) >= grace)
+        s.cull_ran = not (s.n_live <= 2 or (s.n_live / max(1, s.cap)) < pressure)
         if protect is not None and comp_glob is not None:
             for i in list(range(s.n_live)):
                 if s.n_live <= 2: break
-                if s.age(i, step) < grace: continue
+                if s.use_age(i) < grace: continue
                 if not s.failing(i, comp_glob): continue
                 if protect and s.contrib.get(i, 0.0) > 0:            # load-bearing despite the error -> keep
                     spared += 1; continue
                 s.remove(i); culled += 1; s.failed_out += 1
         if s.n_live <= 2 or (s.n_live / max(1, s.cap)) < pressure: return culled, spared
-        order = sorted(range(s.n_live), key=lambda i: s.use.get(i, 0.0))
+        # RANK WITHIN THE ELIGIBLE SET, and this is not cosmetic -- it is the difference between the cull firing
+        # and not firing at all. With a use-based grace, the bottom of a raw utilization ranking is BY DEFINITION
+        # the population with the least use-age, i.e. exactly the experts still inside grace. Taking the bottom
+        # cull_frac globally and then skipping the ungraced ones therefore spends the entire budget on entries it
+        # is guaranteed to skip and removes nobody, forever. Filtering first, then ranking, asks the question that
+        # was meant: among experts that have HAD their chances, which did least with them.
+        _elig = [i for i in range(s.n_live) if s.use_age(i) >= grace]
+        order = sorted(_elig, key=lambda i: s.use.get(i, 0.0))
         for i in list(order[:max(1, int(cull_frac * s.n_live))]):
             if s.n_live <= 2: break
-            if s.age(i, step) < grace: continue
+            if i >= s.n_live: continue                       # remove() renumbers by swapping the last slot down, so
+            #   an index taken before an earlier removal can now be past the end. Pre-existing: it only stayed
+            #   harmless because a cull pass rarely removed enough to shift the tail into the ranking.
             if protect:
                 _c = s.contrib.get(i)
                 if _c is not None and _c > 0: spared += 1; continue        # load-bearing: worse without it
@@ -1679,7 +1737,9 @@ class Fabric(nn.Module):
                     s.A[i] += FAB_RESCUE * _sa * torch.randn_like(s.A[i])
                     s.B[i] += FAB_RESCUE * _sb * torch.randn_like(s.B[i])
                 s.rescued.add(i); s.born[i] = int(step)      # a rescued expert is a newborn for grace purposes
-                s.use[i] = s.use.get(i, 0.0)                 # ...but keeps its history, so it cannot hide forever
+                s.uage[i] = 0.0                              #   -- on the use clock too: the big jump moved it, so
+                #   what it earned before the jump says nothing about where it is now. Its LR cycle restarts with it.
+                s.use[i] = s.use.get(i, 0.0)                 # ...but keeps its FITNESS history, so it cannot hide
                 s.n_rescued += 1
                 continue
             s.remove(i); culled += 1
@@ -1915,7 +1975,7 @@ class Fabric(nn.Module):
         if j != last:
             with torch.no_grad():
                 for _T in (s.A, s.B, s.K, s.SRC, s.cent): _T[j] = _T[last]
-            for _D in (s.use, s.born, s.ef, s.es, s.births):
+            for _D in (s.use, s.uage, s.born, s.ef, s.es, s.births):
                 _D.pop(j, None)
                 if last in _D: _D[j] = _D.pop(last)
             for _D in (s.comp, s.contrib):
@@ -2013,7 +2073,7 @@ class Fabric(nn.Module):
                         s.explored = getattr(s, "explored", 0) + len(_rw)
                 if ban1 is None and learn_regions:
                     with torch.no_grad():
-                        for _u in _i2[:, 0].tolist(): s.use[_u] = s.use.get(_u, 0.0) + 1.0
+                        s.bump_use(_i2[:, 0].tolist())
                         if _t2_ < 2:
                             if getattr(s, "_sample_ord", False): s._ord.append((_t2_, _i2[:, 0].tolist()))
                 _O2 = h.unsqueeze(1) + torch.einsum('bklr,bkrd->bkld',
@@ -2113,7 +2173,7 @@ class Fabric(nn.Module):
                     # `wacc` is a READ-OUT (fab._wrun, which the report reads back after an eval call), not
                     # training state, so it accumulates on every real walk. `use` is training state, so it does not.
                     if learn_regions:
-                        for _uu in _ci[:, 0].tolist(): s.use[_uu] = s.use.get(_uu, 0.0) + 1.0
+                        s.bump_use(_ci[:, 0].tolist())
                     wacc = nm.detach() if wacc is None else wacc + nm.detach()   # per-window mass, over all hops
             # ORDERING, RECORDED IN THE REAL RUN. The question "can the chain vary its SECOND move for the same
             # first move" was only ever asked on a 24-expert synthetic toy, which is not the system. Recording the
@@ -3391,7 +3451,9 @@ def main():
                                                               #   breaking the stream. Also track the LM loss curve --
                                                               #   we had no way to see whether the LM had converged.
     IND_W = _f("IND_W", 0.5); IND_K = _i("IND_K", 2)          # independence-loss weight / how many experts get it
-    BAL_WARM = _i("BAL_WARM", 4000)                           # load-balance pressure DECAYS to 0 over this many steps:
+    BAL_WARM = _i("BAL_WARM", 4000)                           # load-balance pressure DECAYS over this many steps...
+    BAL_FLOOR = _f("BAL_FLOOR", 0.15)                         # ...to THIS fraction of full, and no lower. See the step site.
+
     DIV_W = _f("DIV_W", 0.0)                                  #   it exists to stop early collapse, but equal load and
     # (a module-level ROUTE_T = _f("ROUTE_T", 1.0) used to sit here: assigned, never read by anything, and with a
     #  DIFFERENT default from the one that actually routes -- Fabric.route_t reads ROUTE_T with default 0.1. Two
@@ -3514,6 +3576,19 @@ def main():
                 print(f"  [resume] {len(_missing)} of {fab.n_live} experts had no recorded birth step"
                       f"{' (checkpoint predates fab_born)' if not _fb else ''} -- treated as born at step 0, so "
                       f"they are subject to culling rather than exempt from it.")
+            # ...and the USE clock, which is what grace and the per-expert LR schedule actually read now. Same
+            # failure direction as born: a missing record must read as EXPERIENCED, never as a protected newborn,
+            # or a resume hands the whole population a fresh grace period and a fresh high-LR cycle. An old
+            # checkpoint has no fab_uage, and backfilling to the grace threshold says "these have had their
+            # chances" -- true of anything that survived to be checkpointed, and the conservative reading.
+            _fu = _RD.get("fab_uage") or {}
+            fab.uage = {int(_k): float(_v) for _k, _v in _fu.items()}
+            _umiss = [i for i in range(fab.n_live) if i not in fab.uage]
+            for i in _umiss: fab.uage[i] = float(_i("FAB_GRACE", 48))
+            if _umiss:
+                print(f"  [resume] {len(_umiss)} of {fab.n_live} experts had no recorded USE-age"
+                      f"{' (checkpoint predates fab_uage)' if not _fu else ''} -- backfilled to the grace "
+                      f"threshold, so they are cullable and on the mature rate rather than protected newborns.")
         if WORLD_MODEL and _RD.get("world_cfg"):
             # REPLAY THE PARAM GROUPS, not just the population size. Growth calls om.add_param_group DURING
             # training, so a checkpoint taken after any growth has more groups than a freshly built optimizer --
@@ -3989,6 +4064,7 @@ def main():
                     # nothing about when any of them arrived, so a resume restored 2048 experts whose ages all
                     # read 0 -- the founder bug again, on the path continual learning depends on.
                     "fab_born": (dict(fab.born) if FABRIC else None),
+                    "fab_uage": (dict(fab.uage) if FABRIC else None),   # the USE clock: grace + per-expert LR phase
                     "fab_cfg": ({"n": fab.n(), "rank": fab.r, "cap": fab.cap, "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _f("FAB_HID_MULT", 2),
                                  "min_steps": fab.min_steps, "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
@@ -4291,6 +4367,14 @@ def main():
             ("DIV_W",          DIV_W),                   ("IND_W",          IND_W if SOCIETY else 0.0),
             ("DROPOUT",        DROPOUT),                 ("WEIGHT_DECAY",   WD),
             ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
+            ("BAL_FLOOR",      BAL_FLOOR),               ("FAB_BALANCE",    FAB_BAL),
+            ("FAB_LR_CYCLE",   _f("FAB_LR_CYCLE", 24.0)), ("FAB_LR_GAMMA",  _f("FAB_LR_GAMMA", 0.5)),
+            # READ VIA _f/_i, NOT the locals: FAB_LR_OWN and friends are assigned ~40 lines BELOW the banner call,
+            # so naming them here is a NameError on the enclosing scope, not a stale value.
+            ("FAB_LR_AMIN",    _f("FAB_LR_AMIN", 0.05)), ("FAB_LR_OWN",     bool(_i("FAB_LR_OWN", 1))),
+            ("FAB_LR_BOOST",   _f("FAB_LR_BOOST", 2.0)), ("FAB_LR_MAXR",    _f("FAB_LR_MAXR", 4.0)),
+            ("FAB_GRACE",      _i("FAB_GRACE", 48), "IN SELECTIONS, not steps"),
+            ("FAB_CULL_FRAC",  _f("FAB_CULL_FRAC", 0.02)),
             ("LR",             LR),                      ("LR_SCHED",       LR_SCHED),
             ("LR_WARMUP",      LR_WARMUP),               ("LR_MIN_FRAC",    LR_MIN_FRAC),
             ("LR_EPOCHS",      min(_i("LR_EPOCHS", 8) or EPOCHS, EPOCHS)),
@@ -4566,10 +4650,10 @@ def main():
     # run did, so earlier results stay reproducible.
     LR_RESTARTS = bool(_i("LR_RESTARTS", 1))
     LR_DECAY = _f("LR_DECAY", 0.0)                         # 0 = restarts return to full peak (previous behaviour)
-    FAB_LR_OWN = bool(_i("FAB_LR_OWN", 0))                 # each expert on its own schedule, clocked from its birth
+    FAB_LR_OWN = bool(_i("FAB_LR_OWN", 1))                 # each expert on its own schedule, clocked from its own USE
     FAB_LR_MAXR = _f("FAB_LR_MAXR", 4.0)                   # cap on own-rate / global-rate, see the step site
-    FAB_LR_BOOST = _f("FAB_LR_BOOST", 1.0)                 # multiply the own-rate for the cull-eligible bottom
-    _lrown_said = [-1]
+    FAB_LR_BOOST = _f("FAB_LR_BOOST", 2.0)                 # multiply the own-rate for the cull-eligible bottom
+    _lrown_said = [-1]; _elig_said = [-1]
     _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
     _lr_prev = [0.0]                                       # last applied rate, to detect a cosine restart
     # === PROBATION: MINT PROVISIONALLY, JUDGE ON EVIDENCE ====================================================
@@ -4803,7 +4887,7 @@ def main():
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull + fold
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
         if FABRIC and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
-            _fc, _fs = fab.manage(step, grace=_i("FAB_GRACE", 3000), cull_frac=_f("FAB_CULL_FRAC", 0.08),
+            _fc, _fs = fab.manage(step, grace=_i("FAB_GRACE", 48), cull_frac=_f("FAB_CULL_FRAC", 0.02),
                                   pressure=_f("FAB_PRESSURE", 0.75), protect=COMP_PROTECT,
                                   comp_glob=asm.comp_glob)
             fab.removed += _fc; fab.spared += _fs
@@ -4819,8 +4903,20 @@ def main():
                     _resc_seen[0] = fab.n_rescued
             if _fc or _fs:
                 print(f"  [experts @ {step}] culled {_fc} spared {_fs} -> {fab.n()} live "
-                      f"(cull under capacity pressure, bottom {_f('FAB_CULL_FRAC', 0.08):.0%} by utilization; "
+                      f"(cull under capacity pressure, bottom {_f('FAB_CULL_FRAC', 0.02):.0%} by utilization, "
+                      f"ranked among the {fab.n_elig} past their {_i('FAB_GRACE', 48)}-selection grace; "
                       f"spared = load-bearing or better than the population on its own material)")
+            # ELIGIBILITY IS THE THING THAT CAN SILENTLY GO TO ZERO. Grace is counted in SELECTIONS now, so a
+            # population the router spreads too thinly never accumulates any and the cull has nobody to rank --
+            # not an error, no exception, just a run with no selection in it, which is what arm B turned out to
+            # have been. Say so rather than leaving it to be inferred from a missing line.
+            elif fab.cull_ran and fab.n_elig == 0 and _elig_said[0] != step // max(1, RATE_EVERY):
+                # ONLY WHEN THE CULL ACTUALLY RAN. Below capacity pressure the utilization cull is meant to be
+                # off, and saying "not under selection" there would cry wolf on every early step of every run.
+                _elig_said[0] = step // max(1, RATE_EVERY)
+                print(f"  [experts @ {step}] NO expert has reached the {_i('FAB_GRACE', 48)}-selection grace yet "
+                      f"({fab.n()} live) -- the utilization cull ran with nobody to rank, so the population is "
+                      f"not under selection. Raise BAL_FLOOR or lower FAB_GRACE if this persists.")
         if EXPERTS and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
             router.comp_of = ((lambda i: (fab.contrib[i], "contrib") if i in fab.contrib
                                else (fab.comp.get(i), asm.comp_glob)) if FABRIC else (lambda i: (None, None)))
@@ -5061,7 +5157,17 @@ def main():
         # token was minted, so it behaves as its composite at birth and is progressively released.
         _anc = model.compose.anchor(step, TOK_ANCHOR_TAU, TOK_ANCHOR_USES, _tok_seen) if (TOK_COMPOSE and TOK_ANCHOR > 0
                                                               and getattr(model, "compose", None) is not None) else None
-        _bw = max(0.0, 1.0 - step / max(1, BAL_WARM))            # DECAY balance: uniform early (no collapse), free later
+        # BALANCE DECAYS TO A FLOOR, NOT TO ZERO. The original reasoning is still right -- equal load and
+        # specialization are opposed, so holding full balance pressure forever prevents experts from differentiating.
+        # But decaying it to EXACTLY zero means that after BAL_WARM there is nothing left pushing routing mass
+        # outward at all, and an expert the router has stopped choosing has no route back: no traffic -> no
+        # gradient -> no improvement -> still no traffic. It is dead for the rest of the run, and under the use
+        # clock it is also frozen at whatever use-age it had, so the cull can never reach it either.
+        # A small permanent floor is what makes the population stay selectable: it is far too weak to prevent
+        # specialization (0.15 x FAB_BALANCE = 0.0015 against an LM loss of order 2) but strong enough that every
+        # expert keeps getting occasional traffic, accrues use-age, and remains answerable for what it does with it.
+        # This is the "each expert has a chance" half of the mechanism; use-age is the other half.
+        _bw = max(BAL_FLOOR, 1.0 - step / max(1, BAL_WARM))
         _pw = min(1.0, step / max(1, PONDER_WARM))               # ANNEAL ponder: don't charge for depth before the
         # EVERY STEP, not on the embed cadence. The refresh cadence exists because RE-READING identities is
         # O(N * 2*d*r * hid); TRAINING the embedder is capped at 256 experts and is cheap. Tying the two meant the
@@ -5174,11 +5280,41 @@ def main():
             _own_lr = None
             if FAB_LR_OWN and FABRIC and fab is not None and fab.n_live > 0 and _lrv > 0:
                 _nl = fab.n_live
-                _span = max(1, _i("FAB_LR_SPAN", 0) or _lr_total(step))
-                _age = torch.tensor([min(1.0, fab.age(_i2, step) / _span) for _i2 in range(_nl)],
-                                    device=fab.A.device, dtype=fab.A.dtype)
-                # same shape as the global schedule: high, annealing to the floor, over the expert's own life
-                _oa = LR * (LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + torch.cos(math.pi * _age)))
+                # SMITH'S CYCLICAL LR (triangular2), PER EXPERT, ON THE EXPERT'S OWN USE CLOCK.
+                #   t     = selections since this expert was born or rescued (fab.use_age)
+                #   ss    = FAB_LR_CYCLE, the half-cycle, IN SELECTIONS -- so an expert the router calls often
+                #           cycles fast and one it calls rarely cycles slowly, in its own time. Two experts at the
+                #           same wall-clock step are at different points in their cycle, which is the whole point:
+                #           the population is never all exploring or all consolidating at once.
+                #   cyc   = 1 + floor(t / 2ss)         which cycle it is in
+                #   x     = |t/ss - 2*cyc + 1|         triangle position, 0 at the peak, 1 at the trough
+                #   amp   = FAB_LR_GAMMA**(cyc-1)      the DECAYING ENVELOPE. gamma=0.5 IS triangular2 exactly
+                #           (peak halves each cycle); gamma=1.0 degenerates to plain `triangular`.
+                # High phases move the expert far enough to escape a sharp basin and cross saddles; low phases let
+                # it settle; the falling envelope means each excursion is smaller than the last, so it explores
+                # early and consolidates late WITHOUT the monotone decay that makes a late-born expert arrive dead.
+                # PHASE: a newborn starts at the PEAK, not at the base. Smith's triangular starts at base_lr and
+                # climbs, which is right for a whole model warming up and wrong for one expert in a population --
+                # its first selections are exactly when it has learned nothing and most needs to move, and holding
+                # it at the floor for a full half-cycle is how a late birth arrives dead. Shifting the clock by one
+                # half-cycle costs nothing and keeps the shape: peak, trough, half-peak, trough, quarter-peak...
+                _ss = max(1.0, float(_f("FAB_LR_CYCLE", 24.0)))
+                _t = torch.tensor([min(fab.use_age(_i2), 1e6) for _i2 in range(_nl)],
+                                  device=fab.A.device, dtype=fab.A.dtype) + _ss
+                _cyc = torch.floor(1.0 + _t / (2.0 * _ss))
+                _x = (_t / _ss - 2.0 * _cyc + 1.0).abs()
+                # THE ENVELOPE HAS A FLOOR, and it needs one. gamma^(cyc-1) goes to zero, and use-age has no
+                # horizon -- a heavily-selected expert burns cycles fast (the smoke reached cycle 90 on a 6-expert
+                # population) and is then pinned at LR_MIN_FRAC for the rest of the run, unable to respond to a
+                # distribution shift no matter how badly it is doing. That is exactly the "aged out and cannot
+                # learn" state the evolutionary framing tolerates in an INDIVIDUAL but must not impose on every
+                # survivor by construction: an old expert has to still be able to move when its material changes,
+                # or the only adaptation left in the system is birth and death. FAB_LR_AMIN keeps a small permanent
+                # oscillation, so age lowers the ceiling without ever closing it.
+                _amp = torch.pow(torch.as_tensor(float(_f("FAB_LR_GAMMA", 0.5)), device=_t.device, dtype=_t.dtype),
+                                 _cyc - 1.0).clamp_min(float(_f("FAB_LR_AMIN", 0.05)))
+                _lo = LR * LR_MIN_FRAC
+                _oa = _lo + (LR - _lo) * (1.0 - _x).clamp_min(0.0) * _amp
                 # ratio to what the optimizer is ABOUT to apply, clamped so a newborn at a late-run global rate
                 # cannot be handed an unbounded multiple of a step Adam sized for a different regime
                 # THE BOTTOM OF THE RANKING GETS MORE ROOM TO MOVE, not just a shorter life. An expert in the
@@ -5194,10 +5330,12 @@ def main():
                     # its own schedule, and boosting it again would just make new experts louder. The boost is
                     # for an expert that has had its safe phase and spent it badly, which is the same population
                     # soft_cull is looking at, so the two agree on who is in trouble.
-                    _grace = _i("FAB_GRACE", 3000)
-                    _elig = [i for i in range(_nl) if fab.age(i, step) >= _grace]
+                    # ...and grace is the USE clock, the same one the cull uses, so "has had its chances" means
+                    # one thing in both places rather than two.
+                    _grace = _i("FAB_GRACE", 48)
+                    _elig = [i for i in range(_nl) if fab.use_age(i) >= _grace]
                     _rank = sorted(_elig, key=lambda i: fab.use.get(i, 0.0))
-                    _nb2 = max(1, int(_f("FAB_CULL_FRAC", 0.08) * _nl))
+                    _nb2 = max(1, int(_f("FAB_CULL_FRAC", 0.02) * _nl))
                     if not _rank: _nb2 = 0
                     _bidx = torch.tensor(_rank[:_nb2] or [0], device=_oa.device, dtype=torch.long)
                     if _nb2:
@@ -5216,10 +5354,12 @@ def main():
                 # like a bug in the mechanism rather than a bug in when it was printed.
                 if _lrown_said[0] != step // max(1, RATE_EVERY):
                     _lrown_said[0] = step // max(1, RATE_EVERY)
-                    print(f"  [lr @ {step}] per-expert rates active: global {_lrv:.2e}, experts "
-                          f"{float(_oa.min()):.2e}..{float(_oa.max()):.2e} by age "
+                    print(f"  [lr @ {step}] per-expert rates active (Smith triangular2 on the USE clock, "
+                          f"half-cycle {_ss:g} selections, envelope x{_f('FAB_LR_GAMMA', 0.5):g}/cycle): "
+                          f"global {_lrv:.2e}, experts {float(_oa.min()):.2e}..{float(_oa.max()):.2e} "
                           f"(x{float(_own_lr.min()):.2f}..x{float(_own_lr.max()):.2f}, clamped at "
-                          f"x{FAB_LR_MAXR:g})")
+                          f"x{FAB_LR_MAXR:g}) | use-age {float(_t.min() - _ss):.0f}..{float(_t.max() - _ss):.0f}, "
+                          f"cycle {int(_cyc.min())}..{int(_cyc.max())}")
         _t1("lm fwd+bwd (incl. fabric/world)", _plm)
         _lf = float(loss.detach())                               # ONE host sync per step (was two: the curve and the
         _lm_run.append(_lf)                                      #   plateau detector each pulled the same scalar back)
