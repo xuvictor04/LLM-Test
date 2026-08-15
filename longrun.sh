@@ -338,7 +338,10 @@ pilot)
   # under the wrong description weeks later.
   echo "pilot: ONE English corpus, domains self-assembled | $((P_SL/1000)) kB/epoch x $P_EP epochs = $((P_SL*P_EP/1000)) kB consumed | ~$((P_SL*P_EP/614)) steps"
   # BOTH ARCHITECTURES. The base LM is a GRU by default and every number this project has produced is a GRU
-  # number; MODEL=transformer (4 layers, 8 heads, causal) has never been run here. If proper language is the goal
+  # number; MODEL=transformer (4 layers, 8 heads, causal) HAS been run here -- two pilots, held-out 2.130 and
+  # 2.184 at d768 L4 -- but both under FAB_GROW=1 to 4096 experts and before the instrument fixes, and both show
+  # the broken-base signature (model ALONE 4.680/4.952 with the fabric carrying +2.6/+2.8). So it has never run
+  # in a HEALTHY configuration, and those two numbers say nothing about the architecture. If proper language is the goal
   # then the 1-layer GRU may be the ceiling rather than the system, and the only way to know which is to run both
   # on the identical stream. ~2x the time, and it settles how much of the bits/byte gap is architecture.
   # GRU ONLY by default. The architecture question is ANSWERED: GRU beat the transformer on both pilots,
