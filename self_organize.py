@@ -146,7 +146,7 @@ _SPEC = {
     "FAB_EXPLORE": ("env", 0.15),                         # fabric
     "FAB_FAIL_TOL": ("env", 0.15),                        # fabric
     "FAB_GRACE": ("i", 48),                               # fabric -- IN SELECTIONS, not steps
-    "FAB_LR_AMIN": ("f", 0.05),                           # fabric
+    "FAB_LR_AMIN": ("f", 0.15),                           # fabric
     "FAB_LR_CYCLE": ("f", 24.0),                          # fabric
     "FAB_LR_GAMMA": ("f", 0.5),                           # fabric
     "FAB_GROW": ("env", 1),                               # fabric
@@ -4371,7 +4371,7 @@ def main():
             ("FAB_LR_CYCLE",   _f("FAB_LR_CYCLE", 24.0)), ("FAB_LR_GAMMA",  _f("FAB_LR_GAMMA", 0.5)),
             # READ VIA _f/_i, NOT the locals: FAB_LR_OWN and friends are assigned ~40 lines BELOW the banner call,
             # so naming them here is a NameError on the enclosing scope, not a stale value.
-            ("FAB_LR_AMIN",    _f("FAB_LR_AMIN", 0.05)), ("FAB_LR_OWN",     bool(_i("FAB_LR_OWN", 1))),
+            ("FAB_LR_AMIN",    _f("FAB_LR_AMIN", 0.15)), ("FAB_LR_OWN",     bool(_i("FAB_LR_OWN", 1))),
             ("FAB_LR_BOOST",   _f("FAB_LR_BOOST", 2.0)), ("FAB_LR_MAXR",    _f("FAB_LR_MAXR", 4.0)),
             ("FAB_GRACE",      _i("FAB_GRACE", 48), "IN SELECTIONS, not steps"),
             ("FAB_CULL_FRAC",  _f("FAB_CULL_FRAC", 0.02)),
@@ -5311,8 +5311,14 @@ def main():
                 # survivor by construction: an old expert has to still be able to move when its material changes,
                 # or the only adaptation left in the system is birth and death. FAB_LR_AMIN keeps a small permanent
                 # oscillation, so age lowers the ceiling without ever closing it.
+                # 0.15 rather than something token: an expert at the floor oscillates between 5% and 19% of peak,
+                # which is roughly where a cosine run's late rate sits. The degenerate risk this guards against is
+                # not subtle -- if FAB_LR_CYCLE is short relative to how often the router actually selects, EVERY
+                # expert reaches a vanishing envelope early and the whole population trains at ~0 for most of the
+                # run. Read `cycle min..max` on the [lr] line to see which regime a run is in; a few cycles over a
+                # run is the intent, ninety (as the first smoke produced at 6 experts) is not.
                 _amp = torch.pow(torch.as_tensor(float(_f("FAB_LR_GAMMA", 0.5)), device=_t.device, dtype=_t.dtype),
-                                 _cyc - 1.0).clamp_min(float(_f("FAB_LR_AMIN", 0.05)))
+                                 _cyc - 1.0).clamp_min(float(_f("FAB_LR_AMIN", 0.15)))
                 _lo = LR * LR_MIN_FRAC
                 _oa = _lo + (LR - _lo) * (1.0 - _x).clamp_min(0.0) * _amp
                 # ratio to what the optimizer is ABOUT to apply, clamped so a newborn at a late-run global rate
