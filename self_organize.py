@@ -4996,7 +4996,11 @@ def main():
                       f"settled hop {_nd - 1}.")
             # PER-HOP SPAWN. The hop-2 query is a request that may have no answer, and spawn-by-specification only
             # ever ran at entry. Ask on the deepest hop that actually ran.
-            if FAB_SPAWN and fab._hopq:
+            # THE SOFT CAP MUST BIND EVERY GROWTH PATH, and this is the second one. spawn_from creates an
+            # expert whenever a mid-chain router query has no near match -- independent of PlateauGrowth, so it
+            # ignores FAB_GROW as well as the soft cap. That is why a FAB_GROW=0 run still drifts 3 -> 6 experts,
+            # and why a soft cap of 16 was observed sitting at 17. A cap that binds one of two doors is not a cap.
+            if FAB_SPAWN and fab._hopq and fab.n() < _cap_fab[0]:
                 _nw = fab.spawn_from(fab._hopq[-1], step=step)
                 if _nw is not None:
                     print(f"  [expert @ {step}] a MID-CHAIN query had no near match -> decoded it into slot {_nw} "
