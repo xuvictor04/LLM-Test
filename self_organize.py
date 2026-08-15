@@ -580,14 +580,21 @@ FAB_RESCUE = _f("FAB_RESCUE", 0.0)
 # FAB_NEW_WIN steps. It binds the burst floor and the compounding together, which a per-event rate cannot.
 # ON BY DEFAULT at 0.10, and that is a behaviour change: it leaves the asymptotic ramp rate untouched (already
 # 10%) and removes only the small-n blow-up and the compounding. 0 restores the uncapped behaviour.
-# 0.04 AGAINST AN 8% CULL. FAB_CULL_FRAC=0.08 is the share of the population considered for removal per manage
-# event, so a growth allowance at half that leaves selection strictly able to outpace growth -- which is what makes
-# the population a population rather than a queue. The burst floor drops to 1 for the same reason: at any size, the
-# smallest possible growth step is one expert, so the fraction is in charge from n=25 up instead of n=30.
-# WATCH THE CADENCES, they are not matched: growth is capped per FAB_NEW_WIN (=FAB_COOLDOWN, 400 steps) while the
-# cull runs every MANAGE_EVERY (50). Culling is gated on capacity pressure and skips anything inside FAB_GRACE, so
-# it does not actually fire 8x more often -- but if a run's population trends DOWN, that asymmetry is the first
-# place to look, and the [experts @ N] culled lines are where it shows.
+# 0.04 AGAINST A 2% CULL -- AND THAT ARGUMENT NOW RUNS THE OTHER WAY. This paragraph used to read "0.04 against an
+# 8% cull ... a growth allowance at half that leaves selection strictly able to outpace growth, which is what makes
+# the population a population rather than a queue." Both numbers in it were wrong by the time anyone read it:
+# FAB_CULL_FRAC is 0.02 (lowered with the move to a use-based grace, 9146136) and MANAGE_EVERY is 500, not 50.
+# So the growth allowance is now TWICE the cull share, not half it, and the stated property is inverted --
+# growth can outpace selection 2:1 wherever both are active. The burst floor of 1 stands on its own reasoning:
+# at any size the smallest growth step is one expert, so the fraction is in charge from n=25 up instead of n=30.
+# WATCH THE CADENCES, they are not matched and the mismatch also flipped: growth is capped per FAB_NEW_WIN
+# (=FAB_COOLDOWN, 400 steps) while the cull runs every MANAGE_EVERY (500), so the growth window is now SHORTER
+# than the cull cadence rather than 8x longer. Culling is additionally gated on capacity pressure and skips
+# anything inside FAB_GRACE, so the effective asymmetry is wider still.
+# NOT SILENTLY RE-BALANCED. Whether FAB_NEW_FRAC should drop to 0.01 to restore "selection outpaces growth", or
+# whether growth SHOULD lead under a use-based grace (newborns now stay protected until they have been used, so
+# the old reason to fear a growth surplus is weaker), is a design decision and not a typo to fix in passing.
+# It is inert in any FAB_GROW=0 run, which is where the current baseline sits.
 FAB_NEW_FRAC = _f("FAB_NEW_FRAC", 0.04)
 FAB_NEW_WIN = _i("FAB_NEW_WIN", 0) or _i("FAB_COOLDOWN", 400)
 GROW_CAP = bool(_i("GROW_CAP", 0))                         # master switch for both soft caps
