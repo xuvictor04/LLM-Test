@@ -4056,12 +4056,34 @@ def main():
                   "GEN_LEN", "GEN_TEMP", "GEN_N", "GEN_PROCS", "COH_N", "COH_LEN", "MANAGE_EVERY", "DOM_MANAGE_EVERY", "ENC_WARMUP",
                   "ENC_WARMUP_MIN", "SEG_MIN", "SEG_MAX", "GROW_EVERY", "GROW_BURST", "VERIFY", "OUT", "EPOCHS"}
         _unreg = sorted(set(_ENV_ASKED) - s_cfg_known - _plumb)
-        _pfx = ("FAB_", "ROUTE_", "CHAIN_", "SOCIETY", "DIV_W", "IND_", "ENS_", "MEM_", "DOM_", "ENC_",
-                "WORLD_", "TOK", "EXPERT", "EXP_", "BAL_", "PONDER", "CENT_", "SHIFT_", "WRITE_", "SELF_ORG")
-        _typo = sorted(k for k in os.environ if k.startswith(_pfx) and k not in _ENV_READ)
+        # DENY SYSTEM VARS, DO NOT ALLOW KNOB PREFIXES. This was an allowlist of prefixes -- FAB_, ROUTE_, TOK,
+        # ... -- so it could only catch families someone had remembered to add, and a NEW family is exactly when
+        # a mistake is most likely. It missed six knobs set deliberately (GROW_CAP, GROW_CAP_FAB0,
+        # GROW_CAP_VOCAB0, GROW_CAP_EVERY, GROW_CAP_PLATEAU, LOSS_MASK_DEAD) on a build that predated them: the
+        # run ignored all six, said nothing, and spent an hour of GPU on an experiment nobody had asked for.
+        # The one net built for "you set a knob that does nothing" did not fire, because it had to be told about
+        # the knob first.
+        # Inverted: anything SHAPED like a knob that nothing read is suspect, and the exclusions are system
+        # variables -- a stable set, unlike the knob families, which are what keep growing.
+        # ...and the prefixes come FROM THE REGISTRY, so they cannot go stale. Every knob's first
+        # underscore-delimited token (FAB, ROUTE, TOK, GROW, MEM, LR, SEG, ...) becomes a family, and an unread
+        # environment variable in one of those families is flagged. Adding a knob to _SPEC therefore extends the
+        # net automatically -- which is the property the hardcoded list did not have.
+        # Deny-listing everything instead was the other option and it is worse: on this box it flagged AI_AGENT,
+        # AWS_*, BUN_* and thirty more, and a warning that cries wolf is a warning nobody reads.
+        # MAX_/USE_/MIN_ are families here (MAX_DOMAINS, USE_TOK) and also ordinary English, so they collect
+        # unrelated environment variables -- MAX_THINKING_TOKENS, USE_BUILTIN_RIPGREP. Dropped, along with
+        # _plumb, whose members are read conditionally by design (PROBE_WAIT only when PROBE=1).
+        _generic = {"MAX", "MIN", "USE", "NEW", "SET", "GET", "RUN", "OUT"}
+        _fam = {k.split("_")[0] for k in _SPEC
+                if k.split("_")[0].isalpha() and len(k.split("_")[0]) >= 3 and k.split("_")[0] not in _generic}
+        _typo = sorted(k for k in os.environ
+                       if k not in _ENV_READ and k not in _plumb and k.split("_")[0] in _fam)
         if _typo:
             print(f"\n[config-audit] !! NOTHING READ THESE: {', '.join(_typo)} -- set in the environment but no "
-                  f"code path ever asked for them. Almost certainly a typo; this run used the DEFAULTS for "
+                  f"code path ever asked for them. A typo, or a knob from a DIFFERENT COMMIT than the one "
+                  f"this run is on ({_sha}) -- check that first if you just pulled or just wrote it. "
+                  f"This run used the DEFAULTS for "
                   f"whatever was meant, and every number above describes that run, not the intended one.")
         if _unreg:
             print(f"[config-audit] set and read, but not verified against a live value: {', '.join(_unreg)}")
