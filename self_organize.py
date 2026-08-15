@@ -3120,6 +3120,9 @@ def _eval_logits(model, fab, FABRIC, x):
     return fab_logits(model, fab if FABRIC else None, model.encode(x))
 
 
+_MASK_CACHE = {"k": None, "m": None}
+
+
 def mask_dead(lg):
     """Take never-minted ids out of the distribution. See LOSS_MASK_DEAD.
 
@@ -3131,10 +3134,24 @@ def mask_dead(lg):
     Training reaches the loss directly (fab.society()/fab()), eval reaches it through fab_logits, so masking in
     those two places covers both without masking twice."""
     if not (LOSS_MASK_DEAD and USE_TOK and TOK is not None): return lg
-    _v = TOK.vocab_size
-    if _v >= lg.size(-1): return lg
-    lg = lg.clone(); lg[..., _v:] = float("-inf")
-    return lg
+    _v, _V = TOK.vocab_size, lg.size(-1)
+    # RETIRED IDS ARE DEAD TOO, AND THEY ARE NOT A SUFFIX. The first version masked [vocab_size:] only, which is
+    # the never-minted tail -- but probation RETIRES tokens by popping them from seq2id while leaving id2bytes
+    # intact, precisely so ids stay positional and old checkpoints keep working. A retired id is therefore BELOW
+    # vocab_size, can never be a target again, and was sailing straight through the mask. On the probation arms
+    # that is not a rounding error: prob_use and prob_emb retired 217 and 224 of 256 minted tokens.
+    # Cached on (vocab_size, retired count) because both only ever grow, so the mask is rebuilt when the
+    # vocabulary moves rather than on every call.
+    _ret = getattr(TOK, "retired", None) or ()
+    if _v >= _V and not _ret: return lg
+    _k = (_v, len(_ret))
+    if _MASK_CACHE.get("k") != _k or _MASK_CACHE.get("m") is None or _MASK_CACHE["m"].numel() != _V:
+        _m = torch.zeros(_V, dtype=torch.bool)
+        if _v < _V: _m[_v:] = True
+        for _t in _ret:
+            if 0 <= _t < _V: _m[_t] = True
+        _MASK_CACHE["k"] = _k; _MASK_CACHE["m"] = _m
+    return lg.masked_fill(_MASK_CACHE["m"].to(lg.device), float("-inf"))
 
 
 def fab_logits(model, fab, h, gist=None, nov=None, k=None):
