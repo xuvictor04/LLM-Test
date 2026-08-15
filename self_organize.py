@@ -211,6 +211,8 @@ _SPEC = {
     "GROW_CAP_FAB0": ("i", 0),                            # capacity -- 0 = start at FAB_NMAX
     "GROW_CAP_VOCAB0": ("i", 0),                          # capacity -- 0 = start at VMAX
     "FAB_RESCUE": ("f", 0.0),                             # fabric
+    "FAB_NEW_FRAC": ("f", 0.10),                          # fabric
+    "FAB_NEW_WIN": ("i", 0),                              # fabric -- 0 = follow FAB_COOLDOWN
     "DOM_RADIUS": ("i", 1),                               # domains
     "DOM_RCAP": ("f", 2.0),                               # domains
     "DOM_RECUR": ("i", 1),                                # domains
@@ -549,6 +551,24 @@ LOSS_MASK_DEAD = bool(_i("LOSS_MASK_DEAD", 0))
 # as a multiple of its own weight scale, the same units FAB_MUT uses for offspring. 0 = the old behaviour,
 # cull on first selection. See soft_cull for why a failing expert is where exploration is most worth doing.
 FAB_RESCUE = _f("FAB_RESCUE", 0.0)
+# ---- HOW MUCH OF THE POPULATION MAY BE NEW AT ONCE -------------------------------------------------------------
+# There was a growth RATE and no cap on the newborn FRACTION, which are different things, and the difference is
+# the largest effect measured in this project.
+#   max(FAB_BURST=3, FAB_RAMP_RATE=0.10 * n) is 10% only once n >= 30. At n=3 it is 100%, at 6 it is 50%, at 12
+#   it is 25% -- so a ramp starting from FAB_N0=3 replaces a quarter to all of its population per event for its
+#   first ten events. And 10% every FAB_COOLDOWN//8 = 50 steps COMPOUNDS: over 400 steps the population doubles,
+#   so "10% per event" permits ~114% new per cooldown window.
+# Measured, same ramp and same destination of 4096 experts, differing only in where it started:
+#   ramp 3 -> 4096     held-out 4.327 / 3.572 / 2.253   mean 3.384, spread 2.074
+#   ramp 2048 -> 4096  held-out 1.994 / 2.097 / 1.937   mean 2.009, spread 0.160
+# From 2048 no event exceeds 10%; from 3 the early events are 25-100%. The damaging quantity is the FRACTION of
+# the population that is newborn at once, not the count -- 4096 experts are fine if they arrive slowly enough.
+# FAB_NEW_FRAC caps exactly that: at most this fraction of the live population may have been born in the last
+# FAB_NEW_WIN steps. It binds the burst floor and the compounding together, which a per-event rate cannot.
+# ON BY DEFAULT at 0.10, and that is a behaviour change: it leaves the asymptotic ramp rate untouched (already
+# 10%) and removes only the small-n blow-up and the compounding. 0 restores the uncapped behaviour.
+FAB_NEW_FRAC = _f("FAB_NEW_FRAC", 0.10)
+FAB_NEW_WIN = _i("FAB_NEW_WIN", 0) or _i("FAB_COOLDOWN", 400)
 GROW_CAP = bool(_i("GROW_CAP", 0))                         # master switch for both soft caps
 GROW_CAP_FAB = bool(_i("GROW_CAP_FAB", 1))                 # ...experts   (under GROW_CAP)
 GROW_CAP_VOCAB = bool(_i("GROW_CAP_VOCAB", 1))             # ...vocabulary (under GROW_CAP)
@@ -3741,7 +3761,7 @@ def main():
     # SOFT CAPS. Start where the run was configured; GROW_CAP lifts them, nothing lowers them. With GROW_CAP off
     # the fabric cap is FAB_NMAX and the vocabulary cap is TOK.vmax, i.e. exactly the previous behaviour.
     _cap_fab = [int(_i("GROW_CAP_FAB0", 0)) or FAB_NMAX]
-    _cap_last = [-10 ** 9]; _resc_seen = [0]
+    _cap_last = [-10 ** 9]; _resc_seen = [0]; _newcap_said = [-1]   # one "growth held" line per window, not per event
     if GROW_CAP and USE_TOK and _i("GROW_CAP_VOCAB0", 0): TOK.vmax = min(TOK.vmax, _i("GROW_CAP_VOCAB0", 0))
     _last_vsz = (TOK.vocab_size, len(TOK.seq2id)) if USE_TOK else (256, 256)   # vocab AND match table
     _retok_noop = [0]; _retok_skipped = [False]           # retoks refused because the vocabulary had not moved
@@ -5062,6 +5082,24 @@ def main():
         if FABRIC and not fab.norm_only:
             _nb = fabgrow.step(_lf, step, fab.n(), _cap_fab[0])  # 0, or HOW MANY to grow (burst on an unexpected regression)
             _nb = min(_nb, _cap_fab[0] - fab.n())
+            # ...and no more of the population may be newborn than FAB_NEW_FRAC allows. fab.born is slot -> step,
+            # so the budget is a count, and growth takes whatever is left of it rather than being refused outright
+            # -- a hard refusal would stall growth entirely for a whole window after any burst.
+            if FAB_NEW_FRAC > 0.0 and _nb > 0:
+                _recent = sum(1 for _b in fab.born.values() if step - _b < FAB_NEW_WIN)
+                # max(1, ...) OR THE CAP DEADLOCKS THE BOOTSTRAP. int(0.10 * 3) is 0, so a population starting
+                # at FAB_N0=3 could never grow at all -- measured: it reached 7 (via spawn) instead of 256, and
+                # every ramp event was declined. One expert per window is slow, not stuck, and the fraction is
+                # back in charge as soon as n >= 1/FAB_NEW_FRAC.
+                _budget = max(1, int(FAB_NEW_FRAC * fab.n())) - _recent
+                if _budget < _nb:
+                    _held = _nb - max(0, _budget)
+                    _nb = max(0, _budget)
+                    if _held and _newcap_said[0] != step // FAB_NEW_WIN:
+                        _newcap_said[0] = step // FAB_NEW_WIN
+                        print(f"  [fabric @ {step}] growth held to {_nb} (+{_held} declined): {_recent} of "
+                              f"{fab.n()} experts are younger than {FAB_NEW_WIN} steps, and FAB_NEW_FRAC="
+                              f"{FAB_NEW_FRAC:.0%} is the most of the population allowed to be new at once")
             for _g in range(max(0, _nb)):                       # each newborn is keyed at the CURRENT signature, so a
                 _fp = fab.grow(sig[None, :], step=step)      # burst owns the CURRENT region, on either path:
                 #   a newborn keyed at random receives no traffic, gets no gradient and stays dead, and that is
