@@ -567,6 +567,7 @@ FAB_RESCUE = _f("FAB_RESCUE", 0.0)
 # ---- HOW MUCH OF THE POPULATION MAY BE NEW AT ONCE -------------------------------------------------------------
 # There was a growth RATE and no cap on the newborn FRACTION, which are different things, and the difference is
 # the largest effect measured in this project.
+#   [HISTORICAL, at the FAB_BURST=3 default of the time -- it is 1 now, see the burst-floor note below]
 #   max(FAB_BURST=3, FAB_RAMP_RATE=0.10 * n) is 10% only once n >= 30. At n=3 it is 100%, at 6 it is 50%, at 12
 #   it is 25% -- so a ramp starting from FAB_N0=3 replaces a quarter to all of its population per event for its
 #   first ten events. And 10% every FAB_COOLDOWN//8 = 50 steps COMPOUNDS: over 400 steps the population doubles,
@@ -578,8 +579,14 @@ FAB_RESCUE = _f("FAB_RESCUE", 0.0)
 # the population that is newborn at once, not the count -- 4096 experts are fine if they arrive slowly enough.
 # FAB_NEW_FRAC caps exactly that: at most this fraction of the live population may have been born in the last
 # FAB_NEW_WIN steps. It binds the burst floor and the compounding together, which a per-event rate cannot.
-# ON BY DEFAULT at 0.10, and that is a behaviour change: it leaves the asymptotic ramp rate untouched (already
-# 10%) and removes only the small-n blow-up and the compounding. 0 restores the uncapped behaviour.
+# ON BY DEFAULT -- at 0.04, NOT the 0.10 this line claimed for as long as it stood. It was written when the cap
+# was introduced at 0.10 (matching FAB_RAMP_RATE, so it removed only the small-n blow-up and the compounding and
+# left the asymptotic ramp rate untouched); the default was lowered to 0.04 with the burst floor of 1 and this
+# sentence was not. 0 restores the uncapped behaviour.
+# The two halves of this block then disagreed with each other for a while: the paragraph below was corrected at
+# 3c2a59e and this one was not, so the same block asserted 0.10 and 0.04 eleven lines apart. Comments that quote a
+# knob's value go stale the moment the value moves, and the only defence is to quote the value AND say which
+# commit set it.
 # 0.04 AGAINST A 2% CULL -- AND THAT ARGUMENT NOW RUNS THE OTHER WAY. This paragraph used to read "0.04 against an
 # 8% cull ... a growth allowance at half that leaves selection strictly able to outpace growth, which is what makes
 # the population a population rather than a queue." Both numbers in it were wrong by the time anyone read it:
