@@ -3622,15 +3622,21 @@ def main():
         return LR * _cyc
     # PER-EXPERT MEMORY: each expert owns MEM_QUOTA entries, evicted by LRU on last USE. Sized to FAB_NMAX so the
     # partition does not have to be rebuilt as the population grows. MEM_PER_EXPERT=0 keeps the single global store.
-    # DEFAULT OFF, on measurement: same seed, same config, only the store differs --
+    # DEFAULT OFF -- and it now IS off, which it was not. This comment said "DEFAULT OFF, on measurement" while
+    # the code read _i("MEM_PER_EXPERT", 1), so every run in this project used the partition the comment records
+    # as measured-worse and says should stay off. A decision written down and never implemented.
     #   global 200k slots -> memory contributes -0.097 b/B
     #   32 owners x 64    -> memory contributes -0.652 b/B
-    # The partition costs 0.555 b/B at the scale tested, so it does not become the default path until it is shown to
-    # help. (Memory being slightly net-negative even globally is a separate, pre-existing finding.)
+    # Those numbers are a rough indication from one configuration, not a verdict: the partition's cost depends on
+    # the population size, the router, and the eviction rule, all of which have changed since.
+    # The partition is also what made a FADED DOMAIN VANISH. Owners are EXPERTS folded mod MEM_OWNERS, and both
+    # domains route to overlapping experts, so English and Python competed for the same blocks; eviction inside a
+    # block is LRU on `last`, and `last` was write-recency, so the domain that stopped being written was evicted
+    # oldest-first by construction. Measured: every English entry gone, the unlearn test on it skipped as vacuous.
     # NOT society-only any more. Ownership needs one thing -- a (B,N) table saying which expert served which
     # window -- and the chaining path now produces exactly that (fab._wrun). Gating it on SOCIETY meant flipping
     # to chaining silently turned per-expert memory OFF, which is the failure mode the [config] banner exists for.
-    MEM_PER_EXPERT = bool(_i("MEM_PER_EXPERT", 1)) and FABRIC
+    MEM_PER_EXPERT = bool(_i("MEM_PER_EXPERT", 0)) and FABRIC
     MEM_QUOTA = _i("MEM_QUOTA", 128)
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
@@ -5149,10 +5155,19 @@ def main():
                 # Pairs with FAB_RESCUE, which does the same thing in weight space at the moment of the cull:
                 # this one acts continuously and earlier, that one is the last chance.
                 if FAB_LR_BOOST > 1.0 and _nl > 2:
-                    _rank = sorted(range(_nl), key=lambda i: fab.use.get(i, 0.0))
+                    # ONLY PAST GRACE. A newborn is at the bottom of a utilization ranking because it has not had
+                    # a chance yet, not because it is failing -- it is already getting the high newborn rate from
+                    # its own schedule, and boosting it again would just make new experts louder. The boost is
+                    # for an expert that has had its safe phase and spent it badly, which is the same population
+                    # soft_cull is looking at, so the two agree on who is in trouble.
+                    _grace = _i("FAB_GRACE", 3000)
+                    _elig = [i for i in range(_nl) if fab.age(i, step) >= _grace]
+                    _rank = sorted(_elig, key=lambda i: fab.use.get(i, 0.0))
                     _nb2 = max(1, int(_f("FAB_CULL_FRAC", 0.08) * _nl))
-                    _bidx = torch.tensor(_rank[:_nb2], device=_oa.device, dtype=torch.long)
-                    _oa = _oa.clone(); _oa[_bidx] = _oa[_bidx] * FAB_LR_BOOST
+                    if not _rank: _nb2 = 0
+                    _bidx = torch.tensor(_rank[:_nb2] or [0], device=_oa.device, dtype=torch.long)
+                    if _nb2:
+                        _oa = _oa.clone(); _oa[_bidx] = _oa[_bidx] * FAB_LR_BOOST
                 _own_lr = (_oa / _lrv).clamp(max=FAB_LR_MAXR)
                 _pa = fab.A.detach()[:_nl].clone(); _pb = fab.B.detach()[:_nl].clone()
             om.step(); om.zero_grad()
