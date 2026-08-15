@@ -58,6 +58,13 @@ def main():
     ap.add_argument("--domain", default="eng", help="which DATA_DIR domain to fill (eng/py/num/c/...)")
     ap.add_argument("--shard-mb", type=int, default=512, help="split output into shards of this size")
     ap.add_argument("--min-chars", type=int, default=200, help="skip very short documents")
+    ap.add_argument("--min-score", type=float, default=None,
+                    help="skip documents whose --score-field is below this. fineweb-edu carries an educational-"
+                         "quality classifier score in `score` (roughly 0-5); >=3 is a markedly cleaner slice than "
+                         "the default >=2.5 the sample already applies. Silently does nothing if the field is "
+                         "absent, so it is safe to pass to any dataset -- the count of skipped documents is "
+                         "reported at the end either way.")
+    ap.add_argument("--score-field", default="score")
     ap.add_argument("--data-dir", default=None,
                     help="subdirectory within the dataset repo (the-stack: data/python, data/c, ...)")
     ap.add_argument("--token", default=None,
@@ -124,7 +131,7 @@ def main():
     # IterableDataset.skip() and continue at the next shard index. Skipping still walks the stream, but it neither
     # decodes nor writes, so it is far cheaper than re-downloading.
     man_path = os.path.join(outdir, "_fetch_manifest.json")
-    written = shard = docs_done = 0
+    written = shard = docs_done = 0; n_lowscore = 0
     if a.resume and os.path.exists(man_path):
         try:
             man = json.load(open(man_path))
@@ -150,6 +157,12 @@ def main():
             else:
                 txt = (rec.get(field) or "")
                 if len(txt) < a.min_chars: continue
+                # QUALITY GATE, on the dataset's OWN score rather than a heuristic of ours. Counted, not silent:
+                # a filter that drops 90% of the stream and says nothing turns "the pull is slow" into a mystery.
+                if a.min_score is not None:
+                    _sc = rec.get(a.score_field)
+                    if _sc is not None and float(_sc) < a.min_score:
+                        n_lowscore += 1; continue
                 txt = txt.strip() + "\n\n"
             f.write(txt); written += len(txt.encode("utf-8", "replace"))
             if written // (a.shard_mb * 1_000_000) > shard:
@@ -168,7 +181,13 @@ def main():
         try: json.dump({"bytes": written, "shard": shard, "docs": docs_done + i + 1}, open(man_path, "w"))
         except (NameError, OSError): pass
 
-    print(f"[fetch_big] wrote {written/1e9:.2f} GB in {shard+1} shard(s) to {outdir}")
+    print(f"[fetch_big] wrote {written/1e9:.2f} GB in {shard+1} shard(s) to {outdir}"
+          + (f" | --min-score {a.min_score} skipped {n_lowscore} document(s) on `{a.score_field}`"
+             if a.min_score is not None else ""))
+    if a.min_score is not None and n_lowscore == 0:
+        print(f"[fetch_big] NOTE: --min-score was set and skipped NOTHING. Either every document passed, or this "
+              f"dataset has no `{a.score_field}` field and the gate did nothing at all -- those look identical "
+              f"from here, and only one of them means what you asked for.")
     tag = a.dataset.replace("/", "_")
     stream_len = int(written * 0.9)
     # Only stack the heavy knobs (long windows / big vocab) for a genuinely LARGE corpus; on a small pull they just

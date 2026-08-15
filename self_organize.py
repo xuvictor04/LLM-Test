@@ -130,7 +130,7 @@ _SPEC = {
     "FAB_ALPHA": ("f", 0.5),                              # fabric
     "FAB_BALANCE": ("f", 0.01),                           # fabric
     "FAB_BIRTH_WIN": ("env", 256),                        # fabric
-    "FAB_BURST": ("i", 3),                                # fabric
+    "FAB_BURST": ("i", 1),                                # fabric
     "FAB_CENT_TOPK": ("i", 8),                            # fabric
     "FAB_CHAIN_K": ("env", 8),                            # fabric
     "FAB_COOLDOWN": ("i", 400),                           # fabric
@@ -211,7 +211,7 @@ _SPEC = {
     "GROW_CAP_FAB0": ("i", 0),                            # capacity -- 0 = start at FAB_NMAX
     "GROW_CAP_VOCAB0": ("i", 0),                          # capacity -- 0 = start at VMAX
     "FAB_RESCUE": ("f", 0.0),                             # fabric
-    "FAB_NEW_FRAC": ("f", 0.10),                          # fabric
+    "FAB_NEW_FRAC": ("f", 0.04),                          # fabric
     "FAB_NEW_WIN": ("i", 0),                              # fabric -- 0 = follow FAB_COOLDOWN
     "DOM_RADIUS": ("i", 1),                               # domains
     "DOM_RCAP": ("f", 2.0),                               # domains
@@ -567,7 +567,15 @@ FAB_RESCUE = _f("FAB_RESCUE", 0.0)
 # FAB_NEW_WIN steps. It binds the burst floor and the compounding together, which a per-event rate cannot.
 # ON BY DEFAULT at 0.10, and that is a behaviour change: it leaves the asymptotic ramp rate untouched (already
 # 10%) and removes only the small-n blow-up and the compounding. 0 restores the uncapped behaviour.
-FAB_NEW_FRAC = _f("FAB_NEW_FRAC", 0.10)
+# 0.04 AGAINST AN 8% CULL. FAB_CULL_FRAC=0.08 is the share of the population considered for removal per manage
+# event, so a growth allowance at half that leaves selection strictly able to outpace growth -- which is what makes
+# the population a population rather than a queue. The burst floor drops to 1 for the same reason: at any size, the
+# smallest possible growth step is one expert, so the fraction is in charge from n=25 up instead of n=30.
+# WATCH THE CADENCES, they are not matched: growth is capped per FAB_NEW_WIN (=FAB_COOLDOWN, 400 steps) while the
+# cull runs every MANAGE_EVERY (50). Culling is gated on capacity pressure and skips anything inside FAB_GRACE, so
+# it does not actually fire 8x more often -- but if a run's population trends DOWN, that asymmetry is the first
+# place to look, and the [experts @ N] culled lines are where it shows.
+FAB_NEW_FRAC = _f("FAB_NEW_FRAC", 0.04)
 FAB_NEW_WIN = _i("FAB_NEW_WIN", 0) or _i("FAB_COOLDOWN", 400)
 GROW_CAP = bool(_i("GROW_CAP", 0))                         # master switch for both soft caps
 GROW_CAP_FAB = bool(_i("GROW_CAP_FAB", 1))                 # ...experts   (under GROW_CAP)
@@ -3279,7 +3287,7 @@ def main():
     # allowed to stop: depth 0.00 -> 0.60 on the same config. A composition mechanism that is enabled but never
     # entered is worse than one that is off, because it reads as tested.
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
-                            _f("FAB_Z", 4.0), _i("FAB_BURST", 3), _i("FAB_RAMP", 4000),
+                            _f("FAB_Z", 4.0), _i("FAB_BURST", 1), _i("FAB_RAMP", 4000),
                             _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000),
                             _f("FAB_RAMP_RATE", 0.10), _f("FAB_RAMP_TO", 1.0)) if FABRIC else None
     # 64 was never a design decision, it was a default nothing pushed against -- and the population saturated it at
