@@ -248,7 +248,9 @@ _SPEC = {
     "MEM_CONF0": ("f", 0.3),                              # memory
     "MEM_GATE": ("i", 1),                                 # memory
     "MEM_OWNERS": ("i", 64),                              # memory
-    "MEM_PER_EXPERT": ("i", 1),                           # memory
+    "MEM_PER_EXPERT": ("i", 0),                           # memory
+    "MEM_PROBE_EVERY": ("i", 25),                          # memory
+    "MEM_PROBE_N": ("i", 64),                             # memory
     "MEM_QUOTA": ("i", 128),                              # memory
     "MEM_W": ("f", 0.5),                                  # memory
     "RECON_W": ("f", 0.0),                                # memory
@@ -346,7 +348,7 @@ _SPEC = {
     "COMP_PROTECT": ("i", 1),                             # misc
     "CULL_MODE": ("env", "rank"),                         # misc
     "DECAY_EVERY": ("i", 20000),                          # misc
-    "EVICT": ("env", "recency"),                          # misc
+    "EVICT": ("env", "lru"),                              # misc
     "EXPERT_CULL_FRAC": ("f", 0.25),                      # misc
     "EXPERT_CULL_RANK": ("f", 0.08),                      # misc
     "EXPERT_CULL_STALE": ("i", 1000),                     # misc
@@ -3641,12 +3643,23 @@ def main():
     mem = EditableMemory(_i("MEM_CAP", 200000), D, DEV, V, _f("WRITE_GATE", 0.3), _f("WRONG_THRESH", 1.0), _i("TOPK", 8),
                          ctx_w=(KW if KEY_SRC == "model" else 0), wrong_margin=_f("WRONG_MARGIN", 1.5), wrong_min_n=_i("WRONG_MIN_N", 3),
                          adaptive_gate=bool(_i("WRITE_ADAPTIVE", 0)), gate_target=_f("WRITE_TARGET", 0.5),
-                         evict=_env("EVICT", "recency"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
+                         evict=_env("EVICT", "lru"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
                          quantile_gate=bool(_i("WRITE_QUANTILE", 1)),   # WRITE_QUANTILE=0 restores the old additive controller
                          n_own=(min(_i("FAB_NMAX", 4096), _i("MEM_OWNERS", 64)) if MEM_PER_EXPERT else 1), quota=(MEM_QUOTA if MEM_PER_EXPERT else None))
+    # READ PROBE. EVICT=lru/usage select on retrieval, and retrieval only happened at eval time, so the signal both
+    # rules read was a constant. The probe issues real reads during training against the text being trained on. 0
+    # turns it off and returns the store to write-order eviction -- which is what every run before this one did,
+    # whatever its EVICT said. Cost is one _model_key on MEM_PROBE_N rows plus a (N, active) similarity, every
+    # MEM_PROBE_EVERY steps; at 64/25 that is ~2.5 extra key rows per step against a WIN=256 x BATCH_W forward.
+    MEM_PROBE_EVERY = _i("MEM_PROBE_EVERY", 25)
+    MEM_PROBE_N = max(1, _i("MEM_PROBE_N", 64))
+    _mprobe = {"n": 0}
     if MEM_PER_EXPERT:
         print(f"[memory] PER-EXPERT: {mem.n_own} owners x {mem.quota} entries = {mem.cap} slots, LRU by last USE "
               f"(writes partitioned by routed expert; reads global so information still mixes)")
+    print(f"[memory] EVICT={mem.evict} | read probe {'OFF' if not MEM_PROBE_EVERY else f'{MEM_PROBE_N} queries every {MEM_PROBE_EVERY} steps'}"
+          + ("" if MEM_PROBE_EVERY or mem.evict == "recency" else
+             "  <-- EVICT selects on retrieval but nothing retrieves during training; this is write-order eviction"))
     asm = DomainAssembler()
     if _RD is not None:                                    # part 2 of RESUME: optimizer moments, memory store, domains
         try: om.load_state_dict(_RD["opt_m"]); oe.load_state_dict(_RD["opt_e"])
@@ -3683,6 +3696,13 @@ def main():
                     if mem.ctx_w > 0 and _RD.get("mem_ctx") is not None: mem.ctx[_dst] = _RD["mem_ctx"][_sel].to(DEV)
                     mem.own[_dst] = _o; mem.last[_dst] = _la[_sel]; mem.active[_dst] = True
                 mem.tick = int(_RD.get("mem_tick", 0))
+            elif _RD.get("mem_last") is not None:
+                # GLOBAL STORE: restore the use clock too. `last` now drives eviction on this path, and leaving it
+                # at zero while mem.tick restarts at 0 would make every restored entry -- i.e. everything the run
+                # is resuming in order to KEEP -- the oldest thing in the store, evicted before anything written
+                # after the resume. That is the vanished-domain failure re-created at the run boundary.
+                mem.last[:_mn] = _RD["mem_last"][:_mn].to(DEV)
+                mem.tick = max(int(_RD.get("mem_tick", 0)), int(mem.last[:_mn].max()))
             if _RD.get("mem_selfcon") is not None: mem.selfcon[:_mn] = _RD["mem_selfcon"][:_mn].to(DEV)
             mem.active[:_mn] = True; mem.ptr = _mn % mem.cap
         _a = _RD.get("asm")
@@ -4261,6 +4281,11 @@ def main():
             ("MEM_OWNERS",     mem.n_own),
             ("MEM_QUOTA",      mem.quota if MEM_PER_EXPERT else mem.cap,
                                "no per-expert partition, so one global quota = the whole store"),
+            ("EVICT",          mem.evict),
+            ("MEM_PROBE_EVERY", MEM_PROBE_EVERY,
+                               "no reads during training -> `use`/`last` are constants and EVICT is write-order"
+                               if not MEM_PROBE_EVERY and mem.evict != "recency" else None),
+            ("MEM_PROBE_N",    MEM_PROBE_N),
             ("MAX_DOMAINS",    MAX_DOMAINS),
             ("EXPERTS",        bool(EXPERTS and not FABRIC)),
             ("DIV_W",          DIV_W),                   ("IND_W",          IND_W if SOCIETY else 0.0),
@@ -4701,9 +4726,18 @@ def main():
             # moves the LR 11x between two runs stayed invisible across every comparison we made. Printed as a
             # fraction of peak so it reads without arithmetic: 100% = untouched, 5% = at the LR_MIN_FRAC floor.
             _lrn = _lr_at(step, max(1, _lr_total(step)), _proj_steps(step))
+            # RETRIEVED FRACTION, on the epoch line, because a selection rule with no signal is invisible otherwise.
+            # FAB_RESCUE fired zero times for an entire investigation and nothing said so; this is the same class of
+            # silence. `touched` is how many entries anything has ever asked for -- if it stays 0 while EVICT is
+            # lru/usage, the store is being culled on write order and the run should not be read as a memory result.
+            _tch = int((mem.use > 0).sum()) if mem.n else 0
             print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | "
-                  f"vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} | domains {len(asm.cent)} | "
+                  f"vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} ({_tch} retrieved, "
+                  f"{_mprobe['n']} probes) | domains {len(asm.cent)} | "
                   f"lr {_lrn:.2e} ({_lrn / max(1e-12, LR) * 100:.0f}% of peak)]")
+            if MEM_PROBE_EVERY and mem.n > 64 and _tch == 0:
+                print(f"  !! MEM_PROBE ran {_mprobe['n']} times and NOTHING was retrieved -- EVICT={mem.evict} is "
+                      f"selecting on a dead signal. Check KEY_SRC/mem_ctx; this run's memory is write-order-culled.")
             continue
         w = stream[i:i + WIN + 1]
         x = torch.tensor([list(w[:-1])], device=DEV); y = torch.tensor([list(w[1:])], device=DEV)
@@ -5320,6 +5354,31 @@ def main():
                     mem.write(None if _pre else _K[_b * _n1:(_b + 1) * _n1], y[_b], src=_bd[_b], surprise=surprise[_b],
                               ctx=_cb, key_fn=(_model_key if _pre else None),
                               pos=_posv(_b, _n1))
+            # === READ PROBE: GIVE THE EVICTION RULE A REAL SIGNAL =====================================
+            # mem.read() was called from exactly two places, generate() and bpb_true() -- both EVAL. Training
+            # only ever WROTE. So `use` was zero for every entry that had not been through an eval, `last` was
+            # write time (and on the global store was never written at all), and every eviction rule that claims
+            # to select on utility was in fact selecting on write order or on nothing. The measured consequence:
+            # after the Python run every English entry was gone, not because English was less useful but because
+            # English had stopped being written and nothing in the training loop could observe that its entries
+            # were still being retrieved.
+            # This probe issues real retrievals against the text actually being trained on, so an entry's fitness
+            # is what it is FOR: does anything ask for it. Nothing here feeds the forward pass or the loss -- it
+            # updates `use` and `last` and returns. Sampled and cadenced because a read is a full key encode plus
+            # a (P, M) similarity against the live store; MEM_PROBE_N rows every MEM_PROBE_EVERY steps.
+            if MEM_PROBE_EVERY and mem.n > 0 and _due("memprobe", MEM_PROBE_EVERY):
+                _mprobe["n"] += 1
+                _pc = mem_ctx(x)
+                if _pc is not None and _pc.size(0) > 0:
+                    _pn = min(MEM_PROBE_N, _pc.size(0))
+                    # Deterministic stride, not a random draw: the stream RNG is a controlled resource here
+                    # (frozen_rng exists because diagnostics were silently editing runs), and a probe that
+                    # consumed draws would make the probe cadence change the training trajectory.
+                    _pi = torch.arange(_pn, device=DEV) * (_pc.size(0) // _pn) + (step % max(1, _pc.size(0) // _pn))
+                    _pq = _model_key(_pc[_pi.clamp(max=_pc.size(0) - 1)])
+                    mem.read(_pq)
+                elif KEY_SRC != "model":
+                    mem.read(mem_key(x)[:MEM_PROBE_N])
         _t1("memory key+write", _pmem)
         _ptok = _t0()
         # STOP MINTING EVENTUALLY -- an option, NOT a recommendation. The argument for it was that minting

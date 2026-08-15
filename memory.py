@@ -45,9 +45,15 @@ class EditableMemory:
         self.gate_step = float(gate_step); self.gate_floor = float(gate_floor); self.gate_theta = float(write_gate)
         self.gate_ceil = float(gate_ceil)        # cap so the controller can't overshoot and starve writes (skewed-high surprise)
         self.quantile_gate = bool(quantile_gate) # honour gate_target by QUANTILE rather than an absolute threshold (see _gate)
-        # EVICTION: "recency" = circular overwrite (oldest dies regardless of value). "usage" = least-RETRIEVED dies,
-        # so entries that stay useful survive -- the same relative-fitness selection the domains and fabric nodes use.
-        # Without this, memory is the only population in the system with no selection pressure at all.
+        # EVICTION. Three rules, and the difference between them is WHICH CLOCK decides who dies:
+        #   "recency" = circular overwrite. WRITE order. The oldest write dies regardless of value, so a domain that
+        #               stops being written is erased on a fixed schedule whether or not anything still needs it.
+        #   "usage"   = least-RETRIEVED dies (LFU on decayed retrieval mass).
+        #   "lru"     = least-recently-RETRIEVED dies. USE-BASED RECENCY: the clock is reads, not writes, so a quiet
+        #               domain that still answers queries stays and a loud domain nothing asks for goes.
+        # "usage" and "lru" are the selection pressure memory otherwise has none of -- the same relative-fitness rule
+        # the domains and fabric nodes live under. Both are only real if reads HAPPEN during training; with reads
+        # confined to eval, `use` stays 0 everywhere and `last` stays at write time, and both degenerate to FIFO.
         self.evict = str(evict); self.use_decay = float(use_decay); self.decay_every = int(decay_every); self._wc = 0
         self.pos = torch.zeros(cap, dtype=torch.long, device=device)   # SOURCE POSITION of each entry: lets retrieval
                                                                        # return the actual PASSAGE it came from, not just
@@ -183,17 +189,26 @@ class EditableMemory:
             self.tick += 1
             self.own[idx] = o; self.last[idx] = self.tick
             return self._commit(idx, k, tok, src, ctx, pos, m)
-        if self.evict == "usage" and int(self.active.sum()) >= self.cap:      # LEAST-USED dies (sampled, O(m) not O(cap))
+        if self.evict in ("usage", "lru") and int(self.active.sum()) >= self.cap:
+            # SAMPLED victim selection: draw a candidate pool and kill the worst of it, O(m) rather than O(cap).
+            #   "usage" = LEAST-RETRIEVED dies (LFU on decayed retrieval mass).
+            #   "lru"   = LEAST-RECENTLY-USED dies, where USED means RETRIEVED. Both signals are only real if reads
+            #             actually happen during training -- see MEM_PROBE_EVERY. Without a read probe `use` and
+            #             `last` never move off their write-time values and this degenerates to arbitrary/FIFO.
             ns = int(min(self.cap, max(8 * m, 64)))
             cand = torch.randint(0, self.cap, (ns,), device=self.dev)
             kk = int(min(m, ns))
-            idx = cand[self.use[cand].topk(kk, largest=False).indices]
+            _sig = self.use[cand] if self.evict == "usage" else self.last[cand].float()
+            idx = cand[_sig.topk(kk, largest=False).indices]
             if idx.numel() < m:                                               # pad with circular if the sample was short
                 pad = (torch.arange(m - idx.numel(), device=self.dev) + self.ptr) % self.cap
                 idx = torch.cat([idx, pad])
         else:
             idx = (torch.arange(m, device=self.dev) + self.ptr) % self.cap    # circular overwrite (recency only)
         self.ptr = int((self.ptr + m) % self.cap)
+        self.tick += 1; self.last[idx] = self.tick                            # a fresh entry starts its clock at NOW,
+        #   so an entry that is never retrieved ages from its write and an entry that is retrieved keeps resetting.
+        #   The global path never stamped `last` at all before this line existed.
         return self._commit(idx, k, tok, src, ctx, pos, m)
 
     def _commit(self, idx, k, tok, src, ctx, pos, m):
@@ -244,9 +259,14 @@ class EditableMemory:
         hit[:, :kk] = gi
         wfull = torch.zeros(B, self.topk, device=self.dev); wfull[:, :kk] = w   # retrieval weights (0 for empty slots)
         self.use.index_add_(0, gi.reshape(-1), w.reshape(-1))                 # track usage
-        if self.n_own > 1:                                                    # LAST-USE stamp: this is what makes the
-            self.tick += 1                                                    #   per-owner eviction a true LRU rather
-            self.last[gi.reshape(-1)] = self.tick                             #   than a decayed retrieval count (LFU).
+        # LAST-USE STAMP, UNCONDITIONALLY. This used to be gated on n_own > 1, so on the global store `last` was
+        # never written by a read AND never written by a write -- it stayed all-zero for the entire run and any
+        # eviction rule consulting it was choosing arbitrarily. `last` is the clock for USE-BASED RECENCY: an entry
+        # is young because it was RETRIEVED recently, not because it was WRITTEN recently. That distinction is the
+        # whole point -- write-recency evicts a domain that has gone quiet by construction, use-recency evicts a
+        # domain nothing is asking for, and a quiet domain that still answers queries survives.
+        self.tick += 1
+        self.last[gi.reshape(-1)] = self.tick
         # NOTE reads are deliberately GLOBAL across owners even when the store is partitioned: writes compartmentalize,
         # reads mix. That is the "partially, not fully, isolate" property -- an expert's knowledge is its own to keep
         # and to lose, but any query can still reach it.
