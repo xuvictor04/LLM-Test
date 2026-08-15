@@ -301,7 +301,11 @@ _SPEC = {
     "DROPOUT": ("f", 0.0),                                # optim
     "LR": ("f", 2e-3),                                    # optim
     "LR_EPOCHS": ("i", 8),                                # optim -- cosine WAVELENGTH in epochs; 0 = follow EPOCHS
-    "LR_RESTARTS": ("i", 1),                              # optim -- repeat the cosine; 0 = anneal once, hold
+    "LR_RESTARTS": ("i", 1),
+    "LR_DECAY": ("f", 0.0),                               # lr
+    "FAB_LR_OWN": ("i", 0),                               # fabric
+    "FAB_LR_MAXR": ("f", 4.0),                            # fabric
+    "FAB_LR_SPAN": ("i", 0),                              # fabric -- 0 = follow the global wavelength                              # optim -- repeat the cosine; 0 = anneal once, hold
     "LR_MIN_FRAC": ("f", 0.05),                           # optim
     "LR_SCHED": ("env", "cosine"),                        # optim
     "LR_WARMUP": ("i", 1000),                             # optim
@@ -1335,7 +1339,14 @@ class Fabric(nn.Module):
         s._ord = []                            # (hop0, hop1) expert pairs, for H(hop1 | hop0)
         s.explore = float(_env("FAB_EXPLORE", 0.15))   # fraction of steps that force an off-policy expert
         s.xover = float(_env("FAB_XOVER", 0.35))       # fraction of births assembled from SEVERAL parents
-        s.born = {}                                        # expert -> step it was created (grace before culling)
+        # THE INITIAL POPULATION HAS A BIRTHDAY TOO. Only grow() wrote here, so the first n0 experts were absent
+        # and every reader falls back to `step` -- i.e. reads their age as 0, forever. Three things ran on that:
+        #   soft_cull skips anything younger than FAB_GRACE, so the founding population was PERMANENTLY IMMUNE TO
+        #     CULLING. At FAB_N0=2048 that is the whole population: arm B ran with no selection at all.
+        #   the FAB_NEW_FRAC budget counts recent births, and undercounted by exactly the founders.
+        #   per-expert learning rates read age 0 and handed every founder the newborn rate for the whole run --
+        #     which is how this was found: "experts 2.00e-03..2.00e-03 (x4.00..x4.00, clamped)".
+        s.born = {i: 0 for i in range(n0)}                 # expert -> step it was created (grace before culling)
         s.removed = 0; s.spared = 0
         s.breadth = float(_env("EXP_DOM_FRAC", 0.10))
         s.breadth_min = int(_env("EXP_DOM_MIN", 4))   # never squeeze below this, or a small population
@@ -3548,7 +3559,26 @@ def main():
             _p = (((st - _w) / ((_run_end - _w) / _n)) % 1.0) if st < _run_end else 1.0
         else:
             _p = min(1.0, _prog)
-        return LR * (LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _p)))
+        _cyc = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _p))
+        # === A DECAYING ENVELOPE OVER THE FLUCTUATION =========================================================
+        # The repeating cosine returns to 100% OF PEAK at every restart, forever. Measured on an 18-epoch run:
+        #   [lr @ 201925] cosine restart: 1.00e-04 -> 2.00e-03 (100% of peak)
+        # and the held-out curve after it swings 1.5 b/B and never resettles (3.82 3.29 3.04 4.01 3.39 4.04 4.08
+        # ... 3.92 3.19 2.58 3.85 3.63). Two of three seeds ended with a base model at 5.6 and 5.3; the one that
+        # landed away from a restart read 3.0. That is the entire spread of the arm.
+        # A full-peak jump late in training is not a fresh exploration phase, it is discarding the anneal that
+        # earned the current solution. LR_DECAY scales each successive cycle's PEAK by the run's overall
+        # progress, so the rate still fluctuates -- each cycle keeps its own high phase to move in and its own
+        # anneal to consolidate -- while the ceiling of those fluctuations comes down monotonically.
+        #   LR_DECAY=0 (default) is the existing behaviour, exactly.
+        #   LR_DECAY=1 makes the envelope fall on the same cosine shape as a single cycle would, so the last
+        #     cycle peaks near the floor and the run ends annealed twice over.
+        # The envelope is a function of GLOBAL progress, never of the cycle, so it cannot itself oscillate.
+        if LR_DECAY > 0.0 and _run_end is not None and _run_end > _w:
+            _gp = min(1.0, max(0.0, (st - _w) / max(1, _run_end - _w)))
+            _env = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _gp))
+            _cyc = _cyc * ((1 - LR_DECAY) + LR_DECAY * _env)
+        return LR * _cyc
     # PER-EXPERT MEMORY: each expert owns MEM_QUOTA entries, evicted by LRU on last USE. Sized to FAB_NMAX so the
     # partition does not have to be rebuilt as the population grows. MEM_PER_EXPERT=0 keeps the single global store.
     # DEFAULT OFF, on measurement: same seed, same config, only the store differs --
@@ -4459,6 +4489,10 @@ def main():
     # move in and a fresh anneal to consolidate it. LR_RESTARTS=0 restores the hold, which is what the 2.023
     # run did, so earlier results stay reproducible.
     LR_RESTARTS = bool(_i("LR_RESTARTS", 1))
+    LR_DECAY = _f("LR_DECAY", 0.0)                         # 0 = restarts return to full peak (previous behaviour)
+    FAB_LR_OWN = bool(_i("FAB_LR_OWN", 0))                 # each expert on its own schedule, clocked from its birth
+    FAB_LR_MAXR = _f("FAB_LR_MAXR", 4.0)                   # cap on own-rate / global-rate, see the step site
+    _lrown_said = [-1]
     _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
     _lr_prev = [0.0]                                       # last applied rate, to detect a cosine restart
     # === PROBATION: MINT PROVISIONALLY, JUDGE ON EVIDENCE ====================================================
@@ -5034,7 +5068,51 @@ def main():
             _lr_prev[0] = _lrv
             for _g in om.param_groups: _g["lr"] = _lrv
             for _g in oe.param_groups: _g["lr"] = _lrv
-        if (step + 1) % ACCUM == 0: om.step(); om.zero_grad()
+        # === PER-EXPERT LEARNING RATES ========================================================================
+        # Each expert on its OWN schedule, clocked from its OWN birth: high when it is new, annealing as it
+        # matures, independent of where the global run happens to be. That is the property the global schedule
+        # cannot give -- an expert born at step 40000 is born into whatever rate the run has decayed to and can
+        # never move far enough to differentiate, which is why late births arrive dead.
+        #
+        # WHY NOT param_groups, AND WHY NOT GRADIENT SCALING. fab.A and fab.B are SINGLE tensors of shape
+        # (cap, d, r) -- the whole population is two parameters, deliberately, so routing is two matmuls at any
+        # N. An optimizer group therefore cannot carry a per-expert rate. And scaling a row's GRADIENT does not
+        # scale its step: Adam's update is m_hat / (sqrt(v_hat) + eps), which is invariant to a constant factor
+        # on the gradient, so the obvious implementation silently does nothing at all.
+        # What does work is rescaling the UPDATE: keep the pre-step weights, let the optimizer take its normal
+        # step at the global rate, then move each row back along its own delta to the rate it should have had.
+        # Exact for any optimizer, because it operates on the realised update rather than on its inputs.
+        # Cost: one clone of the LIVE rows per optimizer step (n_live*d*r floats, ~50 MB at 2048 experts, d=768,
+        # r=8, twice for A and B) -- a few tenths of a percent of HBM bandwidth at these step rates.
+        if (step + 1) % ACCUM == 0:
+            _own_lr = None
+            if FAB_LR_OWN and FABRIC and fab is not None and fab.n_live > 0 and _lrv > 0:
+                _nl = fab.n_live
+                _span = max(1, _i("FAB_LR_SPAN", 0) or _lr_total(step))
+                _age = torch.tensor([min(1.0, (step - fab.born.get(_i2, step)) / _span) for _i2 in range(_nl)],
+                                    device=fab.A.device, dtype=fab.A.dtype)
+                # same shape as the global schedule: high, annealing to the floor, over the expert's own life
+                _oa = LR * (LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + torch.cos(math.pi * _age)))
+                # ratio to what the optimizer is ABOUT to apply, clamped so a newborn at a late-run global rate
+                # cannot be handed an unbounded multiple of a step Adam sized for a different regime
+                _own_lr = (_oa / _lrv).clamp(max=FAB_LR_MAXR)
+                _pa = fab.A.detach()[:_nl].clone(); _pb = fab.B.detach()[:_nl].clone()
+            om.step(); om.zero_grad()
+            if _own_lr is not None:
+                with torch.no_grad():
+                    _r3 = _own_lr.view(-1, 1, 1)
+                    fab.A[:_nl] = _pa + _r3 * (fab.A[:_nl] - _pa)
+                    fab.B[:_nl] = _pb + _r3 * (fab.B[:_nl] - _pb)
+                # ON THE RATE CADENCE, not a hardcoded 20000: a short run never advances that counter, so the
+                # line fired exactly once at step ~3 -- when every expert IS newborn and every ratio IS clamped,
+                # which is the one moment the diagnostic cannot say anything. It reported x4.00..x4.00 and looked
+                # like a bug in the mechanism rather than a bug in when it was printed.
+                if _lrown_said[0] != step // max(1, RATE_EVERY):
+                    _lrown_said[0] = step // max(1, RATE_EVERY)
+                    print(f"  [lr @ {step}] per-expert rates active: global {_lrv:.2e}, experts "
+                          f"{float(_oa.min()):.2e}..{float(_oa.max()):.2e} by age "
+                          f"(x{float(_own_lr.min()):.2f}..x{float(_own_lr.max()):.2f}, clamped at "
+                          f"x{FAB_LR_MAXR:g})")
         _t1("lm fwd+bwd (incl. fabric/world)", _plm)
         _lf = float(loss.detach())                               # ONE host sync per step (was two: the curve and the
         _lm_run.append(_lf)                                      #   plateau detector each pulled the same scalar back)
