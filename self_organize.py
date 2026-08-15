@@ -5020,7 +5020,13 @@ def main():
             # PlateauGrowth reads the resulting regression as `unexpected`, fires a growth burst, and can enter
             # a RECOVER lockout of up to FAB_RECOVER_MAX steps; maybe_deepen resets dp_wait on the same spike.
             # Detected by the rate RISING, which only a restart does -- the cosine is otherwise monotone down.
-            if _lrv > _lr_prev[0] * 1.5 and FABRIC and fabgrow is not None:
+            # ...BUT THE WARMUP RAMP IS NOT A RESTART. It climbs from 0, so every early step multiplies the rate
+            # by far more than 1.5 and each one was reported as a "cosine restart" -- observed at steps 15 and 31
+            # of an 18-epoch run, at 2% and 3% of peak. Harmless in effect (nothing has grown that early) but it
+            # puts two false entries above the one that matters, and a log that cries restart is a log nobody
+            # greps for restarts. A real restart returns the rate to a large fraction of peak; require that.
+            if (_lrv > _lr_prev[0] * 1.5 and _lrv > 0.5 * LR
+                    and FABRIC and fabgrow is not None):
                 fabgrow.note_shift(step)
                 print(f"  [lr @ {step}] cosine restart: {_lr_prev[0]:.2e} -> {_lrv:.2e} "
                       f"({_lrv / max(1e-12, LR) * 100:.0f}% of peak). Marked as self-inflicted so the fabric "
