@@ -4,6 +4,11 @@ Extracted from the session JSONL (2026-07-21 .. 2026-08-15). Harness-injected tu
 (system reminders, task notifications, command echoes) are excluded; everything else is
 reproduced exactly as typed, including typos. This is the primary source for 02_IDEAS.md.
 
+**455 entries, of which 9 ARE NOT THE RESEARCHER** and are flagged inline: U0032, U0082, U0147, U0177, U0264, U0309, U0370, U0417, U0448.
+Those are Claude-written context-compaction summaries the harness injects with role=user. The
+original extraction missed them because it filtered on other markers. They are retained rather than
+removed so that ids stay stable for files that already cite them. **Genuine researcher turns: 446.**
+
 ---
 
 ## U0001 — 2026-07-21T18:04:47.140Z
@@ -2528,6 +2533,11 @@ UNLEARN whole process 1: deleted 8801 self-domains (57063 entries) | KEY_SRC=mod
 
 ## U0032 — 2026-07-22T21:49:46.862Z
 
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
+
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
 Summary:
@@ -3299,6 +3309,11 @@ Before I test, is there anything we can or should do before?
 ---
 
 ## U0082 — 2026-07-24T17:10:23.828Z
+
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
 
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
@@ -4954,6 +4969,11 @@ Stop hook feedback:
 ---
 
 ## U0147 — 2026-07-25T17:08:31.973Z
+
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
 
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
@@ -7332,6 +7352,11 @@ Here are the results
 
 ## U0177 — 2026-07-30T15:17:08.191Z
 
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
+
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
 Summary:
@@ -9128,6 +9153,11 @@ Chaining is being run, but, halt should have been set on this
 
 ## U0264 — 2026-08-04T22:07:47.755Z
 
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
+
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
 Summary:
@@ -9604,6 +9634,11 @@ Token minting is critical for my idea of continual learning.
 ---
 
 ## U0309 — 2026-08-06T14:14:36.315Z
+
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
 
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
@@ -10280,6 +10315,11 @@ The random initialization is likely why, let’s run the capless properly then
 
 ## U0370 — 2026-08-11T12:23:30.400Z
 
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
+
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
 Summary:
@@ -10920,6 +10960,11 @@ Why are we trying to measure the noise? Let’s fix the issue that’s coming up
 
 ## U0417 — 2026-08-13T22:12:55.335Z
 
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
+
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
 Summary:
@@ -11372,6 +11417,11 @@ On the DocPlan, I have not looked at yet and will tell you after the webfetch.
 ---
 
 ## U0448 — 2026-08-15T16:06:34.327Z
+
+> **NOT A HUMAN TURN.** This is a Claude-written auto-compaction summary that the harness injects as a
+> user turn. It quotes the researcher extensively, so a literal substring search WILL find his words here --
+> and score a quote-of-a-quote as verified. Never cite this turn as a source for what he said; find the
+> original turn instead. Kept in place, with its id, so the U-numbering that other files cite stays stable.
 
 This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
