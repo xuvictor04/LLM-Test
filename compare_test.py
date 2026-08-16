@@ -89,6 +89,35 @@ def main():
         else:
             print(f"  NULL   -> NOT SIGNIFICANT")
 
+        # --- TOO FEW PAIRS: must refuse a verdict, not manufacture one -------------------------------
+        # The first real use of this tool was a 1-seed bisect, and it answered "SIGNIFICANT AND MEANINGFUL"
+        # with a CI of [1.000, 1.000] -- because a bootstrap over one pair resamples that pair every time.
+        # Wrapping a single comparison in statistical language is worse than not having the tool.
+        for n in (1, 2):
+            A = [_w(d, f"few{n}_A_seed{s}.log", s, 2.0) for s in range(n)]
+            B = [_w(d, f"few{n}_B_seed{s}.log", s, 2.3) for s in range(n)]
+            rc, out = _run(A + ["--"] + B)
+            if "NO VERDICT" not in out or "SIGNIFICANT AND MEANINGFUL" in out:
+                print(f"!! n={n} produced a verdict it cannot support:\n{out}"); ok = False
+            else:
+                print(f"  FEW    n={n} pair(s) -> NO VERDICT (direction reported, significance refused)")
+        # ...and at the floor it must start answering again.
+        A = [_w(d, f"ok3_A_seed{s}.log", s, 2.0) for s in range(3)]
+        B = [_w(d, f"ok3_B_seed{s}.log", s, 2.3) for s in range(3)]
+        rc, out = _run(A + ["--"] + B)
+        if "NO VERDICT" in out:
+            print(f"!! n=3 still refuses; the floor is too high to ever be useful:\n{out}"); ok = False
+        else:
+            print(f"  FEW    n=3 pairs  -> verdict issued")
+
+        # --- FLAGS AFTER THE SEPARATOR: natural to type, and it used to read them as filenames --------
+        A = [_w(d, "fl_A_seed0.log", 0, 2.0)]; B = [_w(d, "fl_B_seed0.log", 0, 2.3)]
+        rc, out = _run(A + ["--"] + B + ["--label-a", "LEFT", "--label-b", "RIGHT"])
+        if "LEFT" not in out or "RIGHT" not in out or "has no held-out line" in out:
+            print(f"!! flags after the -- were mistaken for log paths:\n{out}"); ok = False
+        else:
+            print(f"  ARGS   flags after the -- are parsed as flags")
+
         # --- GUARDS: each must warn, and none may crash ----------------------------------------------
         for label, mk, want in (
             ("different commits",

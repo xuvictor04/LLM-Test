@@ -41,6 +41,13 @@ import sys
 GAMMA = 0.75          # Bouthillier's meaningfulness threshold
 ALPHA, BETA = 0.05, 0.20
 BOOT = 10000
+# BELOW THIS MANY PAIRS THERE IS NO VERDICT TO GIVE, and saying so is the entire point of this file.
+# A percentile bootstrap resamples the pairs it was given: at n=1 every resample IS that pair, so the interval
+# collapses to a point and the tool reports [1.000, 1.000] -- "significant and meaningful" from ONE run. That is
+# strictly worse than eyeballing two numbers, because it wraps a single comparison in the language of statistics.
+# Caught on the first real use, on a genuine 1-seed bisect. n=3 is the floor at which a bootstrap has anything
+# to resample; even there the interval is wide and it will usually, correctly, refuse to call anything.
+MIN_PAIRS = 3
 
 
 def _grab(pat, t, default=None):
@@ -54,7 +61,10 @@ def read_log(path):
     try:
         t = open(path, errors="replace").read()
     except OSError as e:
-        return {"path": path, "error": str(e)}
+        # `name` IS REQUIRED even here. The caller reports unusable inputs by name, so a branch that omits it
+        # turns "I could not read this file" into a KeyError traceback -- which is exactly what an unreadable
+        # path did, and the real cause (a flag mistaken for a path) was invisible behind it.
+        return {"path": path, "name": os.path.basename(path), "error": str(e), "done": False}
     row = {"path": path, "name": os.path.basename(path)}
     eff = _grab(r"^\[config\] EFFECTIVE(.*)$", t, "") or ""
     row["seed"] = _grab(r"\bSEED=(\d+)", eff) or _grab(r"_seed(\d+)", os.path.basename(path))
@@ -151,8 +161,18 @@ def main(argv=None):
     if "--" not in raw:
         ap.error("give arm A's logs, then --, then arm B's:  compare.py A*.log -- B*.log")
     _i = raw.index("--")
-    left, pb = raw[:_i], raw[_i + 1:]
-    a, pa = ap.parse_known_args(left)      # flags must precede the --; whatever else is on the left is arm A
+    left, right = raw[:_i], raw[_i + 1:]
+
+    # FLAGS ON EITHER SIDE OF THE SEPARATOR. The first version required them before the `--`, which is not how
+    # anyone types it -- `compare.py A*.log -- B*.log --label-a x` reads naturally and silently handed
+    # "--label-a" and "x" to the log reader as filenames. Splitting each side into (paths, flags) and parsing the
+    # flags together means the separator only ever separates ARMS, which is the only job it has.
+    def _sides(tokens):
+        _ns, paths = ap.parse_known_args(tokens)
+        return paths, [t for t in tokens if t not in paths]
+    pa, fl = _sides(left)
+    pb, fr = _sides(right)
+    a = ap.parse_args(fl + fr)
     if not pa or not pb:
         ap.error("both sides of the -- need at least one log")
     exp = lambda ps: sorted({f for p in ps for f in (glob.glob(p) or [p])})
@@ -207,6 +227,18 @@ def main(argv=None):
 
     # THE THREE-WAY VERDICT. "Not significant" is a result, and at these sample sizes it is usually the correct
     # one -- reporting it as such is the entire point of the exercise.
+    if len(pairs) < MIN_PAIRS:
+        print(f"  >> NO VERDICT -- {len(pairs)} pair(s) is below the {MIN_PAIRS} a bootstrap needs to mean "
+              f"anything. The interval above is an artefact of resampling {len(pairs)} point(s), not evidence. "
+              f"Read the DIRECTION and the size of the difference, and treat both as a lead.")
+        if need: print(f"  >> {need} paired seeds would be needed to establish an effect this size.")
+        if shared:
+            print(f"\n  per seed ({a.label_a} / {a.label_b} / diff):")
+            for s in shared:
+                print(f"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}"
+                      f"   {'A' if da[s] < db[s] else 'B' if db[s] < da[s] else '='}")
+        print()
+        return 0
     if lo <= 0.5 <= hi:
         v = (f"NOT SIGNIFICANT -- the interval spans 0.5, so this comparison does not distinguish the arms. "
              f"Draw no conclusion about which is better.")
