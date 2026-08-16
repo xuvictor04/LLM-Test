@@ -847,6 +847,51 @@ smoke)
   else echo "!! at least one arm did not finish -- fix that before the pilot."; exit 1; fi
   ;;
 
+pair)
+  # === TWO ARMS, ONE KNOB, THE SAME SEEDS ======================================================================
+  # The measurement discipline made executable. Every architecture claim in this project was made by comparing
+  # two numbers -- INV-35 voids all of them -- and the fix is not a bigger number of runs, it is PAIRING: run
+  # both arms over the SAME seed list so they share data order and initialisation, then judge with P(A>B) rather
+  # than by eye. The stream RNG is already isolated from the global one (c76dc74), so two arms at one seed see
+  # identical text and identical init and differ only by the knob under test. Pairing is therefore free here.
+  #
+  #   bash longrun.sh pair 3 LR=1e-3 -- LR=2e-3
+  #   SEEDS="0 1 2" PAIR_DIR=runs/lr bash longrun.sh pair -- FAB_LR_CYCLE=24 -- FAB_LR_CYCLE=2000
+  #
+  # It runs `seeds` twice into two directories and then calls compare.py on the result, so the comparison cannot
+  # be done unpaired by accident -- which is what happened when the arms were run by hand into one folder.
+  N=${2:-3}
+  case "$N" in ''|*[!0-9]*) N=3;; esac
+  shift $([ "${2:-}" = "$N" ] && echo 2 || echo 1) 2>/dev/null || true
+  [ "${1:-}" = "--" ] && shift
+  # SPLIT ON THE `--` BETWEEN THE ARMS. Everything before it is arm A's flags, everything after is arm B's.
+  A_FLAGS=""; B_FLAGS=""; _side=a
+  for _t in "$@"; do
+    if [ "$_t" = "--" ]; then _side=b; continue; fi
+    if [ "$_side" = a ]; then A_FLAGS="$A_FLAGS $_t"; else B_FLAGS="$B_FLAGS $_t"; fi
+  done
+  A_FLAGS=$(echo "$A_FLAGS" | sed 's/^ *//'); B_FLAGS=$(echo "$B_FLAGS" | sed 's/^ *//')
+  [ -n "$B_FLAGS" ] || { echo "!! usage: bash longrun.sh pair <n> <A flags> -- <B flags>   (the second -- separates the arms)"; exit 1; }
+  PD=${PAIR_DIR:-runs/pair}
+  A_TAG=$(echo "${A_FLAGS:-baseline}" | tr ' =' '__' | cut -c1-24)
+  B_TAG=$(echo "${B_FLAGS:-baseline}" | tr ' =' '__' | cut -c1-24)
+  [ "$A_TAG" = "$B_TAG" ] && { echo "!! both arms tag as '$A_TAG' -- they differ by nothing this script can see"; exit 1; }
+  export SEEDS=${SEEDS:-$(seq 0 $((N-1)))}
+  echo "pair: A=[$A_FLAGS]  B=[$B_FLAGS]  over seeds [$(echo $SEEDS | tr '\n' ' ')] -> $PD"
+  echo "      both arms run the SAME seeds, so compare.py can pair them; anything else is not a comparison."
+  for _arm in A B; do
+    if [ "$_arm" = A ]; then _f="$A_FLAGS"; _d="$PD/$A_TAG"; else _f="$B_FLAGS"; _d="$PD/$B_TAG"; fi
+    mkdir -p "$_d"
+    echo; echo "################  ARM $_arm  [$_f]  ################"
+    # shellcheck disable=SC2086
+    SEED_DIR="$_d" bash "$0" seeds "$N" -- $_f || { echo "!! arm $_arm failed"; exit 1; }
+  done
+  echo; echo "=== PAIRED COMPARISON ==="
+  python3 compare.py "$PD/$A_TAG"/*_seed*.log -- "$PD/$B_TAG"/*_seed*.log \
+      --label-a "$A_TAG" --label-b "$B_TAG" || true
+  echo "  (re-run the comparison any time:  python3 compare.py $PD/$A_TAG/*_seed*.log -- $PD/$B_TAG/*_seed*.log)"
+  ;;
+
 watch)
   [ -f "$OUT/run.log" ] || { echo "no $OUT/run.log yet"; exit 1; }
   echo "=== last progress"; grep -a -E "\[rate\]|\[epoch |\[PHASE |\[saved checkpoint" "$OUT/run.log" | tail -12
@@ -854,5 +899,5 @@ watch)
   echo; echo "=== live"; tail -3 "$OUT/run.log"
   ;;
 
-*) echo "usage: bash longrun.sh [pilot|grid|seeds <n> [FLAGS]|repeat <n> [FLAGS]|smoke|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
+*) echo "usage: bash longrun.sh [pilot|grid|seeds <n> [FLAGS]|pair <n> <A flags> -- <B flags>|repeat <n> [FLAGS]|smoke|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
 esac

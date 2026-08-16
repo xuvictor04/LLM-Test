@@ -177,7 +177,7 @@ _SPEC = {
     "FAB_FAIL_TOL": ("env", 0.15),                        # fabric
     "FAB_GRACE": ("i", 48),                               # fabric -- IN SELECTIONS, not steps
     "FAB_LR_AMIN": ("f", 0.15),                           # fabric
-    "FAB_LR_CYCLE": ("f", 2000.0),                        # fabric -- IN SELECTIONS
+    "FAB_LR_CYCLE": ("f", 24.0),                          # fabric -- IN SELECTIONS
     "FAB_LR_GAMMA": ("f", 0.5),                           # fabric
     "FAB_GROW": ("env", 1),                               # fabric
     "FAB_HALT": ("env", 1),                               # fabric
@@ -4519,7 +4519,7 @@ def main():
             ("DROPOUT",        DROPOUT),                 ("WEIGHT_DECAY",   WD),
             ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
             ("BAL_FLOOR",      BAL_FLOOR),               ("FAB_BALANCE",    FAB_BAL),
-            ("FAB_LR_CYCLE",   _f("FAB_LR_CYCLE", 2000.0)), ("FAB_LR_GAMMA",  _f("FAB_LR_GAMMA", 0.5)),
+            ("FAB_LR_CYCLE",   _f("FAB_LR_CYCLE", 24.0)), ("FAB_LR_GAMMA",  _f("FAB_LR_GAMMA", 0.5)),
             # READ VIA _f/_i, NOT the locals: FAB_LR_OWN and friends are assigned ~40 lines BELOW the banner call,
             # so naming them here is a NameError on the enclosing scope, not a stale value.
             ("FAB_LR_AMIN",    _f("FAB_LR_AMIN", 0.15)), ("FAB_LR_OWN",     bool(_i("FAB_LR_OWN", 1))),
@@ -5465,17 +5465,22 @@ def main():
                 # its first selections are exactly when it has learned nothing and most needs to move, and holding
                 # it at the floor for a full half-cycle is how a late birth arrives dead. Shifting the clock by one
                 # half-cycle costs nothing and keeps the shape: peak, trough, half-peak, trough, quarter-peak...
-                # SIZED FROM A REAL RUN, not guessed. The first default was 24 selections, chosen with no
-                # measurement behind it, and at 2048 experts a run reached `cycle 1..428` with use-age up to
-                # 20497 -- so every heavily-used expert burned through its whole envelope in the first few
-                # percent of the run and then sat pinned at FAB_LR_AMIN. That is a low constant rate, not a
-                # cycle, and it is the opposite of the per-expert schedule this exists to provide.
-                # Rule of thumb: aim for a handful of cycles over a run, so half-cycle ~= max_use_age / 8.
-                # At the observed ~20k selections that is ~2500; 2000 is the round number under it. The [lr]
-                # line reports `cycle min..max` every rate window, and the warning below fires if a run is
-                # heading back into the degenerate regime -- read it rather than assuming this default fits a
-                # population or run length it was not measured on.
-                _ss = max(1.0, float(_f("FAB_LR_CYCLE", 2000.0)))
+                # 24, AND THE ARGUMENT FOR 2000 WAS WRONG. `cycle 1..428` looked degenerate -- experts burning
+                # their whole envelope early and sitting at FAB_LR_AMIN -- so this was raised to 2000 on a
+                # rule of thumb (half-cycle ~= max_use_age / 8) with nothing measured behind it.
+                # MEASURED, and it cost the run:
+                #   18 epochs, 2048 experts:  cycle 24 -> 1.981 / 2.188 held-out;  cycle 2000 -> 3.702, i.e.
+                #                             +0.040 over the order-1 bigram, with model-ALONE at 10.456 --
+                #                             above uniform, so a diverged base rather than a slow one.
+                #   8 epochs, same commit, MEM_SRC_FLOOR on both arms, one knob apart, paired on seed 0:
+                #                             cycle 24 -> 2.158;  cycle 2000 -> 2.451.
+                # Same direction at both lengths, and the harm compounds with run length rather than being a
+                # fixed cost -- a short bisect understates it. n=1 at 8 epochs is a lead, not a verdict
+                # (compare.py says so), but the 18-epoch gap is far outside any spread this arm has shown.
+                # The regime I called degenerate is the one that produced the best numbers in this project.
+                # The [lr] line reports `cycle min..max` and the warning below fires past cycle 12; treat both
+                # as descriptions of what a run did, not as a reason to move this without measuring again.
+                _ss = max(1.0, float(_f("FAB_LR_CYCLE", 24.0)))
                 _t = torch.tensor([min(fab.use_age(_i2), 1e6) for _i2 in range(_nl)],
                                   device=fab.A.device, dtype=fab.A.dtype) + _ss
                 _cyc = torch.floor(1.0 + _t / (2.0 * _ss))
