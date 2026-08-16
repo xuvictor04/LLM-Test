@@ -385,6 +385,7 @@ _SPEC = {
     "COMP_PROTECT": ("i", 1),                             # misc
     "CULL_MODE": ("env", "rank"),                         # misc
     "DECAY_EVERY": ("i", 20000),                          # misc
+    "EVAL_GIST": ("i", 1),                                # misc -- 0 restores the blind zero-gist eval path
     "EVICT": ("env", "lru"),                              # misc
     "EXPERT_CULL_FRAC": ("f", 0.25),                      # misc
     "EXPERT_CULL_RANK": ("f", 0.08),                      # misc
@@ -3225,11 +3226,38 @@ def _units(TOK, USE_TOK, text):
     return TOK.segment(text, count=False) if USE_TOK else list(text)
 
 
+_ENC = [None]   # the live SigEncoder, published by main(). Same shape as _SRNG above and for the same reason:
+#                 `enc` is a main() local while the eval path is module-level and cannot see it.
+
+
+def _eval_sig(x):
+    """A REAL signature for eval windows, so the router has something to route on.
+
+    Returns None when it cannot build one, and the caller falls back to the zero placeholder -- a WRONG signature
+    would be worse than a blind one. Read-only by construction: this runs under no_grad and every fab call on the
+    eval path passes learn_regions=False, so a diagnostic still cannot train the router's regions. That property
+    is what the zero gist was protecting; it is preserved here without also blinding the router."""
+    if not _i("EVAL_GIST", 1) or _ENC[0] is None: return None
+    try:
+        if SIG_SPACE == "bytes" and USE_TOK and TOK is not None:
+            # The signature space is BYTES while eval windows are TOKEN ids. Decoding back to bytes is what makes
+            # the two comparable, and is what training does via its byte-indexed signature window.
+            _w = [list(TOK.decode(r.tolist()).encode("utf-8", "replace"))[-max(1, SIG_WIN):] or [0] for r in x]
+            _n = max(len(t) for t in _w)
+            _w = [t + [0] * (_n - len(t)) for t in _w]
+        else:
+            _w = [r.tolist() for r in x]
+        with torch.no_grad():
+            return sig_of_batch(_w, _ENC[0])
+    except Exception:
+        return None                      # a diagnostic's signature must never be able to kill an eval
+
+
 def _eval_logits(model, fab, FABRIC, x):
     """Logits for x through the SAME path the model trained with -- the one line that must never drift between
     the six evaluation sites that use it. `fab if FABRIC else None` is the whole of it, and getting that wrong
     scores the base model while claiming to score the system."""
-    return fab_logits(model, fab if FABRIC else None, model.encode(x))
+    return fab_logits(model, fab if FABRIC else None, model.encode(x), gist=_eval_sig(x))
 
 
 _MASK_CACHE = {"k": None, "m": None}
@@ -3279,6 +3307,11 @@ def fab_logits(model, fab, h, gist=None, nov=None, k=None):
     # The size of that change is NOT attributable to accumulation here -- see route_w -- it is chaotic
     # sensitivity. The correctness argument stands on its own: a diagnostic must not train the router.
     # Training does not come through here: it calls fab.society()/fab() directly with a real signature.
+    # AND WHEN IT IS ZERO, THE ROUTER IS BLIND. Every eval window then presents the SAME all-zero signature, so
+    # grounded routing scores each expert's centroid against the origin and ranks the population identically for
+    # every window regardless of content -- i.e. the eval measured a fabric that could not route, and every
+    # held-out, retention and boundary figure in this project was produced that way. _eval_sig now supplies a
+    # real one; this remains the fallback for callers that have none, and for EVAL_GIST=0.
     if gist is None: gist = torch.zeros(h.size(0), fab.q_entry.in_features, device=h.device)
     if nov is None: nov = torch.zeros(h.size(0), device=h.device)
     if not SOCIETY:
@@ -3400,6 +3433,7 @@ def main():
     _sd = _i("SEED", 0)
     torch.manual_seed(_sd);       model = build_lm().to(DEV)
     torch.manual_seed(_sd + 101); enc = SigEncoder(D, SIG_D).to(DEV)
+    _ENC[0] = enc                                          # publish for _eval_sig; see the holder's note
     recon = Reconstructor(D, V, _i("RECON_TOK", 32), _i("RECON_HID", 64)).to(DEV) if VERIFY == "recon" else None
     # WORLD MODEL (first brick, gated off by default): reads OBSERVATION EMBEDDINGS (the lowest layer = the point where
     # new SENSES plug in) and learns to predict how that observed world EVOLVES in latent space (physics-like, modality-agnostic).
@@ -3579,6 +3613,8 @@ def main():
     KEY_PREGATE = bool(_i("KEY_PREGATE", 1))              # encode memory keys AFTER the surprise gate (see the write call)
     KEY_BATCH = bool(_i("KEY_BATCH", 1))                  # ...and encode the whole BATCH_W batch in ONE call (KEY_BATCH=0 = per-window)
     _regrown = []                                          # param groups re-created by a RESUME's growth replay
+    _HIST = {}      # domain -> every held-out score ever recorded, carried across resumes; feeds the forgetting
+    #                 measure F, which compares a domain to its BEST ever and so needs more than one prior probe.
     _hb, _hbs = {}, 0                                      # held-out probe carried in from a RESUME (empty otherwise).
     #   Declared BEFORE the resume block: sitting after it, this line clobbered the value resume had just loaded.
     RESUME = _env("RESUME", "")
@@ -3856,6 +3892,7 @@ def main():
                 asm.visits.setdefault(_i2, 0); asm.bornb.setdefault(_i2, asm.nb); asm.rad.setdefault(_i2, None)
                 asm.born.setdefault(_i2, _resume_step); asm.act.setdefault(_i2, float(asm.size.get(_i2, 1)))
         _hb, _hbs = _RD.get("holdout") or {}, int(_RD.get("holdout_step", _resume_step))
+        _HIST.update({_k: list(_v) for _k, _v in (_RD.get("holdout_hist") or {}).items()})
         print(f"[RESUME] {RESUME} -> step {_resume_step} | {mem.n} memory entries | {len(asm.cent)} domains"
               + (f" | fabric {len(fab.bodies)}n" if FABRIC else "") + (f" | {world_fwd.n()} dynamics predictors" if WORLD_MODEL else "")
               + "  (encoder warmup skipped: already trained)")
@@ -3914,7 +3951,7 @@ def main():
         return h
 
     @no_rng_drift                                          # the held-out probe must not move the run
-    def holdout_bpb():
+    def holdout_bpb(use_mem=False):
         """Per-DOMAIN bits/byte on the HELD-OUT tail, on windows fixed by domain NAME.
 
         THE MEASUREMENT THAT LETS AREAS BE ADDED LATER. Every existing metric is computed on the CURRENT stream, so
@@ -3941,7 +3978,19 @@ def main():
                     _X = torch.tensor([_v[a:a + WIN] for a in _st], device=DEV)
                     _Y = torch.tensor([_v[a + 1:a + WIN + 1] for a in _st], device=DEV)
                     _lg = _eval_logits(model, fab, FABRIC, _X)
-                    _pp = F.softmax(_lg, -1).gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
+                    _pm = F.softmax(_lg, -1)
+                    # FORGOTTEN, OR EVICTED? Two different failures with two different fixes, and this probe
+                    # could not tell them apart: it read the WEIGHTS ONLY, so a domain whose memory had been
+                    # deleted scored exactly as if its weights had degraded. Measured twice, an absent domain's
+                    # memory went to zero entries both times, and the boundary number could not see it.
+                    # Blending memory on the SAME windows gives the matched pair: R_full consults the store,
+                    # R_weights does not, and the gap between them is what memory contributes to retention.
+                    if use_mem and mem.n > 0:
+                        _md, _mc, _, _ = mem.read(mem_key(_X))
+                        _pmm = _md.reshape(_X.size(0), _X.size(1), V)
+                        _hp = _mem_hp(_md, _mc, dim=-1).reshape(_X.size(0), _X.size(1), 1)
+                        _pm = (1 - _hp) * _pm + _hp * _pmm
+                    _pp = _pm.gather(-1, _Y.unsqueeze(-1)).squeeze(-1)
                 # PER WINDOW, not pooled, so the number carries an error bar. A pooled sum-over-all-windows gives
                 # one figure with no way to tell a real change from sampling noise -- which is exactly how the
                 # coherence metric went wrong, and there is no excuse for repeating it one section later.
@@ -3963,6 +4012,28 @@ def main():
             model.train()
         return out
 
+    def _decompose(now, prev, _ms):
+        """FORGOTTEN, OR EVICTED? Runs on BOTH paths -- with a baseline and without.
+
+        The boundary figures above are weights-only, so a domain whose memory was deleted and one whose weights
+        degraded produce the same number, and those need opposite fixes. Re-scoring the same windows WITH the
+        store separates them, and the per-source occupancy line says whether the store still holds anything for
+        the domain at all -- which is the question that went unasked while English was being erased twice."""
+        _full = holdout_bpb(use_mem=True)
+        if not _full: return
+        print(f"\n  --- forgotten, or evicted? the same windows, with and without the memory store ---")
+        _sr2 = mem.src_report() if mem.n else {"per_source": [], "floor": 0}
+        for k in sorted(now):
+            _wm, _ = _ms(now[k]); _fm, _ = _ms(_full.get(k, now[k]))
+            _line = f"  {k:<10} weights-only {_wm:.3f} | + memory {_fm:.3f} | memory contributes {_wm - _fm:+.3f}"
+            if prev and k in prev: _line += f" | was {_ms(prev[k])[0]:.3f} before this run"
+            print(_line)
+        print(f"  >> worse than before AND memory contributing ~0  -> FORGOTTEN: the weights moved.")
+        print(f"     worse than before while memory used to carry it -> EVICTED: the store lost it.")
+        print(f"     memory per source id now: "
+              + (", ".join(f"s{_s}={_c}" for _s, _c in sorted(dict(_sr2.get("per_source", [])).items())) or "(empty)")
+              + f"   [floor {_sr2.get('floor', 0)}]")
+
     def report_holdout(prev, prev_step, title):
         """prev = the probe stored in the checkpoint we resumed from. Anything present then and now is a RETENTION
         number that spans the run boundary; anything only now is a domain this run is seeing for the first time."""
@@ -3973,6 +4044,8 @@ def main():
         if not prev:
             for k in sorted(now):
                 _m, _e = _ms(now[k]); print(f"  {k:<10} {_m:.3f} +/- {_e:.3f}   (no earlier probe to compare against)")
+            _decompose(now, prev, _ms)          # no baseline still tells you what memory is contributing today
+            for k in now: _HIST.setdefault(k, []).append(_ms(now[k])[0])
             return now
         _kept = [k for k in sorted(now) if k in prev]
         for k in sorted(now):
@@ -3990,6 +4063,26 @@ def main():
                   + ("" if abs(_m) > 2 * _em else "  -- inside the noise, do not read this as forgetting"))
             print(f"  >> this is the ONLY number that spans the run boundary. Every other retention figure is")
             print(f"     computed on the current stream and cannot see what was known before this run started.")
+        _decompose(now, prev, _ms)
+        # === BWT / FORGETTING MEASURE, so this is comparable to something outside this repo ==========
+        # The metric above is homegrown and has no counterpart in the literature. These two are standard:
+        #   BWT = mean over old domains of (score_now - score_at_last_checkpoint). On a LOWER-IS-BETTER metric
+        #         a NEGATIVE BWT is good -- old domains improved. The sign is stated because most of the
+        #         literature reports accuracy, where it runs the other way, and a sign error here would invert
+        #         the project's headline claim.
+        #   F   = the FORGETTING MEASURE: mean over old domains of (score_now - BEST score ever recorded),
+        #         floored at 0. It differs from BWT exactly when a domain peaked earlier than the last
+        #         checkpoint and has been sliding since, which BWT structurally cannot see.
+        if _kept:
+            _bwt = sum(_ms(now[k])[0] - _ms(prev[k])[0] for k in _kept) / len(_kept)
+            _best = {k: min([_ms(prev[k])[0]] + [float(v) for v in _HIST.get(k, [])]) for k in _kept}
+            _fgt = sum(max(0.0, _ms(now[k])[0] - _best[k]) for k in _kept) / len(_kept)
+            print(f"\n  BWT {_bwt:+.4f} b/B (negative = old domains IMPROVED, on a lower-is-better metric) | "
+                  f"forgetting measure F {_fgt:.4f} b/B (0 = nothing is worse than its own best)")
+            if not any(_HIST.get(k) for k in _kept):
+                print(f"  >> F can only equal a clipped BWT here: no per-domain history came in with the "
+                      f"checkpoint. The two separate once a chain has two or more prior probes to draw on.")
+        for k in now: _HIST.setdefault(k, []).append(_ms(now[k])[0])
         return now
     # SOFT CAPS. Start where the run was configured; GROW_CAP lifts them, nothing lowers them. With GROW_CAP off
     # the fabric cap is FAB_NMAX and the vocabulary cap is TOK.vmax, i.e. exactly the previous behaviour.
@@ -4091,6 +4184,7 @@ def main():
                     # already existed. Cheap (HOLDOUT_N windows per domain) and the only figure that survives a
                     # run boundary.
                     "holdout": holdout_bpb(), "holdout_step": step,
+                    "holdout_hist": {_k: list(_v) for _k, _v in _HIST.items()},   # for F; see report_holdout
                     # WORLD MODEL: with WORLD_FEEDBACK the base LM is TRAINED with `h += world_proj(forecast)`. Omitting
                     # it from the checkpoint made generation run a DIFFERENT network than training -> the coherence test
                     # would have been invalid. Saved with its grown population size so it reconstructs exactly.
