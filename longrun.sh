@@ -884,22 +884,35 @@ ladder)
   export SEEDS=${SEEDS:-$(seq 0 $((N-1)))}
   VALS="$*"
   _n_runs=0; for _v in $VALS; do _n_runs=$((_n_runs + N)); done
+  [ -n "${LADDER_BASE:-}" ] && _n_runs=$((_n_runs - N))
   echo "ladder: $KNOB over [$VALS] x seeds [$(echo $SEEDS | tr '\n' ' ')] -> $LD"
   echo "        $_n_runs runs; the first value ($1) is the baseline the rest are compared against."
+  BASE=$(echo "$VALS" | awk '{print $1}')
+  # REUSE A BASELINE ALREADY RUN. Two ladders over different knobs share one rung -- their baseline is the same
+  # configuration, the defaults -- and running it twice is a wasted arm's worth of GPU for an identical result.
+  # LADDER_BASE=<dir of a completed baseline> skips it here and compares against that instead.
+  BASEDIR="$LD/$KNOB=$BASE"
+  if [ -n "${LADDER_BASE:-}" ]; then
+    BASEDIR="$LADDER_BASE"
+    [ -d "$BASEDIR" ] || { echo "!! LADDER_BASE=$BASEDIR does not exist"; exit 1; }
+    echo "        baseline rung $KNOB=$BASE reused from $BASEDIR (not re-run)"
+    echo "        -- it must be the SAME configuration apart from this knob, or the comparison is not paired;"
+    echo "           compare.py checks the commit and the corpus, but it cannot check what else you changed."
+  fi
   for _v in $VALS; do
+    if [ -n "${LADDER_BASE:-}" ] && [ "$_v" = "$BASE" ]; then continue; fi
     _d="$LD/$KNOB=$_v"
     mkdir -p "$_d"
     echo; echo "################  $KNOB=$_v  ################"
     SEED_DIR="$_d" bash "$0" seeds "$N" -- "$KNOB=$_v" || { echo "!! rung $KNOB=$_v failed"; exit 1; }
     _stopped "$LD" && { echo "ladder: STOP file seen, stopping after $KNOB=$_v"; break; }
   done
-  BASE=$(echo "$VALS" | awk '{print $1}')
   echo; echo "=== LADDER: every rung against the baseline $KNOB=$BASE ==="
   for _v in $VALS; do
     [ "$_v" = "$BASE" ] && continue
     [ -d "$LD/$KNOB=$_v" ] || continue
     echo; echo "---- $KNOB=$_v  vs  $KNOB=$BASE ----"
-    python3 compare.py "$LD/$KNOB=$_v"/*_seed*.log -- "$LD/$KNOB=$BASE"/*_seed*.log \
+    python3 compare.py "$LD/$KNOB=$_v"/*_seed*.log -- "$BASEDIR"/*_seed*.log \
         --label-a "$_v" --label-b "$BASE" || true
   done
   echo; echo "  A ladder is read for its TREND as much as its verdicts: compare.py judges each rung on its own"
