@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# === DO THE INSTRUMENTS STILL WORK? ==============================================================================
+#
+# Three measurement tools were built to stop this project drawing conclusions from things that never happened:
+#
+#   1  DID IT FIRE        an end-of-run table naming every ARMED mechanism that did nothing. Built because
+#                         FAB_RESCUE fired zero times for a whole investigation, maybe_deepen was never called in
+#                         a real run, and TOK_ANCHOR's loss term has never once entered the loss.
+#   2  FORGOTTEN/EVICTED  the retention probe re-scored WITH and WITHOUT memory, plus BWT and the forgetting
+#                         measure. Built because the boundary number was weights-only, so a domain whose memory
+#                         was deleted scored the same as one whose weights degraded.
+#   3  compare.py         P(A>B) with a bootstrap CI, paired by seed. Built because every architecture claim here
+#                         was made by comparing two numbers against a seed spread larger than the effect.
+#
+# All three are themselves code that can silently stop working -- which is precisely the failure they exist to
+# catch, and the DID IT FIRE report has already died on its own NameError once and printed nothing but that.
+# So they get a test. Run it after any change to the report sections, the memory store, or compare.py.
+#
+#   bash selftest.sh            full: unit tests + a real train + a real resume   (~10 min on CPU)
+#   bash selftest.sh --quick    unit tests only, no training                      (seconds)
+#
+set -u
+QUICK=0; [ "${1:-}" = "--quick" ] && QUICK=1
+FAIL=0
+OUT=${SELFTEST_DIR:-$(mktemp -d -t selftest-XXXXXX)}
+mkdir -p "$OUT"
+echo "selftest: artefacts under $OUT"
+
+_ck() {  # _ck <label> <file> <pattern...>   every pattern must appear
+  local label=$1 file=$2; shift 2
+  for pat in "$@"; do
+    if ! grep -aqF -- "$pat" "$file"; then
+      echo "  FAIL  $label -- expected to find: $pat"; FAIL=1; return
+    fi
+  done
+  echo "  ok    $label"
+}
+_nck() {  # _nck <label> <file> <pattern>    the pattern must NOT appear
+  local label=$1 file=$2 pat=$3
+  if grep -aqF -- "$pat" "$file"; then
+    echo "  FAIL  $label -- found what must not be there: $pat"; FAIL=1
+  else
+    echo "  ok    $label"
+  fi
+}
+
+echo; echo "--- unit tests -------------------------------------------------------------------"
+python3 mem_evict_test.py > "$OUT/evict.txt" 2>&1 && echo "  ok    mem_evict_test (eviction clock + per-source floor)" \
+  || { echo "  FAIL  mem_evict_test:"; sed 's/^/          /' "$OUT/evict.txt"; FAIL=1; }
+python3 compare_test.py  > "$OUT/cmp.txt"   2>&1 && echo "  ok    compare_test (known-answer decision rule)" \
+  || { echo "  FAIL  compare_test:"; sed 's/^/          /' "$OUT/cmp.txt"; FAIL=1; }
+python3 levers.py > "$OUT/levers.txt" 2>&1 && echo "  ok    levers (every knob declared and read consistently)" \
+  || { echo "  FAIL  levers:"; tail -5 "$OUT/levers.txt" | sed 's/^/          /'; FAIL=1; }
+
+if [ "$QUICK" = 1 ]; then
+  echo; [ "$FAIL" = 0 ] && echo "quick selftest passed (training not exercised)" || echo "!! quick selftest FAILED"
+  exit $FAIL
+fi
+
+# A REAL RUN, NOT A MOCK. The reports being tested read live state off fab/mem/asm/TOK, so a stub would test the
+# stub. Deliberately tiny -- this asserts the instruments produce their sections and are self-consistent, NOT
+# that the numbers are any good. At this size they are noise.
+COMMON="DATA_MODE=real DATA_DIR=${SELFTEST_DATA:-data} DOMAINS=eng DISK_STREAM=1 CORPUS_CAP=100000000000 \
+MODEL=gru LAYERS=1 DEVICE=${DEVICE:-cpu} PROBE_WAIT=0 PROFILE=0 CKPT_EVERY=0 D_MODEL=48 WIN=32 BATCH_W=4 \
+STREAM_LEN=9000 EPOCHS=2 VMAX=320 SEED_VOCAB=256 GROW_EVERY=20 GROW_BURST=8 RETOK_EVERY=200 FABRIC=1 \
+FAB_NMAX=8 FAB_N0=4 MEM_CAP=1500 MANAGE_EVERY=50 DOM_MANAGE_EVERY=50 ENC_WARMUP=30 ENC_WARMUP_MIN=15 \
+SIG_WIN=64 RATE_EVERY=400 GEN_LEN=12 GEN_N=1 EVAL_N=2 COH_N=1 COH_LEN=24 HOLDOUT_N=4"
+
+echo; echo "--- end to end: a fresh run ------------------------------------------------------"
+# shellcheck disable=SC2086
+env $COMMON SEED=0 SAVE_CKPT="$OUT/ck" TOKENIZER_PATH="$OUT/t.json" \
+    python3 self_organize.py > "$OUT/fresh.log" 2>&1
+RC=$?
+[ "$RC" = 0 ] || { echo "  FAIL  the run itself exited $RC:"; tail -6 "$OUT/fresh.log" | sed 's/^/          /'; FAIL=1; }
+
+_ck  "1  DID IT FIRE section present"     "$OUT/fresh.log" "=== DID IT FIRE?"
+_nck "1  the audit did not die on itself" "$OUT/fresh.log" "[did-it-fire] report FAILED"
+_nck "1  no mechanism left uncountable"   "$OUT/fresh.log" "NO COUNTER -- cannot say"
+_ck  "1  it reports both states"          "$OUT/fresh.log" "  fired   " "  off     "
+_ck  "2  forgotten/evicted decomposition" "$OUT/fresh.log" "forgotten, or evicted?" "weights-only" "+ memory"
+_ck  "2  per-source occupancy reported"   "$OUT/fresh.log" "memory per source id now:"
+_ck  "memory floor is live"               "$OUT/fresh.log" "src floor 0.5"
+_ck  "read probe is live"                 "$OUT/fresh.log" "read probe"
+_ck  "run reached its report"             "$OUT/fresh.log" "held-out"
+
+echo; echo "--- end to end: a resume, where retention is measurable --------------------------"
+# shellcheck disable=SC2086
+env $COMMON SEED=1 RESUME="$OUT/ck" SAVE_CKPT=0 TOKENIZER_PATH="$OUT/t.json" \
+    python3 self_organize.py > "$OUT/resume.log" 2>&1
+RC=$?
+[ "$RC" = 0 ] || { echo "  FAIL  the resume exited $RC:"; tail -6 "$OUT/resume.log" | sed 's/^/          /'; FAIL=1; }
+
+_ck  "2  boundary probe spans the resume" "$OUT/resume.log" "ACROSS THE RUN BOUNDARY" "before this run"
+_ck  "2  BWT and F reported"              "$OUT/resume.log" "BWT " "forgetting measure F"
+_ck  "2  BWT sign is stated"              "$OUT/resume.log" "negative = old domains IMPROVED"
+# ASSERT THE SUCCESS, NOT THE WARNING. The first version looked for the "had no recorded USE-age" line, which
+# only prints when the checkpoint FAILED to carry it -- so a clean resume failed the test and a broken one would
+# have passed it. Check instead that the resume happened and that the backfill warning is absent.
+_ck  "resume actually resumed"            "$OUT/resume.log" "[RESUME]"
+_nck "use-age survived the checkpoint"    "$OUT/resume.log" "had no recorded USE-age"
+_nck "1  audit still alive after resume"  "$OUT/resume.log" "[did-it-fire] report FAILED"
+
+echo; echo "--- 3  compare.py on the two real logs it will actually be given -----------------"
+# They differ by SEED, not by an arm, so there is nothing to find -- which makes NOT SIGNIFICANT the right
+# answer and a useful end-to-end check that the parser reads real logs rather than only synthetic ones.
+cp "$OUT/fresh.log" "$OUT/x_A_seed0.log"; cp "$OUT/resume.log" "$OUT/x_B_seed1.log"
+python3 compare.py "$OUT/x_A_seed0.log" -- "$OUT/x_B_seed1.log" > "$OUT/cmp_real.txt" 2>&1
+_ck "3  parses real logs and reports"     "$OUT/cmp_real.txt" "P(A better)"
+
+echo
+if [ "$FAIL" = 0 ]; then echo "selftest passed -- all three instruments report and are self-consistent."
+else echo "!! selftest FAILED -- see $OUT"; fi
+exit $FAIL
