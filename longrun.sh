@@ -61,10 +61,25 @@ _reserve() {
 # Same for STREAM_LEN, D_MODEL, SIG_WIN, MEM_QUOTA, DEVICE, PILOT_DIR and the commit -- `seeds` reads all of them
 # from the environment and none of them reach the log's name. The SEEDS SUMMARY then globs those stale logs and
 # prints their held-out numbers under the new banner, so the wrong answer is not merely kept, it is REPORTED.
+# EVERY KNOB THE ENVIRONMENT SETS, not a hand-picked list. This used to name seven variables plus ARMFLAGS, so
+# any knob passed through the environment rather than as an arm flag was invisible to it -- and the log NAME is
+# derived from ARMFLAGS too, so two arms differing only by an exported knob got the same filename AND the same
+# signature, and the second run was skipped as "already complete". That is exactly what happened to the
+# FAB_LR_CYCLE bisect: two arms, one log, one result, silently.
+# The knob list comes from _SPEC in self_organize.py, so adding a knob extends this automatically -- the same
+# property the config audit gets by deriving its families from the registry instead of restating them. Read by
+# sed rather than by importing, because importing self_organize.py runs a great deal of module-level setup.
+_knobs() {
+  sed -n 's/^    "\([A-Z][A-Z0-9_]*\)": (.*/\1/p' "$(dirname "$0")/self_organize.py" 2>/dev/null | sort -u
+}
 _cfgsig() {
-  echo "commit=$(git rev-parse --short=10 HEAD 2>/dev/null || echo '?') \
-epochs=${EPOCHS:-} stream=${STREAM_LEN:-} d=${D_MODEL:-} sigwin=${SIG_WIN:-} memq=${MEM_QUOTA:-} \
-dev=${DEVICE:-cuda} data=${PILOT_DIR:-data_pilot} flags=${ARMFLAGS:-}"
+  printf 'commit=%s data=%s flags=%s' \
+    "$(git rev-parse --short=10 HEAD 2>/dev/null || echo '?')" "${PILOT_DIR:-data_pilot}" "${ARMFLAGS:-}"
+  for _k in $(_knobs); do
+    eval "_v=\${$_k+set}"
+    [ -n "${_v:-}" ] && { eval "_vv=\$$_k"; printf ' %s=%s' "$_k" "$_vv"; }
+  done
+  printf ' dev=%s\n' "${DEVICE:-cuda}"
 }
 # _reusable <log> -- a completed log MAY be reused only if it was produced by this same configuration. Anything
 # else stops the run with a message naming the difference, rather than being silently adopted or silently
@@ -847,6 +862,51 @@ smoke)
   else echo "!! at least one arm did not finish -- fix that before the pilot."; exit 1; fi
   ;;
 
+ladder)
+  # === ONE KNOB, SEVERAL VALUES, THE SAME SEEDS ================================================================
+  # A pair answers "is A better than B". A ladder answers the question actually being asked of an untuned knob:
+  # WHICH WAY, and how far. Three or four values over shared seeds cost little more than two and give something
+  # a pairwise test cannot -- a TREND. If bits/byte moves monotonically across four values, that is evidence
+  # beyond what any single comparison reaches at these sample sizes, where compare.py will usually and correctly
+  # refuse to call a 0.2 b/B difference.
+  #
+  #   bash longrun.sh ladder 4 FAB_LR_CYCLE 8 24 72 216
+  #   LADDER_DIR=runs/lr bash longrun.sh ladder 4 LR 1e-3 2e-3 4e-3
+  #
+  # The FIRST value is the baseline every other is compared against. Every value runs the same seed list into its
+  # own directory, so the comparisons are paired by construction.
+  N=${2:-3}
+  case "$N" in ''|*[!0-9]*) N=3;; esac
+  shift 2 2>/dev/null || shift 1
+  KNOB=${1:-}; shift 2>/dev/null || true
+  [ -n "$KNOB" ] && [ $# -ge 2 ] || { echo "!! usage: bash longrun.sh ladder <seeds> <KNOB> <v1> <v2> [v3 ...]"; exit 1; }
+  LD=${LADDER_DIR:-runs/ladder_$(echo "$KNOB" | tr 'A-Z' 'a-z')}
+  export SEEDS=${SEEDS:-$(seq 0 $((N-1)))}
+  VALS="$*"
+  _n_runs=0; for _v in $VALS; do _n_runs=$((_n_runs + N)); done
+  echo "ladder: $KNOB over [$VALS] x seeds [$(echo $SEEDS | tr '\n' ' ')] -> $LD"
+  echo "        $_n_runs runs; the first value ($1) is the baseline the rest are compared against."
+  for _v in $VALS; do
+    _d="$LD/$KNOB=$_v"
+    mkdir -p "$_d"
+    echo; echo "################  $KNOB=$_v  ################"
+    SEED_DIR="$_d" bash "$0" seeds "$N" -- "$KNOB=$_v" || { echo "!! rung $KNOB=$_v failed"; exit 1; }
+    _stopped "$LD" && { echo "ladder: STOP file seen, stopping after $KNOB=$_v"; break; }
+  done
+  BASE=$(echo "$VALS" | awk '{print $1}')
+  echo; echo "=== LADDER: every rung against the baseline $KNOB=$BASE ==="
+  for _v in $VALS; do
+    [ "$_v" = "$BASE" ] && continue
+    [ -d "$LD/$KNOB=$_v" ] || continue
+    echo; echo "---- $KNOB=$_v  vs  $KNOB=$BASE ----"
+    python3 compare.py "$LD/$KNOB=$_v"/*_seed*.log -- "$LD/$KNOB=$BASE"/*_seed*.log \
+        --label-a "$_v" --label-b "$BASE" || true
+  done
+  echo; echo "  A ladder is read for its TREND as much as its verdicts: compare.py judges each rung on its own"
+  echo "  and will refuse small differences at this many seeds, but a consistent direction across rungs is"
+  echo "  itself evidence, and a non-monotone ladder says the knob is not doing what its name suggests."
+  ;;
+
 pair)
   # === TWO ARMS, ONE KNOB, THE SAME SEEDS ======================================================================
   # The measurement discipline made executable. Every architecture claim in this project was made by comparing
@@ -899,5 +959,5 @@ watch)
   echo; echo "=== live"; tail -3 "$OUT/run.log"
   ;;
 
-*) echo "usage: bash longrun.sh [pilot|grid|seeds <n> [FLAGS]|pair <n> <A flags> -- <B flags>|repeat <n> [FLAGS]|smoke|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
+*) echo "usage: bash longrun.sh [pilot|grid|seeds <n> [FLAGS]|pair <n> <A flags> -- <B flags>|ladder <n> <KNOB> <v1> <v2> ...|repeat <n> [FLAGS]|smoke|pilot-add <name> <ds> [gb]|fetch|run|resume|add <name> <ds> [gb]|watch]"; exit 1 ;;
 esac
