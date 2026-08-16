@@ -1,0 +1,512 @@
+{
+ "chunk": "chunk_11",
+ "errors": [
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T20:10:23",
+   "what": "Claude's own fix for the grow bug armed a KeyError: renaming probation's cadence to _due(\"probation\") indexed the plain dict `_fired`, which had no such key, so the first run with TOK_PROBATION>0 would have died with no try/except. 'My fix for the armed grow bug was itself armed.'"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T20:10:23",
+   "what": "RETOK_EVERY=0 silently disabled signature batching (_due returns False on n<=0 before recording, so _fired[\"retok\"] never advanced and the lookahead clamp floored the batch to one window for the whole run). This means frozen_nr differed from frozen in two ways, not one — invalidating the headline 2.189 b/B result."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T22:16:59",
+   "what": "rngprobe.py failed with ModuleNotFoundError: No module named 'memory' — the probe ran without the repo on sys.path"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T22:18:12",
+   "what": "data_pilot/train/eng/part0.txt is a 2-byte placeholder in this container, so NP=0 and every probe run died in build_stream with IndexError: Cannot choose from an empty sequence"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T22:19:42",
+   "what": "pkill -f rngprobe.py killed Claude's own shell (exit code 144) — recurrence of a known hazard"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T22:19:40",
+   "what": "Claude edited self_organize.py while a background probe run was executing it, invalidating its own experiment; killed and re-pinned to prefix/postfix snapshots"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T22:40:03",
+   "what": "State-hash probe crashed with 'RuntimeError: Numpy is not available' (torch built without numpy in this container)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T22:55:05",
+   "what": "Claude's injected _perwin helper had wrong indentation — it parsed but would have returned from main()"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T00:02:24",
+   "what": "Container rolled back to commit 2c705c7 again, wiping the working tree, levers.py/vocab.py/runs.py and the scratchpad. Restored from origin and the turn's five fixes re-applied."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T00:04:00",
+   "what": "Scratchpad wiped along with the rollback (rngprobe.py and data_probe corpus gone); harness rebuilt"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T12:15:56",
+   "what": "Container rolled back again mid-session (second occurrence this chunk); repo restored from origin/rm-predict"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T18:16:11",
+   "what": "Claude's own error-bar change broke runs.py's parser: 'train X | held-out Y' became 'train X +/- a | held-out Y +/- b (...)', so every post-fix log failed to ingest with a message that read like a broken RUN rather than a broken parser"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T18:16:00",
+   "what": "Container rollback again — runs.py missing; restored from origin"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T19:15:29",
+   "what": "longrun.sh's 'already complete, skipping' compared only the log filename, and TAG derives from ARMFLAGS alone — blind to EPOCHS, STREAM_LEN, D_MODEL, SIG_WIN, MEM_QUOTA, DEVICE, PILOT_DIR and the commit. EPOCHS=18 after EPOCHS=8 would skip all three seeds and re-print the 8-epoch numbers under the 18-epoch banner."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T19:43:11",
+   "what": "The checkpoint recorded tok_path but RESUME never read it back. Resuming without setting TOKENIZER_PATH silently pairs trained weights with a different vocabulary — or with a freshly minted 512-token one — and load_state_dict succeeds because VMAX fixes the row count."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T21:00:00",
+   "what": "SEED_CKPT defaulted to 0 while GRID_CKPT defaults to 1, so the sweep producing the models worth continuing from was the one throwing them away — and Claude had also dropped SEED_CKPT=1 from the reorder command it recommended"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T21:02:10",
+   "what": "Container rolled back mid-commit, so Claude's commit landed on a stale base and the push was rejected; recovered by fetch/reset and re-applying both edits on the correct base"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T21:47:22",
+   "what": "pilot-add never ran mkdir -p \"$OUT\" (pilot does). tee opens its output at process start, so on a box that had only run `seeds`, runs/long/ did not exist and the entire report of a multi-hour GPU run went to a closed pipe. 'The worst shape a failure can take: hours of GPU, a valid checkpoint written, and no record of what it measured.'"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T21:47:22",
+   "what": "_reserve was called twice independently in pilot-add, so a second add could put the checkpoint at pilot_gru_py-2 and its log at pilot_py.log — filing a result under a name that does not match the model that produced it"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T21:09:12",
+   "what": "fetch_big.py had no auth at all (load_dataset called with no token), assumed field 'text' where the-stack uses 'content', and had no way to select a language directory — three separate failures on `pilot-add py bigcode/the-stack`, only one of them about the token"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T22:41:08",
+   "what": "Claude's first LOSS_MASK_DEAD applied the mask at the training loss only (line 4707) and nowhere else, so the model never learned to suppress dead rows and was then scored on them — held-out got worse, 4.746 -> 6.100. 'That's my bug, not the idea's.'"
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-14T18:26:34",
+   "what": "Harness blocked `sleep 90; echo waited`; and the cross-run-leak Workflow's TaskOutput retrieval timed out repeatedly (18:33, 18:43, 18:54, 19:04, 19:14) — results had to be read out of journal.jsonl directly"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T22:23:16",
+   "what": "runs.csv carried the continual_eng_py row only locally — added via runs.py but never committed, 'exactly the thing the registry is meant to prevent'"
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "Log parsed: held-out 3.054, 49% words, +0.433 past minimum, LR_RESTARTS=0 confirmed taken. Claude: 'My restart hypothesis is refuted.' Recorded as vmax4k_18ep_norestart, commit 33a9299.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Researcher supplies the LR_RESTARTS=0 vmax4k@18ep run log that Claude had asked for to test the 'restarts cause divergence' hypothesis.",
+   "quote": "@\"/root/.claude/uploads/e880caf7-1208-58de-93fd-49c41549bf70/beb41a38-vmax4k.log\" Here is the results of the run from earlier",
+   "ts": "2026-08-13T22:05:44"
+  },
+  {
+   "evidence": "Directly produced the session's largest finding: diagnostics were drawing from the global RNG that build_stream() uses to pick segment lengths, so runs differing only in how much they measured trained on different text. Measured 23,835 of 250,027 global draws (9.5%) taken inside eval passes; five leaks fixed; commit c76dc74. Post-fix PROBE 1→0 and EVAL_N 4→16 became bit-identical; the '1.594 b/B same-seed spread' went to 0.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Reject Claude's plan to spend GPU measuring the noise floor; find and fix the amplifier causing run-to-run variance instead.",
+   "quote": "Why are we trying to measure the noise? Let’s fix the issue that’s coming up, or first find it",
+   "ts": "2026-08-13T22:09:32"
+  },
+  {
+   "evidence": "Four fixes landed in 37100fb: partial batch surviving the epoch boundary (_bp indexed the old tok_bs), bytes-per-token weighted by text not vocabulary, composition report labelling, final re-tokenization not re-pointing ENC_SEQ / clearing _VALT. Regression sweep: rerun 0 differing lines, PROBE=0 1 line, HOLDOUT_N 1 line, SAVE_CKPT 3 lines.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Before running anything, work through the outstanding list of latent defects from the agent reports.",
+   "quote": "Fix the issues, then we can test again",
+   "ts": "2026-08-13T23:59:34"
+  },
+  {
+   "evidence": "remap_mem_ctx() added (commit 8bdeca4). Measured 82.3% of stored contexts stale across one growth step (vocab 647→1024); observed in-run remaps of 2553/3601/2917/1585/1928/1754/1521/967/597 contexts over 9 retoks. Unrepairable half now reported as a number: 4.0% (255 of 6382) entries predicting an id the final stream never carries. TOKC_DECAY=0.5 added for asm.tokc.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Fix the stale memory-context / mem.tok segmentation drift before spending GPU on a test.",
+   "quote": "Before we do, address the mem.tok issues, since they may cause a drift",
+   "ts": "2026-08-14T00:42:26"
+  },
+  {
+   "evidence": "Launcher validated on CPU end-to-end, smoke green on 7 arms, then the researcher ran `seeds 3` on GPU at commit 451459d. Results uploaded 18:12: held-out 4.327 / 3.572 / 2.253, spread 2.074 b/B.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Run a pilot on the post-fix code to see the effect of the instrument fixes.",
+   "quote": "Let’s do a pilot to see what changed",
+   "ts": "2026-08-14T12:13:33"
+  },
+  {
+   "evidence": "Claude diagnosed it as a failure rate not a measurement spread (1 of 3 runs reached known-good), attributed to the fabric ramp injecting ~2,000 experts in ~600 steps. Later confirmed by the FAB_GROW=0 arm.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Provides the three seed logs and asks for a diagnosis of the 2.07 b/B spread.",
+   "quote": "Here is the run, what do you think of it, and why are they different?",
+   "ts": "2026-08-14T18:12:07"
+  },
+  {
+   "evidence": "Rejected as stated but productive. Evidence against: seed 2 starts WORST at step 2000 (3.49 vs 3.45/3.42); the lead changes hands 5 times over 24 samples; all three print 'SEEDED ... 256 -> 512' (fresh tokenizer). A 39-channel code audit ruled out 38 and found 1 REAL but cross-invocation channel (the _done/TAG resume-skip re-printing stale numbers), fixed in 42d8686. Definitively settled at 20:57 by the researcher's own reorder run.",
+   "outcome": "rejected",
+   "paraphrase": "Hypothesis that the three sequential seed runs are not independent — later runs are inheriting state from earlier ones, which would void the whole pilot.",
+   "quote": "I think you are looking at bit spread incorrectly, since it seems to be dropping from seed 0 to 2, and building off each other. Is this possible?",
+   "ts": "2026-08-14T18:24:05"
+  },
+  {
+   "evidence": "Word percentages are not ordered — seed 1 (middle) is worst at 18% vs 35% and 88%; seed 1 emits 4.89 tokens/word so the 35% is an artefact of emitting spaces, not quality. Generated text shares no family resemblance across seeds. Late mints diverge ('lude'/'ers,' vs 'rote'/'fter ' vs 'grow'/'e pa') while early mints match (corpus-driven BPE, expected). At the first retok the three runs already re-segment 66,510 / 60,955 / 48,510 contexts.",
+   "outcome": "rejected",
+   "paraphrase": "Presses the leak hypothesis again, citing generated-text quality improving with run position as evidence it is more than a reporting bug.",
+   "quote": "Is there a location where state leak is occuring? It does not look like it is just reported numbers, since text quality differs between the runs, and relatively good in the last",
+   "ts": "2026-08-14T19:20:06"
+  },
+  {
+   "evidence": "Answered exhaustively: everything is kept (ckpt.pt with model/fabric/memory/domains/world model/optimizer moments, ckpt.prev.pt, source.bin, probe.pt, .best, tokenizer JSON); only two read sites exist in the whole tree (self_organize.py:3321 torch.load and :653 DynamicTokenizer.load), both gated on RESUME. With TOK_ONLINE=1 and RESUME unset neither fires.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Reframes the question from 'is there a leak' to an exhaustive inventory of what is persisted and what reads it back.",
+   "quote": "Or rather, is there anything that is being kept, saved, and possibly used in the following runs? It likely is not the tokenizer.",
+   "ts": "2026-08-14T19:41:20"
+  },
+  {
+   "evidence": "Claude identified RESUME as exactly that lever, already fully implemented and never used, but unsafe: the checkpoint recorded tok_path and nothing read it back, so a resume could silently pair weights with a different vocabulary. Commit 2ba3ac1 records tok_vocab/tok_merges and refuses on mismatch; pilot-add's hardcoded RESUME=\"$OUT/pilot_$PA\" replaced with RESUME_FROM=<dir>. The researcher then used it for the first continual-learning run that same evening.",
+   "outcome": "built",
+   "paraphrase": "Turn deliberate cross-run state carry-over into a designed capability (that is what continual learning needs), while keeping controlled cold-start runs as the control.",
+   "quote": "Also, state leak would be bad in one sense, however, we can utilize this for our system, building off of it (intentionally), to get more efficient. We still need to control for it when applicable, but it is a helpful lever",
+   "ts": "2026-08-14T19:41:20"
+  },
+  {
+   "evidence": "Results identical to three decimals across a different run order: seed0 4.327 (ran 2nd), seed1 3.572 (ran 3rd), seed2 2.253 (ran 1st). Train loss and word percentages matched too. Order hypothesis retired; GPU path confirmed bit-deterministic, retiring the index_add_/scatter_add_ nondeterminism concern.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Researcher executed the reorder control (seed 2 first) to test the run-order hypothesis directly, and redirects to explaining seed 0's failure.",
+   "quote": "I ran these in order 2, 0, 1 .\n\nNow we need to figure out why seed 0 is so much worse than 2.",
+   "ts": "2026-08-14T20:57:39"
+  },
+  {
+   "evidence": "Confirmed: SEED_CKPT defaulted to 0 while GRID_CKPT defaults to 1, so the sweep producing the models worth continuing from was the one discarding them. Default changed to 1 in commit e0dbf0c.",
+   "outcome": "built",
+   "paraphrase": "Objection that Claude's recommended commands keep dropping SEED_CKPT, leaving no checkpoints to resume from — which blocks the continual-learning target.",
+   "quote": "You keep on turning off checkpoints, so we cant do it yet.",
+   "ts": "2026-08-14T20:57:39"
+  },
+  {
+   "evidence": "Commit b92f358 added --token (falling back to $HF_TOKEN/$HUGGINGFACE_HUB_TOKEN/cached login), the-stack and the-stack-dedup presets (field 'content', not 'text'), --data-dir for directory-organised datasets, and FETCH_ARGS pass-through. Claude explicitly flagged it could not exercise the streaming path — 'this sandbox reaches GitHub and PyPI only'. The researcher's run did proceed, so the plumbing evidently worked, but it was never verified inside the session.",
+   "outcome": "built-never-run",
+   "paraphrase": "Asks how to authenticate to the gated bigcode/the-stack dataset for the continual-learning run.",
+   "quote": "I have set up a Hugging Face token, how do I access the gated dataset?",
+   "ts": "2026-08-14T21:07:49"
+  },
+  {
+   "evidence": "Claude named ACROSS THE RUN BOUNDARY as the one number, predicted English would degrade (PHASE_SCHED [[0],[0],[1],[1]] removes English for half of every epoch and the run ends py-only), predicted Python would look bad from a saturated 2048/2048 vocabulary, and flagged the SEG_CONTIG 1→0 confound. Result at 22:21: eng HELD (+0.052 ± 0.075); the Python prediction was wrong and retracted.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks for the hypothesis and expected outcome of the running continual-learning (eng+py) run before seeing results.",
+   "quote": "The training is running, you were correct that the checkpoints were saved. \nWhat are we testing for and what do we expect?",
+   "ts": "2026-08-14T21:14:08"
+  },
+  {
+   "evidence": "Root cause found: `pilot` runs mkdir -p \"$OUT\" and `pilot-add` never did, so tee failed at process start on a box that had only run `seeds`. Fixed in 40de03d (mkdir plus one reserved name for checkpoint and log, both printed before GPU is spent). holdout.py written to reconstruct ACROSS THE RUN BOUNDARY from the checkpoints' stored `holdout` probe, tested against synthetic fixtures.",
+   "outcome": "built",
+   "paraphrase": "Reports that the continual-learning run finished but produced no log, implying a launcher bug.",
+   "quote": "Run complete, but no log file",
+   "ts": "2026-08-14T21:46:27"
+  },
+  {
+   "evidence": "Recovered the project's first continual-learning result: eng was 1.998 @ step 48157 -> now 2.050, +0.052 +/- 0.075 HELD (inside the noise); py 2.276 NEW; combined held-out 2.243, beating order-1 by +1.402. ABSENT column filled for the first time: ACTIVE +0.116 vs ABSENT -0.029. Recorded as continual_eng_py, commit a9d7258.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Supplies a terminal copy of the lost run output so the result can still be read.",
+   "quote": "It is lost, but I copied from terminal, so not completely gone",
+   "ts": "2026-08-14T22:21:33"
+  },
+  {
+   "evidence": "Claude produced the discriminator: base-model health tracks outcome exactly (model ALONE 10.338 / 4.116 / 2.921 for seeds 0/1/2 vs held-out 4.327/3.572/2.253), and it is NOT router collapse (seed 2, the best, used the fewest experts, 187 vs 268, with identical gradient reach). vmax8k reopened — old verdict declared void, and the cross_entropy-over-all-V finding reframed it as a dead-row denominator problem, motivating LOSS_MASK_DEAD. Config choice put to the researcher via AskUserQuestion.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Sequencing instruction: explain the seed variance mechanism before running more configs, choose the next config series jointly, and reopen vmax8k.",
+   "quote": "Lets first address why the seeds varied so differently earlier.\n\nThen we can run and try this, with a different series of configs that we should decide together. We can relook into the 8kvmax again.",
+   "ts": "2026-08-14T22:27:24"
+  },
+  {
+   "evidence": "Arms specified and plumbing verified (FAB_N0 can exceed defaults; cap = max(n0, FAB_NMAX); MAX_DOMAINS mirrors FAB_NMAX so arm C needs MAX_DOMAINS=4096 pinned). Commands handed over: `SEED_DIR=runs/pop_size bash longrun.sh seeds 3 -- FAB_GROW=0 FAB_N0=2048` and `SEED_DIR=runs/pop_grow bash longrun.sh seeds 3 -- FAB_GROW=1 FAB_NMAX=64 MAX_DOMAINS=4096`. Not run within this chunk.",
+   "outcome": "built-never-run",
+   "paraphrase": "Chooses the 2x2 isolation of population growth vs population size as the next experiment series.",
+   "quote": "[AskUserQuestion answer] \"Growth vs size first (Recommended)\"",
+   "ts": "2026-08-14T22:36:38"
+  },
+  {
+   "evidence": "Claude scoped both: expert count is cheap (cap already preallocated to FAB_NMAX, unused rows are zero-B identities, so it is a policy change and PlateauGrowth already has the plateau test); expandable VMAX depends on LOSS_MASK_DEAD working, since building at 8192 means carrying 6,144 dead rows from step 0. Researcher said 'Build all 3' at 22:51:44; neither was built before the chunk ends at 22:53:10.",
+   "outcome": "deferred",
+   "paraphrase": "Proposes lifting the vocabulary cap and the expert-population cap mid-run, triggered by the conjunction of being pinned at the cap and the loss having plateaued.",
+   "quote": "Mid run expandable vmax and expert count should also be considered to be included - when loss plateaus and both are at cap.",
+   "ts": "2026-08-14T22:36:38"
+  },
+  {
+   "evidence": "Claude endorsed it as the most contained of the three (~15 lines plus a `rescued` set in soft_cull, reset the grace clock, cull only on second selection) and as the right shape — 'selection pressure raising mutation rate is how you escape a local optimum'. Researcher said 'Build all 3'; not built before the chunk ends.",
+   "outcome": "deferred",
+   "paraphrase": "Proposes a rescue-before-cull mechanism: an expert selected for culling gets a large mutation / higher learning rate rather than immediate removal.",
+   "quote": "I am thinking of adding a mechanism of higher randomization or learning, when experts are at threat of being thrown out.",
+   "ts": "2026-08-14T22:36:38"
+  },
+  {
+   "evidence": "Issued at 22:51:44; the chunk ends at 22:53:10 with Claude still answering the accompanying questions. No implementation commit for any of the three appears in this chunk.",
+   "outcome": "deferred",
+   "paraphrase": "Approves building all three proposed mechanisms (rescue-before-cull, expandable expert count, expandable VMAX).",
+   "quote": "Build all 3.",
+   "ts": "2026-08-14T22:51:44"
+  },
+  {
+   "evidence": "Claude ran the audit (every _RD access vs every saved key) and was mid-answer when the chunk ends at 22:53:10 — the last tool call is checking 'is the fabric cap checked on resume?'. The one concrete data point in-chunk is that the continual run resumed with 'fabric 6n' from a FAB_GROW=0 parent. No conclusion delivered.",
+   "outcome": "unclear",
+   "paraphrase": "Questions whether RESUME restores everything a current run has, whether the expert cap is preserved across resume, and why the expert population came back far below the cap.",
+   "quote": "I am wondering about the expert, since the RESUME looks like it was old, I do not know how up to date it is with everything, and is the cap the same? I expected our runs to reach expert cap, but I saw a much lower number of expert thrown somewhere.",
+   "ts": "2026-08-14T22:51:44"
+  },
+  {
+   "evidence": "Chunk ends at 22:53:10 with Claude pulling the seed2 generation samples to answer; no answer delivered. The available anchor in-chunk is 1.989 b/B best vs 'GPT-2-small sits near 1.0-1.2 b/B on comparable text'.",
+   "outcome": "unclear",
+   "paraphrase": "Constraint: get English quality right in a single-domain pilot before committing further to multi-domain continual learning; and asks how far the current model is from real English.",
+   "quote": "I want english to be done well in a pilot before fully committing to adding new domains, and the continual learning. \n\nI know it is undertrained earlier, but how far from english were we?",
+   "ts": "2026-08-14T22:51:44"
+  },
+  {
+   "evidence": "Answered from the log's own config banner: '[config] PATH CHAINED SOCIETY (default)' with SOCIETY=0 -> CHAINING ACTIVE. Confirmed yes.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks which architecture path the runs actually took.",
+   "quote": "And were we using chained society?",
+   "ts": "2026-08-14T22:51:44"
+  }
+ ],
+ "notes": "The single most consequential thing in this chunk follows directly from the researcher's one-line objection at 2026-08-13T22:09:32 (\"Why are we trying to measure the noise? Let's fix the issue that's coming up, or first find it\"). Claude was about to spend GPU measuring a noise floor; the researcher refused, and the hunt found that the noise was not noise — every diagnostic in the file drew from the same global `random` generator that `build_stream()` uses to choose segment lengths, and the stream is rebuilt every epoch, so two runs with the same seed, code and corpus that differed only in HOW MUCH THEY MEASURED trained on different text. Five distinct leaks (eval-time expert exploration, chaining-path utilization recording, the timing probe's `.backward()` reaching world-model params via the `WORLD_FEEDBACK` monkey-patch, halt_ema/_mass_ema averaging eval passes into a \"during TRAINING\" figure, and direct probe draws) plus a per-(SEED, epoch) stream generator. Commit c76dc74.\n\nThe second-most consequential is the researcher's persistent objection at 18:24 / 19:20 / 19:41 that the seeds were building off each other. The hypothesis itself was wrong — settled definitively when the researcher ran the seeds in order 2, 0, 1 and got numbers identical to three decimals — but pressing it produced a 39-channel audit that found one real bug, forced the RESUME/tokenizer-pairing hazard into the open, and led directly to the researcher's reframe (\"we can utilize this for our system, building off of it (intentionally)... it is a helpful lever\"), which unblocked the project's first-ever continual-learning run that same evening: eng HELD at +0.052 ± 0.075 while Python was learned from scratch to 2.276.\n\nTwo results in this chunk are the project's best on record and both came from turning something OFF: FAB_GROW=0 gave 1.989 b/B (previous best 2.140) and cut the seed spread from 2.074 to 0.326.\n\nCaution for synthesis: the ordering of retractions matters here. \"Restarts are net-negative\" was retracted, then its replacement (\"restarts help by 0.922\") was itself framed as inside noise, and then the noise figure it was judged against was itself retracted as stale. Very little quantitative claim from before commit c76dc74 survives, and Claude says so explicitly: \"no number in the record predates these fixes safely.\"\n\nContainer rollbacks to 2c705c7 occurred at least four more times in this chunk (00:02, 12:15, 18:16, 21:02), each wiping the working tree, levers.py/vocab.py/runs.py and the scratchpad. Nothing was lost — everything was on origin — but one of them caused a false retraction (the \"smoke was never committed\" episode) because `git log --all` was run against a reverted `.git`.\n\nNo sources were unreadable; the full file was read.",
+ "retractions": [
+  {
+   "claim": "Claude (one message earlier, and in commit 79dac6c): 'Every 18-epoch arm has a restart and all but one diverged... Restarts are the one mechanism that tracks divergence across every arm on record' — restarts are net-negative and cause the divergence.",
+   "correction": "LR_RESTARTS=0 came back 3.054 against 2.132 with restarts ON. 'My restart hypothesis is refuted.' The one clean single-knob pair says restarts HELP by 0.922 — the opposite of what was asserted two messages earlier.",
+   "ts": "2026-08-13T22:07:20"
+  },
+  {
+   "claim": "Claude: the four vmax4k@18ep runs are 'nominally the same arm, spanning 1.227 b/B — entirely inside the documented noise', therefore no single-run comparison in the project means anything.",
+   "correction": "'I overstated the four vmax4k runs as \"the same arm.\" They aren't — they're four different configurations' (different LR horizon, retok guard present/absent, restarts on/off, four different commits).",
+   "ts": "2026-08-13T22:10:27"
+  },
+  {
+   "claim": "The documented 1.594 b/B same-seed spread (3.694 vs 2.100) is the system's irreducible noise floor, and 'this system cannot resolve differences below ~1.6 b/B from single runs'.",
+   "correction": "That figure was measured WITH the since-fixed eval-mutates-regions bug (ground_update called with a fabricated zero gist from every eval path). The code comment states the fix was made on principle, 'not because it recovers a measured 1.594' — and nobody re-measured after fixing it.",
+   "ts": "2026-08-13T22:10:27"
+  },
+  {
+   "claim": "Claude: 'a single run of this system carries roughly ±1.5 b/B of irreducible noise' — the reason results never carried forward is a measurement-protocol problem requiring error bars.",
+   "correction": "'Found it, and it isn't noise.' The instrument was wired into the circuit: diagnostics drew from the same global RNG that build_stream() uses to choose segment lengths, so two runs differing only in how much they measured trained on different text. After the fix, SAVE_CKPT 0→1 goes from the documented 1.594 spread to 3 lines (checkpoint filenames), and PROBE/EVAL_N become bit-identical.",
+   "ts": "2026-08-13T23:07:40"
+  },
+  {
+   "claim": "Claude's commit 37100fb: the unweighted bytes/token figure 'overstates, and the overstatement grows with VMAX'.",
+   "correction": "The sweep contradicts it at small vocabularies — 1.50 unweighted vs 1.85 as used at 512 tokens, because the 256 single-byte seeds dominate the entry count. 'The fix was right; the reasoning wasn't, and the reasoning is what gets read next time.' Corrected in 8a8fb69.",
+   "ts": "2026-08-14T00:18:20"
+  },
+  {
+   "claim": "Claude: the CAN A DOMAIN PREDICT? / domain-prior section 'never fires in any run' — DOM_PRIOR is on by default, costs a tensor op every window, and the section that reads it never runs.",
+   "correction": "Wrong. It needs 16 held-out windows and draws min(48, EVAL_N) per domain, so it runs fine at the pilot's default EVAL_N=64 and simply did not run in Claude's smoke, which sets EVAL_N=4. 'The section was fine; my test config was too small to reach it.' Commit f75d574.",
+   "ts": "2026-08-14T01:13:48"
+  },
+  {
+   "claim": "Claude (12:45 and again at 12:15): 'The smoke subcommand was never committed' — lost to a container rollback; `git log --all -S'smoke)'` finds nothing; `_flags_for` is still nested inside `grid)` so `grid` works but nothing else can resolve an arm.",
+   "correction": "'I was wrong that it was lost.' Those greps ran against the rolled-back working tree, where .git had reverted too. On the restored f75d574, _flags_for is at top level (line 85), the __UNKNOWN_ARM__ sentinel is present, and smoke is at line 700, committed in 05475cb and 136461c. What actually misled: smoke and repeat were missing from the usage string.",
+   "ts": "2026-08-14T13:02:19"
+  },
+  {
+   "claim": "Claude was writing up a perfect rank correlation — encoder warmup settling at steps 1001/1501/2000 for seeds 2/1/0, matching the outcome ordering exactly — as the ramp and the encoder racing each other.",
+   "correction": "Withdrawn before delivery: the warmup is `for t in range(wu)` running entirely BEFORE the training loop at line 3837, so there is no overlap and the counters are not even the same. 'The mechanism I nearly handed you was wrong, and on n=3 a perfect ordering is a 1-in-6 coincidence anyway.'",
+   "ts": "2026-08-14T21:03:01"
+  },
+  {
+   "claim": "Claude (21:16, predicting the continual run): 'Python will look bad for a reason that isn't learning' — the vocabulary is frozen at 2048/2048 with every merge minted from English, so not one token can be minted for Python; expect high tokens-per-byte and a b/B that reports the tokenizer as much as the model.",
+   "correction": "'It didn't look bad: py 2.276 against eng 2.050, a 0.226 gap. English subword merges evidently cover code far better than I implied... The constraint is real (no token was minted; used 1977 of 2048) but I overstated its cost.'",
+   "ts": "2026-08-14T22:23:14"
+  },
+  {
+   "claim": "Repeated all session and listed under 'Established (survives scrutiny)': 'Dead rows are catastrophic and monotone: 0% → ~2.2, 29.7% → 3.600, 41% → 3.561, 75% → 6.114.'",
+   "correction": "'The dramatic curve I kept quoting came from arms that differed in far more than their dead fraction, measured through the instrument that was editing runs. This is the first controlled test and it doesn't reproduce that magnitude.' Controlled: unmasked 4.746 ± 0.043 vs masked 4.686 ± 0.034 → +0.060 at 1.1 sigma. 'A hint, not a finding.'",
+   "ts": "2026-08-14T22:43:58"
+  },
+  {
+   "claim": "Claude's first LOSS_MASK_DEAD result: masking never-minted ids made the model worse (4.746 → 6.100), implying the dead-row idea was wrong.",
+   "correction": "The mask was applied at the training loss only and nowhere else, so the model never learned to suppress dead rows and every scoring path still scored them. 'That's my bug, not the idea's.' Re-tested with the mask applied wherever logits become a distribution.",
+   "ts": "2026-08-14T22:41:08"
+  },
+  {
+   "claim": "The run's own config-audit: '!! NOTHING READ THESE: ENC_WARMUP_MIN -- set in the environment but no code path ever asked for them. Almost certainly a typo.'",
+   "correction": "Claude: false alarm — RESUME skips encoder warmup entirely ('already trained'), so the knob genuinely had no reader. 'The audit is right that it did nothing, but \"almost certainly a typo\" is the wrong diagnosis.'",
+   "ts": "2026-08-14T22:23:14"
+  },
+  {
+   "claim": "Claude's summary of the session's headline results, including 'the largest single effect in this project's records' (the frozen/frozen_nr pair, 2.189 b/B), the vmax2048/4096/8192 comparison, and the fabric-growth behaviour of multi-cycle runs.",
+   "correction": "Table of seven defects and what each invalidated: VMAX re-rolled every weight (kills the whole vmax comparison); RETOK_EVERY=0 also killed signature batching (kills the frozen/frozen_nr headline); restart unmarked as self-inflicted (kills fabric growth in every multi-cycle run); _due consumed twice (kills three 18-epoch runs). 'Most of what I told you this session was measured through at least one of them.'",
+   "ts": "2026-08-13T20:13:48"
+  }
+ ],
+ "span": "2026-08-13T20:09:45 .. 2026-08-14T22:53:10",
+ "tested": [
+  {
+   "result": "held-out 3.054 | train 3.321 | gap -0.266 | 49% generated words | +0.433 past its own minimum | best 2.601 at step 10000. WORSE than 2.132 with restarts ON -> hypothesis refuted; the one clean single-knob pair says restarts HELP by 0.922.",
+   "ts": "2026-08-13T22:06:07",
+   "what": "LR_RESTARTS=0 at vmax4k, EPOCHS=18, LR_EPOCHS=8 (tests Claude's hypothesis that cosine restarts cause divergence)"
+  },
+  {
+   "result": "oldLR 3.250 (43% words), lr8 2.023 (89%), guard 2.132 (77%), norestart 3.054 (49%). Spread 1.227 b/B against a documented same-seed spread of 1.594.",
+   "ts": "2026-08-13T22:07:02",
+   "what": "Tabulate all four vmax4k@18ep runs from runs.csv"
+  },
+  {
+   "result": "250,027 global-stream draws, 23,835 (9.5%) taken inside an eval pass, on a 3-epoch smoke at HOLDOUT_N=4.",
+   "ts": "2026-08-13T22:24:15",
+   "what": "rngprobe instrumentation: count global-RNG draws and how many fall inside eval passes, pre-fix"
+  },
+  {
+   "result": "Pre-fix: 48 report lines differ, train 3.022 identical but downstream diverged. Post-fix: 226,611 draws, 0 inside eval, train 2.648 identical, 2 differing lines (one legitimate, one the halt_ema leak).",
+   "ts": "2026-08-13T22:28:21",
+   "what": "HOLDOUT_N 4 vs 16, pre-fix vs post-fix (a knob that cannot legitimately touch training)"
+  },
+  {
+   "result": "Runs split at the second logged step (6.119917 vs 6.112525) from byte-identical weights, stream and memory, and never rejoin. X2_nopass and X3_nobwd match PROBE=0 exactly -> .backward() inside the timing probe is the culprit.",
+   "ts": "2026-08-13T22:45:30",
+   "what": "Bisect the PROBE=1 vs PROBE=0 divergence with per-step loss prints"
+  },
+  {
+   "result": "PROBE=1: world_enc 6/6 and world_fwd 23/23 params holding grads. PROBE=0: 0/6 and 0/23. Cause: WORLD_FEEDBACK monkey-patches model.encode, so the probe's backward writes into modules its zero_grad list never named.",
+   "ts": "2026-08-13T22:51:06",
+   "what": "Gradient scan of every module before the training loop, PROBE=1 vs PROBE=0"
+  },
+  {
+   "result": "same-config reruns differ on 0 lines — the CPU path is reproducible, so the earlier diffs were real.",
+   "ts": "2026-08-13T22:44:04",
+   "what": "Control: two identical-config CPU runs back to back"
+  },
+  {
+   "result": "rerun 0 differing lines; holdout16 2; noprobe 38 (4th-decimal report only, training identical); gen4 115; ckpt 3. All draws 226,098 with 0 inside eval.",
+   "ts": "2026-08-13T23:06:00",
+   "what": "Post-fix 6-arm sweep, same seed, one knob each"
+  },
+  {
+   "result": "rerun 0 lines; holdout16 2; noprobe 2 (config-audit listing PROBE); ckpt 3 (filenames). PROBE=0 now byte-identical including the report. Signature banner: 1.50 bytes per ENTRY vs 1.85 bytes per token AS USED.",
+   "ts": "2026-08-14T00:17:53",
+   "what": "Regression sweep after the four epoch-roll / bytes-per-token / ENC_SEQ fixes"
+  },
+  {
+   "result": "200,000 entries in 1.99s | 82.3% of stored contexts are stale | 74.9% re-segment shorter.",
+   "ts": "2026-08-14T00:46:43",
+   "what": "Simulate mem.ctx staleness across one tokenizer growth step (vocab 647 -> 1024)"
+  },
+  {
+   "result": "re-segmented 2553, 3601, 2917, 1585, 1928, 1754, 1521, 967, 597 stored contexts (up to ~60% of the store, tapering as growth slows). Final: 255 of 6382 (4.0%) entries predict an id the final stream never carries.",
+   "ts": "2026-08-14T01:10:44",
+   "what": "remap_mem_ctx firing in-run on a growing-vocabulary config (vocab 256 -> 1097 over 9 retoks)"
+  },
+  {
+   "result": "determinism 0 lines; TOKC_DECAY changes only the domain-prior section. own vs global -0.013 at 0.5, -0.004 at 1.0; both print 'NOT YET: the partition does not beat a single global histogram'.",
+   "ts": "2026-08-14T01:22:40",
+   "what": "TOKC_DECAY 0.5 (new default) vs 1.0 (old cumulative), plus determinism control"
+  },
+  {
+   "result": "rc=0, both seeds completed with error bars: 4.700 ± 0.083 / 4.558 ± 0.080 and 4.430 ± 0.047 / 4.564 ± 0.062.",
+   "ts": "2026-08-14T12:44:49",
+   "what": "longrun.sh seeds end-to-end on CPU at tiny scale, to validate the launcher path"
+  },
+  {
+   "result": "All 7 reached their report. base and nogate byte-identical (2.884/3.006). Probation arms carry 23.3% and 32.6% stale memory values vs 0.1% elsewhere.",
+   "ts": "2026-08-14T13:02:05",
+   "what": "longrun.sh smoke, all 7 pilot arms on CPU at 40 kB / 3 epochs"
+  },
+  {
+   "result": "held-out 4.327 / 3.572 / 2.253, spread 2.074 b/B. Real words 35% / 18% / 88%. Best-and-when: 3.452 @ 2k, 2.675 @ 6k, 2.195 @ 48k. Seeds 0 and 1 both lose to order-1 (3.44).",
+   "ts": "2026-08-14T18:12:21",
+   "what": "Three-seed pilot at HEAD (451459d), FAB_GROW=1 default — the noise-floor measurement"
+  },
+  {
+   "result": "Lead changed hands 5 times across 24 samples; seed 1 ahead of seed 2 at 4 of 24; seed 2 starts WORST at step 2000 (3.49 vs 3.45/3.42). P(strictly decreasing order by chance) = 1/6.",
+   "ts": "2026-08-14T18:26:05",
+   "what": "Check whether the three seed curves are ordered (testing the researcher's cumulative-state hypothesis)"
+  },
+  {
+   "result": "38 ruled out, 1 REAL: longrun.sh's _done resume-skip plus TAG derived from ARMFLAGS alone, so EPOCHS=18 after EPOCHS=8 skips all three seeds and the SEEDS SUMMARY re-prints the 8-epoch numbers under the 18-epoch banner. Cross-invocation, not seed-to-seed; not active in the researcher's pilot.",
+   "ts": "2026-08-14T19:15:29",
+   "what": "Exhaustive audit of cross-run state channels (39 candidates, adversarially verified, via a background workflow)"
+  },
+  {
+   "result": "held-out 2.047 / 2.315 / 1.989 vs 4.327 / 3.572 / 2.253 with growth on. Spread 0.326 vs 2.074 — 6.4x tighter. Words 94% / 85% / 95%. All three beat order-1 by >1.1. 1.989 is the best number in the project's record (previous best vmax4k@18ep 2.140).",
+   "ts": "2026-08-14T19:42:03",
+   "what": "FAB_GROW=0, three seeds (the ramp turned off)"
+  },
+  {
+   "result": "Identical to the first sweep to three decimals — seed0 4.327, seed1 3.572, seed2 2.253, with train losses 4.078/3.713/2.276 and words 35/18/88 also matching. Seed 2 ran first and still got 2.253. Run order irrelevant; GPU path bit-deterministic.",
+   "ts": "2026-08-14T20:58:43",
+   "what": "Reorder control run by the researcher: seeds executed in order 2, 0, 1"
+  },
+  {
+   "result": "Ramp off: 2.047 ± 0.086 vs 1.989 ± 0.077 -> +0.058, combined SE 0.115, 0.50 sigma, indistinguishable. Ramp on: gap 2.074 = 18 sigma. The seed contributes 0.058; the ramp contributes 2.016.",
+   "ts": "2026-08-14T20:58:54",
+   "what": "Significance of the seed-0 vs seed-2 gap with the ramp off vs on"
+  },
+  {
+   "result": "eng was 1.998 @ step 48157 -> now 2.050, +0.052 +/- 0.075, HELD (inside the noise). py 2.276 NEW. Combined held-out 2.243 ± 0.078, beats order-1 (3.644) by +1.402. Python went 5.17 -> 2.53 from scratch.",
+   "ts": "2026-08-14T22:21:43",
+   "what": "First continual-learning run: RESUME from FAB_GROW_0_seed2 (English) + Python from the-stack, PHASE_SCHED [[0],[0],[1],[1]]"
+  },
+  {
+   "result": "mean change per 2000 steps ACTIVE +0.116 b/B, ABSENT -0.029 b/B -> 'it LEARNS faster than it forgets' (4x). English trace recovers rather than ratcheting: worst point 2.19 during an early absence, back to 2.00 by the end.",
+   "ts": "2026-08-14T22:21:50",
+   "what": "The ABSENT column — decay-while-absent, filled for the first time in the project"
+  },
+  {
+   "result": "model ALONE 2.376 -> + FABRIC 2.003 (fabric +0.373) -> + FABRIC + MEMORY 2.173. model + MEMORY 2.473 (memory contributes -0.111, i.e. harmful). UNLEARN a FADED process 0 SKIPPED: only 0 entries left (evicted). Retention came from weights and fabric, not memory. UNLEARN active process 1: target Δ -0.2039, others Δ -0.1347 = LEAKED.",
+   "ts": "2026-08-14T22:22:20",
+   "what": "Where the retention came from: memory vs fabric vs weights"
+  },
+  {
+   "result": "model ALONE 10.338 / 4.116 / 2.921 -> + FABRIC 4.155 / 3.688 / 2.246 (fabric worth +6.183 / +0.428 / +0.675) -> held-out 4.327 / 3.572 / 2.253. Seed 0's base LM is worse than uniform (3.783), i.e. actively anti-predictive.",
+   "ts": "2026-08-14T22:29:15",
+   "what": "Base-model health vs outcome across the three varying seeds"
+  },
+  {
+   "result": "seed0 239 distinct experts / top 10.2% / half the traffic to 20; seed1 268 / 12.0% / 14; seed2 187 (fewest, most concentrated). Gradient reach 252 of 2977 (seed0) vs 252 (seed2), 407 (seed1). Router statistics do not discriminate — router collapse ruled out.",
+   "ts": "2026-08-14T22:27:57",
+   "what": "Router selection and gradient reach across the three seeds (testing router collapse)"
+  },
+  {
+   "result": "held-out 4.746 (off) -> 6.100 (on). WORSE. Cause: every scoring path was unmasked, so a masked-trained model never learns to suppress dead rows and is then evaluated on them.",
+   "ts": "2026-08-14T22:40:35",
+   "what": "LOSS_MASK_DEAD v1, mask applied at the training loss only, 86.7% dead rows"
+  },
+  {
+   "result": "unmasked 4.746 ± 0.043, masked 4.686 ± 0.034 -> +0.060, combined SE 0.055, 1.1 sigma. 'A hint, not a finding.' Both still lose to order-1. Committed off by default (e9f2e58).",
+   "ts": "2026-08-14T22:43:01",
+   "what": "LOSS_MASK_DEAD v2, mask applied wherever logits become a distribution, same seed, one knob"
+  },
+  {
+   "result": "seed2 settled at step 1001, seed1 at 1501, seed0 at 2000 — perfect rank correlation with the ramp-ON held-out ordering (2.253 / 3.572 / 4.327) and no correlation with ramp-OFF (1.989 / 2.315 / 2.047). Mechanism claim withdrawn (see retractions).",
+   "ts": "2026-08-14T20:59:56",
+   "what": "Encoder adaptive-warmup settling step vs outcome"
+  }
+ ],
+ "wip": [
+  "The three mechanisms the researcher approved with 'Build all 3' at 22:51:44 — rescue-before-cull (large mutation + grace-clock reset for an expert first selected for culling), expandable expert count (soft cap lifting on pinned-at-cap plus plateau), and expandable VMAX (build at 8192, hold the tokenizer cap at 2048, lift on saturation-plus-plateau) — were designed and scoped but not implemented before the chunk ends 86 seconds later.",
+  "The growth-vs-size 2x2: arms B (FAB_GROW=0 FAB_N0=2048) and C (FAB_GROW=1 FAB_NMAX=64 MAX_DOMAINS=4096) were specified and the commands handed over, but never run. Claude flagged arm B is an imperfect isolation because B is zero-initialised (exact identities) whereas ramp-born experts are mutated clones of trained parents.",
+  "vmax8k re-examination at EPOCHS=18 — agreed to reopen ('We can relook into the 8kvmax again'), argued for on headroom rather than compression grounds, but not run.",
+  "The clean rerun of the continual-learning run with SEG_CONTIG=1 to remove the confound (the base run had one domain = contiguous read; the continuation had two = random-offset splicing) — recommended twice, never done.",
+  "The researcher's questions from 22:51:44 were being answered when the chunk ends: whether RESUME is up to date with everything a current run has, whether the expert cap is preserved across resume, why the runs did not reach the expert cap, and how far the model is from real English. Only 'were we using chained society?' was answered (yes — CHAINED SOCIETY, SOCIETY=0).",
+  "Memory is now actively harmful in the continual setting: contributes -0.111 b/B, all English entries were evicted by the bounded LRU store during Python phases, and UNLEARN of process 1 improved both the target (Δ -0.2039) and the others (Δ -0.1347 = LEAKED). Flagged as 'worth chasing'; not chased.",
+  "pilot-add does not pass FAB_GROW=0 through its own defaults, so a continuation turns the ramp back on unless the caller prefixes it.",
+  "fetch_big.py's Hugging Face streaming path was never exercised in-session — the sandbox reaches GitHub and PyPI only. Argument plumbing, presets and error handling tested; the actual download is not.",
+  "The main() split (2,964 lines, 658 locals), reverted earlier, is still undone. Also still open from the earlier agent reports: asm.tokc mixing counts across segmentations (now decayed rather than fixed), and the span mismatch left by id-space remapping (75% of windows re-segment shorter, and fixing it means storing bytes, which changes the checkpoint format)."
+ ]
+}

@@ -1,0 +1,622 @@
+{
+ "chunk": "chunk_12",
+ "errors": [
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T22:54:53",
+   "what": "SyntaxError: multi-line f-string expression — needs Python 3.12, container runs 3.11"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T22:58:15",
+   "what": "Rescue-before-cull path fired ZERO times and had no counter in the log; Claude 'nearly reported it working'. Cause: FAB_GRACE=3000 on an 1800-step test, so nothing was ever old enough to cull"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-14T23:01:30",
+   "what": "Plateau gate lifted the capacity cap at step 7 on 'improving +0.0000' — fast and slow EMAs both seeded from the first loss, so 'not improving' was an initialisation, not a reading"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T01:26:55",
+   "what": "Container rollback: runs.py absent, tree at an older commit"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T01:38:31",
+   "what": "spawn_from is a second growth path independent of PlateauGrowth, ignoring both FAB_GROW and the new soft cap — why FAB_GROW=0 runs drifted 3->6 experts"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T03:33:38",
+   "what": "The config audit used a HARDCODED PREFIX ALLOWLIST, so six deliberately-set GROW_CAP*/LOSS_MASK_DEAD knobs were silently ignored and the net designed to catch exactly that never fired. Cost the researcher an hour of GPU"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T03:35:44",
+   "what": "A container rollback hit mid-edit; restoring Claude's saved copy of self_organize.py deleted 1,101 lines. Caught by git diff --stat before commit, discarded and redone"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T03:52:33",
+   "what": "FAB_NEW_FRAC deadlocked the bootstrap: int(0.10*3)=0, so a run starting at FAB_N0=3 could never grow (reached 7 via spawn instead of 256)"
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-08-15T14:01:52",
+   "what": "LR_EPOCHS=8 with LR_RESTARTS=1 over 18 epochs jumps the rate 20x back to full peak mid-training; the held-out curve never resettles and it accounts for the entire 0.364 spread"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T14:02:27",
+   "what": "The warmup ramp was reported as a 'cosine restart' (steps 15 and 31, 2% and 3% of peak) because the detector only checked that the rate rose"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T14:18:22",
+   "what": "s.born was written ONLY by grow(), so the founding FAB_N0 experts had no birth record and read as age 0 forever. Consequences: soft_cull never touched them (arm B ran with no selection at all), the FAB_NEW_FRAC budget undercounted, and per-expert rates gave every founder the newborn rate"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T14:21:20",
+   "what": "The per-expert-rate diagnostic printed on step//20000, which never advances in a short run — it fired once at step ~3 when everything genuinely IS newborn"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T14:27:25",
+   "what": "Second half of the birthday bug: fab_born was not in the checkpoint at all, so every RESUME rebuilt the bug on the path continual learning depends on; and born.get(i, step) failed toward YOUNG, the protected direction"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T14:31:27",
+   "what": "Claude's pre/post-fix cull contrast used git stash, which only reverted to 91fd815 — already containing half the fix — so the comparison was meaningless"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T15:35:29",
+   "what": "mask_dead masked only [vocab_size:], but probation RETIRES ids below vocab_size, so 217 and 224 of 256 minted tokens stayed in the softmax denominator on the prob_use/prob_emb arms"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T15:33:50",
+   "what": "MEM_PER_EXPERT read _i('MEM_PER_EXPERT', 1) while its own comment recorded 'DEFAULT OFF, on measurement' at 0.555 b/B worse — a decision written down and never implemented. Every run in the project used the partitioned store"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T16:07:00",
+   "what": "mem.read() was called only from generate() and bpb_true(), both eval. During training `use` was 0 for every entry and `last` was never written at all on the global store — every eviction rule was ranking a constant"
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-15T16:11:24",
+   "what": "Smoke harness failed: data_pilot/train/eng/part0.txt was 2 bytes; the fetch fallback needed `pip install datasets`"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T16:41:35",
+   "what": "n_elig was counted AFTER the capacity-pressure early return, so the log printed 'NO expert has reached the 48-selection grace' in the same window as a successful cull, with experts at use-age 4287"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T16:41:55",
+   "what": "The per-expert envelope gamma^(cyc-1) decays to zero and use-age has no horizon — the smoke hit cycle 90 on six experts, permanently pinning every survivor at the floor"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T16:42:22",
+   "what": "Traceback: FAB_LR_OWN and friends referenced in the config banner ~40 lines before they are assigned"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T17:08:25",
+   "what": "Container rollback again — notes/ absent, HEAD at 2c705c7; restored from origin/rm-predict"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T18:16:02",
+   "what": "Container rollback a third time — notes/_evidence/commit_log.txt absent; restored from origin"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T18:34:51",
+   "what": "Session limit hit mid-flight; all four wave-3 documentation agents died, 09_COMMENT_AUDIT reported status=failed. Cause diagnosed as four parallel agents each burning 200-400k tokens"
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-15T19:13:22",
+   "what": "The comment at self_organize.py:583 argued '0.04 against an 8% cull ... selection strictly able to outpace growth' — but MANAGE_EVERY is 500 not 50 and FAB_CULL_FRAC is 0.02, so Claude's own change inverted the property the comment defends"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-15T19:39:39",
+   "what": "Commit 3c2a59e fixed only the second half of the FAB_NEW_FRAC comment block, leaving the first half asserting 'ON BY DEFAULT at 0.10' (actual 0.04) and 'FAB_BURST=3' (actual 1) — one block claiming both values eleven lines apart, after Claude had reported it fixed"
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-15T19:13:11",
+   "what": "07_WIP found four not-fixed entries stated wrongly in 05_ERRORS: main() re-measured at 3,953 lines/574 locals (not 2,940); the world model has 413 readings, all negative, so it is unread not unmeasured; MANAGE_EVERY/FAB_CULL_FRAC numbers stale; ENC_WARMUP fixed where it runs"
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-08-15T19:39:46",
+   "what": "09_COMMENT_AUDIT's WRONG list, unacted: self_organize.py:1090 still cites the +0.709 fabric knockout (INV-36 VOID, retrained ablation 3.089 vs 3.090) as the justification for FABRIC=1; three sites describe the default path as the transition walk; longrun.sh says TOK_COMPOSE is on by default when it is 0, silently making `nocompose` a duplicate of `base`"
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "Baseline adopted: every subsequent recommended run uses FAB_GROW=0 FAB_N0=2048. The gradual mechanism (GROW_CAP, e2db890/41d2c5d) was built and smoke-verified, but the intended pilot ran on stale commit e9f2e58 which predates GROW_CAP, so the knobs were silently ignored — it became an unconditional ramp 2048->4096 (2.009 mean, spread 0.160). The correct GROW_CAP run was never executed in this window. vmax was explicitly deferred by Claude, not the researcher.",
+   "outcome": "built",
+   "paraphrase": "Adopt arm B (FAB_GROW=0, FAB_N0=2048) as a temporary baseline, then layer gradual expert growth (and possibly gradual vocabulary growth) on top to try to reach 4096 experts at arm-B quality.",
+   "quote": "Yes we can do that, then add on a gradual increase in experts and perhaps vmax to the mix, we may get the better scalable results, and hopefully reproduce the 2048 results with the 4096\n\nWe can temporarily set it as the baseline. \n\nLets continue. What next?",
+   "ts": "2026-08-15T01:31:56"
+  },
+  {
+   "evidence": "Answer was no: 8 ramp events, 0 capacity lifts, [build] commit e9f2e58a95 predates GROW_CAP. Held-out 1.994/2.097/1.937. The accident produced the key finding that ramp 2048->4096 (2.009) is harmless where ramp 3->4096 (3.384) is not.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asking whether the gradual-growth run actually expanded the expert population via the new earned-capacity mechanism.",
+   "quote": "How does it look? Did it expand?",
+   "ts": "2026-08-15T03:32:09"
+  },
+  {
+   "evidence": "FAB_NEW_FRAC added and committed f4b2e9b, default 0.10, ON by default. Measured: uncapped pop 256 with worst single-event 100% new; capped pop 15 with worst event 33%. The 1.5 target was NOT met in this window — Claude said up front one run would not get there; best on record stayed 1.960 and everything clustered 1.94-2.32.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Set a quality target of <2 b/B (ideally 1.5), and impose an explicit cap on the fraction of the expert population that may be newborn at once.",
+   "quote": "The goal is to get safely below 2, ideally hit 1.5 this run. For the ramping, what is the maximum rate it can do, in terms of percent new? If there is none, lets set one",
+   "ts": "2026-08-15T03:48:30"
+  },
+  {
+   "evidence": "Committed 6d5e6d7 with both default changes. Never measured at pilot scale in this window. Its own justifying comment was later found wrong (19:13): MANAGE_EVERY is 500 not 50 and FAB_CULL_FRAC became 0.02, so the growth allowance is now twice the cull share rather than half — the property the change was made to guarantee was inverted by Claude's later change at the researcher's request.",
+   "outcome": "built",
+   "paraphrase": "Change the defaults so growth cannot outpace selection: FAB_BURST 3->1 and the newborn-fraction cap 10%->4%, against an 8% cull share.",
+   "quote": "Lets change instead to burst of 1, and 4%, since cull is 8%",
+   "ts": "2026-08-15T04:06:17"
+  },
+  {
+   "evidence": "Claude checked seed passages (fineweb-edu, genuine prose), found docs are \\n\\n-separated with sub-200-char dropped, and attributed the apparent junk to 110-char mid-sentence seed windows. Added --min-score/--score-field to fetch_big.py (6d5e6d7). STREAM_LEN=16000000 with a 0.5 GB re-fetch was used in the 18-epoch run — and the re-fetch silently changed the corpus (order-1 3.440 -> 3.747), confounding that run.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Quadruple the English training data and verify/improve corpus quality, because sampled seed text looked non-genuine.",
+   "quote": "Since the target goal is lower, lets allow for a larger data set. Lets do 4x larger english. Also make sure to use a good source, since when I look at some of the seeded samples, they dont always look like genuine text.",
+   "ts": "2026-08-15T04:06:17"
+  },
+  {
+   "evidence": "18ep run: 2.243/2.200/2.564, mean 2.336, spread 0.364 — but normalized against each run's own order-1 anchor it beat by 1.411 vs arm B's 1.441, i.e. 18 epochs bought NOTHING. Transformer answered (31.9M vs 6.7M params, 6.4 vs 19.3 ms/step) and later run: 2.868/2.681 with base models 7.947/7.070.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Run 18 epochs off the arm-B baseline, and explain what switching to a 4-layer transformer would cost/change.",
+   "quote": "Lets do with epoch of 18 then. \n\nWhat will Model= transformer and Layer = 4 do to our system?",
+   "ts": "2026-08-15T04:11:45"
+  },
+  {
+   "evidence": "Committed 91fd815: LR_DECAY envelope (peaks 100%/76%/29% at decay=1.0) and FAB_LR_OWN (experts spanning 1.00e-04..1.99e-03 while global 9.65e-04), both off by default, verified at toy scale only. The LR research agent later found two flaws in the envelope (it multiplies the floor as well as the peak; it re-introduces horizon dependence) — NOT fixed in this window. Building it also uncovered the founders-had-no-birthday bug.",
+   "outcome": "built",
+   "paraphrase": "Replace the repeating full-peak cosine with a decaying envelope over a still-oscillating rate, and give every expert its own independent LR schedule.",
+   "quote": "I am starting to think cosine may not be the right way to go. It should start high, but gradually lower, fluctuatging, but lowering in peak of fluctuations.\n\nAlso, I want to have the LR schedules of each expert to be independent, running on what I described",
+   "ts": "2026-08-15T14:07:13"
+  },
+  {
+   "evidence": "a5cc7ea. Measured contrast on identical config/seed against genuinely pre-fix ac79e92: 0 culls / 24 experts before vs 6 culls / 24->8 after. Also added fab_born to the checkpoint with resume backfill, and fab.age() defaulting to born-at-0 so a missing record fails toward OLD.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Fully fix the founders-have-no-birthday bug that made the initial expert population permanently immune to culling.",
+   "quote": "You mentioned you uncovered something. Fix the issue, since its a pretty big one",
+   "ts": "2026-08-15T14:26:56"
+  },
+  {
+   "evidence": "752b1ff added _stopped / STOP-file to longrun.sh, wired into seeds/grid/repeat. Verified in smoke: '== stop requested (.../STOP) -- finishing here.' A manual workaround (pre-creating stub logs with the completion sentinel) was also given for the run already in flight.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Provide a graceful way to stop a multi-seed sweep after the current run finishes, without killing anything.",
+   "quote": "Second, I want to stop the second and 3rd seed without ctrl C or force kill. How would I do so?",
+   "ts": "2026-08-15T15:19:38"
+  },
+  {
+   "evidence": "notes/research_lr_schedules.md, 882 lines, ~45 schedules, committed 9645050. Heavily caveated: WebFetch was blocked for every paper host, so nearly every claim is [S] search-summary or [M] memory, not [F] fetched. It did produce two corrections to Claude's own LR_DECAY implementation.",
+   "outcome": "built",
+   "paraphrase": "Dispatch a research agent to survey the LR-schedule literature exhaustively and rank by popularity.",
+   "quote": "Third, Send an agent to look at existing research for the learning rates, to see what has been tried. Make a list of all. Then The most popular ones.",
+   "ts": "2026-08-15T15:19:38"
+  },
+  {
+   "evidence": "Four agents completed: research_lr_schedules.md (882), research_tokenizer.md (500), research_experts_routing.md (1082), research_continual_memory.md (943). All committed. Claude flagged them as 'model recollection, not sourced literature' because egress blocked full-text. One finding (mask_dead missing retired ids) was verified and fixed as f8599b7.",
+   "outcome": "built",
+   "paraphrase": "Run parallel literature-survey agents for each subsystem of the project, as review material for the researcher.",
+   "quote": "Fourth, Do the third for each aspect of what we have created, with separate agents. These will be for me to review.",
+   "ts": "2026-08-15T15:19:38"
+  },
+  {
+   "evidence": "FAB_LR_BOOST added (752b1ff). Verified at FAB_LR_BOOST=3: experts spanning 1.00e-04..4.24e-03 while the global rate had annealed to 1.54e-04 (a 27x spread). Toy scale only; later gated on grace per the researcher's follow-up and defaulted to 2.0 in 9146136.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Give bottom-ranked (cull-eligible) experts a raised learning rate or mutation chance rather than only shortening their life.",
+   "quote": "Fifth, SInce we have the custom learning rates per expert, lets have a mechanism, where if the expert is near bottom, it has an increased LR or mutation chance. (since its already pretty poor)",
+   "ts": "2026-08-15T15:19:38"
+  },
+  {
+   "evidence": "notes/DOC_PLAN.md (planner) then nine files committed: 01_TIMELINE (485), 03_EXPERIMENTS (952), 04_RESULTS (924), 05_ERRORS (2455), 06_CONTINUAL_LEARNING (720), 07_WIP (687), 08_GLOSSARY (847), 09_COMMENT_AUDIT (507), LITREVIEW_FINDINGS. 02_IDEAS.md and 00_INDEX.md explicitly NOT written — Claude said he'd write those himself. First attempt at the 05/09 pass was also drafted from the commit log, not the chat log, until the researcher's 19:54 correction.",
+   "outcome": "built",
+   "paraphrase": "Build a thorough documentation set on GitHub covering the researcher's own ideas, what was tested, and results, produced by a planner agent followed by executing agents.",
+   "quote": "Sixth, Have an agent or series of agents to go through our entire chat history, and document them on the github page. At minimum, it needs to include suggested ideas, by me. What was tested, results.",
+   "ts": "2026-08-15T15:19:38"
+  },
+  {
+   "evidence": "Adopted verbatim as DOC_PLAN's caveat block, reproduced at the top of every written file and byte-diffed by at least two agents against DOC_PLAN.md lines 7-12. Enforcement rule added: a claim without commit, n, and instrument era does not go in.",
+   "outcome": "built",
+   "paraphrase": "Instruct that documented conclusions be treated as probably wrong — chance, un-optimized settings, or misinterpretation — and that this caveat attach to each result.",
+   "quote": "(Also note that although you will say it definitively means something, it is likely often wrong, since there is a high likelihood that it was either due to chance, since we have not optimized anything, and are still building out strategy, or had an inherent error in interpretation or why it was done.",
+   "ts": "2026-08-15T15:19:38"
+  },
+  {
+   "evidence": "09_COMMENT_AUDIT.md classified 354 blocks / 2648 lines: KEEP 279, MOVE 51, WRONG 19, STALE 5. It is a plan only — no comment was moved and no source file was touched by the audit. Only two WRONG comments were separately fixed by Claude (3c2a59e and its half-fix completion).",
+   "outcome": "built-never-run",
+   "paraphrase": "Move commentary in the source that isn't usage documentation out into the notes files.",
+   "quote": "Notes in the code that are extranoues and do not describe the usage should be moved to the notes. I expect this to be long and thorough",
+   "ts": "2026-08-15T15:19:38"
+  },
+  {
+   "evidence": "Claude read memory.py and found: owner = argmax-routed expert folded %64 (not domain); src is never consulted in eviction; last is WRITE-recency because mem.read() was only called from generate()/bpb_true(); use is 0 for every entry during training; and MEM_PER_EXPERT defaulted to 1 while its own comment said DEFAULT OFF and recorded it as 0.555 b/B worse. All confirmed in source and led to e25d9b5 and daf9f89.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Diagnose why Python memories evicted English ones — domains are not isolated in the memory store — and rethink memory control.",
+   "quote": "Another note: the fact that the memories from the python run has largely overwritten the english, it means that the domains have not been fully isolated. Better memory control is likely also needed. We need to re evaluate how it currently works.",
+   "ts": "2026-08-15T15:31:54"
+  },
+  {
+   "evidence": "Explicitly listed as 'Not yet done' at 16:19 and still outstanding at chunk end; Claude noted it is now a different measurement anyway because the memory read-probe landed in between.",
+   "outcome": "deferred",
+   "paraphrase": "Rerun the transformer arm with the accompanying settings (LR=3e-4, KEY_LAYERS=2) that the first attempt lacked.",
+   "quote": "SInce the transformer run didn't have those values set, we should do it in a run.",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "Gated on fab.age(i, step) >= FAB_GRACE in e25d9b5, then re-anchored to the use-clock grace in 9146136. Rationale Claude recorded: a newborn is at the bottom because it hasn't had a chance yet, and already gets the newborn rate.",
+   "outcome": "built",
+   "paraphrase": "The LR/mutation boost for bottom-ranked experts should only apply to experts past their grace period, not to newborns.",
+   "quote": "For 5, on the bottom ranked experts, this is assuming they are outside of their safe phase.",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "daf9f89: EVICT=lru now default and means least-recently-RETRIEVED; mem_evict_test.py drives one store three ways — lru: A retrieved 70/100 kept vs 0/100 for never-retrieved; usage: 86/100 vs 20/100; recency (control): 0/100 both. NOTE the later litreview lead (18:17) that LRU-on-retrieval is precisely the scan pathology this system exhibits — contradicting this change, unresolved.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Expert overlap in the memory partition is fine but total overlap is a design failure; router-level domain separation is inadequate; switch eviction to use-based (retrieval) recency.",
+   "quote": "On memory, overlap experts is ok and expected, but having all experts have been overlapped is an inherent issue. Likely separation or distinction, on router level between python and english is not sufficient.\nUse based recency is better I think.",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "e25d9b5 flipped MEM_PER_EXPERT default to 0 in both the read site and the _SPEC registry, and rewrote the comment to say the cited numbers are 'a rough indication from one configuration, not a verdict'. The instruction generalized: 09_COMMENT_AUDIT names comments-that-argue-from-a-knob's-value as the highest-risk category, and two of Claude's own comments were caught stale in this window.",
+   "outcome": "built",
+   "paraphrase": "Fix the identified memory bugs; the MEM_PER_EXPERT=1 default was a bad past decision; never treat an old code comment as authoritative because architecture changes invalidate it.",
+   "quote": "Fix the bugs that you've mentioned. Default 1 sounds like a poor and faulty decision in your past. Treat past comments as a rough statement, never as anything definitive, especially since it can drastically change with different structures and architecture.",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "daf9f89 added MEM_PROBE_EVERY / MEM_PROBE_N — cadenced real retrievals during training on a deterministic stride, plus last stamped on every path and restored on resume. Live CPU smoke: 'mem 4800 (1954 retrieved, 29 probes)'. Claude's summary: 'Every eviction rule claiming to rank by utility was ranking a constant.'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Make the memory store produce genuine read-side utilization during training rather than eviction ranking a constant.",
+   "quote": "Lets give a real signal.",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "Answered in prose: content-addressed cosine top-k over valid keys, softmax(tv/tau) weights scatter-added into a token distribution, use.index_add_(0, gi, w) accruing soft mass not hit counts. Claude drew the contrast the researcher was pointing at: memory's fitness is demand-side and graded, expert `use` is credited by the router being trained — 'Memory can't flatter itself; the router can.' Not yet implemented for experts.",
+   "outcome": "built",
+   "paraphrase": "Explain memory's recall/utilization mechanism, with a view to adopting something like it for expert fitness.",
+   "quote": "Relatedly, what is the memory's system for recall and utilization? Likely we would need something similar here.",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "Informed the use-clock design. Claude partly pushed back and acted on it: when the envelope decayed to zero for every survivor he added FAB_LR_AMIN (0.05, raised to 0.15 in 95aa336), arguing 'Your framing tolerates an individual aging out; it shouldn't be imposed on every survivor by construction, or birth-and-death is the only adaptation left.'",
+   "outcome": "built",
+   "paraphrase": "Individual experts freezing/aging out is acceptable because selection replaces them with successors over long runs.",
+   "quote": "Since the system relies much on an evolutionary mechanism, certain experts \"aging out\" and not learning is not a large issue. If they contain error, ideally, they will eventually be replaced by their own \"new successors\", with long enough runs.",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "Realized in 9146136 as FAB_LR_CYCLE denominated in selections on fab.uage, with FAB_LR_OWN turned ON by default. Never measured at pilot scale in this window — the pilot the researcher launched at 17:08 had not reported by chunk end. The litreview separately found NO prior art for per-group independent LR *phase* (question 1 came back empty).",
+   "outcome": "built",
+   "paraphrase": "The LR cycle length should be a per-expert property rather than a global run-level one, because that suits an evolutionary population.",
+   "quote": "Importantly, having LR Epochs as a per expert effect rather than system encompassing is more conductive to the evolutionary learning, at least in my perspective.",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "notes/EXTERNAL_RESEARCH_BRIEF.md committed cc544ce with a measured egress status (WebSearch works, WebFetch EGRESS_BLOCKED at proxy), a paste-ready 6-question prompt, and a re-check command. Every subsequent doc agent was instructed to report the literal word BLOCKED. The researcher ran it and returned a 16-file litreview zip at 18:13.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Produce a research brief the researcher can paste into a non-Claude-Code session, and make blocked network access surface as an explicit alert rather than silently degrading.",
+   "quote": "Since webfetch was blocked, provide me what to tell a non claude code session, and I will provide to you or digest myself. (also it should alert me if something is blocked)",
+   "ts": "2026-08-15T16:02:18"
+  },
+  {
+   "evidence": "9146136 + 95aa336: fab.uage counts selections since birth/rescue; triangular2 verified numerically (peaks 100/52.5/28.7/16.9% of LR, troughs at LR_MIN_FRAC); phase-shifted so a newborn starts at peak; FAB_GRACE 3000 steps -> 48 selections; FAB_CULL_FRAC 0.08 -> 0.02; BAL_FLOOR 0.15. Smoke-clean only — the container had no GPU, so the pilot was the researcher's to launch and had not reported by chunk end.",
+   "outcome": "built",
+   "paraphrase": "Implement Smith triangular2 per expert, clocked in selections rather than steps, make the grace period use-based too, and cut the cull fraction to 2% or 1%.",
+   "quote": "Lets use Smith's Cyclical LR, but implemented in a per expert scale then, with each expert counting down their age. Lets adjust things to only be when the specific expert is selected, so age is dependent on the expert's use. Lets make the safe period dependent on this instead, and modify the culling percentv from the either 8% or 4% that it currently is to 2% or 1%.",
+   "ts": "2026-08-15T16:34:36"
+  },
+  {
+   "evidence": "BAL_FLOOR=0.15 added: BAL_WARM previously decayed the balance weight to exactly zero, after which an unselected expert had no route back. Claude noted the two asks are one mechanism — under the use clock an unselected expert is also frozen at its use-age so the cull can never reach it. Not measured at pilot scale.",
+   "outcome": "built",
+   "paraphrase": "Keep culling (it is core to the evolutionary mechanism) but add a small persistent balance-loss pressure so every expert gets traffic and a chance.",
+   "quote": "Balance loss can be implemented on a smaller scale. I still want culling since it is semicritical to our evolutionary mechanism. Balance will help ensure that each expert has a chance. ",
+   "ts": "2026-08-15T16:34:36"
+  },
+  {
+   "evidence": "Pilot command given (seeds 2, FAB_GROW=0 FAB_N0=2048 EPOCHS=18 SEED_CKPT=1); researcher confirmed at 17:08 'The pilot is running' and then approved the DOC plan. Pilot results are not in this chunk.",
+   "outcome": "built",
+   "paraphrase": "Gate the documentation review on first validating the new lifecycle changes in a pilot run.",
+   "quote": "I want to test the new changes in a pilot run before I go through the doc",
+   "ts": "2026-08-15T16:34:36"
+  },
+  {
+   "evidence": "Claude produced the 6-question paste prompt; wave 1 (01_TIMELINE, 05_ERRORS, 08_GLOSSARY) launched after freezing notes/_evidence/commit_log.txt (267 commits, 8127 lines) plus a runs.csv snapshot. All three landed and were committed.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Offer to run the literature search in an external chat session; approve the documentation plan and start the writing agents.",
+   "quote": "You mentioned the egress policy. Since it sounded like an issue and I want to have a thorough search, I can send a prompt to another chat, outside of claude code. Let me know what to send if it would be useful.\n\nDOC Plan looks good. Lets run the agents",
+   "ts": "2026-08-15T17:08:15"
+  },
+  {
+   "evidence": "Claude added six questions (cache eviction, replay-buffer selection, seeds-needed methodology, forgetting metrics, MoE aux-loss/expert-choice, Adam under cyclical LR + update-rescaling correctness) and two tangents (neuroevolution x gradient descent, online vocabulary growth). The returned zip covered all of them as files 07-15; the cache-eviction and seeds answers both changed Claude's reading of prior work.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Ask for additional/tangential research questions before handing over the external session's answer.",
+   "quote": "I've run the research prompt and gotten an answer. Before I pass it to you, is there anything else I should add? or tangential areas of search that would be relevant and helpful?",
+   "ts": "2026-08-15T17:27:39"
+  },
+  {
+   "evidence": "Archived verbatim to notes/_evidence/litreview/ (16 files, 2548 lines) and cross-checked; notes/LITREVIEW_FINDINGS.md records what survived checking. Three of its claims changed project readings (GPT-2 b/B anchor, per-arm sigma, LRU scan pathology); two of its warnings were checked and rejected (the 4096x balance-loss error, weight-decay rescaling).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Delivering the external literature review, noting it was a single sequential pass rather than parallel subagents.",
+   "quote": "This is its report. No subagents were used. I was mistaken about the abilities, but it should be fine",
+   "ts": "2026-08-15T18:13:08"
+  },
+  {
+   "evidence": "Claude read /root/.claude/projects/.../e880caf7....jsonl (42 MB, 16229 lines, 2026-07-21T18:04:47Z .. 2026-08-15T19:55:00Z), extracted 455 human turns / 832,046 chars to notes/_evidence/chat/user_turns.{jsonl,md}, and began writing notes/_evidence/chat/chunks/. The chunk ends mid-extraction; no agents were launched against the chunks within this window.",
+   "outcome": "built",
+   "paraphrase": "The documentation agents must cover the whole conversation history, not just what fits in context or what is in the repo.",
+   "quote": "I want the agents to go through the entire history, even if it is outside your current context window.",
+   "ts": "2026-08-15T19:54:38"
+  }
+ ],
+ "notes": "Nothing BLOCKED — the file was read in full (8,086 lines / 473,413 chars), start to end.\n\nFORMAT WARNING for the synthesis stage: in this transcript many `### [ts] USER` entries are NOT the human. Tool output is rendered under a USER heading beginning with `[RESULT]`, and there are also `<task-notification>` blocks (subagent completions) and one stop-hook message under USER headings. I attributed to the researcher only the ~21 USER entries containing actual prose. The chunk's first entry (22:53:11) is a tool result, not a human turn.\n\nThere is a conversation-compaction summary inserted at 2026-08-15T16:06:34 under a USER heading. It is machine-generated, not the researcher speaking, but it contains a valuable verbatim list of the researcher's earlier messages (section 6, \"All user messages\") covering the pre-chunk history — including standing constraints stated verbatim: \"the runs folder and its internal contents should not be overwritten\"; confirm before action on perf changes; no compromises (do not remove/downgrade functionality for speed); default to bash unless python specified; commit and push to rm-predict only; do not create PRs unless explicitly asked. I did not put those in `ideas` because they were not uttered in this window, but they are load-bearing and appear verbatim at lines 3793-3820 of the chunk if the synthesis wants them.\n\nStructural note on this window: it splits cleanly in two. Up to ~16:45 it is mechanism work driven turn-by-turn by the researcher (capacity, newborn-fraction cap, LR shape, per-expert schedules, memory eviction). After 17:08 it is almost entirely a documentation/audit pass by subagents, whose main product is a systematic invalidation of the project's own history: 44 INV rows, 226 catalogued errors, 15 ancestry-verified epoch boundaries, and the finding that of 56 experiments roughly half held and only 1 of 8 continual-learning measurements is real.\n\nTwo claims worth flagging as unverified-by-me because they come from subagent reports rather than direct tool output in this chunk: the \"226 errors / 44 invalidations\" counts and the \"413 world-model readings, zero positive\" figure. Claude spot-checked hashes for the former and did not independently re-derive the latter.\n\nOne idea I could not place: at 03:32 the researcher asked \"How does it look? Did it expand?\" — I recorded it as an idea-shaped question because its answer (no, the run used stale code) is the pivot for the whole newborn-fraction finding, but it is a question rather than a proposal.\n\nThe researcher's stated numerical goal in this window — \"safely below 2, ideally hit 1.5 this run\" — was not achieved. Nothing in the window beat the pre-existing 1.960, and by chunk end the best result (arm B) had itself been degraded to \"measured with no selection at all\".",
+ "retractions": [
+  {
+   "claim": "Claude was about to report the rescue-before-cull mechanism as working after the first A/B",
+   "correction": "'Both mechanisms are silent — rescue is byte-identical to off, and I have no evidence the cap lifted.' It had fired zero times; FAB_GRACE=3000 on an 1800-step run meant nothing was ever old enough to cull, and there was no counter in the log to say so.",
+   "ts": "2026-08-14T22:58:25"
+  },
+  {
+   "claim": "'spawn_from is a second growth path and my soft cap doesn't clamp it — that's how it reached 17'",
+   "correction": "'It works exactly as designed — I misread my own grep.' The cap had already lifted 16->32 at step 2156 before the growth at 2184; the 17-over-16 was not a leak. (The spawn_from clamp was still committed as a genuine second-door fix, 41d2c5d.)",
+   "ts": "2026-08-15T01:41:27"
+  },
+  {
+   "claim": "'MODEL=transformer has never been run at pilot scale' (Claude, previous turn, quoting a longrun.sh comment)",
+   "correction": "'It has already run twice — and I need to correct what I told you last turn.' Two pilots exist at d768 L4: held-out 2.130 and 2.184. Stale comment corrected in bf53d40. Those numbers were then themselves declared void — both ran FAB_GROW=1 to 4096 with model-ALONE at 4.680/4.952, the arm-D signature.",
+   "ts": "2026-08-15T04:12:22"
+  },
+  {
+   "claim": "The 18-epoch result reads as a +0.337 regression against arm B (2.336 vs 1.999)",
+   "correction": "The corpus was re-fetched at 0.5 GB and got harder (order-1 3.440 -> 3.747). Normalized against each run's own anchor: 1.411 vs 1.441 — flat. Claude took responsibility: 'three knobs moved at once — epochs, stream length, and the corpus — which is on me: I gave you that command without flagging that a re-fetch changes the yardstick.'",
+   "ts": "2026-08-15T14:01:52"
+  },
+  {
+   "claim": "A pre-fix vs post-fix cull comparison showing 7 culls before and 8 experts after",
+   "correction": "'I also have to retract a comparison I ran on the way here' — git stash reverted only to 91fd815, which already had the __init__ half of the fix, so both sides had it. Redone against ac79e92: 0 culls / 24 experts before vs 6 culls / 24->8 after.",
+   "ts": "2026-08-15T14:33:16"
+  },
+  {
+   "claim": "'Arm B is the best configuration this project has produced' — 1.999 mean, spread 0.080, 'the first time you have a configuration reproducible enough that a 0.1 b/B difference would actually mean something' (01:27:41)",
+   "correction": "'Arm B's 1.999 / spread 0.080 — the best on record — was produced by a population that could never remove anything.' 05_ERRORS later lists 'arm B as reproducible at HEAD' among the VOID claims (INV-15). What was measured is '2048 experts, frozen, no selection'.",
+   "ts": "2026-08-15T14:33:16"
+  },
+  {
+   "claim": "'webfetch was blocked' — presented as the reason the four research agents could not source their claims",
+   "correction": "'the earlier \"webfetch was blocked\" was only half the story: search was available the whole time and I wasn't using it.' Re-measured: WebSearch works, WebFetch returns EGRESS_BLOCKED for every paper host. Two of the researcher's questions closed with search alone.",
+   "ts": "2026-08-15T16:19:43"
+  },
+  {
+   "claim": "'GPT-2-small sits near 1.0-1.2 b/B on comparable text' — the scale marker printed in every run report and used to judge every result including Python's 2.276",
+   "correction": "External litreview, Pile paper Table 2: GPT-2 small is 1.0878 on Pile-CC, 1.1111 on OpenWebText2, 1.2253 on the Pile aggregate, and 1.7912 on GitHub. Claude: 'Our b/B anchor is wrong for code... it means Python looked worse than it was.'",
+   "ts": "2026-08-15T18:19:15"
+  },
+  {
+   "claim": "External litreview: sigma ~= 0.596 b/B within-configuration, derived from the 1.227 b/B four-run spread, implying ~9 paired seeds for D vs B and ~80,000 for 2.009 vs 1.999",
+   "correction": "Claude: that spread is from 33a9299, which merge-base confirms is PRE-c76dc74 — measured through the instrument INV-13 voids. Per-arm sigma from the post-fix 2x2 ranges 0.047 to 1.225 (26x). 'sigma is a property of the arm, not the measurement.' Recomputed: D vs B ~12 paired seeds, 2.009 vs 1.999 ~1,450.",
+   "ts": "2026-08-15T18:19:15"
+  },
+  {
+   "claim": "External litreview: the balance loss is missing a factor of N, an error of up to 4096x",
+   "correction": "Checked numerically — fab_bal already includes w.size(1); uniform routing gives exactly 1.0 at N=8, 64 and 4096. Warning does not apply. Similarly its weight-decay-rescaling caution: AdamW's step is -lr*(wd*p + adam_step), so rescaling the realised delta IS a per-row rate, decay included.",
+   "ts": "2026-08-15T18:19:15"
+  },
+  {
+   "claim": "'The 07_WIP agent committed 752b1ff on its way to dying — it saw uncommitted changes and tidied them up. That's not its call.' (19:02)",
+   "correction": "'I was wrong that an agent made 752b1ff and it was discarded. It's a legitimate commit from 15:26 today — the one where _stopped and FAB_LR_BOOST landed. The agent was reporting the changes were already committed, and I misread that as a confession. No agent has committed anything.'",
+   "ts": "2026-08-15T19:39:57"
+  },
+  {
+   "claim": "Claude briefed the 07_WIP agent that four recent commits (e25d9b5, daf9f89, 9146136, 95aa336) had fixed some of 05_ERRORS' 12 not-fixed entries",
+   "correction": "The agent corrected him: all four are ANCESTORS of the commit that wrote 05_ERRORS, which already cites them. 'None of the twelve is fixed.'",
+   "ts": "2026-08-15T19:14:33"
+  },
+  {
+   "claim": "main() is ~2,940 lines (carried forward since 9c59a84); the world model is an unmeasured subsystem; self_organize.py is ~6,200 lines; runs.csv has 43 rows; the registry holds 279 knobs",
+   "correction": "Re-measured: main() is 3,953 lines / 574 locals; the world model has been measured 413 times in runs/ with ZERO positive readings (range -13.6% to -94.2%) — unread, not unmeasured; self_organize.py is 7,238 lines; runs.csv has 42 rows; _SPEC holds 310 knobs, 223 never set by any harness and 90 never set anywhere ever — including LR itself, fixed at 2e-3 in every run.",
+   "ts": "2026-08-15T19:13:11"
+  },
+  {
+   "claim": "'ACROSS THE RUN BOUNDARY' is described in the log as 'the ONLY number that spans the run boundary', i.e. the project's continual-learning retention measure (eng HELD +0.052 +/- 0.075)",
+   "correction": "First (15:37): holdout_bpb() calls _eval_logits, which never consults memory — it is a WEIGHTS-ONLY number. Then worse (19:24): fab_logits also fabricates a ZERO GIST, so held-out windows are routed without a real signature. 'every \"HELD\" verdict isn't a BWT variant, it's BWT on a different, ablated system.'",
+   "ts": "2026-08-15T19:25:11"
+  },
+  {
+   "claim": "Claude's own memory fix, shipped a few hours earlier: switching eviction from write-order (recency/FIFO) to LRU-on-retrieval is the correct response to a faded domain being evicted",
+   "correction": "External litreview: 'LRU-on-retrieval is precisely the pattern the caching field spent the last five years moving away from', and the new-domain flood is the textbook scan, which plain LRU has no defence against. Claude logged it as a strong lead rather than a verdict and proposed an internal test (compare occupancy share under EVICT=lru vs recency). Unresolved at chunk end.",
+   "ts": "2026-08-15T18:17:21"
+  },
+  {
+   "claim": "runs.csv / notes contradiction: the one real continual-learning run (a9d7258/b92f358) was 'RESUME from nogrow_s2', implying FAB_GROW=0",
+   "correction": "pilot-add sets NO fabric flags, so at b92f358 it inherited the defaults FAB_GROW=1, FAB_N0=3, FAB_NMAX=4096 — arm D — plus MEM_PER_EXPERT=1 and EVICT=recency. 'RESUME from nogrow_s2' names the checkpoint, not the arm. New unexplained puzzle: growth on at cap 4096 yet the run ended with six experts.",
+   "ts": "2026-08-15T19:24:55"
+  }
+ ],
+ "span": "2026-08-14T22:53:11 .. 2026-08-15T19:55:35",
+ "tested": [
+  {
+   "result": "off 3.607 | rescue 3.607 | caps 3.511 | all 3.511. rescue: 0 mentions — byte-identical to off. Mechanisms never fired.",
+   "ts": "2026-08-14T22:58:15",
+   "what": "First A/B of the three new mechanisms (rescue-before-cull, soft caps that lift on plateau) at toy scale, 1800 steps"
+  },
+  {
+   "result": "base 3.554 | rescue 3.650 | caps 3.447. 8 rescues logged; experts 6->12; vocabulary 320->640->1024 across two plateaus. Claude explicitly refused to offer the quality numbers as evidence ('noise at that toy scale').",
+   "ts": "2026-08-14T23:01:20",
+   "what": "Same mechanisms with gates forced (FAB_GRACE lowered, cadences fixed)"
+  },
+  {
+   "result": "A FAB_GROW=0 N0=3: 2.047/2.315/1.989 mean 2.117 spread 0.326 | B FAB_GROW=0 N0=2048: 1.998/1.960/2.040 mean 1.999 spread 0.080 | C FAB_GROW=1 NMAX=64: 2.163/2.127/1.983 mean 2.091 spread 0.180 | D FAB_GROW=1 NMAX=4096: 4.327/3.572/2.253 mean 3.384 spread 2.074. Fabric contribution +0.225/+0.293/+0.106 in B vs +0.022/+0.001/-0.006 in C.",
+   "ts": "2026-08-15T01:26:36",
+   "what": "The full growth-vs-size 2x2, three seeds per arm (uploaded GPU logs)"
+  },
+  {
+   "result": "Zero ramp events, growth one expert at a time; population reached 17 against a soft cap of 16 — initially misdiagnosed as a spawn_from leak, later shown to be the cap having already lifted to 32.",
+   "ts": "2026-08-15T01:38:02",
+   "what": "Soft-cap latch test: does starting at the soft cap disarm the ramp"
+  },
+  {
+   "result": "1.994/2.097/1.937 (mean 2.009, spread 0.160), 4023/4012/3999 final experts. 8 ramp events, 0 capacity lifts — [build] commit e9f2e58a95 predates GROW_CAP, so all six knobs were silently ignored.",
+   "ts": "2026-08-15T03:32:34",
+   "what": "The requested gradual-growth run, 3 seeds (uploaded)"
+  },
+  {
+   "result": "% new per event: n=3 -> 100%, n=6 -> 50%, n=12 -> 25%, n=30 -> 10%, n=2048 -> 10%. 3->4096 takes 63 events / 3150 steps; 2048->4096 takes 8 events / 400 steps (matches the observed accident exactly).",
+   "ts": "2026-08-15T03:49:08",
+   "what": "Arithmetic of the existing ramp rate: max(FAB_BURST=3, FAB_RAMP_RATE=0.10*n) every FAB_COOLDOWN//8=50 steps"
+  },
+  {
+   "result": "FAB_NEW_FRAC=0 -> pop 256, worst single-event 100% new, 0 held lines. FAB_NEW_FRAC=0.10 -> pop 7, 10 held lines — a deadlock, int(0.10*3)=0.",
+   "ts": "2026-08-15T03:52:12",
+   "what": "FAB_NEW_FRAC cap, first version"
+  },
+  {
+   "result": "FAB_NEW_FRAC=0 -> pop 256, worst 100%. FAB_NEW_FRAC=0.10 -> pop 15, worst 33% (=1-of-3, the best achievable at n=3).",
+   "ts": "2026-08-15T03:54:34",
+   "what": "FAB_NEW_FRAC after the max(1,...) floor fix"
+  },
+  {
+   "result": "n=3: 1 grow, 33.3%, capped to 1 | n=12: 8.3%, capped to 1 | n=64: 9.4%, capped to 2 | n=2048: 10.0%, capped to 81. Fraction is in charge from n>=10 rather than n>=30.",
+   "ts": "2026-08-15T04:07:53",
+   "what": "FAB_BURST=1 + 4% cap arithmetic"
+  },
+  {
+   "result": "GRU L1 6.7M params, 19.3 ms/step probe. Transformer L4 31.9M params (4.8x), 6.4 ms/step (3x FASTER). Two earlier transformer pilots found: 2.130 and 2.184 held-out.",
+   "ts": "2026-08-15T04:12:57",
+   "what": "Transformer L4 vs GRU L1 cost comparison"
+  },
+  {
+   "result": "2.243 / 2.200 / 2.564 (mean 2.336, spread 0.364). Base models 5.612 / 3.023 / 5.268. 78/88/79% real words. Corpus anchors moved: uniform 4.079, order-0 3.807, order-1 3.747 (was 3.440). Normalized: beats order-1 by 1.411 vs arm B's 1.441.",
+   "ts": "2026-08-15T14:00:44",
+   "what": "18-epoch run on the larger corpus, 3 seeds (uploaded)"
+  },
+  {
+   "result": "3 'cosine restart' lines; the real one at step 201925 jumped 1.00e-04 -> 2.00e-03 (100% of peak, a 20x jump). Held-out curve swings 1.5 b/B in the last third. The two seeds nearest a restart are the two with 5.6/5.3 base models.",
+   "ts": "2026-08-15T14:01:25",
+   "what": "LR restart audit of the 18-epoch run"
+  },
+  {
+   "result": "decay 0.0: 100%/100%/100%. decay 0.5: 100%/88.1%/64.4%. decay 1.0: 100%/76.2%/28.7%.",
+   "ts": "2026-08-15T14:08:29",
+   "what": "LR_DECAY envelope, numeric, 3-cycle run"
+  },
+  {
+   "result": "base 2.880 | decay 3.468 | own 2.882. Restart peak 100% -> 52% of peak with decay. Per-expert line exposed a bug: 'experts 2.00e-03..2.00e-03 by age (x4.00..x4.00, clamped)' — every expert identical.",
+   "ts": "2026-08-15T14:18:09",
+   "what": "Toy A/B of LR_DECAY and FAB_LR_OWN"
+  },
+  {
+   "result": "Working: 'global 9.65e-04, experts 1.00e-04..1.99e-03 by age (x0.10..x2.06)' — each on its own clock.",
+   "ts": "2026-08-15T14:23:34",
+   "what": "Per-expert rates after the founder-birthday fix and cadence fix"
+  },
+  {
+   "result": "ac79e92 (genuinely pre-fix): culls=0, final population 24. HEAD (fixed): culls=6, final population 8. Confirms arm B ran with zero selection.",
+   "ts": "2026-08-15T14:32:37",
+   "what": "Culling before vs after the birthday fix, same config and seed, 24 founders, FAB_GRACE=100"
+  },
+  {
+   "result": "held-out 2.868, beats order-1 by +0.874, model ALONE 7.947 -> +FABRIC 2.800 (fabric +5.147), 60% real words, 26.1 ms/step. KEY_LAYERS not set; LR left at the GRU-tuned 2e-3.",
+   "ts": "2026-08-15T15:20:51",
+   "what": "Transformer pilot seed 0 (uploaded, FAB_GROW with transformer)"
+  },
+  {
+   "result": "experts span 1.00e-04..4.24e-03 while the global rate is 1.54e-04 (27x). STOP file verified: '== stop requested ... -- finishing here.'",
+   "ts": "2026-08-15T15:26:24",
+   "what": "FAB_LR_BOOST=3 and the STOP file, toy scale"
+  },
+  {
+   "result": "With vocab_size=300, width 512, retired {256,271}: total masked = 214 (212 tail + 2 retired), live id 257 not masked. Prior behaviour left prob_use/prob_emb's 217 and 224 of 256 retired tokens in the denominator.",
+   "ts": "2026-08-15T15:37:11",
+   "what": "mask_dead retired-id fix, direct unit check"
+  },
+  {
+   "result": "held-out 2.681, beats order-1 by +1.061, model ALONE 7.070 -> +FABRIC 2.580 (fabric +4.490), 61% real words. Spread vs seed 0 is 0.187 — a reproducibly destroyed base model.",
+   "ts": "2026-08-15T16:02:57",
+   "what": "Transformer pilot seed 1 (uploaded)"
+  },
+  {
+   "result": "EVICT=lru: A retrieved 70/100 survive | A never retrieved 0/100. EVICT=usage: 86/100 | 20/100 (tie-break residue). EVICT=recency (control): 0/100 | 0/100. The control is the old bug stated as an assertion.",
+   "ts": "2026-08-15T16:16:03",
+   "what": "mem_evict_test.py — one store, domain A retrieved-but-not-written vs neither"
+  },
+  {
+   "result": "'[memory] EVICT=lru | read probe 64 queries every 25 steps'; epoch lines report 'mem 4800 (1954 retrieved, 29 probes)' and 'mem 4800 (1802 retrieved, 53 probes)'.",
+   "ts": "2026-08-15T16:15:08",
+   "what": "Live CPU smoke with the memory read probe on"
+  },
+  {
+   "result": "use-age 0 -> 100% of peak, 24 -> 5%, 48 -> 52.5%, 144 -> 16.9%, 192 -> 10.9%. Cycle peaks 100/52.5/28.7/16.9%, troughs at LR_MIN_FRAC. Confirms gamma=0.5 is triangular2.",
+   "ts": "2026-08-15T16:39:58",
+   "what": "Smith triangular2 on the use clock, numeric, phase-shifted so a newborn starts at peak"
+  },
+  {
+   "result": "rc=0, reaches report. 'per-expert rates active (Smith triangular2 on the USE clock, half-cycle 24 selections...)' with use-age 187..2942, cycle 5..62 — exposing that the envelope decays to zero (cycle 90 on six experts). held-out 3.224 at toy scale (noise).",
+   "ts": "2026-08-15T16:43:49",
+   "what": "Smoke of the whole use-clock lifecycle"
+  },
+  {
+   "result": "rc=0, train 3.378 | held-out 3.748 at toy scale. Config banner confirms BAL_FLOOR=0.15, FAB_LR_OWN=1, FAB_LR_BOOST=2, FAB_GRACE=48, FAB_CULL_FRAC=0.02, EVICT=lru, MEM_PER_EXPERT=0.",
+   "ts": "2026-08-15T16:46:32",
+   "what": "Smoke after raising FAB_LR_AMIN to 0.15"
+  },
+  {
+   "result": "fab_bal = w.size(1)*(w.mean(0)**2).sum() already includes N; uniform routing gives exactly 1.0 at N=8, 64, 4096. Warning does not apply. Residual difference: Switch uses N*sum(f_i*P_i), this uses N*sum(P_i^2) — ~2x in gradient near uniform.",
+   "ts": "2026-08-15T18:15:29",
+   "what": "Check of the litreview's claim that fab_bal is missing a factor of N"
+  },
+  {
+   "result": "sigma: B 0.047, C 0.106, A 0.193, D 1.225 — 26x across four arms of one experiment. D vs B needs ~12 paired seeds (litreview said 9); 2.009 vs 1.999 needs ~1,450 (litreview said ~80,000). Conclusion: sigma is a property of the arm, not the measurement.",
+   "ts": "2026-08-15T18:16:51",
+   "what": "Recomputation of seed sigma per arm from the post-fix 2x2"
+  },
+  {
+   "result": "runs.csv has 42 rows (not DOC_PLAN's 43). longrun.sh:255 defines nogrow as FAB_GROW=0 FAB_N0=1024 while cc0a377 calls arm A FAB_N0=3. Recorded, not resolved; no number moves either way.",
+   "ts": "2026-08-15T19:11:29",
+   "what": "Verification of 04_RESULTS' flagged discrepancy on 2x2 arm A"
+  },
+  {
+   "result": "42,301,042 bytes / 16,229 lines / 0 unparsable; 4423 user, 7599 assistant entries; 2026-07-21T18:04:47Z .. 2026-08-15T19:55:00Z. 455 human turns, 832,046 chars extracted.",
+   "ts": "2026-08-15T19:54:53",
+   "what": "Inventory of the full session transcript for the whole-history documentation pass"
+  }
+ ],
+ "wip": [
+  "Transformer rerun with LR=3e-4 KEY_LAYERS=2 — requested by the researcher at 16:02, still listed as not done at chunk end.",
+  "The correct gradual-growth run (FAB_GROW=1 FAB_N0=2048 FAB_NMAX=4096 GROW_CAP=1 GROW_CAP_FAB0=2048) on code that actually contains GROW_CAP — never executed; the one attempt ran on the pre-GROW_CAP commit.",
+  "The pilot the researcher launched at ~17:08 (seeds 2, FAB_GROW=0 FAB_N0=2048 EPOCHS=18 SEED_CKPT=1) — first pilot-scale test of the use-clock lifecycle, the live memory signal, and per-expert triangular2. No results in this chunk.",
+  "vmax8k retest on arm B with LOSS_MASK_DEAD=1 EPOCHS=18 — deferred by Claude to keep one knob at a time.",
+  "FAB_RESCUE measured against arm B rather than against noise — built and verified firing, never measured at scale.",
+  "The RESUME config-mismatch bug: fab loads strict=False and `fab.n_live = max(n_live, min(ckpt_n, fab.cap))` silently truncates (a 4096-expert checkpoint into FAB_NMAX=64 loses 4,032 experts without a word). Flagged at 23:03, explicitly not fixed.",
+  "LR_DECAY's two known flaws — it multiplies the LR_MIN_FRAC floor as well as the peak (landing near 0.25% of peak at decay=1.0), and it re-introduces the horizon dependence LR_EPOCHS was added to remove. Reported by the research agent, not fixed.",
+  "Decision pending on whether to drop FAB_NEW_FRAC to 0.01 to restore the cull-outpaces-growth ordering that FAB_CULL_FRAC=0.02 inverted — Claude fixed the comment and explicitly left the behaviour to the researcher.",
+  "02_IDEAS.md (the researcher's ideas and their fate) and 00_INDEX.md — the two documentation files Claude said he must write himself; neither exists at chunk end.",
+  "09_COMMENT_AUDIT's action list: 51 MOVE and 19 WRONG comment blocks, of which only two were actually corrected. The +0.709 fabric-knockout justification for FABRIC=1 still stands in self_organize.py:1090 against a VOID verdict.",
+  "The whole-history documentation pass the researcher requested at 19:54 — transcript extracted and chunking started, but no agent had been launched against the chunks when the window ends.",
+  "Unresolved: cc0a377 calls 2x2 arm A `FAB_GROW=0 FAB_N0=3` while longrun.sh:255 defines the nogrow preset as FAB_N0=1024. Recorded, not settled; the '6 -> 2048 experts' axis is quoted from it.",
+  "runs/equiv_noise_* is absent from the checkout, so c6f54e6's INERT verdicts stay untrusted; runs/equiv_c14f876_vs_37ecb20 has logs but no verdict line, so DOC_PLAN Q10 is unanswerable locally. Both need the GPU box.",
+  "Recovery of the lost continual-learning figure: no .cfg exists (pilot-add never writes one) and no 08-14 checkpoint survives locally, but holdout.py reproduces the 61b9d23 pair exactly — so the number is recoverable IF the GPU box still holds the checkpoint.",
+  "Proposed and costed but not started: a matched R_full / R_weights pair (code only, bpb_true already has the use_mem branch), then 3 seed-paired pilot-add runs because sigma for the continual-learning arm has never been measured.",
+  "LR itself has never been varied — 2e-3 in every run in the project's history. Identified as the cheapest untried experiment; not run.",
+  "runs.csv still has no instrument-era or corpus-era column (04_RESULTS reconstructed both externally); its three SOURCE: line pointers no longer resolve to the code they name.",
+  "HEAD's fabric defaults were still arm D (FAB_GROW=1, FAB_N0=3, FAB_NMAX=4096) as of 15:37 — the configuration the 2x2 measured at 3.384 / spread 2.074."
+ ]
+}

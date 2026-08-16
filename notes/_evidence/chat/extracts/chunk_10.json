@@ -1,0 +1,632 @@
+{
+ "chunk": "chunk_10",
+ "errors": [
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T17:02:08",
+   "what": "longrun.sh never set TOKENIZER_PATH, so every grid arm wrote to the same data/dyntok.json — vmax4k_3's vocabulary was overwritten by vmax8k_3's"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T20:04:46",
+   "what": "Two background jobs killed with exit code 144 from CPU contention (three heavy jobs on a 4-core box). Both had produced their evidence before dying."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T20:33:39",
+   "what": "Bug 1: the composer notification (set_vocab + note_born) was nested inside `if _i(\"WARMSTART\", 1):`. With WARMSTART=0 and TOK_COMPOSE=1 every online-minted token got an all-zero byte mask, so its composite was proj(length(0)) — identical for every such token, exactly the indistinguishable-fresh-row ByteComposer exists to abolish. note_born went with it, so born stayed -1e9 and the anchor held nothing."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T20:34:24",
+   "what": "Bug 2: DynamicTokenizer.load restores the SAVED vmax, not the env one, so resuming against a larger-VMAX tokenizer file gives _V > delta.size(0) and both table() and anchor() hit a bare shape error. Made more reachable by the per-arm TOKENIZER_PATH change."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T20:54:21",
+   "what": "Entropy gate blocked 100% of candidates: wrong statistic (absolute H is scale-dependent and anti-correlated with frequency) AND wrong control flow (a rejected candidate returned None, aborting the entire grow burst)."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T20:58:53",
+   "what": "Registry guard SystemExit: LR_EPOCHS declared default moved 0 -> 8 but two read sites still asked for 0. Would have killed the pilot at startup."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T21:24:45",
+   "what": "Name collision Claude introduced an hour earlier: _hb is the held-out probe dict carried in from RESUME (line 3121), and the new gate report line reused _hb for a block COUNT. report_holdout got an int and raised TypeError, SILENTLY deleting the ACROSS THE RUN BOUNDARY retention section — the measurement the continual-learning claim rests on."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T22:00:25",
+   "what": "Retirement made the segmentation FINER for the first time in the system, and the domain-genuineness reservoir assumed fixed-length windows: ValueError: expected sequence of length 64 at dim 1 (got 61) — killing the run AFTER its metrics printed."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T22:13:00",
+   "what": "maybe_grow's candidate loop breaks at the first entry below min_pair, commented 'the list is frequency-ordered'. After a TOK_MINT_NOVEL re-sort it is not. Latent before, reachable by default once TOK_MINT_PMIN=0.10."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-11T22:32:36",
+   "what": "Container restarted; background tasks stopped. First of several rollbacks."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T22:42:52",
+   "what": "`pkill -f self_organize.py` killed Claude's own shell (exit 144) — the second time in the session"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T22:46:24",
+   "what": "The smoke test duplicated _flags_for's arm definitions instead of calling it, and had drifted within the hour (prob_use 150 vs grid's 200; compose missing TOK_MINT_NOVEL=0). The first fix was also broken: _flags_for was defined INSIDE the grid) branch, so smoke would have resolved every arm to the empty string and passed seven identical runs as seven arms."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T22:48:37",
+   "what": "Claude edited longrun.sh while a background job was executing it. Bash reads scripts incrementally by byte offset, so the 128-line hoist shifted everything under the running interpreter and it resumed inside the watch) branch, exiting 1 on a smoke that had actually passed."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-11T23:26:35",
+   "what": "Container rolled back to 2c705c7 — levers.py, runs.py, vocab.py, runs.csv all missing locally, hours of work gone from the checkout. Everything was on origin; restored with git reset --hard origin/rm-predict."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-12T00:57:31",
+   "what": "The `frozen` arm was TOK_MINT_UNTIL=1 and nothing else while the grid hardcodes VMAX=2048 — 1536 rows (75%) never a target. It had NEVER measured what its name says, in any run it has ever appeared in. 5 more arms had the same defect."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-12T00:57:31",
+   "what": "Claude's own pre-flight shortfall predictor was guarded `if ONLINE and not TOK_MINT_UNTIL` — it skipped exactly the arms whose shortfall is knowable exactly in advance."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-12T01:16:48",
+   "what": "Container rolled back a second time; the arm-audit agents had read the STALE checkout, so their '_flags_for is not at top level' finding was an artifact. All other findings re-verified against the restored file before acting."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-12T01:22:17",
+   "what": "The frozen-arm fix was incomplete: VMAX=512 assumed SEED_VOCAB was 512, true of self_organize's default but not of the smoke harness (256), putting frozen straight back to 50% dead rows. Caught by Claude's own predictor on the first run after writing it."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-12T02:39:09",
+   "what": "Container rolled back a third time (runs.py missing). Restored from origin."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T01:41:38",
+   "what": "_due is not a predicate — it RECORDS the step and returns True. Asking it twice in one if/elif consumed the event, so the retok guard killed mid-epoch re-segmentation ENTIRELY; and _last_vsz is written only inside the retok body, so the skip branch never fired either. Both branches dead, silently, in base_5 / frozen_nr_1 / vmax8k_5. It also corrupted the held-out CURVE via a stale _VALT cache (the 1.6 b/B disagreement in each log)."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T19:14:16",
+   "what": "SIG_PROJ_BPT pinned at 2.4 (the VMAX~2048 end-of-run bytes/token) and used for every vocabulary size, so projected stride came out 256*2.4 = 614 = exactly SIG_WIN and coverage printed 100% whatever VMAX was. Real coverage 82% / 70% / 61%."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-13T20:04:34",
+   "what": "FROZEN = torch.randn(V, D) at module scope, unconditional, V == VMAX. Drew V*D numbers from the global generator BEFORE anything else was built, so changing VMAX re-rolled the init of every module constructed afterwards — including the signature encoder and the fabric's 4096 routing centroids, which are not VMAX-shaped. Also dead weight by default (KEY_SRC=model), an 8192x768 tensor allocated on device and never read at VMAX=8192."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-13T20:05:25",
+   "what": "The same _due double-call fixed for retok in d0728fe was STILL LIVE for 'grow' (lines 4682 and 4710), inert only because TOK_PROBATION defaults to 0. Agent reproduced it: with TOK_PROBATION=200 and non-empty prov -> 0 mint events over 20,000 steps. The first prob_use/prob_emb run would have frozen the vocabulary at SEED_VOCAB and produced the 75%-dead-row signature."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-13T20:09:33",
+   "what": "Claude's own fix for the above introduced a HARD CRASH: _fired is a fixed dict {grow, retok, ckpt, lmcurve} indexed unguarded by _due, and 'probation' was added as a cadence key without being added to _fired — KeyError on the first TOK_PROBATION>0 run."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-13T20:08:28",
+   "what": "The first VMAX-RNG fix did not work: reseeding immediately before `model = build_lm().to(DEV); enc = SigEncoder(...)` still leaves enc downstream of build_lm's VMAX-dependent draws. Encoder step-0 loss still 7.20 vs 6.93 across VMAX."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-13T20:07:54",
+   "what": "Agent finding: the LR restart is a single-step 20x jump (5% -> 100% of peak) applied to the ENCODER optimizer as well as the LM, and nothing calls note_shift for it — so PlateauGrowth classifies the largest self-inflicted loss jump in an 18-epoch run as an unexpected REGRESSION and can lock out growth for up to FAB_RECOVER_MAX=20000 steps."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-13T20:07:54",
+   "what": "Agent finding: the retok guard's invariant is wrong — retire() pops from seq2id but leaves id2bytes alone, so vocab_size is unchanged while the match table (and therefore the segmentation) is not. Latent under TOK_PROBATION>0 or TOK_DROPOUT>0."
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "Run completed (log 7ceb85d0-vmax8k_4.log, EPOCHS=30 LR_EPOCHS=8). Result at 19:58:15: vmax8k@30/LR8 held-out 3.368 vs @18/LR8 3.377 — 12 extra epochs bought 0.009 b/B. Claude gave the full 4-stage minting explanation at 17:42:29. NOTE: this number was later withdrawn (see retractions) because 22 of 30 epochs ran pinned at the 5% LR floor.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Run vmax8k for 30 epochs while holding the LR schedule at the 8-epoch shape, to test whether late-minted tokens simply need more exposure; also re-explain the minting pipeline end to end.",
+   "quote": "It looks interesting. It looks manyare valid. \n\nWhen I say longer, I mean kept at the LR of e epochs, but continuing instead of 18, maybe 30 epochs, to see if it learns those tokens\n\nExplain to me again how tokens are minted again, the full process",
+   "ts": "2026-08-11T17:40:11"
+  },
+  {
+   "evidence": "Claude found the anchor never ran at all (TOK_COMPOSE=0 gates it), so no collision existed yet; then solved it by construction — the appearance counter can only advance when a token is in a training batch, which a re-segmentation cannot do. Commit 3464ba7, verified in a TOK_COMPOSE=1 smoke ([config-audit] auxiliary loss terms that fired: TOK_ANCHOR x563).",
+   "outcome": "built",
+   "paraphrase": "Concern that re-tokenization (every 3000 steps) can fire inside a token's anchor window (4000 steps), and a demand that the two mechanisms be made independent.",
+   "quote": "TOK_ANCHOR_TAU=4000\nRETOK_EVERY=3000\n\nCan Resegmentation trigger during the Anchor Period? I don't want it to trigger incorrectly\n\nI want to keep the two separated",
+   "ts": "2026-08-11T19:51:59"
+  },
+  {
+   "evidence": "TOK_ANCHOR_USES implemented; unit test at 20:26:16 showed two tokens of identical age seen 500x vs 2x get 0.905/0.905 under steps but 0.007/0.980 under appearances. Committed 3464ba7. BUT it remains inert in every real run because TOK_COMPOSE still defaults to 0 — never measured at scale.",
+   "outcome": "built",
+   "paraphrase": "Replace the step-based anchor decay with one keyed to how many times the token has actually appeared in training.",
+   "quote": "I also want to modify anchor, so instead of 4000 steps, it triggers after a certain amount of appearances, ensuring training.",
+   "ts": "2026-08-11T19:51:59"
+  },
+  {
+   "evidence": "Answer at 20:26:59 was 'there is none': a call-site audit showed retire_stale, track_usage, set_fuzzy, fuzzy_segment, build_fuzzy_index, apply_merge and seg() are all defined in tokenizer.py and NEVER called from self_organize.py. 'Once minted, a token is permanent.' This finding directly motivated the probation mechanism built later.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Accepts some bad tokens, but asks what mechanism the system has for detecting and separating them after minting.",
+   "quote": "I still want to address Q3 (TOK_ANCHOR_TAU by steps) .A percentage of oddities is ok, but how robust is the system from separating oddities?",
+   "ts": "2026-08-11T20:23:45"
+  },
+  {
+   "evidence": "_SPEC changed from (\"f\", 0.0) to (\"f\", 400.0); shipped in commit c214c21 and visible on later EFFECTIVE banners (TOK_ANCHOR_USES=400). Still inert under TOK_COMPOSE=0.",
+   "outcome": "built",
+   "paraphrase": "Make appearance-based anchor release the default at 400 appearances rather than opt-in.",
+   "quote": "Anchor uses should not default to 0. Lets make it 400",
+   "ts": "2026-08-11T20:47:12"
+  },
+  {
+   "evidence": "Falsified: `git log -S` over tokenizer.py found nothing in any commit. Claude at 20:48:44: 'No such gate has ever existed — not in the current code, and git log -S finds none in history.' The only re-ranking was TOK_MINT_NOVEL (recency, not meaning), default 0.",
+   "outcome": "rejected",
+   "paraphrase": "Recollection that a pre-mint merge-quality gate already existed in the system.",
+   "quote": "I knew we had a quality control, before minting as permanent, where we check if the overall meaning of them is more than the composites, or has a useful meaning.  I've been thinking we were using it.",
+   "ts": "2026-08-11T20:47:12"
+  },
+  {
+   "evidence": "Built three times. v1 (absolute H(next|a) <= 1.5 bits) blocked 100% of candidates and stalled vocab at 256/1024. v2 switched to the researcher's actual criterion p(b|a) but still aborted the grow burst. v3 filters instead of aborting: 783 merges minted, vocab 1024/1024. Defaulted on at 0.10, then STARVED a real 8-epoch pilot to 1439/2048 (29.7% dead rows, held-out 3.600) — fixed to fail-open and default returned to 0 (commit 1a113f5).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Add a branching-entropy / predictability gate so a merge only happens when the left token reliably predicts the right one.",
+   "quote": "Maybe we can do something like branching entropy, where two tokens , a and b are merged, and I guess used, when a can reliably predict b. (before the minting stage, but a or b can be from either fully minted or undergoing testing)",
+   "ts": "2026-08-11T20:47:12"
+  },
+  {
+   "evidence": "Claude flagged the phrasing as ambiguous and asked via AskUserQuestion; the answer led to LR_EPOCHS default 8 with min(8, EPOCHS) clamp (commit c214c21), which the researcher then corrected the same evening (see 21:20:47).",
+   "outcome": "built",
+   "paraphrase": "Fix the LR-schedule coupling permanently: keep the cosine interval fixed while letting the schedule span the whole run by default.",
+   "quote": "The LR EPOCHS were an issue with the e18 earlier, where the rates were being dragged unusually. Make sure that that issue does not occur again. Can we have LR EPOCHS last the full run by default, but intervals stay the same, like before?",
+   "ts": "2026-08-11T20:47:12"
+  },
+  {
+   "evidence": "Implemented as anneal-over-8-then-hold-at-floor with a min(8, EPOCHS) clamp; the registry guard caught two half-changed read sites (SystemExit at config time, commit 18d4f8f). Superseded ~30 minutes later by the researcher's restart correction.",
+   "outcome": "built",
+   "paraphrase": "Answer to Claude's clarifying question: cosine wavelength stays 8 epochs, but the schedule should cover the whole run.",
+   "quote": "Full run in length, but the defaulted 8 in wavelength(of the cosine)",
+   "ts": "2026-08-11T20:52:16"
+  },
+  {
+   "evidence": "LR_RESTARTS added, default 1 (commit c341921); waveform verified (returns to peak at each wavelength multiple). Later refined so whole cycles fit the run and it always ends annealed. HOWEVER at 2026-08-13T19:09:33 Claude reported the evidence now runs against it: vmax4k 2.023 (hold) vs 2.132 (restarts), vmax8k 3.377 vs 3.989 — 'LR restarts look net-negative, and that's my default.'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Rejects hold-at-floor: the cosine should restart and repeat across a long run rather than saturate.",
+   "quote": "No, I don't want a clamp, it should continue with the cosine waves. The goal is to repeat.",
+   "ts": "2026-08-11T21:20:47"
+  },
+  {
+   "evidence": "Shelved at his request, then partially resurrected on 21:55:31 as TOK_PROBATION_BY=embed (‖delta‖/‖composite‖ >= TOK_PROBATION_MIN), which requires TOK_COMPOSE=1 and has never run at scale.",
+   "outcome": "deferred",
+   "paraphrase": "The real quality test he wanted is an embedding test (is the whole more than the sum of its parts); explicitly deferred in favour of branching entropy.",
+   "quote": "For the quality control, the goal was to have a sort of embedder test, where we see if the sum of components is different from them separately. Lets shelf this for later. I hope the branching entropy would do a good enough job.",
+   "ts": "2026-08-11T21:20:47"
+  },
+  {
+   "evidence": "Claude produced the ON/OFF table at 21:26:04-ish (from an actual run banner, not defaults) and identified four default-behaviour changes that meant 'base today is not the old base'. Also surfaced the EXPERTS=0 subtlety (legacy ExpertBank is mutually exclusive with the fabric, so 0 is correct).",
+   "outcome": "built",
+   "paraphrase": "Demands an explicit before/after comparison design and a full inventory of which subsystems are on and off before spending GPU time.",
+   "quote": "Just to make sure, the pilot needs to compare the difference between before the changes we've made, using a relevant comparison. Just for some double checks, it should have: chained society, experts, etc... Tell me what is on (and off) before I do the run",
+   "ts": "2026-08-11T21:20:47"
+  },
+  {
+   "evidence": "Commit fec2285. Verified firing unprompted in a real run at 21:33:41: '[config-audit] !! TOK_ANCHOR=0.05 was ON and its loss term NEVER FIRED -- it is gated on TOK_COMPOSE, which is 0 here...'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Extend the existing never-fired loss-term audit (which only covered DIV_W, IND_W, CHAIN_SUP) to cover TOK_ANCHOR and every loss-term knob.",
+   "quote": "self_organize.py already has the check that would have caught the inert anchor years of runs ago —\n\n[config-audit] !! {knob}={value} was ON and its loss term NEVER FIRED\n\nMake the change",
+   "ts": "2026-08-11T21:30:14"
+  },
+  {
+   "evidence": "Explicitly recorded by Claude as 'Noted for later ... not started' at 21:34:00 and again at 21:50:51 as 'Queued, not started'. Never run anywhere in this chunk.",
+   "outcome": "deferred",
+   "paraphrase": "Test vmax8k on more corpus coupled with a larger expert pool (FAB_NMAX) rather than more passes.",
+   "quote": "The enlargening of vmax8k corpus is a good idea, let's do it later. I want to couple with a larger expert pool size.",
+   "ts": "2026-08-11T21:30:14"
+  },
+  {
+   "evidence": "Defaulted on at TOK_MINT_PMIN=0.10 (commit fec2285), then REVERSED after the first real pilot: 29.7% dead rows, held-out 3.600 (base_3.log). Claude at 23:28:09: 'A filter that produces 30% dead rows at the standard config hasn't earned a default. It's an arm.' The 'learn and verify before minting' half became the separate probation mechanism.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Make the entropy/predictability gate the default, with the eventual aim of learning and verifying a token before it becomes permanent.",
+   "quote": "Branching entropy should default on. We'll need to figure how to go about, since aim is learn and verify before fully minting token",
+   "ts": "2026-08-11T21:30:14"
+  },
+  {
+   "evidence": "His framing exposed a real bug: at EPOCHS==LR_EPOCHS, _prog hits 1.0 and 1.0 % 1.0 == 0.0, so the LR jumped back to PEAK on the final steps of every 8-epoch run. After the fix: '(a) REPLICATE 8-epoch run, max |restarts - hold| = 0.000e+00'; (b) EPOCHS=18/30 get 2/3 complete cycles each ending annealed.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Two-part requirement on the LR change: it must reproduce the old 8-epoch results bit-for-bit and improve on longer runs.",
+   "quote": "The key for LR Epoch is: we had runs where 8 epochs would be nice. The LR Epochs should, a replicate, and b improve on those results.",
+   "ts": "2026-08-11T21:30:14"
+  },
+  {
+   "evidence": "The attached frozen512 log was diagnosed as a measurement of the LR-schedule bug, not of freezing: 152,725 steps (64% more than any other arm), peaked 2.500 at step 6000 then ran 146k more steps at 82%-of-peak LR, final 5.540. The remembered run was later located and eventually re-run clean as frozen_nr = 2.175 / 94% words.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Wants the previously-planned lever-split pilots plus re-tests of old results, and recalls a much better 8-epoch ~90%-word run with a minimal tokenizer.",
+   "quote": "I want to do the pilots mentioned way back when we were splitting the levers. And retest some old. I attached an impromptu run I did. There was one where we did 8 epochs with roughly 90% word creation (same minimum sized tokenizer), and this fared much worse at same phases, and across.",
+   "ts": "2026-08-11T21:37:30"
+  },
+  {
+   "evidence": "Correct — found recorded in self_organize.py:4624-4626 from the 6-arm pilot at 707f1af, EPOCHS=8: base 1.962 / frozen 2.072 / frozen_nr 2.365. Claude: 'That's your run.' Those rows were later found to have been measured under a 75%-dead-row defect and downgraded to historical.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Corrects Claude's search: the remembered run was a TOK_MINT_UNTIL=1 freeze, predating the 4k/8k series.",
+   "quote": "No, it was well before any of the 4k or 8k. I am confident it was a freeze at step 1.",
+   "ts": "2026-08-11T21:43:06"
+  },
+  {
+   "evidence": "runs.py + runs.csv created, seeded with 13 rows, `runs.py stale` reads today's defaults out of _SPEC and reports per row what must be overridden to reproduce it. Commit 8103a8a. Used repeatedly for the rest of the chunk and survived several container rollbacks via origin.",
+   "outcome": "built",
+   "paraphrase": "Stop burying measured results in source comments; keep a machine-readable CSV run registry instead.",
+   "quote": "Instead of recording in self organize, use a csv to keep track of past runs.\n\nWe can add that new series to the queue of tests. Let's go back to what we were in the middle of adjusting",
+   "ts": "2026-08-11T21:47:07"
+  },
+  {
+   "evidence": "Probation built and committed (9f8412b): TOK_PROBATION / TOK_PROBATION_BY / TOK_PROBATION_STEPS, soft retirement via TOK.retire(). Of his two proposed criteria, entropy was found STRUCTURALLY IMPOSSIBLE post-mint (greedy longest-match consumes the pair, so p(b|a)=0 forever; measured '0 kept, 8 un-merged, 100% failed') and was replaced with a `use` deadline criterion; `embed` survived. Default off; never run at pilot scale.",
+   "outcome": "built",
+   "paraphrase": "Build provisional minting with a keep/drop judgement based on either branching entropy or an embedding test.",
+   "quote": "Judgement of merge or unmerge should correspond to either: the branching entropy that was built, or an embedding system that sees if the sum is more than the parts.\n\nLet's build the probationary mechanism then",
+   "ts": "2026-08-11T21:55:31"
+  },
+  {
+   "evidence": "A `longrun.sh smoke` subcommand was created; four arms (base, nogate, prob_use, prob_emb) verified end-to-end locally, EXIT=0. Commits 05475cb, 136461c.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Verify the code runs end to end before spending GPU on the first pilot.",
+   "quote": "Let's start with the test. Does the code work? If yes, let's do our first pilot",
+   "ts": "2026-08-11T22:39:14"
+  },
+  {
+   "evidence": "Claude killed its local run (and its own shell, via pkill), added the smoke subcommand as a single repo-resident command, and from here on the researcher ran all pilots and uploaded logs.",
+   "outcome": "built",
+   "paraphrase": "Offers to run the heavy jobs on his GPU rather than have Claude grind them on a 4-core CPU box.",
+   "quote": "If it would be faster on gpu, let me run it",
+   "ts": "2026-08-11T22:42:41"
+  },
+  {
+   "evidence": "Vindicated within the hour. The smoke had DUPLICATED _flags_for instead of calling it and three of seven arms had already drifted (prob_use 150 vs 200, compose missing TOK_MINT_NOVEL=0). Claude's first fix was also broken — _flags_for was defined inside the grid) case branch, so smoke would have resolved every arm to the empty string and reported seven identical runs as seven passing arms. Hoisted to top level, commit 136461c.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Challenges whether the smoke tests actually test the configurations the grid runs.",
+   "quote": "Why always the smoke tests? Are they even updated?",
+   "ts": "2026-08-11T22:45:43"
+  },
+  {
+   "evidence": "Correct. The default-on mint gate starved minting: vocab asymptoted at 1439/2048, 29.7% never-minted rows, held-out 3.600 vs best 2.829 at step 6000. Median p(b|a)=0.029 against a 0.10 threshold. Fixed by fail-open (gate may reorder, never prevent) and default returned to 0; commit 1a113f5.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Reports that the first real pilot's base arm regressed badly.",
+   "quote": "Here's the base. It looks much worse",
+   "ts": "2026-08-11T23:24:40"
+  },
+  {
+   "evidence": "base = nogate = 2.239 byte-identical (free determinism check passed); frozen = 6.114 with 75% dead rows — broken by construction because the grid hardcodes VMAX=2048 against a vocabulary frozen at 512. An audit of all 46 arms found 5 more with the same defect (frozen_nr, frozen1k, freeze6k, vmax8k); all fixed, commits b6952da and 25c37eb.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Submits base/nogate/frozen logs and asks for both a read and a defect check.",
+   "quote": "Here are the three. How are they? and Is there anything we need to fix?",
+   "ts": "2026-08-12T00:56:24"
+  },
+  {
+   "evidence": "Produced the chunk's headline result: frozen_nr 2.175 b/B / 94% real words vs frozen 4.364 / 26%, with IDENTICAL vocabularies (512 minted, 441 used, 0% dead), differing only in RETOK_EVERY=0. Cause identified as 23 retoks of which 22 rebuilt a byte-identical stream while flushing the lookahead queue and blacking out fabric growth (8,800 of 67,966 steps = 12.9% of the run). Guard added, commit 046fd81. The 2.189 b/B magnitude was later withdrawn.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Submits the re-run frozen and frozen_nr logs after the arm fixes.",
+   "quote": "Here's the tests",
+   "ts": "2026-08-12T02:37:43"
+  },
+  {
+   "evidence": "base_nr arm committed (04cbe89). Answer traced through code: minting stops at tokenizer.py:172; _retok with count=False is deterministic greedy match over an unchanged table so the stream is byte-identical; but _sigq flush, _VALT/_BL cache drop and fabgrow.note_shift (400-step growth blackout) all still fire. ~10 of ~16 retoks in base@8ep were pure cost. The arm was never actually run in this chunk.",
+   "outcome": "built",
+   "paraphrase": "Approves a base_nr arm and asks what re-tokenization actually does once the vocabulary has hit its cap.",
+   "quote": "Yes, let's test what would be base_nr vs base. \n\nWhat does retok do when vmax is saturated?",
+   "ts": "2026-08-12T12:20:45"
+  },
+  {
+   "evidence": "Claude agreed and downgraded base_nr to the weaker experiment ('I'd run it second, and I'd expect it to lose'). Answer: NOT primarily CPU — with RETOK_TAIL=1 the compute saved is modest and 8 epoch-boundary re-tokenizations still ran. The mechanism was 22x400 = 8,800 steps of suppressed fabric growth plus 22 lookahead flushes.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Objects that base_nr's once-per-epoch re-segmentation would delay useful new tokens, and asks whether frozen_nr's benefit was actually a CPU saving.",
+   "quote": "Moving to 6000 steps would likely have adverse effects on the rest of the run.\n\nThen what did frozen nr do? Did it pause the retok CPU usage?",
+   "ts": "2026-08-12T12:30:10"
+  },
+  {
+   "evidence": "Claude conceded the concrete cost — EVERY grid command it had handed over used GRID_CKPT=0, so not one run saved a checkpoint, including frozen_nr at 2.175; both pilot-add and add REQUIRE a checkpoint, so 'Nothing we ran this session can be added to.' Claude offered to make pilot-add accept a checkpoint path (a few lines) but the change was never made in this chunk, and zero continual-learning runs happened.",
+   "outcome": "unclear",
+   "paraphrase": "Major course correction: the project's target is language and continual learning, not tokenizer optimization, and results must be buildable rather than merely readable.",
+   "quote": "the final goal is for language, not optimizing specifically the tokenizer, vmax, or different ways to freeze the structure . I need to be able to carry and build off the results we get, and a stumbling block has been the levers I've wanted split, but not, and interfering with our runs... Remember that a target has been and still is the continual learning.",
+   "ts": "2026-08-12T21:25:05"
+  },
+  {
+   "evidence": "Claude produced the four-part summary (settled / live / included-not-varied / excluded / never-tested) at 21:32:28, drawn from runs.csv rather than memory. It contained the vmax8k elimination claim the researcher immediately challenged.",
+   "outcome": "built",
+   "paraphrase": "Proceed with checkpointed preliminary runs to eliminate configuration series, and restate what is settled, live, included and excluded.",
+   "quote": "I agree with the checkpointed idea, but we don't have English learned yet. Preliminary results will still be interesting. We can use to see if they work, which series of configs, which we haven't settled on, we can eliminate. Reiterate key configs, and what is included and excluded.",
+   "ts": "2026-08-12T21:30:55"
+  },
+  {
+   "evidence": "Claude fully retracted: every vmax8k run on record carried a known defect (41% dead rows at 8ep; old stretched LR at 18ep; 56% and 73% of the run pinned at the 5% floor for the lr8 runs, which predate LR_RESTARTS). 'vmax8k goes back in the candidate set, untested.' A fair run was then done (vmax8k_5, then vmax8k_6 = 3.989, 8192/8192, 0% dead) — but that too was later withdrawn once the FROZEN RNG bug surfaced.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Objects to declaring vmax8k dead on defective evidence, noting it forecloses the exploratory question capless VMAX was meant to answer.",
+   "quote": "Why is vmax8 eliminated? I don't think we ran it properly, and that statement constrains us a lot",
+   "ts": "2026-08-12T21:36:18"
+  },
+  {
+   "evidence": "Claude found a bug in its own retok guard before reading the results: _due RECORDS the step and returns True, so the if/elif consumed the event and ZERO mid-epoch retoks fired in base_5 and vmax8k_5. Fixed in d0728fe. The 4k was then run (vmax4k_4 = 2.132, 77% words, +0.000 past minimum) and turned out to be the best and only stable arm in the 18-epoch field.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Ran base/frozen_nr/vmax8k at 18 epochs but skipped vmax4k, offering to add it.",
+   "quote": "I didn't do the 4k, since I didnt think it was necessary. I can do if needed",
+   "ts": "2026-08-13T01:40:02"
+  },
+  {
+   "evidence": "Instinct vindicated twice. First: SIG_PROJ_BPT was pinned at 2.4 (the VMAX=2048 value) so the coverage banner printed 'covers 100%' for every VMAX while real end-of-run coverage was 82%/70%/61% — fixed in e200178, but monotone so it does not explain the ordering. Then the agent found FROZEN = torch.randn(V, D) at module scope re-rolling the RNG for every non-VMAX-shaped module (commit 0f96784).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Non-monotonic behaviour in VMAX looks like a bug rather than a property, and if real it is a serious constraint on the continual-learning system.",
+   "quote": "I will run, but in the meanwhile, why would it work in the 4k, not either other? This is an interesting constrain on our system, if the continual learning needs to be around 4k tokens. I suspect a bug may have occured.",
+   "ts": "2026-08-13T19:12:03"
+  },
+  {
+   "evidence": "Three agents launched with distinct hypotheses. Two reported within the chunk and found: (1) VMAX silently re-rolls every weight in the system via module-scope FROZEN, making the three arms three different random inits, against a documented same-seed spread of 1.594 b/B; (2) the _due double-call still live for 'grow', which would have silently frozen minting the first time TOK_PROBATION>0 ran; (3) the retok guard's vocab_size invariant is wrong under retire(); (4) frozen vs frozen_nr is confounded because RETOK_EVERY=0 also collapses the signature lookahead to one window. The third agent had not reported by chunk end.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Directs Claude to dispatch investigative agents to hunt for a bug behind the VMAX non-monotonicity.",
+   "quote": "Send out an agent, to see if there may be a bug.",
+   "ts": "2026-08-13T19:49:14"
+  }
+ ],
+ "notes": "Coverage: read all 8,342 lines of the file. No BLOCKED sources.\n\nShape of this chunk: it opens on a tokenizer-quality investigation and ends with the entire comparative program being invalidated. The arc worth carrying forward is that almost every quantitative claim made in the first two days was withdrawn by the third, and the withdrawals were mostly triggered by the researcher pushing back rather than by Claude's own checks.\n\nResearcher's highest-leverage interventions, in order of impact:\n1. \"Why is vmax8 eliminated? I don't think we ran it properly, and that statement constrains us a lot\" — forced a full retraction of a premature elimination and reopened the top-end probe.\n2. \"why would it work in the 4k, not either other? ... I suspect a bug may have occured\" — non-monotonicity read as a bug, not a property. Correct: led directly to the FROZEN RNG discovery that invalidated the whole VMAX comparison.\n3. \"Why always the smoke tests? Are they even updated?\" — the smoke had drifted from the grid within an hour, and Claude's first fix would have passed seven identical runs as seven arms.\n4. \"the final goal is for language, not optimizing specifically the tokenizer, vmax, or different ways to freeze the structure ... a target has been and still is the continual learning\" — the session-level course correction; Claude conceded drift and that no checkpoint had been saved for anything.\n5. The LR requirement \"a replicate, and b improve\" exposed a real bug (1.0 % 1.0 == 0.0 jumping the LR back to peak on the final steps of every 8-epoch run).\n\nThe single most important structural fact established: the repo's own code at ground_update documents a same-seed spread of 1.594 b/B (\"two runs with byte-identical model code and the same seed ... read 3.694 and 2.100\"). Nearly every comparison made in this chunk was of differences smaller than that, from n=1 runs. Claude's own closing summary: \"this system cannot resolve anything below ~1.6 b/B from single runs.\"\n\nWhat survives at chunk end (Claude's own list, and it looks right): the dead-row series (0% -> ~2.2 b/B vs 75% -> 6.1, consistent across many runs and far outside the spread); the base/nogate byte-identical determinism check (exact, not statistical); and the code-level bug findings, which are facts about the source rather than measurements.\n\nContainer instability is a recurring hazard, not a footnote: the checkout rolled back to commit 2c705c7 at least four times (23:26, 01:16, 02:39, 12:22, 01:42, 19:08, 21:31 across the chunk). Nothing was lost because everything was pushed to origin promptly, but one arm-audit agent read a stale checkout and returned a wrong finding as a result.\n\nA note on Claude's error rate in this window: of the bugs found, roughly half were introduced by Claude during this same chunk (_hb collision, ragged-window ValueError, the entropy gate shipped twice broken, the gate default that starved a pilot, the _due retok double-call that killed re-segmentation for three 18-epoch runs, the _due('probation') KeyError, the incomplete VMAX-513 frozen fix, the failed first RNG fix). The pattern the researcher is implicitly pushing against — ship, default-on, then discover — recurs throughout.",
+ "retractions": [
+  {
+   "claim": "Claude predicted late-minted tokens would show high `unused` — 'minted from pairs that had already stopped recurring' — as the mechanism for late-cohort quality decay",
+   "correction": "'Your read is right, and it falsifies my hypothesis a second time: unused is 0% in every cohort, including the last. All 7,936 minted tokens appear in the corpus... is simply wrong — I should have predicted less confidently.'",
+   "ts": "2026-08-11T17:42:29"
+  },
+  {
+   "claim": "Claude's MIN_PAIR threshold-exhaustion hypothesis: with a fixed MIN_PAIR=50 the tokenizer keeps minting a low-quality long tail once frequent pairs are exhausted, so late tokens are the problem",
+   "correction": "Merge-tree audit showed boundary structure flat (word-init 16%->15%, interior 52%->51%), multi-word units RISING 12%->16%, and waste concentrated EARLY (prefix-of-another 72% -> 10%). 'three hypotheses of mine falsified against this file: unused-late-tokens, shape-degradation, and threshold-exhaustion... the vocabulary is not what's wrong with vmax8k.'",
+   "ts": "2026-08-11T20:16:05"
+  },
+  {
+   "claim": "The run report's own verdict 'UNDERFIT, keep training' with the held-out curve still descending",
+   "correction": "'now contradicted by direct evidence — it kept training, for 53,000 more steps, and got nothing' (0.009 b/B for 12 extra epochs)",
+   "ts": "2026-08-11T19:58:15"
+  },
+  {
+   "claim": "TOK_ANCHOR=0.05 and TOK_ANCHOR_TAU=4000 printed on the EFFECTIVE banner of every run as though active",
+   "correction": "The anchor is a method of ByteComposer, constructed only when TOK_COMPOSE=1, which is 0 in every run in the investigation. 'TOK_ANCHOR and TOK_ANCHOR_TAU have had no effect on anything we've measured.' Confirmed empirically by three runs with a 500x change in the anchor weight producing byte-identical reports.",
+   "ts": "2026-08-11T19:58:15"
+  },
+  {
+   "claim": "The verification workflow's 'plateau' finding: the LR floor explains why vmax8k floors at 3.37",
+   "correction": "REFUTED by the panel — the LR floor is the experiment's controlled constant, not its cause. Holding LR_EPOCHS=8 makes 18- and 30-epoch runs identical at every step, so it explains why extra steps are cheap but not why the model sits at 3.37 rather than 2.02. Its line citations had also drifted.",
+   "ts": "2026-08-11T20:35:12"
+  },
+  {
+   "claim": "RESEARCHER: 'I knew we had a quality control, before minting as permanent, where we check if the overall meaning of them is more than the composites... I've been thinking we were using it.'",
+   "correction": "'No such gate has ever existed — not in the current code, and git log -S finds none in history.' The only re-ranking is TOK_MINT_NOVEL, which scores by recency of growth, not meaning, and defaults to 0.",
+   "ts": "2026-08-11T20:48:44"
+  },
+  {
+   "claim": "Claude's branching-entropy gate, verified on a constructed case (H(next|'t')=1.315 PASS vs H(next|'e')=2.052 BLOCK) and shipped as TOK_MINT_HMAX",
+   "correction": "Wrong on two counts. Wrong statistic: the constructed test used repetitive text; on real English H is median 3.48 / p90 4.39 and is ANTI-correlated with frequency, so 1.5 bits rejects the most useful merges first. Wrong control flow: a rejected candidate returned None, aborting the grow burst. Replaced by p(b|a) with a filtering loop.",
+   "ts": "2026-08-11T20:58:44"
+  },
+  {
+   "claim": "Claude repeatedly described the mint gate as 'reordering which merges happen'",
+   "correction": "'It doesn't trim the vocabulary — it replaces about 70% of it' (shared tokens 307 of ~1024). 'Defaulting it on is a bigger change to base than I implied when I made it.'",
+   "ts": "2026-08-11T22:14:50"
+  },
+  {
+   "claim": "TOK_MINT_PMIN=0.10 defaulted ON, justified from a 400 kB test where it filled the vocabulary; the only caveat stated was 'untested at VMAX=8192'",
+   "correction": "It broke at VMAX=2048 in the first real pilot: 29.7% dead rows, held-out 3.600. 'I defaulted this on from a 400 kB test where it filled the vocabulary... It broke at 2048.' Default returned to 0 and the gate made fail-open.",
+   "ts": "2026-08-11T23:28:09"
+  },
+  {
+   "claim": "Branching entropy as the post-probation keep/drop criterion (one of the two the researcher named)",
+   "correction": "Structurally impossible, not a tuning problem: greedy longest-match consumes t+h into th, so pair count for (a,b) is 0 from the instant of the merge onward. 'The merge destroys the evidence its own criterion needs.' Measured 0 kept / 8 un-merged / 100% failed. Replaced with a use-deadline criterion.",
+   "ts": "2026-08-11T22:10:58"
+  },
+  {
+   "claim": "Claude had said RETOK_EVERY=0 stops re-segmentation",
+   "correction": "'One correction to what I said earlier. RETOK_EVERY=0 does not stop re-segmentation. _resample() rebuilds the stream at every epoch boundary and calls _retok itself, firing the same _sigq flush and note_shift.' base_nr is a reduction, not an elimination.",
+   "ts": "2026-08-12T12:22:53"
+  },
+  {
+   "claim": "'vmax8k is eliminated — 3.37-3.56 across 8, 18 and 30 epochs, worse than order-1 in all three. 8192 units is too many for 4 MB/epoch, and that's now tested three ways.'",
+   "correction": "Retracted after the researcher objected. Every vmax8k run carried a known defect: 41% dead rows at 8ep; old stretched LR at 18ep-old; 56% and 73% of the run pinned at the 5% LR floor for the lr8 runs, which predate LR_RESTARTS. 'vmax8k needs long runs to fill 8192 (~14 epochs), so it is the arm most damaged by the hold.' Also: the '12 extra epochs bought 0.009' finding 'says almost nothing about the vocabulary size; it measures the schedule.'",
+   "ts": "2026-08-12T21:37:04"
+  },
+  {
+   "claim": "The recorded frozen = 2.072 and frozen_nr = 2.365 rows from commit 707f1af, used as reproduction targets",
+   "correction": "Both were measured under the same 75%-dead-row defect (VMAX=2048 against a vocabulary frozen at 512). 'these re-runs won't reproduce those numbers, and shouldn't — they'll be the first clean measurements of that arm.' Left in runs.csv as historical, not targets.",
+   "ts": "2026-08-12T01:24:11"
+  },
+  {
+   "claim": "The retok guard was verified working — '11 skipped on frozen, zero on base. That's the correct discrimination at smoke scale.'",
+   "correction": "At real scale both branches were dead. _due consumed the event in the `if`, so the `elif` returned False and the retok never ran; _last_vsz never advanced so the skip branch never fired either. base_5 and vmax8k_5 have zero [tokenizer @ N] lines and zero 'retok(s) skipped' lines. Their curve, 'best was' and '+N since minimum' figures are invalid.",
+   "ts": "2026-08-13T01:43:24"
+  },
+  {
+   "claim": "LR_RESTARTS=1 was made the default at the researcher's request, framed as a strict improvement over holding at the floor",
+   "correction": "'LR restarts look net-negative, and that's my default.' vmax4k 2.023 (hold) vs 2.132 (restarts); vmax8k 3.377 vs 3.989. 'You asked for repeating cosine and I made it default; the evidence now points the other way, and I'd rather say so than let it ride.' (Confounded with the retok guard.)",
+   "ts": "2026-08-13T19:09:33"
+  },
+  {
+   "claim": "The 18-epoch VMAX comparison read as: 'vmax4k is first and second in the entire 18-epoch field, and it is the only regime that is stable'; '2048 misbehaves at 18 epochs'; '8192 has now had two fair runs and lost'",
+   "correction": "All withdrawn. FROZEN = torch.randn(V, D) at module scope re-rolled the RNG for every module built afterwards, so 'three runs differing only in VMAX' was false — they were three different random initialisations, against a same-seed spread of 1.594 b/B already documented in the repo's own code. Observed VMAX spread 2.132->3.989 = 1.857.",
+   "ts": "2026-08-13T20:06:39"
+  },
+  {
+   "claim": "'A retok on an unchanged vocabulary is pure damage: 2.189 b/B of it' — the session's headline finding, committed as 046fd81",
+   "correction": "Magnitude withdrawn: 'direction plausible, magnitude not separable from chaos.' Agent 1 additionally found the frozen/frozen_nr pair confounded — RETOK_EVERY=0 also silently collapses the signature lookahead to one window for the whole run, so SIG_BATCH is effectively off in frozen_nr. 'The 4.364-vs-2.175 pair is not a clean one-knob comparison.'",
+   "ts": "2026-08-13T20:06:39"
+  },
+  {
+   "claim": "Claude's habit of treating 'I ran the smoke test' as evidence the code was safe",
+   "correction": "Conceded after the researcher's challenge: 'the criticism lands in a way worth conceding: a smoke test I have to keep repairing is itself a liability, and I'd been treating \"I ran it\" as evidence without checking it tested the right thing.'",
+   "ts": "2026-08-11T22:49:35"
+  },
+  {
+   "claim": "Arm-audit agent finding: '_flags_for is NOT at top level. It is defined at longrun.sh:302, nested inside the grid) branch'",
+   "correction": "Artifact of a container rollback — the agents read a stale checkout at 2c705c7. After restoring origin, _flags_for was at line 85, top level, exactly as Claude had committed. All other findings from that audit were re-verified against the restored file and held.",
+   "ts": "2026-08-12T01:16:48"
+  },
+  {
+   "claim": "'FROZEN is now lazy, and I re-seed immediately before model construction, so the encoder/fabric/world-model inits are VMAX-invariant.' Pushed as 0f96784.",
+   "correction": "The fix did not work — encoder step-0 loss still 7.20 (VMAX=2048) vs 6.93 (VMAX=4096). build_lm() runs first on that line and consumes VMAX-dependent RNG before SigEncoder is constructed. Replaced with per-module seeds; not re-verified before the chunk ends.",
+   "ts": "2026-08-13T20:08:28"
+  }
+ ],
+ "span": "2026-08-11T17:02:08 .. 2026-08-13T20:09:45",
+ "tested": [
+  {
+   "result": "unused = 0% in EVERY cohort including the last; %bytes decays 32.6% -> 5.1% (last-cohort token worth ~1/6 of a first-cohort token); word-init 16%->14%, fragment 61%->56%; minted tokens cover 98.7% of corpus bytes",
+   "ts": "2026-08-11T17:40:11",
+   "what": "vocab.py --corpus cohort analysis of the 8k mint log (7936 minted tokens, 8 cohorts)"
+  },
+  {
+   "result": "3.368 held-out vs 3.377 at 18 epochs — 0.009 b/B for 53,000 extra steps; still worse than a two-line order-1 table (3.230). Later withdrawn: 22 of 30 epochs were at the LR floor.",
+   "ts": "2026-08-11T19:58:15",
+   "what": "vmax8k at EPOCHS=30, LR_EPOCHS=8 (13 epochs of pure consolidation at a fixed 8192 vocabulary and pinned 1.0e-4 LR)"
+  },
+  {
+   "result": "prefix-of-another 72%->10% (waste is EARLY not late); boundary structure flat across the run; multi-word units RISE 12%->16% ('versity of ', 'within the'); merge depth mean 2.20 max 5; longest token 14B against max_tok 16 (not binding)",
+   "ts": "2026-08-11T20:14:25",
+   "what": "vocab.py --tree merge-tree audit of the 8k tokenizer (no corpus needed)"
+  },
+  {
+   "result": "STEP rule (tau=1000, step=1000) 1.696956; USES rule (uses=100) 1.315915, dropping to 0.033405 once trained; never-minted row with huge delta contributes exactly 0.000000",
+   "ts": "2026-08-11T20:26:16",
+   "what": "Unit test of the anchor rule lifted from source (step vs appearance release)"
+  },
+  {
+   "result": "CONFIRMED empirically: three end-to-end runs at identical seed with TOK_ANCHOR=0.05/TAU=4000 vs 25.0/TAU=1.0 vs 0 produced byte-identical 94-line reports differing on exactly one line (the banner). A same-config duplicate pair diffed to zero first, so the null is not masked nondeterminism.",
+   "ts": "2026-08-11T20:32:34",
+   "what": "Adversarial workflow audit (12 agents) of TOK_ANCHOR inertness"
+  },
+  {
+   "result": "H(next|'t') = 1.315 bits -> PASS; H(next|'e') = 2.052 bits -> BLOCK. Looked correct; the constructed corpus was later shown to be the reason it looked correct.",
+   "ts": "2026-08-11T20:49:47",
+   "what": "Branching-entropy gate on a constructed case ('the theory of the theatre' x40)"
+  },
+  {
+   "result": "0 merges allowed, 187 blocked (100% rejected); vocabulary never grew past 256; 75% of the softmax never minted. Real English byte-level H: median 3.48, p90 4.39; only 18.5% of left tokens have H<=1.5; the top pair (space+space, x31432) sits at H=4.39.",
+   "ts": "2026-08-11T20:54:21",
+   "what": "Entropy gate end-to-end at TOK_MINT_HMAX=1.5"
+  },
+  {
+   "result": "gate_k matters as much as the threshold: pmin=0.10 reaches vocab 419 at gate_k=64 vs 1010 at gate_k=1024. gate_k defaulted to 1024 so pmin is the only lever. pmin 0.10/0.15/0.25 -> vocab 1010/623/353.",
+   "ts": "2026-08-11T20:57:37",
+   "what": "p(b|a) gate calibration sweep over pmin and gate_k on 400 kB"
+  },
+  {
+   "result": "RESTARTS=1 returns to peak at each wavelength multiple (~step 45k, 90k); RESTARTS=0 reaches the 5% floor once and stays. First cycle identical, so LR_RESTARTS=0 reproduces the 2.023 baseline exactly.",
+   "ts": "2026-08-11T21:22:28",
+   "what": "LR_RESTARTS waveform simulation against the real _lr_at code"
+  },
+  {
+   "result": "(a) max |restarts - hold| over an 8-epoch run = 0.000e+00; (b) EPOCHS=8/18/30 get 1/2/3 COMPLETE cycles, each ending at the 5% floor, floor-parked steps 3030/6161/8787",
+   "ts": "2026-08-11T21:31:30",
+   "what": "LR requirement (a) replicate / (b) improve, after fitting whole cycles to the run"
+  },
+  {
+   "result": "Both reach 512, but only 131 of 256 minted tokens shared — 125 replaced. Half the seed vocabulary changes.",
+   "ts": "2026-08-11T21:44:10",
+   "what": "Effect of the mint gate on the 512-token SEED vocabulary (which for a frozen arm is the whole vocabulary)"
+  },
+  {
+   "result": "0 kept, 8 un-merged, 100% of judged tokens failed. Root cause: greedy longest-match consumes t+h into th, so pair count for (a,b) is 0 immediately after mint and stays 0 forever — the merge destroys the evidence its own criterion reads.",
+   "ts": "2026-08-11T22:00:16",
+   "what": "Probation with branching-entropy as the post-mint criterion"
+  },
+  {
+   "result": "off 3.884; use 6.024 (7 kept, 1 un-merged); embed 4.845 (7 kept, 1 un-merged). Claude explicitly flagged the held-out numbers at 30 kB / 3 epochs as non-evidence.",
+   "ts": "2026-08-11T22:10:21",
+   "what": "Probation modes off / use / embed at smoke scale"
+  },
+  {
+   "result": "pmin=0 -> vocab 1024; pmin=0.10 -> vocab 1010; shared tokens only 307. It does not trim the vocabulary, it REPLACES about 70% of it.",
+   "ts": "2026-08-11T22:14:16",
+   "what": "Magnitude of the mint gate's effect on the vocabulary, 400 kB"
+  },
+  {
+   "result": "held-out 3.600, best 2.829 at step 6000 (+0.910 past its own minimum), 33% words, vocab asymptoted at 1439/2048 = 29.7% never minted. Minting decelerated: epoch 2 878 -> epoch 8 1405.",
+   "ts": "2026-08-11T23:25:27",
+   "what": "First real 8-epoch pilot with the gate defaulted on (base_3.log)"
+  },
+  {
+   "result": "pmin 0 -> 2048/2048, 0 forced; pmin 0.10 -> 2048/2048, 734 forced; pmin 0.15 -> 2048/2048, 1103 forced. Gate can no longer prevent a mint.",
+   "ts": "2026-08-11T23:27:35",
+   "what": "Fail-open gate reproduction of the starvation at VMAX=2048"
+  },
+  {
+   "result": "base 2.239 (75% words, 0% dead, best is final, gap -0.067); nogate BYTE-IDENTICAL to base down to final step 48133 (free determinism check); frozen 6.114 (4% words, +3.219 past minimum, 512/2048 = 75% dead)",
+   "ts": "2026-08-12T00:56:46",
+   "what": "Pilot 2: base / nogate / frozen at EPOCHS=8, commit 1a113f5"
+  },
+  {
+   "result": "6 arms invalid as written: frozen 75%, frozen_nr 75%, frozen1k 50%, freeze6k ~45%, vmax8k 41% at 8ep, vmax4k conditional. Plus two systemic gaps: the shortfall predictor was gated `not TOK_MINT_UNTIL` (skipping exactly the certain cases) and the *) wildcard silently ran base for a typo'd arm.",
+   "ts": "2026-08-12T01:16:20",
+   "what": "Workflow audit of all 46 grid arms for guaranteed dead-row configurations"
+  },
+  {
+   "result": "frozen 4.364 / 26% words / best 2.928 at step 2000 then +1.533; frozen_nr 2.175 / 94% words / best IS final at step 66000. 23 retoks in frozen, 22 of them adding zero tokens. frozen_nr's text reads as English; frozen's is character soup.",
+   "ts": "2026-08-12T02:38:05",
+   "what": "Pilot 3: frozen vs frozen_nr at EPOCHS=8, commit 25c37eb, identical vocabularies"
+  },
+  {
+   "result": "11 retoks skipped on frozen, ZERO on base — correct discrimination, the guard refuses only provable no-ops. (Later shown to be the only branch that ever worked: at real scale the _due double-call made both branches dead.)",
+   "ts": "2026-08-12T02:44:30",
+   "what": "Retok guard verification at smoke scale"
+  },
+  {
+   "result": "base_5: 0 [tokenizer @ N] lines, 0 'retok(s) skipped'. vmax8k_5: 0 and 0. Both guard branches dead. base_5 = 2.182 / 82% words, frozen_nr_1 = 2.356 / 79%, vmax8k_5 = 3.551 / 42% (8192/8192, 0% dead) — but base_5 and vmax8k_5 accidentally became the _nr experiment.",
+   "ts": "2026-08-13T01:41:43",
+   "what": "Check whether any mid-epoch retok fired in the 18-epoch runs base_5 / frozen_nr_1 / vmax8k_5"
+  },
+  {
+   "result": "vmax4k 2.132, 77% words, +0.000 past minimum, gap +0.027, 14 retoks fired / 17 skipped — the only stable arm. base 3.241, 43%, +0.833, saturates at epoch 4, 8 fired / 27 skipped. vmax8k 3.989, 31%, +1.192, 27 fired / 3 skipped. All 0% dead rows.",
+   "ts": "2026-08-13T19:07:17",
+   "what": "18-epoch field at commit d0728fe with the guard actually working: base_6 / vmax4k_4 / vmax8k_6"
+  },
+  {
+   "result": "base 2048: 2.91 B/token, stride 745B, SIG_WIN 614 -> 82% coverage; vmax4k: 3.41 B/tok, 872B -> 70%; vmax8k: 3.93 B/tok, 1006B -> 61%. All three logs printed 'covers 100% now' because SIG_PROJ_BPT was pinned at 2.4. Monotone, so it does NOT explain the non-monotonic result ordering.",
+   "ts": "2026-08-13T19:13:10",
+   "what": "Signature-encoder coverage as a function of VMAX"
+  },
+  {
+   "result": "VMAX 2048/4096/8192 give completely different enc.weight_ih and fabric_cent values. The signature encoder and the fabric's 4096 routing centroids should have been identical across arms.",
+   "ts": "2026-08-13T20:04:47",
+   "what": "Independent verification that VMAX shifts the torch RNG for non-VMAX-shaped modules"
+  },
+  {
+   "result": "VMAX=2048 loss 7.20 / separation 0.67; VMAX=4096 loss 6.93 / 0.64 — STILL DIFFERENT. The first fix (reseed before the model line) failed because build_lm() runs first on that line and consumes VMAX-dependent RNG before enc is constructed. Per-module seeds applied instead; not re-verified before chunk end.",
+   "ts": "2026-08-13T20:08:03",
+   "what": "Post-fix VMAX-invariance check on the encoder's step-0 loss"
+  },
+  {
+   "result": "CONFIRMED numerically: _due returns False on n<=0 BEFORE recording, so _fired['retok'] never advances from -1e9 and the clamp _H = min(_H, RETOK_EVERY - (step - _fired['retok'])) floors to 1. SIG_BATCH is effectively off for the whole run in frozen_nr — so the 4.364-vs-2.175 pair is not a clean one-knob comparison.",
+   "ts": "2026-08-13T20:08:03",
+   "what": "Whether RETOK_EVERY=0 collapses the signature lookahead (agent finding 5)"
+  }
+ ],
+ "wip": [
+  "pilot-add / add cannot resume from a grid checkpoint — they hardcode RESUME=\"$OUT/pilot_$PA\". Claude twice offered to make pilot-add accept a checkpoint path ('a few lines') and was told nothing; the change was never made.",
+  "CONTINUAL LEARNING: zero runs, the stated target of the whole project. Every pilot in this chunk was single-corpus English where PHASED degenerates to a stationary stream.",
+  "No checkpoint exists for ANY result in this chunk — every grid command Claude handed over used GRID_CKPT=0, including frozen_nr at 2.175 / 94% words. The results are readable but not buildable.",
+  "vmax8k on a larger corpus coupled with a larger expert pool (FAB_NMAX above 4096) — explicitly requested 2026-08-11T21:30:14, recorded as queued, never started.",
+  "The embedder quality test ('does the sum of components differ from them separately') — shelved by the researcher, partially built as TOK_PROBATION_BY=embed, never run at scale.",
+  "TOK_COMPOSE=1 has never run at pilot scale, so TOK_ANCHOR / TOK_ANCHOR_USES=400 remain inert in every measured run.",
+  "Probation (prob_use / prob_emb) never run at pilot scale; deliberately held out of pilot 1, and would have been broken by the _due('grow') double-call until 2026-08-13.",
+  "base_nr arm committed (04cbe89) but never run.",
+  "The vmax4k LR_RESTARTS=0 run the researcher said he would do ('I will run') — result not in this chunk.",
+  "A repeat of `base` at a second seed, suggested to settle whether base_6 = 3.241 was instability — not run.",
+  "Multi-seed runs (`bash longrun.sh seeds`) identified as 'the floor for any comparison we've been making' — none run.",
+  "Third agent ('Explain the base divergence') still running at chunk end; its result never arrives in this chunk.",
+  "The _fired KeyError from the new 'probation' cadence key was being fixed at the exact moment the chunk ends — final state unverified.",
+  "Agent-reported defects left partially handled at chunk end: the LR restart not marked self-inflicted for PlateauGrowth/maybe_deepen and applied to the encoder optimizer; the retok guard's vocab_size invariant being wrong under retire(); _bpt as an unweighted mean overstating bytes/token by up to 8% in a VMAX-dependent way; the pair tally and Counter trim still running after vmax saturation; _retok_skipped never reset."
+ ]
+}

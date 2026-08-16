@@ -1,0 +1,653 @@
+{
+ "chunk": "chunk_07",
+ "errors": [
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T19:34:06",
+   "what": "Identity-collapse diagnosis was read off a stale uninitialised variable captured inside spawn_from, which only runs when the spawn bar is met, so it printed its initialiser"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T19:48:57",
+   "what": "'1 of 4096 used' was a 32-EVAL-WINDOW probe, not run utilization; misread as catastrophic routing concentration for ~10 turns and four failed fixes were built on it"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T20:00:02",
+   "what": "rerun.sh parallel gate: $JOBS used in the banner before it was defined; set -u killed the gate in 2s"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T20:08:22",
+   "what": "grep -c exits non-zero when the count is 0, so `|| echo 1` fired on top of grep's own '0' and tb became the two-line string '0\\n1' -- every arm reported FAIL"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T20:59:30",
+   "what": "IndexError in the new ROUTER SELECTION line when fab.use is empty (_uv[0] on an empty list)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T21:02:26",
+   "what": "use[] was written only on the society path, so under SOCIETY=0 the utilization table stayed empty and culling, the breadth cap and discovery were all silently disabled on every chaining run ever made"
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-08-04T21:16:46",
+   "what": "Uploaded smoke-log zip was empty: 182 bytes, one directory entry, 0 bytes uncompressed. Gate result unverifiable"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T22:24:53",
+   "what": "SUFFICIENCY section has printed nothing since routing went per-window: int(_os[j]) applied to a whole row raised ValueError straight into the section's own except clause"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T22:33:06",
+   "what": "Fabric._ids cached graph-attached tensors -- a cache hit would backward through a freed graph; it never fired only because the training loop never passed step=, so the full O(N*2dr*hid) embed ran every step at N=4096"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T22:38:43",
+   "what": "prompt.py chaining branch did `_h = FAB(...)`, assigning the whole 4-tuple and handing it to model.head -- guaranteed TypeError the instant a chaining checkpoint was sampled"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T22:38:43",
+   "what": "prompt.py took the forward path from the environment rather than the checkpoint, so a society-trained checkpoint would generate as a chain once the default moved"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T22:54:35",
+   "what": "FAB_EMB_EVERY defaulted to 50 and was a GRADIENT switch, not a cache cadence -- live on chaining (passes step=) and dead on society, throttling the only channel reaching the whole population to 1 step in 50 and routing on keys up to 50 steps stale"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T22:55:53",
+   "what": "halt_b was allocated, optimized, weight-decayed and never gradiented on the chaining path -- the path made default one commit earlier"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T00:12:33",
+   "what": "LM training curve verdict read its own sign backwards: _d8 is prev-current so negative means the loss ROSE, yet the text asserted 'still FALLING' regardless of sign, and it only compared the last two points"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T00:13:03",
+   "what": "Config banner printed environment values rather than effective values -- a whole 48k-step SOCIETY=0 run logged 'per-expert memory ON' while MEM_PER_EXPERT was `... and SOCIETY` and therefore off from step 0. WORLD_GROW had the same shape"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T00:15:13",
+   "what": "UnboundLocalError: banner referenced WORLD_MODEL before assignment"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T00:41:18",
+   "what": "route_w (society) and Fabric.forward (chaining) each had their own entry router and had drifted: chaining used free learned q_entry keys with no region term and no centroid update anywhere, while the banner reported 'grounded region + learned bilinear'"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T00:41:49",
+   "what": "A mechanical dedent while extracting entry_logits mangled the file into an IndentationError"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T02:09:16",
+   "what": "Cadence bug, 4 instances: `step % MANAGE_EVERY == 0` never coincides with a batch-flush step at BATCH_W=4, so GRADIENT REACH, ROUTING MIX, CHAIN ORDER and maybe_deepen never fired. maybe_deepen's non-execution invalidated a reported result"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T02:27:37",
+   "what": "SyntaxError in the rewritten ROUTING banner: missing `+` after a parenthesised conditional inside the f-string concatenation; killed all three arms"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T02:49:03",
+   "what": "dom_ban was computed in the society branch and never passed to forward(), so the percentage breadth cap the researcher asked for was inert on the chaining path the whole time"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T02:48:22",
+   "what": "The growth ramp never latched off: armed while `n < ramp_to * cap`, and culling holds n just under the cap forever, so it re-fired every ~187 steps for entire runs. 10062 grown = ~4093 building the population once + ~5969 refilling culls; the population was replaced ~1.5x over"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T03:12:41",
+   "what": "longrun.sh grid hardcoded WIN/BATCH_W/ENC_WARMUP so toy overrides did not apply; a verification run spent 2000 encoder warmup steps on CPU and timed out"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T03:01:02",
+   "what": "The append-only unique-name helper written into longrun.sh had a malformed glob (produced a-2.log/a-3.log incorrectly)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T03:41:36",
+   "what": "DIV_W was a local of main() and invisible to Fabric.forward -- NameError on the first chaining hop that would have killed 15 of the 18 grid arms"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T03:45:08",
+   "what": "Society DIV_W indexed _O (rank-ordered) with a global expert id -> IndexError. Un-runnable since routing went per-window, so the one term rewarding experts for differing had never once been on in a real run"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T03:33:06",
+   "what": "Dead module-level ROUTE_T = _f('ROUTE_T', 1.0): assigned, never read, and with a different default from the one that actually routes (0.1)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T12:00:29",
+   "what": "generate() crashed with a device-side CUDA assert in torch.multinomial on a degenerate distribution -- 4 grid arms (frozvocab, stateq, wt_div, explore) finished training and lost their entire report at the last step"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T12:32:00",
+   "what": "FAB_MIN_STEPS forced off with a local conditional inside forward() left s.min_steps reading 2 while the effective value was 0; the banner, the CHAINING report section and the SAVED CHECKPOINT all read the wrong value, so a resume could rebuild the fabric with a different depth policy"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T12:37:19",
+   "what": "UnboundLocalError: the new module-level _rec helper collided with an existing local `_rec` (recurrent-domain count) inside main()"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T12:50:42",
+   "what": "The [build] DIRTY flag counted untracked files, so a freshly-pulled unmodified checkout reported DIRTY; .gitignore also missed data_pilot/, data_big/, data_grid/"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T15:49:11",
+   "what": "CHAIN_ROUTE was missing from the effective-config table, one commit after the table was introduced to make that impossible -- it switched the entire routing architecture for two pilots and neither log said so"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T15:54:47",
+   "what": "The two config-integrity checks ran at banner time, before the report's own env reads had happened, producing false positives (FAB_CULL_FRAC flagged as unread)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T15:57:38",
+   "what": "_config_audit() was defined but never called -- the anchor replacement did not match the final print statement"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T16:39:29",
+   "what": "DIV_W was a silent no-op on CHAIN_ROUTE=soc: the soc-loop branch returns before the distinctness term is computed. A full 20-minute pilot (gru6) came back byte-identical to gru4 and measured nothing"
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-04T22:23:29",
+   "what": "Harness: several background verification runs hit the 10-minute Bash timeout (exit 143); `sleep 240` chaining was blocked by the tool and had to be replaced with until-loops"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T00:48:30",
+   "what": "A `cd` leaking into a backgrounded subshell meant three verification arms never ran (rc=2, 'can't open file .../scratchpad/self_organize.py')"
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "Claude added a ROUTER SELECTION line reading fab.use over the whole run: '84 distinct experts won at least one window | top expert took 3.9% | half the traffic went to 21 expert(s)'. Commit b610b89. Overturned ~10 turns of 'the router is collapsed'.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks whether the weight-derived-identity router actually routes and whether more experts get selected, forcing a real utilization measurement instead of an inference.",
+   "quote": "But at least, does this mean that the router is able to route with this new system, using weights. And have more experts been selected?",
+   "ts": "2026-08-04T19:45:30"
+  },
+  {
+   "evidence": "Claude: 'Understood -- I'll stop running it.' Held for the rest of the chunk; at 03:50 Claude states 'I have not run the smoke gate, per your standing instruction.' Measured: 4 min on user's box vs 701s->485s on the 4-core container.",
+   "outcome": "built",
+   "paraphrase": "Standing constraint: stop running the CPU smoke gate locally, hand it to the researcher instead.",
+   "quote": "Yes, but my point is, you take too long, it is better for me to do it for you.",
+   "ts": "2026-08-04T20:17:48"
+  },
+  {
+   "evidence": "Audit found the router emits only weights; inputs are the detached SigEncoder gist plus ONE novelty scalar per batch (_fab_nov = surprise.mean()), never h. Per-window novelty was named as a cheap fix but never implemented in this chunk.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks what the router actually consumes and whether it transforms anything.",
+   "quote": "While the pilot is running, and to double check on the router, does the routers transform the text? And what are the inputs?",
+   "ts": "2026-08-04T20:50:38"
+  },
+  {
+   "evidence": "Source weights already present as SRC[holder] in the transition query. HALT gating implemented: residual step scaled by mass still routing; mean routed depth 0.50 -> 1.00 of 4. Commit d7994ea. Also exposed that use[] was never written on the chaining path, silently disabling culling, breadth cap and discovery on every chaining run.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Two design instructions: provenance (the holding expert's weights) must enter the routing query, and the router (not a loop counter) must decide when computation completes.",
+   "quote": "I want the router fabric input to include the source's weights. Since that's the only way to know where it's from.\n\nThe router should be the one who determines when to complete, not go directly from expert to head.",
+   "ts": "2026-08-04T20:54:52"
+  },
+  {
+   "evidence": "Claude agreed and grounded it: train 2.066 / held-out 2.043 / gap -0.023, 93% of generated words real English, 2.26 tokens per generated word. Pilot subsequently run by the user.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Researcher's own assessment that the base model output is good for its size/time, plus an instruction to run the pilot on the updated code.",
+   "quote": "What do you think of the output? i think the base is pretty good, with ok structure, but pretty good for size and time, at only 20 min. \n\nLets do the pilot for the updated one.",
+   "ts": "2026-08-04T21:10:04"
+  },
+  {
+   "evidence": "Claude: 'You're right, and my \"cannot by construction\" was wrong. HALT is computed on the society path -- and then thrown away.' Implemented as lg = (1-halt)*expert_blend + halt*model.head(h), commit 30e635d; toy society arm settled at HALT mass 0.632.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Course correction: HALT must apply to the society (one-shot) path too, contradicting Claude's claim that SOCIETY=1 could not support it.",
+   "quote": "Chaining is being run, but, halt should have been set on this",
+   "ts": "2026-08-04T22:05:24"
+  },
+  {
+   "evidence": "SOCIETY now defaults to 0 (commit 7b28570), with all society-gated selection machinery ported to chaining. Gradient-reach probe at N=1024: compute path alone touches 20.9 (society) / 30.7 (chaining) experts per step = 2-3% of the population; distinct over 60 steps 261 (25%) vs 78 (8%). Hypothesis substantially confirmed.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Instruction to make chaining the default, plus a hypothesis that backprop reaching too few experts explains the training problems.",
+   "quote": "Make sure whenever I run, it is including chaining, unless specified otherwise. \n\nNow, how is back propagation done? If it only hits one expert, it may explain some issues with training",
+   "ts": "2026-08-04T22:31:04"
+  },
+  {
+   "evidence": "Per-parameter gradient audit produced. Caught that FAB_EMB_EVERY defaulted to 50 and was a gradient switch (live on chaining, dead on society) -- default changed to 1; halt_b was dead on the new default path and was wired in. New ROUTER LEARNING report line. Commit 8a1e3a7.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks whether the router itself trains, and specifically whether it trains on the experts' continually-updated weights.",
+   "quote": "But, does this mean that the routers will be learning as well? Instead, using new, updated weights as training material for its back propagation?",
+   "ts": "2026-08-04T22:53:28"
+  },
+  {
+   "evidence": "Banner rewritten structurally (deferred until objects exist, reads live objects). Hypothesis CONFIRMED: 8-domain probe gave I(domain;expert)/H = 0.343-0.871 on society and EXACTLY 0.000 on chaining (1 of 32 experts at 100%). Cause: chaining had its own weaker entry router with no region term and no centroid update. Commit a71820a.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Objection to the config banner reporting values that did not run, plus a hypothesis that chaining cannot learn where material belongs, and that this drives runaway expert growth.",
+   "quote": "First fix the banner lie. It is a lie you constructed. \n\nThen, let's evaluate the issue. I believe it has to do something with a backprop failure, when chaining occurs, and which expert something should go to is unclear. This would help explain why so many experts would form, from a poor routing.",
+   "ts": "2026-08-05T00:28:17"
+  },
+  {
+   "evidence": "Implemented as CHAIN_CURRIC (plus CHAIN_SUP deep supervision and CHAIN_STATE_Q). All three measured negative on a 6-domain toy and left OFF by default; commit 7e9612d. Claude later WITHDREW that verdict at 02:15 -- maybe_deepen had never actually executed (cadence bug), so 'staged depth did not help' was reported from a run where it hadn't run.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Proposes staged/curriculum depth: train the chain at its current length until loss stops improving, then extend by one hop.",
+   "quote": "The issue with chain is how to select among the 4k in terms of order, and also for the possibility of the desired not being close.\n\nMaybe a staged learning: where after the end expert is found, the backprop will happen, and the corresponding router. If it is minimal loss, then we go down a layer, to the next expert",
+   "ts": "2026-08-05T01:28:12"
+  },
+  {
+   "evidence": "Claude: 'All three criticisms were right, and the third one found the biggest thing in this branch.' Produced ROUTING MIX and CHAIN ORDER instruments running in the real run; found maybe_deepen never fired (3rd instance of the same cadence bug); found the weight-prediction term contributing 1-2% at toy scale. Commit e0ce4f7.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Three objections: the toy probe is unrepresentative of the 4096-expert system, the curriculum failing to deepen indicates underlearning not failure, and the weight-prediction router should be doing the work.",
+   "quote": "Your implementation is unusual, why 6 domains? why only 24 experts? It feels very different from what the tests are. \n\nIt rarely leaving 1 is only a sign of underlearning.\n\nAlso, weights? I thought we are using a different system, of router predicting weights of which experts will be better.",
+   "ts": "2026-08-05T02:03:57"
+  },
+  {
+   "evidence": "ROUTE_REGION_W added (default 1.0; at 0 the region term is off), commit fcdfaa7. Pilot 7: SPECIALIZATION 0.094 (first nonzero ever, null 0.000), SPAWNED BY SPECIFICATION 7 (first time it ever fired), top expert 79.5% -> 44.5%, 567 -> 741 distinct experts, best loss 3.69 -> 3.60.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Instruction to make the weight-prediction term the sole routing signal for a test arm, then pilot it.",
+   "quote": "I want the weight prediction to be the main consideration. For a test, lets do it as the only consideration for the routing mix (with chain).\nLets do a pilot right after",
+   "ts": "2026-08-05T02:26:17"
+  },
+  {
+   "evidence": "Found the growth ramp never latched off (condition n < ramp_to*cap, culling holds n just under cap forever) -- population replaced ~1.5x over; latch added, commit ff0f0fa. Audit enumerated 6 terms and found dom_ban was computed but never passed to forward(), so the percentage breadth cap the researcher had asked for was inert on chaining.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Directs work on the flagged growth/divergence issue and demands a precise audit of every term still influencing routing.",
+   "quote": "Work on the flagged issue while I run the pilot. Also double checking, is the predicted weights the current only consideration for the routing?",
+   "ts": "2026-08-05T02:47:04"
+  },
+  {
+   "evidence": "longrun.sh grid added: sequential arms, crash-tolerant (verified against a real SIGTERM, rc=143 logged and grid continued), resumable/skip-completed, runs/ made append-only, interactive 12s pause gated behind PROBE_WAIT. Commit 09e3d60.",
+   "outcome": "built",
+   "paraphrase": "Requests an unattended, fire-and-forget multi-arm run that is safe under 'sleep 2h && git pull'.",
+   "quote": "prep for next pilot, and if desired multiple separate pilots. I will run for a while and we can make most of it, and provide all when done. My plan is to use a sleep 2h && git pull to run, so make it safe for that.",
+   "ts": "2026-08-05T02:58:27"
+  },
+  {
+   "evidence": "Grid expanded to 18 arms ordered by information value, commit 3e67b5d. Verification caught two bugs: DIV_W was a local of main() invisible to Fabric.forward (NameError that would have killed 15 of 18 arms), and society DIV_W indexed _O with a global expert id (IndexError). All 18 arms subsequently trained.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks for more arms to fill a 6-hour unattended window.",
+   "quote": "Are there more for the grid? I am running it for the next 6 hours",
+   "ts": "2026-08-05T03:31:30"
+  },
+  {
+   "evidence": "CHAIN_VOTE=1 implemented; toy HALT 0.0000 -> 0.2213, held-out 5.361 -> 5.191, commit 9b179b5. Pilot (gru2): HALT 0.9909, since-min +0.664 (vs base chaining +2.287). But the researcher later corrected that this was NOT what he described -- see 13:52:51.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Design idea: hybridise the two paths, taking multi-hop from chaining and prediction-level blending from society, then fix HALT.",
+   "quote": "I was conversing with another chat, let's do a test combining society and chaining: the multi hop and prediction elements of the system.\n\nThen address halt",
+   "ts": "2026-08-05T12:18:16"
+  },
+  {
+   "evidence": "Two changes between pilot 6 (+1.438) and grid base (+2.287) were separated into flags: CHAIN_BAN=0 (breadth-cap masking on chaining) and FAB_RAMP_LATCH=0. Both became grid arms. Not yet measured at pilot scale within this chunk.",
+   "outcome": "built",
+   "paraphrase": "Wants the router-scoring change isolated because it appears to have degraded results.",
+   "quote": "Also, the change in router fabric scoring, we need to address that, cause it seemed to have an impact.",
+   "ts": "2026-08-05T12:19:01"
+  },
+  {
+   "evidence": "Question exposed a bug: forcing min_steps off with a local conditional left s.min_steps reading 2 while the effective value was 0, and the banner, the CHAINING report section and the SAVED CHECKPOINT all read the wrong value. Fixed as 78c3c1e. Pilots run instead of the grid.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Checks whether FAB_MIN_STEPS is actually disabled, and redirects from the grid to individual pilots.",
+   "quote": "So, is fabminsteps off now?\n\nI don't want to do the grid right now, let's do pilots.",
+   "ts": "2026-08-05T12:31:37"
+  },
+  {
+   "evidence": "_env() recorder added; 72 direct os.environ.get calls in Fabric/PlateauGrowth converted; one declarative table maps env name -> live object value (47 knobs) with an automatic divergence loop; '!!' reserved for unregistered divergences. [build] line with branch/commit/clean-or-DIRTY added. Commit 22a708d. Reproduced all three historical lies as failures.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Demands that config reporting be derived automatically from what actually ran, and that every log declare its exact commit/branch.",
+   "quote": "Fix all banner lies. They are distracting. Make them automatic and based off what's run.\n\nAlso have the exact pull branch be announced in each log.",
+   "ts": "2026-08-05T12:34:15"
+  },
+  {
+   "evidence": "Claude: 'That was my bug, not your tree.' git status --porcelain counts untracked files; now counts tracked modifications only, and data_pilot/, data_big/, data_grid/ added to .gitignore. Commit 4da76b8.",
+   "outcome": "built",
+   "paraphrase": "Reports that a freshly-pulled clean checkout was being labelled DIRTY.",
+   "quote": "[build] branch rm-predict | commit 22a708deae | DIRTY -- uncommitted changes, this log is NOT reproducible from the commit ...\n\nJust got pulled and said this",
+   "ts": "2026-08-05T12:50:13"
+  },
+  {
+   "evidence": "Claude: 'You're right, and what I built isn't what you described.' CHAIN_ROUTE=soc implemented (re-routes from scratch each iteration, no transition matrix, no SRC). Toy: H(hop1|hop0) 0.270 for socloop_w -- first non-trivial value the measurement had ever produced. Commit 7b18214. Pilot then gave 0.533 bits over 202,130 transitions vs 0.005-0.058 for every prior arm.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Correction: the intended hybrid was to run the society and feed its result back in repeatedly, not to keep the learned transition matrix with a vote bolted on.",
+   "quote": "Just to confirm, my idea for chain_vote was the society system, but allowed to loop over and over, (in chains)",
+   "ts": "2026-08-05T13:52:51"
+  },
+  {
+   "evidence": "Claude conceded: 'I have been optimizing mechanism, and it is not paying', ranked all pilots by held-out b/B and generation samples, and stated the run with the best routing diversity produces the second-worst text while nofabric is within 0.06 b/B of the best. Also identified the divergence (every run bottoms ~step 5,900) as the bigger lever. No new mechanism built on it before the chunk ends.",
+   "outcome": "built",
+   "paraphrase": "Course correction: the deliverable is text quality, and the routing diagnostics are not the target.",
+   "quote": "What are we optimizing for right now?\n\nRemember, the ultimate goal is textual, not arbitrary metrics.",
+   "ts": "2026-08-05T16:38:24"
+  },
+  {
+   "evidence": "Final user message of the chunk. Claude began checking two things (the per-process LEARNING CURVE vs the per-token LM curve, and vocabulary growth) and the chunk ends mid-investigation. The default was not changed within this chunk.",
+   "outcome": "deferred",
+   "paraphrase": "States that expert diversity should emerge from niche formation rather than be imposed, reaffirms output quality as the criterion, and instructs that the chaining-society (CHAIN_ROUTE=soc) become the default before the next pilot.",
+   "quote": "Diversity would ideally be emergent. As niches develop and certain experts become more reliable, it should keep on improving. \n\nOutput quality will always trump other metrics. They, however are useful for my design sake. \n\nIf there are any issues with the architecture, let's fix. Then do another pilot. Use the most updated, use the chaining society, it should be the default.",
+   "ts": "2026-08-05T16:47:53"
+  }
+ ],
+ "notes": "Nothing was BLOCKED; the full 9,059-line file was read.\n\nAttribution care: several ideas commonly credited to the project originate with CLAUDE, not the researcher, and I have deliberately excluded them from `ideas`: DIV_W=0.05 as an arm (Claude offered it repeatedly, \"Your call -- I'd rather not change a default mid-comparison without you saying so\"), the ROUTING MIX / CHAIN ORDER / GRADIENT REACH / ROUTER LEARNING / POPULATION CHURN instruments, the ramp latch, the grid design, and the suggestion that \"society IS chaining with depth 1\" so depth-1 should be the default HALT can extend.\n\nPattern worth flagging for synthesis: nearly every researcher intervention in this chunk was a course correction that turned out to be right, and each one exposed a class of instrumentation failure rather than a modelling failure. The four classes, in order of discovery: (1) a reported value is WRONG (banner prints env not effective value); (2) a flag is UNREAD (typo trains 20 min on defaults); (3) a flag is READ BUT UNREACHABLE (DIV_W behind an early return); (4) a diagnostic is MEASURED AT THE WRONG SCALE (64-expert toy inverted the 4096-expert answer). Claude's own summary: \"That's the third distinct layer of the same failure.\"\n\nCommit chain in this chunk, in order: b610b89, d7994ea, 30e635d, 7b28570, 8a1e3a7, a5c893a, a71820a, 7e9612d, e0ce4f7, fcdfaa7, ff0f0fa, 09e3d60, 3e67b5d, ffd39b8, 9b179b5, 78c3c1e, 22a708d, 4da76b8, 7b18214, 99ba0f4, b14d60e. All on branch rm-predict.\n\nThe single most consequential empirical result in the chunk is the 18-arm grid at 12:06:57: society (+0.605 since-min, 2.058 held-out) and nofabric (+0.670, 2.118) beat every chaining arm, base chaining reaching +2.287 / 3.124. Claude's own read: \"Chaining loses to having no fabric at all... The fabric on the chaining path is not underperforming, it's actively destroying the model.\" The generation samples agreed more sharply than any metric -- society and nofabric produce English-shaped text, every chaining arm produces degraded noise.\n\nTwo researcher messages were interrupted mid-send ([2026-08-05T02:59:39] and [2026-08-05T12:18:24]/[12:19:29], the latter followed by a bare \".\" at 12:19:39). The message at 01:28:12 is truncated mid-sentence in the transcript (\"...that would have been chosen by the\") -- the staged-learning proposal may be incomplete as recorded.\n\nA conversation compaction summary occupies lines 1101-1257 (timestamped 2026-08-04T22:07:47). I treated its \"All user messages\" list as context only and drew every quote from the primary USER entries in this chunk.",
+ "retractions": [
+  {
+   "claim": "ASSISTANT (previous turn): expert identities have COLLAPSED -- nearest-neighbour distance 0.000, so the router has nothing to discriminate on",
+   "correction": "ASSISTANT: 'The unconditional measurement overturns what I told you last turn... Identities were never collapsed.' Mean pairwise separation 0.857, nn median 0.0349. The 0.000 was a stale variable captured inside spawn_from that printed its initialiser. Two changes made on that false diagnosis were kept, but 'they were not fixing what I said they were fixing'",
+   "ts": "2026-08-04T19:34:06"
+  },
+  {
+   "claim": "ASSISTANT (held ~10 turns): '1 of 4096 used' proves catastrophic routing concentration; four fixes were built on it",
+   "correction": "ASSISTANT: that number is measured on 32 EVAL windows, a probe not the run. fab.use shows 84 (later 485-487) distinct experts, top expert 3.9-4.4%, half the traffic across 21-60. 'The router was never broken... I read it as evidence of catastrophic concentration for something like ten turns, and built four failed fixes on top of that reading'",
+   "ts": "2026-08-04T19:48:57"
+  },
+  {
+   "claim": "ASSISTANT (21:02): 'SOCIETY=1 cannot satisfy your requirement by construction. It's one-shot -- experts compute once and go straight to the head, there is no HALT and nothing to complete'",
+   "correction": "ASSISTANT: 'You're right, and my \"cannot by construction\" was wrong. HALT IS computed on the society path -- and then thrown away.' The learned branch built a softmax over N+1 operators and sliced off column N; the grounded default branch had no HALT operator at all",
+   "ts": "2026-08-04T22:05:44"
+  },
+  {
+   "claim": "ASSISTANT: c73ea46a-pilot_gru_4.log (depth 1.00 of 4, 485 experts) was the SOCIETY=0 chaining arm",
+   "correction": "ASSISTANT: 'Correction first: the earlier run wasn't the chaining arm.' The log says SOCIETY=1 -> NO CHAINING. Depth comes from a report-time probe call to forward() that runs regardless of which path trained -- something Claude had itself documented two turns earlier",
+   "ts": "2026-08-04T22:03:35"
+  },
+  {
+   "claim": "ASSISTANT: chaining's first honest utilization reading, 7 distinct experts with the top at 99.3%, may be chaining's real behaviour",
+   "correction": "ASSISTANT (21:06): 'it also confirms the small-scale 99.3% I warned you about was an artefact of the toy, not chaining's real behaviour' -- the real log shows 485 distinct experts, top 4.4%",
+   "ts": "2026-08-04T21:02:26"
+  },
+  {
+   "claim": "REPORT: 'last segment change -0.059: still FALLING = more passes/steps will help' -- printed on every long run",
+   "correction": "ASSISTANT: the sign was read backwards and only the last two points were compared. The run diverged: loss bottomed at 3.56 @ step 5903 and rose to 4.68 by 47231, so 91% of the run was spent getting worse. 'This run diverged, and the report told you it was healthy.' The society pilot has the same shape (3.61 -> 4.27)",
+   "ts": "2026-08-05T00:18:19"
+  },
+  {
+   "claim": "BANNER: '[config] ... per-expert memory ON' for a 48k-step chaining pilot",
+   "correction": "ASSISTANT: MEM_PER_EXPERT was `... and FABRIC and SOCIETY` on a SOCIETY=0 run, so it was OFF from step 0. The banner printed the environment variable, not the effective value. WORLD_GROW had the same shape",
+   "ts": "2026-08-05T00:18:19"
+  },
+  {
+   "claim": "BANNER (and Claude's own description): 'ROUTING: grounded region + learned bilinear' on the chaining path",
+   "correction": "ASSISTANT: 'that was false.' Fabric.forward never touched the centroids -- chaining used free learned q_entry keys with no region term and no centroid update anywhere. 'ROUTE_GROUNDED read ON the whole time because it WAS on -- for the path that wasn't running'",
+   "ts": "2026-08-05T00:51:47"
+  },
+  {
+   "claim": "ASSISTANT (earlier reasoning): the shared h term in every expert's output pollutes the routing gradient",
+   "correction": "ASSISTANT: 'It isn't -- the weight normalization cancels any constant added across experts exactly, so that's a dead end'",
+   "ts": "2026-08-05T00:51:47"
+  },
+  {
+   "claim": "ASSISTANT (01:34): 'Hop 2 adds exactly zero information' -- based on I(dom;pair) == I(dom;hop0) on every seed",
+   "correction": "ASSISTANT: 'That reading was wrong. I(dom;pair) >= I(dom;hop0) always, and when hop 0 already identifies the domain at ~0.83 the metric is saturated -- equality is also what CORRECT behaviour looks like... I reported a diagnosis before testing it'",
+   "ts": "2026-08-05T01:55:43"
+  },
+  {
+   "claim": "ASSISTANT (01:55): staged depth (CHAIN_CURRIC=1, the researcher's proposal) 'did not help' -- 'depth rarely left 1; where it reached 2, worse'",
+   "correction": "ASSISTANT: 'maybe_deepen was never called at all in a real run.' It sat behind `step % MANAGE_EVERY == 0` while that block only runs on 1-in-BATCH_W flush steps; at BATCH_W=4, MANAGE_EVERY=20 the intersection is empty. 'I'm WITHDRAWING the numbers I gave against them rather than standing on them'",
+   "ts": "2026-08-05T02:15:55"
+  },
+  {
+   "claim": "ASSISTANT (02:15): 'The weight-prediction term is 1-2% of the routing decision' -- presented as the biggest finding in the branch",
+   "correction": "ASSISTANT: 'measured on a 64-expert toy. At 4096 experts, base measures 7% region / 93% weight-prediction -- the weight term was already dominant at scale, and FAB_KEY_NORM=1 REDUCES it (keynorm 41/59) rather than rescuing it. The direction of that finding was wrong, and it was wrong for exactly the reason you flagged two turns ago'",
+   "ts": "2026-08-05T12:06:57"
+  },
+  {
+   "claim": "ASSISTANT (00:18): the divergence is a closed loss-driven feedback loop -- PlateauGrowth fires on worsening, growth destabilizes routing, which raises the loss",
+   "correction": "ASSISTANT: 'it's not the loss-driven loop I flagged last turn -- the ramp never reads the loss at all.' The ramp was armed while n < ramp_to*cap and culling holds n just under the cap forever. Also self-corrected mid-turn: 'my simulation shows my stated mechanism was wrong -- growth is clamped at the cap, so the real loop is cull->refill'",
+   "ts": "2026-08-05T02:55:02"
+  },
+  {
+   "claim": "ASSISTANT (02:55): the cull-refill churn is the cause of the divergence; the ramp latch is the fix, and 'base' will answer it",
+   "correction": "ASSISTANT: 'The ramp latch worked and didn't help.' Churn fell from ~10,062 grown / 5,969 culled to ~4,210 / 1,205 and latched in every arm, but divergence got WORSE (+1.438 -> +2.287 for base). 'The cull-refill cycle was real; it wasn't the cause. Clean negative'",
+   "ts": "2026-08-05T12:06:57"
+  },
+  {
+   "claim": "ASSISTANT (implicit, repeated across turns): the fabric/chaining path is underperforming and needs fixing",
+   "correction": "ASSISTANT: 'nofabric was the arm I said would partition the problem, and it did -- the opposite way from my guess. The bare GRU is nearly the best run in the grid. The fabric on the chaining path is not underperforming, it's actively destroying the model'",
+   "ts": "2026-08-05T12:06:57"
+  },
+  {
+   "claim": "ASSISTANT (repeatedly, 18 grid arms): HALT reading 0.0000 is a failure of the mechanism",
+   "correction": "ASSISTANT: 'HALT reading 0.0000 in all 18 arms was the gradient's CORRECT answer to the question the architecture was asking it.' _alive only scales the residual update and only h_final is decoded, so HALT's gradient answers 'how much fabric do I want at all', never 'when am I done'",
+   "ts": "2026-08-05T12:20:33"
+  },
+  {
+   "claim": "ASSISTANT (12:28): CHAIN_VOTE=1 is the society x chaining hybrid the researcher asked for",
+   "correction": "ASSISTANT: 'You're right, and what I built isn't what you described.' CHAIN_VOTE changed only WHERE experts combine and kept the learned transition matrix, which is where the rail lives. The researcher's actual idea -- run the society, feed the result back in, run it again -- became CHAIN_ROUTE=soc",
+   "ts": "2026-08-05T13:54:56"
+  },
+  {
+   "claim": "BUILD LINE: a freshly-pulled checkout is DIRTY, 'this log is NOT reproducible from the commit'",
+   "correction": "ASSISTANT: 'That was my bug, not your tree.' git status --porcelain lists untracked files; the user's data_pilot/ corpus made every tree permanently 'dirty'. The affected log IS reproducible from 22a708d despite its header",
+   "ts": "2026-08-05T12:51:17"
+  },
+  {
+   "claim": "Pilot gru6 (socloop_w + DIV_W=0.05) is a measurement of the distinctness term at pilot scale",
+   "correction": "ASSISTANT: 'That pilot measured nothing, and it's my fault. It came back BYTE-IDENTICAL to the previous one' -- held-out 2.893, +0.545, since-min +0.683, H 0.533, spec 0.000, top 25.2%, 424 experts. The soc-loop branch returns before the distinctness term, so DIV_W was inert",
+   "ts": "2026-08-05T16:42:28"
+  },
+  {
+   "claim": "ASSISTANT (16:00): socloop_w shows 'the mechanism you designed works' -- H(hop1|hop0) 0.533, 10-100x every prior run",
+   "correction": "ASSISTANT tempered it the same turn and then more strongly: 'The run with the best routing diversity this project has ever measured produces the second-worst text.' socloop_w held-out 2.893 vs society 2.058 and nofabric 2.118. 'I have been optimizing mechanism, and it is not paying'",
+   "ts": "2026-08-05T16:42:28"
+  },
+  {
+   "claim": "ASSISTANT (12:42): 'banner lies are now structurally impossible' -- the declarative registry makes drift impossible",
+   "correction": "ASSISTANT: 'CHAIN_ROUTE was NOT in the effective-config table -- it switched the entire routing architecture for both of these pilots and neither log said so. That's one commit after I introduced the table to make exactly this impossible.' Registry made self-policing in 99ba0f4",
+   "ts": "2026-08-05T15:49:11"
+  },
+  {
+   "claim": "REPORT: the SUFFICIENCY section (does the population beat its best single member?) has been reporting on every run",
+   "correction": "ASSISTANT: 'SUFFICIENCY has printed NOTHING since routing went per-window.' int(_os[j]) on a whole row raised ValueError into the section's own except -- 'the one measurement that asks whether the population beats its best member has been silently swallowed for every run since'",
+   "ts": "2026-08-04T22:24:53"
+  },
+  {
+   "claim": "CONFIG: DIV_W=0 sits under 'OFF ON PURPOSE' -- a deliberate choice",
+   "correction": "ASSISTANT: 'the one term in this system that rewards experts for differing has been UN-RUNNABLE since routing went per-window, silently. That's why DIV_W=0 has sat in \"OFF ON PURPOSE\" all this time; it wasn't a choice, it was broken'",
+   "ts": "2026-08-05T03:49:27"
+  }
+ ],
+ "span": "2026-08-04T19:33:44 .. 2026-08-05T16:48:18",
+ "tested": [
+  {
+   "result": "84 distinct experts won at least one window | top expert took 3.9% | half the traffic went to 21 experts. IDENTITY SPACE: 196 experts, nn-distance median 0.0349, mean pairwise 0.8571 (DISTINCT)",
+   "ts": "2026-08-04T19:48:44",
+   "what": "ROUTER SELECTION added, reading fab.use over the whole run rather than the 32-window eval probe"
+  },
+  {
+   "result": "12/12 in 485s, down from 701s serial. Less than 4x because torch was already multi-threading per arm",
+   "ts": "2026-08-04T20:16:33",
+   "what": "rerun.sh smoke gate parallelised (SMOKE_JOBS, OMP_NUM_THREADS=1 per arm)"
+  },
+  {
+   "result": "12/12 green in 4 minutes, every arm rc=0, zero tracebacks, readback generates (vs ~79 min on the 4-core container)",
+   "ts": "2026-08-04T20:31:53",
+   "what": "User ran the 12-arm smoke gate on their own GH200 box"
+  },
+  {
+   "result": "mean routed depth 0.50 -> 1.00 of 4; also exposed an IndexError in the new ROUTER SELECTION line when fab.use is empty",
+   "ts": "2026-08-04T20:59:23",
+   "what": "HALT gating the residual chaining step (scaled by mass still routing)"
+  },
+  {
+   "result": "THIS MODEL 2.043 b/B, depth 1.00 of 4, SPECIALIZATION 0.009 vs shuffled null 0.110 +/- 0.093, ROUTER SELECTION 485 distinct top 4.4% half to 60, SPAWNED BY SPECIFICATION 0",
+   "ts": "2026-08-04T21:06:17",
+   "what": "pilot_gru_4 log (uploaded) analysed"
+  },
+  {
+   "result": "vocabulary 2048 tokens mean 3.28 bytes, 2.26 tokens per generated word (model is spelling), 93% of generated words appear in training text, train 2.066 | held-out 2.043 | gap -0.023 = UNDERFIT",
+   "ts": "2026-08-04T21:10:14",
+   "what": "Composition / memorization check on the pilot"
+  },
+  {
+   "result": "one expert 12,288 params; population 50,331,648 (0.20 GB fp32); router 3,176,544 of which eemb 1,581,248 + edec 1,589,376 = 99.8%; base LM 3,937,024; SigEncoder 3,789,376; whole system 61,234,592. Pilot fetches 60 MB, consumes 32 MB (4 MB/epoch x 8)",
+   "ts": "2026-08-04T21:29:47",
+   "what": "Parameter and dataset accounting at the real pilot config"
+  },
+  {
+   "result": "1,792 minted (256 base + 256 seed + 1,536 live). Hit VMAX=2048 at ~step 21,000, ~40% through the run, while still minting ~300 per interval; 0 minted for the remaining 27,000 steps",
+   "ts": "2026-08-04T21:47:21",
+   "what": "Token minting trace from the pilot log"
+  },
+  {
+   "result": "Both SOCIETY=1. 2.043 vs 2.043 b/B; 485 vs 487 distinct experts, top 4.4% both; specialization 0.009 / null 0.110+/-0.093 both; spawned 0 both",
+   "ts": "2026-08-04T22:03:21",
+   "what": "Reproducibility check between two pilot logs (c73ea46a vs b240f890)"
+  },
+  {
+   "result": "grounded=1 halt=1: halt 0.0078, blend delta 0.00046, gradient reaches halt_b and q_route. grounded=0 halt=1: halt 0.5999, blend delta 0.03983. halt=0: halt None, blend delta 0.00000",
+   "ts": "2026-08-04T22:13:02",
+   "what": "HALT unit probe across grounded x halt_on combinations"
+  },
+  {
+   "result": "HALT MASS running mean 0.632; SUFFICIENCY population (2 experts) 5.800 b/B vs best single rank-slot 5.803, population buys +0.003; as the router emitted it (HALT spent on base head) 5.801",
+   "ts": "2026-08-04T22:28:37",
+   "what": "Toy arms with HALT on the society path (6 kB, CPU)"
+  },
+  {
+   "result": "N=1024 compute path only: society 20.9 experts/step (2.0%), 261 distinct in 60 steps (25%); chaining 30.7 (3.0%), 78 distinct (8%). With identity embedder: society 60.9 (5.9%), chaining 66.5 (6.5%), both 1024 distinct (100%)",
+   "ts": "2026-08-04T22:34:06",
+   "what": "Gradient-reach probe, structured signatures, 60 steps, BATCH_W=16"
+  },
+  {
+   "result": "chaining LM-loss-only: gradient to q_entry q_route nov ctrl halt_key eemb A B; DEAD halt_b edec K_p SRC_p. society: gradient to q_route nov halt_key halt_b eemb A B; DEAD q_entry ctrl edec K_p SRC_p. FAB_DERIVE_IDS=0: 0/128 experts get gradient",
+   "ts": "2026-08-04T22:55:27",
+   "what": "Router-parameter gradient audit, 128 experts, one step"
+  },
+  {
+   "result": "held-out 2.576, beats order-1 by +0.862, 4096 nodes (9784 grown on plateau), SPECIALIZATION 0.000 vs null 0.000, 1 of 4096 nodes used in eval, 5691 culled of which 0 for sustained error, SPAWNED 0, mean routed depth 1.00 of 4 with halt 0.00",
+   "ts": "2026-08-05T00:11:05",
+   "what": "pilot_gru_5 (the first real SOCIETY=0 chaining pilot) analysed"
+  },
+  {
+   "result": "best 3.56 @ step 5903 | final 4.68 @ step 47231 | since the minimum +1.120 | DIVERGING: 91% of the run was spent getting worse",
+   "ts": "2026-08-05T00:17:43",
+   "what": "Rewritten LM-training-curve diagnostic replayed against the real pilot curve"
+  },
+  {
+   "result": "BEFORE grounding fix -- society I(domain;expert)/H 0.343 / 0.871 (3-8 experts used); chaining 0.000 / 0.000 with 1 expert taking 100% on both seeds. AFTER: chaining 0.449 / 0.002 / 0.209 / 0.505 across 4 seeds, 2-7 experts",
+   "ts": "2026-08-05T00:40:45",
+   "what": "route_learn.py: 8 latent domains each needing its own map, 32 experts, 1500 steps, separable signatures"
+  },
+  {
+   "result": "loss 2.645 / 2.683 / 2.438 vs uniform-guess 3.871; I(dom;pair) == I(dom;hop0) to three decimals on every seed; order-consistency 94-99%",
+   "ts": "2026-08-05T01:33:47",
+   "what": "order.py: 6 domains each an ORDERED pair of transforms, 24 experts, depth 4, 3 seeds"
+  },
+  {
+   "result": "baseline 2.615/2.654/2.267; CHAIN_SUP=0.3 3.167/3.503/3.641 (worse every seed); CHAIN_CURRIC=1 depth rarely left 1, I/H 0.000; CHAIN_STATE_Q=1 2.787/2.710/2.737 (neutral). All three defaulted OFF -- and the curric numbers were later withdrawn",
+   "ts": "2026-08-05T01:42:58",
+   "what": "Researcher's staged-depth proposal plus deep supervision and state-aware query, on the order toy"
+  },
+  {
+   "result": "signature-region spread 3.904 (99%) vs WEIGHT-PREDICTION spread 0.053 (1%). CHAIN ORDER H(hop1|hop0) = 0.500 bits over 16 transitions, 3 distinct hop-0 experts, 2 always handing to the same successor",
+   "ts": "2026-08-05T02:12:32",
+   "what": "ROUTING MIX and CHAIN ORDER instruments running inside a real (toy-scale) run"
+  },
+  {
+   "result": "mix 66/34 vs 98/2 baseline; top expert 46.0% vs 59.6%; half the traffic to 2 experts vs 1. Also: curriculum finally fires -- '[chain @ 59] depth 1 stopped paying -> 2 hop(s) of 4'",
+   "ts": "2026-08-05T02:15:16",
+   "what": "FAB_KEY_NORM=1 A/B at toy scale"
+  },
+  {
+   "result": "held-out 2.433, +1.005 vs order-1, 567 distinct experts top 79.5%, SPECIALIZATION 0.000, GRADIENT REACH 3580 of 4096 (87.4%), 10062 grown on plateau, 5969 culled (8 for sustained error), since-min +1.438, 124,575 off-policy routings",
+   "ts": "2026-08-05T02:26:37",
+   "what": "pilot_gru_6 (grounding extended to chaining) analysed"
+  },
+  {
+   "result": "ROUTING MIX region 0.000 (0%) vs weight-prediction 2.912 (100%); SPAWNED BY SPECIFICATION 3 (first time it ever fired); 7 distinct experts top 52.7%; CHAIN ORDER -0.000 bits, 4 of 4 hop-0 experts always handing to the same successor",
+   "ts": "2026-08-05T02:31:56",
+   "what": "ROUTE_REGION_W=0 FAB_KEY_NORM=1 weights-only arm at toy scale"
+  },
+  {
+   "result": "with latch: 4830 grown over 50k steps, ramp fired 72x, latched=True, final n=438 (vs the unlatched ramp re-firing every ~187 steps for the whole run)",
+   "ts": "2026-08-05T02:54:01",
+   "what": "Simulation of the growth ramp with the latch against real pilot dynamics (cap 4096, culling holds n below it)"
+  },
+  {
+   "result": "SPECIALIZATION 0.094 (first nonzero ever), SPAWNED 7 (first ever), top expert 44.5%, 741 distinct experts, half the traffic to 2; best loss 3.60 @ 5903 vs pilot 6's 3.69; final 5.21, since-min +1.617. CHAIN ORDER H(hop1|hop0) = 0.018 bits over 117,094 transitions, 90 of 123 hop-0 experts always same successor",
+   "ts": "2026-08-05T03:23:13",
+   "what": "pilot_gru_7 (ROUTE_REGION_W=0 FAB_KEY_NORM=1, weights-only routing) analysed"
+  },
+  {
+   "result": "society +0.605 since-min / 2.058 held-out / +1.381 vs order-1 / spec 0.126; nofabric +0.670 / 2.118 / +1.320; divw +2.151 / 2.324; base +2.287 / 3.124 / +0.314; weights +2.434 / 3.989 / spec 0.142; kitchen +2.637 / 3.221. Churn after latch ~4,210 grown / 1,205 removed, LATCHED in every arm. HALT 0.0000 and depth 1.00/4 in every chaining arm. CHAIN ORDER 0.007-0.058 everywhere",
+   "ts": "2026-08-05T12:00:23",
+   "what": "18-arm unattended grid, all arms trained (4 lost their report to a generate() crash)"
+  },
+  {
+   "result": "base: region 7% / weight-prediction 93%. keynorm: 41% / 59%. weights, balance, softroute, divw, smallpop, curric, wt_bal: 0% / 100%. This inverted the earlier toy-scale 98/2 finding",
+   "ts": "2026-08-05T12:00:49",
+   "what": "ROUTING MIX read from the 4096-expert grid arms rather than the toy"
+  },
+  {
+   "result": "HALT mass 0.0000 -> 0.2213; held-out 5.361 -> 5.191; convex-combination invariant asserted, no violations",
+   "ts": "2026-08-05T12:27:30",
+   "what": "CHAIN_VOTE=1 (per-hop prediction-level voting) at toy scale, with FAB_MIN_STEPS forced to 0"
+  },
+  {
+   "result": "CHAIN_VOTE: HALT 0.9909, mean routed depth 0.03 of 4, since-min +0.664, held-out 2.166, +1.273 vs order-1, spec 0.000, 877 distinct experts top 51.8%, H(hop1|hop0) 0.020 over 201,375 transitions, ROUTING MIX region 1.378 (0%) vs weight 425.029 (100%). SOCIETY: since-min +0.605, held-out 2.058, +1.381",
+   "ts": "2026-08-05T13:53:24",
+   "what": "Pilots gru2 (CHAIN_VOTE=1) vs gru3 (SOCIETY=1)"
+  },
+  {
+   "result": "socloop halt 0.345 held-out 4.918 H(h1|h0) -0.000; socloop_w halt 0.6895 held-out 4.925 H 0.270; vote halt 0.3276 held-out 5.191 H -0.000; society held-out 5.044. 0.270 is the first non-trivial H this measurement ever produced",
+   "ts": "2026-08-05T14:00:07",
+   "what": "CHAIN_ROUTE=soc (society looped) at toy scale, 4 arms"
+  },
+  {
+   "result": "gru4: best 3.60 @ 5903, final 4.28, since-min +0.683, train 2.941 / held-out 2.893, +0.545 vs order-1, HALT 0.9170, depth 1.00/4, spec 0.000, SPAWNED 0, 424 distinct top 25.2%, CHAIN ORDER H = 0.533 bits over 202,130 transitions. gru5: best 3.77 @ 3935, final 7.49, since-min +3.723, held-out 4.193, HALT 0.0000 -- worst run in the project",
+   "ts": "2026-08-05T15:48:33",
+   "what": "Pilots gru4 (socloop_w) and gru5 (socloop with default routing)"
+  },
+  {
+   "result": "BYTE-IDENTICAL on every metric: held-out 2.893, +0.545, since-min +0.683, H(h1|h0) 0.533, spec 0.000, top 25.2%, 424 experts. DIV_W was unreachable on the soc-loop path; the pilot measured nothing",
+   "ts": "2026-08-05T16:39:02",
+   "what": "Pilot gru6 (socloop_w + DIV_W=0.05) compared against gru4 (DIV_W=0)"
+  },
+  {
+   "result": "auxiliary-loss audit confirms 'DIV_W x15' fired, but held-out identical at 4.925 for both arms -- DIV_W now runs but has not been shown to change the outcome",
+   "ts": "2026-08-05T16:41:51",
+   "what": "DIV_W fixed on the soc-loop path, toy A/B (socdiv vs socnodiv)"
+  },
+  {
+   "result": "process 0: 3.34 @2000 -> 2.40 @6000 -> 3.62 @48000; mean change per 2000 active steps -0.012 bits/byte. LM curve best 3.62 @5903, final 4.23, since-min +0.605. Investigation of whether divergence is a per-token units artifact was still in progress at chunk end",
+   "ts": "2026-08-05T16:48:18",
+   "what": "Per-process LEARNING CURVE (unit-stable bits/byte) from the society pilot, read against the per-token LM curve"
+  }
+ ],
+ "wip": [
+  "The divergence is unresolved and is the blocking issue: EVERY run bottoms at ~step 5,900 and rises for the remaining ~41,000 steps (society 3.62->4.23, socloop_w 3.60->4.28, base chaining 3.82->6.11). nofabric diverges too (+0.670), so it is not the fabric. Ramp-latch hypothesis tested and cleanly negative. Remaining suspects named but untested: BAL_WARM decaying load-balance pressure to 0 at step 4000, and per-token loss rising mechanically as minted tokens lengthen (a units artifact).",
+  "The researcher's final instruction -- fix any architecture issues, then make the chaining society (CHAIN_ROUTE=soc) the default and run another pilot -- was not completed. The chunk ends mid-investigation with Claude comparing the per-process bits/byte LEARNING CURVE against the per-token LM curve.",
+  "DIV_W now runs on both paths and on the soc-loop path but has never produced a measured effect: the toy A/B (socdiv vs socnodiv) gave identical held-out 4.925. No pilot-scale DIV_W measurement exists.",
+  "Round-2 grid (vote, vote_w, vote_soc, socloop, socloop_w, society, base, noban, nolatch, ...) was built and pushed but the researcher chose individual pilots instead; it was never run.",
+  "Four grid arms (frozvocab, stateq, wt_div, explore) trained fully but lost their entire reports to the generate() CUDA assert; the crash is fixed but those arms were never re-run.",
+  "FAB_KEY_NORM=0 was flagged as 'broken rather than a default' after three runs where it was the difference between working and catastrophic (weight-term spread 425 vs region 1.4), but the default was not changed.",
+  "q_entry is now untrained (the shared router uses q_route) yet still places newborn keys via seed_key(), so targeted birth uses an untrained projection. Flagged, not decided.",
+  "Per-window novelty (surprise is computed per window and averaged away one line before use) was proposed as a cheap fix and never implemented.",
+  "VMAX=2048 caps the tokenizer at ~step 21,000 while still minting ~300/interval; raising it costs ~9.4M params on a 3.9M base LM. Named as an untested trade. ENC_CREG also still unruled-on.",
+  "CHAIN ORDER on the transition path stays at 0.007-0.058 bits in every arm; only removing the transition matrix (CHAIN_ROUTE=soc) moved it, and that arm predicts worse. The composition question is open.",
+  "H(hop1 | hop0, domain) -- whether the chain can vary its second move for the same first move -- was named as the decisive metric at 01:55 and never measured in that conditional form.",
+  "The 12-arm smoke gate has not been run since 20:31; all verification since is toy-scale CPU arms, per the researcher's standing instruction."
+ ]
+}

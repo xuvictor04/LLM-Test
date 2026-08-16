@@ -1,0 +1,482 @@
+{
+ "chunk": "chunk_05",
+ "errors": [
+  {
+   "fixed": "yes",
+   "ts": "2026-07-27T21:24:06",
+   "what": "MANAGE_MERGE defaulted to 0.12, which is non-zero, so it overrode the `md = merge_dist if merge_dist > 0 else MERGE_FRAC*NEW_DIST` fallback — the 0.28 the code was written to produce under a comment reading 'ONE scale for create AND consolidate' had never once run. Creation used 0.35, consolidation 0.12."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-28T11:45:01",
+   "what": "PH_BOUNDS accumulated across epochs (appended inside build_stream, which runs once per epoch under DISK_STREAM), so by epoch 3 the phase index read 8 for a position whose phase was 2 — past the end of PHASE_SCHED. PHASED=1 would have failed in exactly the multi-epoch config it exists for."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-29T12:35:03",
+   "what": "`except Exception: model.train()` silently swallowed the learning-curve sampler's error, so the whole section printed nothing. Root cause: nbytes() reads BLEN, which is None until the final re-tokenization whenever TOK_ONLINE is set — nbytes is unusable mid-run."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-29T13:03:53",
+   "what": "The IS THE PARTITION INFORMATIVE section vanished silently when only one domain still held retrievable entries (memory had evicted everything else)."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-29T16:57:46",
+   "what": "Adaptive encoder warmup stop condition `_sep <= _prev_sep*(1+eps)` is equally true of a flat and a FALLING curve, so a 69% collapse in signature separation (0.16 -> 0.05) was called convergence and training stopped at 501/2000."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-29T16:57:53",
+   "what": "probe_stability printed 'NO MORE THAN CHANCE' for two runs that each had exactly one domain — an experiment that never ran, reported as a negative result."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-29T17:08:57",
+   "what": "Shell quoting broke two test grids ('ambiguous redirect' from spaces in labels), losing arms of the sweep."
+  },
+  {
+   "fixed": "unclear",
+   "ts": "2026-07-29T20:10:48",
+   "what": "API Error: 529 Overloaded twice in a row; the user had to send 'Change defaults to have things on...' three times."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-30T15:35:33",
+   "what": "ab_no_world exited 1 with no data: WORLD_GROW defaults ON and its step hook dereferenced world_fwd.n() outside the `if WORLD_MODEL:` block, so WORLD_MODEL=0 died at the first MANAGE_EVERY. The one ablation that would say what the world model is worth had never run."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-30T15:35:33",
+   "what": "SIG_SPACE=tokens arm crashed: `ValueError: expected sequence of length 64 at dim 1 (got 0)`. The training loop translated the index correctly (`i if SIG_SPACE == 'tokens' else bpos`) but every EVAL site did tok_bs[s] unconditionally — silently reading the wrong window under token space, and only crashing at the tail."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-07-30T20:45:17",
+   "what": "memory.py:35 `if self.n_own > 1: cap = self.n_own * self.quota` silently overrode MEM_CAP=200000 to 8192 slots once MEM_PER_EXPERT defaulted ON — a 24x cut to the store that every memory number scales with."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T01:06:16",
+   "what": "The ablation table's `+mem` column matched a bare `MEMORY [0-9.]+`, so it printed the coherence FRACTION 0.50 for five arms and BITS/BYTE 2.618 for the sixth, in one unlabelled column."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T00:59:11",
+   "what": "The new coherence resampling (32 autoregressive generations per arm) blew the smoke gate past its 10-minute timeout — a gate broken one commit after being sped up."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T13:08:38",
+   "what": "RESUME crashed at the first domain merge after any resume: asm.born and asm.act were never saved, and _absorb reads s.born[a] with no default. Every resumed run would have died within DOM_MANAGE_EVERY steps — fatal on a 14-day run."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-07-31T13:11:23",
+   "what": "Optimizer moments are not restored on resume after growth: add_param_group during training gives the checkpoint more param groups than a freshly built optimizer, and remapping moments across a different flattening would silently attach them to the wrong tensors."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T13:04:06",
+   "what": "open_corpus globs `*` while fetch_big.py writes `_fetch_manifest.json` into the same directory — the manifest would have been spliced into the corpus and trained on as English."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T13:58:28",
+   "what": "The fetch GB split (20/8/10/1) was wrong: build_stream picks segments with random.choice(act), uniform over active domains and never weighted by corpus size, so a small corpus gets re-read ~100x rather than getting less attention."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T15:06:15",
+   "what": "The new cross-run-boundary holdout probe shipped pooled with no error bar — eng and py both printed 4.259 — immediately after fixing coherence for the same defect. Also Python's salted hash() would have redrawn the probe windows every process."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-07-29T20:41:56",
+   "what": "EXPERTS=1 AND FABRIC=1 makes the expert bank a silent no-op (the forward pass is an elif chain and FABRIC wins), which also means the smoke grid's no_experts arm tests nothing and passes because it is a no-op."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-07-29T20:41:14",
+   "what": "World model reports 'beats baseline -84.7% | latent std 0.07' against its own printed criterion that std ~0 = collapsed — the same collapse shape the signature encoder had."
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "Claude conceded 'I drifted into optimizing V-measure against the four seeded labels', reverted MANAGE_MERGE 0.45->0.28, traced `did` to exactly 3 consumers (mem.src, dom_exp, clustering report) and showed routing never uses it; built the label-free 'IS THE PARTITION INFORMATIVE' test with a shuffled-provenance null. Commit 8914dd1.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Stop steering toward 4 domains; more domains reflecting sub-specialization are fine — tell me what a domain actually DOES, and answer whether our 4 categories are arbitrary versus what the system finds on its own.",
+   "quote": "Let’s rehash the ideas of domain. Why are we going to 4? More or less domains do not matter too much for me. I’m inclined for more, to reflect sub specialization. Again, what is the direct impact of domains? I am fine with removal of unused. My original question for our domains was how arbitrary they were, being the 4 you’ve chosen based off our categorization, instead of how the system itself would categorize and organize.",
+   "ts": "2026-07-27T21:48:49"
+  },
+  {
+   "evidence": "Claude audited all 14 report sections against the two goals, marked 4 as invalid/self-invented, discovered PHASED=1 (the actual catastrophic-forgetting test) had never been run, ran it, and added a permanent RETENTION section. Commit c316813.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Metrics are proxies for 'proper language' and continual learning, not targets; audit everything, and when a metric disagrees with the system, suspect the metric.",
+   "quote": "As a reminder, I don’t want to optimize for our arbitrary metrics. Their use is only as proxies , so we can quickly tell how close we are from getting to proper language, and continual learning capabilities. \n\nRe evaluate and audit everything, not just what we’ve done accordingly. \n\nIf a metric isn’t working, but the system itself is improving, that does not mean the system is at wrong, but the metrics and how we are using them",
+   "ts": "2026-07-27T22:10:44"
+  },
+  {
+   "evidence": "Claude: 'There is no good reason. Nobody ever questioned it, including me.' PHASED flipped to default 1 with a warning on PHASED=0; two latent bugs fixed (PH_BOUNDS accumulating across epochs; the retention metric's stationarity assumption). Commit a5ac033.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Challenge the PHASED=0 default — non-stationarity is the whole point of a continual-learning test, not an option.",
+   "quote": "Why is non stationary off? I thought forgetting was essential",
+   "ts": "2026-07-28T11:43:40"
+  },
+  {
+   "evidence": "ANCHORS (uniform/order-0/order-1 fitted on train, scored held-out) and COHERENCE (fraction of generated windows staying in the seed's corpus, with measured floor and ceiling) added and run. Commit aac17f7.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Add the instruments the audit said were absent, incrementally.",
+   "quote": "Add the metrics you think is missing, there’s probably more, but we can include as we go along.",
+   "ts": "2026-07-28T11:59:25"
+  },
+  {
+   "evidence": "LEARNING CURVE added in-report (acquisition +0.902 vs decay-while-absent +0.192 per 150 steps at 120 kB); probe_stability.py written, first CPU run gave NMI 0.568 vs shuffled floor 0.015. Commit 01c1cd3.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Build the two remaining proposed instruments (per-process learning curve; seed-to-seed stability).",
+   "quote": "Build the two, then let’s follow up",
+   "ts": "2026-07-29T12:29:44"
+  },
+  {
+   "evidence": "Full-subsystem CPU smoke (179 s, 0 tracebacks) then three GPU runs: 4 MB panel + two English-only seeds. Results pasted back at 16:56:26.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks whether to spend GPU time now that six new instruments exist.",
+   "quote": "What next? Should we test?",
+   "ts": "2026-07-29T12:59:57"
+  },
+  {
+   "evidence": "Direction adopted, hypothesis falsified in the opposite direction: English-only encoder loss plateaued at 3.83/3.78 against ln(ENC_BATCH=48)=3.871 (the constant-vector solution), while 4 corpora reached 2.10 — 'the other three corpora weren't throwing the system off. They were the only thing preventing a collapse.' Led to the ENC_VREG anti-collapse fix (17->24 domains from one corpus). Commit c1aadda.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Hypothesis: the three non-English corpora are interfering; run English alone.",
+   "quote": "Let’s do English only. I don’t know why we went back to the 4 domains. Maybe the other 3 are throwing off the system",
+   "ts": "2026-07-29T17:06:56"
+  },
+  {
+   "evidence": "Per-domain token histograms (asm.tokc) + DOM_PRIOR blend + a four-arm held-out test added. Result conditional: 4 corpora own-vs-random +0.063 ('DOMAINS PREDICT'); English-only own-vs-random +0.000 (no signal). Every prior arm still worse than model alone at these weights. Commit 7b481a1.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Domains are optional scaffolding; if they can be made to help prediction rather than only editing, do that.",
+   "quote": "Domains were a result of the llm creation. It can serve a purpose, but does not need to exist. If we can use as a prediction mechanism it would be nice to",
+   "ts": "2026-07-29T19:05:21"
+  },
+  {
+   "evidence": "Claude analysed it as well-founded (Fabric cent and DomainAssembler centroids live in the same sig_d space and never talk; dom_exp affiliation already computed and discarded; PlateauGrowth fires on loss regression, not on 'struggling on THIS material') and proposed birth/routing/discovery designs plus a matched-expert-count falsifier — but said the fabric-on baseline and the HALT-90% problem must come first. Never built anywhere in this chunk.",
+   "outcome": "deferred",
+   "paraphrase": "Use domains to drive expert/router discovery — birth new experts and route via domain structure.",
+   "quote": "One way we can use the domains is for router discovery of other experts and new experts discovery.  Consider this when you are done with what you will say",
+   "ts": "2026-07-29T19:28:42"
+  },
+  {
+   "evidence": "Grep found FABRIC = bool(_i(\"FABRIC\", 0)) and EXPERTS default 0 — 'fabric nodes 0' in every phase table of every run in the project. Claude conceded picking ENC_VREG=5.0 on a domain statistic (cohesion fell 0.69->0.30), dropped the stability chase, and defaulted FABRIC ON. Commit 7a42f90.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Three corrections at once: the one-domain English result smells wrong, domains must be self-organized rather than tuned toward, and the router fabric must not be off — reproducibility matters less than usefulness, and proper language is the goal.",
+   "quote": "It feels wrong for English to only have one domain, double check the test or metric, and if you optimized it for the wrong thing earlier. The domains should be self driven and organically created. ... Why has the router fabric been turned off? It is essential for the current system design. ... The final goal will always be proper language",
+   "ts": "2026-07-29T19:33:36"
+  },
+  {
+   "evidence": "Audit of every bool flag found five more off: TOKENIZER/TOK_ONLINE, WORLD_MODEL, WORLD_GROW, WORLD_FEEDBACK, MEM_PER_EXPERT — all flipped ON; all-on smoke exit 0 with 11 sections. Claude answered 'Yes — everything' and listed specifically invalidated conclusions. Commit 51889b7. (Message had to be sent three times because of two 529 API errors.)",
+   "outcome": "built-and-measured",
+   "paraphrase": "Turn every subsystem on by default and tell me whether prior results are invalidated.",
+   "quote": "Change defaults to have things on. Since things were off in prior tests, do we need a rerun?",
+   "ts": "2026-07-29T20:07:14"
+  },
+  {
+   "evidence": "Found memory.py:35 silently overriding MEM_CAP=200000 -> 8192 slots (24x cut) once MEM_PER_EXPERT came on; added the warning, wrote rerun.sh (all|mix|eng|ablate, settings inline), widened preflight.sh's knob trap. Commit 4869559.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Get the codebase ready before spending GPU time on the reruns.",
+   "quote": "Prep for the reruns.",
+   "ts": "2026-07-29T20:44:45"
+  },
+  {
+   "evidence": "Claude produced a where-to-run table and built a probe.pt sidecar (encoder + domain centroids + SIG_D + WIN only) written on every checkpoint: 187 KB vs 18 MB at D=64, scaling O(vocab x D) not O(MEM_CAP). Both probes now prefer it. Commit 80a4533.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Constraint: GPU access is intermittent — make clear what must run on the GH200 and what can run anywhere.",
+   "quote": "Although I plan on using a GH200, I wont always be using it, so if something must be run there, let me know.",
+   "ts": "2026-07-30T18:43:22"
+  },
+  {
+   "evidence": "Claude measured first (40 kB arm 50.8 s full report vs 19.0 s with BENCH=1), then cut the smoke stream 40 kB->12 kB and made DEVICE auto-detect CUDA: 10 arms in 253 s instead of ~20 min. Verified the faster gate still fires by reintroducing the WORLD_GROW bug. Commit 7de037d.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Objection: the pre-flight gate costs more than the run it protects.",
+   "quote": "I am running. Your CPU smoke is taking longer than what I think the GPU would take.",
+   "ts": "2026-07-30T19:52:14"
+  },
+  {
+   "evidence": "Claude initially answered 'The code is ready', then tested RESUME end-to-end for the first time and found it crashed on the first domain merge (KeyError 0 in _absorb; asm.born/asm.act never saved). Also found open_corpus would train on fetch_big.py's _fetch_manifest.json. Both fixed; longrun.sh written. Commit c8b6991.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Is the system actually ready for a long multi-epoch run?",
+   "quote": "So is it ready for a proper multi epoch run?",
+   "ts": "2026-07-31T12:59:56"
+  },
+  {
+   "evidence": "Fetch plumbing built (longrun.sh fetch/run/resume/watch) but the long run itself was never started inside this chunk. PONDER_WARM/FAB_MIN_STEPS left at 8000/0 as instructed.",
+   "outcome": "deferred",
+   "paraphrase": "Two decisions via the question tool: pull a large fresh corpus and run for days; leave the fabric's ponder/HALT schedule untouched so the long run measures the designed behaviour.",
+   "quote": "\"The 6.9 MB corpus is the limit, not the code. How do you want to feed the long run?\"=\"Fetch big (40 GB) and run for days\", \"PONDER_WARM=8000 and FAB_MIN_STEPS=0 have never been exercised past warmup. Change them for this run?\"=\"Leave both as-is (Recommended)\"",
+   "ts": "2026-07-31T13:03:10"
+  },
+  {
+   "evidence": "Confirmed all four presets are HF streamed via `datasets`. Audit: 221 knobs, 29 default to 0/empty; two judged undefended — DIV_W=0 (the mechanism meant to take over from load-balancing after BAL_WARM=4000, leaving steps 4000-8000 with nothing opposing fabric collapse) and ENC_CREG=0 (the covariance half of the VICReg fix). Also found the fetch GB split wrong because build_stream samples domains uniformly. Commit 10842e8.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Confirm the data provenance and re-audit every default for things still silently off.",
+   "quote": "For the 40GB, is it from Hugging Face?\n\nAlso, double check the defaults, and see what is off",
+   "ts": "2026-07-31T13:56:51"
+  },
+  {
+   "evidence": "The objection was correct: every RETENTION figure was computed on the CURRENT stream, so 'did adding an area damage English?' was unanswerable. Claude built a held-out probe keyed by domain NAME stored in every checkpoint, verified eng,py -> eng,py,num (eng +0.223 +/- 0.047 WORSE, py -0.308 +/- 0.141 better, mean -0.043 +/- 0.074 inside noise). longrun.sh retargeted to eng+web with a `longrun.sh add` mode. Commit 471318c.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Drop Wikipedia; learn English first and ADD harder areas later as the continual-learning demonstration — and there is unfinished work before the multi-epoch run.",
+   "quote": "Let’s not do Wikipedia yet, and start out with an English language focus. The system would should continual learning, so we can tack more linear, complex and abstract areas later.\n\nIt looks like there’s stuff before we can do the multi epoch, with stuff not fully fleshed out",
+   "ts": "2026-07-31T14:58:38"
+  }
+ ],
+ "notes": "Coverage: read the full 8,306 lines / ~502 KB. A large fraction of the file (roughly lines 1563-2011, 2398-2905, 3902-4070, 5263-5915) is pasted GH200 terminal output from the researcher, including one section the researcher repasted several times over (\"I dont know if I pasted the wrong message ealier, so I'm repasing the whole session\") — the same rerun_0730 grid appears ~6 times verbatim. I treated those as data, not as new ideas.\n\nATTRIBUTION WARNINGS. Three kinds of USER-tagged entries in this chunk are NOT the researcher and I excluded them from `ideas`: (1) tool [RESULT] blocks, which dominate the USER entries; (2) automated stop-hook messages at 2026-07-30T15:35:35 and 18:47:24 (\"There are uncommitted changes in the repository\"); (3) the entry at 2026-07-30T15:17:08, which is a conversation-compaction summary written by the harness/Claude, not the human — its \"All user messages\" section is a useful cross-check on my quotes but its prose is not the researcher's. One entry at 2026-07-31T13:03:10 is an AskUserQuestion result carrying two genuine researcher decisions in tool-rendered form rather than free text; I recorded it as an idea and flagged the form.\n\nStanding constraints restated by the compaction summary (originating with the researcher earlier in the project, before this chunk): default to bash unless python specified; assume a fresh box; confirm before action on perf changes; \"no compromises\" — don't remove or downgrade functionality for speed. Also carried in from before this chunk: \"I don't like the idea of freezing\" (which is why SIG_SPACE=tokens exists, and why its crash on 30 Jul mattered).\n\nThe dominant pattern of this chunk, stated by Claude repeatedly and confirmed each time by grep: a default that silently decided what the experiment was. The roll-call by the end is MANAGE_MERGE=0.12, PHASED=0, FABRIC=0, EXPERTS=0, TOKENIZER=0, TOK_ONLINE=0, WORLD_MODEL=0, WORLD_GROW=0, WORLD_FEEDBACK=0, MEM_PER_EXPERT=0, plus BATCH_W cadences and SEG_MIN/WIN from earlier chunks — and MEM_CAP being silently overridden the moment MEM_PER_EXPERT came on. The researcher found two of these directly (PHASED, FABRIC) by asking why something was off.\n\nUncertain outcomes I deliberately did not resolve: whether the domain->prediction result (own-vs-random +0.063 on 4 corpora) survives at GPU scale — the 4 MB grids report own-vs-random +0.018 to +0.020 on mix and -0.005 to -0.028 on English, with no error bar on that statistic, so I cannot say whether it is signal. Similarly, no_world being the largest ablation effect (+0.103) rests on a single grid with no run-to-run spread measured; Claude's own table caption says \"a subsystem that moves it by less than the run-to-run spread is not paying for itself\" without ever measuring that spread.",
+ "retractions": [
+  {
+   "claim": "ASSISTANT, 21:24:25: 'Four self-assembled domains for four seeded corpora, in a clean bijection, with every one recurrent and none visited once. That's the result.' — purity 0.97 / V 0.89 at MANAGE_MERGE=0.45, argued to be discovery not tuning because 'the count is data'.",
+   "correction": "ASSISTANT, after the researcher's challenge: 'I drifted into optimizing V-measure against the four seeded labels — the exact thing your own report calls \"a SCAFFOLD, not the target.\" Reaching a bijection with eng,py,num,c is a reconstruction result.' Default reverted to 0.28; later summarised as 'I tuned MANAGE_MERGE to maximize agreement with four labels we imposed, and paid for it in the property you actually care about.'",
+   "ts": "2026-07-27T21:49:24"
+  },
+  {
+   "claim": "ASSISTANT, 21:54:52: the new label-free test shows 'the domain label CARRIES INFORMATION -- own-domain memory predicts better than foreign', gap +0.360 on 4 corpora and +0.033 on English alone.",
+   "correction": "'That gap is not yet trustworthy... I defined \"own domain\" as the domain of the query's nearest entry, so own-domain retrieval always contains the global top-1 hit and foreign never does. It would win even on a meaningless partition.' With the shuffled-provenance floor: English excess -0.055, NOT distinguishable from random. 'Without the control I'd have told you English sub-specialization was working.'",
+   "ts": "2026-07-27T21:57:23"
+  },
+  {
+   "claim": "ASSISTANT, 22:21:38: the new RETENTION metric compares the first fifth of the stream against the last fifth, which are 'statistically identical material, so a positive gap is FORGETTING'; first reading +0.233 b/B DRIFTING.",
+   "correction": "'Under PHASED they are not — phase 0 is processes [0,1] and phase 3 is [2,3], with an empty intersection. That's precisely the confound I'd corrected by hand an hour ago... reintroduced by me in the fix for it.' Rewritten per-process; the sign of the PHASED vs stationary comparison then inverted.",
+   "ts": "2026-07-28T11:50:59"
+  },
+  {
+   "claim": "ASSISTANT, 12:04:57: 'DOES NOT BEAT ORDER-1 (-1.640) -- a bigram table would do as well', with order-1 = 2.627.",
+   "correction": "'The order-1 anchor is unfairly strong as written — I compute the bigram entropy of the held-out text itself, which is a bigram model that has already seen the answers.' Refitted on train with add-k: order-1 = 3.568, gap -0.699. 'Correcting it halved the apparent gap' — and moved against the assistant's own narrative.",
+   "ts": "2026-07-28T12:14:23"
+  },
+  {
+   "claim": "GPU English-only runs e1/e2 printed purity 1.00, homogeneity 1.00, completeness 1.00, V-measure 1.00, silhouette +0.95, '1/1 live domains GENUINE' — every domain score on the page looked perfect.",
+   "correction": "'A partition of one is perfect by construction. Every score on the page looked excellent for a run where the domain system was completely inert.' Separation had collapsed 69% (0.16 -> 0.05) and the adaptive warmup called it a plateau; 0 boundaries, 1 domain. The English experiment 'didn't measure anything'.",
+   "ts": "2026-07-29T16:57:46"
+  },
+  {
+   "claim": "ASSISTANT, 13:06:18, as an explicit pre-registered prediction: 'I expect stability to hold and coherence to disappoint... more scale won't fix a 768-d GRU trained for 8000 steps' — and the implicit expectation that the model would lose to order-1 at scale.",
+   "correction": "'The model beats a bigram at scale... +0.474. On English alone, +0.941. I predicted this might fail and it didn't.' Conversely stability came back at NMI 0.000 because the runs it compared had collapsed.",
+   "ts": "2026-07-29T17:01:15"
+  },
+  {
+   "claim": "ASSISTANT, 18:28:18: the two GPU English runs land on opposite informativeness verdicts, +0.010 ('NOT distinguishable') and +0.013 ('CARRIES INFORMATION'), reported as a real difference between the runs.",
+   "correction": "'The error bar settles it — and it says both your runs were noise... null spread +/- 0.020 over 5 permutations. Your +0.010 and +0.013 are both far inside +/-2 sigma = +/-0.040. My threshold was 5x tighter than the noise it was measured against.'",
+   "ts": "2026-07-29T18:35:52"
+  },
+  {
+   "claim": "ASSISTANT, 17:30:21 / 17:31:06: ENC_VREG=5.0 defaulted on because it produced 17-24 domains and separation 0.97, described as 'a measured plateau rather than a tuned optimum'.",
+   "correction": "'I picked ENC_VREG=5.0 partly because it produced more domains and higher separation. Cohesion fell from 0.69 to 0.30 in the process... I selected a knob on a domain statistic, which is exactly the thing you're objecting to.' Later listed among conclusions 'specifically invalidated' by the missing subsystems.",
+   "ts": "2026-07-29T19:34:24"
+  },
+  {
+   "claim": "Every result of the session up to this point — the domain findings, 'domains don't predict', coherence, bits/byte and all anchor comparisons — reported as properties of the system.",
+   "correction": "'Every conclusion this project has drawn was measured on a system missing its routing layer... its tokenizer, its world model and its memory partition.' FABRIC, EXPERTS, TOKENIZER, TOK_ONLINE, WORLD_MODEL, WORLD_GROW, WORLD_FEEDBACK and MEM_PER_EXPERT all defaulted off. 'Do we need a rerun? Yes — everything.'",
+   "ts": "2026-07-29T20:41:56"
+  },
+  {
+   "claim": "ASSISTANT, 19:46:21: 'fabric contributes +0.709 bits/byte -- four times what memory contributes... That's the largest component effect measured here', used as the evidence for defaulting FABRIC ON.",
+   "correction": "'I have to walk back the justification, not the default. The +0.709 was the report's own model ALONE -> +FABRIC number. That is an eval-time knockout of a component the model trained with (it also removes the fabric's LayerNorm)... ab_no_fabric is the retrained ablation — the honest test — and it says 3.089 vs 3.090: the fabric buys nothing on bits/byte. I used the overstating number.'",
+   "ts": "2026-07-30T15:35:33"
+  },
+  {
+   "claim": "ASSISTANT/report: 'English alone now yields 71 recurring domains from a single corpus — sub-structure nobody put there.'",
+   "correction": "'eng_only's 71 domains are partly ours, not the system's.' rerun.sh set SEG_MIN/SEG_MAX only on the mix arm, so with one corpus seg_from teleports to a random offset every ~1250 bytes ≈ 3.3 analysis windows. After the fix: 'English: 71 -> 17 domains. Most of the 71 was our splicing.'",
+   "ts": "2026-07-30T15:35:33"
+  },
+  {
+   "claim": "ASSISTANT, 15:44:37: 'What fabric does buy is coherence and retention' — ab_no_fabric coherence 0.75 -> 0.50, drift +0.132 -> +0.154, presented as the fabric's distinguishing contribution.",
+   "correction": "'ab_no_perexp also shows model+MEMORY 0.50 while matching full on drift — so memory's coherence contribution disappears without the per-expert partition too... Two subsystems, same trade, and I'd flagged only one of them.'",
+   "ts": "2026-07-30T18:47:22"
+  },
+  {
+   "claim": "Three separate confident coherence claims: 'memory HURTS coherence' (0.50 -> 0.25, 29 Jul), 'memory now HELPS coherence' (0.50 -> 0.75, 30 Jul, called 'the single most meaningful change in the rerun'), and 'the fabric buys coherence (0.75 vs 0.50)' — the latter used to defend keeping FABRIC on.",
+   "correction": "'Every coherence number this project has printed lands exactly on 0.25/0.50/0.75/1.00. That's the signature of a four-sample mean... Standard error at n=4 is 0.25. All three were one sample flipping. Coherence is the metric closest to \"is this proper language,\" and it had no resolution at all.' Resampled at 16 x 384: ALONE 0.47 +/- 0.10, +MEM 0.44 +/- 0.09, memory NEUTRAL.",
+   "ts": "2026-07-31T01:06:16"
+  },
+  {
+   "claim": "Across many turns: 'the router HALTs 90% of the time, mean routed depth 0.10 of 4' and 'the fabric buys ~0 bits/byte' reported as findings about the fabric.",
+   "correction": "'step counts windows... PONDER_WARM = 8000, _pw = min(1.0, step/8000) peaks at 0.81. The ponder cost has never reached full strength in any run this project has done. Every run ended inside its own warmup.' Compounded on 31 Jul by the discovery that BAL_WARM=4000 decays load-balance to zero while DIV_W (its designated successor) defaults to 0.0 — 'after step 4000, nothing opposes fabric collapse.'",
+   "ts": "2026-07-31T13:01:57"
+  },
+  {
+   "claim": "ASSISTANT, 13:01:57, answering 'is it ready for a proper multi epoch run?': 'The code is ready... RESUME= restores weights, both optimizers, the memory store, domain centroids and the recurrence clock — so a crash at hour 20 doesn't cost the run.'",
+   "correction": "'Ready now — but it wasn't when you asked.' Resume crashed at the first domain merge (KeyError: 0 on s.born), and optimizer moments do not in fact restore after growth — they restart, with the message now saying so.",
+   "ts": "2026-07-31T13:17:38"
+  },
+  {
+   "claim": "ASSISTANT, ~13:17:38: the longrun fetch plan pulling roughly 20/8/10/1 GB across four sources.",
+   "correction": "'My fetch sizes were wrong. build_stream picks the next segment with random.choice(act) — uniform over active domains, not weighted by corpus size... My 20/8/10/1 split would have meant eng gets read once at half-depth while chat gets read ~100x over.'",
+   "ts": "2026-07-31T13:58:28"
+  },
+  {
+   "claim": "The new cross-run-boundary holdout probe printed eng 4.259 and py 4.259 — read at first as a plausible pair of baselines.",
+   "correction": "'Identical 4.259 for two different corpora is not plausible.' They were 4.259256 vs 4.258743 — real but indistinguishable at this scale — and 'I just fixed one metric for having no error bar and shipped another the same way.' Re-shipped per-window with a standard error and a 'inside the noise' verdict.",
+   "ts": "2026-07-31T15:06:15"
+  }
+ ],
+ "span": "2026-07-27T21:13:39 .. 2026-07-31T15:15:13",
+ "tested": [
+  {
+   "result": "0.45 -> 7 domains purity 0.96; 0.60 -> 6, 0.88; 0.80 -> 4, 0.71; 1.00 -> 5, 0.60. Past 0.45 the count falls while purity collapses.",
+   "ts": "2026-07-27T21:21:05",
+   "what": "MANAGE_MERGE falsification sweep on CPU (does the count stop at the true 4, or keep collapsing?)"
+  },
+  {
+   "result": "4 domains for 4 corpora, purity 0.97 | homogeneity 0.89 | completeness 0.89 | V 0.89 | 0% visited once, visits [73,70,56,56]. Root cause of prior fragmentation: MANAGE_MERGE default 0.12 overrode the intended MERGE_FRAC*NEW_DIST=0.28.",
+   "ts": "2026-07-27T21:24:25",
+   "what": "GPU run at MANAGE_MERGE=0.45 (reported as 'the result')"
+  },
+  {
+   "result": "4 corpora: own-vs-foreign +0.360, null +0.265, excess +0.095 (informative). English alone: +0.286 vs null +0.341, excess -0.055 (NOT distinguishable from random).",
+   "ts": "2026-07-27T22:02:23",
+   "what": "Label-free 'IS THE PARTITION INFORMATIVE' with shuffled-provenance null"
+  },
+  {
+   "result": "faded [0,1] 4.819 vs stationary baseline 4.166 = +0.65 b/B forgetting; active 3.411 vs 3.971 = -0.56; memory surviving p0=0 p1=0 p2=2198 p3=4778; 'UNLEARN a FADED process 0: SKIPPED -- only 0 entries left (evicted)'.",
+   "ts": "2026-07-27T22:14:28",
+   "what": "PHASED=1 run for the first time (80 kB), against a matched PHASED=0 stationary control"
+  },
+  {
+   "result": "4.106 vs 3.873, forgetting +0.233 b/B, verdict DRIFTING. (Metric later found invalid under PHASED.)",
+   "ts": "2026-07-27T22:20:56",
+   "what": "First RETENTION metric (first fifth vs last fifth of the stream)"
+  },
+  {
+   "result": "PHASED=1: p1 -0.203, p2 +0.048, p3 +0.226, mean +0.024 RETAINED. PHASED=0: p0 +0.025, p1 -0.048, p2 +0.049, p3 +0.561, mean +0.147 DRIFTING. Stationary showed worse retention than non-stationary.",
+   "ts": "2026-07-28T11:58:42",
+   "what": "Per-process RETENTION after the confound fix, PHASED=1 vs PHASED=0"
+  },
+  {
+   "result": "uniform 5.185 | order-0 4.581 | order-1 2.627 | MODEL 4.267 -> 'DOES NOT BEAT ORDER-1 (-1.640)'. Coherence: ALONE 0.50 | +MEM 0.50 | ceiling 0.85 | floor 0.25.",
+   "ts": "2026-07-28T12:04:57",
+   "what": "ANCHORS and COHERENCE, first version (80 kB CPU)"
+  },
+  {
+   "result": "order-0 4.642 | order-1 3.568 | MODEL 4.267 -> gap -0.699, not -1.640.",
+   "ts": "2026-07-28T12:14:03",
+   "what": "ANCHORS refitted on train (add-k smoothing) rather than on the held-out text"
+  },
+  {
+   "result": "process 2 sits at 7.60 while absent, drops to 3.53 the step it enters. Mean change per 150 steps ACTIVE +0.902, ABSENT +0.192 — 'it LEARNS faster than it forgets'.",
+   "ts": "2026-07-29T12:38:27",
+   "what": "Per-process LEARNING CURVE (120 kB CPU, RATE_EVERY=150)"
+  },
+  {
+   "result": "NMI 0.568 | shuffled-B floor 0.015 [0.012-0.019 over 20 draws] | excess +0.552. Agreement with seeded corpora A 0.646, B 0.676.",
+   "ts": "2026-07-29T12:42:28",
+   "what": "probe_stability.py, two 80 kB CPU runs differing only in SEED (11 vs 10 domains)"
+  },
+  {
+   "result": "train 2.981 / held-out 3.083 (gap +0.102, UNDERFIT); anchors order-1 3.558 -> beats by +0.474; retention mean drift +0.169 DRIFTING; learning curve ACTIVE +0.388 vs ABSENT -0.036; 5 live domains, boundary prec 0.18 / recall 0.74, purity 0.97 V 0.80; partition excess -0.003 (not informative); coherence ALONE 0.50 / +MEM 0.25; memory contributes +0.087; throughput ~2.3-3.0 GB/day.",
+   "ts": "2026-07-29T16:56:26",
+   "what": "GPU 4 MB instrument panel, 4 corpora, D=768 (user-run)"
+  },
+  {
+   "result": "Encoder separation 0.16->0.05 and 0.16->0.07 — collapse. 0 boundaries, 1 domain, yet purity/homogeneity/V all 1.00 and silhouette +0.95 '1/1 GENUINE'. Held-out 2.711 (+0.788 over order-1) and 2.549 (+0.941). Throughput 12.16 GB/day vs 2.35 for 4 corpora (5x, encoder duty cycle). Stability NMI 0.000.",
+   "ts": "2026-07-29T16:56:26",
+   "what": "GPU 4 MB English-only, two seeds (runs e1/e2)"
+  },
+  {
+   "result": "const 1 domain / 0 boundaries; rel 2 / 97; rel_margin 1 / 97; rel_q25 2 / 131. Separation still 0.01 in every arm — boundaries fire but the space itself is collapsed.",
+   "ts": "2026-07-29T17:13:36",
+   "what": "Scale-free boundary tests on the collapsed English encoder (const vs rel vs rel_margin vs rel_q25)"
+  },
+  {
+   "result": "off: 2 domains, sep 0.01, loss 3.85 ~ ln(48)=3.871. VREG=1: 5 domains, sep 0.44, loss 3.70. VREG=5: 17 domains, sep 0.97, loss 1.69. VREG=5 + CREG=0.04: 24 domains, sep 0.96, loss 1.85.",
+   "ts": "2026-07-29T17:21:24",
+   "what": "ENC_VREG (VICReg anti-collapse on the signature encoder, scaled by sqrt(SIG_D)) sweep, English only, 80 kB"
+  },
+  {
+   "result": "4 corpora V 0.56 -> 0.52 and model 4.322 -> 4.384 with VREG on. English with VREG: const threshold gives 13 domains, rel gives 11 — SHIFT_REL was only compensating for a collapsed space.",
+   "ts": "2026-07-29T17:29:57",
+   "what": "Cost of anti-collapse on mixed data, and whether the constant SHIFT_DIST works again"
+  },
+  {
+   "result": "separation 0.27->0.92 both; 68 and 64 live domains; recurrent 64/68 and 58/64; boundary prec/recall 0.98/1.00; held-out 2.676 (+0.822) and 2.524 (+0.966) — best language numbers of the project; retention +0.191 DRIFTING / +0.089 RETAINED; partition excess +0.010 and +0.013 (opposite verdicts); mean cohesion 0.30 vs 0.69 on 4 corpora.",
+   "ts": "2026-07-29T18:27:19",
+   "what": "GPU 4 MB English, two seeds, WITH ENC_VREG=5 (runs v1/v2)"
+  },
+  {
+   "result": "excess +0.000 against a null spread of +/-0.020 — both GPU runs' +0.010/+0.013 are inside 2 sigma; NOT distinguishable.",
+   "ts": "2026-07-29T18:35:27",
+   "what": "Informativeness null with 5 permutations instead of 1"
+  },
+  {
+   "result": "English 31 domains: 3.503 / 3.539 / 3.523 / 3.524 -> own-global +0.016, own-random +0.000 (NOT YET). 4 corpora 6 domains: 3.912 / 3.970 / 3.919 / 3.982 -> +0.050, +0.063 (DOMAINS PREDICT). weight 0.05: +0.018, +0.021.",
+   "ts": "2026-07-29T19:19:58",
+   "what": "'CAN A DOMAIN PREDICT' four-arm test (model alone / +GLOBAL / +OWN-domain / +RANDOM-domain prior), held-out"
+  },
+  {
+   "result": "OFF held-out 3.543, LOSES to order-1 3.495 by 0.048. ON 3.441, BEATS by 0.054. Report's own line: model ALONE 3.905 -> +FABRIC 3.196 (+0.709) -> +FABRIC+MEMORY 2.999. But nodes 36, mean routed depth 0.10 of 4, halt 0.90; affiliation: 18 experts serve >1 domain, 8 exactly one, 10 serve NONE.",
+   "ts": "2026-07-29T19:42:09",
+   "what": "The baseline that should have existed: FABRIC off vs on (English, 120 kB CPU)"
+  },
+  {
+   "result": "exit 0 in 230 s, 0 tracebacks, all 11 sections present, '[memory] PER-EXPERT: 64 owners x 128 entries = 8192 slots'. World model: 'beats baseline -84.7% | latent std 0.07' — collapsed by its own printed criterion.",
+   "ts": "2026-07-29T20:41:05",
+   "what": "Everything-default-on smoke (100 kB CPU, all 6 newly-flipped subsystems)"
+  },
+  {
+   "result": "mix 3.090 vs order-1 3.558; eng 2.436 vs 3.486 with 71 domains; ab_no_fabric 3.089 (identical to full); ab_no_world exit 1 with a traceback; ab_no_perexp 3.090 but +FABRIC+MEMORY 2.916 vs full's 2.981 (better without); ab_no_tok 2.841; ab_no_domains 3.147.",
+   "ts": "2026-07-30T15:14:48",
+   "what": "First full rerun.sh grid on GH200 (mix / eng / 6 ablation arms)"
+  },
+  {
+   "result": "eng silhouette +0.87, num +1.30, py -0.05, c -0.06; mean true silhouette +0.52; d_between/d_within 5.93; 1-NN corpus accuracy 0.874. Python and C sit on top of each other — the encoder found the one place our 4-way split was arbitrary.",
+   "ts": "2026-07-30T18:51:56",
+   "what": "probe_ckpt_geometry via the new sidecar (CPU checkpoint, 4 corpora x 256 windows)"
+  },
+  {
+   "result": "NMI 0.757 | shuffled floor 0.002 [0.000-0.005 over 20 draws] | excess +0.756. Agreement with the seeded corpora A 0.655, B 0.760 — the two runs agree with each other MORE than either agrees with our labels.",
+   "ts": "2026-07-30T18:52:31",
+   "what": "probe_stability run to completion for the first time (sidecar, 60 kB CPU, seeds 1 vs 2, 3 domains each)"
+  },
+  {
+   "result": "STREAM_LEN=40000: 50.8 s vs 19.0 s. STREAM_LEN=12000: 26.1 s vs 11.8 s. Two thirds of the cost is the eval battery — kept anyway, because the sig_tokens bug crashed in the report.",
+   "ts": "2026-07-30T19:56:36",
+   "what": "Timing the smoke gate: full report vs BENCH=1"
+  },
+  {
+   "result": "full 3.046; no_fabric 3.088 (+0.042); no_domains 3.108 (+0.062); no_world 3.149 (+0.103, LARGEST); no_perexp 3.046 but +mem 2.920 vs 2.967; no_tok 2.654. eng 2.571 with 17 domains (down from 71), own-vs-random -0.028. Without the world model, fabric +0.119 -> +0.025.",
+   "ts": "2026-07-31T00:41:35",
+   "what": "First clean rerun.sh grid on GH200 (post-fix, with ab_no_world producing data and the eng SEG fix)"
+  },
+  {
+   "result": "model ALONE 0.47 +/- 0.10 | model+MEMORY 0.44 +/- 0.09 | REAL text ceiling 0.68 | chance floor 0.25 -> memory is NEUTRAL (-0.03 +/- 0.14, inside the noise).",
+   "ts": "2026-07-31T00:48:52",
+   "what": "COHERENCE resampled at 16 seeds x 384 tokens with a standard error"
+  },
+  {
+   "result": "pass1 exit 0; pass2 exit 1 — KeyError: 0 at `s.born[a] = min(s.born[a], s.born[b])` in _absorb. After saving asm.born/asm.act: pass2 exit 0 with the merge at step 400 that used to crash.",
+   "ts": "2026-07-31T13:08:23",
+   "what": "RESUME tested end-to-end for the first time"
+  },
+  {
+   "result": "221 knobs total, 29 default to 0/empty. Two judged undefended: DIV_W=0 and ENC_CREG=0. Also surfaced that BAL_WARM=4000 decays load balance to zero while PONDER_WARM=8000 has not engaged — a 4000-step window with nothing opposing fabric collapse, and every run so far ended at ~6,500 steps inside it.",
+   "ts": "2026-07-31T13:57:15",
+   "what": "Defaults audit across all *.py"
+  },
+  {
+   "result": "eng was 4.263 -> now 4.486, +0.223 +/- 0.047 WORSE (forgetting); py was 4.314 -> 4.006, -0.308 +/- 0.141 better; num 3.637 +/- 0.040 NEW; mean on pre-existing domains -0.043 +/- 0.074 — inside the noise.",
+   "ts": "2026-07-31T15:08:09",
+   "what": "Add-a-domain-later test: train eng,py then resume with eng,py,num, reading the new cross-run-boundary held-out probe"
+  }
+ ],
+ "wip": [
+  "probe_stability at real scale on the non-collapsed 64/68-domain English partitions — the measurement that answers the researcher's original 'how arbitrary are the domains' question. Only ever completed on 60-80 kB CPU runs (NMI 0.757 / 0.568); the 4 MB attempt returned 0.000 because both runs had collapsed, and the re-run on v1/v2 was never executed in this chunk.",
+  "The researcher's expert-discovery proposal (grow an expert when a domain is recurrent AND poorly modelled; blend the dom_exp affiliation into routing; treat an unserved recurrent domain as a discovery trigger). Fully designed with a falsifier ('does domain-triggered growth beat plateau-triggered growth at matched expert count?') but never implemented.",
+  "Router HALT 0.90 / mean routed depth 0.10 of 4 — deliberately left unfixed so the long run can test past PONDER_WARM=8000 for the first time. FAB_MIN_STEPS and PONDER_WARM untouched at the researcher's instruction.",
+  "DIV_W=0 and ENC_CREG=0 identified as the two undefended defaults; explicitly NOT flipped, pending the long run.",
+  "MEM_PER_EXPERT: costs ~0.05 b/B on +FABRIC+MEMORY in two consecutive grids (2.920 vs 2.967) and the coherence benefit it appeared to buy was retracted as noise. Flipping it back off was flagged as needing the researcher's call; no decision recorded.",
+  "EXPERTS/FABRIC mutual exclusivity (elif chain, FABRIC wins) — called 'arguably a bug worth fixing, since your expert-discovery idea wants both'. Not fixed; the no_experts smoke arm is a no-op.",
+  "World-model latent std 0.07 (collapsed by its own criterion) — flagged twice, possibly the same _var_cov fix as the signature encoder; never attempted.",
+  "Optimizer-moment restoration across growth on RESUME — deliberately left restarting rather than risk mis-mapping moments.",
+  "The multi-day English-first long run itself: longrun.sh fetch/run/resume/watch/add written and syntax-checked, but no fetch and no run started. `longrun.sh add` never exercised beyond a 30 kB CPU rehearsal.",
+  "Throughput: ~2.3 GB/day on 4 corpora vs 12.16 GB/day when the encoder idles — identified as the real 40 GB blocker on 27 Jul and never taken up as a work item.",
+  "Local data ceiling: data/train is 6.9 MB total, so STREAM_LEN=4000000 already re-reads the same text; a 12-hour run would be ~340 passes over one bookshelf."
+ ]
+}

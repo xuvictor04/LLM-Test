@@ -1,0 +1,434 @@
+{
+ "chunk": "chunk_04",
+ "errors": [
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T16:18:06",
+   "what": "ENC_POS_MAX above its default crashed contrastive_step: `hi = seen - 3*WIN` only left room for a positive at the DEFAULT radius, so the very knob added to test wider positives could not be used at any non-default value (IndexError on the tensor path, short-window TypeError on the list path). Claude's own instrumentation bug — the sweep he had just told the user to run would have crashed at every setting except the default."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T16:24:36",
+   "what": "Self-inflicted SyntaxError: walrus operator used on an attribute — `(s.capped := s.capped + 1)`. Caught by the syntax gate before running."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T16:39:11",
+   "what": "SHIFT_MULT=2.0 was a GUESS shipped in the same commit as the probe-validated DOM_MARGIN=0.75 and described with the same confidence. From N=1000 onward the threshold sits ABOVE the across-splice distance, switching boundary detection OFF entirely: 14 boundaries for 3213 true switches (recall 0.01), assembler collapsed to 1 domain, unlearn deleted the whole store. The relative-margin rule was never actually tested — it was starved of input by the broken detector."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T16:50:01",
+   "what": "sweep_domains.sh set 8 knobs that self_organize.py reads nowhere (the D_MODEL_B failure mode). Running it would have produced meaningless duplicate rows that look like a clean null result."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T17:06:08",
+   "what": "DOM_RADIUS completely inert (0 of 143 domains ever learned a radius): a domain accumulates distance samples only when MATCHED, but matching requires a radius, and it bootstrapped from the broken NEW_DIST — a censored sample, the identical error already made once with the adaptive spawn threshold. A pooled prior was added and also failed (pool held 3-5 samples)."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T17:35:58",
+   "what": "manage() NEVER RAN. Domain management shared MANAGE_EVERY=500 with the expert/world populations; a 468-step run never hits step%500==0 and the 937-step GH200 runs hit it exactly once. Merge, cull and the recurrence fold were off by arithmetic in EVERY domain number the project had reported, the 142-domain result included."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-07-25T16:23:09",
+   "what": "Background CPU tasks repeatedly killed around the 10-minute mark (exit codes 143/144) — cap-invariance test, unit grids, several tool calls timed out at 2m/6m40s/9m50s."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-26T14:15:53",
+   "what": "BATCH_W phase-lock — the largest instrumentation bug of the chunk. `assigns.append(...)`, the online-tokenizer block, CKPT_EVERY and the LM loss curve all sit BELOW `if len(_bx) < BATCH_W: i += WIN; step += 1; continue`, while `step` increments on every window. Flushes land on a fixed residue mod BATCH_W, so `step % N == 0` is unsolvable for EVERY BATCH_W>1. At Run A's BATCH_W=16: 6.2% of windows recorded, 0 mints, 0 retokenizations, 0 checkpoints (a multi-day run would never have saved)."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-26T14:24:07",
+   "what": "The adaptive warmup printed 'stopped at N/N on separation plateau' when no plateau was detected. `_wfloor = min(ENC_WARMUP_MIN, wu)` with test `t >= _wfloor` over `range(wu)` means ENC_WARMUP_MIN == ENC_WARMUP makes the test unreachable — the single setting that disables the feature, and the user's runs used it, paying all 30,000 encoder steps."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-07-27T13:53:26",
+   "what": "The background workflow died when the container was reclaimed and restarted — not stalled. 2 of 5 diagnosis agents had returned; the verify phase never ran and no notification would ever arrive. Claude's earlier '~2 more hours, running at concurrency 2' diagnosis was wrong."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-27T14:00:05",
+   "what": "Two defects in the domain-genuineness report, both Claude's: (1) `sizes` was built from the subsampled `assigns`, so every size was ~16x understated in Run A and the size>=20 gate 16x too strict; (2) `separation` was a min over the other N-1 centroids, an extreme order statistic that shrinks mechanically as the population grows — it punished exactly the fragmentation the fold exists to reduce."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-27T19:08:38",
+   "what": "The COLLAPSE CHECK metric, shipped one commit earlier and never calibrated, printed 'signature space is COLLAPSED -- fix the ENCODER' at -5.2 sigma. A checkpoint with a measurably healthy encoder (true silhouette +0.25, 1-NN 0.90) scores -4.8 sigma. The null (random unit vectors in 64-d) was never right — centroids of related text are nowhere near orthogonal."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-27T14:25:14",
+   "what": "SigEncoder allocated nn.Embedding(V, d) with V=VMAX=16384 in online-tokenizer mode, but ENC_SEQ is always the raw BYTE stream there — only ids 0-255 reachable. ~77% of encoder params (12.4M) were dead weight touched by AdamW every step, plus 148 MB of optimizer state."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-27T19:41:37",
+   "what": "SAVE_CKPT=0 (Claude's own usage, meaning 'off') created a directory literally named `0` in the repo root — SAVE_CKPT is a PATH and \"0\" is truthy, so `if not ck: return` never fired. .gitignore covered *.pt and runs/ but not `0/` or `source.bin`, so `git add -A` committed 3.7 MB of checkpoint into the repo."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-27T20:14:07",
+   "what": "Two bugs introduced by the SIG_WIN/SIG_SPACE work: the lookahead window builder still hard-coded WIN as the byte width (ValueError: expected sequence of length 256, got 128), and contrastive_step was handed `bpos` (a byte offset) while ENC_SEQ had become the token stream (IndexError: index 36275 out of bounds)."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-27T15:14:35",
+   "what": "kindprobe.py ZeroDivisionError on `math.log(1 + (B-1)/NP)` — DATA_DIR='data' resolved against the scratchpad after a cd, so zero corpora loaded and NP was 0."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-27T20:24:45",
+   "what": "Claude handed the user a GPU command containing a literal placeholder `... (same line otherwise)`, which failed as a bash error when the user ran it."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-07-25T15:58:24",
+   "what": "fetch_data.sh appended to the user's existing 40 GB fineweb download, so eng is 40 GB while py/num/c are ~20/6/12 MB — a 2000:1 corpus imbalance. Domain results still valid (sampling is per-domain) but a multi-epoch run would recycle the small corpora thousands of times."
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "Claude responded by ranking all four configs (A fixed thresholds V 0.42 best; B 0.38; D 0.12; C 0.00), reverting defaults to config A (commit 6397041 'revert defaults to the best MEASURED config'), adding an unread-knob guard to sweep_domains.sh that aborts the sweep, and implementing DOM_RADIUS. The guard immediately caught 8 of 36 sweep knobs read by nothing.",
+   "outcome": "built-and-measured",
+   "paraphrase": "After pasting a GH200 run showing 77 domains / V 0.12, the researcher signals the domain work is not acceptable as-is and demands it be done properly rather than patched.",
+   "quote": "Here, but we need it done well",
+   "ts": "2026-07-25T16:49:01"
+  },
+  {
+   "evidence": "Claude immediately reframed the metric: commit efb818a 'metric: judge domains on RECURRENCE, not on recovering the seeded corpora'; V-measure report relabelled 'vs the 4 SEEDED corpora (a SCAFFOLD, not the target)'; a RECURRENCE block (visits/domain, visited-once %, recurring>=3 %) became the headline. This drove DOM_RECUR / DOM_MIN_VISITS / DOM_RECUR_HORIZON / DOM_FOLD_MULT implementations. Final GPU run 21:13:05 reports 'RECURRENCE: 4 domains | mean visits/domain 63.8 | visited ONCE 0 (0%) | recurring (>=3 visits) 4 (100%)'. Claude also conceded the negative silhouettes he had flagged as failure are a property of overlapping domains.",
+   "outcome": "built-and-measured",
+   "paraphrase": "The four seeded corpora are a scaffold, not the target; domains are expected to overlap naturally and should self-assemble, so recovering the four labels is the wrong success criterion.",
+   "quote": "Domain was a question from original building, where it was classified, as the four domains, where I questioned whether it should be as such, and results where the domains interacted with each other. My view was these domains are naturally overlapping, and instead make it self assembling",
+   "ts": "2026-07-25T16:54:09"
+  },
+  {
+   "evidence": "Inspecting the workflow journal surfaced the BATCH_W phase-lock bug. Claude verified it himself by simulating the loop skeleton: at BATCH_W=16 only 6.2% of windows were recorded in `assigns`, and GROW_EVERY/RETOK_EVERY/CKPT_EVERY fired ZERO times for every BATCH_W>1. Fixed and pushed as c8ba635; Run A's clustering numbers declared void.",
+   "outcome": "built-and-measured",
+   "paraphrase": "The researcher is suspicious that the running background workflow is misbehaving and asks Claude to verify it.",
+   "quote": "Double check your workflow. I think something’s up",
+   "ts": "2026-07-26T14:14:13"
+  },
+  {
+   "evidence": "Claude found the container had been reclaimed and restarted (uptime 1h59m, agent files last written before this lifetime, zero python/worker processes). The workflow was dead, not slow — Claude's earlier '~2 more hours' estimate was wrong. 2 of 5 diagnosis agents had returned; the verify phase never ran. Claude then did the remaining signature-geometry analysis by hand.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks Claude to check whether the long-running background workflow agents are actually alive.",
+   "quote": "The tasks have been going on for a while. I’m a bit concerned check up on them.",
+   "ts": "2026-07-27T13:52:20"
+  },
+  {
+   "evidence": "Claude distinguished overfitting from objective-task mismatch (kind-floor ln(1+(B-1)/K)), then ran a dedicated kindprobe on the real corpora that REFUTED his own claim: 1-NN corpus accuracy rose monotonically to 0.982 rather than peaking and degrading. Encoder embedding resized (Embedding(16384,768)->Embedding(256,768), 137.3ms->53.8ms, 151MB->2.4MB, commit 5218756). The margin rule was tested and rejected (16 live/V 0.50 default vs 23/0.48 with margin vs 29/0.45 margin-only), so the proposed DOM_RADIUS=0 change was NOT made.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Challenges Claude's 'over-trained encoder' terminology and authorises the three proposed changes (encoder embedding resize, warmup A/B, radius/fold decision) on condition the significance is explained.",
+   "quote": "What do you mean by overtrained? Is it overfitting?\n\nYou can run the 3 things, but explain significance afterwards",
+   "ts": "2026-07-27T14:50:51"
+  },
+  {
+   "evidence": "Rerun at 19:04:54 produced the first trustworthy partition numbers: 13 live domains, 144 created, V 0.30, purity 0.66, homogeneity 0.32, boundary 0.97/0.87, memory +0.075, vocab 256->1164 (minting worked), checkpoints fired every 2000. ENTRIES and RECURRENCE now agree (they disagreed 598 vs 100 in Run A). Throughput 1.95-2.00 GB/day, contradicting Claude's prediction of improvement.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Approves re-running the 4 MB GPU config now that the BATCH_W cadence fix is in, since Run A's clustering numbers were computed on 6.2% of windows.",
+   "quote": "Let’s rerun then",
+   "ts": "2026-07-27T18:33:53"
+  },
+  {
+   "evidence": "The pasted rerun output is numerically identical to the 19:04:54 run (13 live, V 0.30, vocab 1164), confirming reproducibility. It also carried the probe_ckpt_geometry result: true silhouette +0.24, 1-NN 0.984.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Notes he had to repeat the previous GPU run (new box IP), with the implication the results are still valid.",
+   "quote": "I had to rerun the prior, but it shoud be fine.",
+   "ts": "2026-07-27T19:21:30"
+  },
+  {
+   "evidence": "The question made Claude inspect the window construction and find an unintended defect he says he had not noticed: `ew = byte_stream[bpos:bpos+WIN]` is 256 BYTES wide while `i += WIN` strides 256 TOKENS (~486 bytes), so the encoder sees only ~53% of the stream, and the fraction DRIFTS as the tokenizer compresses better. Claude answered that byte-level was chosen for centroid stability under a growing vocabulary, then proposed three fixes; all three were implemented (SIG_WIN / SIG_SPACE, commit 97acf05) and measured.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Approves the two long-segment GPU runs and challenges the design choice of a byte-level signature encoder when a variable-length tokenizer already exists.",
+   "quote": "Lets do the runs. \n\nI want to flush out what we are doing more. What is the encoder, and why byte level? Don't we have the variable length tokenizer?",
+   "ts": "2026-07-27T19:32:36"
+  },
+  {
+   "evidence": "Claude agreed the objection killed his version of option 3 and redesigned it: SIG_SPACE=tokens with an APPEND-ONLY growing vocabulary (ids never change meaning, only segmentation shifts; rekey() already tracks drift) and new token embeddings warm-started from their two constituents. Measured on CPU: bytes W=128 (67% coverage) V 0.74; bytes W=256 (100% coverage) V 0.67; tokens-growing V 0.73 with a third fewer domains. Claude called the growing-token result 'promising but not yet a reason to switch' — left OFF by default.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Authorises all three signature options but rejects the freezing of a subword vocabulary on principle, because frozen representations contradict the continual-learning thesis.",
+   "quote": "Let’s do all 3, but I don’t like the idea of freezing, as we can see in 3. Frozen material does not bode well for my idea of learning\n\nI’ll run the GPU tests, and provide you results in a bit",
+   "ts": "2026-07-27T20:06:37"
+  }
+ ],
+ "notes": "Coverage: read all 7546 lines of chunk_04. No BLOCKED sources.\n\nSTRUCTURE OF THIS CHUNK: it is an arc from \"domain identity is fundamentally broken\" to \"domain identity works and the testbed was the problem.\" The final GPU run at the last timestamp produces 4 live domains for 4 true processes, V-measure 0.89, purity 0.97, completeness 0.89, 100% recurrent — after seven of Claude's predictions died to measurement.\n\nCAUTION ON ATTRIBUTION: most technical proposals in this chunk (adaptive spawn threshold, relative margin, scale-free shift, DOM_RADIUS, DOM_RECUR, ENC_FLOOR_K, the three signature options, MANAGE_MERGE) originate with CLAUDE or with a background workflow agent, not the researcher. I have NOT listed those as researcher ideas. The researcher's own contributions in this window are: the self-assembly/overlapping-domains reframe (the single highest-leverage input in the chunk), two correct suspicions that caught real failures (\"Double check your workflow\" -> the BATCH_W bug; \"I'm a bit concerned check up on them\" -> the dead workflow), a design objection on principle (no freezing), a conceptual challenge (\"Is it overfitting?\"), and a design question (\"why byte level?\") that exposed the ~53% stream-coverage defect Claude says he had not noticed.\n\nA CONTEXT-COMPACTION SUMMARY appears mid-chunk at 2026-07-25T17:08:31 (lines 1937-2104). It is machine-generated, not the human speaking. It contains a list of prior user messages and standing constraints from EARLIER chunks which I did not record as ideas here, but which are in force: default to bash unless python is specified; assume a fresh box (the user terminates the cloud GPU between runs); git operations through a python console for mobile copy-paste; confirm before action on perf changes; \"no compromises\" (don't remove/downgrade functionality to gain speed); \"Please don't automatically stop them when I message you\" (background tasks — clarified as \"I think I meant tasks earlier, not agents\", acknowledged by Claude in the first line of this chunk). It also records three earlier retractions not re-litigated here: \"domain assembly works, purity 0.54->0.96\" (purity rises with fragmentation), the completeness formula that was actually homogeneity, and the D_MODEL_B knob read by nothing.\n\nTHE THREE SURVIVING FINDINGS, per Claude's own tally, are all harness arithmetic rather than algorithm design: (1) BATCH_W phase-locking four cadences and subsampling the domain report to 6.2% of windows; (2) manage() sharing MANAGE_EVERY=500 with the expert/world populations so it never fired in any run reported to date; (3) SEG_MIN/SEG_MAX set for WIN in BYTES and never revisited when WIN became 256 TOKENS, giving 2.6 analysis windows per splice segment of which SUSTAIN=2 are consumed detecting the boundary.\n\nA RECURRING META-PATTERN worth flagging for synthesis: three separate times a MEASUREMENT TOOL was the broken thing rather than the system under test — the completeness formula (prior chunk), the ENC_POS_MAX knob that crashed the probe meant to exercise it, the min-based separation statistic, and the COLLAPSE CHECK null. Claude names this himself at 16:18:58 (\"the second time this session that the tool built to measure something was itself the thing broken\").\n\nNumbers in `tested` are transcribed from the run logs as pasted; where a number was later invalidated (notably all Run A clustering metrics) I have said so in the result field and in `retractions`.",
+ "retractions": [
+  {
+   "claim": "Claude (earlier): the multi-domain regime would run at '~1.5 GB/day' versus 4 GB/day single-domain.",
+   "correction": "Measured on the GH200: 2.03 GB/day multi-domain vs 5-10 single-domain. The predicted RATIO (2.7x) held at 2.5x, but both absolute numbers were low.",
+   "ts": "2026-07-25T15:59:12"
+  },
+  {
+   "claim": "Claude: 'the cap is doing the work' — the 64 live domains equalled MAX_DOMAINS=64, so the ceiling was setting the population.",
+   "correction": "FALSE. With MAX_DOMAINS=10^6 the identical run still ends at 64 domains and asm.capped==0 (64 = 67 creations - 3 merges - 0 culls). Cap-invariant. Claude: 'The 64 was coincidence, and I read a matching number as causation.'",
+   "ts": "2026-07-25T16:24:03"
+  },
+  {
+   "claim": "Claude (16:17:47): 'The signatures themselves do not form corpus-level clusters... within-domain spread is 2.4x the between-domain distance. No clustering algorithm can recover clusters that overlap 2.4:1. This was never the assembler's thresholds.'",
+   "correction": "FALSE. 1-NN corpus accuracy is 84-95% at every N>=200 against 25% chance, and the untrained bigram control alone scores AUC 0.887. The 2.4:1 ratio was computed over DOMAIN centroids — 53 fragments of 4 corpora — so of course they overlapped. Claude: 'I measured the symptom and called it the cause.' Real cause: a non-stationary metric judged by constant thresholds.",
+   "ts": "2026-07-25T16:24:03"
+  },
+  {
+   "claim": "Claude: the adaptive spawn threshold (median + K*MAD of the distances at which assignment happened) was 'the fix the diagnosis implies'.",
+   "correction": "Calibrated wrong: assignment only happens when d < threshold, so the sample is CENSORED and structurally cannot follow upward drift. It halved the count and made the partition worse (V 0.42->0.38, unlearn LOCAL->LEAKED).",
+   "ts": "2026-07-25T16:24:03"
+  },
+  {
+   "claim": "Claude shipped SHIFT_MULT=2.0 in the same commit as the probe-validated DOM_MARGIN=0.75, describing both with the same confidence.",
+   "correction": "SHIFT_MULT=2.0 was a guess with no calibration behind it. It stops firing from N=1000 onward and switched boundary detection off (recall 0.01, 1 domain, V 0.00). Claude: 'The probe had the numbers to calibrate it — I just didn't use them.'",
+   "ts": "2026-07-25T16:39:11"
+  },
+  {
+   "claim": "Four successive scale-analysis 'fixes' (adaptive spawn, relative margin, scale-free shift q75*2.0, then q50*1.5) were each presented as the correct diagnosis-driven fix.",
+   "correction": "Every change lowered the primary metric: V 0.42 -> 0.38 -> 0.12 -> 0.00. Defaults reverted to the original fixed thresholds (commit 6397041). Claude also flagged that two of the runs changed the threshold rule AND ENC_WARMUP together, so neither is attributable — 'I did that twice.'",
+   "ts": "2026-07-25T16:51:00"
+  },
+  {
+   "claim": "Claude had been treating V-measure against the four seeded corpora as the target metric, and negative silhouettes / low separation as evidence of breakage.",
+   "correction": "After the researcher's reframe: the four corpora are a SCAFFOLD, not the target; V-measure penalises the intended overlapping behaviour. 'The negative silhouettes and low separation were never necessarily failures. Overlapping domains SHOULD have low separation... I was reading a geometric property of the intended design as a defect.'",
+   "ts": "2026-07-25T16:57:17"
+  },
+  {
+   "claim": "Run A's domain-quality numbers: purity 0.85, homogeneity 0.62, completeness 0.34, V 0.44, plus the entire RECURRENCE block.",
+   "correction": "VOID. All computed from 6.2% of windows because assigns.append sits below the BATCH_W accumulator. The tell was already visible: the assembler counter said the top domain had 598 entries while the report said 100 visits. Sweep results unaffected (never sets BATCH_W). Unaffected Run A results: boundary 0.98/0.96, memory +0.085, cross-segment +0.013, unlearn locality, held-out gap.",
+   "ts": "2026-07-26T14:16:25"
+  },
+  {
+   "claim": "Claude (13:54:16, one hour earlier): 'The domains are not geometrically real, and the BATCH_W bug is not the reason... coh 0.57, sep 0.18 — that isn't weak clustering, it's inverted clustering.'",
+   "correction": "'That was too strong.' separation was a min over N-1 centroids, an order statistic that shrinks as the population grows, so it punished exactly the fragmentation the fold exists to reduce. With median separation, silhouette is POSITIVE for all 16 domains (+0.54 median). The min-based -0.25 measured 'you have 37 domains so some pair is close', not 'the structure is fake'.",
+   "ts": "2026-07-27T14:00:54"
+  },
+  {
+   "claim": "Claude (repeatedly, from the probe and the sweep): '1-NN accuracy peaks around N=1000-4000 and degrades after. More encoder training makes corpus identity WORSE. ENC_WARMUP=30000 is well past the optimum.'",
+   "correction": "NOT REPRODUCED. A dedicated probe on the real corpora shows 1-NN rising monotonically to 0.982 at 8000 steps. 'I should not have repeated it as established.' What actually degrades is the between/within RATIO (12.05 -> 2.24) as d_within inflates 8.7x while d_between saturates.",
+   "ts": "2026-07-27T15:50:49"
+  },
+  {
+   "claim": "Claude: PROFILE=1 syncs CUDA on entry and exit of ~7 regions per step, so Run A's 2.07 GB/day was a profiled number — 'expect better than 2.07'. And the encoder-embedding fix (137ms->54ms) would help throughput.",
+   "correction": "Both wrong. The unprofiled rerun measured 1.95-2.00 GB/day. 'I inferred that from reading torch.cuda.synchronize() calls and never measured it.' The embedding timing was CPU-in-isolation; on an H100 the GRU launch chain swamps it. 'It is NOT the throughput lever, and I implied it would be.'",
+   "ts": "2026-07-27T15:50:49"
+  },
+  {
+   "claim": "Claude: he would set DOM_RADIUS=0 because kill criterion 5 failed the radius mechanism.",
+   "correction": "Did not make the change. End-to-end test showed the shipped default (radius + fold + cadence) is the best of the three at 16 live / 88% recurrent / V 0.50, versus +margin 23/43%/0.48 and margin-only 29/38%/0.45.",
+   "ts": "2026-07-27T15:50:49"
+  },
+  {
+   "claim": "Claude's own COLLAPSE CHECK line, shipped one commit earlier: 'signature space is COLLAPSED -- fix the ENCODER, not the assign rule' (fired at -5.2 sigma on the rerun).",
+   "correction": "RETRACTED and pushed (commit ab3a311). A checkpoint whose encoder is measurably healthy — true-corpus silhouette +0.25, 1-NN 0.90, d_between/d_within 2.68 — scores -4.8 sigma. The test cannot distinguish -4.8 from -5.2. Replaced with a relative-spread readout plus probe_ckpt_geometry.py, which can actually settle it.",
+   "ts": "2026-07-27T19:11:24"
+  },
+  {
+   "claim": "Claude (from sweep kill criterion 8): 'the encoder BUDGET dominates the assign rule' — and, subsequently, 'the space is good and creation over-fires; the next target is the creation rule, since 2844 boundaries produced 144 domains.'",
+   "correction": "Both withdrawn. Criterion 8 compared V-measures of 0.60 vs 0.57 at n=1 — 'noise, over-read.' And the creation rule is refuted by a two-sided falsification test: varying ONLY SEG_MIN/SEG_MAX moves V 0.19 -> 0.50 -> 0.68 while live count stays 15/16/12. The real cause is the TESTBED: 2.6 analysis windows per splice segment, of which SUSTAIN=2 are spent detecting the boundary.",
+   "ts": "2026-07-27T19:29:45"
+  },
+  {
+   "claim": "Claude had argued for closing the encoder's ~53% stream-coverage gap (option 1: stride the signature in bytes so coverage is 100%).",
+   "correction": "Measurement says the gap is doing useful work. At 100% coverage the 256 B window exceeds the 192 B stride, so windows overlap and smear material from both sides of a boundary into one signature: V 0.67 vs 0.74 for the 67%-coverage default. 'I'd argued for closing that gap; the measurement says the gap is doing useful work.'",
+   "ts": "2026-07-27T20:24:45"
+  },
+  {
+   "claim": "Claude (19:41:17, from a CPU run): SHIFT_REL=1 gives the best partition (V 0.70 vs 0.68), and 'the arm with the worst boundary precision has the best partition' — recommended testing it on GPU.",
+   "correction": "Failed to replicate. GPU A/B: V 0.72 (constant) vs 0.73 (SHIFT_REL) — noise; memory contribution FELL 25% (+0.164 -> +0.123) and unlearn-on-target fell 15%. 'That test had 11 true switches. Statistically it was worth nothing and I presented it as a signal.' Verdict: don't ship SHIFT_REL.",
+   "ts": "2026-07-27T21:00:53"
+  },
+  {
+   "claim": "Claude's running self-assessment across the whole chunk.",
+   "correction": "'Seven of my predictions have now died to measurements this session. The three findings that survived are all arithmetic in the harness, not algorithm design: the BATCH_W cadence phase-lock, the MANAGE_EVERY cadence that never fired, and now segment/window. I've been proposing mechanisms when I should have been checking whether the measurement meant what it said.'",
+   "ts": "2026-07-27T19:29:45"
+  }
+ ],
+ "span": "2026-07-25T15:57:37 .. 2026-07-27T21:13:05",
+ "tested": [
+  {
+   "result": "53 live domains (was 142). Fragmentation 24x->11x, but V-measure 0.42->0.38, completeness 0.30->0.28, homogeneity 0.71->0.58, mean silhouette -0.22->-0.25, genuine still 0/38, unlearn went LOCAL(+0.019)->LEAKED(+0.076). Memory contribution improved +0.093->+0.141; held-out 2.234 b/B.",
+   "ts": "2026-07-25T16:16:54",
+   "what": "GH200 4-domain run with the new adaptive spawn threshold (median+K*MAD of assign distances), ENC_WARMUP=30000, D_MODEL=768, WIN=256"
+  },
+  {
+   "result": "MAX_DOMAINS=10^6 still ends at 64 live domains with asm.capped==0 (64 = 67 creations - 3 merges - 0 culls); cap-INVARIANT. 1-NN corpus accuracy 84-95% at every N>=200 (chance 25%); untrained bigram control AUC 0.887. d(query, own centroid) drifts 0.037/0.136/0.319/0.421/0.668 at N=200/400/800/1000/4000 against a constant NEW_DIST=0.35.",
+   "ts": "2026-07-25T16:23:22",
+   "what": "Background workflow probe: cap-invariance and creation-rule calibration on a standalone assembler replica"
+  },
+  {
+   "result": "Best untrained control AUC 0.889 (bigram), best learned AUC 0.980 (posmax4_N200). SPAWN% climbs 0.0->24.8->56.9->72.5% while 1-NN holds 91-97%. Best 1-NN 98.5% at posmax4_N1000. Boundary precision falls 0.92 (N=200) -> 0.27 (N=16000). Rekey lag inflates SPAWN 24.8%->64.6% at lag 800. Probe took 188s.",
+   "ts": "2026-07-25T16:27:40",
+   "what": "probe_signature.py on GH200: signature geometry with true corpus labels, across ENC_POS_MAX 2/4/8/16xWIN and N=0/200/1000/4000/16000"
+  },
+  {
+   "result": "Ratios stay in 0.10-0.57 at every trained state and every ENC_POS_MAX; only exceeds 0.75 at N=0 where spawning is correct. One constant works everywhere — validated arithmetically, but never end-to-end.",
+   "ts": "2026-07-25T16:28:14",
+   "what": "Validation of the relative-margin rule d_own <= 0.75*d_other against all 20 probe cells"
+  },
+  {
+   "result": "COLLAPSE: 1 LIVE domain. Boundary detection 14 found for 3213 true switches, recall 0.01, V-measure 0.00, unlearn LEAKED +0.098. q75*2.0 sits ABOVE the across-splice distance from N=1000 onward, so the boundary detector was effectively OFF.",
+   "ts": "2026-07-25T16:38:38",
+   "what": "GH200 run: relative margin (DOM_MARGIN=0.75) + scale-free shift q75*2.0, ENC_WARMUP=4000, ENC_POS_MAX=512"
+  },
+  {
+   "result": "77 live domains, boundary recall 0.22, V-measure 0.12, purity 0.36, 0/37 genuine. Memory +0.114, unlearn LOCAL. Worse than the original fixed thresholds.",
+   "ts": "2026-07-25T16:49:01",
+   "what": "GH200 run: relative margin + recalibrated shift q50*1.5, ENC_WARMUP=1000"
+  },
+  {
+   "result": "A fixed NEW_DIST/SHIFT_DIST: 142 domains, recall 0.96, V 0.42 (BEST). B adaptive spawn: 53, 0.96, 0.38. D relative+q50*1.5: 77, 0.22, 0.12. C relative+q75*2.0: 1, 0.01, 0.00. Every change lowered the primary metric; C and D also changed ENC_WARMUP simultaneously so neither is attributable.",
+   "ts": "2026-07-25T16:49:27",
+   "what": "Head-to-head ranking of the four domain configurations by V-measure"
+  },
+  {
+   "result": "8 of 36 referenced knobs read by nothing (DOM_MIN_VISITS, DOM_RADIUS, DOM_RECUR, DOM_RECUR_HORIZON, DOM_RMULT, DOM_RQ, ENC_FLOOR_K, ENC_PROTO) — the D_MODEL_B failure mode. Guard added that aborts the sweep.",
+   "ts": "2026-07-25T16:50:01",
+   "what": "Guard check: which sweep_domains.sh knobs are actually read by self_organize.py"
+  },
+  {
+   "result": "16 live domains; RECURRENCE 15 domains, mean visits 2.3, visited ONCE 5 (33%), recurring (>=3) 5 (33%), top counts [5,4,4,4,3,2,2,2]. Verdict line: 'domains recur -- self-assembly is working'. Caveat: small runs may recur trivially.",
+   "ts": "2026-07-25T17:03:10",
+   "what": "Small-scale CPU verification of the new RECURRENCE metric (30 kB stream, d=96, 400 warmup)"
+  },
+  {
+   "result": "Mechanisms INERT: 143 live domains for 4 true clusters, radius learned 0/143. Chicken-and-egg — a domain accumulates distance samples only when MATCHED, but matching requires a radius, bootstrapped from the broken NEW_DIST. A pooled prior did not fix it (pool held only 3-5 samples).",
+   "ts": "2026-07-25T17:05:51",
+   "what": "Direct unit test of DOM_RADIUS / DOM_RECUR on synthetic signatures (4 recurring clusters vs 40 never-repeating)"
+  },
+  {
+   "result": "HEAD margin-only 64.0 live / V 0.82. radius x1.6 cap0.0 -> 10.7 live / V 0.98. radius x1.2 cap1.5 + FOLD -> 4.0 live / V 1.00 / completeness 1.00. Intensivity: constants 64@120seg -> 115.7@240seg (grows); shipped defaults 4.0 at 120/240/480 segments (flat).",
+   "ts": "2026-07-25T17:15:49",
+   "what": "Ported unit-test grid on the real DomainAssembler (synthetic signatures, 120 segments, 4 corpora, 3 seeds)"
+  },
+  {
+   "result": "cap 0.5 is the WORST value in the table (65 live, V 0.82) — the value Claude had inherited as default. cap 0.0, 1.0, 1.5, 2.0, 2.5, 4.0 all give 4.0 live / V 1.00 with fold on. Default set to 2.0.",
+   "ts": "2026-07-25T17:16:44",
+   "what": "DOM_RCAP calibration sweep (fold ON and OFF)"
+  },
+  {
+   "result": "manage() ran ZERO times — 468 steps against MANAGE_EVERY=500. Merge, cull and fold were inert in every domain number reported to date; the 937-step GH200 runs hit it exactly once. Fixed by giving domains their own DOM_MANAGE_EVERY cadence.",
+   "ts": "2026-07-25T17:35:44",
+   "what": "Check whether manage() actually fires during the CPU A/B runs"
+  },
+  {
+   "result": "constants (old default) 50 live / 34% recurrent / V 0.42. radius+fold 36 live / 61% recurrent / V 0.40. floor K=8 alone 23 live / 48% / V 0.49. floor K=8 + radius+fold 16 live / 88% recurrent / V 0.50 (first config to beat 0.42). floor K=4 + radius+fold 6 live / 83% / V 0.54 but boundary recall falls to 0.59 and homogeneity to 0.56.",
+   "ts": "2026-07-25T17:43:20",
+   "what": "CPU real-text A/B, one variable at a time, 60 kB stream, eng/py/num/c"
+  },
+  {
+   "result": "37 live domains, 455 created, 349 folded, 392 merged, capped 0x. Boundary 3911 found for 3213 switches, P 0.98 R 0.96. purity 0.85 hom 0.62 comp 0.34 V 0.44. RECURRENCE 31 domains, 65% recurring. 0/23 genuine, mean silhouette -0.25. Memory +0.085, cross-segment +0.013, unlearn +0.195 target vs +0.011 others. 2.07 GB/day. [Clustering numbers later declared VOID — computed on 6.2% of windows.]",
+   "ts": "2026-07-25T18:42:42",
+   "what": "GH200 'Run A': 4 MB stream, ENC_WARMUP=30000, MAX_DOMAINS=10^6, BATCH_W=16, PROFILE=1"
+  },
+  {
+   "result": "Stage 0 cap invariance PASSES (cap64 and cap1024 byte-identical, capped=0). Best V anywhere is 0.62; best completeness 0.53 — kill criteria 2 and 3 FAIL everywhere. Criterion 5 FAILS (radius_off 18 live/V 0.55 vs best radius row 11 live/V 0.54). Criterion 8 TRIGGERS (warmup2000 V 0.60 > best stage-2 V 0.57). Criterion 4 (recur>=0.6) passes on nearly every row including baseline — non-discriminating. mgmt500->26 live, mgmt250->21, mgmt100->14.",
+   "ts": "2026-07-25T18:42:42",
+   "what": "Full GH200 sweep_domains.sh STAGES 0 1 2 3 (56 rows)"
+  },
+  {
+   "result": "INERT. K=8 gates at ln(1+47/8)=1.928 nats; Run A's encoder loss bottomed at 2.10 and ended at 2.30, so zero steps were gated. K=4 gates at 2.546, above almost the whole curve. K=5 (2.342) and K=6 (2.179) land inside the actual plateau; neither had been tested.",
+   "ts": "2026-07-25T18:44:05",
+   "what": "Check whether the shipped ENC_FLOOR_K=8 gate was ever active in Run A"
+  },
+  {
+   "result": "BATCH_W=1: 100% of windows recorded in assigns, 999 grow events, 66 retok events. BATCH_W=2: 50%, 0, 0. BATCH_W=15: 6.7%, 0, 0. BATCH_W=16 (Run A): 6.2%, 0, 0. Zero mints/retoks for EVERY BATCH_W>1, odd values included. Four cadences affected: GROW_EVERY, RETOK_EVERY, CKPT_EVERY, LM loss curve.",
+   "ts": "2026-07-26T14:15:54",
+   "what": "Loop-skeleton simulation of the BATCH_W batch accumulator over 200k steps"
+  },
+  {
+   "result": "At BATCH_W=16 minting now runs (vocab 512->536, was 0) and the two recurrence measures agree (ENTRIES [9,8,5,5,3,3,2,2] vs report [8,8,5,5,3,3,2,2]). At BATCH_W=1 the run is byte-identical to before — no-op at the default.",
+   "ts": "2026-07-26T14:20:38",
+   "what": "Verification of the cadence fix at BATCH_W=16 and regression check at BATCH_W=1"
+  },
+  {
+   "result": "Same config that scored mean silhouette -0.25 with min-separation now shows mean cohesion 0.74, sep 0.34 nearest / 0.80 median, silhouette +0.08 nearest / +0.54 median — median silhouette POSITIVE for all 16 domains. `sizes` also fixed to read asm.size (had been 16x understated from subsampled assigns).",
+   "ts": "2026-07-27T13:59:41",
+   "what": "Genuineness report with median separation added alongside the min-based one"
+  },
+  {
+   "result": "1-NN accuracy 0.589 -> 0.773 -> 0.956 -> 0.964 -> 0.977 -> 0.979 -> 0.982 at steps 0/250/500/1000/2000/4000/8000 — rises MONOTONICALLY, does not degrade. What degrades is the ratio: d_within inflates 0.057->0.494 (8.7x) while d_between saturates ~1.10, so between/within collapses 12.05 -> 2.24. At 8000 steps, against the four TRUE corpora: cohesion 0.69, separation 1.10, silhouette +0.79.",
+   "ts": "2026-07-27T15:24:20",
+   "what": "kindprobe.py: train one SigEncoder on the real 4-corpus stream, score against true labels, labels never used for training"
+  },
+  {
+   "result": "Shipped defaults (measured radius + fold + cadence): 16 live, 88% recurrent, V 0.50. + margin: 23 live, 43% recurrent, V 0.48. Margin only, no radius: 29 live, 38% recurrent, V 0.45. Worse both ways — the margin normalises by an order statistic that shrinks as the population grows, so it self-amplifies.",
+   "ts": "2026-07-27T15:33:32",
+   "what": "End-to-end CPU test of DOM_RELATIVE (the scale-free margin rule), which no sweep row had ever set"
+  },
+  {
+   "result": "Embedding(16384,768): 12.58M params, 137.32 ms per fwd+bwd+Adam, 151.0 MB. Embedding(256,768): 0.20M params, 53.80 ms, 2.4 MB. Verified a real checkpoint holds encoder (256,64) beside LM (4096,64) and resume through the shim works.",
+   "ts": "2026-07-27T15:48:14",
+   "what": "Isolated timing of the SigEncoder embedding resize"
+  },
+  {
+   "result": "13 live domains, 144 created, 57 folded, 130 merged, 2844 boundaries. Boundary P 0.97 R 0.87. purity 0.66 hom 0.32 comp 0.28 V 0.30 (first trustworthy partition number — worse than Run A's inflated 0.44). Vocab 256->1164, checkpoints every 2000, warmup stopped early at 501. Memory +0.075, cross-segment +0.013, unlearn +0.120/+0.0089. 1.95-2.00 GB/day.",
+   "ts": "2026-07-27T19:04:54",
+   "what": "GH200 rerun of the 4 MB config with the BATCH_W fix, ENC_WARMUP=2000/MIN=500, VMAX=2048, GROW_EVERY=100, PROFILE=0"
+  },
+  {
+   "result": "A demonstrably healthy encoder scores: mean cohesion 0.85, mean nearest separation 0.40, MEAN TRUE SILHOUETTE +0.25, 1-NN 0.898, d_between/d_within 2.68 — yet -4.8 sigma against the random-unit-vector null. The rerun scored -5.2 sigma. The test cannot distinguish them.",
+   "ts": "2026-07-27T19:08:22",
+   "what": "probe_ckpt_geometry.py on a smoke-test checkpoint (calibration of the COLLAPSE CHECK null)"
+  },
+  {
+   "result": "3213 true switches over 4,000,000 bytes = 1245 B per splice segment; WIN=256 tokens at ~1.9 B/token = ~486 B stride but a 256-byte window. Only 2.6 windows per segment, of which SUSTAIN=2 are spent detecting the boundary — under one settled window survives. SEG_MIN/SEG_MAX were set at 700/1800 when WIN was ~96 BYTES (13 windows/segment) and never revisited.",
+   "ts": "2026-07-27T19:22:37",
+   "what": "Segment/window arithmetic for the GPU configuration"
+  },
+  {
+   "result": "180-460 B (2.5 win/seg): 15 live, purity 0.54, hom 0.25, V 0.19. 700-1800 B (9.8 win/seg): 16 live, purity 0.87, hom 0.70, V 0.50. 2800-7200 B (39 win/seg): 12 live, purity 0.88, hom 0.80, V 0.68. V is monotone in segment length while live count barely moves (15/16/12) — so it is not fragmentation, and it is not the creation rule.",
+   "ts": "2026-07-27T19:28:45",
+   "what": "Falsification test: vary ONLY SEG_MIN/SEG_MAX, hold everything else fixed (CPU, 60 kB)"
+  },
+  {
+   "result": "SHIFT_DIST=0.30: 27/11 found, prec 0.30, rec 0.64, V 0.68. SHIFT_REL=1: 61/11, prec 0.18, rec 0.82, V 0.70. SHIFT_DIST=0.45: 10/11, prec 0.40, rec 0.36, V 0.60. The arm with the WORST boundary precision has the BEST partition — extra boundaries are cheap, missed ones are costly. [Later failed to replicate on GPU.]",
+   "ts": "2026-07-27T19:40:09",
+   "what": "Boundary-rule comparison in the long-segment regime (CPU, only 11 true switches)"
+  },
+  {
+   "result": "bytes W=128 (67% coverage, default): 11 live, purity 0.96, hom 0.89, V 0.74. bytes W=256 (100% coverage): 8 live, purity 0.86, hom 0.77, V 0.67. tokens with growing vocab: 7 live, purity 0.89, hom 0.80, V 0.73. Closing the coverage gap made it WORSE — at 100% coverage the window exceeds the stride so windows overlap and smear material across boundaries.",
+   "ts": "2026-07-27T20:18:42",
+   "what": "The three signature-window options measured on CPU (long segments, 60 kB)"
+  },
+  {
+   "result": "0.12 (default): 11 live, 2 merged, completeness 0.63, V 0.74. 0.28: 10 live, 3 merged, comp 0.66, V 0.76. 0.45: 7 live, 7 merged, comp 0.69, V 0.77. Purity holds at 0.96 throughout — merging consolidates genuine siblings rather than smearing corpora.",
+   "ts": "2026-07-27T20:24:20",
+   "what": "MANAGE_MERGE sweep on CPU, long segments"
+  },
+  {
+   "result": "purity 0.66->0.97, homogeneity 0.32->0.90, completeness 0.28->0.60, V 0.30->0.72, median silhouette +0.00->+0.37, memory +0.075->+0.164, unlearn target/others +0.120/+0.0089 -> +0.286/+0.0024, throughput 1.95->2.64 GB/day (shift-gated encoder cadence finally engaging). 139 created, 50 folded, 105 merged, 25 live.",
+   "ts": "2026-07-27T20:19:18",
+   "what": "GH200 Run A: 4 MB with SEG_MIN=8000 SEG_MAX=20000 (~29 windows/segment)"
+  },
+  {
+   "result": "25 live (same), V 0.73 vs 0.72, completeness 0.61 vs 0.60 — noise. But created 97 vs 139 (-30%), merged 62 vs 105 (-41%), memory +0.123 vs +0.164 (-25%), unlearn on target +0.245 vs +0.286 (-15%). Boundary P 0.24 R 0.78. Verdict: don't ship SHIFT_REL — a wash on quality and a loss on memory.",
+   "ts": "2026-07-27T20:59:38",
+   "what": "GH200 Run B: same as Run A plus SHIFT_REL=1 (scale-free boundary test)"
+  },
+  {
+   "result": "BEST RESULT OF THE CHUNK: 4 LIVE domains for 4 true processes (1x fragmentation), 84 created / 80 merged / 0 folded. purity 0.97, homogeneity 0.89, completeness 0.89, V-measure 0.89. RECURRENCE 4 domains, visited ONCE 0 (0%), recurring 4 (100%). 2/4 genuine, median silhouette +0.57. Memory +0.128, cross-segment +0.006, unlearn +0.191 target vs +0.0019 others. 2.79 GB/day. Held-out gap +0.100, still underfit.",
+   "ts": "2026-07-27T21:13:05",
+   "what": "GH200 Run C: long segments plus MANAGE_MERGE=0.45"
+  },
+  {
+   "result": "MEAN TRUE SILHOUETTE +0.55 (eng +0.53, py +0.45, num +0.72, c +0.51), mean cohesion 0.74, mean nearest separation 0.82, d_between/d_within 2.25, 1-NN corpus accuracy 0.982, only -1.4 sigma from the random null. Verdict: the encoder separates the true kinds; a low separation in the run report is about the ASSEMBLER or the STREAM.",
+   "ts": "2026-07-27T21:13:05",
+   "what": "probe_ckpt_geometry.py on runs/seg checkpoint (the good long-segment run)"
+  }
+ ],
+ "wip": [
+  "The final GPU run (MANAGE_MERGE=0.45, 4 live domains / V 0.89 / 100% recurrent — the best result in the chunk) arrives at the very last timestamp 2026-07-27T21:13:05 and Claude has not yet responded to or analysed it.",
+  "probe_ckpt_geometry.py was run only on runs/seg (the long-segment run); the runs/segrel and runs/merge checkpoints were never probed.",
+  "THROUGHPUT IS THE STANDING BLOCKER AND IS UNTOUCHED: ~2.6-2.8 GB/day means 40 GB takes ~15 days; the profile says the encoder is ~70% of wall clock while the LM — the thing to be compared against GPT-2 — gets 4-8%. Claude flags this repeatedly as 'a different problem from anything we've been doing' and nothing in this chunk addresses it.",
+  "The GPT-2-parity coherence run (MODEL=transformer LAYERS=12 D_MODEL=768 HEADS=12 KEY_LAYERS=2) is described as unblocked and independent throughout, and is never run.",
+  "ENC_PROTO implemented but left off — self-referential (the assembler's partition trains the encoder that makes the partition), so it was to be swept, not adopted. Sweep stages 4 (ENC_POS_MAX) and 5 (ENC_PROTO) never ran on GPU.",
+  "ENC_FLOOR_K default of 8 was shown to be INERT on the GPU (gates at 1.928 nats, loss never below 2.10) while K=4 gates above the whole curve; K=5 (2.342) and K=6 (2.179) land inside the real plateau and were never tested.",
+  "SIG_SPACE=tokens (growing vocabulary, warm-started new-token encoder embeddings) ties the byte default at a third fewer domains but was left off — 'promising but not yet a reason to switch'; never tested on GPU.",
+  "Boundary precision sits at 0.24-0.30 in the long-segment regime (965-1031 boundaries found for 287 true switches). Noted but not resolved; SHIFT_REL was rejected as the fix.",
+  "The fetch_data.sh corpus imbalance (eng 40 GB vs py/num/c at 20/6/12 MB, ~2000:1) is flagged twice and never fixed.",
+  "Kill criteria 2 and 3 from the pre-registered sweep (V>=0.80 AND completeness>=0.70; homogeneity>=0.85) failed everywhere in the 56-row sweep; criterion 4 (recurrence>=0.6 of live) was found to be non-discriminating — it passes on nearly every row including baseline — and was never replaced with a stronger test.",
+  "DOM_RADIUS survives in the shipped defaults despite failing kill criterion 5; Claude explicitly left the decision open rather than turning it off."
+ ]
+}

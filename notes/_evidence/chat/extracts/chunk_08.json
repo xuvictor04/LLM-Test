@@ -1,0 +1,691 @@
+{
+ "chunk": "chunk_08",
+ "errors": [
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T16:48:53",
+   "what": "The DIVERGING verdict was computed from the per-TOKEN loss curve, which rises mechanically as minted tokens get longer, while a unit-stable bits/byte curve sat in the same report unused."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T16:51:41",
+   "what": "Banner lie again: the [config] PATH line still described the transition matrix after CHAIN_ROUTE=soc became the default."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T17:01:45",
+   "what": "LR_WARMUP=1000 exceeded a toy run's 360 total steps, so the run never left warmup and trained at a third of peak throughout — looked like the schedule hurting."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T18:05:05",
+   "what": "Stale checkout: a pilot ran at commit 99ba0f400f, three commits behind, and produced a result byte-identical to the two before it (held-out 2.893). Three runs of the same config, ~1 hour of GH200 time, nothing new."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T19:07:22",
+   "what": "The report's verdict contradicted its own cross-check — printed DIVERGING on a run whose bits/byte curve was flat (-0.007) over the last two thirds, because it measured from the global minimum."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T20:55:24",
+   "what": "longrun.sh seeds display bug: seq newlines broke the banner echo of the seed list."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T21:11:18",
+   "what": "`fab.note_dom(int(_w[0].argmax()), did)` recorded ONE expert (row 0, argmax) per step; at BATCH_W=16 that is 15 of 16 windows never recorded — hence 'serving none: 4053'. Consequences: dom_ban (the breadth cap the researcher asked for) was effectively inert, and society()'s `use` table was sampled at 1/16 the rate of chaining's, so every ROUTER SELECTION comparison across paths (516 vs 202 vs 877 experts, top 3.7% vs 5.1% vs 25.2%) compared unlike things."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T21:20:06",
+   "what": "generate() samples the LIVE model at end of training and there was no best-checkpoint tracking anywhere; ckpt.pt is written on a cadence and overwritten. Every text sample in the project came from a model ~41,000 steps past its best, 1.1–1.3 b/B worse."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T21:23:00",
+   "what": "The best-checkpoint block was inserted inside the `except` handler, so it only ran when the curve sample failed."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T21:30:18",
+   "what": "_VALT/_BL cached the tokenised held-out text once and were never invalidated at re-tokenisation, so from the first mint the mid-run learning curve scored the model against validation text in an obsolete segmentation. Invalidated the '+1.220 bits/byte since its own minimum' and the 'memory masks weight degradation' claim."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T22:32:48",
+   "what": "A bad string-replace appended an orphan `return True` at module scope → IndentationError at line 2966/2968; two verification runs came back rc=1."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-05T22:38:15",
+   "what": "_save_ckpt returned early on SAVE_CKPT=0 without signalling, and the caller assumed success — a real log printed 'saved to None.best' on a run that saved nothing."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-06T01:30:47",
+   "what": "TOK_COMPOSE first version sized the composed table to the LIVE vocab, which can lag the stream → IndexError: index 331 out of bounds for dimension 0 with size 300, killing the arm."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-06T12:55:46",
+   "what": "A duplicate `import os` was inserted into tokenizer.py by the edit script."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-06T14:12:06",
+   "what": "pilot_gru_8 ran TOK_COMPOSE=1 and TOK_MINT_NOVEL=0.5 simultaneously (Claude made the composer default-on then recommended novelty minting on top), so the worst result in the project attributes to neither change."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-06T14:19:53",
+   "what": "_total_steps = EPOCHS × (tokens // WIN) measured ONCE at the seed vocabulary. Minted tokens are longer, so later epochs are shorter — pilot_gru_8 projected 81,840 steps and ended at ~48,800, a 40% overestimate. It fed the ETA, the kB/s and GB/day figures, the 'SAMPLED FROM step ~N' label, and the cosine LR horizon."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-06T15:25:42",
+   "what": "Workflow tool call rejected: 'InputValidationError: An unexpected parameter run_in_background was provided'."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-06T16:13:01",
+   "what": "The bisect workflow's returned JSON did not have the expected keys (FLAGGED: [], SURVIVING: [], SCREENED CLEAN: None); the real per-agent verdicts had to be dug out of journal.jsonl."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-06T19:44:56",
+   "what": "User-side run failures: repeat run3 died at step 8800 (log ends mid-training); run2 hit 'cusolver error: CUSOLVER_STATUS_INTERNAL_ERROR' and skipped the SIGNATURE SPACE diagnostic; a terminal was closed mid-run leaving a .partial1 log."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-06T19:45:04",
+   "what": "fab_logits fabricates `gist = torch.zeros(...)` on eval paths; Fabric.forward then calls ground_update on it, and F.normalize(zeros) is zeros, so every eval forward dragged the top-8 experts' region centroids TOWARD THE ORIGIN, five times per call (entry + 4 hops). Present in every run the project has ever done via the RATE_EVERY learning-curve sample, and extra under SAVE_CKPT, so pilot/grid and seeds/repeat were never comparable."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-08-06T15:06:22",
+   "what": "Structural gap after a mint: GROW_EVERY=100 vs RETOK_EVERY=3000 means a newly minted token cannot appear as input or target for up to 3000 steps, yet sits in the softmax denominator warm-started to a HIGH logit — a strict loss increase by construction. pilot_gru_8 logged +317 tokens waiting at once (~15% of the vocabulary)."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-07T12:59:45",
+   "what": "EPOCHS silently rewrites the cosine LR horizon, so four runs compared as 'same config, different length' were four different optimization schedules; and because the frozen-vocab run's step projection is exact, freezing the vocabulary accidentally fixed the LR schedule — perfectly confounding the tokenizer result."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-07T13:51:09",
+   "what": "Harness arm-flag precedence: `env $FLAGS ... VMAX=2048 ...` puts hardcoded values AFTER the arm flags, and the last assignment wins, so arm flags for VMAX, WIN, BATCH_W, RATE_EVERY, CKPT_EVERY, GROW_EVERY/BURST, SEG_MIN/MAX, DATA_DIR, LAYERS, MODEL were silently discarded — while the log was still named after the value that never took effect. Affects grid, seeds and repeat, so past grid arms may not have run what their names claim."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-07T16:06:33",
+   "what": "`seeds` and `repeat` never got the fetch-if-empty corpus guard that `pilot` and `grid` carried, so they parsed args, made their output dir, printed a banner and died inside the model on 'no corpus files in data_pilot/train/eng/'."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-07T16:19:08",
+   "what": "GEN_PROCS=4 caps how many DOMAINS get a continuation; with one corpus that is exactly ONE 200-token sample, and the composing check scored '% of generated words in the training text' on 64–91 words. Every text judgement quoted in the project (91%/71%/31%) rests on that."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-08-07T16:14:46",
+   "what": "data/dyntok.json is written unconditionally by every online run (line 4117). With TOK_ONLINE=0 it IS loaded, so a run inherits whatever vocabulary the previous run left behind — making seeds non-independent and results order-dependent for the frozvocab arm and any past grid arm using it."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-06T21:30:06",
+   "what": "With TOK_MINT_UNTIL set, 39 no-op retokenizations still fired (every 3000 steps), each printing the banner lie 'minting live', clearing _VALT/_BL and _sigq pointlessly, and calling fabgrow.note_shift(step) — which blacked out fabric growth for FAB_COOLDOWN=400 of every 3000 steps, ~13% of the run."
+  },
+  {
+   "fixed": "unclear",
+   "ts": "2026-08-07T16:34:40",
+   "what": "The isolation script meant to prove the new composite-lever layer changes nothing failed with a SyntaxError while stripping torch imports ('levers, line 19: , torch.nn as nn, torch.nn.functional as F'). Retry in flight at the chunk boundary."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-08-06T17:22:35",
+   "what": "No gradient clipping anywhere in the training loop — no clip_grad_norm_ at LR=2e-3 on AdamW with a GRU, a population growing to 4096 experts, and a vocabulary changing underneath it."
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "Claude tried to test it, found the only minting-off arm (frozvocab/TOK_ONLINE=0) was NaN from step 20k and therefore non-discriminating, and conceded: 'My hypothesis was untested and I presented it as a finding.' Search then found lr=2e-3 constant with no schedule (commit 1593c70). Verdict flipped repeatedly afterwards — see retractions.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Rejects Claude's claim that the online minting tokenizer is the cause of the model-alone degradation, on the grounds that earlier rounds minted fine.",
+   "quote": "But the minting tokenizer seemed to have done fine in earlier rounds? I don’t think it is it.",
+   "ts": "2026-08-05T16:57:33"
+  },
+  {
+   "evidence": "The [build] line showed commit 99ba0f400f, three commits behind; result was byte-identical to two prior pilots (held-out 2.893, H=0.533, spec 0.000, top 25.2%). Claude: 'it cost about an hour of GH200 time to find out.'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Endorses his own earlier instruction that every log announce its exact commit, after the [build] line caught a stale-checkout pilot.",
+   "quote": "You are right. This is why we needed the commit numbers.",
+   "ts": "2026-08-05T18:10:37"
+  },
+  {
+   "evidence": "Question exposed a real bug: `fab.note_dom(int(_w[0].argmax()), did)` recorded ONE expert per step at BATCH_W=16, so 4053 of 4096 read 'serving none', and dom_ban (the breadth cap) was effectively inert; society's `use` table was sampled at 1/16 chaining's rate, invalidating all ROUTER SELECTION comparisons. Fixed in 99e5da0. FAB_GROW=0 was implemented and toy-verified (0 grown, held at FAB_N0) but the pilot-scale nogrow arm was never run in this chunk.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks why the affiliation report shows experts serving no domains, and asks for a switch to freeze fabric growth.",
+   "quote": "Why were experts = 0?\n\nCan we turn off fabric growth instead, and see what happens?",
+   "ts": "2026-08-05T21:10:42"
+  },
+  {
+   "evidence": "Found generate() samples the LIVE model at end of training with no best-checkpoint tracking anywhere — 'Every text sample I've shown you came from a model ~41,000 steps past its best.' Added `<SAVE_CKPT>.best` + a SAMPLED FROM line (3f67bfc). Spike correlated exactly with retok events at 3008/6016/9024/12032 and the two largest relative vocab jumps (+32%, +37%).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Wants the 3→2→8→3 loss-curve shape explained and wants to know which checkpoint the generation samples came from.",
+   "quote": "Before the run happens, I want to address the losses pattern seen, going from 3 to 2 to 8 to 3, and which checkpoint was used for generation",
+   "ts": "2026-08-05T21:19:25"
+  },
+  {
+   "evidence": "Found `_VALT`/`_BL` cached the tokenised held-out text once and never invalidated it, so the curve compared a model on the current segmentation against validation text frozen in an old one. Fixed in 18fdd6c (`_VALT.clear(); _BL.clear()` in the retok block). BUT the fix did NOT remove the early best — see retractions; the E18 minting run still read 'Best was 2.803 at step 6000 of 103,805'.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Challenges the premise that the model should peak at step 6k when the tokenizer, embedder and system are all still learning.",
+   "quote": "Another issue then is why is the best bit/byte at step 6k? When the tokenizer didn’t even cap out, and there is still learning for the embedder and overall system",
+   "ts": "2026-08-05T21:29:35"
+  },
+  {
+   "evidence": "TOKENIZER=0 pilot ran to 123,983 steps: held-out 4.378 vs order-1 3.840 — 'DOES NOT BEAT ORDER-1 (-0.538)'. Ruled out as a floor. The mint-teaching half found WARMSTART already existed (emb/head/bias/encoder) and Claude's proposed optimizer-moment inheritance was disproven by his own test.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks for a minimum-vocabulary tokenizer test and hypothesises the fault is in how newly minted tokens are taught.",
+   "quote": "How about this, lets test with the minimum sized tokenizer. From there, we can move on. I'm thinking an issue is stemming with how we are teaching with the new tokens, and what we do with newly minted tokens and their learning",
+   "ts": "2026-08-05T23:41:17"
+  },
+  {
+   "evidence": "Claude agreed: 'the gap is ~30× the seed spread, so a second run can't change the sign.' The bytes arm was closed out on n=1.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Judges a single seed sufficient to settle the bytes-only arm rather than spending a second run.",
+   "quote": "This is only one seed, the other did not complete, but I dont think its worth it",
+   "ts": "2026-08-06T00:59:39"
+  },
+  {
+   "evidence": "Produced the asymmetric-init experiment: 18 trials (6 pairs × 3 seeds) gave last/first 1.4822 vs current mean/mean 1.8222 (-0.340, 31× its own sd). Shipped as WARMSTART_MODE, DEFAULT OFF, because the end-to-end toy disagreed (5.214 vs 5.100).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Rejects vocabulary freezing as a workaround; insists the real fix is in how new tokens are learned.",
+   "quote": "I dont think that will help, unless we fix the issue with the way that the system learns the new tokens",
+   "ts": "2026-08-06T01:02:36"
+  },
+  {
+   "evidence": "Claude dropped the proposed run ('I proposed a run that couldn't answer its own question. Dropped.'), confirmed TOKENIZER=1 is default, and reinterpreted the id idea as TOK_COMPOSE/ByteComposer (vector computed from bytes). Toy: compose 5.765 vs table 5.100; shipped default OFF at first. Note: the first implementation removed per-token parameters, which the researcher then said was NOT what he meant.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Kills the proposed 0.1 b/B run as a waste; requires the tokenizer on; asks whether tokens can use their integer byte-values as ids.",
+   "quote": "There’s no point in looking for a 0.1 b/B it’s a waste unless it’s actually that close.\n\nAlso, is tokenizer on? I want it to be on. Can the tokens, instead of something complex, use its integer values as id’s instead? It will be longer, but easier to convert.",
+   "ts": "2026-08-06T01:27:03"
+  },
+  {
+   "evidence": "Claude: 'I built the wrong thing and you corrected it.' Rebuilt as token vector = composite(bytes) + zero-init residual, plus TOK_ANCHOR (age-decaying penalty on the residual), default ON (ed04aac). Mechanism verified directly (delta 0.0 at birth, anchor 0.25 young → 0.0017 at age 20k, fired 93×/3043×). The one pilot with it on (pilot_gru_8) was the worst in the project at 5.360 — but it also had TOK_MINT_NOVEL=0.5 on, so it attributes to neither. Reverted to default off in be50e3a.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Corrects Claude: the goal is per-token parameters that START at the composite and train with the loss — not the absence of parameters — and asks for the composer default-on.",
+   "quote": "Change default to on. \n\nThanks for letting me know of the consequences.\n\nThey are not the point, however.\n\nWe want minted tokens to start with parameters. My original goal was to make the transition, between new mint and its composite, much easier. I want these tokens to be trained on even with the loss, but we need to do it differently.",
+   "ts": "2026-08-06T12:17:22"
+  },
+  {
+   "evidence": "Second-half slopes computed: TOK_MINT_UNTIL=6000 2.45→2.19 (-0.1020/10k, improving); chained society 3.79→3.76 (+0.0175, FLAT); society 3.47→3.54 (+0.0269, WORSE); TOKENIZER=0 5.46→4.34 (-0.0354). Claude: 'with minting on, the whole second half is flat or slightly rising… they arrive faster than recovery completes.' The STILL LEARNING? instrument was added to every report (23099fc).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Accepts retokenization shocks as tolerable, and asks whether the underlying trend between shocks is actually downward.",
+   "quote": "I don’t expect the shocks to completely disappear. Their existence is ok. \n\nNow, another important question that I want confirmation: has loss been dropping with our architecture if we look away from the tokenizer disruptions?",
+   "ts": "2026-08-06T12:46:40"
+  },
+  {
+   "evidence": "Slope table over all 25 logs: 19 of 21 all-run-minting logs FLAT or WORSE (+0.0175 to +0.2170/10k); only the frozen and bytes arms improved. The constraint reframed the work: Claude found maybe_grow() mints `most_common(1)` — the globally most frequent pair, i.e. the most disruptive possible choice — and built TOK_MINT_NOVEL (`recent/(1+seen)^novel`). Selection verified (novel=0 → AB, novel=0.5 → PQ); default 0; toy 6.034 vs 5.764. Its only pilot was confounded.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks whether the flat/worse second half held historically, and states minting is non-negotiable for his continual-learning design.",
+   "quote": "Has this been true in past runs?\n\nToken minting is critical for my idea of continual learning.",
+   "ts": "2026-08-06T12:54:01"
+  },
+  {
+   "evidence": "Claude pulled held-out from every pilot log: eleven runs across five commits in a 2.0–2.2 band with minting on or frozen. Dropped the LR bug as the explanation ('I found a genuine bug and then reached for it as the explanation because I was staring at the spike. It isn't.'), and reverted TOK_COMPOSE to default off (be50e3a) so HEAD's defaults matched c33f0781.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Objects that the work has fixated on the loss spike as a metric, and proposes reverting to earlier defaults.",
+   "quote": "I think we are overoptimizing for a single metric again, this time the spike. Spikes are ok, just that it wasn’t lowering as much as I thought would happen. Maybe we should go back",
+   "ts": "2026-08-06T14:44:57"
+  },
+  {
+   "evidence": "Produced a five-step account and found a structural gap: GROW_EVERY=100 vs RETOK_EVERY=3000 means a new token is in the softmax denominator (warm-started to a HIGH logit) for up to 3000 steps before it can ever appear as input or target — 'a strict loss increase for the whole gap, by construction'; pilot_gru_8 logged +317 tokens waiting at once. Proposed setting RETOK_EVERY near GROW_EVERY; NOT tested in this chunk.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks for the exact mechanical sequence following a mint event.",
+   "quote": "What happens after minting?",
+   "ts": "2026-08-06T15:06:09"
+  },
+  {
+   "evidence": "Answer: everything switched on but 'almost none of it is exercised' — depth 1.00 of 4, HALT 0.0000, SPEC 0.000, gradient reach 8.5%, top expert 39.0%. Held-out 3.694 vs 2.275 at c33f0781 (DOES NOT BEAT ORDER-1, -0.255). Triggered an 18-agent bisect workflow over 14 commits, which ultimately found nothing — see retractions.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks whether the new run exercised the full architecture and whether the result regressed.",
+   "quote": "Firstly, is it to our full capabilities? with chain and stuff? Second, is it worse?",
+   "ts": "2026-08-06T15:22:41"
+  },
+  {
+   "evidence": "Claude cleared 18fdd6c at code level (the final held-out re-segments fresh at line 4098; and the TRAIN number moved too, 2.080→3.769, which a held-out cache cannot touch) but agreed 'You're right that something broke. I was wrong about where, twice.' The user's own evidence was stronger: 89% → 31% of generated words appearing in the training text. The fix did reveal that the project's two held-out instruments had disagreed by 1.53 b/B for the whole branch.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Suspects the cache-invalidation commit broke something rather than fixing it, since the generated output was better before it.",
+   "quote": "You said that (18fdd6c) fixed a stale held-out tokenisation cache happened, but it looks more like it broke something, since output looked better before\n\nElaborate on the fix",
+   "ts": "2026-08-06T15:48:16"
+  },
+  {
+   "evidence": "Byte-identical model code (`git diff be50e3a 81f4b3c -- self_organize.py tokenizer.py` empty), same SEED=0: held-out 2.100 vs 3.694, spread 1.594. Claude: 'There was no regression. Nothing to bisect. I spent this entire thread chasing a phantom.' The run itself was the project's best to date (fabric +0.533, spec 0.135, top 4.3%, 91% real words, final = best model).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Submits a single confirmation run and judges it sufficient.",
+   "quote": "This is the results. I only ran 1. I think it is conclusive enough.",
+   "ts": "2026-08-06T17:21:13"
+  },
+  {
+   "evidence": "All three executed. Diagnosis: exactly one flag differed — pilot passes SAVE_CKPT=<path>, repeat passes 0, which gates holdout_bpb(). Also uncovered the harness precedence bug (`env EPOCHS=12 EPOCHS=8` → 8), meaning VMAX/WIN/BATCH_W/RATE_EVERY/etc. were silently dropped as arm flags. EPOCHS=12 repeats → 2.468; TOK_MINT_UNTIL=1 at E14 → 2.075.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Orders a no-edit diagnosis of what actually differed, then repeats at longer epochs, then a minimum-tokenizer run at extra epochs.",
+   "quote": "First: what was the change or difference from before? Let’s not edit anything yet.\n\nSecond, I guess we should test a few more times, with a bit longer epochs.\n\nThird, let’s test with minimum sized tokenizer, but a few extra epochs compared to current",
+   "ts": "2026-08-06T17:36:36"
+  },
+  {
+   "evidence": "md5 of the report section identical for run1 and the partial; every model number matched to the last digit (train 2.497 | held-out 2.468, fabric +1.325, spec 0.000, step 70368). Only divergence was a cuSOLVER driver error skipping a diagnostic in run2. Forced Claude to retract the 1.6 b/B noise-floor claim.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Reports the repeat runs are identical.",
+   "quote": "I ran the repeats, they look the same. Also, I accidentally closed a terminal during a run 2 and reran with repeat 2. \n\nMinimum tokenizer was not run yet, and is running",
+   "ts": "2026-08-06T19:43:52"
+  },
+  {
+   "evidence": "Logs showed DROPOUT=0 WEIGHT_DECAY=0 RECON_W=0 ENC_CREG=0 in BOTH runs, gap NEGATIVE in both (-0.007, -0.029), both printing 'UNDERFIT -> more data/passes, not regularization', and each epoch is fresh data under DISK_STREAM=1. Not confounded. Determinism explicitly left alone at the user's direction.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks whether the more-epochs-is-worse finding is confounded by regularization settings, and defers the determinism question.",
+   "quote": "Although you say more epochs is worse, is that accounting for the different anti overfitting techniques? And is it related?\n\nIs training supposed to be deterministic? Let’s leave it be for now if it’s not an immediate issue. I’m surprised that the outputs are so similar though.",
+   "ts": "2026-08-06T20:23:15"
+  },
+  {
+   "evidence": "Length confound: the user then ran E18 minting → 3.645, worse than E12's 2.468 and E8's 2.100, so length was not protecting the frozen run (though this too was later confounded by the LR horizon — see retractions). Spike hypothesis tested directly: 67 growth events before step 26000, ZERO during the 26k–42k plateau (27 culls instead), first growth after recovery at step 51,903 — 8,000 steps AFTER the loss recovered. Claude reframed rather than refuted: 'why didn't the search fire when the system was visibly stuck?'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Flags the run-length confound in the frozen-vocab result and hypothesises that loss spikes are the system searching for new sub-specialties.",
+   "quote": "I agree that its’s the best, but it’s also the longest running. […] Maybe the others need to go through a longer training as well before we can see such a crash. It’s possible that when there are spikes, new subspecialties are in demand and in search for.",
+   "ts": "2026-08-06T21:29:18"
+  },
+  {
+   "evidence": "Confirmed by the log: 39 retokenizations fired in the frozen run, every one a no-op ('vocab 512/2048 (minting live; +0 since last retok)'), each dropping _sigq, clearing _VALT/_BL, and calling fabgrow.note_shift(step) — which blacked out fabric growth for FAB_COOLDOWN=400 of every 3000 steps, ~13% of the run. RETOK_EVERY=0 identified as the flag that stops it (verified `_due` returns False at _n<=0). Included in the next test pair.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asserts the 'frozen' tokenizer was only half switched off and is still doing work.",
+   "quote": "Let’s keep the tokenizer system available, but no minting or otherwise activity. I believe we only shut off part of it, not all, giving more load to the system.",
+   "ts": "2026-08-06T21:29:18"
+  },
+  {
+   "evidence": "Claude conceded: 'I overstated it, you're right' — model ALONE 2.057 is a model that trained WITH the fabric for 118k steps; the ablation also strips the fabric LayerNorm; and the fabric was working harder than ever (gradient reach 23.8% vs ~9.7%, 636 distinct experts vs 238, HALT 0.4048 after reading 0.0000 in every prior chaining run).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Pushes back on Claude's reading that the fabric's low marginal ablation value means it contributes little.",
+   "quote": "I don’t think it means the fabric contribution was that much worse, since it has been instrumental for our expert selection and learning of it.",
+   "ts": "2026-08-06T21:29:18"
+  },
+  {
+   "evidence": "Concern CONFIRMED by data the next turn without a dedicated experiment: the run that minted to 2048 produced 31% real words; the one held at 512 produced 92%. Claude: 'That is exactly the mechanism you described, showing up in the data before we went looking for it.' The proposed token-utilization instrument (per-id occurrence histogram bucketed by length, fraction of vocab receiving zero gradient) was NOT built in this chunk.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Wants an uncapped vocabulary eventually but worries small/basic token ids will stop receiving gradient and go stale.",
+   "quote": "I want to try uncapped tokenizer later, however, one concern I have is underutilization of some of the basic or smaller tokens.",
+   "ts": "2026-08-06T22:08:55"
+  },
+  {
+   "evidence": "Design sketched only: gate on existing `surprise` (already computed, feeds _fab_nov); cross-referencing mapped onto per-expert output spread already computed each hop; fixed-op expert modelled on the HALT reserved-mass branch rather than a tensor slot. Nothing implemented in this chunk; Claude explicitly staged it behind the three fixes and the noise-floor measurement.",
+   "outcome": "deferred",
+   "paraphrase": "Asks for a learned/self-judged update gate (skip backprop when the model already knows), cross-referencing as a confidence signal, and the ability to put a fixed op in an expert slot.",
+   "quote": "And the continual training. I want the system to be able to decide, when it is sufficient, when to or not to backprop when there is a difference. Ideally this would include cross referencing, other ways for it to use its own judgement. Also ways to replace an expert with a fixed line of code or action, for it to learn to use.",
+   "ts": "2026-08-06T22:08:55"
+  },
+  {
+   "evidence": "Claude blocked it on three defects that worsen with run length: the zero-gist ground_update (fixed 08-07), the stale _total_steps LR horizon (fixed 08-07), and the harness precedence bug (fixed 08-07); plus an untested RESUME path. Still not run at chunk end; test ordering put it fourth.",
+   "outcome": "deferred",
+   "paraphrase": "Wants the big 40GB training run as one of the two remaining deliverables.",
+   "quote": "Two things left: a major and long run, originally would have been called the multi epoch, but will be an expanded run with the desired 40GB training  set",
+   "ts": "2026-08-06T22:08:55"
+  },
+  {
+   "evidence": "Claude flagged that every run reports UNDERFIT with a negative gap so regularization points at a problem that hasn't appeared, but agreed to run DROPOUT=0.1 and WEIGHT_DECAY=0.01 as separate arms after the baseline is settled. Repeated by the user on 08-07 ('And let’s use the anti overfitting mechanisms in it') and again in the final message. Not run by chunk end.",
+   "outcome": "deferred",
+   "paraphrase": "Wants standard regularization (dropout, weight decay) actually tested in the real runs.",
+   "quote": "We also should test if typical anti overfitting can works, and use it. In our runs",
+   "ts": "2026-08-06T22:08:55"
+  },
+  {
+   "evidence": "Correct. EPOCHS sets the cosine horizon, so it changes the LR at EVERY step: at the same step 48,130 the arms trained at 3.58e-4 / 1.04e-3 / 1.52e-3 (E8/E12/E18) — E18 at 4.3× E8's rate. Minting runs overestimate their length by 31–37% (minted tokens are longer); the frozen run overestimated by 0.03%, so 'freezing the vocabulary accidentally fixes the learning-rate schedule' and was the only run ever to anneal to LR_MIN_FRAC. Claude: 'my \"the moving tokenizer is the cause\" was not supported. Second time your instinct has beaten my read.'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Refuses the 'longer epochs made it worse' conclusion and demands a search for another change.",
+   "quote": "Look deeper. I don’t think it’s because longer epoch that it worsened. Was there an otherwise change? \n\nAnd let’s use the anti overfitting mechanisms in it\n\nAfter the analysis, we can do an expanded min tokenizer run at the 40GB",
+   "ts": "2026-08-07T12:57:05"
+  },
+  {
+   "evidence": "All three landed and pushed as 5f4f117. Verified: route_w/society/forward all accept learn_regions, 9 call sites pass it by keyword, 0 suspicious positional calls, all three ground_update sites gated; simulated final LR on the E18 trajectory moved 4.21e-4 → 1.88e-4; end-to-end stub confirmed 'VMAX=512 RATE_EVERY=250 EPOCHS=9 SEED=0' now reaches the process.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Approves the three pending fixes (LR live horizon, zero-gist ground_update guard, harness flag precedence).",
+   "quote": "Yes let’s do it",
+   "ts": "2026-08-07T13:47:03"
+  },
+  {
+   "evidence": "Claude corrected the reading (q_entry/q_route/keys/halt_key/nov/ctrl/eemb/edec still get gradient every training step; `cent` is a register_buffer updated under no_grad, and it still updates on all 240,650 training calls) — but the challenge forced arithmetic that overturned Claude's own prior claim: 125 corrupting eval nudges vs 240,650 real = 0.052%, 'That cannot accumulate to 1.594 bits/byte.' Also re-opened multi-seed testing. Claude noted ROUTING MIX has had the region term at ~13% vs weight-prediction ~87% as the next thing to watch.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Objects that the just-landed fix appears to stop the router learning, which he considers the crux of the system.",
+   "quote": "Why aren’t we training router? It’s the key to properly determining which expert to go to.",
+   "ts": "2026-08-07T13:57:51"
+  },
+  {
+   "evidence": "`pilot` and `grid` each carried their own fetch-if-empty guard; `seeds` and `repeat` were added later without it. Shared `_pilot_corpus()` added and called by all four subcommands (adbc07a); verified it fires with a usable message on an empty dir and is a no-op when the corpus is present.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Reports the seeds run dying for lack of corpus and asks for the fetch to be built into the harness with a check.",
+   "quote": "no corpus files in data_pilot/train/eng/ -- DOMAINS names a domain with no data. […] Place the pull explicitly in the setup or run (with a check) or tell me how to do it",
+   "ts": "2026-08-07T16:06:08"
+  },
+  {
+   "evidence": "Confirmed: one sequential `python3 self_organize.py` per seed, SEED_CKPT=0 so no checkpoint written or read, RESUME unset. But the question surfaced a hazard: data/dyntok.json is written unconditionally by every online run, and with TOK_ONLINE=0 it IS loaded — making seeds non-independent and order-dependent for the frozvocab arm and any past grid arm using it. Offered a per-run TOKENIZER_PATH; not done.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Checks whether each seed is a genuinely independent process rather than sharing state.",
+   "quote": "Are the different seeds separate runs?",
+   "ts": "2026-08-07T16:13:52"
+  },
+  {
+   "evidence": "GEN_N added (default 4 distinct passages per process, drawn with random.sample), pushed as c14f876. Revealed that with one corpus, GEN_PROCS=4 meant every text judgement in the project came from a SINGLE 200-token continuation, and the '% of generated words in the training text' figures (91%/71%/31%) were computed on 64–91 words.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks for the repeat-vs-seeds distinction and asks for more generated text samples.",
+   "quote": "What is the difference between a repeat and seed? Also,  for the sample generations, we should do a few more.",
+   "ts": "2026-08-07T16:17:21"
+  },
+  {
+   "evidence": "Claude re-specified as `bash longrun.sh seeds 1` and `bash longrun.sh seeds 1 -- TOK_MINT_UNTIL=1 RETOK_EVERY=0` (both EPOCHS=8, SAVE_CKPT=0, same harness mode). The user confirmed at 16:31 'I am running what you just provided' — results are NOT in this chunk.",
+   "outcome": "built-never-run",
+   "paraphrase": "Overrides the proposed 4-seeds-per-arm plan in favour of one run per arm as a rough estimate.",
+   "quote": "I don’t want to run multiple tests yet, first each once, because once is enough for a rough estimate.\n\nTell me again which you want to run",
+   "ts": "2026-08-07T16:26:16"
+  },
+  {
+   "evidence": "In progress at the chunk boundary. Survey found 272 knob reads and documented tangles; a COMPOSITE LEVERS block, banner reporting and CONFIG_DUMP were added and compiled OK; the isolation test that would PROVE unset levers change nothing failed with a SyntaxError while stripping imports and was being retried at 16:34:51, the last line of the chunk. No table produced yet.",
+   "outcome": "unclear",
+   "paraphrase": "Orders a pure refactor to expose clean orthogonal levers, with a change table and a guarantee of zero behavioural change.",
+   "quote": "I want you to normalize and disentangle the code, since there are so many interrelated things, some unnecessary. This way we have clearer levers. \n\nCreate a table of what was modified, in the end. \n\nEnsure that nothing is functionally different, just that things are disentangled.",
+   "ts": "2026-08-07T16:31:40"
+  },
+  {
+   "evidence": "Stated at 16:31:40; chunk ends at 16:34:51 with the refactor still mid-flight. None of the three reruns started.",
+   "outcome": "deferred",
+   "paraphrase": "Specifies the post-refactor regression sequence: 8-epoch baseline, then TOK_MINT_UNTIL=1, then the anti-overfitting arms.",
+   "quote": "We will need to rerun some pilot tests, to make sure nothing changed. \n\nStarting with the original 8 epoch, Freeze on 1 tokenizer, then run the anti-overfitting to see differences in production.",
+   "ts": "2026-08-07T16:31:40"
+  }
+ ],
+ "notes": "Scope note: entries labelled `USER` that contain only a `[RESULT]` block are tool output, not the human; I excluded those and used only genuine human turns for `ideas`. A context-compaction summary written by Claude appears inline at 2026-08-06T14:14:36 (lines 3691–3838) and restates earlier user messages verbatim — I did NOT treat those restatements as new researcher input, only the live USER turns in this chunk's timespan.\n\nStanding constraints restated in that summary and still in force: work on branch `rm-predict`; never overwrite anything under `runs/`; confirm before action on performance changes; no compromises (do not remove functionality for speed); do not run the smoke gate locally.\n\nThe arc of this chunk in one line: a sequence of confidently-stated causes for the same phenomenon (tokenizer minting → no LR schedule → seed variance → stale held-out cache → TOK_COMPOSE → commit 18fdd6c → commit 99e5da0 → SAVE_CKPT/zero-gist centroid corruption → the EPOCHS-driven LR horizon), almost every one of which was withdrawn, and in five separate cases withdrawn because the researcher objected first. The researcher's objections have a notably better hit rate than Claude's hypotheses: 'I don't think it is it' (minting), 'we are overoptimizing for the spike', 'it looks more like it broke something', 'we only shut off part of it', and 'I don't think it's because longer epoch' were all borne out. Claude acknowledged this explicitly twice ('Second time your instinct has beaten my read').\n\nTwo claims that survived everything in this chunk and are worth carrying forward: (1) runs are bit-for-bit deterministic given (config, commit, SEED) — three identical repeats, md5-verified; (2) TOKENIZER=0 (raw bytes) loses to an order-1 bigram table by 0.538 b/B at 2.6× the steps, so the tokenizer buys most of the model's advantage. Everything else about the tokenizer axis was still open at the chunk boundary.\n\nBest result in the chunk: TOK_MINT_UNTIL=1 (vocab frozen at 512) at EPOCHS=14 — held-out 2.075, beats order-1 by 1.45, 118,743 steps, first non-zero HALT mass (0.4048) ever recorded on a chaining path, gradient reach 23.8%, retention drift -0.069, 92% real words. Caveat the researcher raised and Claude accepted: it is also the longest run and its LR schedule was the only one in the project that annealed correctly, so the cause is not isolated.\n\nNever resolved: the fabric has still not been shown to beat FABRIC=0 on text; coherence remains INCOHERENT (0.08 ± 0.04 against a 0.50 real-text ceiling); and the routing diagnostics (specialization, HALT, H(hop1|hop0)) have repeatedly moved in the opposite direction from text quality.",
+ "retractions": [
+  {
+   "claim": "Claude: 'The cross-check settles it: bits/byte rises +1.220, more than the per-token curve's +0.610. The divergence is real, not units — and worse than I thought.' Used to argue 'The weights are getting worse. Memory hides it.'",
+   "correction": "2026-08-05T21:35 — after finding _VALT was never invalidated: 'Now in question: the per-process curve and everything I read off it. Specifically the +1.220 bits/byte since its own minimum I used two turns ago… and the \"model-alone quality degrades while memory masks it\" claim. Both need re-measuring.'",
+   "ts": "2026-08-05T16:52:18"
+  },
+  {
+   "claim": "Claude: the online minting tokenizer is the leading explanation for degradation — 'That is exactly the continual-learning failure this project exists to study, self-inflicted, and it's in every pilot including FABRIC=0.'",
+   "correction": "2026-08-05T17:04 — after the researcher's objection: 'My hypothesis was untested and I presented it as a finding.' The one minting-off arm (frozvocab) also built the full vocab up front and went NaN, so it could not discriminate.",
+   "ts": "2026-08-05T16:55:27"
+  },
+  {
+   "claim": "Claude: 'SPECIALIZATION 0.132 is the highest this project has recorded… with DIV_W=0 and nothing forcing it' and 'Chained society + LR is the only arm whose curve is flat (−0.007).' Presented as vindicating the researcher's emergence intuition.",
+   "correction": "2026-08-05T20:44 — at SEED=1 the same arm gives spec 0.009 and last-2/3 +0.298. 'Both were seed artifacts. I presented them as findings, including the part where I told you your emergence intuition was vindicated… I withdraw it.'",
+   "ts": "2026-08-05T19:13:34"
+  },
+  {
+   "claim": "Claude: 'The degradation every pilot in this project has shown was substantially the optimizer. Not the fabric, not the router, not the tokenizer — and I spent a long time on all three.'",
+   "correction": "2026-08-05T21:25 — 'You doubted the tokenizer explanation, and the LR result appeared to settle it against me. Both are real and they aren't competing… I was wrong to drop the tokenizer hypothesis.' And 2026-08-06T14:46 — 'The LR-schedule bug is real but it is not what moved the level. Every run in that 2.0–2.2 band had the same stale _total_steps.'",
+   "ts": "2026-08-05T19:13:34"
+  },
+  {
+   "claim": "Claude (and commit 18fdd6c): '\"best at step 6k\" is largely the yardstick moving, not the model stopping… A model that stops degrading at precisely the step its vocabulary stops changing is a drifting yardstick, not a model.'",
+   "correction": "2026-08-06T15:50 — 'its own stated prediction failed. The new run's best is 2.805 at step 4000. The early turn survived the fix.' And 2026-08-06T22:40 — at E18 minting, 'Best was 2.803 at step 6000' of 103,805: '\"Best at ~6000\" is real, and minting causes it… It was never an instrumentation artifact.'",
+   "ts": "2026-08-05T21:35:13"
+  },
+  {
+   "claim": "Claude: 'Minting is not costing you anything. Full minting: 2.007, 2.058, 2.067, 2.101, 2.166, 2.275. Frozen at 6k: 2.189. The freeze is worse than the median minting run… Minting is fine.'",
+   "correction": "2026-08-06T21:18 — 'That's a correction I owe you. I told you two days ago that \"minting is not costing you anything\"… Those comparisons crossed harness modes — pilot checkpoints, seeds doesn't — which we now know shifts a result by more than a bit/byte. This is the first same-mode, same-commit, deterministic comparison of the two, and it says the opposite of what I told you.'",
+   "ts": "2026-08-06T14:46:00"
+  },
+  {
+   "claim": "Claude, in commit be50e3a's message: 'TOK_COMPOSE back to default off -- it is the only change that moved the LEVEL.'",
+   "correction": "2026-08-06T17:23 — 'Including claims I stated flatly, one of them in a commit message: \"TOK_COMPOSE is the only change that has ever moved the LEVEL.\" That was one run. It may still be true… but I don't have the evidence I claimed.'",
+   "ts": "2026-08-06T14:46:24"
+  },
+  {
+   "claim": "Claude floated 18fdd6c (the _VALT cache invalidation) as a possible cause of the 2.275 → 3.694 regression: 'If the final held-out number ever depended on that cache, then 2.275 was understated and 3.694 is simply the first honest reading.'",
+   "correction": "2026-08-06T15:50 — '18fdd6c is not it, and I should not have floated it last turn. I wrote the refutation into that commit's own message and then forgot I had.' Decisive fact: the TRAIN number moved too (2.080 → 3.769), which a held-out cache cannot touch.",
+   "ts": "2026-08-06T15:27:24"
+  },
+  {
+   "claim": "Claude: 99e5da0 (which re-enabled the expert breadth cap) 'is the one whose fingerprint matches top expert 5.9% → 39.0%'; the bisect's own automated verdict also named it as the single behavioural change.",
+   "correction": "2026-08-06T16:13 — refuted on four grounds: the cap was already masking 146–372 experts before it; the cited 'serving none: 4053' comes from dom_exp not the dom_of table dom_ban reads, and still reads 4055 after; ROUTING MIX is sampled before the ban mask; and 18fdd6c (two commits later) already showed top expert 30.1% while reading held-out 2.189. '99e5da0 is dead.'",
+   "ts": "2026-08-06T15:50:37"
+  },
+  {
+   "claim": "Claude: 'That second-half slope is the first negative one in this project. Every prior pilot was flat or rising through its second half; this one is genuinely still coming down at the end.'",
+   "correction": "2026-08-06T15:50 — 'I also over-read one number last turn… that's the model climbing back down toward its own plateau after a mid-run excursion, not new learning. It never gets near its step-4000 value of 2.81 again.'",
+   "ts": "2026-08-06T15:27:24"
+  },
+  {
+   "claim": "Claude reported the be50e3a run as the fabric getting worse: 'fabric contribution +0.376 → +0.148'.",
+   "correction": "2026-08-06T16:14 — 'I reported \"the fabric contribution fell.\" What that actually says is model ALONE moved 1.338 of the 1.42 — with the fabric ablated out entirely. The regression is in the base GRU + embedding + head, where no routing change can reach.'",
+   "ts": "2026-08-06T15:23:39"
+  },
+  {
+   "claim": "Claude: 'The noise floor is 1.6 bits/byte… every single-run comparison here is unmeasured — society vs chaining, TOK_MINT_UNTIL, TOKENIZER=0, LR_SCHED, all 18 grid arms.'",
+   "correction": "2026-08-06T19:48 — 'My \"noise floor is 1.6 bits/byte\" claim was wrong. There is no run-to-run jitter. Same seed, same config, same commit → bit-identical output, three times.'",
+   "ts": "2026-08-06T17:23:10"
+  },
+  {
+   "claim": "Claude: the 3.694 and 2.100 runs had identical config and byte-identical code.",
+   "correction": "2026-08-06T17:39 — 'I told you the two runs had identical config. The code was identical; the config was not, by that one flag [SAVE_CKPT]. It's too small to matter, but I shouldn't have said \"identical\" without diffing the harness.'",
+   "ts": "2026-08-06T17:23:10"
+  },
+  {
+   "claim": "Claude: 'Saving a checkpoint corrupts the router. That's the 1.594.' — attributing the whole 1.594 b/B gap to accumulated zero-gist centroid corruption.",
+   "correction": "2026-08-07T13:59 (after the researcher questioned the router fix) — '125 corrupting nudges against 240,650 real ones is 0.052% of the updates. That cannot accumulate to 1.594 bits/byte. I presented the centroid corruption as the cause of that gap and it can't carry that weight… it is a correctness fix, not a 1.6 bits/byte recovery.'",
+   "ts": "2026-08-06T19:45:04"
+  },
+  {
+   "claim": "Claude: 'Determinism means single runs are valid… one run each settles it' — used repeatedly to justify n=1 per arm.",
+   "correction": "2026-08-07T13:59 — 'That undoes something I told you three messages ago. I said determinism means n=1 is enough per config. It's enough to reproduce a config — it is not enough to attribute a difference between two configs… Which means multiple seeds per arm are back on the table — that's what longrun.sh seeds was built for and what I wrongly said we'd stopped needing.'",
+   "ts": "2026-08-06T19:48:04"
+  },
+  {
+   "claim": "Claude: 'Longer training doesn't rescue the minting runs — it's what destroys them… Length wasn't protecting the frozen run; the fixed segmentation was.' Framed as 'the tokenizer axis is settled and needs no more runs.'",
+   "correction": "2026-08-07T12:59 — EPOCHS also sets the cosine horizon, so E8/E12/E18 trained at 3.58e-4 / 1.04e-3 / 1.52e-3 at the same step. 'These were never \"the same run, one longer.\"… Freezing the vocabulary accidentally fixes the learning-rate schedule… my \"the moving tokenizer is the cause\" was not supported.'",
+   "ts": "2026-08-06T22:40:49"
+  },
+  {
+   "claim": "Claude: 'Most of what the fabric appeared to be worth was repairing damage the moving tokenizer was doing to the base model. Remove the damage and the routed population adds almost nothing on this corpus.'",
+   "correction": "2026-08-06T21:32 (after the researcher pushed back) — 'On the fabric — I overstated it, you're right… What I can defend is narrower: on this corpus, at the end of this run, ablating the fabric costs 0.031 bits/byte. Everything beyond that was me over-reading one number.'",
+   "ts": "2026-08-06T21:18:02"
+  },
+  {
+   "claim": "Claude proposed inheriting Adam optimizer moments for a newly minted token row, arguing a never-gradiented row has v=0 and so takes Adam's maximum step, undoing the warm start.",
+   "correction": "2026-08-05T23:49 — Claude's own micro-test disproved it: 'Adam's step counter is per-tensor, not per-row… Inheritance makes the first step larger (1.0e-3 vs 5.4e-4), the opposite of the motivation.' Shipped as WARMSTART_OPT, default off, with the disproof recorded next to it.",
+   "ts": "2026-08-05T16:52:41"
+  },
+  {
+   "claim": "Claude: the asymmetric mint init 'beats the current one by almost as much as warm-starting beat random — it roughly doubles the value of the whole mechanism' (18 trials, last/first -0.340 vs current, 31× its own sd).",
+   "correction": "2026-08-06T01:13 — 'The end-to-end toy contradicts the isolated measurement — new 5.214 vs old 5.100… those trials measure immediate recovery cost, and \"cheaper to recover from\" isn't the same claim as \"better model at the end.\"' Shipped as a flag, default mean.",
+   "ts": "2026-08-06T01:08:36"
+  }
+ ],
+ "span": "2026-08-05T16:48:52 .. 2026-08-07T16:34:51",
+ "tested": [
+  {
+   "result": "cosine best 5.23 @319, heldout 4.536; none best 5.07 @359, heldout 4.393. Claude: a 360-step toy cannot test a failure that takes 6,000 steps to appear.",
+   "ts": "2026-08-05T17:04:04",
+   "what": "Toy LR schedule arms (360 steps): cosine vs none"
+  },
+  {
+   "result": "cosine held-out 2.101, +1.337 vs order-1, spec 0.132, top 5.1%, 202 experts, last-2/3 -0.007. none held-out 4.193, spec 0.000, top 57.9%, 275 experts, last-2/3 +1.668, curve oscillating 3.4–7.8 all run.",
+   "ts": "2026-08-05T19:06:23",
+   "what": "Pilot pair at 1593c70: LR_SCHED=cosine (gru7) vs LR_SCHED=none (gru8), chained society defaults"
+  },
+  {
+   "result": "held-out 2.067, +1.371, spec 0.000, top expert 2.4%, last-2/3 +0.262. 'The LR schedule bought society nothing' (2.067 vs 2.058 without it).",
+   "ts": "2026-08-05T19:48:42",
+   "what": "SOCIETY=1 + LR schedule (gru9) at c33f078 — the missing control"
+  },
+  {
+   "result": "8f774c94, 96d906b1, 9b2ca7c8 all held-out 2.893 — byte-identical.",
+   "ts": "2026-08-05T19:49:11",
+   "what": "Determinism spot-check: three same-config pilots"
+  },
+  {
+   "result": "chained-soc 2.101→2.275 (spread 0.174), society 2.067→2.007 (spread 0.060); spec 0.132→0.009; last-2/3 -0.007→+0.298. Seed spread exceeds the 0.06 b/B band separating the four best arms.",
+   "ts": "2026-08-05T20:44:10",
+   "what": "SEED=1 pair vs SEED=0 for chained society and society"
+  },
+  {
+   "result": "seed0 6.032, seed1 6.138; mean 6.085, spread 0.106, sd 0.053 — plus a printed warning that a difference smaller than the spread is not a result.",
+   "ts": "2026-08-05T20:55:27",
+   "what": "New `longrun.sh seeds <n>` harness, toy scale, SOCIETY=1"
+  },
+  {
+   "result": "grow: 6 grown → 9 live; nogrow: 0 grown → 64 live (held at FAB_N0) on both chaining and society paths.",
+   "ts": "2026-08-05T21:14:26",
+   "what": "FAB_GROW=0 population-freeze verification (4 toy arms)"
+  },
+  {
+   "result": "SAMPLED FROM line prints correctly; ck and ck.best both on disk; .best loads and samples in prompt.py.",
+   "ts": "2026-08-05T21:24:35",
+   "what": "Best-checkpoint tracking end-to-end (.best written and loadable via prompt.py)"
+  },
+  {
+   "result": "MINTING FROZEN at vocab 740 @ step 6015. Curve 3.52 4.36 4.77 | 2.60 2.49 … 2.24 — monotone for 60k steps. best = final @ 57071, since-min +0.000, last-2/3 -0.607. held-out 2.189, beats order-1 by +1.307. Cost: 67,872 steps vs 47,231 (44% more) for the same bytes.",
+   "ts": "2026-08-05T22:31:52",
+   "what": "Pilot TOK_MINT_UNTIL=6000 at 18fdd6c"
+  },
+  {
+   "result": "bytes 4.677 (vocab 256), mint 4.995 (vocab 426), freeze 4.691 (vocab 354).",
+   "ts": "2026-08-05T23:48:36",
+   "what": "Toy tokenizer arms: bytes / mint / freeze"
+  },
+  {
+   "result": "DISPROVED Claude's own rationale: inherited moments give a first step of 1.002e-03 vs 5.406e-04 without — LARGER, not smaller, because Adam's step counter is per-tensor not per-row. Shipped as WARMSTART_OPT default OFF.",
+   "ts": "2026-08-05T23:48:59",
+   "what": "Micro-test of Adam moment inheritance for a newly minted row"
+  },
+  {
+   "result": "off 5.100, on 4.995, nowarm 5.667, bytes 4.720 — WARMSTART is doing real work (5.667 without it).",
+   "ts": "2026-08-05T23:55:47",
+   "what": "Toy warm-start arms"
+  },
+  {
+   "result": "uniform 8.000 | order-0 4.539 | order-1 3.840 | THIS MODEL 4.378 → 'DOES NOT BEAT ORDER-1 (-0.538)'. Text: 'sodesffmrng, s thpse trtned ntrote traldrnuwkls'. Curve still shows the early climb (3.24→6.86→5.59) with no tokenizer at all.",
+   "ts": "2026-08-06T01:00:29",
+   "what": "TOKENIZER=0 pilot (raw bytes, 256 ids) at 1e62eff, 123,983 steps"
+  },
+  {
+   "result": "random 2.1699 (sd 0.120); mean/mean [current] 1.8222 (sd 0.078); mean/first 1.6252 (sd 0.071); last/first 1.4822 (sd 0.011, -0.340 vs current, 31× its own sd); sum/first 1.6518 (sd 0.100).",
+   "ts": "2026-08-06T01:08:24",
+   "what": "Minted-token initialisation, 6 pairs × 3 seeds = 18 trials, immediate post-mint loss"
+  },
+  {
+   "result": "new (last/first) 5.214 vs old (mean) 5.100 vs none 5.667 — CONTRADICTS the isolated measurement, so WARMSTART_MODE ships as a flag, default mean.",
+   "ts": "2026-08-06T01:13:25",
+   "what": "End-to-end toy of the new mint init"
+  },
+  {
+   "result": "compose 5.765 vs table 5.100, both vocab 426. Default OFF; 'the toy can't tell you why'.",
+   "ts": "2026-08-06T01:34:15",
+   "what": "TOK_COMPOSE (ByteComposer) toy"
+  },
+  {
+   "result": "delta starts at exactly 0.0; anchor 0.0 at birth; 0.25 once a young token's residual moves; 0.0016845 for the same delta at age 20k; 0.0 for tokens predating the composer. Fired 93× in a toy run, 3043× in the real pilot.",
+   "ts": "2026-08-06T12:27:54",
+   "what": "TOK_ANCHOR mechanism check"
+  },
+  {
+   "result": "TOK_MINT_UNTIL=6000: 2.45→2.19, -0.1020/10k improving. chained society: 3.79→3.76, +0.0175 FLAT. society: 3.47→3.54, +0.0269 WORSE. TOKENIZER=0: 5.46→4.34, -0.0354.",
+   "ts": "2026-08-06T12:47:22",
+   "what": "Second-half slope of the held-out curve, four representative runs"
+  },
+  {
+   "result": "FROZEN and TOKENIZER=0 improving; of 21 all-run-minting logs, 19 FLAT or WORSE (+0.0175 to +0.2170/10k), across GRU and transformer, FABRIC=0 and every fabric variant. The 2 'improving' minting logs are recoveries from spikes to 7.76.",
+   "ts": "2026-08-06T12:54:28",
+   "what": "Second-half slope across all 25 logs in the project"
+  },
+  {
+   "result": "TOK_MINT_NOVEL=0.0 mints AB (common all along); =0.5 mints PQ (brand new). Toy end-to-end: novel 6.034 vs plain 5.764.",
+   "ts": "2026-08-06T12:55:46",
+   "what": "TOK_MINT_NOVEL selection check (AB: 500/seen 460, CD: 400/seen 380, PQ: 60/seen 0)"
+  },
+  {
+   "result": "WORST pilot in the project. train 5.480 | held-out 5.360; order-1 3.396 → 'DOES NOT BEAT ORDER-1 (-1.964)'. STILL LEARNING +0.6504/10k (getting worse). model ALONE 4.198 → +FABRIC 5.348 (fabric -1.151). spec 0.083, top 70.2%. Text degenerate: 'vargcanrgrgrg thergrg therg therg ex'. Unattributable — two changes on at once.",
+   "ts": "2026-08-06T14:11:21",
+   "what": "pilot_gru_8 at f9d676c — TOK_COMPOSE=1 + TOK_ANCHOR=0.05 + TOK_MINT_NOVEL=0.5 together"
+  },
+  {
+   "result": "held-out 3.694 vs 2.275 (+1.42). DOES NOT BEAT ORDER-1 (-0.255). top expert 5.9%→39.0%. fabric +0.376→+0.148. H(hop1|hop0) 0.046→0.198. GRADIENT REACH 8.5% (vs 95.2% on the society path). since-min +1.306→+0.851.",
+   "ts": "2026-08-06T15:23:03",
+   "what": "pilot_gru2_1 at be50e3a (defaults restored) vs pilot_gru10 at c33f0781"
+  },
+  {
+   "result": "Screened 14/14, flagged 99e5da0 as high suspicion, then three independent verifiers REFUTED it: the breadth cap was already masking 146–372 experts before the commit; the 'serving none: 4053' evidence came from dom_exp not dom_of and still read 4055 after; the ROUTING MIX sample is taken before the ban mask; and the run at 18fdd6c already showed top expert 30.1% while reading held-out 2.189. 1,188,868 subagent tokens, 362 tool uses, 46 min.",
+   "ts": "2026-08-06T16:12:40",
+   "what": "18-agent bisect workflow over the 14 commits c33f0781..be50e3a"
+  },
+  {
+   "result": "train 2.106 | held-out 2.100 | gap -0.007. model ALONE 2.637 → +FABRIC 2.105 (fabric +0.533, largest ever). +0.000 since its own minimum (final IS best, first time). slope -0.1087/10k. SPEC 0.135 (highest ever), top expert 4.3%, 91% real words. Spread vs the 3.694 run: 1.594 with zero code difference.",
+   "ts": "2026-08-06T17:21:28",
+   "what": "default_seed0_run1 at 81f4b3c — byte-identical model code to the 3.694 run, same SEED=0"
+  },
+  {
+   "result": "Identical to every printed digit: train 2.497 | held-out 2.468; model ALONE 3.794 → +FABRIC 2.469 (+1.325); since-min +0.000; slope -0.5404; SPEC 0.000; 268 experts, top 5.9%; 71% real words; final step 70368. md5 of the report section identical for run1 and the partial. Only divergence: a cuSOLVER error skipping one diagnostic in run2.",
+   "ts": "2026-08-06T19:44:12",
+   "what": "Three EPOCHS=12 repeat runs at fixed SEED=0"
+  },
+  {
+   "result": "train 1.980 | held-out 2.075 | gap +0.095 (first positive). order-1 3.525 → beats by 1.45. model ALONE 2.057 → +FABRIC 2.025 (fabric only +0.031). HALT MASS 0.4048 — first non-zero in any chaining run. GRADIENT REACH 23.8%, 636 distinct experts, retention drift -0.069, 92% real words. But a 16,000-step plateau at 4.7–5.1 (steps 26k–42k) before recovery. Coherence still INCOHERENT (0.08 ± 0.04 vs ceiling 0.50).",
+   "ts": "2026-08-06T21:15:59",
+   "what": "TOK_MINT_UNTIL=1 at EPOCHS=14 (vocab frozen at 512 from step 15), 118,743 steps"
+  },
+  {
+   "result": "Growth events: <26000 → 67; 26000–42000 (the plateau) → 0, with 27 culls; >42000 → 35, the first at step 51,903. Loss recovered at 44000; growth resumed 8,000 steps later. Growth did not cause the recovery, and the population contracted through the plateau.",
+   "ts": "2026-08-06T21:31:09",
+   "what": "Direct test of the researcher's 'spikes = new subspecialties in demand' hypothesis"
+  },
+  {
+   "result": "train 3.663 | held-out 3.645 → 'DOES NOT BEAT ORDER-1 (-0.206)'. Best was 2.803 at step 6000 — peaked at step 6k of 103,805 and spent 98,000 steps getting worse, then flat at 3.64–3.68 for the last 60,000 (slope -0.0095). model ALONE 4.567 → +FABRIC 3.700 (+0.868). HALT 0.0000, top expert 40.8%, 31% real words.",
+   "ts": "2026-08-06T22:39:37",
+   "what": "EPOCHS=18 minting run at 81f4b3c, 103,805 steps"
+  },
+  {
+   "result": "E8/E12/E18 overestimate their length by 31%/34%/37% and reach only p≈0.73–0.76, ending at 18–21% of peak LR. FROZEN14 overestimates by 0.03%, reaches p=1.000, anneals to the 5% floor. At the common step 48,130: E8 3.58e-4, E12 1.04e-3, E18 1.52e-3, FROZEN 1.34e-3 — E18 at 4.3× E8's rate.",
+   "ts": "2026-08-07T12:59:04",
+   "what": "LR-horizon analysis of the four runs (_total_steps vs actual, and LR at a common step)"
+  },
+  {
+   "result": "Final LR moves from 4.21e-04 (21% of peak) to 1.88e-04 (~9%) — better but not the 5% floor, because the projection can only see the current epoch's length and lags.",
+   "ts": "2026-08-07T13:50:04",
+   "what": "Simulation of the corrected `_lr_at(step, _proj_steps(step))` on the E18 trajectory"
+  },
+  {
+   "result": "'VMAX=512 RATE_EVERY=250 EPOCHS=9 SEED=0' — both previously-dropped knobs now take effect; SEED still wins from the loop.",
+   "ts": "2026-08-07T13:51:24",
+   "what": "End-to-end check that arm flags now reach the process after the precedence fix"
+  },
+  {
+   "result": "route_w, society and forward all accept learn_regions; 9 call sites pass it by keyword; 0 suspicious positional calls; all three ground_update sites (1108, 1347, 1378) behind the flag.",
+   "ts": "2026-08-07T13:51:41",
+   "what": "Static verification of the learn_regions gating"
+  },
+  {
+   "result": "training calls with a REAL signature 240,650; eval-curve zero-gist calls 120 (in both runs); extra holdout zero-gist calls 125 — the entire config difference is 0.052% of all updates. Refutes the accumulation mechanism Claude had claimed for the 1.594 gap.",
+   "ts": "2026-08-07T13:58:52",
+   "what": "Arithmetic on how many ground_update calls are corrupted vs real (E8 run)"
+  },
+  {
+   "result": "Fires on an empty dir with the exact fetch_big.py command for that directory; returns immediately as a no-op when the corpus is present.",
+   "ts": "2026-08-07T16:07:03",
+   "what": "_pilot_corpus() guard, both branches"
+  }
+ ],
+ "wip": [
+  "The code disentangle/normalize refactor the researcher ordered at 16:31 is mid-flight at the chunk boundary: a COMPOSITE LEVERS block, banner reporting and CONFIG_DUMP were added and compile OK, but the isolation test that would PROVE unset levers change nothing failed with a SyntaxError and was being retried on the last line of the chunk. The promised table of what was modified does not exist yet.",
+  "The two `seeds 1` runs the researcher launched at 16:31 (arm A: minting vocab 2048; arm B: TOK_MINT_UNTIL=1 RETOK_EVERY=0) have no results in this chunk — this is the first clean tokenizer test with the LR confound removed.",
+  "The post-refactor regression sequence the researcher specified (8-epoch baseline, then TOK_MINT_UNTIL=1, then anti-overfitting) has not started.",
+  "Anti-overfitting arms (DROPOUT=0.1, WEIGHT_DECAY=0.01) requested three separate times by the researcher; never run.",
+  "The 40GB expanded run: deferred behind three fixes (all now landed) plus a RESUME smoke test that was called 'non-negotiable' and never done.",
+  "Token-utilization instrument (per-id occurrence histogram bucketed by token length; fraction of vocabulary receiving zero gradient in the last N steps) — proposed as a prerequisite for uncapping the tokenizer, not built.",
+  "Continual-learning update gate (surprise-scaled loss contribution + expert-disagreement as a cross-reference confidence signal) and the fixed-op-in-an-expert-slot design — sketched only, nothing implemented.",
+  "`pilot-add` — a second area arriving mid-run, described by Claude as 'the only thing here that tests continual learning rather than describing it' and 'the number your continual-learning claim rests on' — still never run.",
+  "The FAB_GROW=0 / nogrow pilot arm the researcher explicitly asked for on 08-05 was implemented and toy-verified but never run at pilot scale.",
+  "GRAD_CLIP=1.0 proposed and explicitly withheld pending approval; never added.",
+  "Setting RETOK_EVERY near GROW_EVERY to close the up-to-3000-step window where a minted token is an unreachable softmax competitor — proposed, untested.",
+  "Per-run TOKENIZER_PATH to stop data/dyntok.json leaking a vocabulary between runs under TOK_ONLINE=0 — offered, not done.",
+  "The `grid ablate` / `grid tokens` arms that would separate TOK_COMPOSE from TOK_MINT_NOVEL were added to longrun.sh but never run, so pilot_gru_8's 5.360 remains unattributable.",
+  "Claude's own flag: 'HALT MASS 0.0000' printing 'all 4 hops run at full strength' while the fabric section prints 'mean routed depth 1.00 of 4' — 'Those cannot both be true. One of the two instruments is wrong, and I don't yet know which.' Unresolved."
+ ]
+}

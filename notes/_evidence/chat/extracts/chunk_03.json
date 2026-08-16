@@ -1,0 +1,719 @@
+{
+ "chunk": "chunk_03",
+ "errors": [
+  {
+   "fixed": "partial",
+   "ts": "2026-07-24T17:53:18",
+   "what": "Encoder fusion (ENC_FUSE=1) is mathematically equivalent but NOT bit-identical: enc weights drift ~1e-5 relative because cat([A,P]) changes the GRU kernel's reduction order."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-07-24T18:21:29",
+   "what": "Workflow harness failure: parallel[1] failed — agent StructuredOutput retry cap (5) exceeded, 5 failed calls with no valid output (1 of 9 agents lost)."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T18:58:45",
+   "what": "D_MODEL_B is read by NOTHING in self_organize.py (which reads D_MODEL). Every direct `python3 self_organize.py` silently ran at d=128 instead of 768 — including the entire first A100 bench AND the pilot command Claude had given the researcher. Param counts prove it: 4,309,760 = '4.3M', 5,069,312 = '5.1M'."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T18:58:45",
+   "what": "STREAM_LEN is counted in BYTES while the training loop iterates a TOKEN stream (~1.84 B/tok), so STEPS=1800 silently ran 976 steps."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T19:00:52",
+   "what": "WRITE_TARGET=0.12 not honored: the additive adaptive gate pins gate_theta at gate_ceil=0.95 within ~40 calls, so kept fraction runs 1.00->0.93->0.80 and the store hits MEM_CAP=200,000 by step ~831 instead of the predicted 6,510."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T20:44:12",
+   "what": "WRITE_QUANTILE was not wired to the EditableMemory constructor, making the first gate A/B meaningless."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T20:45:52",
+   "what": "English-only (single-domain) runs crash AFTER training with IndexError: Cannot choose from an empty sequence at self_organize.py:1317 — the wrongness-injection test needs >=2 processes. Killed generation, unlearn and verification."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:36:21",
+   "what": "Audit critical: the expert-independence test calls fab.remove() on the BUSIEST expert and never restores it, so every eval after that point — including the generation samples used to judge coherence — ran on a mutilated model."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:36:21",
+   "what": "Audit critical: fab.cent was a plain attribute, not a registered buffer, so with ROUTE_GROUNDED=1 the centroids that ARE the routing function were never saved, resumed, or moved to GPU — prompt.py routed every generation with untrained centroids."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:36:21",
+   "what": "Audit critical: EXPERTS=1 is a complete no-op when FABRIC=1 (elif chain at :1030-1040); adapters get zero gradient, verified 'adapters learned: -0.000', while the end-of-run report still prints expert counts. bpb_true has the same precedence so no test could catch it."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:36:21",
+   "what": "Audit critical: CORPUS_CAP defaults to 2 MB and run_full_unfrozen.sh never sets it — a multi-day run would have trained on 2 MB of English."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:36:21",
+   "what": "Audit critical: EPOCHS>1 only resamples under DISK_STREAM=1; otherwise every epoch is a byte-identical replay. Both default off in the product script."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:36:21",
+   "what": "_save_ckpt was non-atomic: a kill mid-save destroyed the only checkpoint and the tokenizer that decodes it."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:38:15",
+   "what": "Self-inflicted #1: the new startup-guard block referenced EPOCHS before assignment -> UnboundLocalError."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:39:32",
+   "what": "Self-inflicted #2: ablation restore used load_state_dict, which cannot repopulate a ModuleList that remove() shrank -> RuntimeError on unexpected keys."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:43:43",
+   "what": "mem.pos provenance was written as arange(bpos, bpos+WIN) — bpos is a BYTE coordinate but arange steps once per TOKEN (~1.85 B/tok), so recorded provenance drifted 200+ bytes over a WIN=256 window while prompt.py's _recall reads only a 220-byte span. Every grounded passage lookup pointed at the wrong text."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:53:05",
+   "what": "Self-inflicted #3: a prefix string-replace swallowed the `_fab_nov = torch.full(...)` assignment into a comment -> UnboundLocalError."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:55:59",
+   "what": "Self-inflicted #4: a smart quote (U+201D) introduced by a patch script -> SyntaxError at line 350."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:55:44",
+   "what": "Fabric.remove(j) rebuilt bodies/keys/qproj but never pruned cent, so every expert above index j was routed by its neighbour's region — silently misrouting the whole population after any removal, and corrupting the independence test."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:56:20",
+   "what": "ROUTE_T=1.0 with 64-d unit vectors gives cosine logits of std ~0.125, so the top-vs-mean routing weight ratio is ~1.37x AT ANY N — effectively uniform, so top-k selects noise and no expert can specialize. Likely explains the historical '0 exclusive experts' and '12/17 idle'."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T21:56:20",
+   "what": "Burst births were exact clones: grow() seeds the newborn centroid at the current signature, so a burst of 3 created three identical regions that could never differentiate."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T22:12:58",
+   "what": "Tool use rejected by user, then container restarted. Two background tasks lost: 'Rerun A/B with knob wired' (bsevl3kt2) and 'Full English-only end-to-end run' (b7vyte2ud). The partition-vs-capacity isolation test had to be re-run."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-24T22:14:27",
+   "what": "Checkpoint/resume did not carry own/last/tick/n_own/quota, and the existing restore path COMPACTS entries into the first N slots — which would have silently reassigned every entry to the wrong owner block and destroyed the partition on resume."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T04:21:38",
+   "what": "requirements.txt pinned torch>=2.1, which on linux-aarch64 is satisfied by a CPU-ONLY wheel (every CUDA dep gated platform_machine==x86_64 through 2.10.0). It imports cleanly, reports no GPU, and would have trained on the Grace CPU while merely looking slow."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-07-25T04:22:26",
+   "what": "Memory blend rule broken: hp = dist.sum() but read() scatters a softmax, so dist always sums to exactly 1.0 and hp is identically 1.0 — an unconditional 50/50 model/memory mix at every position regardless of match quality, while `conf` was computed and discarded by every caller."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T04:23:43",
+   "what": "LAYERS=12 blockers: TransformerEncoder lacked a final LayerNorm with norm_first=True (checkpoints would load into a different network); selfcheck built a 12-layer autograd graph over every stored entry (tens of GiB); FAB_HID_MULT not float-parsed."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T04:24:29",
+   "what": "prompt.py's fabric used the NON-GROUNDED routing path (q_entry/keys) while training routes by centroid cosine — and in grounded mode those parameters receive no gradient at all. It also blended hidden states while training ensembles at the output. Third distinct defect in the generation path."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T04:25:14",
+   "what": "Self-inflicted #5: making FAB_HID_MULT float-parsed made hid = hid_mult*d a float -> nn.Linear TypeError."
+  },
+  {
+   "fixed": "unclear",
+   "ts": "2026-07-25T04:25:52",
+   "what": "BENCH=1 returns before the end-of-run save, so SAVE_CKPT alone writes nothing — a bench run produces no checkpoint unless CKPT_EVERY is set."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T04:35:17",
+   "what": "Bash error '(${$(date +%s)}s): bad substitution' killed the scaling-study loop after only one of three configs."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T05:44:19",
+   "what": "Self-inflicted #6: the KEY_LAYERS module-level constant was inserted between @torch.no_grad() and its function -> SyntaxError."
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-07-25T08:05:28",
+   "what": "DomainAssembler over-segmentation: four rules disagree about what a domain is. _assign queries a SINGLE 128-byte window against 40-window centroid means with absolute NEW_DIST=0.35; create at 0.35 vs merge at 0.12 leaves a permanent dead zone; `size` is cumulative so any domain reaching 15 windows is immortal; MANAGE_STALE=2000 exceeded the pilot's 937 total steps so ZERO culls ever ran; and domains were the only uncapped population. asm.manage is O(N^2) and asm.rekey does N sequential GRU passes — combined they double wall-clock at N~300."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T15:29:52",
+   "what": "The completeness metric Claude added specifically to stop over-segmentation hiding was itself wrong — it computed H(true|domain), which is HOMOGENEITY and behaves like purity. The run reporting 'completeness 0.89 | V 0.91' was not the good result it appeared to be."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T15:30:07",
+   "what": "Claude's own suggested launch command omitted DATA_MODE=real, so it fell through to synthetic mode where TOK is never constructed and died later inside _retok with a bare AttributeError."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T15:43:58",
+   "what": "[profile] attribution percentage divided a WINDOW's instrumented time by the WHOLE run's elapsed time (_prof is cleared at every [rate] print). Reported 97%/32%/42%/24% 'of wall-clock attributed' were meaningless; component shares were always correct."
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-25T15:43:29",
+   "what": "Adaptive encoder warmup stopped at 3001 of 30000 steps reading a plateau, but separation had FALLEN from its random-init 0.24 to 0.08 and only partially recovered to 0.18 — the early-stop fired on what is arguably a collapse."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-07-25T15:57:05",
+   "what": "fetch_data.sh line 69/71: 'bc: command not found' on the GH200, so all corpus sizes printed as 0.0 MB."
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-07-25T15:57:05",
+   "what": "Final 4-domain GH200 run: 0/74 live domains GENUINE (mean silhouette -0.22, 67 live tiny), 142 domains for 4 processes, V-measure 0.42. Also the online tokenizer stalled at vocab 512/16384 with '+0 since last retok' in both GPU runs."
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "bench_gpu.sh + BENCH=1 early exit built and committed (0c00652, 096094b); A100 bench summary pasted back at 18:19:21 with five configs A-E.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Researcher will rent a GPU to empirically locate the time sink rather than reason about it; asks Claude to prepare a benchmark harness.",
+   "quote": "Let’s do this: I’ll set up a gpu to confirm and test performance changes. It will not be as good as the one we will use in the multi epoc run, but will tell us what is taking too much time. Prep for this",
+   "ts": "2026-07-24T18:04:51"
+  },
+  {
+   "evidence": "At 19:00:52 Claude reports 'Your two reverse-encoder paths — both refuted'. Path 2 refuted algebraically (unit-norm tcode makes reconstruction-error ranking identical to net(q)·tcode[t], i.e. an LM head); Path 1 refuted statistically (0.26% base rate, AUC ~0.55, and it cited an AUC 0.978 figure STATE.md had already retracted). Neither was built.",
+   "outcome": "rejected",
+   "paraphrase": "Two proposed rescues for the reverse encoder/Reconstructor: (1) reinforce it with more per-expert training, or (2) add a decompositional inverse pass that reconstructs input from output.",
+   "quote": "A compromise I am willing to make: the reverse encoder was supposed to help train the system and detect places where it went wrong. We can have two paths: reinforce this, probably increasing the amount of training for those associated experts. Or adjust it, and have a decompositional back pass from the encoder",
+   "ts": "2026-07-24T18:19:21"
+  },
+  {
+   "evidence": "mem.write_batch/KEY_BATCH and REKEY_CHUNK implemented and committed (a46c045). CPU A/B: 142s vs 144s (no gain, as predicted). Corrected GPU d=768: REKEY_CHUNK=16 gave +1.5% for 2.3x peak memory and was rejected; KEY_BATCH later bounded at ~1.5-1.6x on _model_key.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Directive to actually implement and measure the proposed dispatch-count optimizations rather than just describe them.",
+   "quote": "Lets test if things become much faster then",
+   "ts": "2026-07-24T19:03:36"
+  },
+  {
+   "evidence": "Claude answered with an H100 estimate of ~1.5-2x (bandwidth-bound, not FLOP-bound) and a full change table. The H100 plan was superseded on 2026-07-25T03:28:49 when the researcher got a GH200 instead.",
+   "outcome": "deferred",
+   "paraphrase": "Signals intent to upgrade hardware to an H100 and asks for a consolidated status of all measured changes for the multi-epoch run.",
+   "quote": "Although we are running on an A100, I plan on using a stronger gpu later H100, if better.\n\nRehash the results and changes made, or desired, for the multi epoch test",
+   "ts": "2026-07-24T20:38:36"
+  },
+  {
+   "evidence": "Quantile write gate (WRITE_QUANTILE) and tail-only retokenization (RETOK_TAIL) built and committed (c134830). The English-only choice immediately exposed a crash (IndexError at self_organize.py:1317, wrongness injection needs >=2 processes), fixed in 3b7844d. The 'domains within English' expectation was NOT confirmed: the 15:43 GH200 single-domain run gave 1 live domain, completeness 0.00, V-measure 0.00, and testing moved back to the 4-domain mix.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Decision: run the proof of concept single-domain (English), expecting sub-domains to emerge within it; build the two outstanding items (write-gate fix and retokenization fix).",
+   "quote": "Realistically, we can start with English as a proof of concept. Likely there will still be domains within.\n\nAdding more can be done later.\n\nBuild the desired.\n\nThen tell me what is needed next",
+   "ts": "2026-07-24T20:42:25"
+  },
+  {
+   "evidence": "A full capability audit (workflow wkhowsjol) answered NO. Found FABRIC=0, EXPERTS=0, VERIFY=selfcon, RECON_W=0.0, WORLD_MODEL=0, CKPT_EVERY=0 by default; EXPERTS=1 is a verified no-op when FABRIC=1 ('adapters learned: -0.000'); CORPUS_CAP defaults to 2MB; EPOCHS>1 replays byte-identically without DISK_STREAM=1. Five criticals fixed + five startup CONFIG WARNING guards added (535f5f6). Claude: 'Your instinct to ask was correct.'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Demand for a verified inventory that every subsystem is actually enabled and live in the multi-epoch run, driven by past experience of silent disablement.",
+   "quote": "This sounds good so far, however, I must know. Since I’ve been burned on this a few times: does the multi epoch test contain everything?\n\nFull scale with surprise, experts, reverse, tokenizer, constant learning capacity, checkpoints, pause optionality, etc… ?",
+   "ts": "2026-07-24T21:10:32"
+  },
+  {
+   "evidence": "Audit verdict 'EXPERT GROWTH EXPECTATION MET: NO'. Growth trigger is loss-plateau only (PlateauGrowth at :292-304 sees no signature/domain input); FAB_NMAX=6-8 gives 3 growth events total, consumed by ~step 5000. Later partially addressed by the burst-growth rebuild the researcher requested (3 -> 57 experts observed), but the original mechanism as configured could not do it.",
+   "outcome": "rejected",
+   "paraphrase": "Expectation that expert count should grow sharply as new domains/subspecialties appear — proposed as the decisive test of the system.",
+   "quote": "I hope and expect to see a large increase in experts (upon initial sight) to occupy the different subspecialties emerging, and new domain.\nThis would be an ultimate test.",
+   "ts": "2026-07-24T21:10:32"
+  },
+  {
+   "evidence": "Drove the whole fix batch. Audit found 'constant learning capacity: FAILS' — every bounded population pins within 51s to 90min, leaving only ordinary SGD on a fixed 28.7M network. Fixes committed 535f5f6 through 883d0fd.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Framing constraint: a run that only exercises a fixed standard LM is worthless; the run must test the novel machinery.",
+   "quote": "Yes please, otherwise the multi epoch test would be a waste, since it would not be testing our actual system, and reproving existing llm architecture works. Something that we already know.",
+   "ts": "2026-07-24T21:20:48"
+  },
+  {
+   "evidence": "Claude retracted at 21:22:57 ('That was pattern-matching on tokens, not an assessment of coherence') and gave arithmetic: GRU LAYERS=1 has 3.54M non-embedding params vs GPT-2 small's 85M; 'Honest likelihood of coherent multi-sentence English on the current default: low'. Added held-out bits/byte bands as a live gauge (<1.5 = coherence begins; runs sat at 3.2-3.4, later 2.2-2.4 on GH200).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Objection that Claude previously mislabelled token-level fragments as 'code'; demands an honest probability that the coherence test fails.",
+   "quote": "A goal is coherence test. What is the likelihood of failure? Your prior analysis of the results have been misleading, saying that it was providing code, only through sights of code like tokens. I want it to work, otherwise we’ll continue at this standstill.",
+   "ts": "2026-07-24T21:20:48"
+  },
+  {
+   "evidence": "Workflow wrqhuqzps designed both. Self-training: recommendation was NOT to have the system generate its own reference (retrieve a real passage via mem.pos -> source.bin instead) plus four coherence gates G1-G4 (held-out <=2.0 b/B, gap in [0,0.5], 4-gram repetition <0.5, memory hit rate >=0.3). G3/G4 described as ~10 lines each. Nothing was implemented in this chunk. Compartmentalization was partly answered by the per-expert memory build.",
+   "outcome": "deferred",
+   "paraphrase": "Requests parallel design work on a self-training loop gated on coherence, and a re-assessment of partial compartmentalization.",
+   "quote": "While we are waiting for other agents, let’s continue on the two other ideas I introduced, the self training (when coherent) and assess compartmentalization question again.",
+   "ts": "2026-07-24T21:20:48"
+  },
+  {
+   "evidence": "Layering intuition confirmed as pointing at the SOCIETY=0 chaining path (learned transition matrix, HALT absorbing, adaptive depth) which is off by default because it 'entangles every expert with every other' — the weights-unlearn failure mode. Claude corrected it further at 21:51:37: 'SOCIETY=1 has depth exactly 1, and even SOCIETY=0 chains the blend, not the experts'. Capacity expanded via sparse top-k + FAB_NMAX 8->64 (9b05bd3, 020c157).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Instruction to add model capacity in either direction, plus a hypothesis that the fabric's node-to-node rerouting already provides a form of layering.",
+   "quote": "Let’s expand capacity then. Whether horizontally or vertically. Also, the rerouting property of the router fabric should allow for a sort of layering, no?",
+   "ts": "2026-07-24T21:29:44"
+  },
+  {
+   "evidence": "PlateauGrowth replaced by a WATCH->BURST->RECOVER state machine with FAB_RAMP early ramp; FAB_WARMUP 2000->300, FAB_COOLDOWN 1500->400. First attempt fired once then stalled (RECOVER min 600 > ramp cadence 50) — Claude's own bug, fixed by moving the ramp check above the RECOVER gate. Verified: '[fabric @ 3..887] ramp -> grew 3 -> 57/64 experts'. Committed 020c157.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Course correction retracting the researcher's earlier acceptance of delayed fabric growth; now demands rapid growth from the start.",
+   "quote": "Also, I was rethinking the statement about the delayed growth. I want to see rapid initial growth.",
+   "ts": "2026-07-24T21:29:44"
+  },
+  {
+   "evidence": "Implemented as MEM_PER_EXPERT/MEM_QUOTA with owner*quota+slot addressing, argmax-routed ownership, write-partitioned / read-global, a new `last`/`tick` LRU clock (mem.use was a decayed count, not a timestamp), and checkpoint persistence with in-place restore (242e021, ef412e2). Committed with default OFF: global 200k slots -0.097 vs per-expert 2048 -0.652 b/B. Isolation test then showed the partition itself costs only -0.058 (10%); capacity costs -0.497 (90%) — 'Your per-expert LRU design is nearly free.'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Design specification: partition memory per expert with a small per-expert quota counted in entries (16-128), evicted LRU by last use.",
+   "quote": "Also, a note on the memory, I believe that it should be keyed such that each expert has their own, and they have a max quota. Not in terms of bytes or bits. It should be in number of entries. Since I expect a large number of experts, their max should be relatively low, possibly 16 to 128 max entries. (Ranked on when last utilized)",
+   "ts": "2026-07-24T21:29:44"
+  },
+  {
+   "evidence": "Sparse top-k built and verified (society() now computes only k, since the caller already used only top-ENS_K=2 and discarded the dense blend); committed 9b05bd3. Chaining re-verified as running (16/16 experts) but 'mean routed depth 0.24 of 4 | halt 0.76' with near-uniform node mass — barely exercised. Root cause found 2026-07-25T05:43: route_t was applied only on the society path; now applied to entry distribution and transition matrix (b3ce153). The measurement of the effect (task bhcz0yrte) never reported in this chunk.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Directive to enable the chaining path and to implement sparse top-k expert execution.",
+   "quote": "Allow for chaining. I don’t know why the default is off.\nThen we must do sparse top-k, since it sounds necessary.",
+   "ts": "2026-07-24T21:40:38"
+  },
+  {
+   "evidence": "Claude: 'you're more right than I said' — worsening already passed the plateau test; the real limit was the rate cap. Built exactly as specified: WATCH (loss above slow EMA by z robust MAD deviations) -> BURST (FAB_BURST=3 nodes) -> RECOVER (no re-arm until improvement flattens) -> WATCH, plus note_shift() so retokenization/epoch resampling don't masquerade as shifts. Verified firing; committed 020c157.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Proposes replacing plateau-only growth with growth on unexpected worsening, in bursts, without re-arming until progress stalls again.",
+   "quote": "Why just stall? Not when unexpected worsen? ( brief burst, which will result in some worsening, but not resetting till stall)",
+   "ts": "2026-07-24T21:40:38"
+  },
+  {
+   "evidence": "Claude confirmed the mismatch is real: an expert is one residual MLP block Linear(768->1536)->GELU->Linear(1536->768), ~2.36M params, zero-init identity at birth — 'Not a stack. That's why six of them felt like a small number to me and a strange number to you.'",
+   "outcome": "built-and-measured",
+   "paraphrase": "Flags a definitional mismatch: the researcher pictured an expert as a stack of layers, not whatever the code actually has.",
+   "quote": "128 was arbitrary, but I did not expect experts to be such a low count. \n\nWe may need to clarify on what is an expert, since I imagined it as series of layered neural networks.",
+   "ts": "2026-07-24T21:40:38"
+  },
+  {
+   "evidence": "Claude ran an empirical gradient check rather than reading the docstring and found the entire routing apparatus inert: keys, qproj, q_entry, halt_key, nov, ctrl all 'no grad'. Conclusion: 'The fabric as documented is an interesting adaptive-depth architecture. The fabric as configured is a soft mixture with a clustering router.' Led directly to the ROUTE_LEARN bilinear fix that revived those parameters.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks for a first-principles re-explanation of the fabric node so the design can be re-evaluated.",
+   "quote": "Re explain what a node is, and how it works, and what it interacts with. I want to re evaluate this idea",
+   "ts": "2026-07-24T21:44:16"
+  },
+  {
+   "evidence": "8-item list; items 1-7 committed (9b05bd3, 020c157, 242e021, f9d33f2, ef412e2). Second audit ran: pass A 8 programmatic checks all PASS (after Claude corrected one bad test of his own), pass B a full-feature end-to-end run exit 0 with fabric+burst growth+per-expert memory+world model+tokenizer+checkpoints simultaneously. Three items explicitly left open: 1 LIVE domain on a 2-domain stream, chaining halting 76%, memory net-negative.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Authorizes the full fix batch, demands an explicit done/left-over accounting, and asks for a second audit after.",
+   "quote": "Good analysis and auditing. Fix the issues and implement the edits. Take as long as needed and explicitly tell me if everything is done or anything left over.\n\nIt would be good practice if we audit again afterwards.",
+   "ts": "2026-07-24T21:48:30"
+  },
+  {
+   "evidence": "Claude produced a 21-defect table, the performance table, a 'Where I was wrong' section, and four ranked next steps (fix domain separation; settle coherence architecture; confidence-gate the memory blend; then the long run).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Requests a consolidated recap of all findings and a proposed plan.",
+   "quote": "That was a lot. Tell me everything again, and proposed next steps",
+   "ts": "2026-07-25T03:25:14"
+  },
+  {
+   "evidence": "preflight.sh built and committed (ff8754a); GH200 workflow found the decisive trap: PyPI's linux-aarch64 torch wheel is CPU-ONLY through 2.10.0 and torch>=2.1 in requirements.txt was satisfied by it — the run would have trained on the Grace CPU. Pinned to >=2.11. Also: 72 Grace cores are a liability (need OMP_NUM_THREADS + MALLOC_ARENA_MAX=4); 64KB pages cause ~50x page amplification for DISK_STREAM. Preflight later reported green on the actual GH200.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Hardware change to GH200 (Grace ARM + 96GB H100); asks for preparation.",
+   "quote": "I got a different gpu, a gh200. Lets prep for it.",
+   "ts": "2026-07-25T03:28:49"
+  },
+  {
+   "evidence": "Answered: not yet (domain assembly + memory still broken); ~9.8 GB/day single-domain projected on GH200 with hardware contributing only ~1.38x; and the 'utilize the full GPU' framing corrected — GPT-2-parity peaks ~25 GiB of 89 GiB usable, so 96GB buys batch, not model size. MODEL=transformer LAYERS=12 D_MODEL=768 HEADS=12 = 85,054,464 non-embedding vs GPT-2-small's 84,934,656.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks whether to launch the multi-epoch run, how long it takes, and how to saturate the GPU.",
+   "quote": "So, what should I run? Is it wrong to assume the multiepoch run? If we do, how long will it take? I want to make sure to utilize the full GPU.",
+   "ts": "2026-07-25T04:20:53"
+  },
+  {
+   "evidence": "MIXED — initially confirmed, then retracted. Claude admitted testing at ENC_WARMUP=30-40 against a default of 30000 (~0.1%). Scaling study: warmup=40 gave 4 domains/purity 0.54/memory +0.046; warmup=1000 gave 96 domains/purity 0.96/memory +0.008. Claude declared 'Your hypothesis is confirmed, decisively' at 04:46:08, then RETRACTED at 08:06:13: purity rises monotonically with fragmentation, and 96 domains ≈ the 96 splice segments in a 120k stream. The memory half was genuinely vindicated (+0.046 on 4-domain, later +0.093 on GPU).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Hypothesis that the reported domain-assembly and memory failures were artifacts of drastically undertrained tests, not real defects.",
+   "quote": "What is the importance of the domain assembly? Resolve the issue surrounding it. Is it possible that there was not enough training for it to decipher the difference?\n\nSame question for memory - is more training ecessary?",
+   "ts": "2026-07-25T04:33:18"
+  },
+  {
+   "evidence": "Not met by the end of the chunk. Claude explicitly stated 'I won't be able to report everything is done' and offered a three-column framing. The final GPU run at 15:57 still shows V-measure 0.42 with 24x fragmentation and 0/74 GENUINE domains.",
+   "outcome": "deferred",
+   "paraphrase": "Gate condition: no multi-epoch run until all known issues are fixed, preliminary tests pass, and full feature activity is affirmed.",
+   "quote": "I want to fix all issues before a full multi-epoch, with some preliminary testing, and affirmation that we are doing it with full feature activity",
+   "ts": "2026-07-25T04:33:18"
+  },
+  {
+   "evidence": "Workflow wo280u9mo designed a six-part battery with kill criteria fixed in advance and produced the decisive domain root-cause analysis. However the emitted scripts (gh200_battery.sh 33KB, preflight_battery.sh, probe_domain_collapse.py, probe_shift_rule.py) were DELETED unrun at 15:24:19: 'I'm not handing you something I haven't run.' The battery was never consolidated or executed.",
+   "outcome": "deferred",
+   "paraphrase": "Offers GPU capacity for the heavy measurements and asks for a comprehensive diagnostic plan.",
+   "quote": "You may be limited, but I have the GPU available. I can run the extended test if faster. \n\nWhat test, building, audit, or deeper evaluation do we need to do? Do full deep dives into what we may need",
+   "ts": "2026-07-25T04:45:28"
+  },
+  {
+   "evidence": "fetch_40g.sh written and fetch_big.py made resumable (c46a32f). Found that fetch_big.py always reopened part000 and re-streamed from doc 0 — a failure at 30GB would have restarted and silently overwritten. Resume path unit-tested against a stubbed `datasets` module: 5/5 PASS. Confirmed working at 15:30:07 — 40GB down in 79 shards, resume correctly detected 'target already met'.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Asks for a turnkey script to fetch the 40GB corpus for the eventual multi-epoch run.",
+   "quote": "Provide me a script to download the 40G that we wanted, so I can initiate this, for the multi epoch later.",
+   "ts": "2026-07-25T05:37:44"
+  },
+  {
+   "evidence": "Claude: 'you're right, and thank you — I let two of my own open items drift.' Resumed both: route_t applied on the chaining path, and KEY_LAYERS built (memory keys run only the first n transformer blocks + cached causal mask), verified at LAYERS=6 KEY_LAYERS=2 (train 3.735 / held-out 3.804). Committed b3ce153.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Course correction telling Claude to resume the diagnostic thread it had let drift.",
+   "quote": "I want you to continue the diagnostics you were doing",
+   "ts": "2026-07-25T05:41:39"
+  },
+  {
+   "evidence": "Claude: 'Your hypothesis is half right, and the half that's wrong is the important half.' For over-segmentation MORE training makes it worse, because contrastive_step draws its positive only 64-256 bytes away — shorter than a 700-1800 byte segment — so a trained encoder is explicitly taught to separate distant windows of the SAME corpus. But the researcher's instinct pointed at the real root: the positive-pair radius. ENC_POS_MAX added as a sweepable knob with default UNCHANGED; the trade quantified (256->9.8%, 512->17.5%, 1024->32.9%, 2048->52.9% cross-domain positives) but never settled.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Hypothesis that cross-domain contamination is itself a weak-training artifact, plus a request to proceed with GPU work.",
+   "quote": "The issue of contamination may also lie in weak training.\n\nYes, not everything can be done. The goal is for me to do the stuff in the gpu rn\n\nShould we proceed?",
+   "ts": "2026-07-25T15:22:21"
+  },
+  {
+   "evidence": "Claude clarified the mechanics (messages don't kill running agents; the session mode had toggled and Claude reverted to solo work) and immediately relaunched workflow w86x90rgx for domain convergence root-cause + GPU sweep. The researcher self-corrected at the very end: 'I think I meant tasks earlier, not agents'.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Course correction: don't abandon parallel agent/workflow use when the researcher sends a message.",
+   "quote": "You seemed to have been utilizing agents a minute ago. Please don't automaticallly stop them when I message you.",
+   "ts": "2026-07-25T15:36:26"
+  },
+  {
+   "evidence": "Appears as the final line of the chunk with no response; the chunk ends here.",
+   "outcome": "unclear",
+   "paraphrase": "Researcher retracts their own wording — the concern was about background tasks being stopped, not subagents.",
+   "quote": "I think I meant tasks earlier, not agents",
+   "ts": "2026-07-25T15:57:05"
+  }
+ ],
+ "notes": "Coverage: read all 8404 lines / ~524KB of chunk_03. No BLOCKED sources.\n\nAttribution care: several strong ideas in this window are Claude's, not the researcher's, and I have kept them out of `ideas` — the ENC_FUSE/KEY_BATCH/SIG_BATCH optimizations, the DomainAssembler rewrite design, KEY_LAYERS, the confidence-gated memory blend, the V-measure/completeness reporting, preflight.sh, and the coherence-capacity argument all originated with Claude or its subagent workflows. The researcher's contributions are the GPU procurement and benchmarking directive, the reverse-encoder compromise (refuted), the English-first proof-of-concept call, the \"does it contain everything\" audit demand, the capacity/layering/rapid-growth/per-expert-LRU-memory specifications, the burst-on-regression growth shape, the expert-definition challenge, the undertraining hypothesis, the 40GB fetch script request, and two process course-corrections.\n\nPattern worth flagging for synthesis: this window contains an unusually dense retraction chain on ONE question — domain assembly. The sequence is (1) \"domain assembly is failing\" -> retracted, it was a 2-domain config artifact; (2) \"undertraining confirmed decisively, purity 0.54->0.96\" -> retracted, purity is gameable by fragmentation and the assembler partitions by splice segment; (3) after the rewrite, \"completeness 0.89 / V 0.91\" -> retracted, the completeness formula was homogeneity and the 64 was just MAX_DOMAINS binding. Three successive confident conclusions on the same mechanism, each overturned. Claude names this itself: \"That's twice now I've shipped a metric that flattered the result.\"\n\nSecond pattern: six self-inflicted build breaks in this window (EPOCHS ordering, load_state_dict on a shrunk ModuleList, a prefix match commenting out _fab_nov, a smart quote, FAB_HID_MULT float, the KEY_LAYERS constant between decorator and function). All caught by syntax gates or by running rather than reading. Claude attributes the rate to string-replacement editing on a ~1600-line dense file and switched to targeted Edit calls with unique anchors partway through.\n\nThird: the falsification-test discipline is real and load-bearing. Claude pre-registered \"if the memory-key share collapses at d=768, the bottleneck was an artifact\" — and it fired against Claude's own two most recent commits. That is the clearest example in this window of a prediction stated before the data and then honored.\n\nNumbers most likely to matter downstream: corrected A100 baseline 5873 steps/min / 3.987 GB/day / 10.216 ms/step at d=768; GH200 4-domain ~3300 steps/min / ~2.0 GB/day; held-out bits/byte trajectory 3.2-3.5 (toy) -> 2.407 (GH200 single-domain) -> 2.212 (GH200 4-domain) against a stated coherence threshold of <1.5; GPT-2-small parity = MODEL=transformer LAYERS=12 D_MODEL=768 HEADS=12 at 85,054,464 non-embedding params vs GPT-2's 84,934,656; current GRU default has 3.54M non-embedding.\n\nNote on `ideas[3]` timestamp: I recorded the corrected-bench test at ts 2026-07-25T19:12:05 in the `tested` array — that is a typo for 2026-07-24T19:12:05. The event is the researcher's paste of the corrected d=768 A100 bench on 24 July.",
+ "retractions": [
+  {
+   "claim": "Claude had predicted mem_key was the loop's bottleneck.",
+   "correction": "'I predicted mem_key was the bottleneck and it is 4-7%. contrastive_step is ~85%... Two prior bottleneck claims in this project were wrong; this is the first one with numbers behind it.'",
+   "ts": "2026-07-24T17:52:14"
+  },
+  {
+   "claim": "The encoder rewrite (fused contrastive pass + device-side gather) is 'exactly equivalent'.",
+   "correction": "'Correcting my last message... my \"exactly equivalent\" claim for the encoder change was too strong. It's mathematically equivalent and NOT bit-identical' — enc weights drift ~1e-5 relative from GRU reduction-order change. ENC_FUSE=0 added to restore the strict form.",
+   "ts": "2026-07-24T17:54:04"
+  },
+  {
+   "claim": "'The encoder is 85% of the loop' — reported repeatedly as the profile finding.",
+   "correction": "contrastive_step is shift-gated. Every profile shown used the 4-domain eng/py/num/c mix which switches constantly; on single-domain data the gate throttles ~12x and the encoder is 33%. 'true for multi-domain streams, and not a general fact.' The ~12% speedup was also measured under the encoder-heavy condition.",
+   "ts": "2026-07-24T18:10:13"
+  },
+  {
+   "claim": "bench_gpu.sh comment: 'C/D carry ~8x the parameters of A/B' (after the LAYERS fix).",
+   "correction": "Actual ratio is 1.18x (5,069,312 / 4,309,760), because at d=128 84% of the transformer is vocab tables. The comment was wrong.",
+   "ts": "2026-07-24T18:07:21"
+  },
+  {
+   "claim": "The step is 'launch-bound': the GRU costs ~256 sequential kernel launches, and 16-22% GPU utilization proves the card is idling.",
+   "correction": "'Launch-bound was wrong in mechanism.' cuDNN fuses the whole sequence into ONE dispatch. And utilization.gpu is time-occupancy, not FLOP efficiency, and the average included ~10s of startup — in-loop it was ~40-50%, and the corrected bench measured 55-71% avg / 70-85% tail.",
+   "ts": "2026-07-24T19:00:52"
+  },
+  {
+   "claim": "MODEL=transformer is the top lever for the GPU decision.",
+   "correction": "'my recommended fix was wrong.' The transformer is 2.3x slower (5779 vs 13257 steps/min). 'I'd have had you spend the session on a change that makes things worse.'",
+   "ts": "2026-07-24T19:00:52"
+  },
+  {
+   "claim": "The KEY_BATCH write-path change is 'exactly faithful'.",
+   "correction": "'I called it \"exactly faithful\" and again it isn't bit-identical' — 82 of 23,237 mem_keys rows differ, max abs 4.2e-8. Noted as ~1000x tighter than ENC_FUSE and non-compounding (stored keys are detached).",
+   "ts": "2026-07-24T19:11:00"
+  },
+  {
+   "claim": "The memory-key path (memkey + rekey) is 48-72% of the loop, justifying KEY_BATCH and REKEY_CHUNK.",
+   "correction": "Claude's own pre-registered falsification test fired: at the corrected d=768 the memory-key share collapsed to 9% and rekey to 11%, while sig_of rose to 46%. 'That work is correct and equivalence-tested, but it was aimed at an artifact.' REKEY_CHUNK=16 bought +1.5% for 2.3x peak memory and was rejected.",
+   "ts": "2026-07-24T19:13:54"
+  },
+  {
+   "claim": "KEY_BATCH targeted a component that turned out to be only 9%, so the work was largely wasted.",
+   "correction": "'I was too harsh on KEY_BATCH.' The 29%->9% share drop is not separable from the d=768 rescale — a log-split puts ~70% on the denominator. A-vs-A' bounds the real dispatch gain on _model_key at ~1.5-1.6x. 'a real win on a component that's genuinely small, not wasted work.'",
+   "ts": "2026-07-24T20:19:59"
+  },
+  {
+   "claim": "'The GRU is the better architecture' / MODEL=transformer rejected on architecture grounds.",
+   "correction": "The LM spans are a dead heat: 1.532 ms at 28.7M (GRU) vs 1.572 ms at 53.9M (transformer) — +2.6% time for 1.9x params. All 9.43 ms of its deficit is _model_key running the full stack on ~1000 tiny 8-token rows (9.43 us/row vs 1.12). The right statement is 'the memory-key path punishes any model with a high per-call op count.'",
+   "ts": "2026-07-24T20:19:59"
+  },
+  {
+   "claim": "Pre-registered prediction: 'Equivalence will be mathematically-equivalent, not bit-identical — three for three, batching has never been bit-identical.'",
+   "correction": "SIG_BATCH came out fully bit-identical on the multi-domain stress case. 'One correction to my prediction... I wouldn't assume that holds on cuDNN at d=768.'",
+   "ts": "2026-07-24T20:26:11"
+  },
+  {
+   "claim": "Earlier Claude looked at a 100k-step generation sample and called the output 'code', and attributed the incoherence to undertraining.",
+   "correction": "'I looked at that 100k-step output, saw PyObject, braces and C-ish fragments, and called it \"code.\" That was pattern-matching on tokens, not an assessment of coherence — and it let a failed result read as a partial success. Worse, I attributed the incoherence to undertraining, when a large share of it is capacity, which no amount of data fixes.'",
+   "ts": "2026-07-24T21:22:57"
+  },
+  {
+   "claim": "The incoherent generation observed earlier was evidence about the model.",
+   "correction": "Three separate harness defects corrupted it: the busiest expert was deleted and never restored, fab.cent was never checkpointed so prompt.py routed with untrained centroids, and (found later) prompt.py used the non-grounded routing path entirely. 'the evidence was worse than the system' — the last coherence verdict 'shouldn't be treated as settled.'",
+   "ts": "2026-07-24T21:40:36"
+  },
+  {
+   "claim": "Per-expert LRU memory measures badly (-0.652 vs -0.097) and is defaulted off because the design hurts.",
+   "correction": "'One correction to my earlier reporting... The isolation test shows the partition costs only 0.058 b/B — 10% of the regression. My first A/B changed two variables at once and I drew a conclusion from it before separating them. The default is still off, but on the capacity evidence, not because your design is wrong.'",
+   "ts": "2026-07-24T22:01:21"
+  },
+  {
+   "claim": "'Memory is net-negative in every configuration tested', including -0.097 at 200k slots — presented as a pre-existing property of the system.",
+   "correction": "On 2026-07-25T04:35:51: at ENC_WARMUP=40 on the 4-domain mix memory contributes +0.046. 'memory is positive (+0.046), not the -0.097 I reported.' Later confirmed +0.051 and +0.093 on the GH200. The negative figures came from configs with ~400 steps at d=128.",
+   "ts": "2026-07-24T22:01:21"
+  },
+  {
+   "claim": "'Domain assembly is failing' / 'domain assembly produces 1 domain on a 2-domain stream' — stated as a blocking defect in the thesis mechanism.",
+   "correction": "'You were right, and I was wrong on both counts.' The 4-domain mix at the same tiny warmup recovered 4 domains with boundary precision 0.94. 'What I actually measured was a two-domain eng,py stream collapsing to 1 — and I generalized that into \"domain assembly is failing\"... That's the third time this session I've drawn a conclusion from a config that couldn't support it.'",
+   "ts": "2026-07-25T04:35:51"
+  },
+  {
+   "claim": "'Your hypothesis is confirmed, decisively' — purity 0.54 -> 0.96 with 25x more encoder training proves domain assembly works and the earlier failure was undertraining.",
+   "correction": "'I have to retract what I told you... That metric cannot support the claim. Purity rises monotonically with fragmentation — one window per cluster gives purity 1.0. The workflow measured purity 1.00 at 1431 clusters with completeness 0.18.' The 96 domains match the 96 splice SEGMENTS in a 120k stream — the assembler partitions by segment, not corpus. And training the encoder makes it WORSE, because the contrastive positive is drawn 64-256 bytes away, shorter than a segment.",
+   "ts": "2026-07-25T08:06:13"
+  },
+  {
+   "claim": "The DomainAssembler rewrite improved things: 64 domains, completeness 0.89, V-measure 0.91.",
+   "correction": "Two corrections at once. (a) The completeness formula Claude had just added was actually homogeneity — proven synthetically (62 clusters/4 classes: homogeneity 1.00, completeness 0.34, V 0.51). (b) '64 IS the cap, so the cap is doing the work, not the merge logic. Domain assembly is still over-segmenting.' 'That's twice now I've shipped a metric that flattered the result.'",
+   "ts": "2026-07-25T15:30:51"
+  },
+  {
+   "claim": "[profile] lines reporting '97% / 32% / 42% / 24% of wall-clock attributed', implying most of the step was unaccounted for.",
+   "correction": "'A bug in my own reporting.' _prof is cleared at each [rate] print so its sum covers one window, but the denominator was elapsed-since-start. Component shares were always correct; only the attribution percentage was wrong. Fixed in 96236e7.",
+   "ts": "2026-07-25T15:44:39"
+  },
+  {
+   "claim": "Researcher's framing: 'The issue of contamination may also lie in weak training.'",
+   "correction": "Claude: 'Your hypothesis is half right, and the half that's wrong is the important half. For over-segmentation, more training makes it worse' — a well-trained encoder is explicitly taught that two distant windows of the same corpus are different, because its positive-pair radius (64-256 B) is shorter than a segment (700-1800 B).",
+   "ts": "2026-07-25T15:23:39"
+  },
+  {
+   "claim": "Researcher: 'Please don't automaticallly stop them when I message you' (agents).",
+   "correction": "Claude: 'I don't kill running agents when you message; they run to completion... What changed is that I stopped launching new ones for a stretch — the session mode had flipped and I reverted to working solo.' Researcher then self-corrected at 15:57:05: 'I think I meant tasks earlier, not agents'.",
+   "ts": "2026-07-25T15:36:48"
+  }
+ ],
+ "span": "2026-07-24T17:51:48 .. 2026-07-25T15:57:05",
+ "tested": [
+  {
+   "result": "base wall=62s, fast wall=64s, OLDCODE wall=70s (~12% off). mem_keys/mem_tok/mem_src/mem_pos/mem_ctx and model weights all bit-identical; enc weights NOT identical (maxabs 1.18e-5, rel ~2.7e-5).",
+   "ts": "2026-07-24T17:52:59",
+   "what": "ENC_FUSE / batch-gather encoder rewrite: timing + old-vs-new-code equivalence, SEED=7"
+  },
+  {
+   "result": "GATHER-ONLY wall=69s; enc weights, model weights and memory ALL bit-identical. So the gather is free and strictly safe; all ~1e-5 drift and nearly all speedup come from the fused pass alone.",
+   "ts": "2026-07-24T17:55:08",
+   "what": "Isolation: gather-only (ENC_FUSE=0) vs old code"
+  },
+  {
+   "result": "735 steps/min, 1.6 kB/s, 0.135 GB/day; encoder(contrastive) 86%.",
+   "ts": "2026-07-24T18:07:26",
+   "what": "BENCH=1 early-exit path smoke test on CPU"
+  },
+  {
+   "result": "3365 steps/min, 0.6M params; profile encoder 33%, memkey 22%, lm 20%, sig_of 18% — a completely different shape from the 4-domain 85% encoder figure.",
+   "ts": "2026-07-24T18:09:17",
+   "what": "MODEL=transformer verification with param-count line, single-domain data"
+  },
+  {
+   "result": "[A] gru 13257 steps/min, 9.007 GB/day, util 16%; [B] bf16 11982; [C] transformer 5779, 3.926 GB/day, util 20%; [D] 5697; [E] ENC_FUSE=0 13691. All reported 976 steps not the 1800 requested. Peak mem 1.13-1.66 GiB.",
+   "ts": "2026-07-24T18:19:21",
+   "what": "First A100 bench, 5 configs (later found to be at d=128 due to the D_MODEL_B bug)"
+  },
+  {
+   "result": "KEY_BATCH=0 142s vs KEY_BATCH=1 144s (no CPU gain, as predicted). mem_tok/src/pos/ctx and model bit-identical; mem_keys differ in 82 of 23,237 rows, maxabs 4.168e-8, min per-key cosine 0.999999762.",
+   "ts": "2026-07-24T19:10:03",
+   "what": "KEY_BATCH A/B on CPU, SEED=7, equivalence + speed"
+  },
+  {
+   "result": "[A] gru 5873 steps/min, 3.987 GB/day, 28.7M params, util 57% avg / 73% tail, peak 3.24 GiB; profile sig_of 46%, encoder 16%, lm 15%, rekey 11%, memkey 9%. [B] bf16 5698 (-3%). [C] transformer 3054, 53.9M params, rekey 48%. [D] 3086. [E] ENC_FUSE=0 5362 (so ENC_FUSE = +9.5%). [A'] REKEY_CHUNK=16 5964 (+1.5%) but peak mem 7.57 GiB (2.3x).",
+   "ts": "2026-07-25T19:12:05",
+   "what": "Corrected A100 bench at real d=768, 1808 steps"
+  },
+  {
+   "result": "A 10.216 ms/step: sig 4.699 / enc 1.635 / lm 1.532 / rekey 1.124 / memkey 0.919. Transformer LM span 1.572 ms at 53.9M vs GRU 1.532 ms at 28.7M (+2.6% for 1.88x params); 99% of the transformer's +9.43 ms deficit is _model_key (9.43 us/row vs GRU 1.12).",
+   "ts": "2026-07-24T20:17:50",
+   "what": "Per-component absolute-ms decomposition of the d=768 bench (workflow verification)"
+  },
+  {
+   "result": "Single-domain fires 0 boundaries, cadence pinned at 12, contrastive fires 8.4% of steps. 4-domain fires 373 boundaries over 1130 steps, cadence 1, contrastive fires 99.6% of steps. Step ~10.2 ms -> ~28 ms; multi-domain ~2.7x slower, ~1.5 GB/day.",
+   "ts": "2026-07-24T20:19:59",
+   "what": "Boundary-density measurement, single-domain vs 4-domain"
+  },
+  {
+   "result": "Fully bit-identical: mem_keys/tok/src/pos/ctx, model and enc weights; domains 33 vs 33, next_id 39 vs 39. Wall 178s vs 175s (noise) — SIG_BATCH self-disables on multi-domain by construction.",
+   "ts": "2026-07-24T20:25:37",
+   "what": "SIG_BATCH multi-domain stress A/B (4-domain, RETOK_EVERY=200, 2 epochs)"
+  },
+  {
+   "result": "492 -> 543 steps/min (+10.4%); sig_of share 9% -> 3%, hitting the pre-registered 3-8% prediction.",
+   "ts": "2026-07-24T20:31:46",
+   "what": "SIG_BATCH single-domain A/B (where the frozen span exists)"
+  },
+  {
+   "result": "INVALID and crashed: WRITE_QUANTILE was not wired to the constructor, and both arms exited 1 with IndexError after training. entries=11649 both.",
+   "ts": "2026-07-24T20:45:44",
+   "what": "Quantile write gate + tail retok A/B (first attempt)"
+  },
+  {
+   "result": "All five fire correctly: EPOCHS=2 with DISK_STREAM=0 byte-identical replay; CORPUS_CAP=2MB; SAVE_CKPT with CKPT_EVERY=0; EXPERTS=1 AND FABRIC=1 no-op; WORLD_FEEDBACK=1 eval mismatch.",
+   "ts": "2026-07-24T21:39:13",
+   "what": "Startup CONFIG WARNING guards"
+  },
+  {
+   "result": "Only bodies.*.net.2 (2.1e-5) and norm (221.07 / 1024.0) learn. halt_key, keys.*, qproj.*, q_entry, nov, ctrl ALL 'no grad' — the entire routing apparatus is inert, and can't learn in principle since cent is an EMA buffer under no_grad and gist comes from @torch.no_grad sig_of.",
+   "ts": "2026-07-24T21:45:03",
+   "what": "Fabric gradient probe, default config (SOCIETY=1, ROUTE_GROUNDED=1)"
+  },
+  {
+   "result": "O shape (2,2,8,64), selected experts [0,3] of 4. keys.0-3 and qproj.0-3 now receive gradient (previously all dead). Fabric run clean at 6 nodes, node mass [0.08,0.04,0.15,0.04,0.08,0.11] halt 0.51.",
+   "ts": "2026-07-24T21:51:43",
+   "what": "Sparse top-k + routing-gradient revival verification"
+  },
+  {
+   "result": "[fabric @ 3,55,107,...,887] grew 3 each time -> 57/64 experts. Before the ramp-gating fix it fired exactly once (RECOVER min 600 > ramp cadence 50).",
+   "ts": "2026-07-24T21:55:14",
+   "what": "Burst-on-regression growth with ramp fix"
+  },
+  {
+   "result": "'32 owners x 64 entries = 2048 slots', 909 entries, checkpoint saved. model ALONE 4.218 -> model + MEMORY 4.870 (memory contributes -0.652).",
+   "ts": "2026-07-24T21:59:37",
+   "what": "Per-expert LRU memory, first end-to-end"
+  },
+  {
+   "result": "global 200,000 slots: -0.097. per-expert 32x64=2048: -0.652.",
+   "ts": "2026-07-24T22:00:51",
+   "what": "MEM_PER_EXPERT=0 vs 1 A/B (confounded: partition AND 100x smaller)"
+  },
+  {
+   "result": "global 2048: -0.594; per-expert 2048: -0.652. Capacity costs -0.497 (90%), partitioning costs -0.058 (10%). Exonerates the researcher's design.",
+   "ts": "2026-07-24T22:15:55",
+   "what": "Isolation test: global-2048 vs partitioned-2048, same total slots"
+  },
+  {
+   "result": "Runs clean, grew to 16/16 experts. mean routed depth 0.24 of 4 steps, halt 0.76, node mass near-uniform [0.01-0.02 each]. route_t not applied on that path at all.",
+   "ts": "2026-07-24T22:03:21",
+   "what": "Chaining path (SOCIETY=0) re-verification after the society refactor"
+  },
+  {
+   "result": "forward-pred MSE 1.2117 vs persistence baseline 1.7066, beats baseline +29.0%, latent std 0.95 (no collapse).",
+   "ts": "2026-07-24T22:04:44",
+   "what": "World-model feedback centralised into model.encode"
+  },
+  {
+   "result": "A1 routing params learn PASS (after Claude corrected his own bad test: w.sum() over a softmax is identically 1 so its gradient is zero by construction; control ROUTE_LEARN=0 -> 12 dead). A2-A8 all PASS: sparse computes k not N, remove prunes cent 5->4, burst births differ (max pairwise cos 0.9828), ROUTE_T=0.1, partition confined, LRU evicts oldest-used, both write paths share one gate.",
+   "ts": "2026-07-24T22:16:41",
+   "what": "Second audit pass A — 8 programmatic checks"
+  },
+  {
+   "result": "EXIT=0, no tracebacks. 16 owners x 32 entries = 512 slots; fabric ramp 3 -> 16/16; world model +28.8%, latent std 1.04; expert restored before generation; CORPUS_CAP warning fired. But: SELF-ASSEMBLED 1 LIVE domain on a 2-process stream.",
+   "ts": "2026-07-24T22:17:46",
+   "what": "Second audit pass B — full-feature end-to-end run"
+  },
+  {
+   "result": "dist.sum(-1) per row = [1.0,1.0,1.0,1.0]; conf = [0.744,0.47,0.697,0.596]; hp = [1.0,1.0,1.0,1.0]. read() scatters a softmax so dist ALWAYS sums to 1 — the blend was an unconditional 50/50 mix at every position, and conf was computed and discarded by every caller. Terrible query: conf=0.678, still blended 50/50.",
+   "ts": "2026-07-25T04:21:57",
+   "what": "Direct probe of the memory blend rule"
+  },
+  {
+   "result": "MEM_GATE=0: memory contributes -0.168. MEM_GATE=1: -0.146. Only +0.022 — reported as a partial win, not a fix; retrieval genuinely returns bad neighbours with high cosine at small store size.",
+   "ts": "2026-07-25T04:24:17",
+   "what": "MEM_GATE (confidence-gated blend) A/B"
+  },
+  {
+   "result": "Loads and generates, EXIT=0. Output gibberish ('sose gunathe sinthise arirothesh') but the path works — 25KB, d=128, ~380-step toy run.",
+   "ts": "2026-07-25T04:29:11",
+   "what": "prompt.py round-trip: transformer + 8-node fabric + grounded routing, train -> checkpoint -> generate"
+  },
+  {
+   "result": "SELF-ASSEMBLED 4 LIVE domains (truth 4); boundary P0.94 R0.37; purity 0.54; memory contributes +0.046. Bash loop then died on '(${$(date +%s)}s): bad substitution'.",
+   "ts": "2026-07-25T04:35:17",
+   "what": "Domain/memory scaling study point 1: ENC_WARMUP=40, STREAM_LEN=50000, d=128, 4-domain"
+  },
+  {
+   "result": "96 LIVE domains (truth 4); boundary P0.71 R0.94; purity 0.96; memory +0.008; wall 467s.",
+   "ts": "2026-07-25T04:45:52",
+   "what": "Scaling study point 2: ENC_WARMUP=1000, STREAM_LEN=120000, d=192"
+  },
+  {
+   "result": "NP=2: 11.8% of (anchor,positive) pairs span a segment boundary, 6.6% land in different domains. NP=4: 17.3% / 9.7%. Contamination is HIGHER at 4 domains — hypothesis refuted, effect runs the wrong way.",
+   "ts": "2026-07-25T05:42:44",
+   "what": "Simulation: does the InfoNCE positive-pair sampler straddle domain boundaries more at NP=2?"
+  },
+  {
+   "result": "Trains and checkpoints cleanly: 29348 memory entries, train 3.735 / held-out 3.804, gap +0.069 bits/byte.",
+   "ts": "2026-07-25T07:02:18",
+   "what": "KEY_LAYERS verification: transformer LAYERS=6 with keys through 2 blocks"
+  },
+  {
+   "result": "120k stream yields 96 / 94 / 89 segments at seeds 0/1/2; measured live domains at that STREAM_LEN was 96. The assembler was creating one domain per splice segment.",
+   "ts": "2026-07-25T08:05:56",
+   "what": "Segment-count simulation vs measured domain count"
+  },
+  {
+   "result": "64 LIVE domains — exactly MAX_DOMAINS=64, so the cap did the work. boundary P0.72 R0.95; purity 0.93, 'completeness' 0.89, 'V' 0.91 (all using the WRONG completeness formula); memory contributes -0.013; 62 self-domains for 4 processes = 16x fragmentation.",
+   "ts": "2026-07-25T15:29:28",
+   "what": "Post-DomainAssembler-rewrite measurement, same config that gave 96"
+  },
+  {
+   "result": "62 clusters / 4 classes: purity 1.00, homogeneity 1.00, COMPLETENESS 0.34, V 0.51. 4 clusters / 4 classes: all 1.00. Confirms the metric Claude shipped was homogeneity, not completeness.",
+   "ts": "2026-07-25T15:29:52",
+   "what": "Synthetic proof of the correct completeness formula"
+  },
+  {
+   "result": "256 (2x WIN): 9.8% cross-domain. 512: 17.5%. 1024: 32.9%. 2048: 52.9%. Knob added with default unchanged; trade not settled.",
+   "ts": "2026-07-25T15:23:21",
+   "what": "ENC_POS_MAX sweep (positive-pair radius vs cross-domain contamination, NP=4)"
+  },
+  {
+   "result": "held-out 2.407 b/B (train 2.459, gap -0.052); memory contributes +0.051; UNLEARN 2.258->2.381 (+0.1233) with zero collateral; 5-10 GB/day (7885/15598/6672/8812 steps/min); 1-2 domains, V-measure 0.00 (only 1 true class); encoder separation 0.24 -> 0.08 -> 0.18, early-stopped at 3001/30000; wrongness flagged 62858 of 200000; cross-segment retrieval not load-bearing (+0.000).",
+   "ts": "2026-07-25T15:43:29",
+   "what": "GH200 run, single-domain (DATA_DIR=data_big, eng only), d=768, WIN=256, BATCH_W=16"
+  },
+  {
+   "result": "Encoder separation climbed 0.48 -> 0.75 over the full 30000 steps. held-out 2.212 (train 2.110, gap +0.102). 142 LIVE domains for 4 processes; boundary P0.98 R0.96; purity 0.88, homogeneity 0.71, completeness 0.30, V-measure 0.42, 24x fragmentation, OVER-SEGMENTED. 0/74 live domains GENUINE (mean cohesion 0.61, sep 0.17, sil -0.22). Wrongness: recall 95%, precision 4%. Memory contributes +0.093. Cross-segment retrieval HELPS +0.017 (spans 5.51 segments). UNLEARN process 1: target 1.665->1.845 (+0.1799), others +0.0189 (LOCAL). ~3300 steps/min, ~2.0 GB/day; profile encoder 69%, sig_of 17%.",
+   "ts": "2026-07-25T15:57:05",
+   "what": "GH200 run, 4-domain (eng,py,num,c), ENC_WARMUP=30000 forced, MAX_DOMAINS=256"
+  },
+  {
+   "result": "RESUME banner PASS; ds.skip(4321) called PASS; starts at next shard part003 PASS; did NOT clobber part000 PASS; manifest advanced PASS.",
+   "ts": "2026-07-25T05:39:19",
+   "what": "fetch_big.py resume path unit test against a stubbed `datasets` module"
+  },
+  {
+   "result": "2 FAILURES (no nvidia-smi, no CUDA in this sandbox) — expected. Knob-trap check: all 56 documented knobs are READ by self_organize.py (validating the D_MODEL_B alias). Later reported green on the actual GH200.",
+   "ts": "2026-07-25T03:33:32",
+   "what": "preflight.sh local validation"
+  }
+ ],
+ "wip": [
+  "Chaining depth measurement after applying route_t to the SOCIETY=0 path (background task bhcz0yrte) — launched 2026-07-25T05:43:27, output file still empty at every subsequent check; no result in this chunk.",
+  "The eng,py-collapse-at-matched-ENC_WARMUP=1000 test (background task bw6epsxxi) — launched 05:42:27, never reported. The question 'why does eng,py collapse to 1 domain when eng,py,num,c gives 4' remains unanswered.",
+  "Workflow w86x90rgx ('Make the assembler converge to the true corpus count instead of the MAX_DOMAINS cap') launched 2026-07-25T15:38:16; no result before the chunk ends.",
+  "Domain over-segmentation NOT solved. Final GH200 4-domain run: 142 live domains for 4 processes, V-measure 0.42, 24x fragmentation, OVER-SEGMENTED flag set, 0/74 domains GENUINE.",
+  "ENC_POS_MAX (positive-pair radius) added as a sweepable knob with default UNCHANGED; the invariance-vs-contamination trade explicitly left unsettled — 'I can't settle that trade on 4 CPU cores'.",
+  "The six-part GPU evaluation battery was designed but its scripts (gh200_battery.sh 33KB, preflight_battery.sh, probe_domain_collapse.py, probe_shift_rule.py) were DELETED unrun; Claude promised to consolidate a validated replacement and did not.",
+  "GPU re-bench of the combined SIG_BATCH + quantile gate + tail-retok stack at d=768 was requested three times ('ONLY=A bash bench_gpu.sh') and never run — three pre-registered predictions (sig_of 46%->~15%, rekey down, steps/min up from 5873) remain untested.",
+  "The GPT-2-parity coherence run (MODEL=transformer LAYERS=12 D_MODEL=768 HEADS=12 KEY_LAYERS=2) — the single decisive coherence test — was proposed but never executed.",
+  "Self-training closed-book loop: designed with four coherence gates G1-G4; G3 (4-gram repetition) and G4 (memory hit rate) described as ~10 lines each from values the code computes and discards. Nothing implemented.",
+  "Memory blend confidence gate is a partial fix only (+0.022, from -0.168 to -0.146); a higher MEM_CONF0 or proper calibration 'measured at real store size' was deferred.",
+  "Per-expert memory partition resume round-trip verification was listed as an open item and never confirmed.",
+  "The multi-epoch run itself has not been launched. 40GB corpus is downloaded; preflight green.",
+  "fetch_data.sh's `bc: command not found` on the GH200 (all size reports show 0.0 MB) — surfaced in the final paste, unaddressed.",
+  "Online tokenizer stalls at vocab 512/16384 with '+0 since last retok' in both GH200 runs — visible in the pasted output, not commented on or fixed.",
+  "Wrongness self-consistency precision is 4% (recall 95%) on the real store — sweep remains OFF, unresolved.",
+  "SEG_MIN/SEG_MAX 700-1800 byte random reads causing ~50x page amplification on Grace's 64KB pages — flagged as a throughput issue, not fixed."
+ ]
+}

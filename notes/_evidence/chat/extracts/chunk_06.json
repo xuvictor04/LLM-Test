@@ -1,0 +1,721 @@
+{
+ "chunk": "chunk_06",
+ "errors": [
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T15:22:15",
+   "what": "PHASE_SCHED hard-coded for four processes and filtered only inside build_stream; at NP=2 the final 'fade' phase was the least non-stationary, process 0 never faded, the phase banner printed non-existent processes, was_active was wrong for every NP<4, and UNLEARN marked EVERY process as faded (so the unlearn-a-faded-process test reported passing without ever running)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T16:33:35",
+   "what": "seg_from always seeks a random offset, so even a single-corpus stream teleports every 8-20 kB; more than half of English's assembled domains were our own seek artefacts (31 vs 13)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T17:20:46",
+   "what": "IndexError: `_wn = _oid[_w.argmax(-1)]` treated a global node id as a rank (index 4 out of bounds for size 2)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-02T05:36:11",
+   "what": "SIG_WIN=0 meant 'use WIN' i.e. 256 BYTES while the loop advances WIN TOKENS -- the signature encoder was reading 42% of the stream once the vocabulary compressed. Every domain result the project ever produced was measured through a partially-blind encoder"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-02T19:56:22",
+   "what": "Claude's own fix for the above recomputed _sigw live, so asm.wins held windows of two widths and rekey died: 'ValueError: expected sequence of length 384 at dim 1 (got 426)'. Killed BOTH arms of the researcher's first real pilot. Worse than a crash: a moving width makes centroids incomparable"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-02T20:03:33",
+   "what": "The smoke gate certified the change that killed the pilot -- every arm ran 12 kB, where the vocabulary barely grows, so no arm exercised tokenizer growth + rekey"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-02T06:48:35",
+   "what": "Smoke gate took 4967s vs 479s; feared a regression from the signature widening"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T13:09:52",
+   "what": "MAX_DOMAINS defaults to 64 with the comment 'mirroring the expert bank's fixed slot pool', but every launcher set MAX_DOMAINS=1000000 while leaving FAB_NMAX=64 -- the two populations designed as duals ran 15,625x apart"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T13:14:46",
+   "what": "Domains were merged but essentially never culled (0 culls in the first 1000 pilot steps against 5-8 merges per manage), because the cull rule needed `act < min_size AND unseen > stale`, a conjunction an empty domain can fail forever"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T14:30:06",
+   "what": "A stale `torch.stack(list(fab.keys))` left by the tensor refactor raised inside a try/except, silently deleting the ENTIRE EXPERTS and SUFFICIENCY output from the report with no sign it had been attempted"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T14:34:13",
+   "what": "prompt.py -- the tool used to read generations, i.e. the deliverable -- carried a duplicated copy of Fabric and had been completely dead since the refactor (load_state_dict failed with ~300 missing keys). Nothing in the pipeline ever loaded a checkpoint back, so it went unnoticed for several commits"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T13:14:46",
+   "what": "The `no_experts` smoke arm was vacuous -- EXPERTS is mutually exclusive with FABRIC, which wins the elif chain -- so it passed in every gate run while testing nothing"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T19:11:03",
+   "what": "Optimizer moments were discarded on every resume: fab.grow() returns [] since the population became preallocated tensors, but the caller still called om.add_param_group on it, appending an EMPTY param group per growth event (60 growths -> 60 phantom groups -> load_state_dict count mismatch)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T19:58:42",
+   "what": "There was NO expert culling at all. router.manage() (create/replicate/cull) is gated on EXPERTS, mutually exclusive with FABRIC, so it never ran; the fabric population was grow-only. This is also why COMPETENCE PROTECTION reported 'spared 0' on every run"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T19:58:42",
+   "what": "The [config] banner printed 'experts off' for a run with thousands of routed fabric experts -- EXPERTS names the legacy ExpertBank, not the live population"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T21:39:04",
+   "what": "Every newborn expert was born as a blank identity (B=0): computes nothing -> no competence -> no routing mass -> no traffic -> can never acquire competence. A trap with no exit"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T21:57:25",
+   "what": "Mutation jitter was an absolute 0.02 against weights of unknown scale, so a 'clone' was effectively an exact copy and the population explored nothing"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T22:28:22",
+   "what": "Only the argmax winner's centroid ever moved (`s.cent[w.mean(0).argmax()]`), so the winner drifted toward everything it won while every other centroid stayed frozen at init -- expert discovery was impossible by construction"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T01:50:43",
+   "what": "Routing was at BATCH granularity: `idx = w.mean(0).topk(kk)` and `_wk = _w[:, _oid[_ki]].mean(0)` gave all BATCH_W windows the same expert set and weights, making per-window specialization impossible. This made discovery/crossover/exploration incapable of helping"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T02:11:18",
+   "what": "The per-window routing change broke prompt.py again -- it imported the classes but still duplicated the ENSEMBLE LOGIC (`_wk = _w[:, _oid]`). Gate failed 11/12 on the readback arm (RuntimeError: size of tensor a (4096) must match tensor b (2))"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T13:37:37",
+   "what": "The chaining path computed EVERY expert at EVERY hop (Bo = (B,N,L,d)) -> CUDA OOM trying to allocate 11.39 GiB at 972 experts. Claude had written the comment warning about this and then recommended the flag anyway, costing the researcher a GPU run"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T13:44:06",
+   "what": "With the OOM fixed, mean routed depth was 0.00 of 4 -- FAB_MIN_STEPS defaulted to 0 so HALT absorbed on the first hop. Chaining was switched on and nothing chained"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T16:33:32",
+   "what": "The chaining transition matrix was memoryless: Q was one shared query, so R did not depend on which expert held the mass -- 'expert A hands to expert B' could not be learned. Caused by Claude collapsing the per-expert qproj during the scale refactor"
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-04T19:24:16",
+   "what": "Expert-identity representation collapse: every expert embedded to the SAME identity vector (typical nearest-neighbour distance 0.000). Explains routing landing arbitrarily on one node, SPECIALIZATION exactly 0.000, and the spawn never firing. The embedder had no VICReg/anti-collapse protection"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T19:27:44",
+   "what": "The autoencoder/embedder loss ran only every FAB_EMB_EVERY=50 steps at weight 0.05 -- twelve weak updates in a short run, far too little to separate identities"
+  },
+  {
+   "fixed": "partial",
+   "ts": "2026-08-04T19:19:12",
+   "what": "FAB_SPAWN_DIST=0.45 was an absolute threshold on distance to the nearest of N identities, which shrinks as N grows -- spawning became impossible exactly when the population was large. SPAWNED BY SPECIFICATION: 0"
+  },
+  {
+   "fixed": "no",
+   "ts": "2026-08-04T19:30:45",
+   "what": "Instrumentation bug: the identity nearest-neighbour distance meant to diagnose the collapse is only recorded inside spawn_from, which never runs when the bar is not met -- so it prints a stale 0.000"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-04T18:37:17",
+   "what": "Claude ran two full 12-arm gates concurrently, competing for the same cores (gate took 4731s vs the usual 400-650s), and held the rm-predict push for ~an hour so the branch the researcher asked for did not exist on GitHub"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T22:01:29",
+   "what": "Duplicated banner text -- '| competence protection ON | competence protection ON |' from a botched edit"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-07-31T15:40:29",
+   "what": "The pilot banner printed '0 MB/epoch x 2 epochs = 0 MB consumed | ~0k steps' when overridden with small values (integer division)"
+  },
+  {
+   "fixed": "yes",
+   "ts": "2026-08-03T20:07:09",
+   "what": "Commit 68c0e34 would have shown as Unverified on GitHub (committer email not noreply@anthropic.com)"
+  }
+ ],
+ "ideas": [
+  {
+   "evidence": "`longrun.sh pilot` built (2 domains x 30MB, 8 epochs, ~52k steps); running multi-epoch for the first time surfaced the PHASE_SCHED bug (commit c411ac7); pilot eventually ran 2026-08-03 with ANCHORS 2.064 b/B.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Run an MB-scale multi-epoch pilot as proof of concept before the GB run, add a larger corpus later as the forgetting test, and state coherence expectations in advance so the human can judge them.",
+   "quote": "When adding, I expect a larger amount, and it would be a good test for the forgetting quantity. However, double check everything. I want to run a short multi epoch first, in the level of MB, as a pilot to the GB run, and mini proof of concept.",
+   "ts": "2026-07-31T15:20:17"
+  },
+  {
+   "evidence": "Commit a3ed1a9 'english is ONE corpus, and the phase schedule is generated rather than tabulated'; _phases(n,p,w) sliding-window generator verified at n=1,2,3,4,6; PHASE_SCHED= env override added.",
+   "outcome": "built",
+   "paraphrase": "English-only should mean one corpus, and the phase schedule must be generated by a rule rather than replacing one hardcoded table with another.",
+   "quote": "Why are we going by domain? I thought we’re doing English only\n\nI don’t like how there’s something hardcoded in again, especially with something as arbitrary as the domains. Make it more flexible.",
+   "ts": "2026-07-31T16:16:39"
+  },
+  {
+   "evidence": "Exposed that seg_from always seeks a random offset; A/B same seed: SEG_CONTIG=0 -> 31 LIVE domains (model 3.349), SEG_CONTIG=1 -> 13 LIVE (model 3.513). Commit 98f19fa; contiguous is now default for one corpus.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Correction of Claude's over-reading: keep the domain-discovery mechanism, only drop the four spliced corpora, because domains should emerge inside English.",
+   "quote": "Not why domain at all? But why the 4 domains when we are doing English only. We can keep the domains, since I expect some to appear within the English only environment",
+   "ts": "2026-07-31T16:33:01"
+  },
+  {
+   "evidence": "Commit 9d90416 'measure the EXPERTS, and put output and retention above the domain scores'; reading order in both launchers rewritten, domain/clustering scores relabelled 'DIAGNOSTICS, not targets'.",
+   "outcome": "built",
+   "paraphrase": "Reorient the project: generation output, low forgetting, and retention of old capability are the goals; domain counts are only diagnostics that Claude has been inflating and misreading.",
+   "quote": "No, domains are not a major concern for me. I’m not hoping to pay too much attention to it. The end all is the resulting output, and capacity for continual learning without exorbitant forgetting, and maintaining old capacities, without significant degradation.",
+   "ts": "2026-07-31T16:57:45"
+  },
+  {
+   "evidence": "New EXPERTS section added same turn; first run: 64 nodes, 5 used, SPECIALIZATION 0.179 vs shuffled null 0.161 +/- 0.054 -> INTERCHANGEABLE.",
+   "outcome": "built-and-measured",
+   "paraphrase": "The real object of interest is what happens inside domains and to the experts, not the domain count.",
+   "quote": "The domains are only  a concern because you have been driving it up, and improperly interpreting it. My bigger concerns is within the domains, and the experts.",
+   "ts": "2026-07-31T16:57:45"
+  },
+  {
+   "evidence": "COMP_PROTECT competence protection + SUFFICIENCY section built (commits bcd3fd5, 54e55a2). SUFFICIENCY reported NOT AGGREGATE every run (pilot: population 2.055 vs best single 2.059, +0.004). Protection reported 'spared 0' for days until the culling path itself was found missing.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Design statement: experts should be individually insufficient but collectively sufficient; utilization is the competitive resource, but useful-but-rare experts and domains must be protected from culling.",
+   "quote": "The expectation is that none of the individual experts are sufficient for the tasks at hand, but aggregate, they are. ... What is the main resource for competition? Utilization. In a sense, the attention each expert gets. Rarely used experts and domains for niche tasks still needs to be protected.",
+   "ts": "2026-07-31T17:14:59"
+  },
+  {
+   "evidence": "Claude produced a component table: base LM is a 1-layer GRU by default ('every number in this project is a GRU number'); attention exists only in fabric routing (over modules) and memory read (non-parametric). Led directly to running MODEL=transformer for the first time.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Ask what parts of the architecture are actually transformer-based.",
+   "quote": "I want to double check something: is it transformer in structure? And which parts are?",
+   "ts": "2026-07-31T17:14:59"
+  },
+  {
+   "evidence": "Pilot ran both arms; GRU 2.064 vs transformer 2.130 b/B, coherence 0.17 vs 0.02. Protection implemented but reported 'spared 0' on every run until 2026-08-03T20:02 when the missing cull path was fixed.",
+   "outcome": "built-and-measured",
+   "paraphrase": "AskUserQuestion answers: run both architectures in the pilot, and implement competence-weighted protection for niche experts immediately.",
+   "quote": "\"Run both, GRU and transformer\", \"Implement protection now\"",
+   "ts": "2026-07-31T17:18:30"
+  },
+  {
+   "evidence": "Commit 54e55a2 replaced the correlational loss-EMA with a leave-one-out counterfactual on society()'s already-computed per-expert outputs; Claude argued the noise worry does not apply because a noisy expert's removal improves loss so contribution goes negative.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Propose measuring expert competence by its impact/contribution to the whole system, while flagging that this could reward noisy experts.",
+   "quote": "How is competency done? One way we can do it is through seeing their impact on the overall system for their messages, and how far they contribute, however may incentivize noise.",
+   "ts": "2026-07-31T19:00:08"
+  },
+  {
+   "evidence": "Kept decoupled at the time; later realised as the percentage breadth cap (EXP_DOM_FRAC=0.10, floor 4) enforced by masking the routing softmax, commit 763e9f2.",
+   "outcome": "built",
+   "paraphrase": "Experts need not be scoped to a single domain; they should draw on limited domain resources with some freedom to span domains.",
+   "quote": "Experts not being strictly within a domain is ok, maybe operate by taking the limited resources of domains, and some freedom of stretch.",
+   "ts": "2026-07-31T19:00:08"
+  },
+  {
+   "evidence": "SUFFICIENCY section added the same turn: 'population (2 experts blended) 3.079 | best single expert (node 48) 3.082 | population buys +0.004 >> NOT AGGREGATE'.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Aggregate sufficiency should be measured on the outcome (bits/byte), not on internal proxies.",
+   "quote": "Measurement of sufficiency can be seen in resulting outcomes",
+   "ts": "2026-07-31T19:00:32"
+  },
+  {
+   "evidence": "pilot -> pilot-add chain run end to end for the first time (eng was 5.171 @172 -> 4.466, -0.706 +/- 0.162; py 4.680 NEW); readiness check found the SIG_WIN 42%-coverage defect (commit 98e3301).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Ask for pilot readiness plus a proactive check for anything else to fix.",
+   "quote": "Can we ready up for the pilot now? And is there anything else we should include or fix?",
+   "ts": "2026-08-02T05:03:45"
+  },
+  {
+   "evidence": "Pilot is DOMAINS=eng single corpus; pilot-add deferred. The pilot launched 2026-08-02T19:55 and crashed on Claude's signature-width regression before completing.",
+   "outcome": "built",
+   "paraphrase": "Sequence the work: English foundation first, then add code/science areas later via continual learning.",
+   "quote": "Let’s just do English. Python, programming languages and sciences can be added later. The key is to build capabilities to lead up to it, starting with English foundation and using the continual learning to build off it. Is the pilot ready?",
+   "ts": "2026-08-02T17:03:28"
+  },
+  {
+   "evidence": "Commit 2e3a464: FabricNode became a low-rank d->r->d adapter (2.36M -> 12.3k params), keys/qproj became tensors, slots preallocated, FAB_NMAX default 4096. Measured society(top-4) latency after a shared query projection: N=64 1.6ms, 1024 1.2ms, 8192 1.5ms, 65536 15.2ms (was 345.2ms).",
+   "outcome": "built-and-measured",
+   "paraphrase": "The expert population must scale to thousands or millions; selection over tens is meaningless.",
+   "quote": "I don’t understand why experts is capped at 64, my expectation is much higher. Thousands or even millions. Selection at a scale of tens is pointless.",
+   "ts": "2026-08-03T12:14:46"
+  },
+  {
+   "evidence": "FAB_RANK=8 low-rank adapters shipped in 2e3a464; Claude flagged the ~190x per-expert capacity drop as a deliberate trade.",
+   "outcome": "built",
+   "paraphrase": "AskUserQuestion answer selecting low-rank expert bodies targeting 10k-1M population.",
+   "quote": "\"Getting to thousands-plus experts needs the node form to change. Which target?\"=\"Low-rank nodes, target 10k-1M (Recommended)\"",
+   "ts": "2026-08-03T12:17:51"
+  },
+  {
+   "evidence": "Found MAX_DOMAINS default 64 'mirroring the expert bank' while every launcher set MAX_DOMAINS=1000000 with FAB_NMAX=64 -- 15,625x apart. Geometric ramp: reaches 4096 at step 3101 in 63 events vs old +3 reaching 243 by step 60,000. Commit cc04c21.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Question exposing an inconsistency between domain and expert population sizes, plus an instruction that additive growth is too slow and a demand for a broader bug sweep.",
+   "quote": "If we only had 64 experts, how were there hundreds of domains at some point?\n\nThe limit of 3 per 64 steps is too low. Not saturating is an issue\n\nLook for other issues that may be present.",
+   "ts": "2026-08-03T13:08:50"
+  },
+  {
+   "evidence": "Commit 763e9f2: EXP_DOM_FRAC=0.10 floor 4 enforced by masking the routing softmax ('BREADTH: an expert may serve <= 4 domains ... 40 expert(s) at the cap'); DOM_CULL_EMPTY=1. The sweep found a stale fab.keys silently deleting the whole EXPERTS/SUFFICIENCY report and prompt.py dead since the refactor.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Add a percentage-based cap on how many domains one expert may serve, cull empty domains, and re-audit everything because more is suspected broken.",
+   "quote": "Cap the number of domains a single expert can be part of. It should be percentage based. \n\nWe can cull domains when they are empty. I suspect more will be emptied.\n\nI suspect much more is broken or not working as intended. Go through everything again please",
+   "ts": "2026-08-03T14:23:34"
+  },
+  {
+   "evidence": "Commit 4554d6b: vacuous no_experts arm replaced with expert_bank:EXPERTS=1 FABRIC=0, checkpoint read-back arm added (gate 12/12), dead import alias removed. ROUTE_T deliberately left untouched on the strength of this message.",
+   "outcome": "built",
+   "paraphrase": "Fix the known-broken items; accept 3-of-236 used experts for now given little training; keep auditing.",
+   "quote": "Fix the explicitly broken.\n\n3/236 for experts is ok for low training done\n\nCheck again for anything left",
+   "ts": "2026-08-03T18:19:21"
+  },
+  {
+   "evidence": "Commit dec9fb3: prompt.py reduced to zero duplicated model classes via nv= overrides on build_lm/MiniLM/TinyTransformer/SigEncoder; optimizer moments found to be a one-line bug (empty param group per growth event) rather than the inherent limitation Claude had claimed. Resume restores moments with zero warnings.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Demand a thorough re-audit and that Claude fix the items it had explicitly chosen to leave alone, including prompt.py's remaining duplicated classes.",
+   "quote": "Triple check stuff if they are broken. I’m not sure everything is done.\n\nIt must be completely thorough. I don’t want any issues.\n\nFix the issues you mentioned, even though you didn’t touch.\n\nFix the issue you brought up with prompt.py",
+   "ts": "2026-08-03T19:04:06"
+  },
+  {
+   "evidence": "Never satisfied within this chunk: pilots reported 1 of 4096 (2026-08-03), 3 of 4096 (2026-08-04 run 2), 1 of 4096 (rm-predict run 3), and a toy 1->2 after the VICReg fix. Cause still unresolved at chunk end.",
+   "outcome": "unclear",
+   "paraphrase": "Explicit expectation that expert utilization must improve substantially once real training happens.",
+   "quote": "3/236 is only accepted because it’s not trained. I expect much better after training.",
+   "ts": "2026-08-03T19:04:06"
+  },
+  {
+   "evidence": "Commit 3440634: every run now prints [config] SUBSYSTEMS / SELECTION / OFF ON PURPOSE banners; audit found the signature encoder would have ended the pilot at ~62% coverage, fixed with SIG_WIN=614 (verified 100%).",
+   "outcome": "built",
+   "paraphrase": "Audit configs/defaults so the pilot measures the whole system rather than a partially-disabled one.",
+   "quote": "Let’s prep pilot then. Double check configs and defaults to make sure we are testing the right things (the system as a whole)",
+   "ts": "2026-08-03T19:25:33"
+  },
+  {
+   "evidence": "Claude identified byja2rbny as the real gate and bdu5f31dw as a pointless watcher, tried TaskStop (already completed), said it would stop creating them. It nonetheless created more watchers later, and on 2026-08-04T18:37 was found running two full gates concurrently.",
+   "outcome": "built",
+   "paraphrase": "Objection to Claude spawning a redundant second background shell task.",
+   "quote": "? I’m confused of the 2 shell tasks you put up.",
+   "ts": "2026-08-03T19:49:43"
+  },
+  {
+   "evidence": "Found there was NO expert culling at all -- router.manage() is gated on EXPERTS, mutually exclusive with FABRIC, so the fabric was grow-only; also why COMPETENCE PROTECTION had always reported 'spared 0'. fab.manage() added: '[experts @ 1600] culled 9 spared 8 -> 206 live'. Banner corrected. Commit 2a262a2.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Two challenges: does expert culling actually exist, and why does the config banner say experts are off.",
+   "quote": "Is there an expert culling mechanism?\n\nAnd it said experts off when I was looking at it",
+   "ts": "2026-08-03T19:57:36"
+  },
+  {
+   "evidence": "Answered in prose only (table of schedules per n, NON-STATIONARY report description, note that one corpus makes all four phases [0] i.e. stationary). No code change resulted from this message.",
+   "outcome": "unclear",
+   "paraphrase": "Ask what the phase schedule actually is and measures.",
+   "quote": "Also what are the different phases?",
+   "ts": "2026-08-03T20:06:38"
+  },
+  {
+   "evidence": "Claude tried to rebuild the vocabulary outside the training loop and FAILED (vocab stuck at 256, 0 multi-byte tokens), explicitly declined to assert an answer. Instead added an 'IS IT COMPOSING?' report section; toy run: vocab 609 tokens mean 1.80 B, 2.29 tokens per generated word -> SPELLING, 77% of generated words appear in training text.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Doubt that word-shaped generations prove learning -- the tokenizer may be spelling the words, and apparent syntax may be chance.",
+   "quote": "I’m surprised that words have been formed. Is this confidently from our own tokenizer? I’m surprised it got a name correctly. \n\nSentence structure is still inconclusive, since there’s a chance that it was from randomness, since it’s not fully coherent.",
+   "ts": "2026-08-03T21:38:11"
+  },
+  {
+   "evidence": "Confirmed: every newborn was B=0, an exact identity that computes nothing, gets no mass, and can never acquire competence. FAB_REPLICATE added (commit e714531); toy used-node count went 1 -> 4 (65%/22%/9%) on one run but regressed on others; the pilot count never improved.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Hypothesis that routing concentration follows from a broken growth rule, and that growth should replicate successful experts rather than mint blank ones.",
+   "quote": "One node carrying so much is not too surprising, if the growth mechanism was done incorrectly. Part of what I wanted was replication of successful or (most successful for targeted task at hand)",
+   "ts": "2026-08-03T21:38:11"
+  },
+  {
+   "evidence": "Commit 8565246: parent sampled by fitness among the FAB_PARENT_K=8 nearest region-owners; mutation raised from an absolute 0.02 to 25% of the parent's own std with a 10%-of-births x6 heavy tail. Claude reported honestly that used-node count did not improve (still 1 of 256).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Parent selection should favour relevance to the birth region over global fitness, and newborns need real mutation.",
+   "quote": "Growth should not just be the fittest, since a more niche may be more relevant.\n\nNewborn should also have some randomness / mutation injected",
+   "ts": "2026-08-03T21:56:59"
+  },
+  {
+   "evidence": "Commit 580cd62: rank-slice crossover, top-8 centroid updates (previously only the argmax winner's centroid moved, making discovery impossible), novelty->least-used handoff (FAB_DISCOVER=0.35), 15% off-policy exploration. Toy flipped to SPECIALIZED 0.206 vs null 0.054 +/- 0.055 -- but the pilot fired all three mechanisms (3081/436/1770) and moved nothing, with bits/byte WORSE (2.064 -> 2.200).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Add crossover -- newborns inherit connected sections from several experts -- and treat the router's inability to discover new experts as a critical failure.",
+   "quote": "We can add on to the randomness mechanism by allowing (completely random) new experts to take random connected sections of other experts.\n\nThe router issue is very big. We need to fix it, inability to discover a new expert is almost catastrophic to the idea. How can we do it?",
+   "ts": "2026-08-03T22:27:22"
+  },
+  {
+   "evidence": "Built at the researcher's explicit request the next turn (commit 245bc68): per-expert fast/slow error EMAs, fast~=slow and both above population -> cull, fast>>slow -> protected as adaptation. Toy: 'SELECTION OUT: 152 culled total, of which 72 for SUSTAINED error | 173 spared'. Pilot run 3: 4293 culled, 126 for sustained error, 7038 spared.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Add a selection route driven by sustained backprop error -- cull persistently high-error experts, but protect experts whose error spikes because the material changed.",
+   "quote": "Another way we can add more selection is through backprop: if there consistently is too much, then cull. However learning should still be preserved, like if old news changes, which might cause the same effect.",
+   "ts": "2026-08-04T02:41:38"
+  },
+  {
+   "evidence": "Confirmed and fixed with a parent quota (max 20% of recent births): 'LINEAGE: 91 distinct parents in the recent-birth window | largest share 4% (cap 20%)'. Pilot run 3: 80 distinct parents, 4% max share. Used-expert count still 1.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Hypothesis that the dominant expert parents every birth, so the population becomes one lineage; asks for more variety and stronger culling.",
+   "quote": "And how can we get more expert variety to be chosen and taught? Or perhaps enhance culling, since I’d think the main expert being use would be most likely to replicate, and therefore lose its competitive edge over time.",
+   "ts": "2026-08-04T03:08:04"
+  },
+  {
+   "evidence": "Claude answered no (GRU 2.064/2.200 vs transformer 2.130/2.184, coherence 0.17 vs 0.02) and changed both loops to `for ARCH in ${PILOT_ARCH:-gru}`; commit 245bc68.",
+   "outcome": "built",
+   "paraphrase": "Question whether both architecture arms are still needed in the pilot.",
+   "quote": "For the pilot, do we still need the two runs?",
+   "ts": "2026-08-04T03:08:04"
+  },
+  {
+   "evidence": "Answer: they never have. SOCIETY=1 (default) uses society() with no chaining; the transition matrix/HALT path only runs at SOCIETY=0. CHAINING report section added (commit 33355b2). Forced two retractions from Claude (halt/depth figures, PONDER_WARM justification).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Ask whether experts actually chain through the router, and require the answer to be a permanent test/report line.",
+   "quote": "Another thing I want to know is if the experts are chaining via router.\n\nLet’s add this to the test",
+   "ts": "2026-08-04T11:52:30"
+  },
+  {
+   "evidence": "Commit c4000c6: each hop now computes only FAB_CHAIN_K=8 top-k (Bo was (B,N,L,d) = 11.39 GiB alloc at N=972); then found depth 0.00 of 4 because FAB_MIN_STEPS defaulted to 0, so HALT absorbed on hop 1 -- default now 2 under chaining, depth 0.00 -> 0.60. Chaining pilot: MODEL 2.154, depth 0.50 of 4, halt 0.50, 445 steps/min.",
+   "outcome": "built-and-measured",
+   "paraphrase": "After the SOCIETY=0 pilot OOM'd: chaining and its learning behaviour are load-bearing for the design and must work.",
+   "quote": "There seems to have been an issue with chaining. Properly chaining and its learning capabilities are important for my design.",
+   "ts": "2026-08-04T13:37:02"
+  },
+  {
+   "evidence": "Explanation produced, and it surfaced a defect: the transition query was shared, so R did not depend on which expert held the mass. Verified numerically -- all mass on expert 0 vs expert 4 gave an identical next distribution (True).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Accept the 6x slowdown but demand an explanation of how learning under chaining actually works.",
+   "quote": "The system is slower, but that is expected and ok, but we may need to re evaluate how learning with chaining works. Please explain how it works as of currently",
+   "ts": "2026-08-04T16:32:23"
+  },
+  {
+   "evidence": "Correct -- the original per-expert qproj had been collapsed to one shared q_route during the tensorisation. Restored as a per-expert SRC vector (dk=32 floats, not the sig_d x dk matrix): identical-next-distribution went True -> False, max abs difference 0.056. Commit 012a2e0.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Assert that per-source signatures existed originally and should be restored in modified form so routing depends on which expert emitted the message.",
+   "quote": "I thought we held predetermined signatures on where each message came from.\n\nThe original version would will need to be modified though.",
+   "ts": "2026-08-04T16:48:50"
+  },
+  {
+   "evidence": "Commit 59945e5: eemb maps full adapter weights (2*d*r) -> (K, SRC). Verified: mutating only expert 3 shifted its identity by 0.3361 while every other expert shifted 0.0. The originating user message is absent from this chunk, so attribution is inferred from Claude's 'your new request'.",
+   "outcome": "built-and-measured",
+   "paraphrase": "Apparent researcher request (text missing from the transcript) that an expert's routing identity be derived from its actual weights rather than be a free parameter.",
+   "quote": "[USER TURN NOT PRESENT IN CHUNK -- assistant opens at 17:07:32 with \"Now your new request.\" and proceeds to derive expert identity from weights]",
+   "ts": "2026-08-04T17:07:32"
+  },
+  {
+   "evidence": "Commit f4fc6c7: edec decoder, spawn_from, FAB_AE_W=0.05 autoencoder tie. Unit-verified (far query spawns, near query does not, edec(q_route(gist)) differentiable, AE round-trip 0.2699) and gate 12/12, but 'SPAWNED BY SPECIFICATION: 0' in the pilot -- it has never fired inside training. The absolute FAB_SPAWN_DIST=0.45 was then found structurally wrong.",
+   "outcome": "built-never-run",
+   "paraphrase": "Let the router emit the weights of the expert it wants; route to the nearest existing expert, and if nothing is close, decode the query into a new expert -- making discovery differentiable through the router.",
+   "quote": "Can we use this system for expert creation and discovery? Where routers output its desired expert (by weights), and we will route to closest, but if there is a wildly different, than the predicted to be, for the new to be created. \n\nThis way routers can be trained to discover and created.",
+   "ts": "2026-08-04T17:14:47"
+  },
+  {
+   "evidence": "Branch `rm-predict` created at f4fc6c7 (spaces illegal in git refs, flagged for the user); claude/hub-addition-1ueehb reset back to 012a2e0 so the mechanism lives only on the new branch.",
+   "outcome": "built",
+   "paraphrase": "Isolate the router-predicts-expert mechanism on its own branch named 'R M Predict'.",
+   "quote": "Since this is an interesting new mechanism, I’d like to have it be pushed as a separately named branch. Call it “R M Predict”",
+   "ts": "2026-08-04T17:48:01"
+  },
+  {
+   "evidence": "git checkout rm-predict; all later commits and the eventual push went there.",
+   "outcome": "built",
+   "paraphrase": "Make rm-predict the working branch going forward.",
+   "quote": "I want you to be working on this branch from now on",
+   "ts": "2026-08-04T17:50:08"
+  },
+  {
+   "evidence": "Claude had been holding the push on a gate for ~an hour without pushing; pushed immediately ('* [new branch] rm-predict'). Also revealed two concurrent `bash rerun.sh smoke` gates competing for CPU (Claude's error); one killed. Gate then reported 4731s vs the usual 400-650s.",
+   "outcome": "built",
+   "paraphrase": "Objection that the branch never appeared on GitHub, plus a demand to know what background work Claude is running.",
+   "quote": "Please push again. I don't see it in branches on github. Also, are you running anything in the background agenticaly or shell?",
+   "ts": "2026-08-04T18:36:40"
+  },
+  {
+   "evidence": "Answer: neither (2.100 b/B, inside the 2.064-2.200 band) and no (1 of 4096). The diagnostic added in response found the root cause: every expert embeds to an IDENTICAL identity vector (nearest-neighbour distance 0.000). VICReg on identities + training the embedder every step moved a toy from 1 to 2 used nodes (62.5/37.5).",
+   "outcome": "built-and-measured",
+   "paraphrase": "Ask for a direct better/worse verdict on the new run and specifically whether expert utilization improved.",
+   "quote": "Is it better or worse? \n\nRegardless, lets see the expert utilization now. Are more experts being used?",
+   "ts": "2026-08-04T19:18:23"
+  }
+ ],
+ "notes": "Coverage: read the full file, lines 1-8497, no gaps.\n\nAttribution caveats worth flagging for synthesis:\n(1) One apparently-substantial researcher request is MISSING from the transcript. At 2026-08-04T17:07:32 the assistant opens with \"Now your new request\" and proceeds to derive expert identity from full weights, but no USER turn appears between 17:07:24 (a tool RESULT) and that message. I recorded it in `ideas` with an explicit \"[USER TURN NOT PRESENT IN CHUNK]\" marker rather than inventing a quote.\n(2) Two of the researcher's decisions arrive via AskUserQuestion tool results rather than typed messages (\"Run both, GRU and transformer\" / \"Implement protection now\" at 2026-07-31T17:18:30; \"Low-rank nodes, target 10k-1M (Recommended)\" at 2026-08-03T12:17:51). These are genuine researcher choices but the wording is Claude's option text, not the human's prose.\n(3) Many \"USER\" entries in this format are tool RESULT blocks, stop-hook feedback, or task-notifications, not the human. I excluded all of those from `ideas`.\n\nStructural observation about this window: the researcher's questions were consistently more diagnostically productive than Claude's proposals. Five separate researcher questions (\"why 4 domains\", \"if we only had 64 experts how were there hundreds of domains\", \"is there an expert culling mechanism\", \"it said experts off\", \"are the experts chaining via router\") each uncovered a mechanism that was silently absent or inert. Claude explicitly acknowledged this three times, e.g. 2026-08-03T20:12:02: \"this was the third time in this session that something I'd reported as understood turned out to be a defect I hadn't looked at closely enough... Your instinct to keep pushing on 'check again' has been right each time.\"\n\nThe language results held steady and are the one genuinely positive thread: ~2.06-2.20 bits/byte against order-1 3.438, no memorization (held-out sometimes better than train), RETENTION drift +0.055 RETAINED, recognizable English morphology. The expert/routing thread produced six real bug fixes and zero movement in the outcome metric.\n\nWorking branch changed mid-window: claude/hub-addition-1ueehb (through 012a2e0) -> rm-predict (59945e5, f4fc6c7) at the researcher's instruction.",
+ "retractions": [
+  {
+   "claim": "rerun.sh's header stated 'FABRIC alone is worth +0.709 bits/byte'",
+   "correction": "Claude removed it as a stale claim already retracted earlier -- it was an eval-time knockout; the retrained ablation says 3.089 vs 3.090",
+   "ts": "2026-07-31T17:09:29"
+  },
+  {
+   "claim": "Competence protection shipped an hour earlier measured competence as an EMA of per-window loss on the windows a unit wins, against the population EMA",
+   "correction": "'That has a flaw that matters for a rule deciding who lives' -- a node winning EASY windows scores well regardless of skill; replaced with a leave-one-out counterfactual contribution",
+   "ts": "2026-07-31T19:15:38"
+  },
+  {
+   "claim": "'The pilot is ready' -- everything on the readiness list verified on real runs, smoke 240s 10/10",
+   "correction": "2026-08-02T20:14:07: 'Not ready — my last change broke it.' The signature-width fix Claude had just certified killed both pilot arms at the first rekey",
+   "ts": "2026-08-02T06:52:56"
+  },
+  {
+   "claim": "Pilot would take ~15-20 min per arm and the 20 GB run ~14 days",
+   "correction": "The researcher's own [rate] line gave 1533 steps/min -> ~35 min per arm and ~19 days for 20 GB. Claude's estimate came from the [probe] lower bound. (Later runs reached 2637 steps/min, ~19 min/arm)",
+   "ts": "2026-08-02T20:14:07"
+  },
+  {
+   "claim": "Fixing the 42%-coverage gap by recomputing _sigw live as the tokenizer grows (verified at 100% coverage)",
+   "correction": "'Updating it live was wrong in principle, not just in implementation' -- a width that changes mid-run makes centroids incomparable; the width is now fixed for the run's lifetime",
+   "ts": "2026-08-02T05:36:11"
+  },
+  {
+   "claim": "The loss of optimizer moments on resume is inherent -- growth adds param groups and remapping across a different flattening would attach moments to the wrong tensors, so the ~1000-step Adam re-warm is safer than the fix",
+   "correction": "'That reasoning was wrong... it was a one-line defect.' fab.grow() returns [] but the caller still called add_param_group, appending an empty group per growth event",
+   "ts": "2026-08-03T19:13:54"
+  },
+  {
+   "claim": "COMPETENCE PROTECTION reports 'spared 0' only because toy runs never reach capacity pressure; the pilot at 52k steps will give it a live code path",
+   "correction": "2026-08-03T19:58:42: 'The protection was wired into router.manage, on a path that never executed. I said the pilot would exercise it — that was wrong.' There was no expert culling at all",
+   "ts": "2026-08-02T06:47:11"
+  },
+  {
+   "claim": "Claude predicted the 1-layer GRU would be the ceiling for proper language and that the transformer arm was needed to test it",
+   "correction": "'The GRU beat the transformer' -- 2.064 vs 2.130 b/B and coherence 0.17 +/- 0.08 vs 0.02 +/- 0.01. Restated at 22:10:46: 'That was my prediction and it was wrong'",
+   "ts": "2026-08-03T21:03:23"
+  },
+  {
+   "claim": "The pilot report's COHERENCE verdict read 'ON-TOPIC -- close to what real text of this corpus scores'",
+   "correction": "Claude tempered it himself: the verdict fires on best >= ceiling - 0.15, and with a ceiling of only 0.30 that margin does most of the work; honestly it is ~57% of what real English scores",
+   "ts": "2026-08-03T21:03:23"
+  },
+  {
+   "claim": "Discovery, off-policy exploration and rank-slice crossover would fix the routing concentration (toy flipped to SPECIALIZED 0.206 vs null 0.054)",
+   "correction": "In the pilot they fired 3081/436/1770 times and moved nothing; bits/byte got WORSE (2.064 -> 2.200). Root cause was batch-granularity routing, which all three were downstream of",
+   "ts": "2026-08-04T01:50:43"
+  },
+  {
+   "claim": "Hypothesis that single-corpus English produces one dense signature region, so no routing rule can spread traffic -- Claude asked the researcher to run probe_ckpt_geometry.py on the checkpoint",
+   "correction": "The in-report SIGNATURE SPACE diagnostic falsified it outright: mean pairwise cosine distance 0.871, 14.5 effective dimensions of 64, 50 distinct nearest-experts -> SEPARABLE; concentration is the router's doing",
+   "ts": "2026-08-04T02:45:26"
+  },
+  {
+   "claim": "'Found it' -- the learned routing term is a raw unbounded dot product added to a bounded cosine, so one expert's key can grow and dominate every input; a winner-take-all amplifier",
+   "correction": "Normalising both terms made the toy WORSE (3 used nodes -> 1). Shipped behind FAB_KEY_NORM=0 rather than asserted as a fix: 'four unvalidated router changes in a row is enough'",
+   "ts": "2026-08-04T02:45:53"
+  },
+  {
+   "claim": "'PONDER_WARM=8000 never completes, so the fabric's schedule has never finished' -- the argument Claude used across several rounds to justify the pilot's length; plus quoted figures 'router HALTs 90%, mean routed depth 0.10 of 4'",
+   "correction": "Under SOCIETY=1 the chaining path never runs and _dep is identically zero, so PONDER_WARM has no effect whatsoever; the halt/depth figures come from a report-time probe of a path no run used",
+   "ts": "2026-08-04T11:53:12"
+  },
+  {
+   "claim": "Recommending SOCIETY=0 as 'the more interesting arm to run'",
+   "correction": "'I recommended SOCIETY=0 having already written the comment saying the chaining path is O(N)... That was careless and it cost you a run' -- it OOM'd at 11.39 GiB",
+   "ts": "2026-08-04T13:58:58"
+  },
+  {
+   "claim": "Collapsing the per-expert query projection into one shared q_route was a pure scale optimisation (345ms -> 15ms at N=65k) with 'same expressiveness class'",
+   "correction": "'I optimised away the thing that made the chain a chain' -- it removed the transition's dependence on which expert held the mass, verified numerically as an identical next distribution",
+   "ts": "2026-08-04T16:49:15"
+  },
+  {
+   "claim": "Spawn-by-specification is built and unit-verified; FAB_SPAWN_DIST=0.45 may need tuning",
+   "correction": "After the pilot: SPAWNED BY SPECIFICATION 0, and 'the criterion is structurally wrong, not just mistuned' -- an absolute distance to the nearest of N identities shrinks as N grows",
+   "ts": "2026-08-04T17:26:26"
+  },
+  {
+   "claim": "VICReg on identities plus per-step embedder training fixed the identity collapse (isolated test 0.0208 -> 0.2168)",
+   "correction": "In a real run the reported nearest-neighbour distance still printed 0.000; Claude noted this is his own instrumentation bug (recorded only inside spawn_from) so the number is stale rather than current, and refused to claim the fix worked -- used nodes only 1 -> 2, still INTERCHANGEABLE",
+   "ts": "2026-08-04T19:30:45"
+  },
+  {
+   "claim": "prompt.py's remaining duplicated MiniLM/TinyTransformer/SigEncoder are latent and deliberately not changed; the read-back gate catches drift",
+   "correction": "On the researcher's insistence ('Fix the issues you mentioned, even though you didn't touch') all three were removed via nv= overrides; and the read-back gate later caught the ensemble-logic copy breaking anyway, which Claude noted only worked because the drift was fatal rather than subtle",
+   "ts": "2026-08-03T18:20:42"
+  }
+ ],
+ "span": "2026-07-31T15:20:17 .. 2026-08-04T19:31:10",
+ "tested": [
+  {
+   "result": "exit 0, 0 tracebacks; epochs resample fresh, step keeps counting, vocab 512->530, memory 0->5181; phase banner printed 'active processes [2, 3]' for processes that do not exist -> exposed the PHASE_SCHED bug",
+   "ts": "2026-07-31T15:22:02",
+   "what": "First-ever multi-epoch run (EPOCHS=3, STREAM_LEN=30000, English+py)"
+  },
+  {
+   "result": "UNLEARN whole process 0: target 3.946->3.946, others 3.352->3.352 (LOCAL). COHERENCE: model ALONE 0.47 +/- 0.27, model+MEMORY 0.59 +/- 0.12, ceiling 1.00, floor 0.50 -> INCOHERENT, memory NEUTRAL",
+   "ts": "2026-07-31T15:25:06",
+   "what": "NP=2 faded-process unlearn + coherence on 2 corpora"
+  },
+  {
+   "result": "model ALONE 0.07 +/- 0.05 | model+MEMORY 0.05 +/- 0.03 | ceiling 0.38 | floor 0.05 (21 domains) -> INCOHERENT",
+   "ts": "2026-07-31T16:21:29",
+   "what": "English-only run with self-assembled coherence reference"
+  },
+  {
+   "result": "SEG_CONTIG=0 (random offset): 31 LIVE domains, order-1 3.500, MODEL 3.349. SEG_CONTIG=1 (contiguous): 13 LIVE, order-1 3.498, MODEL 3.513. More than half of English's domains were seek artefacts",
+   "ts": "2026-07-31T16:38:33",
+   "what": "SEG_CONTIG A/B, same seed, only read mode differs"
+  },
+  {
+   "result": "5 of 64 nodes win any of 32 held-back windows; SPECIALIZATION 0.179 vs shuffled null 0.161 +/- 0.054 -> INTERCHANGEABLE",
+   "ts": "2026-07-31T17:02:36",
+   "what": "First EXPERTS specialization measurement (64-node fabric)"
+  },
+  {
+   "result": "exit 0; order-1 3.494 | THIS MODEL 4.304. Side-by-side toy later: gru 5.810 vs transformer 5.884",
+   "ts": "2026-07-31T17:23:24",
+   "what": "MODEL=transformer path run for the first time in the project"
+  },
+  {
+   "result": "population (2 experts blended) 3.079 b/B | best single expert (node 48) 3.082 | population buys +0.004 -> NOT AGGREGATE",
+   "ts": "2026-07-31T19:06:58",
+   "what": "First SUFFICIENCY measurement"
+  },
+  {
+   "result": "ACROSS THE RUN BOUNDARY: eng was 5.171 @ step 172 -> now 4.466, -0.706 +/- 0.162 (better); py 4.680 +/- 0.093 NEW. Claude cautioned the 172-step baseline makes this uninterpretable as a continual-learning result",
+   "ts": "2026-08-02T06:46:36",
+   "what": "pilot -> pilot-add chain end to end (first time)"
+  },
+  {
+   "result": "CLEAN smoke rc=0 | 240s | 10/10 -- the 10x was CPU contention from three concurrent jobs, not a regression",
+   "ts": "2026-08-02T06:52:43",
+   "what": "Re-timing the smoke gate on an idle box after a 4967s run"
+  },
+  {
+   "result": "BOTH ARMS CRASHED at the first rekey: ValueError: expected sequence of length 384 at dim 1 (got 426). Before dying: 64/64 experts by step 1295, zero domain culls for 1000 steps, 1533 steps/min (~1.04 GB/day), encoder separation 0.89-0.93",
+   "ts": "2026-08-02T19:55:43",
+   "what": "First real pilot launch on the GH200 (GRU then transformer)"
+  },
+  {
+   "result": "Before: N=64 1.7ms, 1024 2.2ms, 8192 26.2ms, 65536 345.2ms. After shared query projection: 1.6ms, 1.2ms, 1.5ms, 15.2ms (23x faster, flat to ~10k); params 0.3M/4.2M/33.8M/270.5M; N=1M OOM on the 16GB CPU box",
+   "ts": "2026-08-03T12:25:15",
+   "what": "Fabric scaling benchmark, society(top-4), before and after collapsing the per-expert query matrix"
+  },
+  {
+   "result": "geometric +10%: 4096 experts by step 3101 in 63 growth events. Old +3 ramp: 243 experts by step 60,000 in 80 events",
+   "ts": "2026-08-03T13:10:12",
+   "what": "Geometric vs additive expert growth ramp"
+  },
+  {
+   "result": "236 nodes, 3 win any of 32 windows; SPECIALIZATION 0.086 vs null 0.089 +/- 0.038 -> INTERCHANGEABLE; BREADTH: widest 4, 40 experts at cap, median 2",
+   "ts": "2026-08-03T14:33:07",
+   "what": "EXPERTS section after the tensor refactor (stale fab.keys fixed)"
+  },
+  {
+   "result": "[experts @ 1600] culled 9 spared 8 -> 206 live; [1700] culled 8 spared 5; [1800] culled 5 spared 8. COMPETENCE PROTECTION fired for the first time ever (previously always 'spared 0')",
+   "ts": "2026-08-03T20:02:25",
+   "what": "First run with fab.manage() expert culling"
+  },
+  {
+   "result": "GRU: uniform 3.780 | order-0 3.562 | order-1 3.438 | MODEL 2.064 (+1.375). MEMORIZATION train 2.074 vs held-out 2.064, gap -0.010 UNDERFIT. RETENTION drift +0.055 RETAINED. COHERENCE 0.17 +/- 0.08 (ceiling 0.30, floor 0.03). 1 of 4096 nodes used (node 3923, 100%). SUFFICIENCY 2.055 vs best single 2.059. 2637 steps/min. Transformer: MODEL 2.130, coherence 0.02 +/- 0.01",
+   "ts": "2026-08-03T21:01:38",
+   "what": "PILOT RUN 1 on the GH200, GRU and transformer, 52k steps, 32MB English"
+  },
+  {
+   "result": "2 of 256 used; SPECIALIZATION 0.206 vs null 0.054 +/- 0.055 -> SPECIALIZED for the first time in the project; DISCOVERY 871 novelty handoffs, 137 off-policy routings, 127 crossover births",
+   "ts": "2026-08-03T22:32:26",
+   "what": "Toy run with discovery + off-policy exploration + rank-slice crossover"
+  },
+  {
+   "result": "GRU MODEL 2.200 (train 2.075, gap +0.125 UNDERFIT); transformer 2.184 (train 2.289, gap -0.105). 3 of 4096 used; SPECIALIZATION 0.035 vs null 0.087 +/- 0.063 -> INTERCHANGEABLE. DISCOVERY 3081 handoffs, 436 off-policy, 1770 crossover births -- fired hard, outcome unchanged, bits/byte worse",
+   "ts": "2026-08-04T01:49:50",
+   "what": "PILOT RUN 2 (after discovery/crossover/exploration)"
+  },
+  {
+   "result": "200 held-back windows: mean pairwise cosine distance 0.871, spread 0.242, effective dimensions 14.5 of 64, distinct nearest-experts 50 of 128 live -> SEPARABLE. Falsified Claude's single-corpus-collapse hypothesis",
+   "ts": "2026-08-04T02:45:05",
+   "what": "New SIGNATURE SPACE diagnostic (does the encoder separate the material?)"
+  },
+  {
+   "result": "Made it WORSE on the toy: used nodes 3 -> 1, SPECIALIZATION 0.000. Shipped behind FAB_KEY_NORM=0 rather than as a fix",
+   "ts": "2026-08-04T02:49:21",
+   "what": "Normalising the learned routing key term (both terms as cosines)"
+  },
+  {
+   "result": "SELECTION OUT: 152 culled, 72 for SUSTAINED error, 173 spared as load-bearing. LINEAGE: 91 distinct parents, largest share 4% (cap 20%). Still 1 of 256 used, SPECIALIZATION 0.000",
+   "ts": "2026-08-04T03:27:55",
+   "what": "Toy run with sustained-error cull + parent quota"
+  },
+  {
+   "result": "SOCIETY=1 -> NO CHAINING (composition machinery never runs, ponder cost 0 by construction). SOCIETY=0 -> CHAINING ACTIVE (transition matrix, absorbing HALT)",
+   "ts": "2026-08-04T11:57:05",
+   "what": "CHAINING probe on both fabric paths"
+  },
+  {
+   "result": "CUDA OutOfMemoryError, tried to allocate 11.39 GiB at 972/4096 experts, step ~2960. Run lost",
+   "ts": "2026-08-04T13:37:02",
+   "what": "PILOT with SOCIETY=0 (chaining) on the GH200"
+  },
+  {
+   "result": "0.00 of 4 (chaining on, nothing chained) vs 0.60 of 4. Toy bits/byte 3.663 vs order-1 3.503",
+   "ts": "2026-08-04T13:48:12",
+   "what": "Chaining depth with FAB_MIN_STEPS=0 vs 2"
+  },
+  {
+   "result": "MODEL 2.154 (beats order-1 by 1.284); mean routed depth 0.50 of 4, halt 0.50; 445 steps/min (vs 2637 society); 9781 experts grown to hold 4096 live (~5700 culled); LINEAGE 195 parents, 2% max share; 1 of 4096 used",
+   "ts": "2026-08-04T16:32:51",
+   "what": "PILOT RUN with chaining after the top-k hop fix"
+  },
+  {
+   "result": "all mass on expert 0 vs expert 4 -> identical next distribution: True (memoryless). After restoring per-expert SRC: False, max abs difference 0.056",
+   "ts": "2026-08-04T16:34:42",
+   "what": "Direct test of whether the transition depends on which expert holds the mass"
+  },
+  {
+   "result": "Mutating ONLY expert 3: identity shift 0.3361, every other expert 0.0 -> identity follows weights: True",
+   "ts": "2026-08-04T17:10:51",
+   "what": "Does derived identity follow weights?"
+  },
+  {
+   "result": "far query -> spawned slot 4, n_live 4->5; near query -> no spawn; edec(q_route(gist)) differentiable wrt q_route, shape (1,1024)=2*d*r; autoencoder round-trip loss 0.2699",
+   "ts": "2026-08-04T17:26:09",
+   "what": "Unit test of spawn-by-specification"
+  },
+  {
+   "result": "MODEL 2.100 (order-1 3.441). 1 of 4096 used, SPECIALIZATION 0.000. SPAWNED BY SPECIFICATION: 0. SELECTION OUT 4293 culled (126 sustained error), 7038 spared. LINEAGE 80 parents, 4% max share",
+   "ts": "2026-08-04T19:18:48",
+   "what": "PILOT RUN 3 on rm-predict (embedder + spawn)"
+  },
+  {
+   "result": "spawn on FAR query True (gap 0.988 vs typ 0.083), NEAR query False. In a real run: 'last query was 0.000 from its nearest identity; typical nearest-neighbour distance 0.000' -> every expert embeds to the SAME identity vector (representation collapse)",
+   "ts": "2026-08-04T19:20:57",
+   "what": "Relative spawn threshold (FAB_SPAWN_MULT) unit test + the diagnostic it printed"
+  },
+  {
+   "result": "typical nearest-neighbour identity distance 0.0208 before -> 0.2168 after 300 steps of embedder training",
+   "ts": "2026-08-04T19:24:37",
+   "what": "VICReg anti-collapse on expert identities, isolated"
+  },
+  {
+   "result": "used nodes 1 -> 2 (node 3: 62.5%, node 41: 37.5%); SPECIALIZATION 0.002 vs null 0.041 +/- 0.027 -> still INTERCHANGEABLE; the reported NN distance still printed 0.000 because it is only recorded inside spawn_from",
+   "ts": "2026-08-04T19:30:30",
+   "what": "Toy run with VICReg + embedder trained every step (not every 50)"
+  },
+  {
+   "result": "gate rc=0 | 4731s | 12/12 (the 4731s reflects two gates running concurrently; clean solo runs are 400-650s)",
+   "ts": "2026-08-04T18:45:56",
+   "what": "Full 12-arm gate on rm-predict (embedder + spawn)"
+  }
+ ],
+ "wip": [
+  "ENC_CREG=0.0 -- the one audit finding the researcher never ruled on. Claude raised it at least five times ('the code's own comment says encoder collapse on single-corpus runs is not a risk but a certainty') and it remains off, now printed in the [config] banner every run.",
+  "Instrumenting the per-window logit decomposition (grounded cosine vs learned bilinear vs novelty bias) to find which term flattens the routing distribution. Claude recommended this as 'a measurement, not a change' three separate times and never did it.",
+  "The routing-concentration problem itself: still 1 of 4096 experts used at chunk end after six mechanism changes. Every input is measurably healthy (diverse lineages, two-way selection, discovery firing, separable signature space) and the output is unchanged.",
+  "Spawn-by-specification has never fired inside a training run (SPAWNED BY SPECIFICATION: 0).",
+  "The stale spawn-gap instrumentation fix -- Claude was mid-edit at the final timestamp (2026-08-04T19:31:10); the identity spread is still not measured unconditionally.",
+  "The last batch on rm-predict (relative spawn threshold, VICReg on identities, per-step embedder training, instrumentation fix) is UNCOMMITTED and UNGATED at chunk end.",
+  "FAB_KEY_NORM=1 A/B at pilot scale -- suggested as a one-env-var experiment, never run.",
+  "ROUTE_T=0.1 (tuned when N was 64) and DIV_W=0.0 remain untouched levers.",
+  "pilot-add at real scale -- the actual forgetting number the researcher's plan turns on. Only ever run at 172-step-baseline toy scale.",
+  "The 20 GB English run (the original target) has never been started.",
+  "probe_stability has still never completed a run (flagged as known-open on 2026-08-02, never revisited).",
+  "Claude could not reproduce the tokenizer's minting path outside the training loop (vocab stuck at 256, 0 multi-byte tokens), so the researcher's question about whether the tokenizer or the model spelled 'Leonardo' was answered only indirectly via the IS IT COMPOSING? metric.",
+  "The feedback loop Claude flagged but could not test: routing identity is now a function of weights that routing itself trains (weights -> identity -> routing -> material -> weights), damped only by FAB_EMB_EVERY=50. Stability at 4096 experts over 52k steps is unknown.",
+  "Whether chaining (SOCIETY=0) is actually better than voting is unmeasured -- 2.154 vs 2.064/2.200 is inside the band, and the per-source-routing restoration has never run at pilot scale."
+ ]
+}
