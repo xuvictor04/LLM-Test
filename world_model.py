@@ -103,6 +103,8 @@ class DynamicsPopulation(nn.Module):
         """Add a predictor CLONED from the fittest (preserve learning), keyed at the mispredicted region. Returns the
         new params so the CALLER adds them to the optimizer (mirrors fabric growth). None if at capacity."""
         if s.n() >= s.nmax: return None
+        s.grown = getattr(s, "grown", 0) + 1     # counted for the DID IT FIRE audit: growth that never happens is
+        #   indistinguishable from growth that is off, and this population has never been shown to earn its place.
         valid = [i for i in range(s.n()) if not torch.isnan(s.fit[i])]
         best = min(valid, key=lambda i: float(s.fit[i])) if valid else 0
         new = ForwardModel(s.d_lat, s.hid).to(s.keys[0].device); new.load_state_dict(s.preds[best].state_dict())

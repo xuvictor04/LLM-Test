@@ -32,6 +32,36 @@ except Exception: pass
 # FAB_MIN_STEPS=2 while the code ran 0 -- and each was fixed individually while the next one was already there.
 _ENV_ASKED = {}                                            # name -> the value the environment explicitly set
 _ENV_READ = set()                                          # every key the code ever ASKED FOR, set or not
+# === DID IT FIRE? =================================================================================================
+# The recurring failure in this project is not a crash, it is a mechanism that RUNS AND DOES NOTHING. FAB_RESCUE
+# fired zero times for a whole investigation. maybe_deepen was never called in a real run because its cadence
+# could not coincide with a flush step. TOK_ANCHOR's loss term has never once entered the loss. MEM_PER_EXPERT was
+# documented OFF and read 1 for the project's entire life. Memory eviction ranked a `use` that was 0 everywhere.
+# None of those produced an error; every one of them produced a log that looked like success, and several produced
+# a published conclusion about a code path that never executed.
+#
+# The countermeasure that has worked, every time, is a COUNT IN THE LOG. This generalises it: a mechanism is ARMED
+# when the configuration says it should do something, and the end-of-run report names every armed mechanism that
+# fired ZERO times. The distinction matters and is the whole design -- "off by configuration" is not a warning,
+# "on by configuration and inert in practice" is, and conflating them is how a warning becomes noise nobody reads.
+#
+# Deliberately DERIVED at report time from counters the subsystems already keep, rather than by scattering _fire()
+# calls through the loop. A counter that must itself be called correctly in twenty places is one more thing that
+# can silently not fire, which is the bug this exists to catch.
+def _cfg(k):
+    """A knob's live value, read WITHOUT restating its default.
+
+    The audit must not be able to disagree with the registry. Restating defaults is exactly what _env() raises
+    SystemExit over -- and it did, here: this function replaced a first version that guessed FAB_RESCUE=0.35
+    against a declared 0.0 and killed the run at the report. Reading _SPEC directly makes that class of mistake
+    impossible and keeps the audit correct as defaults move.
+
+    Deliberately NOT routed through _env(): that would add these keys to _ENV_READ and make the 'nothing read
+    this' audit think a knob is live merely because the report looked at it."""
+    v = os.environ.get(k, _SPEC.get(k, (None, None))[1])
+    try: return float(v)
+    except (TypeError, ValueError): return v
+
 # === THE KNOB REGISTRY =======================================================================================
 # EVERY environment knob this file reads, in one place, with its type and default. Before this existed the
 # 279 knobs were read inline at their point of use across 5,500 lines, so there was nowhere to look to see
@@ -2791,7 +2821,7 @@ class DomainAssembler:
         s.rad = {}; s._radp = None                                        # per-domain radius + POOLED radius (young domains)
         s.tokc = {}                                                       # domain -> token counts (the PREDICTIVE prior)
         s.visits = {}; s.bornb = {}; s.nb = 0                             # recurrence: separate entries, BOUNDARY clock
-        s.created = 0; s.capped = 0; s.folded = 0
+        s.created = 0; s.capped = 0; s.folded = 0; s.n_merged = 0; s.n_culled = 0
     def _dirty(s): s._C = None
     def _mat(s):
         if s._C is None:
@@ -3017,6 +3047,11 @@ class DomainAssembler:
                 culled += 1; s._dirty()
         for i in s.act: s.act[i] *= DOM_DECAY                             # DECAY -> `act` reflects RECENT use, so a domain
         s.comp = {i: v for i, v in s.comp.items() if i in s.cent}         # competence follows the population
+        # CUMULATIVE, not just this call's tally. `merged` here is a local and `s.merged` is a DICT of fold
+        # provenance, so nothing anywhere held a running count -- the DID IT FIRE audit reported both as
+        # "NO COUNTER -- cannot say whether it fired", which is the honest answer and a gap worth closing.
+        s.n_merged = getattr(s, "n_merged", 0) + merged
+        s.n_culled = getattr(s, "n_culled", 0) + culled
         return merged, culled                                             #   that stops being fed becomes cullable
 
 @torch.no_grad()
@@ -3986,7 +4021,7 @@ def main():
         _fired[_k] = step; return True
     # ---- NO-COMPROMISE PERF: amortized re-key + shift-gated encoder (keep FULL drift-survival + FULL responsiveness) ----
     REKEY_AMORTIZED = bool(_i("REKEY_AMORTIZED", 1))       # spread the SAME whole-store re-encode across steps -> no periodic spike,
-    _rk = {"ii": None, "cur": 0}                           #   SAME per-entry refresh rate + freshness. Nothing removed.
+    _rk = {"ii": None, "cur": 0, "done": 0}                           #   SAME per-entry refresh rate + freshness. Nothing removed.
     # REKEY_CHUNK: do C steps' worth of re-keying in ONE call every C steps instead of a small call EVERY step.
     # Identical total work and identical per-entry refresh RATE; an entry's refresh can land up to C steps later than
     # it would have. Profiling showed the loop is bound by _model_key CALL COUNT (~1952 calls per 976 steps against
@@ -3998,6 +4033,7 @@ def main():
         if _rk["ii"] is None or _rk["cur"] >= _rk["ii"].numel():        # snapshot exhausted -> take a fresh one (once per full pass)
             valid = mem.active & (~mem.is_wrong()) & (~mem.is_unverified())   # only entries that can be READ (skip re-keying dead weight)
             _rk["ii"] = valid.nonzero(as_tuple=True)[0]; _rk["cur"] = 0
+            _rk["done"] += 1                                 # completed passes over the store, for DID IT FIRE
             if _rk["ii"].numel() == 0: return
         per = max(1, -(-_rk["ii"].numel() // max(1, REKEY_EVERY))) * chunk   # ceil: cover the whole snapshot once per REKEY_EVERY steps
         a = _rk["cur"]; b = min(a + per, _rk["ii"].numel()); idx = _rk["ii"][a:b]
@@ -4675,6 +4711,7 @@ def main():
     FAB_LR_MAXR = _f("FAB_LR_MAXR", 4.0)                   # cap on own-rate / global-rate, see the step site
     FAB_LR_BOOST = _f("FAB_LR_BOOST", 2.0)                 # multiply the own-rate for the cull-eligible bottom
     _lrown_said = [-1]; _elig_said = [-1]; _cycwarn = [False]
+    _lrboost = [0]; _memw = [0]        # mechanisms with no counter of their own -- see the DID IT FIRE report
     _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
     _lr_prev = [0.0]                                       # last applied rate, to detect a cosine restart
     # === PROBATION: MINT PROVISIONALLY, JUDGE ON EVIDENCE ====================================================
@@ -5392,6 +5429,7 @@ def main():
                     _bidx = torch.tensor(_rank[:_nb2] or [0], device=_oa.device, dtype=torch.long)
                     if _nb2:
                         _oa = _oa.clone(); _oa[_bidx] = _oa[_bidx] * FAB_LR_BOOST
+                        _lrboost[0] += _nb2
                 _own_lr = (_oa / _lrv).clamp(max=FAB_LR_MAXR)
                 _pa = fab.A.detach()[:_nl].clone(); _pb = fab.B.detach()[:_nl].clone()
             om.step(); om.zero_grad()
@@ -5546,7 +5584,7 @@ def main():
                 #   FAB_NMAX (4096+), so an unfolded id indexes past the partition table. Owners are a memory-eviction
                 #   scheme, not an identity: several experts sharing one LRU block is fine, an out-of-range write
                 #   is not. Sizing owners to FAB_NMAX instead would have given 200000/4096 = 48 entries per expert.
-                mem.write_batch([(y[_b], _bd[_b], surprise[_b],   # BATCH_W separate tiny encodes -- the measured
+                _memw[0] += mem.write_batch([(y[_b], _bd[_b], surprise[_b],   # BATCH_W separate tiny encodes -- measured
                                   _C[_b * _n1:(_b + 1) * _n1],    # bottleneck was CALL COUNT, not FLOPs
                                   _posv(_b, _n1))
                                  for _b in range(x.size(0))], _model_key, owners=_own)
@@ -5554,8 +5592,8 @@ def main():
                 _K = None if _pre else mem_key(x)
                 for _b in range(x.size(0)):                 # per-window: each carries its OWN domain + source position
                     _cb = None if _C is None else _C[_b * _n1:(_b + 1) * _n1]
-                    mem.write(None if _pre else _K[_b * _n1:(_b + 1) * _n1], y[_b], src=_bd[_b], surprise=surprise[_b],
-                              ctx=_cb, key_fn=(_model_key if _pre else None),
+                    _memw[0] += mem.write(None if _pre else _K[_b * _n1:(_b + 1) * _n1], y[_b], src=_bd[_b],
+                              surprise=surprise[_b], ctx=_cb, key_fn=(_model_key if _pre else None),
                               pos=_posv(_b, _n1))
             # === READ PROBE: GIVE THE EVICTION RULE A REAL SIGNAL =====================================
             # mem.read() was called from exactly two places, generate() and bpb_true() -- both EVAL. Training
@@ -6464,6 +6502,77 @@ def main():
     sizes = {d: int(asm.size.get(d, sum(by[d].values()))) for d in by}
     MIN_SIZE = _i("GENUINE_MIN", 20); SIL_MIN = _f("GENUINE_SIL", 0.10)
     live = [d for d in by if d in asm.cent]               # domains that survived management (still have a centroid)
+    # === DID IT FIRE? ==============================================================================
+    # Every mechanism this run armed, and whether it actually did anything. See the _ARMED registry at the top
+    # of the file for why this exists. Read the ZERO lines first: an armed mechanism that never fired means the
+    # run measured a system without it, whatever the config banner says.
+    def _fire_report():
+        # EVERY ROW IS INDEPENDENTLY FAULT-TOLERANT, and that is not defensive habit -- the first version of this
+        # report died whole on one NameError (FAB_GROW is not in this scope) and printed nothing but its own
+        # failure. An audit that any single bad reference can silence is the exact class of thing it exists to
+        # catch. Counts and armed-ness are read through lambdas so a broken row degrades to "?" and the other
+        # thirty still print. Config is read via _i/_f/_env rather than main()'s locals, which are not visible here.
+        _c = []
+        def _r(nm, get_n, get_armed=lambda: True, why=""):
+            try: n = get_n(); n = None if n is None else int(n)
+            except Exception: n = None
+            try: a = bool(get_armed())
+            except Exception: a = True
+            _c.append((nm, n, a, why))
+        _fb = fab if (FABRIC and fab is not None) else None
+        if _fb is not None:
+            _r("fabric.grow",       lambda: _fb.grown,      lambda: _cfg("FAB_GROW"),      "FAB_GROW=0")
+            _r("fabric.spawn",      lambda: _fb.spawned,    lambda: _cfg("FAB_SPAWN"),     "FAB_SPAWN=0")
+            _r("fabric.cull",       lambda: _fb.removed,    lambda: _cfg("MANAGE"),        "MANAGE=0")
+            _r("fabric.spare",      lambda: _fb.spared,     lambda: _cfg("COMP_PROTECT"),  "COMP_PROTECT=0")
+            _r("fabric.failed_out", lambda: _fb.failed_out, lambda: _cfg("COMP_PROTECT"),  "COMP_PROTECT=0")
+            _r("fabric.rescue",     lambda: _fb.n_rescued,  lambda: _cfg("FAB_RESCUE") > 0, "FAB_RESCUE=0")
+            _r("fabric.crossover",  lambda: _fb.crossed,    lambda: _cfg("FAB_XOVER") > 0,  "FAB_XOVER=0")
+            _r("fabric.replicate",  lambda: _fb.replicated, lambda: _cfg("FAB_REPLICATE"), "FAB_REPLICATE=0")
+            _r("fabric.explore",    lambda: _fb.explored,   lambda: _cfg("FAB_EXPLORE") > 0, "FAB_EXPLORE=0")
+            _r("fabric.cull_eligible", lambda: _fb.n_elig,  lambda: _cfg("MANAGE"),
+               "nobody reached the use-grace, so the cull had nothing to rank")
+            _r("fabric.lr_boost",   lambda: _lrboost[0],
+               lambda: _cfg("FAB_LR_OWN") and _cfg("FAB_LR_BOOST") > 1.0, "FAB_LR_BOOST=1 or FAB_LR_OWN=0")
+        _r("memory.write",       lambda: _memw[0])
+        _r("memory.read_probe",  lambda: _mprobe["n"],       lambda: _cfg("MEM_PROBE_EVERY"), "MEM_PROBE_EVERY=0")
+        _r("memory.floor_block", lambda: mem._floor_blocked, lambda: _cfg("MEM_SRC_FLOOR") > 0, "MEM_SRC_FLOOR=0")
+        _r("memory.rekey_pass",  lambda: _rk["done"],        lambda: _cfg("REKEY_EVERY"),     "REKEY_EVERY=0")
+        _r("domains.create",     lambda: asm.created)
+        _r("domains.merge",      lambda: asm.n_merged, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
+        _r("domains.cull",       lambda: asm.n_culled, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
+        _r("tokenizer.mint",     lambda: TOK.vocab_size - int(_cfg("SEED_VOCAB")), lambda: _cfg("TOK_ONLINE"), "TOK_ONLINE=0")
+        _r("world.grow",         lambda: world_fwd.grown,
+           lambda: _cfg("WORLD_MODEL") and _cfg("WORLD_GROW"), "WORLD_MODEL=0 or WORLD_GROW=0")
+        for _tn in ("DIV_W", "RECON_W", "CHAIN_SUP", "TOK_ANCHOR"):
+            _r(f"loss.{_tn}", (lambda t=_tn: _termfired.get(t, 0)), (lambda t=_tn: _cfg(t) > 0), f"{_tn}=0")
+        # IND_W IS NOT ARMED ON THE CHAINING PATH, and calling it armed would be a permanent false alarm on every
+        # default run. It needs separable per-expert logits, which a composed walk does not produce -- the run
+        # already says so on its own [config] line. Off-by-architecture is not the same as on-and-inert.
+        _r("loss.IND_W", lambda: _termfired.get("IND_W", 0),
+           lambda: _cfg("IND_W") > 0 and _cfg("SOCIETY"), "IND_W=0, or chaining (no separable per-expert logits)")
+        print(f"\n=== DID IT FIRE? every armed mechanism, and whether it did anything this run ===")
+        print(f"  Read the ZERO lines first. An ARMED mechanism that never fired means this run measured a system")
+        print(f"  WITHOUT it, whatever the [config] banner says -- which has happened here at least six times.")
+        _dead = [c for c in _c if c[2] and c[1] == 0]
+        _blind = [c for c in _c if c[2] and c[1] is None]
+        for nm, n, armed, why in _c:
+            if not armed:   print(f"  off     {nm:24s}       --   {why}")
+            elif n is None: print(f"  ?       {nm:24s}       --   NO COUNTER -- cannot say whether it fired")
+            elif n == 0:    print(f"  !! ZERO {nm:24s} {n:>8}   ARMED AND INERT")
+            else:           print(f"  fired   {nm:24s} {n:>8}")
+        if _dead:
+            print(f"  >> {len(_dead)} ARMED MECHANISM(S) DID NOTHING: {', '.join(d[0] for d in _dead)}")
+        if _blind:
+            print(f"  >> {len(_blind)} could not be read: {', '.join(b[0] for b in _blind)} -- a missing counter is")
+            print(f"     indistinguishable from a mechanism that never ran. Add one before trusting this line.")
+        if not _dead and not _blind:
+            print(f"  >> every armed mechanism fired at least once.")
+    try: _fire_report()
+    except Exception as _e:
+        print(f"\n[did-it-fire] report FAILED ({type(_e).__name__}: {_e}) -- the audit itself is the thing that "
+              f"silently stopped working. Fix it before trusting a run's mechanism counts.")
+
     print(f"\n=== domain genuineness ({len(live)} live domains: size | cohesion | separation | silhouette=coh+sep-1) ===")
     # SEPARATION IS REPORTED TWICE, ON PURPOSE. `sep` is a MIN over the other N-1 centroids -- an extreme order
     # statistic, so it shrinks mechanically as the population grows and penalises exactly the fragmentation the
