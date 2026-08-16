@@ -239,16 +239,26 @@ def main(argv=None):
                       f"   {'A' if da[s] < db[s] else 'B' if db[s] < da[s] else '='}")
         print()
         return 0
+    # WHICH SIDE OF 0.5 FIRST, THEN HOW FAR. The previous order asked `hi <= gamma` before establishing that A
+    # was ahead at all, so an interval lying entirely BELOW 0.5 -- A losing every single seed -- fell into the
+    # "A wins more often than chance" branch. It printed exactly that for LR=4e-3 at P(A better)=0.000, CI
+    # [0.000, 0.000]: A won nothing and was reported as winning. A decision rule that can invert its own sign is
+    # worse than no decision rule, because the output still reads like an answer.
     if lo <= 0.5 <= hi:
         v = (f"NOT SIGNIFICANT -- the interval spans 0.5, so this comparison does not distinguish the arms. "
              f"Draw no conclusion about which is better.")
-    elif hi <= a.gamma:
-        v = (f"SIGNIFICANT BUT NOT MEANINGFUL -- {a.label_a} wins more often than chance, but by less than the "
-             f"gamma={a.gamma} bar for an effect worth acting on.")
     elif lo > 0.5:
-        v = f"SIGNIFICANT AND MEANINGFUL -- {a.label_a} is better, and by enough to act on."
-    else:
-        v = f"{a.label_b} is favoured; re-read with the labels swapped."
+        v = (f"SIGNIFICANT AND MEANINGFUL -- {a.label_a} is better, and by enough to act on."
+             if hi > a.gamma else
+             f"SIGNIFICANT BUT NOT MEANINGFUL -- {a.label_a} is ahead more often than chance, but by less than "
+             f"the gamma={a.gamma} bar for an effect worth acting on.")
+    else:      # the whole interval sits below 0.5: B won, and the same two-way split applies mirrored
+        _lo_b, _hi_b = 1 - hi, 1 - lo
+        v = (f"SIGNIFICANT AND MEANINGFUL -- {a.label_b} is better (P({a.label_b} better) = {1-p:.3f}, "
+             f"95% CI [{_lo_b:.3f}, {_hi_b:.3f}]), and by enough to act on."
+             if _hi_b > a.gamma else
+             f"SIGNIFICANT BUT NOT MEANINGFUL -- {a.label_b} is ahead more often than chance (P = {1-p:.3f}), "
+             f"but by less than the gamma={a.gamma} bar for an effect worth acting on.")
     print(f"  >> {v}")
     if need is None:
         print(f"  >> the arms are indistinguishable on this metric at this variance; no seed budget resolves it.")

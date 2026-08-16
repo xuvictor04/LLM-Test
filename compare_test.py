@@ -118,6 +118,27 @@ def main():
         else:
             print(f"  ARGS   flags after the -- are parsed as flags")
 
+        # --- SIGN: an arm that loses every seed must not be reported as winning ----------------------
+        # Taken verbatim from a real ladder rung. LR=4e-3 lost to 2e-3 on all three seeds -- P(A better)=0.000,
+        # CI [0.000, 0.000] -- and the tool printed "4e-3 wins more often than chance", because it tested
+        # `hi <= gamma` before establishing which side of 0.5 the interval was on. A decision rule that can
+        # invert its own sign is worse than none, since the output still reads like an answer.
+        A = [_w(d, f"sgn_A_seed{i}.log", i, v) for i, v in enumerate((2.098, 2.105, 2.162))]
+        B = [_w(d, f"sgn_B_seed{i}.log", i, v) for i, v in enumerate((2.039, 2.103, 2.039))]
+        rc, out = _run(A + ["--"] + B + ["--label-a", "hi", "--label-b", "lo"])
+        if "hi is ahead" in out or "hi is better" in out:
+            print(f"!! the losing arm was reported as winning -- sign inversion is back:\n{out}"); ok = False
+        elif "lo is better" not in out:
+            print(f"!! neither arm was named the winner on a clean sweep:\n{out}"); ok = False
+        else:
+            print(f"  SIGN   arm losing 3/3 -> the OTHER arm is named the winner")
+        # ...and the mirror: the winning arm on the left must still be called correctly.
+        rc, out = _run(B + ["--"] + A + ["--label-a", "lo", "--label-b", "hi"])
+        if "lo is better" not in out:
+            print(f"!! the winning arm on the left was not named:\n{out}"); ok = False
+        else:
+            print(f"  SIGN   arm winning 3/3 on the left -> named correctly")
+
         # --- GUARDS: each must warn, and none may crash ----------------------------------------------
         for label, mk, want in (
             ("different commits",
