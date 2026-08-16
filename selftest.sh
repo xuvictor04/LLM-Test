@@ -57,11 +57,19 @@ if [ "$QUICK" = 1 ]; then
   exit $FAIL
 fi
 
+# CPU UNLESS DELIBERATELY TOLD OTHERWISE, and it must NOT read $DEVICE. This ran DEVICE=${DEVICE:-cpu}, which
+# inherits an ambient DEVICE=cuda -- and longrun.sh sets exactly that, so anyone with it exported who ran the
+# test suite on the GPU box would have quietly put a training job on the GPU alongside an 18-epoch run. The
+# suite exists to be run often and at any time; that is only safe if running it cannot cost anything. Opting in
+# takes a variable nothing else sets.
+ST_DEV=${SELFTEST_DEVICE:-cpu}
+echo "selftest: training on $ST_DEV (set SELFTEST_DEVICE=cuda to override; \$DEVICE is deliberately ignored)"
+
 # A REAL RUN, NOT A MOCK. The reports being tested read live state off fab/mem/asm/TOK, so a stub would test the
 # stub. Deliberately tiny -- this asserts the instruments produce their sections and are self-consistent, NOT
 # that the numbers are any good. At this size they are noise.
 COMMON="DATA_MODE=real DATA_DIR=${SELFTEST_DATA:-data} DOMAINS=eng DISK_STREAM=1 CORPUS_CAP=100000000000 \
-MODEL=gru LAYERS=1 DEVICE=${DEVICE:-cpu} PROBE_WAIT=0 PROFILE=0 CKPT_EVERY=0 D_MODEL=48 WIN=32 BATCH_W=4 \
+MODEL=gru LAYERS=1 DEVICE=$ST_DEV PROBE_WAIT=0 PROFILE=0 CKPT_EVERY=0 D_MODEL=48 WIN=32 BATCH_W=4 \
 STREAM_LEN=9000 EPOCHS=2 VMAX=320 SEED_VOCAB=256 GROW_EVERY=20 GROW_BURST=8 RETOK_EVERY=200 FABRIC=1 \
 FAB_NMAX=8 FAB_N0=4 MEM_CAP=1500 MANAGE_EVERY=50 DOM_MANAGE_EVERY=50 ENC_WARMUP=30 ENC_WARMUP_MIN=15 \
 SIG_WIN=64 RATE_EVERY=400 GEN_LEN=12 GEN_N=1 EVAL_N=2 COH_N=1 COH_LEN=24 HOLDOUT_N=4"
