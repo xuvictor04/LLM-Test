@@ -28,8 +28,12 @@ def _keys(dom, n, g):
 
 
 def _fill(evict):
+    # src_floor=0 ON PURPOSE. These three cases isolate WHICH CLOCK eviction ranks on, and the per-source floor
+    # is a different mechanism layered above it -- at its default the absent domain is protected regardless of
+    # the clock, which is the floor working and would leave this test unable to see the clock at all. The floor
+    # gets its own case in domain_switch() below.
     g = torch.Generator().manual_seed(0)
-    m = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, evict=evict)
+    m = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, evict=evict, src_floor=0.0)
     m.write(_keys(0, HALF, g), torch.randint(0, V, (HALF,), generator=g), src=0)   # domain A
     m.write(_keys(1, HALF, g), torch.randint(0, V, (HALF,), generator=g), src=1)   # domain B
     return m, g
@@ -47,6 +51,24 @@ def _run(evict, read_a, rounds=40):
         if read_a: m.read(_keys(0, 8, g))
         m.write(_keys(1, 8, g), torch.randint(0, V, (8,), generator=g), src=1)
     return _alive(m, 0)
+
+
+def domain_switch(src_floor, rounds=60):
+    """THE FAILURE THE LOGS SHOWED, as a test.
+
+    A run trains on domain A, then switches to domain B for good. B is written continuously; A is neither
+    written nor retrieved, because the read probe queries the CURRENT stream and no query resembles A any more.
+    That is not a hypothetical -- it is what two real runs did, under write-recency and again under
+    retrieval-recency, both ending with `p0=0 p1=198019`.
+
+    Returns A's surviving entry count. With no floor this must go to 0; with a floor it must not."""
+    g = torch.Generator().manual_seed(0)
+    m = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, evict="lru", src_floor=src_floor, n_src_hint=8)
+    m.write(_keys(0, HALF, g), torch.randint(0, V, (HALF,), generator=g), src=0)      # phase 1: domain A only
+    for _ in range(rounds):
+        m.read(_keys(1, 8, g))                                                        # phase 2: B streams,
+        m.write(_keys(1, 8, g), torch.randint(0, V, (8,), generator=g), src=1)        #   and only B is queried
+    return _alive(m, 0), _alive(m, 1)
 
 
 def main():
@@ -82,7 +104,23 @@ def main():
         print(f"!! EVICT=recency distinguished read from unread ({rec_read} vs {rec_quiet}); it is not write-order any more.")
         ok = False
 
-    print("\nok -- eviction selects on retrieval." if ok else "\n!! FAILED")
+    # --- the domain-switch test, which is the one that matters for continual learning -----------------
+    print()
+    a_off, b_off = domain_switch(0.0)
+    a_on,  b_on  = domain_switch(0.5)
+    print(f"domain switch, MEM_SRC_FLOOR=0    A kept {a_off:3d}/{HALF}  B {b_off}")
+    print(f"domain switch, MEM_SRC_FLOOR=0.5  A kept {a_on:3d}/{HALF}  B {b_on}")
+    if a_off != 0:
+        print(f"!! with no floor an unqueried domain kept {a_off} entries -- the test is not reproducing the "
+              f"failure it exists to guard, so its pass below proves nothing."); ok = False
+    if a_on <= 0:
+        print(f"!! MEM_SRC_FLOOR=0.5 did NOT protect the absent domain ({a_on} entries left). This is the "
+              f"measured continual-learning failure, unfixed."); ok = False
+    if b_on <= 0:
+        print(f"!! the floor starved the ACTIVE domain ({b_on} entries) -- protection must not deadlock the "
+              f"store against the material actually streaming."); ok = False
+
+    print("\nok -- eviction selects on retrieval, and a floor survives a domain switch." if ok else "\n!! FAILED")
     raise SystemExit(0 if ok else 1)
 
 

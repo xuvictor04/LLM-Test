@@ -22,7 +22,7 @@ class EditableMemory:
                  wrong_margin=1.5, wrong_min_n=3, flag_min_w=0.0, selfcon_thresh=2.5,
                  adaptive_gate=False, gate_target=0.5, gate_step=0.02, gate_floor=0.0, gate_ceil=0.95,
                  evict="recency", use_decay=0.98, decay_every=20000, quantile_gate=True,
-                 n_own=1, quota=None):
+                 n_own=1, quota=None, src_floor=0.5, n_src_hint=64):
         # PER-OWNER PARTITION (n_own > 1): the store is split into n_own contiguous blocks of `quota` entries, one per
         # expert, and an entry lives at index owner*quota + slot. Eviction is per-owner LRU on LAST-USE TIME -- not
         # self.use, which is a decayed retrieval COUNT (an LFU signal, and decayed by WRITE count rather than time).
@@ -75,6 +75,14 @@ class EditableMemory:
         self.selfcon = torch.full((cap,), -1.0, device=device)               # per-entry self-consistency implausibility
         #   (fraction of vocab the model ranks above the stored token, given the entry's own context); -1 = not checked
         self.use = torch.zeros(cap, device=device)                          # retrieval count (for turnover)
+        self.src_floor = float(src_floor)   # fraction of cap reserved per live source; 0 = no floor (old behaviour)
+        self.nsrc = torch.zeros(max(1, int(n_src_hint)), device=device)     # ACTIVE entries per source id, kept
+        self._floor_blocked = 0             #   incrementally in _commit; a recount is 200k elements per write
+        # HIGH-WATER MARK per source. Occupancy below the floor means two completely different things -- a domain
+        # that never wrote that much yet, and a domain that HAD it and lost it -- and only the second is a
+        # failure. Without this the starvation alarm fires on every newly-appearing domain, and a warning that
+        # cries wolf is a warning nobody reads.
+        self.nsrc_max = torch.zeros(max(1, int(n_src_hint)), device=device)
         self.active = torch.zeros(cap, dtype=torch.bool, device=device)
         self.ctx_w = int(ctx_w)                                              # if >0, store a raw context window per
         if self.ctx_w > 0:                                                   #   entry so keys can be RE-ENCODED (drift fix)
@@ -197,7 +205,8 @@ class EditableMemory:
             #             `last` never move off their write-time values and this degenerates to arbitrary/FIFO.
             ns = int(min(self.cap, max(8 * m, 64)))
             cand = torch.randint(0, self.cap, (ns,), device=self.dev)
-            kk = int(min(m, ns))
+            cand = self._unprotected(cand, m)                                 # PER-SOURCE FLOOR, see below
+            kk = int(min(m, cand.numel()))
             _sig = self.use[cand] if self.evict == "usage" else self.last[cand].float()
             idx = cand[_sig.topk(kk, largest=False).indices]
             if idx.numel() < m:                                               # pad with circular if the sample was short
@@ -211,8 +220,72 @@ class EditableMemory:
         #   The global path never stamped `last` at all before this line existed.
         return self._commit(idx, k, tok, src, ctx, pos, m)
 
+    # ---- PER-SOURCE FLOOR: no domain can be driven to zero by a domain that is currently streaming ----
+    def _src_counts(self):
+        """Active entries per source. Maintained incrementally in _commit -- an O(cap) recount on every write is
+        200k elements per step at the sizes this runs at."""
+        return self.nsrc
+
+    def _unprotected(self, cand, need):
+        """Drop candidates belonging to a source that is at or below its reserved floor.
+
+        WHY THIS EXISTS, and why a better ranking function cannot replace it. Eviction ranked on retrieval --
+        `use` or `last` -- asks "what is the CURRENT stream asking for". For a domain that is not currently
+        streaming the answer is nothing, by construction: no query resembles it, so it is never retrieved, its
+        clock never advances, and it is the victim every time. Measured twice, once under write-recency and again
+        under retrieval-recency, with the same outcome both times: after a Python run, English held 0 of 200000
+        entries. The read probe made the signal real; the signal it made real is still the current stream.
+        So the floor is not a tie-break, it is the only thing in the design that a silent domain can survive on.
+
+        floor_i = src_floor * cap / (number of sources with any entries). At src_floor=0.5 and two domains each
+        is guaranteed a quarter of the store and the other half is contested -- partial isolation, which is the
+        stated goal: overlap between domains is expected, TOTAL overlap is the failure.
+
+        NEVER DEADLOCKS. If protection would leave nothing to evict -- every source at its floor, which happens
+        when the store is full and sources are balanced -- the filter is dropped for this call and the ranking
+        decides. A store that cannot evict is worse than one that evicts something protected."""
+        if self.src_floor <= 0.0: return cand
+        live = int((self.nsrc > 0).sum())
+        if live <= 1: return cand                                            # one source owns everything anyway
+        floor = int(self.src_floor * self.cap / live)
+        if floor <= 0: return cand
+        prot = (self.nsrc <= floor)                                          # (nsrc_len,) bool, per source id
+        cs = self.src[cand].clamp(min=0, max=self.nsrc.numel() - 1)
+        keep = ~prot[cs]
+        keep &= (self.src[cand] >= 0)                                        # never protect an unwritten slot
+        out = cand[keep]
+        self._floor_blocked += int(cand.numel() - out.numel())
+        return out if out.numel() >= need else cand
+
+    def src_report(self):
+        """Per-source occupancy against the floor. Printed rather than inferred: the domain that vanished did so
+        silently for the whole project, and the only reason anyone noticed was an unrelated unlearn test going
+        vacuous."""
+        live = int((self.nsrc > 0).sum())
+        floor = int(self.src_floor * self.cap / max(1, live)) if self.src_floor > 0 else 0
+        rows = [(int(s), int(self.nsrc[s])) for s in (self.nsrc > 0).nonzero(as_tuple=True)[0].tolist()]
+        # `lost` is the only starvation worth an alarm: the source once held a floor's worth and no longer does.
+        lost = [(int(s), int(self.nsrc[s]), int(self.nsrc_max[s]))
+                for s in (self.nsrc_max >= max(1, floor)).nonzero(as_tuple=True)[0].tolist()
+                if floor > 0 and int(self.nsrc[s]) < max(1, floor // 4)]
+        return {"floor": floor, "per_source": rows, "blocked": self._floor_blocked, "lost": lost}
+
     def _commit(self, idx, k, tok, src, ctx, pos, m):
         """Write the chosen slots. Split out so the partitioned and global eviction paths share one body."""
+        # SOURCE ACCOUNTING, before the overwrite: the slots being taken still hold their old owners' counts.
+        old = self.src[idx]
+        oa = old[(old >= 0) & self.active[idx]]
+        if oa.numel():
+            self.nsrc.index_add_(0, oa.clamp(min=0, max=self.nsrc.numel() - 1),
+                                 torch.full((oa.numel(),), -1.0, device=self.dev, dtype=self.nsrc.dtype))
+        s_i = int(src)
+        if s_i >= self.nsrc.numel():                                         # a new source id: grow both tables
+            grow = torch.zeros(s_i + 1 - self.nsrc.numel(), device=self.dev, dtype=self.nsrc.dtype)
+            self.nsrc = torch.cat([self.nsrc, grow])
+            self.nsrc_max = torch.cat([self.nsrc_max, grow.clone()])
+        if s_i >= 0:
+            self.nsrc[s_i] += idx.numel()
+            self.nsrc_max[s_i] = torch.maximum(self.nsrc_max[s_i], self.nsrc[s_i])
         self.keys[idx] = torch.nn.functional.normalize(k, dim=-1)
         self.tok[idx] = tok.to(self.dev)
         self.src[idx] = int(src)
@@ -314,7 +387,19 @@ class EditableMemory:
     # ---- FORGET (the editability) ----
     def delete(self, mask):
         """mask:(cap,) bool -> deactivate those entries. Returns count removed."""
-        rm = int((mask & self.active).sum())
+        gone = mask & self.active
+        rm = int(gone.sum())
+        if rm:
+            # KEEP THE SOURCE CENSUS HONEST. nsrc drives the per-source floor, so a delete that does not
+            # decrement it leaves a source looking fuller than it is -- and therefore protected from eviction on
+            # the strength of entries that no longer exist. delete_src, sweep_wrong and the unlearn tests all
+            # route through here, which is why the accounting lives here and not in each caller.
+            gs = self.src[gone]
+            gs = gs[gs >= 0]
+            if gs.numel():
+                self.nsrc.index_add_(0, gs.clamp(min=0, max=self.nsrc.numel() - 1),
+                                     torch.full((gs.numel(),), -1.0, device=self.dev, dtype=self.nsrc.dtype))
+                self.nsrc.clamp_(min=0)
         self.active[mask] = False
         return rm
 
@@ -322,9 +407,15 @@ class EditableMemory:
         return self.delete(self.src == int(src))
 
     def reassign_src(self, old, new):
+        # (nsrc is rebuilt for the two ids involved rather than tracked incrementally: a merge is rare and the
+        #  two-source recount is exact, where an incremental delta would drift if the caller merged twice.)
         """Remap provenance old->new (when the domain manager MERGES two domains). Keeps memory consistent with the
         managed domain set -- pruning/merging domains INDIRECTLY prunes+relabels their memory."""
-        m = self.src == int(old); self.src[m] = int(new); return int(m.sum())
+        m = self.src == int(old); self.src[m] = int(new)
+        for _s in (int(old), int(new)):
+            if 0 <= _s < self.nsrc.numel():
+                self.nsrc[_s] = float(((self.src == _s) & self.active).sum())
+        return int(m.sum())
 
     def sweep_wrong(self):
         """Delete every entry currently flagged wrong (self-inconsistent: stored token implausible for its own context)."""
@@ -335,4 +426,5 @@ class EditableMemory:
         per_src = {}
         for s in self.src[act].unique().tolist():
             per_src[int(s)] = int((self.src == s).logical_and(act).sum())
-        return {"n": self.n, "flagged_wrong": int(self.is_wrong().sum()), "per_source": per_src}
+        return {"n": self.n, "flagged_wrong": int(self.is_wrong().sum()), "per_source": per_src,
+                "src_floor": self.src_floor, "floor_blocked": self._floor_blocked}

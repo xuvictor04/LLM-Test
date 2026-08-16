@@ -147,7 +147,7 @@ _SPEC = {
     "FAB_FAIL_TOL": ("env", 0.15),                        # fabric
     "FAB_GRACE": ("i", 48),                               # fabric -- IN SELECTIONS, not steps
     "FAB_LR_AMIN": ("f", 0.15),                           # fabric
-    "FAB_LR_CYCLE": ("f", 24.0),                          # fabric
+    "FAB_LR_CYCLE": ("f", 2000.0),                        # fabric -- IN SELECTIONS
     "FAB_LR_GAMMA": ("f", 0.5),                           # fabric
     "FAB_GROW": ("env", 1),                               # fabric
     "FAB_HALT": ("env", 1),                               # fabric
@@ -253,6 +253,7 @@ _SPEC = {
     "MEM_OWNERS": ("i", 64),                              # memory
     "MEM_PER_EXPERT": ("i", 0),                           # memory
     "MEM_PROBE_EVERY": ("i", 25),                          # memory
+    "MEM_SRC_FLOOR": ("f", 0.5),                          # memory
     "MEM_PROBE_N": ("i", 64),                             # memory
     "MEM_QUOTA": ("i", 128),                              # memory
     "MEM_W": ("f", 0.5),                                  # memory
@@ -3734,7 +3735,8 @@ def main():
                          adaptive_gate=bool(_i("WRITE_ADAPTIVE", 0)), gate_target=_f("WRITE_TARGET", 0.5),
                          evict=_env("EVICT", "lru"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
                          quantile_gate=bool(_i("WRITE_QUANTILE", 1)),   # WRITE_QUANTILE=0 restores the old additive controller
-                         n_own=(min(_i("FAB_NMAX", 4096), _i("MEM_OWNERS", 64)) if MEM_PER_EXPERT else 1), quota=(MEM_QUOTA if MEM_PER_EXPERT else None))
+                         n_own=(min(_i("FAB_NMAX", 4096), _i("MEM_OWNERS", 64)) if MEM_PER_EXPERT else 1), quota=(MEM_QUOTA if MEM_PER_EXPERT else None),
+                         src_floor=_f("MEM_SRC_FLOOR", 0.5), n_src_hint=max(64, _i("MAX_DOMAINS", 32) * 2))
     # READ PROBE. EVICT=lru/usage select on retrieval, and retrieval only happened at eval time, so the signal both
     # rules read was a constant. The probe issues real reads during training against the text being trained on. 0
     # turns it off and returns the store to write-order eviction -- which is what every run before this one did,
@@ -3746,7 +3748,9 @@ def main():
     if MEM_PER_EXPERT:
         print(f"[memory] PER-EXPERT: {mem.n_own} owners x {mem.quota} entries = {mem.cap} slots, LRU by last USE "
               f"(writes partitioned by routed expert; reads global so information still mixes)")
-    print(f"[memory] EVICT={mem.evict} | read probe {'OFF' if not MEM_PROBE_EVERY else f'{MEM_PROBE_N} queries every {MEM_PROBE_EVERY} steps'}"
+    print(f"[memory] EVICT={mem.evict} | src floor {mem.src_floor:g} "
+          f"({'no domain can be evicted below cap*floor/live_sources' if mem.src_floor > 0 else 'OFF -- a silent domain can be driven to zero'}) "
+          f"| read probe {'OFF' if not MEM_PROBE_EVERY else f'{MEM_PROBE_N} queries every {MEM_PROBE_EVERY} steps'}"
           + ("" if MEM_PROBE_EVERY or mem.evict == "recency" else
              "  <-- EVICT selects on retrieval but nothing retrieves during training; this is write-order eviction"))
     asm = DomainAssembler()
@@ -4376,13 +4380,16 @@ def main():
                                "no reads during training -> `use`/`last` are constants and EVICT is write-order"
                                if not MEM_PROBE_EVERY and mem.evict != "recency" else None),
             ("MEM_PROBE_N",    MEM_PROBE_N),
+            ("MEM_SRC_FLOOR",  mem.src_floor,
+                               "0 = a domain that stops streaming can be evicted to zero; measured twice"
+                               if mem.src_floor <= 0 else None),
             ("MAX_DOMAINS",    MAX_DOMAINS),
             ("EXPERTS",        bool(EXPERTS and not FABRIC)),
             ("DIV_W",          DIV_W),                   ("IND_W",          IND_W if SOCIETY else 0.0),
             ("DROPOUT",        DROPOUT),                 ("WEIGHT_DECAY",   WD),
             ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
             ("BAL_FLOOR",      BAL_FLOOR),               ("FAB_BALANCE",    FAB_BAL),
-            ("FAB_LR_CYCLE",   _f("FAB_LR_CYCLE", 24.0)), ("FAB_LR_GAMMA",  _f("FAB_LR_GAMMA", 0.5)),
+            ("FAB_LR_CYCLE",   _f("FAB_LR_CYCLE", 2000.0)), ("FAB_LR_GAMMA",  _f("FAB_LR_GAMMA", 0.5)),
             # READ VIA _f/_i, NOT the locals: FAB_LR_OWN and friends are assigned ~40 lines BELOW the banner call,
             # so naming them here is a NameError on the enclosing scope, not a stale value.
             ("FAB_LR_AMIN",    _f("FAB_LR_AMIN", 0.15)), ("FAB_LR_OWN",     bool(_i("FAB_LR_OWN", 1))),
@@ -4667,7 +4674,7 @@ def main():
     FAB_LR_OWN = bool(_i("FAB_LR_OWN", 1))                 # each expert on its own schedule, clocked from its own USE
     FAB_LR_MAXR = _f("FAB_LR_MAXR", 4.0)                   # cap on own-rate / global-rate, see the step site
     FAB_LR_BOOST = _f("FAB_LR_BOOST", 2.0)                 # multiply the own-rate for the cull-eligible bottom
-    _lrown_said = [-1]; _elig_said = [-1]
+    _lrown_said = [-1]; _elig_said = [-1]; _cycwarn = [False]
     _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
     _lr_prev = [0.0]                                       # last applied rate, to detect a cosine restart
     # === PROBATION: MINT PROVISIONALLY, JUDGE ON EVIDENCE ====================================================
@@ -4829,10 +4836,25 @@ def main():
             # silence. `touched` is how many entries anything has ever asked for -- if it stays 0 while EVICT is
             # lru/usage, the store is being culled on write order and the run should not be read as a memory result.
             _tch = int((mem.use > 0).sum()) if mem.n else 0
+            # PER-SOURCE OCCUPANCY, EVERY EPOCH. The vanished domain was invisible for the whole project and was
+            # only noticed because an unrelated unlearn test reported itself vacuous. A store that has quietly
+            # become single-domain should say so while the run is still going, not at the post-mortem.
+            _sr = mem.src_report() if mem.n else {"floor": 0, "per_source": [], "blocked": 0, "lost": []}
+            _occ = " ".join(f"s{_s}:{_c}" for _s, _c in sorted(_sr["per_source"], key=lambda r: -r[1])[:6])
+            # ONLY SOURCES THAT LOST GROUND. Being under the floor is normal for a domain that has just appeared
+            # and has not written a floor's worth yet; it is a failure only for one that HAD it and no longer
+            # does. The first version of this alarm could not tell them apart and fired on every new domain.
+            _starved = [f"s{_s} ({_c} now, peaked {_pk})" for _s, _c, _pk in _sr.get("lost", [])]
             print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | "
                   f"vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} ({_tch} retrieved, "
-                  f"{_mprobe['n']} probes) | domains {len(asm.cent)} | "
+                  f"{_mprobe['n']} probes; floor {_sr['floor']} | {_occ}) | domains {len(asm.cent)} | "
                   f"lr {_lrn:.2e} ({_lrn / max(1e-12, LR) * 100:.0f}% of peak)]")
+            if _starved and mem.src_floor > 0:
+                print(f"  !! MEMORY STARVATION: {', '.join(_starved)} -- each once held at least the "
+                      f"{_sr['floor']}-entry floor that MEM_SRC_FLOOR={mem.src_floor:g} reserves and is now under "
+                      f"a quarter of it. The floor protects against EVICTION only, so check whether those entries "
+                      f"are being DELETED (unlearn/sweep) or whether the live-source count grew and moved the "
+                      f"floor under them.")
             if MEM_PROBE_EVERY and mem.n > 64 and _tch == 0:
                 print(f"  !! MEM_PROBE ran {_mprobe['n']} times and NOTHING was retrieved -- EVICT={mem.evict} is "
                       f"selecting on a dead signal. Check KEY_SRC/mem_ctx; this run's memory is write-order-culled.")
@@ -5312,7 +5334,17 @@ def main():
                 # its first selections are exactly when it has learned nothing and most needs to move, and holding
                 # it at the floor for a full half-cycle is how a late birth arrives dead. Shifting the clock by one
                 # half-cycle costs nothing and keeps the shape: peak, trough, half-peak, trough, quarter-peak...
-                _ss = max(1.0, float(_f("FAB_LR_CYCLE", 24.0)))
+                # SIZED FROM A REAL RUN, not guessed. The first default was 24 selections, chosen with no
+                # measurement behind it, and at 2048 experts a run reached `cycle 1..428` with use-age up to
+                # 20497 -- so every heavily-used expert burned through its whole envelope in the first few
+                # percent of the run and then sat pinned at FAB_LR_AMIN. That is a low constant rate, not a
+                # cycle, and it is the opposite of the per-expert schedule this exists to provide.
+                # Rule of thumb: aim for a handful of cycles over a run, so half-cycle ~= max_use_age / 8.
+                # At the observed ~20k selections that is ~2500; 2000 is the round number under it. The [lr]
+                # line reports `cycle min..max` every rate window, and the warning below fires if a run is
+                # heading back into the degenerate regime -- read it rather than assuming this default fits a
+                # population or run length it was not measured on.
+                _ss = max(1.0, float(_f("FAB_LR_CYCLE", 2000.0)))
                 _t = torch.tensor([min(fab.use_age(_i2), 1e6) for _i2 in range(_nl)],
                                   device=fab.A.device, dtype=fab.A.dtype) + _ss
                 _cyc = torch.floor(1.0 + _t / (2.0 * _ss))
@@ -5380,6 +5412,17 @@ def main():
                           f"(x{float(_own_lr.min()):.2f}..x{float(_own_lr.max()):.2f}, clamped at "
                           f"x{FAB_LR_MAXR:g}) | use-age {float(_t.min() - _ss):.0f}..{float(_t.max() - _ss):.0f}, "
                           f"cycle {int(_cyc.min())}..{int(_cyc.max())}")
+                    # A SCHEDULE THAT HAS RUN OUT OF SCHEDULE. Past ~12 cycles the envelope is at FAB_LR_AMIN
+                    # and stays there, so the expert has a constant rate for the rest of its life. Say so once
+                    # per rate window rather than leaving it to be reconstructed from the log afterwards, which
+                    # is how the 24-selection default survived a full 18-epoch run.
+                    if int(_cyc.max()) > 12 and not _cycwarn[0]:
+                        _cycwarn[0] = True
+                        _want = int(max(1.0, float(_t.max() - _ss)) / 8)
+                        print(f"  !! FAB_LR_CYCLE={_ss:g} is too short for this run: experts have reached cycle "
+                              f"{int(_cyc.max())}, so their envelope is pinned at FAB_LR_AMIN and the per-expert "
+                              f"schedule is now a constant. For a few cycles over a run of this shape try "
+                              f"FAB_LR_CYCLE~{_want}.")
         _t1("lm fwd+bwd (incl. fabric/world)", _plm)
         _lf = float(loss.detach())                               # ONE host sync per step (was two: the curve and the
         _lm_run.append(_lf)                                      #   plateau detector each pulled the same scalar back)

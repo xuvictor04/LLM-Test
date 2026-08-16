@@ -400,6 +400,12 @@ pilot-add)
   # $OUT/pilot_$PA, so every checkpoint produced by `seeds`, `grid` or `repeat` -- which is now most of them,
   # since SEED_CKPT=1 -- was unreachable, and continual learning could only be attempted from a run shape nobody
   # was using. RESUME_FROM=<dir> points it anywhere.
+  # CONSUMED HERE, AND STRIPPED BEFORE PYTHON SEES IT. RESUME_FROM is a harness knob -- it selects which
+  # checkpoint this script resumes from and self_organize.py has no business reading it. But it stays in the
+  # environment the run inherits, where the config audit sees a RESUME-family variable that nothing read and
+  # reports "NOTHING READ THESE: RESUME_FROM ... This run used the DEFAULTS for whatever was meant". That
+  # warning is the one that catches real typos, so a standing false positive in it is expensive. `env -u`
+  # below removes it for the child rather than adding an allow-list here that would go stale.
   FROM=${RESUME_FROM:-$OUT/pilot_$PA}
   [ -f "$FROM/ckpt.pt" ] || { echo "!! no checkpoint at $FROM/ckpt.pt -- run 'bash longrun.sh pilot' first (PILOT_ADD_ARCH=gru|transformer), or set RESUME_FROM=<dir containing ckpt.pt>"; exit 1; }
   # THE TOKENIZER TRAVELS WITH THE CHECKPOINT. The restored embedding is indexed by the vocabulary that trained
@@ -432,7 +438,7 @@ pilot-add)
     # shellcheck disable=SC2086
     python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume ${FETCH_ARGS:-} || exit 1
   fi
-  env DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
+  env -u RESUME_FROM DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
       WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       SIG_WIN=${SIG_WIN:-614} \
