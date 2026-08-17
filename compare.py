@@ -48,6 +48,14 @@ BOOT = 10000
 # Caught on the first real use, on a genuine 1-seed bisect. n=3 is the floor at which a bootstrap has anything
 # to resample; even there the interval is wide and it will usually, correctly, refuse to call anything.
 MIN_PAIRS = 3
+# BELOW THIS, THE EFFECT IS TOO SMALL TO CARE ABOUT WHETHER IT IS REAL. Measured on this project: two rungs that
+# were the SAME configuration -- FAB_LR_CYCLE=24 and LR=2e-3 are both just the defaults -- differed by up to
+# 0.039 b/B at the same seed, on the same box, on the same commit. That is the floor for running the same thing
+# twice, so an effect under it is not a small effect, it is indistinguishable from re-running.
+# The distinction matters because the seed-count line is otherwise actively misleading: it answered "38 paired
+# seeds would be needed" for a difference of 0.004, which reads as an invitation to spend 38 runs establishing
+# something that would not be worth knowing if it were established.
+NEGLIGIBLE = 0.03
 
 
 def _grab(pat, t, default=None):
@@ -154,6 +162,9 @@ def main(argv=None):
                     help="held_out (default) | d_order1 (comparable across corpora) | train")
     ap.add_argument("--label-a", default="A"); ap.add_argument("--label-b", default="B")
     ap.add_argument("--gamma", type=float, default=GAMMA)
+    ap.add_argument("--negligible", type=float, default=NEGLIGIBLE,
+                    help="effects smaller than this are reported as not worth resolving (default: the measured "
+                         "replication floor, 0.03 b/B)")
     # SPLIT ON `--` BEFORE argparse SEES IT. argparse treats a bare `--` as its own end-of-options marker and
     # removes it, so a positional list can never contain the separator -- the first version of this errored out
     # with "could not find the --" on a command line that plainly had one.
@@ -260,6 +271,18 @@ def main(argv=None):
              f"SIGNIFICANT BUT NOT MEANINGFUL -- {a.label_b} is ahead more often than chance (P = {1-p:.3f}), "
              f"but by less than the gamma={a.gamma} bar for an effect worth acting on.")
     print(f"  >> {v}")
+    _eff = abs(_mean(diffs))
+    if _eff < a.negligible:
+        print(f"  >> NEGLIGIBLE -- the arms differ by {_eff:.4f} b/B, below the {a.negligible} replication floor "
+              f"(two runs of the SAME configuration on this project have differed by up to 0.039). Whether this "
+              f"is 'real' is not worth resolving: an effect this size would not change a decision if it were.")
+        if shared:
+            print(f"\n  per seed ({a.label_a} / {a.label_b} / diff):")
+            for s in shared:
+                print(f"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}"
+                      f"   {'A' if da[s] < db[s] else 'B' if db[s] < da[s] else '='}")
+        print()
+        return 0
     if need is None:
         print(f"  >> the arms are indistinguishable on this metric at this variance; no seed budget resolves it.")
     elif len(pairs) < need:

@@ -72,9 +72,25 @@ _reserve() {
 _knobs() {
   sed -n 's/^    "\([A-Z][A-Z0-9_]*\)": (.*/\1/p' "$(dirname "$0")/self_organize.py" 2>/dev/null | sort -u
 }
+# THE CORPUS IS PART OF THE CONFIGURATION, and a PATH is not the corpus. `data=data_pilot` was all this
+# recorded, so a box that fetched a fresh corpus into the same directory produced an identical signature for
+# materially different runs -- which is exactly what happened: one box's data_pilot has order-1 3.742 and
+# another's, freshly pulled into the same path, has 3.440. Numbers from the two are not comparable, and nothing
+# said so. Fingerprint = total bytes + file count + a hash of the first megabyte, which is cheap and catches a
+# re-fetch, a truncation, or a different shard set.
+_corpsig() {
+  _cd="${PILOT_DIR:-data_pilot}/train"
+  [ -d "$_cd" ] || { echo "none"; return; }
+  _cb=$(find "$_cd" -name '*.txt' -type f -printf '%s\n' 2>/dev/null | awk '{t+=$1} END{print t+0}')
+  _cn=$(find "$_cd" -name '*.txt' -type f 2>/dev/null | wc -l | tr -d ' ')
+  _ch=$(find "$_cd" -name '*.txt' -type f 2>/dev/null | sort | head -1 | xargs -r head -c 1048576 2>/dev/null \
+        | sha1sum 2>/dev/null | cut -c1-12)
+  echo "b${_cb}n${_cn}h${_ch:-?}"
+}
 _cfgsig() {
-  printf 'commit=%s data=%s flags=%s' \
-    "$(git rev-parse --short=10 HEAD 2>/dev/null || echo '?')" "${PILOT_DIR:-data_pilot}" "${ARMFLAGS:-}"
+  printf 'commit=%s data=%s corpus=%s flags=%s' \
+    "$(git rev-parse --short=10 HEAD 2>/dev/null || echo '?')" "${PILOT_DIR:-data_pilot}" \
+    "$(_corpsig)" "${ARMFLAGS:-}"
   for _k in $(_knobs); do
     eval "_v=\${$_k+set}"
     [ -n "${_v:-}" ] && { eval "_vv=\$$_k"; printf ' %s=%s' "$_k" "$_vv"; }

@@ -139,6 +139,31 @@ def main():
         else:
             print(f"  SIGN   arm winning 3/3 on the left -> named correctly")
 
+        # --- NEGLIGIBLE: an effect below the replication floor is not worth resolving ----------------
+        # Real numbers from the FAB_LR_OWN=1 vs =0 pair. The arms differ by 0.004 b/B; the tool used to answer
+        # "38 paired seeds would be needed", which reads as an invitation to spend 38 runs establishing something
+        # that would not be worth knowing if established. Two runs of the SAME configuration on this project have
+        # differed by up to 0.039.
+        A = [_w(d, f"neg_A_seed{i}.log", i, v) for i, v in enumerate((2.072, 1.943, 2.055))]
+        B = [_w(d, f"neg_B_seed{i}.log", i, v) for i, v in enumerate((1.966, 2.070, 2.022))]
+        rc, out = _run(A + ["--"] + B)
+        if "NEGLIGIBLE" not in out:
+            print(f"!! a 0.004 b/B difference was not called negligible:\n{out}"); ok = False
+        elif "paired seeds would be needed" in out:
+            print(f"!! it still recommends a seed budget for an effect below the replication floor:\n{out}")
+            ok = False
+        else:
+            print(f"  NEG    0.004 b/B -> NEGLIGIBLE, and no seed budget suggested")
+        # ...but a real effect must still get its seed count.
+        A = [_w(d, f"big_A_seed{i}.log", i, v) for i, v in enumerate((1.70, 1.72, 1.68))]
+        B = [_w(d, f"big_B_seed{i}.log", i, v) for i, v in enumerate((2.05, 2.07, 2.03))]
+        rc, out = _run(A + ["--"] + B)
+        if "NEGLIGIBLE" in out:
+            print(f"!! a 0.35 b/B difference was called negligible; the floor is swallowing real effects:\n{out}")
+            ok = False
+        else:
+            print(f"  NEG    0.35 b/B  -> still judged normally")
+
         # --- GUARDS: each must warn, and none may crash ----------------------------------------------
         for label, mk, want in (
             ("different commits",
