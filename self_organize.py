@@ -168,6 +168,7 @@ _SPEC = {
     "FAB_DERIVE_IDS": ("env", 1),                         # fabric
     "FAB_DISCOVER": ("f", 0.35),                          # fabric
     "FAB_DK": ("i", 32),                                  # fabric
+    "FAB_EC_W": ("env", 0.0),                             # fabric -- expert-choice-style deficit bonus; 0 = off
     "FAB_EMB_EVERY": ("env", 1),                          # fabric
     "FAB_EMB_HID": ("env", 128),                          # fabric
     "FAB_EMB_VAR": ("env", 1.0),                          # fabric
@@ -1444,6 +1445,7 @@ class Fabric(nn.Module):
         s.grounded = bool(int(_env("ROUTE_GROUNDED", 1)))
         s.route_learn = bool(int(_env("ROUTE_LEARN", 1)))   # add the learned bilinear term (see route_w)
         s.birth_jitter = float(_env("BIRTH_JITTER", 0.15))
+        s.ec_w = float(_env("FAB_EC_W", 0.0))   # deficit bonus; see entry_logits. 0 = the previous router exactly.
         s.cent_m = float(_env("CENT_EMA", 0.02))
     def _ids(s, N, step=None):
         """(K, SRC) for the N live experts, embedded from their full weights. Cached on a cadence: the embed is
@@ -1872,6 +1874,31 @@ class Fabric(nn.Module):
                 with torch.no_grad():
                     s._rmix.append((float((s.region_w * _gterm).std()), float(_lrn.std())))
                 s._sample_mix = False
+        # === ALLOCATION BY CONSTRUCTION, NOT BY PRESSURE (FAB_EC_W) ===============================
+        # EXPERT-CHOICE ROUTING, ADAPTED, AND THE ADAPTATION IS NOT COSMETIC. In the published form each EXPERT
+        # picks its top-c items from the batch, so every expert is served by construction and dead experts cannot
+        # arise. That assumes many items per expert per batch. Here it is the other way round: BATCH_W=16 windows
+        # against FAB_NMAX=2048 experts gives c = B*k/N = 0.016, so 2016 of 2048 experts would receive nothing
+        # even under perfect balance. Literal expert-choice is not implementable at this ratio -- it would need
+        # per-TOKEN routing (4096 items, c=4), and the fabric routes windows.
+        # What transfers is the PROPERTY: an expert's share should be guaranteed by the assignment rule rather
+        # than coaxed out of it by a loss term. Realised as a DEFICIT BONUS -- an expert below its fair share of
+        # recent assignments is scored up in proportion to how far below. Bounded, so it biases the ranking
+        # without overriding a strong signature match, and identical to the previous router at FAB_EC_W=0.
+        #
+        # WHY THIS MIGHT NOT BE THE RIGHT FIX, stated here because the measurement says so: specialization reads
+        # ~0.0 across 24 ladder runs, and spec measures whether a node models its OWN material differently from
+        # the population. That is not "some experts get no traffic", it is "they all do the same job". Balance
+        # cannot create difference; it can only ensure everyone is present to be different. DIV_W -- which rewards
+        # experts for DISAGREEING, is already implemented on this path, and has never once been set above 0 in a
+        # real run -- attacks the measured symptom more directly and costs nothing to try.
+        if s.ec_w > 0.0 and N > 1:
+            _tot = sum(s.use.get(i, 0.0) for i in range(N))
+            if _tot > 0:
+                _fair = _tot / N
+                _def = torch.tensor([max(0.0, _fair - s.use.get(i, 0.0)) / _fair for i in range(N)],
+                                    device=logits.device, dtype=logits.dtype)
+                logits = logits + s.ec_w * _def[None]
         if ban is not None: logits = logits.masked_fill(ban.to(logits.device)[None], float("-inf"))
         return logits
 
@@ -4546,6 +4573,8 @@ def main():
             ("ROUTE_T",        _F0.route_t),             ("ROUTE_GROUNDED", _F0.grounded),
             ("ROUTE_LEARN",    _F0.route_learn),         ("ROUTE_REGION_W", _F0.region_w),
             ("FAB_KEY_NORM",   FAB_KEY_NORM),            ("CHAIN_VOTE",     _F0.vote),
+            ("FAB_EC_W",       _F0.ec_w,
+                               "0 = routing unchanged; the deficit bonus is off" if _F0.ec_w <= 0 else None),
             ("CHAIN_ROUTE",    "soc" if _F0.loop_soc else "transition"),
             ("CHAIN_BAN",      _F0.chain_ban),           ("CHAIN_CURRIC",   _F0.curric),
             ("CHAIN_SUP",      _F0.sup_w),               ("CHAIN_STATE_Q",  _F0.state_q),
