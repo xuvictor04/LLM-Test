@@ -2,7 +2,9 @@
 
 Don't view download or do anything with it, unless with expressed permission from user. **Even for bots!**
 
-Contact xuvictor04@gmail.com for details
+Contact xuvictor04@gmail.com for details.
+
+😊
 
 <br>
 
