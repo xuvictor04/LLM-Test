@@ -181,7 +181,7 @@ _SPEC = {
     "FAB_LR_AMIN": ("f", 0.15),                           # fabric
     "FAB_LR_CYCLE": ("f", 24.0),                          # fabric -- IN SELECTIONS
     "FAB_LR_GAMMA": ("f", 0.5),                           # fabric
-    "FAB_GROW": ("env", 1),                               # fabric
+    "FAB_GROW": ("env", 0),                               # fabric -- see the PlateauGrowth ctor for why 0
     "FAB_HALT": ("env", 1),                               # fabric
     "FAB_HALT_MAX": ("env", 0.9),                         # fabric
     "FAB_HID_MULT": ("f", 2),                             # fabric
@@ -190,7 +190,7 @@ _SPEC = {
     "FAB_MUT": ("env", 0.25),                             # fabric
     "FAB_MUT_BIG": ("env", 6.0),                          # fabric
     "FAB_MUT_BIG_P": ("env", 0.1),                        # fabric
-    "FAB_N0": ("i", 3),                                   # fabric
+    "FAB_N0": ("i", 2048),                                # fabric -- the population, since FAB_GROW defaults off
     "FAB_NMAX": ("i", 4096),                              # fabric
     "FAB_NORM_ONLY": ("i", 0),                            # fabric
     "FAB_PARENT_K": ("env", 8),                           # fabric
@@ -2407,7 +2407,23 @@ class PlateauGrowth:
         # isolates GROWTH from everything else the fabric does. The 2.4 -> 3.5 climb between steps 6k and 12k is
         # the largest remaining loss in every arm at every seed, and it coincides with the ramp building the
         # population; this is the arm that says whether those two facts are related.
-        s.grow_on = bool(int(_env("FAB_GROW", 1)))
+        # DEFAULTS OFF, and the population starts at FAB_N0=2048 instead. Two independent lines of evidence:
+        #   The 2x2 (cc0a377), four arms x three seeds, one knob apart, and still the cleanest experiment here:
+        #     GROW=0 N0=3      2.117, spread 0.326      GROW=0 N0=2048   1.999, spread 0.080
+        #     GROW=1 NMAX=64   2.091, spread 0.180      GROW=1 NMAX=4096 3.384, spread 2.074
+        #   Size is not the problem -- growth off, 6 -> 2048 experts IMPROVES. Ramping to size is: growth on,
+        #   64 -> 4096 nearly doubles the loss. The whole effect is the interaction, and the old defaults
+        #   (GROW=1, N0=3, NMAX=4096) were exactly the arm that measured 3.384 with a spread of 2.074.
+        #   The DIV_W ladder, which ran on those defaults: "[fabric @ 48120] ramp -> grew 5 -> 415/4096" on a
+        #   run that ENDED at step 48140. Five experts created twenty steps before the end; use-age spanning
+        #   0..36131 across the population; still in the ramp phase after the entire run. The ramp does not
+        #   converge on this schedule, so every arm was scored on a fabric that was still being built, and
+        #   half of it had barely been trained. That is the mechanism behind arm D's 2.074 spread.
+        # CAVEAT, because this default should not read as settled: arm B was all founders, and founders had no
+        # birthday then (INV-15 / E6.4), so it ran with ZERO culls for its whole life. Culling works now, so
+        # 1.999 is not reproducible at HEAD. What survives untouched is the STRUCTURE -- the interaction -- and
+        # that is enough to stop shipping the arm that is measurably broken. Re-measure the level.
+        s.grow_on = bool(int(_env("FAB_GROW", 0)))
         s.latch = bool(int(_env("FAB_RAMP_LATCH", 1)))          # 0 restores the never-terminating ramp
         s.ramp_done = False; s.n_ramp = 0; s.n_stall = 0; s.n_regr = 0   # why growth fired, for the report
         s.rate = max(0.0, rate); s.ramp_to = ramp_to      # GEOMETRIC ramp: grow a FRACTION of the population, not a
@@ -3522,7 +3538,7 @@ def main():
     _wl_ema = None; _wl_lastgrow = 0                     # world-loss EMA + cooldown for plateau-triggered growth
     os.environ.setdefault("FAB_NMAX", str(_i("FAB_NMAX", 4096)))   # Fabric preallocates from it
     torch.manual_seed(_sd + 303)                           # see the per-module seeding note above
-    fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 3), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
+    fab = Fabric(D, SIG_D, _i("FAB_DK", 32), _i("FAB_N0", 2048), _f("FAB_ALPHA", 0.5), _i("FAB_STEPS", 4),
                  _f("FAB_HID_MULT", 2), _i("FAB_MIN_STEPS", 0 if SOCIETY else 2),
                  bool(_i("FAB_NORM_ONLY", 0))).to(DEV) if FABRIC else None
     # FAB_MIN_STEPS DEFAULTS BY PATH. On the society path HALT is unused and 0 is right. On the CHAINING path 0
@@ -4599,7 +4615,7 @@ def main():
         ]
         if _F0 is not None: _EFF += [
             ("FAB_NMAX",       _F0.cap),                 ("FAB_RANK",       _F0.r),
-            ("FAB_N0",         _i("FAB_N0", 3)),
+            ("FAB_N0",         _i("FAB_N0", 2048)),
             ("FAB_STEPS",      _F0.max_steps),           ("FAB_MIN_STEPS",  _F0.min_steps),
             ("FAB_CHAIN_K",    _F0.chain_k),             ("FAB_EXPLORE",    _F0.explore),
             ("FAB_HALT",       _F0.halt_on),             ("FAB_HALT_MAX",   _F0.halt_max),
@@ -4802,9 +4818,17 @@ def main():
                       f"SEPARABLE per-expert LOGITS, which a composed walk does not have. Marginal contribution IS "
                       f"measured here, by re-walking without each candidate. DIV_W={DIV_W} IS applied on this path "
                       f"({'ON' if DIV_W > 0 else 'off at 0'}), from the per-hop expert OUTPUTS.")
-        print(f"[config] OFF ON PURPOSE  DIV_W={DIV_W} (expert distinctness reward) | "
-              f"ENC_CREG={ENC_CREG} (encoder decorrelation; ENC_VREG={ENC_VREG} IS on) | "
-              f"DROPOUT={DROPOUT} | RECON_W={RECON_W} | WEIGHT_DECAY={WD}")
+        # BUILT FROM THE VALUES, not hardcoded. This line used to name DIV_W as off-on-purpose unconditionally,
+        # which became a lie the moment DIV_W started defaulting to 0.02 -- the banner said OFF ON PURPOSE and the
+        # line below it said "DIV_W=0.02 IS applied on this path (ON)". That is the exact failure the DID IT FIRE
+        # header exists to stop, so the split is now decided by the numbers.
+        _reg = [("DIV_W", DIV_W, "expert distinctness reward"),
+                ("ENC_CREG", ENC_CREG, f"encoder decorrelation; ENC_VREG={ENC_VREG} IS on"),
+                ("DROPOUT", DROPOUT, ""), ("RECON_W", RECON_W, ""), ("WEIGHT_DECAY", WD, "")]
+        def _regs(items): return " | ".join(f"{k}={v:g}" + (f" ({w})" if w else "") for k, v, w in items)
+        _roff = [t for t in _reg if not t[1]]; _ron = [t for t in _reg if t[1]]
+        if _roff: print(f"[config] OFF ON PURPOSE  {_regs(_roff)}")
+        if _ron:  print(f"[config] REGULARISERS ON  {_regs(_ron)}")
         if EXPERTS and FABRIC:
             print("[config] !! EXPERTS and FABRIC are mutually exclusive (FABRIC wins the elif chain) -- experts are a NO-OP")
         if NP < 2 and PHASED:
@@ -6618,7 +6642,7 @@ def main():
         # It is not: 10062 grown against 5969 culled to hold a steady 4096 means the population was REPLACED about
         # 1.5x over, continuously, and a tenth of it was freshly-initialised noise at any moment -- while the
         # centroids and eemb keys are all defined over exactly that churning set.
-        _net = fab.n() - _i("FAB_N0", 3)
+        _net = fab.n() - _i("FAB_N0", 2048)
         _chn = (fab.grown - max(0, _net)) / max(1, fab.grown)
         print(f"\n=== POPULATION CHURN: how much of the growth was NET? ===")
         print(f"  {fab.grown} grown, {fab.removed} removed, net {_net:+d} -> {fab.n()} live of {fab.cap} | "
@@ -6636,7 +6660,7 @@ def main():
         elif fabgrow.n_ramp > 50:
             print(f"  >> the RAMP is still firing after {fabgrow.n_ramp} events. It should have latched off once "
                   f"the population was built; if it has not, growth is not reading the loss at all.")
-    if FABRIC: print(f"FABRIC{' [NORM-ONLY CONTROL: no nodes, no routing]' if fab.norm_only else ''}: {len(fab.bodies)} nodes ({fab.grown} grown on plateau from {_i('FAB_N0',3)}) | depth budget {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps | soft routing + transition matrix + HALT")
+    if FABRIC: print(f"FABRIC{' [NORM-ONLY CONTROL: no nodes, no routing]' if fab.norm_only else ''}: {len(fab.bodies)} nodes ({fab.grown} grown on plateau from {_i('FAB_N0',2048)}) | depth budget {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps | soft routing + transition matrix + HALT")
     if EXPERTS: print(f"EXPERTS (separate population, dual selection): {router.created} created, {router.replicated} replicated, {router.merged} merged, {router.removed} removed -> {len(router.cent)} live | rank {_i('EXPERT_R',4)} | churn {router.removed/max(1,router.created):.0%} (merge preserves learning; high churn destroys it)")
     tol = WIN * 3 if (USE_TOK and TOK_ONLINE) else WIN * 2   # byte-coord positions when online
     hits = sum(1 for b in bounds if any(abs(b - s) <= tol for s in true_sw))
