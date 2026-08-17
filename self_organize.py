@@ -150,7 +150,7 @@ _SPEC = {
     "CHAIN_SUP": ("env", 0.0),                            # fabric
     "CHAIN_VOTE": ("env", 1),                             # fabric
     "DIV_MASS": ("env", 1),                               # fabric -- weight DIV_W by routing mass; 0 = unweighted
-    "DIV_W": ("env", 0.0),                                # fabric
+    "DIV_W": ("env", 0.02),                               # fabric
     "ENS_K": ("i", 2),                                    # fabric
     "EXPERTS": ("i", 0),                                  # fabric
     "EXPERT_R": ("i", 4),                                 # fabric
@@ -345,7 +345,7 @@ _SPEC = {
     "LR_EPOCHS": ("i", 8),                                # optim -- cosine WAVELENGTH in epochs; 0 = follow EPOCHS
     "LR_RESTARTS": ("i", 1),
     "LR_DECAY": ("f", 0.0),                               # lr
-    "FAB_LR_OWN": ("i", 1),                               # fabric
+    "FAB_LR_OWN": ("i", 0),                               # fabric
     "FAB_LR_MAXR": ("f", 4.0),                            # fabric
     "FAB_LR_BOOST": ("f", 2.0),                           # fabric
     # (FAB_LR_SPAN is gone. It scaled a per-expert COSINE across a wall-clock lifetime; the schedule is now
@@ -1337,7 +1337,7 @@ class Fabric(nn.Module):
         s._hopq = []                                               # per-hop router queries, for per-hop spawn
         # DIV_W is a LOCAL in main(), so Fabric.forward could not see it -- a NameError on the first chaining hop
         # that would have killed every chaining arm. Read it here, from the same env var and the same default.
-        s.div_w = float(_env("DIV_W", 0.0))
+        s.div_w = float(_env("DIV_W", 0.02))
         # === SOCIETY x CHAINING: multi-hop, but blended at the PREDICTION level =============================
         # The two paths differ in TWO independent ways and the grid only ever tested them together:
         #   depth      one hop (society) vs many (chaining)
@@ -3594,7 +3594,15 @@ def main():
     BAL_WARM = _i("BAL_WARM", 4000)                           # load-balance pressure DECAYS over this many steps...
     BAL_FLOOR = _f("BAL_FLOOR", 0.15)                         # ...to THIS fraction of full, and no lower. See the step site.
 
-    DIV_W = _f("DIV_W", 0.0)                                  #   it exists to stop early collapse, but equal load and
+    # 0.02, AND THE EVIDENCE FOR IT IS WEAK -- stated here so nobody later reads this default as established.
+    # One seed per rung: DIV_W 0.0 -> 1.971, 0.02 -> 1.932, 0.1 -> 2.103. The 0.02 gain is 0.039 b/B, which is
+    # EXACTLY the largest difference ever measured between two runs of an identical configuration, so it is at
+    # the noise floor and compare.py refused to call it. What is better supported is the other end: 0.1 costs
+    # +0.132, three times the floor, so pushing distinctness hard hurts output.
+    # Specialization did NOT improve at any setting -- every arm scored below its own shuffled-assignment null.
+    # And all of it was measured while the population was still being built, so it says little about a fabric
+    # that exists from step 0. Re-test at FAB_GROW=0 before treating 0.02 as anything but a placeholder.
+    DIV_W = _f("DIV_W", 0.02)                                  #   it exists to stop early collapse, but equal load and
     # (a module-level ROUTE_T = _f("ROUTE_T", 1.0) used to sit here: assigned, never read by anything, and with a
     #  DIFFERENT default from the one that actually routes -- Fabric.route_t reads ROUTE_T with default 0.1. Two
     #  names for one env var with disagreeing defaults is how a config gets misread. The live one is Fabric's.)
@@ -4579,7 +4587,7 @@ def main():
             ("FAB_LR_CYCLE",   _f("FAB_LR_CYCLE", 24.0)), ("FAB_LR_GAMMA",  _f("FAB_LR_GAMMA", 0.5)),
             # READ VIA _f/_i, NOT the locals: FAB_LR_OWN and friends are assigned ~40 lines BELOW the banner call,
             # so naming them here is a NameError on the enclosing scope, not a stale value.
-            ("FAB_LR_AMIN",    _f("FAB_LR_AMIN", 0.15)), ("FAB_LR_OWN",     bool(_i("FAB_LR_OWN", 1))),
+            ("FAB_LR_AMIN",    _f("FAB_LR_AMIN", 0.15)), ("FAB_LR_OWN",     bool(_i("FAB_LR_OWN", 0))),
             ("FAB_LR_BOOST",   _f("FAB_LR_BOOST", 2.0)), ("FAB_LR_MAXR",    _f("FAB_LR_MAXR", 4.0)),
             ("FAB_GRACE",      _i("FAB_GRACE", 48), "IN SELECTIONS, not steps"),
             ("FAB_CULL_FRAC",  _f("FAB_CULL_FRAC", 0.02)),
@@ -4860,7 +4868,17 @@ def main():
     # run did, so earlier results stay reproducible.
     LR_RESTARTS = bool(_i("LR_RESTARTS", 1))
     LR_DECAY = _f("LR_DECAY", 0.0)                         # 0 = restarts return to full peak (previous behaviour)
-    FAB_LR_OWN = bool(_i("FAB_LR_OWN", 1))                 # each expert on its own schedule, clocked from its own USE
+    # OFF, ON MEASUREMENT. FAB_LR_OWN=1 vs =0, three paired seeds, one knob apart: 2.023 vs 2.019, a difference
+    # of 0.0040 b/B. Two runs of the SAME configuration on this project have differed by up to 0.039, so this is
+    # thirty times below the floor for running the same thing twice -- not a small effect, an absent one. It also
+    # explains the FAB_LR_CYCLE ladder being flat across a x64 range: you cannot tune the wavelength of a
+    # schedule that is not doing anything.
+    # Turning it off is not neutral, it is a saving: the update-rescaling path clones every live row of A and B
+    # on each optimizer step (~50 MB at 2048 experts, d=768, r=8) to rescale a delta that measurably does not
+    # matter. The machinery stays -- the use clock, the boost, the envelope -- because the measurement was taken
+    # on a population that never finished growing (the ramp was still adding experts 20 steps before the run
+    # ended), and this deserves re-testing on a fixed population before it is called settled.
+    FAB_LR_OWN = bool(_i("FAB_LR_OWN", 0))                 # each expert on its own schedule, clocked from its own USE
     FAB_LR_MAXR = _f("FAB_LR_MAXR", 4.0)                   # cap on own-rate / global-rate, see the step site
     FAB_LR_BOOST = _f("FAB_LR_BOOST", 2.0)                 # multiply the own-rate for the cull-eligible bottom
     _lrown_said = [-1]; _elig_said = [-1]; _cycwarn = [False]
