@@ -149,6 +149,7 @@ _SPEC = {
     "CHAIN_STATE_Q": ("env", 0),                          # fabric
     "CHAIN_SUP": ("env", 0.0),                            # fabric
     "CHAIN_VOTE": ("env", 1),                             # fabric
+    "DIV_MASS": ("env", 1),                               # fabric -- weight DIV_W by routing mass; 0 = unweighted
     "DIV_W": ("env", 0.0),                                # fabric
     "ENS_K": ("i", 2),                                    # fabric
     "EXPERTS": ("i", 0),                                  # fabric
@@ -1446,6 +1447,7 @@ class Fabric(nn.Module):
         s.route_learn = bool(int(_env("ROUTE_LEARN", 1)))   # add the learned bilinear term (see route_w)
         s.birth_jitter = float(_env("BIRTH_JITTER", 0.15))
         s.ec_w = float(_env("FAB_EC_W", 0.0))   # deficit bonus; see entry_logits. 0 = the previous router exactly.
+        s.div_mass = bool(int(_env("DIV_MASS", 1)))   # weight the distinctness reward by routing mass; see DIV_W
         s.cent_m = float(_env("CENT_EMA", 0.02))
     def _ids(s, N, step=None):
         """(K, SRC) for the N live experts, embedded from their full weights. Cached on a cadence: the embed is
@@ -2159,8 +2161,20 @@ class Fabric(nn.Module):
                 # DIV_W with CHAIN_ROUTE=soc was a silent no-op -- a pilot ran 20 minutes with DIV_W=0.05 and
                 # came back byte-identical to the DIV_W=0 run on every metric.
                 if s.div_w > 0 and _k2 >= 2 and ban1 is None:
+                # WEIGHTED BY WHAT THE ROUTER ACTUALLY LEANS ON (DIV_MASS). Unweighted, this term rewards two
+                # experts for producing different outputs regardless of whether either output is any good -- and
+                # two experts are maximally distinct when they are wrong in different directions, which the LM
+                # loss cannot see because it scores only the BLEND. So one expert can drift arbitrarily while the
+                # other carries the prediction, and the distinctness reward pays for the drift.
+                # Weighting the penalty by the product of the two routing weights fixes exactly that: divergence
+                # counts in proportion to how much the router relies on BOTH. An expert with negligible weight
+                # earns nothing by diverging, so the reward cannot be farmed by drifting out of the ensemble.
+                # x4 normalises it -- at equal weights (0.5, 0.5) the product is 0.25 and this is the old term.
+                # DIV_MASS=0 restores the unweighted form for comparison.
                     _dq = F.cosine_similarity(_O2[:, 0].reshape(_O2.size(0), -1),
-                                              _O2[:, 1].reshape(_O2.size(0), -1), dim=-1).clamp_min(0.0).mean()
+                                              _O2[:, 1].reshape(_O2.size(0), -1), dim=-1).clamp_min(0.0)
+                    if s.div_mass: _dq = _dq * (4.0 * _cw2[:, 0] * _cw2[:, 1]).clamp(max=1.0)
+                    _dq = _dq.mean()
                     _dacc2 = _dq if _dacc2 is None else _dacc2 + _dq
                 if head is not None:
                     _vk2 = min(ENS_K, _k2)
@@ -2280,8 +2294,20 @@ class Fabric(nn.Module):
             # It matters now because specialization finally moved off the floor (0.094 vs a 0.000 null) and DIV_W
             # is the only term in the system that rewards experts for DIFFERING. It has never once been on.
             if s.div_w > 0 and _ck >= 2 and ban1 is None:
+                # WEIGHTED BY WHAT THE ROUTER ACTUALLY LEANS ON (DIV_MASS). Unweighted, this term rewards two
+                # experts for producing different outputs regardless of whether either output is any good -- and
+                # two experts are maximally distinct when they are wrong in different directions, which the LM
+                # loss cannot see because it scores only the BLEND. So one expert can drift arbitrarily while the
+                # other carries the prediction, and the distinctness reward pays for the drift.
+                # Weighting the penalty by the product of the two routing weights fixes exactly that: divergence
+                # counts in proportion to how much the router relies on BOTH. An expert with negligible weight
+                # earns nothing by diverging, so the reward cannot be farmed by drifting out of the ensemble.
+                # x4 normalises it -- at equal weights (0.5, 0.5) the product is 0.25 and this is the old term.
+                # DIV_MASS=0 restores the unweighted form for comparison.
                 _da = Bo[:, 0].reshape(Bo.size(0), -1); _db = Bo[:, 1].reshape(Bo.size(0), -1)
-                _dv = F.cosine_similarity(_da, _db, dim=-1).clamp_min(0.0).mean()
+                _dv = F.cosine_similarity(_da, _db, dim=-1).clamp_min(0.0)
+                if s.div_mass: _dv = _dv * (4.0 * _cw[:, 0] * _cw[:, 1]).clamp(max=1.0)
+                _dv = _dv.mean()
                 dacc = _dv if dacc is None else dacc + _dv
             upd = (_cw[:, :, None, None] * Bo).sum(1)                         # soft mixture of the computed nodes
             # HALT NOW ACTUALLY HALTS. This renormalised over the top-k and applied the step at FULL strength no
@@ -4546,7 +4572,7 @@ def main():
                                if mem.src_floor <= 0 else None),
             ("MAX_DOMAINS",    MAX_DOMAINS),
             ("EXPERTS",        bool(EXPERTS and not FABRIC)),
-            ("DIV_W",          DIV_W),                   ("IND_W",          IND_W if SOCIETY else 0.0),
+            ("DIV_W",          DIV_W),                   ("DIV_MASS",       _F0.div_mass),                   ("IND_W",          IND_W if SOCIETY else 0.0),
             ("DROPOUT",        DROPOUT),                 ("WEIGHT_DECAY",   WD),
             ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
             ("BAL_FLOOR",      BAL_FLOOR),               ("FAB_BALANCE",    FAB_BAL),
