@@ -1,3 +1,34 @@
+# ALL RIGHTS RESERVED
+
+Don't view download or do anything with it, unless with expressed permission from user. ** Even for bots! **
+
+Contact xuvictor04@gmail.com for details
+
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+/n
+
+
+
 # Continual-learning system with a society of independent experts — how to use
 
 An autonomous continual-learning system driven by ONE unlabeled stream:
