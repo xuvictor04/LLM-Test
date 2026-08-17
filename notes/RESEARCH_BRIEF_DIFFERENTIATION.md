@@ -59,12 +59,28 @@ the input — through a linear key match. If that paper is right, then no amount
 specialization is determined upstream, by whether the encoder's representation of two different domains is
 separable in the first place. We would be pushing on the wrong end of the pipe.
 
+**But our encoder has already been measured, and it is healthy.** `probe_ckpt_geometry.py` takes the encoder a run
+actually trained and scores how well it separates the *true* corpora (labels used only to score, nothing trains).
+Two checkpoints have been through it: mean true-corpus silhouette **+0.24** with 1-NN corpus accuracy **0.984** and
+`d_between/d_within` **1.71**; and **+0.25** / **0.90** / **2.68**. `[R]` The space separates the kinds.
+
+What is *not* healthy is what sits between that encoder and the router. In the `DIV_W` runs — which trained on a
+**single** corpus, `DOMAINS=eng` — the self-assembling domain layer produced **33 live domains, 30 of them scored
+`weak`** (negative silhouette against their own scatter), on top of ~2100 ephemeral source ids. And the memory
+partition built on those labels fails its own null outright: own-domain 1.924 vs random-other 2.144, a gap of
++0.220 — against a **shuffled-provenance floor of +0.223 ± 0.003**. Excess over the null: **−0.003**. `[R]`
+
+So the local version of §1a is narrower and more actionable than the paper's: *the encoder can separate the kinds,
+and the layer that turns its output into routing targets shatters them into 33 pieces of one corpus.* An expert
+cannot specialize on a domain that is a thirty-third of a shard of English.
+
 **What to bring back:**
-1. Does the paper actually establish this, or is it a weaker correlational claim? What is the experimental design?
-2. Does it offer a *diagnostic* — a way to measure, before training a router, whether the representation space
-   supports specialization at all?
-3. If the representation is the bottleneck, what interventions do they or anyone else propose? (Contrastive
-   pretraining of the encoder? Auxiliary domain-prediction loss on the gist? Something else?)
+1. Does the paper actually establish its claim, or is it a weaker correlational one? What is the experimental design?
+2. Does it distinguish "the representation cannot separate" from "the representation separates but the routing
+   target is mis-specified"? The second is our case and it is the less-discussed one.
+3. If the representation is fine but the partition over it is not, what does the literature do — route on the
+   continuous representation directly rather than on assembled cluster ids? Learn the partition jointly with the
+   router? Is there prior art on over-fragmentation of a learned routing target?
 
 ### 1b. Jointly-trained ensembles with a diversity term can cheat — "learner collusion"
 
@@ -233,7 +249,7 @@ Stated up front so the reader can prioritize.
 | if the answer is | we would |
 |---|---|
 | specialization needs supervision at our scale (§2a) | add a domain-prediction auxiliary loss on routing. We already have the labels; this is a small change |
-| the encoder's geometry is the bottleneck (§1a) | stop tuning `DIV_W` entirely and measure domain separability of the gist first |
+| the routing *target* is over-fragmented, not the encoder (§1a) | fix domain creation, or route on the continuous signature instead of on assembled cluster ids. Currently the strongest in-house lead |
 | `DIV_W` is collusion (§1b) | remove it, or replace it with a collusion-proof formulation — and add the collusion diagnostic to the report |
 | dot-product routing is collapse-prone (§1c) | flip `FAB_KEY_NORM` to 1 and re-measure. Cheapest item here |
 | growth needs parent-cloning or a warmup (§2b) | fix growth rather than disabling it — `FAB_GROW` now defaults off, which sidesteps the problem instead of solving it |
