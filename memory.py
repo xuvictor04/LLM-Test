@@ -22,7 +22,7 @@ class EditableMemory:
                  wrong_margin=1.5, wrong_min_n=3, flag_min_w=0.0, selfcon_thresh=2.5,
                  adaptive_gate=False, gate_target=0.5, gate_step=0.02, gate_floor=0.0, gate_ceil=0.95,
                  evict="recency", use_decay=0.98, decay_every=20000, quantile_gate=True,
-                 n_own=1, quota=None, src_floor=0.5, n_src_hint=64):
+                 n_own=1, quota=None, src_floor=0.5, n_src_hint=64, prob_frac=0.10):
         # PER-OWNER PARTITION (n_own > 1): the store is split into n_own contiguous blocks of `quota` entries, one per
         # expert, and an entry lives at index owner*quota + slot. Eviction is per-owner LRU on LAST-USE TIME -- not
         # self.use, which is a decayed retrieval COUNT (an LFU signal, and decayed by WRITE count rather than time).
@@ -79,6 +79,21 @@ class EditableMemory:
         self.nsrc = torch.zeros(max(1, int(n_src_hint)), device=device)     # ACTIVE entries per source id, kept
         self._floor_blocked = 0             #   incrementally in _commit; a recount is 200k elements per write
         self.live_src = None                # set_live_src(): source ids with a live domain. None = all eligible.
+        # PROBATION -- the generic form of a problem this project has three times over.
+        # A newborn expert is culled before it can prove itself; a newly-minted token is decayed to zero before it
+        # accumulates updates; a newly-written entry has no retrievals, so any frequency rule kills it. All three
+        # are ONE problem: a new unit cannot survive a competition scored on evidence it has not had time to
+        # gather. NEAT calls the answer speciation protection, the caching field calls it a probationary segment,
+        # the vocabulary literature calls it progressive unfreezing -- and all three converge on the same shape,
+        # A BOUNDED PROTECTED REGION WITH AN EXPLICIT PROMOTION CRITERION, not a gentler scoring function.
+        # Here: a write lands on probation; being RETRIEVED promotes it; probation is capped at prob_frac of the
+        # store and evicts its own oldest first. So a flood of new material -- a domain switch, a scan -- can
+        # occupy at most that fraction and has to earn the rest, which is the scan resistance plain LRU lacks.
+        # Sizes in the literature: S3-FIFO 10%, LIRS 1%, 2Q 25%.
+        # NOTE this is NOT a per-source quota: it protects by NEWNESS with a promotion test, not by identity.
+        self.prob_frac = float(prob_frac)
+        self.prob = torch.zeros(cap, dtype=torch.bool, device=device)   # still on probation (never retrieved yet)
+        self.n_promoted = 0; self.n_prob_evict = 0; self.n_main_evict = 0
         # HIGH-WATER MARK per source. Occupancy below the floor means two completely different things -- a domain
         # that never wrote that much yet, and a domain that HAD it and lost it -- and only the second is a
         # failure. Without this the starvation alarm fires on every newly-appearing domain, and a warning that
@@ -206,7 +221,29 @@ class EditableMemory:
             #             `last` never move off their write-time values and this degenerates to arbitrary/FIFO.
             ns = int(min(self.cap, max(8 * m, 64)))
             cand = torch.randint(0, self.cap, (ns,), device=self.dev)
-            cand = self._unprotected(cand, m)                                 # PER-SOURCE FLOOR, see below
+            # PROBATION FIRST, and this is what makes the store scan-resistant. If the never-retrieved region is
+            # over its share, the new write displaces one of ITS OWN rather than something established -- so a
+            # flood of unwanted material (a domain switch, a scan) eats itself instead of the working set, which
+            # is the failure plain LRU has no defence against. Only when probation is within budget does the
+            # eviction fall through to the ranking and the per-source floor below.
+            _pn = int(self.prob.sum())
+            _over = _pn > int(self.prob_frac * self.cap)
+            if _over:
+                _pc = cand[self.prob[cand]]
+                if _pc.numel() < m:
+                    _all_prob = self.prob.nonzero(as_tuple=True)[0]           # sample was thin; take the region
+                    _pc = _all_prob[self.last[_all_prob].argsort()] if _all_prob.numel() else _pc
+                if _pc.numel() >= m:
+                    cand = _pc; self.n_prob_evict += m
+                else:
+                    _over = False
+            # THE FLOOR APPLIES INSIDE PROBATION TOO. The first version narrowed to probation and went straight to
+            # the ranking, so a source at or below its floor lost its entries anyway as long as they were still
+            # unpromoted -- the two mechanisms cancelled and the domain-switch test went from 49 survivors back to
+            # 0. Probation decides WHICH POOL is drawn from; the floor decides who inside it is off limits. They
+            # answer different questions and both have to be asked.
+            cand = self._unprotected(cand, m)
+            if not _over: self.n_main_evict += m
             kk = int(min(m, cand.numel()))
             _sig = self.use[cand] if self.evict == "usage" else self.last[cand].float()
             idx = cand[_sig.topk(kk, largest=False).indices]
@@ -283,6 +320,23 @@ class EditableMemory:
         pass None to go back to treating every source with entries as eligible."""
         self.live_src = None if live is None else set(int(x) for x in live)
 
+    def pressure(self):
+        """IS THE STORE ACTUALLY SHORT OF ROOM? Returns the fraction of recent evictions that destroyed a PROMOTED
+        entry -- one that had been retrieved at least once and so had proved itself.
+
+        THE POINT, and it is A12's, not the quota's. Evicting probation is the store working: unwanted material
+        arrived and was discarded. Evicting promoted entries is different in kind -- it means proven material is
+        being thrown away to make room, which is the only honest definition of "the store is too small". A hard
+        per-domain quota answers that by walling capacity off; the objection recorded against it is that a wall
+        fights growability, and that pressure should be a SIGNAL -- grow the experts serving that domain, retrain
+        them, or split the domain -- rather than a limit. This is the measurement that signal needs, and until it
+        existed there was nothing to trigger on.
+
+        Returns None until enough evictions have happened to mean anything."""
+        tot = self.n_prob_evict + self.n_main_evict
+        if tot < 1000: return None
+        return self.n_main_evict / tot
+
     def src_report(self):
         """Per-source occupancy against the floor. Printed rather than inferred: the domain that vanished did so
         silently for the whole project, and the only reason anyone noticed was an unrelated unlearn test going
@@ -297,7 +351,9 @@ class EditableMemory:
                 for s in (self.nsrc_max >= max(1, floor)).nonzero(as_tuple=True)[0].tolist()
                 if floor > 0 and int(self.nsrc[s]) < max(1, floor // 4)]
         return {"floor": floor, "per_source": rows, "blocked": self._floor_blocked, "lost": lost,
-                "live": live, "orphan": orph}
+                "live": live, "orphan": orph,
+                "prob": int(self.prob.sum()), "prob_cap": int(self.prob_frac * self.cap),
+                "promoted": self.n_promoted, "prob_evict": self.n_prob_evict, "main_evict": self.n_main_evict}
 
     def _commit(self, idx, k, tok, src, ctx, pos, m):
         """Write the chosen slots. Split out so the partitioned and global eviction paths share one body."""
@@ -321,6 +377,7 @@ class EditableMemory:
         if pos is not None: self.pos[idx] = pos[:idx.numel()].to(self.dev)   # remember WHERE it came from
         if self.ctx_w > 0 and ctx is not None: self.ctx[idx] = ctx.to(self.dev)
         self.use[idx] = 0.0; self.active[idx] = True
+        self.prob[idx] = True                       # every write lands on probation; retrieval is what promotes it
         self.selfcon[idx] = -1.0                                              # new entry: self-consistency not yet checked
         self.recon[idx] = -1.0                                                # new entry: reconstruction not yet checked
         self._wc += m                                                         # decay usage so it reflects RECENT utility
@@ -361,6 +418,11 @@ class EditableMemory:
         hit[:, :kk] = gi
         wfull = torch.zeros(B, self.topk, device=self.dev); wfull[:, :kk] = w   # retrieval weights (0 for empty slots)
         self.use.index_add_(0, gi.reshape(-1), w.reshape(-1))                 # track usage
+        # PROMOTION. Being retrieved is the criterion, and it is checked here because this is the only place that
+        # knows an entry was actually wanted. Anything never retrieved stays on probation and is evicted from it.
+        _g = gi.reshape(-1)
+        self.n_promoted += int(self.prob[_g].sum())
+        self.prob[_g] = False
         # LAST-USE STAMP, UNCONDITIONALLY. This used to be gated on n_own > 1, so on the global store `last` was
         # never written by a read AND never written by a write -- it stayed all-zero for the entire run and any
         # eviction rule consulting it was choosing arbitrarily. `last` is the clock for USE-BASED RECENCY: an entry

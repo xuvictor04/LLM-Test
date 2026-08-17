@@ -283,6 +283,9 @@ _SPEC = {
     "MEM_OWNERS": ("i", 64),                              # memory
     "MEM_PER_EXPERT": ("i", 0),                           # memory
     "MEM_PROBE_EVERY": ("i", 25),                          # memory
+    "MEM_PRESSURE_ACT": ("i", 0),                         # memory -- let pressure drive growth (off: report only)
+    "MEM_PROB_FRAC": ("f", 0.10),                         # memory
+    "MEM_PRESSURE": ("f", 0.80),                          # memory -- report a capacity signal above this
     "MEM_SRC_FLOOR": ("f", 0.5),                          # memory
     "MEM_PROBE_N": ("i", 64),                             # memory
     "MEM_QUOTA": ("i", 128),                              # memory
@@ -3807,7 +3810,8 @@ def main():
                          evict=_env("EVICT", "lru"), use_decay=_f("USE_DECAY", 0.98), decay_every=_i("DECAY_EVERY", 20000),
                          quantile_gate=bool(_i("WRITE_QUANTILE", 1)),   # WRITE_QUANTILE=0 restores the old additive controller
                          n_own=(min(_i("FAB_NMAX", 4096), _i("MEM_OWNERS", 64)) if MEM_PER_EXPERT else 1), quota=(MEM_QUOTA if MEM_PER_EXPERT else None),
-                         src_floor=_f("MEM_SRC_FLOOR", 0.5), n_src_hint=max(64, _i("MAX_DOMAINS", 32) * 2))
+                         src_floor=_f("MEM_SRC_FLOOR", 0.5), n_src_hint=max(64, _i("MAX_DOMAINS", 32) * 2),
+                         prob_frac=_f("MEM_PROB_FRAC", 0.10))
     # READ PROBE. EVICT=lru/usage select on retrieval, and retrieval only happened at eval time, so the signal both
     # rules read was a constant. The probe issues real reads during training against the text being trained on. 0
     # turns it off and returns the store to write-order eviction -- which is what every run before this one did,
@@ -4972,7 +4976,28 @@ def main():
             # become single-domain should say so while the run is still going, not at the post-mortem.
             _sr = mem.src_report() if mem.n else {"floor": 0, "per_source": [], "blocked": 0, "lost": []}
             _occ = " ".join(f"s{_s}:{_c}" for _s, _c in sorted(_sr["per_source"], key=lambda r: -r[1])[:6])
-            _occ += f" | {_sr.get('live', 0)} live, {_sr.get('orphan', 0)} orphaned"
+            _occ += (f" | {_sr.get('live', 0)} live, {_sr.get('orphan', 0)} orphaned"
+                     f" | probation {_sr.get('prob', 0)}/{_sr.get('prob_cap', 0)}, {_sr.get('promoted', 0)} promoted")
+            # MEMORY PRESSURE AS A SIGNAL, NOT A WALL. A12 rejected a strict per-domain quota on the grounds that
+            # a wall fights growability, and proposed that pressure should instead mean: grow the experts serving
+            # this domain, retrain them, or split the domain. That mechanism was never built, and until
+            # mem.pressure() there was nothing to trigger it on. Evicting probation is the store working as
+            # intended; evicting PROMOTED entries -- material that had proved itself by being retrieved -- is the
+            # only honest sign that the store is genuinely too small.
+            # REPORTED, NOT ACTED ON. Wiring this to growth is a behaviour change nobody has measured, and the
+            # last unmeasured default in this file cost a run. It says what it would do; MEM_PRESSURE_ACT turns it
+            # into an actual growth signal once someone has looked at the numbers it prints.
+            _pr = mem.pressure()
+            if _pr is not None and _pr >= _f("MEM_PRESSURE", 0.80):
+                print(f"  !! MEMORY PRESSURE {_pr:.0%} of evictions are destroying PROMOTED entries "
+                      f"(retrieved at least once), not probation. The store is genuinely short of room rather "
+                      f"than merely turning over new material. A12's reading: this is a signal to GROW the "
+                      f"experts serving these domains, retrain them, or SPLIT the domain -- not to wall capacity "
+                      f"off per domain. Set MEM_PRESSURE_ACT=1 to let it drive growth once you have looked at "
+                      f"these numbers across a few runs.")
+                if _i("MEM_PRESSURE_ACT", 0) and FABRIC and fabgrow is not None:
+                    fabgrow.note_shift(step)     # same entry point a regression uses: makes growth eligible now
+                    print(f"     MEM_PRESSURE_ACT=1 -> growth made eligible at step {step}.")
             # ONLY SOURCES THAT LOST GROUND. Being under the floor is normal for a domain that has just appeared
             # and has not written a floor's worth yet; it is a failure only for one that HAD it and no longer
             # does. The first version of this alarm could not tell them apart and fired on every new domain.

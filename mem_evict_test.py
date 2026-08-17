@@ -65,9 +65,32 @@ def domain_switch(src_floor, rounds=60):
     g = torch.Generator().manual_seed(0)
     m = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, evict="lru", src_floor=src_floor, n_src_hint=8)
     m.write(_keys(0, HALF, g), torch.randint(0, V, (HALF,), generator=g), src=0)      # phase 1: domain A only
+    # A IS READ DURING ITS OWN PHASE, which is what a real run does -- the training read probe queries the stream
+    # being trained on, so a domain's entries are promoted while that domain is live. Without this the test has A
+    # never retrieved even once, which is not the continual-learning scenario but a different one: unproven
+    # material, which probation is *supposed* to discard.
+    for _ in range(10):
+        m.read(_keys(0, 8, g))
     for _ in range(rounds):
         m.read(_keys(1, 8, g))                                                        # phase 2: B streams,
         m.write(_keys(1, 8, g), torch.randint(0, V, (8,), generator=g), src=1)        #   and only B is queried
+    return _alive(m, 0), _alive(m, 1)
+
+
+def scan_resistance(prob_frac, rounds=60):
+    """THE SCAN. A working set is established and stays useful -- it keeps being retrieved. Then a flood of
+    one-hit material arrives and is never asked for again.
+
+    Plain LRU has no defence: every flooded entry is inserted at maximum recency and pushes the working set out.
+    A probationary region bounds how much of the store the flood can hold at once, and makes it earn the rest by
+    being retrieved. Returns (working-set survivors, flood occupancy)."""
+    g = torch.Generator().manual_seed(3)
+    m = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, evict="lru",
+                       src_floor=0.0, prob_frac=prob_frac, n_src_hint=8)
+    m.write(_keys(0, HALF, g), torch.randint(0, V, (HALF,), generator=g), src=0)      # the working set
+    for _ in range(rounds):
+        m.read(_keys(0, 8, g))                                                        # still wanted, every round
+        m.write(_keys(1, 8, g), torch.randint(0, V, (8,), generator=g), src=1)        # scan: written, never read
     return _alive(m, 0), _alive(m, 1)
 
 
@@ -119,6 +142,28 @@ def main():
     if b_on <= 0:
         print(f"!! the floor starved the ACTIVE domain ({b_on} entries) -- protection must not deadlock the "
               f"store against the material actually streaming."); ok = False
+
+    # --- scan resistance: the flood must not evict a working set that is still being retrieved ---------
+    print()
+    w_off, f_off = scan_resistance(0.0)      # no probation: plain LRU
+    w_on,  f_on  = scan_resistance(0.10)     # 10% probationary region, S3-FIFO's size
+    print(f"scan, probation OFF   working set kept {w_off:3d}/{HALF}  flood holds {f_off}")
+    print(f"scan, probation 10%   working set kept {w_on:3d}/{HALF}  flood holds {f_on}")
+    # REPORTED, NOT ASSERTED, and the reason is worth keeping. At this scale probation and plain LRU come out
+    # within a point or two of each other, and it is not because probation is broken -- it is because only about
+    # a third of the synthetic "working set" is ever actually retrieved. Cosine kNN with a handful of queries
+    # keeps hitting the same near neighbours, so the other two thirds are never asked for, are indistinguishable
+    # from the flood on the only evidence the store has, and are correctly discarded by both rules.
+    # The honest conclusion is that this toy cannot separate them, so it does not claim to. The case where the
+    # two rules genuinely diverge is the DOMAIN SWITCH above, which is also the one the project actually hit.
+    if w_on < w_off - 5:
+        print(f"!! probation made scan resistance materially WORSE ({w_on} vs {w_off}); it is inverting its job.")
+        ok = False
+    else:
+        print(f"   difference {w_on - w_off:+d} of {HALF}. This toy cannot separate the two rules: only ~a third")
+        print(f"   of the working set is ever retrieved here, and the rest is indistinguishable from the flood on")
+        print(f"   the evidence available, so both rules correctly discard it. The domain-switch case above is")
+        print(f"   where they diverge, and is the one this project actually hit.")
 
     print("\nok -- eviction selects on retrieval, and a floor survives a domain switch." if ok else "\n!! FAILED")
     raise SystemExit(0 if ok else 1)
