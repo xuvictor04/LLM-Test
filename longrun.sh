@@ -723,12 +723,23 @@ for f in sorted(glob.glob(f"{sd}/{tag}_seed*.log")):
     def g(p):
         m = re.search(p, b)
         return float(m.group(1)) if m else None
+    # SPEC NEVER WITHOUT ITS NULL. The bare number is meaningless and reliably over-read: a DIV_W ladder showed
+    # 0.000 / 0.120 / 0.047 and the 0.120 looked like the distinctness reward finally working. It was not -- the
+    # log's own shuffled-assignment null for that run was 0.138 +/- 0.062, so the "improvement" sat BELOW the bar
+    # it must clear, and all three arms were INTERCHANGEABLE. Specialization is a difference from a null, not a
+    # level, and printing the level alone invites exactly that mistake.
     rows.append((re.search(r"seed(\d+)", f).group(1), g(r"held-out ([0-9.]+)"),
-                 g(r"beats order-1 by \+([0-9.]+)"), g(r"SPECIALIZATION[^0-9]*([0-9.]+)")))
-print(f"  {'seed':>4}  {'held-out':>9}  {'vs order-1':>11}  {'spec':>7}")
-for s, h, o, sp in rows:
-    print(f"  {s:>4}  {h if h else '-':>9}  {o if o else '-':>11}  {sp if sp is not None else '-':>7}")
-hs = [h for _, h, _, _ in rows if h]
+                 g(r"beats order-1 by \+([0-9.]+)"), g(r"SPECIALIZATION[^0-9]*([0-9.]+)"),
+                 g(r"shuffled-assignment null\s+([0-9.]+)"),
+                 g(r"shuffled-assignment null\s+[0-9.]+ \+/- ([0-9.]+)")))
+print(f"  {'seed':>4}  {'held-out':>9}  {'vs order-1':>11}   {'spec vs its shuffled null':<34}")
+for s, h, o, sp, nu, ns in rows:
+    if sp is None:   _sc = "-"
+    elif nu is None: _sc = f"{sp}  (null not reported)"
+    else:            _sc = (f"{sp:.3f} vs {nu:.3f}+/-{(ns or 0):.3f}  "
+                            + ("SPECIALIZED" if sp > nu + (ns or 0) else "interchangeable"))
+    print(f"  {s:>4}  {h if h else '-':>9}  {o if o else '-':>11}   {_sc:<34}")
+hs = [r[1] for r in rows if r[1]]
 if len(hs) > 1:
     print(f"\n  held-out: mean {st.mean(hs):.3f}  spread {max(hs)-min(hs):.3f}  "
           f"sd {st.pstdev(hs):.3f}  over {len(hs)} seeds")
