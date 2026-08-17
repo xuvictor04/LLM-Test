@@ -4972,6 +4972,7 @@ def main():
             # become single-domain should say so while the run is still going, not at the post-mortem.
             _sr = mem.src_report() if mem.n else {"floor": 0, "per_source": [], "blocked": 0, "lost": []}
             _occ = " ".join(f"s{_s}:{_c}" for _s, _c in sorted(_sr["per_source"], key=lambda r: -r[1])[:6])
+            _occ += f" | {_sr.get('live', 0)} live, {_sr.get('orphan', 0)} orphaned"
             # ONLY SOURCES THAT LOST GROUND. Being under the floor is normal for a domain that has just appeared
             # and has not written a floor's worth yet; it is a failure only for one that HAD it and no longer
             # does. The first version of this alarm could not tell them apart and fired on every new domain.
@@ -5052,6 +5053,11 @@ def main():
             with _T("rekey(amortized)"): _rekey_amortized(REKEY_CHUNK)                                  # no-compromise: same work, spread out, no stall
         if SELF_ORG and MANAGE_ON and step % DOM_MANAGE_EVERY == 0 and step > 0:                    # MANAGE the domain set
             m, c = asm.manage(step, mem, MANAGE_MERGE, MANAGE_MIN, MANAGE_STALE)                     #   merge redundant + cull + fold
+            # WHICH SOURCES STILL HAVE A DOMAIN. Told to the store on the manage cadence, because that is when
+            # the answer changes -- domains are folded and culled here, and every fold leaves the source id it
+            # merged FROM holding entries with nothing live behind them. Without this the floor divides its
+            # reservation by the orphans too and spends most of it on them.
+            mem.set_live_src(asm.cent.keys())
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
         if FABRIC and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
             _fc, _fs = fab.manage(step, grace=_i("FAB_GRACE", 48), cull_frac=_f("FAB_CULL_FRAC", 0.02),

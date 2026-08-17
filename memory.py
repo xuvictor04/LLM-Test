@@ -78,6 +78,7 @@ class EditableMemory:
         self.src_floor = float(src_floor)   # fraction of cap reserved per live source; 0 = no floor (old behaviour)
         self.nsrc = torch.zeros(max(1, int(n_src_hint)), device=device)     # ACTIVE entries per source id, kept
         self._floor_blocked = 0             #   incrementally in _commit; a recount is 200k elements per write
+        self.live_src = None                # set_live_src(): source ids with a live domain. None = all eligible.
         # HIGH-WATER MARK per source. Occupancy below the floor means two completely different things -- a domain
         # that never wrote that much yet, and a domain that HAD it and lost it -- and only the second is a
         # failure. Without this the starvation alarm fires on every newly-appearing domain, and a warning that
@@ -245,11 +246,12 @@ class EditableMemory:
         when the store is full and sources are balanced -- the filter is dropped for this call and the ranking
         decides. A store that cannot evict is worse than one that evicts something protected."""
         if self.src_floor <= 0.0: return cand
-        live = int((self.nsrc > 0).sum())
+        has = self._eligible()
+        live = int(has.sum())
         if live <= 1: return cand                                            # one source owns everything anyway
         floor = int(self.src_floor * self.cap / live)
         if floor <= 0: return cand
-        prot = (self.nsrc <= floor)                                          # (nsrc_len,) bool, per source id
+        prot = has & (self.nsrc <= floor)                                    # (nsrc_len,) bool, per source id
         cs = self.src[cand].clamp(min=0, max=self.nsrc.numel() - 1)
         keep = ~prot[cs]
         keep &= (self.src[cand] >= 0)                                        # never protect an unwritten slot
@@ -257,18 +259,45 @@ class EditableMemory:
         self._floor_blocked += int(cand.numel() - out.numel())
         return out if out.numel() >= need else cand
 
+    def _eligible(self):
+        """Sources that both HOLD entries and still have a LIVE domain behind them.
+
+        ORPHANS ARE NOT PROTECTED AND DO NOT DILUTE THE FLOOR, and both halves of that matter. Measured on a real
+        run: 125 source ids held entries while 27 domains were live, so dividing the reserved capacity by "sources
+        with anything in them" gave each 800 slots instead of the ~3300 a live domain is due -- and most of the
+        reservation went to domains that no longer exist. An orphan is precisely the entry eviction should reach
+        first, so protecting it inverts the mechanism.
+
+        Sources go orphaned legitimately: the assembler folds domains together (reassign_src) and culls them
+        (delete_src), and ids climb monotonically, so a long run accumulates them. live_src=None means "no domain
+        information supplied" and everything with entries is eligible, which is the previous behaviour."""
+        has = (self.nsrc > 0)
+        if self.live_src is None: return has
+        lv = torch.zeros_like(has)
+        for s in self.live_src:
+            if 0 <= s < lv.numel(): lv[s] = True
+        return has & lv
+
+    def set_live_src(self, live):
+        """Tell the store which source ids still correspond to a live domain. Called on the domain-manage cadence;
+        pass None to go back to treating every source with entries as eligible."""
+        self.live_src = None if live is None else set(int(x) for x in live)
+
     def src_report(self):
         """Per-source occupancy against the floor. Printed rather than inferred: the domain that vanished did so
         silently for the whole project, and the only reason anyone noticed was an unrelated unlearn test going
         vacuous."""
-        live = int((self.nsrc > 0).sum())
+        has = self._eligible()
+        live = int(has.sum())
+        orph = int((self.nsrc > 0).sum()) - live
         floor = int(self.src_floor * self.cap / max(1, live)) if self.src_floor > 0 else 0
         rows = [(int(s), int(self.nsrc[s])) for s in (self.nsrc > 0).nonzero(as_tuple=True)[0].tolist()]
         # `lost` is the only starvation worth an alarm: the source once held a floor's worth and no longer does.
         lost = [(int(s), int(self.nsrc[s]), int(self.nsrc_max[s]))
                 for s in (self.nsrc_max >= max(1, floor)).nonzero(as_tuple=True)[0].tolist()
                 if floor > 0 and int(self.nsrc[s]) < max(1, floor // 4)]
-        return {"floor": floor, "per_source": rows, "blocked": self._floor_blocked, "lost": lost}
+        return {"floor": floor, "per_source": rows, "blocked": self._floor_blocked, "lost": lost,
+                "live": live, "orphan": orph}
 
     def _commit(self, idx, k, tok, src, ctx, pos, m):
         """Write the chosen slots. Split out so the partitioned and global eviction paths share one body."""
