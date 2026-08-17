@@ -181,7 +181,7 @@ _SPEC = {
     "FAB_LR_AMIN": ("f", 0.15),                           # fabric
     "FAB_LR_CYCLE": ("f", 24.0),                          # fabric -- IN SELECTIONS
     "FAB_LR_GAMMA": ("f", 0.5),                           # fabric
-    "FAB_GROW": ("env", 0),                               # fabric -- see the PlateauGrowth ctor for why 0
+    "FAB_GROW": ("env", 1),                               # fabric -- ON; the ramp is neutered by FAB_RAMP_TO
     "FAB_HALT": ("env", 1),                               # fabric
     "FAB_HALT_MAX": ("env", 0.9),                         # fabric
     "FAB_HID_MULT": ("f", 2),                             # fabric
@@ -190,7 +190,7 @@ _SPEC = {
     "FAB_MUT": ("env", 0.25),                             # fabric
     "FAB_MUT_BIG": ("env", 6.0),                          # fabric
     "FAB_MUT_BIG_P": ("env", 0.1),                        # fabric
-    "FAB_N0": ("i", 2048),                                # fabric -- the population, since FAB_GROW defaults off
+    "FAB_N0": ("i", 2048),                                # fabric -- the population is BUILT, not ramped to
     "FAB_NMAX": ("i", 4096),                              # fabric
     "FAB_NORM_ONLY": ("i", 0),                            # fabric
     "FAB_PARENT_K": ("env", 8),                           # fabric
@@ -200,7 +200,7 @@ _SPEC = {
     "FAB_RAMP": ("i", 4000),                              # fabric
     "FAB_RAMP_LATCH": ("env", 1),                         # fabric
     "FAB_RAMP_RATE": ("f", 0.10),                         # fabric
-    "FAB_RAMP_TO": ("f", 1.0),                            # fabric
+    "FAB_RAMP_TO": ("f", 0.5),                            # fabric -- N0=2048 of cap 4096 latches it at once
     "FAB_RANK": ("env", 8),                               # fabric
     "FAB_RECOVER_MAX": ("i", 20000),                      # fabric
     "FAB_RECOVER_MIN": ("i", 600),                        # fabric
@@ -2398,7 +2398,7 @@ class PlateauGrowth:
                  Leaves RECOVER only once improvement has flattened (the ORIGINAL plateau test), or after rmax steps.
     Returns an INT (how many to grow), 0 for none."""
     def __init__(s, rel=0.002, cooldown=1500, warmup=2000, z=4.0, burst=3, ramp=0, rmin=600, rmax=20000,
-                 rate=0.10, ramp_to=1.0):
+                 rate=0.10, ramp_to=0.5):   # ramp_to MUST match FAB_RAMP_TO's registry default, see the read site
         s.fast = s.slow = None; s.rel = rel; s.cool = cooldown; s.warm = warmup; s.last = -10**9
         s.z = z; s.burst = max(1, burst); s.ramp = ramp; s.rmin = rmin; s.rmax = rmax
         s.dev = 0.0; s.n = 0; s.state = "W"; s.t0 = 0; s.blackout = -10**9; s.why = ""
@@ -2407,7 +2407,26 @@ class PlateauGrowth:
         # isolates GROWTH from everything else the fabric does. The 2.4 -> 3.5 climb between steps 6k and 12k is
         # the largest remaining loss in every arm at every seed, and it coincides with the ramp building the
         # population; this is the arm that says whether those two facts are related.
-        # DEFAULTS OFF, and the population starts at FAB_N0=2048 instead. Two independent lines of evidence:
+        # GROWTH STAYS ON. The population is BUILT at FAB_N0=2048 rather than ramped to, and FAB_RAMP_TO=0.5 makes
+        # the ramp latch off on the first step (2048 >= 0.5 x 4096), which leaves the REGRESSION and stall triggers
+        # -- the ones that answer "this material needs more capacity" -- with a clear field and 2048 slots of
+        # headroom. Turning FAB_GROW off entirely was the first attempt and it was wrong: growth on demand is the
+        # continual-learning mechanism, and freezing the population removes the system's only reply to a new area
+        # arriving. What was broken is the RAMP, not growth.
+        # MEASURED on PlateauGrowth directly, 20k steps with a sustained regression injected at 12k:
+        #   N0=3    cap=4096 ramp_to=1.0 (old default) -> ramp 107, REGRESSION 0, stall 0
+        #   N0=2048 cap=4096 ramp_to=1.0               -> ramp 107, REGRESSION 0, stall 0
+        #   N0=2048 cap=4096 ramp_to=0.5 (this)        -> ramp   0, REGRESSION 0, stall 7
+        # The ramp does not merely dominate the on-demand triggers, it STARVES them: it re-fires every cool//8=187
+        # steps and each firing sets s.last, so the `t - s.last < s.cool` gate below can never open. On the old
+        # default the continual-learning path was unreachable by construction, which is what "grow 417x on the RAMP,
+        # 0x on a REGRESSION, 0x on a stall" in the DIV_W runs was recording.
+        # STILL BROKEN, and the probe above is why REGRESSION reads 0 even here: REGRESSION and stall share ONE
+        # cooldown through s.last, and stall keeps re-arming it. Traced at the injected regression -- state W,
+        # unexpected TRUE, and dropped anyway on `t - s.last = 772 < cool = 1500`, where s.last had been set by a
+        # routine stall 772 steps earlier. The rare, important event is suppressed by the common one. Not fixed
+        # here because it changes when capacity is allocated and deserves its own measurement.
+        # Two independent lines of evidence for building the population rather than ramping to it:
         #   The 2x2 (cc0a377), four arms x three seeds, one knob apart, and still the cleanest experiment here:
         #     GROW=0 N0=3      2.117, spread 0.326      GROW=0 N0=2048   1.999, spread 0.080
         #     GROW=1 NMAX=64   2.091, spread 0.180      GROW=1 NMAX=4096 3.384, spread 2.074
@@ -2423,7 +2442,7 @@ class PlateauGrowth:
         # birthday then (INV-15 / E6.4), so it ran with ZERO culls for its whole life. Culling works now, so
         # 1.999 is not reproducible at HEAD. What survives untouched is the STRUCTURE -- the interaction -- and
         # that is enough to stop shipping the arm that is measurably broken. Re-measure the level.
-        s.grow_on = bool(int(_env("FAB_GROW", 0)))
+        s.grow_on = bool(int(_env("FAB_GROW", 1)))
         s.latch = bool(int(_env("FAB_RAMP_LATCH", 1)))          # 0 restores the never-terminating ramp
         s.ramp_done = False; s.n_ramp = 0; s.n_stall = 0; s.n_regr = 0   # why growth fired, for the report
         s.rate = max(0.0, rate); s.ramp_to = ramp_to      # GEOMETRIC ramp: grow a FRACTION of the population, not a
@@ -3549,7 +3568,7 @@ def main():
     fabgrow = PlateauGrowth(_f("FAB_PLATEAU", 0.002), _i("FAB_COOLDOWN", 400), _i("FAB_WARMUP", 300),
                             _f("FAB_Z", 4.0), _i("FAB_BURST", 1), _i("FAB_RAMP", 4000),
                             _i("FAB_RECOVER_MIN", 600), _i("FAB_RECOVER_MAX", 20000),
-                            _f("FAB_RAMP_RATE", 0.10), _f("FAB_RAMP_TO", 1.0)) if FABRIC else None
+                            _f("FAB_RAMP_RATE", 0.10), _f("FAB_RAMP_TO", 0.5)) if FABRIC else None
     # 64 was never a design decision, it was a default nothing pushed against -- and the population saturated it at
     # step 1295 of the pilot, after which "selection" is merge/cull churn over a full bank. With low-rank experts the
     # ceiling is memory: 2*NMAX*d*r floats, so 4096 experts costs 0.2 GB at d=768/r=8, 10k costs 0.5 GB, 1M costs 49.
