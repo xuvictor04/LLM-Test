@@ -323,6 +323,19 @@ _flags_for() {
     # for prediction (own-domain 1.924 vs random-other 2.144, gap +0.220, against a shuffled null of +0.223), and
     # per-expert memory keys off the EXPERT rather than the domain, so it survives this.
     nodom)     echo "SELF_ORG=0" ;;
+    # DOMAINS OFF *AND* MEMORY PER EXPERT -- drop the domain partition and put the expert partition in its place,
+    # rather than dropping the partition altogether (which is what plain `nodom` does: MEM_OWNERS collapses to 1
+    # and the store becomes one global pool). MEM_PER_EXPERT defaults OFF at HEAD and the reason is recorded at
+    # its read site: global 200k slots contributed -0.097 b/B against 32 owners x 64 at -0.652, and the partition
+    # is what made a FADED DOMAIN VANISH -- owners are experts folded mod MEM_OWNERS, both domains route to
+    # overlapping experts, and eviction inside a block was LRU on WRITE-recency, so whichever domain stopped
+    # being written was evicted oldest-first by construction. Every English entry gone, measured.
+    # That failure mode is the one the eviction-clock work targeted: `last` is now last-RETRIEVAL and the read
+    # probe makes it real during training rather than eval-only. So this arm is a RETEST of a known-bad
+    # configuration on the machinery that was built to fix it, and the retention section is what it is read on --
+    # not bits/byte. If English still vanishes here, per-expert memory is not a replacement for domains.
+    nodom_mem) echo "SELF_ORG=0 MEM_PER_EXPERT=1" ;;
+    nodom_mem_kn) echo "SELF_ORG=0 MEM_PER_EXPERT=1 FAB_KEY_NORM=1" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
     # under the misspelled arm's log name -- a result filed against an experiment that never happened, which is
@@ -632,7 +645,7 @@ grid)
     #              (own-domain gap +0.220 against a shuffled null of +0.223), so this asks what it costs to drop.
     #   embvar16   the second rung -- a coefficient with no measured direction needs more than one point.
     #   mintok_kn / nodom_kn / keynorm_ev   the combinations, only informative once keynorm has a verdict.
-    round3)  ARMS="base keynorm embvar4 mintok nodom embvar16 mintok_kn nodom_kn keynorm_ev" ;;
+    round3)  ARMS="base keynorm embvar4 mintok nodom nodom_mem embvar16 mintok_kn nodom_mem_kn keynorm_ev" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
