@@ -302,6 +302,28 @@ _flags_for() {
     wt_bal)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000" ;;
     wt_div)    echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 DIV_W=0.05" ;;
     kitchen)   echo "ROUTE_REGION_W=0 FAB_KEY_NORM=1 BAL_WARM=100000000 DIV_W=0.05 ROUTE_T=0.3" ;;
+    # === IDENTITY-SPACE COLLAPSE ===============================================================================
+    # 31 of 40 archived runs print ">> COLLAPSED: every expert embeds to essentially the SAME identity", with a
+    # nearest-neighbour distance median of 0.0009-0.0093 against a spawn bar of 0.0200. When the identity space is
+    # collapsed the router has nothing to discriminate on, so specialization reads 0.000, FAB_SPAWN can never fire
+    # (the query sits 0.0000 from its nearest identity), and HALT cannot win a softmax it enters far too small.
+    # Every FAB_KEY_NORM=1 run is NON-collapsed (4/4, NN 0.0195-0.0722) and the three of those that report HALT
+    # have HALT mass 0.917 against 0.0000 nearly everywhere else. FAB_EMB_VAR is the coefficient the report itself
+    # names ("Raise FAB_EMB_VAR"); it has never been varied -- it is in notes/07_WIP.md's list of untested knobs.
+    embvar4)   echo "FAB_EMB_VAR=4.0" ;;                   # is collapse fixable WITHOUT touching routing?
+    embvar16)  echo "FAB_EMB_VAR=16.0" ;;
+    keynorm_ev) echo "FAB_KEY_NORM=1 FAB_EMB_VAR=4.0" ;;   # both levers on the same space
+    # === HALT ==================================================================================================
+    # HALT's logit is a RAW DOT at FAB_KEY_NORM=0 and a cosine over route_t at 1 (see Fabric, the halt_key sites),
+    # so key_norm is not merely a routing knob -- it sets whether HALT has any dynamic range at all.
+    mintok)    echo "TOK_MINT_UNTIL=1" ;;                  # the minimum tokenizer: seed vocabulary, no live minting
+    mintok_kn) echo "TOK_MINT_UNTIL=1 FAB_KEY_NORM=1" ;;
+    # === DOMAINS OFF ===========================================================================================
+    # SELF_ORG=0 is one bucket, no provenance, no management. The partition has been measured NOT to earn its keep
+    # for prediction (own-domain 1.924 vs random-other 2.144, gap +0.220, against a shuffled null of +0.223), and
+    # per-expert memory keys off the EXPERT rather than the domain, so it survives this.
+    nodom)     echo "SELF_ORG=0" ;;
+    nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
     # under the misspelled arm's log name -- a result filed against an experiment that never happened, which is
     # the most expensive quiet failure available here. base is a real arm at the top of this case; anything
