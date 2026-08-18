@@ -611,6 +611,28 @@ grid)
     ablate)  ARMS="nocompose composenov compose mintnovel noanchor nogrow bigpop" ;;
     tokens)  ARMS="nocompose compose mintnovel composenov noanchor" ;;
     fabric)  ARMS="nogrow bigpop nofabric smallpop" ;;
+    # === ROUND 3: THE IDENTITY SPACE ==========================================================================
+    # 31 of 40 archived runs print ">> COLLAPSED: every expert embeds to essentially the SAME identity" (NN
+    # distance median 0.0009-0.0093 against a spawn bar of 0.0200). That one fact accounts for specialization
+    # reading 0.000 and losing its own shuffled null, for FAB_SPAWN firing ~5x a run, and for HALT mass sitting
+    # at 0.0000 -- the router cannot discriminate, so nothing downstream of it can either. Every arm here is
+    # read FIRST on the identity-space line and the DID IT FIRE counters, and only then on bits/byte.
+    #
+    # ORDERED BY INFORMATION VALUE, so stopping early still leaves a readable comparison, and the two arms the
+    # question was actually asked about (mintok, nodom) sit against base ONE KNOB APART rather than buried in a
+    # combination. Their _kn partners come later, because they are only worth reading if keynorm lands.
+    #   base       the control at HEAD -- growth fix, latched ramp, FAB_N0=2048. Everything is read against it.
+    #   keynorm    the single highest-value arm: 4/4 archived key_norm runs are NON-collapsed, and the 3 of those
+    #              that report HALT sit at 0.9170 against 0.0000 nearly everywhere else.
+    #   embvar4    the coefficient the report itself names. Tests whether collapse is fixable WITHOUT touching
+    #              routing at all -- if it is, key_norm's win is about scale and not about the embedding.
+    #   mintok     TOK_MINT_UNTIL=1, one knob from base. The two archived runs with it reach HALT 0.4048, but
+    #              four others sit at 0.0000, so alone it is the weaker lever and this is the arm that says so.
+    #   nodom      SELF_ORG=0, one knob from base. The partition is measured not to earn its keep for prediction
+    #              (own-domain gap +0.220 against a shuffled null of +0.223), so this asks what it costs to drop.
+    #   embvar16   the second rung -- a coefficient with no measured direction needs more than one point.
+    #   mintok_kn / nodom_kn / keynorm_ev   the combinations, only informative once keynorm has a verdict.
+    round3)  ARMS="base keynorm embvar4 mintok nodom embvar16 mintok_kn nodom_kn keynorm_ev" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
