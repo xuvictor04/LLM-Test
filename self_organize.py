@@ -2445,6 +2445,8 @@ class PlateauGrowth:
         s.grow_on = bool(int(_env("FAB_GROW", 1)))
         s.latch = bool(int(_env("FAB_RAMP_LATCH", 1)))          # 0 restores the never-terminating ramp
         s.ramp_done = False; s.n_ramp = 0; s.n_stall = 0; s.n_regr = 0   # why growth fired, for the report
+        s.last_regr = -10**9                     # REGRESSION's OWN cooldown clock -- see the gate in step()
+        s.n_regr_supp = 0                        # regressions DETECTED but refused by that cooldown
         s.rate = max(0.0, rate); s.ramp_to = ramp_to      # GEOMETRIC ramp: grow a FRACTION of the population, not a
         #   fixed count. +3 every 50 steps reaches ~240 experts by the end of a 4000-step ramp window and then stops,
         #   because afterwards growth needs a plateau or a regression and those are rare. A population of thousands is
@@ -2484,16 +2486,30 @@ class PlateauGrowth:
         if s.ramp and _ramping and t - s.last >= max(1, s.cool // 8):
             s.last = t; s.why = "ramp"; s.n_ramp += 1
             return max(s.burst, int(s.rate * n)) if n else s.burst
+        # A REGRESSION IS TESTED BEFORE ANY GATE, and on its OWN cooldown. It used to be computed after the shared
+        # `t - s.last < s.cool` gate and after the RECOVER early-return, so both swallowed it: measured on a 20k-step
+        # probe with a sustained regression injected at 12k, the machine was in state W with unexpected TRUE and the
+        # event was dropped anyway on t - s.last = 772 against cool = 1500 -- where s.last had been set by a ROUTINE
+        # STALL 772 steps earlier. One cooldown shared by both triggers means the common event suppresses the rare
+        # one, and the rare one is the whole point: a stall says "this has stopped improving", a regression says "the
+        # material just CHANGED", which is the arrival of a new area and the only signal continual learning has.
+        # RECOVER is preempted for the same reason. RECOVER exists so the burst's own transient does not re-trigger
+        # growth; it is not evidence about new material, so a genuine regression must be able to interrupt it.
+        # What is NOT relaxed is the BLACKOUT. note_shift() sets it on retok/resample, where the loss jump is OURS --
+        # growing on our own tokenizer change would be the system reacting to itself.
+        unexpected = (loss - s.slow) > s.z * max(1e-6, s.dev)                 # a REGRESSION we did not cause
+        if unexpected and t - s.blackout >= s.cool:
+            if t - s.last_regr >= s.cool:
+                s.last = s.last_regr = t; s.t0 = t; s.state = "R"; s.why = "REGRESSION"; s.n_regr += 1
+                return s.burst
+            s.n_regr_supp += 1                    # detected, refused by the REGRESSION cooldown -- counted, not silent
         if s.state == "R":                                                   # RECOVER: wait for the stall
             if t - s.t0 >= s.rmin and (improving < s.rel or t - s.t0 > s.rmax): s.state = "W"
             return 0
         if t - s.last < s.cool or t - s.blackout < s.cool: return 0
-        unexpected = (loss - s.slow) > s.z * max(1e-6, s.dev)                 # a REGRESSION we did not cause
-        if unexpected or (t >= s.warm and improving < s.rel):
-            s.last = t; s.t0 = t; s.state = "R"; s.why = "REGRESSION" if unexpected else "stall"
-            if unexpected: s.n_regr += 1
-            else: s.n_stall += 1
-            return s.burst if unexpected else 1                               # burst on shift, single node on a stall
+        if t >= s.warm and improving < s.rel:
+            s.last = t; s.t0 = t; s.state = "R"; s.why = "stall"; s.n_stall += 1
+            return 1                                                          # single node on a stall
         return 0
 
 EXPERTS = bool(_i("EXPERTS", 0))                           # EXPERTS=1: a growing, selective bank of per-domain experts
@@ -6667,7 +6683,13 @@ def main():
         print(f"  {fab.grown} grown, {fab.removed} removed, net {_net:+d} -> {fab.n()} live of {fab.cap} | "
               f"{_chn:.0%} of all growth was replaced rather than added")
         print(f"  growth fired: {fabgrow.n_ramp}x on the RAMP (population-building), {fabgrow.n_regr}x on a "
-              f"REGRESSION, {fabgrow.n_stall}x on a stall")
+              f"REGRESSION, {fabgrow.n_stall}x on a stall"
+              + (f" | {fabgrow.n_regr_supp} REGRESSION(s) DETECTED AND REFUSED by the regression cooldown"
+                 if fabgrow.n_regr_supp else ""))
+        if fabgrow.n_regr == 0 and fabgrow.n_regr_supp == 0:
+            print(f"  >> the REGRESSION trigger never fired and was never even refused, so no window of this run "
+                  f"read as a CHANGE in the material. On a single stationary corpus that is correct; on a run that "
+                  f"ADDED an area it means the arrival was invisible to growth, and capacity never answered it.")
         if _chn > 0.5:
             print(f"  >> CHURNING. More than half of everything grown was later culled, so capacity is being "
                   f"rebuilt rather than accumulated. Every newborn is untrained, and the identity space the "

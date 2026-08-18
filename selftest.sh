@@ -49,6 +49,8 @@ python3 mem_evict_test.py > "$OUT/evict.txt" 2>&1 && echo "  ok    mem_evict_tes
   || { echo "  FAIL  mem_evict_test:"; sed 's/^/          /' "$OUT/evict.txt"; FAIL=1; }
 python3 compare_test.py  > "$OUT/cmp.txt"   2>&1 && echo "  ok    compare_test (known-answer decision rule)" \
   || { echo "  FAIL  compare_test:"; sed 's/^/          /' "$OUT/cmp.txt"; FAIL=1; }
+python3 growth_test.py   > "$OUT/grow.txt"  2>&1 && echo "  ok    growth_test (a new area reaches the REGRESSION trigger)" \
+  || { echo "  FAIL  growth_test:"; sed 's/^/          /' "$OUT/grow.txt"; FAIL=1; }
 python3 levers.py > "$OUT/levers.txt" 2>&1 && echo "  ok    levers (every knob declared and read consistently)" \
   || { echo "  FAIL  levers:"; tail -5 "$OUT/levers.txt" | sed 's/^/          /'; FAIL=1; }
 
