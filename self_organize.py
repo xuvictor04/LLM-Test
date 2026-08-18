@@ -7163,8 +7163,11 @@ def main():
                 print(f"  >> " + ("SPECIALIZED: the material a node wins really is material it models differently."
                                   if _spread > _nm + 2 * _nsd else
                                   "INTERCHANGEABLE: nodes differ no more than a random split of the same windows "
-                                  "would. Routing load is spread, competence is not -- see DIV_W (0.0 by default, "
-                                  "and BAL_WARM decays the only other pressure to 0 by step 4000)."))
+                                  f"would. Routing load is spread, competence is not. DIV_W is {DIV_W:g} and "
+                                  "BAL_WARM decays the only other pressure to a floor by BAL_WARM steps -- but "
+                                  "neither is the lever this line used to point at: a DIV_W ladder (0 / 0.02 / 0.1) "
+                                  "left this verdict INTERCHANGEABLE at every rung, as did key_norm, emb_var and "
+                                  "a frozen vocabulary. Nothing tried so far moves it."))
                 print(f"  ({len(_used)} of {_N} nodes used: unused nodes are capacity the router never calls on.)")
                 _lin = sorted(fab.births.values(), reverse=True)
                 print(f"  SELECTION OUT: {getattr(fab,'removed',0)} culled total, of which "
@@ -7299,7 +7302,14 @@ def main():
                 print(f"  >> " + (
                     "COLLAPSED: every expert embeds to essentially the SAME identity, so the router has nothing to "
                     "discriminate on -- argmax lands arbitrarily on one node, specialization reads 0.000, and a "
-                    "spawn can never fire because any query is 0 from 'the nearest'. Raise FAB_EMB_VAR."
+                    "spawn can never fire because any query is 0 from 'the nearest'. Do NOT reach for FAB_EMB_VAR: "
+                    "a three-rung ladder measured it CAUSING this, not curing it -- at 1.0 (default) the space is "
+                    "distinct at NN 0.1443, at 4.0 it is 0.1166, and at 16.0 it collapses to 0.0017, the only "
+                    "collapsed arm in that grid. This line used to say 'Raise FAB_EMB_VAR' on no measurement at "
+                    "all and it sent one whole investigation the wrong way. What DID clear the collapse was "
+                    "building the population at FAB_N0 instead of ramping to the cap: 31 of 40 archived runs are "
+                    "collapsed and every one of them is from the ramp regime, where the population was replaced "
+                    "~1.5x over and a tenth of it was freshly-initialised noise at any moment."
                     if float(_nn.median()) < 0.01 else
                     "DISTINCT: experts occupy different points in identity space, so routing concentration (if any) "
                     "is a property of the ROUTER rather than of collapsed identities."))
