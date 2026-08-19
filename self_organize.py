@@ -240,9 +240,9 @@ _SPEC = {
     "GROW_CAP": ("i", 0),                                 # capacity
     "GROW_CAP_FAB": ("i", 1),                             # capacity
     "GROW_CAP_VOCAB": ("i", 1),                           # capacity
-    "GROW_LIFT": ("f", 2.0),                              # capacity
+    "GROW_LIFT": ("f", 256),                              # capacity -- ADDITIVE rows per lift, not a multiplier
     "GROW_CAP_PLATEAU": ("f", 0.002),                     # capacity
-    "GROW_CAP_EVERY": ("i", 2000),                        # capacity
+    "GROW_CAP_EVERY": ("i", 20000),                       # capacity -- steps PINNED at the cap, not since a lift
     "GROW_CAP_FAB0": ("i", 0),                            # capacity -- 0 = start at FAB_NMAX
     "GROW_CAP_VOCAB0": ("i", 0),                          # capacity -- 0 = start at VMAX
     "FAB_RESCUE": ("f", 0.0),                             # fabric
@@ -584,7 +584,8 @@ LOSS_MASK_DEAD = bool(_i("LOSS_MASK_DEAD", 0))
 # then either wasted (never filled, and in the vocabulary's case sitting in the loss denominator) or binding (full
 # and unable to answer new material). Neither is a decision the run gets to revisit.
 #
-# A SOFT cap does. It starts where the run can actually use it, and lifts by GROW_LIFT only when BOTH: the
+# A SOFT cap does. It starts where the run can actually use it, and lifts by GROW_LIFT rows -- a COUNT, added,
+# not a multiplier -- only when BOTH: the
 # population is pinned against it, AND the loss has stopped improving. Pinned-but-improving means the capacity in
 # hand is still paying, so more would only dilute; plateaued-but-not-pinned means the limit is not what is
 # stopping it, so raising it would change nothing and only add dead rows. The conjunction is the whole rule.
@@ -644,9 +645,9 @@ FAB_NEW_WIN = _i("FAB_NEW_WIN", 0) or _i("FAB_COOLDOWN", 400)
 GROW_CAP = bool(_i("GROW_CAP", 0))                         # master switch for both soft caps
 GROW_CAP_FAB = bool(_i("GROW_CAP_FAB", 1))                 # ...experts   (under GROW_CAP)
 GROW_CAP_VOCAB = bool(_i("GROW_CAP_VOCAB", 1))             # ...vocabulary (under GROW_CAP)
-GROW_LIFT = _f("GROW_LIFT", 2.0)                           # multiply the soft cap by this when it is earned
+GROW_LIFT = _f("GROW_LIFT", 256)                           # ADD this many rows to the soft cap when it is earned
 GROW_CAP_PLATEAU = _f("GROW_CAP_PLATEAU", 0.002)           # relative slow-loss improvement below which it counts as stalled
-GROW_CAP_EVERY = _i("GROW_CAP_EVERY", 2000)               # minimum steps between lifts, so one plateau lifts once
+GROW_CAP_EVERY = _i("GROW_CAP_EVERY", 20000)              # steps a cap must stay PINNED before a lift is earned
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memory and NO windows, without waiting
 #   for the act/stale conjunction that an empty domain can fail forever.
@@ -4204,6 +4205,7 @@ def main():
     # the fabric cap is FAB_NMAX and the vocabulary cap is TOK.vmax, i.e. exactly the previous behaviour.
     _cap_fab = [int(_i("GROW_CAP_FAB0", 0)) or FAB_NMAX]
     _cap_last = [-10 ** 9]; _resc_seen = [0]; _newcap_said = [-1]   # one "growth held" line per window, not per event
+    _pin_fab = [None]; _pin_voc = [None]   # step each soft cap FIRST saturated; None = not pinned. See the valve.
     if GROW_CAP and USE_TOK and _i("GROW_CAP_VOCAB0", 0): TOK.vmax = min(TOK.vmax, _i("GROW_CAP_VOCAB0", 0))
     _last_vsz = (TOK.vocab_size, len(TOK.seq2id)) if USE_TOK else (256, 256)   # vocab AND match table
     _retok_noop = [0]; _retok_skipped = [False]           # retoks refused because the vocabulary had not moved
@@ -5759,23 +5761,38 @@ def main():
         #   [capacity @ 7] experts pinned at 6 and the loss has stalled (improving +0.0000 < 0.5)
         # The EMAs are 0.98/0.998, so a few hundred observations is the point at which "not improving" is a
         # reading rather than an initialisation.
-        if (GROW_CAP and fabgrow is not None and fabgrow.slow is not None
-                and fabgrow.n >= GROW_CAP_EVERY and step - _cap_last[0] >= GROW_CAP_EVERY):
+        # THE CLOCK STARTS WHEN THE CAP IS HIT, not when the last lift happened. `step - _cap_last` measured time
+        # since the previous LIFT, so a population that pinned five minutes ago and one that pinned two hours ago
+        # were treated identically, and a cap that was never reached still aged toward eligibility. What the valve
+        # is meant to ask is "has this population been PRESSED against its ceiling long enough to have earned
+        # more" -- so each cap carries its own pin timestamp, set when it first saturates and cleared the moment
+        # it does not, which also makes a lift reset it (the population is no longer pinned once the cap rises).
+        # GROW_CAP_EVERY is therefore steps-since-PINNED, not steps-since-lifted.
+        _fabpin = (GROW_CAP_FAB and FABRIC and fab.n() >= _cap_fab[0])
+        _vocpin = (GROW_CAP_VOCAB and USE_TOK and ONLINE and TOK.vocab_size >= TOK.vmax)
+        if not _fabpin: _pin_fab[0] = None
+        elif _pin_fab[0] is None: _pin_fab[0] = step
+        if not _vocpin: _pin_voc[0] = None
+        elif _pin_voc[0] is None: _pin_voc[0] = step
+        if GROW_CAP and fabgrow is not None and fabgrow.slow is not None and fabgrow.n >= GROW_CAP_EVERY:
             _improving = (fabgrow.slow - fabgrow.fast) / max(1e-6, abs(fabgrow.slow))
             if _improving < GROW_CAP_PLATEAU:
-                if GROW_CAP_FAB and FABRIC and fab.n() >= _cap_fab[0]:
-                    _was = _cap_fab[0]
-                    _cap_fab[0] = min(FAB_NMAX, max(_cap_fab[0] + 1, int(_cap_fab[0] * GROW_LIFT)))
+                # LINEAR, not geometric. GROW_LIFT used to MULTIPLY, so one lift doubled the cap at the default
+                # 2.0 and every later lift handed out more than the one before -- the opposite of a valve, which
+                # should release a fixed amount however large the vessel. It is now a COUNT: +GROW_LIFT rows.
+                if _fabpin and _pin_fab[0] is not None and step - _pin_fab[0] >= GROW_CAP_EVERY:
+                    _was = _cap_fab[0]; _held = step - _pin_fab[0]      # BEFORE clearing the pin, or this reads None
+                    _cap_fab[0] = min(FAB_NMAX, _cap_fab[0] + max(1, int(GROW_LIFT)))
                     if _cap_fab[0] > _was:
-                        _cap_last[0] = step
-                        print(f"  [capacity @ {step}] experts pinned at {_was} and the loss has stalled "
-                              f"(improving {_improving:+.4f} < {GROW_CAP_PLATEAU}) -> soft cap {_was} -> "
-                              f"{_cap_fab[0]} (hard ceiling {FAB_NMAX})")
-                if GROW_CAP_VOCAB and USE_TOK and ONLINE and TOK.vocab_size >= TOK.vmax:
+                        _cap_last[0] = step; _pin_fab[0] = None
+                        print(f"  [capacity @ {step}] experts pinned at {_was} for {_held} steps and the loss "
+                              f"has stalled (improving {_improving:+.4f} < {GROW_CAP_PLATEAU}) -> soft cap "
+                              f"{_was} -> {_cap_fab[0]} (+{_cap_fab[0]-_was}, hard ceiling {FAB_NMAX})")
+                if _vocpin and _pin_voc[0] is not None and step - _pin_voc[0] >= GROW_CAP_EVERY:
                     _wasv = TOK.vmax
-                    TOK.vmax = min(int(V), max(TOK.vmax + 1, int(TOK.vmax * GROW_LIFT)))
+                    TOK.vmax = min(int(V), TOK.vmax + max(1, int(GROW_LIFT)))
                     if TOK.vmax > _wasv:
-                        _cap_last[0] = step
+                        _cap_last[0] = step; _pin_voc[0] = None
                         # Nested f-string expressions may not span lines before 3.12; build the clause first.
                         _mnote = ("masked, so the reserved rows are free" if LOSS_MASK_DEAD else
                                   "UNMASKED -- the newly reachable rows sit in the denominator until minted")
