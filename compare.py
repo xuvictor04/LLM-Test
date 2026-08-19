@@ -25,7 +25,9 @@ WHAT IT DOES
   - reports the paired seeds needed to resolve the observed effect (Noether), so the next run is budgeted from a
     measurement rather than from optimism.
 
-LOWER IS BETTER throughout: the metric is bits/byte, so "A > B" means A scored LOWER than B.
+DIRECTION IS PER-METRIC, see LOWER_IS_BETTER. held_out and train are losses in bits/byte, so "A > B" means A
+scored LOWER. d_order1 is a MARGIN over the order-1 anchor, so there "A > B" means A scored HIGHER. This used to
+be hardcoded to lower-is-better and every --metric d_order1 verdict it printed named the wrong arm.
 
     python3 compare.py runs/seeds/armA_seed*.log -- runs/seeds/armB_seed*.log
     python3 compare.py --metric held_out --label-a nofloor --label-b floor A*.log -- B*.log
@@ -121,6 +123,21 @@ def _phi_inv(p):
     return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q / (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1)
 
 
+# DIRECTION IS PER-METRIC, and getting it wrong silently inverts every verdict. held_out and train are losses:
+# lower is better. d_order1 is a MARGIN -- order1 minus held_out, i.e. how far the model beats the order-1 anchor
+# -- so HIGHER is better. The tool used to hardcode "lower is better" in the header and rank on `<` regardless,
+# which meant every --metric d_order1 comparison it ever printed named the wrong winner. That is the same class
+# of fault as the branch-order sign bug below, and the same reason it matters: the output still reads like an
+# answer. Everything downstream assumes lower-is-better, so higher-is-better metrics are NEGATED for the
+# statistics only; the printed values stay raw so they match the logs.
+LOWER_IS_BETTER = {"held_out": True, "train": True, "d_order1": False}
+
+
+def _orient(metric):
+    """+1 if the metric is already lower-is-better, -1 if it must be flipped for the statistics."""
+    return 1.0 if LOWER_IS_BETTER.get(metric, True) else -1.0
+
+
 def p_a_better(pairs):
     """P(A > B) in Bouthillier's sense, on a lower-is-better metric: the fraction of pairs where A scored lower.
     Ties count as half, so a metric that cannot separate two arms lands at exactly 0.5 rather than at 0 or 1."""
@@ -209,7 +226,9 @@ def main(argv=None):
         print(f"!! the arms saw different corpora (order-1 anchors {sorted(o1)}). held_out is not comparable "
               f"across them -- rerun with --metric d_order1.")
 
-    print(f"\n=== {a.label_a}  vs  {a.label_b}   [{a.metric}, lower is better] ===")
+    _sgn = _orient(a.metric)
+    print(f"\n=== {a.label_a}  vs  {a.label_b}   "
+          f"[{a.metric}, {'lower' if _sgn > 0 else 'HIGHER'} is better] ===")
     print(describe(a.label_a, A, a.metric)); print(describe(a.label_b, B, a.metric))
 
     # PAIR BY SEED. Unpaired is a fallback, not an equivalent: it throws away the variance reduction that makes
@@ -228,11 +247,18 @@ def main(argv=None):
                 f"pairing that would cut the variance is unavailable. Rerun both arms over the same SEEDS.")
     print(f"\n  {mode}")
 
-    diffs = [x - y for x, y in pairs]
-    p = p_a_better(pairs)
-    lo, hi = bootstrap_ci(pairs)
+    # ORIENTED pairs for every direction-sensitive statistic; `pairs` itself stays raw for display.
+    opairs = [(_sgn * x, _sgn * y) for x, y in pairs]
+    diffs = [x - y for x, y in opairs]        # signed so that NEGATIVE always means "A is worse", any metric
+    p = p_a_better(opairs)
+    lo, hi = bootstrap_ci(opairs)
+    def _win(x, y):                            # per-seed winner, oriented
+        return 'A' if _sgn * x < _sgn * y else 'B' if _sgn * y < _sgn * x else '='
     need = seeds_needed(p, gamma=a.gamma)
-    print(f"  mean difference ({a.label_a} - {a.label_b}) {_mean(diffs):+.4f}"
+    # ORIENTED, so the sign means the same thing on every metric: POSITIVE = A is worse. On a loss that is just
+    # A - B; on a margin it is B - A. Saying which is the difference between a readable number and a trap.
+    print(f"  mean difference ({a.label_a} - {a.label_b}"
+          + ("" if _sgn > 0 else ", oriented: + means A is worse") + f") {_mean(diffs):+.4f}"
           + (f"   std of the paired difference {_std(diffs):.4f}" if len(diffs) > 1 and shared else ""))
     print(f"  P({a.label_a} better) = {p:.3f}   95% CI [{lo:.3f}, {hi:.3f}]   (gamma={a.gamma})")
 
@@ -246,8 +272,7 @@ def main(argv=None):
         if shared:
             print(f"\n  per seed ({a.label_a} / {a.label_b} / diff):")
             for s in shared:
-                print(f"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}"
-                      f"   {'A' if da[s] < db[s] else 'B' if db[s] < da[s] else '='}")
+                print(f"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}   {_win(da[s], db[s])}")
         print()
         return 0
     # WHICH SIDE OF 0.5 FIRST, THEN HOW FAR. The previous order asked `hi <= gamma` before establishing that A
@@ -279,8 +304,7 @@ def main(argv=None):
         if shared:
             print(f"\n  per seed ({a.label_a} / {a.label_b} / diff):")
             for s in shared:
-                print(f"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}"
-                      f"   {'A' if da[s] < db[s] else 'B' if db[s] < da[s] else '='}")
+                print(f"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}   {_win(da[s], db[s])}")
         print()
         return 0
     if need is None:
@@ -294,8 +318,7 @@ def main(argv=None):
     if shared:
         print(f"\n  per seed ({a.label_a} / {a.label_b} / diff):")
         for s in shared:
-            print(f"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}"
-                  f"   {'A' if da[s] < db[s] else 'B' if db[s] < da[s] else '='}")
+            print(f"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}   {_win(da[s], db[s])}")
     print()
     return 0
 

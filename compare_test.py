@@ -194,6 +194,35 @@ def main():
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
+    # --- METRIC DIRECTION -------------------------------------------------------------------------------
+    # d_order1 = order1 - held_out is a MARGIN over the order-1 anchor, so HIGHER is better, while held_out is a
+    # loss where LOWER is better. compare.py hardcoded "lower is better" for every metric, so every
+    # --metric d_order1 run it printed named the LOSING arm as the winner. Same class of fault as the branch-order
+    # sign bug: the output still reads like an answer.
+    # Arm A is worse on the loss and therefore better on the margin -- one fixture, two opposite correct verdicts.
+    d2 = tempfile.mkdtemp(prefix="cmpdir_")
+    try:
+        A = [_w(d2, f"a_seed{s}.log", s, 2.20 + 0.01 * s) for s in range(4)]   # higher loss, smaller margin
+        B = [_w(d2, f"b_seed{s}.log", s, 2.00 + 0.01 * s) for s in range(4)]   # lower loss, bigger margin
+        rc, out = _run(A + ["--"] + B + ["--metric", "held_out", "--label-a", "AA", "--label-b", "BB"])
+        if "lower is better" not in out or "BB is better" not in out:
+            print(f"!! DIRECTION held_out: expected BB to win the LOSS comparison:\n{out}"); ok = False
+        else:
+            print("  DIR    held_out  -> lower is better, BB wins")
+        rc, out = _run(A + ["--"] + B + ["--metric", "d_order1", "--label-a", "AA", "--label-b", "BB"])
+        if "HIGHER is better" not in out:
+            print(f"!! DIRECTION d_order1: header still claims lower is better:\n{out}"); ok = False
+        elif "BB is better" not in out:
+            print(f"!! DIRECTION d_order1: expected BB (bigger margin) to win:\n{out}"); ok = False
+        else:
+            print("  DIR    d_order1  -> HIGHER is better, BB wins")
+        # and the per-seed winner column must agree with the verdict, not with raw `<`
+        if "  A\n" in out.split("per seed")[-1]:
+            print(f"!! DIRECTION d_order1: per-seed column still labels the smaller margin as the winner:\n{out}")
+            ok = False
+    finally:
+        shutil.rmtree(d2, ignore_errors=True)
+
     print("\nok -- compare.py agrees with every known answer." if ok else "\n!! FAILED")
     return 0 if ok else 1
 
