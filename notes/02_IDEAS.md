@@ -2146,8 +2146,33 @@ choosing them before it.
 are zero-B identities, so it is a policy change) while expandable VMAX depends on `LOSS_MASK_DEAD` working,
 since building at 8192 means carrying 6,144 dead rows from step 0. Approval given.
 
-**Outcome.** **NEVER IMPLEMENTED.** No commit implements either. Of the three things "Build all 3"
-approved, only the rescue mechanism (`A92`) was built.
+**Outcome.** **BUILT — this entry was wrong.** `e2db890` (2026-08-14), *"capacity that is earned:
+rescue-before-cull, and soft caps that lift on plateau"*, implements **both** halves. The entry credited that
+same commit to `A92` while reading its title as covering only the rescue mechanism, so the soft caps were
+recorded as missing by the very evidence that shows they exist.
+
+The mechanism is `GROW_CAP` (master switch) with `GROW_CAP_FAB` / `GROW_CAP_VOCAB`, `GROW_CAP_FAB0` /
+`GROW_CAP_VOCAB0` for the soft starts, `GROW_LIFT` for the increment, `GROW_CAP_EVERY` for the cadence and
+`GROW_CAP_PLATEAU` for the stall threshold. A lift needs **both** conditions the idea asked for: the cap
+pinned *and* the loss plateaued. `LOSS_MASK_DEAD` exists too, and the vocabulary half is dishonest without
+it — reserved rows sit in the softmax denominator unless they are masked, exactly as scoped here.
+
+**Revised at `31874a5`,** which also changed two things that did not match the idea's intent: `GROW_LIFT`
+multiplied rather than added (one lift doubled the cap, and each later lift handed out more than the last),
+and the cadence measured steps since the previous *lift* rather than steps *pinned*, so a cap nothing was
+pressing against still aged toward eligibility. Now linear (`+GROW_LIFT` rows, default 256) and clocked from
+the pin (default 20000 steps held).
+
+**STILL NEVER MEASURED.** `GROW_CAP` defaults to `0` and has not run outside a CPU smoke, which fired 7
+lifts with `GROW_CAP_PLATEAU` forced to 0.5 to make them happen inside 1200 steps. That smoke says the valve
+opens and that the clock and increment are right; it says nothing about how often it fires at the real
+default of 0.002. The smoke also showed the two halves behave very differently — the vocabulary re-pins
+within a few steps because minting refills it, while the expert cap lifted once and never re-pinned, because
+expert growth only comes from the rare REGRESSION/stall bursts. One `GROW_LIFT` currently serves both.
+
+> **The lesson is the entry itself.** "NEVER IMPLEMENTED" here cost real work: it was read during the
+> 0.75 GB planning and used to tell the user the mechanism did not exist, when they correctly remembered
+> that it did. A stale outcome line is worse than no entry, because it is quoted with confidence.
 
 ---
 
