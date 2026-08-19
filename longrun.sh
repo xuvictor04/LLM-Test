@@ -336,6 +336,25 @@ _flags_for() {
     # not bits/byte. If English still vanishes here, per-expert memory is not a replacement for domains.
     nodom_mem) echo "SELF_ORG=0 MEM_PER_EXPERT=1" ;;
     nodom_mem_kn) echo "SELF_ORG=0 MEM_PER_EXPERT=1 FAB_KEY_NORM=1" ;;
+    # === NEVER MEASURED ========================================================================================
+    # Each of these is a mechanism that is BUILT, SHIPPED and OFF BY DEFAULT, and has never produced a number.
+    # They are listed here so that "we have this" and "we know whether it helps" stop being the same sentence.
+    #   mask     LOSS_MASK_DEAD alone. Excludes never-minted ids from the softmax DENOMINATOR. Isolated from
+    #            growcap on purpose: growcap needs the mask, so bundling them would confound the valve with it.
+    #   growcap  the capacity valve (A91). Soft caps that lift by GROW_LIFT rows when the cap is BOTH pinned and
+    #            the loss has plateaued. FAB0 starts at the initial population so it is pinned from step 0;
+    #            VOCAB0 starts below where minting saturated last run (2048) so the vocabulary half can lift too.
+    #   ecw      FAB_EC_W, the expert-choice deficit bonus -- a per-expert logit bonus proportional to how far
+    #            below its fair share of traffic an expert sits. The comment at its own site says it "has never
+    #            once been set above 0 in a real run". 0.5 against a measured routing spread of ~2.3 is ~20% of
+    #            the decision, chosen to be visible without dominating; the value is a guess and the arm is a
+    #            direction test, not a tuning.
+    #   rescue   FAB_RESCUE, mutate-instead-of-cull for a threatened expert (A92). Built, toy scale only. 0.35
+    #            is the value the config-audit note quotes, so it is at least the number the design had in mind.
+    mask)      echo "LOSS_MASK_DEAD=1" ;;
+    growcap)   echo "GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=2048 GROW_CAP_VOCAB0=1024" ;;
+    ecw)       echo "FAB_EC_W=0.5" ;;
+    rescue)    echo "FAB_RESCUE=0.35" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
     # under the misspelled arm's log name -- a result filed against an experiment that never happened, which is
@@ -646,6 +665,21 @@ grid)
     #   embvar16   the second rung -- a coefficient with no measured direction needs more than one point.
     #   mintok_kn / nodom_kn / keynorm_ev   the combinations, only informative once keynorm has a verdict.
     round3)  ARMS="base keynorm embvar4 mintok nodom nodom_mem embvar16 mintok_kn nodom_mem_kn keynorm_ev" ;;
+    # === ROUND 4: THINGS THAT HAVE NEVER PRODUCED A NUMBER =====================================================
+    # Every arm here is a shipped mechanism sitting at its off-by-default value. The point is not to find a
+    # winner, it is to stop carrying machinery whose effect is unknown -- and each arm ALSO answers a DID IT FIRE
+    # question, which is the cheaper half of the result: growcap must print [capacity @ ...], rescue must move
+    # fabric.rescue off "ARMED AND INERT", prob_use must retire tokens. An arm that changes nothing AND never
+    # fires is a different finding from one that fires and changes nothing, and only the second is about the idea.
+    #   base       control, re-run in this directory so the comparison is same-session
+    #   frozen2k   07_WIP.md calls it "the highest-value unrun arm per unit of GPU": it separates FIXED vocabulary
+    #              from TINY vocabulary, which every frozen-vs-growing comparison so far has confounded
+    #   mask       LOSS_MASK_DEAD alone, so growcap's result can be attributed
+    #   growcap    the capacity valve, measured for the first time
+    #   ecw        the only implemented term that rewards experts for taking traffic they are short of
+    #   rescue     mutate-instead-of-cull
+    #   prob_use   TOK_PROBATION: do minted tokens that never get used earn their slot back
+    round4)  ARMS="base frozen2k mask growcap ecw rescue prob_use" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
