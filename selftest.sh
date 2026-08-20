@@ -51,6 +51,8 @@ python3 compare_test.py  > "$OUT/cmp.txt"   2>&1 && echo "  ok    compare_test (
   || { echo "  FAIL  compare_test:"; sed 's/^/          /' "$OUT/cmp.txt"; FAIL=1; }
 python3 growth_test.py   > "$OUT/grow.txt"  2>&1 && echo "  ok    growth_test (a new area reaches the REGRESSION trigger)" \
   || { echo "  FAIL  growth_test:"; sed 's/^/          /' "$OUT/grow.txt"; FAIL=1; }
+python3 proj_test.py     > "$OUT/proj.txt"  2>&1 && echo "  ok    proj_test (the LR horizon knows how long the run is)" \
+  || { echo "  FAIL  proj_test:"; sed 's/^/          /' "$OUT/proj.txt"; FAIL=1; }
 python3 levers.py > "$OUT/levers.txt" 2>&1 && echo "  ok    levers (every knob declared and read consistently)" \
   || { echo "  FAIL  levers:"; tail -5 "$OUT/levers.txt" | sed 's/^/          /'; FAIL=1; }
 

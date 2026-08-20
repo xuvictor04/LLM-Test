@@ -3371,6 +3371,36 @@ def _eval_logits(model, fab, FABRIC, x):
 _MASK_CACHE = {"k": None, "m": None}
 
 
+def proj_arith(step, horizon_epochs, epoch, ep_start, per, eplen):
+    """How many steps will this run END on, given what it has actually cost so far?
+
+    MODULE LEVEL ON PURPOSE. This is the arithmetic behind the LR horizon, it has been wrong twice, and while it
+    lived inside a closure the only way to check it was to re-implement it in the test -- which tests the
+    re-implementation, not the code that runs. proj_test.py calls THIS.
+
+      step            the step now
+      horizon_epochs  how many epochs the horizon covers (EPOCHS for the ETA, LR_EPOCHS for the wavelength)
+      epoch           epochs COMPLETED
+      ep_start        step at which the current epoch began
+      per             steps per epoch AT THE CURRENT VOCABULARY
+      eplen           OBSERVED step counts of completed epochs, oldest first
+
+    Minted tokens are longer, so each epoch covers the same bytes in fewer steps than the last. Pricing the
+    remaining epochs at the CURRENT epoch's length therefore overestimates, always, and the cosine gets stretched
+    over a horizon the run never reaches. The shrink ratio is estimated from completed epochs -- measured, not
+    assumed -- and clamped to (0.5, 1.0]: above 1.0 would predict epochs getting LONGER, and 0.5 is past the
+    worst overestimate ever recorded here (40%). Fewer than two completed epochs leaves nothing to estimate from,
+    so it falls back to the flat projection, which is what the old code did at every step of every run.
+    """
+    r = 1.0
+    if len(eplen) >= 2 and eplen[-2] > 0:
+        r = min(1.0, max(0.5, eplen[-1] / eplen[-2]))
+    rest = max(0, per - (step - ep_start))                 # what is left of the CURRENT epoch
+    m = max(0, horizon_epochs - epoch - 1)                 # whole epochs after this one
+    tail = (per * r * (1 - r ** m) / (1 - r)) if (m and r < 1.0) else (per * m)
+    return max(step + 1, int(step + rest + tail))
+
+
 def mask_dead(lg):
     """Take never-minted ids out of the distribution. See LOSS_MASK_DEAD.
 
@@ -4971,12 +5001,29 @@ def main():
     TOK_PROBATION_MIN = _f("TOK_PROBATION_MIN", 0.10)
     _prob = [0, 0]                                         # [kept, retired]
     _ep_start = 0                                          # step at which the current epoch began
+    _eplen = []                                            # OBSERVED length, in steps, of each COMPLETED epoch
     # TWO CONSUMERS, TWO PROJECTIONS. One function served both the ETA and the LR horizon, so they could not
     # be given different horizons without one silently taking the other's. They also need SEPARATE monotone
     # clamps: a shared running minimum would let the shorter horizon drag the longer one down with it.
     def _project(step, horizon_epochs, state):
         _per = max(1, len(stream) // WIN)                  # steps per epoch AT THE CURRENT VOCABULARY
-        _p = max(step + 1, _ep_start + (horizon_epochs - _epoch) * _per)
+        # PROJECT THE SHRINKAGE, do not assume it away. This used to be
+        #     _ep_start + (horizon_epochs - _epoch) * _per
+        # -- every remaining epoch priced at the CURRENT epoch's length. But minting continues, minted tokens are
+        # longer, so each later epoch is SHORTER than the one being measured. The estimate was therefore high by
+        # construction, every step of the run, and the cosine was stretched over a horizon it never reached and
+        # never annealed. _proj_steps fixed the gross version of this error; this fixes the residual.
+        # IT IS MEASURABLE IN THE RESULTS. `curve` -- how far a run rises after its own minimum -- separates
+        # perfectly on whether the vocabulary was FIXED. round4: frozen2k (fixed at 2048) +0.000 and growcap
+        # (fixed at 1024, by a soft cap that never lifted) +0.000, against base +0.285, mask +0.430, ecw +0.401,
+        # rescue +0.286 -- every one of which let the vocabulary grow. Two different mechanisms, one intermediate
+        # state (a vocabulary that stops moving), the same result. A fixed vocabulary makes this projection exact,
+        # which is the whole of what it was doing.
+        # The ratio is estimated from COMPLETED epochs only, so it is measured rather than assumed, and it is
+        # clamped to (0.5, 1.0]: above 1.0 would predict epochs growing, and below 0.5 is past anything observed
+        # here (the worst recorded overestimate was 40%). With fewer than two completed epochs there is nothing
+        # to estimate from and it falls back to the flat projection, which is what the old code always did.
+        _p = proj_arith(step, horizon_epochs, _epoch, _ep_start, _per, _eplen)
         # The projection only ever shrinks in truth (minting makes tokens longer, so later epochs are shorter),
         # but len(stream) jitters with each epoch's resample. Clamping to the running minimum keeps the cosine's
         # progress monotone, so the LR falls and never steps back UP mid-run -- a schedule that reverses is worse
@@ -5085,6 +5132,9 @@ def main():
                 stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
                 set_enc_tensor(ENC_SEQ); _sigq = []          # stream replaced -> queued lookahead windows are stale
                 if FABRIC and fabgrow is not None: fabgrow.note_shift(step)
+            # RECORD WHAT THE EPOCH ACTUALLY COST, before _ep_start moves. _project estimates the per-epoch
+            # shrink ratio from these, so they must be OBSERVED lengths, not the projected ones.
+            if step > _ep_start: _eplen.append(step - _ep_start)
             i = 0; _ep_start = step
             # THE PARTIAL BATCH DOES NOT SURVIVE THE BOUNDARY. This roll sits ABOVE the accumulator, so on any
             # epoch whose last window lands mid-batch (BATCH_W=16: fifteen times in sixteen) up to BATCH_W-1
