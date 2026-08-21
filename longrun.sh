@@ -395,6 +395,16 @@ _flags_for() {
     # BEST_KEEP rides on gc_real so the long run is not its first execution -- it is new code and this container
     # has no torch, so it has never run at all. 2 slots, not more: each is a FULL checkpoint and the memory store
     # dominates the size. Read it on the BEST-KEEP block in the report; "ARMED and took NOTHING" is a failure.
+    # THE MISSING CONTROL. gc_real vs gc_fast differ in TWO things -- whether the valve fired AND where the
+    # vocabulary ended (640 vs 2048) -- so neither can attribute the quality drop. gc_ctrl reaches 2048 by
+    # ordinary minting with the valve OFF, which makes gc_ctrl vs gc_fast one knob (how it got there) and
+    # gc_ctrl vs gc_real the other (how big it ended).
+    gc_ctrl)   echo "FAB_N0=256 VMAX=2048" ;;
+    # THE EXPERT VALVE, GIVEN A CAP IT CAN REACH. In round6 the population settled at ~165 against a soft cap of
+    # 256, because sustained-error culls (2-5 per manage pass) outpace ramp growth (+1 per event) -- so it was
+    # never pinned, never eligible, and the valve correctly declined. A cap at the settling point is the only
+    # configuration in which the expert half can fire at all.
+    gc_pin)    echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=160 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000" ;;
     gc_real)   echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 BEST_KEEP=2" ;;
     gc_fast)   echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000" ;;
     gc_loose)  echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000 GROW_CAP_PLATEAU=0.5" ;;
@@ -731,7 +741,19 @@ grid)
     # === ROUND 6: the capacity valve, before the long run depends on it ========================================
     # Ordered so the most informative silence comes first. If gc_real lifts, the other two are confirmation; if it
     # does not, gc_fast and gc_loose say WHICH condition blocked it.
+    # === ROUND 7: is it the VALVE that costs quality, or just the vocabulary? ==================================
+    # round6 read as "lifting the vocabulary made it worse" -- gc_real +1.451 delta-order-1 against gc_fast's
+    # +1.172. But those two differ in TWO things, not one: whether the valve fired AND where the vocabulary ended
+    # (640 vs 2048). Every comparison in round6 confounds them, so none of them can answer the question.
+    #   gc_ctrl  the missing control: same tiny expert population, VMAX=2048 from the start, valve OFF. Ends at
+    #            the same 2048 vocabulary as gc_fast by ordinary minting. gc_ctrl vs gc_fast is then ONE knob --
+    #            how the vocabulary got there -- and gc_ctrl vs gc_real is the other -- how big it ended up.
+    #   gc_pin   the expert valve, given a cap it can actually reach. In round6 the population sat at ~165
+    #            against a soft cap of 256 because sustained-error culls (2-5 per manage pass) outpaced ramp
+    #            growth (+1 per event), so it was never eligible and the valve correctly declined. A cap AT the
+    #            settling point is the only configuration in which the expert half can fire at all.
     round6)  ARMS="gc_real gc_fast gc_loose" ;;
+    round7)  ARMS="gc_ctrl gc_pin" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac

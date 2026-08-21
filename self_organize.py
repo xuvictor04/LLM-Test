@@ -4272,7 +4272,8 @@ def main():
     # the fabric cap is FAB_NMAX and the vocabulary cap is TOK.vmax, i.e. exactly the previous behaviour.
     _cap_fab = [int(_i("GROW_CAP_FAB0", 0)) or FAB_NMAX]
     _cap_last = [-10 ** 9]; _resc_seen = [0]; _newcap_said = [-1]   # one "growth held" line per window, not per event
-    _pin_fab = [None]; _pin_voc = [None]   # step each soft cap FIRST saturated; None = not pinned. See the valve.
+    _pin_fab = [0]; _pin_voc = [0]         # STEPS ACCUMULATED at each soft cap (not a timestamp). See the valve.
+    _pin_seen = [0.0, 0.0, 0, 0]           # high-water marks: [fab occupancy, vocab occupancy, fab held, voc held]
     if GROW_CAP and USE_TOK and _i("GROW_CAP_VOCAB0", 0): TOK.vmax = min(TOK.vmax, _i("GROW_CAP_VOCAB0", 0))
     _last_vsz = (TOK.vocab_size, len(TOK.seq2id)) if USE_TOK else (256, 256)   # vocab AND match table
     _retok_noop = [0]; _retok_skipped = [False]           # retoks refused because the vocabulary had not moved
@@ -5912,31 +5913,44 @@ def main():
         # more" -- so each cap carries its own pin timestamp, set when it first saturates and cleared the moment
         # it does not, which also makes a lift reset it (the population is no longer pinned once the cap rises).
         # GROW_CAP_EVERY is therefore steps-since-PINNED, not steps-since-lifted.
+        # TIME SPENT AT THE CAP, ACCUMULATED -- not an unbroken run of it. The first version stored the step at
+        # which a cap first saturated and required `step - pinned >= GROW_CAP_EVERY` with no interruption, so any
+        # momentary dip below the cap reset the clock to zero. For the VOCABULARY that is harmless, because a
+        # vocabulary never shrinks. For the EXPERTS it is fatal: culling removes several per manage pass, so the
+        # population drops below its cap within a thousand steps and the clock restarts every time.
+        # It accumulates while at the cap and DECAYS while below it, so a brief dip costs one step rather than
+        # everything, and a population that is mostly-below still cannot creep to a lift.
         _fabpin = (GROW_CAP_FAB and FABRIC and fab.n() >= _cap_fab[0])
         _vocpin = (GROW_CAP_VOCAB and USE_TOK and ONLINE and TOK.vocab_size >= TOK.vmax)
-        if not _fabpin: _pin_fab[0] = None
-        elif _pin_fab[0] is None: _pin_fab[0] = step
-        if not _vocpin: _pin_voc[0] = None
-        elif _pin_voc[0] is None: _pin_voc[0] = step
+        _pin_fab[0] = (_pin_fab[0] + 1) if _fabpin else max(0, _pin_fab[0] - 1)
+        _pin_voc[0] = (_pin_voc[0] + 1) if _vocpin else max(0, _pin_voc[0] - 1)
+        # ...and WHY a cap never lifted has to be answerable afterwards. "0 lifts" alone cannot distinguish
+        # "never full" from "never plateaued", and those have completely different fixes.
+        if FABRIC:
+            _pin_seen[0] = max(_pin_seen[0], fab.n() / max(1, _cap_fab[0]))
+            _pin_seen[2] = max(_pin_seen[2], _pin_fab[0])
+        if USE_TOK and ONLINE:
+            _pin_seen[1] = max(_pin_seen[1], TOK.vocab_size / max(1, TOK.vmax))
+            _pin_seen[3] = max(_pin_seen[3], _pin_voc[0])
         if GROW_CAP and fabgrow is not None and fabgrow.slow is not None and fabgrow.n >= GROW_CAP_EVERY:
             _improving = (fabgrow.slow - fabgrow.fast) / max(1e-6, abs(fabgrow.slow))
             if _improving < GROW_CAP_PLATEAU:
                 # LINEAR, not geometric. GROW_LIFT used to MULTIPLY, so one lift doubled the cap at the default
                 # 2.0 and every later lift handed out more than the one before -- the opposite of a valve, which
                 # should release a fixed amount however large the vessel. It is now a COUNT: +GROW_LIFT rows.
-                if _fabpin and _pin_fab[0] is not None and step - _pin_fab[0] >= GROW_CAP_EVERY:
-                    _was = _cap_fab[0]; _held = step - _pin_fab[0]      # BEFORE clearing the pin, or this reads None
+                if _fabpin and _pin_fab[0] >= GROW_CAP_EVERY:
+                    _was = _cap_fab[0]; _held = _pin_fab[0]             # BEFORE zeroing it, or this reads 0
                     _cap_fab[0] = min(FAB_NMAX, _cap_fab[0] + max(1, int(GROW_LIFT)))
                     if _cap_fab[0] > _was:
-                        _cap_last[0] = step; _pin_fab[0] = None
+                        _cap_last[0] = step; _pin_fab[0] = 0
                         print(f"  [capacity @ {step}] experts pinned at {_was} for {_held} steps and the loss "
                               f"has stalled (improving {_improving:+.4f} < {GROW_CAP_PLATEAU}) -> soft cap "
                               f"{_was} -> {_cap_fab[0]} (+{_cap_fab[0]-_was}, hard ceiling {FAB_NMAX})")
-                if _vocpin and _pin_voc[0] is not None and step - _pin_voc[0] >= GROW_CAP_EVERY:
+                if _vocpin and _pin_voc[0] >= GROW_CAP_EVERY:
                     _wasv = TOK.vmax
                     TOK.vmax = min(int(V), TOK.vmax + max(1, int(GROW_LIFT)))
                     if TOK.vmax > _wasv:
-                        _cap_last[0] = step; _pin_voc[0] = None
+                        _cap_last[0] = step; _pin_voc[0] = 0
                         # Nested f-string expressions may not span lines before 3.12; build the clause first.
                         _mnote = ("masked, so the reserved rows are free" if LOSS_MASK_DEAD else
                                   "UNMASKED -- the newly reachable rows sit in the denominator until minted")
@@ -7619,6 +7633,25 @@ def main():
             # NAME THE RESTORE POINTS. A rotating set of checkpoints nobody is told about is a directory of files
             # with no provenance -- which slot holds which step, and whether the mechanism ran at all, both have
             # to come from the log.
+            # WHY DID THE VALVE NOT LIFT? "0 lifts" is three different findings wearing one face: never full,
+            # never plateaued, or never held long enough. round6 spent three GPU arms distinguishing them by hand
+            # -- the expert cap turned out to have dropped below its ceiling within 1000 steps and never come
+            # back, so it was never eligible at all, which no amount of cadence tuning would have fixed.
+            try:
+              if GROW_CAP:
+                for _lbl, _occ, _held, _on in (("experts", _pin_seen[0], _pin_seen[2], GROW_CAP_FAB and FABRIC),
+                                               ("vocabulary", _pin_seen[1], _pin_seen[3],
+                                                GROW_CAP_VOCAB and USE_TOK and ONLINE)):
+                    if not _on: continue
+                    print(f"  CAPACITY VALVE ({_lbl}): peak occupancy {_occ:.2f} of its soft cap, longest spell "
+                          f"held at the cap {int(_held)} steps against GROW_CAP_EVERY={GROW_CAP_EVERY}"
+                          + ("" if _occ >= 1.0 else
+                             " -- NEVER REACHED ITS CAP, so no lift was ever possible. The cap is not what is "
+                             "limiting this population; raising it would only add unused capacity.")
+                          + (" -- reached the cap but never held it long enough; the cadence is the binding "
+                             "constraint here." if (_occ >= 1.0 and _held < GROW_CAP_EVERY) else ""))
+            except Exception as _e:
+                print(f"  [capacity-valve report FAILED: {type(_e).__name__}: {_e}]")
             # WRAPPED, BECAUSE A REPORT BUG MUST NOT COST A RUN. The first version of this block killed gc_real
             # with a TypeError at line 7621 -- AFTER 60227 steps and a complete set of results -- and the grid
             # recorded the arm as FAILED. On the 0.75 GB run that would be eleven hours lost to a print. Every
