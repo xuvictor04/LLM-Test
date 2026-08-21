@@ -196,7 +196,15 @@ _SPEC = {
     "FAB_PARENT_K": ("env", 8),                           # fabric
     "FAB_PARENT_MAX": ("env", 0.20),                      # fabric
     "FAB_PLATEAU": ("f", 0.002),                          # fabric
-    "FAB_PRESSURE": ("f", 0.75),                          # fabric
+    # 0.45, AND IT IS A SETPOINT, not a threshold fitted to one population size -- which is what I argued it was
+    # before round5 measured it. Every arm equilibrated at pressure x cap: gate_press predicted 0.45 x 4096 = 1843
+    # and ended at 1838 live. So FAB_PRESSURE CHOOSES the operating population, FAB_NMAX is preallocation, and the
+    # difference is headroom for growth. At the old 0.75 against FAB_N0=2048/FAB_NMAX=4096 the occupancy was 0.50
+    # forever, the utilization cull never ran, and the utilization spare and FAB_RESCUE -- which live inside that
+    # branch -- were unreachable. Measured at 0.45: 204 utilization culls and 1253 spares against 0 and 0.
+    # It also cost nothing: 1.964 b/B vs base 1.968, +1.476 vs +1.471 delta-order-1, both inside seed noise, and
+    # the least routing concentration of any gate arm (top expert 13.7% against gate_nmax's 34.7%).
+    "FAB_PRESSURE": ("f", 0.45),                          # fabric
     "FAB_PRESS_SOFT": ("i", 0),                           # fabric -- measure pressure against the SOFT cap
     "FAB_RAMP": ("i", 4000),                              # fabric
     "FAB_RAMP_LATCH": ("env", 1),                         # fabric
@@ -1755,7 +1763,8 @@ class Fabric(nn.Module):
         s.n_elig = sum(1 for i in range(s.n_live) if s.use_age(i) >= grace)
         # WHICH CAP IS THE POPULATION MEASURED AGAINST? s.cap is PREALLOCATION -- how many slots exist -- and it
         # is not the same question as "is this population full". With FAB_N0=2048 against FAB_NMAX=4096 the
-        # occupancy is 0.50 forever, permanently below FAB_PRESSURE=0.75, so this gate never opens and the
+        # occupancy is 0.50 forever, which was permanently below the OLD FAB_PRESSURE=0.75, so this gate never
+        # opened and the
         # utilization cull, the utilization spare and FAB_RESCUE are all unreachable. `cap` lets the caller pass
         # the OPERATING ceiling (the soft cap) instead, so pressure asks whether the population is full at the
         # size it is currently allowed to be, and preallocated-but-unreachable slots stop counting as free space.
@@ -4696,7 +4705,7 @@ def main():
             # runs and nothing in the config output said so. Occupancy is stated next to the threshold it is
             # compared against, so "the cull is off" is readable before the run rather than inferred after it.
             # INSIDE the _F0 guard: the base list above is built even when FABRIC=0, where _F0 is None.
-            ("FAB_PRESSURE",   _f("FAB_PRESSURE", 0.75)),
+            ("FAB_PRESSURE",   _f("FAB_PRESSURE", 0.45)),
             ("FAB_PRESS_SOFT", FAB_PRESS_SOFT,
              "pressure judged against the SOFT cap (operating ceiling)" if FAB_PRESS_SOFT else
              "pressure judged against FAB_NMAX preallocation"),
@@ -4900,7 +4909,7 @@ def main():
             # making; a state that can silently disable three mechanisms has to be an unconditional line.
             _pc = max(1, (_cap_fab[0] if FAB_PRESS_SOFT else _F.cap))
             _po = _F.n() / _pc
-            _pt = _f("FAB_PRESSURE", 0.75)
+            _pt = _f("FAB_PRESSURE", 0.45)
             print(f"[config] CULL GATE  occupancy {_F.n()}/{_pc} = {_po:.2f} vs FAB_PRESSURE={_pt:g}"
                   + (f" -- OPEN: the utilization cull, the utilization spare and FAB_RESCUE can all fire. "
                      f"The population will settle near {_pt:g} x {_pc} = {int(_pt * _pc)}." if _po >= _pt else
@@ -5304,7 +5313,7 @@ def main():
         if FABRIC and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
             _fo_before = fab.failed_out
             _fc, _fs = fab.manage(step, grace=_i("FAB_GRACE", 48), cull_frac=_f("FAB_CULL_FRAC", 0.02),
-                                  pressure=_f("FAB_PRESSURE", 0.75), protect=COMP_PROTECT,
+                                  pressure=_f("FAB_PRESSURE", 0.45), protect=COMP_PROTECT,
                                   comp_glob=asm.comp_glob,
                                   cap=(_cap_fab[0] if FAB_PRESS_SOFT else None))
             fab.removed += _fc; fab.spared += _fs
@@ -5324,7 +5333,7 @@ def main():
                 # NAME THE ROUTE THAT ACTUALLY FIRED. This line said "cull under capacity pressure, bottom N%
                 # by utilization" for EVERY cull, including runs where the utilization cull never executed at
                 # all -- measured: 24 culled total, 24 of them for SUSTAINED error, on a population at 2035 of
-                # 4096 slots (0.50) against FAB_PRESSURE=0.75, so the early return in manage() fired on every
+                # 4096 slots (0.50) against the old FAB_PRESSURE=0.75, so the early return fired on every
                 # pass. The log described the mechanism that did nothing and stayed silent about the one that
                 # did the work, which is the same failure DID IT FIRE exists to stop.
                 _why = (f"{_fc_util} under capacity pressure (bottom {_f('FAB_CULL_FRAC', 0.02):.0%} by "
@@ -5335,7 +5344,7 @@ def main():
                 print(f"  [experts @ {step}] culled {_fc} spared {_fs} -> {fab.n()} live"
                       + (f" | {' + '.join(x for x in (_why, _why2) if x)}" if (_why or _why2) else "")
                       + (f" | the UTILIZATION cull did not run: {fab.n()}/{fab.cap} = {_occ:.2f} occupancy is "
-                         f"below FAB_PRESSURE={_f('FAB_PRESSURE', 0.75)}, so FAB_RESCUE and the utilization "
+                         f"below FAB_PRESSURE={_f('FAB_PRESSURE', 0.45)}, so FAB_RESCUE and the utilization "
                          f"spare are unreachable too -- they live inside that gate" if not fab.cull_ran else "")
                       + " | spared = load-bearing or better than the population on its own material")
             # ELIGIBILITY IS THE THING THAT CAN SILENTLY GO TO ZERO. Grace is counted in SELECTIONS now, so a
@@ -6918,7 +6927,9 @@ def main():
             # different fix. FAB_RESCUE and the utilization spare both live INSIDE manage()'s capacity-pressure
             # branch, so when occupancy sits below FAB_PRESSURE the code is not merely doing nothing -- it is
             # unreachable. Measured: FAB_RESCUE=0.35 fired 0 times on a population at 2035/4096 = 0.50 against
-            # FAB_PRESSURE=0.75. Reported as plain inertness that reads as "the idea does not work", when what it
+            # the old FAB_PRESSURE=0.75. Reported as plain inertness, which reads as "the idea does not work"
+            # rather than "the run never asked" -- and it was the latter: at FAB_PRESSURE=0.45 the same mechanism
+            # fires 203 times. Reported as plain inertness that reads as "the idea does not work", when what it
             # means is "the run never asked the question". Treat it as OFF, with the reason, so nobody spends a
             # grid arm on a mechanism the configuration has already disabled.
             _resc_reach = (FAB_RESCUE > 0.0 and getattr(_fb, "cull_ran", False))
