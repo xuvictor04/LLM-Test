@@ -3697,7 +3697,11 @@ def main():
     BEST_TRACK = bool(_i("BEST_TRACK", 1))                    # keep the best-by-held-out checkpoint, not just the last
     BEST_KEEP = max(0, _i("BEST_KEEP", 0))                    # >0: also retain this many recent LOCAL lows
     BEST_KEEP_TOL = _f("BEST_KEEP_TOL", 0.02)                 # ...that are within this fraction of the best so far
-    _keep = []                                                # [(step, bpb, slot)] most recent local lows kept
+    # _bkeep, NOT _keep. `_keep` is reused as a throwaway local in five other places in this function -- a list
+    # of expert indices, a bool, a list of windows, an int count -- and by report time it held an int, so the
+    # BEST-KEEP block died on `TypeError: 'int' object is not iterable` AFTER a complete 60k-step run. main() is
+    # ~4000 lines and short generic names are not free in it.
+    _bkeep = []                                               # [(step, bpb, slot)] most recent local lows kept
     _prev_probe = [None]                                      # the previous probe's mean, to see a descent
     _best_bpb = [None, -1, False]                             # [best mean bits/byte, step, saved?]
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
@@ -5169,10 +5173,10 @@ def main():
                 # right way to be wrong here -- a spare restore point costs disk, a missing one cannot be recovered.
                 if BEST_KEEP and _prev_probe[0] is not None and _cm < _prev_probe[0] - 1e-6 \
                         and _best_bpb[0] is not None and _cm <= _best_bpb[0] * (1.0 + BEST_KEEP_TOL):
-                    _slot = (len(_keep) % BEST_KEEP) + 1
+                    _slot = (len(_bkeep) % BEST_KEEP) + 1
                     try:
                         if _save_ckpt(stream, quiet=True, suffix=f".best{_slot}"):
-                            _keep.append((step, _cm, _slot))
+                            _bkeep.append((step, _cm, _slot))
                             print(f"  [best-keep @ {step}] local low {_cm:.3f} b/B (best {_best_bpb[0]:.3f}) "
                                   f"-> slot .best{_slot} of {BEST_KEEP}")
                     except Exception as _e:
@@ -7615,11 +7619,16 @@ def main():
             # NAME THE RESTORE POINTS. A rotating set of checkpoints nobody is told about is a directory of files
             # with no provenance -- which slot holds which step, and whether the mechanism ran at all, both have
             # to come from the log.
-            if BEST_KEEP:
-                if _keep:
+            # WRAPPED, BECAUSE A REPORT BUG MUST NOT COST A RUN. The first version of this block killed gc_real
+            # with a TypeError at line 7621 -- AFTER 60227 steps and a complete set of results -- and the grid
+            # recorded the arm as FAILED. On the 0.75 GB run that would be eleven hours lost to a print. Every
+            # other long-lived report section here is already fault-tolerant for exactly this reason.
+            try:
+              if BEST_KEEP:
+                if _bkeep:
                     _live = {}                                # a slot reused later holds only the LATER snapshot
-                    for _st, _bb, _sl in _keep: _live[_sl] = (_st, _bb)
-                    print(f"  BEST-KEEP: {len(_keep)} local low(s) taken, {len(_live)} still on disk "
+                    for _st, _bb, _sl in _bkeep: _live[_sl] = (_st, _bb)
+                    print(f"  BEST-KEEP: {len(_bkeep)} local low(s) taken, {len(_live)} still on disk "
                           f"(BEST_KEEP={BEST_KEEP} slots, rotating; earlier ones were overwritten):")
                     for _sl in sorted(_live):
                         _st, _bb = _live[_sl]
@@ -7628,6 +7637,9 @@ def main():
                     print(f"  BEST-KEEP: ARMED (BEST_KEEP={BEST_KEEP}) and took NOTHING -- no probe was both a "
                           f"descent and within {BEST_KEEP_TOL:.0%} of the best. Either the run never improved "
                           f"after its first probe, or SAVE_CKPT is off so every save returned False.")
+            except Exception as _e:
+                print(f"  [BEST-KEEP report FAILED: {type(_e).__name__}: {_e} -- the checkpoints on disk are "
+                      f"unaffected, only this summary of them was lost]")
             if _best_bpb[2]:
                 print(f"  to sample the BEST model instead:  python3 prompt.py CKPT={_env('SAVE_CKPT', '')}.best")
         # MORE THAN ONE SAMPLE PER PROCESS. GEN_PROCS caps how many DOMAINS get sampled, and this project runs ONE
