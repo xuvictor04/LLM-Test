@@ -249,7 +249,17 @@ _SPEC = {
     "GROW_CAP": ("i", 0),                                 # capacity
     "GROW_CAP_FAB": ("i", 1),                             # capacity
     "GROW_CAP_VOCAB": ("i", 1),                           # capacity
-    "GROW_LIFT": ("f", 256),                              # capacity -- ADDITIVE rows per lift, not a multiplier
+    # A FRACTION OF THE CAP, not a flat count. This was 256 absolute, which is a completely different intervention
+    # depending on what it is applied to: +160% on gc_pin's expert cap of 160, +40% on a 640 vocabulary, +12.5%
+    # at VMAX=2048. One knob cannot mean "a nudge" and "more than double" at the same time.
+    # This supersedes the earlier instruction to make the lift linear rather than proportional. That was the right
+    # call against a MULTIPLIER of 2.0, where each lift handed out more than the one before and the cap ran away.
+    # A small fixed fraction does not run away -- 8% takes eleven lifts to double -- and it is the only form that
+    # means the same thing to a cap of 160 and a cap of 4096.
+    "GROW_LIFT": ("f", 0.08),                             # capacity -- FRACTION of the current cap per lift
+    # ...with an absolute floor, so a small cap still moves. 8% of 64 is 5; without this a low starting cap would
+    # inch upward in ones and never reach anything.
+    "GROW_LIFT_MIN": ("i", 8),                            # capacity
     "GROW_CAP_PLATEAU": ("f", 0.002),                     # capacity
     "GROW_CAP_EVERY": ("i", 20000),                       # capacity -- steps PINNED at the cap, not since a lift
     "GROW_CAP_FAB0": ("i", 0),                            # capacity -- 0 = start at FAB_NMAX
@@ -613,8 +623,8 @@ LOSS_MASK_DEAD = bool(_i("LOSS_MASK_DEAD", 0))
 # then either wasted (never filled, and in the vocabulary's case sitting in the loss denominator) or binding (full
 # and unable to answer new material). Neither is a decision the run gets to revisit.
 #
-# A SOFT cap does. It starts where the run can actually use it, and lifts by GROW_LIFT rows -- a COUNT, added,
-# not a multiplier -- only when BOTH: the
+# A SOFT cap does. It starts where the run can actually use it, and lifts by a small FRACTION of itself
+# (GROW_LIFT, with the GROW_LIFT_MIN floor) only when BOTH: the
 # population is pinned against it, AND the loss has stopped improving. Pinned-but-improving means the capacity in
 # hand is still paying, so more would only dilute; plateaued-but-not-pinned means the limit is not what is
 # stopping it, so raising it would change nothing and only add dead rows. The conjunction is the whole rule.
@@ -676,7 +686,14 @@ FAB_NEW_WIN = _i("FAB_NEW_WIN", 0) or _i("FAB_COOLDOWN", 400)
 GROW_CAP = bool(_i("GROW_CAP", 0))                         # master switch for both soft caps
 GROW_CAP_FAB = bool(_i("GROW_CAP_FAB", 1))                 # ...experts   (under GROW_CAP)
 GROW_CAP_VOCAB = bool(_i("GROW_CAP_VOCAB", 1))             # ...vocabulary (under GROW_CAP)
-GROW_LIFT = _f("GROW_LIFT", 256)                           # ADD this many rows to the soft cap when it is earned
+GROW_LIFT = _f("GROW_LIFT", 0.08)                          # lift the soft cap by this FRACTION when it is earned
+GROW_LIFT_MIN = _i("GROW_LIFT_MIN", 8)                     # ...but never by fewer than this many rows
+
+
+def lift_to(cap, frac, floor_):
+    """The new soft cap after one earned lift. Proportional, so it means the same thing at 160 and at 4096, with
+    an absolute floor so small caps still move. Module level so cap_test.py exercises the shipped arithmetic."""
+    return int(cap) + max(int(floor_), int(float(frac) * int(cap)))
 GROW_CAP_PLATEAU = _f("GROW_CAP_PLATEAU", 0.002)           # relative slow-loss improvement below which it counts as stalled
 GROW_CAP_EVERY = _i("GROW_CAP_EVERY", 20000)              # steps a cap must stay PINNED before a lift is earned
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
@@ -5946,12 +5963,15 @@ def main():
         if GROW_CAP and fabgrow is not None and fabgrow.slow is not None and fabgrow.n >= GROW_CAP_EVERY:
             _improving = (fabgrow.slow - fabgrow.fast) / max(1e-6, abs(fabgrow.slow))
             if _improving < GROW_CAP_PLATEAU:
-                # LINEAR, not geometric. GROW_LIFT used to MULTIPLY, so one lift doubled the cap at the default
-                # 2.0 and every later lift handed out more than the one before -- the opposite of a valve, which
-                # should release a fixed amount however large the vessel. It is now a COUNT: +GROW_LIFT rows.
+                # A SMALL FRACTION, which is neither of the two things this knob has been. It started as a
+                # MULTIPLIER of 2.0 -- one lift doubled the cap and each later one handed out more than the last.
+                # It was then made a flat COUNT of 256, which fixed the runaway but meant +160% to gc_pin's expert
+                # cap of 160 and +12.5% to a vocabulary at 2048: the same knob as a nudge and as a doubling.
+                # GROW_LIFT is now a fraction of the current cap, so a lift means the same thing at every size,
+                # with GROW_LIFT_MIN as a floor so small caps still move.
                 if _fabpin and _pin_fab[0] >= GROW_CAP_EVERY:
                     _was = _cap_fab[0]; _held = _pin_fab[0]             # BEFORE zeroing it, or this reads 0
-                    _cap_fab[0] = min(FAB_NMAX, _cap_fab[0] + max(1, int(GROW_LIFT)))
+                    _cap_fab[0] = min(FAB_NMAX, lift_to(_cap_fab[0], GROW_LIFT, GROW_LIFT_MIN))
                     if _cap_fab[0] > _was:
                         _cap_last[0] = step; _pin_fab[0] = 0
                         print(f"  [capacity @ {step}] experts pinned at {_was} for {_held} steps and the loss "
@@ -5959,7 +5979,7 @@ def main():
                               f"{_was} -> {_cap_fab[0]} (+{_cap_fab[0]-_was}, hard ceiling {FAB_NMAX})")
                 if _vocpin and _pin_voc[0] >= GROW_CAP_EVERY:
                     _wasv = TOK.vmax
-                    TOK.vmax = min(int(V), TOK.vmax + max(1, int(GROW_LIFT)))
+                    TOK.vmax = min(int(V), lift_to(TOK.vmax, GROW_LIFT, GROW_LIFT_MIN))
                     if TOK.vmax > _wasv:
                         _cap_last[0] = step; _pin_voc[0] = 0
                         # Nested f-string expressions may not span lines before 3.12; build the clause first.

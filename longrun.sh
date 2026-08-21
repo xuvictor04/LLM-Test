@@ -400,6 +400,11 @@ _flags_for() {
     # ordinary minting with the valve OFF, which makes gc_ctrl vs gc_fast one knob (how it got there) and
     # gc_ctrl vs gc_real the other (how big it ended).
     gc_ctrl)   echo "FAB_N0=256 VMAX=2048" ;;
+    gc8_small) echo "FAB_N0=256 VMAX=640" ;;
+    gc8_big)   echo "FAB_N0=256 VMAX=2048" ;;
+    gc8_p5)    echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=160 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000 GROW_LIFT=0.05" ;;
+    gc8_p10)   echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=160 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000 GROW_LIFT=0.10" ;;
+
     # THE EXPERT VALVE, GIVEN A CAP IT CAN REACH. In round6 the population settled at ~165 against a soft cap of
     # 256, because sustained-error culls (2-5 per manage pass) outpace ramp growth (+1 per event) -- so it was
     # never pinned, never eligible, and the valve correctly declined. A cap at the settling point is the only
@@ -753,7 +758,21 @@ grid)
     #            growth (+1 per event), so it was never eligible and the valve correctly declined. A cap AT the
     #            settling point is the only configuration in which the expert half can fire at all.
     round6)  ARMS="gc_real gc_fast gc_loose" ;;
+    # === ROUND 8: the valve at a sane lift size, against BOTH fixed references =================================
+    # GROW_LIFT is now a FRACTION (default 0.08). round6/7 ran it as a flat 256, which was +160% to an expert cap
+    # of 160 and +12.5% to a vocabulary at 2048 -- the same knob as a nudge and as a doubling.
+    # The valve only earns its place if it beats BOTH ends of the fixed alternative, so both are in the round:
+    #   gc8_small  VMAX=640 fixed, no valve. The best arm of round6/7 (+1.451) was effectively this.
+    #   gc8_big    VMAX=2048 fixed, no valve. The other reference (+1.246).
+    #   gc8_p5     the valve at 5% lifts, starting low.
+    #   gc8_p10    the valve at 10% lifts, starting low.
+    # A valve that starts small and lifts only when earned SHOULD land between the two references and ideally
+    # above both -- keeping the small vocabulary's efficiency while buying room when the run actually needs it.
+    # Landing below gc8_small means the lifting is not paying for itself and the answer is a fixed small cap.
+    # Expert caps start at 160 against FAB_N0=256, the only configuration in which the expert half has ever been
+    # pinned (round7): above the settling point it is never eligible and correctly declines.
     round7)  ARMS="gc_ctrl gc_pin" ;;
+    round8)  ARMS="gc8_small gc8_big gc8_p5 gc8_p10" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
