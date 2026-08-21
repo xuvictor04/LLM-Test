@@ -375,6 +375,17 @@ _SPEC = {
     # a single .best. Each snapshot costs a full checkpoint on disk (the memory store dominates it), so this is
     # opt-in and n is a disk budget, not a free setting.
     "BEST_KEEP": ("i", 0),                                # report
+    # MEASURED, round6 + round7. The valve fires, and it is mostly EXONERATED of the quality cost that round6
+    # appeared to show. Those arms confounded two variables -- whether the valve lifted, and where the vocabulary
+    # ended. Separating them across five arms, on delta-order-1 (higher better):
+    #     640 vocab, no vocab lift  +1.451      2048, valve OFF  +1.246
+    #     896 vocab, 1 lift         +1.333      2048, valve ON   +1.172 / +1.065
+    #   valve, holding vocabulary at 2048:  +1.246 -> +1.172, a cost of 0.074
+    #   vocabulary size, 640 -> 2048:       +1.451 -> +1.246, a cost of 0.205
+    # Seed spread on this metric measured 0.066-0.131 this session, so the VALVE's cost is inside noise while the
+    # SIZE effect is 2-3x it. What hurt was ending with a big vocabulary on a small corpus, not the lifting.
+    # The expert half lifted for the first time at round7: soft cap 160 -> 416 after 2001 steps pinned. It needs a
+    # cap AT or BELOW where the population settles -- above that it is never pinned and correctly declines.
     # ...and a low only counts if it is actually in a GOOD region: within this fraction of the best seen so far.
     # Without it every improving probe early in a run is a "local low" and the rotation fills with the warmup.
     "BEST_KEEP_TOL": ("f", 0.02),                         # report
