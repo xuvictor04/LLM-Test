@@ -731,15 +731,27 @@ grid)
     L="$GRID/$ARM.log"; [ -f "$L" ] || continue
     _ho=$(grep -a -oE "held-out [0-9.]+" "$L" | head -1 | awk '{print $2}')
     _o1=$(grep -a -oE "beats order-1 by \+[0-9.]+" "$L" | head -1 | awk '{print $NF}')
-    _cv=$(grep -a -oE "since the minimum [-+][0-9.]+" "$L" | head -1 | awk '{print $NF}')
+    # THE UNIT-STABLE NUMBER, NOT THE PER-TOKEN ONE. This used to grep "since the minimum", which is per-TOKEN
+    # cross-entropy. The tokenizer mints throughout a run, so each token comes to carry more bytes and that loss
+    # rises MECHANICALLY while the model improves per byte. The log says so itself, three lines further down:
+    # "NOT DIVERGING -- the per-token rise is the growing vocabulary, not the model. Judge this run on bits/byte."
+    # The summary was surfacing the misleading figure and hiding the correct one directly beneath it, and a whole
+    # session of conclusions was drawn off the difference -- frozen2k and growcap reading +0.000 against base
+    # +0.285 is ENTIRELY this artifact: on bits/byte both read +0.000. A grid summary is what gets quoted, so it
+    # has to carry the number the log tells you to judge on.
+    _cv=$(grep -a -oE "CROSS-CHECK \(held-out bits/byte[^)]*\): [-+][0-9.]+" "$L" | head -1 | awk '{print $NF}')
+    # Fall back to the per-token figure only if the unit-stable one is absent (too few held-out points), and MARK
+    # it, so a reader never mistakes one for the other.
+    [ -n "$_cv" ] || _cv="$(grep -a -oE "since the minimum [-+][0-9.]+" "$L" | head -1 | awk '{print $NF}')~tok"
     _ex=$(grep -a -oE "[0-9]+ distinct experts won" "$L" | head -1 | awk '{print $1}')
     _tp=$(grep -a -oE "top expert took [0-9.]+%" "$L" | head -1 | awk '{print $NF}')
     _mx=$(grep -a -oE "spread [0-9.]+ \([0-9]+%\) vs WEIGHT-PREDICTION term spread [0-9.]+ \([0-9]+%\)" "$L" | head -1 | sed -E 's/spread [0-9.]+ \(([0-9]+%)\).*\(([0-9]+%)\)/region \1 weight \2/')
     printf "  %-9s %-7s %-13s %-11s %-9s %-22s %s\n" "$ARM" "${_ho:--}" "${_o1:--}" "${_cv:--}" "${_ex:--}" "${_tp:--}" "${_mx:--}"
   done
   echo
-  echo "  curve = change SINCE THE MINIMUM. Positive means the run got worse after its best point; every pilot so"
-  echo "  far has been +1.1 to +1.4, and whether the growth-ramp latch fixed that is what 'base' answers."
+  echo "  curve = held-out BITS/BYTE since this run's own minimum. Positive means it really got worse. A value"
+  echo "  marked ~tok is the per-TOKEN fallback and is NOT comparable across arms whose vocabularies differ:"
+  echo "  minted tokens carry more bytes, so per-token loss rises even while bits/byte falls."
   echo "  Also worth grepping in each log: POPULATION CHURN, CHAIN ORDER, ROUTING MIX, GRADIENT REACH."
   echo
   echo "  logs: $GRID/*.log   status: $GRID/_status.tsv"
