@@ -377,6 +377,27 @@ _flags_for() {
     # not the winner this needs re-running on whichever is; it is here so the grid produces a first FAB_RESCUE
     # number rather than none at all.
     gate_nmax_resc) echo "FAB_NMAX=2048 FAB_RESCUE=0.35" ;;
+    # === DOES THE CAPACITY VALVE FIRE? =========================================================================
+    # GROW_CAP has never produced a clean number. round4's growcap never lifted once, and gate_soft bundled it
+    # with FAB_PRESS_SOFT so its behaviour cannot be attributed. The valve needs BOTH conditions: the cap PINNED
+    # and the loss PLATEAUED. round4 failed the second -- the run reads UNDERFIT and was still improving -- so a
+    # low cap alone is not enough to make it fire, and these arms separate the two conditions instead of guessing.
+    # The caps start very low so pinning is immediate and lifting has somewhere to go.
+    #   gc_real   low caps, SHIPPING cadence and plateau. Answers the question that matters for the long run:
+    #             will the valve fire on its own, under the settings the long run would actually use?
+    #   gc_fast   the same, but GROW_CAP_EVERY=2000 instead of 20000. Isolates the CADENCE: if gc_real is silent
+    #             and this fires, the run is long enough to plateau but not long enough to wait 20k steps pinned.
+    #   gc_loose  the same, but GROW_CAP_PLATEAU raised so "still improving" counts as stalled. Isolates the
+    #             PLATEAU condition, and is the arm that proves the lift MECHANISM works end to end on GPU --
+    #             it has only ever been seen in a CPU smoke.
+    # READ ON [capacity @ ...] LINES, nothing else. Three arms, three different silences to tell apart: no lift
+    # because never pinned, no lift because never plateaued, no lift because the cadence never came round.
+    # BEST_KEEP rides on gc_real so the long run is not its first execution -- it is new code and this container
+    # has no torch, so it has never run at all. 2 slots, not more: each is a FULL checkpoint and the memory store
+    # dominates the size. Read it on the BEST-KEEP block in the report; "ARMED and took NOTHING" is a failure.
+    gc_real)   echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 BEST_KEEP=2" ;;
+    gc_fast)   echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000" ;;
+    gc_loose)  echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000 GROW_CAP_PLATEAU=0.5" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
     # under the misspelled arm's log name -- a result filed against an experiment that never happened, which is
@@ -707,6 +728,10 @@ grid)
     # baseline. Every other arm is judged first on whether [experts @ ...] reports culls "under capacity
     # pressure", whether fabric.spare leaves zero, and whether fabric.rescue stops reading UNREACHABLE.
     round5)  ARMS="base gate_nmax gate_press gate_soft gate_nmax_resc" ;;
+    # === ROUND 6: the capacity valve, before the long run depends on it ========================================
+    # Ordered so the most informative silence comes first. If gc_real lifts, the other two are confirmation; if it
+    # does not, gc_fast and gc_loose say WHICH condition blocked it.
+    round6)  ARMS="gc_real gc_fast gc_loose" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac

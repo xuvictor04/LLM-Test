@@ -369,6 +369,15 @@ _SPEC = {
     # --- report: end-of-run measurement only -- nothing here changes training ----------------------
     "BENCH": ("i", 0),                                    # report
     "BEST_TRACK": ("i", 1),                               # report
+    # KEEP THE GOOD REGIONS, not just the single best point. On a long run the best-by-held-out checkpoint is one
+    # file that keeps being overwritten, so every earlier low is gone by the end and there is nothing to go back
+    # to. BEST_KEEP=n retains the n most recent LOCAL lows as .best1 ... .bestN, rotating. 0 = the old behaviour,
+    # a single .best. Each snapshot costs a full checkpoint on disk (the memory store dominates it), so this is
+    # opt-in and n is a disk budget, not a free setting.
+    "BEST_KEEP": ("i", 0),                                # report
+    # ...and a low only counts if it is actually in a GOOD region: within this fraction of the best seen so far.
+    # Without it every improving probe early in a run is a "local low" and the rotation fills with the warmup.
+    "BEST_KEEP_TOL": ("f", 0.02),                         # report
     "COH_LEN": ("i", 384),                                # report
     "COH_N": ("i", 16),                                   # report
     "EVAL_N": ("i", 64),                                  # report
@@ -3686,6 +3695,10 @@ def main():
               f"composite. {model.compose.byte.num_embeddings} byte embeddings underlie all "
               f"{TOK.vocab_size} tokens.")
     BEST_TRACK = bool(_i("BEST_TRACK", 1))                    # keep the best-by-held-out checkpoint, not just the last
+    BEST_KEEP = max(0, _i("BEST_KEEP", 0))                    # >0: also retain this many recent LOCAL lows
+    BEST_KEEP_TOL = _f("BEST_KEEP_TOL", 0.02)                 # ...that are within this fraction of the best so far
+    _keep = []                                                # [(step, bpb, slot)] most recent local lows kept
+    _prev_probe = [None]                                      # the previous probe's mean, to see a descent
     _best_bpb = [None, -1, False]                             # [best mean bits/byte, step, saved?]
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
     _rlive, _rseen = set(), set()                             # router parameters that DID / could receive gradient
@@ -5147,6 +5160,24 @@ def main():
                         _best_bpb[2] = bool(_save_ckpt(stream, quiet=True, suffix=".best"))
                     except Exception as _e:
                         print(f"  [best-ckpt save failed: {type(_e).__name__}: {_e}]")
+                # EVERY LOCAL LOW, not only the global best. A descent (this probe below the last) that lands in a
+                # GOOD region -- within BEST_KEEP_TOL of the best seen -- is kept in a rotating set, so a long run
+                # ends holding several restore points at its best-performing areas rather than one.
+                # A true local minimum can only be CONFIRMED one probe later, once the curve turns back up, and by
+                # then the weights have moved past it. So the rule is "descent into a good region", which is a
+                # superset: it contains every local minimum, plus some points on the way down to one. That is the
+                # right way to be wrong here -- a spare restore point costs disk, a missing one cannot be recovered.
+                if BEST_KEEP and _prev_probe[0] is not None and _cm < _prev_probe[0] - 1e-6 \
+                        and _best_bpb[0] is not None and _cm <= _best_bpb[0] * (1.0 + BEST_KEEP_TOL):
+                    _slot = (len(_keep) % BEST_KEEP) + 1
+                    try:
+                        if _save_ckpt(stream, quiet=True, suffix=f".best{_slot}"):
+                            _keep.append((step, _cm, _slot))
+                            print(f"  [best-keep @ {step}] local low {_cm:.3f} b/B (best {_best_bpb[0]:.3f}) "
+                                  f"-> slot .best{_slot} of {BEST_KEEP}")
+                    except Exception as _e:
+                        print(f"  [best-keep save failed: {type(_e).__name__}: {_e}]")
+                _prev_probe[0] = _cm
         if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark:
             _now = _time.time(); _rate = (step - _s_mark) / max(1e-9, _now - _t_mark)      # steps/sec over the last window
             # bytes-per-step moves with the vocabulary too, so kB/s and GB/day were quoted at the SEED vocabulary
@@ -7581,6 +7612,22 @@ def main():
                   + (f", saved to {_env('SAVE_CKPT', '')}.best" if _best_bpb[2] else " (not saved: SAVE_CKPT is off)")
                   + (f". The final model is {_fin - _best_bpb[0]:+.3f} bits/byte worse than it; read the text below "
                      f"as the END of the run, not its best." if _fin else "."))
+            # NAME THE RESTORE POINTS. A rotating set of checkpoints nobody is told about is a directory of files
+            # with no provenance -- which slot holds which step, and whether the mechanism ran at all, both have
+            # to come from the log.
+            if BEST_KEEP:
+                if _keep:
+                    _live = {}                                # a slot reused later holds only the LATER snapshot
+                    for _st, _bb, _sl in _keep: _live[_sl] = (_st, _bb)
+                    print(f"  BEST-KEEP: {len(_keep)} local low(s) taken, {len(_live)} still on disk "
+                          f"(BEST_KEEP={BEST_KEEP} slots, rotating; earlier ones were overwritten):")
+                    for _sl in sorted(_live):
+                        _st, _bb = _live[_sl]
+                        print(f"    {_env('SAVE_CKPT', '')}.best{_sl}  step {_st}  {_bb:.3f} bits/byte")
+                else:
+                    print(f"  BEST-KEEP: ARMED (BEST_KEEP={BEST_KEEP}) and took NOTHING -- no probe was both a "
+                          f"descent and within {BEST_KEEP_TOL:.0%} of the best. Either the run never improved "
+                          f"after its first probe, or SAVE_CKPT is off so every save returned False.")
             if _best_bpb[2]:
                 print(f"  to sample the BEST model instead:  python3 prompt.py CKPT={_env('SAVE_CKPT', '')}.best")
         # MORE THAN ONE SAMPLE PER PROCESS. GEN_PROCS caps how many DOMAINS get sampled, and this project runs ONE
