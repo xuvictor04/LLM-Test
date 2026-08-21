@@ -5269,10 +5269,13 @@ def main():
             mem.set_live_src(asm.cent.keys())
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
         if FABRIC and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
+            _fo_before = fab.failed_out
             _fc, _fs = fab.manage(step, grace=_i("FAB_GRACE", 48), cull_frac=_f("FAB_CULL_FRAC", 0.02),
                                   pressure=_f("FAB_PRESSURE", 0.75), protect=COMP_PROTECT,
                                   comp_glob=asm.comp_glob)
             fab.removed += _fc; fab.spared += _fs
+            _fc_err = fab.failed_out - _fo_before          # sustained-error route: runs at ANY occupancy
+            _fc_util = _fc - _fc_err                       # utilization route: only under capacity pressure
             # REPORT THE RESCUES. A maintenance path with no counter in the log is indistinguishable from one
             # that silently stopped firing -- the failure mode this file has hit repeatedly (retire_stale,
             # fuzzy_segment, the domain-prior section). n_rescued is cumulative, so it also says whether the
@@ -5284,10 +5287,23 @@ def main():
                           f"{fab.n()} live")
                     _resc_seen[0] = fab.n_rescued
             if _fc or _fs:
-                print(f"  [experts @ {step}] culled {_fc} spared {_fs} -> {fab.n()} live "
-                      f"(cull under capacity pressure, bottom {_f('FAB_CULL_FRAC', 0.02):.0%} by utilization, "
-                      f"ranked among the {fab.n_elig} past their {_i('FAB_GRACE', 48)}-selection grace; "
-                      f"spared = load-bearing or better than the population on its own material)")
+                # NAME THE ROUTE THAT ACTUALLY FIRED. This line said "cull under capacity pressure, bottom N%
+                # by utilization" for EVERY cull, including runs where the utilization cull never executed at
+                # all -- measured: 24 culled total, 24 of them for SUSTAINED error, on a population at 2035 of
+                # 4096 slots (0.50) against FAB_PRESSURE=0.75, so the early return in manage() fired on every
+                # pass. The log described the mechanism that did nothing and stayed silent about the one that
+                # did the work, which is the same failure DID IT FIRE exists to stop.
+                _why = (f"{_fc_util} under capacity pressure (bottom {_f('FAB_CULL_FRAC', 0.02):.0%} by "
+                        f"utilization, ranked among the {fab.n_elig} past their "
+                        f"{_i('FAB_GRACE', 48)}-selection grace)" if _fc_util else "")
+                _why2 = f"{_fc_err} for SUSTAINED error (runs at any occupancy)" if _fc_err else ""
+                _occ = fab.n() / max(1, fab.cap)
+                print(f"  [experts @ {step}] culled {_fc} spared {_fs} -> {fab.n()} live"
+                      + (f" | {' + '.join(x for x in (_why, _why2) if x)}" if (_why or _why2) else "")
+                      + (f" | the UTILIZATION cull did not run: {fab.n()}/{fab.cap} = {_occ:.2f} occupancy is "
+                         f"below FAB_PRESSURE={_f('FAB_PRESSURE', 0.75)}, so FAB_RESCUE and the utilization "
+                         f"spare are unreachable too -- they live inside that gate" if not fab.cull_ran else "")
+                      + " | spared = load-bearing or better than the population on its own material")
             # ELIGIBILITY IS THE THING THAT CAN SILENTLY GO TO ZERO. Grace is counted in SELECTIONS now, so a
             # population the router spreads too thinly never accumulates any and the cull has nobody to rank --
             # not an error, no exception, just a run with no selection in it, which is what arm B turned out to
@@ -6859,9 +6875,23 @@ def main():
             _r("fabric.grow",       lambda: _fb.grown,      lambda: _cfg("FAB_GROW"),      "FAB_GROW=0")
             _r("fabric.spawn",      lambda: _fb.spawned,    lambda: _cfg("FAB_SPAWN"),     "FAB_SPAWN=0")
             _r("fabric.cull",       lambda: _fb.removed,    lambda: _cfg("MANAGE"),        "MANAGE=0")
-            _r("fabric.spare",      lambda: _fb.spared,     lambda: _cfg("COMP_PROTECT"),  "COMP_PROTECT=0")
+            _r("fabric.spare",      lambda: _fb.spared,     lambda: _cfg("COMP_PROTECT"),
+               ("COMP_PROTECT=0" if not _cfg("COMP_PROTECT") else
+                "COMP_PROTECT is on, but the UTILIZATION half of sparing is behind the same capacity-pressure "
+                "gate as FAB_RESCUE; only the sustained-error spare can fire below FAB_PRESSURE"))
             _r("fabric.failed_out", lambda: _fb.failed_out, lambda: _cfg("COMP_PROTECT"),  "COMP_PROTECT=0")
-            _r("fabric.rescue",     lambda: _fb.n_rescued,  lambda: _cfg("FAB_RESCUE") > 0, "FAB_RESCUE=0")
+            # ARMED, BUT BEHIND A GATE THAT NEVER OPENED, is a different finding from ARMED AND INERT and has a
+            # different fix. FAB_RESCUE and the utilization spare both live INSIDE manage()'s capacity-pressure
+            # branch, so when occupancy sits below FAB_PRESSURE the code is not merely doing nothing -- it is
+            # unreachable. Measured: FAB_RESCUE=0.35 fired 0 times on a population at 2035/4096 = 0.50 against
+            # FAB_PRESSURE=0.75. Reported as plain inertness that reads as "the idea does not work", when what it
+            # means is "the run never asked the question". Treat it as OFF, with the reason, so nobody spends a
+            # grid arm on a mechanism the configuration has already disabled.
+            _resc_reach = (FAB_RESCUE > 0.0 and getattr(_fb, "cull_ran", False))
+            _r("fabric.rescue",     lambda: _fb.n_rescued,  lambda: _resc_reach,
+               ("FAB_RESCUE=0" if FAB_RESCUE <= 0.0 else
+                f"UNREACHABLE: {_fb.n()}/{_fb.cap} occupancy < FAB_PRESSURE, so the utilization cull it lives "
+                f"inside never ran"))
             _r("fabric.crossover",  lambda: _fb.crossed,    lambda: _cfg("FAB_XOVER") > 0,  "FAB_XOVER=0")
             _r("fabric.replicate",  lambda: _fb.replicated, lambda: _cfg("FAB_REPLICATE"), "FAB_REPLICATE=0")
             _r("fabric.explore",    lambda: _fb.explored,   lambda: _cfg("FAB_EXPLORE") > 0, "FAB_EXPLORE=0")
