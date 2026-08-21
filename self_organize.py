@@ -4691,20 +4691,12 @@ def main():
             ("LR_RESTARTS",    bool(_i("LR_RESTARTS", 1))),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
         ]
-        _pressnote = ""
-        if _F0 is not None:
-            _pcap = max(1, (_cap_fab[0] if FAB_PRESS_SOFT else _F0.cap))
-            _pocc = _F0.n() / _pcap
-            _pressnote = (f"occupancy {_F0.n()}/{_pcap} = {_pocc:.2f}"
-                          + (" -- BELOW the threshold, so the utilization cull, the utilization spare and "
-                             "FAB_RESCUE are all unreachable" if _pocc < _f("FAB_PRESSURE", 0.75)
-                             else " -- at or above the threshold, utilization cull ACTIVE"))
         if _F0 is not None: _EFF += [
             # THE GATE, IN THE BANNER, because it silently switched off the utilization cull for a whole round of
             # runs and nothing in the config output said so. Occupancy is stated next to the threshold it is
             # compared against, so "the cull is off" is readable before the run rather than inferred after it.
             # INSIDE the _F0 guard: the base list above is built even when FABRIC=0, where _F0 is None.
-            ("FAB_PRESSURE",   _f("FAB_PRESSURE", 0.75), _pressnote),
+            ("FAB_PRESSURE",   _f("FAB_PRESSURE", 0.75)),
             ("FAB_PRESS_SOFT", FAB_PRESS_SOFT,
              "pressure judged against the SOFT cap (operating ceiling)" if FAB_PRESS_SOFT else
              "pressure judged against FAB_NMAX preallocation"),
@@ -4902,6 +4894,20 @@ def main():
                   f" | exploration {_F.explore:.0%} of windows swap a slot for a low-use expert"
                   f" | identities {'from FULL WEIGHTS' if _F.derive_ids else 'free parameters (FAB_DERIVE_IDS=0)'}"
                   f", refreshed every {_F.emb_every} step(s) | route_t {_F.route_t}")
+            # THE CULL GATE, SAID OUT LOUD, EVERY RUN. This was first written as a `note` on the FAB_PRESSURE row
+            # of _EFF -- which is only ever printed when the ASKED value differs from the LIVE one, so it never
+            # fired. Writing an inert diagnostic while fixing an inert mechanism is the joke this file keeps
+            # making; a state that can silently disable three mechanisms has to be an unconditional line.
+            _pc = max(1, (_cap_fab[0] if FAB_PRESS_SOFT else _F.cap))
+            _po = _F.n() / _pc
+            _pt = _f("FAB_PRESSURE", 0.75)
+            print(f"[config] CULL GATE  occupancy {_F.n()}/{_pc} = {_po:.2f} vs FAB_PRESSURE={_pt:g}"
+                  + (f" -- OPEN: the utilization cull, the utilization spare and FAB_RESCUE can all fire. "
+                     f"The population will settle near {_pt:g} x {_pc} = {int(_pt * _pc)}." if _po >= _pt else
+                     f" -- SHUT: the utilization cull CANNOT run, and the utilization spare and FAB_RESCUE "
+                     f"live inside it, so they cannot either. Only the sustained-error cull is active. "
+                     f"Raise FAB_N0, lower FAB_NMAX, lower FAB_PRESSURE, or set FAB_PRESS_SOFT=1 with GROW_CAP.")
+                  + (" [judged against the SOFT cap]" if FAB_PRESS_SOFT else ""))
             if _F.grounded and _F.region_w == 0 and not FAB_KEY_NORM:
                 print("[config] !! ROUTE_REGION_W=0 with FAB_KEY_NORM=0: the weight-prediction term is a RAW dot "
                       "whose spread across experts measured 0.075, against a region term at 3.7. With the region "
