@@ -197,6 +197,7 @@ _SPEC = {
     "FAB_PARENT_MAX": ("env", 0.20),                      # fabric
     "FAB_PLATEAU": ("f", 0.002),                          # fabric
     "FAB_PRESSURE": ("f", 0.75),                          # fabric
+    "FAB_PRESS_SOFT": ("i", 0),                           # fabric -- measure pressure against the SOFT cap
     "FAB_RAMP": ("i", 4000),                              # fabric
     "FAB_RAMP_LATCH": ("env", 1),                         # fabric
     "FAB_RAMP_RATE": ("f", 0.10),                         # fabric
@@ -601,6 +602,8 @@ LOSS_MASK_DEAD = bool(_i("LOSS_MASK_DEAD", 0))
 # FAB_RESCUE: how large a mutation an expert gets INSTEAD of being culled, the first time it comes up --
 # as a multiple of its own weight scale, the same units FAB_MUT uses for offspring. 0 = the old behaviour,
 # cull on first selection. See soft_cull for why a failing expert is where exploration is most worth doing.
+FAB_PRESS_SOFT = bool(_i("FAB_PRESS_SOFT", 0))  # 1 = capacity pressure is judged against the OPERATING ceiling
+#   (the GROW_CAP soft cap) rather than against FAB_NMAX preallocation. See Fabric.manage's `cap` argument.
 FAB_RESCUE = _f("FAB_RESCUE", 0.0)
 # ---- HOW MUCH OF THE POPULATION MAY BE NEW AT ONCE -------------------------------------------------------------
 # There was a growth RATE and no cap on the newborn FRACTION, which are different things, and the difference is
@@ -1721,7 +1724,7 @@ class Fabric(nn.Module):
         if s.ef[e] > s.es[e] * (1 + s.shift_tol): return False      # rising fast -> shift, not failure
         return min(s.ef[e], s.es[e]) > pop * (1 + s.fail_tol)       # both ends above the population
 
-    def manage(s, step, grace=3000, cull_frac=0.08, pressure=0.75, protect=True, comp_glob=None):
+    def manage(s, step, grace=3000, cull_frac=0.08, pressure=0.75, protect=True, comp_glob=None, cap=None):
         """SELECTION for the fabric population. There was NONE.
 
         router.manage() -- create/replicate/cull -- is gated on `EXPERTS`, which is mutually exclusive with FABRIC
@@ -1750,7 +1753,15 @@ class Fabric(nn.Module):
         # experts sat at use-age 4287 -- and reported it in the same line as a successful cull, which came from
         # the sustained-error route below. A diagnostic that contradicts itself is worse than no diagnostic.
         s.n_elig = sum(1 for i in range(s.n_live) if s.use_age(i) >= grace)
-        s.cull_ran = not (s.n_live <= 2 or (s.n_live / max(1, s.cap)) < pressure)
+        # WHICH CAP IS THE POPULATION MEASURED AGAINST? s.cap is PREALLOCATION -- how many slots exist -- and it
+        # is not the same question as "is this population full". With FAB_N0=2048 against FAB_NMAX=4096 the
+        # occupancy is 0.50 forever, permanently below FAB_PRESSURE=0.75, so this gate never opens and the
+        # utilization cull, the utilization spare and FAB_RESCUE are all unreachable. `cap` lets the caller pass
+        # the OPERATING ceiling (the soft cap) instead, so pressure asks whether the population is full at the
+        # size it is currently allowed to be, and preallocated-but-unreachable slots stop counting as free space.
+        # None keeps the old meaning exactly, so this changes nothing unless a caller opts in.
+        _cap = int(cap) if cap else s.cap
+        s.cull_ran = not (s.n_live <= 2 or (s.n_live / max(1, _cap)) < pressure)
         if protect is not None and comp_glob is not None:
             for i in list(range(s.n_live)):
                 if s.n_live <= 2: break
@@ -1759,7 +1770,7 @@ class Fabric(nn.Module):
                 if protect and s.contrib.get(i, 0.0) > 0:            # load-bearing despite the error -> keep
                     spared += 1; continue
                 s.remove(i); culled += 1; s.failed_out += 1
-        if s.n_live <= 2 or (s.n_live / max(1, s.cap)) < pressure: return culled, spared
+        if not s.cull_ran: return culled, spared
         # RANK WITHIN THE ELIGIBLE SET, and this is not cosmetic -- it is the difference between the cull firing
         # and not firing at all. With a use-based grace, the bottom of a raw utilization ranking is BY DEFINITION
         # the population with the least use-age, i.e. exactly the experts still inside grace. Taking the bottom
@@ -4680,7 +4691,23 @@ def main():
             ("LR_RESTARTS",    bool(_i("LR_RESTARTS", 1))),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
         ]
+        _pressnote = ""
+        if _F0 is not None:
+            _pcap = max(1, (_cap_fab[0] if FAB_PRESS_SOFT else _F0.cap))
+            _pocc = _F0.n() / _pcap
+            _pressnote = (f"occupancy {_F0.n()}/{_pcap} = {_pocc:.2f}"
+                          + (" -- BELOW the threshold, so the utilization cull, the utilization spare and "
+                             "FAB_RESCUE are all unreachable" if _pocc < _f("FAB_PRESSURE", 0.75)
+                             else " -- at or above the threshold, utilization cull ACTIVE"))
         if _F0 is not None: _EFF += [
+            # THE GATE, IN THE BANNER, because it silently switched off the utilization cull for a whole round of
+            # runs and nothing in the config output said so. Occupancy is stated next to the threshold it is
+            # compared against, so "the cull is off" is readable before the run rather than inferred after it.
+            # INSIDE the _F0 guard: the base list above is built even when FABRIC=0, where _F0 is None.
+            ("FAB_PRESSURE",   _f("FAB_PRESSURE", 0.75), _pressnote),
+            ("FAB_PRESS_SOFT", FAB_PRESS_SOFT,
+             "pressure judged against the SOFT cap (operating ceiling)" if FAB_PRESS_SOFT else
+             "pressure judged against FAB_NMAX preallocation"),
             ("FAB_NMAX",       _F0.cap),                 ("FAB_RANK",       _F0.r),
             ("FAB_N0",         _i("FAB_N0", 2048)),
             ("FAB_STEPS",      _F0.max_steps),           ("FAB_MIN_STEPS",  _F0.min_steps),
@@ -5272,7 +5299,8 @@ def main():
             _fo_before = fab.failed_out
             _fc, _fs = fab.manage(step, grace=_i("FAB_GRACE", 48), cull_frac=_f("FAB_CULL_FRAC", 0.02),
                                   pressure=_f("FAB_PRESSURE", 0.75), protect=COMP_PROTECT,
-                                  comp_glob=asm.comp_glob)
+                                  comp_glob=asm.comp_glob,
+                                  cap=(_cap_fab[0] if FAB_PRESS_SOFT else None))
             fab.removed += _fc; fab.spared += _fs
             _fc_err = fab.failed_out - _fo_before          # sustained-error route: runs at ANY occupancy
             _fc_util = _fc - _fc_err                       # utilization route: only under capacity pressure

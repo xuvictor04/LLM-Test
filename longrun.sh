@@ -355,6 +355,28 @@ _flags_for() {
     growcap)   echo "GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=2048 GROW_CAP_VOCAB0=1024" ;;
     ecw)       echo "FAB_EC_W=0.5" ;;
     rescue)    echo "FAB_RESCUE=0.35" ;;
+    # === WHICH GATE? ===========================================================================================
+    # FAB_N0=2048 against FAB_NMAX=4096 parks occupancy at 0.50, permanently below FAB_PRESSURE=0.75, so the
+    # utilization cull never runs -- and the utilization spare and FAB_RESCUE live inside that same branch.
+    # Measured: "24 culled total, of which 24 for SUSTAINED error". Three ways to reopen it, one knob apart each,
+    # so the runs decide rather than an argument does.
+    #   gate_nmax  the population IS its own cap. Occupancy 1.0, closest to the pre-regression behaviour, but no
+    #              preallocated headroom -- growth then has nowhere to go unless GROW_CAP lifts the soft cap.
+    #   gate_press just lower the bar to below the standing occupancy. Keeps the headroom; the cost is that the
+    #              threshold becomes a number fitted to one population size rather than a property.
+    #   gate_soft  judge pressure against the OPERATING ceiling (the GROW_CAP soft cap) instead of against
+    #              preallocation. Needs GROW_CAP on to mean anything, so it necessarily bundles the valve --
+    #              read it against growcap from round4, not against base.
+    # READ THESE ON DID IT FIRE FIRST. The question is whether the cull, the spare and the rescue become
+    # reachable at all; bits/byte at n=1 cannot separate them, since base alone spans 1.969-2.100 across two
+    # seeds. An arm that opens the gate and costs nothing is the answer; b/B is the tiebreak, not the test.
+    gate_nmax)  echo "FAB_NMAX=2048" ;;
+    gate_press) echo "FAB_PRESSURE=0.45" ;;
+    gate_soft)  echo "FAB_PRESS_SOFT=1 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=2048 GROW_CAP_VOCAB0=1024" ;;
+    # ...and the rescue measurement that round4 could not make, on the gate most likely to open. If gate_nmax is
+    # not the winner this needs re-running on whichever is; it is here so the grid produces a first FAB_RESCUE
+    # number rather than none at all.
+    gate_nmax_resc) echo "FAB_NMAX=2048 FAB_RESCUE=0.35" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
     # under the misspelled arm's log name -- a result filed against an experiment that never happened, which is
@@ -680,6 +702,11 @@ grid)
     #   rescue     mutate-instead-of-cull
     #   prob_use   TOK_PROBATION: do minted tokens that never get used earn their slot back
     round4)  ARMS="base frozen2k mask growcap ecw rescue prob_use" ;;
+    # === ROUND 5: WHICH GATE REOPENS THE UTILIZATION CULL ======================================================
+    # base is the control and is EXPECTED to show the cull off -- that is the regression, restated as a measured
+    # baseline. Every other arm is judged first on whether [experts @ ...] reports culls "under capacity
+    # pressure", whether fabric.spare leaves zero, and whether fabric.rescue stops reading UNREACHABLE.
+    round5)  ARMS="base gate_nmax gate_press gate_soft gate_nmax_resc" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
