@@ -396,6 +396,20 @@ _SPEC = {
     # SIZE effect is 2-3x it. What hurt was ending with a big vocabulary on a small corpus, not the lifting.
     # The expert half lifted for the first time at round7: soft cap 160 -> 416 after 2001 steps pinned. It needs a
     # cap AT or BELOW where the population settles -- above that it is never pinned and correctly declines.
+    # ROUND 8, at a proportional lift, put the valve ABOVE both fixed references on delta-order-1:
+    #     gc8_p5  +1.411   gc8_p10 +1.405   gc8_small (VMAX=640) +1.237   gc8_big (VMAX=2048) +1.057
+    # ...and then the logs said it was not the lifting. Both valve arms lifted ONCE, by 32 and 64 tokens, ending
+    # at 672 and 704 -- effectively the same vocabulary as gc8_small's fixed 640. Whatever separated them, it was
+    # not capacity that got handed out.
+    # WHAT DOES TRACK IT is the number of experts the router actually used, across all nine arms of rounds 6-8
+    # (all at FAB_N0=256, so the population ceiling is the only thing moving):
+    #     154 -> +1.451   158 -> +1.411   175 -> +1.405   177 -> +1.333   198 -> +1.065
+    #     208 -> +1.172   258 -> +1.237   322 -> +1.246   327 -> +1.057
+    #     Pearson r = -0.64, slope -0.14 delta-order-1 per 100 experts.
+    # FEWER EXPERTS SCORED BETTER. That is a correlation over arms that differ in several ways at once, not a
+    # controlled result, and it points the same way as two earlier findings: the nodom arms scored best while
+    # routing was collapsed onto one expert, and specialization has read INTERCHANGEABLE in all 24 arms measured.
+    # It needs a one-knob test before it is believed -- FAB_N0 alone, everything else fixed.
     # ...and a low only counts if it is actually in a GOOD region: within this fraction of the best seen so far.
     # Without it every improving probe early in a run is a "local low" and the rotation fills with the warmup.
     "BEST_KEEP_TOL": ("f", 0.02),                         # report

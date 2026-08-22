@@ -400,6 +400,10 @@ _flags_for() {
     # ordinary minting with the valve OFF, which makes gc_ctrl vs gc_fast one knob (how it got there) and
     # gc_ctrl vs gc_real the other (how big it ended).
     gc_ctrl)   echo "FAB_N0=256 VMAX=2048" ;;
+    pop128)    echo "FAB_N0=128" ;;
+    pop256)    echo "FAB_N0=256" ;;
+    pop512)    echo "FAB_N0=512" ;;
+    pop1024)   echo "FAB_N0=1024" ;;
     gc8_small) echo "FAB_N0=256 VMAX=640" ;;
     gc8_big)   echo "FAB_N0=256 VMAX=2048" ;;
     gc8_p5)    echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=160 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000 GROW_LIFT=0.05" ;;
@@ -773,6 +777,18 @@ grid)
     # pinned (round7): above the settling point it is never eligible and correctly declines.
     round7)  ARMS="gc_ctrl gc_pin" ;;
     round8)  ARMS="gc8_small gc8_big gc8_p5 gc8_p10" ;;
+    # === ROUND 9: is the expert population itself the cost? ====================================================
+    # Across all nine arms of rounds 6-8 the number of experts the router USED correlates -0.64 with quality,
+    # slope -0.14 delta-order-1 per 100 experts. But those arms differ in several ways at once -- caps, masks,
+    # valves -- so it is a correlation over a grab-bag, not a result. This is the one-knob version: FAB_N0 alone,
+    # everything else at its default, four population sizes an octave apart.
+    # It matters more than any valve question. If quality really falls with population size, then the fabric is
+    # costing what it is supposed to buy, and that outranks tuning how its caps expand. Two earlier findings point
+    # the same way: the nodom arms scored best with routing collapsed onto ONE expert, and specialization has read
+    # INTERCHANGEABLE in every arm ever measured.
+    # nofab is in the round as the floor: no fabric at all. If it wins, the population is not paying for itself
+    # anywhere, and that is the finding -- not a tuning result.
+    round9)  ARMS="nofabric pop128 pop256 pop512 pop1024" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
