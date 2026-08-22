@@ -90,6 +90,26 @@ def main(argv):
     if set(free) != set(derived):
         problems.append(f"_SPEC_FREE and _DERIVED disagree: {sorted(set(free) ^ set(derived))}")
 
+    # THE BANNER MUST SURVIVE FABRIC=0. _EFF is built as one flat list and only the rows AFTER
+    # `if _F0 is not None: _EFF += [` are guarded; _F0 is None whenever FABRIC=0. A single _F0 dereference above
+    # that line kills every FABRIC=0 run before its first training step, which is exactly what happened to the
+    # nofabric arm in round9:
+    #     ("DIV_MASS", _F0.div_mass)  ->  AttributeError: 'NoneType' object has no attribute 'div_mass'
+    # It cost a grid arm to find because I had reasoned that nofabric "must have run since" instead of checking a
+    # log. This check costs nothing and does not need a GPU, so the next one is caught here.
+    try:
+        _lines = open(SRC).read().splitlines()
+        _start = next(i for i, l in enumerate(_lines) if l.strip().startswith("_EFF = ["))
+        _guard = next(i for i, l in enumerate(_lines) if "if _F0 is not None: _EFF" in l)
+        for i, l in enumerate(_lines[_start:_guard], _start):
+            _code = l.split("#", 1)[0]                      # comments quoting the bug are not the bug
+            if "_F0." in _code and "_F0 is not None" not in _code:
+                problems.append(f"self_organize.py:{i+1} dereferences _F0 in the UNGUARDED part of _EFF -- "
+                                f"this is an AttributeError on every FABRIC=0 run: {_code.strip()[:70]}")
+    except StopIteration:
+        problems.append("could not locate the _EFF banner list or its `if _F0 is not None` guard -- if that "
+                        "structure changed, this FABRIC=0 check is no longer checking anything")
+
     if problems:
         print()
         for p in problems:

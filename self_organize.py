@@ -406,10 +406,16 @@ _SPEC = {
     #     154 -> +1.451   158 -> +1.411   175 -> +1.405   177 -> +1.333   198 -> +1.065
     #     208 -> +1.172   258 -> +1.237   322 -> +1.246   327 -> +1.057
     #     Pearson r = -0.64, slope -0.14 delta-order-1 per 100 experts.
-    # FEWER EXPERTS SCORED BETTER. That is a correlation over arms that differ in several ways at once, not a
-    # controlled result, and it points the same way as two earlier findings: the nodom arms scored best while
-    # routing was collapsed onto one expert, and specialization has read INTERCHANGEABLE in all 24 arms measured.
-    # It needs a one-knob test before it is believed -- FAB_N0 alone, everything else fixed.
+    # FEWER EXPERTS SCORED BETTER -- AND ROUND 9 REFUTED IT. The one-knob ladder, FAB_N0 alone at 128/256/512/1024
+    # with everything else default, runs the OTHER WAY:
+    #     pop128  199 experts -> +1.150     pop512  426 -> +1.251
+    #     pop256  326 experts -> +1.257     pop1024 479 -> +1.335
+    #     Pearson r = +0.93, slope +0.06 delta-order-1 per 100 experts
+    # Sign flipped, from -0.64 to +0.93. The rounds 6-8 correlation was driven by what ELSE varied across those
+    # arms -- soft caps, LOSS_MASK_DEAD, VMAX width, the valve -- not by population size. A bigger population is
+    # mildly BETTER when it is the only thing changing, which is also the direction the 2x2 found long ago.
+    # Kept here rather than deleted: the refuted version is the more useful record, because the mistake was
+    # reading a correlation over a grab-bag of configurations as if one variable had been isolated.
     # ...and a low only counts if it is actually in a GOOD region: within this fraction of the best seen so far.
     # Without it every improving probe early in a run is a "local low" and the rotation fills with the warmup.
     "BEST_KEEP_TOL": ("f", 0.02),                         # report
@@ -4743,7 +4749,14 @@ def main():
                                if mem.src_floor <= 0 else None),
             ("MAX_DOMAINS",    MAX_DOMAINS),
             ("EXPERTS",        bool(EXPERTS and not FABRIC)),
-            ("DIV_W",          DIV_W),                   ("DIV_MASS",       _F0.div_mass),                   ("IND_W",          IND_W if SOCIETY else 0.0),
+            # DIV_MASS reads off the FABRIC, which is None when FABRIC=0 -- and this row is in the UNGUARDED base
+            # list, so every FABRIC=0 run died here before printing a single training step:
+            #   ("DIV_MASS", _F0.div_mass)  ->  AttributeError: 'NoneType' object has no attribute 'div_mass'
+            # I spotted this two rounds ago, reasoned that "the nofabric arm has run since, so something must be
+            # catching it", and left it. Nothing was catching it. nofabric is in GRID_ARMS_DEFAULT but that list
+            # was never run, so the arm had not executed since the row was added -- I inferred coverage from a
+            # name in a config file instead of from a log, and round9 spent the arm finding out.
+            ("DIV_W",          DIV_W),                   ("DIV_MASS",       _F0.div_mass if _F0 is not None else 0),                   ("IND_W",          IND_W if SOCIETY else 0.0),
             ("DROPOUT",        DROPOUT),                 ("WEIGHT_DECAY",   WD),
             ("RECON_W",        RECON_W),                 ("BAL_WARM",       BAL_WARM),
             ("BAL_FLOOR",      BAL_FLOOR),               ("FAB_BALANCE",    FAB_BAL),
