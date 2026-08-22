@@ -416,6 +416,21 @@ _SPEC = {
     # mildly BETTER when it is the only thing changing, which is also the direction the 2x2 found long ago.
     # Kept here rather than deleted: the refuted version is the more useful record, because the mistake was
     # reading a correlation over a grab-bag of configurations as if one variable had been isolated.
+    # AND THE FLOOR, run afterwards: nofabric +1.396 against pop1024's +1.335, pop256 +1.257, pop512 +1.251,
+    # pop128 +1.150. No fabric beats every fabric size -- but only pop128 and the middle two by more than the
+    # 0.066-0.131 seed spread. Against the BEST fabric size the gap is 0.061, which is inside noise: the fabric
+    # at 1024 ties with not having one, it does not lose to it.
+    # WHAT THE MECHANISM IS, from the same two logs:
+    #     nofabric  model ALONE 1.937 -> + memory 1.899   (memory contributes +0.038)
+    #     pop1024   model ALONE 2.222 -> + memory 2.011   (memory contributes +0.211)
+    # The base model is 0.285 b/B WORSE when the fabric is present. The fabric does not add to a healthy base, it
+    # makes the base depend on it and then returns roughly what it took. That is the same signature the 2x2 found
+    # on arm D (model ALONE 4.680, fabric compensating +2.625), milder. SUFFICIENCY agrees from the other side:
+    # 479 experts buy -0.002 over the best single rank-slot, so the population is redundant within itself.
+    # WHAT THIS DOES NOT SAY: the fabric exists for continual learning -- holding old areas while new ones arrive
+    # -- and a single-corpus language-quality pilot cannot test that at all. These arms judge it on the one axis
+    # it was not built for. The eng -> add py -> eng chain is the measurement that would count, and it has still
+    # never been run.
     # ...and a low only counts if it is actually in a GOOD region: within this fraction of the best seen so far.
     # Without it every improving probe early in a run is a "local low" and the rotation fills with the warmup.
     "BEST_KEEP_TOL": ("f", 0.02),                         # report
