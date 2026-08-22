@@ -752,6 +752,9 @@ def pin_tick(held, pinned, dstep):
     return (int(held) + dstep) if pinned else max(0, int(held) - dstep)
 GROW_CAP_PLATEAU = _f("GROW_CAP_PLATEAU", 0.002)           # relative slow-loss improvement below which it counts as stalled
 GROW_CAP_EVERY = _i("GROW_CAP_EVERY", 20000)              # steps a cap must stay PINNED before a lift is earned
+PLATEAU_WARM = 1000    # OBSERVATIONS (not steps) before the fast/slow pair is a reading rather than an
+#   initialisation. Two time constants of the 0.998 slow EMA. Deliberately not a knob: it is a property of the
+#   EMA rates, which are hardcoded in PlateauGrowth.step, and nothing about a run should want it tuned.
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
 DOM_CULL_EMPTY = bool(_i("DOM_CULL_EMPTY", 1))   # cull a domain holding NO memory and NO windows, without waiting
 #   for the act/stale conjunction that an empty domain can fail forever.
@@ -4370,6 +4373,13 @@ def main():
     _pin_prev = [0]                        # ...and STEPS means steps: this block runs once per FLUSH, so the
                                            # clock advances by the step DELTA. See pin_tick.
     _pin_seen = [0.0, 0.0, 0, 0]           # high-water marks: [fab occupancy, vocab occupancy, fab held, voc held]
+    # ...AND THE PLATEAU READING, which was invisible. `improving` is computed inside the valve's gate and
+    # printed only ON A LIFT, so a run that never lifted gave no way to tell whether it came close. round11
+    # pinned 42425 steps against a cadence of 20000 -- earned twice over -- lifted nothing, and left no evidence
+    # of which of the two remaining conditions refused. Keep the BEST (lowest) reading seen and how many times
+    # the test actually ran: [best improving, checks]. `None` until the first check, so "never tested" and
+    # "tested and always improving" cannot be confused.
+    _plat_seen = [None, 0]
     if GROW_CAP and USE_TOK and _i("GROW_CAP_VOCAB0", 0): TOK.vmax = min(TOK.vmax, _i("GROW_CAP_VOCAB0", 0))
     _last_vsz = (TOK.vocab_size, len(TOK.seq2id)) if USE_TOK else (256, 256)   # vocab AND match table
     _retok_noop = [0]; _retok_skipped = [False]           # retoks refused because the vocabulary had not moved
@@ -6050,8 +6060,22 @@ def main():
         if USE_TOK and ONLINE:
             _pin_seen[1] = max(_pin_seen[1], TOK.vocab_size / max(1, TOK.vmax))
             _pin_seen[3] = max(_pin_seen[3], _pin_voc[0])
-        if GROW_CAP and fabgrow is not None and fabgrow.slow is not None and fabgrow.n >= GROW_CAP_EVERY:
+        # ...AND THAT WARMUP IS OBSERVATIONS, NOT STEPS, AND IT IS NOT GROW_CAP_EVERY. This guard was
+        # `fabgrow.n >= GROW_CAP_EVERY`, which is wrong twice over. fabgrow.n counts CALLS -- once per flush,
+        # like everything below the batch early-out -- while GROW_CAP_EVERY is a step count, so at BATCH_W=16 it
+        # demanded 20000 flushes = 320,000 steps before the valve could even be CONSIDERED. And the comment
+        # directly above says what the guard is actually for: "a few hundred observations is the point at which
+        # 'not improving' is a reading rather than an initialisation". A few hundred, not twenty thousand.
+        # Measured: round11 fixed the pin clock, which then read 42425 against GROW_CAP_EVERY=20000 -- earned
+        # several times over -- and still lifted nothing, because this outer gate never opened. Two clocks in
+        # the same units fault, one behind the other; the first one masked the second.
+        # PLATEAU_WARM is in OBSERVATIONS because the EMAs it protects update per observation. The slow EMA is
+        # 0.998, so its time constant is 500; 1000 is two of them, which is the "few hundred" the design asked
+        # for and is reached in 16,000 steps at BATCH_W=16 rather than 320,000.
+        if GROW_CAP and fabgrow is not None and fabgrow.slow is not None and fabgrow.n >= PLATEAU_WARM:
             _improving = (fabgrow.slow - fabgrow.fast) / max(1e-6, abs(fabgrow.slow))
+            _plat_seen[1] += 1                                 # the test RAN -- distinct from it passing
+            if _plat_seen[0] is None or _improving < _plat_seen[0]: _plat_seen[0] = _improving
             if _improving < GROW_CAP_PLATEAU:
                 # A SMALL FRACTION, which is neither of the two things this knob has been. It started as a
                 # MULTIPLIER of 2.0 -- one lift doubled the cap and each later one handed out more than the last.
@@ -7777,7 +7801,25 @@ def main():
                              " -- NEVER REACHED ITS CAP, so no lift was ever possible. The cap is not what is "
                              "limiting this population; raising it would only add unused capacity.")
                           + (" -- reached the cap but never held it long enough; the cadence is the binding "
-                             "constraint here." if (_occ >= 1.0 and _held < GROW_CAP_EVERY) else ""))
+                             "constraint here." if (_occ >= 1.0 and _held < GROW_CAP_EVERY) else "")
+                          # THE THIRD SILENCE, which this report had no sentence for. round11 printed
+                          # "held at the cap 42425 steps against GROW_CAP_EVERY=20000" and then stopped -- the
+                          # clock said EARNED and nothing lifted, and the reader was left to find out why by
+                          # reading source. Every other way of not firing here names itself; so must this one.
+                          + ("" if not (_occ >= 1.0 and _held >= GROW_CAP_EVERY and _cap_last[0] < 0) else
+                             (f" -- EARNED IT AND NEVER GOT IT: pinned well past the cadence and the cap never "
+                              f"moved, because the plateau test never RAN. fabgrow saw "
+                              f"{(fabgrow.n if fabgrow is not None else 0)} observations against "
+                              f"PLATEAU_WARM={PLATEAU_WARM}; the warmup is the gate that did not open."
+                              if _plat_seen[1] == 0 else
+                              f" -- EARNED IT AND NEVER GOT IT: pinned past the cadence and the plateau test ran "
+                              f"{_plat_seen[1]} times, but the run never STALLED. Closest it came was improving "
+                              f"{_plat_seen[0]:+.4f} against GROW_CAP_PLATEAU={GROW_CAP_PLATEAU:g}"
+                              + (" -- still improving that fast at its best, so the valve is declining on the "
+                                 "merits: more capacity is not what this run is short of, and a run this short "
+                                 "cannot answer whether it ever would be."
+                                 if (_plat_seen[0] or 0) > GROW_CAP_PLATEAU * 5 else
+                                 " -- close enough that a longer run would likely cross it."))))
             except Exception as _e:
                 print(f"  [capacity-valve report FAILED: {type(_e).__name__}: {_e}]")
             # WRAPPED, BECAUSE A REPORT BUG MUST NOT COST A RUN. The first version of this block killed gc_real
