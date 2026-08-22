@@ -729,6 +729,27 @@ def lift_to(cap, frac, floor_):
     """The new soft cap after one earned lift. Proportional, so it means the same thing at 160 and at 4096, with
     an absolute floor so small caps still move. Module level so cap_test.py exercises the shipped arithmetic."""
     return int(cap) + max(int(floor_), int(float(frac) * int(cap)))
+
+
+def pin_tick(held, pinned, dstep):
+    """Advance the PINNED-at-the-cap clock by however many steps actually elapsed, not by one per call.
+
+    IT MUST BE A STEP DELTA, and it was a bare +1/-1. The valve's block sits BELOW the batch early-out
+    (`if len(_bx) < BATCH_W: step += 1; continue`), so it runs once per FLUSH while `step` advances once per
+    WINDOW -- and the clock therefore ticked at 1/BATCH_W the rate GROW_CAP_EVERY is written in. Measured on
+    the lr_pilot rehearsal at BATCH_W=16: the population sat pinned at its soft cap for 43,645 real steps and
+    the clock read 2,650 against a GROW_CAP_EVERY of 20,000, so the valve reported "reached the cap but never
+    held it long enough". 2650 x 16 = 42,400, i.e. the whole shortfall was the units.
+
+    GROW_CAP_EVERY=20000 silently meant 320,000 steps at BATCH_W=16 and 640,000 at 32 -- a knob whose meaning
+    depended on the batch size, which is the same class of fault as the modulo cadences the note above the
+    early-out already warns about. Those fire ZERO times; this one fires at the wrong rate, which is harder to
+    see because it looks like the mechanism declining on the merits.
+
+    Module level so cap_test.py exercises the shipped arithmetic rather than a copy of it.
+    """
+    dstep = max(0, int(dstep))
+    return (int(held) + dstep) if pinned else max(0, int(held) - dstep)
 GROW_CAP_PLATEAU = _f("GROW_CAP_PLATEAU", 0.002)           # relative slow-loss improvement below which it counts as stalled
 GROW_CAP_EVERY = _i("GROW_CAP_EVERY", 20000)              # steps a cap must stay PINNED before a lift is earned
 MANAGE_ON = bool(_i("MANAGE", 1))                          # MANAGE=0 -> ABLATION: no merge/cull (domains grow unbounded)
@@ -4346,6 +4367,8 @@ def main():
     _cap_fab = [int(_i("GROW_CAP_FAB0", 0)) or FAB_NMAX]
     _cap_last = [-10 ** 9]; _resc_seen = [0]; _newcap_said = [-1]   # one "growth held" line per window, not per event
     _pin_fab = [0]; _pin_voc = [0]         # STEPS ACCUMULATED at each soft cap (not a timestamp). See the valve.
+    _pin_prev = [0]                        # ...and STEPS means steps: this block runs once per FLUSH, so the
+                                           # clock advances by the step DELTA. See pin_tick.
     _pin_seen = [0.0, 0.0, 0, 0]           # high-water marks: [fab occupancy, vocab occupancy, fab held, voc held]
     if GROW_CAP and USE_TOK and _i("GROW_CAP_VOCAB0", 0): TOK.vmax = min(TOK.vmax, _i("GROW_CAP_VOCAB0", 0))
     _last_vsz = (TOK.vocab_size, len(TOK.seq2id)) if USE_TOK else (256, 256)   # vocab AND match table
@@ -6016,8 +6039,9 @@ def main():
         # everything, and a population that is mostly-below still cannot creep to a lift.
         _fabpin = (GROW_CAP_FAB and FABRIC and fab.n() >= _cap_fab[0])
         _vocpin = (GROW_CAP_VOCAB and USE_TOK and ONLINE and TOK.vocab_size >= TOK.vmax)
-        _pin_fab[0] = (_pin_fab[0] + 1) if _fabpin else max(0, _pin_fab[0] - 1)
-        _pin_voc[0] = (_pin_voc[0] + 1) if _vocpin else max(0, _pin_voc[0] - 1)
+        _dstep = step - _pin_prev[0]; _pin_prev[0] = step   # once per FLUSH, so BATCH_W steps at a time
+        _pin_fab[0] = pin_tick(_pin_fab[0], _fabpin, _dstep)
+        _pin_voc[0] = pin_tick(_pin_voc[0], _vocpin, _dstep)
         # ...and WHY a cap never lifted has to be answerable afterwards. "0 lifts" alone cannot distinguish
         # "never full" from "never plateaued", and those have completely different fixes.
         if FABRIC:

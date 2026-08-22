@@ -425,6 +425,16 @@ _flags_for() {
     # The two lifts this should produce carry the cap 3000 -> 3240 -> 3499, and the cull gate takes over at 3686.
     lr_pilot)   echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
     lr_novalve) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 BEST_KEEP=4" ;;
+    # ROUND 11. Same flags as lr_pilot; what changed is the CODE. round10 pinned the population at its soft cap
+    # for 43,645 steps and the valve still declined, because the pin clock ticked once per FLUSH while
+    # GROW_CAP_EVERY is written in STEPS -- at BATCH_W=16 the knob silently meant 320,000. With that fixed both
+    # halves of the valve become live for the first time, and round10's headline number was produced with the
+    # vocabulary frozen at 2048 BY that bug, so it will not reproduce. lr_vcap is the separation: identical
+    # except VMAX=2048, which pins the vocabulary where round10 accidentally had it and leaves the EXPERT valve
+    # as the only thing that can move. lr_pilot2 vs lr_vcap is therefore one question -- what did the vocabulary
+    # do -- and lr_vcap vs round10's lr_pilot is the other: what did the expert valve do, at last.
+    lr_pilot2)  echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
+    lr_vcap)    echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=2048 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
     # under the misspelled arm's log name -- a result filed against an experiment that never happened, which is
@@ -823,6 +833,25 @@ grid)
     # NOT A QUALITY VERDICT. n=1 at 4 MB against a seed spread of 0.066-0.131 on delta-order-1 settles nothing
     # about bits/byte; if the mechanisms fire and the clock is affordable, the rehearsal has done its job.
     round10) ARMS="lr_pilot lr_novalve" ;;
+    # === ROUND 11: THE VALVE, WITH A CLOCK THAT COUNTS THE RIGHT THING =========================================
+    # round10 did what it was built to do: it found that the config could not work, twice, for two reasons that
+    # were both invisible in the launch line.
+    #   1  the ramp. Fixed BEFORE round10 ran, and round10 confirms it -- the population built 2048 -> 3000 and
+    #      sat there, peak occupancy 1.00 of its soft cap. That link is now measured, not reasoned.
+    #   2  the pin clock, which round10 found. Pinned 43,645 steps, clock read 2,650 against GROW_CAP_EVERY of
+    #      20,000: it advanced once per FLUSH, and the block is below the batch early-out, so at BATCH_W=16 the
+    #      knob meant 320,000 steps. The valve's own report said "reached the cap but never held it long enough;
+    #      the cadence is the binding constraint" -- correct, and pointing at a cadence that was 16x its label.
+    # THE HEADLINE NUMBER FROM ROUND10 IS NOT REPEATABLE. lr_pilot scored 1.971 b/B against lr_novalve's 2.336,
+    # and the largest single difference between them is a vocabulary of 2048 against 4808 -- which lr_pilot had
+    # only because the same broken clock froze its vocabulary valve too. Fixing the clock unfreezes it. So this
+    # round is not a confirmation run; it is the first honest look at the configuration.
+    # ALSO NOTE what round10 measured about the cull gate: at 3000/8192 = 0.37 occupancy it stays SHUT all run,
+    # and fabric.spare read ARMED AND INERT while lr_novalve, whose population reached 3932, spared 3586. That is
+    # not a defect to fix -- FAB_PRESSURE x FAB_NMAX = 3686 is the true ceiling, the valve's room is the range
+    # BELOW it, and the gate opens by itself once the lifts have carried the population there. Read it as a
+    # handoff: the valve owns 3000 -> 3686, the cull gate owns everything after.
+    round11) ARMS="lr_pilot2 lr_vcap" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
