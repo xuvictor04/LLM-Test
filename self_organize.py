@@ -2546,7 +2546,7 @@ class PlateauGrowth:
         #   unreachable by addition; 3 -> 4096 at +10% per event is ~76 events. The ramp also ends on POPULATION SIZE
         #   rather than on a step number, so it does not quietly expire before the population is built.
     def note_shift(s, t): s.blackout = t          # retok / resample: the loss jump is OURS, not the data's
-    def step(s, loss, t, n=None, cap=None):
+    def step(s, loss, t, n=None, cap=None, pool=None):
         if not s.grow_on: return 0                                           # population frozen at FAB_N0
         s.fast = loss if s.fast is None else 0.98 * s.fast + 0.02 * loss
         s.slow = loss if s.slow is None else 0.998 * s.slow + 0.002 * loss
@@ -2574,8 +2574,18 @@ class PlateauGrowth:
         # cull-refill cycle that selection cannot win, because whatever it removes is replaced within 187 steps.
         # Latch on FIRST arrival: the ramp exists to BUILD the population, and it is built once. After that,
         # growth must come from a REGRESSION or a stall -- i.e. from evidence that more capacity is needed.
-        if s.latch and n is not None and cap is not None and n >= s.ramp_to * cap: s.ramp_done = True
-        _ramping = (t < s.ramp) if (n is None or cap is None) else not s.ramp_done
+        # AGAINST THE POOL, NOT THE OPERATING CEILING. `cap` is the SOFT cap, which is what growth is clamped by;
+        # judging the latch against it too made GROW_CAP_FAB0 silently reprogram FAB_RAMP_TO. At the launch
+        # config -- FAB_N0=2048, FAB_NMAX=8192, FAB_RAMP_TO=0.5 -- the valve OFF latches at 4096 and the ramp
+        # builds the population; the valve ON with GROW_CAP_FAB0=3000 latches at 1500, which 2048 already meets,
+        # so the ramp died on step 1 and the population could never reach the cap it was supposed to press
+        # against. Turning the valve on disarmed the only mechanism that could make the valve fire. Nothing in
+        # the launch line said so, and the symptom -- no lift, ever -- is identical to never plateauing, which
+        # is how round6 and round7 both read. See ramp_test.py; `pool` defaults to `cap` so a caller that has
+        # only one number keeps the old behaviour.
+        _pool = cap if pool is None else pool
+        if s.latch and n is not None and _pool is not None and n >= s.ramp_to * _pool: s.ramp_done = True
+        _ramping = (t < s.ramp) if (n is None or _pool is None) else not s.ramp_done
         if s.ramp and _ramping and t - s.last >= max(1, s.cool // 8):
             s.last = t; s.why = "ramp"; s.n_ramp += 1
             return max(s.burst, int(s.rate * n)) if n else s.burst
@@ -5005,6 +5015,20 @@ def main():
                      f"live inside it, so they cannot either. Only the sustained-error cull is active. "
                      f"Raise FAB_N0, lower FAB_NMAX, lower FAB_PRESSURE, or set FAB_PRESS_SOFT=1 with GROW_CAP.")
                   + (" [judged against the SOFT cap]" if FAB_PRESS_SOFT else ""))
+            # ...AND THIS LINE IS A SNAPSHOT AT STEP 0, which is not the same claim as "shut for the run". The
+            # ramp BUILDS the population toward FAB_RAMP_TO x FAB_NMAX, so a run that starts under the threshold
+            # still crosses it whenever FAB_RAMP_TO >= FAB_PRESSURE -- the 0.75 GB config (N0 2048, NMAX 8192,
+            # RAMP_TO 0.5, PRESSURE 0.45) reads SHUT above and opens the gate as soon as the ramp finishes.
+            # Saying only "SHUT" there sends the reader to raise FAB_N0 against a config that needs nothing.
+            _rt = _f("FAB_RAMP_TO", 0.5)
+            if not FAB_PRESS_SOFT and _po < _pt and bool(int(_env("FAB_GROW", 1))) and _F.n() < _rt * _pc:
+                print(f"[config] CULL GATE  ...but SHUT ONLY FOR NOW: the ramp builds toward "
+                      f"FAB_RAMP_TO={_rt:g} x {_pc} = {int(_rt * _pc)}"
+                      + (f", which is past the threshold of {int(_pt * _pc)}, so the gate OPENS once the "
+                         f"population is built and the three mechanisms above come back. Nothing needs raising."
+                         if _rt >= _pt else
+                         f", which STOPS SHORT of the threshold of {int(_pt * _pc)} -- so the gate stays shut "
+                         f"for the whole run unless growth is driven past it by REGRESSION or stall events."))
             if _F.grounded and _F.region_w == 0 and not FAB_KEY_NORM:
                 print("[config] !! ROUTE_REGION_W=0 with FAB_KEY_NORM=0: the weight-prediction term is a RAW dot "
                       "whose spread across experts measured 0.075, against a region term at 3.7. With the region "
@@ -6030,7 +6054,14 @@ def main():
                         print(f"  [capacity @ {step}] vocabulary saturated at {_wasv} and the loss has stalled "
                               f"-> soft cap {_wasv} -> {TOK.vmax} (hard ceiling {int(V)}; {_mnote})")
         if FABRIC and not fab.norm_only:
-            _nb = fabgrow.step(_lf, step, fab.n(), _cap_fab[0])  # 0, or HOW MANY to grow (burst on an unexpected regression)
+            # TWO CAPS, TWO QUESTIONS. `cap` clamps how far growth may go -- the OPERATING ceiling, which the
+            # capacity valve lifts. `pool` decides whether the population is BUILT and the ramp may latch off --
+            # the HARDWARE pool, which never moves. Passing the soft cap for both meant GROW_CAP_FAB0 set the
+            # ramp's latch threshold, so switching the valve on switched the ramp off. See ramp_test.py.
+            # fab.cap, not FAB_NMAX: the Fabric preallocates max(FAB_N0, FAB_NMAX), so the two differ whenever
+            # N0 is set above NMAX, and fab.n() can then exceed FAB_NMAX -- which would latch the ramp against a
+            # pool smaller than the population. The banner's occupancy line reads _F.cap for the same reason.
+            _nb = fabgrow.step(_lf, step, fab.n(), _cap_fab[0], pool=fab.cap)  # 0, or HOW MANY to grow (burst on an unexpected regression)
             _nb = min(_nb, _cap_fab[0] - fab.n())
             # ...and no more of the population may be newborn than FAB_NEW_FRAC allows. fab.born is slot -> step,
             # so the budget is a count, and growth takes whatever is left of it rather than being refused outright

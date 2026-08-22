@@ -417,6 +417,14 @@ _flags_for() {
     gc_real)   echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 BEST_KEEP=2" ;;
     gc_fast)   echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000" ;;
     gc_loose)  echo "FAB_N0=256 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=256 GROW_CAP_VOCAB0=640 VMAX=2048 GROW_CAP_EVERY=2000 GROW_CAP_PLATEAU=0.5" ;;
+    # THE 0.75 GB LAUNCH CONFIG, rehearsed at 1/23rd the data. FAB_N0=2048 into a pool of 8192 puts the ramp's
+    # latch at 0.5 x 8192 = 4096, so the population is BUILT rather than frozen at N0; growth is then clamped at
+    # the GROW_CAP_FAB0=3000 soft cap, which is what "pinned" means and what the valve needs. The soft cap sits
+    # BELOW the predicted settling point of 0.45 x 8192 = 3686 deliberately: above it the population never
+    # presses against the cap and the valve correctly declines, which is how round6 and round7 both ended.
+    # The two lifts this should produce carry the cap 3000 -> 3240 -> 3499, and the cull gate takes over at 3686.
+    lr_pilot)   echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
+    lr_novalve) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 BEST_KEEP=4" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
     # under the misspelled arm's log name -- a result filed against an experiment that never happened, which is
@@ -789,6 +797,32 @@ grid)
     # nofab is in the round as the floor: no fabric at all. If it wins, the population is not paying for itself
     # anywhere, and that is the finding -- not a tuning result.
     round9)  ARMS="nofabric pop128 pop256 pop512 pop1024" ;;
+    # === ROUND 10: THE DRESS REHEARSAL ========================================================================
+    # Not a question about the architecture -- a rehearsal of the 0.75 GB launch config at 1/23rd the data, run
+    # because that config has never executed and three separate things about it were arrived at by arithmetic
+    # rather than by measurement. 8 epochs of 4 MB is ~48,000 steps against the long run's ~1,128,000.
+    #
+    # WHAT ONLY A RUN CAN ANSWER:
+    #   1  does the chain fire END TO END -- ramp builds 2048 -> the 3000 soft cap, pins, plateaus, lifts. Every
+    #      link has been reasoned about; the ramp link was reasoned about WRONGLY until ramp_test.py, which found
+    #      that switching the valve on used to switch the ramp off. Read the [capacity @ ...] lines: at the
+    #      shipping cadence of 20000 pinned steps the pin should arrive by ~step 1000 and two lifts should land.
+    #   2  where does the population actually SETTLE. Predicted 3686 = FAB_PRESSURE 0.45 x FAB_NMAX 8192, on the
+    #      same arithmetic that predicted 1843 and measured 1838 -- but never at this size, and the utilization
+    #      gate only opens once the ramp has carried the population past 0.45 occupancy.
+    #   3  wall clock at this population, which sets the 0.75 GB estimate. The standing 16-22 h is extrapolated
+    #      from 1.6 GB/day measured at half this population, by assuming launch cost is linear in it.
+    #   4  what BEST_KEEP=4 costs on disk. Four FULL checkpoints resident, and the long run will take ~515 save
+    #      events across ~705 probes. It has never run above 2 slots.
+    #
+    #   lr_pilot    the launch config exactly. Everything above is read off this one.
+    #   lr_novalve  the same with GROW_CAP off: the control, and the independent read of the settling point,
+    #               since with the valve off nothing but culling and the ramp decide where the population lands.
+    #               Its vocabulary jumps straight to VMAX=8192 while lr_pilot's is grown 2048 -> 8192 in 8% steps,
+    #               so the pair is also the launch-scale version of the round8 grown-vs-given comparison.
+    # NOT A QUALITY VERDICT. n=1 at 4 MB against a seed spread of 0.066-0.131 on delta-order-1 settles nothing
+    # about bits/byte; if the mechanisms fire and the clock is affordable, the rehearsal has done its job.
+    round10) ARMS="lr_pilot lr_novalve" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac

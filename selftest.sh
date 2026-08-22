@@ -55,6 +55,8 @@ python3 proj_test.py     > "$OUT/proj.txt"  2>&1 && echo "  ok    proj_test (the
   || { echo "  FAIL  proj_test:"; sed 's/^/          /' "$OUT/proj.txt"; FAIL=1; }
 python3 cap_test.py      > "$OUT/cap.txt"   2>&1 && echo "  ok    cap_test (one earned lift means the same at every cap size)" \
   || { echo "  FAIL  cap_test:"; sed 's/^/          /' "$OUT/cap.txt"; FAIL=1; }
+python3 ramp_test.py     > "$OUT/ramp.txt"  2>&1 && echo "  ok    ramp_test (the capacity valve does not disarm the population ramp)" \
+  || { echo "  FAIL  ramp_test:"; sed 's/^/          /' "$OUT/ramp.txt"; FAIL=1; }
 python3 levers.py > "$OUT/levers.txt" 2>&1 && echo "  ok    levers (every knob declared and read consistently)" \
   || { echo "  FAIL  levers:"; tail -5 "$OUT/levers.txt" | sed 's/^/          /'; FAIL=1; }
 
