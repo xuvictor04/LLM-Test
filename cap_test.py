@@ -125,6 +125,58 @@ check(pin_tick(1000, True, 0) == 1000, "a zero-step delta moves nothing")
 _h = held_after(20000, 16)
 check(pin_tick(_h, False, 16) > EVERY * 0.9, "one dip below the cap costs one dip, not the entire accumulation")
 
+
+# --- 6. WHAT COUNTS AS "STALLED" -------------------------------------------------------------------------------
+# The third fault in this same mechanism, and the one that cost a 7-hour run. `improving` is (slow - fast)/|slow|,
+# so NEGATIVE means the loss is RISING. The gate was `improving < GROW_CAP_PLATEAU`, which passes for every
+# negative value there is -- so the valve fired hardest exactly when the run was falling apart, and its own
+# message said so: "the loss has stalled (improving -0.1937 < 0.002)".
+print("\nWHAT COUNTS AS STALLED -- a band, because a rising loss is not a plateau")
+PLATEAU = 0.002
+
+
+def stalled_old(improving): return improving < PLATEAU          # what shipped
+def stalled_new(improving): return abs(improving) < PLATEAU     # what ships now
+
+
+# The five expert lifts the 0.75 GB run actually took, read off its log.
+MEASURED = [(-0.1937, "loss rising 19%"), (-0.0287, "loss rising 3%"), (-0.0378, "loss rising 4%"),
+            (+0.0000, "genuinely flat"), (+0.0018, "genuinely flat")]
+_kept = 0
+for imp, what in MEASURED:
+    o, n = stalled_old(imp), stalled_new(imp)
+    _kept += n
+    print(f"  improving {imp:+.4f} ({what:16s}) old={'LIFT' if o else 'hold'}  new={'LIFT' if n else 'hold'}")
+check(all(stalled_old(i) for i, _ in MEASURED), "the old test authorised all five, including three degrading")
+check(_kept == 2, f"the band keeps the {_kept} genuine plateaus and refuses the three degrading ones")
+
+print("\n  the band must not become a different kind of wrong")
+check(not stalled_new(-0.5), "a badly diverging run is refused")
+check(not stalled_new(+0.5), "a rapidly improving run is refused -- it does not need capacity yet")
+check(stalled_new(0.0), "exactly flat is the centre of the band")
+check(stalled_new(-PLATEAU / 2) and stalled_new(PLATEAU / 2), "small noise either side still reads as flat")
+check(not stalled_new(-PLATEAU) and not stalled_new(PLATEAU), "the band is open at both edges, symmetrically")
+
+# --- 7. THE BLACKOUT -------------------------------------------------------------------------------------------
+# The valve read the same fast/slow pair PlateauGrowth reads but ignored the blackout PlateauGrowth respects, so
+# it fired on the loss jump that a retok causes -- and a vocabulary lift CAUSES a retok. That is a loop that
+# feeds on its own damage: 19 vocabulary lifts walked 2048 -> 8192 in one run.
+print("\nTHE BLACKOUT -- a loss jump we caused is not evidence about the model")
+COOL = 1500
+
+
+def valve_may_run(step, blackout): return (step - blackout) >= COOL
+
+
+check(not valve_may_run(41935 + 1, 41935), "immediately after a retok the valve stands down")
+check(not valve_may_run(41935 + COOL - 1, 41935), "...for the whole cooldown")
+check(valve_may_run(41935 + COOL, 41935), "and resumes once the transient has washed out")
+check(valve_may_run(24783, -10 ** 9), "with no shift ever recorded the valve is unaffected")
+# The loop, stated as the property that breaks it: a lift causes a retok, so the NEXT lift cannot be authorised
+# by that retok's own jump.
+check(not valve_may_run(41935 + 100, 41935),
+      "a lift's own retok cannot authorise the next lift -- which is the loop that ran the vocabulary to 8192")
+
 print()
 if FAILED:
     print(f"FAILED {len(FAILED)} check(s):")

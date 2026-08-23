@@ -6072,11 +6072,27 @@ def main():
         # PLATEAU_WARM is in OBSERVATIONS because the EMAs it protects update per observation. The slow EMA is
         # 0.998, so its time constant is 500; 1000 is two of them, which is the "few hundred" the design asked
         # for and is reached in 16,000 steps at BATCH_W=16 rather than 320,000.
-        if GROW_CAP and fabgrow is not None and fabgrow.slow is not None and fabgrow.n >= PLATEAU_WARM:
+        # AND THE VALVE MUST RESPECT THE SAME BLACKOUT GROWTH DOES. note_shift() marks retok, epoch resample and
+        # LR restart -- "the loss jump is OURS, not the data's" -- and PlateauGrowth refuses to grow inside it
+        # for exactly that reason. The valve read the same fast/slow pair and ignored the flag, so it fired on
+        # the artefact growth is protected from, and then CAUSED the next one: a vocabulary lift mints tokens,
+        # the retok rebuilds the stream, the loss jumps, the jump reads as a stall, and the stall authorises the
+        # next lift. The 0.75 GB run walked the vocabulary 2048 -> 8192 in 19 lifts that way.
+        _blackout = fabgrow is not None and (step - fabgrow.blackout) < fabgrow.cool
+        if (GROW_CAP and fabgrow is not None and fabgrow.slow is not None and fabgrow.n >= PLATEAU_WARM
+                and not _blackout):
             _improving = (fabgrow.slow - fabgrow.fast) / max(1e-6, abs(fabgrow.slow))
             _plat_seen[1] += 1                                 # the test RAN -- distinct from it passing
-            if _plat_seen[0] is None or _improving < _plat_seen[0]: _plat_seen[0] = _improving
-            if _improving < GROW_CAP_PLATEAU:
+            if _plat_seen[0] is None or abs(_improving) < abs(_plat_seen[0]): _plat_seen[0] = _improving
+            # A BAND, NOT A ONE-SIDED THRESHOLD. `improving` is (slow - fast)/|slow|, so NEGATIVE means the loss
+            # is RISING -- and `_improving < GROW_CAP_PLATEAU` passed for every negative value there is. The
+            # valve therefore fired hardest exactly when the run was degrading worst, and said so in its own
+            # message: "the loss has stalled (improving -0.1937 < 0.002)" is a 19% degradation being called a
+            # stall. Three of the five expert lifts in the 0.75 GB run went to a run that was getting worse.
+            # A stall is FLAT: not improving, and not falling apart either. More capacity is the answer to the
+            # first and never to the second -- a degrading run is what REGRESSION growth is for, and that path
+            # has its own cooldown and blackout precisely so the two are not confused.
+            if abs(_improving) < GROW_CAP_PLATEAU:
                 # A SMALL FRACTION, which is neither of the two things this knob has been. It started as a
                 # MULTIPLIER of 2.0 -- one lift doubled the cap and each later one handed out more than the last.
                 # It was then made a flat COUNT of 256, which fixed the runaway but meant +160% to gc_pin's expert
@@ -7813,11 +7829,14 @@ def main():
                               f"PLATEAU_WARM={PLATEAU_WARM}; the warmup is the gate that did not open."
                               if _plat_seen[1] == 0 else
                               f" -- EARNED IT AND NEVER GOT IT: pinned past the cadence and the plateau test ran "
-                              f"{_plat_seen[1]} times, but the run never STALLED. Closest it came was improving "
-                              f"{_plat_seen[0]:+.4f} against GROW_CAP_PLATEAU={GROW_CAP_PLATEAU:g}"
-                              + (" -- still improving that fast at its best, so the valve is declining on the "
-                                 "merits: more capacity is not what this run is short of, and a run this short "
-                                 "cannot answer whether it ever would be."
+                              f"{_plat_seen[1]} times, but the run never went FLAT. Closest it came was "
+                              f"improving {_plat_seen[0]:+.4f} against a band of "
+                              f"+/-{GROW_CAP_PLATEAU:g}"
+                              + ((" -- NEGATIVE, i.e. the loss was RISING at its flattest. That is not a stall "
+                                  "and more capacity is not the answer to it; a degrading run is what REGRESSION "
+                                  "growth is for.") if (_plat_seen[0] or 0) < 0 else
+                                 (" -- still improving that fast at its flattest, so the valve is declining on "
+                                  "the merits: more capacity is not what this run is short of.")
                                  if (_plat_seen[0] or 0) > GROW_CAP_PLATEAU * 5 else
                                  " -- close enough that a longer run would likely cross it."))))
             except Exception as _e:

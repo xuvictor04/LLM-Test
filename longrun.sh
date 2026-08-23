@@ -852,6 +852,33 @@ grid)
     # BELOW it, and the gate opens by itself once the lifts have carried the population there. Read it as a
     # handoff: the valve owns 3000 -> 3686, the cull gate owns everything after.
     round11) ARMS="lr_pilot2 lr_vcap" ;;
+    # === ROUND 12: WHAT THE 0.75 GB RUN ACTUALLY SAID =========================================================
+    # It ran 840,000 steps in 7 hours and the valve fired 24 times -- the mechanism works end to end for the
+    # first time. The expert half lifted 3000 -> 4406 in five lifts and then stopped, handing over to the cull
+    # gate exactly as predicted (final population 3947 against a predicted 3686). The vocabulary half lifted
+    # nineteen times, 2048 -> 8192, and hit the hard ceiling at step 561,395.
+    #
+    # AND IT NEVER BEAT THE 4 MB PILOTS. Held-out 2.288 against 2.037. Two things about that:
+    #   1  THE RUN CONVERGED IN ITS FIRST THIRD. Mean held-out by thirds: 2.70 / 2.79 / 2.66 -- flat. The
+    #      minimum of 2.18 at step 194,000 is a low probe in a noisy series, not a level the run held, and the
+    #      "+0.235 since its own minimum" is mostly that noise. 650,000 further steps bought nothing. The system
+    #      saturates around 0.2 GB of processed text, so 0.75 GB was ~4x more than it can use, and the long-run
+    #      question can be asked in two hours instead of seven.
+    #   2  QUALITY TRACKS VOCABULARY SIZE, not data volume. Every run ending at 2048 scored 1.971-2.178; the two
+    #      that let the vocabulary past 4800 scored 2.288 and 2.336, at 4 MB and at 94 MB alike. That matches the
+    #      0.205 b/B round9 measured for vocabulary size. It is not proven -- the long run differs in data volume
+    #      too, and per-lift the curve moved worse after only 9 of 24 lifts -- which is what this round settles.
+    #
+    # NOT A CLAIM THIS ROUND MAKES: that routing collapsed. The "1 of 3948 nodes used" line is the 32-window
+    # eval probe, and the report warns against exactly that misreading; over the whole run 1654 distinct experts
+    # won a window, top share 1.7%, half the traffic across 91 -- MORE diverse than the pilot, not less.
+    #
+    # ONE KNOB APART, at the size the system actually uses:
+    #   lr_pilot2  the config, with the two valve defects the long run exposed now fixed
+    #   lr_vcap    the same with VMAX=2048, so the vocabulary cannot move and the expert valve is alone
+    # Run it at the saturation point, not the original target:
+    #   STREAM_LEN=25000000 EPOCHS=8 GRID_DIR=runs/sat bash longrun.sh grid round12
+    round12) ARMS="lr_pilot2 lr_vcap" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
