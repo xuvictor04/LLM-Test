@@ -3801,6 +3801,7 @@ def main():
     _bkeep = []                                               # [(step, bpb, slot)] most recent local lows kept
     _prev_probe = [None]                                      # the previous probe's mean, to see a descent
     _best_bpb = [None, -1, False]                             # [best mean bits/byte, step, saved?]
+    _blew = [False]                                           # the blow-up alarm fires ONCE, not every probe
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
     _rlive, _rseen = set(), set()                             # router parameters that DID / could receive gradient
     _lm_run = []; _lm_curve = []                              #   has very noisy gradients; this fixes that WITHOUT
@@ -5292,6 +5293,22 @@ def main():
                         _best_bpb[2] = bool(_save_ckpt(stream, quiet=True, suffix=".best"))
                     except Exception as _e:
                         print(f"  [best-ckpt save failed: {type(_e).__name__}: {_e}]")
+                # SAY IT WHEN IT HAPPENS, NOT EIGHT HOURS LATER. A 16-epoch run lost 4.6 bits/byte in a
+                # 6,000-step window at 99% of peak LR, and then spent 520,000 further steps -- about seven hours
+                # -- never getting back to where it had been. Nothing said so until the end-of-run report, and
+                # that report called it PLATEAUED. One line, once, at the moment the curve leaves the level it
+                # had already reached, is the difference between killing a broken run and paying for it in full.
+                # The LR is named because it is the first thing to check and it is not otherwise on this line.
+                elif (_best_bpb[0] is not None and _cm > _best_bpb[0] + 0.5 and not _blew[0]):
+                    _blew[0] = True
+                    try: _lrnow = _lr_at(step, max(1, _lr_total(step)), _proj_steps(step))
+                    except Exception: _lrnow = float('nan')
+                    print(f"  !! BLEW UP @ {step}: held-out {_cm:.3f} bits/byte against a best of "
+                          f"{_best_bpb[0]:.3f} at step {_best_bpb[1]} -- {_cm - _best_bpb[0]:+.3f}, far outside "
+                          f"the 0.066-0.131 seed spread. LR here is {_lrnow:.2e} ({_lrnow / max(1e-12, LR):.0%} "
+                          f"of peak). The best model is already saved to .best; if this does not come back "
+                          f"within a few probes the remaining steps are being spent below a level already "
+                          f"reached, and the run is worth killing rather than finishing.")
                 # EVERY LOCAL LOW, not only the global best. A descent (this probe below the last) that lands in a
                 # GOOD region -- within BEST_KEEP_TOL of the best seen -- is kept in a rotating set, so a long run
                 # ends holding several restore points at its best-performing areas rather than one.
@@ -6911,6 +6928,21 @@ def main():
             if _fl - _bl > 0.05 and _bpb_dir[0] <= 0.05:
                 print(f"  >> NOT DIVERGING -- the per-token rise is the growing vocabulary, not the model. "
                       f"Judge this run on bits/byte.")
+            elif _bpb_dir[0] > 0.5:
+                # A BIG UNRECOVERED RISE IS NOT A PLATEAU. The branch below is right about SMALL ones -- "climbed
+                # early then settled" is not divergence, and measuring only from the global minimum used to call
+                # a flat tail DIVERGING. But it keyed solely on the tail, so a run that lost 1.118 bits/byte in a
+                # 6,000-step window at 99% of peak LR and never got it back was told "nothing is degrading". It
+                # was flat, at a level more than a bit/byte above where it had already been. The tail says
+                # whether it is STILL falling apart; the height says whether it already did, and both matter.
+                # 0.5 is far above the 0.066-0.131 seed spread measured on this system and far below the 1.118
+                # this was written for, so it separates a blow-up from ordinary early wobble.
+                print(f"  >> BLEW UP AND STAYED DOWN. It rose {_bpb_dir[0]:+.3f} bits/byte from its minimum and "
+                      f"has been flat since ({_bpb_dir[1]:+.3f} over the last two thirds) -- flat at a level it "
+                      f"had already beaten. This is not a plateau and not a slow divergence: something broke, "
+                      f"the run never recovered it, and every step after that point was spent at the worse "
+                      f"level. Read the per-process curve above for WHEN, then what was near peak on the LR "
+                      f"schedule there. The best model is on disk; the FINAL one is not what to judge.")
             elif _bpb_dir[1] <= 0.05:
                 # PLATEAU IS NOT DIVERGENCE. Measuring only from the global minimum cannot tell "climbed early
                 # then settled" from "still climbing", and it called a run DIVERGING whose last two thirds were

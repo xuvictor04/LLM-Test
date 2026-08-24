@@ -905,6 +905,34 @@ grid)
     # lr_expvalve says the same thing as lr_vcap through the knob that means it, and keeps VMAX preallocated
     # so the comparison against round12's lr_pilot2 is the vocabulary VALVE and not the table size.
     round13) ARMS="lr_expvalve" ;;
+    # === ROUND 14: THE SAME RUN WITH THE SCHEDULE THAT SURVIVED ===============================================
+    # round13 ran EPOCHS=16 LR_EPOCHS=0 and blew up. Held-out 3.476 -- worse than the order-1 anchor at 3.446 --
+    # after reaching 2.226 at step 38,000 and losing it inside 6,000 steps. LR_EPOCHS=0 was my recommendation
+    # and it is what broke the run.
+    #
+    # WHAT THE TWO RUNS SHOW WHEN LINED UP. Both are 25 MB/epoch, so their epoch boundaries fall on identical
+    # steps, and BOTH are destabilised by the epoch-2 fresh resample at step 38,576:
+    #
+    #                  curve across the epoch-2 boundary        LR at 38576 / 73331 / 108246 / 143141 / 177923
+    #   lr_vcap    2.83 3.36 4.12 4.13  -> recovers to 2.03      96%  80%  59%  38%  19%
+    #   round13    2.23 3.40 4.05 6.80  -> settles near 3.4      99%  90%  79%  65%  50%
+    #
+    # The SHOCK is the resample and both runs take it. What differs is the recovery window: an 8-epoch cosine
+    # has the rate down to 19% of peak by the fifth boundary, a 16-epoch one is still at 50%. Stretching the
+    # wavelength did not lower the peak, it lengthened the time spent near it -- through exactly the stretch the
+    # run needed to re-settle. A wobble became a permanent loss.
+    #
+    # So: keep the 8-epoch WAVELENGTH and take the restart. Each cycle is then shaped exactly like the one that
+    # recovered, and LR_RESTARTS=1 re-heats once at epoch 8 -- which I talked us out of last round on the
+    # grounds that it was "a different experiment". It is the safer one. If the re-heat causes a second shock,
+    # the new blow-up alarm says so at the probe it happens on rather than eight hours later.
+    #   STREAM_LEN=25000000 EPOCHS=16 LR_EPOCHS=8 GRID_DIR=runs/passes2 bash longrun.sh grid round14
+    # WORTH KNOWING SEPARATELY: nothing protects the OPTIMIZER from the epoch resample. fabgrow.note_shift()
+    # marks it so growth does not react to our own distribution change, and the capacity valve now respects the
+    # same flag -- but the LR takes the shift at whatever the cosine says, which at the second boundary is near
+    # peak in every configuration run so far. A per-epoch LR dip, or a warmup that re-arms on resample, is the
+    # obvious thing to try and has never been tried.
+    round14) ARMS="lr_expvalve" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
