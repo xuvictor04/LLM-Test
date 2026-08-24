@@ -434,6 +434,12 @@ _flags_for() {
     # as the only thing that can move. lr_pilot2 vs lr_vcap is therefore one question -- what did the vocabulary
     # do -- and lr_vcap vs round10's lr_pilot is the other: what did the expert valve do, at last.
     lr_pilot2)  echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
+    # THE EXPERT VALVE ALONE. GROW_CAP_VOCAB=0 is the semantically right way to say what lr_vcap said with
+    # VMAX=2048: keep the expert half, stop the vocabulary half. GROW_CAP_VOCAB0 still pins TOK.vmax at 2048
+    # (that clamp runs whether or not the vocabulary half is armed), so the realised vocabulary is identical
+    # while the table stays preallocated at 8192 and LOSS_MASK_DEAD keeps the unminted rows out of the
+    # denominator. round12 measured the cost of letting it grow: 2.162 against 2.021 held-out, one knob apart.
+    lr_expvalve) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
     lr_vcap)    echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=2048 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
@@ -879,6 +885,26 @@ grid)
     # Run it at the saturation point, not the original target:
     #   STREAM_LEN=25000000 EPOCHS=8 GRID_DIR=runs/sat bash longrun.sh grid round12
     round12) ARMS="lr_pilot2 lr_vcap" ;;
+    # === ROUND 13: MORE PASSES, NOT MORE BYTES ================================================================
+    # round12 settled the vocabulary question and refuted something I had asserted one round earlier.
+    #   SETTLED: growing the vocabulary costs quality. Same corpus, same box, adjacent runs, one knob apart --
+    #   held-out 2.021 with it frozen at 2048 against 2.162 with it grown to 3784, and delta-order-1 +1.426
+    #   against +1.126. The 0.141 is just outside the 0.066 replication floor measured this session; the 0.300
+    #   on the margin is well outside it. Consistent with the 0.205 b/B round9 measured for vocabulary size.
+    #   REFUTED: "the system saturates around 0.2 GB of processed text". It does not. BOTH round12 arms were
+    #   still falling at the end -- lr_vcap's minimum is 1.96 at step 258,000 of 282,000, thirds 3.12 / 2.12 /
+    #   1.98, and +0.005 since its own minimum. That claim came from the 0.75 GB run's flat thirds, and that run
+    #   is not comparable: data_pilot was re-fetched between them, the box is ~2x slower here, and it asked for
+    #   94 MB an epoch from a corpus whose size at the time cannot be confirmed from the log. One run, over-read.
+    # SO THE NEXT LEVER IS PASSES, NOT BYTES. lr_vcap reached the session's best held-out and was still
+    # improving; give it twice the epochs over the SAME 25 MB rather than more unique text, which is the
+    # variable that has never once helped here.
+    #   LR_EPOCHS=0 makes the cosine follow EPOCHS instead of staying an 8-epoch wavelength -- without it,
+    #   EPOCHS=16 is two cycles and the second half re-heats the LR, which is a different experiment.
+    #   STREAM_LEN=25000000 EPOCHS=16 LR_EPOCHS=0 GRID_DIR=runs/passes bash longrun.sh grid round13
+    # lr_expvalve says the same thing as lr_vcap through the knob that means it, and keeps VMAX preallocated
+    # so the comparison against round12's lr_pilot2 is the vocabulary VALVE and not the table size.
+    round13) ARMS="lr_expvalve" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
