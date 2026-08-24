@@ -440,6 +440,24 @@ _flags_for() {
     # while the table stays preallocated at 8192 and LOSS_MASK_DEAD keeps the unminted rows out of the
     # denominator. round12 measured the cost of letting it grow: 2.162 against 2.021 held-out, one knob apart.
     lr_expvalve) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
+    # === THE SCHEDULE ARMS =====================================================================================
+    # All four are lr_expvalve plus one schedule change, so the fabric side is held fixed and only the LR moves.
+    # 100,000 steps is the wavelength because it is close to what an 8-epoch cosine ACTUALLY spanned in the run
+    # that recovered (282,000 steps / ~3 boundaries of useful anneal), and it is now a number rather than a
+    # quantity derived through the per-epoch length.
+    #   sched_ctl   the control: today's epoch-derived schedule at the corpus size these arms all use. Without
+    #               it the step-based arms have nothing to be read against at THIS STREAM_LEN, and the only
+    #               8-epoch number on record came from a different corpus fetch on a different box.
+    #   sched_step  LR_STEPS alone. Does stating the wavelength in steps reproduce the schedule that worked?
+    #   sched_warm  LR_SHIFT_WARM alone, on the epoch-derived schedule. Attacks the epoch-2 SHOCK rather than
+    #               the recovery, and is the one design change that has never been tried. 4000 steps is roughly
+    #               a tenth of an epoch here and 4x the standing LR_WARMUP.
+    #   sched_both  both. Only worth reading once the two singles have said whether either does anything --
+    #               it is here so the combination is not inferred from two separate arms.
+    sched_ctl)  echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
+    sched_step) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=100000" ;;
+    sched_warm) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_SHIFT_WARM=4000" ;;
+    sched_both) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=100000 LR_SHIFT_WARM=4000" ;;
     lr_vcap)    echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=2048 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
@@ -933,6 +951,32 @@ grid)
     # peak in every configuration run so far. A per-epoch LR dip, or a warmup that re-arms on resample, is the
     # obvious thing to try and has never been tried.
     round14) ARMS="lr_expvalve" ;;
+    # === ROUND 15: THE SCHEDULE, AS A PILOT ===================================================================
+    # Two changes, tested at pilot scale before either goes near a long run -- because the last two schedule
+    # decisions were made by argument and both were wrong.
+    #
+    # 1  LR_STEPS. LR_EPOCHS names the cosine's wavelength in EPOCHS, and an epoch's length in steps is
+    #    STREAM_LEN/WIN -- so "LR_EPOCHS=8" has meant 48,000 steps at STREAM_LEN=4e6 and 840,000 at 94e6. One
+    #    number, a 17x range of schedules, and the conversion is itself an ESTIMATE because minting shortens
+    #    later epochs and the code has to project the shrinkage. The schedule was already rewritten once to stop
+    #    EPOCHS setting the learning rate; this is the same fault one level down. LR_STEPS states the wavelength
+    #    directly: the rate at step N becomes a function of N alone, immune to STREAM_LEN, to the vocabulary and
+    #    to the projection. See lr_test.py, which asserts exactly that property.
+    # 2  LR_SHIFT_WARM. Nothing protects the OPTIMIZER from our own distribution shift. Under DISK_STREAM each
+    #    epoch draws fresh text; note_shift() already tells growth the jump is ours, and the capacity valve now
+    #    respects the same flag, but the LR meets it at whatever the cosine says -- 96-99% of peak at the second
+    #    boundary in every run measured. round12 and round13 were BOTH destabilised there and only the one whose
+    #    rate then fell recovered. This attacks the shock instead of the recovery, and has never been tried.
+    #
+    # ONE KNOB EACH, AGAINST A CONTROL AT THIS CORPUS SIZE. sched_ctl matters: the only 8-epoch number on record
+    # came from a different corpus fetch on a different box, so without it the step-based arms would be compared
+    # across a re-fetch -- which is how the 0.2 GB saturation claim went wrong.
+    # BOTH DEFAULT TO OFF. LR_STEPS=0 and LR_SHIFT_WARM=0 leave the schedule bit-identical, so nothing already
+    # measured becomes unreproducible and sched_ctl is a true control rather than a fourth variant.
+    # READ ON THE EPOCH-2 BOUNDARY FIRST, at step ~38,576, where every run so far has wobbled -- and only then
+    # on held-out. The blow-up alarm now fires at the probe it happens on, so an arm that breaks says so.
+    #   STREAM_LEN=25000000 EPOCHS=8 GRID_DIR=runs/sched bash longrun.sh grid round15
+    round15) ARMS="sched_ctl sched_step sched_warm sched_both" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac

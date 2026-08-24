@@ -362,6 +362,8 @@ _SPEC = {
     "DROPOUT": ("f", 0.0),                                # optim
     "LR": ("f", 2e-3),                                    # optim
     "LR_EPOCHS": ("i", 8),                                # optim -- cosine WAVELENGTH in epochs; 0 = follow EPOCHS
+    "LR_STEPS": ("i", 0),                                 # optim -- WAVELENGTH IN STEPS; 0 = derive from LR_EPOCHS
+    "LR_SHIFT_WARM": ("i", 0),                            # optim -- re-warm this many steps after an epoch resample
     "LR_RESTARTS": ("i", 1),
     "LR_DECAY": ("f", 0.0),                               # lr
     "FAB_LR_OWN": ("i", 0),                               # fabric
@@ -4002,6 +4004,23 @@ def main():
     # and it is one flag to test. LR_SCHED=none restores the old behaviour exactly.
     LR = _f("LR", 2e-3); LR_SCHED = _env("LR_SCHED", "cosine")
     LR_WARMUP = _i("LR_WARMUP", 1000); LR_MIN_FRAC = _f("LR_MIN_FRAC", 0.05)
+    # AN EPOCH IS NOT A UNIT OF ANYTHING. LR_EPOCHS names the cosine's wavelength in EPOCHS, and an epoch's
+    # length in steps is STREAM_LEN/WIN -- so "8 epochs" has meant 48,000 steps at STREAM_LEN=4e6 and 840,000 at
+    # 94e6, a 17x range, all under one number. The schedule was already rewritten once to stop EPOCHS setting
+    # the learning rate; this is the same fault one level down, because LR_EPOCHS still has to be converted
+    # through a quantity nothing holds fixed. LR_STEPS states the wavelength directly and is immune to
+    # STREAM_LEN, to the vocabulary growing (which shortens later epochs), and to the per-epoch projection
+    # arithmetic entirely. 0 keeps the epoch-derived path, so every existing configuration is unchanged.
+    LR_STEPS = max(0, _i("LR_STEPS", 0))
+    # ...AND NOTHING PROTECTS THE OPTIMIZER FROM OUR OWN DISTRIBUTION SHIFT. Under DISK_STREAM each epoch draws
+    # FRESH text, and note_shift() already tells growth "this jump is OURS, not the data's" so it does not react
+    # to it. The LR takes the same shift at whatever the cosine says, which at the second boundary has been
+    # 96-99% of peak in every run measured. Both round12 and round13 were destabilised there; the one whose rate
+    # then fell quickly recovered, the one held near peak did not. LR_SHIFT_WARM re-runs a short warmup after a
+    # resample so the optimizer eases back into new material instead of hitting it at full rate. 0 = off, which
+    # is the behaviour every result so far was produced under.
+    LR_SHIFT_WARM = max(0, _i("LR_SHIFT_WARM", 0))
+    _shift_at = [-10 ** 9]                                 # step of the last resample; see LR_SHIFT_WARM
     om = torch.optim.AdamW(_base, lr=LR, weight_decay=WD)
     for _g in _regrown: om.add_param_group({"params": _g})   # same groups, same order as the original run
     oe = torch.optim.AdamW(enc.parameters(), lr=LR, weight_decay=WD)
@@ -4045,6 +4064,13 @@ def main():
         else:
             _p = min(1.0, _prog)
         _cyc = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _p))
+        # RE-WARM AFTER A RESAMPLE, as an ATTENUATION of the cycle rather than a replacement of it. Returning
+        # `LR * ramp` here would RAISE the rate whenever a shift lands late in the anneal -- a schedule that
+        # steps back up mid-run, which is exactly what the monotone-progress clamp above exists to prevent. It
+        # multiplies instead, so it can only ever lower the rate, and rejoins the cycle exactly where the cycle
+        # would have been. The floor keeps it from stalling at zero on the shift itself.
+        if LR_SHIFT_WARM and 0 <= st - _shift_at[0] < LR_SHIFT_WARM:
+            _cyc *= max(LR_MIN_FRAC, (st - _shift_at[0] + 1) / LR_SHIFT_WARM)
         # === A DECAYING ENVELOPE OVER THE FLUCTUATION =========================================================
         # The repeating cosine returns to 100% OF PEAK at every restart, forever. Measured on an 18-epoch run:
         #   [lr @ 201925] cosine restart: 1.00e-04 -> 2.00e-03 (100% of peak)
@@ -4828,7 +4854,13 @@ def main():
             ("FAB_CULL_FRAC",  _f("FAB_CULL_FRAC", 0.02)),
             ("LR",             LR),                      ("LR_SCHED",       LR_SCHED),
             ("LR_WARMUP",      LR_WARMUP),               ("LR_MIN_FRAC",    LR_MIN_FRAC),
+            # PLAIN ENTRIES, NOT NOTES. The third field is only ever printed when the ASKED value differs from
+            # the LIVE one, so a note attached to a knob that ran as requested never renders -- which is how the
+            # first CULL GATE diagnostic came to be written and be invisible. Both of these appear on the
+            # EFFECTIVE line below, and the COUPLING block says which one is deciding, unconditionally.
             ("LR_EPOCHS",      min(_i("LR_EPOCHS", 8) or EPOCHS, EPOCHS)),
+            ("LR_STEPS",       LR_STEPS),
+            ("LR_SHIFT_WARM",  LR_SHIFT_WARM),
             ("LR_RESTARTS",    bool(_i("LR_RESTARTS", 1))),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
         ]
@@ -4899,7 +4931,22 @@ def main():
         # Nothing here CHANGES a value. It prints what the run is actually doing, so a coupling cannot be
         # discovered again by losing a day to it.
         _cpl = []
-        if LR_SCHED != "none":
+        if LR_SCHED != "none" and LR_STEPS:
+            # WHEN THE WAVELENGTH IS IN STEPS, SAY THAT. The block below describes the epoch-derived path in
+            # detail, and printing it under LR_STEPS would be a banner describing a schedule that did not run --
+            # the failure mode this section exists to prevent, committed by this section.
+            _cpl.append(
+                f"LR_STEPS={LR_STEPS} sets the cosine WAVELENGTH IN STEPS, so LR_EPOCHS and EPOCHS do not "
+                f"reach the learning rate at all and the per-epoch length is not consulted. The rate at a given "
+                f"step is the same for any STREAM_LEN, any vocabulary size and any EPOCHS -- which is the whole "
+                f"point: 'LR_EPOCHS=8' has meant 48,000 steps at STREAM_LEN=4e6 and 840,000 at 94e6. "
+                + (f"LR_RESTARTS=1, so the cycle repeats every {LR_STEPS} steps for as long as the run lasts."
+                   if bool(_i("LR_RESTARTS", 1)) else
+                   f"LR_RESTARTS=0, so after {LR_STEPS} steps the rate HOLDS at the "
+                   f"LR_MIN_FRAC={LR_MIN_FRAC:g} floor.")
+                + (f" LR_SHIFT_WARM={LR_SHIFT_WARM}: each epoch resample re-warms the rate over that many "
+                   f"steps, so the fresh sample is not met at full rate." if LR_SHIFT_WARM else ""))
+        elif LR_SCHED != "none":
             _lre = min(_i("LR_EPOCHS", 8) or EPOCHS, EPOCHS)   # what the schedule will ACTUALLY use
             _cpl.append(
                 f"EPOCHS={EPOCHS} sets run length AND the cosine horizon, so it changes the LR at EVERY step, "
@@ -5223,6 +5270,10 @@ def main():
     def _proj_steps(step):                                 # WORK REMAINING -- the ETA. Always the real end.
         return _project(step, EPOCHS, _proj)
     def _lr_total(step):                                   # ONE WAVELENGTH -- what the cosine is shaped over.
+        # STATED IN STEPS, IF IT WAS STATED IN STEPS. Everything below converts an epoch count into a step count
+        # through a per-epoch length that moves as the vocabulary grows, and then projects the shrinkage. None
+        # of that is needed when the wavelength is a number of steps: return it and skip the estimation.
+        if LR_STEPS: return LR_STEPS
         _project(step, LR_EPOCHS, _proj_lr)                # keep the projection current
         # THE PERIOD IS LATCHED, not re-read. _project returns max(step+1, latched) so that the HOLD-at-floor
         # form saturates once the horizon passes; under restarts that would make the wavelength grow with the
@@ -5354,6 +5405,12 @@ def main():
                 stream, byte_stream, byte_labels, tok_bs, labels, ENC_SEQ, true_sw = _resample()
                 set_enc_tensor(ENC_SEQ); _sigq = []          # stream replaced -> queued lookahead windows are stale
                 if FABRIC and fabgrow is not None: fabgrow.note_shift(step)
+                # THE SAME EVENT, TOLD TO THE OPTIMIZER. note_shift above stops GROWTH reacting to our own
+                # distribution change; this stops the LEARNING RATE meeting it at full speed. See LR_SHIFT_WARM.
+                if LR_SHIFT_WARM:
+                    _shift_at[0] = step
+                    print(f"  [lr @ {step}] epoch resample -> re-warming over {LR_SHIFT_WARM} steps "
+                          f"(LR_SHIFT_WARM); the fresh sample is a distribution shift we caused.")
             # RECORD WHAT THE EPOCH ACTUALLY COST, before _ep_start moves. _project estimates the per-epoch
             # shrink ratio from these, so they must be OBSERVED lengths, not the projected ones.
             if step > _ep_start: _eplen.append(step - _ep_start)
