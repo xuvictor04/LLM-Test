@@ -5391,7 +5391,13 @@ def main():
                 _cm = sum(_cs) / len(_cs)
                 _blew[2].append(_cm); del _blew[2][:-5]     # the last five probes; the median is what is judged
                 if _best_bpb[0] is None or _cm < _best_bpb[0] - 1e-6:
-                    _best_bpb[0] = _cm; _best_bpb[1] = step; _blew[1] = 0   # a new best resets the staleness
+                    # A NEW BEST RE-ARMS THE ALARM. It was one-shot -- `if not _blew[0]` and _blew[0] never
+                    # cleared -- so a run got exactly one warning for its whole length. All four round15 arms
+                    # spent theirs on the spurious step-8000 trigger and were then SILENT through mid-run
+                    # excursions of +2.0 to +2.3 bits/byte. An alarm you can only hear once is not much better
+                    # than one that fires at the wrong time. Coming back to a new best means the run recovered,
+                    # so the next excursion deserves its own warning.
+                    _best_bpb[0] = _cm; _best_bpb[1] = step; _blew[1] = 0; _blew[0] = False
                     try:
                         _best_bpb[2] = bool(_save_ckpt(stream, quiet=True, suffix=".best"))
                     except Exception as _e:
@@ -7058,6 +7064,18 @@ def main():
                       f"the run never recovered it, and every step after that point was spent at the worse "
                       f"level. Read the per-process curve above for WHEN, then what was near peak on the LR "
                       f"schedule there. The best model is on disk; the FINAL one is not what to judge.")
+            elif _bpb_dir[1] < -0.05:
+                # STILL FALLING IS NOT FLAT, and the branch below called it flat. `_bpb_dir[1] <= 0.05` is a
+                # ONE-SIDED test, so it passed for every negative value there is -- the same fault as the
+                # capacity valve's plateau gate, in a different file section. sched_ctl fell -0.086 over its
+                # last two thirds and was told "has been flat since ... more steps at this setting will not
+                # help either", two lines after the LM curve block said "clearly still improving -- more steps
+                # at this setting will buy more". Both were computed correctly; one of them was described
+                # backwards, and they gave opposite advice about the same run.
+                print(f"  >> RECOVERED, AND STILL IMPROVING. It rose {_bpb_dir[0]:+.3f} from its minimum early "
+                      f"on, but the last two thirds are DOWN {_bpb_dir[1]:+.3f} -- it is not sitting at the "
+                      f"worse level, it is working back through it. More steps at this setting will buy more. "
+                      f"The early transition is still worth explaining; it is not what the run ended up doing.")
             elif _bpb_dir[1] <= 0.05:
                 # PLATEAU IS NOT DIVERGENCE. Measuring only from the global minimum cannot tell "climbed early
                 # then settled" from "still climbing", and it called a run DIVERGING whose last two thirds were

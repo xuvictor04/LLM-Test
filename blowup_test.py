@@ -60,18 +60,30 @@ def check(cond, msg):
     else: print(f"  ok    {msg}")
 
 
-def run(curve, rise=None, stale=None):
-    """Drive the alarm over a curve exactly as the call site does. Returns the probe index it fired on, or None."""
+def fires(curve, rise=None, stale=None):
+    """Every probe index the alarm fires on, driving it exactly as the call site does.
+
+    A NEW BEST RE-ARMS IT. The first version latched on the first firing and never cleared, so a run got one
+    warning for its whole length -- and all four round15 arms spent theirs on a spurious step-8000 trigger and
+    were silent through mid-run excursions of +2.0 to +2.3 b/B afterwards.
+    """
     rise = RISE if rise is None else rise
     stale = STALE if stale is None else stale
-    best, since, recent = None, 0, []
+    best, since, recent, fired, out = None, 0, [], False, []
     for i, x in enumerate(curve):
         recent.append(x); del recent[:-5]
         if best is None or x < best - 1e-6:
-            best = x; since = 0; continue
+            best = x; since = 0; fired = False; continue        # recovered -> the alarm re-arms
         since += 1
-        if blowup_stale(recent, best, since, rise, stale): return i
-    return None
+        if not fired and blowup_stale(recent, best, since, rise, stale):
+            fired = True; out.append(i)
+    return out
+
+
+def run(curve, rise=None, stale=None):
+    """The FIRST firing, or None -- most checks below only care whether it went off at all."""
+    _f = fires(curve, rise, stale)
+    return _f[0] if _f else None
 
 
 print(f"blow-up alarm: BLOWUP_RISE={RISE}  BLOWUP_STALE={STALE}\n")
@@ -127,6 +139,24 @@ check(blowup_stale([3.0] * 5, None, STALE) is False, "no best yet -> silent")
 check(blowup_stale([3.0, 3.0], 2.0, STALE) is False, "fewer than three probes of history -> silent")
 check(blowup_stale([2.0, 2.0, 9.9, 9.9, 9.9], 2.0, STALE) is True, "the median follows a genuine shift in level")
 check(blowup_stale([2.0, 2.0, 2.0, 2.0, 9.9], 2.0, STALE) is False, "...and ignores one outlier at the end")
+
+
+# --- 5. IT MUST BE ABLE TO FIRE MORE THAN ONCE ------------------------------------------------------------------
+# The shipped version latched: `if not _blew[0]` with _blew[0] never cleared. Across round15 all four arms spent
+# their single warning on the spurious step-8000 trigger and then said nothing about excursions of +2.34, +2.05,
+# +2.04 and +2.16 bits/byte later in the same runs.
+print("\nRE-ARMING -- one warning per run is not enough")
+# Blow up, recover to a new best, blow up again. Both deserve a line.
+twice = ([3.0] * 3 + [2.0] + [3.0] * 120        # best 2.0, then 120 probes elevated -> fire
+         + [1.5]                                 # a new best: recovered, re-arm
+         + [3.0] * 120)                          # elevated again -> fire again
+_f = fires(twice)
+print(f"  blow up -> recover to a new best -> blow up again: fired at probes {_f}")
+check(len(_f) == 2, f"both excursions are reported, not just the first ({len(_f)} firing(s))")
+check(_f[0] < 124 < _f[1], "the second firing comes after the recovery, not as a repeat of the first")
+# ...but it must not chatter: one firing per excursion, not one per probe.
+check(len(fires([3.0] * 3 + [2.0] + [3.0] * 200)) == 1,
+      "a single sustained excursion fires ONCE, however long it lasts")
 
 print()
 if FAILED:
