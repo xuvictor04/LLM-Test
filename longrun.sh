@@ -487,6 +487,14 @@ _flags_for() {
     # worse. At EPOCHS=2 the wavelength IS the run, so there is no restart to get wrong, and the anneal shape
     # matches sched_ctl's (282,000 steps) rather than round13's stretched one. ~2 hours instead of 8.5.
     lr_075_short) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=260000 LR_RESTARTS=0 CKPT_EVERY=20000" ;;
+    # ...AND ONE ARM THAT ACTUALLY EXERCISES THE DAMPING. The closed-loop restart fix engages only on a
+    # MULTI-cycle schedule, and every arm above sets LR_RESTARTS=0 -- so the mechanism built to stop the 0.75 GB
+    # failure would never have run on anything recommended, and nothing said so. It does now: DID IT FIRE has
+    # lr.restart / lr.damp / lr.envelope rows, and on this arm all three must read FIRED.
+    # LR_STEPS=90000 against ~262,852 steps gives 3 cycles and 2 restarts inside a two-epoch run, so the
+    # mechanism is tested in two hours rather than eight. If the damping works, the second restart is taken at
+    # half swing and the arm should land near lr_075_short; if it does not, this is the cheap way to find out.
+    lr_075_rst)   echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=90000 CKPT_EVERY=20000" ;;
     # ...and the same thing with the vocabulary allowed to grow, which is what was originally asked for. Kept
     # nameable because the 0.141 that argues against it is one measurement at 25 MB an epoch, and the argument
     # FOR it -- that a bigger vocabulary should pay off on more text -- has never been tested at 94.
@@ -582,6 +590,18 @@ pilot)
   # buys nothing. PILOT_ARCH="gru transformer" to re-open it.
   for ARCH in ${PILOT_ARCH:-gru}; do
   echo; echo "################  base LM: $ARCH  ################"
+  # THE TOKENIZER HAS TO LAND WHERE pilot-add LOOKS FOR IT, and it did not. `pilot` set SAVE_CKPT but no
+  # TOKENIZER_PATH, so self_organize.py wrote the vocabulary to its default data/dyntok.json -- while pilot-add
+  # searches "$FROM.dyntok.json" beside the checkpoint. The result: `pilot` then `pilot-add`, the project's
+  # advertised continual-learning demo and the one thing it has never run, exits 1 before touching the GPU.
+  # It also punched a hole in the append-only invariant this file states at the top: _reserve namespaces the
+  # checkpoint and the log, so a second `pilot` gets pilot_gru-2 -- and then overwrites the SHARED
+  # data/dyntok.json, leaving pilot_gru's weights with no matching vocabulary anywhere on disk. The checkpoint
+  # survives; the thing that makes it loadable does not. grid, seeds, repeat and smoke all namespace it
+  # already; pilot was the one that did not.
+  # Reserved ONCE into a variable: calling _reserve twice for the same run would let the checkpoint and its
+  # vocabulary land on different suffixes, which is the same failure wearing a different hat.
+  _PCK="$(_reserve "$OUT/pilot_$ARCH")"
   env MODEL=$ARCH LAYERS=$([ "$ARCH" = transformer ] && echo ${TF_LAYERS:-4} || echo 1) HEADS=${HEADS:-8} \
       DATA_MODE=real DATA_DIR="$P_DD" DOMAINS=eng DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=$P_SL EPOCHS=$P_EP D_MODEL=${D_MODEL:-768} \
@@ -589,7 +609,7 @@ pilot)
       SIG_WIN=${SIG_WIN:-614} \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 \
-      SAVE_CKPT="$(_reserve "$OUT/pilot_$ARCH")" PROBE_WAIT=${PROBE_WAIT:-12} \
+      SAVE_CKPT="$_PCK" TOKENIZER_PATH="$_PCK.dyntok.json" PROBE_WAIT=${PROBE_WAIT:-12} \
       python3 self_organize.py 2>&1 | tee "$(_reserve "$OUT/pilot_$ARCH.log")"
   done
   echo
@@ -637,6 +657,16 @@ pilot-add)
     for _tc in "$FROM.dyntok.json" "${FROM%.ckpt}.dyntok.json" "$(dirname "$FROM")/$(basename "$FROM" .ckpt).dyntok.json"; do
       [ -f "$_tc" ] && { TOKENIZER_PATH="$_tc"; break; }
     done
+    # LAST RESORT: the SHARED default. Any pilot run before the fix above wrote its vocabulary to
+    # data/dyntok.json, so without this every such checkpoint is permanently unresumable. It is last on
+    # purpose and it says so, because that file is shared -- if two pilots ran, it belongs to the SECOND one
+    # and pairing it with the first one's weights is exactly the silent mismatch this block exists to prevent.
+    # self_organize.py refuses on a vocabulary mismatch, so a wrong pairing fails loudly rather than quietly.
+    if [ -z "${TOKENIZER_PATH:-}" ] && [ -f data/dyntok.json ]; then
+      TOKENIZER_PATH=data/dyntok.json
+      echo "!! falling back to the SHARED data/dyntok.json -- $FROM predates per-run tokenizer paths. If any"
+      echo "   other pilot has run since, this vocabulary is that one's and the resume will be refused."
+    fi
   fi
   [ -n "${TOKENIZER_PATH:-}" ] || { echo "!! cannot find the tokenizer that goes with $FROM -- set TOKENIZER_PATH=<the .dyntok.json saved beside it>"; exit 1; }
   # $OUT MUST EXIST BEFORE tee OPENS ITS FILE. `pilot` mkdir -p's it, `pilot-add` never did -- and tee opens its
@@ -1065,7 +1095,7 @@ grid)
     # ORDER MATTERS: run the short one FIRST. If it reproduces 2.03 the long arm is answering a question that
     # has already been answered, and the compute belongs on model capacity instead.
     #   PILOT_DIR=data_075 STREAM_LEN=94000000 EPOCHS=2 GRID_DIR=runs/075b bash longrun.sh grid round17
-    round17) ARMS="lr_075_short" ;;
+    round17) ARMS="lr_075_short lr_075_rst" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac

@@ -331,7 +331,11 @@ _SPEC = {
     "ENC_VREG": ("f", 5.0),                               # encoder
     "ENC_WARMUP": ("i", 800),                             # encoder
     "ENC_WARMUP_EPS": ("f", 0.015),                       # encoder
-    "ENC_WARMUP_MIN": ("i", 3000),                        # encoder
+    "ENC_WARMUP_MIN": ("i", 200),                         # encoder -- MUST be < ENC_WARMUP or the early stop
+    #   is unreachable: _wfloor = min(ENC_WARMUP_MIN, ENC_WARMUP), so a MIN above WARMUP collapses the floor
+    #   onto the full warmup and the adaptive stop can never fire early. At 3000 against ENC_WARMUP=800 that
+    #   was the shipped state; every launcher already passes MIN below WARMUP (grid: 500 against 2000), so
+    #   nothing measured used the inverted pair -- only a default-configured run did.
     "ENC_WARMUP_PROBE": ("i", 500),                       # encoder
     "SIG_BATCH": ("i", 1),                                # encoder
     "SIG_D": ("i", 64),                                   # encoder
@@ -4062,6 +4066,13 @@ def main():
     # than once per step. See the restart block in _lr_at.
     LR_RESTART_DAMP = min(1.0, max(0.0, _f("LR_RESTART_DAMP", 0.5)))
     _rst_amp = [1.0]; _cyc_best = [None]; _cyc_seen = [0]
+    # ...AND THE COUNTERS THE DID IT FIRE ROWS READ. Defined HERE, above _lr_at, because _lr_at writes _ncyc
+    # and _nenv from inside itself -- a closure resolves at call time, but keeping the definition below its
+    # only writer is how a NameError waits for the one configuration that reaches it.
+    _nrst = [0]      # restarts taken
+    _ndamp = [0]     # restarts damped for failing to beat the best they inherited
+    _nenv = [0]      # times the LR_DECAY envelope actually scaled the rate
+    _ncyc = [1]      # cycles that FIT the run -- "armed" for a restart means >1, not LR_RESTARTS=1
     om = torch.optim.AdamW(_base, lr=LR, weight_decay=WD)
     for _g in _regrown: om.add_param_group({"params": _g})   # same groups, same order as the original run
     oe = torch.optim.AdamW(enc.parameters(), lr=LR, weight_decay=WD)
@@ -4104,6 +4115,7 @@ def main():
             _per_c = (_run_end - _w) / _n
             _p = (((st - _w) / _per_c) % 1.0) if st < _run_end else 1.0
             _ci = int((st - _w) / _per_c) if st < _run_end else _n - 1     # which cycle we are in, 0-based
+            _ncyc[0] = _n                              # what the report calls "cycles that fit"
         else:
             _p = min(1.0, _prog); _n, _ci = 1, 0
         _cyc = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _p))
@@ -4144,7 +4156,10 @@ def main():
         # earned the current solution. LR_DECAY scales each successive cycle's PEAK by the run's overall
         # progress, so the rate still fluctuates -- each cycle keeps its own high phase to move in and its own
         # anneal to consolidate -- while the ceiling of those fluctuations comes down monotonically.
-        #   LR_DECAY=0 (default) is the existing behaviour, exactly.
+        #   LR_DECAY=0 restores the pre-2026-08-26 behaviour exactly: restarts return to full peak.
+        #   LR_DECAY=1 IS THE DEFAULT. This block said "LR_DECAY=0 (default)" for one commit after the
+        #     default was flipped -- prose left behind by an edit to the value it justifies, which is the
+        #     same class of stale-comment fault the config banner exists to catch.
         #   LR_DECAY=1 makes the envelope fall on the same cosine shape as a single cycle would, so the last
         #     cycle peaks near the floor and the run ends annealed twice over.
         # The envelope is a function of GLOBAL progress, never of the cycle, so it cannot itself oscillate.
@@ -4158,7 +4173,7 @@ def main():
         if LR_DECAY > 0.0 and _n > 1 and _run_end is not None and _run_end > _w:
             _gp = min(1.0, max(0.0, (st - _w) / max(1, _run_end - _w)))
             _env = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _gp))
-            _cyc = _cyc * ((1 - LR_DECAY) + LR_DECAY * _env)
+            _cyc = _cyc * ((1 - LR_DECAY) + LR_DECAY * _env); _nenv[0] += 1
         return LR * _cyc
     # PER-EXPERT MEMORY: each expert owns MEM_QUOTA entries, evicted by LRU on last USE. Sized to FAB_NMAX so the
     # partition does not have to be rebuilt as the population grows. MEM_PER_EXPERT=0 keeps the single global store.
@@ -5298,7 +5313,6 @@ def main():
     _lrboost = [0]; _memw = [0]        # mechanisms with no counter of their own -- see the DID IT FIRE report
     _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
     _lr_prev = [0.0]                                       # last applied rate, to detect a cosine restart
-    _nrst = [0]                                            # how many restarts have happened -- see the restart line
     # === PROBATION: MINT PROVISIONALLY, JUDGE ON EVIDENCE ====================================================
     # TOK_MINT_PMIN decides from co-occurrence BEFORE the model has seen the token once. That is the most
     # statistics alone can do and less than we can do: a token can be minted, TRAINED, and then judged on what
@@ -6051,7 +6065,7 @@ def main():
                 # not evidence of failure, so it is left alone.
                 _paid = (_cyc_best[0] is None or (_best_bpb[0] is not None and _best_bpb[0] < _cyc_best[0] - 1e-6))
                 if not _paid and LR_RESTART_DAMP < 1.0:
-                    _rst_amp[0] *= LR_RESTART_DAMP
+                    _rst_amp[0] *= LR_RESTART_DAMP; _ndamp[0] += 1
                 _cyc_best[0] = _best_bpb[0]
                 _bstr = (f"best held-out so far {_best_bpb[0]:.3f} at step {_best_bpb[1]}"
                          if _best_bpb[0] is not None else "no held-out probe yet")
@@ -7408,6 +7422,31 @@ def main():
         # already says so on its own [config] line. Off-by-architecture is not the same as on-and-inert.
         _r("loss.IND_W", lambda: _termfired.get("IND_W", 0),
            lambda: _cfg("IND_W") > 0 and _cfg("SOCIETY"), "IND_W=0, or chaining (no separable per-expert logits)")
+        # THE LR SCHEDULE HAD NO ROW HERE AT ALL, and it is the part of this system that has broken the most
+        # runs. Six schedule fixes in eleven days, three of them in one day, and the audit that exists to say
+        # "this mechanism did nothing" could not see any of them. The closed-loop restart damping added to stop
+        # a converged model being slammed back to peak is a case in point: it only engages on a MULTI-cycle
+        # schedule, every arm that recommends itself sets LR_RESTARTS=0, and nothing would have reported that
+        # it had never once run.
+        #   lr.restart   how many times the cosine returned to peak. ARMED means restarts are configured AND
+        #                the run is long enough for more than one cycle to fit -- LR_RESTARTS=1 on a run of one
+        #                wavelength is off by arithmetic, not a mechanism that declined.
+        #   lr.damp      how many restarts were damped for failing to beat the best they inherited. ZERO while
+        #                armed means either every cycle paid, or none was ever tested.
+        #   lr.envelope  whether LR_DECAY actually scaled anything, which it cannot on a single-cycle run.
+        _r("lr.restart",  lambda: _nrst[0],
+           lambda: bool(_cfg("LR_RESTARTS")) and _cfg("LR_SCHED") != "none" and _ncyc[0] > 1,
+           ("LR_SCHED=none" if _cfg("LR_SCHED") == "none" else
+            "LR_RESTARTS=0" if not _cfg("LR_RESTARTS") else
+            f"one cycle fits this run ({_ncyc[0]}), so there is nothing to restart"))
+        _r("lr.damp",     lambda: _ndamp[0],
+           lambda: _cfg("LR_RESTART_DAMP") < 1.0 and _nrst[0] > 0,
+           ("LR_RESTART_DAMP=1 (damping disabled)" if _cfg("LR_RESTART_DAMP") >= 1.0 else
+            "no restart happened, so no cycle was ever judged"))
+        _r("lr.envelope", lambda: _nenv[0],
+           lambda: _cfg("LR_DECAY") > 0.0 and _ncyc[0] > 1,
+           ("LR_DECAY=0" if _cfg("LR_DECAY") <= 0.0 else
+            f"one cycle fits this run ({_ncyc[0]}); the envelope is gated to multi-cycle schedules"))
         print(f"\n=== DID IT FIRE? every armed mechanism, and whether it did anything this run ===")
         print(f"  Read the ZERO lines first. An ARMED mechanism that never fired means this run measured a system")
         print(f"  WITHOUT it, whatever the [config] banner says -- which has happened here at least six times.")
