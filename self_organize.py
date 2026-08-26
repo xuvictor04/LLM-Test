@@ -4611,6 +4611,23 @@ def main():
     if EPOCHS > 1 and not DISK_STREAM:
         _warn.append(f"EPOCHS={EPOCHS} with DISK_STREAM=0 -> every epoch is a BYTE-IDENTICAL REPLAY "
                      f"(_resample runs only under DISK_STREAM). Set DISK_STREAM=1 for fresh data per epoch.")
+    # A CORPUS SMALLER THAN STREAM_LEN DUPLICATES ITSELF, SILENTLY. build_stream draws random segments until it
+    # has STREAM_LEN bytes and stops -- it never checks whether that many DISTINCT bytes exist. Ask for 94 MB an
+    # epoch from a 58 MB corpus and you get 94 MB containing the same text about 1.6x over, with no error and
+    # nothing in the log to say so. And _pilot_corpus in longrun.sh returns early if ANY part file exists, so a
+    # directory fetched at 0.06 GB is silently reused for a run configured for 0.75 GB.
+    # This matters for reading old results as much as for launching new ones: the 0.75 GB run asked for 94 MB an
+    # epoch, and whether it got that many distinct bytes cannot be recovered from its log, because the log never
+    # said. Anything comparing it against a 25 MB-an-epoch run is comparing two different amounts of repetition
+    # as well as two different sizes.
+    _avail = sum(SEG_LEN) if DATA_MODE == "real" else 0
+    if _avail and STREAM_LEN > _avail:
+        _warn.append(f"STREAM_LEN={STREAM_LEN} exceeds the {_avail} training bytes on disk "
+                     f"({_avail / 1e6:.0f} MB across {NP} corpus/corpora after the {VAL_FRAC:.0%} held-out tail). "
+                     f"build_stream will still produce {STREAM_LEN} bytes by RESAMPLING, so each epoch repeats "
+                     f"the corpus ~{STREAM_LEN / _avail:.2f}x internally. That is not more data, it is the same "
+                     f"data more times -- and it is invisible in every other line of this log. Fetch more text "
+                     f"(fetch_big.py --gb) or lower STREAM_LEN below {_avail / 1e6:.0f} MB.")
     if _i("CORPUS_CAP", 2000000) <= 2000000 and DATA_MODE == "real":
         _warn.append(f"CORPUS_CAP={_i('CORPUS_CAP', 2000000)} bytes -> each domain is capped at ~2MB regardless of how "
                      f"much data is on disk. A multi-day run would see 2MB of text. Set CORPUS_CAP to the real size.")

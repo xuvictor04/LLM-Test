@@ -458,6 +458,26 @@ _flags_for() {
     sched_step) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=100000" ;;
     sched_warm) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_SHIFT_WARM=4000" ;;
     sched_both) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=100000 LR_SHIFT_WARM=4000" ;;
+    # === THE 0.75 GB LAUNCH ARM ================================================================================
+    # Everything that has been MEASURED, and nothing that has not.
+    #   FAB_N0=2048 / FAB_NMAX=8192 / GROW_CAP_FAB0=3000   the expert valve, which fires five times to a cap of
+    #        4406 and then hands over to the cull gate at 0.45 x 8192. Measured in four runs; never shown to
+    #        help or hurt beyond noise, and it is the mechanism the run exists to exercise.
+    #   GROW_CAP_VOCAB=0                                   the vocabulary half OFF. round12 is the one clean
+    #        one-knob measurement in this whole sequence: 2.021 frozen at 2048 against 2.162 grown to 3784.
+    #   LR_STEPS=280000                                    the wavelength of the schedule that produced the best
+    #        held-out on record (sched_ctl: 8 epochs x 25 MB = 282,000 steps, single cosine, no restart), now
+    #        stated in STEPS so it is the same schedule at 94 MB an epoch as at 25. Across ~840,000 steps that
+    #        is ~3 cycles; sched_step took a full restart to peak at step 119,157 and finished within noise, so
+    #        a restart is survivable evidence rather than a hope.
+    #   LR_SHIFT_WARM is NOT set. It has never been tested against the failure it targets -- the epoch-2 shock
+    #        did not occur in the round where it was armed -- and on the run where it WAS armed it cost 0.128,
+    #        inside the seed spread but the wrong sign. Off is the measured configuration.
+    lr_075)     echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=280000 CKPT_EVERY=20000" ;;
+    # ...and the same thing with the vocabulary allowed to grow, which is what was originally asked for. Kept
+    # nameable because the 0.141 that argues against it is one measurement at 25 MB an epoch, and the argument
+    # FOR it -- that a bigger vocabulary should pay off on more text -- has never been tested at 94.
+    lr_075_voc) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=280000 CKPT_EVERY=20000" ;;
     lr_vcap)    echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=2048 GROW_CAP=1 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4" ;;
     nodom_kn)  echo "SELF_ORG=0 FAB_KEY_NORM=1" ;;
     # AN UNKNOWN ARM NAME MUST NOT SILENTLY BE base. Returning "" meant a typo ran the DEFAULT configuration
@@ -940,11 +960,11 @@ grid)
     # wavelength did not lower the peak, it lengthened the time spent near it -- through exactly the stretch the
     # run needed to re-settle. A wobble became a permanent loss.
     #
-    # So: keep the 8-epoch WAVELENGTH and take the restart. Each cycle is then shaped exactly like the one that
-    # recovered, and LR_RESTARTS=1 re-heats once at epoch 8 -- which I talked us out of last round on the
-    # grounds that it was "a different experiment". It is the safer one. If the re-heat causes a second shock,
-    # the new blow-up alarm says so at the probe it happens on rather than eight hours later.
-    #   STREAM_LEN=25000000 EPOCHS=16 LR_EPOCHS=8 GRID_DIR=runs/passes2 bash longrun.sh grid round14
+    # So: keep the WAVELENGTH that recovered and take the restart. In STEPS, not in epochs -- writing this as
+    # LR_EPOCHS=8 would put the wavelength back on the quantity LR_STEPS exists to remove, and at EPOCHS=16 the
+    # per-epoch length is exactly what is changing. 280,000 steps is what sched_ctl's 8 epochs of 25 MB actually
+    # spanned (282,000), so two cycles cover a 16-epoch run and each is shaped like the one that worked.
+    #   STREAM_LEN=25000000 EPOCHS=16 LR_STEPS=280000 GRID_DIR=runs/passes2 bash longrun.sh grid round14
     # WORTH KNOWING SEPARATELY: nothing protects the OPTIMIZER from the epoch resample. fabgrow.note_shift()
     # marks it so growth does not react to our own distribution change, and the capacity valve now respects the
     # same flag -- but the LR takes the shift at whatever the cosine says, which at the second boundary is near
@@ -977,6 +997,34 @@ grid)
     # on held-out. The blow-up alarm now fires at the probe it happens on, so an arm that breaks says so.
     #   STREAM_LEN=25000000 EPOCHS=8 GRID_DIR=runs/sched bash longrun.sh grid round15
     round15) ARMS="sched_ctl sched_step sched_warm sched_both" ;;
+    # === ROUND 16: THE 0.75 GB RUN ============================================================================
+    # One arm, everything measured, ~840,000 steps. Read the PREP block below before launching -- the corpus is
+    # the part that will silently be wrong.
+    #
+    # THE CORPUS IS THE PREP. build_stream draws random segments until it has STREAM_LEN bytes and stops; it
+    # never checks that many DISTINCT bytes exist. _pilot_corpus here returns early if ANY part file is present,
+    # so data_pilot fetched at 0.06 GB is reused unchanged by a run configured for 0.75 GB, and each epoch then
+    # repeats the corpus ~1.6x internally with nothing in the log to say so. self_organize.py now WARNS on this
+    # (STREAM_LEN vs bytes on disk), but the fix is to fetch the text:
+    #
+    #   python3 fetch_big.py --dataset fineweb-edu --domain eng --gb 1.0 --out data_075 --resume
+    #   du -sh data_075/train/eng                               # confirm before spending twelve hours
+    # NOT `bash longrun.sh fetch`: that subcommand pulls into $DATA_DIR (default data_big) at $ENG_GB (default
+    # 20), and reads neither PILOT_DIR nor PILOT_GB -- while the grid trains out of $PILOT_DIR. The two halves
+    # use different variables for the same directory, so the obvious command fetches somewhere the run will not
+    # look. Calling fetch_big.py directly has one --out and no room for that mistake.
+    #
+    # A SEPARATE DIRECTORY ON PURPOSE. Pointing this at data_pilot would either reuse the 58 MB silently or
+    # grow the directory every pilot from here on reads, which would make round12-15 unreproducible.
+    #
+    # WHAT IT COSTS. ~840,000 steps. 2.2-3.1 GB/day measured on the fast box (~7 h), 1.17 GB/day on the slow one
+    # (~15 h). BEST_KEEP=4 took 18 local lows in 48k steps, so expect ~300 save events with 4 resident;
+    # CKPT_EVERY=20000 is set so a crash at hour ten does not cost the run.
+    # WHAT TO READ FIRST: the STREAM_LEN warning at the top, then [capacity @ ...], then the epoch-2 boundary at
+    # ~step 38,576, then held-out. The blow-up alarm is now trustworthy -- it fires only after 80 probes with no
+    # new best -- so if it goes off, kill the run.
+    #   PILOT_DIR=data_075 STREAM_LEN=94000000 EPOCHS=8 GRID_DIR=runs/075 bash longrun.sh grid round16
+    round16) ARMS="lr_075" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac
