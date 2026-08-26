@@ -365,7 +365,8 @@ _SPEC = {
     "LR_STEPS": ("i", 0),                                 # optim -- WAVELENGTH IN STEPS; 0 = derive from LR_EPOCHS
     "LR_SHIFT_WARM": ("i", 0),                            # optim -- re-warm this many steps after an epoch resample
     "LR_RESTARTS": ("i", 1),
-    "LR_DECAY": ("f", 0.0),                               # lr
+    "LR_RESTART_DAMP": ("f", 0.5),                        # optim -- a restart that did not pay halves the next
+    "LR_DECAY": ("f", 1.0),                               # lr -- envelope over RESTART cycles; no-op at 1 cycle
     "FAB_LR_OWN": ("i", 0),                               # fabric
     "FAB_LR_MAXR": ("f", 4.0),                            # fabric
     "FAB_LR_BOOST": ("f", 2.0),                           # fabric
@@ -4055,6 +4056,12 @@ def main():
     # is the behaviour every result so far was produced under.
     LR_SHIFT_WARM = max(0, _i("LR_SHIFT_WARM", 0))
     _shift_at = [-10 ** 9]                                 # step of the last resample; see LR_SHIFT_WARM
+    # CLOSED-LOOP RESTART AMPLITUDE. _rst_amp scales the swing of every cycle after the first; a cycle that
+    # fails to beat the best held-out from before it started halves it. _cyc_best is that pre-cycle best, and
+    # _cyc_seen is the cycle index the loop last acted on, so the decision is taken once per boundary rather
+    # than once per step. See the restart block in _lr_at.
+    LR_RESTART_DAMP = min(1.0, max(0.0, _f("LR_RESTART_DAMP", 0.5)))
+    _rst_amp = [1.0]; _cyc_best = [None]; _cyc_seen = [0]
     om = torch.optim.AdamW(_base, lr=LR, weight_decay=WD)
     for _g in _regrown: om.add_param_group({"params": _g})   # same groups, same order as the original run
     oe = torch.optim.AdamW(enc.parameters(), lr=LR, weight_decay=WD)
@@ -4094,10 +4101,32 @@ def main():
             # EPOCHS-stretching caused, which is what this whole change is about. At EPOCHS == LR_EPOCHS the
             # count is 1 and the period is the run, so the schedule is bit-identical to LR_RESTARTS=0.
             _n = max(1, round((_run_end - _w) / _span))
-            _p = (((st - _w) / ((_run_end - _w) / _n)) % 1.0) if st < _run_end else 1.0
+            _per_c = (_run_end - _w) / _n
+            _p = (((st - _w) / _per_c) % 1.0) if st < _run_end else 1.0
+            _ci = int((st - _w) / _per_c) if st < _run_end else _n - 1     # which cycle we are in, 0-based
         else:
-            _p = min(1.0, _prog)
+            _p = min(1.0, _prog); _n, _ci = 1, 0
         _cyc = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _p))
+        # === A RESTART THAT DID NOT PAY DOES NOT GET TO HAPPEN AGAIN AT FULL SIZE ==============================
+        # THE OPEN-LOOP DEFECT. Every fix for this so far has been a launch-config choice -- pick a wavelength,
+        # pick LR_RESTARTS -- and the same failure came back three rounds running because the SCHEDULE cannot
+        # see what it is doing. A warm restart is a BET: give up the current anneal, explore, and re-anneal into
+        # something at least as good. On the 0.75 GB run that bet lost three times in a row and the schedule
+        # took it again each time at full amplitude, because nothing connects the rate to the objective:
+        #     best 2.030 @ 252,000, restarts at 263,965 / 504,894 / 756,851, final 2.848
+        #     before r1  2.03 2.03    after  2.18 2.26 2.31
+        #     before r2  2.10 2.10    after  3.59 3.12 3.06
+        #     before r3  2.20 2.20    after  2.37 2.29 2.46
+        # A losing bet that is re-taken identically is not a schedule, it is a ratchet. So: a cycle that fails
+        # to beat the best held-out from BEFORE it starts halves the amplitude of the next restart, cumulatively
+        # (LR_RESTART_DAMP). A schedule whose restarts keep failing therefore anneals itself off within two or
+        # three of them, while one whose restarts genuinely help is untouched -- the damping only ever engages
+        # after a cycle has already been measured not to pay.
+        # It CANNOT affect a single-cycle run: _ci is 0 throughout and the amplitude is only applied past the
+        # first cycle. Every result this project has recorded came from a single-cycle schedule, so all of them
+        # are bit-identical under this change.
+        if _ci > 0 and _rst_amp[0] < 1.0:
+            _cyc = LR_MIN_FRAC + (_cyc - LR_MIN_FRAC) * _rst_amp[0]   # damp the SWING, never below the floor
         # RE-WARM AFTER A RESAMPLE, as an ATTENUATION of the cycle rather than a replacement of it. Returning
         # `LR * ramp` here would RAISE the rate whenever a shift lands late in the anneal -- a schedule that
         # steps back up mid-run, which is exactly what the monotone-progress clamp above exists to prevent. It
@@ -4119,7 +4148,14 @@ def main():
         #   LR_DECAY=1 makes the envelope fall on the same cosine shape as a single cycle would, so the last
         #     cycle peaks near the floor and the run ends annealed twice over.
         # The envelope is a function of GLOBAL progress, never of the cycle, so it cannot itself oscillate.
-        if LR_DECAY > 0.0 and _run_end is not None and _run_end > _w:
+        # ...AND THE ENVELOPE APPLIES TO RESTART CYCLES ONLY. Written as a function of GLOBAL progress with no
+        # reference to the cycle count, it also squeezed a SINGLE-cycle run -- multiplying one cosine by another,
+        # so a run that should end at LR_MIN_FRAC ended at LR_MIN_FRAC squared and annealed to nothing well
+        # before the finish. That is why turning it on was never safe, and why it has sat at 0.0 since it was
+        # written for exactly this failure. Gated on _n > 1 it is a no-op for every single-cycle schedule -- i.e.
+        # for every result this project has recorded -- and active precisely where the damage happens, so it can
+        # now default ON.
+        if LR_DECAY > 0.0 and _n > 1 and _run_end is not None and _run_end > _w:
             _gp = min(1.0, max(0.0, (st - _w) / max(1, _run_end - _w)))
             _env = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * _gp))
             _cyc = _cyc * ((1 - LR_DECAY) + LR_DECAY * _env)
@@ -5244,7 +5280,7 @@ def main():
     # move in and a fresh anneal to consolidate it. LR_RESTARTS=0 restores the hold, which is what the 2.023
     # run did, so earlier results stay reproducible.
     LR_RESTARTS = bool(_i("LR_RESTARTS", 1))
-    LR_DECAY = _f("LR_DECAY", 0.0)                         # 0 = restarts return to full peak (previous behaviour)
+    LR_DECAY = _f("LR_DECAY", 1.0)                         # 0 = restarts return to full peak (the old behaviour)
     # OFF, ON MEASUREMENT. FAB_LR_OWN=1 vs =0, three paired seeds, one knob apart: 2.023 vs 2.019, a difference
     # of 0.0040 b/B. Two runs of the SAME configuration on this project have differed by up to 0.039, so this is
     # thirty times below the floor for running the same thing twice -- not a small effect, an absent one. It also
@@ -6008,15 +6044,26 @@ def main():
                 # best-so-far and the restart count are the two numbers that make the ratchet visible while it
                 # is happening rather than only in the final curve.
                 _nrst[0] += 1
+                # DID THE CYCLE THAT JUST ENDED PAY FOR ITSELF? _cyc_best is the best held-out from before it
+                # began. If the cycle did not beat that, the restart bet lost, and the next one is taken at half
+                # the amplitude -- cumulatively, so a schedule whose restarts keep failing anneals itself off
+                # within two or three of them. None on the first restart means no probe had landed yet, which is
+                # not evidence of failure, so it is left alone.
+                _paid = (_cyc_best[0] is None or (_best_bpb[0] is not None and _best_bpb[0] < _cyc_best[0] - 1e-6))
+                if not _paid and LR_RESTART_DAMP < 1.0:
+                    _rst_amp[0] *= LR_RESTART_DAMP
+                _cyc_best[0] = _best_bpb[0]
                 _bstr = (f"best held-out so far {_best_bpb[0]:.3f} at step {_best_bpb[1]}"
                          if _best_bpb[0] is not None else "no held-out probe yet")
+                _pstr = ("" if _paid else
+                         f" THE LAST CYCLE DID NOT BEAT THE BEST IT INHERITED, so the restart bet lost and this "
+                         f"one is damped to {_rst_amp[0]:.0%} of full swing; two more failures and the schedule "
+                         f"has annealed itself off.")
                 print(f"  [lr @ {step}] cosine restart {_nrst[0]}: {_lr_prev[0]:.2e} -> {_lrv:.2e} "
                       f"({_lrv / max(1e-12, LR) * 100:.0f}% of peak, x{_lrv / max(1e-12, _lr_prev[0]):.0f}). "
                       f"Marked as self-inflicted so the fabric does not read the loss jump as a regression to "
                       f"grow on. {_bstr} -- a restart puts THAT model back at the peak rate, and on the 0.75 GB "
-                      f"run three of these cost +0.725 bits/byte that never came back. If the curve does not "
-                      f"return to its best within ~20 probes, the wavelength is too short for this run: set "
-                      f"LR_RESTARTS=0, or LR_STEPS to about the run length.")
+                      f"run three of these cost +0.725 bits/byte that never came back.{_pstr}")
             _lr_prev[0] = _lrv
             for _g in om.param_groups: _g["lr"] = _lrv
             for _g in oe.param_groups: _g["lr"] = _lrv

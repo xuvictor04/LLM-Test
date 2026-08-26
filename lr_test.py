@@ -62,19 +62,27 @@ for _frag, _what in (("LR_SCHED == 'none'", "the LR_SCHED=none escape"),
 
 # --- the reimplementation, mirroring _lr_at ---------------------------------------------------------------------
 def lr_at(st, total, run_end=None, *, LR=2e-3, LR_WARMUP=1000, LR_MIN_FRAC=0.05, LR_RESTARTS=1,
-          LR_SHIFT_WARM=0, shift_at=-10 ** 9):
+          LR_SHIFT_WARM=0, shift_at=-10 ** 9, rst_amp=1.0, LR_DECAY=0.0):
     w = min(LR_WARMUP, max(1, total // 10))
     if st < w: return LR * (st + 1) / w
     span = max(1, total - w)
     prog = (st - w) / span
     if LR_RESTARTS and run_end is not None:
         n = max(1, round((run_end - w) / span))
-        p = (((st - w) / ((run_end - w) / n)) % 1.0) if st < run_end else 1.0
+        per_c = (run_end - w) / n
+        p = (((st - w) / per_c) % 1.0) if st < run_end else 1.0
+        ci = int((st - w) / per_c) if st < run_end else n - 1
     else:
-        p = min(1.0, prog)
+        p = min(1.0, prog); n, ci = 1, 0
     cyc = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * p))
+    if ci > 0 and rst_amp < 1.0:
+        cyc = LR_MIN_FRAC + (cyc - LR_MIN_FRAC) * rst_amp
     if LR_SHIFT_WARM and 0 <= st - shift_at < LR_SHIFT_WARM:
         cyc *= max(LR_MIN_FRAC, (st - shift_at + 1) / LR_SHIFT_WARM)
+    if LR_DECAY > 0.0 and n > 1 and run_end is not None and run_end > w:
+        gp = min(1.0, max(0.0, (st - w) / max(1, run_end - w)))
+        env = LR_MIN_FRAC + (1 - LR_MIN_FRAC) * 0.5 * (1 + math.cos(math.pi * gp))
+        cyc = cyc * ((1 - LR_DECAY) + LR_DECAY * env)
     return LR * cyc
 
 
@@ -140,6 +148,61 @@ print("   8-epoch:   " + "  ".join(f"{v:>6.0%} " for v in e8))
 print("   16-epoch:  " + "  ".join(f"{v:>6.0%} " for v in e16))
 check(abs(e8[0] - e16[0]) < 0.10, "at the SHOCK both are near peak -- the shock is not what differs")
 check(e16[4] > 2 * e8[4], "by the fifth boundary the stretched schedule is still more than twice as hot")
+
+
+# --- 5. THE RESTART THAT DESTROYED THE 0.75 GB RUN ---------------------------------------------------------------
+# 1,051,405 steps, LR_STEPS=280000, LR_RESTARTS=1 -> four cycles, restarts at 263,965 / 504,894 / 756,851, each
+# 1.00e-04 -> 2.00e-03 onto a model that had converged to 2.030 by step 252,000. Final 2.848.
+# Three rounds of fixing this in the LAUNCH CONFIG did not stop it, because the schedule is open-loop: nothing
+# connects the rate to the objective, so a losing bet is re-taken identically. Two changes close the loop.
+print("\nTHE 0.75 GB FAILURE -- a losing restart must not be re-taken at full size")
+RUN, WAVE = 1_051_405, 280_000
+_n = round((RUN - 1000) / (WAVE - 1000))
+# THE SCHEDULE'S OWN BOUNDARIES, not the log's. The run restarted at 263,965 / 504,894 / 756,851, which drift
+# from these because _run_end is a PROJECTION that shrinks as minting lengthens tokens -- the very estimate
+# LR_STEPS removes from the wavelength but not from the restart count. Sampling at the logged steps would test
+# that drift rather than the schedule, so the boundaries are recomputed here and the drift is just noted.
+_per = (RUN - 1000) / _n
+RST = tuple(int(1000 + k * _per) for k in (1, 2, 3))
+print(f"  LR_STEPS={WAVE} over {RUN} steps -> {_n} cycles, {_n - 1} restarts at {RST}")
+print(f"  (the run's own restarts were 263965 / 504894 / 756851 -- the projected end drifts; see above)")
+check(_n == 4, f"the config really did produce {_n} cycles -- the failure is reproduced, not assumed")
+_undamped = [lr_at(s + 200, WAVE, RUN) / 2e-3 for s in RST]
+print("  peak reached at each restart, undamped: " + "  ".join(f"{v:.0%}" for v in _undamped))
+check(all(v > 0.85 for v in _undamped), "undamped, every restart returns to near full peak -- the ratchet")
+
+# ...and with the loop closed: each failed cycle halves the amplitude, cumulatively.
+_damped = [lr_at(s + 200, WAVE, RUN, rst_amp=0.5 ** i, LR_DECAY=1.0) / 2e-3 for i, s in enumerate(RST, start=1)]
+print("  with damping + envelope:                " + "  ".join(f"{v:.0%}" for v in _damped))
+check(_damped[0] < _undamped[0] * 0.7, "the first failed restart is already cut well below full swing")
+check(_damped[1] < _damped[0] and _damped[2] < _damped[1], "and each further failure cuts it again")
+check(_damped[2] < 0.15, "by the third the schedule has effectively annealed itself off")
+
+print("\n  ...but it must not touch a schedule whose restarts are WORKING")
+_ok = [lr_at(s + 200, WAVE, RUN, rst_amp=1.0, LR_DECAY=1.0) / 2e-3 for s in RST]
+print("  restarts that paid (amp stays 1.0):     " + "  ".join(f"{v:.0%}" for v in _ok))
+check(_ok[0] > _damped[0], "a paying restart keeps more amplitude than a failing one")
+check(all(a >= b for a, b in zip(_ok, _ok[1:])), "the envelope alone still brings the ceiling down monotonically")
+
+# --- 6. NOTHING ALREADY MEASURED MAY CHANGE ----------------------------------------------------------------------
+# Every result this project has recorded came from a SINGLE-cycle schedule. Both new mechanisms must be exact
+# no-ops there, or the whole back-catalogue becomes unreproducible.
+print("\nSINGLE-CYCLE RUNS MUST BE BIT-IDENTICAL -- every recorded result came from one")
+for name, total, run_end in (("sched_ctl 282k", 282_000, 282_000), ("lr_075_short 260k", 260_000, 262_852)):
+    base = [lr_at(s, total, run_end, LR_DECAY=0.0, rst_amp=1.0) for s in (5_000, 50_000, 150_000, 250_000)]
+    now = [lr_at(s, total, run_end, LR_DECAY=1.0, rst_amp=0.125) for s in (5_000, 50_000, 150_000, 250_000)]
+    same = all(abs(a - b) < 1e-15 for a, b in zip(base, now))
+    print(f"  {name:18s} " + "  ".join(f"{v/2e-3:.0%}" for v in now) + ("   unchanged" if same else "   CHANGED"))
+    check(same, f"{name}: one cycle -> neither the envelope nor the damping can reach it")
+# The FIRST cycle of a multi-cycle run: the DAMPING cannot reach it (it starts at the first restart), but the
+# ENVELOPE can and should -- it is a smooth function of global progress, and making it switch on discontinuously
+# at the first restart would be a worse schedule than one that eases in. Early on it is nearly 1.0 anyway.
+_c1_damp = lr_at(150_000, 280_000, 1_051_405, LR_DECAY=0.0, rst_amp=0.125)
+_c1_base = lr_at(150_000, 280_000, 1_051_405, LR_DECAY=0.0, rst_amp=1.0)
+_c1_env = lr_at(150_000, 280_000, 1_051_405, LR_DECAY=1.0, rst_amp=1.0)
+check(abs(_c1_damp - _c1_base) < 1e-15, "cycle 1 is beyond the DAMPING's reach -- it starts at the first restart")
+check(_c1_env < _c1_base and _c1_env > _c1_base * 0.9,
+      f"the envelope eases in rather than switching on: cycle 1 is scaled {_c1_env/_c1_base:.1%}, not cut")
 
 print()
 if FAILED:
