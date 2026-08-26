@@ -59,6 +59,8 @@ python3 ramp_test.py     > "$OUT/ramp.txt"  2>&1 && echo "  ok    ramp_test (the
   || { echo "  FAIL  ramp_test:"; sed 's/^/          /' "$OUT/ramp.txt"; FAIL=1; }
 python3 lr_test.py       > "$OUT/lr.txt"    2>&1 && echo "  ok    lr_test (the LR schedule means the same thing at every corpus size)" \
   || { echo "  FAIL  lr_test:"; sed 's/^/          /' "$OUT/lr.txt"; FAIL=1; }
+python3 blowup_test.py   > "$OUT/blow.txt"  2>&1 && echo "  ok    blowup_test (the divergence alarm fires on divergence and not on wander)" \
+  || { echo "  FAIL  blowup_test:"; sed 's/^/          /' "$OUT/blow.txt"; FAIL=1; }
 python3 levers.py > "$OUT/levers.txt" 2>&1 && echo "  ok    levers (every knob declared and read consistently)" \
   || { echo "  FAIL  levers:"; tail -5 "$OUT/levers.txt" | sed 's/^/          /'; FAIL=1; }
 

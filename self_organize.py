@@ -733,6 +733,40 @@ def lift_to(cap, frac, floor_):
     return int(cap) + max(int(floor_), int(float(frac) * int(cap)))
 
 
+BLOWUP_RISE = 0.5      # bits/byte above the best that counts as elevated
+BLOWUP_STALE = 80      # ...and this many probes with NO new best before that counts as permanent
+
+
+def blowup_stale(recent, best, since_best, rise=BLOWUP_RISE, stale=BLOWUP_STALE):
+    """Has this run left a level it reached and stopped coming back?
+
+    THE FIRST VERSION OF THIS ALARM FIRED ON FOUR RUNS OUT OF FOUR, at steps 8,000-12,000, on runs that went on
+    to produce the best held-out number this project has recorded (1.94 b/B). It compared ONE probe against the
+    best-so-far and fired at +0.5. That cannot work: the per-process curve genuinely wanders by more than that,
+    especially early, and the best-so-far is the running minimum of a noisy series -- so noise crosses
+    best+0.5 in every healthy run. An alarm that cries wolf is worse than no alarm, because it trains the
+    reader to skip the line that matters.
+
+    What actually separates the two, measured across nine real runs, is not the SIZE of the excursion but how
+    long the run goes without setting a new best while elevated:
+
+        healthy   sched_ctl 28   sched_step 20   sched_warm 22   sched_both 50   lr_vcap 22   lr_pilot2 11
+        blown up  round13 261    0.75 GB 309
+
+    Nothing healthy exceeded 50 probes; neither blow-up came in under 261. 80 sits between them with margin on
+    both sides and separates all nine correctly. It is deliberately nearer the healthy end's ceiling than the
+    midpoint, because a late alarm costs some wasted steps and a false one costs the instrument.
+
+    The MEDIAN of recent probes, not the latest one, so a single spike cannot trip it -- 4.82 at step 14,000 in
+    sched_ctl was one probe and the run was back to 2.95 at the next.
+
+    Module level so blowup_test.py exercises the shipped rule against the curves that defeated the old one.
+    """
+    if best is None or since_best < stale or len(recent) < 3: return False
+    _r = sorted(recent)[len(recent) // 2]
+    return _r > best + rise
+
+
 def pin_tick(held, pinned, dstep):
     """Advance the PINNED-at-the-cap clock by however many steps actually elapsed, not by one per call.
 
@@ -3803,7 +3837,7 @@ def main():
     _bkeep = []                                               # [(step, bpb, slot)] most recent local lows kept
     _prev_probe = [None]                                      # the previous probe's mean, to see a descent
     _best_bpb = [None, -1, False]                             # [best mean bits/byte, step, saved?]
-    _blew = [False]                                           # the blow-up alarm fires ONCE, not every probe
+    _blew = [False, 0, []]     # [fired once?, probes since the last new best, the last five probe values]
     _greach = []; _nbwd = 0                                   # experts receiving a nonzero gradient, sampled on cadence
     _rlive, _rseen = set(), set()                             # router parameters that DID / could receive gradient
     _lm_run = []; _lm_curve = []                              #   has very noisy gradients; this fixes that WITHOUT
@@ -5338,28 +5372,35 @@ def main():
             _cs = [b for st, _p, b, _a in _CURVE if st == step]
             if _cs:
                 _cm = sum(_cs) / len(_cs)
+                _blew[2].append(_cm); del _blew[2][:-5]     # the last five probes; the median is what is judged
                 if _best_bpb[0] is None or _cm < _best_bpb[0] - 1e-6:
-                    _best_bpb[0] = _cm; _best_bpb[1] = step
+                    _best_bpb[0] = _cm; _best_bpb[1] = step; _blew[1] = 0   # a new best resets the staleness
                     try:
                         _best_bpb[2] = bool(_save_ckpt(stream, quiet=True, suffix=".best"))
                     except Exception as _e:
                         print(f"  [best-ckpt save failed: {type(_e).__name__}: {_e}]")
-                # SAY IT WHEN IT HAPPENS, NOT EIGHT HOURS LATER. A 16-epoch run lost 4.6 bits/byte in a
-                # 6,000-step window at 99% of peak LR, and then spent 520,000 further steps -- about seven hours
-                # -- never getting back to where it had been. Nothing said so until the end-of-run report, and
-                # that report called it PLATEAUED. One line, once, at the moment the curve leaves the level it
-                # had already reached, is the difference between killing a broken run and paying for it in full.
-                # The LR is named because it is the first thing to check and it is not otherwise on this line.
-                elif (_best_bpb[0] is not None and _cm > _best_bpb[0] + 0.5 and not _blew[0]):
-                    _blew[0] = True
-                    try: _lrnow = _lr_at(step, max(1, _lr_total(step)), _proj_steps(step))
-                    except Exception: _lrnow = float('nan')
-                    print(f"  !! BLEW UP @ {step}: held-out {_cm:.3f} bits/byte against a best of "
-                          f"{_best_bpb[0]:.3f} at step {_best_bpb[1]} -- {_cm - _best_bpb[0]:+.3f}, far outside "
-                          f"the 0.066-0.131 seed spread. LR here is {_lrnow:.2e} ({_lrnow / max(1e-12, LR):.0%} "
-                          f"of peak). The best model is already saved to .best; if this does not come back "
-                          f"within a few probes the remaining steps are being spent below a level already "
-                          f"reached, and the run is worth killing rather than finishing.")
+                # SAY IT WHEN IT HAPPENS, NOT EIGHT HOURS LATER. A 16-epoch run lost 4.6 bits/byte and then
+                # spent 520,000 further steps -- about seven hours -- never getting back. Nothing said so until
+                # the end-of-run report, and that report called it PLATEAUED.
+                # BUT NOT ON ONE PROBE. The first version of this compared a single probe against the best and
+                # fired at +0.5; it went off in four runs out of four, at steps 8,000-12,000, on runs that ended
+                # at the best held-out this project has recorded. See blowup_stale: what separates a blow-up
+                # from ordinary wander is not the size of the excursion but how long the run stays elevated
+                # without setting a new best.
+                else:
+                    _blew[1] += 1
+                    if not _blew[0] and blowup_stale(_blew[2], _best_bpb[0], _blew[1]):
+                        _blew[0] = True
+                        try: _lrnow = _lr_at(step, max(1, _lr_total(step)), _proj_steps(step))
+                        except Exception: _lrnow = float('nan')
+                        print(f"  !! BLEW UP @ {step}: {_blew[1]} probes with no new best, and the recent "
+                              f"median is {sorted(_blew[2])[len(_blew[2]) // 2]:.3f} bits/byte against a best "
+                              f"of {_best_bpb[0]:.3f} at step {_best_bpb[1]}. Nothing healthy measured here has "
+                              f"stayed elevated for more than 50 probes; the two runs that never recovered went "
+                              f"261 and 309. LR here is {_lrnow:.2e} ({_lrnow / max(1e-12, LR):.0%} of peak). "
+                              f"The best model is already on disk as .best -- every step from here is being "
+                              f"spent below a level this run already reached, so it is worth killing rather "
+                              f"than finishing.")
                 # EVERY LOCAL LOW, not only the global best. A descent (this probe below the last) that lands in a
                 # GOOD region -- within BEST_KEEP_TOL of the best seen -- is kept in a rotating set, so a long run
                 # ends holding several restore points at its best-performing areas rather than one.
