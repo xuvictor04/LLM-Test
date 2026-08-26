@@ -474,6 +474,19 @@ _flags_for() {
     #        did not occur in the round where it was armed -- and on the run where it WAS armed it cost 0.128,
     #        inside the seed spread but the wrong sign. Off is the measured configuration.
     lr_075)     echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=280000 CKPT_EVERY=20000" ;;
+    # ...AND THE SAME ARM WITH THE RESTARTS OFF, which is what lr_075 should have been. sched_ctl -- the arm
+    # whose wavelength lr_075 copied -- had ZERO restarts: its wavelength WAS its run length, one monotone
+    # anneal. Taking that number of steps and applying it to a run 3.7x longer turned a no-restart schedule
+    # into a four-cycle one with three restarts, which is the opposite of what made it work. I checked
+    # "cosine restarts: 0" on that arm at the time and then chose a wavelength guaranteeing three.
+    # LR_RESTARTS=0 anneals once over LR_STEPS and then HOLDS at the LR_MIN_FRAC floor. Nothing measured here
+    # has ever been damaged by a low rate; three things have now been damaged by a high one.
+    lr_075_norst) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=280000 LR_RESTARTS=0 CKPT_EVERY=20000" ;;
+    # THE SHORT VERSION, which is what the evidence actually points at. lr_075 bottomed at 2.030 by step
+    # 252,000 -- two epochs at 94 MB is 262,852 steps -- and every one of the remaining 789,000 steps made it
+    # worse. At EPOCHS=2 the wavelength IS the run, so there is no restart to get wrong, and the anneal shape
+    # matches sched_ctl's (282,000 steps) rather than round13's stretched one. ~2 hours instead of 8.5.
+    lr_075_short) echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=260000 LR_RESTARTS=0 CKPT_EVERY=20000" ;;
     # ...and the same thing with the vocabulary allowed to grow, which is what was originally asked for. Kept
     # nameable because the 0.141 that argues against it is one measurement at 25 MB an epoch, and the argument
     # FOR it -- that a bigger vocabulary should pay off on more text -- has never been tested at 94.
@@ -1025,6 +1038,34 @@ grid)
     # new best -- so if it goes off, kill the run.
     #   PILOT_DIR=data_075 STREAM_LEN=94000000 EPOCHS=8 GRID_DIR=runs/075 bash longrun.sh grid round16
     round16) ARMS="lr_075" ;;
+    # === ROUND 17: WHAT THE 0.75 GB RUN SAID ==================================================================
+    # It ran 1,051,405 steps in 8.4 hours, the corpus prep worked (no STREAM_LEN warning), the vocabulary held
+    # at 2048, the expert valve fired five times to a cap of 4406 -- and the LEARNING RATE destroyed it.
+    #
+    #   best held-out 2.030 at step 252,000        final 2.848        +0.725 never recovered
+    #   restarts at 263,965 / 504,894 / 756,851, each 1.00e-04 -> 2.00e-03, a 20x jump onto a converged model
+    #       before r1  2.03 2.04 2.03 2.03   after  2.05 2.18 2.26 2.21 2.31
+    #       before r2  2.10 2.10 2.10 2.10   after  2.14 3.59 2.23 3.12 3.06
+    #       before r3  2.20 2.20 2.20 2.20   after  2.31 2.26 2.37 2.29 2.46
+    #
+    # THE INSTRUMENTS WERE RIGHT THIS TIME, which is the one cheerful part. The blow-up alarm fired at step
+    # 516,000 -- 127 probes with no new best, median 3.062 against a best of 2.029 -- with half the run left to
+    # save, and the end-of-run verdict said BLEW UP AND STAYED DOWN rather than PLATEAUED. Both were wrong about
+    # exactly this shape one round ago.
+    #
+    # AND THE 0.75 GB CORPUS BOUGHT NOTHING. On the margin that survives a change of corpus:
+    #     lr_075    best 2.030 @ 252k   order-1 3.573   ->  delta-order-1 +1.543
+    #     sched_ctl best 1.943 @ 244k   order-1 3.446   ->  delta-order-1 +1.503
+    # Four times the unique text, the same floor, reached at the same step. Two runs, not a law -- but nothing
+    # here has ever been improved by more unique bytes, and this is the largest test of it so far.
+    #
+    #   lr_075_short   two epochs, ~262,852 steps, no restart possible. Should reproduce ~2.03 in ~2 hours.
+    #   lr_075_norst   the full eight epochs with LR_RESTARTS=0, which is what lr_075 should have been. Only
+    #                  worth the 8.5 hours if the short arm shows the tail still improving at the floor.
+    # ORDER MATTERS: run the short one FIRST. If it reproduces 2.03 the long arm is answering a question that
+    # has already been answered, and the compute belongs on model capacity instead.
+    #   PILOT_DIR=data_075 STREAM_LEN=94000000 EPOCHS=2 GRID_DIR=runs/075b bash longrun.sh grid round17
+    round17) ARMS="lr_075_short" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac

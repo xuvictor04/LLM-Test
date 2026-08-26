@@ -5262,6 +5262,7 @@ def main():
     _lrboost = [0]; _memw = [0]        # mechanisms with no counter of their own -- see the DID IT FIRE report
     _tok_seen = torch.zeros(int(V), device=DEV)            # per-token APPEARANCES in trained-on material
     _lr_prev = [0.0]                                       # last applied rate, to detect a cosine restart
+    _nrst = [0]                                            # how many restarts have happened -- see the restart line
     # === PROBATION: MINT PROVISIONALLY, JUDGE ON EVIDENCE ====================================================
     # TOK_MINT_PMIN decides from co-occurrence BEFORE the model has seen the token once. That is the most
     # statistics alone can do and less than we can do: a token can be minted, TRAINED, and then judged on what
@@ -5996,9 +5997,26 @@ def main():
             if (_lrv > _lr_prev[0] * 1.5 and _lrv > 0.5 * LR
                     and FABRIC and fabgrow is not None):
                 fabgrow.note_shift(step)
-                print(f"  [lr @ {step}] cosine restart: {_lr_prev[0]:.2e} -> {_lrv:.2e} "
-                      f"({_lrv / max(1e-12, LR) * 100:.0f}% of peak). Marked as self-inflicted so the fabric "
-                      f"does not read the loss jump as a regression to grow on.")
+                # SAY WHAT IS BEING RESTARTED ONTO. A restart returns a CONVERGED model to peak, and on the
+                # 0.75 GB run that was the whole story: the curve bottomed at 2.030 by step 252,000, the first
+                # restart landed at 263,965, and each of the three restarts ratcheted it worse --
+                #   before r1  2.03 2.04 2.03 2.03    after  2.05 2.18 2.26 2.21 2.31
+                #   before r2  2.10 2.10 2.10 2.10    after  2.14 3.59 2.23 3.12 3.06
+                #   before r3  2.20 2.20 2.20 2.20    after  2.31 2.26 2.37 2.29 2.46
+                # -- ending at 2.848 against a best of 2.029, with 81% of the run spent getting worse. The
+                # restart line already printed; what it did not say was that there was something to lose. The
+                # best-so-far and the restart count are the two numbers that make the ratchet visible while it
+                # is happening rather than only in the final curve.
+                _nrst[0] += 1
+                _bstr = (f"best held-out so far {_best_bpb[0]:.3f} at step {_best_bpb[1]}"
+                         if _best_bpb[0] is not None else "no held-out probe yet")
+                print(f"  [lr @ {step}] cosine restart {_nrst[0]}: {_lr_prev[0]:.2e} -> {_lrv:.2e} "
+                      f"({_lrv / max(1e-12, LR) * 100:.0f}% of peak, x{_lrv / max(1e-12, _lr_prev[0]):.0f}). "
+                      f"Marked as self-inflicted so the fabric does not read the loss jump as a regression to "
+                      f"grow on. {_bstr} -- a restart puts THAT model back at the peak rate, and on the 0.75 GB "
+                      f"run three of these cost +0.725 bits/byte that never came back. If the curve does not "
+                      f"return to its best within ~20 probes, the wavelength is too short for this run: set "
+                      f"LR_RESTARTS=0, or LR_STEPS to about the run length.")
             _lr_prev[0] = _lrv
             for _g in om.param_groups: _g["lr"] = _lrv
             for _g in oe.param_groups: _g["lr"] = _lrv
