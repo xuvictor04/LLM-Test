@@ -8546,9 +8546,13 @@ def main():
             print(f"  ...but READ FILTERS ON THE SAME FLAG: {_nblk} of {_nact} active entries "
                   f"({_nblk / max(1, _nact) * 100:.0f}% of the store) are excluded from EVERY retrieval, "
                   f"not merely spared deletion."
-                  + (f" At {100 * 1820 / max(1, flg):.0f}%-scale precision most of that is genuine memory the "
-                     f"model can no longer reach. MEM_WRONG_READ=0 keeps the flag for reporting and stops it "
-                     f"gating reads." if _nblk else ""))
+                  + ((f" At the {100 * fb / max(1, flg):.0f}% precision measured just above, most of that is "
+                      f"genuine memory the model can no longer reach."
+                      if ninj > 0 else
+                      " No injection ran here, so there is no precision figure to weigh it against -- run with "
+                      "WRONG_INJECT>0 and two or more source processes to get one.")
+                     + " MEM_WRONG_READ=0 keeps the flag for reporting and stops it gating reads."
+                     if _nblk else ""))
             if ninj > 0: mem.delete_src(99)      # remove the SYNTHETIC injected entries so downstream metrics are clean
             mem.selfcon.fill_(-1.0)              # clear flags so genuine entries aren't excluded from retrieval below
 
