@@ -107,6 +107,8 @@ _SPEC = {
     "PHASE_W": ("i", None),                               # data -- DEFAULT IS COMPUTED: (n_phases + 1) // 2
     "STREAM_LEN": ("i", 120000),                          # data
     "VAL_FRAC": ("f", 0.05),                              # data
+    "EXPOSURE_MAX": ("f", 2.0),                           # data
+    "EXPOSURE_SKEW": ("f", 3.0),                          # data
     "WIN": ("i", 128),                                    # data
     # --- tokenizer: vocabulary: build, mint, freeze, re-segment ------------------------------------
     "GROW_PASSES": ("i", 8),                              # tokenizer
@@ -993,7 +995,36 @@ if DATA_MODE == "real":
     from datastream import open_corpus
     CORP = open_corpus(_env("DATA_DIR", "data"), DN, cap=_i("CORPUS_CAP", 2000000), disk=DISK_STREAM)
     _nraw = len(CORP)
-    CORP = [c for c in CORP if len(c) > 5000]; NP = len(CORP)
+    # DN AND CORP ARE INDEX-ALIGNED, AND THIS FILTER USED TO BREAK THAT ALIGNMENT SILENTLY. open_corpus returns
+    # one entry per name, in DOMAINS order, so CORP[i] is DN[i]. Dropping entries from CORP without dropping the
+    # same entries from DN shifts every name after the gap by one -- and DN is what report_holdout uses to LABEL
+    # each held-out score:  nm = DN[_p] if _p < len(DN) else str(_p).
+    # Its own docstring says the probe is "keyed by NAME rather than by index on purpose: adding a domain shifts
+    # every index after it, so an index-keyed probe would silently compare `eng` against `py`". Name-keying does
+    # defend against a REORDER. It cannot defend against a DROP, because the name it is keyed by is itself read
+    # out of the desynchronised list. Reproduced, with DOMAINS="eng,py" and an eng corpus under the floor:
+    #     before filter: DN = ['eng','py']  sizes = [1880, 84000]
+    #     after  filter: DN = ['eng','py']  sizes = [84000]        NP = 1
+    #     VALC[0] is the PYTHON corpus, and report_holdout names it 'eng'
+    # The scores are then filed under 'eng', and because ACROSS THE RUN BOUNDARY looks the previous run's probe up
+    # BY NAME, the next run compares this run's Python against the last run's English and reports the difference
+    # as forgetting. That number is the one the continual-learning claim rests on, computed across two languages.
+    # The trigger is an undersized corpus -- a partial fetch, an interrupted download, a gated dataset that wrote
+    # nothing -- which is the single most likely thing to go wrong when adding a second area.
+    _keep = [_i0 for _i0, _c0 in enumerate(CORP) if len(_c0) > 5000]
+    _drop = [(DN[_i0] if _i0 < len(DN) else str(_i0), len(CORP[_i0]))
+             for _i0 in range(len(CORP)) if _i0 not in set(_keep)]
+    CORP = [CORP[_i0] for _i0 in _keep]
+    DN = [DN[_i0] if _i0 < len(DN) else str(_i0) for _i0 in _keep]
+    NP = len(CORP)
+    if _drop:
+        # LOUD, because it changes what the run measures. A dropped domain is not a smaller experiment; it is a
+        # different one, and every per-domain line below will be missing it without saying why.
+        print(f"[corpus] !! DROPPED {len(_drop)} domain(s) under the 5000-byte floor: "
+              + ", ".join(f"{_n0} ({_b0} B)" for _n0, _b0 in _drop))
+        print(f"[corpus]    remaining DOMAINS in order: {','.join(DN)} -- names re-aligned to the corpora that "
+              f"survived, so the per-domain scores below are labelled correctly. A domain you EXPECT to see here "
+              f"means its fetch produced nothing usable; check that directory before reading any result.")
     # SAY SO HERE. With every corpus under 5000 bytes this leaves NP=0, and the run then died ~700 lines later
     # inside build_stream on `random.choice([])` -> "IndexError: Cannot choose from an empty sequence", which names
     # neither the directory nor the reason. A placeholder part0.txt is exactly how that happens.
@@ -4816,6 +4847,70 @@ def main():
                      f"the corpus ~{STREAM_LEN / _avail:.2f}x internally. That is not more data, it is the same "
                      f"data more times -- and it is invisible in every other line of this log. Fetch more text "
                      f"(fetch_big.py --gb) or lower STREAM_LEN below {_avail / 1e6:.0f} MB.")
+    # ...AND THE SUM IS THE WRONG DENOMINATOR THE MOMENT THERE IS MORE THAN ONE CORPUS. build_stream does not
+    # draw STREAM_LEN bytes from a pool; it draws them PER CORPUS, in the proportions PHASE_SCHED sets. So the
+    # guard above passes comfortably on 60 MB of English beside 8 MB of Python -- 68 MB against a 4 MB stream --
+    # while the Python half is resampled 4x every epoch. That is the same quantity-in-one-unit, consumed-in-
+    # another fault this file keeps finding, and it hides it in exactly the configuration that matters: ADDING
+    # AN AREA. The added corpus is always the small one, and it is the one whose repetition would be mistaken
+    # for the model having learned it.
+    if DATA_MODE == "real" and NP > 1:
+        _draw = [0.0] * NP                                  # bytes drawn from each corpus per EPOCH
+        if PHASED and PHASE_SCHED:
+            _per = STREAM_LEN / len(PHASE_SCHED)            # build_stream: per = STREAM_LEN // len(PHASE_SCHED)
+            for _act in PHASE_SCHED:
+                _a = [_x for _x in _act if _x < NP] or list(range(NP))   # same fallback build_stream applies
+                for _p0 in _a: _draw[_p0] += _per / len(_a)  # uniform choice within a phase
+        else:
+            for _p0 in range(NP): _draw[_p0] = STREAM_LEN / NP           # _rs.randrange(NP), uniform
+        # EXPOSURE IS A WHOLE-RUN QUANTITY, NOT A PER-EPOCH ONE, and writing this guard in epoch units was the
+        # same fault one level up. 60 MB of English beside 8 MB of Python draws 2.00 MB/epoch from each: under
+        # the cap, quiet, fine. Over EPOCHS=8 it is 16 MB drawn from 7.6 MB of Python against 16 MB drawn from
+        # 57 MB of English -- the added area is seen 2.1 times over while the original is 28% sampled. "Adding
+        # py cost eng X bits/byte" is then confounded with "py was memorised and eng was skimmed", and nothing
+        # in the log would have said so. Exposure is printed for EVERY multi-corpus run, because the RATIO
+        # between corpora has to be known before any forgetting number from that run means anything.
+        _nm0 = [(DN[_p0] if _p0 < len(DN) else str(_p0)) for _p0 in range(NP)]
+        _exp = [(_draw[_p0] * EPOCHS / SEG_LEN[_p0] if SEG_LEN[_p0] else float("inf")) for _p0 in range(NP)]
+        print("[corpus] exposure over the whole run (EPOCHS=%d, STREAM_LEN=%d, PHASE_SCHED=%s):"
+              % (EPOCHS, STREAM_LEN, "|".join(",".join(str(_x) for _x in _p1) for _p1 in PHASE_SCHED)
+                 if PHASED else "off"))
+        for _p0 in range(NP):
+            print(f"[corpus]   {_nm0[_p0]:<10} {_draw[_p0]/1e6:7.2f} MB/epoch x{EPOCHS} = "
+                  f"{_draw[_p0]*EPOCHS/1e6:8.2f} MB drawn from {SEG_LEN[_p0]/1e6:8.2f} MB on disk "
+                  f"-> each byte seen ~{_exp[_p0]:.2f}x")
+        # WITHIN one epoch: the original pathology. The corpus is smaller than a single pass over it.
+        _tight = [(_nm0[_p0], _draw[_p0], SEG_LEN[_p0]) for _p0 in range(NP)
+                  if SEG_LEN[_p0] and _draw[_p0] > SEG_LEN[_p0]]
+        if _tight:
+            _warn.append(
+                "PER-CORPUS RESAMPLING WITHIN ONE EPOCH: the stream draws more bytes from a corpus than that "
+                "corpus HAS, so it repeats before the epoch is out. The total-bytes check above cannot see "
+                "this -- it sums the corpora, and build_stream does not.\n      "
+                + "\n      ".join(f"{_n0:<10} draws {_d0/1e6:6.2f} MB/epoch from {_s0/1e6:6.2f} MB on disk "
+                                  f"-> {_d0/_s0:.2f}x" for _n0, _d0, _s0 in _tight)
+                + "\n      Fetch more of the named corpus, or lower STREAM_LEN.")
+        # ACROSS the run: repetition high enough to memorise, and -- the one that matters for a continual-
+        # learning result -- repetition that differs sharply BETWEEN corpora.
+        _rep = [(_nm0[_p0], _exp[_p0]) for _p0 in range(NP) if _exp[_p0] > _f("EXPOSURE_MAX", 2.0)]
+        if _rep:
+            _warn.append(
+                f"WHOLE-RUN REPETITION over EXPOSURE_MAX={_f('EXPOSURE_MAX', 2.0):g}x: "
+                + ", ".join(f"{_n0} {_e0:.2f}x" for _n0, _e0 in _rep)
+                + ". At this many passes the model can memorise the corpus rather than learn its "
+                  "distribution, and the held-out score stops being a measurement of generalisation. "
+                  "Fetch more of the named corpus, or lower EPOCHS.")
+        _lo, _hi = min(_exp), max(_exp)
+        if _lo > 0 and _hi / _lo > _f("EXPOSURE_SKEW", 3.0):
+            _warn.append(
+                f"EXPOSURE IMBALANCE {_hi/_lo:.1f}x (EXPOSURE_SKEW={_f('EXPOSURE_SKEW', 3.0):g}): "
+                + ", ".join(f"{_n0} {_e0:.2f}x" for _n0, _e0 in zip(_nm0, _exp))
+                + ". The corpora get the same SHARE OF THE STREAM but are different SIZES, so the small one is "
+                  "seen many times over while the large one is skimmed. This is the configuration 'add an area "
+                  "and measure what it cost' produces by default -- the added area is always the small one -- "
+                  "and it confounds the result: what looks like the new area displacing the old is partly the "
+                  "new area having been memorised. Match the corpus sizes, or set PHASE_SCHED to give them "
+                  "shares proportional to their sizes.")
     # TWO WRITE PATHS, AND ONLY ONE CARRIES THE OWNER. The batched path computes _own from the routing weights
     # and passes owners= to write_batch; the per-window fallback calls write(), whose signature has no owner at
     # all, so every entry lands in partition 0. Which path runs is decided by KEY_PREGATE / KEY_BATCH / KEY_SRC

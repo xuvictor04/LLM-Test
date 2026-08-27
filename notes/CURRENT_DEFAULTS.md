@@ -9,7 +9,7 @@ it became 2048. Every other note in this directory is a RECORD of what was true 
 This is the only one that claims to describe the code as it stands, and it is the only one that is
 not written by hand.
 
-324 knobs.
+326 knobs.
 
 ## kind `env`
 
@@ -108,6 +108,8 @@ not written by hand.
 | `EXPERT_NEW_DIST` | `0.5` |
 | `EXPERT_PRESSURE` | `0.75` |
 | `EXPERT_REP_MULT` | `2.5` |
+| `EXPOSURE_MAX` | `2.0` |
+| `EXPOSURE_SKEW` | `3.0` |
 | `FAB_AE_W` | `0.5` |
 | `FAB_ALPHA` | `0.5` |
 | `FAB_BALANCE` | `0.01` |

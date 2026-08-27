@@ -24,7 +24,7 @@ request is that failure in its purest form: the run completes, the report prints
 about a stream that ran out. Short of target it says so, with what it found and where, and exits non-zero
 unless --allow-short.
 """
-import argparse, hashlib, os, random, sys, sysconfig
+import argparse, hashlib, os, random, site, sys, sysconfig
 
 # The shard size and the document separator match fetch_big.py exactly. datastream.open_corpus concatenates
 # part*.txt in sorted order, so a corpus assembled here has to be indistinguishable from a downloaded one --
@@ -35,6 +35,11 @@ SEP = "\n\n"
 EXT = {"py": [".py"], "c": [".c", ".h"], "js": [".js", ".ts"], "go": [".go"], "rs": [".rs"],
        "md": [".md", ".rst"], "sh": [".sh"]}
 
+# The Stack names its language directories in full. Our domains are short. Printing "--data-dir data/py" in
+# the fallback advice below would hand the user a path that does not exist on the Hub, which is a worse
+# failure than printing nothing: it looks authoritative and fails after the download starts.
+STACK_DIR = {"py": "python", "c": "c", "js": "javascript", "go": "go", "rs": "rust", "sh": "shell"}
+
 # Directories whose content is overwhelmingly generated, vendored or repetitive. Test trees are the big one:
 # CPython's Lib/test is ~30% of the stdlib by bytes and is mostly assertion boilerplate, so including it would
 # let a single template dominate the distribution the model is supposed to be learning.
@@ -43,16 +48,42 @@ SKIP_DIRS = {"test", "tests", "__pycache__", ".git", "node_modules", ".mypy_cach
 
 
 def roots_for(domain, extra):
-    """Default search roots. Explicit --root always wins and is used alone."""
+    """Default search roots. Explicit --root always wins and is used alone.
+
+    ASK site, NOT ONLY sysconfig. sysconfig.get_paths() reports purelib and platlib, which on Debian and
+    Ubuntu -- what most of these boxes run -- both collapse to /usr/local/lib/pythonX/dist-packages. The
+    system packages live in /usr/lib/python3/dist-packages, a THIRD directory that sysconfig never names.
+    Measured on this container: sysconfig gives 2 paths, site.getsitepackages() gives 3. So the walk missed
+    an entire install root, which is the first thing to suspect behind "the corpus is too small".
+    site.getusersitepackages() adds ~/.local/lib/... for pip --user, missed the same way.
+    """
     if extra:
         return list(extra)
     if domain != "py":
         return []
-    out = []
+    cand = []
     for k in ("stdlib", "purelib", "platlib"):
-        p = sysconfig.get_paths().get(k)
-        if p and os.path.isdir(p) and p not in out:
-            out.append(p)
+        cand.append(sysconfig.get_paths().get(k))
+    try:
+        cand += list(site.getsitepackages())
+    except AttributeError:                     # absent inside some virtualenvs
+        pass
+    try:
+        cand.append(site.getusersitepackages())
+    except Exception:
+        pass
+    # A NESTED ROOT IS NOT A NEW ROOT. stdlib is often the parent of a dist-packages entry, and walking both
+    # visits every file twice -- harmless for the corpus (the content hash dedups it) but it doubles the read
+    # and makes the "found N unique files" line disagree with what is on disk. Drop any candidate that lives
+    # under one already kept.
+    out = []
+    for p in cand:
+        if not p or not os.path.isdir(p):
+            continue
+        rp = os.path.realpath(p)
+        if any(rp == q or rp.startswith(q + os.sep) for q in out):
+            continue
+        out = [q for q in out if not q.startswith(rp + os.sep)] + [rp]
     return out
 
 
@@ -159,10 +190,21 @@ def main():
     if written < target:
         pct = 100.0 * written / max(1, target)
         msg = (f"[fetch_local] SHORT: {written/1e6:.1f} MB of the {target/1e6:.0f} MB asked for ({pct:.0f}%). "
-               f"This machine's source trees do not hold that much {a.domain}.\n"
-               f"  Either lower --gb, or add roots: --root ~/some/checkout --root /usr/lib/python3/dist-packages\n"
-               f"  A corpus this much smaller than requested is not a smaller version of the experiment -- the "
-               f"stream wraps sooner, so EPOCHS stops meaning what the command says it means.")
+               f"The {len(roots)} root(s) searched hold {have/1e6:.1f} MB of {a.domain} in total:\n"
+               + "".join(f"    {r}\n" for r in roots)
+               + f"  A corpus this much smaller than requested is not a smaller version of the experiment: the\n"
+               f"  two corpora get the same SHARE of the stream whatever their sizes, so the short one is drawn\n"
+               f"  just as often from less text and is seen many times over. self_organize.py prints the\n"
+               f"  per-corpus exposure at startup and warns past EXPOSURE_MAX / EXPOSURE_SKEW; this is the same\n"
+               f"  problem, caught earlier.\n"
+               f"  In descending order of how much it helps:\n"
+               f"    - pull the real thing. With a Hugging Face token and the terms accepted:\n"
+               f"        python3 fetch_big.py --dataset bigcode/the-stack-dedup "
+               f"--data-dir data/{STACK_DIR.get(a.domain, a.domain)} \\\n"
+               f"            --domain {a.domain} --gb {a.gb} --out {a.out} --resume\n"
+               f"    - add roots this walk cannot guess: --root <a checkout> --root <another venv>, repeatable\n"
+               f"    - install more source here (a big pure-Python package is tens of MB), then re-run\n"
+               f"    - lower --gb to {written/1e9:.3f} and MATCH the other corpus to it, so neither is favoured")
         if not a.allow_short:
             sys.exit(msg + "\n  Pass --allow-short to proceed anyway.")
         print(msg + "\n  --allow-short given; proceeding.")

@@ -658,7 +658,14 @@ pilot)
   ;;
 
 pilot-add)
-  NAME=${2:-}; DS=${3:-}; GB=${4:-0.03}; P_DD=${PILOT_DIR:-data_pilot}
+  # THE ADDED AREA DEFAULTS TO THE SIZE OF THE ONE ALREADY THERE. It used to default to 0.03 GB against
+  # _pilot_corpus's 0.06 GB of English, and the two corpora get the SAME SHARE OF THE STREAM whatever
+  # their sizes -- PHASE_SCHED for two corpora is [[0],[0],[1],[1]], a straight 50/50. So the half-sized
+  # area was drawn just as often from half as much text: at EPOCHS=8 that is 16 MB drawn from 28.5 MB of
+  # Python beside 16 MB drawn from 57 MB of English. "Adding py cost eng X" would then be measuring the
+  # new area at twice the exposure of the old one. Matching the sizes removes the confound; pass a fourth
+  # argument to override, and self_organize.py now prints the per-corpus exposure either way.
+  NAME=${2:-}; DS=${3:-}; GB=${4:-${PILOT_GB:-0.06}}; P_DD=${PILOT_DIR:-data_pilot}
   [ -n "$NAME" ] && [ -n "$DS" ] || { echo "usage: bash longrun.sh pilot-add <name> local|<hf-dataset> [gb]"; echo "  local = build the corpus from source already on this machine (no account, no network)"; exit 1; }
   PA=${PILOT_ADD_ARCH:-gru}
   # RESUME FROM ANY CHECKPOINT, not only the one `pilot` happens to write. This was hardcoded to
@@ -1147,16 +1154,50 @@ grid)
     # 3 AND 4 ARE ONLY VISIBLE ACROSS A RESUME, which no grid arm performs. Run them as a pair:
     #
     #     STREAM_LEN=4000000 EPOCHS=4 GRID_DIR=runs/fix bash longrun.sh grid round18
-    #     RESUME_FROM=runs/fix/fix_resume bash longrun.sh pilot-add py local 0.03
     #
-    # The second command is the continual-learning chain, which has never run. Two things blocked it and both
-    # are now gone. The tokenizer path was the first (`pilot` wrote its vocabulary to a shared default while
-    # pilot-add looked beside the checkpoint, so it exited 1 before touching the GPU) -- fixed, and the round18
-    # attempt confirmed it: "pilot-add: resuming runs/fix/fix_resume with vocabulary .../fix_resume.dyntok.json".
-    # It then died on the second: both code presets in fetch_big.py are GATED, so the run stopped at
-    # "is a gated dataset on the Hub. You must be authenticated" -- an account, not a defect. `local` reads the
-    # machine's own Python instead (fetch_local.py); bigcode/the-stack-dedup still works with HF_TOKEN set and
-    # the terms accepted, and is the better corpus if you have it.
+    #     export HF_TOKEN=hf_...                    # read scope; terms accepted on the dataset page first
+    #     FETCH_ARGS="--data-dir data/python" \
+    #       RESUME_FROM=runs/fix/fix_resume bash longrun.sh pilot-add py bigcode/the-stack-dedup
+    #
+    # The second command is the continual-learning chain, which has never run. THREE things blocked it:
+    #   1  the tokenizer path. `pilot` wrote its vocabulary to a shared default while pilot-add looked beside
+    #      the checkpoint, so it exited 1 before touching the GPU. Fixed, and the attempt confirmed the fix:
+    #      "pilot-add: resuming runs/fix/fix_resume with vocabulary .../fix_resume.dyntok.json".
+    #   2  the gated dataset. Both code presets need an account, terms accepted in a browser, and a token --
+    #      not a defect, but it stopped the run. `local` (fetch_local.py) reads the machine's own Python if
+    #      you have no token; the-stack-dedup is the better material and is what the command above uses.
+    #   3  A PRESET WAS ONLY FINDABLE BY ITS SHORT KEY. `--dataset the-stack-dedup` resolved field="content";
+    #      `--dataset bigcode/the-stack-dedup` -- the id on the dataset page, the id in fetch_big.py's own
+    #      gated-dataset instructions, and the id THIS NOTE used to give -- missed the table and fell through
+    #      to field="text". fetch_big.py's docstring already describes what happens next: a KeyError after
+    #      authenticating, which reads like an auth problem and is not one. So the documented command could not
+    #      have worked even with a valid token. Presets now resolve by dataset id as well as by short key.
+    # --data-dir matters too: the Stack is organised by LANGUAGE as directories, and without it the pull is
+    # every language mixed together, labelled "py" in every per-domain line afterwards. fetch_big.py now says so.
+    #
+    # THE SIZE. The fourth argument now defaults to PILOT_GB (0.06) rather than 0.03, because two corpora get
+    # the SAME SHARE OF THE STREAM whatever their sizes -- PHASE_SCHED for NP=2 is [[0],[0],[1],[1]], a straight
+    # 50/50. A half-sized second area is therefore drawn just as often from half as much text: at EPOCHS=8,
+    # 16 MB drawn from 28.5 MB of Python beside 16 MB from 57 MB of English, so the new area is seen at twice
+    # the exposure of the old one and "adding py cost eng X" is confounded with "py was memorised". Matched
+    # sizes remove it. self_organize.py now prints the per-corpus exposure at startup and warns above
+    # EXPOSURE_MAX=2x repetition or EXPOSURE_SKEW=3x imbalance.
+    #
+    # AND WHAT THE RUN ACTUALLY TESTS -- read this before reading its numbers. PHASE_SCHED=[[0],[0],[1],[1]]
+    # means English for the first half of each epoch and Python for the second, REPEATED EVERY EPOCH. At
+    # EPOCHS=8 that is eng,py,eng,py,... -- English is rehearsed eight times DURING the run that is supposed to
+    # measure what forgetting it. Rehearsal is a legitimate continual-learning method, but it has to be
+    # declared, because under it "modularity protected English" cannot be told apart from "English kept being
+    # trained". Two arms, and the second is the one the modularity claim rests on:
+    #
+    #   rehearsed (default)   ... bash longrun.sh pilot-add py bigcode/the-stack-dedup
+    #                         both areas in the stream. Asks: can it hold both at once?
+    #   pure                  PHASE_SCHED="1|1|1|1" ... bash longrun.sh pilot-add py bigcode/the-stack-dedup
+    #                         Python only in the stream; English still has a held-out corpus, so ACROSS THE RUN
+    #                         BOUNDARY still scores it. Asks the actual catastrophic-forgetting question: when
+    #                         English STOPS ARRIVING, does the fabric preserve it? Note that `faded` is computed
+    #                         from labels present in the stream, so the unlearn-a-faded-process test goes vacuous
+    #                         here -- ACROSS THE RUN BOUNDARY is the measurement, not that.
     #
     # WHAT TO READ, in order. None of these is a bits/byte number:
     #   fix_cadence   "SPAWNED BY SPECIFICATION: N expert(s)", N > 0, and fabric.spawn non-zero in DID IT FIRE.

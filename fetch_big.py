@@ -75,7 +75,22 @@ def main():
                     help="continue a previous pull instead of overwriting it (see the manifest note below)")
     a = ap.parse_args()
 
-    p = PRESETS.get(a.dataset, dict(path=a.dataset, config=a.config, field="text", split="train"))
+    # A PRESET IS FOUND BY ITS SHORT KEY *OR* BY THE DATASET ID IT POINTS AT. Both name the same thing, and
+    # only one of them used to work. `--dataset the-stack-dedup` resolved field="content"; `--dataset
+    # bigcode/the-stack-dedup` -- the id printed on the dataset page, the id in this file's own gated-dataset
+    # instructions, and the id longrun.sh's round18 note told people to run -- missed the table entirely and
+    # fell through to field="text". The docstring above already describes what happens next: "with the default
+    # field this failed on a KeyError after authenticating, which reads like an auth problem and is not one."
+    # So the documented command could not have worked even with a valid token and the terms accepted.
+    _by_path = {v["path"]: k for k, v in PRESETS.items()}
+    _key = a.dataset if a.dataset in PRESETS else _by_path.get(a.dataset)
+    p = PRESETS.get(_key) if _key else None
+    if p is None:
+        p = dict(path=a.dataset, config=a.config, field="text", split="train")
+    else:
+        print(f"[fetch_big] preset {_key}: field={p.get('field', 'text')!r}"
+              + (f" config={p['config']!r}" if p.get("config") else "")
+              + (f" data_dir={p['data_dir']!r}" if p.get("data_dir") else ""))
     path = p["path"]; config = a.config or p.get("config"); field = a.field or p.get("field", "text")
     split = a.split or p.get("split", "train")
 
@@ -93,6 +108,16 @@ def main():
     if config: kw["name"] = config
     data_dir = a.data_dir or p.get("data_dir")
     if data_dir: kw["data_dir"] = data_dir
+    # THE STACK IS ORGANISED BY LANGUAGE AS DIRECTORIES. Without --data-dir it streams EVERY language, so a
+    # pull labelled --domain py delivers a mixture of Python, Java, JavaScript, HTML and generated files. The
+    # run then trains on it, calls it "py" in every per-domain line, and measures the cost of adding "Python"
+    # against something that is not mostly Python. Nothing downstream can detect that, which is why it is said
+    # here rather than left to be noticed.
+    elif "the-stack" in path:
+        print(f"[fetch_big] !! no --data-dir: {path} is organised by LANGUAGE as directories, so this streams "
+              f"ALL of them mixed together.\n"
+              f"             For one language:  --data-dir data/{a.domain}   (data/python, data/c, data/java, ...)\n"
+              f"             Continuing with the mixture -- it will be labelled --domain {a.domain!r} regardless.")
 
     # AUTH, EXPLICITLY. Relying on the ambient credential means "works on my machine" and an opaque 401 on
     # anyone else's. Order: --token, then the environment, then whatever huggingface-cli cached (token=None lets
