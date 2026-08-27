@@ -167,6 +167,7 @@ class DynamicTokenizer:
         self._sstamp = -1                      # len(self.pair) when _scache was built
         self.h_pass = self.h_block = 0         # how the gate ruled, for the run report
         self.gate_forced = 0                   # mints the gate blocked but could not afford to
+        self.gate_skipped = 0    # candidates discarded for max_tok / already-existing -- see maybe_grow
         self.h_pmin_seen = []                  # p(b|a) of the candidates it judged, for the report
         self.prov = {}                         # id -> (a, b) for tokens minted but not yet judged
         self.retired = set()                   # ids un-merged after failing probation
@@ -306,10 +307,44 @@ class DynamicTokenizer:
                     if _c >= self.min_pair:
                         _pick = (_pr, _c); self.gate_forced += 1; break
             if _pick is None: return None                          # genuinely nothing above min_pair
-            (a, b), cnt = _pick
-            self.pair[(a, b)] = 0
-            ns = self.id2bytes[a] + self.id2bytes[b]
-            if len(ns) > self.max_tok or ns in self.seq2id: return None
+            # ...AND THE FAIL-OPEN ABOVE HAD A HOLE SIX LINES WIDE. The comment says the gate "may REORDER what
+            # gets minted and may never PREVENT minting", and then the max_tok / already-exists rejection below
+            # returned None anyway -- the same None every caller reads as "nothing left to mint". Worse, the
+            # candidate had already been zeroed out of self.pair on the line above, so it was discarded AND the
+            # burst stopped. Reproduced on real English:
+            #     max_tok=16 vmax=2048 -> stalled at 1845/2048 with 3940 pairs still above min_pair (9.9% dead)
+            #     max_tok=6  vmax=4000 -> stalled at  658/4000 with 1866 pairs still above min_pair (83.5% dead)
+            # Dead rows are the failure this file calls "the worst failure this system has", and the vocabulary
+            # is the largest measured effect on quality in the project.
+            # A REJECTED CANDIDATE IS NOT AN EXHAUSTED VOCABULARY. Walk on to the next one; return None only
+            # when nothing in the window can be minted at all.
+            # ...AND WITH BOTH RE-RANKERS OFF, _k IS 1. The candidate window is a SINGLE pair, so "walk on to
+            # the next one" has nothing to walk: one unmintable top pair ends the burst. That is why widening
+            # is lazy -- the common path still costs one most_common(1), and the wider query happens only when
+            # the cheap answer was unusable.
+            def _mintable(_pr):
+                _ns = self.id2bytes[_pr[0]] + self.id2bytes[_pr[1]]
+                return None if (len(_ns) > self.max_tok or _ns in self.seq2id) else _ns
+
+            a = b = None; cnt = 0; ns = None
+            _cands = [_pick] + [(_pr, _c) for _pr, _c in _top if _c >= self.min_pair and _pr != _pick[0]]
+            _seen_pr = set()
+            for _round in (0, 1):
+                for _pr, _c in _cands:
+                    if _pr in _seen_pr: continue
+                    _seen_pr.add(_pr)
+                    self.pair[_pr] = 0                             # consumed either way: it will not be re-picked
+                    _ns = _mintable(_pr)
+                    if _ns is None:
+                        self.gate_skipped += 1                     # counted: a window of all-rejects is visible
+                        continue
+                    a, b = _pr; cnt = _c; ns = _ns; break
+                if ns is not None or _round: break
+                # WIDEN ONCE. Every rejected candidate above has been zeroed, so most_common now surfaces the
+                # ones behind them. Bounded, because an unbounded rescan on a 60k-entry Counter in the hot path
+                # would trade a correctness bug for a throughput one.
+                _cands = [(p, c) for p, c in self.pair.most_common(max(256, _k * 4)) if c >= self.min_pair]
+            if ns is None: return None                             # every candidate really was unmintable
             nid = self.vocab_size
             self.id2bytes.append(ns); self.seq2id[ns] = nid; self.merges.append((a, b))
             self.maxlen = max(self.maxlen, len(ns)); self.bytes_per_id.append(len(ns))

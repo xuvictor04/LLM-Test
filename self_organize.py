@@ -4078,6 +4078,22 @@ def main():
                 print(f"  [resume] {len(_umiss)} of {fab.n_live} experts had no recorded USE-age"
                       f"{' (checkpoint predates fab_uage)' if not _fu else ''} -- backfilled to the grace "
                       f"threshold, so they are cullable and on the mature rate rather than protected newborns.")
+            # ...AND THE UTILIZATION, which is the cull's ranking key and was not carried at all. Restoring uage
+            # WITHOUT use is the worst of the three states: every expert reads past-grace and every utilization
+            # reads 0.0, so the ranking is a stable sort over equal keys -- slot order -- and the cull removes
+            # the founders while printing an ordinary line. A checkpoint that predates fab_use gets the same
+            # conservative treatment as uage: unknown means EXPERIENCED, not newborn, so a missing record must
+            # not look like an unused expert and get culled first. The population mean is that reading.
+            _fus = _RD.get("fab_use") or {}
+            fab.use = {int(_k): float(_v) for _k, _v in _fus.items()}
+            _wmiss = [i for i in range(fab.n_live) if i not in fab.use]
+            if _wmiss:
+                _fill = (sum(fab.use.values()) / len(fab.use)) if fab.use else 1.0
+                for i in _wmiss: fab.use[i] = _fill
+                print(f"  [resume] {len(_wmiss)} of {fab.n_live} experts had no recorded UTILIZATION"
+                      f"{' (checkpoint predates fab_use)' if not _fus else ''} -- backfilled to the population "
+                      f"mean {_fill:.2f}. Left at 0.0 they would have ranked at the BOTTOM of the utilization "
+                      f"cull, which sorts stably and would have removed them in slot order.")
         if WORLD_MODEL and _RD.get("world_cfg"):
             # REPLAY THE PARAM GROUPS, not just the population size. Growth calls om.add_param_group DURING
             # training, so a checkpoint taken after any growth has more groups than a freshly built optimizer --
@@ -4698,6 +4714,14 @@ def main():
                     # read 0 -- the founder bug again, on the path continual learning depends on.
                     "fab_born": (dict(fab.born) if FABRIC else None),
                     "fab_uage": (dict(fab.uage) if FABRIC else None),   # the USE clock: grace + per-expert LR phase
+                    # ...AND THE UTILIZATION ITSELF, which was not saved while uage was. That combination is
+                    # worse than saving neither: on the first manage pass after a resume every expert is
+                    # past grace (uage restored) and every utilization reads 0.0 (use empty), so
+                    # `sorted(_elig, key=lambda i: s.use.get(i, 0.0))` is a stable sort over equal keys --
+                    # it degenerates to SLOT ORDER, and the cull takes the lowest-numbered slots, which are
+                    # the founders. It prints an ordinary "culled N spared M" line while doing it, and
+                    # selftest.sh runs a real resume and cannot see it. This is the continual-learning path.
+                    "fab_use": (dict(fab.use) if FABRIC else None),    # UTILIZATION: the cull's ranking key
                     "fab_cfg": ({"n": fab.n(), "rank": fab.r, "cap": fab.cap, "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _f("FAB_HID_MULT", 2),
                                  "min_steps": fab.min_steps, "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
@@ -5854,7 +5878,16 @@ def main():
             # to try on the manage cadence rather than every step, and bounded by FAB_NMAX like any other growth.
             # NOT society-only: q_route is the chaining path's transition query too, so "the router asked for an
             # expert that does not exist" is exactly as meaningful there, and it was simply never asked.
-            if FAB_SPAWN and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
+            # THE CADENCE FAULT, AT THE THIRD AND FOURTH AND FIFTH SITE. This block sits BELOW the batch
+            # early-out, so it runs once per FLUSH while `step` advances once per WINDOW. Flushes land on a
+            # fixed residue mod BATCH_W, so `step % MANAGE_EVERY == 0` asks for a simultaneous solution to
+            # two congruences: at BATCH_W=16 / MANAGE_EVERY=500 it fires for 4 of the 16 possible flush
+            # residues and ZERO times for the other 12. The comments at the deepen site and the manage site
+            # both name this defect and both fixed only themselves; these three were left. FAB_SPAWN did
+            # fire in the runs measured (34-144 experts), so the current pairing happens to land on a
+            # working residue -- which is luck, not design, and changes the moment BATCH_W does.
+            # Counting FLUSHES asks the question the cadence means, at any BATCH_W.
+            if FAB_SPAWN and MANAGE_ON and _nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0 and _nbwd > 0:
                 with torch.no_grad(): _q6 = fab.q_route(sigb[:1])
                 _new6 = fab.spawn_from(_q6, step=step)
                 if _new6 is not None:
@@ -5979,7 +6012,7 @@ def main():
             # Nearly free, and only because society() returns per-expert outputs separately: every _hd[j] is
             # already computed for the forward pass, so leave-one-out is a re-weighted sum of tensors in hand
             # rather than k extra forward passes. Run on the manage cadence -> 1-in-MANAGE_EVERY cross_entropy.
-            if (FABRIC and SOCIETY and MANAGE_ON and len(_hd) > 1 and step % MANAGE_EVERY == 0 and step > 0):
+            if (FABRIC and SOCIETY and MANAGE_ON and len(_hd) > 1 and _nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0 and _nbwd > 0):   # flushes, not steps
                 _kk2 = sorted(_hd)
                 for _j2 in _kk2:
                     _keep = [q for q in _kk2 if q != _j2]
@@ -6006,7 +6039,7 @@ def main():
             # and FAB_CHAIN_K=8 it is 8 forwards per 500 steps. Without it, chaining culls on utilization alone,
             # which cannot tell a niche expert that is excellent from a dead one -- both are called rarely.
             elif (FABRIC and MANAGE_ON and _w is not None and _oid is not None
-                  and step % MANAGE_EVERY == 0 and step > 0):
+                  and _nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0 and _nbwd > 0):                              # flushes, not steps -- see FAB_SPAWN above
                 _cand = sorted({int(v) for v in _oid.reshape(-1).tolist()})[:fab.chain_k]
                 for _n3 in _cand:
                     _h3 = fab(model.encode(x), sigb, _fab_nov.expand(x.size(0)), step=step, ban1=_n3)[0]

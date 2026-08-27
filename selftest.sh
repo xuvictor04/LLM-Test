@@ -65,6 +65,8 @@ python3 curve_test.py    > "$OUT/curve.txt" 2>&1 && echo "  ok    curve_test (en
   || { echo "  FAIL  curve_test:"; sed 's/^/          /' "$OUT/curve.txt"; FAIL=1; }
 python3 notes_check.py   > "$OUT/notes.txt" 2>&1 && echo "  ok    notes_check (no note states a default the code contradicts)" \
   || { echo "  FAIL  notes_check:"; tail -20 "$OUT/notes.txt" | sed 's/^/          /'; FAIL=1; }
+python3 tok_test.py      > "$OUT/tok.txt"    2>&1 && echo "  ok    tok_test (minting reaches the cap; a rejected candidate is not an exhausted vocabulary)" \
+  || { echo "  FAIL  tok_test:"; grep -a FAIL "$OUT/tok.txt" | sed 's/^/          /'; FAIL=1; }
 bash harness_test.sh     > "$OUT/harness.txt" 2>&1 && echo "  ok    harness_test (arm resolution + the append-only guarantee)" \
   || { echo "  FAIL  harness_test:"; grep -a FAIL "$OUT/harness.txt" | sed 's/^/          /'; FAIL=1; }
 python3 levers.py > "$OUT/levers.txt" 2>&1 && echo "  ok    levers (every knob declared and read consistently)" \
