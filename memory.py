@@ -280,12 +280,22 @@ class EditableMemory:
 
         Called once after a resume, where O(cap) costs nothing.
         """
-        self.nsrc.zero_()
+        # GROW THE TABLE, DO NOT CLAMP INTO IT. _commit grows nsrc as domain ids climb, so a fresh run
+        # self-heals; a RESUME builds a fresh store whose census is n_src_hint long (64 in every real run --
+        # nothing sets MAX_DOMAINS, and the module default is FAB_NMAX) and then this clamped every id past the
+        # end into the last bucket. _eligible()'s own docstring records 125 source ids on a real run, so the
+        # fix I added for the resume floor would have re-broken it at exactly the scale it was written for.
         _s = self.src[self.active]
+        _s = _s[_s >= 0] if _s.numel() else _s
         if _s.numel():
-            _s = _s[_s >= 0].clamp(min=0, max=self.nsrc.numel() - 1)
-            if _s.numel():
-                self.nsrc.index_add_(0, _s, torch.ones(_s.numel(), device=self.nsrc.device))
+            _need = int(_s.max()) + 1
+            if _need > self.nsrc.numel():
+                _pad = _need - self.nsrc.numel()
+                self.nsrc = torch.cat([self.nsrc, torch.zeros(_pad, device=self.nsrc.device)])
+                self.nsrc_max = torch.cat([self.nsrc_max, torch.zeros(_pad, device=self.nsrc_max.device)])
+        self.nsrc.zero_()
+        if _s.numel():
+            self.nsrc.index_add_(0, _s.long(), torch.ones(_s.numel(), device=self.nsrc.device))
         self.nsrc_max = torch.maximum(self.nsrc_max, self.nsrc)
         return int((self.nsrc > 0).sum())
 

@@ -68,6 +68,11 @@ class DynamicsPopulation(nn.Module):
     prediction level, tracks per-predictor FITNESS, GROWS on plateau, and SOFT-CULLS the unused -- so subspecialties of
     dynamics EMERGE and are SELECTED, exactly like experts/domains, instead of one monolithic net. Same primitive, reused."""
     def __init__(s, d_lat, n0=2, nmax=8, hid=128, route_dim=32, tau=1.0):
+        # INITIALISED HERE, not lazily inside grow(). Created on first growth, the attribute is
+        # ABSENT on every run where growth never fires -- which is every short run and every
+        # WORLD_GROW=0 run -- and the DID IT FIRE audit then reads it through getattr and cannot
+        # tell "armed and never fired" from "no counter". Fabric initialises its own the same way.
+        s.grown = 0
         super().__init__()
         s.d_lat, s.hid, s.nmax, s.route_dim, s.tau = d_lat, hid, nmax, route_dim, tau
         s.preds = nn.ModuleList([ForwardModel(d_lat, hid) for _ in range(n0)])

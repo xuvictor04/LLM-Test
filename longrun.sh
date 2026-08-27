@@ -1189,7 +1189,11 @@ grid)
     set -e 2>/dev/null || true
     _t_end=$(date +%s)
     printf "%s\trc=%s\t%ss\n" "$ARM" "$_rc" "$((_t_end-_t_start))" >> "$GRID/_status.tsv"
-    if [ "$_rc" = 0 ] && _done "$LOG"; then echo "== $ARM: OK ($((_t_end-_t_start))s)"
+    # STAMP THE CONFIG, as `seeds` and `repeat` already do. grid is the only sweep that calls _reusable and
+    # never wrote $LOG.cfg -- and _reusable returns 1 on a MISSING .cfg ("it predates this check"), so the
+    # documented `sleep 2h && git pull && bash longrun.sh grid` continue-a-sweep workflow exited 1 on the first
+    # completed arm instead of skipping it. The skip path could never have worked for grid.
+    if [ "$_rc" = 0 ] && _done "$LOG"; then _cfgsig > "$LOG.cfg"; echo "== $ARM: OK ($((_t_end-_t_start))s)"
     else echo "== $ARM: FAILED rc=$_rc after $((_t_end-_t_start))s -- see $LOG (grid continues)"; fi
   done
   echo; echo "=== GRID SUMMARY ==="
@@ -1197,7 +1201,14 @@ grid)
   for ARM in $ARMS; do
     L="$GRID/$ARM.log"; [ -f "$L" ] || continue
     _ho=$(grep -a -oE "held-out [0-9.]+" "$L" | head -1 | awk '{print $2}')
+    # MATCH THE LOSING BRANCH TOO. self_organize.py prints "beats order-1 by +X" OR "DOES NOT BEAT ORDER-1
+    # (-X) -- a two-line frequency table does as well", and this pattern only matched the first. An arm that
+    # LOSES to an order-1 frequency table therefore printed "-" in this column, which is what an arm that was
+    # never measured prints. The report's own gate is "ANCHORS must beat order-1. If it does not, nothing below
+    # is worth reading" -- so the one row that must never be mistaken for missing was the one that was.
     _o1=$(grep -a -oE "beats order-1 by \+[0-9.]+" "$L" | head -1 | awk '{print $NF}')
+    [ -z "$_o1" ] && _o1=$(grep -a -oE "DOES NOT BEAT ORDER-1 \(-?[0-9.]+\)" "$L" | head -1 \
+                           | grep -oE '\(-?[0-9.]+\)' | tr -d '()')
     # THE UNIT-STABLE NUMBER, NOT THE PER-TOKEN ONE. This used to grep "since the minimum", which is per-TOKEN
     # cross-entropy. The tokenizer mints throughout a run, so each token comes to carry more bytes and that loss
     # rises MECHANICALLY while the model improves per byte. The log says so itself, three lines further down:

@@ -54,6 +54,42 @@ def scan(path=SRC):
     return reads, computed, spec, free, derived
 
 
+def default_mismatches(path=SRC):
+    """Call-site defaults that disagree with the registry.
+
+    _env() raises SystemExit for this at RUNTIME -- "read with default X here but the registry declares Y" --
+    which is the right behaviour and the wrong time to find out. It is one edit away at all times: change a
+    registry default, miss the read site, and EVERY RUN dies on its first call to that knob.
+
+    It happened at d267864. ENC_WARMUP_MIN was corrected in the registry (3000 -> 200) and left at 3000 at the
+    read site; the encoder warmup runs in every real run, so every arm launched from that commit would have
+    exited immediately. levers.py checked declaration and derivation and not this, so the first thing that
+    would have caught it was a GPU.
+
+    Comments are excluded because this parses rather than greps: two of the three raw text matches for this
+    pattern in the file are prose quoting code that used to exist.
+    """
+    src = open(path).read()
+    tree = ast.parse(src)
+    spec = {}
+    for m in re.finditer(r'^\s*"([A-Z_0-9]+)":\s*\(\s*("?\w+"?)\s*,\s*([^)]*)\)', src, re.M):
+        try: spec[m.group(1)] = ast.literal_eval(m.group(3).strip().rstrip(","))
+        except Exception: pass
+    free = set(re.findall(r'"([A-Z_0-9]+)":', re.search(r"_DERIVED = \{(.*?)\n\}", src, re.S).group(1)))
+    out = []
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in READERS): continue
+        if len(n.args) < 2 or not isinstance(n.args[0], ast.Constant): continue
+        k = n.args[0].value
+        if k not in spec or k in free: continue
+        try: d = ast.literal_eval(n.args[1])
+        except Exception: continue                    # computed default -- the registry cannot mirror it
+        r = spec[k]
+        same = (float(d) == float(r)) if isinstance(d, (int, float)) and isinstance(r, (int, float)) else (d == r)
+        if not same: out.append((k, d, r, n.lineno))
+    return out
+
+
 def main(argv):
     quiet = "--quiet" in argv
     reads, computed, spec, free, derived = scan()
@@ -117,7 +153,13 @@ def main(argv):
         return 1
     if not quiet:
         print()
-        print("levers: declarations match the source.")
+        _mm = default_mismatches()
+    if _mm:
+        print("!! a call-site default disagrees with the registry -- _env() will SystemExit on the first run:")
+        for _k, _d, _r, _ln in _mm:
+            print(f"   self_organize.py:{_ln}  {_k} read with default {_d!r}, registry declares {_r!r}")
+        return 1
+    print("levers: declarations match the source; no call-site default disagrees with it.")
     return 0
 
 

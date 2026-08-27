@@ -4100,9 +4100,19 @@ def main():
             # and load_state_dict then refuses the whole thing, discarding every moment. Capturing what each
             # replayed grow() returns lets the optimizer below be rebuilt with the SAME group structure, in the
             # same order, so the moments load exactly. This was the last "known broken, reported not fixed" item.
-            while world_fwd.n() < _RD["world_cfg"]["n"]:
+            # grow() RETURNS None WITHOUT APPENDING at capacity (world_model.py:105), so if the checkpoint
+            # records a population larger than this run's nmax, n() never advances and this spins forever --
+            # no output, no traceback, no timeout, a resume that simply never starts. A checkpoint from a run
+            # with a larger WORLD_NMAX is all it takes. Bounded, and it says which knob to change.
+            _want2 = int(_RD["world_cfg"]["n"])
+            while world_fwd.n() < _want2:
                 _np2 = world_fwd.grow()
-                if _np2: _regrown.append(_np2)
+                if _np2 is None:
+                    raise SystemExit(
+                        f"[resume] the checkpoint holds {_want2} dynamics predictors and this run caps at "
+                        f"{world_fwd.nmax} (WORLD_NMAX). grow() cannot append past the cap, so the population "
+                        f"cannot be replayed. Set WORLD_NMAX>={_want2}, or resume with WORLD_MODEL=0.")
+                _regrown.append(_np2)
         model.load_state_dict(_RD["model"]); _load_enc(enc, _RD["enc"])
         if FABRIC and _RD.get("fab") is not None:
             # TOLERANT, AND LOUD ABOUT IT. A checkpoint written before a router parameter existed (halt_b is the
@@ -4407,7 +4417,7 @@ def main():
                 return float((1 - Z @ Z.t()).mean())
         # ADAPTIVE WARMUP: stop once separation PLATEAUS instead of always running the full (30k) budget -- the #1 startup
         # cost. Probe periodically; stop when the trailing relative gain < eps, with a min floor so we never underfit it.
-        curve = []; _wfloor = min(_i("ENC_WARMUP_MIN", 3000), wu); _weps = _f("ENC_WARMUP_EPS", 0.015); _probe_ev = max(1, _i("ENC_WARMUP_PROBE", 500))
+        curve = []; _wfloor = min(_i("ENC_WARMUP_MIN", 200), wu); _weps = _f("ENC_WARMUP_EPS", 0.015); _probe_ev = max(1, _i("ENC_WARMUP_PROBE", 500))
         _prev_sep = None; _stop = wu; _plateau = False; _smax = 0.0
         for t in range(wu):
             l = contrastive_step(enc, oe, ENC_SEQ, len(ENC_SEQ))
