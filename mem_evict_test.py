@@ -94,6 +94,64 @@ def scan_resistance(prob_frac, rounds=60):
     return _alive(m, 0), _alive(m, 1)
 
 
+def census_survives_resume():
+    """Does the per-source floor still work after a RESUME?
+
+    THE FLOOR'S ONLY INPUT IS nsrc, and nsrc is maintained incrementally in _commit because an O(cap) recount
+    on every write is 200k elements per step. A resume does not go through _commit: it restores keys/tok/src/
+    pos/use and sets `active` directly. nsrc therefore stayed at the zeros a fresh store starts with, so
+    `has = (nsrc > 0)` was all False, `prot` was all False, and MEM_SRC_FLOOR protected NOTHING for the rest of
+    the run -- while the banner still printed "src floor 0.5" and this very file still proved the floor works.
+
+    That is the shape the project keeps getting caught by: the test covers the hot path, the bug lives on the
+    path the test does not take, and every report about the mechanism keeps printing.
+
+    Restores are simulated exactly as self_organize.py does them -- assign the arrays, set active, DO NOT call
+    write() -- and then rebuild_census() has to put the census back.
+    """
+    g = torch.Generator().manual_seed(0)
+    m = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, evict="lru", src_floor=0.5, n_src_hint=8)
+    for dom in (0, 1):
+        m.write(_keys(dom, HALF, g), torch.randint(0, V, (HALF,), generator=g), src=dom)
+    before = m.nsrc.clone()
+    live_before = int((before > 0).sum())
+
+    # THE RESUME, as self_organize.py performs it: arrays in, active set, _commit never called.
+    n = int(m.active.sum())
+    keys, tok, src, pos = m.keys.clone(), m.tok.clone(), m.src.clone(), m.pos.clone()
+    r = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, evict="lru", src_floor=0.5, n_src_hint=8)
+    r.keys[:n] = keys[:n]; r.tok[:n] = tok[:n]; r.src[:n] = src[:n]; r.pos[:n] = pos[:n]
+    r.active[:n] = True; r.ptr = n % r.cap
+
+    ok = True
+    if int(r.nsrc.sum()) != 0:
+        print("  note: a fresh store's census was not zero, so this test cannot show the gap")
+    # The bug, stated as the assertion: without the rebuild the floor has nothing to protect with.
+    blocked_broken = int((r._eligible()).sum())
+    r.rebuild_census()
+    live_after = int((r.nsrc > 0).sum())
+    same = bool(torch.equal(r.nsrc[:before.numel()], before))
+    print(f"  before resume: {live_before} source id(s) hold memory, census sum {int(before.sum())}")
+    print(f"  restored without rebuild: {blocked_broken} eligible source(s) -- the floor sees nothing")
+    print(f"  after rebuild_census():   {live_after} source id(s), census sum {int(r.nsrc.sum())}")
+    if blocked_broken != 0:
+        print("  !! a restored store already had a live census -- the gap this guards is not reproduced"); ok = False
+    if not same:
+        print("  !! rebuild_census did not reproduce the census the store had before the resume"); ok = False
+    if live_after != live_before:
+        print(f"  !! {live_after} live sources after rebuild, {live_before} before"); ok = False
+    # ...and the rebuild must count only ACTIVE entries, or a deleted entry keeps its slot in the floor.
+    r.active[0] = False
+    r.rebuild_census()
+    if int(r.nsrc.sum()) != int(before.sum()) - 1:
+        print(f"  !! deactivating one entry did not drop the census by exactly 1 "
+              f"({int(r.nsrc.sum())} vs {int(before.sum()) - 1})"); ok = False
+    else:
+        print("  deactivating one entry drops the census by exactly 1 -- it counts ACTIVE rows, not slots")
+    print("  ok -- the per-source floor survives a resume" if ok else "  !! FAILED")
+    return ok
+
+
 def main():
     ok = True
     lru_read, lru_quiet = _run("lru", True), _run("lru", False)
@@ -164,6 +222,11 @@ def main():
         print(f"   of the working set is ever retrieved here, and the rest is indistinguishable from the flood on")
         print(f"   the evidence available, so both rules correctly discard it. The domain-switch case above is")
         print(f"   where they diverge, and is the one this project actually hit.")
+
+    print("\n--- does the floor survive a RESUME? ---")
+
+    ok = census_survives_resume() and ok
+
 
     print("\nok -- eviction selects on retrieval, and a floor survives a domain switch." if ok else "\n!! FAILED")
     raise SystemExit(0 if ok else 1)

@@ -495,6 +495,26 @@ _flags_for() {
     # mechanism is tested in two hours rather than eight. If the damping works, the second restart is taken at
     # half swing and the arm should land near lr_075_short; if it does not, this is the cheap way to find out.
     lr_075_rst)   echo "FAB_N0=2048 FAB_NMAX=8192 VMAX=8192 GROW_CAP=1 GROW_CAP_VOCAB=0 LOSS_MASK_DEAD=1 GROW_CAP_FAB0=3000 GROW_CAP_VOCAB0=2048 BEST_KEEP=4 LR_STEPS=90000 CKPT_EVERY=20000" ;;
+    # === ARMS THAT EXERCISE THE FIXES, rather than measuring quality ===========================================
+    # Each of these exists to make one repaired mechanism VISIBLE in a log. They are short and they are read on
+    # named lines, not on bits/byte -- at this size the quality numbers are noise and reading them would be the
+    # mistake this project keeps making.
+    #
+    #   fix_cadence  BATCH_W=12 with MANAGE_EVERY at its default. Under the old `step % MANAGE_EVERY == 0` this
+    #                fired for 3 of 12 possible flush residues and ZERO for the other 9; FAB_SPAWN, the SOCIETY
+    #                merge and the chain-order pass all sat behind it. Counting flushes, it must fire at any
+    #                BATCH_W. READ: "SPAWNED BY SPECIFICATION: N expert(s)" with N > 0, and fabric.spawn in DID
+    #                IT FIRE. A zero there now means the fix did not take.
+    #   fix_vocab    a vocabulary the corpus can actually fill, so "did minting reach the cap" is answerable.
+    #                Before the maybe_grow fix a rejected candidate ended the burst and left up to 83.5% of the
+    #                width unminted. READ: the final "vocab N/M" -- N must equal M, or the [tokenizer] line must
+    #                say the corpus ran out rather than that minting stopped.
+    #   fix_resume   the arm to RESUME FROM. Small, checkpointed, and with a memory floor and a live population
+    #                so the resume has something to restore. Its partner is the resume itself, which is where
+    #                fab_use and the source census are read -- see round18's note.
+    fix_cadence)  echo "BATCH_W=12 FAB_N0=256 FAB_NMAX=1024 VMAX=2048 BEST_KEEP=2" ;;
+    fix_vocab)    echo "VMAX=1024 FAB_N0=256 FAB_NMAX=1024 BEST_KEEP=2" ;;
+    fix_resume)   echo "FAB_N0=256 FAB_NMAX=1024 VMAX=2048 MEM_SRC_FLOOR=0.5 CKPT_EVERY=4000 BEST_KEEP=2" ;;
     # ...and the same thing with the vocabulary allowed to grow, which is what was originally asked for. Kept
     # nameable because the 0.141 that argues against it is one measurement at 25 MB an epoch, and the argument
     # FOR it -- that a bigger vocabulary should pay off on more text -- has never been tested at 94.
@@ -1096,6 +1116,37 @@ grid)
     # has already been answered, and the compute belongs on model capacity instead.
     #   PILOT_DIR=data_075 STREAM_LEN=94000000 EPOCHS=2 GRID_DIR=runs/075b bash longrun.sh grid round17
     round17) ARMS="lr_075_short lr_075_rst" ;;
+    # === ROUND 18: DOES EACH REPAIR SHOW UP IN A LOG? =========================================================
+    # Four defects were found and fixed without a run: three by an audit whose verify stage died, one by hand.
+    # Unit tests hold the arithmetic; only a run shows the mechanism firing inside the system. That distinction
+    # is the whole basis of the DID IT FIRE report, so it would be strange to skip it here.
+    #
+    #   1  the tokenizer stopped minting with candidates left. Reproduced: 1845/2048 and 658/4000 before,
+    #      2048/2048 and 4000/4000 after. fix_vocab asks the same question inside a real run.
+    #   2  `step % MANAGE_EVERY == 0` below the batch early-out at three sites -- 4 of 16 flush residues at
+    #      BATCH_W=16, and ZERO for the other 12. fix_cadence runs at BATCH_W=12 (3 of 12 under the old rule).
+    #   3  fab_use was not in the checkpoint while fab_uage was, so after a resume every utilization read 0.0,
+    #      the cull's stable sort degenerated to SLOT ORDER, and it removed the founders.
+    #   4  the memory source census was never rebuilt on resume, so MEM_SRC_FLOOR protected nothing afterwards.
+    #
+    # 3 AND 4 ARE ONLY VISIBLE ACROSS A RESUME, which no grid arm performs. Run them as a pair:
+    #
+    #     STREAM_LEN=4000000 EPOCHS=4 GRID_DIR=runs/fix bash longrun.sh grid round18
+    #     RESUME_FROM=runs/fix/fix_resume bash longrun.sh pilot-add py bigcode/the-stack-dedup 0.03
+    #
+    # The second command is the continual-learning chain, which has never run -- and could not, until the
+    # tokenizer path was fixed this session (`pilot` wrote its vocabulary to a shared default while pilot-add
+    # looked beside the checkpoint, so it exited 1 before touching the GPU).
+    #
+    # WHAT TO READ, in order. None of these is a bits/byte number:
+    #   fix_cadence   "SPAWNED BY SPECIFICATION: N expert(s)", N > 0, and fabric.spawn non-zero in DID IT FIRE
+    #   fix_vocab     the final "vocab N/M" -- N == M, or a [tokenizer] line saying the corpus ran out
+    #   the resume    "[resume] source census rebuilt from N restored entries" and "[resume] K of N experts had
+    #                 no recorded UTILIZATION" (K should be 0 for a checkpoint written after this commit), then
+    #                 the first "[experts @ ...] culled" line -- it must not be removing the lowest slot numbers
+    #   the resume    "ACROSS THE RUN BOUNDARY", BWT and F: the continual-learning numbers this project exists
+    #                 to produce and has never once measured
+    round18) ARMS="fix_cadence fix_vocab fix_resume" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
   esac

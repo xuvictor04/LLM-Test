@@ -264,6 +264,31 @@ class EditableMemory:
         200k elements per step at the sizes this runs at."""
         return self.nsrc
 
+    def rebuild_census(self):
+        """Recount nsrc (and its high-water mark) from src + active. O(cap), for the paths that bypass _commit.
+
+        nsrc IS THE FLOOR'S ONLY INPUT, and it is maintained incrementally in _commit because an O(cap) recount
+        on every write is 200k elements per step. That is right for the hot path and wrong for RESUME, which
+        restores keys/tok/src/pos/use and sets `active` directly -- without ever going through _commit. nsrc
+        therefore stays at the zeros a freshly constructed store starts with, `has = (nsrc > 0)` is all False,
+        `prot` is all False, and the per-source floor protects NOTHING for the rest of the run.
+
+        The failure is silent in the worst way: mem_evict_test.py proves the floor works, the banner still
+        prints "src floor 0.5", selftest.sh asserts that line is present, and the mechanism is off. It is the
+        same shape as fab_use -- a derived counter that the checkpoint did not carry, disabling a protection
+        while every report about it kept printing.
+
+        Called once after a resume, where O(cap) costs nothing.
+        """
+        self.nsrc.zero_()
+        _s = self.src[self.active]
+        if _s.numel():
+            _s = _s[_s >= 0].clamp(min=0, max=self.nsrc.numel() - 1)
+            if _s.numel():
+                self.nsrc.index_add_(0, _s, torch.ones(_s.numel(), device=self.nsrc.device))
+        self.nsrc_max = torch.maximum(self.nsrc_max, self.nsrc)
+        return int((self.nsrc > 0).sum())
+
     def _unprotected(self, cand, need):
         """Drop candidates belonging to a source that is at or below its reserved floor.
 

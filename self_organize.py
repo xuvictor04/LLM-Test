@@ -4359,6 +4359,17 @@ def main():
                 mem.tick = max(int(_RD.get("mem_tick", 0)), int(mem.last[:_mn].max()))
             if _RD.get("mem_selfcon") is not None: mem.selfcon[:_mn] = _RD["mem_selfcon"][:_mn].to(DEV)
             mem.active[:_mn] = True; mem.ptr = _mn % mem.cap
+            # ...AND REBUILD THE SOURCE CENSUS, which nothing did. nsrc is the per-source floor's ONLY input and
+            # is maintained incrementally in _commit -- so a resume, which sets `active` directly and never goes
+            # through _commit, left it at the zeros a fresh store starts with. `has = (nsrc > 0)` is then all
+            # False, `prot` is all False, and MEM_SRC_FLOOR protects nothing for the rest of the run, while the
+            # banner keeps printing "src floor 0.5" and selftest.sh keeps asserting that line is present.
+            # Same shape as fab_use: a derived counter the checkpoint did not carry, silently disabling a
+            # protection that every report about it continued to describe as live.
+            _nsrc_live = mem.rebuild_census()
+            print(f"  [resume] source census rebuilt from {_mn} restored entries -- {_nsrc_live} source id(s) "
+                  f"hold memory. Without this the per-source floor (MEM_SRC_FLOOR={mem.src_floor:g}) would "
+                  f"protect nothing for the rest of the run.")
         _a = _RD.get("asm")
         if _a:
             asm.cent = {int(k): v.to(DEV) for k, v in _a["cent"].items()}
