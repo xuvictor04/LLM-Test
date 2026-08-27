@@ -67,8 +67,29 @@ python3 notes_check.py   > "$OUT/notes.txt" 2>&1 && echo "  ok    notes_check (n
   || { echo "  FAIL  notes_check:"; tail -20 "$OUT/notes.txt" | sed 's/^/          /'; FAIL=1; }
 python3 tok_test.py      > "$OUT/tok.txt"    2>&1 && echo "  ok    tok_test (minting reaches the cap; a rejected candidate is not an exhausted vocabulary)" \
   || { echo "  FAIL  tok_test:"; grep -a FAIL "$OUT/tok.txt" | sed 's/^/          /'; FAIL=1; }
+# A TEST NOBODY RUNS IS A TEST THAT DOES NOT EXIST. These two were written alongside the resume and corpus
+# work and never wired in here, so the project's own entry point -- the thing anyone runs before a launch --
+# was silently skipping 120-odd checks covering every path a continual-learning run takes: the fabric and
+# vocabulary widening, the geometry refusals, the restored-vs-new expert split, the growth controller's state,
+# the cull budget, the exposure guards, the DN/CORP realignment, and the ACCUM gate. They pass; that was never
+# the issue. Nothing was asking them.
+python3 corpus_test.py   > "$OUT/corpus.txt" 2>&1 && echo "  ok    corpus_test (a dropped corpus takes its name with it; per-corpus exposure)" \
+  || { echo "  FAIL  corpus_test:"; grep -a FAIL "$OUT/corpus.txt" | sed 's/^/          /'; FAIL=1; }
+python3 resume_test.py   > "$OUT/resume.txt" 2>&1 && echo "  ok    resume_test (widening, the newborn split, the growth controller, ACCUM, the cull budget)" \
+  || { echo "  FAIL  resume_test:"; grep -a FAIL "$OUT/resume.txt" | sed 's/^/          /'; FAIL=1; }
 bash harness_test.sh     > "$OUT/harness.txt" 2>&1 && echo "  ok    harness_test (arm resolution + the append-only guarantee)" \
   || { echo "  FAIL  harness_test:"; grep -a FAIL "$OUT/harness.txt" | sed 's/^/          /'; FAIL=1; }
+# WHAT THIS FILE DELIBERATELY DOES NOT RUN, said here so the omission is a decision and not an oversight --
+# which is how corpus_test and resume_test came to be missing from it for a whole session:
+#   run_verify_test.py     a full training run at STREAM_LEN=6,000,000 with VERIFY=recon, comparing the
+#                          reconstruction gate against the old self-consistency one. selftest already does one
+#                          end-to-end run below; a second heavyweight one does not belong in a fast gate.
+#                          Its own docstring gives the CPU smoke form:
+#                            DEVICE=cpu STREAM_LEN=4000 D_MODEL=32 WIN=16 ENC_WARMUP=60 FABRIC=0 \
+#                              TOKENIZER=0 PROBE=0 python3 run_verify_test.py
+#   verify_console_test.py the same A/B, self-contained, needing only torch and data/train/{eng,py,num,c}.
+# Both are A/B experiments rather than regression tests: they answer "which gate is better", not "did this
+# still work". Run them when that question is live, not before every launch.
 python3 levers.py > "$OUT/levers.txt" 2>&1 && echo "  ok    levers (every knob declared and read consistently)" \
   || { echo "  FAIL  levers:"; tail -5 "$OUT/levers.txt" | sed 's/^/          /'; FAIL=1; }
 
