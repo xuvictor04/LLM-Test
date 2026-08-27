@@ -53,8 +53,14 @@ def block(start, end):
 # report on the wrong text, which is worse than not having it.
 GATE = block("# ---- FABRIC GEOMETRY: CHECKED BEFORE ANYTHING IS RESTORED",
              '        if FABRIC and _RD.get("fab_cfg"):\n            # RESTORED SLOTS')
+# END ANCHORS ARE THE NEXT BANNER, and inserting a block between two of them breaks this LOUDLY. That has now
+# happened three times in one session -- here, when the growth-controller restore landed between the
+# bookkeeping and the world model; in section 1, when a second "_wide_by = 0" appeared; and in corpus_test.py,
+# when the capacity-gate warning landed inside its span. Every one failed with a NameError from code the test
+# was never written for, which is the correct failure: a test that quietly reports on the WRONG text is worth
+# less than no test. Anchor on distinctive banner comments, and let drift stop the suite.
 BOOK = block('if FABRIC and _RD.get("fab_cfg"):\n            # RESTORED SLOTS',
-             '        if WORLD_MODEL and _RD.get("world_cfg"):')
+             "        # ...AND THE GROWTH CONTROLLER'S MEMORY COMES BACK WITH THE POPULATION IT BUILT")
 COPY = block('_fsd = dict(_RD["fab"])', "            _mk = fab.load_state_dict(_fsd, strict=False)")
 
 
@@ -256,6 +262,185 @@ check("FAB_NMAX=2048" in w,
 check("1843" in w, "...and where the gate would reopen at the cap actually chosen (0.45 x 4096 = 1843)")
 check("ARMED AND INERT" in w,
       "...and that the three mechanisms will read ARMED AND INERT because of THIS, not as a finding")
+
+# --- 5. THE RAMP MUST NOT RE-ARM BECAUSE THE CAP MOVED ------------------------------------------------------
+# The ramp exists to BUILD the population and, in the file's own words, "it is built once". Its latch is
+# `n >= ramp_to * pool` judged against fab.cap, so widening moves the threshold out from under an already-
+# built population: 523 experts have latched at cap 1024 (523 >= 512) and have not at cap 2048 (523 < 1024)
+# or 4096 (523 < 2048). PlateauGrowth is rebuilt from env every run and was never in the checkpoint, so
+# every resume started with ramp_done=False. The ramp never reads the loss -- it mints on no evidence.
+print("\nTHE GROWTH CONTROLLER'S MEMORY SURVIVES THE BOUNDARY")
+import ast as _ast
+_tree = _ast.parse(SRC)
+_cls = next((n for n in _tree.body if isinstance(n, _ast.ClassDef) and n.name == "PlateauGrowth"), None)
+if _cls is None:
+    check(False, "PlateauGrowth is no longer a module-level class -- this test cannot find its subject")
+else:
+    _pg = {"_env": lambda k, d=None: d}
+    exec(compile(_ast.Module(body=[_cls], type_ignores=[]), "<self_organize>", "exec"), _pg)
+    PlateauGrowth = _pg["PlateauGrowth"]
+
+    # BUILD IT THE WAY THE RUN DOES, NOT THE WAY THE SIGNATURE DEFAULTS DO. PlateauGrowth's own signature has
+    # ramp=0, so PlateauGrowth(0.002, 400, 300) has NO ramp at all and every ramp assertion below passes
+    # vacuously -- which is what the first version of this test did, and it reported "0 ramp events" while
+    # claiming to measure the ramp. The call site at self_organize.py:3905 passes _i("FAB_RAMP", 4000), and
+    # the registry default is 4000, so a real run always has one. Mirror the call site exactly.
+    def build():
+        return PlateauGrowth(0.002, 400, 300,        # FAB_PLATEAU, FAB_COOLDOWN, FAB_WARMUP
+                             4.0, 1, 4000,           # FAB_Z, FAB_BURST, FAB_RAMP
+                             600, 20000,             # FAB_RECOVER_MIN, FAB_RECOVER_MAX
+                             0.10, 0.5)              # FAB_RAMP_RATE, FAB_RAMP_TO
+
+    # what the latch does at each cap, from the REAL class
+    for cap, want_latched in ((1024, True), (2048, False), (4096, False)):
+        g = build()
+        g.step(2.0, 1000, 523, cap, pool=cap)
+        check(g.ramp_done == want_latched,
+              f"a FRESH controller at cap {cap} with 523 live: ramp {'latches' if g.ramp_done else 'ARMS'} "
+              f"(threshold {int(g.ramp_to * cap)})")
+
+    # ...and how many experts a re-armed ramp mints on no evidence, over a flat loss
+    def mint(cap, latched, steps=20000):
+        """Count experts created, BY REASON. A flat loss also stalls, so a bare total cannot tell ramp growth
+        from stall growth -- and the claim here is specifically about the ramp, which never reads the loss."""
+        g = build()
+        if latched:
+            g.ramp_done = True
+        n, by = 523, {}
+        for t in range(0, steps, 16):                       # BATCH_W=16 flush cadence
+            b = min(g.step(2.0, t, n, cap, pool=cap), cap - n)   # FLAT loss: nothing has changed
+            if b > 0:
+                by[g.why] = by.get(g.why, 0) + b
+                n += b
+        return by
+
+    for cap in (2048, 4096):
+        fresh, kept = mint(cap, latched=False), mint(cap, latched=True)
+        check(fresh.get("ramp", 0) > 0,
+              f"cap {cap}, latch NOT restored: +{fresh.get('ramp', 0)} experts from the RAMP on a FLAT loss "
+              f"(all reasons: { {k: v for k, v in fresh.items()} })")
+        check(kept.get("ramp", 0) == 0,
+              f"cap {cap}, latch RESTORED: +{kept.get('ramp', 0)} from the ramp -- growth must now come from a "
+              f"regression or a stall (all reasons: { {k: v for k, v in kept.items()} })")
+        check(sum(fresh.values()) > sum(kept.values()),
+              f"...and the difference is what the cap alone would have added: "
+              f"{sum(fresh.values())} vs {sum(kept.values())} experts over {20000} steps")
+    # At the checkpoint's OWN cap nothing changes either way -- the population had already latched it.
+    same = mint(1024, latched=False)
+    check(same.get("ramp", 0) == 0,
+          f"at the checkpoint's cap 1024 the ramp latches on its own first call, restored or not "
+          f"(reasons: { {k: v for k, v in same.items()} })")
+
+    # THE OTHER HALF: the EMA that detects an arriving area is seeded from the material it is supposed to
+    # detect. A fresh controller cannot see the boundary it exists for.
+    print("\n  ...and the slow EMA is what makes an arriving area visible at all")
+    g_fresh, g_kept = build(), build()
+    for t in range(0, 6000, 16):                            # 'English': settled around 2.0
+        g_fresh.step(2.0, t, 523, 1024, pool=1024)
+    g_kept.__dict__.update({k: getattr(g_fresh, k) for k in
+                            ("fast", "slow", "dev", "n", "ramp_done", "last", "last_regr", "blackout",
+                             "t0", "state", "n_ramp", "n_stall", "n_regr", "n_regr_supp")})
+    g_new = build()                                          # what a resume built until now
+    g_new.ramp_done = True                                   # isolate the EMA effect from the ramp effect
+    seen_kept = seen_new = 0
+    for t in range(6000, 12000, 16):                         # 'Python' arrives: loss jumps to 3.4
+        if g_kept.step(3.4, t, 523, 1024, pool=1024) and g_kept.why == "REGRESSION": seen_kept += 1
+        if g_new.step(3.4, t, 523, 1024, pool=1024) and g_new.why == "REGRESSION": seen_new += 1
+    check(seen_kept > 0,
+          f"a RESTORED EMA carries the old level, so the arrival registers as a REGRESSION ({seen_kept}x)")
+    check(seen_new == 0,
+          f"a FRESH EMA seeds from the new material's own loss and sees nothing ({seen_new}x) -- the trigger "
+          f"this file calls 'the only signal continual learning has' was blind at the boundary")
+
+print("\n  ...and the restore block itself runs, on the real source")
+RESTORE = block("# ...AND THE GROWTH CONTROLLER'S MEMORY COMES BACK WITH THE POPULATION IT BUILT",
+                '        if WORLD_MODEL and _RD.get("world_cfg"):')
+
+
+class FG:
+    def __init__(s):
+        s.fast = s.slow = s.dev = None; s.n = 0; s.ramp_done = False
+        s.last = s.last_regr = s.blackout = s.t0 = 0; s.state = "W"
+        s.n_ramp = s.n_stall = s.n_regr = s.n_regr_supp = 0; s.ramp_to = 0.5
+
+
+saved = {"fast": 2.01, "slow": 2.04, "dev": 0.03, "n": 375, "ramp_done": True, "last": 24000,
+         "last_regr": 0, "blackout": 0, "t0": 0, "state": "W", "n_ramp": 12, "n_stall": 3,
+         "n_regr": 0, "n_regr_supp": 0}
+ns = dict(FABRIC=True, fabgrow=FG(), fab=Fab(4096, 523), _RD={"fabgrow": saved})
+out = run(RESTORE, ns)
+check(ns["fabgrow"].ramp_done and abs(ns["fabgrow"].slow - 2.04) < 1e-9,
+      "the restore block puts the latch and the EMAs back")
+check(any("stays latched" in l and "4096" in l for l in out),
+      "...and says the latch holds at the WIDER cap, which is the whole point")
+check(any("carries the PREVIOUS material's level" in l for l in out),
+      "...and that the EMA is what will make the arriving area visible")
+ns2 = dict(FABRIC=True, fabgrow=FG(), fab=Fab(4096, 523), _RD={})
+out2 = run(RESTORE, ns2)
+check(any("predates the growth controller being saved" in l for l in out2),
+      "an older checkpoint keeps the old behaviour and is TOLD so, not silently re-armed")
+check(any("FAB_RAMP_TO<=0.1277" in l for l in out2),
+      f"...with the value that would latch it immediately: "
+      f"{[l for l in out2 if 'FAB_RAMP_TO' in l][0].split('FAB_RAMP_TO')[1][:12] if any('FAB_RAMP_TO' in l for l in out2) else '(none)'}")
+
+# --- 6. TWO OPTIMIZERS, TWO INDEPENDENT HAZARDS ------------------------------------------------------------
+# _wide_by is a fact about the FABRIC's cap-shaped parameters, all of which are in om. oe is
+# AdamW(enc.parameters()) and holds nothing sized by fab.cap, so widening cannot invalidate one of its
+# moments -- yet the first version of this fix dropped them anyway, because both loads shared a line. enc
+# produces `gist`: the routing query, and the space every centroid lives in. Resetting its Adam state at the
+# exact boundary where a new area's signatures first arrive is the worst available moment, and the message
+# blamed the fabric for it. A quantity computed for one consumer and spent on another -- committed while
+# fixing that very class of bug, which is why this section exists.
+print("\nEACH OPTIMIZER IS SKIPPED FOR ITS OWN REASON, OR NOT AT ALL")
+OPT = block("# ONE FLAG WAS GATING TWO OPTIMIZERS", '        _mk = _RD["mem_keys"]')
+
+
+class Opt:
+    def __init__(s, name): s.name, s.loaded = name, False
+    def load_state_dict(s, d): s.loaded = True
+
+
+for wide, resized, want_m, want_e in ((0, False, True, True),      # ordinary resume: both restore
+                                      (3072, False, False, True),  # fabric widened: only om is affected
+                                      (0, True, True, False),      # encoder resized: only oe is affected
+                                      (3072, True, False, False)): # both
+    om_, oe_ = Opt("m"), Opt("e")
+    ns = dict(_wide_by=wide, _enc_resized=resized, om=om_, oe=oe_,
+              _RD={"opt_m": {}, "opt_e": {}})
+    out = run(OPT, ns)
+    check(om_.loaded == want_m and oe_.loaded == want_e,
+          f"_wide_by={wide} _enc_resized={resized}: model {'restored' if om_.loaded else 'skipped'}, "
+          f"encoder {'restored' if oe_.loaded else 'skipped'}")
+    if wide and not resized:
+        check(any("ENCODER's moments are unaffected and are restored" in l for l in out),
+              "...and a widened fabric says so explicitly, rather than blaming the fabric for the encoder")
+    if resized:
+        check(any("ENCODER optimizer's moments are not restored" in l for l in out),
+              "...and a resized embedding is named as its own, different reason")
+
+print("\n  ...and _load_enc reports the reshape rather than leaving the caller to guess")
+_src = block("def _load_enc(enc, sd):", "\n# ALLOCATED LAZILY")
+
+
+class Enc:
+    def __init__(s): s.sd = None
+    def load_state_dict(s, d): s.sd = d
+
+
+class W:
+    def __init__(s, n): s.n = n
+    def size(s, i): return s.n
+    def __getitem__(s, k): return W(k.stop)
+
+
+for rows, encv, want in ((512, 512, False), (1024, 512, True)):
+    ns = {"ENC_V": encv, "print": lambda *a, **k: None}
+    exec(compile(_src, "<self_organize>", "exec"), ns)
+    e = Enc()
+    got = ns["_load_enc"](e, {"emb.weight": W(rows)})
+    check(got == want,
+          f"a {rows}-row saved embedding into ENC_V={encv}: _load_enc returns {got} "
+          f"({'reshaped, so the moments are stale' if want else 'unchanged, so they are fine'})")
 
 print()
 if FAILED:

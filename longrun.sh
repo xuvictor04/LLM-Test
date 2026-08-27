@@ -815,6 +815,36 @@ add)
     echo "$DD/train/$NAME already has data -- skipping the pull"
   fi
   mkdir -p "$OUT"
+  # THE GEOMETRY IS NOT A FREE PARAMETER ON A RESUME, AND THE CRASH THAT USED TO SAY SO IS GONE. Until the
+  # widening fix this command died inside torch with five tensor shapes whenever the defaults did not match the
+  # checkpoint. The resume can now widen -- a resume that cannot add capacity for the area it is adding is not
+  # a continual-learning experiment -- but widening is not free, and this path was left on the registry
+  # defaults while pilot-add was taught to read the checkpoint. `add` is the one that runs the real experiment.
+  # At FAB_N0=2048 FAB_NMAX=4096 against a 523-expert/cap-1024 checkpoint: 1525 slots enter as newborns growth
+  # never asked for, and the RAMP -- latched off at 523/1024 in the run being resumed -- re-arms against the
+  # new pool and mints experts on no evidence, because the ramp never reads the loss. self_organize.py now
+  # carries the growth controller's state across the boundary so the latch survives, but the cap still decides
+  # where FAB_PRESSURE puts the population, so it is set here from what was actually saved.
+  _CKG=$(python3 - "$OUT/ck/ckpt.pt" <<'PY' 2>/dev/null
+import sys, torch
+try:
+    c = torch.load(sys.argv[1], map_location="meta", weights_only=False).get("fab_cfg") or {}
+    print(int(c.get("n") or 0), int(c.get("cap") or 0))
+except Exception:
+    pass
+PY
+)
+  _CKN=${_CKG%% *}; _CKC=${_CKG##* }
+  if [ -n "${_CKN:-}" ] && [ "${_CKN:-0}" -gt 0 ] 2>/dev/null; then
+    [ -z "${FAB_N0:-}" ] && export FAB_N0="$_CKN"
+    [ -z "${FAB_NMAX:-}" ] && [ "${_CKC:-0}" -gt 0 ] 2>/dev/null && export FAB_NMAX=$((_CKC * 2))
+    echo "add: FAB_N0=$FAB_N0 FAB_NMAX=${FAB_NMAX:-default}, read from the checkpoint's fab_cfg"
+    echo "     (cap doubled: one existing area, one added -- see the FAB_PRESSURE sizing note in pilot-add)"
+  else
+    echo "add: !! could not read the checkpoint's geometry. The defaults will enter blank experts as veterans-"
+    echo "     turned-newborns and put FAB_PRESSURE's setpoint somewhere the added area did not ask for."
+    echo "     Set FAB_N0/FAB_NMAX by hand from the previous run's 'fabric ON (N slots ...)' banner line."
+  fi
   env DATA_MODE=real DATA_DIR="$DD" DOMAINS="eng,$NAME" DEVICE=cuda DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=$SL EPOCHS=$EP D_MODEL=${D_MODEL:-768} WIN=256 BATCH_W=16 \
       VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 SIG_WIN=${SIG_WIN:-614} \

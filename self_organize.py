@@ -2939,7 +2939,14 @@ def _load_enc(enc, sd):
         if w.size(0) < ENC_V: raise ValueError(f"checkpoint encoder vocab {w.size(0)} < required {ENC_V}")
         sd = dict(sd); sd["emb.weight"] = w[:ENC_V]
         print(f"  [resume] encoder embedding {w.size(0)} -> {ENC_V} rows (ids >= {ENC_V} were never indexable)")
+        enc.load_state_dict(sd)
+        # SAY SO TO THE CALLER, because the WEIGHTS being sliced correctly says nothing about the MOMENTS. oe is
+        # AdamW(enc.parameters()) and its exp_avg for emb.weight is still the checkpoint's larger shape; torch's
+        # Optimizer.load_state_dict does not validate shape, so it would load cleanly and fail on the first
+        # step(). Exactly the hazard the fabric's widening has, on a path nothing was watching.
+        return True
     enc.load_state_dict(sd)
+    return False
 
 # ALLOCATED LAZILY, BECAUSE ITS SIZE DEPENDS ON VMAX AND ITS EXISTENCE DID NOT. This was an unconditional
 # torch.randn(V, D) at module scope, so it drew V*D numbers from the global generator before anything else was
@@ -4058,6 +4065,8 @@ def main():
     KEY_PREGATE = bool(_i("KEY_PREGATE", 1))              # encode memory keys AFTER the surprise gate (see the write call)
     KEY_BATCH = bool(_i("KEY_BATCH", 1))                  # ...and encode the whole BATCH_W batch in ONE call (KEY_BATCH=0 = per-window)
     _regrown = []                                          # param groups re-created by a RESUME's growth replay
+    _enc_resized = False                                   # _load_enc had to slice the saved embedding, which
+    #   invalidates the ENCODER optimizer's moments for it -- a hazard of its own, unrelated to the fabric's.
     _wide_by = 0                                           # slots this resume added to the fabric beyond the
     #   checkpoint's cap. Initialised HERE, not only inside `if RESUME:`, because part 2 of the resume reads it
     #   and a name that exists only down one branch is a NameError waiting for the branch that skips it.
@@ -4212,6 +4221,36 @@ def main():
                       f"mean {_fill:.2f}. Left at 0.0 they would have ranked at the BOTTOM of the utilization "
                       f"cull, which sorts stably and would have removed them in slot order.")
             for i in _new: fab.use.pop(i, None)              # grow() pops rather than zeroes; match it exactly
+        # ...AND THE GROWTH CONTROLLER'S MEMORY COMES BACK WITH THE POPULATION IT BUILT. See the save site for
+        # why: without this the ramp re-arms against a widened cap and mints experts on no evidence, and the
+        # regression trigger -- the only signal that says "the material just CHANGED" -- is seeded from the new
+        # material and so cannot see the change. A checkpoint written before this existed has no "fabgrow" key
+        # and keeps the old behaviour; it is announced rather than assumed, because a resume that silently
+        # re-arms the ramp looks exactly like a resume that did not.
+        if FABRIC and fabgrow is not None:
+            _fg = _RD.get("fabgrow")
+            if _fg:
+                for _k, _v in _fg.items():
+                    if hasattr(fabgrow, _k): setattr(fabgrow, _k, _v)
+                print(f"  [resume] growth controller restored: slow EMA {fabgrow.slow:.4f}, dev "
+                      f"{fabgrow.dev:.4f}, ramp {'LATCHED' if fabgrow.ramp_done else 'still arming'}, "
+                      f"{fabgrow.n_regr} regression(s) / {fabgrow.n_ramp} ramp event(s) so far.")
+                if fabgrow.ramp_done:
+                    print(f"  [resume]   the ramp stays latched at this run's cap {fab.cap} even though "
+                          f"{fab.n_live}/{fab.cap} is under FAB_RAMP_TO={fabgrow.ramp_to:g}. The population was "
+                          f"BUILT once; growth from here must come from a REGRESSION or a stall, which is what "
+                          f"makes a new expert attributable to the area that arrived.")
+                if fabgrow.slow is not None:
+                    print(f"  [resume]   and the slow EMA carries the PREVIOUS material's level, so a new area "
+                          f"arriving registers as the regression it is. Watch for 'REGRESSION' in the growth "
+                          f"reasons: at a run boundary that is the added corpus being detected, not noise.")
+            else:
+                print(f"  [resume] !! this checkpoint predates the growth controller being saved, so the ramp "
+                      f"re-arms and the slow EMA reseeds from the FIRST loss on the new material. The ramp will "
+                      f"add experts on no evidence until {fabgrow.ramp_to:g} x {fab.cap} = "
+                      f"{int(fabgrow.ramp_to * fab.cap)}, and the REGRESSION trigger cannot see the boundary it "
+                      f"exists for. Set FAB_RAMP_TO<={fab.n_live / max(1, fab.cap):.4f} to latch it immediately, "
+                      f"or accept that this run's growth is mostly the cap talking.")
         if WORLD_MODEL and _RD.get("world_cfg"):
             # REPLAY THE PARAM GROUPS, not just the population size. Growth calls om.add_param_group DURING
             # training, so a checkpoint taken after any growth has more groups than a freshly built optimizer --
@@ -4231,7 +4270,7 @@ def main():
                         f"{world_fwd.nmax} (WORLD_NMAX). grow() cannot append past the cap, so the population "
                         f"cannot be replayed. Set WORLD_NMAX>={_want2}, or resume with WORLD_MODEL=0.")
                 _regrown.append(_np2)
-        model.load_state_dict(_RD["model"]); _load_enc(enc, _RD["enc"])
+        model.load_state_dict(_RD["model"]); _enc_resized = _load_enc(enc, _RD["enc"])
         if FABRIC and _RD.get("fab") is not None:
             # TOLERANT, AND LOUD ABOUT IT. A checkpoint written before a router parameter existed (halt_b is the
             # current example) is missing that key, and a strict load throws away the ENTIRE fabric -- every
@@ -4485,11 +4524,24 @@ def main():
         # parameters through a flattening this file already declines to trust two lines below ("remapping moments
         # across a different flattening would silently attach them to the wrong tensors -- worse than restarting
         # them"). Same judgement, same cost: Adam re-accumulates over ~1/(1-beta2) ~ 1000 steps.
+        # ONE FLAG WAS GATING TWO OPTIMIZERS, AND ONLY ONE OF THEM HAD THE PROBLEM. _wide_by is a fact about the
+        # FABRIC's cap-shaped parameters, and every one of those is in om. oe is AdamW(enc.parameters()) --
+        # SigEncoder alone, nothing in it sized by fab.cap -- so widening cannot invalidate one of its moments,
+        # and they were being dropped anyway because both loads shared a line. enc produces `gist`: the routing
+        # query, and the space every centroid lives in. Resetting its Adam state at the exact boundary where a
+        # new area's signatures first arrive is the worst available moment, and the message blamed the fabric
+        # for it. A quantity computed for one consumer and spent on another, which is the class of bug this
+        # whole block exists to fix -- committed while fixing it.
         if _wide_by:
-            print(f"[resume] optimizer MOMENTS not restored: the fabric was widened by {_wide_by} slots, so the "
-                  f"checkpoint's Adam moments are shaped for the OLD cap. Restoring them would load cleanly and "
-                  f"then fail on the first step(). Weights, memory and domains ARE restored; Adam re-warms over "
-                  f"~1000 steps. Watch the first [rate] line: a brief bump in bits/byte is this, and it recovers.")
+            print(f"[resume] the MODEL optimizer's moments are not restored: the fabric was widened by "
+                  f"{_wide_by} slots, so the checkpoint's Adam moments are shaped for the OLD cap. Restoring "
+                  f"them would load cleanly and then fail on the first step(). Weights, memory and domains ARE "
+                  f"restored; Adam re-warms over ~1000 steps. Watch the first [rate] line: a brief bump in "
+                  f"bits/byte is this, and it recovers. The ENCODER's moments are unaffected and are restored.")
+        if _enc_resized:
+            print(f"[resume] the ENCODER optimizer's moments are not restored: its embedding was resized to "
+                  f"ENC_V rows on load, so its moments are shaped for the old vocabulary. Same failure mode, "
+                  f"different tensor -- it would load cleanly and fail on the first step().")
         # KNOWN AND BOUNDED, not a mystery. Growth (world predictors, fabric nodes, experts) calls
         # om.add_param_group DURING training, so a checkpoint taken after any growth has more param groups than
         # the optimizer rebuilt at resume, which puts every parameter in group 0. The SET of parameters is the
@@ -4497,10 +4549,11 @@ def main():
         # attach them to the wrong tensors -- worse than restarting them. So they restart: Adam re-accumulates
         # its moments over roughly 1/(1-beta2) ~ 1000 steps, about 20 seconds at the observed rate. Weights,
         # memory, domains and the recurrence clock all restore exactly; this costs a brief transient, not a run.
-        if not _wide_by:
-            try: om.load_state_dict(_RD["opt_m"]); oe.load_state_dict(_RD["opt_e"])
+        for _on, _oo, _ok, _skip in (("model", om, "opt_m", _wide_by), ("encoder", oe, "opt_e", _enc_resized)):
+            if _skip: continue
+            try: _oo.load_state_dict(_RD[_ok])
             except (KeyError, ValueError) as e:
-                print(f"[resume] optimizer MOMENTS not restored ({type(e).__name__}: {e}).\n"
+                print(f"[resume] {_on} optimizer MOMENTS not restored ({type(e).__name__}: {e}).\n"
                       f"         Expected after growth -- the checkpoint has more param groups than a fresh optimizer.\n"
                       f"         Weights/memory/domains ARE restored; Adam re-warms over ~1000 steps. Watch the first\n"
                       f"         [rate] line after a resume: a brief bump in bits/byte is this, and it should recover.")
@@ -4908,6 +4961,31 @@ def main():
                     # the founders. It prints an ordinary "culled N spared M" line while doing it, and
                     # selftest.sh runs a real resume and cannot see it. This is the continual-learning path.
                     "fab_use": (dict(fab.use) if FABRIC else None),    # UTILIZATION: the cull's ranking key
+                    # THE GROWTH CONTROLLER'S STATE, WHICH WAS NEVER SAVED AT ALL. PlateauGrowth is rebuilt
+                    # from env on every run, so a resume gets fast=slow=None, ramp_done=False, last=-1e9. Two
+                    # consequences, and the second is the more serious:
+                    #   THE RAMP RE-ARMS. Its latch is `n >= ramp_to * pool` judged against fab.cap. A 523-expert
+                    #     population in a cap of 1024 has latched (523 >= 512) -- the ramp exists to BUILD the
+                    #     population and it is built once. Resume that same population into ANY larger cap and the
+                    #     threshold moves out from under it: at 2048 it is 1024, at 4096 it is 2048, and the ramp
+                    #     starts again. It never reads the loss, so it mints experts on no evidence -- simulated
+                    #     over 50k steps against the real call-site clamps, +503 at cap 2048 and +1527 at cap 4096,
+                    #     which is 96% of all growth in the run. "What did adding an area cost" cannot be read out
+                    #     of a population the CAP quadrupled.
+                    #   THE REGRESSION TRIGGER GOES BLIND AT THE BOUNDARY. `s.slow = loss if s.slow is None else
+                    #     0.998 * s.slow + ...` seeds the EMA from the FIRST loss it sees, and on a resume that is
+                    #     the first loss on the NEW material. The test is (loss - s.slow) > z * dev, so there is no
+                    #     jump left to detect. This file calls that trigger "the arrival of a new area and the only
+                    #     signal continual learning has" -- and it cannot fire at the one moment an area arrives,
+                    #     because the memory of the old level was thrown away between the two runs. Carrying the
+                    #     EMAs across means English's level meets Python's loss and the arrival registers, which is
+                    #     the channel that should be allocating experts to the new area.
+                    # Config (rate, ramp_to, cooldowns, z) is deliberately NOT saved: those are knobs for this run
+                    # to set. Only what the controller LEARNED travels.
+                    "fabgrow": ({k: getattr(fabgrow, k) for k in
+                                 ("fast", "slow", "dev", "n", "ramp_done", "last", "last_regr", "blackout",
+                                  "t0", "state", "n_ramp", "n_stall", "n_regr", "n_regr_supp")}
+                                if (FABRIC and fabgrow is not None) else None),
                     "fab_cfg": ({"n": fab.n(), "rank": fab.r, "cap": fab.cap, "dk": _i("FAB_DK", 32), "alpha": _f("FAB_ALPHA", 0.5),
                                  "max_steps": _i("FAB_STEPS", 4), "hid_mult": _f("FAB_HID_MULT", 2),
                                  "min_steps": fab.min_steps, "norm_only": bool(_i("FAB_NORM_ONLY", 0)),
@@ -6786,6 +6864,19 @@ def main():
                         print(f"  [fabric @ {step}] growth held to {_nb} (+{_held} declined): {_recent} of "
                               f"{fab.n()} experts are younger than {FAB_NEW_WIN} steps, and FAB_NEW_FRAC="
                               f"{FAB_NEW_FRAC:.0%} is the most of the population allowed to be new at once")
+            # WHAT THE TRIGGER ASKED FOR IS NOT WHAT GROWTH DELIVERED, and only the ask was counted. n_regr is
+            # incremented inside PlateauGrowth.step and returned from there; both clamps above -- the soft cap
+            # and FAB_NEW_FRAC -- run at THIS call site, after the return. So a regression whose whole burst is
+            # declined still reports as a regression that fired, and the end-of-run summary prints "Nx on a
+            # REGRESSION" for events that created nothing. The diagnostic that exists to catch precisely this
+            # ("the REGRESSION trigger never fired ... the arrival was invisible to growth") is gated on n_regr
+            # being zero, so it stays silent in the one case where it is most needed. Measured: with the ramp
+            # re-armed at cap 4096 the newborn budget is spent before the regression is tested, and 2 counted
+            # regressions produced 0 experts. Record what was actually created, per reason.
+            if _nb <= 0 and fabgrow is not None and fabgrow.why:
+                fabgrow.n_declined = getattr(fabgrow, "n_declined", 0) + 1
+                fabgrow.declined_why = getattr(fabgrow, "declined_why", {})
+                fabgrow.declined_why[fabgrow.why] = fabgrow.declined_why.get(fabgrow.why, 0) + 1
             for _g in range(max(0, _nb)):                       # each newborn is keyed at the CURRENT signature, so a
                 _fp = fab.grow(sig[None, :], step=step)      # burst owns the CURRENT region, on either path:
                 #   a newborn keyed at random receives no traffic, gets no gradient and stays dead, and that is
@@ -7700,6 +7791,21 @@ def main():
               f"REGRESSION, {fabgrow.n_stall}x on a stall"
               + (f" | {fabgrow.n_regr_supp} REGRESSION(s) DETECTED AND REFUSED by the regression cooldown"
                  if fabgrow.n_regr_supp else ""))
+        # WHAT WAS ASKED FOR vs WHAT WAS CREATED. n_ramp/n_regr/n_stall count the TRIGGER, incremented inside
+        # PlateauGrowth.step and returned from there; the soft cap and FAB_NEW_FRAC clamp the burst afterwards,
+        # at the call site. So these three numbers are requests, not experts, and a run whose whole newborn
+        # budget was spent by the ramp will print "2x on a REGRESSION" for two events that created nothing --
+        # while the diagnostic below, gated on n_regr == 0, stays silent because the trigger did fire.
+        _decl = getattr(fabgrow, "declined_why", {}) or {}
+        if _decl:
+            print(f"  ...of which DECLINED entirely by the cap or FAB_NEW_FRAC: "
+                  + ", ".join(f"{_v}x {_k}" for _k, _v in sorted(_decl.items()))
+                  + ". Those events are counted above as having fired and produced NO expert.")
+        if _decl.get("REGRESSION"):
+            print(f"  >> {_decl['REGRESSION']} REGRESSION(s) fired and were declined outright. On a run that ADDED "
+                  f"an area this is the failure that matters: the arrival WAS detected and capacity still did not "
+                  f"answer it, because the budget had already gone elsewhere. Check the RAMP count above -- if the "
+                  f"ramp re-armed against a widened cap it spends the newborn budget on no evidence at all.")
         if fabgrow.n_regr == 0 and fabgrow.n_regr_supp == 0:
             print(f"  >> the REGRESSION trigger never fired and was never even refused, so no window of this run "
                   f"read as a CHANGE in the material. On a single stationary corpus that is correct; on a run that "
