@@ -865,6 +865,33 @@ def widen_prefix(live_sd, ck_sd):
     return out, grew, bad
 
 
+def _curve_by_step(curve):
+    """Collapse the per-process learning curve to one series per step -- correctly.
+
+    This was `{st: b for st, _p, b, _a in curve}`: a dict keyed on the STEP alone, so each step kept whichever
+    process was appended last, and both the process id and the was-active flag were thrown away. Appends run in
+    ascending process order, so the survivor is always the HIGHEST-INDEXED process -- which under the
+    "add an area" schedule is systematically the NEWEST corpus, the one that cannot have been forgotten. Not
+    arbitrary: reliably wrong in the direction that hides the failure this project exists to measure.
+    Checked against the first continual-learning run. The verdict quoted 1.77 -> 1.74 over the second half;
+    those are py's numbers to the digit. English moved 2.17 -> 2.08 -- 3.3x further -- and the two-process mean
+    is neither. Every "is it still learning" sentence that run printed was about Python only.
+
+    ABSENT WINDOWS ARE EXCLUDED, which the old expression could not do because it discarded the flag. A process
+    that is out of the stream gets worse while it is away; feeding that rise to a divergence test asks whether
+    the model is blowing up and answers with the phase schedule. The same run has py going 2.51 ACTIVE to 4.64
+    ABSENT, a +2.13 b/B step into a test whose threshold is 0.5.
+
+    Returns [(step, mean bits/byte over ACTIVE processes at that step)]. Falls back to all rows if nothing is
+    marked active, so a curve recorded before the flag existed still produces a series rather than nothing.
+    """
+    rows = [(st, b) for st, _p, b, _a in curve if _a] or [(st, b) for st, _p, b, _a in curve]
+    agg = {}
+    for st, b in rows:
+        agg.setdefault(st, []).append(b)
+    return sorted((st, sum(v) / len(v)) for st, v in agg.items())
+
+
 def bwt_of(now, prev):
     """Backward transfer: mean change on OLD material, on a LOWER-IS-BETTER metric.
 
@@ -5772,6 +5799,21 @@ def main():
                             f"changing how minting behaves: ~{_ep_needed} epochs covers the {_need} needed here. "
                             f"GROW_BURST would also cover it, but it changes how large a segmentation shift each "
                             f"grow event is, which is a different experiment.")
+        # A DEFAULT THAT CANNOT FIRE, AND NOTHING SAID SO. memory.py gates the quantile write gate as
+        # `if self.adaptive_gate and self.quantile_gate:` -- so WRITE_QUANTILE, whose registry default is 1,
+        # is inert unless WRITE_ADAPTIVE is also on, and WRITE_ADAPTIVE defaults to 0. longrun.sh sets no
+        # WRITE_* knob anywhere, so every run this harness launches -- the continual-learning run included --
+        # writes memory through the FIXED absolute threshold `keep = sd >= write_gate`, which is precisely the
+        # mechanism notes/05_ERRORS.md records as broken and the quantile gate as its fix. The fix ships off.
+        # It is not unreachable: WRITE_ADAPTIVE=1 turns it on. But nothing in the log names either knob --
+        # there is no WRITE_* on the EFFECTIVE line and the [memory] banner prints evict/floor/probe only --
+        # and preflight.sh's check is satisfied by the knob NAME appearing in the source, which a dead knob
+        # does. So the state was invisible from both directions.
+        if _i("WRITE_QUANTILE", 1) and not _i("WRITE_ADAPTIVE", 0):
+            _cpl.append(f"WRITE_QUANTILE=1 has NO EFFECT: memory.py gates it behind `adaptive_gate and "
+                        f"quantile_gate`, and WRITE_ADAPTIVE={_i('WRITE_ADAPTIVE', 0)}. Writes take the FIXED "
+                        f"threshold `surprise >= WRITE_GATE={_f('WRITE_GATE', 0.3):g}` instead -- the absolute "
+                        f"gate the quantile one was written to replace. Set WRITE_ADAPTIVE=1 to use it.")
         for _c in _cpl: print(f"[config] COUPLING    {_c}")
         # DERIVED KNOBS. A knob left unset whose default is computed FOLLOWS another knob, so changing the
         # other one moves it too. That is fine and often right, but it was only visible by reading the read
@@ -6758,7 +6800,22 @@ def main():
         # Exact for any optimizer, because it operates on the realised update rather than on its inputs.
         # Cost: one clone of the LIVE rows per optimizer step (n_live*d*r floats, ~50 MB at 2048 experts, d=768,
         # r=8, twice for A and B) -- a few tenths of a percent of HBM bandwidth at these step rates.
-        if (step + 1) % ACCUM == 0:
+        # ON BACKWARD PASSES, NOT ON STEPS -- the last cadence in this file still below the batch early-out.
+        # `step` advances once per WINDOW; this body runs once per FLUSH, and om.step()/om.zero_grad() below are
+        # the ONLY calls to either in the loop. So the gate asked "(windows + 1) mod ACCUM" about a decision that
+        # happens per backward pass, and with g = gcd(BATCH_W, ACCUM) it fires on g/ACCUM of flushes when the
+        # epoch's first step is right and on NONE otherwise. Whenever ACCUM divides BATCH_W -- every ACCUM worth
+        # setting at the BATCH_W=16 longrun.sh hardcodes -- it is all-or-nothing, and _bx is cleared at the epoch
+        # roll so which one flips per epoch. Simulated over 4000 windows at BATCH_W=16, ACCUM=4: offset 0 steps on
+        # all 250 flushes (so nothing accumulates and ACCUM does nothing at all), offsets 1, 2 and 3 step ZERO
+        # times -- an entire epoch of backward passes accumulated into a gradient that is never applied and never
+        # zeroed. Not a rate error; the optimizer simply does not run.
+        # Harmless today only because ACCUM defaults to 1 and longrun.sh never sets it. fetch_big.py prints the
+        # recommended heavy-run command as "WIN=256 BATCH_W=16 ACCUM=4 D_MODEL=768 VMAX=16384", so the next GB
+        # run launched the way the repo says to launch it had a 3-in-4 chance per epoch of taking no step at all,
+        # and ACCUM appears in no print anywhere, so it would have failed in silence.
+        # Same fix as the three management cadences: count the thing the decision is actually about.
+        if _nbwd % ACCUM == 0:
             _own_lr = None
             if FAB_LR_OWN and FABRIC and fab is not None and fab.n_live > 0 and _lrv > 0:
                 _nl = fab.n_live
@@ -7797,7 +7854,7 @@ def main():
         # alone was reading a unit change as a failure, and I have been quoting it for many turns.
         _bpb_dir = None
         try:
-            _bp = sorted({st: b for st, _p, b, _a in _CURVE}.items())
+            _bp = _curve_by_step(_CURVE)
             if len(_bp) >= 6:
                 _bmin = min(v for _, v in _bp)
                 _bpb_dir = (_bp[-1][1] - _bmin, _bp[-1][1] - _bp[len(_bp) // 3][1])
@@ -7808,7 +7865,7 @@ def main():
         # half while still showing a good minimum somewhere early. The SLOPE over the second half says whether
         # more steps at this setting would buy anything.
         try:
-            _bp2 = sorted({st: b for st, _p, b, _a in _CURVE}.items())
+            _bp2 = _curve_by_step(_CURVE)
             if len(_bp2) >= 8:
                 _hh = _bp2[len(_bp2) // 2:]
                 _mx = sum(a for a, _ in _hh) / len(_hh); _my = sum(b for _, b in _hh) / len(_hh)
@@ -8543,10 +8600,28 @@ def main():
             if len(_ew) >= 8:
                 with torch.no_grad():
                     _G = enc(torch.tensor(_ew, device=DEV))
-                    _K = torch.cat([fab._ids(_N)[0], fab.halt_key[None]], 0)
-                    _nb = fab.nov(torch.zeros(_G.size(0), 1, device=DEV))
-                    _c = torch.softmax(((fab.q_entry(_G) + _nb) @ _K.t()) / max(1e-3, fab.route_t), -1)
-                    _win = _c[:, :_N].argmax(-1)           # the node that takes this window at ENTRY
+                    # THE PARTITION MUST COME FROM THE ROUTER THAT ACTUALLY RAN. This was the pre-grounding
+                    # expression `q_entry(gist) @ [ids; halt_key].t()`. Entry moved to the shared grounded router
+                    # -- Fabric.forward takes `entry_logits` under `if s.grounded`, and route_w does the same --
+                    # and this copy was never updated. ROUTE_GROUNDED defaults to 1, so q_entry sits on no live
+                    # path, and the ROUTER LEARNING audit in this very report says so in as many words:
+                    #     never gradiented -> ctrl, q_entry
+                    # So the verdict below partitioned held-out windows with an UNTRAINED projection and then
+                    # asked whether that partition beat a shuffle of itself -- it was drawn from its own null,
+                    # and would read INTERCHANGEABLE whatever the population did. Every arm that has ever
+                    # reported INTERCHANGEABLE was reading a dead input.
+                    # The symptom was visible and got explained away: this diagnostic found 5 distinct winners
+                    # on the pilot while ROUTER SELECTION over the same run found 415, and the gap was
+                    # rationalised as "a probe, not the run". An 83x disagreement between two counts of the same
+                    # thing is not a sampling difference.
+                    if fab.grounded:
+                        _lg = fab.entry_logits(_G, torch.zeros(_G.size(0), device=DEV), _N)
+                        _win = _lg[:, :_N].argmax(-1)
+                    else:
+                        _K = torch.cat([fab._ids(_N)[0], fab.halt_key[None]], 0)
+                        _nb = fab.nov(torch.zeros(_G.size(0), 1, device=DEV))
+                        _c = torch.softmax(((fab.q_entry(_G) + _nb) @ _K.t()) / max(1e-3, fab.route_t), -1)
+                        _win = _c[:, :_N].argmax(-1)       # the node that takes this window at ENTRY
                     _X = torch.tensor(_ex, device=DEV); _Y = torch.tensor(_ey, device=DEV)
                     _pp = F.softmax(fab_logits(model, fab, model.encode(_X), _G), -1) \
                             .gather(-1, _Y.unsqueeze(-1)).squeeze(-1)

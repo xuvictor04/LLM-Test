@@ -218,6 +218,14 @@ def main():
     # Only stack the heavy knobs (long windows / big vocab) for a genuinely LARGE corpus; on a small pull they just
     # make a 40-min run take many hours. ALWAYS include CKPT_EVERY (killable/promptable mid-run) + RUN_NAME (isolates artifacts).
     heavy = written >= 250_000_000
+    # ACCUM=4 STAYS, AND IT NOW MEANS WHAT IT SAYS. This line recommended ACCUM=4 alongside BATCH_W=16 while
+    # self_organize.py gated the optimizer on `(step + 1) % ACCUM == 0` -- a step counter that advances per
+    # WINDOW, tested in a body that runs once per FLUSH. With gcd(16, 4) = 4 that was all-or-nothing per epoch:
+    # depending on where the epoch's first step landed, the optimizer either ran on every flush (accumulating
+    # nothing, so ACCUM did nothing) or NEVER RAN AT ALL for the whole epoch. Three of four offsets gave zero
+    # steps, ACCUM is printed nowhere, and this is the command the repo tells people to launch for the heavy
+    # run. The gate counts backward passes now, so this recommendation is safe -- but only from that commit on:
+    # a run launched from an older tree with these knobs may have trained nothing and said so nowhere.
     knobs = " WIN=256 BATCH_W=16 ACCUM=4 D_MODEL=768 VMAX=16384" if heavy else ""
     print(f"\nNext ({'large corpus -> heavy config' if heavy else 'small corpus -> light defaults'}; "
           f"CKPT_EVERY = saves every N steps so a crash never loses everything):\n"

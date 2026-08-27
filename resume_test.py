@@ -565,6 +565,77 @@ check(not grew_d and len(bad_d) == 1, f"a D_MODEL change is refused rather than 
 sd_s, grew_s, bad_s = WIDEN(cur_m, {k: T(v.shape, "ck") for k, v in cur_m.items()})
 check(not grew_s and not bad_s, "an identical geometry widens nothing and refuses nothing")
 
+# --- 9. FOUR CLAIMS I MADE AND NEVER CHECKED -----------------------------------------------------------
+# Audited after the first continual-learning run. Two were true and worse than stated, one was partly wrong
+# in my wording, one was true with a consequence I had understated.
+print("\nACCUM COUNTS BACKWARD PASSES, NOT WINDOWS")
+# `step` advances per WINDOW; the gate's body runs once per FLUSH; om.step()/om.zero_grad() are the only
+# calls to either in the loop. `(step + 1) % ACCUM` therefore asked a window question about a per-backward
+# decision. With g = gcd(BATCH_W, ACCUM) it is all-or-nothing whenever ACCUM divides BATCH_W -- which is
+# every ACCUM worth setting at the BATCH_W=16 longrun.sh hardcodes -- and _bx is cleared at the epoch roll,
+# so which way it lands can flip per epoch. fetch_big.py prints ACCUM=4 BATCH_W=16 as the heavy-run command.
+
+
+def accum_steps(BATCH_W, ACCUM, s0, gate, windows=4000):
+    bx, step, nbwd, flushes, taken = 0, s0, 0, 0, 0
+    for _ in range(windows):
+        bx += 1
+        if bx < BATCH_W:
+            step += 1
+            continue
+        flushes += 1; nbwd += 1
+        if gate(step, nbwd, ACCUM):
+            taken += 1
+        bx = 0; step += 1
+    return flushes, taken
+
+
+OLD = lambda step, nbwd, A: (step + 1) % A == 0
+NEW = lambda step, nbwd, A: nbwd % A == 0
+for BW, AC in ((16, 1), (16, 2), (16, 4), (12, 4)):
+    old_counts = {accum_steps(BW, AC, s0, OLD)[1] for s0 in range(4)}
+    new_counts = {accum_steps(BW, AC, s0, NEW)[1] for s0 in range(4)}
+    f = accum_steps(BW, AC, 0, NEW)[0]
+    check(len(new_counts) == 1 and new_counts != {0},
+          f"BATCH_W={BW} ACCUM={AC}: the new gate takes {new_counts.pop()} step(s) of {f} flushes at EVERY "
+          f"starting offset")
+    if AC > 1:
+        check(0 in old_counts and len(old_counts) > 1,
+              f"  ...where the old gate took {sorted(old_counts)} depending only on where the epoch started "
+              f"-- including ZERO, an entire epoch with no optimizer step and no zero_grad")
+check(accum_steps(16, 4, 0, NEW)[1] == accum_steps(16, 4, 0, NEW)[0] // 4,
+      "and ACCUM=4 now genuinely steps once per four backward passes, which is what it is for")
+
+print("\nTHE LEARNING CURVE KEEPS THE PROCESS AND THE ACTIVE FLAG")
+_cb = {}
+exec(compile(block("def _curve_by_step(curve):", "\ndef bwt_of("), "<self_organize>", "exec"), _cb)
+curve_by_step = _cb["_curve_by_step"]
+# the pilot's own rows: (step, process, bits/byte, was_active)
+CURVE = [(26000, 0, 2.12, True), (26000, 1, 5.75, False),
+         (28000, 0, 2.37, False), (28000, 1, 2.80, True),
+         (84000, 0, 2.07, False), (84000, 1, 1.74, True),
+         (86000, 0, 2.08, False), (86000, 1, 1.74, True)]
+old_series = sorted({st: b for st, _p, b, _a in CURVE}.items())
+new_series = curve_by_step(CURVE)
+check(old_series[0][1] == 5.75,
+      f"the old expression took {old_series[0][1]} at step 26000 -- py while it was ABSENT, because the dict "
+      f"was keyed on the step alone and appends ascend by process")
+check(new_series[0][1] == 2.12,
+      f"the new one takes {new_series[0][1]} -- the process that was ACTIVE there")
+check(min(v for _, v in new_series) < min(v for _, v in old_series) or
+      max(v for _, v in new_series) < max(v for _, v in old_series),
+      f"...so an ABSENT window can no longer enter rise_since_min: the old series spanned "
+      f"{max(v for _, v in old_series) - min(v for _, v in old_series):.2f} b/B against a "
+      f"CURVE_RISE_BLEWUP threshold of 0.5, on nothing but the phase schedule")
+# and with two ACTIVE processes at one step it must MEAN over them, not pick one
+both = [(1000, 0, 2.0, True), (1000, 1, 3.0, True)]
+check(curve_by_step(both) == [(1000, 2.5)],
+      "two active processes at one step average, rather than one silently winning")
+# a curve with no active flags at all still yields a series rather than nothing
+none_active = [(1000, 0, 2.0, False), (2000, 0, 3.0, False)]
+check(len(curve_by_step(none_active)) == 2,
+      "a curve with nothing marked active falls back to all rows instead of returning empty")
+
 print()
 if FAILED:
     print(f"resume_test: {len(FAILED)} CHECK(S) FAILED")
