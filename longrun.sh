@@ -715,22 +715,41 @@ pilot-add)
   # checkpoint should not be paged into RAM to learn one integer. Any failure here is non-fatal -- the engine's
   # own gate will explain the geometry far better than this shell can.
   if [ -z "${FAB_N0:-}" ]; then
-    _CKN=$(python3 - "$FROM/ckpt.pt" <<'PY' 2>/dev/null
+    _CKG=$(python3 - "$FROM/ckpt.pt" <<'PY' 2>/dev/null
 import sys, torch
 try:
-    d = torch.load(sys.argv[1], map_location="meta", weights_only=False)
-    print(int((d.get("fab_cfg") or {}).get("n") or 0))
+    c = torch.load(sys.argv[1], map_location="meta", weights_only=False).get("fab_cfg") or {}
+    print(int(c.get("n") or 0), int(c.get("cap") or 0))
 except Exception:
-    print(0)
+    pass
 PY
 )
+    _CKN=${_CKG%% *}; _CKC=${_CKG##* }
     if [ -n "${_CKN:-}" ] && [ "${_CKN:-0}" -gt 0 ] 2>/dev/null; then
       export FAB_N0="$_CKN"
       echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint -- not the default 2048, which"
       echo "           would enter $((2048 - _CKN)) identity experts at step 0 that growth never asked for."
+      # AND THE CAP IS NOT A FREE PARAMETER. cull_gate_open is n_live/cap >= FAB_PRESSURE, and the utilization
+      # cull, the utilization spare and FAB_RESCUE all live behind it. Leaving FAB_NMAX at the default 4096
+      # against a 523-expert checkpoint puts occupancy at 0.128 against a pressure of 0.45 -- the gate is shut,
+      # and it STAYS shut: at 4096 it needs 1843 experts, so even after the added area grows a population the
+      # size of the original one (1046 total, 0.26) none of the three ever runs. They would read ARMED AND
+      # INERT in DID IT FIRE, which is exactly the failure cull_gate_open's own docstring records.
+      # FAB_PRESSURE is a SETPOINT -- the population equilibrates at pressure x cap -- so an oversized cap also
+      # invites the population toward it whether or not the new area needs the experts, which would confound
+      # "what did adding this area cost" with "the cap told it to quadruple".
+      # DOUBLE the checkpoint's cap: one existing area, one added area. The old population plus a comparable
+      # new one then lands at the same occupancy the original run ended on.
+      if [ -z "${FAB_NMAX:-}" ] && [ -n "${_CKC:-}" ] && [ "${_CKC:-0}" -gt 0 ] 2>/dev/null; then
+        export FAB_NMAX=$((_CKC * 2))
+        echo "           slot pool FAB_NMAX=$FAB_NMAX (double the checkpoint's $_CKC: one existing area, one added)."
+        echo "           The capacity gate reopens near $((FAB_NMAX * 45 / 100)) experts, which is where the old"
+        echo "           population plus a comparable new one lands. The default 4096 would shut it for the run."
+      fi
     else
-      echo "pilot-add: could not read the checkpoint's expert count; leaving FAB_N0 to the default."
-      echo "           If the run reports slots that were 'LIVE here but not in the checkpoint', that is why."
+      echo "pilot-add: could not read the checkpoint's geometry; leaving FAB_N0 and FAB_NMAX to the defaults."
+      echo "           If the run reports slots that were 'LIVE here but not in the checkpoint', or warns that"
+      echo "           WIDENING CLOSED THE CAPACITY GATE, that is why -- set FAB_N0/FAB_NMAX by hand."
     fi
   fi
   # $OUT MUST EXIST BEFORE tee OPENS ITS FILE. `pilot` mkdir -p's it, `pilot-add` never did -- and tee opens its

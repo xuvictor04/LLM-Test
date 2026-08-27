@@ -5034,6 +5034,43 @@ def main():
                   "and it confounds the result: what looks like the new area displacing the old is partly the "
                   "new area having been memorised. Match the corpus sizes, or set PHASE_SCHED to give them "
                   "shares proportional to their sizes.")
+    # WIDENING THE FABRIC MOVES THE CAPACITY GATE, AND THREE MECHANISMS LIVE BEHIND IT. cull_gate_open is
+    # n_live/cap >= FAB_PRESSURE, and its own docstring records what a wrong answer here costs: "Three
+    # mechanisms live inside this gate -- the utilization cull, the utilization spare and FAB_RESCUE -- so a
+    # wrong answer here does not fail, it silently removes three things from the run. It has already done that
+    # once ... `fabric.spare` read ARMED AND INERT for a whole investigation."
+    # A resume that widens the cap divides that ratio without touching the population, so it can close a gate
+    # that was open in the run being resumed. Measured on the run this was written for: 523 experts at cap 1024
+    # is 0.51 and the gate is OPEN; the same 523 at cap 4096 is 0.128 and it is SHUT. Worse, it stays shut --
+    # at cap 4096 the gate needs 1843 experts, so even after the added area grows a population the size of the
+    # original one (1046 total, 0.26) none of the three ever runs. The cap is not a free parameter: FAB_PRESSURE
+    # is a SETPOINT, and the population equilibrates at pressure x cap, so quadrupling the cap quadruples where
+    # the population wants to sit regardless of whether the new area needs the experts.
+    # THE TEST IS NOT "IS THE GATE SHUT" -- IT IS "CAN IT REOPEN". A population below FAB_PRESSURE at the start
+    # of a growth run is ordinary: round18's own logs print "the UTILIZATION cull did not run: 273/1024 = 0.27
+    # occupancy is below FAB_PRESSURE=0.45" for thousands of steps and then the gate opens as the population
+    # grows into it. Warning on that would be noise, and a warning that fires on the healthy case is one nobody
+    # reads. What is NOT ordinary is a cap so large that the gate cannot open within the run: the sizing rule is
+    # the old population plus a comparable new one, so if even DOUBLE the current population stays under
+    # pressure, the three mechanisms are out of reach for the whole run rather than merely waiting.
+    if FABRIC and _wide_by and fab.cap:
+        _occ_now = fab.n_live / fab.cap
+        _pres = _f("FAB_PRESSURE", 0.45)
+        _occ_was = fab.n_live / max(1, fab.cap - _wide_by)
+        if (2 * fab.n_live) < _pres * fab.cap:
+            _warn.append(
+                f"WIDENING CLOSED THE CAPACITY GATE: {fab.n_live} experts were {_occ_was:.2f} occupancy at the "
+                f"checkpoint's cap {fab.cap - _wide_by} and are {_occ_now:.2f} at this run's {fab.cap}, against "
+                f"FAB_PRESSURE={_pres:g}. The utilization cull, the utilization spare and FAB_RESCUE all live "
+                f"behind that gate, so this run measures a system WITHOUT them -- they will read ARMED AND INERT "
+                f"in DID IT FIRE and that will be this, not a finding about the mechanisms.\n      "
+                f"The gate reopens at {int(_pres * fab.cap)} experts. FAB_PRESSURE is a setpoint and the "
+                f"population equilibrates at pressure x cap, so this cap also invites the population toward "
+                f"~{int(_pres * fab.cap)} whether or not the added area needs that many.\n      "
+                f"Sizing rule: pick a cap where the OLD population plus a comparable NEW one lands near "
+                f"FAB_PRESSURE. Here that is FAB_NMAX={2 * (fab.cap - _wide_by)} "
+                f"({2 * fab.n_live}/{2 * (fab.cap - _wide_by)} = "
+                f"{2 * fab.n_live / max(1, 2 * (fab.cap - _wide_by)):.2f}), not {fab.cap}.")
     # TWO WRITE PATHS, AND ONLY ONE CARRIES THE OWNER. The batched path computes _own from the routing weights
     # and passes owners= to write_batch; the per-window fallback calls write(), whose signature has no owner at
     # all, so every entry lands in partition 0. Which path runs is decided by KEY_PREGATE / KEY_BATCH / KEY_SRC

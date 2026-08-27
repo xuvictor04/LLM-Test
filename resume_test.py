@@ -210,6 +210,53 @@ except SystemExit as e:
     check("mystery" in str(e) and "FAB_NMAX=1024" in str(e),
           f"it names the tensor and the way out: {str(e)[:96]}...")
 
+# --- 4. WIDENING MOVES THE CAPACITY GATE, AND THREE MECHANISMS LIVE BEHIND IT ------------------------------
+# The cap is not a free parameter. cull_gate_open is n_live/cap >= FAB_PRESSURE, and its own docstring
+# records the cost of getting this wrong: "a wrong answer here does not fail, it silently removes three
+# things from the run ... `fabric.spare` read ARMED AND INERT for a whole investigation." A resume that
+# widens divides that ratio without touching the population, so it can shut a gate that was open in the run
+# being resumed -- which is what FAB_NMAX=4096 would have done here, and it was my own recommendation.
+print("\nTHE CAP IS NOT A FREE PARAMETER")
+_gate_ns = {"__builtins__": __builtins__}
+exec(compile(block("def cull_gate_open(n_live, cap, pressure):", "\ndef bwt_of("),
+             "<self_organize>", "exec"), _gate_ns)
+gate = _gate_ns["cull_gate_open"]
+P = 0.45
+check(gate(523, 1024, P), "523 experts in the checkpoint's 1024 cap = 0.51: the gate was OPEN")
+check(not gate(523, 4096, P), "the same 523 in a 4096 cap = 0.128: widening SHUTS it")
+check(not gate(1046, 4096, P),
+      "...and it stays shut after the added area grows a population the size of the original (1046 = 0.26)")
+check(gate(1046, 2048, P),
+      "at cap 2048 that same 1046 is 0.51 -- the regime the original run ended in, which is the sizing rule")
+check(not gate(523, 2048, P), "...while 523 starts at 0.26, so there is room to grow into it first")
+check(not gate(2, 1, P) and not gate(1, 1, P), "n_live <= 2 is a floor, not a pressure test")
+
+print("\n  ...and the run says so at startup rather than leaving it to DID IT FIRE afterwards")
+WARN = block("# WIDENING THE FABRIC MOVES THE CAPACITY GATE",
+             "    # TWO WRITE PATHS, AND ONLY ONE CARRIES THE OWNER.")
+# The condition is "can the gate reopen", not "is it shut". 523 experts: doubling to 1046 clears 0.45 at
+# cap 2048 (921) but not at cap 4096 (1843). A run that merely STARTS below pressure and grows into it is
+# the healthy case and must stay quiet, or the warning is noise and nobody reads it.
+for cap, wide, want in ((4096, 3072, True),      # 1024 -> 4096: 1046 < 1843, out of reach for the whole run
+                        (2048, 1024, False),     # 1024 -> 2048: 1046 > 921, it reopens as the area grows
+                        (1024, 0, False),        # not widened at all
+                        (8192, 7168, True),      # 1024 -> 8192: further out of reach
+                        (1024, 512, False)):     # 512 -> 1024: 1046 > 460, fine
+    ns = dict(FABRIC=True, _wide_by=wide, fab=Fab(cap, 523), _warn=[], _f=lambda k, d: d)
+    run(WARN, ns)
+    check(bool(ns["_warn"]) == want,
+          f"cap {cap - wide} -> {cap} at 523 experts: {'WARNS' if ns['_warn'] else 'quiet'} "
+          f"-- gate reopens at {int(P * cap)}, and 2x the population is 1046")
+ns = dict(FABRIC=True, _wide_by=3072, fab=Fab(4096, 523), _warn=[], _f=lambda k, d: d)
+run(WARN, ns)
+w = ns["_warn"][0]
+check("FAB_NMAX=2048" in w,
+      f"...and it names the cap that would have been right, computed not guessed: "
+      f"{[x for x in w.split() if x.startswith('FAB_NMAX=')][0]}")
+check("1843" in w, "...and where the gate would reopen at the cap actually chosen (0.45 x 4096 = 1843)")
+check("ARMED AND INERT" in w,
+      "...and that the three mechanisms will read ARMED AND INERT because of THIS, not as a finding")
+
 print()
 if FAILED:
     print(f"resume_test: {len(FAILED)} CHECK(S) FAILED")

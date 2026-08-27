@@ -259,7 +259,14 @@ check(ns2["DN"] == ["eng", "py"] and ns2["NP"] == 2 and not p2,
       "...and it is a silent no-op when nothing is under the floor")
 
 # -- the exposure guard, run on the case that motivated it
-exp_src = block('if DATA_MODE == "real" and NP > 1:', "# TWO WRITE PATHS")
+# END THE BLOCK AT THE NEXT BANNER, AND LET IT BREAK LOUDLY WHEN ONE IS INSERTED. This ended at
+# "# TWO WRITE PATHS" until a capacity-gate warning was added between the two, at which point this test
+# started exec'ing code it was never written for and died on a NameError from it. That is the right
+# failure: a brittle anchor that reports on the WRONG text is far worse than one that stops. Both this
+# test and resume_test.py have now caught an anchor drift this way, which is the argument for anchoring
+# on distinctive banner comments rather than on ordinary lines.
+exp_src = block('if DATA_MODE == "real" and NP > 1:',
+                "    # WIDENING THE FABRIC MOVES THE CAPACITY GATE")
 for eng_mb, py_mb, want_warns in ((60, 60, 0), (60, 30, 0), (60, 8, 2), (60, 1, 3)):
     ns = dict(
         DATA_MODE="real", NP=2, DN=["eng", "py"], PHASED=True, PHASE_SCHED=[[0], [0], [1], [1]],
