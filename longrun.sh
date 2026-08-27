@@ -797,7 +797,11 @@ PY
   _WANT=$(python3 -c "print(int(float('$GB') * 1e9))" 2>/dev/null || echo 0)
   if [ "${_HAVE:-0}" -gt 0 ] 2>/dev/null && [ "${_WANT:-0}" -gt 0 ] 2>/dev/null \
      && [ "$_HAVE" -lt $((_WANT * 9 / 10)) ] 2>/dev/null; then
-    echo "pilot-add: $P_DD/train/$NAME holds $((_HAVE / 1000000)) MB but $GB GB was asked for -- topping up."
+    # MB WITH INTEGER DIVISION PRINTS "0 MB" FOR ANYTHING UNDER A MEGABYTE, and the first run of this block
+    # reported "holds 0 MB" for a directory holding 40 kB. "0" reads as EMPTY, which is the one thing this
+    # message exists to distinguish from -- an empty directory is a fetch that never happened, a short one is
+    # a fetch that stopped early, and they want different responses from the reader.
+    echo "pilot-add: $P_DD/train/$NAME holds $(awk -v b="$_HAVE" 'BEGIN{printf "%.2f", b/1e6}') MB but $GB GB was asked for -- topping up."
     echo "           (a corpus short of the request is not a smaller experiment: both areas get the same SHARE"
     echo "            of the stream whatever their sizes, so the short one is simply seen more times over.)"
     _HAVE=0

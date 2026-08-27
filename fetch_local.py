@@ -150,7 +150,10 @@ def main():
         sys.exit(f"[fetch_local] no search roots for --domain {a.domain}: pass --root <dir> (repeatable).\n"
                  f"  Only --domain py has defaults, and they are this interpreter's stdlib and site-packages.")
     target = int(a.gb * 1e9)
-    print(f"[fetch_local] domain {a.domain} | extensions {' '.join(exts)} | target {target/1e6:.0f} MB")
+    # .0f PRINTS "target 0 MB" FOR ANY REQUEST UNDER HALF A MEGABYTE, which is what a --gb of 0.0004 looks
+    # like -- and "0" reads as "nothing was asked for" rather than "400 kB was asked for". Two decimals keeps
+    # small requests legible without making large ones unreadable.
+    print(f"[fetch_local] domain {a.domain} | extensions {' '.join(exts)} | target {target/1e6:.2f} MB")
     for r in roots:
         print(f"[fetch_local]   root {r}")
 
