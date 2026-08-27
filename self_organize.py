@@ -4941,7 +4941,15 @@ def main():
     # ...AND IT COMES BACK FROM THE CHECKPOINT IF ONE RECORDED IT. Restored BEFORE the refusal below, so the
     # refusal judges the cap this run will actually use. Only ever raises: a run that explicitly asks for a
     # higher GROW_CAP_FAB0 than the checkpoint reached keeps its own number.
-    if _RD is not None and _RD.get("cap_fab"):
+    # ...BUT AN EXPLICIT REQUEST WINS, AND THE FIRST VERSION OF THIS TOOK THE MAX INSTEAD. GROW_CAP_FAB0=8
+    # against a checkpoint that had reached 48 restored 48 and discarded the 8 -- so a deliberately small valve
+    # became a no-op, and the refusal below (soft cap under the population) became UNREACHABLE on every
+    # checkpoint written from now on, since they all carry cap_fab. A guard that new checkpoints can never trip
+    # is the defect class this file exists to catch, committed while adding the guard. Caught by firing the
+    # refusal paths in a real run rather than reasoning about them.
+    # Fill in from the checkpoint only when the environment did not ask for a value; when it did, honour it and
+    # let the refusal judge it. Same rule pilot-add uses for FAB_N0 and FAB_NMAX.
+    if _RD is not None and _RD.get("cap_fab") and "GROW_CAP_FAB0" not in os.environ:
         _ck_cf = int(_RD["cap_fab"])
         if _ck_cf > _cap_fab[0]:
             print(f"  [resume] soft fabric cap restored to {_ck_cf} (this run's GROW_CAP_FAB0 would have "
