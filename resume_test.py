@@ -62,6 +62,11 @@ GATE = block("# ---- FABRIC GEOMETRY: CHECKED BEFORE ANYTHING IS RESTORED",
 BOOK = block('if FABRIC and _RD.get("fab_cfg"):\n            # RESTORED SLOTS',
              "        # ...AND THE GROWTH CONTROLLER'S MEMORY COMES BACK WITH THE POPULATION IT BUILT")
 COPY = block('_fsd = dict(_RD["fab"])', "            _mk = fab.load_state_dict(_fsd, strict=False)")
+# widen_prefix is module level, so it can be exercised directly rather than through the resume path -- which
+# matters because BOTH preallocated geometries now go through it: the fabric's slots and the softmax width.
+_wp = {}
+exec(compile(block("def widen_prefix(live_sd, ck_sd):", "\ndef bwt_of("), "<self_organize>", "exec"), _wp)
+WIDEN = _wp["widen_prefix"]
 
 
 class T:
@@ -194,7 +199,8 @@ ck = {"A": T((1024, D, R), "ck"), "B": T((1024, R, D), "ck"), "SRC_p": T((1024, 
 cur = {"A": T((4096, D, R), "init"), "B": T((4096, R, D), "init"), "SRC_p": T((4096, DK), "init"),
        "K_p": T((4096, DK), "init"), "cent": T((4096, SIGD), "init"),
        "halt_key": T((DK,), "init"), "halt_b": T((1,), "init")}
-ns = dict(_RD={"fab": ck}, fab=Fab(4096, 2048, sd=cur), _wide_by=3072, _ck_cap=1024)
+ns = dict(_RD={"fab": ck}, fab=Fab(4096, 2048, sd=cur), _wide_by=3072, _ck_cap=1024,
+          widen_prefix=WIDEN)
 out = run(COPY, ns)
 sd = ns["_fsd"]
 for k in ("A", "B", "SRC_p", "K_p", "cent"):
@@ -210,7 +216,8 @@ print("\n  ...and a cap-shaped tensor this code does not know about is refused, 
 ck2 = dict(ck); ck2["mystery"] = T((7, 5), "ck")
 cur2 = dict(cur); cur2["mystery"] = T((9, 3), "init")          # not a prefix in ANY dimension
 try:
-    run(COPY, dict(_RD={"fab": ck2}, fab=Fab(4096, 2048, sd=cur2), _wide_by=3072, _ck_cap=1024))
+    run(COPY, dict(_RD={"fab": ck2}, fab=Fab(4096, 2048, sd=cur2), _wide_by=3072, _ck_cap=1024,
+                   widen_prefix=WIDEN))
     check(False, "an unreconcilable tensor should refuse")
 except SystemExit as e:
     check("mystery" in str(e) and "FAB_NMAX=1024" in str(e),
@@ -243,17 +250,25 @@ WARN = block("# WIDENING THE FABRIC MOVES THE CAPACITY GATE",
 # The condition is "can the gate reopen", not "is it shut". 523 experts: doubling to 1046 clears 0.45 at
 # cap 2048 (921) but not at cap 4096 (1843). A run that merely STARTS below pressure and grows into it is
 # the healthy case and must stay quiet, or the warning is noise and nobody reads it.
-for cap, wide, want in ((4096, 3072, True),      # 1024 -> 4096: 1046 < 1843, out of reach for the whole run
-                        (2048, 1024, False),     # 1024 -> 2048: 1046 > 921, it reopens as the area grows
-                        (1024, 0, False),        # not widened at all
-                        (8192, 7168, True),      # 1024 -> 8192: further out of reach
-                        (1024, 512, False)):     # 512 -> 1024: 1046 > 460, fine
-    ns = dict(FABRIC=True, _wide_by=wide, fab=Fab(cap, 523), _warn=[], _f=lambda k, d: d)
+# AND IT MUST AGREE WITH THE CULL GATE BANNER, which reads the same state later in the same startup. The ramp
+# builds toward FAB_RAMP_TO x cap without reading the loss, and at the registry defaults 0.5 > 0.45, so on a
+# FRESH run it always overshoots the gate -- warning there would contradict the banner. On a RESUME whose latch
+# came back in the checkpoint the ramp will not fire at all, so nothing is coming and the warning is the correct
+# one. Both now consult ramp_done. `latched=True` is the resume case.
+for cap, wide, latched, want in ((4096, 3072, True,  True),   # resumed+latched: 1046 < 1843 and no ramp coming
+                                 (4096, 3072, False, False),  # ramp still armed: it builds to 2048, banner is right
+                                 (2048, 1024, True,  False),  # 1046 > 921: the area's own growth reopens it
+                                 (1024, 0,    True,  False),  # not widened at all
+                                 (8192, 7168, True,  True),   # further out of reach, and no ramp coming
+                                 (1024, 512,  True,  False)): # 1046 > 460, fine
+    ns = dict(FABRIC=True, _wide_by=wide, fab=Fab(cap, 523), _warn=[], _f=lambda k, d: d,
+              _i=lambda k, d: d, fabgrow=type("G", (), {"ramp_done": latched})())
     run(WARN, ns)
     check(bool(ns["_warn"]) == want,
-          f"cap {cap - wide} -> {cap} at 523 experts: {'WARNS' if ns['_warn'] else 'quiet'} "
-          f"-- gate reopens at {int(P * cap)}, and 2x the population is 1046")
-ns = dict(FABRIC=True, _wide_by=3072, fab=Fab(4096, 523), _warn=[], _f=lambda k, d: d)
+          f"cap {cap - wide} -> {cap}, 523 experts, ramp {'LATCHED' if latched else 'armed'}: "
+          f"{'WARNS' if ns['_warn'] else 'quiet'} -- gate at {int(P * cap)}, 2x population is 1046")
+ns = dict(FABRIC=True, _wide_by=3072, fab=Fab(4096, 523), _warn=[], _f=lambda k, d: d,
+          _i=lambda k, d: d, fabgrow=type("G", (), {"ramp_done": True})())
 run(WARN, ns)
 w = ns["_warn"][0]
 check("FAB_NMAX=2048" in w,
@@ -441,6 +456,84 @@ for rows, encv, want in ((512, 512, False), (1024, 512, True)):
     check(got == want,
           f"a {rows}-row saved embedding into ENC_V={encv}: _load_enc returns {got} "
           f"({'reshaped, so the moments are stale' if want else 'unchanged, so they are fine'})")
+
+# --- 7. THE CULL BUDGET, AND THE SIGN OF RETENTION ---------------------------------------------------------
+# Both found in pilot_gru_py.log, the first run that ever crossed a run boundary.
+print("\nTHE CULL BUDGET IS SIZED ON THE SET IT CAN BE SPENT ON")
+# The comment above the ranking explains why RANKING happens inside _elig; the budget was left on n_live.
+# Measured in that run: n_live 523, eligible 84 (the [experts] lines print it -- "ranked among the 84 past
+# their ..."), FAB_CULL_FRAC 0.02. It removed 10 a pass where the intent is 1, and _elig shrank 84 -> 75 -> 65
+# as it ate through them. 159 removed against 84 grown; the population fell 523 -> 448 while a whole new
+# language was being added, and the churn line read "100% of all growth was replaced rather than added".
+for n_live, elig, frac in ((523, 84, 0.02), (523, 75, 0.02), (523, 65, 0.02), (523, 523, 0.02), (100, 3, 0.02)):
+    was, now = max(1, int(frac * n_live)), max(1, int(frac * elig))
+    check(now <= was,
+          f"n_live {n_live}, eligible {elig}: budget {was} -> {now} "
+          f"({'unchanged' if now == was else f'{was / now:.0f}x less aggressive'})")
+check(max(1, int(0.02 * 84)) == 1 and max(1, int(0.02 * 523)) == 10,
+      "the run's own numbers: 10 removed a pass where 1 was intended -- a 10x over-cull, aimed entirely at "
+      "the trained population a resume exists to preserve")
+check(max(1, int(0.02 * 3)) == 1,
+      "and the max(1, ...) floor still lets a tiny eligible set be culled at all, rather than deadlocking")
+
+print("\nRETENTION'S SUBTRACTION RUNS THE SAME WAY AS bwt_of")
+# bits/byte is LOWER-IS-BETTER, so forgetting is latest MINUS earliest. The section computed earliest minus
+# latest while printing "a positive number is FORGETTING" two lines down -- so every genuine case of
+# forgetting arrived with the sign that means retention. From the run: process 0 (eng) 2.114 -> 2.223 got
+# WORSE and was reported -0.109; process 1 (py) 1.447 -> 1.103 got BETTER and was reported +0.344. The
+# verdict "DRIFTING -- earlier material is measurably worse" printed BECAUSE PYTHON IMPROVED.
+RUN = [(0, 2.114, 2.223, 2816, "eng"), (1, 1.447, 1.103, 4879, "py")]
+OLD_NAMES = {"eng"}                                   # py was NEW this run: it has no prior probe
+for _p, e, l, _n, nm in RUN:
+    worse = l > e
+    check((l - e > 0) == worse,
+          f"process {_p} ({nm}) {e:.3f} -> {l:.3f}: drift {l - e:+.3f} "
+          f"-- {'worse, and positive' if worse else 'better, and negative'}")
+    check((e - l > 0) != worse or not worse,
+          f"  ...the old subtraction gave {e - l:+.3f}, which says the opposite")
+_judge = [r for r in RUN if r[4] in OLD_NAMES]
+worst_new = max(l - e for _p, e, l, _n, nm in _judge)
+mean_old = sum(e - l for _p, e, l, _n, nm in RUN) / len(RUN)
+check(abs(worst_new - 0.109) < 1e-9,
+      f"the verdict is taken over the {len(_judge)} process(es) that existed before: worst {worst_new:+.3f}")
+check(abs(mean_old - 0.1175) < 1e-3 and mean_old > 0,
+      f"the old mean over ALL processes was {mean_old:+.3f} -- driven by py IMPROVING by 0.344, which a "
+      f"retention figure must not be able to absorb")
+check(worst_new > 0.10,
+      "so the run's verdict is still DRIFTING -- but now because English genuinely drifted, not because "
+      "Python learned")
+
+# --- 8. THE VOCABULARY IS THE OTHER PREALLOCATED GEOMETRY --------------------------------------------------
+# VMAX is the softmax width; under TOK_ONLINE the model is built to it and the tokenizer mints into it for the
+# whole run. emb.weight [V,d], head.weight [V,d] and head.bias [V] are all leading-dim-V, so raising VMAX is
+# the same prefix relation the fabric slots have. The run that added Python printed "grew 2048 -> 2048 during
+# training (+0)": the checkpoint's vocabulary already filled VMAX=2048, so the new language got not one token
+# of its own and was segmented entirely with English's merges. New EXPERTS, no new TOKENS.
+print("\nVMAX WIDENS THE SAME WAY THE SLOT POOL DOES")
+D = 768
+ck_m = {"emb.weight": T((2048, D), "ck"), "head.weight": T((2048, D), "ck"),
+        "head.bias": T((2048,), "ck"), "gru.weight_ih_l0": T((3 * D, D), "ck")}
+cur_m = {"emb.weight": T((4096, D), "init"), "head.weight": T((4096, D), "init"),
+         "head.bias": T((4096,), "init"), "gru.weight_ih_l0": T((3 * D, D), "init")}
+sd_m, grew_m, bad_m = WIDEN(cur_m, ck_m)
+check(not bad_m, f"a doubled VMAX reconciles cleanly ({len(grew_m)} tensors widened, {len(bad_m)} refused)")
+for k in ("emb.weight", "head.weight", "head.bias"):
+    check(sd_m[k].shape == cur_m[k].shape, f"{k} arrives at this run's shape {sd_m[k].shape}")
+    check(all(x == "ck" for x in sd_m[k].rows[:2048]) and all(x == "init" for x in sd_m[k].rows[2048:]),
+          f"  ...ids 0..2047 keep their trained rows; 2048.. are unminted ids at their initialisation")
+check(sd_m["gru.weight_ih_l0"] is ck_m["gru.weight_ih_l0"],
+      "a tensor not sized by the vocabulary is passed through untouched")
+
+# Narrowing must NOT be silently absorbed -- it would drop trained token rows.
+sd_n, grew_n, bad_n = WIDEN({"emb.weight": T((1024, D), "init")}, {"emb.weight": T((2048, D), "ck")})
+check(not grew_n and len(bad_n) == 1,
+      f"a NARROWED vocabulary is refused, not truncated: {bad_n}")
+# ...and a change that is not a leading-dimension change at all is refused too.
+sd_d, grew_d, bad_d = WIDEN({"emb.weight": T((2048, 1024), "init")}, {"emb.weight": T((2048, D), "ck")})
+check(not grew_d and len(bad_d) == 1, f"a D_MODEL change is refused rather than reinterpreted: {bad_d}")
+# An identical geometry is a complete no-op, so an ordinary resume is untouched.
+sd_s, grew_s, bad_s = WIDEN(cur_m, {k: T(v.shape, "ck") for k, v in cur_m.items()})
+check(not grew_s and not bad_s, "an identical geometry widens nothing and refuses nothing")
 
 print()
 if FAILED:

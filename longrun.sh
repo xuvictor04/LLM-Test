@@ -718,13 +718,17 @@ pilot-add)
     _CKG=$(python3 - "$FROM/ckpt.pt" <<'PY' 2>/dev/null
 import sys, torch
 try:
-    c = torch.load(sys.argv[1], map_location="meta", weights_only=False).get("fab_cfg") or {}
-    print(int(c.get("n") or 0), int(c.get("cap") or 0))
+    d = torch.load(sys.argv[1], map_location="meta", weights_only=False)
+    c = d.get("fab_cfg") or {}
+    print(int(c.get("n") or 0), int(c.get("cap") or 0), int(d.get("tok_vocab") or 0))
 except Exception:
     pass
 PY
 )
-    _CKN=${_CKG%% *}; _CKC=${_CKG##* }
+    # POSITIONAL SPLIT, NOT ${x%% *} / ${x##* }: with three fields those give the first and the LAST, so adding
+    # a third number would have silently read the vocabulary as the slot cap.
+    set -- ${_CKG:-}
+    _CKN=${1:-0}; _CKC=${2:-0}; _CKV=${3:-0}
     if [ -n "${_CKN:-}" ] && [ "${_CKN:-0}" -gt 0 ] 2>/dev/null; then
       export FAB_N0="$_CKN"
       echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint -- not the default 2048, which"
@@ -740,6 +744,18 @@ PY
       # "what did adding this area cost" with "the cap told it to quadruple".
       # DOUBLE the checkpoint's cap: one existing area, one added area. The old population plus a comparable
       # new one then lands at the same occupancy the original run ended on.
+      # ...AND THE VOCABULARY NEEDS THE SAME HEADROOM, for the same reason, and it is the ceiling that actually
+      # bound. VMAX is the softmax width; under TOK_ONLINE the tokenizer mints into it for the whole run. The
+      # first run that ever added an area printed "grew 2048 -> 2048 during training (+0)" because the
+      # checkpoint's vocabulary already filled VMAX=2048, so Python got not one token of its own and was
+      # segmented entirely with English's merges. A new area got new EXPERTS and could not get new TOKENS.
+      # self_organize.py now prefix-widens emb/head across a resume, so doubling is safe: token id i keeps its
+      # meaning and the rows above are ids nothing has minted yet.
+      if [ -z "${VMAX:-}" ] && [ "${_CKV:-0}" -gt 0 ] 2>/dev/null; then
+        export VMAX=$((_CKV * 2))
+        echo "           vocabulary VMAX=$VMAX (double the checkpoint's $_CKV) so the added area can mint its"
+        echo "           own tokens instead of being segmented with the existing area's merges."
+      fi
       if [ -z "${FAB_NMAX:-}" ] && [ -n "${_CKC:-}" ] && [ "${_CKC:-0}" -gt 0 ] 2>/dev/null; then
         export FAB_NMAX=$((_CKC * 2))
         echo "           slot pool FAB_NMAX=$FAB_NMAX (double the checkpoint's $_CKC: one existing area, one added)."
@@ -787,7 +803,7 @@ PY
   fi
   env -u RESUME_FROM DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
-      WIN=256 BATCH_W=16 VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
+      WIN=256 BATCH_W=16 VMAX=${VMAX:-2048} GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 \
       SIG_WIN=${SIG_WIN:-614} \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=10000 RATE_EVERY=2000 PROFILE=0 RESUME="$FROM" TOKENIZER_PATH="$TOKENIZER_PATH" \
@@ -1309,6 +1325,30 @@ grid)
     #   the resume    "[resume] source census rebuilt from N restored entries" and "[resume] K of N experts had
     #                 no recorded UTILIZATION" (K should be 0 for a checkpoint written after this commit), then
     #                 the first "[experts @ ...] culled" line -- it must not be removing the lowest slot numbers
+    # ==== IT RAN. 2026-08-27, runs/long/pilot_gru_py.log, commit 63191a0. ===================================
+    #   eng  was 2.096 @ step 24707  ->  now 2.139   +0.043 +/- 0.075   HELD (inside the noise)
+    #   py   1.932 +/- 0.139   NEW this run
+    #   BWT +0.0431 b/B | forgetting F 0.0431 b/B
+    # Adding a whole second language cost English 0.043 bits/byte, inside its own noise band. That is the number
+    # this project exists to produce and it had never been measured. Read it with all four of these:
+    #   1  EXPOSURE IMBALANCE 5.6x fired. The py corpus was 10.26 MB against 57 MB of English, and the two get
+    #      the same SHARE of the stream, so py was seen 1.56x and eng 0.28x. Some of "py learned well" is py
+    #      having been memorised. Match the corpus sizes before quoting this number anywhere.
+    #   2  THE VOCABULARY WAS FULL BEFORE PYTHON ARRIVED: "grew 2048 -> 2048 during training (+0)". VMAX=2048
+    #      was already filled by English, so the new language got ZERO tokens of its own and was segmented
+    #      entirely with English's merges. New EXPERTS, no new TOKENS. pilot-add now doubles VMAX from the
+    #      checkpoint's vocabulary and self_organize.py prefix-widens emb/head to match.
+    #   3  THE RUN'S FIRST ACT WAS CULLING ENGLISH. At FAB_NMAX=1024 the population resumed at 523/1024 = 0.51,
+    #      over FAB_PRESSURE=0.45, so the utilization cull was open from step one: 159 removed against 84 grown,
+    #      523 -> 448 live, "100% of all growth was replaced rather than added". Doubling the cap (now the
+    #      default) keeps the gate shut until the added area has genuinely earned the capacity.
+    #   4  AND THE CULL BUDGET WAS 10x TOO LARGE. n_live was 523 but only 84 experts were past the use-grace;
+    #      the budget was FAB_CULL_FRAC x n_live = 10 when it should have been x eligible = 1. Nearly all of
+    #      that 159 is this bug, aimed precisely at the trained population a resume exists to preserve.
+    # The RETENTION section of that log is WRONG and has been fixed since: its drift was earliest-minus-latest
+    # on a lower-is-better metric, so "DRIFTING -- earlier material is measurably worse" was printed because
+    # PYTHON IMPROVED, while English's real +0.109 drift carried the sign that means retention.
+    #
     #   the resume    "ACROSS THE RUN BOUNDARY", BWT and F: the continual-learning numbers this project exists
     #                 to produce and has never once measured
     #                 STILL UNANSWERED. The 2026-08-27 attempt produced ZERO "[resume]" lines in all three logs

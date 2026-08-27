@@ -831,6 +831,39 @@ def cull_gate_open(n_live, cap, pressure):
     return not (n_live <= 2 or (n_live / max(1, cap)) < pressure)
 
 
+def widen_prefix(live_sd, ck_sd):
+    """Fit a checkpoint's tensors into a LARGER live model by copying them into the leading rows.
+
+    Two geometries in this system are preallocated and grown by advancing a counter rather than by
+    reallocating: the fabric's expert slots (FAB_NMAX) and the softmax width (VMAX). For both, a smaller
+    checkpoint is a genuine PREFIX of a larger live tensor -- slot i is still slot i, token id i is still
+    token id i -- so the checkpoint's rows go to 0..n-1 and the remainder keeps its initialisation.
+
+    That is not a convenience. A resume that cannot widen either one cannot add capacity for the area it is
+    adding, and the run that motivated this had BOTH ceilings pressed against it: the fabric's cull opened
+    immediately at 523/1024 and removed 159 experts while a new language arrived, and the vocabulary was
+    already full at 2048/2048 so the new language got ZERO tokens of its own and was segmented entirely with
+    the previous one's merges. "Strap on another modality" needs room in both.
+
+    Returns (state_dict, widened, unreconcilable). Anything the same shape is passed through untouched, so a
+    same-size resume takes the identical path it always did. NARROWING is not handled here and must be
+    refused by the caller with the knob's name: it would silently drop trained rows.
+    """
+    out = dict(ck_sd); grew = []; bad = []
+    for k, v in list(out.items()):
+        c = live_sd.get(k)
+        if c is None or getattr(v, "shape", None) is None or tuple(v.shape) == tuple(c.shape):
+            continue
+        if v.dim() >= 1 and tuple(v.shape[1:]) == tuple(c.shape[1:]) and v.shape[0] < c.shape[0]:
+            w = c.detach().clone()
+            w[:v.shape[0]] = v
+            out[k] = w
+            grew.append(f"{k} {tuple(v.shape)}->{tuple(w.shape)}")
+        else:
+            bad.append(f"{k} {tuple(v.shape)} vs {tuple(c.shape)}")
+    return out, grew, bad
+
+
 def bwt_of(now, prev):
     """Backward transfer: mean change on OLD material, on a LOWER-IS-BETTER metric.
 
@@ -2048,7 +2081,18 @@ class Fabric(nn.Module):
         # was meant: among experts that have HAD their chances, which did least with them.
         _elig = [i for i in range(s.n_live) if s.use_age(i) >= grace]
         order = sorted(_elig, key=lambda i: s.use.get(i, 0.0))
-        for i in list(order[:max(1, int(cull_frac * s.n_live))]):
+        # ...AND THE BUDGET MUST BE SIZED ON THE SET IT CAN BE SPENT ON. The comment directly above explains why
+        # RANKING happens inside `_elig`, and then the budget was left as a fraction of n_live -- the whole
+        # population, most of which is not in `order` and cannot be. The two diverge by whatever fraction of the
+        # population is still inside grace, which on the continual-learning path is most of it.
+        # Measured on the first run that ever crossed a run boundary: n_live 523, ELIGIBLE 84. The budget was
+        # int(0.02 * 523) = 10 and should have been int(0.02 * 84) = 1, so every pass removed TEN of the experts
+        # that had had their chances instead of one. 159 removed against 84 grown, the population fell 523 -> 448
+        # while a whole new language was being added, and the churn line read "100% of all growth was replaced
+        # rather than added". A 10x over-cull, aimed precisely at the trained population a resume exists to
+        # preserve. `_elig` shrinks as the pass eats it (84 -> 75 -> 65 in that run's own [experts] lines), which
+        # is the ranking working; the budget has to shrink with it.
+        for i in list(order[:max(1, int(cull_frac * len(_elig)))]):
             if s.n_live <= 2: break
             if i >= s.n_live: continue                       # remove() renumbers by swapping the last slot down, so
             #   an index taken before an earlier removal can now be past the end. Pre-existing: it only stayed
@@ -4270,7 +4314,31 @@ def main():
                         f"{world_fwd.nmax} (WORLD_NMAX). grow() cannot append past the cap, so the population "
                         f"cannot be replayed. Set WORLD_NMAX>={_want2}, or resume with WORLD_MODEL=0.")
                 _regrown.append(_np2)
-        model.load_state_dict(_RD["model"]); _enc_resized = _load_enc(enc, _RD["enc"])
+        # THE VOCABULARY HAS A CEILING TOO, AND IT WAS THE ONE THAT ACTUALLY BOUND. VMAX is the softmax width;
+        # under TOK_ONLINE the model is built to it and the tokenizer mints into it for the whole run. emb.weight
+        # [V, d], head.weight [V, d] and head.bias [V] are all leading-dim-V, so raising VMAX across a resume is
+        # the same prefix relation the fabric has -- token id i is still token id i, and the new rows are simply
+        # ids nothing has minted yet. Without it the run that added Python printed
+        #     [tokenizer] ONLINE: minted throughout -> grew 2048 -> 2048 during training (+0)
+        # because the checkpoint's vocabulary already filled VMAX=2048. The new language got not one token of its
+        # own and was segmented entirely with English's merges. A new area gets new EXPERTS and could not get new
+        # TOKENS, which is half of what "strap on another modality" has to mean.
+        # This is NOT the vocabulary-mismatch check above and does not weaken it: that one refuses a DIFFERENT
+        # tokenizer for the same rows, which would reinterpret every trained embedding. This is the same
+        # tokenizer with more room above it.
+        _msd, _mgrew, _mbad = widen_prefix(model.state_dict(), _RD["model"])
+        if _mbad:
+            raise SystemExit(
+                f"[resume] the model does not fit this run's shapes: {'; '.join(_mbad)}. Leading dimensions can "
+                f"be widened (VMAX raises the softmax width, and the checkpoint's ids keep their meaning); "
+                f"anything else -- D_MODEL, layer count, a narrowed VMAX that would drop trained token rows -- "
+                f"cannot. Resume with the geometry the checkpoint was written at.")
+        if _mgrew:
+            print(f"  [resume] widened {len(_mgrew)} model tensor(s) for a larger VMAX: {', '.join(_mgrew)}")
+            print(f"  [resume]   the tokenizer stays at {TOK.vocab_size if USE_TOK else 'n/a'} tokens and now has "
+                  f"room above it, so an area arriving in this run can mint ids of its own instead of being "
+                  f"segmented with the previous one's merges.")
+        model.load_state_dict(_msd); _enc_resized = _load_enc(enc, _RD["enc"])
         if FABRIC and _RD.get("fab") is not None:
             # TOLERANT, AND LOUD ABOUT IT. A checkpoint written before a router parameter existed (halt_b is the
             # current example) is missing that key, and a strict load throws away the ENTIRE fabric -- every
@@ -4287,23 +4355,11 @@ def main():
             # Shape-matched keys are untouched, so a same-cap resume takes the identical path it always did.
             _fsd = dict(_RD["fab"])
             if _wide_by:
-                _cur = fab.state_dict()
-                _grew = []
-                for _k, _v in list(_fsd.items()):
-                    _c = _cur.get(_k)
-                    if (_c is None or _v.shape == _c.shape or _v.dim() < 1
-                            or _v.shape[1:] != _c.shape[1:] or _v.shape[0] >= _c.shape[0]):
-                        continue
-                    _w = _c.detach().clone()
-                    _w[:_v.shape[0]] = _v
-                    _fsd[_k] = _w
-                    _grew.append(f"{_k} {tuple(_v.shape)}->{tuple(_w.shape)}")
+                _fsd, _grew, _bad = widen_prefix(fab.state_dict(), _RD["fab"])
                 print(f"  [resume] widened {len(_grew)} fabric tensor(s): {', '.join(_grew)}")
-                # A cap-shaped tensor that did NOT widen here is one this code does not know about, and it would
+                # A cap-shaped tensor that did NOT widen is one this code does not know about, and it would
                 # reach load_state_dict at the wrong size and throw the same opaque error the gate above exists
                 # to replace. Say which, rather than letting torch say it worse.
-                _bad = [f"{_k} {tuple(_v.shape)} vs {tuple(_cur[_k].shape)}" for _k, _v in _fsd.items()
-                        if _k in _cur and _v.shape != _cur[_k].shape]
                 if _bad:
                     raise SystemExit(
                         f"[resume] widening cannot reconcile {len(_bad)} fabric tensor(s): {'; '.join(_bad)}. "
@@ -5135,7 +5191,18 @@ def main():
         _occ_now = fab.n_live / fab.cap
         _pres = _f("FAB_PRESSURE", 0.45)
         _occ_was = fab.n_live / max(1, fab.cap - _wide_by)
-        if (2 * fab.n_live) < _pres * fab.cap:
+        # ...AND THE RAMP IS THE OTHER HALF OF THE QUESTION, so this must agree with the CULL GATE banner far
+        # below, which reads the same state and used to be able to say the opposite. "Can the gate reopen" is not
+        # answered by the population doubling alone: the ramp builds toward FAB_RAMP_TO x pool without ever
+        # reading the loss, and at the registry defaults FAB_RAMP_TO=0.5 exceeds FAB_PRESSURE=0.45, so on a FRESH
+        # run it always overshoots the gate and this warning would fire on a case the banner then contradicts.
+        # On a RESUME it is the banner that is wrong, and only since the growth controller's latch started
+        # travelling in the checkpoint: a restored ramp_done means the ramp will not fire at all, so nothing is
+        # coming to lift the population and the gate stays shut for the run. Both now ask the same question.
+        _rt0 = _f("FAB_RAMP_TO", 0.5)
+        _ramp_builds = (fabgrow is not None and not fabgrow.ramp_done
+                        and _i("FAB_RAMP", 4000) > 0 and _rt0 >= _pres)
+        if (2 * fab.n_live) < _pres * fab.cap and not _ramp_builds:
             _warn.append(
                 f"WIDENING CLOSED THE CAPACITY GATE: {fab.n_live} experts were {_occ_was:.2f} occupancy at the "
                 f"checkpoint's cap {fab.cap - _wide_by} and are {_occ_now:.2f} at this run's {fab.cap}, against "
@@ -5696,8 +5763,24 @@ def main():
             # still crosses it whenever FAB_RAMP_TO >= FAB_PRESSURE -- the 0.75 GB config (N0 2048, NMAX 8192,
             # RAMP_TO 0.5, PRESSURE 0.45) reads SHUT above and opens the gate as soon as the ramp finishes.
             # Saying only "SHUT" there sends the reader to raise FAB_N0 against a config that needs nothing.
+            # ...AND "THE RAMP BUILDS THE POPULATION" STOPPED BEING UNCONDITIONALLY TRUE. The latch now travels
+            # in the checkpoint, so a resumed run whose population was already built has ramp_done=True and the
+            # ramp never fires again -- by design, because growth after the build must come from a REGRESSION or
+            # a stall if a new expert is to be attributable to the area that arrived. Printing "the gate OPENS
+            # once the population is built" there promises a lift that is not coming, and directly contradicts
+            # the WIDENING CLOSED THE CAPACITY GATE warning above, which reads the same state in the same
+            # startup. Two unconditional diagnostics of one fact must not be able to disagree.
             _rt = _f("FAB_RAMP_TO", 0.5)
-            if not FAB_PRESS_SOFT and _po < _pt and bool(int(_env("FAB_GROW", 1))) and _F.n() < _rt * _pc:
+            _latched = (fabgrow is not None and fabgrow.ramp_done)
+            if not FAB_PRESS_SOFT and _po < _pt and _latched:
+                print(f"[config] CULL GATE  ...and SHUT FOR THE RUN unless growth earns it: the ramp has already "
+                      f"LATCHED (this population was built in an earlier run and the latch came back with it), "
+                      f"so nothing is going to lift occupancy on its own. The gate opens at "
+                      f"{int(_pt * _pc)} experts and growth from here comes only from a REGRESSION or a stall. "
+                      f"That is the intended shape for adding an area -- every new expert is attributable to the "
+                      f"arrival -- but it does mean the utilization cull, the utilization spare and FAB_RESCUE "
+                      f"stay out of reach unless the added area genuinely needs that much capacity.")
+            elif not FAB_PRESS_SOFT and _po < _pt and bool(int(_env("FAB_GROW", 1))) and _F.n() < _rt * _pc:
                 print(f"[config] CULL GATE  ...but SHUT ONLY FOR NOW: the ramp builds toward "
                       f"FAB_RAMP_TO={_rt:g} x {_pc} = {int(_rt * _pc)}"
                       + (f", which is past the threshold of {int(_pt * _pc)}, so the gate OPENS once the "
@@ -6679,7 +6762,13 @@ def main():
                     _grace = _i("FAB_GRACE", 48)
                     _elig = [i for i in range(_nl) if fab.use_age(i) >= _grace]
                     _rank = sorted(_elig, key=lambda i: fab.use.get(i, 0.0))
-                    _nb2 = max(1, int(_f("FAB_CULL_FRAC", 0.02) * _nl))
+                    # ON THE ELIGIBLE COUNT, for the same reason the cull's own budget is -- see Fabric.manage.
+                    # `_rank` is filtered to past-grace experts on the line above, so sizing the boost off _nl
+                    # spends a population-sized budget on an eligible-sized list: every entry in _rank gets the
+                    # boost whenever len(_rank) < FAB_CULL_FRAC * _nl, which is the normal case on a resume
+                    # (523 live, 84 eligible). "The worst 2%" then means "all of them", and a mechanism meant to
+                    # give the struggling tail a larger step gives it to everyone who has had their chances.
+                    _nb2 = max(1, int(_f("FAB_CULL_FRAC", 0.02) * len(_elig)))
                     if not _rank: _nb2 = 0
                     _bidx = torch.tensor(_rank[:_nb2] or [0], device=_oa.device, dtype=torch.long)
                     if _nb2:
@@ -7441,11 +7530,39 @@ def main():
                 _rows.append((_p, _bpb_at(_at[:_k]), _bpb_at(_at[-_k:]), len(_at)))
             if _rows:
                 print(f"\n=== RETENTION: does it still know what it saw FIRST? (per process -- like for like) ===")
-                for _p, _e, _l, _n in _rows:
-                    print(f"  process {_p}: earliest windows {_e:.3f}  ->  latest {_l:.3f}   "
-                          f"drift {_e - _l:+.3f} bits/byte  ({_n} windows)")
-                _d = sum(e - l for _, e, l, _n in _rows) / len(_rows)
-                print(f"  mean drift {_d:+.3f} bits/byte over {len(_rows)} process(es)")
+                # THE SUBTRACTION WAS BACKWARDS, ON THE LINE THE CLAIM RESTS ON. bits/byte is LOWER-IS-BETTER,
+                # so material that got worse has latest > earliest, and "forgetting is positive" -- the sentence
+                # printed two lines down, and the convention bwt_of uses -- requires latest MINUS earliest. This
+                # computed earliest minus latest, so every genuine case of forgetting arrived with the sign that
+                # means retention, and the thresholds below read it that way. Caught in the first run that ever
+                # crossed a run boundary:
+                #   process 0 (eng)  2.114 -> 2.223, i.e. WORSE, reported as drift -0.109
+                #   process 1 (py)   1.447 -> 1.103, i.e. BETTER, reported as drift +0.344
+                #   verdict: "DRIFTING -- earlier material is measurably worse"
+                # The verdict was printed BECAUSE PYTHON IMPROVED, and the one process that actually forgot
+                # pushed the mean the other way. This is the identical fault bwt_of's docstring records
+                # ("reversing this subtraction passed every assertion while inverting the project's headline
+                # continual-learning claim"), in the section that sits directly beneath it.
+                # AND A MEAN OVER PROCESSES CANNOT ANSWER THIS QUESTION. Averaging a domain that ARRIVED THIS RUN
+                # into a retention figure lets its learning cancel an old domain's forgetting -- which is exactly
+                # what happened above. "Does it still know what it saw FIRST" is a question about material that
+                # existed before, so the verdict is taken over those processes alone, and over the WORST of them:
+                # if any old area was lost, that is the answer, whatever the others did.
+                _old_names = set(_hb or {})
+                _rows2 = [(_p, _e, _l, _n, (DN[_p] if _p < len(DN) else str(_p))) for _p, _e, _l, _n in _rows]
+                for _p, _e, _l, _n, _nm in _rows2:
+                    _new = _nm not in _old_names
+                    print(f"  process {_p} ({_nm}): earliest windows {_e:.3f}  ->  latest {_l:.3f}   "
+                          f"drift {_l - _e:+.3f} bits/byte  ({_n} windows)"
+                          + ("   [NEW this run -- this is acquisition, not retention]" if _new else ""))
+                _old = [r for r in _rows2 if r[4] in _old_names]
+                _judge = _old or _rows2
+                _d = max(l - e for _p, e, l, _n, _nm in _judge)          # the WORST, not the mean
+                _dm = sum(l - e for _p, e, l, _n, _nm in _judge) / len(_judge)
+                print(f"  worst drift {_d:+.3f} bits/byte (mean {_dm:+.3f}) over the {len(_judge)} process(es) "
+                      + ("that existed before this run" if _old else
+                         "in this run -- NONE of them predate it, so this is acquisition and the verdict below "
+                         "is about a first run, not about retention"))
                 print(f"  >> both ends were TRAINED on and are the SAME material, so a positive number is "
                       f"FORGETTING, not generalisation.")
                 print(f"  >> {'RETAINED -- what it saw first is modelled as well as what it saw last' if _d < 0.10 else ('DRIFTING -- earlier material is measurably worse' if _d < 0.40 else 'CATASTROPHIC -- it has largely moved on from what it saw first')}"
@@ -7945,7 +8062,20 @@ def main():
         _r("domains.create",     lambda: asm.created)
         _r("domains.merge",      lambda: asm.n_merged, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
         _r("domains.cull",       lambda: asm.n_culled, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
-        _r("tokenizer.mint",     lambda: TOK.vocab_size - TOK_V0, lambda: _cfg("TOK_ONLINE"), "TOK_ONLINE=0")
+        # A FULL VOCABULARY IS NOT AN INERT MECHANISM, AND CALLING IT ONE HID THE FINDING. On the first run that
+        # ever added a second area this row read "ZERO ... ARMED AND INERT", which reads as "minting is broken".
+        # It was not: the checkpoint's vocabulary was already at VMAX=2048, so the tokenizer had nowhere to put a
+        # single token for the arriving language, and Python was segmented entirely with English's merges. That
+        # is a much more interesting fact than an inert mechanism, and it is the one the "strap on another
+        # modality" claim runs into first -- a new area gets new EXPERTS but cannot get new TOKENS unless VMAX
+        # was set with room to spare. Report it as OFF with the reason, so the ZERO lines keep meaning what they
+        # say, and say the number that matters: how much headroom there was to begin with.
+        _r("tokenizer.mint",     lambda: TOK.vocab_size - TOK_V0,
+           lambda: _cfg("TOK_ONLINE") and TOK is not None and TOK.vocab_size < int(_cfg("VMAX")),
+           ("TOK_ONLINE=0" if not _cfg("TOK_ONLINE") else
+            f"the vocabulary was already FULL at {TOK_V0}/{int(_cfg('VMAX'))} when this run started, so there was no "
+            f"room to mint for anything that arrived. Raise VMAX above the checkpoint's vocabulary to give a new "
+            f"area its own tokens"))
         # THE FAIL-OPEN REPAIR, VISIBLE. maybe_grow used to return None the moment its top candidate failed the
         # max_tok / already-exists test, and every caller reads None as "the vocabulary is exhausted" -- so one
         # unmintable pair ended the burst with thousands of pairs still above min_pair. round18's fix_vocab arm
