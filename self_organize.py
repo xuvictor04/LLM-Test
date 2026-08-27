@@ -4795,6 +4795,20 @@ def main():
                      f"the corpus ~{STREAM_LEN / _avail:.2f}x internally. That is not more data, it is the same "
                      f"data more times -- and it is invisible in every other line of this log. Fetch more text "
                      f"(fetch_big.py --gb) or lower STREAM_LEN below {_avail / 1e6:.0f} MB.")
+    # TWO WRITE PATHS, AND ONLY ONE CARRIES THE OWNER. The batched path computes _own from the routing weights
+    # and passes owners= to write_batch; the per-window fallback calls write(), whose signature has no owner at
+    # all, so every entry lands in partition 0. Which path runs is decided by KEY_PREGATE / KEY_BATCH / KEY_SRC
+    # -- knobs about how memory KEYS are encoded, which have no obvious connection to whether the per-expert
+    # partition works. At the defaults (1 / 1 / "model") the batched path runs and the partition is honoured, so
+    # this is latent rather than live; it becomes real the moment someone turns the partition on and anything
+    # else pushes the run onto the fallback. Nothing else in the run would say so: the banner reports
+    # MEM_PER_EXPERT=1 and the store reports its owner count, both truthfully, while every write goes to one.
+    if MEM_PER_EXPERT and not (KEY_PREGATE and KEY_BATCH and KEY_SRC == "model"):
+        _warn.append(f"MEM_PER_EXPERT=1 but this run takes the PER-WINDOW write path "
+                     f"(KEY_PREGATE={int(KEY_PREGATE)} KEY_BATCH={int(KEY_BATCH)} KEY_SRC={KEY_SRC}), and "
+                     f"write() has no owner argument -- every entry will land in partition 0 while the banner "
+                     f"reports {mem.n_own} owners. Set KEY_PREGATE=1 KEY_BATCH=1 KEY_SRC=model, or accept that "
+                     f"the partition is off for this run.")
     if _i("CORPUS_CAP", 2000000) <= 2000000 and DATA_MODE == "real":
         _warn.append(f"CORPUS_CAP={_i('CORPUS_CAP', 2000000)} bytes -> each domain is capped at ~2MB regardless of how "
                      f"much data is on disk. A multi-day run would see 2MB of text. Set CORPUS_CAP to the real size.")
