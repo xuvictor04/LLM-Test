@@ -911,6 +911,9 @@ TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 400.0)             #   ...or over this m
 # -- that is why it was minted late -- so it gets the fewest appearances in the same number of steps.
 TOK_MINT_PMIN = _f("TOK_MINT_PMIN", 0.0)                   # predictability gate on minting; 0 = off
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
+TOK_V0 = 256    # vocabulary size when training starts; overwritten once the tokenizer is seeded or loaded.
+#   Declared here so the DID IT FIRE row that reads it degrades to a plain byte alphabet rather than to a
+#   NameError printed as "NO COUNTER" on every run with TOKENIZER=0.
 torch.manual_seed(_i("SEED", 0)); random.seed(_i("SEED", 0))
 
 
@@ -1036,6 +1039,14 @@ if DATA_MODE == "real":
                 if minted == 0: break                      # converged: no pair crosses the min_pair threshold
             if not TOK_ONLINE: TOK.save(_tp)
             print(f"[tokenizer] {'SEEDED (will keep minting live)' if TOK_ONLINE else 'EXPANDING byte-BPE grew'} 256 -> {TOK.vocab_size} (mint-on-repetition, {len(curve)} passes): {curve}")
+        # WHAT THE VOCABULARY ACTUALLY WAS WHEN TRAINING STARTED, recorded once. Two places downstream needed
+        # this number and both guessed it: the end-of-run summary printed a hardcoded "grew 256 -> N" (256 is
+        # the byte alphabet, not the seeded vocabulary -- every round18 log says "grew 256 -> 2048" for a run
+        # that entered training at 512), and DID IT FIRE's tokenizer.mint row subtracts SEED_VOCAB, which is the
+        # seed loop's TARGET. The loop breaks early on `minted == 0`, so a corpus that converges below target
+        # makes that row report MORE mints than happened -- and on a RESUME, where TOK is loaded from disk at
+        # whatever size it had reached, SEED_VOCAB has nothing to do with the starting point at all.
+        TOK_V0 = TOK.vocab_size
         if TOK_ONLINE:                                     # corpora stay BYTES; model sized to VMAX; tokenized live in main()
             V = VMAX; BLEN = None
             print(f"[tokenizer] ONLINE mode: model sized to vocab {V}; tokenizer keeps minting throughout training")
@@ -6880,7 +6891,8 @@ def main():
             print(f"[tokenizer] final re-segmentation moved {_mchf} of {int(mem.active.sum())} stored contexts "
                   f"into the final vocabulary")
         TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
-        print(f"[tokenizer] ONLINE: minted throughout -> grew 256 -> {TOK.vocab_size} during training; final re-tokenization for eval")
+        print(f"[tokenizer] ONLINE: minted throughout -> grew {TOK_V0} -> {TOK.vocab_size} during training "
+              f"(+{TOK.vocab_size - TOK_V0}); final re-tokenization for eval")
 
     # === SOFTMAX WIDTH vs THE VOCABULARY THAT EXISTS =========================================================
     # V is the row count the LM loss normalises over. Under ONLINE it is VMAX, fixed before training starts,
@@ -7572,7 +7584,31 @@ def main():
         _r("domains.create",     lambda: asm.created)
         _r("domains.merge",      lambda: asm.n_merged, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
         _r("domains.cull",       lambda: asm.n_culled, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
-        _r("tokenizer.mint",     lambda: TOK.vocab_size - int(_cfg("SEED_VOCAB")), lambda: _cfg("TOK_ONLINE"), "TOK_ONLINE=0")
+        _r("tokenizer.mint",     lambda: TOK.vocab_size - TOK_V0, lambda: _cfg("TOK_ONLINE"), "TOK_ONLINE=0")
+        # THE FAIL-OPEN REPAIR, VISIBLE. maybe_grow used to return None the moment its top candidate failed the
+        # max_tok / already-exists test, and every caller reads None as "the vocabulary is exhausted" -- so one
+        # unmintable pair ended the burst with thousands of pairs still above min_pair. round18's fix_vocab arm
+        # could only show that minting REACHED its cap, and a run where the hole was never in the path prints
+        # exactly the same thing. These rows separate those cases.
+        #   mint_reject   candidates refused for max_tok / already-exists. This is the repair's PRECONDITION:
+        #                 at zero the hole was never in the path and the other two rows are meaningless, which
+        #                 is why they are armed on it rather than on TOK_ONLINE. Arming a row on a knob when it
+        #                 really depends on a runtime condition is how "ARMED AND INERT" becomes background
+        #                 noise, and this report is only worth reading while its ZERO lines still mean something.
+        #   mint_rescued  mints that exist ONLY because a rejected FIRST candidate was walked past -- one per
+        #                 call the pre-fix code would have answered None to. ZERO here WITH rejections above is
+        #                 the finding: it means every reject was a non-leading candidate, so the fail-open walk
+        #                 has never actually been the thing that kept minting alive.
+        #   mint_widen    times the whole candidate window rejected and the lazy re-query ran. At _k = 1 (both
+        #                 re-rankers off) the window is a single pair, so this is the only path that walks.
+        _tk_rej = (lambda: (getattr(TOK, "gate_skipped", 0) if USE_TOK else 0))
+        _r("tokenizer.mint_reject",  lambda: TOK.gate_skipped, lambda: _cfg("TOK_ONLINE"), "TOK_ONLINE=0")
+        _r("tokenizer.mint_rescued", lambda: TOK.mint_rescued, lambda: _cfg("TOK_ONLINE") and _tk_rej() > 0,
+           ("TOK_ONLINE=0" if not _cfg("TOK_ONLINE") else
+            "no candidate was ever rejected, so the fail-open walk was never entered"))
+        _r("tokenizer.mint_widen",   lambda: TOK.mint_widened, lambda: _cfg("TOK_ONLINE") and _tk_rej() > 0,
+           ("TOK_ONLINE=0" if not _cfg("TOK_ONLINE") else
+            "no candidate was ever rejected, so the candidate window never emptied"))
         _r("world.grow",         lambda: world_fwd.grown,
            lambda: _cfg("WORLD_MODEL") and _cfg("WORLD_GROW"), "WORLD_MODEL=0 or WORLD_GROW=0")
         for _tn in ("DIV_W", "RECON_W", "CHAIN_SUP", "TOK_ANCHOR"):

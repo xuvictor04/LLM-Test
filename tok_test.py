@@ -85,6 +85,23 @@ print(f"  max_tok=2   vmax=1024 -> {got}/1024, {t.gate_skipped} candidates skipp
 check(t.gate_skipped > 0, "the skip counter records them, so an all-rejects window is visible in the report")
 check(not (got < 1024 and left > 0), "and it still does not stop while candidates remain")
 
+# THE REPAIR HAS TO BE COUNTABLE, not merely effective. gate_skipped says candidates were refused; it does not
+# say the WALK is what kept minting alive, because a reject behind a mintable leader costs nothing. mint_rescued
+# counts only the calls whose FIRST candidate was refused -- exactly the calls the pre-fix code answered None to.
+# Without it a log cannot tell "the hole was never in the path" from "the fix saved the vocabulary": both print
+# the same "vocab N/M", which is all round18's fix_vocab arm was able to report.
+print(f"  mint_rescued {t.mint_rescued} (mints the pre-fix code would have refused) | "
+      f"mint_widened {t.mint_widened} (times the candidate window emptied and the re-query ran)")
+check(t.mint_rescued > 0, "mint_rescued counts them, so the fix's own firing is visible in DID IT FIRE")
+check(t.mint_rescued <= t.gate_skipped,
+      "and it cannot exceed the rejects -- a rescue requires at least one refused candidate")
+# The clean control: max_tok=16 on this corpus rejects nothing, so the repair must report itself as NOT ENTERED
+# rather than as inert. A row that reads "ARMED AND INERT" on every healthy run is a row nobody reads.
+tc = DynamicTokenizer(vmax=1024, min_pair=20, max_tok=16)
+fill(tc, CORPUS)
+check(tc.mint_rescued == 0 if tc.gate_skipped == 0 else True,
+      f"no rejects ({tc.gate_skipped}) means no rescues ({tc.mint_rescued}) -- the row is armed on the rejects")
+
 # --- 2. None MUST STILL MEAN EXHAUSTED ------------------------------------------------------------------------
 # The fix must not make maybe_grow loop forever or mint past its cap. None has to keep its one true meaning.
 print("\nNone STILL MEANS EXHAUSTED, AND THE CAP STILL BINDS")

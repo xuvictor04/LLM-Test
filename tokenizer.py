@@ -168,6 +168,9 @@ class DynamicTokenizer:
         self.h_pass = self.h_block = 0         # how the gate ruled, for the run report
         self.gate_forced = 0                   # mints the gate blocked but could not afford to
         self.gate_skipped = 0    # candidates discarded for max_tok / already-existing -- see maybe_grow
+        self.mint_widened = 0    # times the whole candidate window rejected and the lazy re-query ran
+        self.mint_rescued = 0    # mints that only happened because a REJECTED first candidate was walked past.
+        #   This is the fail-open repair's own DID IT FIRE count: pre-fix, every one of these returned None.
         self.h_pmin_seen = []                  # p(b|a) of the candidates it judged, for the report
         self.prov = {}                         # id -> (a, b) for tokens minted but not yet judged
         self.retired = set()                   # ids un-merged after failing probation
@@ -329,6 +332,7 @@ class DynamicTokenizer:
             a = b = None; cnt = 0; ns = None
             _cands = [_pick] + [(_pr, _c) for _pr, _c in _top if _c >= self.min_pair and _pr != _pick[0]]
             _seen_pr = set()
+            _skipped_here = 0                                      # rejects inside THIS call -- see mint_rescued
             for _round in (0, 1):
                 for _pr, _c in _cands:
                     if _pr in _seen_pr: continue
@@ -337,14 +341,23 @@ class DynamicTokenizer:
                     _ns = _mintable(_pr)
                     if _ns is None:
                         self.gate_skipped += 1                     # counted: a window of all-rejects is visible
+                        _skipped_here += 1
                         continue
                     a, b = _pr; cnt = _c; ns = _ns; break
                 if ns is not None or _round: break
                 # WIDEN ONCE. Every rejected candidate above has been zeroed, so most_common now surfaces the
                 # ones behind them. Bounded, because an unbounded rescan on a 60k-entry Counter in the hot path
                 # would trade a correctness bug for a throughput one.
+                self.mint_widened += 1
                 _cands = [(p, c) for p, c in self.pair.most_common(max(256, _k * 4)) if c >= self.min_pair]
             if ns is None: return None                             # every candidate really was unmintable
+            # THE REPAIR, COUNTED. _pick is always the first entry of _cands and nothing has been seen before it,
+            # so _skipped_here > 0 at this point means the FIRST candidate was rejected -- which is precisely the
+            # case the pre-fix code returned None on, ending the burst. Without this counter the fix is invisible
+            # in a log: a run where it never mattered and a run where it saved the vocabulary print the same
+            # "vocab N/M", and round18 could only report that minting reached the cap, not that the hole was ever
+            # in the path. A mechanism that runs and does nothing must be distinguishable from one that works.
+            if _skipped_here: self.mint_rescued += 1
             nid = self.vocab_size
             self.id2bytes.append(ns); self.seq2id[ns] = nid; self.merges.append((a, b))
             self.maxlen = max(self.maxlen, len(ns)); self.bytes_per_id.append(len(ns))

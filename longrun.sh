@@ -3,7 +3,9 @@
 # longrun.sh -- the multi-day run. Everything before this measured a system inside its own warmup.
 #
 #   bash longrun.sh pilot     MB PROOF OF CONCEPT first: 60 MB English, 8 epochs, ~15-20 min. Run before the GB run.
-#   bash longrun.sh pilot-add py <hf-dataset> 0.06    add an area at MB scale and measure what it cost
+#   bash longrun.sh pilot-add py local 0.03           add an area at MB scale and measure what it cost.
+#                                                     `local` builds the corpus from this machine's own Python;
+#                                                     an HF dataset id works too (gated ones need HF_TOKEN).
 #   bash longrun.sh fetch     pull 20 GB of English (hours; resumable)
 #   bash longrun.sh add NAME DATASET GB    add a NEW area to the trained system and measure what it costs
 #   bash longrun.sh run       launch. survives disconnect. writes runs/long/
@@ -651,12 +653,13 @@ pilot)
   echo "  EXPERTS      specialized or interchangeable, and how many nodes the router never calls on."
   echo "  (domain counts and clustering scores are DIAGNOSTICS -- they explain the above, they are not targets)"
   echo
-  echo "then add an area and see what it costs:  bash longrun.sh pilot-add py bigcode/the-stack-dedup 0.03"
+  echo "then add an area and see what it costs:  bash longrun.sh pilot-add py local 0.03"
+  echo "  ('local' needs no account; bigcode/the-stack-dedup is better material but is GATED -- HF_TOKEN + accepted terms)"
   ;;
 
 pilot-add)
   NAME=${2:-}; DS=${3:-}; GB=${4:-0.03}; P_DD=${PILOT_DIR:-data_pilot}
-  [ -n "$NAME" ] && [ -n "$DS" ] || { echo "usage: bash longrun.sh pilot-add <name> <hf-dataset> [gb]"; exit 1; }
+  [ -n "$NAME" ] && [ -n "$DS" ] || { echo "usage: bash longrun.sh pilot-add <name> local|<hf-dataset> [gb]"; echo "  local = build the corpus from source already on this machine (no account, no network)"; exit 1; }
   PA=${PILOT_ADD_ARCH:-gru}
   # RESUME FROM ANY CHECKPOINT, not only the one `pilot` happens to write. This was hardcoded to
   # $OUT/pilot_$PA, so every checkpoint produced by `seeds`, `grid` or `repeat` -- which is now most of them,
@@ -705,10 +708,22 @@ pilot-add)
   echo "           checkpoint -> $_PA_CK"
   echo "           log        -> $_PA_LOG"
   if [ -z "$(ls "$P_DD/train/$NAME"/part*.txt 2>/dev/null)" ]; then
-    # FETCH_ARGS passes anything else through to fetch_big.py -- notably --data-dir for datasets organised by
-    # directory rather than config (the-stack: --data-dir data/python), and --token for gated ones.
-    # shellcheck disable=SC2086
-    python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume ${FETCH_ARGS:-} || exit 1
+    if [ "$DS" = local ]; then
+      # THE ONE THING BLOCKING THE CLAIM WAS AN ACCOUNT, NOT THE CODE. round18's fix_resume produced a clean
+      # checkpoint and pilot-add resolved its vocabulary correctly, and then the run died here:
+      #   [fetch_big] cannot read bigcode/the-stack-dedup: ... is a gated dataset on the Hub.
+      # Both code presets in fetch_big.py are gated, so the SECOND AREA -- the whole point of the exercise --
+      # needed a Hugging Face account, terms accepted in a browser, and a token in the environment. None of
+      # that is part of the experiment: the second area only has to be a DIFFERENT DISTRIBUTION, and every
+      # machine that can run this project ships tens of MB of real Python in its own interpreter.
+      # shellcheck disable=SC2086
+      python3 fetch_local.py --domain "$NAME" --gb "$GB" --out "$P_DD" ${FETCH_ARGS:-} || exit 1
+    else
+      # FETCH_ARGS passes anything else through to fetch_big.py -- notably --data-dir for datasets organised by
+      # directory rather than config (the-stack: --data-dir data/python), and --token for gated ones.
+      # shellcheck disable=SC2086
+      python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume ${FETCH_ARGS:-} || exit 1
+    fi
   fi
   env -u RESUME_FROM DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \
@@ -1132,20 +1147,36 @@ grid)
     # 3 AND 4 ARE ONLY VISIBLE ACROSS A RESUME, which no grid arm performs. Run them as a pair:
     #
     #     STREAM_LEN=4000000 EPOCHS=4 GRID_DIR=runs/fix bash longrun.sh grid round18
-    #     RESUME_FROM=runs/fix/fix_resume bash longrun.sh pilot-add py bigcode/the-stack-dedup 0.03
+    #     RESUME_FROM=runs/fix/fix_resume bash longrun.sh pilot-add py local 0.03
     #
-    # The second command is the continual-learning chain, which has never run -- and could not, until the
-    # tokenizer path was fixed this session (`pilot` wrote its vocabulary to a shared default while pilot-add
-    # looked beside the checkpoint, so it exited 1 before touching the GPU).
+    # The second command is the continual-learning chain, which has never run. Two things blocked it and both
+    # are now gone. The tokenizer path was the first (`pilot` wrote its vocabulary to a shared default while
+    # pilot-add looked beside the checkpoint, so it exited 1 before touching the GPU) -- fixed, and the round18
+    # attempt confirmed it: "pilot-add: resuming runs/fix/fix_resume with vocabulary .../fix_resume.dyntok.json".
+    # It then died on the second: both code presets in fetch_big.py are GATED, so the run stopped at
+    # "is a gated dataset on the Hub. You must be authenticated" -- an account, not a defect. `local` reads the
+    # machine's own Python instead (fetch_local.py); bigcode/the-stack-dedup still works with HF_TOKEN set and
+    # the terms accepted, and is the better corpus if you have it.
     #
     # WHAT TO READ, in order. None of these is a bits/byte number:
-    #   fix_cadence   "SPAWNED BY SPECIFICATION: N expert(s)", N > 0, and fabric.spawn non-zero in DID IT FIRE
-    #   fix_vocab     the final "vocab N/M" -- N == M, or a [tokenizer] line saying the corpus ran out
+    #   fix_cadence   "SPAWNED BY SPECIFICATION: N expert(s)", N > 0, and fabric.spawn non-zero in DID IT FIRE.
+    #                 ANSWERED 2026-08-27: 39 spawns at BATCH_W=12 against 41 on fix_resume at BATCH_W=1, with
+    #                 fabric.grow 312 vs 327 and crossover 95 vs 97 -- the management cadence is now
+    #                 BATCH_W-invariant, which is the whole content of the fix.
+    #   fix_vocab     the final "vocab N/M" -- N == M, or a [tokenizer] line saying the corpus ran out.
+    #                 ANSWERED 2026-08-27: 1024/1024 at step 6016 of 27528. But N == M is what a run prints when
+    #                 the hole was never in the path TOO, so the arm could not distinguish the two. The
+    #                 tokenizer.mint_reject / mint_rescued / mint_widen rows added after it exist for that:
+    #                 mint_rescued counts the mints the pre-fix code would have refused outright.
     #   the resume    "[resume] source census rebuilt from N restored entries" and "[resume] K of N experts had
     #                 no recorded UTILIZATION" (K should be 0 for a checkpoint written after this commit), then
     #                 the first "[experts @ ...] culled" line -- it must not be removing the lowest slot numbers
     #   the resume    "ACROSS THE RUN BOUNDARY", BWT and F: the continual-learning numbers this project exists
     #                 to produce and has never once measured
+    #                 STILL UNANSWERED. The 2026-08-27 attempt produced ZERO "[resume]" lines in all three logs
+    #                 because the second leg never started. fix_resume.log is the FIRST leg only -- its own
+    #                 ACROSS THE RUN BOUNDARY says "no earlier probe to compare against", which is what that
+    #                 section prints for a run with no boundary in it. Defects 3 and 4 remain unobserved in a run.
     round18) ARMS="fix_cadence fix_vocab fix_resume" ;;
     "")      ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;;
     *)       ARMS="$2" ;;
