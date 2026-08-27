@@ -600,9 +600,16 @@ for BW, AC in ((16, 1), (16, 2), (16, 4), (12, 4)):
           f"BATCH_W={BW} ACCUM={AC}: the new gate takes {new_counts.pop()} step(s) of {f} flushes at EVERY "
           f"starting offset")
     if AC > 1:
+        # THIS IS A SIMULATION RESULT AND IT ASSUMES FLUSHES SIT AT A FIXED RESIDUE mod BATCH_W. They do not:
+        # the real loop also flushes at segment boundaries and clears the batch at the epoch roll, so positions
+        # drift. Measured on two real runs identical but for that one line, BATCH_W=4 ACCUM=4, ~52 backward
+        # passes: the OLD gate made 55 om.step() calls and the new one 13. So the observed failure is that ACCUM
+        # accumulated NOTHING -- it stepped about once per backward pass whatever it was set to -- not that an
+        # epoch took zero steps. The zero case is what this simulation shows and what the arithmetic permits;
+        # it is not what was seen, and the distinction is kept here rather than let the stronger claim stand.
         check(0 in old_counts and len(old_counts) > 1,
-              f"  ...where the old gate took {sorted(old_counts)} depending only on where the epoch started "
-              f"-- including ZERO, an entire epoch with no optimizer step and no zero_grad")
+              f"  ...where the old gate took {sorted(old_counts)} across offsets IN SIMULATION (fixed-residue "
+              f"assumption). Measured in a real run it over-stepped instead: 55 calls where 13 were due")
 check(accum_steps(16, 4, 0, NEW)[1] == accum_steps(16, 4, 0, NEW)[0] // 4,
       "and ACCUM=4 now genuinely steps once per four backward passes, which is what it is for")
 

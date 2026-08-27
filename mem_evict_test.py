@@ -198,16 +198,32 @@ def wrong_gates_reads():
         print(f"   read() with MEM_WRONG_READ=1 reached {len(set(reached_on))} entries, none of them flagged")
 
     # 4. ...AND THE KNOB TURNS THAT OFF WITHOUT TOUCHING THE FLAG.
+    # PROBE AT A FLAGGED ENTRY'S OWN KEY, not at arbitrary queries. The first version of this check read with
+    # four unrelated probes, reached the same 14 entries either way, and passed -- because none of the flagged
+    # entries was in the top-k for those queries. A test that cannot reach the thing it is gating proves the
+    # gate works no matter what the gate does, which is the failure mode this whole suite exists to catch.
+    tgt = int(m.is_wrong().nonzero(as_tuple=True)[0][0])
+    aim = m.keys[tgt:tgt + 1].clone()                          # exactly the flagged entry's own key
+    _, _, hit_gated, _ = m.read(aim)
+    gated = [int(h) for h in hit_gated.reshape(-1).tolist() if h >= 0]
+    if tgt in gated:
+        print(f"!! entry {tgt} is flagged WRONG and read() returned it anyway -- the gate does nothing"); ok = False
+    else:
+        print(f"   querying flagged entry {tgt} at its OWN key with MEM_WRONG_READ=1 -> not returned")
+
     m.wrong_read = False
-    _, _, hit_off, _ = m.read(probe)
-    reached_off = [int(h) for h in hit_off.reshape(-1).tolist() if h >= 0]
+    _, _, hit_open, _ = m.read(aim)
+    opened = [int(h) for h in hit_open.reshape(-1).tolist() if h >= 0]
     still_flagged = int(m.is_wrong().sum())
-    print(f"   MEM_WRONG_READ=0 -> read() reaches {len(set(reached_off))} entries, and the flag still marks "
-          f"{still_flagged} (reporting is unaffected)")
+    if tgt not in opened:
+        print(f"!! MEM_WRONG_READ=0 and entry {tgt} is STILL unreachable -- the knob is not the thing gating it")
+        ok = False
+    else:
+        print(f"   MEM_WRONG_READ=0 -> the same query returns it, so the knob is what was gating retrieval")
     if still_flagged != n_wrong:
         print("!! turning off the read gate changed the FLAG; the two decisions are still coupled"); ok = False
-    if len(set(reached_off)) < len(set(reached_on)):
-        print("!! ungating reads reached FEWER entries, which is backwards"); ok = False
+    else:
+        print(f"   ...and the flag still marks {still_flagged} entries, so reporting is unaffected")
     return ok
 
 

@@ -5628,6 +5628,25 @@ def main():
             # crashed with ZeroDivisionError. Printing it costs one field and makes every log pairable.
             ("SEED",           _i("SEED", 0)),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
+            # THE FOUR THAT DECIDE WHAT TRAINS AND WHAT IS STORED, AND WERE ON NO LINE OF ANY LOG. BATCH_W and
+            # ACCUM together set the effective batch, and until the flush-counter fix they decided whether the
+            # optimizer stepped AT ALL -- at BATCH_W=16 ACCUM=4, three of four epoch offsets took zero steps,
+            # and ACCUM appeared in no print anywhere, so a run that trained nothing looked exactly like one
+            # that trained. WRITE_* decides which text reaches memory at all, and the quantile gate is nested
+            # INSIDE the adaptive branch (memory.py: `if self.adaptive_gate and self.quantile_gate`), so
+            # WRITE_ADAPTIVE=0 -- the registry default, and what every longrun.sh command runs -- leaves
+            # WRITE_QUANTILE=1 dead and the store on the fixed absolute threshold the quantile gate was written
+            # to replace. Printing the LIVE value routes all four through the "asked for but not run" check
+            # below, so the dead combination announces itself at launch instead of being found by reading
+            # memory.py two months later.
+            ("BATCH_W",        BATCH_W),                  ("ACCUM",          ACCUM),
+            ("WRITE_GATE",     mem.write_gate),           ("WRITE_TARGET",   mem.gate_target),
+            ("WRITE_ADAPTIVE", mem.adaptive_gate),
+            ("WRITE_QUANTILE", bool(mem.quantile_gate and mem.adaptive_gate),
+             "the quantile gate lives inside the adaptive branch, so WRITE_ADAPTIVE=0 leaves the fixed "
+             "WRITE_GATE threshold running"),
+            ("MEM_WRONG_READ", mem.wrong_read,
+             "the WRONG flag gates every retrieval, not only the sweep"),
         ]
         if _F0 is not None: _EFF += [
             # THE GATE, IN THE BANNER, because it silently switched off the utilization cull for a whole round of
@@ -6805,11 +6824,18 @@ def main():
         # the ONLY calls to either in the loop. So the gate asked "(windows + 1) mod ACCUM" about a decision that
         # happens per backward pass, and with g = gcd(BATCH_W, ACCUM) it fires on g/ACCUM of flushes when the
         # epoch's first step is right and on NONE otherwise. Whenever ACCUM divides BATCH_W -- every ACCUM worth
-        # setting at the BATCH_W=16 longrun.sh hardcodes -- it is all-or-nothing, and _bx is cleared at the epoch
-        # roll so which one flips per epoch. Simulated over 4000 windows at BATCH_W=16, ACCUM=4: offset 0 steps on
-        # all 250 flushes (so nothing accumulates and ACCUM does nothing at all), offsets 1, 2 and 3 step ZERO
-        # times -- an entire epoch of backward passes accumulated into a gradient that is never applied and never
-        # zeroed. Not a rate error; the optimizer simply does not run.
+        # setting at the BATCH_W=16 longrun.sh hardcodes -- it is all-or-nothing IF flushes land at a fixed
+        # residue mod BATCH_W. Simulated on that assumption at BATCH_W=16 ACCUM=4: offset 0 steps on all 250
+        # flushes and offsets 1, 2, 3 step ZERO times.
+        # MEASURED, THE REAL LOOP LANDS ON THE FIRST OF THOSE, NOT THE SECOND, and I had it the wrong way round
+        # until I ran it. Flush positions DRIFT -- the batch is also flushed at segment boundaries and cleared at
+        # the epoch roll -- so they do not sit at one residue and the gate is not all-or-nothing in practice.
+        # Two real runs, identical but for this line, BATCH_W=4 ACCUM=4, ~52 backward passes:
+        #     old gate  55 om.step() calls      new gate  13 om.step() calls
+        # 55 is one per backward pass. ACCUM=4 was not accumulating ANYTHING; the knob silently did nothing at
+        # all, at any value. That is the confirmed defect. The zero-step epoch remains possible in principle --
+        # the arithmetic allows it whenever flushes do sit at a fixed residue -- but I did not observe it in a
+        # run and should not have claimed it as the consequence.
         # Harmless today only because ACCUM defaults to 1 and longrun.sh never sets it. fetch_big.py prints the
         # recommended heavy-run command as "WIN=256 BATCH_W=16 ACCUM=4 D_MODEL=768 VMAX=16384", so the next GB
         # run launched the way the repo says to launch it had a 3-in-4 chance per epoch of taking no step at all,
@@ -8699,8 +8725,22 @@ def main():
                 if _uv:
                     print(f"  ROUTER SELECTION over the whole run: {len(_uv)} distinct experts won at least one "
                           f"window | top expert took {100*_uv[0]/_ut:.1f}% | half the traffic went to {_c50} expert(s)")
-                print(f"    (the 'N of 4096 used' line above is 32 EVAL windows -- a probe, not the run. These two "
-                      f"answer different questions and only this one says whether the router ever chose variety.)")
+                # THIS LINE EXPLAINED AWAY THE SYMPTOM OF A DEAD INPUT FOR THE WHOLE LIFE OF THE q_entry
+                # PARTITION. The two counts do answer different questions -- a 32-window held-out probe against
+                # the whole run -- but they are the SAME ROUTER, so they cannot disagree by orders of magnitude.
+                # On the pilot they disagreed 5 against 415, and this sentence absorbed it. The partition above
+                # was scoring with q_entry while every live path had moved to entry_logits, and the run's own
+                # ROUTER LEARNING audit was printing "never gradiented -> ctrl, q_entry" a few lines earlier.
+                # A diagnostic whose job is to notice a broken mechanism must not carry its own alibi.
+                # The hardcoded "4096" was wrong too: it is the live population, not FAB_NMAX's old default.
+                print(f"    (the 'N of {_N} used' line above is a held-out PROBE, not the run, so these two answer "
+                      f"different questions -- but they are the same router and cannot differ by orders of "
+                      f"magnitude. When they do, the probe is not calling the path the run calls.)")
+                if _uv and len(_used) * 10 < len(_uv):
+                    print(f"    !! THE PROBE PARTITION IS NOT THE RUN'S ROUTER: {len(_used)} winner(s) here "
+                          f"against {len(_uv)} over the run. Every SPECIALIZATION verdict above is void until "
+                          f"that is explained -- check the entry path this block scores with against the one "
+                          f"fab_logits actually takes.")
                 # === GRADIENT REACH: how many experts LEARN per step? =========================================
                 # Distinct from utilization. `use` says who WON a window at some point in the run; this says how
                 # many experts were in the graph on a single step, i.e. how many were being trained at once.
