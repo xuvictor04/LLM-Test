@@ -412,15 +412,31 @@ class FG:
 saved = {"fast": 2.01, "slow": 2.04, "dev": 0.03, "n": 375, "ramp_done": True, "last": 24000,
          "last_regr": 0, "blackout": 0, "t0": 0, "state": "W", "n_ramp": 12, "n_stall": 3,
          "n_regr": 0, "n_regr_supp": 0}
-ns = dict(FABRIC=True, fabgrow=FG(), fab=Fab(4096, 523), _RD={"fabgrow": saved})
+ns = dict(FABRIC=True, fabgrow=FG(), fab=Fab(4096, 523), _RD={"fabgrow": saved}, _fg_base={})
 out = run(RESTORE, ns)
+# THE COUNTERS ARRIVE CUMULATIVE, AND POPULATION CHURN REPORTS "growth fired: Nx" AS THIS RUN. Carrying the
+# controller is the point of the block, but n_ramp/n_regr/n_stall came with it, so after a resume the churn
+# line was attributing the PREVIOUS run's growth events to this one -- in the report the continual-learning
+# claim is read out of. The baseline recorded here is what lets the report subtract them.
+check(ns["_fg_base"] == {"n_ramp": 12, "n_stall": 3, "n_regr": 0, "n_regr_supp": 0},
+      f"the restore records the counts it arrived with: {ns['_fg_base']}")
+check(ns["fabgrow"].n_ramp == 12,
+      "...while the controller keeps the cumulative total, so the chain's history is not thrown away")
+_gr = {k: getattr(ns["fabgrow"], k) - ns["_fg_base"].get(k, 0)
+       for k in ("n_ramp", "n_stall", "n_regr", "n_regr_supp")}
+check(_gr == {"n_ramp": 0, "n_stall": 0, "n_regr": 0, "n_regr_supp": 0},
+      f"...so a run that has grown nothing yet reports {_gr['n_ramp']}x on the RAMP, not 12x")
+ns_fresh = dict(FABRIC=True, fabgrow=FG(), fab=Fab(4096, 523), _RD={}, _fg_base={})
+run(RESTORE, ns_fresh)
+check(ns_fresh["_fg_base"] == {},
+      "a checkpoint with no controller state records no baseline, so a fresh run subtracts nothing")
 check(ns["fabgrow"].ramp_done and abs(ns["fabgrow"].slow - 2.04) < 1e-9,
       "the restore block puts the latch and the EMAs back")
 check(any("stays latched" in l and "4096" in l for l in out),
       "...and says the latch holds at the WIDER cap, which is the whole point")
 check(any("carries the PREVIOUS material's level" in l for l in out),
       "...and that the EMA is what will make the arriving area visible")
-ns2 = dict(FABRIC=True, fabgrow=FG(), fab=Fab(4096, 523), _RD={})
+ns2 = dict(FABRIC=True, fabgrow=FG(), fab=Fab(4096, 523), _RD={}, _fg_base={})
 out2 = run(RESTORE, ns2)
 check(any("predates the growth controller being saved" in l for l in out2),
       "an older checkpoint keeps the old behaviour and is TOLD so, not silently re-armed")
@@ -445,17 +461,29 @@ class Opt:
     def load_state_dict(s, d): s.loaded = True
 
 
-for wide, resized, want_m, want_e in ((0, False, True, True),      # ordinary resume: both restore
-                                      (3072, False, False, True),  # fabric widened: only om is affected
-                                      (0, True, True, False),      # encoder resized: only oe is affected
-                                      (3072, True, False, False)): # both
+# A THIRD REASON THE MODEL'S MOMENTS CANNOT BE RESTORED, and the one I missed. emb.weight, head.weight and
+# head.bias are all in om, so widening the SOFTMAX invalidates its moments exactly as widening the fabric
+# does -- and the skip was gated on _wide_by alone. A resume that raises VMAX without touching FAB_NMAX
+# therefore loaded moments shaped for the old vocabulary, cleanly, and would die at the first om.step().
+# Masked on both harness paths only because they happen to widen the fabric too: a latent crash, not a
+# theoretical one, and it is the same bug the commit that introduced it is named for.
+for wide, mwide, resized, want_m, want_e in (
+        (0, 0, False, True, True),        # ordinary resume: both restore
+        (3072, 0, False, False, True),    # fabric widened: only om is affected
+        (0, 3, False, False, True),       # VMAX widened alone: om is STILL affected -- the case I missed
+        (0, 0, True, True, False),        # encoder resized: only oe is affected
+        (3072, 3, True, False, False)):   # everything
     om_, oe_ = Opt("m"), Opt("e")
-    ns = dict(_wide_by=wide, _enc_resized=resized, om=om_, oe=oe_,
+    ns = dict(_wide_by=wide, _mwide=mwide, _enc_resized=resized, om=om_, oe=oe_,
               _RD={"opt_m": {}, "opt_e": {}})
     out = run(OPT, ns)
     check(om_.loaded == want_m and oe_.loaded == want_e,
-          f"_wide_by={wide} _enc_resized={resized}: model {'restored' if om_.loaded else 'skipped'}, "
+          f"_wide_by={wide} _mwide={mwide} _enc_resized={resized}: "
+          f"model {'restored' if om_.loaded else 'skipped'}, "
           f"encoder {'restored' if oe_.loaded else 'skipped'}")
+    if mwide and not wide:
+        check(any("widened for a larger VMAX" in l for l in out),
+              "...and a VMAX-only widening says so in its own words, not the fabric's")
     if wide and not resized:
         check(any("ENCODER's moments are unaffected and are restored" in l for l in out),
               "...and a widened fabric says so explicitly, rather than blaming the fabric for the encoder")

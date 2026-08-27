@@ -714,13 +714,27 @@ pilot-add)
   # Read with map_location="meta" so no tensor is allocated: the geometry is in fab_cfg, and a multi-GB
   # checkpoint should not be paged into RAM to learn one integer. Any failure here is non-fatal -- the engine's
   # own gate will explain the geometry far better than this shell can.
-  if [ -z "${FAB_N0:-}" ]; then
+  # ONE GATE FOR THREE UNRELATED DERIVATIONS, AND FAB_N0 IS NONE OF THE OTHER TWO. FAB_N0 is a population
+  # count; VMAX is the softmax width and FAB_NMAX is the slot pool, and both were nested inside the test for
+  # FAB_N0 being unset. So setting FAB_N0 -- which this block's own failure message instructs you to do, and
+  # which anyone resuming a specific population would do -- silently reverted VMAX to 2048 and FAB_NMAX to
+  # 4096, re-creating both round18 defects with no message: the vocabulary full before the new area arrives,
+  # and the capacity gate shut for the run. The read of the checkpoint stays behind one gate because it costs
+  # a torch load; each knob it feeds now decides for itself whether it was already asked for.
+  if [ -z "${FAB_N0:-}" ] || [ -z "${VMAX:-}" ] || [ -z "${FAB_NMAX:-}" ]; then
     _CKG=$(python3 - "$FROM/ckpt.pt" <<'PY' 2>/dev/null
 import sys, torch
 try:
     d = torch.load(sys.argv[1], map_location="meta", weights_only=False)
     c = d.get("fab_cfg") or {}
-    print(int(c.get("n") or 0), int(c.get("cap") or 0), int(d.get("tok_vocab") or 0))
+    # V, NOT tok_vocab. tok_vocab is how many tokens were MINTED; V is the SOFTMAX WIDTH, which is what
+    # emb.weight and head are sized by and therefore what has to be doubled. On a checkpoint that filled less
+    # than half its vocabulary -- 332 minted into a width of 512, which is exactly what the smoke checkpoint
+    # here looks like -- 2 x tok_vocab can land BELOW the width, and widen_prefix refuses a narrowing outright.
+    # The resume would die on a number this block computed for it.
+    print(int(c.get("n") or 0), int(c.get("cap") or 0),
+          int(d.get("V") or d.get("tok_vocab") or 0),
+          int(c.get("rank") or 0), int(c.get("dk") or 0))
 except Exception:
     pass
 PY
@@ -728,11 +742,13 @@ PY
     # POSITIONAL SPLIT, NOT ${x%% *} / ${x##* }: with three fields those give the first and the LAST, so adding
     # a third number would have silently read the vocabulary as the slot cap.
     set -- ${_CKG:-}
-    _CKN=${1:-0}; _CKC=${2:-0}; _CKV=${3:-0}
+    _CKN=${1:-0}; _CKC=${2:-0}; _CKV=${3:-0}; _CKR=${4:-0}; _CKD=${5:-0}; _CKR=${4:-0}; _CKD=${5:-0}
     if [ -n "${_CKN:-}" ] && [ "${_CKN:-0}" -gt 0 ] 2>/dev/null; then
-      export FAB_N0="$_CKN"
-      echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint -- not the default 2048, which"
-      echo "           would enter $((2048 - _CKN)) identity experts at step 0 that growth never asked for."
+      if [ -z "${FAB_N0:-}" ]; then
+        export FAB_N0="$_CKN"
+        echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint -- not the default 2048, which"
+        echo "           would enter $((2048 - _CKN)) identity experts at step 0 that growth never asked for."
+      fi
       # AND THE CAP IS NOT A FREE PARAMETER. cull_gate_open is n_live/cap >= FAB_PRESSURE, and the utilization
       # cull, the utilization spare and FAB_RESCUE all live behind it. Leaving FAB_NMAX at the default 4096
       # against a 523-expert checkpoint puts occupancy at 0.128 against a pressure of 0.45 -- the gate is shut,
@@ -756,6 +772,14 @@ PY
         echo "           vocabulary VMAX=$VMAX (double the checkpoint's $_CKV) so the added area can mint its"
         echo "           own tokens instead of being segmented with the existing area's merges."
       fi
+      # FAB_RANK AND FAB_DK ARE INHERITED BECAUSE THEY CANNOT BE WIDENED. A is [cap, d, rank] and SRC_p/K_p
+      # are [cap, dk], so both are INNER dimensions -- self_organize.py refuses a mismatch outright, by design,
+      # since no prefix of a rank-4 adapter is a valid rank-8 one. The harness inherited n, cap and the softmax
+      # width and left these two on the registry defaults, so resuming any checkpoint not trained at the default
+      # rank died at the gate with the geometry this block had just computed correctly sitting unused. Hit
+      # immediately the first time `add` was run against a real non-default checkpoint.
+      [ -z "${FAB_RANK:-}" ] && [ "${_CKR:-0}" -gt 0 ] 2>/dev/null && export FAB_RANK="$_CKR"
+      [ -z "${FAB_DK:-}" ] && [ "${_CKD:-0}" -gt 0 ] 2>/dev/null && export FAB_DK="$_CKD"
       if [ -z "${FAB_NMAX:-}" ] && [ -n "${_CKC:-}" ] && [ "${_CKC:-0}" -gt 0 ] 2>/dev/null; then
         export FAB_NMAX=$((_CKC * 2))
         echo "           slot pool FAB_NMAX=$FAB_NMAX (double the checkpoint's $_CKC: one existing area, one added)."
@@ -884,26 +908,67 @@ add)
   _CKG=$(python3 - "$OUT/ck/ckpt.pt" <<'PY' 2>/dev/null
 import sys, torch
 try:
-    c = torch.load(sys.argv[1], map_location="meta", weights_only=False).get("fab_cfg") or {}
-    print(int(c.get("n") or 0), int(c.get("cap") or 0))
+    d = torch.load(sys.argv[1], map_location="meta", weights_only=False)
+    c = d.get("fab_cfg") or {}
+    # V, not tok_vocab: V is the SOFTMAX WIDTH, which is what emb/head are sized by and therefore what has to
+    # be doubled. tok_vocab counts tokens MINTED, and on a checkpoint that filled less than half its width
+    # (332 of 512 here) twice that lands BELOW the width -- a narrowing, which widen_prefix refuses outright.
+    print(int(c.get("n") or 0), int(c.get("cap") or 0), int(d.get("V") or d.get("tok_vocab") or 0),
+          int(c.get("rank") or 0), int(c.get("dk") or 0))
 except Exception:
     pass
 PY
 )
-  _CKN=${_CKG%% *}; _CKC=${_CKG##* }
+  # POSITIONAL SPLIT, as in pilot-add and for the same reason: ${x%% *} / ${x##* } give the FIRST and the
+  # LAST field, so the moment this helper gained a third number the vocabulary would have been read as the
+  # slot cap. Nothing after this block reads a positional -- NAME, DS, GB and DD are captured at the top of
+  # the branch -- which is checked, not assumed.
+  set -- ${_CKG:-}
+  _CKN=${1:-0}; _CKC=${2:-0}; _CKV=${3:-0}; _CKR=${4:-0}; _CKD=${5:-0}
   if [ -n "${_CKN:-}" ] && [ "${_CKN:-0}" -gt 0 ] 2>/dev/null; then
     [ -z "${FAB_N0:-}" ] && export FAB_N0="$_CKN"
     [ -z "${FAB_NMAX:-}" ] && [ "${_CKC:-0}" -gt 0 ] 2>/dev/null && export FAB_NMAX=$((_CKC * 2))
-    echo "add: FAB_N0=$FAB_N0 FAB_NMAX=${FAB_NMAX:-default}, read from the checkpoint's fab_cfg"
-    echo "     (cap doubled: one existing area, one added -- see the FAB_PRESSURE sizing note in pilot-add)"
+    # ...AND THE VOCABULARY, which pilot-add doubles and this branch did not. It hardcoded VMAX=2048 while
+    # FAB_NMAX learned to follow the checkpoint, so the added area got new EXPERTS and no new TOKENS -- which
+    # is round18's "grew 2048 -> 2048 during training (+0)", on the command that runs the real experiment.
+    [ -z "${VMAX:-}" ] && [ "${_CKV:-0}" -gt 0 ] 2>/dev/null && export VMAX=$((_CKV * 2))
+    # FAB_RANK AND FAB_DK ARE INHERITED BECAUSE THEY CANNOT BE WIDENED. A is [cap, d, rank] and SRC_p/K_p
+    # are [cap, dk], so both are INNER dimensions -- self_organize.py refuses a mismatch outright, by design,
+    # since no prefix of a rank-4 adapter is a valid rank-8 one. The harness inherited n, cap and the softmax
+    # width and left these two on the registry defaults, so resuming any checkpoint not trained at the default
+    # rank died at the gate with the geometry this block had just computed correctly sitting unused. Hit
+    # immediately the first time `add` was run against a real non-default checkpoint.
+    [ -z "${FAB_RANK:-}" ] && [ "${_CKR:-0}" -gt 0 ] 2>/dev/null && export FAB_RANK="$_CKR"
+    [ -z "${FAB_DK:-}" ] && [ "${_CKD:-0}" -gt 0 ] 2>/dev/null && export FAB_DK="$_CKD"
+    echo "add: FAB_N0=$FAB_N0 FAB_NMAX=${FAB_NMAX:-default} VMAX=${VMAX:-default} FAB_RANK=${FAB_RANK:-default} FAB_DK=${FAB_DK:-default},"
+    echo "     (cap and width doubled: one existing area, one added -- see the sizing note in pilot-add)"
   else
     echo "add: !! could not read the checkpoint's geometry. The defaults will enter blank experts as veterans-"
     echo "     turned-newborns and put FAB_PRESSURE's setpoint somewhere the added area did not ask for."
-    echo "     Set FAB_N0/FAB_NMAX by hand from the previous run's 'fabric ON (N slots ...)' banner line."
+    echo "     Set FAB_N0/FAB_NMAX/VMAX by hand from the previous run's 'fabric ON (N slots ...)' banner line."
   fi
-  env DATA_MODE=real DATA_DIR="$DD" DOMAINS="eng,$NAME" DEVICE=cuda DISK_STREAM=1 \
+  # THE TOKENIZER TRAVELS WITH THE CHECKPOINT HERE TOO, AND THIS BRANCH NEVER LEARNED THAT. pilot-add has
+  # resolved it since the round18 fix; `add` -- whose own comment says it runs the real experiment -- set no
+  # TOKENIZER_PATH at all, so the child fell back to the shared data/dyntok.json, seeded a fresh vocabulary,
+  # and self_organize.py refused with VOCABULARY MISMATCH. The geometry computed just above was correct and
+  # thrown away, because the run never reached it. The refusal is right -- restored embedding rows indexed by
+  # a different vocabulary would be silent -- so the defect was that nothing handed it the right file.
+  # UNCONDITIONAL, not inside the else: a checkpoint whose geometry read fine still needs its tokenizer.
+  if [ -z "${TOKENIZER_PATH:-}" ]; then
+    for _tc in "$OUT/ck.dyntok.json" "$OUT/ck/dyntok.json" "$OUT/dyntok.json"; do
+      [ -f "$_tc" ] && { TOKENIZER_PATH="$_tc"; break; }
+    done
+    if [ -z "${TOKENIZER_PATH:-}" ] && [ -f data/dyntok.json ]; then
+      TOKENIZER_PATH=data/dyntok.json
+      echo "add: !! falling back to the SHARED data/dyntok.json -- if anything else has written it since this"
+      echo "     checkpoint was saved the resume will be REFUSED, which is the loud failure and not the silent one."
+    fi
+  fi
+  [ -n "${TOKENIZER_PATH:-}" ] || { echo "add: !! cannot find the tokenizer saved with $OUT/ck -- set TOKENIZER_PATH=<the .dyntok.json>"; exit 1; }
+  env DATA_MODE=real DATA_DIR="$DD" DOMAINS="eng,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
+      TOKENIZER_PATH="$TOKENIZER_PATH" \
       CORPUS_CAP=100000000000 STREAM_LEN=$SL EPOCHS=$EP D_MODEL=${D_MODEL:-768} WIN=256 BATCH_W=16 \
-      VMAX=2048 GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 SIG_WIN=${SIG_WIN:-614} \
+      VMAX=${VMAX:-2048} GROW_EVERY=100 GROW_BURST=12 SEG_MIN=8000 SEG_MAX=20000 SIG_WIN=${SIG_WIN:-614} \
       ENC_WARMUP=2000 ENC_WARMUP_MIN=500 MEM_CAP=200000 MEM_QUOTA=${MEM_QUOTA:-3125} \
       CKPT_EVERY=${CKPT_EVERY:-50000} RATE_EVERY=5000 PROFILE=0 RESUME="$OUT/ck" \
       SAVE_CKPT="$OUT/ck_$NAME" nohup python3 self_organize.py >> "$OUT/add_$NAME.log" 2>&1 &

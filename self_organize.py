@@ -4139,6 +4139,14 @@ def main():
     _regrown = []                                          # param groups re-created by a RESUME's growth replay
     _enc_resized = False                                   # _load_enc had to slice the saved embedding, which
     #   invalidates the ENCODER optimizer's moments for it -- a hazard of its own, unrelated to the fabric's.
+    _mwide = 0                                             # model tensors widened for a larger VMAX. A SECOND
+    #   reason the model optimizer's moments cannot be restored, and the one I missed: emb.weight, head.weight
+    #   and head.bias are all in om, so widening the SOFTMAX invalidates its moments exactly as widening the
+    #   fabric does -- and the skip below was gated on _wide_by alone. A resume that raises VMAX without
+    #   touching FAB_NMAX therefore loaded moments shaped for the old vocabulary, cleanly, and died at the
+    #   first om.step(). Masked on both harness paths only because they happen to widen the fabric too.
+    _fg_base = {}                                          # growth-event counts the checkpoint arrived with,
+    #   so POPULATION CHURN can report THIS run rather than the chain's running total. See the restore below.
     _wide_by = 0                                           # slots this resume added to the fabric beyond the
     #   checkpoint's cap. Initialised HERE, not only inside `if RESUME:`, because part 2 of the resume reads it
     #   and a name that exists only down one branch is a NameError waiting for the branch that skips it.
@@ -4316,6 +4324,16 @@ def main():
             if _fg:
                 for _k, _v in _fg.items():
                     if hasattr(fabgrow, _k): setattr(fabgrow, _k, _v)
+                # ...AND THE COUNTERS ARE NOW CUMULATIVE, WHICH POPULATION CHURN DOES NOT KNOW. Carrying the
+                # EMAs and the latch across the boundary is the point of this block, but n_ramp / n_regr /
+                # n_stall / n_regr_supp came with them, and the churn report prints "growth fired: Nx on the
+                # RAMP, Nx on a REGRESSION, Nx on a stall" as a statement about THIS RUN. After a resume those
+                # were the previous run's events attributed to this one -- a regression introduced by the fix
+                # that carries the controller, in the report that the continual-learning claim is read out of.
+                # Keep the history (it is genuinely useful across a chain) and record where this run started,
+                # so the report can say both.
+                _fg_base.update({_k: getattr(fabgrow, _k, 0)
+                                 for _k in ("n_ramp", "n_stall", "n_regr", "n_regr_supp")})
                 print(f"  [resume] growth controller restored: slow EMA {fabgrow.slow:.4f}, dev "
                       f"{fabgrow.dev:.4f}, ramp {'LATCHED' if fabgrow.ramp_done else 'still arming'}, "
                       f"{fabgrow.n_regr} regression(s) / {fabgrow.n_ramp} ramp event(s) so far.")
@@ -4374,6 +4392,7 @@ def main():
                 f"anything else -- D_MODEL, layer count, a narrowed VMAX that would drop trained token rows -- "
                 f"cannot. Resume with the geometry the checkpoint was written at.")
         if _mgrew:
+            _mwide = len(_mgrew)
             print(f"  [resume] widened {len(_mgrew)} model tensor(s) for a larger VMAX: {', '.join(_mgrew)}")
             print(f"  [resume]   the tokenizer stays at {TOK.vocab_size if USE_TOK else 'n/a'} tokens and now has "
                   f"room above it, so an area arriving in this run can mint ids of its own instead of being "
@@ -4654,6 +4673,12 @@ def main():
         # new area's signatures first arrive is the worst available moment, and the message blamed the fabric
         # for it. A quantity computed for one consumer and spent on another, which is the class of bug this
         # whole block exists to fix -- committed while fixing it.
+        if _mwide and not _wide_by:
+            print(f"[resume] the MODEL optimizer's moments are not restored: {_mwide} model tensor(s) were "
+                  f"widened for a larger VMAX, so the checkpoint's Adam moments for emb.weight, head.weight "
+                  f"and head.bias are shaped for the OLD vocabulary. Same failure as a widened fabric and the "
+                  f"same reason -- torch would load them cleanly and fail on the first step(). The ENCODER's "
+                  f"moments are unaffected and are restored.")
         if _wide_by:
             print(f"[resume] the MODEL optimizer's moments are not restored: the fabric was widened by "
                   f"{_wide_by} slots, so the checkpoint's Adam moments are shaped for the OLD cap. Restoring "
@@ -4671,7 +4696,8 @@ def main():
         # attach them to the wrong tensors -- worse than restarting them. So they restart: Adam re-accumulates
         # its moments over roughly 1/(1-beta2) ~ 1000 steps, about 20 seconds at the observed rate. Weights,
         # memory, domains and the recurrence clock all restore exactly; this costs a brief transient, not a run.
-        for _on, _oo, _ok, _skip in (("model", om, "opt_m", _wide_by), ("encoder", oe, "opt_e", _enc_resized)):
+        for _on, _oo, _ok, _skip in (("model", om, "opt_m", _wide_by or _mwide),
+                                     ("encoder", oe, "opt_e", _enc_resized)):
             if _skip: continue
             try: _oo.load_state_dict(_RD[_ok])
             except (KeyError, ValueError) as e:
@@ -7101,6 +7127,7 @@ def main():
             # N0 is set above NMAX, and fab.n() can then exceed FAB_NMAX -- which would latch the ramp against a
             # pool smaller than the population. The banner's occupancy line reads _F.cap for the same reason.
             _nb = fabgrow.step(_lf, step, fab.n(), _cap_fab[0], pool=fab.cap)  # 0, or HOW MANY to grow (burst on an unexpected regression)
+            _nb_asked = _nb                                 # what the TRIGGER asked for, before either clamp
             _nb = min(_nb, _cap_fab[0] - fab.n())
             # ...and no more of the population may be newborn than FAB_NEW_FRAC allows. fab.born is slot -> step,
             # so the budget is a count, and growth takes whatever is left of it rather than being refused outright
@@ -7129,7 +7156,13 @@ def main():
             # being zero, so it stays silent in the one case where it is most needed. Measured: with the ramp
             # re-armed at cap 4096 the newborn budget is spent before the regression is tested, and 2 counted
             # regressions produced 0 experts. Record what was actually created, per reason.
-            if _nb <= 0 and fabgrow is not None and fabgrow.why:
+            # `fabgrow.why` IS A LEFTOVER, NOT A SIGNAL THAT SOMETHING FIRED. It holds the reason of the LAST
+            # firing and is never cleared, so testing it counted a decline on every flush where growth was not
+            # triggered at all -- which is nearly all of them. Measured: 107 declines against 9 asks, an
+            # inflation of more than 10x, in a line whose whole purpose is to say how often a REGRESSION was
+            # detected and answered with nothing. A counter meant to expose a silent failure was itself
+            # reporting one. Gate on the trigger's own return value instead: asked for something, got nothing.
+            if _nb_asked > 0 and _nb <= 0 and fabgrow is not None and fabgrow.why:
                 fabgrow.n_declined = getattr(fabgrow, "n_declined", 0) + 1
                 fabgrow.declined_why = getattr(fabgrow, "declined_why", {})
                 fabgrow.declined_why[fabgrow.why] = fabgrow.declined_why.get(fabgrow.why, 0) + 1
@@ -8071,10 +8104,14 @@ def main():
         print(f"\n=== POPULATION CHURN: how much of the growth was NET? ===")
         print(f"  {fab.grown} grown, {fab.removed} removed, net {_net:+d} -> {fab.n()} live of {fab.cap} | "
               f"{_chn:.0%} of all growth was replaced rather than added")
-        print(f"  growth fired: {fabgrow.n_ramp}x on the RAMP (population-building), {fabgrow.n_regr}x on a "
-              f"REGRESSION, {fabgrow.n_stall}x on a stall"
-              + (f" | {fabgrow.n_regr_supp} REGRESSION(s) DETECTED AND REFUSED by the regression cooldown"
-                 if fabgrow.n_regr_supp else ""))
+        _gr = {_k: getattr(fabgrow, _k, 0) - _fg_base.get(_k, 0)
+               for _k in ("n_ramp", "n_stall", "n_regr", "n_regr_supp")}
+        print(f"  growth fired: {_gr['n_ramp']}x on the RAMP (population-building), {_gr['n_regr']}x on a "
+              f"REGRESSION, {_gr['n_stall']}x on a stall"
+              + (f" | {_gr['n_regr_supp']} REGRESSION(s) DETECTED AND REFUSED by the regression cooldown"
+                 if _gr['n_regr_supp'] else "")
+              + (f"  [this run; the chain totals {fabgrow.n_ramp}/{fabgrow.n_regr}/{fabgrow.n_stall} since the "
+                 f"controller's state began travelling in the checkpoint]" if _fg_base else ""))
         # WHAT WAS ASKED FOR vs WHAT WAS CREATED. n_ramp/n_regr/n_stall count the TRIGGER, incremented inside
         # PlateauGrowth.step and returned from there; the soft cap and FAB_NEW_FRAC clamp the burst afterwards,
         # at the call site. So these three numbers are requests, not experts, and a run whose whole newborn
@@ -8090,7 +8127,7 @@ def main():
                   f"an area this is the failure that matters: the arrival WAS detected and capacity still did not "
                   f"answer it, because the budget had already gone elsewhere. Check the RAMP count above -- if the "
                   f"ramp re-armed against a widened cap it spends the newborn budget on no evidence at all.")
-        if fabgrow.n_regr == 0 and fabgrow.n_regr_supp == 0:
+        if _gr['n_regr'] == 0 and _gr['n_regr_supp'] == 0:
             print(f"  >> the REGRESSION trigger never fired and was never even refused, so no window of this run "
                   f"read as a CHANGE in the material. On a single stationary corpus that is correct; on a run that "
                   f"ADDED an area it means the arrival was invisible to growth, and capacity never answered it.")
@@ -8102,8 +8139,8 @@ def main():
         if fabgrow.ramp_done:
             print(f"  (the ramp has LATCHED OFF -- the population reached {fabgrow.ramp_to:.0%} of cap and "
                   f"the ramp does not re-arm when culling drops it back below)")
-        elif fabgrow.n_ramp > 50:
-            print(f"  >> the RAMP is still firing after {fabgrow.n_ramp} events. It should have latched off once "
+        elif _gr['n_ramp'] > 50:
+            print(f"  >> the RAMP is still firing after {_gr['n_ramp']} events. It should have latched off once "
                   f"the population was built; if it has not, growth is not reading the loss at all.")
     if FABRIC: print(f"FABRIC{' [NORM-ONLY CONTROL: no nodes, no routing]' if fab.norm_only else ''}: {len(fab.bodies)} nodes ({fab.grown} grown on plateau from {_i('FAB_N0',2048)}) | depth budget {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps | soft routing + transition matrix + HALT")
     if EXPERTS: print(f"EXPERTS (separate population, dual selection): {router.created} created, {router.replicated} replicated, {router.merged} merged, {router.removed} removed -> {len(router.cent)} live | rank {_i('EXPERT_R',4)} | churn {router.removed/max(1,router.created):.0%} (merge preserves learning; high churn destroys it)")
