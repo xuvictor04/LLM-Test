@@ -9,7 +9,7 @@ it became 2048. Every other note in this directory is a RECORD of what was true 
 This is the only one that claims to describe the code as it stands, and it is the only one that is
 not written by hand.
 
-326 knobs.
+327 knobs.
 
 ## kind `env`
 
@@ -286,6 +286,7 @@ not written by hand.
 | `MEM_PROBE_EVERY` | `25` |
 | `MEM_PROBE_N` | `64` |
 | `MEM_QUOTA` | `128` |
+| `MEM_WRONG_READ` | `1` |
 | `MIN_PAIR` | `50` |
 | `N_PROCESSES` | `4` |
 | `PHASED` | `1` |

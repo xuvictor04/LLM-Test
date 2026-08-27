@@ -783,7 +783,26 @@ PY
   # checkpoint being RESUMED lives, and there is no way to guess that from the command line.
   echo "           checkpoint -> $_PA_CK"
   echo "           log        -> $_PA_LOG"
-  if [ -z "$(ls "$P_DD/train/$NAME"/part*.txt 2>/dev/null)" ]; then
+  # "ANY PART FILE EXISTS" IS NOT "THE CORPUS IS THE SIZE THAT WAS ASKED FOR", and this is how the first
+  # continual-learning run got a 5.6x exposure imbalance. An earlier `pilot-add py local 0.03` had left ~10 MB
+  # in data_pilot/train/py; the next invocation asked for 0.06 GB, saw part000.txt, skipped the fetch entirely
+  # and trained on the 10 MB. Against 57 MB of English -- and the two corpora get the SAME SHARE of the stream
+  # whatever their sizes -- Python was seen 1.56x and English 0.28x, so "Python learned well" is partly Python
+  # having been memorised, and the +0.043 b/B that run measured carries that caveat.
+  # self_organize.py warns about the exposure at startup, which is the last line of defence. This is the first:
+  # the same defect is already documented for _pilot_corpus ("a directory fetched at 0.06 GB is silently reused
+  # for a run configured for 0.75 GB") and pilot-add had the identical hole.
+  # fetch_big.py --resume tops up from its manifest rather than restarting, so re-running is cheap.
+  _HAVE=$(du -sb "$P_DD/train/$NAME" 2>/dev/null | cut -f1); _HAVE=${_HAVE:-0}
+  _WANT=$(python3 -c "print(int(float('$GB') * 1e9))" 2>/dev/null || echo 0)
+  if [ "${_HAVE:-0}" -gt 0 ] 2>/dev/null && [ "${_WANT:-0}" -gt 0 ] 2>/dev/null \
+     && [ "$_HAVE" -lt $((_WANT * 9 / 10)) ] 2>/dev/null; then
+    echo "pilot-add: $P_DD/train/$NAME holds $((_HAVE / 1000000)) MB but $GB GB was asked for -- topping up."
+    echo "           (a corpus short of the request is not a smaller experiment: both areas get the same SHARE"
+    echo "            of the stream whatever their sizes, so the short one is simply seen more times over.)"
+    _HAVE=0
+  fi
+  if [ "${_HAVE:-0}" -eq 0 ] 2>/dev/null; then
     if [ "$DS" = local ]; then
       # THE ONE THING BLOCKING THE CLAIM WAS AN ACCOUNT, NOT THE CODE. round18's fix_resume produced a clean
       # checkpoint and pilot-add resolved its vocabulary correctly, and then the run died here:
@@ -800,6 +819,23 @@ PY
       # shellcheck disable=SC2086
       python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume ${FETCH_ARGS:-} || exit 1
     fi
+  fi
+  # PURE_ADD=1 -- THE ARM THE MODULARITY CLAIM ACTUALLY RESTS ON. By default PHASE_SCHED for two corpora is
+  # [[0],[0],[1],[1]]: English for the first half of each epoch, the added area for the second, REPEATED EVERY
+  # EPOCH. At EPOCHS=8 that rehearses English eight times during the run that is supposed to measure what
+  # forgetting it. Rehearsal is a legitimate continual-learning method, but under it "modularity protected
+  # English" cannot be told apart from "English kept being trained".
+  # PURE_ADD puts ONLY the added area in the stream. English keeps its held-out corpus, so ACROSS THE RUN
+  # BOUNDARY still scores it -- the question becomes: when English STOPS ARRIVING, does the fabric preserve it?
+  # Computed from the DOMAINS order rather than hand-typed: DOMAINS="eng,$NAME" makes the added area index 1,
+  # and a hand-written PHASE_SCHED="1|1|1|1" silently becomes wrong the moment that order changes.
+  if [ "${PURE_ADD:-0}" = 1 ] && [ -z "${PHASE_SCHED:-}" ]; then
+    _AI=1                                     # DOMAINS is "eng,$NAME", so the added area is index 1
+    export PHASE_SCHED="$_AI|$_AI|$_AI|$_AI"
+    echo "pilot-add: PURE_ADD -- PHASE_SCHED=$PHASE_SCHED, so only '$NAME' is in the stream and 'eng' survives"
+    echo "           only as a held-out corpus. ACROSS THE RUN BOUNDARY is the measurement; note that \`faded\`"
+    echo "           is computed from labels PRESENT in the stream, so the unlearn-a-faded-process test goes"
+    echo "           vacuous in this arm and is not the number to read."
   fi
   env -u RESUME_FROM DATA_MODE=real DATA_DIR="$P_DD" DOMAINS="eng,$NAME" DEVICE=${DEVICE:-cuda} DISK_STREAM=1 \
       CORPUS_CAP=100000000000 STREAM_LEN=${STREAM_LEN:-4000000} EPOCHS=${EPOCHS:-8} D_MODEL=${D_MODEL:-768} \

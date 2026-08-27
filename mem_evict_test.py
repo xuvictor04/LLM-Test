@@ -152,6 +152,65 @@ def census_survives_resume():
     return ok
 
 
+def wrong_gates_reads():
+    """set_selfcon / is_wrong / read had no test at all, and is_wrong gates EVERY retrieval.
+
+    Two states are invisible in a log and print exactly the same nothing:
+      - INERT. is_wrong() opens with `if int(checked.sum()) > 10`, so with ten or fewer entries ever
+        self-consistency-checked it returns all-False and the filter does nothing whatever.
+      - OVER-EAGER. On the first continual-learning run it flagged 63,146 genuine entries of 200,000 at 3%
+        precision, and the log said "detect-only: sweep OFF ... too low to delete safely" -- which is true of
+        DELETION and says nothing about reads, because Memory.read filters on the same predicate. About a third
+        of the store was unreachable while the report read as reassurance.
+    MEM_WRONG_READ separates the two decisions. This checks all three: the floor, the gating, and the knob.
+    """
+    ok = True
+    V, D, CAP = 32, 8, 64
+    m = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, evict="lru", src_floor=0.0)
+    q = torch.nn.functional.normalize(torch.randn(CAP, D), dim=-1)
+    for i in range(CAP):
+        m.write(q[i:i + 1], torch.tensor([i % V]), src=torch.tensor([0]))
+    n_act = int(m.active.sum())
+
+    # 1. THE FLOOR. Fewer than 11 checked entries and nothing can ever be flagged, however implausible.
+    m.set_selfcon(torch.arange(5), torch.ones(5))              # maximally implausible, but only 5 of them
+    n_wrong_few = int(m.is_wrong().sum())
+    print(f"   5 entries checked, all at implausibility 1.0 -> flagged {n_wrong_few}")
+    if n_wrong_few != 0:
+        print("!! the >10 floor did not hold; is_wrong() flagged on a sample too small to have a threshold"); ok = False
+
+    # 2. IT FLAGS ONCE IT HAS ENOUGH, and only the tail.
+    frac = torch.cat([torch.zeros(n_act - 8), torch.ones(8)])   # a clear implausible tail
+    m.set_selfcon(torch.arange(n_act), frac)
+    n_wrong = int(m.is_wrong().sum())
+    print(f"   {n_act} entries checked, 8 in the implausible tail -> flagged {n_wrong}")
+    if not (0 < n_wrong <= 16):
+        print(f"!! expected the tail and only the tail to be flagged, got {n_wrong} of {n_act}"); ok = False
+
+    # 3. READ IS GATED BY IT. This is the half "detect-only" never covered.
+    probe = q[:4]
+    _, _, hit_on, _ = m.read(probe)
+    flagged = m.is_wrong().nonzero(as_tuple=True)[0].tolist()
+    reached_on = [int(h) for h in hit_on.reshape(-1).tolist() if h >= 0]
+    if any(h in flagged for h in reached_on):
+        print("!! read() returned an entry the WRONG flag had excluded -- the gate is not doing its job"); ok = False
+    else:
+        print(f"   read() with MEM_WRONG_READ=1 reached {len(set(reached_on))} entries, none of them flagged")
+
+    # 4. ...AND THE KNOB TURNS THAT OFF WITHOUT TOUCHING THE FLAG.
+    m.wrong_read = False
+    _, _, hit_off, _ = m.read(probe)
+    reached_off = [int(h) for h in hit_off.reshape(-1).tolist() if h >= 0]
+    still_flagged = int(m.is_wrong().sum())
+    print(f"   MEM_WRONG_READ=0 -> read() reaches {len(set(reached_off))} entries, and the flag still marks "
+          f"{still_flagged} (reporting is unaffected)")
+    if still_flagged != n_wrong:
+        print("!! turning off the read gate changed the FLAG; the two decisions are still coupled"); ok = False
+    if len(set(reached_off)) < len(set(reached_on)):
+        print("!! ungating reads reached FEWER entries, which is backwards"); ok = False
+    return ok
+
+
 def main():
     ok = True
     lru_read, lru_quiet = _run("lru", True), _run("lru", False)
@@ -226,6 +285,9 @@ def main():
     print("\n--- does the floor survive a RESUME? ---")
 
     ok = census_survives_resume() and ok
+
+    print("\n--- does the WRONG flag gate reads, and does it say so? ---")
+    ok = wrong_gates_reads() and ok
 
 
     print("\nok -- eviction selects on retrieval, and a floor survives a domain switch." if ok else "\n!! FAILED")

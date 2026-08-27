@@ -209,8 +209,27 @@ for k in ("A", "B", "SRC_p", "K_p", "cent"):
     check(all(x == "init" for x in sd[k].rows[1024:]), f"  ...rows 1024..4095 keep their initialisation")
 for k in ("halt_key", "halt_b"):
     check(sd[k] is ck[k], f"{k} is cap-independent and is passed through untouched")
-check(any("widened 5 fabric tensor" in l for l in out),
-      f"...and it reports what it widened: {[l for l in out if 'widened' in l][0][:80] if any('widened' in l for l in out) else '(silent)'}")
+# COUNTED AGAINST WHAT SHOULD HAVE WIDENED, not just counted. `cent` is a BUFFER registered after the fact,
+# so a checkpoint predating it simply has no such key: widen_prefix never sees it, load_state_dict(strict=False)
+# never misses it, and every RESTORED expert's routing region comes back at random init. A bare count cannot
+# catch an absence.
+check(any("widened 5 of 5 cap-shaped fabric tensor" in l for l in out),
+      f"...and it reports what it widened AGAINST the cap-shaped total: "
+      f"{[l for l in out if 'widened' in l][0][:74] if any('widened' in l for l in out) else '(silent)'}")
+check(not any("NOT IN THE CHECKPOINT" in l for l in out),
+      "...and says nothing about absentees when there are none")
+
+print("\n  ...and a cap-shaped tensor MISSING from the checkpoint is named, not counted past")
+ck_nocent = {k: v for k, v in ck.items() if k != "cent"}
+ns_nc = dict(_RD={"fab": ck_nocent}, fab=Fab(4096, 2048, sd=cur), _wide_by=3072, _ck_cap=1024,
+             widen_prefix=WIDEN)
+out_nc = run(COPY, ns_nc)
+check(any("widened 4 of 5" in l for l in out_nc),
+      f"4 of 5 widened, and the total is stated so the gap is visible")
+check(any("NOT IN THE CHECKPOINT" in l and "cent" in l for l in out_nc),
+      "...and `cent` is named as absent rather than silently left at init")
+check(any("keep their adapters and lose their addresses" in l for l in out_nc),
+      "...with what that actually costs: the routing region of every restored expert")
 
 print("\n  ...and a cap-shaped tensor this code does not know about is refused, not left to torch")
 ck2 = dict(ck); ck2["mystery"] = T((7, 5), "ck")
@@ -220,8 +239,19 @@ try:
                    widen_prefix=WIDEN))
     check(False, "an unreconcilable tensor should refuse")
 except SystemExit as e:
-    check("mystery" in str(e) and "FAB_NMAX=1024" in str(e),
-          f"it names the tensor and the way out: {str(e)[:96]}...")
+    # THE REFUSAL MUST NAME THE DIMENSION THAT DIFFERS, NOT THE KNOB WE ASSUMED. The widening predicate tests
+    # "leading dim grew, trailing dims match", which is a PROXY for cap-shaped rather than a check of it -- so a
+    # tensor failing it may be failing on FAB_RANK, FAB_DK, SIG_D or D_MODEL, and pointing at FAB_NMAX sends the
+    # reader to change the one knob that is fine.
+    check("mystery" in str(e) and "(7, 5) vs (9, 3)" in str(e),
+          f"it names the tensor and both shapes: {str(e)[:88]}...")
+    check("trailing dimension" in str(e) and "FAB_RANK" in str(e),
+          "...and explains that a trailing dimension is the expert's own geometry, with the knobs that set it")
+    # Counting mentions was the wrong assertion: the message names FAB_NMAX twice ON PURPOSE -- once for the
+    # case where the leading dimension really did shrink, and once to say it is NOT the answer otherwise. The
+    # property that matters is the disclaimer, not the word count.
+    check("not FAB_NMAX" in str(e),
+          "...and explicitly disclaims FAB_NMAX for a mismatch that is not about the cap")
 
 # --- 4. WIDENING MOVES THE CAPACITY GATE, AND THREE MECHANISMS LIVE BEHIND IT ------------------------------
 # The cap is not a free parameter. cull_gate_open is n_live/cap >= FAB_PRESSURE, and its own docstring

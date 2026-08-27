@@ -14,6 +14,7 @@ Design (four decisions, each a knob so the formulas can be tuned later):
 
 This module is deliberately standalone (torch only) so it can be unit-tested and dropped into any model.
 """
+import os
 import torch
 
 
@@ -63,6 +64,9 @@ class EditableMemory:
         self.wrong_min_n = int(wrong_min_n)      #   unused -- retained so existing constructor calls don't break)
         self.flag_min_w = float(flag_min_w)      # only JUDGE an entry on retrievals where it was a CLOSE match (weight
         #                                          >= this); loose cross-domain hits are noise that inflates genuine error
+        self.wrong_read = bool(int(os.environ.get("MEM_WRONG_READ", 1)))   # does the WRONG flag gate retrieval,
+        #   or only the sweep? Read through os.environ here and via _i() in self_organize.py so the registry
+        #   sees the knob and the "declared but never read" audit stays correct.
         self.selfcon_k = float(selfcon_thresh)   # SELF-CONSISTENCY: flag an entry as wrong if the model ranks its stored
         #   token this many robust-deviations (median + k*MAD) above the typical implausibility. Adaptive, so it tracks
         #   whatever scale the model's distribution produces (corrupt context->token pairs are the high tail).
@@ -433,7 +437,16 @@ class EditableMemory:
     def read(self, q, tau=0.1):
         """q:(B,d) -> (dist:(B,V), conf:(B,), hit_idx:(B,topk)). Excludes deleted + flagged-wrong entries."""
         B = q.size(0)
-        valid = self.active & (~self.is_wrong()) & (~self.is_unverified())   # exclude old-B-wrong AND recon-unverified
+        # WRONG_READ SEPARATES DETECTING FROM ACTING, WHICH "detect-only" ONLY EVER DID FOR DELETION. WRONG_SWEEP
+        # gates sweep_wrong(); this predicate gates every RETRIEVAL, and they were the same flag with only one of
+        # them switchable. Measured on the first continual-learning run: 63,146 genuine entries flagged at 3%
+        # precision out of 200,000 active -- about a third of the store unreachable, to keep 1,820 corrupt
+        # entries out of the vote, while the log said "sweep OFF ... too low to delete safely" and read as
+        # reassurance. Default 1 keeps the existing behaviour; 0 keeps the flag for the report and lets the
+        # entries be read. A precision figure that low should be a decision, not a default nobody can see.
+        valid = self.active & (~self.is_unverified())
+        if self.wrong_read:
+            valid = valid & (~self.is_wrong())
         #   (is_unverified() is a no-op until verify() has populated recon, so default runs are unchanged)
         dist = torch.zeros(B, self.V, device=self.dev)
         conf = torch.zeros(B, device=self.dev)

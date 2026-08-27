@@ -309,6 +309,7 @@ _SPEC = {
     "MEM_PRESSURE_ACT": ("i", 0),                         # memory -- let pressure drive growth (off: report only)
     "MEM_PROB_FRAC": ("f", 0.10),                         # memory
     "MEM_PRESSURE": ("f", 0.80),                          # memory -- report a capacity signal above this
+    "MEM_WRONG_READ": ("i", 1),                            # memory
     "MEM_SRC_FLOOR": ("f", 0.5),                          # memory
     "MEM_PROBE_N": ("i", 64),                             # memory
     "MEM_QUOTA": ("i", 128),                              # memory
@@ -4168,6 +4169,18 @@ def main():
         _wide_by = 0
         if FABRIC and _RD.get("fab_cfg"):
             _fc = _RD["fab_cfg"]
+            # A MISSING "cap" SLID THROUGH ALL THREE BRANCHES BELOW, each of which is guarded on `_ck_cap and
+            # ...`, and then reached load_state_dict as the original five-shape dump -- the exact output this
+            # gate exists to replace. The engine's own writer has always recorded it, so this is only reachable
+            # via a hand-built or truncated checkpoint; that is precisely when a clear message is worth most.
+            if not _fc.get("cap"):
+                raise SystemExit(
+                    f"[resume] the checkpoint's fab_cfg has no \"cap\", so this run cannot tell whether its "
+                    f"{fab.cap} expert slots are more or fewer than the checkpoint's. Every geometry check "
+                    f"below is guarded on that number, and without it the load fails inside torch as five "
+                    f"tensor-shape mismatches naming no knob. Resume from a checkpoint written by this "
+                    f"engine, or set FAB_NMAX to the value it was trained at and remove FABRIC from the "
+                    f"resume if you cannot.")
             _ck_cap = int(_fc.get("cap") or 0)
             _ck_r = int(_fc.get("rank") or fab.r)
             _ck_dk = int(_fc.get("dk") or _i("FAB_DK", 32))
@@ -4356,15 +4369,41 @@ def main():
             _fsd = dict(_RD["fab"])
             if _wide_by:
                 _fsd, _grew, _bad = widen_prefix(fab.state_dict(), _RD["fab"])
-                print(f"  [resume] widened {len(_grew)} fabric tensor(s): {', '.join(_grew)}")
+                # ...AND COUNT THEM AGAINST WHAT SHOULD HAVE WIDENED. `cent` is a BUFFER, registered after the
+                # fact, so a checkpoint written before that line existed simply has no such key -- widen_prefix
+                # never sees it, load_state_dict(strict=False) never misses it, and every RESTORED expert's
+                # routing region comes back at random initialisation. The only trace is one
+                # "missing [...] (left at init)" line among the ordinary output. A count that is never compared
+                # to anything cannot catch an absence, which is the whole failure mode here.
+                _capshaped = [_k for _k, _c in fab.state_dict().items()
+                              if getattr(_c, "shape", None) is not None and _c.dim() >= 1
+                              and _c.shape[0] == fab.cap]
+                _absent = [_k for _k in _capshaped if _k not in _RD["fab"]]
+                print(f"  [resume] widened {len(_grew)} of {len(_capshaped)} cap-shaped fabric tensor(s): "
+                      f"{', '.join(_grew)}")
+                if _absent:
+                    print(f"  [resume] !! {len(_absent)} cap-shaped tensor(s) are NOT IN THE CHECKPOINT and stay "
+                          f"at their initialisation for every RESTORED expert: {', '.join(_absent)}. "
+                          + ("`cent` is each expert's routing region, so its absence means the grounded router "
+                             "re-learns where every restored expert lives -- they keep their adapters and lose "
+                             "their addresses. " if "cent" in _absent else "")
+                          + f"This checkpoint predates one of them being saved.")
                 # A cap-shaped tensor that did NOT widen is one this code does not know about, and it would
                 # reach load_state_dict at the wrong size and throw the same opaque error the gate above exists
                 # to replace. Say which, rather than letting torch say it worse.
                 if _bad:
+                    # NAME THE DIMENSION THAT DIFFERS, NOT THE KNOB WE ASSUMED. The widening predicate tests
+                    # "leading dim grew, trailing dims match", which is a PROXY for cap-shaped rather than a
+                    # check of it -- so a tensor that fails it may be failing on FAB_EMB_HID, SIG_D or D_MODEL,
+                    # and pointing the reader at FAB_NMAX sends them to change the one knob that is fine.
                     raise SystemExit(
-                        f"[resume] widening cannot reconcile {len(_bad)} fabric tensor(s): {'; '.join(_bad)}. "
-                        f"These are not a prefix of this run's shapes, so there is nothing correct to copy. "
-                        f"Resume with FAB_NMAX={_ck_cap} to load the checkpoint as it was written.")
+                        f"[resume] widening cannot reconcile {len(_bad)} fabric tensor(s): {'; '.join(_bad)}.\n"
+                        f"  A leading dimension can grow -- that is the slot pool, and slot i stays slot i. "
+                        f"Anything else cannot: a trailing dimension is the expert's own geometry (FAB_RANK, "
+                        f"FAB_DK, SIG_D, D_MODEL) and no prefix of it means anything.\n"
+                        f"  If the leading dimension SHRANK, this run's FAB_NMAX ({fab.cap}) is below the "
+                        f"checkpoint's ({_ck_cap}) and would drop trained experts. If a trailing one differs, "
+                        f"the knob to restore is named in the shape above, not FAB_NMAX.")
             _mk = fab.load_state_dict(_fsd, strict=False)
             if _mk.missing_keys or _mk.unexpected_keys:
                 print(f"  [resume] fabric state partially matched -- missing {list(_mk.missing_keys)} "
@@ -4872,6 +4911,38 @@ def main():
     # SOFT CAPS. Start where the run was configured; GROW_CAP lifts them, nothing lowers them. With GROW_CAP off
     # the fabric cap is FAB_NMAX and the vocabulary cap is TOK.vmax, i.e. exactly the previous behaviour.
     _cap_fab = [int(_i("GROW_CAP_FAB0", 0)) or FAB_NMAX]
+    # ...AND IT COMES BACK FROM THE CHECKPOINT IF ONE RECORDED IT. Restored BEFORE the refusal below, so the
+    # refusal judges the cap this run will actually use. Only ever raises: a run that explicitly asks for a
+    # higher GROW_CAP_FAB0 than the checkpoint reached keeps its own number.
+    if _RD is not None and _RD.get("cap_fab"):
+        _ck_cf = int(_RD["cap_fab"])
+        if _ck_cf > _cap_fab[0]:
+            print(f"  [resume] soft fabric cap restored to {_ck_cf} (this run's GROW_CAP_FAB0 would have "
+                  f"started it at {_cap_fab[0]}). GROW_CAP lifts and nothing lowers, so the lift is state the "
+                  f"previous run earned, not a knob to re-read from the environment.")
+            _cap_fab[0] = _ck_cf
+    # A SOFT CAP BELOW THE POPULATION FREEZES GROWTH FOR THE RUN, SILENTLY. The clamp is
+    # `_nb = min(_nb, _cap_fab[0] - fab.n())`, so once fab.n() exceeds the soft cap that expression is NEGATIVE
+    # and `for _g in range(max(0, _nb))` grows nothing, forever -- while the valve stays permanently pinned
+    # because occupancy never falls. Nothing in the log says so: the growth reasons still count triggers, and
+    # the pin counter reads exactly as it would on a population that is legitimately pressed against its cap.
+    # Unreachable on a fresh run, where FAB_N0 <= FAB_NMAX by construction. Entirely reachable on a RESUME,
+    # which is the path that matters: FAB_N0 now comes from the checkpoint (523 in the run this was written
+    # for), and any GROW_CAP arm sets GROW_CAP_FAB0 well below that -- the gc arms in longrun.sh use 160 and
+    # 256. 160 - 523 = -363, and the run would train to completion having grown nothing, on a configuration
+    # whose entire purpose is to study growth.
+    # ...AND THE VALVE'S OWN STATE IS NOT IN THE CHECKPOINT. _cap_fab is rebuilt from the environment on every
+    # resume, so a run that spent hours lifting its soft cap hands the next run the STARTING cap again. Saving
+    # it is the honest fix, but the refusal has to come first: a lift that is lost is recoverable, a run that
+    # grows nothing for eight epochs is not.
+    if FABRIC and fab is not None and _cap_fab[0] < fab.n():
+        raise SystemExit(
+            f"[config] GROW_CAP_FAB0={_cap_fab[0]} is BELOW the population this run starts with ({fab.n()} "
+            f"experts, from FAB_N0={_i('FAB_N0', 2048)}"
+            + (f", inherited from the checkpoint {RESUME}" if RESUME else "") + ").\n"
+            f"  The growth clamp is min(burst, soft_cap - n), which is negative here, so NOTHING would ever "
+            f"grow and the valve would stay pinned for the whole run -- with no line in the log to say so.\n"
+            f"  Either raise GROW_CAP_FAB0 above {fab.n()}, or drop it and let FAB_NMAX={FAB_NMAX} be the cap.")
     _cap_last = [-10 ** 9]; _resc_seen = [0]; _newcap_said = [-1]   # one "growth held" line per window, not per event
     _pin_fab = [0]; _pin_voc = [0]         # STEPS ACCUMULATED at each soft cap (not a timestamp). See the valve.
     _pin_prev = [0]                        # ...and STEPS means steps: this block runs once per FLUSH, so the
@@ -5038,6 +5109,11 @@ def main():
                     #     the channel that should be allocating experts to the new area.
                     # Config (rate, ramp_to, cooldowns, z) is deliberately NOT saved: those are knobs for this run
                     # to set. Only what the controller LEARNED travels.
+                    # THE VALVE'S LIFTED CAP, which was rebuilt from the environment on every resume. GROW_CAP
+                    # lifts the soft cap and nothing lowers it, so the cap IS accumulated state -- a run that
+                    # spent hours earning a lift handed the next one its starting value back, and the lift had
+                    # to be re-earned against a population that had already grown into it.
+                    "cap_fab": (int(_cap_fab[0]) if FABRIC else None),
                     "fabgrow": ({k: getattr(fabgrow, k) for k in
                                  ("fast", "slow", "dev", "n", "ramp_done", "last", "last_regr", "blackout",
                                   "t0", "state", "n_ramp", "n_stall", "n_regr", "n_regr_supp")}
@@ -8059,6 +8135,17 @@ def main():
         _r("memory.read_probe",  lambda: _mprobe["n"],       lambda: _cfg("MEM_PROBE_EVERY"), "MEM_PROBE_EVERY=0")
         _r("memory.floor_block", lambda: mem._floor_blocked, lambda: _cfg("MEM_SRC_FLOOR") > 0, "MEM_SRC_FLOOR=0")
         _r("memory.rekey_pass",  lambda: _rk["done"],        lambda: _cfg("REKEY_EVERY"),     "REKEY_EVERY=0")
+        # THE WRONG FLAG GATES EVERY RETRIEVAL AND HAD NO ROW HERE AT ALL. is_wrong() is read by Memory.read on
+        # every query, and it has a hard floor -- `if int(checked.sum()) > 10` -- below which it returns all-False
+        # and the whole self-consistency filter is inert. Both states are invisible: an inert filter and a filter
+        # excluding a third of the store print exactly the same nothing. On the first continual-learning run it
+        # was the second, 63,146 of 200,000 entries, at 3% precision.
+        _r("memory.wrong_block", lambda: int((mem.active & mem.is_wrong()).sum()),
+           lambda: _cfg("MEM_WRONG_READ") and int((mem.selfcon >= 0).sum()) > 10,
+           ("MEM_WRONG_READ=0 -- the flag is reported but does not gate retrieval" if not _cfg("MEM_WRONG_READ")
+            else f"only {int((mem.selfcon >= 0).sum())} entries have been self-consistency checked, and "
+                 f"is_wrong() needs more than 10 before it computes a threshold at all -- so nothing can be "
+                 f"flagged and read() filters nothing"))
         _r("domains.create",     lambda: asm.created)
         _r("domains.merge",      lambda: asm.n_merged, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
         _r("domains.cull",       lambda: asm.n_culled, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
@@ -8300,6 +8387,22 @@ def main():
             print(f"  swept {mem.sweep_wrong()} -> {int(mem.active.sum())} entries remain")
         else:
             print(f"  (detect-only: sweep OFF -- B's precision is too low on a surprise-gated store to delete safely; WRONG_SWEEP=1 to force)")
+            # ...AND "DETECT-ONLY" DOES NOT MEAN THE FLAG IS INERT. It gates DELETION only. Memory.read filters
+            # on the very same predicate -- `valid = self.active & (~self.is_wrong()) & ...` -- so every entry
+            # this precision figure calls a false positive is already excluded from every retrieval, sweep or no
+            # sweep. The line above reads as reassurance and the reassurance covers half the consequence.
+            # Measured on the first continual-learning run: 63,146 genuine entries flagged at 3% precision, out
+            # of 200,000 -- roughly a THIRD of the store unreadable, to keep 1,820 corrupt entries out. Memory
+            # was contributing +0.085 bits/byte at the time, so this is not a rounding error on goal A.
+            _nact = int(mem.active.sum()); _nblk = int((mem.active & iw).sum())
+            if not _i("MEM_WRONG_READ", 1):
+                _nblk = 0                                     # the flag is reported but does not gate retrieval
+            print(f"  ...but READ FILTERS ON THE SAME FLAG: {_nblk} of {_nact} active entries "
+                  f"({_nblk / max(1, _nact) * 100:.0f}% of the store) are excluded from EVERY retrieval, "
+                  f"not merely spared deletion."
+                  + (f" At {100 * 1820 / max(1, flg):.0f}%-scale precision most of that is genuine memory the "
+                     f"model can no longer reach. MEM_WRONG_READ=0 keeps the flag for reporting and stops it "
+                     f"gating reads." if _nblk else ""))
             if ninj > 0: mem.delete_src(99)      # remove the SYNTHETIC injected entries so downstream metrics are clean
             mem.selfcon.fill_(-1.0)              # clear flags so genuine entries aren't excluded from retrieval below
 
