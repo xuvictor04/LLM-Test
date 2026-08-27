@@ -239,11 +239,10 @@ dangerous list in the file** — it is what a default run is actually made of.
 | `LR_RESTARTS` | 1 | — | `ac79e92` measured a real restart swinging the held-out curve 1.5 b/B and never resettling; the arm that isolates it (`vmax4k_18ep_norestart`) is n=1 |
 | the retok guard | `RETOK_EVERY=3000` | `d0728fe` | `self_organize.py:4856`; the `RETOK_EVERY=0` companion arm `base_nr` has never run (§7) |
 
-**The compounding fact, from `DOC_PLAN.md` "know NOW" #1:** `_SPEC` at HEAD reads `FAB_GROW=1`,
-`FAB_N0=3`, `FAB_NMAX=4096` — that is arm **D** of the population 2×2 (`cc0a377`: mean 3.384, spread
-2.074), not arm B (mean 1.999, spread 0.080). Everything in the table above was built to make arm D
-survivable. **None of it has been measured.** Until it is, "the default configuration" is a
-hypothesis.
+**RESOLVED 2026-08-17 (this paragraph is the record).** It used to read that `_SPEC` reads `FAB_GROW=1`,
+`FAB_N0=3`, `FAB_NMAX=4096` — arm **D** of the population 2x2 (`cc0a377`: mean 3.384, spread 2.074) rather
+than arm B (mean 1.999, spread 0.080). `6380519`/`25aba88` set `FAB_N0=2048`, so the default IS arm B's
+population, built rather than ramped. See `notes/CURRENT_DEFAULTS.md`, which is generated from `_SPEC`.
 
 ---
 
@@ -424,9 +423,11 @@ Three consequences:
 
 ### 8.2 Two other families worth naming
 
-- **`GROW_CAP` and its entire family** (`GROW_CAP`, `_EVERY`, `_FAB`, `_FAB0`, `_PLATEAU`, `_VOCAB`,
-  `_VOCAB0`, `GROW_LIFT`) have never been set, and `GROW_CAP=0` makes the whole mechanism inert. The
-  soft-cap system built at `e2db890` and `41d2c5d` **has never executed outside a smoke test.**
+- **`GROW_CAP` — NO LONGER TRUE as of 2026-08-26.** It used to read that the whole family had never been
+  set and had never executed outside a smoke test. It now drives ~20 arms in `longrun.sh` (rounds 6-17) and
+  has run at 840,000 and 1,051,405 steps. The expert half lifts 3000 -> 4406 in five lifts; the vocabulary
+  half ran 2048 -> 8192 in nineteen. `GROW_CAP` still DEFAULTS to 0 — off by default is not the same as
+  never measured, and conflating the two is what made this entry cost real work twice.
 - **The whole `WORLD_*` sizing family** (`_HID`, `_K`, `_LAT`, `_N0`, `_NMAX`, `_ROUTE`, `_VAR`) has
   never been set, so **the world model has only ever run in one shape** — the shape §9.1 shows has
   never worked.

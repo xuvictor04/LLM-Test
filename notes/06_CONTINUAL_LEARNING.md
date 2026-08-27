@@ -91,7 +91,7 @@ goal:
 
 > *AUDIT FINDING. The report has fourteen sections. Exactly one of them bears on catastrophic
 > forgetting, the defining problem of continual learning: the NON-STATIONARY block behind PHASED=1.
-> PHASED defaults to 0 and it had never been executed in any run of this project. Everything we have
+> PHASED was 0 at the time and it had never been executed in any run of this project. Everything we have
 > been tuning — purity, homogeneity, completeness, V-measure, fragmentation, silhouette — scores the
 > ORGANISATION of a store, against categories we ourselves spliced in, and none of it says whether
 > the system keeps what it learns.*
@@ -458,7 +458,7 @@ and no `ARMFLAGS` hook. The run therefore inherited the `_SPEC` defaults. Read o
 | knob | default at `b92f358` | consequence |
 |---|---|---|
 | `FAB_GROW` | **1** | growth **ON** |
-| `FAB_N0` | **3** | — (overridden on resume: `self_organize.py:3574` restores `n_live` from `fab_cfg["n"]`) |
+| `FAB_N0` | **2048** (was **3** until 2026-08-17) | — (overridden on resume: `self_organize.py:3574` restores `n_live` from `fab_cfg["n"]`) |
 | `FAB_NMAX` | **4096** | matches `runs.csv`'s `fab_nmax 4096` exactly |
 | `FAB_BURST` | 3 | `FAB_NEW_FRAC` **did not yet exist** — the newborn-fraction mitigation was not in |
 | `MEM_PER_EXPERT` | **1** | partitioned store — `INV-06` |

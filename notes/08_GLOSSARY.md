@@ -378,7 +378,7 @@ so** — which is why the rescue counter now exists.
 **SRC** — the outgoing signature mark expert `n` puts on a message, used only by the transition-routed
 path. The chained-society default has no SRC.
 
-**soft cap (`GROW_CAP`=0 master switch, `GROW_CAP_FAB`, `GROW_CAP_VOCAB`, `GROW_LIFT`=2.0)** — a cap
+**soft cap (`GROW_CAP` master switch, `GROW_CAP_FAB`, `GROW_CAP_VOCAB`, `GROW_LIFT`, `GROW_LIFT_MIN`)** — a cap
 below `FAB_NMAX`/`VMAX` that LIFTS when a plateau earns it; nothing lowers it. **INERT AT DEFAULTS**
 (`GROW_CAP=0`). Six `GROW_CAP*` knobs were once set deliberately on a build that predated them
 (`c909918`).
@@ -812,8 +812,9 @@ search for a shell/env **assignment** (`KNOB=`) rather than a mere mention.
     **2e-3**. Only `LR_SCHED` / `LR_EPOCHS` / `LR_RESTARTS` were ever varied. `1593c70` ("there was no
     learning-rate schedule — 2e-3 constant for 48,000 steps") is about the schedule; the *peak rate*
     was never moved either.
-  - **`GROW_CAP` and its entire six-knob family** have never been set, so the soft-cap mechanism
-    (`e2db890`, `41d2c5d`) **has never executed outside a smoke test**.
+  - **`GROW_CAP` — CORRECTED 2026-08-26.** It used to read that the six-knob family had never been set and
+    had never executed outside a smoke test. It has since driven ~20 arms and run for over a million steps.
+    It still defaults to 0; off-by-default is not never-measured.
   - **The whole `WORLD_*` sizing family** (`_HID`, `_K`, `_LAT`, `_N0`, `_NMAX`, `_ROUTE`, `_VAR`) has
     never been set, so the world model has only ever run in one shape.
 

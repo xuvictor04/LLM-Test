@@ -95,11 +95,17 @@ re-checked without re-running anything:
 Every quotation in `02_IDEAS.md` was mechanically located in `user_turns.md` before being
 reproduced; 26 that could not be were dropped or marked unconfirmed rather than printed.
 
+**Before anything else:** `notes/CURRENT_DEFAULTS.md` is the only file here that states the current
+defaults, and it is generated from `_SPEC`. `../ARCHIVE.md` names the four frozen directories whose
+code and prose describe an older system — `garry/self_organize.py` still reads `FAB_N0=3`.
+
 ## Five things to know before spending any GPU time
 
-1. **The default configuration at HEAD is close to the arm the 2×2 found fatal.** `_SPEC` reads
-   `FAB_GROW=1`, `FAB_N0=3`, `FAB_NMAX=4096`. `FAB_NEW_FRAC` and `FAB_BURST` were added afterwards
-   to bound the newborn fraction, and that mitigation has never been measured at pilot scale.
+1. **FIXED 2026-08-17, and this item is kept only as the record.** It used to read: *the default
+   configuration at HEAD is close to the arm the 2x2 found fatal — `FAB_GROW=1`, `FAB_N0=3`,
+   `FAB_NMAX=4096`.* `6380519` and `25aba88` changed it: the population is now BUILT at `FAB_N0=2048`
+   rather than ramped from 3, which IS arm B. The ramp was the defect, not growth.
+   **Current defaults are generated into `notes/CURRENT_DEFAULTS.md` — read that, not prose.**
 2. **The best result on record ran with no selection at all.** Founders had no birthday and were
    permanently immune to culling, so arm B (`FAB_N0=2048`) had zero culls for its whole life
    (`a5cc7ea`, INV-15). It is not reproducible at HEAD; pin the config or re-run it.

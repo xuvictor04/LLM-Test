@@ -772,6 +772,87 @@ def blowup_stale(recent, best, since_best, rise=BLOWUP_RISE, stale=BLOWUP_STALE)
     return _r > best + rise
 
 
+CURVE_RISE_BLEWUP = 0.5     # b/B above the minimum that stops being "wobble"
+CURVE_FLAT = 0.05           # b/B either side of zero that counts as flat over the last two thirds
+CURVE_TOK_RISE = 0.05       # per-TOKEN rise that needs explaining at all
+
+
+def curve_verdict(rise_since_min, tail_change, tok_rise):
+    """Which end-of-run verdict the held-out curve earns. Returns one label; the report supplies the prose.
+
+    THIS CASCADE HAS SHIPPED A WRONG VERDICT THREE TIMES, and every time it ran without error and printed a
+    confident sentence:
+      - it read the sign backwards and told a FALLING curve it was rising;
+      - it called a run DIVERGING whose last two thirds were flat to -0.007, because it measured only from the
+        global minimum;
+      - it called a run that lost 1.118 b/B and never recovered PLATEAUED ... nothing is degrading, because it
+        then keyed only on the tail;
+      - and `tail <= CURVE_FLAT` is one-sided, so a curve FALLING at -0.086 was described as "flat since".
+    Four wrong verdicts, five thresholds, and no test -- selftest.sh only ever checked that the section
+    appeared. Being a pure function of three numbers, it is now checkable, and curve_test.py holds each of
+    those four failures as a known answer.
+
+    Two questions, not one. The HEIGHT (rise_since_min) says whether the run already fell apart; the TAIL
+    (tail_change, over the last two thirds) says whether it still is. A verdict that reads only one of them
+    gets the other case wrong, which is exactly the history above.
+    """
+    if rise_since_min is None or tail_change is None:
+        return "diverging" if tok_rise > CURVE_TOK_RISE else "none"
+    if tok_rise > CURVE_TOK_RISE and rise_since_min <= CURVE_FLAT:
+        return "vocab"          # per-token rose, bits/byte did not: the vocabulary, not the model
+    if rise_since_min > CURVE_RISE_BLEWUP:
+        return "blewup"         # left a level it had reached and stayed off it
+    if tail_change < -CURVE_FLAT:
+        return "recovering"     # still falling: not flat, whatever the height says
+    if tail_change <= CURVE_FLAT:
+        return "plateau"        # genuinely flat
+    # STILL CLIMBING -- but DIVERGING is only claimed when the per-token curve agrees. The original cascade
+    # guarded the diverging print on `_fl - _bl > 0.05` as well, and dropping that guard here would have made
+    # this function print DIVERGING for runs the report has always been silent about. Faithfulness to the
+    # shipped behaviour matters more than tidiness: this is a refactor of a decision, not a change to it.
+    return "diverging" if tok_rise > CURVE_TOK_RISE else "none"
+
+
+def cull_gate_open(n_live, cap, pressure):
+    """Is the population under enough capacity pressure for the UTILIZATION cull to run?
+
+    Three mechanisms live inside this gate -- the utilization cull, the utilization spare and FAB_RESCUE -- so
+    a wrong answer here does not fail, it silently removes three things from the run. It has already done that
+    once: FAB_N0=2048 against FAB_NMAX=4096 parked occupancy at 0.50 below a FAB_PRESSURE of 0.75, and
+    `fabric.spare` read ARMED AND INERT for a whole investigation.
+
+    n_live <= 2 is a floor, not a pressure test: culling from a population of two can empty it.
+
+    Module level so manage_test.py can exercise it -- Fabric.manage itself needs torch, and this is the one
+    decision in it that is pure arithmetic and has cost the most when wrong.
+    """
+    return not (n_live <= 2 or (n_live / max(1, cap)) < pressure)
+
+
+def bwt_of(now, prev):
+    """Backward transfer: mean change on OLD material, on a LOWER-IS-BETTER metric.
+
+    THE SIGN IS THE WHOLE POINT and it runs opposite to the literature, which reports accuracy. Negative means
+    the old domains IMPROVED. selftest.sh only ever checked that the words "BWT" and "negative = old domains
+    IMPROVED" appear in the log, so reversing this subtraction passed every assertion while inverting the
+    project's headline continual-learning claim.
+    """
+    ks = [k for k in now if k in prev]
+    if not ks: return 0.0
+    return sum(now[k] - prev[k] for k in ks) / len(ks)
+
+
+def forgetting_of(now, best):
+    """Forgetting measure F: how far each domain sits above its OWN best, clipped at zero, averaged.
+
+    Clipped, so a domain that IMPROVED contributes 0 rather than a negative that cancels a real regression
+    elsewhere. That is what separates F from BWT: BWT nets improvement against loss, F cannot.
+    """
+    ks = [k for k in now if k in best]
+    if not ks: return 0.0
+    return sum(max(0.0, now[k] - best[k]) for k in ks) / len(ks)
+
+
 def pin_tick(held, pinned, dstep):
     """Advance the PINNED-at-the-cap clock by however many steps actually elapsed, not by one per call.
 
@@ -1907,7 +1988,7 @@ class Fabric(nn.Module):
         # size it is currently allowed to be, and preallocated-but-unreachable slots stop counting as free space.
         # None keeps the old meaning exactly, so this changes nothing unless a caller opts in.
         _cap = int(cap) if cap else s.cap
-        s.cull_ran = not (s.n_live <= 2 or (s.n_live / max(1, _cap)) < pressure)
+        s.cull_ran = cull_gate_open(s.n_live, _cap, pressure)
         if protect is not None and comp_glob is not None:
             for i in list(range(s.n_live)):
                 if s.n_live <= 2: break
@@ -4467,9 +4548,9 @@ def main():
         #         floored at 0. It differs from BWT exactly when a domain peaked earlier than the last
         #         checkpoint and has been sliding since, which BWT structurally cannot see.
         if _kept:
-            _bwt = sum(_ms(now[k])[0] - _ms(prev[k])[0] for k in _kept) / len(_kept)
+            _bwt = bwt_of({k: _ms(now[k])[0] for k in _kept}, {k: _ms(prev[k])[0] for k in _kept})
             _best = {k: min([_ms(prev[k])[0]] + [float(v) for v in _HIST.get(k, [])]) for k in _kept}
-            _fgt = sum(max(0.0, _ms(now[k])[0] - _best[k]) for k in _kept) / len(_kept)
+            _fgt = forgetting_of({k: _ms(now[k])[0] for k in _kept}, _best)
             print(f"\n  BWT {_bwt:+.4f} b/B (negative = old domains IMPROVED, on a lower-is-better metric) | "
                   f"forgetting measure F {_fgt:.4f} b/B (0 = nothing is worse than its own best)")
             if not any(_HIST.get(k) for k in _kept):
@@ -7125,10 +7206,11 @@ def main():
             print(f"  UNIT-STABLE CROSS-CHECK (held-out bits/byte, the curve above): {_bpb_dir[0]:+.3f} since its "
                   f"own minimum, {_bpb_dir[1]:+.3f} over the last two thirds. Per-token loss can rise purely "
                   f"because minted tokens got longer; this cannot.")
-            if _fl - _bl > 0.05 and _bpb_dir[0] <= 0.05:
+            _verdict = curve_verdict(_bpb_dir[0], _bpb_dir[1], _fl - _bl)
+            if _verdict == "vocab":
                 print(f"  >> NOT DIVERGING -- the per-token rise is the growing vocabulary, not the model. "
                       f"Judge this run on bits/byte.")
-            elif _bpb_dir[0] > 0.5:
+            elif _verdict == "blewup":
                 # A BIG UNRECOVERED RISE IS NOT A PLATEAU. The branch below is right about SMALL ones -- "climbed
                 # early then settled" is not divergence, and measuring only from the global minimum used to call
                 # a flat tail DIVERGING. But it keyed solely on the tail, so a run that lost 1.118 bits/byte in a
@@ -7143,7 +7225,7 @@ def main():
                       f"the run never recovered it, and every step after that point was spent at the worse "
                       f"level. Read the per-process curve above for WHEN, then what was near peak on the LR "
                       f"schedule there. The best model is on disk; the FINAL one is not what to judge.")
-            elif _bpb_dir[1] < -0.05:
+            elif _verdict == "recovering":
                 # STILL FALLING IS NOT FLAT, and the branch below called it flat. `_bpb_dir[1] <= 0.05` is a
                 # ONE-SIDED test, so it passed for every negative value there is -- the same fault as the
                 # capacity valve's plateau gate, in a different file section. sched_ctl fell -0.086 over its
@@ -7155,7 +7237,7 @@ def main():
                       f"on, but the last two thirds are DOWN {_bpb_dir[1]:+.3f} -- it is not sitting at the "
                       f"worse level, it is working back through it. More steps at this setting will buy more. "
                       f"The early transition is still worth explaining; it is not what the run ended up doing.")
-            elif _bpb_dir[1] <= 0.05:
+            elif _verdict == "plateau":
                 # PLATEAU IS NOT DIVERGENCE. Measuring only from the global minimum cannot tell "climbed early
                 # then settled" from "still climbing", and it called a run DIVERGING whose last two thirds were
                 # flat to -0.007. The slope over the recent stretch is the one that says whether it is STILL
@@ -7164,8 +7246,9 @@ def main():
                       f"has been flat since ({_bpb_dir[1]:+.3f} over the last two thirds). What to explain is the "
                       f"EARLY transition, not the tail -- more steps at this setting will not help either, but "
                       f"nothing is degrading.")
-        if (_fl - _bl > 0.05 and _bi < len(_lm_curve) - 2
-                and (_bpb_dir is None or (_bpb_dir[0] > 0.05 and _bpb_dir[1] > 0.05))):
+        if (_bi < len(_lm_curve) - 2 and curve_verdict(
+                None if _bpb_dir is None else _bpb_dir[0],
+                None if _bpb_dir is None else _bpb_dir[1], _fl - _bl) == "diverging"):
             print(f"  >> DIVERGING on BOTH the per-token and the bits/byte curve. The loss bottomed at step {_bs} "
                   f"and has been RISING for the "
                   f"{_fs - _bs} steps since -- {100 * (len(_lm_curve) - 1 - _bi) / max(1, len(_lm_curve) - 1):.0f}% "

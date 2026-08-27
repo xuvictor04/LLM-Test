@@ -468,7 +468,11 @@ non-comment line, exactly as `bdce727` did.
 
 ## WHAT THE RESEARCHER SHOULD KNOW NOW, NOT AT THE END
 
-1. **The default configuration at HEAD is the arm the 2x2 found fatal.** `_SPEC` reads `FAB_GROW=1`, `FAB_N0=3`,
+1. **SUPERSEDED 2026-08-26 — this was true until `6380519`/`25aba88` (2026-08-17).** `_SPEC` now reads
+   `FAB_GROW=1`, `FAB_N0=2048`, `FAB_NMAX=4096`: the population is BUILT at 2048, not ramped from 3, which is
+   arm **B**, the good arm — not arm D. The ramp was the defect, not growth. Current defaults are generated
+   into `notes/CURRENT_DEFAULTS.md`; this paragraph is kept as the record of what was believed before that.
+   ~~The default configuration at HEAD is the arm the 2x2 found fatal. `_SPEC` reads `FAB_GROW=1`, `FAB_N0=3`,
    `FAB_NMAX=4096` — that is arm D (ramp 3→4096: mean 3.384, spread 2.074), not arm B (`FAB_GROW=0 FAB_N0=2048`: mean
    1.999, spread 0.080). `FAB_NEW_FRAC=0.04` and `FAB_BURST=1` were added afterwards to bound the newborn fraction and
    should mitigate it, but that has never been measured at pilot scale. Until it is, a default run is not arm B.

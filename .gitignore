@@ -23,6 +23,10 @@ runs/
 data_pilot/
 data_big/
 data_grid/
+# ...and any other corpus directory. data_075/ was created for the 0.75 GB run and was NOT covered by the
+# three names above, so a 1 GB fetch made the tree untracked-dirty. The glob covers the next one too.
+data_075/
+data_[0-9]*/
 venv/
 
 # accidental checkpoint dirs from SAVE_CKPT=<falsy> (now normalised to OFF, kept so old trees stay clean)

@@ -2160,8 +2160,15 @@ it — reserved rows sit in the softmax denominator unless they are masked, exac
 **Revised at `31874a5`,** which also changed two things that did not match the idea's intent: `GROW_LIFT`
 multiplied rather than added (one lift doubled the cap, and each later lift handed out more than the last),
 and the cadence measured steps since the previous *lift* rather than steps *pinned*, so a cap nothing was
-pressing against still aged toward eligibility. Now linear (`+GROW_LIFT` rows, default 256) and clocked from
-the pin (default 20000 steps held).
+pressing against still aged toward eligibility. Then linear (`+GROW_LIFT` rows, 256) and clocked from
+the pin (20000 steps held).
+
+**UNITS, CORRECTED 2026-08-26.** `GROW_LIFT` has had three incompatible meanings and this file carried the
+middle one. It was a MULTIPLIER of 2.0 (one lift doubled the cap), then a flat COUNT of 256 (+160% against a
+cap of 160, +12.5% against 2048 — one knob as both a nudge and a doubling), and since `52ecef4` it is a
+**FRACTION of the current cap**, with `GROW_LIFT_MIN` as an absolute floor so small caps still move. A
+fraction is the only form that means the same thing at 160 and at 4096. Read the current value from
+`notes/CURRENT_DEFAULTS.md`; `cap_test.py` asserts the arithmetic.
 
 **STILL NEVER MEASURED.** `GROW_CAP` defaults to `0` and has not run outside a CPU smoke, which fired 7
 lifts with `GROW_CAP_PLATEAU` forced to 0.5 to make them happen inside 1200 steps. That smoke says the valve

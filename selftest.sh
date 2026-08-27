@@ -61,6 +61,10 @@ python3 lr_test.py       > "$OUT/lr.txt"    2>&1 && echo "  ok    lr_test (the L
   || { echo "  FAIL  lr_test:"; sed 's/^/          /' "$OUT/lr.txt"; FAIL=1; }
 python3 blowup_test.py   > "$OUT/blow.txt"  2>&1 && echo "  ok    blowup_test (the divergence alarm fires on divergence and not on wander)" \
   || { echo "  FAIL  blowup_test:"; sed 's/^/          /' "$OUT/blow.txt"; FAIL=1; }
+python3 curve_test.py    > "$OUT/curve.txt" 2>&1 && echo "  ok    curve_test (end-of-run verdict, BWT sign, cull gate)" \
+  || { echo "  FAIL  curve_test:"; sed 's/^/          /' "$OUT/curve.txt"; FAIL=1; }
+python3 notes_check.py   > "$OUT/notes.txt" 2>&1 && echo "  ok    notes_check (no note states a default the code contradicts)" \
+  || { echo "  FAIL  notes_check:"; tail -20 "$OUT/notes.txt" | sed 's/^/          /'; FAIL=1; }
 python3 levers.py > "$OUT/levers.txt" 2>&1 && echo "  ok    levers (every knob declared and read consistently)" \
   || { echo "  FAIL  levers:"; tail -5 "$OUT/levers.txt" | sed 's/^/          /'; FAIL=1; }
 

@@ -1515,7 +1515,7 @@ Not bugs in code. Comparisons that could not carry the weight put on them.
 > `contrastive_step` is **shift-gated**: it runs every step near a detected boundary and every
 > `ENC_EVERY_IDLE` (12) steps when the stream is stable. Every profile so far used the 4-domain mix,
 > which switches constantly, *"so the encoder was effectively always at the dense cadence."* A short
-> single-domain run drops it to **33%**. And `LAYERS` defaults to 4 for transformer and 1 for GRU, so
+> single-domain run drops it to **33%**. And `LAYERS` was 4 for transformer and 1 for GRU, so
 > comparing config A against C would have compared models differing **~8x in parameter count**.
 > **Found/Fix** `096094b` (LAYERS set explicitly per config; parameter count reported; the summary
 > sheet says the ranking is data-dependent).
@@ -2131,7 +2131,7 @@ bug* — recurs often enough to be a class.
 > (`245bc68`: 91 distinct parents, largest share 4%).
 
 > **`E10.32` — the two populations designed as duals ran 15,625x apart**
-> `MAX_DOMAINS` defaults to 64 with the comment *"hard cap, MIRRORING the expert bank's fixed slot
+> `MAX_DOMAINS` was then 64 with the comment *"hard cap, MIRRORING the expert bank's fixed slot
 > pool"* — and every launcher then set `MAX_DOMAINS=1000000` while leaving `FAB_NMAX` at 64.
 > *"Hundreds of domains routed through 64 experts means expert granularity was coarser than domain
 > granularity by more than 100x, so 'experts competing within a domain' could not happen at all."*
@@ -2236,7 +2236,15 @@ bug* — recurs often enough to be a class.
 > **Verified NOT FIXED at HEAD**: `self_organize.py:3695-3698` multiplies `_cyc` (which already
 > contains the `LR_MIN_FRAC` floor) by `_env` (which itself only bottoms at `LR_MIN_FRAC`), giving
 > `LR_MIN_FRAC²` = 0.0025; and `_env` is computed from **global** progress `_gp`.
-> **Mitigation** — `LR_DECAY` defaults to 0, so nothing measured is affected. **Open.**
+> **Mitigation** — `LR_DECAY` was 0, so nothing measured was affected. **Open.**
+
+**CORRECTION 2026-08-26.** No longer mitigated by being off: `LR_DECAY` now defaults to **1.0**. It was
+flipped on when the same failure this entry describes recurred on the 0.75 GB run — three cosine restarts
+returning a converged model to peak, costing +0.725 b/B that never came back. Turning it on was only safe
+once the envelope was gated to multi-cycle schedules (`_n > 1`); ungated it also squeezed single-cycle runs,
+which is why it had sat at 0 since it was written. Every result recorded before this date came from a
+single-cycle schedule and is unaffected. See `LR_RESTART_DAMP`, added at the same time, which halves a
+restart that failed to beat the best it inherited.
 
 > **`E10.47` — the per-expert LR envelope decays to zero, pinning survivors at the floor**
 > `gamma^(cyc-1)` goes to zero and use-age has no horizon: *"the smoke reached cycle 90 on six experts,
