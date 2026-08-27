@@ -1068,6 +1068,19 @@ if USE_TOK and DATA_MODE != "real":
     raise SystemExit("TOKENIZER=1 requires DATA_MODE=real -- the tokenizer is only built on the real-data path,\n"
                      "  so the synthetic path leaves TOK=None and dies later inside _retok with a bare\n"
                      "  AttributeError. Add DATA_MODE=real (and DATA_DIR=...) to your command.")
+# THE HELD-OUT CORPORA, DECLARED FOR BOTH PATHS. VALC is built inside the real-data branch below and the
+# training loop reads it unguarded -- `if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark and VALC:`
+# -- so DATA_MODE=synthetic died with a bare `NameError: name 'VALC' is not defined` the first time the rate
+# meter came round. Since 2026-08-15, on every synthetic run.
+# Nothing caught it because nothing RUNS the synthetic path: selftest.sh trains on real data end to end and
+# passes, and preflight.sh's END-TO-END SMOKE is the only caller that sets DATA_MODE=synthetic -- which is
+# exactly the check whose stated purpose is "the only check that proves the product path runs on this arch".
+# So the one instrument aimed at a fresh box was the one thing failing, and it reported an arch problem
+# ("self_organize.py FAILED on CUDA") for a defect that has nothing to do with the architecture.
+# The empty list is the honest value, not a placeholder: the synthetic path generates its stream from Markov
+# processes and holds nothing out, so every consumer guarded on `and VALC` correctly skips. The
+# three lines above already refuse TOKENIZER=1 here for the same class of reason.
+VALC = []
 if DATA_MODE == "real":
     DN = _env("DOMAINS", "eng,py,num,c").split(",")
     DISK_STREAM = bool(_i("DISK_STREAM", 0))              # mmap the corpus (disk-paged) so training data can EXCEED RAM (GPT-2 scale)
