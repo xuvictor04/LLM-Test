@@ -114,11 +114,28 @@ SPEC_LINE = re.compile(r"`_SPEC`\s*(?:reads?|says?|has)", re.I)
 ANY = re.compile(_K + r"\s*=\s*" + _V)
 
 
+def _live_markdown():
+    """Every markdown file that is NOT archived.
+
+    SCANNING ONLY notes/ WAS NOT ENOUGH. STATE.md sat at the top level for eleven days describing itself as a
+    "living project ledger" whose PROTOCOL is "binding, for the assistant" and whose first instruction is to
+    update it every turn -- while carrying FAB_N0=3, abandoned since 2026-08-15. A stale file that tells a
+    reader it is authoritative is worse than a stale file that does not, and this check could not see it.
+    Everything outside archive/ is now in scope; archive/ is excluded by definition, because a frozen record
+    describing an older system is exactly what it is for. See ARCHIVE.md.
+    """
+    out = []
+    for fn in sorted(os.listdir(ROOT)):
+        if fn.endswith(".md") and fn != "ARCHIVE.md": out.append(os.path.join(ROOT, fn))
+    for fn in sorted(os.listdir(NOTES)):
+        if fn.endswith(".md") and fn != os.path.basename(GENERATED): out.append(os.path.join(NOTES, fn))
+    return out
+
+
 def check():
     bad = []
-    for fn in sorted(os.listdir(NOTES)):
-        if not fn.endswith(".md") or fn == os.path.basename(GENERATED): continue
-        path = os.path.join(NOTES, fn)
+    for path in _live_markdown():
+        fn = os.path.relpath(path, ROOT)
         for i, line in enumerate(open(path, errors="ignore"), 1):
             if HISTORICAL.search(line): continue              # a record of what WAS true
             hits = []
@@ -145,14 +162,21 @@ if __name__ == "__main__":
               f"run: python3 notes_check.py --write")
         sys.exit(1)
 
+    _arch = os.path.join(ROOT, "archive")
+    if os.path.isdir(_arch) and not os.path.exists(os.path.join(ROOT, "ARCHIVE.md")):
+        print("!! archive/ exists but ARCHIVE.md does not -- the frozen trees are unlabelled, which is how "
+              "garry/self_organize.py's FAB_N0=3 got quoted as current in nine notes.")
+        sys.exit(1)
+
     drift = check()
     if not drift:
-        print(f"notes_check: {len(SPEC)} knobs, no note states a default that disagrees with _SPEC")
+        print(f"notes_check: {len(SPEC)} knobs, {len(_live_markdown())} live markdown files, "
+              f"no default stated that _SPEC disagrees with (archive/ excluded by design)")
         sys.exit(0)
     print(f"!! {len(drift)} note line(s) state a default that _SPEC contradicts.\n"
           f"   Either correct the value, or mark the line as history (say 'was', 'used to', or cite the "
           f"commit) -- a record of what WAS true is fine and is why this corpus exists.\n")
     for fn, i, knob, val, real, line in drift:
-        print(f"  notes/{fn}:{i}  {knob} stated as {val}, _SPEC says {real}")
+        print(f"  {fn}:{i}  {knob} stated as {val}, _SPEC says {real}")
         print(f"      {line}")
     sys.exit(1)

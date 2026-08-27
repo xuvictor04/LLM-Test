@@ -8,7 +8,7 @@ trained only on the genuine associations it sees, it reconstructs them well and 
 Reconstruction error is therefore a verification signal DECOUPLED from surprise (= 1 - p_model(token|context)): a
 novel-but-genuine association has HIGH surprise yet LOW reconstruction error, while a corrupt one has HIGH reconstruction
 error. Surprise alone conflated those two (why the old B sat at ~1% precision); the two signals together are the
-surprise x reconstruction handling in handoff/design-directions/learning-signal-classification-...
+surprise x reconstruction handling in archive/handoff/design-directions/learning-signal-classification-...
 
 Standalone (torch only): `python3 verification.py` runs a CPU probe that checks the core claim on structured-synthetic
 data (a mechanism sanity check -- the REAL validation is the GPU cl_bench corruption test with model-produced keys).

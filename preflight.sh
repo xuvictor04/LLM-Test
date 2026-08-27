@@ -86,7 +86,7 @@ else bad "torch/CUDA unusable -- see 'FRESH GH200 BOX' at the bottom of this fil
 fi
 
 echo "=== 3b. numpy ==="
-# requirements.txt pins numpy>=1.21, but NOTHING in this repo imports numpy (only legacy/ does, which is not on the
+# requirements.txt pins numpy>=1.21, but NOTHING in this repo imports numpy (only archive/legacy/ does, which is not on the
 # product path). torch prints "Failed to initialize NumPy" and works fine. The DANGEROUS case is the opposite one:
 # numpy present but ABI-mismatched with the torch wheel, which turns every tensor<->array boundary into a hard error.
 python3 - <<'PY'
