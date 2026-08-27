@@ -4058,6 +4058,9 @@ def main():
     KEY_PREGATE = bool(_i("KEY_PREGATE", 1))              # encode memory keys AFTER the surprise gate (see the write call)
     KEY_BATCH = bool(_i("KEY_BATCH", 1))                  # ...and encode the whole BATCH_W batch in ONE call (KEY_BATCH=0 = per-window)
     _regrown = []                                          # param groups re-created by a RESUME's growth replay
+    _wide_by = 0                                           # slots this resume added to the fabric beyond the
+    #   checkpoint's cap. Initialised HERE, not only inside `if RESUME:`, because part 2 of the resume reads it
+    #   and a name that exists only down one branch is a NameError waiting for the branch that skips it.
     _HIST = {}      # domain -> every held-out score ever recorded, carried across resumes; feeds the forgetting
     #                 measure F, which compares a domain to its BEST ever and so needs more than one prior probe.
     _hb, _hbs = {}, 0                                      # held-out probe carried in from a RESUME (empty otherwise).
@@ -4095,29 +4098,99 @@ def main():
                 print(f"  [resume] tokenizer path differs from the checkpoint's ({_RD['tok_path']} -> {_livep}) "
                       f"but the vocabulary matches ({TOK.vocab_size} tokens, {len(TOK.merges)} merges), so this is "
                       f"the same vocabulary under another name.")
+        # ---- FABRIC GEOMETRY: CHECKED BEFORE ANYTHING IS RESTORED --------------------------------------
+        # A resume whose FAB_NMAX differs from the checkpoint's died inside torch with five tensor shapes and
+        # no knob name:
+        #     RuntimeError: Error(s) in loading state_dict for Fabric:
+        #       size mismatch for A: copying a param with shape [1024, 768, 8] from checkpoint,
+        #       the shape in current model is [4096, 768, 8].   ... and B, SRC_p, K_p, cent
+        # The checkpoint has recorded fab_cfg["cap"], ["rank"] and ["dk"] since it was written; nothing on this
+        # path read them. Data recorded and never read is the same defect class as a mechanism that runs and
+        # does nothing, and here it cost a run that was otherwise ready: the tokenizer resolved, the corpus
+        # was pulled, and the failure arrived as a tensor dump after the GPU was already warm.
+        # WIDENING IS NOT AN ERROR -- IT IS THE POINT. The tensors are preallocated to cap and growth only
+        # advances n_live, so a smaller-cap checkpoint IS a prefix of a larger-cap fabric. Refusing to widen
+        # would mean a resume can never add capacity for the area it is adding, which is the whole exercise.
+        # Narrowing is refused: it would silently discard trained experts.
+        _wide_by = 0
         if FABRIC and _RD.get("fab_cfg"):
-            fab.n_live = max(fab.n_live, min(int(_RD["fab_cfg"]["n"]), fab.cap))   # rows already exist
+            _fc = _RD["fab_cfg"]
+            _ck_cap = int(_fc.get("cap") or 0)
+            _ck_r = int(_fc.get("rank") or fab.r)
+            _ck_dk = int(_fc.get("dk") or _i("FAB_DK", 32))
+            if _ck_r != fab.r:
+                raise SystemExit(
+                    f"[resume] the checkpoint's experts are rank {_ck_r} and this run builds rank {fab.r} "
+                    f"(FAB_RANK). A is [cap, d, rank], so rank is an INNER dimension -- there is no prefix of a "
+                    f"rank-{_ck_r} adapter that is a valid rank-{fab.r} one, and nothing sensible to copy. "
+                    f"Resume with FAB_RANK={_ck_r}, or start a fresh run.")
+            if _ck_dk != int(_i("FAB_DK", 32)):
+                raise SystemExit(
+                    f"[resume] the checkpoint's router keys are {_ck_dk}-dimensional and this run builds "
+                    f"{_i('FAB_DK', 32)} (FAB_DK). SRC_p and K_p are [cap, dk], so every identity and every key "
+                    f"would be reinterpreted in a different space -- the routing would be arbitrary rather than "
+                    f"restored. Resume with FAB_DK={_ck_dk}.")
+            if _ck_cap and _ck_cap > fab.cap:
+                raise SystemExit(
+                    f"[resume] the checkpoint holds {_ck_cap} expert slots and this run caps at {fab.cap} "
+                    f"(FAB_NMAX={_i('FAB_NMAX', 4096)}, FAB_N0={_i('FAB_N0', 2048)}; cap = max of the two). "
+                    f"Loading it would drop slots {fab.cap}..{_ck_cap - 1} and every expert trained into them. "
+                    f"Set FAB_NMAX>={_ck_cap}, or resume with FABRIC=0.")
+            if _ck_cap and _ck_cap < fab.cap:
+                _wide_by = fab.cap - _ck_cap
+                print(f"  [resume] WIDENING the fabric: {_ck_cap} slots in the checkpoint -> {fab.cap} here "
+                      f"(+{_wide_by}). The checkpoint's slots are copied into 0..{_ck_cap - 1} and the rest stay "
+                      f"at their initialisation, which for B is zero -- an exact identity, inert until something "
+                      f"routes to it. This is how capacity is added for a new area.")
+        if FABRIC and _RD.get("fab_cfg"):
+            # RESTORED SLOTS AND NEW SLOTS NEED OPPOSITE CONSERVATIVE DIRECTIONS, and the backfill could not tell
+            # them apart. It filled every slot in range(n_live) that the checkpoint dict did not mention, on the
+            # reasoning that an unrecorded expert must read as EXPERIENCED rather than as a protected newborn --
+            # correct for a checkpoint written by a build that predates the field. It is exactly wrong for a slot
+            # that WAS NEVER IN THE CHECKPOINT AT ALL, which is what FAB_N0 greater than the checkpoint's live
+            # count produces. Measured on the run that found this: a 523-expert checkpoint resumed at the default
+            # FAB_N0=2048 reported "1525 of 2048 experts had no recorded birth step" and "1813 of 2048 ... no
+            # recorded UTILIZATION -- backfilled to the population mean 383.45". Those 1525 slots hold RANDOM
+            # INITIALISATION. The resume was about to enter them as mature veterans at mean utilization: past
+            # grace, so cullable and on the mature per-expert learning rate, yet ranked mid-population in the
+            # utilization cull, where they would displace genuinely trained experts. The geometry crash above
+            # prevented a silently worse outcome than itself.
+            # The split is exact, because n is recorded: slots [0, ck_n) came from the checkpoint and slots
+            # [ck_n, n_live) did not. New slots get what Fabric.grow() gives a newborn -- born=this step,
+            # uage=0.0, and `use` ABSENT rather than zero, which is what grow() leaves behind (s.use.pop(j)).
+            _ck_n = min(int(_RD["fab_cfg"]["n"]), fab.cap)
+            _ck_step = int(_RD.get("step", 0))
+            fab.n_live = max(fab.n_live, _ck_n)             # rows already exist; never shrink below what was saved
+            _new = list(range(_ck_n, fab.n_live))           # live here, absent from the checkpoint: genuinely new
+            if _new:
+                print(f"  [resume] {len(_new)} slot(s) are LIVE here but were not in the checkpoint "
+                      f"({_ck_n} saved, {fab.n_live} live -- FAB_N0={_i('FAB_N0', 2048)}). They hold their "
+                      f"initialisation, so they are entered as NEWBORNS (born={_ck_step}, no use-age, no "
+                      f"utilization) exactly as grow() would enter them -- not as veterans.")
             # ...and their ages come back with them. Checkpoints written before fab_born existed have none, so
             # backfill to 0: those experts are old, which is what they are, and which is the safe direction.
             _fb = _RD.get("fab_born") or {}
             fab.born = {int(_k): int(_v) for _k, _v in _fb.items()}
-            _missing = [i for i in range(fab.n_live) if i not in fab.born]
+            _missing = [i for i in range(_ck_n) if i not in fab.born]
             for i in _missing: fab.born[i] = 0
+            for i in _new: fab.born[i] = _ck_step
             if _missing:
-                print(f"  [resume] {len(_missing)} of {fab.n_live} experts had no recorded birth step"
+                print(f"  [resume] {len(_missing)} of {_ck_n} RESTORED experts had no recorded birth step"
                       f"{' (checkpoint predates fab_born)' if not _fb else ''} -- treated as born at step 0, so "
                       f"they are subject to culling rather than exempt from it.")
             # ...and the USE clock, which is what grace and the per-expert LR schedule actually read now. Same
-            # failure direction as born: a missing record must read as EXPERIENCED, never as a protected newborn,
-            # or a resume hands the whole population a fresh grace period and a fresh high-LR cycle. An old
-            # checkpoint has no fab_uage, and backfilling to the grace threshold says "these have had their
-            # chances" -- true of anything that survived to be checkpointed, and the conservative reading.
+            # failure direction as born FOR RESTORED SLOTS: a missing record must read as EXPERIENCED, never as a
+            # protected newborn, or a resume hands the whole population a fresh grace period and a fresh high-LR
+            # cycle. An old checkpoint has no fab_uage, and backfilling to the grace threshold says "these have
+            # had their chances" -- true of anything that survived to be checkpointed. A NEW slot is the opposite
+            # case and gets 0.0: it has had no chances, and grace is what lets it train up at all.
             _fu = _RD.get("fab_uage") or {}
             fab.uage = {int(_k): float(_v) for _k, _v in _fu.items()}
-            _umiss = [i for i in range(fab.n_live) if i not in fab.uage]
+            _umiss = [i for i in range(_ck_n) if i not in fab.uage]
             for i in _umiss: fab.uage[i] = float(_i("FAB_GRACE", 48))
+            for i in _new: fab.uage[i] = 0.0
             if _umiss:
-                print(f"  [resume] {len(_umiss)} of {fab.n_live} experts had no recorded USE-age"
+                print(f"  [resume] {len(_umiss)} of {_ck_n} RESTORED experts had no recorded USE-age"
                       f"{' (checkpoint predates fab_uage)' if not _fu else ''} -- backfilled to the grace "
                       f"threshold, so they are cullable and on the mature rate rather than protected newborns.")
             # ...AND THE UTILIZATION, which is the cull's ranking key and was not carried at all. Restoring uage
@@ -4125,17 +4198,20 @@ def main():
             # reads 0.0, so the ranking is a stable sort over equal keys -- slot order -- and the cull removes
             # the founders while printing an ordinary line. A checkpoint that predates fab_use gets the same
             # conservative treatment as uage: unknown means EXPERIENCED, not newborn, so a missing record must
-            # not look like an unused expert and get culled first. The population mean is that reading.
+            # not look like an unused expert and get culled first. The population mean is that reading -- and it
+            # is computed over the RESTORED slots only, because a mean that included slots holding random
+            # initialisation would be a mean of nothing.
             _fus = _RD.get("fab_use") or {}
-            fab.use = {int(_k): float(_v) for _k, _v in _fus.items()}
-            _wmiss = [i for i in range(fab.n_live) if i not in fab.use]
+            fab.use = {int(_k): float(_v) for _k, _v in _fus.items() if int(_k) < _ck_n}
+            _wmiss = [i for i in range(_ck_n) if i not in fab.use]
             if _wmiss:
                 _fill = (sum(fab.use.values()) / len(fab.use)) if fab.use else 1.0
                 for i in _wmiss: fab.use[i] = _fill
-                print(f"  [resume] {len(_wmiss)} of {fab.n_live} experts had no recorded UTILIZATION"
+                print(f"  [resume] {len(_wmiss)} of {_ck_n} RESTORED experts had no recorded UTILIZATION"
                       f"{' (checkpoint predates fab_use)' if not _fus else ''} -- backfilled to the population "
                       f"mean {_fill:.2f}. Left at 0.0 they would have ranked at the BOTTOM of the utilization "
                       f"cull, which sorts stably and would have removed them in slot order.")
+            for i in _new: fab.use.pop(i, None)              # grow() pops rather than zeroes; match it exactly
         if WORLD_MODEL and _RD.get("world_cfg"):
             # REPLAY THE PARAM GROUPS, not just the population size. Growth calls om.add_param_group DURING
             # training, so a checkpoint taken after any growth has more groups than a freshly built optimizer --
@@ -4162,7 +4238,39 @@ def main():
             # expert, every centroid -- over one freshly-initialised scalar. Load non-strict so a resume across a
             # code change works, and PRINT what did not match, because silently absorbing a mismatch is how a
             # resume quietly loads a different model than the one that was saved.
-            _mk = fab.load_state_dict(_RD["fab"], strict=False)
+            # THE WIDENING COPY. Every cap-shaped tensor -- A [cap,d,r], B [cap,r,d], SRC_p [cap,dk],
+            # K_p [cap,dk] and the cent BUFFER [cap,sig_d] -- is a prefix relation when the cap grows, because
+            # the design preallocates to cap and growth only advances n_live ("the tensors never change
+            # identity, only n grows"). So take THIS run's initialised tensor, overwrite its first ck_cap rows
+            # with the checkpoint's, and hand that back. The remainder keeps its initialisation, which for B is
+            # zero -- an exact identity, computing nothing until something routes to it, which is precisely the
+            # contract a preallocated empty slot has during ordinary training.
+            # Shape-matched keys are untouched, so a same-cap resume takes the identical path it always did.
+            _fsd = dict(_RD["fab"])
+            if _wide_by:
+                _cur = fab.state_dict()
+                _grew = []
+                for _k, _v in list(_fsd.items()):
+                    _c = _cur.get(_k)
+                    if (_c is None or _v.shape == _c.shape or _v.dim() < 1
+                            or _v.shape[1:] != _c.shape[1:] or _v.shape[0] >= _c.shape[0]):
+                        continue
+                    _w = _c.detach().clone()
+                    _w[:_v.shape[0]] = _v
+                    _fsd[_k] = _w
+                    _grew.append(f"{_k} {tuple(_v.shape)}->{tuple(_w.shape)}")
+                print(f"  [resume] widened {len(_grew)} fabric tensor(s): {', '.join(_grew)}")
+                # A cap-shaped tensor that did NOT widen here is one this code does not know about, and it would
+                # reach load_state_dict at the wrong size and throw the same opaque error the gate above exists
+                # to replace. Say which, rather than letting torch say it worse.
+                _bad = [f"{_k} {tuple(_v.shape)} vs {tuple(_cur[_k].shape)}" for _k, _v in _fsd.items()
+                        if _k in _cur and _v.shape != _cur[_k].shape]
+                if _bad:
+                    raise SystemExit(
+                        f"[resume] widening cannot reconcile {len(_bad)} fabric tensor(s): {'; '.join(_bad)}. "
+                        f"These are not a prefix of this run's shapes, so there is nothing correct to copy. "
+                        f"Resume with FAB_NMAX={_ck_cap} to load the checkpoint as it was written.")
+            _mk = fab.load_state_dict(_fsd, strict=False)
             if _mk.missing_keys or _mk.unexpected_keys:
                 print(f"  [resume] fabric state partially matched -- missing {list(_mk.missing_keys)} "
                       f"(left at init), unexpected {list(_mk.unexpected_keys)} (ignored)")
@@ -4368,19 +4476,34 @@ def main():
              "  <-- EVICT selects on retrieval but nothing retrieves during training; this is write-order eviction"))
     asm = DomainAssembler()
     if _RD is not None:                                    # part 2 of RESUME: optimizer moments, memory store, domains
-        try: om.load_state_dict(_RD["opt_m"]); oe.load_state_dict(_RD["opt_e"])
-        except (KeyError, ValueError) as e:
-            # KNOWN AND BOUNDED, not a mystery. Growth (world predictors, fabric nodes, experts) calls
-            # om.add_param_group DURING training, so a checkpoint taken after any growth has more param groups than
-            # the optimizer rebuilt at resume, which puts every parameter in group 0. The SET of parameters is the
-            # same; only the grouping differs, and remapping moments across a different flattening would silently
-            # attach them to the wrong tensors -- worse than restarting them. So they restart: Adam re-accumulates
-            # its moments over roughly 1/(1-beta2) ~ 1000 steps, about 20 seconds at the observed rate. Weights,
-            # memory, domains and the recurrence clock all restore exactly; this costs a brief transient, not a run.
-            print(f"[resume] optimizer MOMENTS not restored ({type(e).__name__}: {e}).\n"
-                  f"         Expected after growth -- the checkpoint has more param groups than a fresh optimizer.\n"
-                  f"         Weights/memory/domains ARE restored; Adam re-warms over ~1000 steps. Watch the first\n"
-                  f"         [rate] line after a resume: a brief bump in bits/byte is this, and it should recover.")
+        # A WIDENED FABRIC CANNOT TAKE THE OLD MOMENTS, AND THE FAILURE WOULD NOT ARRIVE HERE. Adam's exp_avg and
+        # exp_avg_sq are shaped like the parameter they track, so the checkpoint holds [1024, d, r] moments for an
+        # A that is now [4096, d, r]. torch's Optimizer.load_state_dict does not validate shape -- it casts dtype
+        # and device and assigns -- so this call SUCCEEDS and the mismatch surfaces on the first step(), inside
+        # exp_avg.mul_(beta1).add_(grad), as a size error minutes into training with nothing connecting it to the
+        # resume. Prefix-copying the moments would be possible but has to map optimizer state indices onto
+        # parameters through a flattening this file already declines to trust two lines below ("remapping moments
+        # across a different flattening would silently attach them to the wrong tensors -- worse than restarting
+        # them"). Same judgement, same cost: Adam re-accumulates over ~1/(1-beta2) ~ 1000 steps.
+        if _wide_by:
+            print(f"[resume] optimizer MOMENTS not restored: the fabric was widened by {_wide_by} slots, so the "
+                  f"checkpoint's Adam moments are shaped for the OLD cap. Restoring them would load cleanly and "
+                  f"then fail on the first step(). Weights, memory and domains ARE restored; Adam re-warms over "
+                  f"~1000 steps. Watch the first [rate] line: a brief bump in bits/byte is this, and it recovers.")
+        # KNOWN AND BOUNDED, not a mystery. Growth (world predictors, fabric nodes, experts) calls
+        # om.add_param_group DURING training, so a checkpoint taken after any growth has more param groups than
+        # the optimizer rebuilt at resume, which puts every parameter in group 0. The SET of parameters is the
+        # same; only the grouping differs, and remapping moments across a different flattening would silently
+        # attach them to the wrong tensors -- worse than restarting them. So they restart: Adam re-accumulates
+        # its moments over roughly 1/(1-beta2) ~ 1000 steps, about 20 seconds at the observed rate. Weights,
+        # memory, domains and the recurrence clock all restore exactly; this costs a brief transient, not a run.
+        if not _wide_by:
+            try: om.load_state_dict(_RD["opt_m"]); oe.load_state_dict(_RD["opt_e"])
+            except (KeyError, ValueError) as e:
+                print(f"[resume] optimizer MOMENTS not restored ({type(e).__name__}: {e}).\n"
+                      f"         Expected after growth -- the checkpoint has more param groups than a fresh optimizer.\n"
+                      f"         Weights/memory/domains ARE restored; Adam re-warms over ~1000 steps. Watch the first\n"
+                      f"         [rate] line after a resume: a brief bump in bits/byte is this, and it should recover.")
         _mk = _RD["mem_keys"]; _mn = _mk.size(0)
         if _mn > 0:
             _mn = min(_mn, mem.cap)

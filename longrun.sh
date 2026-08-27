@@ -699,6 +699,40 @@ pilot-add)
     fi
   fi
   [ -n "${TOKENIZER_PATH:-}" ] || { echo "!! cannot find the tokenizer that goes with $FROM -- set TOKENIZER_PATH=<the .dyntok.json saved beside it>"; exit 1; }
+  # THE FABRIC GEOMETRY TRAVELS WITH THE CHECKPOINT TOO, and until now nothing carried it. pilot-add sets
+  # sixteen environment variables and neither FAB_N0 nor FAB_NMAX is among them, so a checkpoint written by a
+  # grid arm at FAB_N0=256 FAB_NMAX=1024 was resumed at the registry defaults 2048/4096 and died inside torch
+  # with five tensor shapes and no knob name. self_organize.py now WIDENS rather than refusing -- a resume that
+  # cannot add capacity for the area it is adding is not a continual-learning experiment -- but two things still
+  # want the checkpoint's own numbers:
+  #   FAB_N0   is "the population is BUILT, not ramped to", which is a statement about a FRESH run. On a resume
+  #            the starting population is whatever was saved. Left at 2048 against a 523-expert checkpoint it
+  #            manufactures 1525 identity experts at step 0 -- inert, grace-protected, and entirely beside the
+  #            point, because growth is supposed to add experts as the new area demands them. That IS the
+  #            modularity claim; preallocating past it measures something else.
+  #   FAB_NMAX is left alone deliberately. The default 4096 is the headroom Python grows into.
+  # Read with map_location="meta" so no tensor is allocated: the geometry is in fab_cfg, and a multi-GB
+  # checkpoint should not be paged into RAM to learn one integer. Any failure here is non-fatal -- the engine's
+  # own gate will explain the geometry far better than this shell can.
+  if [ -z "${FAB_N0:-}" ]; then
+    _CKN=$(python3 - "$FROM/ckpt.pt" <<'PY' 2>/dev/null
+import sys, torch
+try:
+    d = torch.load(sys.argv[1], map_location="meta", weights_only=False)
+    print(int((d.get("fab_cfg") or {}).get("n") or 0))
+except Exception:
+    print(0)
+PY
+)
+    if [ -n "${_CKN:-}" ] && [ "${_CKN:-0}" -gt 0 ] 2>/dev/null; then
+      export FAB_N0="$_CKN"
+      echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint -- not the default 2048, which"
+      echo "           would enter $((2048 - _CKN)) identity experts at step 0 that growth never asked for."
+    else
+      echo "pilot-add: could not read the checkpoint's expert count; leaving FAB_N0 to the default."
+      echo "           If the run reports slots that were 'LIVE here but not in the checkpoint', that is why."
+    fi
+  fi
   # $OUT MUST EXIST BEFORE tee OPENS ITS FILE. `pilot` mkdir -p's it, `pilot-add` never did -- and tee opens its
   # output at process start, before python writes a byte. So on any box that has run `seeds` but not `pilot`,
   # runs/long/ does not exist, tee fails instantly, and the entire report goes to a closed pipe. The run itself
@@ -1166,6 +1200,20 @@ grid)
     #   2  the gated dataset. Both code presets need an account, terms accepted in a browser, and a token --
     #      not a defect, but it stopped the run. `local` (fetch_local.py) reads the machine's own Python if
     #      you have no token; the-stack-dedup is the better material and is what the command above uses.
+    #   4  THE FABRIC GEOMETRY DID NOT TRAVEL WITH THE CHECKPOINT. fix_resume was trained at FAB_N0=256
+    #      FAB_NMAX=1024; pilot-add sets neither, so the resume built 2048/4096 and died inside torch:
+    #        RuntimeError: size mismatch for A: copying a param with shape [1024, 768, 8] from checkpoint,
+    #        the shape in current model is [4096, 768, 8].   ... and B, SRC_p, K_p, cent
+    #      fab_cfg has recorded "cap", "rank" and "dk" since it was written and nothing read them. Now the
+    #      resume WIDENS -- the tensors are preallocated to cap and growth only advances n_live, so a smaller
+    #      checkpoint is a prefix -- and refuses only what cannot be a prefix (a narrower cap, a changed rank
+    #      or dk), naming the knob instead of dumping five shapes. And the crash was the lucky outcome: the
+    #      three [resume] lines before it said "1525 of 2048 experts had no recorded birth step" and "1813 of
+    #      2048 ... no recorded UTILIZATION -- backfilled to the population mean 383.45". 2048-523 = 1525 slots
+    #      holding RANDOM INITIALISATION were about to be entered as mature veterans at mean utilization.
+    #      Restored slots and new slots need OPPOSITE conservative directions and the backfill could not tell
+    #      them apart; it can now. pilot-add also reads the checkpoint's live count into FAB_N0, so the default
+    #      path no longer manufactures identity experts that growth never asked for.
     #   3  A PRESET WAS ONLY FINDABLE BY ITS SHORT KEY. `--dataset the-stack-dedup` resolved field="content";
     #      `--dataset bigcode/the-stack-dedup` -- the id on the dataset page, the id in fetch_big.py's own
     #      gated-dataset instructions, and the id THIS NOTE used to give -- missed the table and fell through
