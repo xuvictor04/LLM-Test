@@ -1024,7 +1024,25 @@ def no_rng_drift(fn):
 # scaling and no GradScaler), which is the standard training precision on H100-class hardware.
 if bool(_i("TF32", 1)):
     torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
-AMP = _env("AMP", "off").lower()                 # "off" (default) | "bf16" | "fp16"
+AMP = _env("AMP", "off").lower()                 # "off" (default) | "bf16"
+# fp16 IS REFUSED, AND THE REASON IS THE SENTENCE DIRECTLY ABOVE. bf16 needs no loss scaling because it has
+# fp32's exponent range; fp16 does not, and there is no GradScaler anywhere in this file. Autocasting to fp16
+# without one lets small gradients underflow to zero -- the model trains, the loss curve looks plausible, and
+# an unknown fraction of the update is silently discarded. The knob accepted "fp16" and printed a confident
+# "[precision] LM step in fp16 autocast" while doing exactly that.
+# Refused rather than fixed: adding a scaler is a change to the optimizer step, and the step is now gated on
+# accumulated backward passes (see the ACCUM gate) -- a scaler has to unscale at the right point in that cycle
+# or it silently breaks accumulation instead. That is a deliberate piece of work, not a one-line addition.
+# This is only reachable on CUDA, so nothing on a CPU box can see it: the AMP branch is guarded on
+# DEV == "cuda" and every test in this repo that runs the model runs on CPU unless SELFTEST_DEVICE says
+# otherwise. It was found by asking what CPU testing structurally cannot cover.
+if AMP == "fp16":
+    raise SystemExit(
+        "AMP=fp16 is refused: there is no GradScaler in this file, and fp16 needs one.\n"
+        "  bf16 does not -- it carries fp32's exponent range, which is why the AMP path was written for it --\n"
+        "  but fp16 gradients underflow to zero without loss scaling, and the run would look entirely normal\n"
+        "  while discarding part of every update.\n"
+        "  Use AMP=bf16 on any Ampere-or-later GPU (H100, A100, GH200). Use AMP=off to rule precision out.")
 
 
 # ---------------- latent processes + the mixed, unlabeled stream ----------------
