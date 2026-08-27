@@ -14,6 +14,7 @@ The two that matter:
     python3 compare_test.py
 """
 import os
+import re
 import random
 import shutil
 import sys
@@ -42,6 +43,39 @@ def _run(argv):
     with contextlib.redirect_stdout(buf):
         rc = compare.main(argv)
     return rc, buf.getvalue()
+
+
+
+def fixture_matches_the_real_format():
+    """Does the fixture above describe a log self_organize.py can actually PRODUCE?
+
+    It did not, and that is how the project's most important instrument came to be untested where it mattered.
+    compare.py pairs runs by seed and reads SEED from the `[config] EFFECTIVE` line; SEED was on
+    self_organize.py's _plumb list, so it was never printed there. The regex matched 0 of 37 real logs. This
+    file wrote `SEED={seed}` into its own synthetic log, so the PAIRED path -- the one every architecture claim
+    in this project depends on -- passed against a format that has never existed, while real logs fell through
+    to a filename fallback or crashed with ZeroDivisionError.
+
+    A fixture that the shipped code cannot emit is not a test, it is a second implementation. So: read the real
+    source and check the field is genuinely on that line.
+    """
+    import ast
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "self_organize.py")).read()
+    ok = True
+    # _EFF is built as a list of tuples whose first element is the knob name; SEED must be one of them.
+    if not re.search(r'\(\s*"SEED"\s*,', src):
+        print('  FAIL  self_organize.py does not put "SEED" on the EFFECTIVE line -- compare.py cannot pair '
+              'any log it produces, and the fixture in this file is fiction.')
+        ok = False
+    else:
+        print("  ok    self_organize.py prints SEED on the [config] EFFECTIVE line, which is what compare.py reads")
+    # NOT a _plumb check. An earlier draft of this asserted SEED must be absent from self_organize.py's
+    # _plumb set, on the report's claim that _plumb was why it never printed. _plumb is nothing of the kind --
+    # it is the allowlist for the "you set a knob and nothing read it" audit, and SEED belongs in it precisely
+    # BECAUSE it is read at module scope where _ENV_READ cannot see it. The real cause was simply that SEED
+    # was never in _EFF. The false check fired the moment it was written, which is the only reason the wrong
+    # explanation did not end up in the commit message as fact.
+    return ok
 
 
 def main():
@@ -222,6 +256,9 @@ def main():
             ok = False
     finally:
         shutil.rmtree(d2, ignore_errors=True)
+
+    print("\n--- does the fixture describe a log the real code can emit? ---")
+    ok = fixture_matches_the_real_format() and ok
 
     print("\nok -- compare.py agrees with every known answer." if ok else "\n!! FAILED")
     return 0 if ok else 1

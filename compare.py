@@ -242,10 +242,32 @@ def main(argv=None):
         lone = sorted((set(da) | set(db)) - set(shared))
         if lone: mode += f"  (unpaired and ignored: seeds {lone})"
     else:
+        # NO SHARED SEED IS TWO DIFFERENT SITUATIONS, and this said the same thing about both. "the arms share
+        # no seed" is true when each side has seeds and they do not overlap; it is MISLEADING when NEITHER side
+        # has a seed at all, which is the state of every log this project has ever produced -- SEED was on the
+        # _plumb list, so it never reached the EFFECTIVE line, and the primary regex matched nothing in 37 of
+        # 37 real logs. The filename fallback (_seedN) fires only for runs launched through `seeds`.
+        if not da and not db:
+            print(f"\n  !! NEITHER ARM HAS A SEED. Not 'the arms disagree about seeds' -- no run on either side "
+                  f"carries one at all, so there is nothing to pair on and nothing to cross. Give the logs "
+                  f"names containing _seed<N>, or re-run on a build that prints SEED on the [config] EFFECTIVE "
+                  f"line (it is printed there as of 2026-08-27; older logs predate it).")
+            return 2
+        # THE CROSS PRODUCT IS NOT n_a x n_b OBSERVATIONS. Every downstream statistic treats these as
+        # independent, and they are not: each run appears in n_other of them. Two runs an arm becomes "4 pairs",
+        # which clears MIN_PAIRS=3 -- the guard whose comment says "BELOW THIS MANY PAIRS THERE IS NO VERDICT TO
+        # GIVE, and saying so is the entire point of this file" -- and the bootstrap then resamples 4 crossings
+        # drawn from 4 runs and collapses to [1.000, 1.000]. Reproduced from two runs an arm.
+        # So the crossings are still SHOWN, because a mean difference over them is a legitimate rough read, but
+        # the EFFECTIVE sample size for every threshold is the smaller arm, not the product.
         pairs = [(x, y) for x in da.values() for y in db.values()]
-        mode = (f"UNPAIRED ({len(da)}x{len(db)} = {len(pairs)} crossings) -- the arms share no seed, so the "
+        _eff_n = min(len(da), len(db))
+        mode = (f"UNPAIRED ({len(da)}x{len(db)} = {len(pairs)} crossings, but only {_eff_n} independent "
+                f"observation(s) per arm -- a crossing is not a sample) -- the arms share no seed, so the "
                 f"pairing that would cut the variance is unavailable. Rerun both arms over the same SEEDS.")
     print(f"\n  {mode}")
+    if not pairs:
+        print(f"  !! no pairs to compare -- nothing further can be said."); return 2
 
     # ORIENTED pairs for every direction-sensitive statistic; `pairs` itself stays raw for display.
     opairs = [(_sgn * x, _sgn * y) for x, y in pairs]
@@ -264,8 +286,13 @@ def main(argv=None):
 
     # THE THREE-WAY VERDICT. "Not significant" is a result, and at these sample sizes it is usually the correct
     # one -- reporting it as such is the entire point of the exercise.
-    if len(pairs) < MIN_PAIRS:
-        print(f"  >> NO VERDICT -- {len(pairs)} pair(s) is below the {MIN_PAIRS} a bootstrap needs to mean "
+    # COUNTED IN INDEPENDENT OBSERVATIONS. On the unpaired branch len(pairs) is the cross
+    # product, so this guard passed on 2 runs an arm. `_n_indep` is the smaller arm there and the
+    # shared-seed count when paired -- which is what MIN_PAIRS was always meant to be counting.
+    _n_indep = len(shared) if shared else min(len(da), len(db))
+
+    if _n_indep < MIN_PAIRS:
+        print(f"  >> NO VERDICT -- {_n_indep} independent observation(s) is below the {MIN_PAIRS} a bootstrap needs to mean "
               f"anything. The interval above is an artefact of resampling {len(pairs)} point(s), not evidence. "
               f"Read the DIRECTION and the size of the difference, and treat both as a lead.")
         if need: print(f"  >> {need} paired seeds would be needed to establish an effect this size.")

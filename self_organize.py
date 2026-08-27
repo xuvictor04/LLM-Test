@@ -5094,6 +5094,15 @@ def main():
             ("LR_STEPS",       LR_STEPS),
             ("LR_SHIFT_WARM",  LR_SHIFT_WARM),
             ("LR_RESTARTS",    bool(_i("LR_RESTARTS", 1))),
+            # SEED BELONGS ON THIS LINE, and its absence broke the tool built to make this project's claims
+            # trustworthy. compare.py pairs runs by seed and reads it from here first -- and SEED was simply
+            # never in _EFF, so the regex matched 0 of 37 real logs. (Not because of _plumb, which suppresses
+            # nothing: that is the allowlist for the "you set a knob nothing read" audit, and SEED belongs in it
+            # because it is read at module scope.) compare_test.py wrote `SEED={n}` into its own synthetic
+            # fixture, so the PAIRED path -- the one every architecture claim in this project depends on --
+            # passed against a format that has never existed, while real logs fell to a filename fallback or
+            # crashed with ZeroDivisionError. Printing it costs one field and makes every log pairable.
+            ("SEED",           _i("SEED", 0)),
             ("PONDER",         PONDER),                  ("ENS_K",          ENS_K),
         ]
         if _F0 is not None: _EFF += [
@@ -8202,8 +8211,17 @@ def main():
             # the REAL last step, not the projection. This said "step ~81840" on a run that ended at ~48800,
             # because _total_steps was measured at the seed vocabulary and minted tokens made every later epoch
             # shorter. `step` is the number the loop actually stopped on.
+            # TWO INSTRUMENTS, TWO NUMBERS, ONE LABEL. This figure and the MEMORIZATION CHECK headline are both
+            # printed as "held-out bits/byte" and they are NOT the same measurement: that one is a mean over
+            # <=24 randomly drawn windows per corpus, this one is the last learning-curve probe over
+            # HOLDOUT_N windows seeded per domain NAME. Measured across 36 finished logs they disagree in 27
+            # of them by more than 0.03 -- compare.py's own "worth resolving" floor -- by up to 0.190, with
+            # the sign going both ways, so it cannot be corrected for. 0.190 is larger than most arm effects
+            # this project has claimed. Both are legitimate estimators; calling them the same thing is not.
             print(f"  SAMPLED FROM: the FINAL model, step {step}"
-                  + (f" ({_fin:.3f} held-out bits/byte)" if _fin else "")
+                  + (f" ({_fin:.3f} b/B on the LEARNING-CURVE probe -- NOT the MEMORIZATION CHECK's held-out "
+                     f"figure above, which is a different sample and disagrees by up to 0.190 across this "
+                     f"project's logs)" if _fin else "")
                   + f" -- NOT the best. Best was {_best_bpb[0]:.3f} at step {_best_bpb[1]}"
                   + (f", saved to {_env('SAVE_CKPT', '')}.best" if _best_bpb[2] else " (not saved: SAVE_CKPT is off)")
                   + (f". The final model is {_fin - _best_bpb[0]:+.3f} bits/byte worse than it; read the text below "
