@@ -237,6 +237,7 @@ _SPEC = {
     # --- domains: self-assembled domains and their management --------------------------------------
     "DOM_ADAPTIVE": ("i", 0),                             # domains
     "DOM_CULL_EMPTY": ("i", 1),                           # domains
+    "DOM_CULL_FLOOR": ("i", 1),                           # domains
     "DOM_CULL_FRAC": ("f", 0.10),                         # domains
     "DOM_DECAY": ("f", 0.9),                              # domains
     "DOM_FOLD_MULT": ("f", 1.5),                          # domains
@@ -599,6 +600,9 @@ MERGE_FRAC = _f("MERGE_FRAC", 0.8)         # merge threshold = MERGE_FRAC*NEW_DI
 DOM_DECAY = _f("DOM_DECAY", 0.9)           # per-manage decay of the activity counter (ExpertRouter's rule)
 DOM_GRACE = _i("DOM_GRACE", 500)           # min age before a domain may be culled
 DOM_CULL_FRAC = _f("DOM_CULL_FRAC", 0.10)  # per-manage cull budget: bottom fraction by DECAYED activity
+DOM_CULL_FLOOR = bool(_i("DOM_CULL_FLOOR", 1))  # refuse to CULL a domain still holding a per-source floor's worth
+#   of memory. MEM_SRC_FLOOR forbids EVICTING those entries; the cull deleted them outright on a weaker test.
+#   0 restores the pre-fix behaviour, which is the arm that reproduces the collapse to one domain.
 DOM_WINS = _i("DOM_WINS", 40)              # reservoir of sample windows per domain (the rekey basis)
 # DEFAULTS RESTORED TO THE BEST MEASURED CONFIGURATION. Three successive 'fixes' of mine each LOWERED the
 # primary metric: fixed thresholds V=0.42 (boundary recall 0.96) -> adaptive spawn 0.38 -> relative margin
@@ -3574,11 +3578,44 @@ class DomainAssembler:
             if s.act.get(b, 0.0) > s.act.get(a, 0.0): a, b = b, a         # keep the more ACTIVE (was: the lower id)
             s._absorb(a, b, mem); merged += 1
         if len(s.cent) > 1:                                               # CULL: DECAYED activity + age grace (expert rule)
+            # THE BUDGET IS A FRACTION, AND max(1, ...) MADE IT A MINIMUM. int(0.10 * n) is 0 for every
+            # population under ten, so the floor turned "cull at most a tenth" into "cull at least one, every
+            # manage pass, for as long as the run lasts". The run that added Python shows it as a ratchet, three
+            # times over, each time landing on exactly the number where `len(s.cent) <= 1` is the only thing
+            # left to stop it:
+            #     [manage @ 96500] merged 0 culled 1 -> 3 live domains
+            #     [manage @ 97300] merged 0 culled 1 -> 2 live domains
+            #     [manage @ 97400] merged 0 culled 1 -> 1 live domains
+            #     [manage @ 102800] ... -> 5 ... -> 4 ... -> 3 ... -> 2 ... [105500] -> 1 live domains
+            # At ten or more the floor never binds (int(0.10 * 10) is already 1), so removing it changes nothing
+            # about a healthy population and removes the only rule that could drive one to a single domain.
+            # A population too small for a proportional cull is not culled proportionally; the EMPTY cull above
+            # and the merge below still run, and both are lossless.
             order = sorted(s.cent, key=lambda i: s.act.get(i, 0.0))
-            for d in order[:max(1, int(DOM_CULL_FRAC * len(s.cent)))]:
+            for d in order[:int(DOM_CULL_FRAC * len(s.cent))]:
                 if len(s.cent) <= 1: break
                 if step - s.born.get(d, step) < DOM_GRACE: continue
                 if not (s.act.get(d, 0.0) < min_size and step - s.last[d] > stale): continue
+                # ...AND "NOBODY FED THIS" IS THE SCHEDULE TALKING, NOT THE DOMAIN. This is the memory lesson
+                # again, one level up. EVICT was documented as choosing victims by utility while `use` never
+                # moved, and the English domain vanished after the Python run because it "was not less useful,
+                # it had merely stopped being WRITTEN". MEM_SRC_FLOOR was built for exactly that -- and it
+                # guards EVICTION only. This line calls mem.delete_src(), which deletes the domain's entries
+                # outright, floor and all, on the weaker test of the two.
+                # Under PHASE_SCHED [[0],[0],[1],[1]] every domain of the absent process has act decaying by
+                # DOM_DECAY per pass toward zero and `last` stale within MANAGE_STALE steps, by construction.
+                # So while Python streamed, English's whole domain population was cullable and was culled, its
+                # memory deleted with it -- 200,000 entries ending under a single source id. That is
+                # catastrophic forgetting performed by the manager, not suffered by the model.
+                # The test is the floor's own number: a domain still holding a floor's worth of entries is
+                # holding material the store is forbidden to evict, and deleting it is a bigger action on a
+                # weaker warrant. It self-releases -- once eviction has genuinely drained the domain, it falls
+                # below the floor and becomes cullable, which is the right ordering: evict first, then cull,
+                # never cull in order to evict.
+                if mem is not None and DOM_CULL_FLOOR:
+                    _fl = int(getattr(mem, "src_floor", 0.0) * mem.cap / max(1, mem._eligible().sum().item()))
+                    if _fl > 0 and int((mem.src == int(d)).sum()) >= _fl:
+                        s.held = getattr(s, "held", 0) + 1; continue
                 # COMPETENCE PROTECTION. Rare and stale is exactly what a niche domain looks like from a
                 # utilization-only vantage point, and it is also what a dead one looks like. The difference is
                 # whether the material it does get is modelled BETTER than the population manages on average.
@@ -4235,6 +4272,8 @@ def main():
     #   first om.step(). Masked on both harness paths only because they happen to widen the fabric too.
     _fg_base = {}                                          # growth-event counts the checkpoint arrived with,
     #   so POPULATION CHURN can report THIS run rather than the chain's running total. See the restore below.
+    _collapsed = [0]                                       # step at which the domain population first fell to
+    #   one in a multi-process run, so the alarm fires once rather than on every manage pass after it.
     _step0 = [0]                                           # the step THIS run started at: 0 fresh, the
     #   checkpoint's step on a resume. Same reason as _fg_base -- `step` is a chain-wide counter, so "how old
     #   is this expert" and "how long has this run been going" cannot be answered from it alone. A resume that
@@ -6558,6 +6597,21 @@ def main():
             # reservation by the orphans too and spends most of it on them.
             mem.set_live_src(asm.cent.keys())
             if m or c: print(f"  [manage @ {step}] merged {m} culled {c} -> {len(asm.cent)} live domains (memory reassigned/pruned)")
+            # A SINGLE DOMAIN IN A MULTI-PROCESS RUN IS THE PARTITION CEASING TO EXIST, and it happened three
+            # separate times in the run that added Python without one line saying so -- the manage trace showed
+            # "-> 1 live domains" among a hundred other lines, and the end-of-run report only reached
+            # "IS THE PARTITION INFORMATIVE? -- CANNOT BE MEASURED" long after the material was gone. Say it
+            # once, when it happens, with what is still standing.
+            if len(asm.cent) <= 1 and NP > 1 and not _collapsed[0]:
+                _collapsed[0] = step
+                print(f"  !! DOMAIN COLLAPSE @ {step}: {NP} processes are being streamed and the manager is down "
+                      f"to {len(asm.cent)} live domain(s). Provenance no longer separates them -- memory is "
+                      f"single-source, so MEM_SRC_FLOOR protects nothing, per-domain retention cannot be "
+                      f"measured, and every expert-to-domain figure in the report collapses with it. Culling is "
+                      f"the usual cause: a domain of a process the schedule is not currently streaming has its "
+                      f"activity decaying by DOM_DECAY per pass and goes stale within MANAGE_STALE steps by "
+                      f"construction. Check domains.held / domains.spare in DID IT FIRE for whether either "
+                      f"brake was reached.")
         if FABRIC and MANAGE_ON and step % MANAGE_EVERY == 0 and step > 0:
             _fo_before = fab.failed_out
             _fc, _fs = fab.manage(step, grace=_i("FAB_GRACE", 48), cull_frac=_f("FAB_CULL_FRAC", 0.02),
@@ -8457,6 +8511,27 @@ def main():
         _r("domains.create",     lambda: asm.created)
         _r("domains.merge",      lambda: asm.n_merged, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
         _r("domains.cull",       lambda: asm.n_culled, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
+        # THE THREE THINGS THAT STOP A CULL, EACH WITH ITS OWN ROW. The cull had a counter and its brakes did
+        # not, so a run could delete its way down to one domain with every guard either off or never reached and
+        # the audit would show only "domains.cull 145". These say which brake held and how often.
+        #   domains.held    refused because the domain still holds a per-source floor's worth of memory --
+        #                   MEM_SRC_FLOOR forbids evicting those entries, so deleting them is a bigger action
+        #                   on a weaker test. This is the brake that was missing entirely.
+        #   domains.spare   refused because the domain models its own material better than the population does
+        #                   (COMP_PROTECT). Rare-and-stale and dead look identical without it.
+        #   domains.empty   removed for holding NO memory and NO windows -- the lossless cull, which needs no
+        #                   staleness test because nothing is destroyed.
+        _r("domains.held",       lambda: getattr(asm, "held", 0),
+           lambda: _cfg("DOM_MANAGE_EVERY") and _cfg("DOM_CULL_FLOOR"),
+           ("DOM_MANAGE_EVERY=0" if not _cfg("DOM_MANAGE_EVERY") else
+            "DOM_CULL_FLOOR=0 -- a cull may delete a domain's memory however much of it the per-source floor "
+            "would have refused to evict"))
+        _r("domains.spare",      lambda: getattr(asm, "protected", 0),
+           lambda: _cfg("DOM_MANAGE_EVERY") and _cfg("COMP_PROTECT"),
+           ("DOM_MANAGE_EVERY=0" if not _cfg("DOM_MANAGE_EVERY") else "COMP_PROTECT=0"))
+        _r("domains.empty",      lambda: getattr(asm, "emptied", 0),
+           lambda: _cfg("DOM_MANAGE_EVERY") and _cfg("DOM_CULL_EMPTY"),
+           ("DOM_MANAGE_EVERY=0" if not _cfg("DOM_MANAGE_EVERY") else "DOM_CULL_EMPTY=0"))
         # A FULL VOCABULARY IS NOT AN INERT MECHANISM, AND CALLING IT ONE HID THE FINDING. On the first run that
         # ever added a second area this row read "ZERO ... ARMED AND INERT", which reads as "minting is broken".
         # It was not: the checkpoint's vocabulary was already at VMAX=2048, so the tokenizer had nowhere to put a

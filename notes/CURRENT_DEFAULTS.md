@@ -9,7 +9,7 @@ it became 2048. Every other note in this directory is a RECORD of what was true 
 This is the only one that claims to describe the code as it stands, and it is the only one that is
 not written by hand.
 
-327 knobs.
+328 knobs.
 
 ## kind `env`
 
@@ -189,6 +189,7 @@ not written by hand.
 | `DISK_STREAM` | `0` |
 | `DOM_ADAPTIVE` | `0` |
 | `DOM_CULL_EMPTY` | `1` |
+| `DOM_CULL_FLOOR` | `1` |
 | `DOM_GRACE` | `500` |
 | `DOM_MANAGE_EVERY` | `100` |
 | `DOM_MIN_VISITS` | `2` |

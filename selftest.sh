@@ -51,6 +51,8 @@ python3 compare_test.py  > "$OUT/cmp.txt"   2>&1 && echo "  ok    compare_test (
   || { echo "  FAIL  compare_test:"; sed 's/^/          /' "$OUT/cmp.txt"; FAIL=1; }
 python3 growth_test.py   > "$OUT/grow.txt"  2>&1 && echo "  ok    growth_test (a new area reaches the REGRESSION trigger)" \
   || { echo "  FAIL  growth_test:"; sed 's/^/          /' "$OUT/grow.txt"; FAIL=1; }
+python3 domain_test.py   > "$OUT/dom.txt"   2>&1 && echo "  ok    domain_test (the cull cannot delete the area the schedule is not streaming)" \
+  || { echo "  FAIL  domain_test:"; sed 's/^/          /' "$OUT/dom.txt"; FAIL=1; }
 python3 proj_test.py     > "$OUT/proj.txt"  2>&1 && echo "  ok    proj_test (the LR horizon knows how long the run is)" \
   || { echo "  FAIL  proj_test:"; sed 's/^/          /' "$OUT/proj.txt"; FAIL=1; }
 python3 cap_test.py      > "$OUT/cap.txt"   2>&1 && echo "  ok    cap_test (one earned lift means the same at every cap size)" \

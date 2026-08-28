@@ -24,7 +24,7 @@ request is that failure in its purest form: the run completes, the report prints
 about a stream that ran out. Short of target it says so, with what it found and where, and exits non-zero
 unless --allow-short.
 """
-import argparse, hashlib, os, random, site, sys, sysconfig
+import argparse, hashlib, json, os, random, site, sys, sysconfig
 
 # The shard size and the document separator match fetch_big.py exactly. datastream.open_corpus concatenates
 # part*.txt in sorted order, so a corpus assembled here has to be indistinguishable from a downloaded one --
@@ -189,6 +189,16 @@ def main():
     finally:
         f.close()
 
+    # THE SAME MANIFEST fetch_big.py WRITES, so a corpus directory always says where it came from. Without it
+    # a directory built here is indistinguishable from a downloaded one -- which is exactly the property the
+    # SHARD_MB/SEP match at the top of this file is FOR, and exactly the property that makes the next caller
+    # reuse it by mistake. `pilot-add py local` builds 57 MB here; the day the-stack-dedup's terms are accepted,
+    # `pilot-add py bigcode/the-stack-dedup` finds 57 MB already present, skips the fetch, and trains on the
+    # interpreter's source while every line of the log says the-stack. Indistinguishable CONTENT, declared
+    # PROVENANCE.
+    json.dump({"bytes": written, "shard": shard, "docs": ndoc, "source": "local",
+               "data_dir": None, "domain": a.domain, "roots": list(roots)},
+              open(os.path.join(outdir, "_fetch_manifest.json"), "w"))
     print(f"[fetch_local] wrote {written/1e6:.1f} MB in {shard+1} shard(s) from {ndoc} files -> {outdir}")
     if written < target:
         pct = 100.0 * written / max(1, target)

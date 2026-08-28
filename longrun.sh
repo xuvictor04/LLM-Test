@@ -844,6 +844,31 @@ PY
   # the same defect is already documented for _pilot_corpus ("a directory fetched at 0.06 GB is silently reused
   # for a run configured for 0.75 GB") and pilot-add had the identical hole.
   # fetch_big.py --resume tops up from its manifest rather than restarting, so re-running is cheap.
+  # ...AND BEFORE ASKING WHETHER IT IS BIG ENOUGH, ASK WHERE IT CAME FROM. The size test below skips the fetch
+  # for any directory already near the target, and a corpus directory looked identical whatever built it --
+  # fetch_local.py deliberately matches fetch_big.py's shard size and separator so that "eng vs py" is not also
+  # "downloaded vs local". That is right for the experiment and wrong for the bookkeeping: `pilot-add py local`
+  # writes 57 MB into data_pilot/train/py, and the day the-stack-dedup's terms are accepted `pilot-add py
+  # bigcode/the-stack-dedup` finds 57 MB already there, skips the fetch entirely, and trains on this machine's
+  # interpreter while every line of the log names the-stack. Both fetchers now record their source in
+  # _fetch_manifest.json; this reads it and refuses rather than silently reusing the wrong corpus.
+  _MANF="$P_DD/train/$NAME/_fetch_manifest.json"
+  if [ -f "$_MANF" ]; then
+    _SRC=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('source') or '')" "$_MANF" 2>/dev/null)
+    if [ -n "${_SRC:-}" ] && [ "$_SRC" != "$DS" ]; then
+      echo "!! $P_DD/train/$NAME was built from '$_SRC' and this run asks for '$DS'."
+      echo "   The size check below would have accepted it and skipped the fetch, so the run would have trained"
+      echo "   on '$_SRC' with '$DS' in every line of its log. Nothing here deletes your corpus; pick one:"
+      echo "     mv $P_DD/train/$NAME $P_DD/train/$NAME.$(echo "$_SRC" | tr / _)   # then re-run to pull '$DS'"
+      echo "     bash longrun.sh pilot-add $NAME $_SRC $GB                          # keep what is on disk"
+      echo "     PILOT_DIR=<another dir> bash longrun.sh pilot-add $NAME $DS $GB     # both, side by side"
+      exit 1
+    fi
+  elif [ -d "$P_DD/train/$NAME" ] && [ -n "$(ls -A "$P_DD/train/$NAME" 2>/dev/null)" ]; then
+    echo "pilot-add: $P_DD/train/$NAME has no _fetch_manifest.json, so it predates provenance recording and"
+    echo "           this script cannot tell what built it. If it was built by 'local' and you now want '$DS',"
+    echo "           move it aside first -- the size check below will otherwise accept it and skip the fetch."
+  fi
   _HAVE=$(du -sb "$P_DD/train/$NAME" 2>/dev/null | cut -f1); _HAVE=${_HAVE:-0}
   _WANT=$(python3 -c "print(int(float('$GB') * 1e9))" 2>/dev/null || echo 0)
   if [ "${_HAVE:-0}" -gt 0 ] 2>/dev/null && [ "${_WANT:-0}" -gt 0 ] 2>/dev/null \

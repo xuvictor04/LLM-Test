@@ -94,15 +94,41 @@ def main():
     path = p["path"]; config = a.config or p.get("config"); field = a.field or p.get("field", "text")
     split = a.split or p.get("split", "train")
 
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        sys.exit("need: pip install datasets")
-
     outdir = os.path.join(a.out, "train", a.domain)
     os.makedirs(outdir, exist_ok=True)
     target = int(a.gb * 1e9)
     print(f"[fetch_big] {path}" + (f" ({config})" if config else "") + f" -> {outdir}  target {a.gb} GB")
+    # WHOSE CORPUS IS ALREADY IN THERE -- ASKED BEFORE THE NETWORK IS TOUCHED. The manifest used to record only
+    # how far the last pull got, so a directory holding one corpus was indistinguishable from a directory
+    # holding another, and --resume would continue the OTHER dataset's byte count into these shards. Checked
+    # here rather than beside the resume read below because opening the dataset first turns a bookkeeping
+    # question into a network round trip, and on a gated repo into an authorisation error that hides it.
+    _mp0 = os.path.join(outdir, "_fetch_manifest.json")
+    if os.path.exists(_mp0):
+        try:
+            _was = (json.load(open(_mp0)) or {}).get("source")
+        except Exception:
+            _was = None
+        if _was and _was != path:
+            sys.exit(
+                f"[fetch_big] {outdir} already holds a corpus pulled from {_was}, and this call asks for {path}.\n"
+                f"  Writing into it would leave a directory that is part one corpus and part the other, with a\n"
+                f"  manifest describing neither, and every number a run reports on it would be about a mixture\n"
+                f"  nobody chose. Nothing here deletes your corpus:\n"
+                f"    mv {outdir} {outdir}.{_was.replace('/', '_')}     # then re-run to pull {path}\n"
+                + (f"    (what is on disk was built by fetch_local.py, not by any --dataset; keep it by running\n"
+                   f"     the pilot with 'local' as the dataset argument instead)\n"
+                   if _was == "local" else
+                   f"    --dataset {_was}                                  # keep what is on disk\n")
+                + f"    --out <another directory>                         # both, side by side")
+
+    # THE LIBRARY IS NEEDED FOR THE PULL, NOT FOR THE BOOKKEEPING ABOVE. Checking provenance first means a
+    # wrong-corpus mistake is reported as a wrong-corpus mistake, on any machine, instead of as a missing
+    # dependency or -- on a gated repo -- as an authorisation error that hides it entirely.
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        sys.exit("need: pip install datasets")
 
     kw = dict(split=split, streaming=True)
     if config: kw["name"] = config
@@ -162,6 +188,17 @@ def main():
     # IterableDataset.skip() and continue at the next shard index. Skipping still walks the stream, but it neither
     # decodes nor writes, so it is far cheaper than re-downloading.
     man_path = os.path.join(outdir, "_fetch_manifest.json")
+
+    # WHAT IS IN THIS DIRECTORY, not merely how far the last pull got. The manifest recorded bytes/shard/docs
+    # and nothing about the SOURCE, so a directory already holding one corpus was indistinguishable from a
+    # directory holding another -- and both --resume here and pilot-add's "is it big enough" test would accept
+    # it. The concrete case: `pilot-add py local` builds 57 MB of stdlib Python into data_pilot/train/py; the
+    # next day the-stack-dedup's terms are accepted and `pilot-add py bigcode/the-stack-dedup` finds 57 MB
+    # already there, skips the fetch, and trains on the interpreter's source while the log says the-stack. The
+    # run reports on a corpus nobody chose.
+    def _man(b, sh, dc):
+        return {"bytes": b, "shard": sh, "docs": dc, "source": path,
+                "data_dir": data_dir, "domain": a.domain}   # the RESOLVED data_dir (preset or --data-dir)
     written = shard = docs_done = 0; n_lowscore = 0
     if a.resume and os.path.exists(man_path):
         try:
@@ -198,7 +235,7 @@ def main():
             f.write(txt); written += len(txt.encode("utf-8", "replace"))
             if written // (a.shard_mb * 1_000_000) > shard:
                 f.close()
-                json.dump({"bytes": written, "shard": shard, "docs": docs_done + i + 1}, open(man_path, "w"))
+                json.dump(_man(written, shard, docs_done + i + 1), open(man_path, "w"))
                 shard += 1
                 f = open(os.path.join(outdir, f"part{shard:03d}.txt"), "w", encoding="utf-8")
             if i % 20000 == 0 and i:
@@ -209,7 +246,7 @@ def main():
         print("\n  interrupted -- keeping what was written")
     finally:
         f.close()
-        try: json.dump({"bytes": written, "shard": shard, "docs": docs_done + i + 1}, open(man_path, "w"))
+        try: json.dump(_man(written, shard, docs_done + i + 1), open(man_path, "w"))
         except (NameError, OSError): pass
 
     print(f"[fetch_big] wrote {written/1e9:.2f} GB in {shard+1} shard(s) to {outdir}"
