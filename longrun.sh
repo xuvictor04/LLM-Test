@@ -896,8 +896,26 @@ PY
     else
       # FETCH_ARGS passes anything else through to fetch_big.py -- notably --data-dir for datasets organised by
       # directory rather than config (the-stack: --data-dir data/python), and --token for gated ones.
+      # ...AND THE ONE ARGUMENT THIS EXPERIMENT CANNOT AFFORD TO FORGET IS SUPPLIED, NOT LEFT TO MEMORY.
+      # The Stack is organised by LANGUAGE as directories: without --data-dir it streams every language mixed
+      # together, and fetch_big.py can only WARN and continue, because a mixture is a legitimate thing to want.
+      # It is not what `pilot-add py` wants. The whole measurement is "what did adding PYTHON cost English",
+      # and a corpus that is a third Java labelled 'py' answers a question nobody asked -- with nothing
+      # downstream able to detect it. An explicit --data-dir in FETCH_ARGS still wins.
+      _DD_ARG=""
+      case "$DS" in
+        *the-stack*)
+          case "${FETCH_ARGS:-}" in
+            *--data-dir*) ;;
+            *) _LANG=$(python3 -c "from fetch_big import STACK_DIR; import sys; print(STACK_DIR.get(sys.argv[1], sys.argv[1]))" "$NAME" 2>/dev/null || echo "$NAME")
+               _DD_ARG="--data-dir data/$_LANG"
+               echo "pilot-add: $DS is organised by language as directories -- passing $_DD_ARG for domain '$NAME'."
+               echo "           (without it the pull is every language mixed together, labelled '$NAME' regardless."
+               echo "            Put --data-dir in FETCH_ARGS to override, including to ask for the mixture.)" ;;
+          esac ;;
+      esac
       # shellcheck disable=SC2086
-      python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume ${FETCH_ARGS:-} || exit 1
+      python3 fetch_big.py --dataset "$DS" --domain "$NAME" --gb "$GB" --out "$P_DD" --resume $_DD_ARG ${FETCH_ARGS:-} || exit 1
     fi
   fi
   # PURE_ADD=1 -- THE ARM THE MODULARITY CLAIM ACTUALLY RESTS ON. By default PHASE_SCHED for two corpora is

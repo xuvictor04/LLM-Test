@@ -31,6 +31,15 @@ Step 1 is the one people skip; without it a perfectly valid token still returns 
 """
 import argparse, json, os, sys, time
 
+# THE STACK NAMES ITS LANGUAGE DIRECTORIES IN FULL; OUR DOMAINS ARE SHORT. This mapping lives HERE, in the file
+# that actually performs the download, because this is the file that prints the advice. fetch_local.py worked it
+# out first and recorded why: printing "--data-dir data/py" hands the user a path that does not exist on the Hub,
+# "which is a worse failure than printing nothing: it looks authoritative and fails after the download starts".
+# That lesson was written into the file that cannot download and left out of the one that can, which then printed
+# exactly the path it warns against. One table, imported by the other.
+STACK_DIR = {"py": "python", "c": "c", "js": "javascript", "go": "go", "rs": "rust", "sh": "shell",
+             "java": "java", "rb": "ruby", "cpp": "c++", "cs": "c-sharp", "php": "php", "ts": "typescript"}
+
 PRESETS = {
     "fineweb-edu": dict(path="HuggingFaceFW/fineweb-edu", config="sample-10BT", field="text", split="train"),
     "c4":          dict(path="allenai/c4",                config="en",          field="text", split="train"),
@@ -142,7 +151,8 @@ def main():
     elif "the-stack" in path:
         print(f"[fetch_big] !! no --data-dir: {path} is organised by LANGUAGE as directories, so this streams "
               f"ALL of them mixed together.\n"
-              f"             For one language:  --data-dir data/{a.domain}   (data/python, data/c, data/java, ...)\n"
+              f"             For one language:  --data-dir data/{STACK_DIR.get(a.domain, a.domain)}"
+              f"   (the repo names languages in full: data/python, data/javascript, data/c-sharp, ...)\n"
               f"             Continuing with the mixture -- it will be labelled --domain {a.domain!r} regardless.")
 
     # AUTH, EXPLICITLY. Relying on the ambient credential means "works on my machine" and an opaque 401 on

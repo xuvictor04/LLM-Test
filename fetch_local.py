@@ -38,7 +38,15 @@ EXT = {"py": [".py"], "c": [".c", ".h"], "js": [".js", ".ts"], "go": [".go"], "r
 # The Stack names its language directories in full. Our domains are short. Printing "--data-dir data/py" in
 # the fallback advice below would hand the user a path that does not exist on the Hub, which is a worse
 # failure than printing nothing: it looks authoritative and fails after the download starts.
-STACK_DIR = {"py": "python", "c": "c", "js": "javascript", "go": "go", "rs": "rust", "sh": "shell"}
+# THE TABLE NOW LIVES IN fetch_big.py, which is the file that performs the download and prints the same advice
+# on the same mistake -- and which was printing "data/py" for years because this note was written here instead
+# of there. Imported rather than copied: two copies of a mapping is two chances to fix only one of them.
+# fetch_big.py is stdlib-only at module level (datasets is imported inside main), so this costs nothing and
+# needs no network; the fallback keeps fetch_local runnable if it is ever moved out on its own.
+try:
+    from fetch_big import STACK_DIR
+except Exception:
+    STACK_DIR = {"py": "python", "c": "c", "js": "javascript", "go": "go", "rs": "rust", "sh": "shell"}
 
 # Directories whose content is overwhelmingly generated, vendored or repetitive. Test trees are the big one:
 # CPython's Lib/test is ~30% of the stdlib by bytes and is mostly assertion boilerplate, so including it would
