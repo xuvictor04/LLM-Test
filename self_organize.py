@@ -832,6 +832,13 @@ def cull_gate_open(n_live, cap, pressure):
     return not (n_live <= 2 or (n_live / max(1, cap)) < pressure)
 
 
+class _NoHeldOut(Exception):
+    """Not an error: this configuration has no held-out data, so the held-out battery cannot run.
+
+    Distinct from a genuine failure of that battery, which arrives at the same except clause. Without the
+    distinction a synthetic run printed a NameError where it should have printed a sentence."""
+
+
 def widen_prefix(live_sd, ck_sd):
     """Fit a checkpoint's tensors into a LARGER live model by copying them into the leading rows.
 
@@ -7652,6 +7659,16 @@ def main():
         return _m, (sum((_x - _m) ** 2 for _x in _xs) / (len(_xs) - 1) / len(_xs)) ** 0.5
 
     try:                                                   # === MEMORIZATION CHECK: train vs HELD-OUT ===
+        # A PATH WITH NO HELD-OUT DATA SHOULD SAY SO, NOT RAISE INSIDE A CATCH-ALL. This battery compares train
+        # against a held-out tail, and the synthetic path has neither -- it generates its stream from Markov
+        # processes and holds nothing back, so VALC is empty and CORP does not exist at all. It reached for CORP
+        # anyway, the except below caught the NameError, and the run printed
+        #     [memorization check skipped: NameError: name 'CORP' is not defined]
+        # which reads as a bug in the check rather than a configuration that cannot support it. That matters
+        # because the except is a CATCH-ALL: a real failure of this battery on the real-data path prints in the
+        # same shape, and one of the two is background noise. Raising a named, deliberate signal keeps them
+        # distinguishable without re-indenting 270 lines to wrap them in an else.
+        if not VALC: raise _NoHeldOut(f"DATA_MODE={DATA_MODE} holds nothing out")
         model.eval()
         _vb = []; _vw = []                                 # ...and the PER-WINDOW values, for an error bar
         for _p in range(len(VALC)):
@@ -7906,6 +7923,10 @@ def main():
         except Exception as _e:
             print(f"[domain-prior check skipped: {type(_e).__name__}: {_e}]")
         model.train()
+    except _NoHeldOut as _e:
+        print(f"\n[memorization check] skipped: {_e}, so there is no held-out tail to compare train against. "
+              f"ACROSS THE RUN BOUNDARY, BWT and F read from the same probe and are skipped with it. "
+              f"DATA_MODE=real is what produces those numbers.")
     except Exception as _e:
         print(f"[memorization check skipped: {type(_e).__name__}: {_e}]")
     if WORLD_MODEL:                                        # === WORLD MODEL: forward-dynamics on HELD-OUT observations ===
@@ -8504,22 +8525,36 @@ def main():
     # ---- WRONGNESS (B) IN THE LOOP: detect + remove implausible associations via self-consistency ----
     if _i("WRONG_CHECK", 1):
         ninj = _i("WRONG_INJECT", 8)                       # inject a few cross-domain WRONG windows so B has real errors to catch
-        procs = sorted(set(labels))
+        # ...AND "THE PROCESS EXISTS" IS NOT "THE PROCESS HAS A WINDOW TO SAMPLE". The guard below counted
+        # distinct labels, but the sampler two blocks down only takes positions that are MULTIPLES OF WIN:
+        #     random.choice([s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p])
+        # A process can occupy a band of the stream that contains no window-aligned start at all -- narrow
+        # bands, short streams and PHASED schedules all produce it -- and then that comprehension is empty and
+        # random.choice raises IndexError, killing the whole eval battery AFTER training and the checkpoint have
+        # completed. Exactly the failure the comment below describes, surviving the fix written for it, because
+        # the fix guarded on the wrong quantity.
+        # Build the candidate lists FIRST and keep only processes that actually have one. That is the condition
+        # the sampler needs, so it cannot disagree with the test.
+        _wpos = {}
+        for _p0 in sorted(set(labels)):
+            _c0 = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == _p0]
+            if _c0: _wpos[_p0] = _c0
+        procs = sorted(_wpos)
         if ninj > 0 and len(procs) < 2:
             # SINGLE-DOMAIN RUN: the injection builds a WRONG pair by taking a context from one process and a
             # continuation from a DIFFERENT one, which is undefined with a single source -- `random.choice` on the
             # empty "other processes" list raised IndexError and killed the whole eval battery AFTER training and the
             # checkpoint had completed. An English-only run is a supported configuration, so skip the injection and
             # say so, rather than crashing on it.
-            print(f"[wrongness] skipping synthetic injection: needs >=2 source processes, found {len(procs)} "
-                  f"(single-domain run). Self-consistency still runs on the GENUINE store below.")
+            print(f"[wrongness] skipping synthetic injection: needs >=2 source processes with a window-aligned "
+                  f"sample, found {len(procs)} of {len(set(labels))} label(s) present. Self-consistency still "
+                  f"runs on the GENUINE store below.")
             ninj = 0
         if ninj > 0:
             rx = []; ry = []
             for _ in range(ninj):
                 p = random.choice(procs); qd = random.choice([z for z in procs if z != p])
-                sp = random.choice([s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p])
-                sq = random.choice([s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == qd])
+                sp = random.choice(_wpos[p]); sq = random.choice(_wpos[qd])   # non-empty by construction above
                 rx.append(list(stream[sp:sp + WIN])); ry.append(list(stream[sq + 1:sq + WIN + 1]))
             XW = torch.tensor(rx, device=DEV); YW = torch.tensor(ry, device=DEV)
             mem.write(mem_key(XW), YW.reshape(-1), src=99, surprise=None, ctx=mem_ctx(XW))   # bypass gate: force-write the synthetic wrong entries
