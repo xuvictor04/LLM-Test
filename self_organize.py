@@ -985,6 +985,31 @@ TOK_ANCHOR_USES = _f("TOK_ANCHOR_USES", 400.0)             #   ...or over this m
 # -- that is why it was minted late -- so it gets the fewest appearances in the same number of steps.
 TOK_MINT_PMIN = _f("TOK_MINT_PMIN", 0.0)                   # predictability gate on minting; 0 = off
 USE_TOK = bool(_i("TOKENIZER", 1)); TOK_ONLINE = bool(_i("TOK_ONLINE", 1)); TOK = None; BLEN = None   # TOK_ONLINE=1 mints during training
+# WHERE THIS RUN'S VOCABULARY IS WRITTEN -- WHICH IS NOT WHERE IT WAS READ FROM.
+# TOKENIZER_PATH had two jobs: the file the resume READS its parent's vocabulary from, and the file this run
+# SAVES its own to. pilot-add points it at the PARENT's .dyntok.json so the restored embedding is indexed by
+# the vocabulary that trained it -- and then both save sites wrote back through the same variable, so a run
+# that minted anything overwrote its own parent's vocabulary with a longer one.
+# That was harmless only while minting was broken. The moment the tokenizer's cap was raised on resume and
+# Python actually minted its 2048 tokens, the next resume from the SAME parent died:
+#     [resume] VOCABULARY MISMATCH -- refusing to load.
+#       checkpoint runs/long/pilot_gru was trained with 2048 tokens (1792 merges), saved at
+#         TOKENIZER_PATH=runs/long/pilot_gru.dyntok.json
+#       this run has 4096 tokens (3840 merges) from
+#         TOKENIZER_PATH=runs/long/pilot_gru.dyntok.json
+# The refusal is right and the state it refused was created by the previous run writing over its input. A
+# checkpoint's vocabulary is part of the checkpoint; nothing else may write to it. The run's own vocabulary
+# goes beside the run's own checkpoint, which is the convention `pilot` already used for a fresh run
+# (SAVE_CKPT=X TOKENIZER_PATH=X.dyntok.json) and which a RESUME broke by having a parent to read from.
+# SAVE_CKPT=0 MEANS OFF, and the normalisation that knows this runs at save time, hundreds of lines below --
+# so reading the raw variable here would name a file "0.dyntok.json". Same predicate, applied where the value
+# is first consumed.
+# AND WITH NO CHECKPOINT TO PAIR IT WITH, A RESUME SAVES NO VOCABULARY AT ALL. The only file it could write is
+# the one it read the parent's vocabulary from, and overwriting that is the failure this block exists to stop.
+# A FRESH run with no checkpoint is different: TOKENIZER_PATH is its own file and nothing else depends on it.
+_ck0 = _env("SAVE_CKPT", "").strip()
+_TOK_SAVE = ((_ck0 + ".dyntok.json") if _ck0.lower() not in ("0", "", "off", "no", "none", "false")
+             else ("" if _env("RESUME", "") else _env("TOKENIZER_PATH", "data/dyntok.json")))
 TOK_V0 = 256    # vocabulary size when training starts; overwritten once the tokenizer is seeded or loaded.
 #   Declared here so the DID IT FIRE row that reads it degrades to a plain byte alphabet rather than to a
 #   NameError printed as "NO COUNTER" on every run with TOKENIZER=0.
@@ -1173,7 +1198,28 @@ if DATA_MODE == "real":
               f"corpus. Re-pull with fetch_big.py's --shuffle-buffer (now the default) to make it a sample.")
     if USE_TOK:                                            # EXPANDING SUBWORD MODE: an online byte-BPE that GROWS its vocab
         from tokenizer import DynamicTokenizer             #   by mint-on-repetition as it reads the stream (byte-grounded)
+        # ON A RESUME, THE DEFAULT IS THE CHECKPOINT'S OWN FILE, NOT THE SHARED ONE. Unset, this used to fall
+        # back to data/dyntok.json -- a single file every run in the project writes to, so resuming any
+        # checkpoint without naming a tokenizer paired its weights with whichever run happened to touch that
+        # file last. pilot-add's own fallback already warns about exactly this ("if any other pilot has run
+        # since, this vocabulary is that one's"). Now that a run writes its vocabulary beside its checkpoint,
+        # <RESUME>.dyntok.json is both the right guess and the one the refusal below asks for. An explicit
+        # TOKENIZER_PATH still wins, and a missing file still falls through to the shared default rather than
+        # dying, so nothing that worked before stops working.
+        # READ THROUGH _env WITH THE DECLARED DEFAULT, and ask os.environ separately whether it was SET. Reading
+        # it with a different default is what _env exists to refuse -- levers.py caught this on the first try:
+        #   "TOKENIZER_PATH read with default '', registry declares 'data/dyntok.json'"
+        # -- and it is right to. The registry is the single statement of what a knob defaults to; "was it
+        # supplied" is a different question and belongs to a different call.
         _tp = _env("TOKENIZER_PATH", "data/dyntok.json")
+        if "TOKENIZER_PATH" not in os.environ:
+            _rz = _env("RESUME", "").rstrip("/")
+            _cand = ((_rz[:-3] if _rz.endswith(".pt") else _rz) + ".dyntok.json") if _rz else ""
+            if _cand and os.path.exists(_cand):
+                _tp = _cand
+                print(f"[tokenizer] TOKENIZER_PATH unset on a resume -> {_tp}, the file saved beside "
+                      f"{_rz}. (The default is the SHARED data/dyntok.json, which belongs to whichever "
+                      f"run wrote it last.)")
         VMAX = _i("VMAX", 4096)
         _target = _i("SEED_VOCAB", 512) if TOK_ONLINE else VMAX            # online: only SEED here; keep minting during training
         _passes = _i("SEED_PASSES", 2) if TOK_ONLINE else _i("GROW_PASSES", 8)
@@ -4340,7 +4386,26 @@ def main():
                     f"    TOKENIZER_PATH={_livep}\n"
                     f"  The restored embedding rows would mean something different from what they were trained as,\n"
                     f"  and every shape still matches, so nothing else would notice. Set TOKENIZER_PATH to the\n"
-                    f"  file this checkpoint was saved with.")
+                    f"  file this checkpoint was saved with:\n"
+                    f"    TOKENIZER_PATH={_RD.get('tok_path') or (RESUME.rstrip('/') + '.dyntok.json')}"
+                    # THE COMMON CASE IS RECOVERABLE, EXACTLY, AND SAYING SO IS THE DIFFERENCE BETWEEN A DEAD
+                    # CHECKPOINT AND A LIVE ONE. Minting is APPEND-ONLY -- an id never changes meaning, which is
+                    # the property the whole prefix-widening design rests on -- so a file with MORE merges than
+                    # the checkpoint, whose first _ckm of them are the checkpoint's, still contains that
+                    # vocabulary as its prefix. That is exactly what a run that saved its grown vocabulary over
+                    # its parent's file leaves behind, and it was the only way to lose a parent's vocabulary
+                    # until the save path stopped pointing at the file the resume reads.
+                    # Written to a NEW file, never over the one that exists: the run that caused this lost data
+                    # by overwriting, and the recovery advice must not do the same thing.
+                    + (f"\n  RECOVERABLE: this file has MORE merges than the checkpoint, and minting is "
+                       f"append-only, so its first {_ckm} merges ARE that vocabulary. Write the prefix to a new "
+                       f"file and point at that -- nothing existing is modified:\n"
+                       f"    python3 -c \"import json,sys; d=json.load(open(sys.argv[1])); "
+                       f"d['merges']=d['merges'][:{_ckm}]; json.dump(d, open(sys.argv[2],'w'))\" \\\n"
+                       f"        {_livep} {RESUME.rstrip('/')}.dyntok.recovered.json\n"
+                       f"    TOKENIZER_PATH={RESUME.rstrip('/')}.dyntok.recovered.json <your command>\n"
+                       f"  (verify: the new file should read {_ckv} tokens / {_ckm} merges.)"
+                       if (_ckm is not None and len(TOK.merges) > _ckm) else ""))
             if _RD.get("tok_path") and _RD["tok_path"] != _livep:
                 print(f"  [resume] tokenizer path differs from the checkpoint's ({_RD['tok_path']} -> {_livep}) "
                       f"but the vocabulary matches ({TOK.vocab_size} tokens, {len(TOK.merges)} merges), so this is "
@@ -5269,11 +5334,14 @@ def main():
         if not ck: return False                            # RETURNS whether it saved: the caller used to assume it did
         ck = ck + suffix                                   # suffix=".best" writes the best-by-held-out snapshot
         os.makedirs(ck, exist_ok=True)
-        if USE_TOK: TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
+        if USE_TOK and _TOK_SAVE: TOK.save(_TOK_SAVE)
         act = mem.active
         torch.save({"model": model.state_dict(), "D": D, "V": V, "KW": KW, "KEY_SRC": KEY_SRC,
                     "model_type": MODEL_TYPE, "layers": _i("LAYERS", 4 if MODEL_TYPE=="transformer" else 1), "heads": _i("HEADS", 8), "maxlen": _i("MAXLEN", 512),
-                    "use_tok": USE_TOK, "tok_path": (_env("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None),
+                    # ...AND tok_path RECORDS WHERE IT WAS WRITTEN, not where this run happened to read from.
+                    # A checkpoint has to name the vocabulary that indexes ITS OWN embedding rows; on a resume
+                    # that is the file just written beside it, and the parent's file is the parent's business.
+                    "use_tok": USE_TOK, "tok_path": (_TOK_SAVE if USE_TOK else None),
                     # THE VOCABULARY THIS MODEL'S EMBEDDING TABLE IS INDEXED BY. tok_path alone is a filename, and
                     # a filename does not certify contents; these two do, and the resume check below reads them.
                     "tok_vocab": (TOK.vocab_size if USE_TOK else None),
@@ -5379,7 +5447,7 @@ def main():
         torch.save({"enc": enc.state_dict(), "sig_d": SIG_D, "win": WIN, "step": step,
                     "cent": {int(k): v.cpu() for k, v in asm.cent.items()}, "size": dict(asm.size),
                     "sig_space": SIG_SPACE, "domains": _env("DOMAINS", "eng,py,num,c"), "enc_v": ENC_V,
-                    "use_tok": USE_TOK, "tok_path": (_env("TOKENIZER_PATH", "data/dyntok.json") if USE_TOK else None)},
+                    "use_tok": USE_TOK, "tok_path": (_TOK_SAVE if USE_TOK else None)},   # written, not read
                    f"{ck}/probe.pt.tmp")
         os.replace(f"{ck}/probe.pt.tmp", f"{ck}/probe.pt")
         if not quiet:
@@ -7772,9 +7840,13 @@ def main():
         if mem.ctx_w > 0:
             print(f"[tokenizer] final re-segmentation moved {_mchf} of {int(mem.active.sum())} stored contexts "
                   f"into the final vocabulary")
-        TOK.save(_env("TOKENIZER_PATH", "data/dyntok.json"))
+        if _TOK_SAVE: TOK.save(_TOK_SAVE)
         print(f"[tokenizer] ONLINE: minted throughout -> grew {TOK_V0} -> {TOK.vocab_size} during training "
-              f"(+{TOK.vocab_size - TOK_V0}); final re-tokenization for eval")
+              f"(+{TOK.vocab_size - TOK_V0}); final re-tokenization for eval"
+              + (f" -> {_TOK_SAVE}" if _TOK_SAVE else
+                 f" -- NOT SAVED: this is a resume with no SAVE_CKPT, so the only file to write to is the one "
+                 f"the parent's vocabulary was read from, and {TOK.vocab_size - TOK_V0} new token(s) would make "
+                 f"that checkpoint unloadable. Set SAVE_CKPT to keep this vocabulary."))
 
     # === SOFTMAX WIDTH vs THE VOCABULARY THAT EXISTS =========================================================
     # V is the row count the LM loss normalises over. Under ONLINE it is VMAX, fixed before training starts,

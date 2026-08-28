@@ -716,6 +716,75 @@ check(any("IS NOT THE RUN'S ROUTER: 1 of 16" in l for l in out3) and any("1 prob
       "a mixed set splits: the old one alarms, the new one is explained, counts stated separately")
 
 
+# --- 8d. WHERE THIS RUN'S VOCABULARY IS WRITTEN, AND THE RECOVERY WHEN IT WENT TO THE WRONG PLACE -----------
+# TOKENIZER_PATH had two jobs: the file a resume READS its parent's vocabulary from, and the file this run
+# SAVES its own to. pilot-add points it at the PARENT so the restored embedding is indexed by the vocabulary
+# that trained it -- and both save sites wrote back through the same variable. Harmless only while minting was
+# broken; the moment the tokenizer's cap was raised on resume and Python minted its 2048 tokens, the run wrote
+# 4096 merges over its parent's 2048 and the NEXT resume from that parent died:
+#     [resume] VOCABULARY MISMATCH -- checkpoint ... 2048 tokens (1792 merges) ... this run has 4096 (3840)
+# ...with both lines naming the same file. The refusal was right; the state it refused was made by the previous
+# run overwriting its own input.
+print("\nTHE RUN'S VOCABULARY IS WRITTEN BESIDE THE RUN'S OWN CHECKPOINT")
+
+TOKSAVE = block("_ck0 = _env(\"SAVE_CKPT\", \"\").strip()", "\nTOK_V0 =")
+
+
+def _tok_save(save_ckpt, resume, tokenizer_path="data/dyntok.json"):
+    env = {"SAVE_CKPT": save_ckpt, "RESUME": resume, "TOKENIZER_PATH": tokenizer_path}
+    ns = {"_env": lambda k, d: env.get(k, d)}
+    exec(compile(TOKSAVE, "<self_organize>", "exec"), ns)
+    return ns["_TOK_SAVE"]
+
+
+check(_tok_save("runs/long/pilot_gru_py-4", "runs/long/pilot_gru", "runs/long/pilot_gru.dyntok.json")
+      == "runs/long/pilot_gru_py-4.dyntok.json",
+      "a resume writes beside its OWN checkpoint, not over the parent it read from")
+check(_tok_save("runs/long/pilot_gru", "", "runs/long/pilot_gru.dyntok.json")
+      == "runs/long/pilot_gru.dyntok.json",
+      "a fresh run keeps the convention pilot already used: SAVE_CKPT=X -> X.dyntok.json")
+check(_tok_save("0", "runs/long/pilot_gru", "runs/long/pilot_gru.dyntok.json") == "",
+      "SAVE_CKPT=0 on a RESUME saves nothing -- the only file it could write is the parent's")
+check(_tok_save("", "", "data/dyntok.json") == "data/dyntok.json",
+      "SAVE_CKPT off on a FRESH run still writes its own file, which nothing else depends on")
+for _off in ("0", "off", "no", "none", "false", "", "  "):
+    check(_tok_save(_off, "", "data/dyntok.json") == "data/dyntok.json",
+          f"SAVE_CKPT={_off!r} is OFF here too, not a directory named {_off!r}")
+
+# THE RECOVERY THE REFUSAL OFFERS, ON THE REAL TOKENIZER. Minting is append-only -- an id never changes
+# meaning, which is the property prefix-widening already rests on -- so a clobbered file still contains the
+# parent's vocabulary as its first _ckm merges. The refusal tells the user to write that prefix to a NEW file;
+# this asserts the prefix really is that vocabulary, because "equal merge counts" is not "equal meaning".
+print("\n  ...and a clobbered file still contains the parent's vocabulary as its prefix")
+import json as _json, os as _os, tempfile
+from tokenizer import DynamicTokenizer
+
+_txt = SRC[:400000].encode()
+_tk = DynamicTokenizer(vmax=600, min_pair=5, max_tok=16)
+for _i in range(0, len(_txt), 8192): _tk.segment(_txt[_i:_i + 8192], count=True)
+while _tk.vocab_size < 400 and _tk.maybe_grow() is not None: pass
+_v0, _m0 = _tk.vocab_size, len(_tk.merges)
+_tmp = tempfile.mkdtemp(); _clob = _os.path.join(_tmp, "parent.dyntok.json")
+_tk.save(_clob)
+_ref = DynamicTokenizer.load(_clob)                       # what the parent's checkpoint is indexed by
+for _i in range(0, len(_txt), 8192): _tk.segment(_txt[_i:_i + 8192], count=True)
+while _tk.vocab_size < 600 and _tk.maybe_grow() is not None: pass
+_tk.save(_clob)                                           # the child writing over its parent's file
+check(len(_tk.merges) > _m0, f"the child grew the file to {len(_tk.merges)} merges over the parent's {_m0}")
+
+_d = _json.load(open(_clob)); _d["merges"] = _d["merges"][:_m0]
+_rec = _os.path.join(_tmp, "parent.dyntok.recovered.json")
+_json.dump(_d, open(_rec, "w"))
+_back = DynamicTokenizer.load(_rec)
+check(_back.vocab_size == _v0 and len(_back.merges) == _m0,
+      f"truncating to the first {_m0} merges restores the counts ({_back.vocab_size} tokens)")
+_probe = SRC[400000:420000].encode() or _txt[:20000]
+check(_back.segment(_probe) == _ref.segment(_probe),
+      f"...and SEGMENTS IDENTICALLY on {len(_probe)} unseen bytes, which is what makes the restored embedding "
+      f"rows mean what they were trained as")
+check(_back.merges == _ref.merges, "...and the merge lists are identical, not merely the same length")
+
+
 # --- 9. FOUR CLAIMS I MADE AND NEVER CHECKED -----------------------------------------------------------
 # Audited after the first continual-learning run. Two were true and worse than stated, one was partly wrong
 # in my wording, one was true with a consequence I had understated.

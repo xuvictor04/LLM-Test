@@ -136,7 +136,12 @@ _ck  "run reached its report"             "$OUT/fresh.log" "held-out"
 
 echo; echo "--- end to end: a resume, where retention is measurable --------------------------"
 # shellcheck disable=SC2086
-env $COMMON SEED=1 RESUME="$OUT/ck" SAVE_CKPT=0 TOKENIZER_PATH="$OUT/t.json" \
+# THE VOCABULARY THAT GOES WITH $OUT/ck IS THE ONE SAVED BESIDE IT. This said TOKENIZER_PATH=$OUT/t.json,
+# which worked only while a run wrote its grown vocabulary back over the file it READ -- the coupling that let
+# a resume overwrite its parent's vocabulary and made the parent unloadable. t.json now keeps the 256-token
+# seed it was written with, so pointing a resume at it is a genuine mismatch and the engine says so. Naming the
+# checkpoint's own file is both the fix and the convention every caller now uses.
+env $COMMON SEED=1 RESUME="$OUT/ck" SAVE_CKPT=0 TOKENIZER_PATH="$OUT/ck.dyntok.json" \
     python3 self_organize.py > "$OUT/resume.log" 2>&1
 RC=$?
 [ "$RC" = 0 ] || { echo "  FAIL  the resume exited $RC:"; tail -6 "$OUT/resume.log" | sed 's/^/          /'; FAIL=1; }
