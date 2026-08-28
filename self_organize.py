@@ -6361,20 +6361,63 @@ def main():
                 if _i("MEM_PRESSURE_ACT", 0) and FABRIC and fabgrow is not None:
                     fabgrow.note_shift(step)     # same entry point a regression uses: makes growth eligible now
                     print(f"     MEM_PRESSURE_ACT=1 -> growth made eligible at step {step}.")
+            # ...AND WHETHER THAT SIGNAL CAN FIRE AT ALL, which is a different question and the one that decides
+            # whether the silence above means anything. pressure() is n_main_evict / (n_prob + n_main): the share
+            # of evictions that destroyed a PROMOTED entry. Eviction narrows to probation whenever probation is
+            # over its budget, and probation is where every write lands -- only RETRIEVAL promotes out of it. At
+            # the write:read ratio this runs at (a pilot wrote 11.7M times into 200k slots against 1469 read
+            # probes) probation is not a 10% scan-resistant region, it is 82% of the store, permanently over
+            # budget. So the probation branch is not the exception, it is the rule; n_main_evict stays near zero;
+            # and pressure() reads ~0 for the whole run whatever the store is actually suffering. A signal that
+            # cannot reach its own threshold reads exactly like a healthy one, which is the failure this file
+            # keeps finding. Say so, with the numbers, rather than printing nothing and letting it pass for calm.
+            _pcap = max(1, _sr.get("prob_cap", 0)); _pnow = _sr.get("prob", 0)
+            if _pnow > 2 * _pcap:
+                _pe, _me = mem.n_prob_evict, mem.n_main_evict
+                print(f"  !! PROBATION IS {_pnow / _pcap:.1f}x ITS BUDGET ({_pnow} entries against a cap of "
+                      f"{_pcap} = MEM_PROB_FRAC x {mem.cap}): every write lands on probation and only RETRIEVAL "
+                      f"promotes out of it, so at this write-to-read ratio the region covers most of the store. "
+                      f"Eviction therefore takes the probation branch almost always ({_pe} probation vs {_me} "
+                      f"main evictions), which leaves MEMORY PRESSURE = main/(main+probation) = "
+                      f"{_me / max(1, _pe + _me):.3f} pinned near zero for the run -- it cannot reach "
+                      f"MEM_PRESSURE={_f('MEM_PRESSURE', 0.80):g} whatever the store is suffering, so its silence "
+                      f"above is not evidence of a healthy store. Raise MEM_PROBE_EVERY's read rate to promote "
+                      f"more, or read pressure() as unavailable on this configuration.")
             # ONLY SOURCES THAT LOST GROUND. Being under the floor is normal for a domain that has just appeared
             # and has not written a floor's worth yet; it is a failure only for one that HAD it and no longer
             # does. The first version of this alarm could not tell them apart and fired on every new domain.
-            _starved = [f"s{_s} ({_c} now, peaked {_pk})" for _s, _c, _pk in _sr.get("lost", [])]
+            # WORST FIRST, AND ONLY AS MANY AS CAN BE READ. The domain manager runs to hundreds of live sources,
+            # so this list reached 200+ entries on one 5 kB line, eight times a run. That is the same failure the
+            # high-water mark above was added to fix -- an alarm nobody reads is an alarm that is not firing --
+            # and it was reintroduced by printing every row instead of the ones worth acting on. Rank by how much
+            # was LOST (peak minus now), name the worst, and count the rest.
+            _lost = sorted(_sr.get("lost", []), key=lambda r: -(r[2] - r[1]))
+            _starved = [f"s{_s} ({_c} now, peaked {_pk})" for _s, _c, _pk in _lost[:12]]
+            _more = max(0, len(_lost) - len(_starved))
             print(f"  [epoch {_epoch + 1}/{EPOCHS}{' (fresh sample)' if DISK_STREAM else ''} @ step {step} | "
                   f"vocab {TOK.vocab_size if USE_TOK else 256} | mem {mem.n} ({_tch} retrieved, "
                   f"{_mprobe['n']} probes; floor {_sr['floor']} | {_occ}) | domains {len(asm.cent)} | "
                   f"lr {_lrn:.2e} ({_lrn / max(1e-12, LR) * 100:.0f}% of peak)]")
             if _starved and mem.src_floor > 0:
-                print(f"  !! MEMORY STARVATION: {', '.join(_starved)} -- each once held at least the "
+                print(f"  !! MEMORY STARVATION ({len(_lost)} source(s), worst first): {', '.join(_starved)}"
+                      f"{f' ... and {_more} more' if _more else ''} -- each once held at least the "
                       f"{_sr['floor']}-entry floor that MEM_SRC_FLOOR={mem.src_floor:g} reserves and is now under "
                       f"a quarter of it. The floor protects against EVICTION only, so check whether those entries "
                       f"are being DELETED (unlearn/sweep) or whether the live-source count grew and moved the "
                       f"floor under them.")
+            # THE CENSUS ITSELF, BEFORE ANY READING OF THE ALARM ABOVE. Both of these are zero on a healthy run,
+            # and both make the starvation list untrustworthy when they are not: a duplicated slot in one write
+            # decrements the displaced source once per repeat, so the counts drift down for whatever is being
+            # displaced -- exactly the sources this alarm names. Until these read 0 the alarm above is reporting
+            # bookkeeping, not eviction. (A run before this was fixed printed "s779 (-2 now, peaked 111230)": a
+            # negative count of entries, which no amount of eviction can produce.)
+            if _sr.get("dup_slot", 0) or _sr.get("src_underflow", 0):
+                print(f"  !! MEMORY CENSUS DRIFT: {_sr.get('dup_slot', 0)} slot(s) named twice by a single write "
+                      f"(collapsed, so that many rows were NOT stored), {_sr.get('src_underflow', 0)} decrement(s) "
+                      f"took a source below zero. nsrc is the per-source floor's only input and `nsrc > 0` is what "
+                      f"makes a source eligible for protection at all, so an undercounted source is unprotected by "
+                      f"the floor that exists to keep it alive. Read MEMORY STARVATION above as suspect until this "
+                      f"line is absent.")
             if MEM_PROBE_EVERY and mem.n > 64 and _tch == 0:
                 print(f"  !! MEM_PROBE ran {_mprobe['n']} times and NOTHING was retrieved -- EVICT={mem.evict} is "
                       f"selecting on a dead signal. Check KEY_SRC/mem_ctx; this run's memory is write-order-culled.")
@@ -8320,12 +8363,18 @@ def main():
         # and the whole self-consistency filter is inert. Both states are invisible: an inert filter and a filter
         # excluding a third of the store print exactly the same nothing. On the first continual-learning run it
         # was the second, 63,146 of 200,000 entries, at 3% precision.
-        _r("memory.wrong_block", lambda: int((mem.active & mem.is_wrong()).sum()),
-           lambda: _cfg("MEM_WRONG_READ") and int((mem.selfcon >= 0).sum()) > 10,
+        # ...AND IT IS COUNTED WHERE IT GATES, NOT FROM THE STATE LEFT AT THE END. The first version of this row
+        # armed on `(mem.selfcon >= 0).sum() > 10` at report time. Every write resets that entry's selfcon to -1,
+        # and the pilot wrote 11.7M times into 200k slots, so by the end nothing was marked as checked and the
+        # row printed "only 0 entries have been self-consistency checked ... read() filters nothing" -- in the
+        # same report as "61,952 of 200,000 active entries are excluded from EVERY retrieval". Two numbers for
+        # one mechanism, disagreeing, both honestly computed, and the wrong one in the audit that exists to catch
+        # exactly this. Memory.read now counts its own exclusions as it makes them.
+        _r("memory.wrong_block", lambda: mem.n_wrong_read_hit,
+           lambda: _cfg("MEM_WRONG_READ") and mem.n_wrong_reads > 0,
            ("MEM_WRONG_READ=0 -- the flag is reported but does not gate retrieval" if not _cfg("MEM_WRONG_READ")
-            else f"only {int((mem.selfcon >= 0).sum())} entries have been self-consistency checked, and "
-                 f"is_wrong() needs more than 10 before it computes a threshold at all -- so nothing can be "
-                 f"flagged and read() filters nothing"))
+            else "read() was never called with the gate on, so it blocked nothing -- check MEM_PROBE_EVERY, "
+                 "which is what makes retrieval happen during training at all"))
         _r("domains.create",     lambda: asm.created)
         _r("domains.merge",      lambda: asm.n_merged, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
         _r("domains.cull",       lambda: asm.n_culled, lambda: _cfg("DOM_MANAGE_EVERY"), "DOM_MANAGE_EVERY=0")
@@ -8337,8 +8386,16 @@ def main():
         # modality" claim runs into first -- a new area gets new EXPERTS but cannot get new TOKENS unless VMAX
         # was set with room to spare. Report it as OFF with the reason, so the ZERO lines keep meaning what they
         # say, and say the number that matters: how much headroom there was to begin with.
+        # ...AND "WAS THERE ROOM" IS A QUESTION ABOUT THE START OF THE RUN, WHICH IS WHERE IT HAS TO BE ASKED.
+        # The armed test read TOK.vocab_size -- the vocabulary NOW, at report time -- against VMAX, while the
+        # count beside it is TOK.vocab_size - TOK_V0, i.e. what was minted THIS RUN. So a run that minted its way
+        # from 512 to a full 2048 reported "off -- the vocabulary was already FULL at 512/2048 when this run
+        # started, so there was no room to mint", with 1536 mints in the number it had just discarded, and the
+        # log directly above it showing vocab climbing 512 -> 824 -> 1148 -> 1304. The mechanism ran, the row
+        # said it could not have, and the reason said the opposite of what happened. TOK_V0 is the vocabulary
+        # this run STARTED with and is already the count's own baseline; arming on it makes the two agree.
         _r("tokenizer.mint",     lambda: TOK.vocab_size - TOK_V0,
-           lambda: _cfg("TOK_ONLINE") and TOK is not None and TOK.vocab_size < int(_cfg("VMAX")),
+           lambda: _cfg("TOK_ONLINE") and TOK is not None and TOK_V0 < int(_cfg("VMAX")),
            ("TOK_ONLINE=0" if not _cfg("TOK_ONLINE") else
             f"the vocabulary was already FULL at {TOK_V0}/{int(_cfg('VMAX'))} when this run started, so there was no "
             f"room to mint for anything that arrived. Raise VMAX above the checkpoint's vocabulary to give a new "
@@ -8601,6 +8658,18 @@ def main():
                       "WRONG_INJECT>0 and two or more source processes to get one.")
                      + " MEM_WRONG_READ=0 keeps the flag for reporting and stops it gating reads."
                      if _nblk else ""))
+            # WHAT THE GATE DID DURING TRAINING, beside what the store looks like now. The count above is a
+            # snapshot taken after a self-consistency pass this report itself just ran; it says how much would be
+            # unreachable if a read happened this instant. It does not say whether any read ever hit the filter,
+            # and those are different claims -- the DID IT FIRE audit runs BEFORE this pass, found selfcon empty
+            # (every write resets it) and concluded "read() filters nothing" in the same report as this line.
+            # Memory.read counts its own exclusions now, so both questions get their own answer.
+            print(f"     DURING TRAINING the gate ran on {mem.n_wrong_reads} read(s) and excluded at least one "
+                  f"entry on {mem.n_wrong_read_hit} of them ({mem.n_wrong_blocked} entry-exclusions in total, "
+                  f"counting an entry once per read it was withheld from)."
+                  if mem.n_wrong_reads else
+                  f"     DURING TRAINING read() was never called with the gate on, so nothing above was withheld "
+                  f"from any actual retrieval -- MEM_PROBE_EVERY is what makes reads happen during training.")
             if ninj > 0: mem.delete_src(99)      # remove the SYNTHETIC injected entries so downstream metrics are clean
             mem.selfcon.fill_(-1.0)              # clear flags so genuine entries aren't excluded from retrieval below
 
@@ -8626,7 +8695,18 @@ def main():
             _excl = int((_share == 1).sum()); _shared = int((_share > 1).sum()); _idle = int((_share == 0).sum())
             print(f"\n=== AFFILIATION: domains are COLLECTIONS of experts -- how shared are they? ===")
             print(f"  experts serving >1 domain: {_shared} | serving exactly 1 (exclusive): {_excl} | serving none: {_idle}")
-            print(f"  domains served per expert: {[int(v) for v in _share]}")
+            # A HISTOGRAM, NOT THE VECTOR. This printed one integer per expert: at 2090 experts that is a 6.3 kB
+            # line of which the first two thousand entries were "0, 0, 0, ...", and the three counts printed
+            # immediately above it already say everything the head of that list could. What the dump alone could
+            # answer is the TAIL -- how many experts are stretched across many domains at once, which is the
+            # breadth-cap's whole subject -- so that is what replaces it.
+            _hist = {}
+            for _v in _share.tolist(): _hist[int(_v)] = _hist.get(int(_v), 0) + 1
+            print(f"  domains served per expert: "
+                  + ", ".join(f"{_k}->{_hist[_k]} expert(s)" for _k in sorted(_hist))
+                  + f" | busiest expert serves {int(_share.max()) if _share.numel() else 0} domain(s) "
+                    f"(breadth cap EXP_DOM_FRAC={fab.breadth:.0%} of {len(_aff)} domains, floored at "
+                    f"EXP_DOM_MIN={fab.breadth_min} -> {max(fab.breadth_min, int(fab.breadth * max(1, len(_aff))))})")
             _big = sorted(_aff, key=lambda d: float(_aff[d].sum()), reverse=True)[:5]
             print(f"  BLAST RADIUS if a domain is deleted (experts that would be left with NO other domain):")
             for _d in _big:
@@ -8683,8 +8763,23 @@ def main():
                                torch.zeros(1, device=DEV), learn_regions=False)
         print(f"\n=== FABRIC: does the routed node population help? (bits/byte, lower=better) ===")
         print(f"  model ALONE {_b:.3f}  ->  + FABRIC {_f2:.3f} (fabric {_b - _f2:+.3f})  ->  + FABRIC + MEMORY {_fm:.3f}")
+        # THE SHAPE OF THE MASS, NOT 2090 FLOATS. This line dumped one number per node -- 10.5 kB on the pilot,
+        # almost all of it "0.0, 0.0, 0.0" -- under a note telling the reader to judge whether the mass is spread
+        # or collapsed. Nobody can answer that from the dump, and the numbers that do answer it (how many nodes
+        # carry the mass, how much the top one takes, how much went to HALT) were never computed. The note is
+        # only worth printing next to the measurement it asks for.
+        _nm = [float(v) for v in _m[:-1]]
+        _halt = float(_m[-1])
+        _ns = sorted(_nm, reverse=True)
+        _tm = sum(_ns) or 1.0
+        _c50 = 0; _a = 0.0
+        for _v in _ns:
+            _a += _v; _c50 += 1
+            if _a >= 0.5 * _tm: break
+        _nz = sum(1 for _v in _nm if _v > 1e-4)
         print(f"  nodes {len(fab.bodies)} | mean routed depth {float(_d):.2f} of {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps"
-              f" | node mass {[round(float(v), 2) for v in _m[:-1]]} halt {float(_m[-1]):.2f}")
+              f" | node mass: {_nz} of {len(_nm)} nodes carry any, top node {100 * _ns[0] / _tm if _ns else 0:.0f}%, "
+              f"half of it on {_c50} node(s) | halt {_halt:.2f}")
         print(f"  (mass spread across nodes = SPECIALIZED; all mass on one node = collapsed; all mass on HALT = the")
         print(f"   router wrote the nodes off before they could learn -- raise FAB_MIN_STEPS / PONDER_WARM)")
         print(f"  NOTE: 'model ALONE' here is an ABLATION of a component the model TRAINED WITH (it also removes the")
@@ -8851,11 +8946,42 @@ def main():
                 print(f"    (the 'N of {_N} used' line above is a held-out PROBE, not the run, so these two answer "
                       f"different questions -- but they are the same router and cannot differ by orders of "
                       f"magnitude. When they do, the probe is not calling the path the run calls.)")
-                if _uv and len(_used) * 10 < len(_uv):
-                    print(f"    !! THE PROBE PARTITION IS NOT THE RUN'S ROUTER: {len(_used)} winner(s) here "
-                          f"against {len(_uv)} over the run. Every SPECIALIZATION verdict above is void until "
-                          f"that is explained -- check the entry path this block scores with against the one "
-                          f"fab_logits actually takes.")
+                # TWO COUNTS OF THE SAME ROUTER, COMPARED IN THE RIGHT UNITS. The first version of this check
+                # read `len(_used) * 10 < len(_uv)` -- 8 probe winners against 633 run winners -- and fired on
+                # the pilot with "every SPECIALIZATION verdict above is void". It was the check that was void.
+                # The probe scores 32 windows, so len(_used) CANNOT exceed 32 whatever the router does: even a
+                # perfectly-behaved probe that picked a different expert every single window would give 320 < 633
+                # and trip. A guard that cannot be satisfied is not measuring anything -- it is the same failure
+                # this file keeps finding, a quantity in one unit tested against a quantity in another.
+                # What the two counts can honestly be asked:
+                #   (a) MEMBERSHIP, which has no units at all. Every expert the probe routes to should be one the
+                #       run selected at least once. A winner the run NEVER chose is a genuinely different path,
+                #       and no sample size explains it away.
+                #   (b) COVERAGE against what this many draws from the run's own selection distribution would
+                #       give. With p_i the share of run windows expert i won, the expected number of distinct
+                #       winners in W draws is sum_i (1 - (1-p_i)^W) -- the coupon-collector count. That is the
+                #       null the observed number belongs next to, and it is bounded by W by construction.
+                _wk = {int(k) for k, v in fab.use.items() if v > 0}
+                _off = [n for n in _used if n not in _wk]
+                _W = max(1, len(_bw))
+                _exp = sum(1.0 - (1.0 - _u / _ut) ** _W for _u in _uv) if _uv else 0.0
+                if _uv and _off:
+                    print(f"    !! THE PROBE PARTITION IS NOT THE RUN'S ROUTER: {len(_off)} of {len(_used)} "
+                          f"winner(s) here -- {', '.join(str(n) for n in _off[:8])}"
+                          f"{' ...' if len(_off) > 8 else ''} -- were never selected once in {int(_ut)} routed "
+                          f"windows over the whole run. Every SPECIALIZATION verdict above is void until that is "
+                          f"explained -- check the entry path this block scores with against the one fab_logits "
+                          f"actually takes.")
+                elif _uv and _exp >= 4 and len(_used) < 0.4 * _exp:
+                    print(f"    !! THE PROBE IS FAR MORE CONCENTRATED THAN THE RUN: {len(_used)} distinct winner(s) "
+                          f"over {_W} probe windows, where drawing {_W} windows from the run's own selection "
+                          f"distribution would give about {_exp:.1f}. The winners are all experts the run does "
+                          f"use, so the entry path matches; what differs is how sharply it discriminates on this "
+                          f"held-out slice. Read SPECIALIZATION as a statement about {len(_used)} experts.")
+                elif _uv:
+                    print(f"    ({len(_used)} distinct winner(s) over {_W} probe windows against about {_exp:.1f} "
+                          f"expected from the run's own selection distribution, all of them experts the run "
+                          f"selected: the probe is calling the same router.)")
                 # === GRADIENT REACH: how many experts LEARN per step? =========================================
                 # Distinct from utilization. `use` says who WON a window at some point in the run; this says how
                 # many experts were in the graph on a single step, i.e. how many were being trained at once.
