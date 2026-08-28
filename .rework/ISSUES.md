@@ -1981,3 +1981,200 @@ EXPERTS and FABRIC are mutually exclusive and lose the elif chain, so `EXPERTS=1
 | `unit-mismatch` | 32 | a quantity produced in one unit, consumed in another |
 | `silent-overwrite` | 29 | state is destroyed with no error |
 | `crash` | 25 | the run dies |
+
+---
+
+## PART 4 — defect-shaped statements recorded as facts, not as bugs
+
+The survey's `bugs` arrays were not the only place defects landed. These are statements from the
+`facts` and `carry_forward` arrays that describe something broken, inert, or self-contradictory and
+that did not appear in Parts 1-3. They are *unverified* by construction and several will turn out to be
+descriptions of intended behaviour — but a work list built only from the `bugs` field would have missed
+them, which is itself the `recorded-never-read` class applied to this document.
+
+- **[archive/facts]** DECISION/INVARIANT — fab_logits() is the SINGLE hidden→logits path; a new consumer of model output MUST use it or a fabric-trained checkpoint silently runs the wrong forward pass. This bug hit at least 3 times.  
+  `archive/handoff/decisions/fab_logits-is-the-single-hidden-to-logits-path-and-diagnostics-never-crash-a-run.md:4-7; still asserted live at self_organize.py:4001`
+- **[archive/facts]** DESIGNED-BUT-NOT-BUILT — corroboration-based wrongness detection (does an entry disagree with its nearest neighbours?) was proposed as the only plausible fix for B's ~1% precision and never built.  
+  `archive/handoff/designed-but-not-built/corroboration-based-wrongness-detection.md:3-6`
+- **[archive/facts]** The 11 process/ rules are the project's working protocol: report every add/remove/change AND omission; end each build with a recommended next step and who does it; estimate wall-clock before any GPU run; bias toward pruning; flag [me] defaults and ask rather than silently default; name sandbox blockers explicitly and hand off ready-to-run commands; no GPU here (user runs H100 and pastes results); disclose the CPU-only + network-allowlist sandbox; develop on the designated branch; update STATE.md before responding; verify ledger edits actually landed.  
+  ``ls /home/user/LLM-Test/archive/handoff/process` → 11 files, each named for its rule`
+- **[archive/facts]** The most operationally important process rule is 'verify the edit landed': STATE.md silently stopped being written to disk for ~30 turns while later turns narrated edits to it, and that is named as the single root cause of the project's worst drift.  
+  `archive/handoff/process/verify-ledger-edits-actually-landed-before-claiming-success.md:3-6; archive/STATE.md:5-6`
+- **[archive/facts]** The archive records that D_MODEL_B was read by NOTHING — self_organize.py reads D_MODEL and only run_full_unfrozen.sh translated the name — so a direct D_MODEL_B=768 run silently used the d=128 default, including in the pilot command handed to the user.  
+  `archive/STATE.md:198-202`
+- **[archive/facts]** The 12 history/ files reconstruct Phases 0–11 and are the narrative source for how each decision was made; STATE.md §6 declares the phase framing canonical over the older inconsistent turn labels (T33, T18/T24).  
+  `archive/STATE.md:15; archive/STATE.md:564-577; `ls archive/handoff/history | wc -l` → 12`
+- **[chat-a/facts]** INSTRUCTION (L1721): "The vocabulary size increse looks liek too much, 640 when at 2k, is almost 30%. / The increase should be more like 5-10% each time. Similarly for the experts, at a similar percentage.. / It works, now lets see it in action, and run some more pilots to see if it improves." — this reverses the owner's own earlier "linear (so not 1.1x)" instruction; the assistant flagged the reversal explicitly rather than switching silently.  
+  `jsonl:1721; assistant at :1776 ("This does reverse your earlier 'linear, not percentage' instruction, so I want to be explicit rather than quietly switch")`
+- **[chat-a/facts]** QUESTION (L2254): "Are these enough?" (round11); (L2331) "What happened? It didn't go down, and never reached the loss of the short runs" (the 0.75 GB run); (L2473) "Looks worse again" (round13).  
+  `jsonl:2254, jsonl:2331, jsonl:2473`
+- **[chat-a/facts]** ASSISTANT ASSUMPTION THAT WAS WRONG: it claimed the GROW_CAP soft-cap mechanism did not exist and had to be built, when the owner remembered correctly that it did. "You're right and I was wrong — the mechanism exists. I missed it because it isn't in the groups I dumped, and because GROW_CAP defaults to 0, so it has never run." The proximate cause was a stale note: notes/02_IDEAS.md A91 said "NEVER IMPLEMENTED" while citing the very commit (e2db890) that implemented it.  
+  `assistant at jsonl:908, :1015`
+- **[chat-a/facts]** MEASURED (round5, runs/round5, cull-gate arms, judged on DID IT FIRE as pre-committed): base 23 culls all sustained-error, 0 utilization culls, 0 spares, rescue unreachable; gate_nmax 296/5/291/1578; gate_press 220/16/204/1253; gate_soft 484/35/449/2749; gate_nmax_resc 104/16/88/3211 with FAB_RESCUE firing 203 times — the first ever measurement of A92.  
+  `assistant at jsonl:1499; grid summary at :1450`
+- **[chat-a/carry_forward]** Judge structural interventions on DID IT FIRE, not on bits/byte, and commit to that before seeing the numbers. 'An arm that changes nothing AND never fires is a different finding from one that fires and changes nothing — only the second is about the idea.'  
+  `assistant at jsonl:1092, :1446`
+- **[chat-a/carry_forward]** 'Unreachable' is not the same as 'inert', and the audit must distinguish them — they have different fixes. A mechanism reported as ARMED AND INERT when the run simply never asked reads as 'the idea does not work'.  
+  `assistant at jsonl:1376, :1387`
+- **[chat-a/carry_forward]** `longrun.sh grid` skips completed arms and never overwrites a finished log; `pair` runs both arms over the SAME seeds so they cannot be compared unpaired by accident. These are the mechanical enforcement of the owner's no-overwrite constraint and of paired comparison.  
+  `owner-pasted harness output at jsonl:651; assistant at :714`
+- **[chat-b/facts]** ASSISTANT CONTAINER: /home/user/LLM-Test, has NO torch installed, so mem_evict_test.py and growth_test.py cannot be run there — they are written for the owner's box and shipped unrun.  
+  `transcript:L3697 ("ModuleNotFoundError: No module named 'torch'"), L4448, L5309 ("those four checks are unrun until you run them on your box")`
+- **[chat-b/facts]** ASSISTANT CONTAINER: huggingface.co is UNREACHABLE through the agent proxy (CONNECT tunnel failed, 403); pypi.org and files.pythonhosted.org return 200 and `pip download` works at ~56 MB/s.  
+  `transcript:L4034, L4037, L4246, L4251`
+- **[chat-b/facts]** MEASURED (sched_ctl): final step 282744, vocab 2048/2048, population 3685/8192, 3160 grown / 1523 removed / net +1637, 5 capacity-valve lifts (3000->3240->3499->3778->4080->4406), longest spell at cap 39363 steps against GROW_CAP_EVERY=20000. The final soft cap 4406 was never used.  
+  `transcript:L2887`
+- **[chat-b/facts]** MEASURED (two identically-labelled held-out numbers): 36 finished logs carry BOTH the MEMORIZATION CHECK figure (what compare.py and runs.py read) and the `SAMPLED FROM ... (X held-out bits/byte)` figure (what a human greps). 27 of 36 disagree by more than compare.py's own 0.03 "worth resolving" floor; the largest gap is 0.190 (lr_vcap 2.178 vs 1.988), then pop1024 2.104/1.966 (+0.138) and pop128 2.289/2.156 (+0.133). Signs go both ways.  
+  `transcript:L3767, L3785, L3788`
+- **[chat-b/carry_forward]** A default that cannot fire is worse than one that is off: WRITE_QUANTILE=1 gated behind WRITE_ADAPTIVE=0; TOK_ANCHOR=0.05 whose loss term never enters the loss; LR_DECAY/LR_RESTART_DAMP unreachable on every arm that would be run. Every such knob needs a DID IT FIRE row that distinguishes 'off by arithmetic' from 'armed and inert'.  
+  `transcript:L3144, L3235, L5277, L5399`
+- **[chat-c/carry_forward]** There are TWO preallocated geometries and they must be reasoned about separately: the fabric slot pool (FAB_NMAX → A, B, SRC_p, K_p, cent) and the softmax width (VMAX → emb.weight, head.weight, head.bias). emb/head/bias are in the MODEL optimizer, so widening the softmax invalidates om's moments exactly as widening the fabric does. FAB_RANK and FAB_DK are INNER dimensions — they cannot be prefix-widened and a mismatch is fatal by design.  
+  `chat L5849, L5856, L5942, L5985`
+- **[chat-c/carry_forward]** RATE_EVERY gates the per-process curve probe as well as the rate meter. Setting RATE_EVERY high to suppress smoke-run output silently removes the table you are trying to verify.  
+  `chat L5743, L5810`
+- **[chat-c/carry_forward]** Every guard must be expressed in the same units as the thing it guards. Two failed on this: `len(_used) * 10 < len(_uv)` compared 32-window probe winners with whole-run winners; `if ninj > 0 and len(procs) < 2` used set(labels) where the sampler needs window-aligned positions. Build the candidate list first and test IT, so the guard and the consumer cannot disagree.  
+  `chat L7036, L6479, L6520`
+- **[chat-c/carry_forward]** Three items were REPORTED AND DELIBERATELY NOT FIXED and must survive into the bugs/issues list: MEMORY PRESSURE cannot reach its threshold on this configuration (probation is 82% of the store, so the signal is pinned at ~0 and its silence reads as health); MEM_WRONG_READ gates only the report's own evaluations because selfcheck() is called once from the report while every write resets selfcon to -1; TOK_ANCHOR has never once entered the loss because it is gated on TOK_COMPOSE=0 while printing on the EFFECTIVE line of every run.  
+  `chat L7036, L7141, L7527, L6727`
+- **[chat-c/carry_forward]** AMP=fp16 is REFUSED, not fixed, and on purpose: adding a GradScaler changes the optimizer step, which is now gated on accumulated backward passes, and an unscale at the wrong point in that cycle silently breaks accumulation instead. bf16 is what an H100/GH200 wants anyway.  
+  `chat L6152, L6163, L6166`
+- **[chat-early/facts]** ENVIRONMENT: `bc` is not installed on the GPU box — `fetch_data.sh` printed "line 69: bc: command not found" four times, silently zeroing every corpus size report ("eng 40040948877 bytes (0.0 MB)")  
+  `notes/_evidence/chat/user_turns.md:4235-:4244`
+- **[chat-early/carry_forward]** 2026-07-29/31 — Harness era begins: rerun.sh (mix / eng / ablate / smoke arms, 2026-07-29) then longrun.sh (pilot regime, 2026-07-31). Defaults were changed so subsystems are ON by default after the owner found things silently off in prior tests ("Change defaults to have things on. Since things were off in prior tests, do we need a rerun?", asked four times).  
+  `notes/_evidence/chat/chunks/chunk_05.md:3815 (rerun.sh, 2026-07-29T20:46), :7309 (longrun.sh, 2026-07-31); notes/_evidence/chat/user_turns.md:7159-:7172`
+- **[chat-early/carry_forward]** 2026-08-04/05 — Chaining landed and became the default path (SOCIETY=0 + CHAIN_ROUTE=soc + CHAIN_VOTE=1, 'chained society'). The owner's definition: 'the society system, but allowed to loop over and over, (in chains)'. HALT was found computed-and-discarded on the society path and had to be wired in.  
+  `notes/_evidence/chat/user_turns.md:9323, :9483, :9509, :9694; notes/_evidence/chat/chunks/chunk_07.md:3502`
+- **[harness/carry_forward]** Both `pilot-add` and `add` must read the checkpoint's fab_cfg and export FAB_N0, FAB_NMAX (2x cap), VMAX (2x V, NOT 2x tok_vocab), FAB_RANK and FAB_DK, each behind its OWN `[ -z "${X:-}" ]` test. Nesting them inside one gate meant that setting FAB_N0 by hand silently reverted VMAX to 2048 and FAB_NMAX to 4096.  
+  `longrun.sh:770-807 (pilot-add), longrun.sh:990-1010 (add); the V-vs-tok_vocab reasoning is inline at longrun.sh:752-757`
+- **[notes-num/facts]** The notes corpus was written against branch `rm-predict` at HEAD `92a967b` (2026-08-15); this checkout's branch is `rm-predict-DC` at `aee4a52` (2026-08-28), and `git cat-file -t` cannot resolve 92a967b, a5cc7ea, c76dc74, 5f4f117, cc0a377, a9d7258, e9f2e58, daf9f89 or 9645050 — the entire hash vocabulary of the notes is unreachable from any branch in this checkout.  
+  `notes/01_TIMELINE.md:37 "HEAD at time of writing is `92a967b` (2026-08-15)"; `git rev-parse --short HEAD` → aee4a52; `git cat-file -t c76dc74` → "fatal: Not a valid object name"`
+- **[notes-num/facts]** `runs.csv` has NOT been updated since 2026-08-15 — its last commit is `d3d2bdc` — so none of the 2026-08-26..28 work (the 0.75 GB run, rounds 15–18, the two CL arms that "disagree by 10x") appears in it, and 04_RESULTS' master table is the complete run record only up to 08-15.  
+  ``git log -1 --format='%h %ad' -- runs.csv` → d3d2bdc 2026-08-15; `git log --oneline` shows commits b990c9d/3174460/934789d/271f875 dated 2026-08-26..27 describing runs absent from the CSV`
+- **[notes-num/facts]** 07_WIP §6 verifies that `retire_stale`, `fuzzy_segment` and `track_usage` are defined and never called in the live tree; this is still true at HEAD — `fuzzy_segment` is reached only behind `getattr(self,'_use_fuzzy',False)` which nothing sets, and `retire_stale`/`track_usage` have no live caller.  
+  `notes/07_WIP.md:309-313; tokenizer.py:391,396 (`_use_fuzzy` guard), tokenizer.py:402,420 (definitions); grep over the live tree finds no call site`
+- **[notes-num/facts]** `longrun.sh`'s `_flags_for` now defines 99 arms, against the 52 recorded in 03 Part III and 07 §7 and the 46 in 08_GLOSSARY — so the "29 run / 23 never run" inventory is measured against a list that has nearly doubled.  
+  ``sed -n '163,533p' longrun.sh | grep -cE '^\s{4}[a-z0-9_|]+\)\s+echo'` → 99; notes/03_EXPERIMENTS.md:800; notes/07_WIP.md:330; notes/08_GLOSSARY.md:725`
+- **[notes-num/facts]** `runs/` does not exist in this checkout at all and is gitignored, so it was never tracked. Every log-derived count in the corpus (07_WIP's 413 world-model readings across 47 directories, 09's "420 logs", 06 §7's checkpoint survey, DOC_PLAN Q10/Q11) rests on files that cannot be re-checked here.  
+  ``ls runs` → No such file or directory; `.gitignore` contains `runs/`; `git ls-files runs` → 0 entries; notes/07_WIP.md:459, :613; notes/09_COMMENT_AUDIT.md:506`
+- **[notes-num/facts]** The nine recurring defect classes are named with the countermeasure each escaped: unread knob, cadence-never-coincides, diagnostic-writes-training-state, read-but-unreachable, section-vanishes-silently, maintenance-path-with-no-counter, comment-records-a-measurement, fix-that-is-itself-broken, and comparison-at-the-wrong-scale.  
+  `notes/05_ERRORS.md:2383-2393`
+- **[notes-num/carry_forward]** `_due` is not a predicate: it RECORDS the step and returns True, so calling it twice in one `if`/`elif` consumes the event. This killed re-segmentation entirely for three 18-epoch runs, was separately armed for `grow`, and its early-return on n<=0 silently disabled signature batching for every `RETOK_EVERY=0` arm.  
+  `notes/05_ERRORS.md:353-388 (E3.3, E3.4, E3.5); notes/08_GLOSSARY.md:537-539`
+- **[notes-num/carry_forward]** A maintenance path with no counter cannot be told from one that silently stopped. The corpus names `retire_stale`, `fuzzy_segment`, `track_usage`, `FAB_RESCUE`, `remap_mem_ctx`, the memory probe and the domain-prior section as instances, and now ships a count with every new maintenance path.  
+  `notes/05_ERRORS.md:2390, :2461-2463; notes/07_WIP.md:315-321; still true at HEAD — tokenizer.py:391,396,402,420 have no live caller`
+- **[notes-num/carry_forward]** A value can be wrong (banner), unread (typo), or read-but-unreachable — and each needed its own check because each is invisible to the others. The three layers are the derived `[config] EFFECTIVE` banner, the NOTHING-READ-THESE/not-verified audit, and the never-fired loss-term audit.  
+  `notes/05_ERRORS.md:2021-2032 (E10.21), :2397-2398; notes/08_GLOSSARY.md:716-719`
+- **[notes-num/carry_forward]** Prefer a RETRAINED ablation to an eval-time KNOCKOUT. They disagree badly: the FABRIC knockout said +0.709 b/B, the retrained pair said 3.089 vs 3.090.  
+  `notes/08_GLOSSARY.md:640-643; notes/04_RESULTS.md:549-559`
+- **[notes-num/carry_forward]** 29 retractions exist ONLY in the conversation and never reached the repo record (R21–R49 in 10_HISTORY_FINDINGS, each marked '— not in INV'). Several are still asserted in durable places: the shared-`q_route` refactor that made the chain memoryless, the 'single runs are valid' methodology that governed a week of collection, the `be50e3a` commit message, and the GPT-2 anchor.  
+  `notes/10_HISTORY_FINDINGS.md:95-99, :217-224 (R32), :246-265 (R35, R36), :278-283 (R38), :337-345 (R45)`
+- **[notes-num/carry_forward]** The automated drift check has a failure mode of its own: it rewrites history to satisfy a check about the present. At `0065372` it produced an altered verbatim commit quotation (06:94) and a historical table cell that contradicts its own column header (06:461), and its regexes still miss table cells and 'has X at Y' prose (07_WIP's LR_DECAY=0.0 survives).  
+  `notes_check.py:103-111, :141; `git show 0065372 -- notes/06_CONTINUAL_LEARNING.md`; notes/07_WIP.md:146 still reads '`_SPEC` has `LR_DECAY` at **0.0**' while _SPEC says 1.0`
+- **[notes-research/facts]** Q3 answer: per-source quota is used by NONE of the five retrieval leads. SeMem is unbounded and never evicts; CREAM prunes per-cluster with retain iff SimDist(x,p_c) < mu_c + gamma*sigma_c; TraceRetain is the only one with a real capacity bound (K=50) and its score has no source term; Goodtriever partitions into two physically separate stores; arXiv 2505.00675 was never reached.  
+  `/home/user/LLM-Test/notes/_evidence/litreview/03_domain_isolation_bounded_store.md:5-20, 89-96, 146-160, 220, 258-273`
+- **[notes-research/facts]** Q10 supplies the standard forgetting apparatus with formulas: the T x T matrix R_{i,j}, ACC, BWT = mean(R_{T,j} - R_{j,j}) (negative = forgetting), FWT, and Chaudhry's Forgetting Measure f_j^k = max_l (R_{l,j} - R_{k,j}) (positive = forgetting), with the instruction to report both because they disagree when a task keeps improving after training stops.  
+  `/home/user/LLM-Test/notes/_evidence/litreview/11_forgetting_metrics.md:20-55`
+- **[notes-research/facts]** The cache-eviction finding is explicitly accepted as a strong lead rather than a settled result ('I have not verified this against a primary source ... and it contradicts a design decision made here last week') with a cheap internal test proposed: compare the new domain's occupancy share under EVICT=lru vs EVICT=recency after a domain switch.  
+  `/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:112-124`
+- **[so-config/facts]** _cfg is never called with any of the 9 derived knobs, which is necessary: their _SPEC default is None and float(None) would return None from _cfg, silently making an 'armed' predicate false.  
+  `AST scan of all 40 _cfg call sites (self_organize.py:8566-8722); none names a key in _DERIVED`
+- **[so-config/facts]** SEG_CONTIG's declared parent is DOMAINS, but its actual default is '1 if NP == 1 else 0' where NP is len(CORP) AFTER the 5000-byte drop filter -- so it also depends on DATA_DIR contents and CORPUS_CAP, and a partially-fetched corpus can silently flip the stream from random-offset splicing to contiguous reading.  
+  `self_organize.py:1299 'SEG_CONTIG = bool(_i("SEG_CONTIG", 1 if NP == 1 else 0))'; NP set at :1147 'NP = len(CORP)' after the filter at :1142-1146; declared parent at :92`
+- **[so-config/facts]** NP serves two purposes: it is the N_PROCESSES knob value on the synthetic path and the surviving-corpus count on the real path. N_PROCESSES therefore has no effect whatsoever under DATA_MODE=real.  
+  `self_organize.py:539 'NP = _i("N_PROCESSES", 4)'; :1147 'NP = len(CORP)'; N_PROCESSES appears nowhere else (grep)`
+- **[so-config/facts]** On the tokenizer LOAD path, MIN_PAIR, MAX_TOK and TOK_DROPOUT are never read from the environment -- DynamicTokenizer.load reconstructs them from the saved json. They are read only in the fresh-construction else-branch.  
+  `self_organize.py:1226 'if os.path.exists(_tp) and (not TOK_ONLINE or _env("RESUME", "")):' -> load; :1256 is in the else branch; tokenizer.py:481-482 't = cls(d.get("vmax", 8192), d.get("min_pair", 200), d.get("max_tok", 16), d.get("dropout", 0.0), ...)'`
+- **[so-config/facts]** VMAX is the one saved-tokenizer field that IS corrected on a resume, and only when it is a widening: 'if TOK.vmax != VMAX and VMAX >= TOK.vocab_size'. A narrowing silently does nothing here and is caught later.  
+  `self_organize.py:1245-1254; the later refusal is ByteComposer.set_vocab at :1476-1481 (TOK_COMPOSE only) and the resume geometry gate near :4616`
+- **[so-config/facts]** GROW_PASSES is never read at the default configuration: line 1225 evaluates '_i("SEED_PASSES", 2) if TOK_ONLINE else _i("GROW_PASSES", 8)' and TOK_ONLINE defaults to 1. Symmetrically SEED_VOCAB (1224) and SEED_PASSES are never read when TOK_ONLINE=0.  
+  `self_organize.py:1224-1225; :137 '"TOK_ONLINE": ("i", 1)'`
+- **[so-config/facts]** EXPOSURE_MAX and EXPOSURE_SKEW are read only inside 'if DATA_MODE == "real" and NP > 1', so on a single-corpus run -- the configuration for goal A -- neither is ever read and the exposure/imbalance warnings cannot fire.  
+  `self_organize.py:5497 guard; reads at :5535, :5538, :5544, :5546`
+- **[so-config/facts]** AMP is the only string knob in the region that is case-normalised. DATA_MODE, SIG_MODE, MODEL, VERIFY, KEY_SRC, LR_SCHED, SIG_SPACE, WARMSTART_MODE, TOK_PROBATION_BY, CHAIN_ROUTE, CULL_MODE and EVICT are all compared case-sensitively, so DATA_MODE=Real silently takes the synthetic branch.  
+  `self_organize.py:1063 'AMP = _env("AMP", "off").lower()' vs :1102/:1120 'DATA_MODE = _env(...)' then 'if DATA_MODE == "real":' with no normalisation`
+- **[so-config/facts]** ENC_WARMUP_MIN must be strictly below ENC_WARMUP or the adaptive early stop is unreachable, because the code takes min(ENC_WARMUP_MIN, ENC_WARMUP). The registry default 200 against ENC_WARMUP 800 satisfies this; the shipped state was once 3000 against 800.  
+  `self_organize.py:336-342`
+- **[so-config/facts]** FAB_PRESSURE=0.45 is documented as a SETPOINT that chooses the operating population (pressure x cap), not a threshold; at the previous 0.75 against FAB_N0=2048/FAB_NMAX=4096 occupancy parked at 0.50 and the utilization cull, the utilization spare and FAB_RESCUE -- all three of which live behind cull_gate_open -- were unreachable.  
+  `self_organize.py:201-209; cull_gate_open at :823-836 'return not (n_live <= 2 or (n_live / max(1, cap)) < pressure)'`
+- **[so-config/facts]** BLOWUP_RISE/BLOWUP_STALE and CURVE_RISE_BLEWUP/CURVE_FLAT/CURVE_TOK_RISE are module constants, not registry knobs, so they cannot be swept from the environment and do not appear in the config audit.  
+  `self_organize.py:748-749 and :782-784; neither name appears in _SPEC`
+- **[so-config/facts]** `glob` is imported at line 18 and never used anywhere in the file.  
+  `self_organize.py:18 'import os, math, random, glob, json, sys, contextlib, functools'; `grep -c 'glob\.'` returns 0`
+- **[so-config/facts]** TinyTransformer has no ByteComposer at all -- no s.compose attribute, and forward is 's.head(h)' unconditionally -- so TOK_COMPOSE has no effect on MODEL=transformer.  
+  `self_organize.py:1563-1594; the composer hookup at :4219 requires 'getattr(model, "compose", None) is not None'`
+- **[so-config/carry_forward]** A saved tokenizer carries its OWN vmax, min_pair, max_tok and dropout in the json. On a resume only vmax is corrected from the environment; the other three are silently the parent's.  
+  `self_organize.py:1229-1254; tokenizer.py:474-482`
+- **[so-config/carry_forward]** ENC_WARMUP_MIN must be strictly below ENC_WARMUP; the code takes min(ENC_WARMUP_MIN, ENC_WARMUP), so an inverted pair collapses the floor onto the full warmup and the adaptive early stop can never fire.  
+  `self_organize.py:338-342`
+- **[so-config/carry_forward]** MANAGE_MERGE is a POLICY knob, not a correctness one: `did` is consumed only by mem.src provenance, dom_exp reporting and the clustering report -- routing uses the continuous gist, so the domain COUNT sets the granularity of FORGETTING, not prediction quality. Never read the domain count without purity and homogeneity beside it; 0.80 also reaches '4 domains' with purity 0.71.  
+  `self_organize.py:559-588`
+- **[so-fabric/facts]** With FAB_DERIVE_IDS=1 (default) the free parameters K_p and SRC_p are never read for routing; the K/SRC properties exist only so old write sites (grow) still work.  
+  `self_organize.py:1930 `if not s.derive_ids: return s.K_p[:N], s.SRC_p[:N]`; :2008-2016 property K/SRC docstring "simply unused while FAB_DERIVE_IDS=1"; :2143-2145 writes`
+- **[so-fabric/facts]** FAB_MIN_STEPS is force-zeroed whenever CHAIN_VOTE=1 (the default), and an explicit non-zero env value raises SystemExit rather than being silently discarded.  
+  `self_organize.py:1860-1868`
+- **[so-fabric/facts]** FAB_RESCUE defaults to 0.0, so the one path that makes use and uage diverge (rescue keeps use, zeroes uage) never runs by default.  
+  `self_organize.py:694 `FAB_RESCUE = _f("FAB_RESCUE", 0.0)`; :2280-2290`
+- **[so-fabric/facts]** `failing()` returns False whenever the fast error EMA exceeds the slow one by more than shift_tol, so an adapting expert cannot be culled by the error route by construction.  
+  `self_organize.py:2189-2194`
+- **[so-fabric/facts]** The mid-chain spawn is gated on `fab._hopq` being non-empty, so under CHAIN_ROUTE=soc it can never fire.  
+  `self_organize.py:7337 `if FAB_SPAWN and fab._hopq and fab.n() < _cap_fab[0]`; :1810 `s._hopq = []``
+- **[so-fabric/facts]** Deep supervision is gated on len(fab._hops) > 1, so CHAIN_SUP is unreachable under CHAIN_ROUTE=soc even if set above its 0.0 default.  
+  `self_organize.py:7003 `if FABRIC and not SOCIETY and fab.sup_w > 0 and len(getattr(fab, "_hops", [])) > 1``
+- **[so-fabric/facts]** maybe_deepen returns immediately unless CHAIN_CURRIC=1, which defaults to 0, so `deepened` is always empty and staged depth never runs in a default run.  
+  `self_organize.py:2522 `if not s.curric or s.depth_now >= s.max_steps: return None`; registry :145 `"CHAIN_CURRIC": ("env", 0)``
+- **[so-fabric/facts]** grow() always returns [] because the rows already belong to preallocated Parameters, so the caller's add_param_group branch is dead by design.  
+  `self_organize.py:2151-2152; :7487 `if _fp: om.add_param_group({"params": _fp})``
+- **[so-loop/facts]** The CULL GATE line computes occupancy against the SOFT cap when FAB_PRESS_SOFT else `_F.cap` (the preallocation), and states that when SHUT the utilization cull, the utilization spare and FAB_RESCUE are all unreachable because the latter two live inside that gate.  
+  `self_organize.py:6168-6177`
+- **[so-loop/facts]** The learning-curve `except` deliberately prints once rather than swallowing silently: "a silent except here hid the whole learning curve, printing nothing at all".  
+  `self_organize.py:6417-6420`
+- **[so-loop/facts]** The code itself declares that `mem.pressure()` CANNOT reach its own threshold on this configuration: eviction narrows to probation whenever probation is over budget, every write lands on probation, and only retrieval promotes out of it -- at a measured 11.7M writes into 200k slots against 1469 read probes, probation is 82% of the store and permanently over budget, so n_main_evict stays near zero.  
+  `self_organize.py:6572-6581; the PROBATION IS Nx ITS BUDGET alarm at 6582-6593`
+- **[so-loop/facts]** `om.add_param_group({"params": _fp})` is guarded on `if _fp:` because grow() returns [] with preallocated tensors; adding an empty group anyway appended one phantom param group per growth event, so load_state_dict refused the count mismatch and every Adam moment was discarded on every resume.  
+  `self_organize.py:7484-7492`
+- **[so-loop/facts]** Probation uses its own `_due("probation", GROW_EVERY)` key rather than `_due("grow")`, because `_due` RECORDS the step and returns True -- asking it under the grow key would consume the grow event and the minting block would never fire.  
+  `self_organize.py:7583-7591; _due at 5283-5285`
+- **[so-loop/facts]** Branching entropy cannot be a post-probation test because minting DESTROYS the evidence: greedy longest-match consumes a+b into the merged token so the pair never occurs again and p(b|a) is 0 from the merge onward (measured 0 after forty more passes). Entropy is therefore a PRE-mint criterion, which is where TOK_MINT_PMIN already is.  
+  `self_organize.py:6314-6319`
+- **[so-loop/facts]** A single `_due` call guards the retok if/else: asking `_due` twice in one if/elif CONSUMED the event, so the retok never ran, `_last_vsz` (written only inside the retok body) stayed at the seed value, and the skip branch could never fire either -- BOTH paths were dead across three 18-epoch runs.  
+  `self_organize.py:7726-7733`
+- **[so-loop/facts]** Per-window loss is kept (`reduction="none"` then `.mean()`) at identical cost, because COMPETENCE tracking cannot be done without the per-window numbers.  
+  `self_organize.py:6900-6902, 6918-6919`
+- **[so-model/facts]** _eval_sig returns None on any exception and the caller silently falls back to the zero gist; nothing counts how often that happens.  
+  `self_organize.py:3926-3927 `except Exception: return None``
+- **[so-model/facts]** compose_test returns silently (no output at all) when there are no windows or no valid memory entries.  
+  `self_organize.py:3724 `if not wins: return`; 3730 `if vi.numel() == 0: return``
+- **[so-model/facts]** fab.use is filtered to keys < ck_n on restore, so any recorded utilization for slots beyond the checkpoint's live count is discarded.  
+  `self_organize.py:4530`
+- **[so-model/facts]** A soft cap below the starting population is refused with SystemExit, because the growth clamp min(burst, soft_cap - n) would be negative and nothing would ever grow, silently.  
+  `self_organize.py:5228-5249; clamp at 7446`
+- **[so-model/facts]** In the per-owner store, allocation is purely block-arithmetic (base = owner*quota) and self.own is written but never read for allocation; own is initialised to -1, not 0.  
+  `memory.py:38, 216-240`
+- **[so-report/facts]** The per-process surviving-memory line silently drops any memory whose source domain is not a key of `s2t` (a domain with no window in `assigns`, or the injected src=99), so the printed counts need not sum to the active store.  
+  `self_organize.py:9822-9824 `for _d, _c in Counter(mem.src[mem.active].tolist()).items(): if _d in s2t: _cnt[s2t[_d]] += _c``
+- **[so-report/carry_forward]** Section verdict thresholds are hardcoded and inconsistent across sections that use the same words: LOCAL is |delta|<0.1 in `_edit_test` and <0.05 in the final UNLEARN; INDEPENDENT is |mean collateral|<0.3; DOMAINS PREDICT needs both gaps >0.01; SPECIALIZED needs >2 sigma of an EXPERT_NULLS-sized shuffle; PARTITION INFORMATIVE needs >2 sigma of an INFO_NULLS-sized permutation; RETAINED/DRIFTING/CATASTROPHIC at 0.10/0.40.  
+  `self_organize.py:9839, 9852, 9021, 8199, 9166, 3843, 8097`
+- **[subsys/facts]** EditableMemory's cap is DERIVED, not configured, when the per-expert partition is on: n_own>1 replaces cap with n_own*quota, so MEM_CAP is silently overridden (at defaults 64 owners x 128 = 8192 slots instead of 200000).  
+  `memory.py:35-37 `self.quota = int(quota) if quota else int(cap // self.n_own)` / `if self.n_own > 1: cap = self.n_own * self.quota`; warned at self_organize.py:5622-5628`
+- **[subsys/facts]** The quantile gate lives INSIDE the adaptive branch, so WRITE_QUANTILE (registry default 1) has no effect unless WRITE_ADAPTIVE (registry default 0) is also on.  
+  `memory.py:133 `if self.adaptive_gate and self.quantile_gate:`; self_organize.py:6111-6115 emits a coupling warning saying exactly this`
+- **[subsys/facts]** write_batch silently writes nothing for any row whose ctx is None, and returns 0 outright if no row has a ctx.  
+  `memory.py:170-171 `if not ctxs: return 0`; memory.py:178 `if ctx is None or m == 0: continue``
+- **[subsys/carry_forward]** The tokenizer file carries its own vmax, min_pair, max_tok, dropout and max_pairs. Only vmax is repaired on resume; the rest silently override the environment.  
+  `tokenizer.py:473-483; self_organize.py:1229-1254`
+- **[tests/facts]** The end-to-end config is DOMAINS=eng, i.e. NP=1, so every NP>1 path is unreachable in the only real run the suite performs.  
+  `selftest.sh:114 `DOMAINS=eng`; self_organize.py:5497 `if DATA_MODE == "real" and NP > 1:``
+- **[tests/facts]** notes_check.py guarantees: notes/CURRENT_DEFAULTS.md is byte-identical to what generate() produces from _SPEC; ARCHIVE.md exists whenever archive/ does; and no non-historical line in a scanned .md states a default value _SPEC contradicts. _SPEC currently holds 328 knobs and 20 files are scanned.  
+  `notes_check.py:155-163, :165-169, :171-181; run output 'notes_check: 328 knobs, 20 live markdown files'`
+- **[tests/facts]** blowup_test.py guarantees, against the AST-lifted blowup_stale and module constants: the two real healthy curve openings that defeated the old rule fire the old rule and not the new one; a single 4.82 spike cannot fire it; two blow-up-shaped curves fire with most of the run left; BLOWUP_STALE sits above every measured healthy run (max 50) and below both blow-ups (min 261) with >=1.5x margin; the rule needs >=3 probes, a best, elevation AND staleness; and it re-arms on a new best so a run can be warned twice but does not chatter.  
+  `blowup_test.py:92-159`
+- **[tests/facts]** curve_test.py does NOT cover how curve_verdict's INPUTS are computed. `_bpb_dir` (rise since minimum, change over the last two thirds) is built inline in main() inside a bare `except Exception: _bpb_dir = None`, so a failure there silently removes the whole verdict with no message.  
+  `self_organize.py:8255-8262, :8290-8294`
+- **[tests/carry_forward]** Anything selftest.sh does not name explicitly is skipped. Two tests (corpus_test, resume_test) sat unwired for a whole session, silently omitting ~120 checks. The file now states what it deliberately does NOT run and why.  
+  `selftest.sh:72-77, :84-94`
+- **[tools/facts]** fetch_big.py cannot be exercised in this environment: the `datasets` package is not installed, and its own docstring says the download path was never tested end to end.  
+  ``python3 -c "import datasets"` -> ModuleNotFoundError; fetch_big.py:5-6 "this sandbox's network is allowlisted to GitHub/PyPI only, so I cannot reach HuggingFace/S3 to test the streaming path end-to-end"`
+- **[tools/carry_forward]** Direction is per-metric and must be applied to EVERY printed quantity, not just the statistics. compare.py orients the pairs for the bootstrap but leaves the per-seed diff column raw, so the headline and the table disagree in sign on d_order1.  
+  `compare.py:126-133 (the header note), :273 (opairs), :282-284 (oriented mean) vs :302 (raw per-seed diff); reproduced -0.6000 headline against +0.6000 per-seed rows`
+- **[tools/carry_forward]** fetch_big.py's preset lookup accepts both the short key and the full dataset id (fetch_big.py:112-114), but `is_dialogue` at :212 still compares only the short key — so `--dataset OpenAssistant/oasst1` silently loses the turn markers the preset exists for.  
+  `fetch_big.py:105-114 (the fix, with its own commentary) vs fetch_big.py:212 `is_dialogue = a.dataset == "oasst1"``
