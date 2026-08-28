@@ -293,6 +293,57 @@ ns = dict(DATA_MODE="real", NP=1, DN=["eng"], PHASED=True, PHASE_SCHED=[[0]] * 4
 out = run_block(exp_src, ns)
 check(ns["_warn"] == [] and out == [], "NP=1: the block is skipped entirely, as its guard says")
 
+# -- IS THE HELD-OUT TAIL A SAMPLE OR A BLOCK? Run on the actual source, because this warning decides whether
+# every held-out number in the report is about the corpus or about its last few documents, and it reads a file
+# on disk -- which means it has three outcomes (shuffled / arrival-order / no manifest) and a run only ever
+# exercises one of them.
+print("\nTHE HELD-OUT TAIL SAYS WHETHER IT IS A SAMPLE")
+import json as _json, os as _os, tempfile
+
+tail_src = block("    _unshuf = []", "    if USE_TOK:")
+
+
+def _corpus(tmp, name, manifest):
+    d = _os.path.join(tmp, "train", name)
+    _os.makedirs(d, exist_ok=True)
+    if manifest is not None:
+        with open(_os.path.join(d, "_fetch_manifest.json"), "w") as fh:
+            _json.dump(manifest, fh)
+
+
+def _tail(cases):
+    tmp = tempfile.mkdtemp()
+    for nm, man in cases:
+        _corpus(tmp, nm, man)
+    ns = dict(DN=[nm for nm, _ in cases], VAL_FRAC=0.05, os=_os, json=_json,
+              _env=lambda k, d: tmp if k == "DATA_DIR" else d)
+    return run_block(tail_src, ns), ns
+
+
+_M = lambda buf, src: {"bytes": 1, "shard": 0, "docs": 1, "source": src, "shuffle_buffer": buf, "seed": 0}
+
+out, ns = _tail([("eng", _M(10000, "HuggingFaceFW/fineweb-edu")), ("py", _M(10000, "bigcode/the-stack-dedup"))])
+check(ns["_unshuf"] == [] and not out, "two shuffled corpora: nothing is said, because there is nothing to say")
+
+out, ns = _tail([("eng", _M(10000, "HuggingFaceFW/fineweb-edu")), ("py", _M(0, "bigcode/the-stack-dedup"))])
+check([n for n, _ in ns["_unshuf"]] == ["py"],
+      f"one arrival-order corpus is named and the shuffled one is not: {[n for n, _ in ns['_unshuf']]}")
+check(any("HELD-OUT TAIL IS A BLOCK" in l and "py" in l and "the-stack" in l for l in out),
+      "...and the warning names the corpus AND the dataset it came from, which is what decides whether "
+      "arrival order matters")
+check(not any("eng" in l.split("for:")[-1] for l in out if "HELD-OUT TAIL" in l),
+      "...and does not accuse the corpus that was shuffled")
+
+# THE RUN THAT MOTIVATED THIS is the case where the manifest predates the field entirely.
+out, ns = _tail([("py", {"bytes": 1, "shard": 0, "docs": 1, "source": "bigcode/the-stack-dedup"})])
+check([n for n, _ in ns["_unshuf"]] == ["py"],
+      "a manifest written before --shuffle-buffer existed counts as arrival order, which is what it was")
+
+out, ns = _tail([("eng", None), ("py", None)])
+check(ns["_unshuf"] == [] and not out,
+      "no manifest at all says NOTHING -- an absent record is not evidence either way, and a corpus the "
+      "harness built by hand must not be accused")
+
 print()
 if FAILED:
     print(f"corpus_test: {len(FAILED)} CHECK(S) FAILED")

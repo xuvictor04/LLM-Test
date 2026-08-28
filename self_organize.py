@@ -15,7 +15,7 @@ separate SELF-CONSISTENCY check on stored entries.
 
   python3 self_organize.py [DEVICE=cuda DATA_MODE=real DOMAINS=eng,py,num,c D_MODEL=256 SIG_MODE=learned ...]
 """
-import os, math, random, glob, sys, contextlib, functools
+import os, math, random, glob, json, sys, contextlib, functools
 import torch, torch.nn as nn, torch.nn.functional as F
 from memory import EditableMemory
 from verification import Reconstructor, recon_loss, verify as verify_mem   # Verification (renamed from B): reconstruction, not surprise
@@ -1145,6 +1145,32 @@ if DATA_MODE == "real":
         VALC = [c[int(len(c) * (1 - VAL_FRAC)):] for c in CORP]  # in-RAM: unchanged -- val = tail, CORP = head.
         CORP = [c[:int(len(c) * (1 - VAL_FRAC))] for c in CORP]
         SEG_LEN = [len(c) for c in CORP]
+    # ...AND IS THAT TAIL A SAMPLE, OR A BLOCK? Every held-out number this run reports -- the memorization
+    # check, the anchors, ACROSS THE RUN BOUNDARY, the whole continual-learning claim -- is computed on the last
+    # VAL_FRAC of each corpus. That is a SAMPLE only if the corpus was written in no particular order. Corpora
+    # written in ARRIVAL order from a dataset that arrives ordered (the-stack by repository, C4 by crawl) put a
+    # contiguous block of whichever documents came last on the held-out side, and the headline becomes a
+    # measurement of those documents. fetch_local.py has shuffled since it was written and said why; fetch_big.py
+    # did not, and the manifest it writes is what makes the difference visible from here.
+    # Measured on the run that added the-stack's Python: py held out at 5.061 +/- 0.560 against 2.922 in-stream,
+    # while eng -- fineweb-edu, shuffled upstream -- was 2.273 against 2.303. The gap was the ordering.
+    _unshuf = []
+    for _p, _nm in enumerate(DN):
+        _mf = os.path.join(_env("DATA_DIR", "data"), "train", str(_nm), "_fetch_manifest.json")
+        try:
+            with open(_mf) as _fh: _mj = json.load(_fh)
+        except Exception:
+            continue                                       # no manifest: says nothing either way, so claim nothing
+        if not int(_mj.get("shuffle_buffer") or 0):
+            _unshuf.append((_nm, _mj.get("source") or "?"))
+    if _unshuf:
+        print(f"[corpus] !! HELD-OUT TAIL IS A BLOCK, NOT A SAMPLE, for: "
+              + ", ".join(f"{_n} (from {_s})" for _n, _s in _unshuf))
+        print(f"         Those corpora were written in ARRIVAL order, and VAL_FRAC={VAL_FRAC:g} holds out the "
+              f"LAST {VAL_FRAC:.0%} of each. If the dataset arrives ordered -- the-stack by repository, C4 by "
+              f"crawl -- the held-out side is whichever documents came last, so the memorization check, the "
+              f"anchors and ACROSS THE RUN BOUNDARY are all measurements of that block rather than of the "
+              f"corpus. Re-pull with fetch_big.py's --shuffle-buffer (now the default) to make it a sample.")
     if USE_TOK:                                            # EXPANDING SUBWORD MODE: an online byte-BPE that GROWS its vocab
         from tokenizer import DynamicTokenizer             #   by mint-on-repetition as it reads the stream (byte-grounded)
         _tp = _env("TOKENIZER_PATH", "data/dyntok.json")
@@ -5074,7 +5100,14 @@ def main():
             _m, _e = _ms(now[k])
             if k in prev:
                 _pm, _pe = _ms(prev[k]); _d = _m - _pm; _ed = (_e ** 2 + _pe ** 2) ** 0.5
-                print(f"  {k:<10} was {_pm:.3f} @ step {prev_step}  ->  now {_m:.3f}   {_d:+.3f} +/- {_ed:.3f}  "
+                # PRINT THE TOLERANCE THAT IS ACTUALLY APPLIED. The verdict tests against 2 x the combined
+                # error and the line printed the 1-sigma figure, so the one run where they straddled read as a
+                # contradiction: "+0.149 +/- 0.092  HELD (inside the noise)", where 0.149 is plainly outside
+                # 0.092. It is inside 0.184, which is the number the verdict used and the only one nobody could
+                # see. A reader who cannot reconstruct a verdict from the numbers beside it has to trust it
+                # instead, and this project's whole method is not trusting verdicts.
+                print(f"  {k:<10} was {_pm:.3f} @ step {prev_step}  ->  now {_m:.3f}   {_d:+.3f}  "
+                      f"(1 sigma {_ed:.3f}; the verdict tests against 2 sigma = {2 * _ed:.3f})  "
                       f"{'WORSE (forgetting)' if _d > 2 * _ed else ('better' if -_d > 2 * _ed else 'HELD (inside the noise)')}")
             else:
                 print(f"  {k:<10} {_m:.3f} +/- {_e:.3f}   NEW this run -- no baseline, nothing to forget yet")
@@ -8924,10 +8957,32 @@ def main():
         _b = sum(bpb_true(q, use_fab=False, use_mem=False) for q in _ps) / max(1, len(_ps))
         _f2 = sum(bpb_true(q, use_fab=True, use_mem=False) for q in _ps) / max(1, len(_ps))
         _fm = sum(bpb_true(q, use_fab=True, use_mem=True) for q in _ps) / max(1, len(_ps))
+        # OVER MANY WINDOWS, BECAUSE ONE WINDOW ROUTES TO ONE EXPERT. This measured a batch of exactly ONE --
+        # stream[:WIN] against a signature from ENC_SEQ[WIN*3:WIN*4] -- and the line below then reported the
+        # result as a property of the POPULATION, under a note telling the reader that "all mass on one node =
+        # collapsed". A single window puts essentially all of its mass on one node whatever the router is doing,
+        # so the diagnosis was structurally guaranteed. On the run that added the-stack's Python it read
+        #     node mass: 1 of 2214 nodes carry any, top node 100%
+        # in the same report as
+        #     ROUTER SELECTION over the whole run: 2108 distinct experts won at least one window | top 6.1%
+        # -- 2108 against 1, from the same router, because one of them asked about the run and the other about a
+        # window. (I read the first as a routing collapse in the round before this one. It was not.) The whole
+        # point of the summary that replaced the 2214-float dump was that a reader could act on it, and a number
+        # that cannot come out any other way is not one to act on.
+        # The windows are drawn the way the specialization probe draws them -- evenly spaced across the stream,
+        # each with its OWN signature, so the mass is the router's answer to varied material rather than to one
+        # position. Capped at EVAL_N: this is one extra forward per window and the report already pays for many.
         with torch.no_grad():
-            _sg = enc(torch.tensor([list(ENC_SEQ[WIN * 3:WIN * 4])], device=DEV))
-            _, _d, _m, _ = fab(model.encode(torch.tensor([list(stream[:WIN])], device=DEV)), _sg,
-                               torch.zeros(1, device=DEV), learn_regions=False)
+            _nw = max(1, min(_i("EVAL_N", 64), max(1, (len(stream) - WIN - 1) // WIN)))
+            _stp = max(1, (len(stream) - WIN - 1) // _nw)
+            _pos = [min(i * _stp, len(stream) - WIN - 1) for i in range(_nw)]
+            _mx = torch.tensor([list(stream[q:q + WIN]) for q in _pos], device=DEV)
+            _sq = [q for q in _pos if q + WIN <= len(ENC_SEQ)] or [0]
+            _sg = enc(torch.tensor([list(ENC_SEQ[q:q + WIN]) for q in
+                                    (_sq * ((_nw // len(_sq)) + 1))[:_nw]], device=DEV))
+            _, _d, _m, _ = fab(model.encode(_mx), _sg,
+                               torch.zeros(_mx.size(0), device=DEV), learn_regions=False)
+            if _m.dim() > 1: _m = _m.mean(0)                 # per-node mass AVERAGED over the windows
         print(f"\n=== FABRIC: does the routed node population help? (bits/byte, lower=better) ===")
         print(f"  model ALONE {_b:.3f}  ->  + FABRIC {_f2:.3f} (fabric {_b - _f2:+.3f})  ->  + FABRIC + MEMORY {_fm:.3f}")
         # THE SHAPE OF THE MASS, NOT 2090 FLOATS. This line dumped one number per node -- 10.5 kB on the pilot,
@@ -8945,8 +9000,11 @@ def main():
             if _a >= 0.5 * _tm: break
         _nz = sum(1 for _v in _nm if _v > 1e-4)
         print(f"  nodes {len(fab.bodies)} | mean routed depth {float(_d):.2f} of {max(1, min(fab.max_steps, 2 + len(fab.bodies)//2))} steps"
-              f" | node mass: {_nz} of {len(_nm)} nodes carry any, top node {100 * _ns[0] / _tm if _ns else 0:.0f}%, "
-              f"half of it on {_c50} node(s) | halt {_halt:.2f}")
+              f" | over {_nw} window(s): {_nz} of {len(_nm)} nodes carry mass, top node "
+              f"{100 * _ns[0] / _tm if _ns else 0:.0f}%, half of it on {_c50} node(s) | halt {_halt:.2f}")
+        print(f"  (this is EVAL-time mass over {_nw} window(s); ROUTER SELECTION below counts what the router "
+              f"chose across every TRAINING window of the run, which is the larger sample and the fairer test "
+              f"of whether the population is used.)")
         print(f"  (mass spread across nodes = SPECIALIZED; all mass on one node = collapsed; all mass on HALT = the")
         print(f"   router wrote the nodes off before they could learn -- raise FAB_MIN_STEPS / PONDER_WARM)")
         print(f"  NOTE: 'model ALONE' here is an ABLATION of a component the model TRAINED WITH (it also removes the")

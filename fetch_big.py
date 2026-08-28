@@ -74,6 +74,24 @@ def main():
                          "absent, so it is safe to pass to any dataset -- the count of skipped documents is "
                          "reported at the end either way.")
     ap.add_argument("--score-field", default="score")
+    # SHUFFLE, THEN CUT -- the lesson fetch_local.py wrote down and this file, which pulls the corpora every
+    # real run trains on, never applied. self_organize.py holds out the LAST VAL_FRAC of each corpus as
+    # never-trained material, and this writer emits documents in stream order. For a dataset that arrives
+    # ordered -- the-stack is organised by repository, C4 by crawl, most code corpora by path -- the "held-out
+    # tail" is then a contiguous block of whichever repos came last, not a sample of the corpus, and the
+    # headline number of every run is a measurement of those repos.
+    # Measured on the run that added the-stack's Python: py held out at 5.061 +/- 0.560 bits/byte against 2.922
+    # on the same corpus in-stream, a 2.1 b/B gap with an error bar three times English's -- while eng, pulled
+    # from fineweb-edu, which is already shuffled upstream, showed 2.273 held out against 2.303 in-stream, no
+    # gap at all. One corpus was being scored on a sample and the other on a block.
+    # A streaming shuffle buffer is the standard answer and datasets provides it: documents are drawn from a
+    # reservoir of this many rather than in arrival order. The buffer costs roughly buffer_size x mean document
+    # size in RAM -- ~10k source files is a few hundred MB. 0 restores the old arrival-order behaviour.
+    ap.add_argument("--shuffle-buffer", type=int, default=10000,
+                    help="stream through a shuffle reservoir of this many documents (0 = arrival order). The "
+                         "held-out TAIL is only a sample of the corpus if the corpus was not written in order")
+    ap.add_argument("--seed", type=int, default=0, help="shuffle seed; recorded in the manifest so a --resume "
+                                                        "cannot continue one ordering into another")
     ap.add_argument("--data-dir", default=None,
                     help="subdirectory within the dataset repo (the-stack: data/python, data/c, ...)")
     ap.add_argument("--token", default=None,
@@ -208,11 +226,36 @@ def main():
     # run reports on a corpus nobody chose.
     def _man(b, sh, dc):
         return {"bytes": b, "shard": sh, "docs": dc, "source": path,
-                "data_dir": data_dir, "domain": a.domain}   # the RESOLVED data_dir (preset or --data-dir)
+                "data_dir": data_dir, "domain": a.domain,   # the RESOLVED data_dir (preset or --data-dir)
+                "shuffle_buffer": a.shuffle_buffer, "seed": a.seed}
+    # SHUFFLE BEFORE ANY SKIP. `.skip(n)` means "the first n of THIS ordering", so a resume that shuffles
+    # differently from the pull it is continuing skips documents the first pass never saw and re-writes ones it
+    # did. Applied here, above the resume, with the seed and buffer recorded in the manifest and a mismatch
+    # refused below -- the same discipline the source check uses, for the same reason.
+    if a.shuffle_buffer > 0:
+        try:
+            ds = ds.shuffle(seed=a.seed, buffer_size=a.shuffle_buffer)
+            print(f"[fetch_big] shuffle buffer {a.shuffle_buffer:,} documents (seed {a.seed}) -- so the held-out "
+                  f"TAIL self_organize.py cuts is a SAMPLE of this corpus rather than whichever documents the "
+                  f"stream happened to end on. --shuffle-buffer 0 for arrival order.")
+        except (AttributeError, TypeError) as e:
+            print(f"[fetch_big] !! this datasets version cannot shuffle a stream ({e}); writing in ARRIVAL "
+                  f"ORDER. The held-out tail will be a contiguous block, not a sample -- if this dataset is "
+                  f"ordered (by repo, by crawl, by path) every held-out number about it is about that block.")
+            a.shuffle_buffer = 0
     written = shard = docs_done = 0; n_lowscore = 0
     if a.resume and os.path.exists(man_path):
         try:
             man = json.load(open(man_path))
+            _sb, _sd = man.get("shuffle_buffer"), man.get("seed")
+            if _sb is not None and (_sb != a.shuffle_buffer or _sd != a.seed):
+                sys.exit(
+                    f"[fetch_big] {outdir} was pulled with --shuffle-buffer {_sb} --seed {_sd}, and this call "
+                    f"uses {a.shuffle_buffer} / {a.seed}.\n"
+                    f"  --resume skips the first {int(man.get('docs', 0)):,} documents of THIS ordering, which is\n"
+                    f"  not the ordering already on disk: the skip would step over documents the first pass never\n"
+                    f"  wrote and re-write ones it did. Pass --shuffle-buffer {_sb} --seed {_sd} to continue it,\n"
+                    f"  or move the directory aside and pull fresh.")
             written, shard, docs_done = int(man["bytes"]), int(man["shard"]) + 1, int(man["docs"])
             print(f"[fetch_big] RESUME: {written/1e9:.2f} GB already on disk in {shard} shard(s); "
                   f"skipping {docs_done:,} documents already consumed")
