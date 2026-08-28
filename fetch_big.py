@@ -146,7 +146,13 @@ def main():
                 f"         export HF_TOKEN=hf_...        (or pass --token hf_...)\n"
                 f"       or  huggingface-cli login\n"
                 f"  Token seen by this process: {'yes' if tok else 'NO -- neither --token nor $HF_TOKEN is set'}.\n"
-                f"  The token needs only READ scope.")
+                f"  The token needs only READ scope.\n"
+                f"  OR SKIP THE ACCOUNT ENTIRELY. Both code presets here are gated, and the continual-learning\n"
+                f"  experiment only needs the second area to be a DIFFERENT DISTRIBUTION from the first -- not\n"
+                f"  this particular corpus. fetch_local.py builds one from source already on this machine:\n"
+                f"    python3 fetch_local.py --domain {a.domain} --out {a.out} --gb {a.gb}\n"
+                f"    bash longrun.sh pilot-add {a.domain} local {a.gb}\n"
+                f"  ('local' makes pilot-add skip the fetch, so populating the directory is all it takes.)")
         raise
 
     is_dialogue = a.dataset == "oasst1"

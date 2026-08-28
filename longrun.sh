@@ -3,7 +3,9 @@
 # longrun.sh -- the multi-day run. Everything before this measured a system inside its own warmup.
 #
 #   bash longrun.sh pilot     MB PROOF OF CONCEPT first: 60 MB English, 8 epochs, ~15-20 min. Run before the GB run.
-#   bash longrun.sh pilot-add py local 0.03           add an area at MB scale and measure what it cost.
+#   bash longrun.sh pilot-add py local              add an area at MB scale and measure what it cost. The size
+#                                                     defaults to PILOT_GB, i.e. to whatever the first area was
+#                                                     pulled at -- pass a fourth argument only to override it.
 #                                                     `local` builds the corpus from this machine's own Python;
 #                                                     an HF dataset id works too (gated ones need HF_TOKEN).
 #   bash longrun.sh fetch     pull 20 GB of English (hours; resumable)
@@ -653,7 +655,13 @@ pilot)
   echo "  EXPERTS      specialized or interchangeable, and how many nodes the router never calls on."
   echo "  (domain counts and clustering scores are DIAGNOSTICS -- they explain the above, they are not targets)"
   echo
-  echo "then add an area and see what it costs:  bash longrun.sh pilot-add py local 0.03"
+  # THE SIZE IN THIS HINT IS THE SIZE THE ENGLISH HALF WAS PULLED AT, resolved from the same expression
+  # _pilot_corpus used. It read 0.03 while the corpus above it was 0.06, so following the printed advice
+  # verbatim built the added area at half the size of the one already there -- and PHASE_SCHED gives the two
+  # corpora the same share of the stream whatever their sizes, so the smaller one is drawn just as often from
+  # half as much text. That confound is exactly what pilot-add's own fourth-argument default was changed to
+  # remove; the closing line went on recommending it.
+  echo "then add an area and see what it costs:  bash longrun.sh pilot-add py local ${PILOT_GB:-0.06}"
   echo "  ('local' needs no account; bigcode/the-stack-dedup is better material but is GATED -- HF_TOKEN + accepted terms)"
   ;;
 
@@ -742,12 +750,31 @@ PY
     # POSITIONAL SPLIT, NOT ${x%% *} / ${x##* }: with three fields those give the first and the LAST, so adding
     # a third number would have silently read the vocabulary as the slot cap.
     set -- ${_CKG:-}
-    _CKN=${1:-0}; _CKC=${2:-0}; _CKV=${3:-0}; _CKR=${4:-0}; _CKD=${5:-0}; _CKR=${4:-0}; _CKD=${5:-0}
+    _CKN=${1:-0}; _CKC=${2:-0}; _CKV=${3:-0}; _CKR=${4:-0}; _CKD=${5:-0}
+    # THE DEFAULT IS READ, NOT TYPED. This message hardcoded 2048 and subtracted the checkpoint's population
+    # from it, which is only the right sentence while the checkpoint holds FEWER experts than the default. The
+    # pilot's checkpoint holds 2090, so it printed "would enter -42 identity experts" -- a negative count of
+    # things that would be created. Same registry line the arm list reads at the top of this file.
+    _DEFN0=$(sed -n 's/^    "FAB_N0": ("i", \([0-9]*\)).*/\1/p' "$(dirname "$0")/self_organize.py" 2>/dev/null | head -1)
+    _DEFN0=${_DEFN0:-2048}
     if [ -n "${_CKN:-}" ] && [ "${_CKN:-0}" -gt 0 ] 2>/dev/null; then
       if [ -z "${FAB_N0:-}" ]; then
         export FAB_N0="$_CKN"
-        echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint -- not the default 2048, which"
-        echo "           would enter $((2048 - _CKN)) identity experts at step 0 that growth never asked for."
+        if [ "$_CKN" -lt "$_DEFN0" ]; then
+          echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint -- not the default $_DEFN0, which"
+          echo "           would enter $((_DEFN0 - _CKN)) identity experts at step 0 that growth never asked for."
+        elif [ "$_CKN" -gt "$_DEFN0" ]; then
+          # THE OTHER DIRECTION IS NOT HARMLESS EITHER, it just fails differently. The restore does
+          # `n_live = max(n_live, ck_n)`, so leaving FAB_N0 at the default manufactures nothing -- the population
+          # comes back at $_CKN regardless. What breaks is every count taken AGAINST FAB_N0: the end-of-run net
+          # growth line is fab.n() - FAB_N0, so it would credit this run with experts the RESTORE brought back.
+          echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint -- above the default $_DEFN0."
+          echo "           Nothing would have been manufactured (the restore raises n_live back to $_CKN either"
+          echo "           way), but net growth is measured as fab.n() - FAB_N0, so the default would credit this"
+          echo "           run with $((_CKN - _DEFN0)) experts the restore brought back rather than the run grew."
+        else
+          echo "pilot-add: starting population FAB_N0=$_CKN, read from the checkpoint (same as the default $_DEFN0)."
+        fi
       fi
       # AND THE CAP IS NOT A FREE PARAMETER. cull_gate_open is n_live/cap >= FAB_PRESSURE, and the utilization
       # cull, the utilization spare and FAB_RESCUE all live behind it. Leaving FAB_NMAX at the default 4096
