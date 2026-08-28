@@ -3570,6 +3570,12 @@ class DomainAssembler:
         s.n_culled = getattr(s, "n_culled", 0) + culled
         return merged, culled                                             #   that stops being fed becomes cullable
 
+# THE HELD-OUT with/without-memory PAIR, recorded where it is computed and read by PERFORMANCE below. The two
+# sections answer the same question on different text and printed 127 lines apart, with the memorising one under
+# the heading "does the memory earn its keep?". Filled by the retention decomposition, which runs first.
+_HELDOUT_MEM = {}
+
+
 @torch.no_grad()
 def compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=64):
     """Do the self-assembled segments WORK TOGETHER across boundaries? Retrieval is a single global kNN (no src filter),
@@ -3609,6 +3615,24 @@ def compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=64):
     bm, bg, bs = bpb(torch.zeros_like(distG)), bpb(distG, confG), bpb(distS, confG)   # ALONE vs +memory vs siloed
     print(f"\n=== PERFORMANCE: does the memory earn its keep? (bits/byte, lower=better) ===")
     print(f"  model ALONE (weights only) {bm:.3f}  ->  model + MEMORY {bg:.3f}   (memory contributes {bm - bg:+.3f})")
+    # ON THE TRAINING STREAM, WHICH IS WHERE THE STORE'S ENTRIES CAME FROM. `wins` is drawn from `stream` -- the
+    # text this run trained on and wrote memory from -- so a retrieval that returns the very window being scored
+    # is a hit, and this number is partly a memorisation score. It sat under the heading "does the memory earn
+    # its keep?" as the headline, while the held-out pair in the retention section said the opposite on the
+    # pilot: +0.212 here against -0.100 on eng's held-out tail, 127 lines apart, one question, two answers, and
+    # the flattering one in the bigger type. Both are worth having -- retrieval of trained material IS the
+    # mechanism working -- but only the held-out one answers "does it help on text it has not seen".
+    _hm = {k: v for k, v in _HELDOUT_MEM.items() if v}
+    print(f"  ...but these windows are drawn from the TRAINING stream, and the store was written from that same "
+          f"text, so this figure includes retrieving material the store memorised.")
+    if _hm:
+        print(f"  ON HELD-OUT TEXT (the same comparison, from the retention section above): "
+              + " | ".join(f"{k} {_w:.3f} -> {_f:.3f} ({_w - _f:+.3f})" for k, (_w, _f) in sorted(_hm.items()))
+              + f"\n  >> that is the number for 'does it help on text it has not seen'; this one is for 'does "
+                f"retrieval of trained material work at all'.")
+    else:
+        print(f"  No held-out comparison was produced this run (DATA_MODE=real with a VAL_FRAC tail is what "
+              f"makes one), so there is nothing here that is not partly a memorisation score.")
     print(f"\n=== CROSS-SEGMENT COMPOSITION (do the {len(procs)}-process / many-segment store's segments work together?) ===")
     print(f"  top-{kk} retrieval spans {div_sum / max(1, n):.2f} distinct segments per position  (>1 = composing across segments)")
     print(f"  model+memory GLOBAL (all segments) {bg:.3f}  vs  SILOED (nearest segment only) {bs:.3f}")
@@ -4940,6 +4964,7 @@ def main():
         _sr2 = mem.src_report() if mem.n else {"per_source": [], "floor": 0}
         for k in sorted(now):
             _wm, _ = _ms(now[k]); _fm, _ = _ms(_full.get(k, now[k]))
+            _HELDOUT_MEM[k] = (_wm, _fm)      # kept for PERFORMANCE below, which scores on the TRAINING stream
             _line = f"  {k:<10} weights-only {_wm:.3f} | + memory {_fm:.3f} | memory contributes {_wm - _fm:+.3f}"
             if prev and k in prev: _line += f" | was {_ms(prev[k])[0]:.3f} before this run"
             print(_line)
