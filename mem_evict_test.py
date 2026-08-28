@@ -227,7 +227,120 @@ def wrong_gates_reads():
     return ok
 
 
+def census_is_exact():
+    """ONE SLOT, ONE ROW -- and the per-source census that depends on it.
+
+    THE FAILURE THIS ASSERTS AGAINST, in the form it actually appeared. A pilot's memory report printed
+
+        !! MEMORY STARVATION: ... s779 (-2 now, peaked 111230), ... s899 (-3 now, peaked 5566) ...
+
+    A count of ACTIVE ENTRIES cannot be negative. No amount of eviction produces one; only bad arithmetic does.
+    Both producers were slots named MORE THAN ONCE inside a single write:
+
+      - the global path drew its victim pool with torch.randint, i.e. WITH REPLACEMENT, so a slot could appear
+        twice in the pool carrying the same `last`, and if it ranked into the victims both copies were taken;
+        the circular pad could also re-take a slot the pool had already chosen.
+      - the per-owner path ranked the WHOLE block by `last` to find victims, and free slots have never been
+        stamped, so their clock reads 0 -- the oldest possible. The "victims" were therefore exactly the free
+        slots the line above had already taken, and cat([free, lru]) returned m indices of which only
+        free.numel() were distinct.
+
+    A repeated slot costs twice. Index assignment collapses it silently, so the store holds fewer rows than the
+    caller was told; and _commit decrements the DISPLACED owner once per occurrence while crediting the new
+    source idx.numel(), so the displaced source is overcharged on every write. nsrc is the per-source floor's
+    only input and `has = (nsrc > 0)` is what makes a source eligible for protection at all -- so an
+    undercounted source loses the protection of the floor that exists to stop it being driven to zero, which is
+    the exact failure MEM_SRC_FLOOR was added for.
+
+    Asserted three ways, because the clamp alone would only hide the next drift:
+      1. no repeats are produced (mem.n_dup_slot == 0) on either path,
+      2. no decrement ever went below zero (mem.n_src_underflow == 0),
+      3. the incremental census EQUALS an exact recount from `src & active`, source by source.
+    """
+    ok = True
+    g = torch.Generator().manual_seed(11)
+
+    for tag, kw in (("global  (n_own=1)", dict(evict="lru")),
+                    ("per-owner (n_own=8)", dict(evict="lru", n_own=8, quota=25))):
+        mem = EditableMemory(CAP, D, "cpu", V, write_gate=0.0, topk=4, src_floor=0.5, n_src_hint=8, **kw)
+        # Enough writes to cycle the store many times over, from a rotating set of sources, so that every source
+        # spends time being displaced by the others. That rotation is what drove the counts negative.
+        # The per-owner arm calls _store directly: write() takes no owner, and the owner-partitioned path is
+        # reached in the engine through write_batch(owners=...) -- which is a batching wrapper around this same
+        # call. The slot selection under test is _store's, so _store is what the test drives.
+        for t in range(400):
+            n = 3 + (t % 5)
+            k = torch.randn(n, D, generator=g)
+            tok = torch.randint(0, V, (n,), generator=g)
+            if mem.n_own > 1:
+                mem._store(k, tok, t % 7, None, None, own=(t % 8))
+            else:
+                mem.write(k, tok, src=t % 7)
+        exact = torch.zeros_like(mem.nsrc)
+        for s in mem.src[mem.active].unique().tolist():
+            if s >= 0: exact[int(s)] = float(((mem.src == int(s)) & mem.active).sum())
+        drift = (mem.nsrc - exact).abs().max().item()
+        neg = int((mem.nsrc < 0).sum())
+        print(f"  {tag:20s} dup slots {mem.n_dup_slot:3d} | underflows {mem.n_src_underflow:3d} | "
+              f"negative sources {neg} | max |census - recount| {drift:g}")
+        if mem.n_dup_slot:
+            print(f"!! a write named {mem.n_dup_slot} slot(s) more than once on the {tag} path -- those rows were "
+                  f"never stored, and the displaced source was charged for each repeat."); ok = False
+        if mem.n_src_underflow or neg:
+            print(f"!! the per-source census went below zero ({mem.n_src_underflow} underflow(s), {neg} negative "
+                  f"source(s)) -- a count of active entries cannot be negative."); ok = False
+        if drift > 0:
+            print(f"!! the incremental census disagrees with an exact recount by {drift:g}. nsrc is the floor's "
+                  f"only input, so this is protection granted or withheld on numbers that are not true."); ok = False
+
+    # THE PER-OWNER DEFECT NEEDS AIMING AT, because it lives in a transient the random arm above walks straight
+    # past. It fires only while 0 < free < m -- once a block is FULL there are no free slots to re-take, and
+    # while it is EMPTY the free list covers the whole write. That is one write per owner, during fill-up, which
+    # is why the random arm reported 0 drift on a path that was genuinely broken. Measured on the pre-fix code
+    # this exact sequence stored FOUR of the six rows handed over and credited the source with six.
+    mem = EditableMemory(200, D, "cpu", V, write_gate=0.0, topk=4, evict="lru",
+                         src_floor=0.5, n_src_hint=8, n_own=8, quota=25)
+    mem._store(torch.randn(23, D, generator=g), torch.randint(0, V, (23,), generator=g), 1, None, None, own=0)
+    mem._store(torch.randn(6, D, generator=g), torch.randint(0, V, (6,), generator=g), 2, None, None, own=0)
+    _true = int(((mem.src == 2) & mem.active).sum())
+    print(f"  {'per-owner fill-up':20s} 23 then 6 rows into a 25-slot block: 6 asked for, {_true} stored, "
+          f"census says {int(mem.nsrc[2])}")
+    if _true != 6 or int(mem.nsrc[2]) != _true:
+        print(f"!! {6 - _true} row(s) handed to the store were never written, and the source was charged for "
+              f"{int(mem.nsrc[2])}. Two free slots read last=0 -- the oldest possible -- so ranking the whole "
+              f"block for victims picks the slots the free list had already taken."); ok = False
+
+    # AND THE INVARIANT ITSELF, driven directly. Both checks above now pass because the SELECTION no longer
+    # produces repeats -- which means the collapse in _commit is never entered, and a guard that is never
+    # entered is not a guard that works. A third caller could build `idx` its own way at any time, so hand
+    # _commit the exact shape the old selection produced and assert the backstop holds: fewer rows written,
+    # counted, and a census that still matches the truth.
+    mem = EditableMemory(50, D, "cpu", V, write_gate=0.0, topk=4, evict="lru", src_floor=0.5, n_src_hint=8)
+    mem._commit(torch.tensor([3, 4]), torch.randn(2, D, generator=g), torch.randint(0, V, (2,), generator=g),
+                1, None, torch.tensor([10, 11]), 2)
+    n = mem._commit(torch.tensor([3, 7, 3, 9]), torch.randn(4, D, generator=g),
+                    torch.randint(0, V, (4,), generator=g), 2, None, torch.tensor([20, 21, 22, 23]), 4)
+    t1 = int(((mem.src == 1) & mem.active).sum()); t2 = int(((mem.src == 2) & mem.active).sum())
+    _kept = [int(v) for v in mem.pos[torch.tensor([3, 7, 9])]]
+    print(f"  {'_commit backstop':20s} idx [3,7,3,9] -> wrote {n} row(s), dup_slot {mem.n_dup_slot} | "
+          f"census s1={int(mem.nsrc[1])} s2={int(mem.nsrc[2])} vs truth s1={t1} s2={t2} | kept pos {_kept}")
+    if n != 3 or mem.n_dup_slot != 1 or int(mem.nsrc[1]) != t1 or int(mem.nsrc[2]) != t2:
+        print(f"!! _commit did not collapse a repeated slot: it returned {n} for 3 distinct slots, counted "
+              f"{mem.n_dup_slot} repeat(s), and left a census that disagrees with `src & active`."); ok = False
+    if _kept != [20, 21, 23]:
+        print(f"!! the collapse kept the wrong payload rows ({_kept}, expected [20, 21, 23]): the survivor of a "
+              f"repeated slot must be a row the caller actually handed over, at the position it handed it."); ok = False
+    return ok
+
+
 def main():
+    # SEEDED, BECAUSE THIS SUITE FAILED THREE TIMES IN TWENTY ON UNCHANGED CODE. The per-case generators cover
+    # the KEYS; the store's victim sampling calls torch.randint/randperm on the global RNG and was never seeded,
+    # so every run drew a different pool and the knife-edge assertion below landed on either side of its own
+    # threshold at random. A regression test that fails 15% of the time on code nobody touched cannot be used to
+    # judge a change -- the first instinct on a red run is to re-run it, which is the instinct that lets a real
+    # regression through. Seeding makes a failure mean something.
+    torch.manual_seed(0)
     ok = True
     lru_read, lru_quiet = _run("lru", True), _run("lru", False)
     use_read, use_quiet = _run("usage", True), _run("usage", False)
@@ -266,7 +379,12 @@ def main():
     a_on,  b_on  = domain_switch(0.5)
     print(f"domain switch, MEM_SRC_FLOOR=0    A kept {a_off:3d}/{HALF}  B {b_off}")
     print(f"domain switch, MEM_SRC_FLOOR=0.5  A kept {a_on:3d}/{HALF}  B {b_on}")
-    if a_off != 0:
+    # A TOLERANCE, NOT AN EXACT ZERO, and the seed above is what makes even this reproducible. The control's
+    # claim is "without the floor the unqueried domain is wiped out"; whether the last one or two of a hundred
+    # entries happen to survive a random victim sample is not part of that claim, and asserting == 0 made the
+    # suite's verdict depend on it. The number that matters is the CONTRAST with the floor arm below, which
+    # keeps ~44 of 100 -- a margin two entries cannot touch.
+    if a_off > 2:
         print(f"!! with no floor an unqueried domain kept {a_off} entries -- the test is not reproducing the "
               f"failure it exists to guard, so its pass below proves nothing."); ok = False
     if a_on <= 0:
@@ -304,6 +422,9 @@ def main():
 
     print("\n--- does the WRONG flag gate reads, and does it say so? ---")
     ok = wrong_gates_reads() and ok
+
+    print("\n--- is the per-source census EXACT? (one slot, one row) ---")
+    ok = census_is_exact() and ok
 
 
     print("\nok -- eviction selects on retrieval, and a floor survives a domain switch." if ok else "\n!! FAILED")

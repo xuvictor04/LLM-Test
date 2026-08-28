@@ -98,6 +98,20 @@ class EditableMemory:
         self.prob_frac = float(prob_frac)
         self.prob = torch.zeros(cap, dtype=torch.bool, device=device)   # still on probation (never retrieved yet)
         self.n_promoted = 0; self.n_prob_evict = 0; self.n_main_evict = 0
+        # TWO ACCOUNTING ALARMS, both zero on a healthy run and both printed whatever they read.
+        #   n_dup_slot      slots a single write named more than once, collapsed by _commit. Every one is
+        #                   a row the caller believed it stored, and the census error that follows is what
+        #                   drove per-source counts NEGATIVE.
+        #   n_src_underflow times a decrement took a source below zero, i.e. the incremental census had
+        #                   already drifted from `src & active`. recount() is the repair; this says
+        #                   whether it is needed, because a clamp on its own would only hide the next one.
+        self.n_dup_slot = 0; self.n_src_underflow = 0
+        # THE WRONG-FLAG GATE, measured where it gates rather than from the state left at the end.
+        #   n_wrong_reads     read() calls made while the gate was on
+        #   n_wrong_read_hit  ...of which excluded at least one entry
+        #   n_wrong_blocked   entries excluded, summed over reads (so it counts exclusion WORK, not a
+        #                     final flag count -- the same entry blocked on ten reads counts ten times)
+        self.n_wrong_reads = 0; self.n_wrong_read_hit = 0; self.n_wrong_blocked = 0
         # HIGH-WATER MARK per source. Occupancy below the floor means two completely different things -- a domain
         # that never wrote that much yet, and a domain that HAD it and lost it -- and only the second is a
         # failure. Without this the starvation alarm fires on every newly-appearing domain, and a warning that
@@ -212,7 +226,15 @@ class EditableMemory:
                 idx = free[:m]
             else:
                 need = m - free.numel()
-                lru = blk[self.last[blk].argsort()][:need]                    # oldest LAST-USE within this owner only
+                # VICTIMS COME FROM THE OCCUPIED SLOTS, and the sort has to be over those alone. Ranking the
+                # WHOLE block by `last` put the free slots first -- they have never been stamped, so their clock
+                # reads 0, which is the oldest possible last-use. The `need` oldest were therefore exactly the
+                # free slots this line had already taken, and `cat([free, lru])` returned m indices of which only
+                # `free.numel()` were distinct. Every duplicate is a row the caller believed it stored and a
+                # double decrement of the previous owner's census in _commit -- which is how a source count
+                # reaches a NEGATIVE number, printed as "s779 (-2 now, peaked 111230)" in MEMORY STARVATION.
+                _occ = blk[self.active[blk]]
+                lru = _occ[self.last[_occ].argsort()][:need]                  # oldest LAST-USE among the OCCUPIED
                 idx = torch.cat([free, lru]) if free.numel() else lru
             self.tick += 1
             self.own[idx] = o; self.last[idx] = self.tick
@@ -224,7 +246,20 @@ class EditableMemory:
             #             actually happen during training -- see MEM_PROBE_EVERY. Without a read probe `use` and
             #             `last` never move off their write-time values and this degenerates to arbitrary/FIFO.
             ns = int(min(self.cap, max(8 * m, 64)))
-            cand = torch.randint(0, self.cap, (ns,), device=self.dev)
+            # DRAWN WITH REPLACEMENT, SO THE POOL REPEATS ITSELF. randint samples independently: at cap=200k and
+            # ns=512 the chance the pool contains the same slot twice is about one in two, and a repeated slot
+            # carries the same `last`/`use`, so if it ranks into the victims BOTH copies are taken. `idx` then
+            # names m slots of which fewer are distinct. torch.unique is O(ns log ns) on a few hundred elements
+            # against a store of hundreds of thousands -- the pool loses a slot or two and stays a uniform
+            # sample, because uniqueness is independent of the signal being ranked.
+            # ...AND THEN PUT BACK IN RANDOM ORDER. torch.unique SORTS, and the ranking below is a topk over
+            # `_sig` whose ties resolve toward the earlier position. A pool sorted by slot id therefore makes
+            # LOW-NUMBERED SLOTS the systematic loser of every tie -- and ties are the common case, not the edge
+            # one: under EVICT=usage every never-retrieved entry has use=0, which this file's own test states as
+            # "with no retrievals every `use` is 0 and the ranking is arbitrary". Arbitrary is what it must stay.
+            # A permutation of a few hundred indices restores that at no measurable cost.
+            cand = torch.unique(torch.randint(0, self.cap, (ns,), device=self.dev))
+            cand = cand[torch.randperm(cand.numel(), device=self.dev)]
             # PROBATION FIRST, and this is what makes the store scan-resistant. If the never-retrieved region is
             # over its share, the new write displaces one of ITS OWN rather than something established -- so a
             # flood of unwanted material (a domain switch, a scan) eats itself instead of the working set, which
@@ -252,8 +287,12 @@ class EditableMemory:
             _sig = self.use[cand] if self.evict == "usage" else self.last[cand].float()
             idx = cand[_sig.topk(kk, largest=False).indices]
             if idx.numel() < m:                                               # pad with circular if the sample was short
-                pad = (torch.arange(m - idx.numel(), device=self.dev) + self.ptr) % self.cap
-                idx = torch.cat([idx, pad])
+                # AND THE PAD MUST NOT RE-TAKE WHAT THE POOL ALREADY TOOK. The circular sweep starts at self.ptr
+                # and knows nothing about the sampled victims, so it can name a slot already in `idx`. Walk a
+                # wider window and keep only the slots not already claimed.
+                _walk = (torch.arange(int(min(self.cap, 2 * m + 8)), device=self.dev) + self.ptr) % self.cap
+                pad = _walk[~torch.isin(_walk, idx)][:m - idx.numel()]
+                idx = torch.cat([idx, pad]) if pad.numel() else idx
         else:
             idx = (torch.arange(m, device=self.dev) + self.ptr) % self.cap    # circular overwrite (recency only)
         self.ptr = int((self.ptr + m) % self.cap)
@@ -390,18 +429,51 @@ class EditableMemory:
                 for s in (self.nsrc_max >= max(1, floor)).nonzero(as_tuple=True)[0].tolist()
                 if floor > 0 and int(self.nsrc[s]) < max(1, floor // 4)]
         return {"floor": floor, "per_source": rows, "blocked": self._floor_blocked, "lost": lost,
+                "dup_slot": self.n_dup_slot, "src_underflow": self.n_src_underflow,
                 "live": live, "orphan": orph,
                 "prob": int(self.prob.sum()), "prob_cap": int(self.prob_frac * self.cap),
                 "promoted": self.n_promoted, "prob_evict": self.n_prob_evict, "main_evict": self.n_main_evict}
 
     def _commit(self, idx, k, tok, src, ctx, pos, m):
         """Write the chosen slots. Split out so the partitioned and global eviction paths share one body."""
+        # ONE SLOT, ONE ROW -- ENFORCED HERE, BECAUSE EVERY CALLER BUILDS `idx` DIFFERENTLY.
+        # Index assignment already collapses a repeat silently: self.keys[idx] = k with idx naming slot j twice
+        # writes the later row and drops the earlier one, so a store that reported m writes held fewer. The
+        # accounting is where it does real damage. The census below decrements the PREVIOUS owner once per
+        # occurrence while crediting the new source idx.numel() -- so a repeat overcharges the displaced source
+        # and overpays the streaming one, and after enough of them nsrc goes NEGATIVE. That is not cosmetic:
+        # nsrc is the per-source floor's only input, `has = (nsrc > 0)` is what makes a source eligible for
+        # protection at all, and a source whose count has drifted to zero is unprotected by the very floor that
+        # exists to stop it being driven to zero. Both known producers of repeats are fixed in _store above;
+        # this stays as the invariant, with a counter, so that a third one cannot be silent.
+        if idx.numel() > 1:
+            _srt = torch.argsort(idx, stable=True)                            # ties keep their original order
+            _iss = idx[_srt]
+            _keep = torch.ones_like(_iss, dtype=torch.bool)
+            _keep[1:] = _iss[1:] != _iss[:-1]                                 # first occurrence of each slot
+            if not bool(_keep.all()):
+                _sel = _srt[_keep].sort().values                              # survivors, back in write order
+                self.n_dup_slot += int(idx.numel() - _sel.numel())
+                idx = idx[_sel]
+                k = k[_sel]; tok = tok[_sel]
+                if ctx is not None: ctx = ctx[_sel]
+                if pos is not None: pos = pos[:_keep.numel()][_sel]
+        m = int(idx.numel())                                                  # what is ACTUALLY written, and returned
         # SOURCE ACCOUNTING, before the overwrite: the slots being taken still hold their old owners' counts.
         old = self.src[idx]
         oa = old[(old >= 0) & self.active[idx]]
         if oa.numel():
             self.nsrc.index_add_(0, oa.clamp(min=0, max=self.nsrc.numel() - 1),
                                  torch.full((oa.numel(),), -1.0, device=self.dev, dtype=self.nsrc.dtype))
+            # A COUNT OF ENTRIES CANNOT BE NEGATIVE, and if this clamp ever bites the census has drifted from
+            # what `src & active` actually says. delete() has clamped since it was written; _commit did not, so
+            # this was the path that let it go below zero and the report printed the negative straight out.
+            # Clamping alone would only hide the next drift, so the bite is counted and recount() is what fixes
+            # it: src_report names both.
+            _neg = int((self.nsrc < 0).sum())
+            if _neg:
+                self.n_src_underflow += _neg
+                self.nsrc.clamp_(min=0)
         s_i = int(src)
         if s_i >= self.nsrc.numel():                                         # a new source id: grow both tables
             grow = torch.zeros(s_i + 1 - self.nsrc.numel(), device=self.dev, dtype=self.nsrc.dtype)
@@ -446,7 +518,20 @@ class EditableMemory:
         # entries be read. A precision figure that low should be a decision, not a default nobody can see.
         valid = self.active & (~self.is_unverified())
         if self.wrong_read:
-            valid = valid & (~self.is_wrong())
+            # COUNTED AT THE POINT OF USE, because the state this filter runs on does not survive to report time.
+            # The DID IT FIRE row for this gate was armed on `(selfcon >= 0).sum() > 10` evaluated at the END of
+            # the run, and every write resets selfcon to -1 -- so on a store that turns over 11.7M writes into
+            # 200k slots the final snapshot said "only 0 entries have been self-consistency checked, so nothing
+            # can be flagged and read() filters nothing", in the same report as "61,952 of 200,000 active entries
+            # are excluded from EVERY retrieval". Both were computed honestly; only one of them was about what
+            # happened. A gate is measured where it gates.
+            _w = self.is_wrong()
+            self.n_wrong_reads += 1
+            _nb = int((valid & _w).sum())
+            if _nb:
+                self.n_wrong_blocked += _nb                                   # entries this read could not reach
+                self.n_wrong_read_hit += 1
+            valid = valid & (~_w)
         #   (is_unverified() is a no-op until verify() has populated recon, so default runs are unchanged)
         dist = torch.zeros(B, self.V, device=self.dev)
         conf = torch.zeros(B, device=self.dev)
