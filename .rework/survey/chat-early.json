@@ -1,0 +1,1071 @@
+{
+ "area": "chat-early",
+ "summary": "\"chat-early\" is the owner's conversation with Claude Code from 2026-07-21 to 2026-08-15, preserved as `notes/_evidence/chat/user_turns.md` (455 turns, 446 genuine researcher turns; 9 flagged as harness-injected compaction summaries) plus 12 full-transcript chunks (`chunks/chunk_01..12.md`, ~6MB total, manifest at `chunks/MANIFEST.md`). The raw JSONL is gone, so these files are primary source. The period covers the project from the moment an uploaded 121-file zip was committed into `xuvictor04/LLM-Test` through the creation of the `notes/DOC_PLAN.md` documentation mandate that produced the notes corpus itself. The arc runs: naming/handoff hygiene \u2192 build and test \"Verification\" (reconstruction) \u2192 discover it dies on the base-rate wall \u2192 scale data and lose a day of H100 compute to a missing checkpoint \u2192 build a JEPA-style world model \u2192 performance work and GPT-2 as a rough benchmark \u2192 repeated reframes away from domain/clustering metrics toward language output and continual learning \u2192 expert-population work (router discovery, weight-predicting router, chaining) on a new branch `rm-predict` \u2192 tokenizer/minting work \u2192 a \"disentangle the levers\" refactor program \u2192 per-expert learning rates and evolutionary culling. Roughly 18% of the \"user turns\" (81 of 455) are `stop-hook-git-check.sh` echoes, not researcher input. The owner ran every GPU experiment himself on rented cloud boxes and pasted results back; the assistant's container was CPU-only and ephemeral.",
+ "facts": [
+  {
+   "claim": "Standing constraint: shell commands default to bash. Verbatim: \"Send test message, default to bash unless I specify python\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:227 (U0024, 2026-07-21T22:36:37Z)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Standing constraint: every run command must assume a fresh, empty box. Verbatim: \"For the bashes, assume I am starting clear, since sometimes I need to terminate the cloud GPU\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:651 (U0027, 2026-07-22T02:57:24Z)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Standing constraint: git operations must be pasteable from a phone. Verbatim: \"Never mind, I made it public for now, but I want the git to be through the python console so I can copy and paste when on mobile\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:170 (U0019, 2026-07-21T22:00:19Z)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Preference for single copy-pasteable scripts: \"Provide copy paste instructions for the test\" and \"Create a single python script that I can easier copy and paste\", then \"No, I mean for a py console. And, the repo is private, so I don't know if it will pull\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:145, :151, :157",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Standing constraint: confirm before acting on performance changes. Verbatim: \"I don't want to get rid of it, but you are allowed to think of ways around it. I must confirm before action.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3214 (U0068, 2026-07-24T03:41:38Z)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Standing constraint: no compromises \u2014 do not remove or downgrade functionality to gain speed. Verbatim: \"I asked for no compromise, but what you did was exactly that, by removing sections and only using \u201ctested and approved\u201d. That isn't what I asked for.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3264 (U0074, 2026-07-24T12:43:21Z)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Instruction on completeness of work: \"Fix the issues and implement the edits. Take as long as needed and explicitly tell me if everything is done or anything left over.\" plus \"It would be good practice if we audit again afterwards.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3951, :3953 (U0108, 2026-07-24T21:48:30Z)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Instruction not to kill background work on a new message: \"You seemed to have been utilizing agents a minute ago. Please don't automaticallly stop them when I message you.\" \u2014 later self-corrected to \"I think I meant tasks earlier, not agents\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:4131 (U0133); :4358",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner prefers to run GPU tests himself rather than wait on the assistant: \"Yes, but my point is, you take too long, it is better for me to do it for you.\" and later \"I can run the tests. Send it to me. My system is likely faster\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9072 (U0252, 2026-08-04); :10123 (U0355, 2026-08-10)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Branch instruction: the weight-prediction router work was to be pushed to a separately named branch \"R M Predict\", and thereafter \"I want you to be working on this branch from now on\" (the branch became `rm-predict`)",
+   "evidence": "notes/_evidence/chat/user_turns.md:9019 (U0244), :9032 (U0246), both 2026-08-04",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Instruction on run banners: \"First fix the banner lie. It is a lie you constructed.\" then \"Fix all banner lies. They are distracting. Make them automatic and based off what's run. Also have the exact pull branch be announced in each log.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9343 (U0268, 2026-08-05); :9464-:9466 (U0285, 2026-08-05)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Instruction on code comments: \"Your comment audit is not good. It's stating things like facts when they are not... Remove anything that makes claims subject to change.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:10113 (U0354, 2026-08-10)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Epistemic constraint on prior conclusions: \"Default 1 sounds like a poor and faulty decision in your past. Treat past comments as a rough statement, never as anything definitive, especially since it can drastically change with different structures and architecture.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11407 (U0447, 2026-08-15)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Explicit instruction that all recorded results are provisional: \"although you will say it definitively means something, it is likely often wrong, since there is a high likelihood that it was either due to chance, since we have not optimized anything, and are still building out strategy, or had an inherent error in interpretation or why it was done\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11376 (U0444, 2026-08-15)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The documentation mandate that created the notes/ corpus: \"Have an agent or series of agents to go through our entire chat history, and document them on the github page. At minimum, it needs to include suggested ideas, by me. What was tested, results.\" ... \"It should contain notes for me to use on what is a work in progress, all errors encountered, if they were fixed, etc... Notes in the code that are extranoues and do not describe the usage should be moved to the notes. I expect this to be long and thorough\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11376, :11378, :11380 (U0444, 2026-08-15)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Scope instruction on that documentation: \"I want the agents to go through the entire history, even if it is outside your current context window.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11642 (U0455, 2026-08-15T19:54:38Z \u2014 the last turn in the period)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NORTH STAR in the owner's own words (given via AskUserQuestion, 2026-07-21): \"The genie wish is an LLM capable of learning, complex reasoning, much smaller than conventional models, and with an ever expanding and updatable knowledge base. Realistically there will be compromises. When this occurs, expansion and growability are not to be lost. It also need to be capable of language, as a personal benchmark. WIth this concept, a goal is the ability for multimodality, where we can plug in and add more avenues, and a dashboard to stream and see the thinking and processes occuring\"",
+   "evidence": "notes/_evidence/chat/chunks/chunk_01.md:1855",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Training from scratch (not on a pretrained base) was chosen for \"Novelty / full ownership\"; compute is \"rented, so as long as necessary.\"; success priorities are \"covo [conversation], sentence generation, architecture, shipping in order of most to least important\"",
+   "evidence": "notes/_evidence/chat/chunks/chunk_01.md:1855 (same AskUserQuestion result)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Goal A restated as a hard priority: \"The final goal will always be proper language, working on top of that.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:7153 (U0171, 2026-07-29)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Goal A restated again: \"Remember, the ultimate goal is textual, not arbitrary metrics.\" and \"Output quality will always trump other metrics. They, however are useful for my design sake.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9499 (U0289); :9507 (U0290), both 2026-08-05",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Goal B stated in the owner's words: \"The end all is the resulting output, and capacity for continual learning without exorbitant forgetting, and maintaining old capacities, without significant degradation. The project should reflect this.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8337 (U0189, 2026-07-31)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Both goals reasserted against tokenizer optimization: \"the final goal is for language, not optimizing specifically the tokenizer, vmax, or different ways to freeze the structure... Remember that a target has been and still is the continual learning.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:10895 (U0406, 2026-08-12)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Anti-metric-optimization constraint: \"I don't want to optimize for our arbitrary metrics. Their use is only as proxies, so we can quickly tell how close we are from getting to proper language, and continual learning capabilities... If a metric isn't working, but the system itself is improving, that does not mean the system is at wrong, but the metrics and how we are using them.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:6129-:6135 (U0161, 2026-07-27)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Multimodality design: \"Sense\" means a modality, not polysemy \u2014 \"Sense was supposed to be a separate thing, where currently it is built as an LLM, but multimodal in and output can be created. Ie I attach a mic to the system, giving it a new sense\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:137 (U0014, 2026-07-21)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Modalities enter at the tokenizer layer: \"Senses should be integrated via the lowest tokenizer layer, and \u201cdiscovered\u201d when unknown or unusual inputs are recieved, before reconciliation, and understanding\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:97 (U0010, 2026-07-21)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Core architectural intent \u2014 work must be subdivided, not done by one component: \"I don't want the full task to be done alone. Ideally it is subcontracted in a sense, and spread out, via the router base.\" and \"On the interchangeability, ideally, subspecialties will emerge, for specific tasks, breaking things down\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:95 (U0010); :89 (U0009)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Experts may terminate in tool calls: \"some \u201cexperts\u201d can end in a tool call/pre established scripts (but capable of being created by the system itself if done often enough) like a token\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:103 (U0011, 2026-07-21)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Routers-as-embedders is an owner idea from day one: \"Maybe routers can act like embedders, taking an input (and source), modification, then embedding to determine which expert is most similar, or from learned recognition, allowing it to transfer to prior unknown parts\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:107 (U0011, 2026-07-21)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Surprise and reverse embedders were intended as learning-signal machinery: \"Surprise was supposed to be a mechanic to facilitate the ongoing learning\" / \"Reverse embedders, a part of it, for a certain level of thought, verification, or training\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:115, :117 (U0012, 2026-07-21)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Rejected design: strict per-domain memory quota. \"I don't like a strict per domain quota. The system sounds like it will break something. Likely, a better way is if memory burden is near, the domain can be expanded in terms of experts, possibly retrain the experts, or a sign as domain splitting is needed\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:143 (U0015, 2026-07-21)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Memory design directive: per-expert memory, quota counted in entries not bytes, 16-128 entries, LRU by last use. \"it should be keyed such that each expert has their own, and they have a max quota. Not in terms of bytes or bits. It should be in number of entries... possibly 16 to 128 max entries. (Ranked on when last utilized)\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3903 (U0102, 2026-07-24)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Expert population scale expectation: \"I don't understand why experts is capped at 64, my expectation is much higher. Thousands or even millions. Selection at a scale of tens is pointless.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8560 (U0200, 2026-08-03)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Breadth cap directive: \"Cap the number of domains a single expert can be part of. It should be percentage based.\" plus \"We can cull domains when they are empty.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8590, :8592 (U0204, 2026-08-03)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Evolutionary growth directive: \"Growth should not just be the fittest, since a more niche may be more relevant. Newborn should also have some randomness / mutation injected\" and \"We can add on to the randomness mechanism by allowing (completely random) new experts to take random connected sections of other experts.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8728-:8730 (U0222); :8743 (U0224), both 2026-08-03",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Router discovery declared the critical gap: \"The router issue is very big. We need to fix it, inability to discover a new expert is almost catastrophic to the idea. How can we do it?\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8745 (U0224, 2026-08-03)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The `rm-predict` mechanism in the owner's words: \"Can we use this system for expert creation and discovery? Where routers output its desired expert (by weights), and we will route to closest, but if there is a wildly different, than the predicted to be, for the new to be created. This way routers can be trained to discover and created. Accordingly, backprop for routers will work with the new weights of the experts\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9002-:9006 (U0242, 2026-08-04)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Router input/exit directive: \"I want the router fabric input to include the source's weights. Since that's the only way to know where it's from. The router should be the one who determines when to complete, not go directly from expert to head.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9096, :9098 (U0256, 2026-08-04)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Chaining is the default path: \"Make sure whenever I run, it is including chaining, unless specified otherwise.\" and \"Use the most updated, use the chaining society, it should be the default.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9323 (U0265, 2026-08-04); :9509 (U0290, 2026-08-05)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The owner's own definition of chain_vote: \"my idea for chain_vote was the society system, but allowed to loop over and over, (in chains)\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9483 (U0287, 2026-08-05)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Tokenizer minting is load-bearing for goal B: \"Token minting is critical for my idea of continual learning.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9626 (U0307, 2026-08-06)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Minted tokens must inherit parameters, not start cold: \"We want minted tokens to start with parameters. My original goal was to make the transition, between new mint and its composite, much easier. I want these tokens to be trained on even with the loss, but we need to do it differently.\" \u2014 reversing his own earlier suggestion of integer-value ids",
+   "evidence": "notes/_evidence/chat/user_turns.md:9609 (U0305, 2026-08-06); the reversed suggestion is at :9597 (U0304)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Token quality gate directive: \"Maybe we can do something like branching entropy, where two tokens, a and b are merged, and I guess used, when a can reliably predict b.\" and \"Branching entropy should default on. We'll need to figure how to go about, since aim is learn and verify before fully minting token\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:10757 (U0388); :10787 (U0390), both 2026-08-11",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Token probation directive: \"Judgement of merge or unmerge should correspond to either: the branching entropy that was built, or an embedding system that sees if the sum is more than the parts. Let's build the probationary mechanism then\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:10815, :10817 (U0394, 2026-08-11)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Anchor release changed from steps to appearances: \"I also want to modify anchor, so instead of 4000 steps, it triggers after a certain amount of appearances, ensuring training.\" then \"Anchor uses should not default to 0. Lets make it 400\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:10721 (U0383); :10753 (U0388), both 2026-08-11",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LR schedule directive, reversing a proposed clamp: \"No, I don't want a clamp, it should continue with the cosine waves. The goal is to repeat.\" and \"The key for LR Epoch is: we had runs where 8 epochs would be nice. The LR Epochs should, a replicate, and b improve on those results.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:10769 (U0389); :10789 (U0390), both 2026-08-11",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LR schedule reversed again on 2026-08-15: \"I am starting to think cosine may not be the right way to go. It should start high, but gradually lower, fluctuatging, but lowering in peak of fluctuations. Also, I want to have the LR schedules of each expert to be independent\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11350-:11352 (U0442)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Final LR/culling spec of the period: \"Lets use Smith's Cyclical LR, but implemented in a per expert scale then, with each expert counting down their age. Lets adjust things to only be when the specific expert is selected, so age is dependent on the expert's use. Lets make the safe period dependent on this instead, and modify the culling percentv from the either 8% or 4% that it currently is to 2% or 1%. I want to keep LR independent for each expert.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11597 (U0449, 2026-08-15)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Culling is non-negotiable but must be balanced: \"Balance loss can be implemented on a smaller scale. I still want culling since it is semicritical to our evolutionary mechanism. Balance will help ensure that each expert has a chance.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11599 (U0449, 2026-08-15)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Bottom-ranked experts should get more LR or mutation, but only outside their safe phase: \"SInce we have the custom learning rates per expert, lets have a mechanism, where if the expert is near bottom, it has an increased LR or mutation chance\" ... \"For 5, on the bottom ranked experts, this is assuming they are outside of their safe phase.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11374 (U0444); :11403 (U0447), both 2026-08-15",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Evolutionary framing for expert aging: \"certain experts \\\"aging out\\\" and not learning is not a large issue. If they contain error, ideally, they will eventually be replaced by their own \\\"new successors\\\", with long enough runs. Importantly, having LR Epochs as a per expert effect rather than system encompassing is more conductive to the evolutionary learning\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11411 (U0447, 2026-08-15)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Benchmark: \"Our rough benchmark is GPT 2, in terms of training size and quality\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3288 (U0078, 2026-07-24)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Numeric target set late in the period: \"The goal is to get safely below 2, ideally hit 1.5 this run.\" (bits/byte)",
+   "evidence": "notes/_evidence/chat/user_turns.md:11322 (U0438, 2026-08-15)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Corpus scope decision: English first, other domains later. \"Realistically, we can start with English as a proof of concept. Likely there will still be domains within. Adding more can be done later.\" ; \"Let's not do Wikipedia yet, and start out with an English language focus.\" ; \"Let's just do English. Python, programming languages and sciences can be added later.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3850 (U0097, 2026-07-24); :8309 (U0185, 2026-07-31); :8393 (U0197, 2026-08-02)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Gate on expanding beyond English: \"I want english to be done well in a pilot before fully committing to adding new domains, and the continual learning.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11290 (U0434, 2026-08-14)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "World-model requirement: general, not self-referential. \"Build the world model as a general world model. Not of its own situation. I wanted integration of other modalities. This would require a physics like model.\" \u2014 later relaxed: \"Physics does not necessarily have to be the target, as long as it is simulating the world in a real sense.\" and \"Make the world model more like the rest of the system, in its separation\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3116 (U0062); :3242 (U0072); :3210 (U0068), 2026-07-23/24",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Deferred design item, explicitly not to be coded at the time: active learning \u2014 \"the system generates like such: a reference article, followed by a prompt, then reproduce the output without the reference. Do not write code yet.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3030 (U0050, 2026-07-23)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Deferred design item: partial compartmentalization \u2014 \"some information may be relevant to different aspects, and to partially (not fully) isolate. Allowing things to mix is important for creativity.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3032 (U0050, 2026-07-23)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Freezing is disfavoured on principle: \"Let's do all 3, but I don't like the idea of freezing, as we can see in 3. Frozen material does not bode well for my idea of learning\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:5803 (U0157, 2026-07-27)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Non-stationarity is required, not optional: \"Why is non stationary off? I thought forgetting was essential\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:6141 (U0162, 2026-07-28)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Domains reframe #1: the seeded 4-domain labels are the arbitrary part \u2014 \"My view was these domains are naturally overlapping, and instead make it self assembling\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:4953 (U0144, 2026-07-25)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Domains reframe #2: \"The domains should be self driven and organically created.\" together with \"Why has the router fabric been turned off? It is essential for the current system design.\" and \"Complete reproduction of the domains is not necessary, substance and usefulness of the domains is more important.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:7147, :7149, :7151 (U0171, 2026-07-29)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Domains reframe #3 (de-prioritization): \"No, domains are not a major concern for me... The domains are only a concern because you have been driving it up, and improperly interpreting it. My bigger concerns is within the domains, and the experts.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8337, :8339 (U0189, 2026-07-31)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner's model of aggregate competence: \"The expectation is that none of the individual experts are sufficient for the tasks at hand, but aggregate, they are. The hope is that the structure of selection drives this, producing an overarching system that works and is capable of expansion and learning.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8345 (U0190, 2026-07-31)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The \"disentangle the levers\" mandate: \"I want you to normalize and disentangle the code, since there are so many interrelated things, some unnecessary. This way we have clearer levers. Create a table of what was modified, in the end. Ensure that nothing is functionally different, just that things are disentangled. We will need to rerun some pilot tests, to make sure nothing changed.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9950-:9958 (U0330, 2026-08-07)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Why the levers mattered: \"This is why we need to fix the levers and their connections, so they do not overlap and improperly change things\" and later \"Have those levers been separated and isolated? I thought I asked for that.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:10570 (U0375); :10538 (U0371), both 2026-08-11",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Run bookkeeping instruction: \"Instead of recording in self organize, use a csv to keep track of past runs.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:10807 (U0393, 2026-08-11)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Memory finding and directive at the end of the period: \"the fact that the memories from the python run has largely overwritten the english, it means that the domains have not been fully isolated. Better memory control is likely also needed. We need to re evaluate how it currently works.\" and \"overlap experts is ok and expected, but having all experts have been overlapped is an inherent issue... Use based recency is better I think.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11386 (U0445); :11405-:11406 (U0447), both 2026-08-15",
+   "confidence": "verified"
+  },
+  {
+   "claim": "State leak reframed as an asset: \"state leak would be bad in one sense, however, we can utilize this for our system, building off of it (intentionally), to get more efficient. We still need to control for it when applicable, but it is a helpful lever\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:11226 (U0426, 2026-08-14)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the assistant's container has no GPU. Owner's answer to \"This remote container has NO GPU (CPU-only, ephemeral). The real runs need CUDA/H100. How do GPU results get produced?\" was \"You run on your own H100, paste back\"",
+   "evidence": "notes/_evidence/chat/chunks/chunk_01.md:359 (AskUserQuestion result, 2026-07-21)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: GPU boxes are rented, short-lived and numerous \u2014 at least 15 distinct `ubuntu@<ip>` hostnames appear in pasted terminal output across the period (192-222-53-46, 192-222-52-116, 129-153-102-123, 129-153-86-229, 192-222-50-188, 192-222-51-110, 192-222-53-218, 192-222-54-145, 192-222-54-220, 192-222-55-36, 192-222-58-77, 209-20-159-106, 68-209-72-255, 68-209-75-15)",
+   "evidence": "`grep -o \"ubuntu@[0-9-]*\" notes/_evidence/chat/user_turns.md | sort -u` over the file",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: hardware used or planned over the period \u2014 a single H100 (\"I'm on 400k, on the h100 and it's been nearly a day\"), a planned 4xH100 (\"Instead of a H100, I plan on using a 4x H100. I want to make sure it gets used in full capacity (without crashing)\"), an A100-SXM4-40GB (bench box), and a GH200",
+   "evidence": "notes/_evidence/chat/user_turns.md:2679 (U0035); :3100 (U0060); :3629 (bench output); :4040 (U0121 \"I got a different gpu, a gh200. Lets prep for it.\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the GH200 is not always available \u2014 \"Although I plan on using a GH200, I wont always be using it, so if something must be run there, let me know.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8147 (U0181-region, 2026-07-30)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: repo `xuvictor04/LLM-Test`; it was private at first (\"the repo is private, so I don't know if it will pull\"), made public the same evening; the branch pushed for the initial import, `claude/hub-addition-1ueehb`, became the repository default branch because the repo was empty",
+   "evidence": "notes/_evidence/chat/user_turns.md:157, :170; notes/_evidence/chat/chunks/chunk_01.md:441, :801",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: a Stop hook (`~/.claude/stop-hook-git-check.sh`) blocks turn completion on untracked files and on commits whose committer email is not noreply@anthropic.com; 81 of the 455 recorded \"user turns\" are echoes of this hook, not researcher input",
+   "evidence": "notes/_evidence/chat/user_turns.md:163-164; :8699; `grep -c \"^Stop hook feedback:\"` = 81",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: `bc` is not installed on the GPU box \u2014 `fetch_data.sh` printed \"line 69: bc: command not found\" four times, silently zeroing every corpus size report (\"eng 40040948877 bytes (0.0 MB)\")",
+   "evidence": "notes/_evidence/chat/user_turns.md:4235-:4244",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: HuggingFace access was unauthenticated for most of the period (\"Warning: You are sending unauthenticated requests to the HF Hub\") and a fineweb-edu streaming pull died with \"'[Errno 9] Bad file descriptor'\" then \"Fatal Python error: PyGILState_Release\"; the owner only set up an HF token on 2026-08-14 (\"I have set up a Hugging Face token, how do I access the gated dataset?\")",
+   "evidence": "notes/_evidence/chat/user_turns.md:2985, :2992-:2997; :11252 (U0428)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the network egress proxy blocked WebFetch for essentially every paper host (arxiv.org, semanticscholar.org, OpenReview, ACL Anthology, HuggingFace) \u2014 research agents could only read search summaries. Owner's response: \"Since webfetch was blocked, provide me what to tell a non claude code session, and I will provide to you or digest myself. (also it should alert me if something is blocked)\"",
+   "evidence": "notes/_evidence/chat/chunks/chunk_12.md:3398, :4864, :4885; notes/_evidence/chat/user_turns.md:11413",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the owner runs unattended grids with `sleep 2h && git pull` \u2014 \"My plan is to use a sleep 2h && git pull to run, so make it safe for that.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:9388 (U0273, 2026-08-05)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the owner loses terminal sessions and run logs \u2014 \"I've already closed the session, so we'll need to rerun\", \"Run complete, but no log file\", \"It is lost, but I copied from terminal, so not completely gone\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8778 (U0229); :11259 (U0430); :11265 (U0431)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WRONG ASSUMPTION: the assistant asserted the bottleneck was CPU-bound; the owner corrected it \u2014 \"I'm pretty sure it's not cpu bound since I've seen (and have told the other context) that it's gpu bound, due to the reverse encoders.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3212 (U0068, 2026-07-24)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WRONG ASSUMPTION: run scripts carried a hardcoded `cd ~/overarching-package` that had been dead since the repo was flattened \u2014 it printed \"run_full_unfrozen.sh: line 23: cd: /home/ubuntu/overarching-package: No such file or directory\" in the owner's terminal",
+   "evidence": "notes/_evidence/chat/user_turns.md:264; fix recorded at :2590",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WRONG ASSUMPTION: wall-clock estimates were persistently wrong. Owner: \"The estimates given are always wrong and longer than expected.\" and later \"you estimated the tests will take 2hrs, they ended up taking 6\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:2685 (U0036, 2026-07-23); :10068 (U0348, 2026-08-10)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WRONG ASSUMPTION: the assistant's local CPU smoke tests were assumed cheap; the owner reported \"I am running. Your CPU smoke is taking longer than what I think the GPU would take.\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:8162 (U0181, 2026-07-30)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WRONG ASSUMPTION: the assistant read code-shaped generation output as evidence of coherence. Owner: \"Your prior analysis of the results have been misleading, saying that it was providing code, only through sights of code like tokens.\" and earlier \"I feel somewhat deluded by you, since we are not getting results, and we keep on walking back on stuf\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:3891 (U0101, 2026-07-24); :3181 (U0064, 2026-07-24)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WRONG ASSUMPTION (owner's, corrected by the assistant): domains were believed disabled. \"make sure that the domains are not disabled, since I was running on the assumption that they weren't used\" \u2014 SELF_ORG was confirmed to default to 1",
+   "evidence": "notes/_evidence/chat/user_turns.md:3270 (U0075, 2026-07-24); confirmation quoted at :3508",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The 20GB / few-TB corpus the owner remembered pulling in a prior chat was never located in this one: \"What happened to the large database?\" / \"I am referring to a 20GB pull we did in another context\" / \"Not directly from the repo, but from a larger, I think a few TB public llm training database\"",
+   "evidence": "notes/_evidence/chat/user_turns.md:203, :209, :215 (U0020-U0022, 2026-07-21)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "user_turns.md itself warns that 9 of its 455 entries (U0032, U0082, U0147, U0177, U0264, U0309, U0370, U0417, U0448) are Claude-written compaction summaries injected with role=user, and that a literal substring search will find quote-of-a-quote matches in them",
+   "evidence": "notes/_evidence/chat/user_turns.md:8-11 (header) and the inline banner repeated at e.g. :2536-:2539",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "VERIFY / VERIFY_SWEEP / RECON_W",
+   "effect": "VERIFY selects the wrongness signal (\"selfcon\" default vs \"recon\"); VERIFY_SWEEP deletes unverified entries from the store; RECON_W turns on joint training of the Reconstructor (0.0 = off).",
+   "owner": "verification.py + self_organize.py",
+   "couples_with": [
+    "WRONG_SWEEP",
+    "the surprise write gate (base rate of corrupt entries)"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:2586 (\"VERIFY=os.environ.get(\\\"VERIFY\\\",\\\"selfcon\\\")\", RECON_W default 0.0); run output at :573-:574"
+  },
+  {
+   "name": "TOK_ONLINE / SEED_VOCAB / VMAX",
+   "effect": "Online mint-on-repetition tokenizer. SEED_VOCAB is only a seed; VMAX is the true cap. Owner ran capless (uncapped VMAX), 4k and 8k arms as an experimental spread.",
+   "owner": "tokenizer.py",
+   "couples_with": [
+    "RETOK_EVERY",
+    "TOK_MINT_UNTIL",
+    "LOSS_MASK_DEAD (dead softmax rows scale with VMAX)",
+    "_total_steps / LR schedule (measured once at seed vocabulary)"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:3353 (\"SEED_VOCAB is a seed, VMAX is the true cap\"); :11001; :10365-:10368"
+  },
+  {
+   "name": "TOK_MINT_UNTIL",
+   "effect": "Freezes minting at the given step. Does NOT stop re-segmentation: at TOK_MINT_UNTIL=1 a \"frozen\" run still fired 39 no-op re-tokenizations.",
+   "owner": "tokenizer.py / self_organize.py retok block",
+   "couples_with": [
+    "RETOK_EVERY"
+   ],
+   "evidence": "notes/_evidence/chat/chunks/chunk_09.md:36; chunk_08.md:6708"
+  },
+  {
+   "name": "TOK_ANCHOR / TOK_ANCHOR_TAU / TOK_ANCHOR_USES / TOK_COMPOSE",
+   "effect": "ByteComposer gives a minted token vector = composite(bytes) + zero-init residual, with a decaying penalty on the residual. TOK_ANCHOR_USES (owner-set to 400) releases the anchor by appearances rather than steps \u2014 but it is gated on TOK_COMPOSE, whose default is 0, so it is inert at default.",
+   "owner": "tokenizer.py / ByteComposer",
+   "couples_with": [
+    "TOK_COMPOSE (gate)",
+    "RETOK_EVERY (owner asked resegmentation not to fire inside the anchor period)"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:11004-:11005; owner's directive at :10717-:10721 and :10753"
+  },
+  {
+   "name": "TOK_MINT_PMIN / TOK_MINT_GATE_K / TOK_MINT_NOVEL",
+   "effect": "Branching-entropy merge gating before minting (p(b|a) threshold, top-K pair pool). TOK_MINT_PMIN defaults to 0 and fails open; TOK_MINT_NOVEL defaults to 0.0, making the novelty branch inert.",
+   "owner": "tokenizer.py maybe_grow",
+   "couples_with": [
+    "TOK_PROBATION*"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:11002; chunk_08.md:5385 (\"f9d676c ... gated on `if self.novel > 0` ... Banner: TOK_MINT_NOVEL=0. Inert.\")"
+  },
+  {
+   "name": "SOCIETY / CHAIN_ROUTE / CHAIN_VOTE",
+   "effect": "Selects the forward path: society() one-hop blend at prediction level; CHAIN_ROUTE=transition (learned transition matrix); CHAIN_ROUTE=soc (society re-routed each hop, default). CHAIN_VOTE makes experts vote each hop with HALT mass choosing which hop's answer is used. CHAINED SOCIETY = SOCIETY=0 + CHAIN_ROUTE=soc + CHAIN_VOTE=1.",
+   "owner": "Fabric in self_organize.py",
+   "couples_with": [
+    "FAB_MIN_STEPS (CHAIN_VOTE silently forces it to 0)",
+    "MEM_PER_EXPERT, competence EMAs, spawn_from, sustained-error culling \u2014 all were SOCIETY-gated and therefore off under chaining",
+    "DIV_W and IND_W (not runnable on a composed walk)"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:10351; :11459; chunk_07.md:3502-3504, :4155-:4180"
+  },
+  {
+   "name": "FAB_N0 / FAB_NMAX / FAB_GROW / FAB_COOLDOWN",
+   "effect": "Expert population: initial size, hard cap (raised to 4096), growth on/off, and a blackout window after a detected shift during which PlateauGrowth cannot grow. Owner ran 2048-start vs growth-from-small as the \"growth vs size\" series.",
+   "owner": "Fabric / PlateauGrowth",
+   "couples_with": [
+    "PlateauGrowth ramp latch (`n >= ramp_to * cap` \u2014 starting at the soft cap disarms the ramp)",
+    "note_shift() blackout"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:10349; :10997; :11460; chunk_12.md:713"
+  },
+  {
+   "name": "EXP_DOM_FRAC / EXP_DOM_MIN / CHAIN_BAN",
+   "effect": "The percentage-based breadth cap the owner asked for (dom_ban returns a hard -inf routing mask). It reads fab.dom_of, which was populated one sample per step, so the cap could only ever ban the ~30 experts that happened to be sampled \u2014 effectively inert from the day it was added until commit 99e5da0 fixed the table.",
+   "owner": "Fabric.dom_ban",
+   "couples_with": [
+    "BATCH_W (samples per step into dom_of)",
+    "SELF_ORG"
+   ],
+   "evidence": "notes/_evidence/chat/chunks/chunk_08.md:1367, :5385, :5464"
+  },
+  {
+   "name": "MEM_CAP / MEM_QUOTA / MEM_OWNERS / MEM_PER_EXPERT / WRITE_TARGET",
+   "effect": "Editable memory: capacity, per-expert entry quota (owner: 16-128, LRU by last use), owner bucket = expert id folded modulo MEM_OWNERS, and the surprise-quantile write target that right-sizes the store.",
+   "owner": "memory.py EditableMemory",
+   "couples_with": [
+    "SOCIETY (MEM_PER_EXPERT was SOCIETY-gated and silently off under chaining)",
+    "KEY_SRC and the rekey cadence"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:11465; :5006; chunk_07.md:4160; owner directive at :3903"
+  },
+  {
+   "name": "KEY_SRC + rekey (REKEY_CHUNK, amortized rekey)",
+   "effect": "Memory keys come from the model's own representation (KEY_SRC=model) and must be periodically re-keyed as the model drifts; the amortized rekey spreads that cost across steps. In the A100 bench, rekey(amortized) was 48-49% of step time at d=768.",
+   "owner": "memory.py _rekey_amortized",
+   "couples_with": [
+    "D_MODEL_B",
+    "MEM_CAP",
+    "WRITE_TARGET"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:3730, :3759 (bench profiles); :11465"
+  },
+  {
+   "name": "SIG_MODE / SIG_SPACE / SIG_WIN / ENC_WARMUP / ENC_WARMUP_MIN / ENC_EVERY_IDLE",
+   "effect": "SigEncoder domain-fingerprint encoder (InfoNCE over byte or token windows). ENC_WARMUP_MIN is the adaptive-warmup floor; contrastive_step is shift-gated (every step near a boundary, every ENC_EVERY_IDLE=12 steps when stable) so its profile share is data-mix dependent.",
+   "owner": "self_organize.py SigEncoder",
+   "couples_with": [
+    "ENC_WARMUP (setting ENC_WARMUP_MIN == ENC_WARMUP makes the plateau test unreachable)",
+    "the data mix (encoder share is not transferable between corpora)"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:7419; :3771-:3776 (\"the encoder share is DATA-DEPENDENT, so do not carry the ~85% figure over\")"
+  },
+  {
+   "name": "NEW_DIST / SHIFT_DIST / MAX_DOMAINS / SEG_MIN / SEG_MAX / WIN",
+   "effect": "Domain assembly thresholds and segment geometry. The thresholds are absolute constants while the encoder's distance scale inflates as it trains \u2014 the run's own diagnostic named this an \"ASSEMBLER/threshold problem (raise NEW_DIST, or normalize distances per-domain)\". SEGMENT/WINDOW below ~3 windows per splice makes clustering scores describe transitions, not domains.",
+   "owner": "DomainAssembler",
+   "couples_with": [
+    "ENC_WARMUP (scale grows with training)",
+    "WIN",
+    "SEG_MIN/SEG_MAX"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:4728-:4730; :6382 (\"!! CONFIG WARNING: SEGMENT/WINDOW = 1250B / 384B = 3.3 windows per splice segment\")"
+  },
+  {
+   "name": "ROUTE_GROUNDED / ROUTE_T / ROUTE_REGION_W",
+   "effect": "Grounded routing. ROUTE_GROUNDED=1 ROUTE_T=0.3 reproduces the \"modularity\" regime from the same code as the \"redundancy\" regime \u2014 a config difference, not a code difference. ROUTE_REGION_W weights the grounded-region cosine against the weight-prediction term in entry_logits.",
+   "owner": "Fabric routing / entry_logits",
+   "couples_with": [
+    "ground_update (EMA centroid buffer, no_grad \u2014 not backprop)",
+    "the weight-prediction term the owner asked to be the main consideration"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:57 (regime reproduction via two env vars); :2560; :9672; :10352"
+  },
+  {
+   "name": "CKPT_EVERY / SAVE_CKPT / RESUME / BEST_TRACK",
+   "effect": "Mid-run checkpointing every N steps plus SIGUSR1 checkpoint-on-demand, added after a full day of H100 compute was lost to an end-only save. BEST_TRACK writes a `.best` snapshot on held-out improvement but never restores it.",
+   "owner": "self_organize.py _save_ckpt",
+   "couples_with": [
+    "repeat/seeds harness modes (SAVE_CKPT=0 also disables holdout_bpb, changing what the run measures)"
+   ],
+   "evidence": "notes/_evidence/chat/chunks/chunk_02.md:935-:951, :1814, :1822; chunk_08.md:6107, :6475"
+  },
+  {
+   "name": "EPOCHS / LR_EPOCHS / LR_RESTARTS / LR_DECAY",
+   "effect": "Cosine LR wavelength in epochs (default 8, clamped min(8, EPOCHS)), number of whole cycles fitted to the run, and a decaying envelope added later. _lr_at reads _total_steps, measured once at the seed vocabulary; _proj_steps re-projects live but is used only in the ETA print, not the schedule.",
+   "owner": "self_organize.py _lr_at",
+   "couples_with": [
+    "EPOCHS",
+    "VMAX / online tokenizer (total step count moves as the vocabulary grows)",
+    "the per-expert LR rescaling added 2026-08-15"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:11001; :10353-:10354; chunk_08.md:5385 (\"the cosine LR schedule at line 3868 still reads `_lr_at(step, max(1, _total_steps))`, the stale total\")"
+  },
+  {
+   "name": "DISK_STREAM / CORPUS_CAP / STREAM_LEN / SEG_CONTIG / PHASED / PHASE_SCHED",
+   "effect": "mmap-backed disk streaming to break the RAM ceiling on corpus size; PHASED makes processes enter and fade (the actual catastrophic-forgetting test); SEG_CONTIG reads the corpus contiguously instead of random-offset splicing.",
+   "owner": "self_organize.py data path",
+   "couples_with": [
+    "EPOCHS (config guard exists for EPOCHS+DISK_STREAM)",
+    "PH_BOUNDS accumulated across epochs under DISK_STREAM, running the phase index past PHASE_SCHED"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:3357; :5025; :7427; :9197"
+  },
+  {
+   "name": "DIV_W / IND_W",
+   "effect": "Diversity and independence losses on the expert population. Both are un-runnable on a composed walk; DIV_W was additionally a silent no-op on CHAIN_ROUTE=soc via an early return.",
+   "owner": "Fabric loss terms",
+   "couples_with": [
+    "CHAIN_ROUTE",
+    "SOCIETY"
+   ],
+   "evidence": "notes/_evidence/chat/chunks/chunk_07.md:3504; chunk_08.md:561, :3748, :6024"
+  },
+  {
+   "name": "_SPEC knob registry (levers.py)",
+   "effect": "A single registry of every environment knob (274 knobs / 11 groups at 6f4c534, 279 later); `_env` raises SystemExit when a call site's default disagrees with the registry. _SPEC_FREE exempts derived knobs. levers.py enforces 100% coverage.",
+   "owner": "levers.py + self_organize.py _env",
+   "couples_with": [
+    "every other knob \u2014 this is the mechanism that makes the owner's \"separate and isolate the levers\" request enforceable"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:10355; :11461; chunk_09.md:7917 (levers.py written 2026-08-11T14:58:31)"
+  },
+  {
+   "name": "MODEL / LAYERS / KEY_LAYERS / D_MODEL",
+   "effect": "Backbone selection (gru vs transformer) and depth. Owner asked \"What will Model= transformer and Layer = 4 do to our system?\" and ran transformer arms on 2026-08-15.",
+   "owner": "self_organize.py model construction",
+   "couples_with": [
+    "LAYERS is in _SPEC_FREE (exempt from the default-mismatch check)"
+   ],
+   "evidence": "notes/_evidence/chat/user_turns.md:11338 (U0440); :10365 (_SPEC_FREE includes LAYERS)"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "Run banner printed the environment variable, not the effective value",
+   "severity": "critical",
+   "where": "self_organize.py [config] banner; reported in notes/_evidence/chat/chunks/chunk_07.md:4155-4162",
+   "symptom": "A full pilot ran with `[config] ... per-expert memory ON` while MEM_PER_EXPERT required SOCIETY and the run was SOCIETY=0 \u2014 the feature was off from step 0. WORLD_GROW had the same shape. Every conclusion drawn from that run about per-expert memory measured nothing.",
+   "evidence": "\"`[config] ... per-expert memory ON` \u2014 but `MEM_PER_EXPERT` was `... and FABRIC and SOCIETY`, and this was a `SOCIETY=0` run. It was **off from step 0**. The banner printed the environment variable, not the effective value.\" (chunk_07.md:4159-4160). Owner: \"First fix the banner lie. It is a lie you constructed.\" (user_turns.md:9343)",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Learning-curve verdict read its own sign backwards and only compared two points",
+   "severity": "critical",
+   "where": "self_organize.py LM training-curve report; chunk_07.md:4123-4145",
+   "symptom": "A 48k-step chaining pilot that had been diverging for 91% of its length (loss bottomed 3.56 @ step 5903, rose to 4.68 @ 47231) was reported as \"last segment change -0.059: still FALLING = more passes/steps will help\".",
+   "evidence": "\"`_d8` is `prev \u2212 current`, so negative means the loss went **up** \u2014 and the text asserted 'still FALLING' regardless of sign. It also only compared the last two points, so it couldn't have seen a 41,000-step trend even with the sign right.\" (chunk_07.md:4141)",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "dom_ban breadth cap was inert because the table it reads was sampled once per step",
+   "severity": "high",
+   "where": "Fabric.dom_ban / fab.note_dom; chunk_08.md:1367 and :5385",
+   "symptom": "The percentage-based breadth cap the owner explicitly requested could only ever ban the ~30 experts that happened to land in the one-sample-per-step table. When commit 99e5da0 fixed the sampling (1 -> BATCH_W=16 samples/step) the previously dead routing constraint went live and the held-out figure moved from ~2.1 to ~3.7 b/B \u2014 read at the time as a regression.",
+   "evidence": "\"`dom_ban` \u2014 the percentage breadth cap you asked for \u2014 reads exactly that table. So it could only ever ban the ~30 experts that happened to land in the sample. It's been effectively inert since I added it.\" (chunk_08.md:1367); \"99e5da0 turned a dead routing constraint on\" (chunk_08.md:5385)",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Modulo cadence never coincided with batch-flush steps \u2014 four subsystems silently never fired",
+   "severity": "critical",
+   "where": "self_organize.py management cadence; chunk_08.md:3747",
+   "symptom": "`step % MANAGE_EVERY == 0` can never coincide with a batch-flush step at BATCH_W=4, so `_greach`, ROUTING MIX, CHAIN ORDER and `maybe_deepen` all silently never ran. Fixed by replacing the modulo with an `_nbwd` counter.",
+   "evidence": "\"Cadence bug repeated **four times**: `step % MANAGE_EVERY == 0` never coincides with batch-flush steps at BATCH_W=4 \u2192 `_greach`, ROUTING MIX, CHAIN ORDER, `maybe_deepen` all silently never fired; fixed with `_nbwd` counter\" (chunk_08.md:3747)",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "DIV_W was a silent no-op on the default chaining path",
+   "severity": "high",
+   "where": "self_organize.py diversity loss; chunk_08.md:561, :3748, :6024",
+   "symptom": "A 20-minute pilot ran with DIV_W=0.05 and measured nothing. The loss was un-runnable on both paths at different times: NameError on chaining (main()-local), IndexError on society (global id indexed into a rank-ordered list), then still inert on the soc-loop via an early return.",
+   "evidence": "\"b14d60e DIV_W was a silent no-op on CHAIN_ROUTE=soc -- a whole pilot measured nothing\" (chunk_08.md:561)",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Adaptive encoder warmup reported a plateau stop when it had merely run out of budget",
+   "severity": "high",
+   "where": "self_organize.py adaptive warmup; user_turns.md:7419, and visible in run output at :4259",
+   "symptom": "The log line reads \"(adaptive warmup: stopped at 30000/30000 on separation plateau; floor 30000, eps 0.015)\" \u2014 floor equals budget, so the plateau test can never be reached, yet the report claims the plateau caused the stop.",
+   "evidence": "\"**Adaptive warmup claimed 'stopped on separation plateau'** when it had run out of budget; `ENC_WARMUP_MIN==ENC_WARMUP` makes the test unreachable. Now reports which happened + warns.\" (user_turns.md:7419)",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "Bare `except Exception` swallowed the learning-curve error so the section never appeared",
+   "severity": "high",
+   "where": "self_organize.py learning-curve block; user_turns.md:7423",
+   "symptom": "A whole report section silently vanished from every run. Root cause: `nbytes()` reads `BLEN`, which is `None` until the final re-tokenization under TOK_ONLINE.",
+   "evidence": "\"**`except Exception: model.train()`** silently swallowed the learning-curve error \u2192 section never appeared. Root cause: `nbytes()` reads `BLEN`, which is `None` until final re-tokenization under `TOK_ONLINE`.\" (user_turns.md:7423)",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "Fabric.remove(j) did not prune the centroid buffer",
+   "severity": "critical",
+   "where": "Fabric.remove; user_turns.md:5020",
+   "symptom": "Removing expert j left s.cent unpruned, misrouting every expert above j for the rest of the run.",
+   "evidence": "\"`Fabric.remove(j)` now prunes `s.cent` (was misrouting every expert above `j`).\" (user_turns.md:5020)",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "Expert region centroids were a plain attribute, absent from state_dict",
+   "severity": "high",
+   "where": "Fabric; user_turns.md:5021",
+   "symptom": "`s.cent` was not a registered buffer, so it was not saved in the checkpoint \u2014 every RESUME restarted routing from cold centroids.",
+   "evidence": "\"`s.register_buffer(\\\"cent\\\", ...)` \u2014 was a plain attribute, absent from `state_dict()`.\" (user_turns.md:5021)",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "HALT was computed and then discarded on the society path",
+   "severity": "high",
+   "where": "Fabric.society; user_turns.md:9694",
+   "symptom": "HALT mass was calculated every step and thrown away, so the router's stop decision had no effect on the society path. The owner spotted it from the run: \"Chaining is being run, but, halt should have been set on this\".",
+   "evidence": "\"HALT computed then discarded on society \u2192 `_with_halt`/`halt_blend`\" (user_turns.md:9694); owner at :9150",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "SUFFICIENCY report dead since per-window routing was introduced",
+   "severity": "medium",
+   "where": "self_organize.py SUFFICIENCY section; user_turns.md:9695",
+   "symptom": "`int(_os[j])` applied to a row raised ValueError, so the section never rendered; fixed to use the modal holder.",
+   "evidence": "\"SUFFICIENCY dead since per-window routing: `int(_os[j])` on a row \u2192 ValueError; fixed to modal holder\" (user_turns.md:9695)",
+   "bug_class": "crash"
+  },
+  {
+   "title": "`_due(k, n)` is not a predicate \u2014 it consumes the event",
+   "severity": "high",
+   "where": "self_organize.py cadence helper; user_turns.md:11000",
+   "symptom": "`_due` records `_fired[k] = step` and returns True, so calling it twice in one step silently consumes the event and the second consumer never fires.",
+   "evidence": "\"`_due(k, n)` \u2014 **not a predicate**: it records `_fired[k] = step` and returns True (calling it twice consumes the event)\" (user_turns.md:11000)",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "TOK_ANCHOR_USES=400 is gated on TOK_COMPOSE, which defaults to 0",
+   "severity": "high",
+   "where": "tokenizer.py ByteComposer / anchor release; user_turns.md:11004-11005",
+   "symptom": "The owner explicitly set anchor release to 400 appearances; the knob sits behind TOK_COMPOSE=0 and therefore does nothing at default settings. The [config] guard that would have caught it existed but the value was never checked against the gate.",
+   "evidence": "\"`TOK_ANCHOR_USES` (400) \u2014 release the composite anchor by appearances not steps; gated on `TOK_COMPOSE` (default 0, so inert)\" (user_turns.md:11005); owner directive at :10753",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "PH_BOUNDS accumulated across epochs under DISK_STREAM",
+   "severity": "medium",
+   "where": "self_organize.py phase scheduling; user_turns.md:7427",
+   "symptom": "The phase index ran past PHASE_SCHED, so the non-stationary phase structure \u2014 the actual catastrophic-forgetting test \u2014 was wrong after epoch 1.",
+   "evidence": "\"**`PH_BOUNDS` accumulated across epochs** \u2192 phase index ran past `PHASE_SCHED` under DISK_STREAM.\" (user_turns.md:7427)",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "CHAIN_ROUTE was missing from the knob registry one commit after the registry was built",
+   "severity": "medium",
+   "where": "_SPEC registry; user_turns.md:9701",
+   "symptom": "The registry built specifically to prevent unregistered knobs immediately admitted one; it now self-polices.",
+   "evidence": "\"`CHAIN_ROUTE` missing from the registry one commit after the registry was built \u2192 registry now self-polices\" (user_turns.md:9701)",
+   "bug_class": "other"
+  },
+  {
+   "title": "`_VALT` held-out tokenization cache was never invalidated",
+   "severity": "high",
+   "where": "self_organize.py held-out evaluation cache; user_turns.md:9704",
+   "symptom": "The learning curve was not comparable across time within a run because the cached held-out tokenization went stale as the tokenizer minted. The owner flagged the fix as suspicious: \"You said that (18fdd6c) fixed a stale held-out tokenisation cache happened, but it looks more like it broke something, since output looked better before\".",
+   "evidence": "\"`_VALT` never invalidated \u2192 learning curve not comparable across time\" (user_turns.md:9704); owner at :9814",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Brown corpus POS-tag stripper only matched uppercase tags",
+   "severity": "high",
+   "where": "fetch_data.sh line ~69; user_turns.md:3362-3365",
+   "symptom": "Brown uses lowercase tags (`the/at movie/nn`); a `[A-Z]`-only character class leaked them into the English training corpus, and they surfaced in generated text as \"/at\", \"/nn\", \"/cc\" artifacts.",
+   "evidence": "\"strip POS tags: Brown uses LOWERCASE tags (the/at movie/nn) -> [A-Z] alone leaked them\" (user_turns.md:3364); artifacts visible in generation samples at :2506-:2511",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "No mid-run checkpointing \u2014 a day of H100 compute produced nothing loadable",
+   "severity": "critical",
+   "where": "self_organize.py checkpoint path (pre-CKPT_EVERY); chunks/chunk_02.md:1814-1822",
+   "symptom": "An end-only save meant a ~24h run that crashed at the end left no checkpoint. pyrasite failed and a gdb attach hit SIGSEGV trying to run PyRun_SimpleString while the process held CUDA with the GIL released.",
+   "evidence": "\"I have to correct myself \u2014 I got ahead of the facts and I'm sorry for the false relief. **There is no checkpoint. The day's compute is lost for a promptable model.**\" (chunk_02.md:1814); gdb SIGSEGV in user_turns.md:2808-2815",
+   "bug_class": "other"
+  },
+  {
+   "title": "Machine non-determinism invalidates every commit-to-commit comparison",
+   "severity": "critical",
+   "where": "equiv.sh determinism self-test; user_turns.md:10207-10208",
+   "symptom": "Two runs of the SAME commit disagreed, so the DIFFERS/SAME verdicts used to validate the levers refactor could prove nothing. The seed-spread analyses that followed (\"why seed 0 is so much worse than 2\") sit on top of this.",
+   "evidence": "\"THIS MACHINE IS NOT DETERMINISTIC. Two runs of the SAME commit disagree, so a DIFFERS verdict between two different commits would prove nothing here. Fix this before trusting any comparison.\" (user_turns.md:10207-10208)",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Reported \"system chaos\" spread was measured with a since-fixed bug",
+   "severity": "high",
+   "where": "seed-spread analysis; user_turns.md:11006",
+   "symptom": "A documented same-seed spread of 1.594 b/B \u2014 used as the noise floor against which arm differences were judged \u2014 was itself measured with a bug that was later fixed, so the noise floor is unreliable.",
+   "evidence": "\"**System chaos**: documented same-seed spread of 1.594 b/B \u2014 but measured *with* a since-fixed bug\" (user_turns.md:11006)",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "FABRIC ablation removes the fabric's LayerNorm and overstates its contribution",
+   "severity": "medium",
+   "where": "run report ablation; user_turns.md:614-616",
+   "symptom": "\"model ALONE 7.357 -> + FABRIC 2.586 (fabric +4.772)\" is not a fabric contribution \u2014 it ablates a component the model trained with, including its LayerNorm. The report itself flags this, but the headline number is still printed.",
+   "evidence": "\"NOTE: 'model ALONE' here is an ABLATION of a component the model TRAINED WITH (it also removes the fabric's LayerNorm), so it overstates the fabric's contribution.\" (user_turns.md:614-616)",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Expert affiliation report shows every expert serving every domain \u2014 the metric cannot discriminate",
+   "severity": "high",
+   "where": "run report AFFILIATION section; user_turns.md:589-592",
+   "symptom": "\"experts serving >1 domain: 6 | serving exactly 1 (exclusive): 0 | serving none: 0 / domains served per expert: [443, 443, 443, 443, 442, 440]\" with 6 experts and 443 domains. Blast radius is therefore always 0 orphans, so the whole \"deleting a domain releases its experts\" claim is untestable at that population size.",
+   "evidence": "user_turns.md:589-592 (run output, 2026-07-21)",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Verification worked standalone (AUC 0.980) and collapsed in the product loop (0.3% precision)",
+   "severity": "critical",
+   "where": "verification.py + self_organize.py VERIFY path; user_turns.md:573 and :2600",
+   "symptom": "The reconstruction signal scored AUC 0.980 / 100% precision@1% in the isolated console test but flagged 64 of 768 injected entries at 0.3% precision in the loop. Two wrong root causes were proposed (joint-training-on-churn, undertraining) before the base-rate wall was identified.",
+   "evidence": "\"=== VERIFICATION (reconstruction) [VERIFY=recon]: flagged 64 injected / 768 (precision 0.3%, recall 8.3%)\" (user_turns.md:573); \"correct diagnosis: BASE-RATE wall (not undertraining). At 5x steps: still 0.3%\" (user_turns.md:2600)",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "End-of-run full-stream re-tokenization OOMs the GPU",
+   "severity": "high",
+   "where": "self_organize.py final _retok; user_turns.md:8950",
+   "symptom": "\"torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 11.39 GiB\" on an 80 GiB card at the end of a pilot \u2014 the run completes training then dies before writing its report.",
+   "evidence": "user_turns.md:8950 (pasted traceback, 2026-08-04)",
+   "bug_class": "crash"
+  },
+  {
+   "title": "asm.rekey crashed on ragged windows",
+   "severity": "high",
+   "where": "self_organize.py asm.rekey; user_turns.md:8471",
+   "symptom": "\"ValueError: expected sequence of length 384 at dim 1 (got 426)\" killed a pilot at the domain-centroid re-key step.",
+   "evidence": "user_turns.md:8464-:8471 (pasted traceback, 2026-08-02)",
+   "bug_class": "crash"
+  },
+  {
+   "title": "Refactor introduced NameError and UnboundLocalError in the report path",
+   "severity": "high",
+   "where": "self_organize.py _report / _retok after the levers refactor; user_turns.md:10148, :10171",
+   "symptom": "\"NameError: name '_retok' is not defined\" then \"UnboundLocalError: local variable 'assigns' referenced before assignment\" \u2014 the refactor that was supposed to be behaviour-preserving broke the run twice in a row on the owner's box.",
+   "evidence": "user_turns.md:10148 and :10171 (pasted tracebacks, 2026-08-10)",
+   "bug_class": "crash"
+  },
+  {
+   "title": "mask_dead missed retired token ids",
+   "severity": "medium",
+   "where": "tokenizer / loss masking; user_turns.md:11508",
+   "symptom": "Retired ids sit below vocab_size rather than forming a suffix, so a suffix-based dead-row mask left them in the cross-entropy denominator.",
+   "evidence": "\"**`mask_dead` missed retired ids** (below `vocab_size`, not a suffix) \u2014 found by the tokenizer agent, verified empirically, fixed with a cached full-width mask.\" (user_turns.md:11508)",
+   "bug_class": "other"
+  },
+  {
+   "title": "Six latent defects from agent reports left unfixed as of 2026-08-15",
+   "severity": "high",
+   "where": "self_organize.py / memory.py / tokenizer.py; user_turns.md:11145",
+   "symptom": "Batch accumulator straddles the epoch boundary (`_bx/_by/_bg` not cleared at the roll, `_posv` indexes new `tok_bs` with old indices); `mem.tok`/`mem.ctx` keep write-time segmentation and are never remapped; `asm.tokc` mixes counts across segmentations; `ENC_SEQ` not re-pointed after the final retok under SIG_SPACE=tokens; pair tally + Counter trim continue after saturation; `_bpt` is an unweighted mean overstating by up to 8% and growing with VMAX.",
+   "evidence": "\"Latent items from agent reports, unfixed: ...\" (user_turns.md:11145)",
+   "bug_class": "other"
+  },
+  {
+   "title": "ExpertBank path is unreachable in every real run yet retained as a smoke arm",
+   "severity": "low",
+   "where": "self_organize.py:63 comment; chunk_08.md:8528, chunk_09.md:625, :1024",
+   "symptom": "EXPERTS and FABRIC are mutually exclusive and lose the elif chain, so `EXPERTS=1 FABRIC=0` is the only config that reaches ExpertBank \u2014 a supported-but-never-used config. It was offered for deletion as dead code, then kept because it is one of the eleven smoke arms.",
+   "evidence": "\"63:# turning both on makes the expert bank a silent no-op. Exclusivity is arguably a bug\" (chunk_08.md:8528); \"I'm not deleting `ExpertBank`. I offered it to you as dead code and that was wrong\" (chunk_09.md:1024)",
+   "bug_class": "coupling"
+  }
+ ],
+ "junk": [
+  {
+   "what": "81 of the 455 entries in user_turns.md are `~/.claude/stop-hook-git-check.sh` echoes",
+   "why": "They are harness output, not researcher input. Roughly 18% of the 'human turns' in the primary source carry no research content, and several consecutive turns (U0109-U0119, U0143-U0146) are nothing else.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "9 entries (U0032, U0082, U0147, U0177, U0264, U0309, U0370, U0417, U0448) are Claude-written auto-compaction summaries injected with role=user",
+   "why": "They quote the researcher extensively, so a substring search finds his words there and scores a quote-of-a-quote as verified. The file's own header warns against citing them. They are retained only so U-numbering stays stable for files that already cite it.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "Verbatim console dumps pasted into single turns: U0026 (~300 lines), U0028 (~296), U0030 (~597), U0031 (~706), U0045, U0135, U0148, U0166, U0168, U0179 (~499)",
+   "why": "Several are byte-identical repeats of the same run report (U0026 and U0028 differ only in a handful of digits). They dominate the file's 860KB but contribute one datum each.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The 2026-07-21 naming pass: Fabric retired in favour of Router + Compositor",
+   "why": "Locked in the glossary, handoff docs and a commit message, then never adopted in practice \u2014 by 2026-07-29 the owner is writing \"Why has the router fabric been turned off?\" and 'Fabric' is the class name for the rest of the period.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Refactor commit 4e91275 (TOKENIZER_MODE / PATH_MODE / ROUTE_SCORE / POP_MODE / CONFIG_DUMP)",
+   "why": "Recorded as \"inert, **and not what you asked for**\"; the owner responded \"Did you edit the code? I wanted clearer, and better defined code, and a table of those changes\" and had it reverted.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The 51 redundant knob reads and the ExpertBank deletion proposal from the levers refactor",
+   "why": "Both proposed as cleanup, both reversed: the knob registry made the redundant reads harmless, and ExpertBank turned out to be a live smoke arm rather than dead code.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "Domain-clustering purity / homogeneity / completeness / V-measure scores against the seeded 4-domain labels",
+   "why": "The owner rejected these as targets three separate times, and probe_stability found domain identity is not reproducible across seeds (\"NO MORE THAN CHANCE... Domain identity is not reproducible here\"). They are diagnostics at best.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "Regime freezing: a separate frozen copy of the 'modularity' regime alongside garry/",
+   "why": "Rejected on the grounds that it reproduces from garry's own code via two env vars (ROUTE_GROUNDED=1 ROUTE_T=0.3), so freezing it would duplicate ~72KB of code for a config difference.",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "2026-07-21 \u2014 The project entered this chat as an upload, not as a repo. A 121/122-file zip was committed into the empty repo `xuvictor04/LLM-Test`; because the repo was empty, the import branch `claude/hub-addition-1ueehb` became the repository's default branch. The owner was migrating from a prior chat he could no longer compress.",
+   "why": "Explains why there is no `main`, why the default branch has a Claude-generated name, and why the earliest project history exists only as prose the owner pasted forward.",
+   "evidence": "notes/_evidence/chat/user_turns.md:16, :22; notes/_evidence/chat/chunks/chunk_01.md:441, :801"
+  },
+  {
+   "item": "2026-07-21 \u2014 `handoff/` was created at repo root on the owner's spec: \"Each idea should have separate folders or files. The target is to assume that the next message will blank, relying on it\", with filenames as the index. STATE.md remained the single source of truth rather than being duplicated.",
+   "why": "This is the ancestor of the notes/ corpus and the reason context is organized one-idea-per-file. The stated design assumption \u2014 the next reader starts blank \u2014 still governs.",
+   "evidence": "notes/_evidence/chat/chunks/chunk_01.md:838; notes/_evidence/chat/user_turns.md:63"
+  },
+  {
+   "item": "2026-07-21 \u2014 Naming was locked: B -> Verification, Fabric -> Router + Compositor (Fabric 'retired'), Expert -> Sub-skill -> Tool-expert, Domain kept, Sense = modality (NOT polysemy; polysemy became 'Meaning'). The Fabric retirement did not survive contact with the code.",
+   "why": "Anyone reading old docs will hit 'Router + Compositor' and 'B' and needs the mapping; and needs to know that 'fabric' is still the live term.",
+   "evidence": "notes/_evidence/chat/chunks/chunk_01.md:2909, :3195; contradicted at notes/_evidence/chat/user_turns.md:7149"
+  },
+  {
+   "item": "2026-07-21/22 \u2014 Verification-by-reconstruction was built, validated standalone (AUC 0.980 / precision@1% 100% vs self-consistency B at 0.907 / 36.9%), and then failed in the product loop at 0.3% precision. Two wrong root causes were proposed (joint-training-on-churn, then undertraining) before the correct one: the BASE-RATE WALL \u2014 at <1% corruption injection, any signal's false-positive rate sinks precision. VERIFY reverted to `selfcon` by default.",
+   "why": "This is the canonical example of a mechanism that measured beautifully in isolation and did nothing in situ. Any future store-wide wrong-detection proposal must answer the base-rate question first.",
+   "evidence": "notes/_evidence/chat/user_turns.md:198-:199, :573, :2563, :2600"
+  },
+  {
+   "item": "2026-07-22 \u2014 The owner flagged that short runs may make all results misleading: \"I am concerned, however, that some results may be misleading since the runs are so short.\" Data was scaled 6M -> 30M -> 40M byte streams in response, and the corpus moved from NLTK to HuggingFace (\"Why not use a set of data from hugging face?\").",
+   "why": "Establishes early that run-length is a standing confound on every number in this project, by the owner's own reckoning.",
+   "evidence": "notes/_evidence/chat/user_turns.md:1043, :2667; stream sizes at :312, :1097, :1785"
+  },
+  {
+   "item": "2026-07-23 \u2014 A ~day-long H100 run finished with no checkpoint. pyrasite failed; a gdb attach to force a save hit SIGSEGV because the process spends nearly all its time in CUDA with the GIL released. The day was lost. `CKPT_EVERY=N` mid-run saves and a SIGUSR1 checkpoint-on-demand handler were added afterwards; the owner said \"I am surprised that we stopped checkpointing. The estimates given are always wrong and longer than expected.\"",
+   "why": "The single most expensive incident of the period, and the origin of the checkpointing machinery. Also the origin of the owner's recurring 'You keep on turning off checkpoints' complaint (2026-08-14).",
+   "evidence": "notes/_evidence/chat/user_turns.md:2685, :2808-:2815; notes/_evidence/chat/chunks/chunk_02.md:1814, :1098; user_turns.md:11240"
+  },
+  {
+   "item": "2026-07-23/24 \u2014 The world model was requested and built as JEPA/VICReg-style latent forward dynamics: predict the *representation* of the future, not tokens or pixels. The owner's constraint was that it be a general world model, not a model of its own situation, and that it be 'more like the rest of the system, in its separation'. Physics was later downgraded from requirement to illustration.",
+   "why": "Fixes the design intent of WORLD_MODEL/WORLD_FEEDBACK/WORLD_GROW: modality-agnostic latent prediction, structured like the expert population.",
+   "evidence": "notes/_evidence/chat/chunks/chunk_02.md:2832, :3000; notes/_evidence/chat/user_turns.md:3116, :3210, :3242"
+  },
+  {
+   "item": "2026-07-24 \u2014 Performance work was authorized (\"let's make the system more efficient\") and immediately produced the 'no compromise' correction: removing sections and running only 'tested and approved' paths to gain speed is not acceptable. GPT-2 was adopted as the rough benchmark (~124M params, ~8B tokens, ~1.0-1.2 b/B; the system was ~29M params at D_MODEL_B=768 and ~2.0 b/B). An mmap disk-streaming loader was built to break the RAM ceiling.",
+   "why": "The 'no compromise' rule is a standing constraint that recurs for the rest of the period; the GPT-2 numbers are the reference frame for every bits/byte figure.",
+   "evidence": "notes/_evidence/chat/user_turns.md:3264, :3288, :3358, :3294"
+  },
+  {
+   "item": "2026-07-24/25 \u2014 Expert and memory design turns: per-expert memory with an entry-count quota (16-128, LRU by last use); chaining to be allowed by default; sparse top-k routing; capacity expansion horizontally or vertically; rapid initial growth preferred over delayed growth. The owner also asked to 'clarify on what is an expert, since I imagined it as series of layered neural networks'.",
+   "why": "These are the design commitments the expert population is supposed to satisfy, and the 'what is an expert' question was never fully closed \u2014 low-rank A/B adapters are what got built.",
+   "evidence": "notes/_evidence/chat/user_turns.md:3901-:3903, :3923-:3932; :10349"
+  },
+  {
+   "item": "2026-07-25 \u2014 GH200 acquired. probe_signature.py built. The domain-assembly failure was root-caused to a scale-free-vs-absolute-threshold mismatch: NEW_DIST/SHIFT_DIST are constants while the encoder's distance scale inflates as it trains. The run's own diagnostic distinguished 'ASSEMBLER/threshold problem' from 'ENCODER problem'.",
+   "why": "This is a unit-mismatch of exactly the class the DID IT FIRE audit hunts, and it is the reason domain counts swing from 1 to 547 across otherwise similar runs.",
+   "evidence": "notes/_evidence/chat/user_turns.md:4040, :4705, :4728-:4730, :5007"
+  },
+  {
+   "item": "2026-07-25 \u2014 KEY REFRAME: the four seeded domains (eng/py/num/c) were always the arbitrary part. \"My view was these domains are naturally overlapping, and instead make it self assembling.\" Optimizing clustering purity against those labels is optimizing against a fiction.",
+   "why": "Any note that reports purity/V-measure against the seeded labels as a success criterion is measuring the wrong thing by the owner's explicit statement.",
+   "evidence": "notes/_evidence/chat/user_turns.md:4953"
+  },
+  {
+   "item": "2026-07-27/29 \u2014 Metric reframe #2: \"I don't want to optimize for our arbitrary metrics. Their use is only as proxies... If a metric isn't working, but the system itself is improving, that does not mean the system is at wrong, but the metrics and how we are using them.\" probe_stability then found domain identity is not reproducible across seeds: \"NO MORE THAN CHANCE. The two runs did not find the same structure.\"",
+   "why": "Establishes both the epistemic rule and the concrete finding that kills domain identity as a target.",
+   "evidence": "notes/_evidence/chat/user_turns.md:6129-:6135, :6638-:6639"
+  },
+  {
+   "item": "2026-07-29/31 \u2014 Harness era begins: rerun.sh (mix / eng / ablate / smoke arms, 2026-07-29) then longrun.sh (pilot regime, 2026-07-31). Defaults were changed so subsystems are ON by default after the owner found things silently off in prior tests (\"Change defaults to have things on. Since things were off in prior tests, do we need a rerun?\", asked four times).",
+   "why": "Explains why the repo has two run harnesses and why 'is it actually on?' became a first-class question in every banner.",
+   "evidence": "notes/_evidence/chat/chunks/chunk_05.md:3815 (rerun.sh, 2026-07-29T20:46), :7309 (longrun.sh, 2026-07-31); notes/_evidence/chat/user_turns.md:7159-:7172"
+  },
+  {
+   "item": "2026-07-31 \u2014 KEY REFRAME #3, the clearest statement of the two goals: \"domains are not a major concern for me... The end all is the resulting output, and capacity for continual learning without exorbitant forgetting, and maintaining old capacities, without significant degradation. The project should reflect this... My bigger concerns is within the domains, and the experts.\"",
+   "why": "This is the sentence that defines the project's two definitive goals in the owner's own words, and it explicitly demotes everything else.",
+   "evidence": "notes/_evidence/chat/user_turns.md:8337-:8339"
+  },
+  {
+   "item": "2026-08-02/03 \u2014 First pilots run. The 64-expert cap was rejected (\"Thousands or even millions. Selection at a scale of tens is pointless\"). Percentage-based breadth cap requested. Growth must not be fitness-only ('a more niche may be more relevant'); newborns need randomness/mutation and may take random connected sections of other experts.",
+   "why": "Defines the evolutionary contract for the expert population: diversity by construction, not just selection pressure.",
+   "evidence": "notes/_evidence/chat/user_turns.md:8560, :8590, :8728-:8730, :8743"
+  },
+  {
+   "item": "2026-08-03/04 \u2014 Router discovery declared the critical failure: \"The router issue is very big. We need to fix it, inability to discover a new expert is almost catastrophic to the idea.\" The answer became expert weight-embedders (eemb/edec) plus spawn_from: the router outputs a desired expert as weights, routes to the nearest, and if nothing is near, decodes the query into a new expert.",
+   "why": "This is the mechanism the whole `rm-predict` branch exists for; it is the owner's own design, not a suggestion.",
+   "evidence": "notes/_evidence/chat/user_turns.md:8745, :9002-:9006, :9182"
+  },
+  {
+   "item": "2026-08-04 \u2014 Branch change: \"Since this is an interesting new mechanism, I'd like to have it be pushed as a separately named branch. Call it 'R M Predict'\" then \"I want you to be working on this branch from now on\". All subsequent work is on `rm-predict`, not `claude/hub-addition-1ueehb`.",
+   "why": "Anything read from the default branch after 2026-08-04 is stale; the live line of development is rm-predict.",
+   "evidence": "notes/_evidence/chat/user_turns.md:9019, :9032; pushes visible at notes/_evidence/chat/chunks/chunk_07.md:226"
+  },
+  {
+   "item": "2026-08-04/05 \u2014 Chaining landed and became the default path (SOCIETY=0 + CHAIN_ROUTE=soc + CHAIN_VOTE=1, 'chained society'). The owner's definition: 'the society system, but allowed to loop over and over, (in chains)'. HALT was found computed-and-discarded on the society path and had to be wired in.",
+   "why": "The default forward path changed here; every earlier measurement was on a different path, and four subsystems were SOCIETY-gated and silently off under the new one.",
+   "evidence": "notes/_evidence/chat/user_turns.md:9323, :9483, :9509, :9694; notes/_evidence/chat/chunks/chunk_07.md:3502"
+  },
+  {
+   "item": "2026-08-05 \u2014 The banner-lie / diverging-curve incident. A 48k-step chaining pilot had been getting worse for 91% of its length (3.56 @ 5903 -> 4.68 @ 47231) while the report said 'still FALLING = more passes/steps will help', and the banner claimed per-expert memory was ON when it had been off from step 0. The society pilot had the same shape. Owner: \"Fix all banner lies... Make them automatic and based off what's run. Also have the exact pull branch be announced in each log.\"",
+   "why": "The origin of the project's DID IT FIRE discipline: a mechanism reported as on, a verdict computed with the wrong sign, and a run whose headline was the opposite of the truth \u2014 all in the same log.",
+   "evidence": "notes/_evidence/chat/chunks/chunk_07.md:4123-:4180; notes/_evidence/chat/user_turns.md:9343, :9464-:9466"
+  },
+  {
+   "item": "2026-08-05/06 \u2014 Focus shifts to the tokenizer. The owner probed why best bits/byte lands at step ~6k when minting has not capped, tested a minimum-sized tokenizer, and set the design rule: minted tokens must start with parameters (ByteComposer: composite(bytes) + zero-init residual, with a decaying TOK_ANCHOR penalty) so \"the transition, between new mint and its composite\" is easy. He explicitly reversed his own suggestion of using raw integer values as token ids. \"Token minting is critical for my idea of continual learning.\"",
+   "why": "Fixes why the tokenizer is not a side concern: minting is the owner's mechanism for goal B, and the parameter-inheritance rule is a hard design constraint on it.",
+   "evidence": "notes/_evidence/chat/user_turns.md:9565, :9597, :9609, :9626"
+  },
+  {
+   "item": "2026-08-07 to 2026-08-11 \u2014 The levers program. \"I want you to normalize and disentangle the code, since there are so many interrelated things, some unnecessary. This way we have clearer levers... Ensure that nothing is functionally different.\" Produced: equiv.sh (behavioural-equivalence tool with a determinism self-test, 2026-08-10), a _SPEC knob registry (274 -> 279 knobs, `_env` raises SystemExit on default mismatch), and levers.py enforcing 100% coverage (2026-08-11). The first attempt was rejected and reverted; the determinism self-test then reported the machine is NOT deterministic.",
+   "why": "This is why the codebase has a knob registry at all, and why the equivalence claims from that period are weaker than they look \u2014 the comparison tool's own precondition failed.",
+   "evidence": "notes/_evidence/chat/user_turns.md:9950-:9958, :10207-:10208, :10355; notes/_evidence/chat/chunks/chunk_09.md:2420, :7917, :1368-:1371"
+  },
+  {
+   "item": "2026-08-11 \u2014 Token quality control built: branching-entropy merge gating (merge a,b when a reliably predicts b) defaulted ON, plus a probationary mechanism (TOK_PROBATION, retire() that pops from seq2id but leaves id2bytes). Anchor release moved from steps to appearances (TOK_ANCHOR_USES=400). LR schedule reworked: no clamp, repeating cosine, wavelength 8 epochs but running the whole length of the run.",
+   "why": "These are owner-specified mechanisms with owner-specified defaults; TOK_ANCHOR_USES in particular is inert at default because TOK_COMPOSE=0, which is a live DID-IT-FIRE finding.",
+   "evidence": "notes/_evidence/chat/user_turns.md:10757, :10787, :10815-:10817, :10753, :10769, :11003-:11005"
+  },
+  {
+   "item": "2026-08-12 \u2014 Restatement against tokenizer tunnel-vision: \"the final goal is for language, not optimizing specifically the tokenizer, vmax, or different ways to freeze the structure. I need to be able to carry and build off the results we get, and a stumbling block has been the levers I've wanted split, but not, and interfering with our runs. Our capless vmax was supposed to be an experimental test... Min tokenizer was for the opposite end. Remember that a target has been and still is the continual learning.\"",
+   "why": "Names the purpose of the capless/min-tokenizer arms (bracketing an unknown, not selecting a winner) and re-anchors on the two goals.",
+   "evidence": "notes/_evidence/chat/user_turns.md:10895"
+  },
+  {
+   "item": "2026-08-13/14 \u2014 Seed-spread investigation. Same-config runs at seeds 0/1/2 differed markedly in both numbers and text quality; the owner suspected cross-run state leak (\"is there anything that is being kept, saved, and possibly used in the following runs? It likely is not the tokenizer\") and then reframed it: \"state leak would be bad in one sense, however, we can utilize this for our system, building off of it (intentionally), to get more efficient. We still need to control for it when applicable, but it is a helpful lever.\"",
+   "why": "An unresolved reproducibility problem that undermines every A/B in the period, plus an explicit owner instruction not to simply eliminate it.",
+   "evidence": "notes/_evidence/chat/user_turns.md:11216, :11222, :11226, :11234"
+  },
+  {
+   "item": "2026-08-14/15 \u2014 Growth-vs-size series. FAB_N0=2048 with FAB_NMAX=4096 became a temporary baseline (\"hopefully reproduce the 2048 results with the 4096. We can temporarily set it as the baseline\"); growth burst reduced to 1 at 4% (cull is 8%); 4x larger English corpus; 18 epochs; a transformer arm (MODEL=transformer, LAYERS=4). Target: \"safely below 2, ideally hit 1.5 this run.\"",
+   "why": "The concrete configuration state at the end of the period, and the numeric bar the owner set.",
+   "evidence": "notes/_evidence/chat/user_turns.md:11306-:11310, :11322, :11328-:11330, :11336-:11338"
+  },
+  {
+   "item": "2026-08-15 \u2014 Per-expert learning rates. \"Lets use Smith's Cyclical LR, but implemented in a per expert scale then, with each expert counting down their age. Lets adjust things to only be when the specific expert is selected, so age is dependent on the expert's use. Lets make the safe period dependent on this instead, and modify the culling percent... to 2% or 1%.\" Implemented via update rescaling (Adam is invariant to constant gradient scaling). Bottom-ranked experts get increased LR or mutation chance, but only outside their safe phase. Balance loss added; culling explicitly retained as \"semicritical to our evolutionary mechanism\".",
+   "why": "The last architectural commitment of the period, and it converts a global training schedule into a per-expert lifecycle keyed to use \u2014 a structural change to how continual learning is supposed to work.",
+   "evidence": "notes/_evidence/chat/user_turns.md:11350-:11352, :11374, :11403, :11597-:11599, :11464"
+  },
+  {
+   "item": "2026-08-15 \u2014 Memory isolation failure found: \"the fact that the memories from the python run has largely overwritten the english, it means that the domains have not been fully isolated. Better memory control is likely also needed.\" Owner's diagnosis: \"overlap experts is ok and expected, but having all experts have been overlapped is an inherent issue. Likely separation or distinction, on router level between python and english is not sufficient. Use based recency is better I think.\"",
+   "why": "This is a direct catastrophic-forgetting observation on goal B, made by the owner from the run output, and it is unresolved at the end of the period.",
+   "evidence": "notes/_evidence/chat/user_turns.md:11386, :11405-:11406"
+  },
+  {
+   "item": "2026-08-15 \u2014 Research and documentation agents launched. Five agents (LR schedules, MoE/expert routing, adaptive tokenization, continual learning + editable memory, and a documentation planner producing notes/DOC_PLAN.md). WebFetch was blocked by the egress proxy for arxiv, OpenReview, ACL, SemanticScholar and HuggingFace, so almost nothing was read in full and nearly every claim is memory-tagged rather than fetched. Owner: \"Since webfetch was blocked, provide me what to tell a non claude code session... (also it should alert me if something is blocked)\", then supplied an external report himself.",
+   "why": "Every literature claim written into notes/ during this period carries an evidence tag for a reason: the sources were mostly not readable. And DOC_PLAN.md is the direct parent of this documentation task.",
+   "evidence": "notes/_evidence/chat/chunks/chunk_12.md:3067, :3398, :3585, :4864; notes/_evidence/chat/user_turns.md:11413, :11624"
+  },
+  {
+   "item": "Standing operating rules for anyone working this repo, verbatim from the owner: default to bash unless python is specified; assume a fresh box each run; git through a python console so it pastes from a phone; confirm before acting on performance changes; no compromises (do not remove or downgrade functionality for speed); work on rm-predict; treat every past comment as a rough statement, never as definitive.",
+   "why": "These recur across every compaction boundary in the period and are the closest thing the project has to a contract.",
+   "evidence": "notes/_evidence/chat/user_turns.md:227, :651, :170, :3214, :3264, :9032, :11407"
+  }
+ ],
+ "open_questions": [
+  "Two constraints cited as verbatim standing rules in every compaction summary from 2026-08-05 onward \u2014 \"the runs folder and its internal contents should not be overwritten\" and \"just because I dont want you to normally do the test, that doesn't mean I dont want you to ensure that the code works. You should still do quick runs and tsts\" \u2014 do not appear anywhere in user_turns.md and appear in the chunks only inside Claude-written summaries (chunk_08.md:3705/:3772, chunk_09.md:5548/:5693). Their original turns are not recoverable from these files. Are they genuine researcher instructions or paraphrases that hardened through repeated compaction?",
+  "user_turns.md claims to hold every human turn, but the North Star and four other decisions were given via AskUserQuestion and appear only in chunk_01.md:359/:838/:1855/:2786/:3257, chunk_10.md:2061 and chunk_11.md:9336. So the primary source is incomplete for structured answers. Are there other AskUserQuestion answers in the chunks that were missed, and should they be folded into user_turns.md?",
+  "Was the 2026-07-21 rename 'Fabric -> Router + Compositor' ever applied in code, or only in the glossary and handoff docs? By 2026-07-29 the owner writes 'router fabric' and the class is still `Fabric`.",
+  "The 20GB / few-TB corpus the owner remembered pulling in a prior chat (U0020-U0022, 2026-07-21) was never located. Was it ever recovered, or was fetch_big.py/fetch_data.sh built to replace it from scratch?",
+  "Was the machine non-determinism reported by equiv.sh's self-test (\"THIS MACHINE IS NOT DETERMINISTIC\", user_turns.md:10207) ever fixed? Every subsequent seed-spread analysis and levers-equivalence verdict depends on it.",
+  "Was the documented same-seed spread of 1.594 b/B ever re-measured after the bug it was measured with was fixed (user_turns.md:11006)? It is the noise floor against which arm differences were judged.",
+  "Which of the six latent defects listed at user_turns.md:11145 (epoch-boundary batch accumulator, unremapped mem.tok/mem.ctx, asm.tokc mixing segmentations, ENC_SEQ not re-pointed, post-saturation pair tally, unweighted _bpt) were fixed after 2026-08-15?",
+  "TOK_ANCHOR_USES=400 was an explicit owner directive but is gated on TOK_COMPOSE, which defaults to 0 (user_turns.md:11004-11005). Was TOK_COMPOSE ever flipped on in a real run, or has the owner's anchor rule never executed?",
+  "The AskUserQuestion answer at chunk_11.md:9336 chose \"Growth vs size first\" and specified mid-run expandable vmax and expert count \"when loss plateaus and both are at cap\", plus \"a mechanism of higher randomization or learning, when experts are at threat of being thrown out\". Was the mid-run expansion mechanism ever built, or only the growth-vs-size arms?",
+  "The owner's two deferred design items \u2014 active learning (reference article -> prompt -> reproduce without the reference, 'Do not write code yet', user_turns.md:3030) and partial compartmentalization ('Allowing things to mix is important for creativity', :3032) \u2014 are never revisited in this period. Were they built later, or are they still open?",
+  "The world model was built 2026-07-24 and WORLD_MODEL/WORLD_FEEDBACK were noted as 'newly enabled in a real run for the first time' with a collapse fix verified only on tiny CPU runs (user_turns.md:3569). Was the world model's latent std ever checked at scale, and does the world model still contribute anything in the chained-society configuration?",
+  "What happened to the 'expert = series of layered neural networks' question the owner raised at user_turns.md:3932? What got built is low-rank A/B adapters, which is not obviously what he described."
+ ]
+}

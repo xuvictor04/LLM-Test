@@ -1,0 +1,1334 @@
+{
+ "area": "subsys",
+ "summary": "Four standalone-ish modules under self_organize.py. memory.py holds EditableMemory: a fixed-slot key/token store with a surprise-gated write, three eviction rules (circular \"recency\", LFU \"usage\", LRU-on-retrieval \"lru\"), an optional per-expert partition, a per-source floor, a probation region for newly-written entries, two adaptive flag predicates (self-consistency \"wrong\" and reconstruction \"unverified\") and delete/delete_src/reassign_src/sweep_wrong editing. tokenizer.py holds ByteBPE (offline, unused by the live system) and DynamicTokenizer, an online byte-grounded BPE that mints tokens mid-run from a running pair tally, up to vmax, with an optional novelty re-ranker and a p(b|a) predictability gate that is deliberately fail-open; ids are positional and minting is append-only, which is the invariant remap_mem_ctx depends on. datastream.py is MmapConcat, a read-only virtual concatenation of files presented as one indexable byte sequence, plus open_corpus. world_model.py is a JEPA-style latent forward-dynamics core (WorldEncoder + ForwardModel + VICReg _var_cov) and DynamicsPopulation, a routed population of dynamics predictors with EMA fitness, grow-on-plateau and a soft cull. The recurring defect class here is exactly the one the project names: mechanisms that are armed and structurally cannot fire (the wrong-flag read filter, pressure(), the world-model grow), state that is recorded but not carried across a resume (probation, recon, gate_theta, nsrc_max, tokenizer retirement), and two code paths that answer the same question differently (per-owner vs global eviction, batched vs per-window write, disk vs RAM corpus).",
+ "facts": [
+  {
+   "claim": "EditableMemory's cap is DERIVED, not configured, when the per-expert partition is on: n_own>1 replaces cap with n_own*quota, so MEM_CAP is silently overridden (at defaults 64 owners x 128 = 8192 slots instead of 200000).",
+   "evidence": "memory.py:35-37 `self.quota = int(quota) if quota else int(cap // self.n_own)` / `if self.n_own > 1: cap = self.n_own * self.quota`; warned at self_organize.py:5622-5628",
+   "confidence": "verified"
+  },
+  {
+   "claim": "There are three eviction rules and the difference is which clock decides: 'recency' is a circular overwrite on WRITE order, 'usage' is LFU on decayed retrieval mass, 'lru' is least-recently-RETRIEVED. Default from self_organize is EVICT=lru.",
+   "evidence": "memory.py:49-58; self_organize.py:479 `\"EVICT\": (\"env\", \"lru\")`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The sampled-victim eviction branch (usage/lru, probation, per-source floor) only runs when the store is FULL; otherwise every write takes the circular-overwrite branch.",
+   "evidence": "memory.py:242 `if self.evict in (\"usage\", \"lru\") and int(self.active.sum()) >= self.cap:` ... memory.py:297 `else: idx = (torch.arange(m, device=self.dev) + self.ptr) % self.cap`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "self.ptr is advanced on every write regardless of which branch chose the slots, including the sampled-eviction branch where idx did not come from ptr.",
+   "evidence": "memory.py:298 `self.ptr = int((self.ptr + m) % self.cap)` sits outside the if/else",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The write gate has three distinct forms and they use different comparison operators: fixed is `sd >= write_gate`, adaptive is `sd > gate_theta`, quantile is `sd > gate_theta` where gate_theta is an EMA of the (1-gate_target) quantile.",
+   "evidence": "memory.py:143-153",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The quantile gate lives INSIDE the adaptive branch, so WRITE_QUANTILE (registry default 1) has no effect unless WRITE_ADAPTIVE (registry default 0) is also on.",
+   "evidence": "memory.py:133 `if self.adaptive_gate and self.quantile_gate:`; self_organize.py:6111-6115 emits a coupling warning saying exactly this",
+   "confidence": "verified"
+  },
+  {
+   "claim": "gate_theta starts as a Python float and is replaced by a 0-dim tensor on the first quantile call.",
+   "evidence": "memory.py:46 `self.gate_theta = float(write_gate)`; memory.py:143-144 `if not torch.is_tensor(self.gate_theta): self.gate_theta = q.detach().clone()`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "write_batch gates every window first, in call order, then does ONE key_fn call over the concatenated survivors, so gate_theta evolves identically to the per-window path.",
+   "evidence": "memory.py:167-172 `keeps = [self._gate(r[2]) for r in rows]` ... `allk = key_fn(torch.cat(ctxs, 0)).detach()`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "write_batch silently writes nothing for any row whose ctx is None, and returns 0 outright if no row has a ctx.",
+   "evidence": "memory.py:170-171 `if not ctxs: return 0`; memory.py:178 `if ctx is None or m == 0: continue`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "write() has no `own` parameter at all; only write_batch can carry an owner. _store therefore takes the GLOBAL eviction path (over the whole n_own*quota slot range) whenever own is None, leaving self.own at -1 for those entries.",
+   "evidence": "memory.py:185 `def write(self, k, tok, src, surprise=None, ctx=None, pos=None, key_fn=None)`; memory.py:207 `return self._store(k, tok, src, ctx, pos)`; memory.py:212 `if self.n_own > 1 and own is not None:`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The per-owner _store path returns before line 242, so probation-first eviction, the per-source floor, and the n_prob_evict/n_main_evict counters are ALL bypassed when MEM_PER_EXPERT is on.",
+   "evidence": "memory.py:212-241 ends `return self._commit(idx, k, tok, src, ctx, pos, m)` at 241, before the `if self.evict in (\"usage\",\"lru\")` block at 242 and the `cand = self._unprotected(cand, m)` at 284",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The per-owner path truncates an oversized write by taking the first `quota` rows positionally, not the most surprising ones, despite the comment claiming otherwise.",
+   "evidence": "memory.py:218-222 comment 'keep the most surprising `quota` of them' followed by `m = self.quota; k, tok = k[:m], tok[:m]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Per-owner victims are ranked over OCCUPIED slots only, because free slots read last=0 and would otherwise always rank as oldest and duplicate the free list.",
+   "evidence": "memory.py:235-237 `_occ = blk[self.active[blk]]` / `lru = _occ[self.last[_occ].argsort()][:need]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The global victim pool is drawn with replacement, de-duplicated with torch.unique (which sorts), then re-permuted so that ties in the topk ranking do not systematically kill low-numbered slots.",
+   "evidence": "memory.py:263-264 `cand = torch.unique(torch.randint(0, self.cap, (ns,), device=self.dev))` / `cand = cand[torch.randperm(cand.numel(), device=self.dev)]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Probation narrows the victim pool before the ranking: if more than prob_frac*cap entries are unpromoted, eviction takes from probation instead of the working set.",
+   "evidence": "memory.py:268-280 `_pn = int(self.prob.sum())` / `_over = _pn > int(self.prob_frac * self.cap)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The per-source floor is applied INSIDE the probation pool as well, not only on the main pool.",
+   "evidence": "memory.py:284 `cand = self._unprotected(cand, m)` runs after the probation narrowing at 268-280",
+   "confidence": "verified"
+  },
+  {
+   "claim": "floor_i = src_floor * cap / (number of ELIGIBLE sources), where eligible means holding entries AND having a live domain when live_src has been set.",
+   "evidence": "memory.py:367 `floor = int(self.src_floor * self.cap / live)`; memory.py:363-364 `has = self._eligible(); live = int(has.sum())`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The floor never deadlocks: if protection would leave fewer candidates than needed, the filter is dropped for that call and the ranking decides.",
+   "evidence": "memory.py:375 `return out if out.numel() >= need else cand`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "set_live_src(None) restores 'every source with entries is eligible'; otherwise orphaned source ids are neither protected nor counted in the divisor.",
+   "evidence": "memory.py:388-394 and memory.py:396-399",
+   "confidence": "verified"
+  },
+  {
+   "claim": "pressure() returns None until at least 1000 evictions have been recorded, and is the fraction of evictions that destroyed a PROMOTED (previously retrieved) entry.",
+   "evidence": "memory.py:414-416 `tot = self.n_prob_evict + self.n_main_evict` / `if tot < 1000: return None` / `return self.n_main_evict / tot`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_commit enforces one-slot-one-row: a repeated slot index is collapsed (first occurrence kept, in write order), counted in n_dup_slot, and the returned count is the post-dedup count.",
+   "evidence": "memory.py:443-461 `_keep[1:] = _iss[1:] != _iss[:-1]` ... `self.n_dup_slot += int(idx.numel() - _sel.numel())`; memory.py:462 `m = int(idx.numel())`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The per-source census nsrc is maintained incrementally in _commit (decrement previous owners, credit the new src), is clamped at zero, and every clamp bite is counted in n_src_underflow.",
+   "evidence": "memory.py:464-476",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_commit GROWS nsrc and nsrc_max when a source id exceeds the table, so a fresh run self-heals past n_src_hint.",
+   "evidence": "memory.py:478-482 `if s_i >= self.nsrc.numel(): grow = torch.zeros(s_i + 1 - self.nsrc.numel(), ...)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every write lands on probation and resets that entry's selfcon and recon to -1 (unchecked).",
+   "evidence": "memory.py:491-493 `self.prob[idx] = True` / `self.selfcon[idx] = -1.0` / `self.recon[idx] = -1.0`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The retrieval-usage decay is driven by a WRITE counter, not by time or by reads: use is multiplied by use_decay once every decay_every writes.",
+   "evidence": "memory.py:494-496 `self._wc += m` / `if self.use_decay < 1.0 and self._wc >= self.decay_every: self.use *= self.use_decay`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Stored keys are L2-normalized at commit and at rekey, and the query is normalized at read, so retrieval similarity is cosine.",
+   "evidence": "memory.py:486, memory.py:506, memory.py:543",
+   "confidence": "verified"
+  },
+  {
+   "claim": "read() filters on active AND not-unverified AND (if wrong_read) not-wrong, then does a topk over cosine similarity, softmaxes with a hardcoded tau, and scatter-adds the weights into a token distribution.",
+   "evidence": "memory.py:519-551",
+   "confidence": "verified"
+  },
+  {
+   "claim": "read() is the only place promotion happens: retrieved entries have prob cleared, n_promoted incremented, use index_added, and last stamped unconditionally.",
+   "evidence": "memory.py:555-566",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Reads are deliberately GLOBAL across owners even when writes are partitioned.",
+   "evidence": "memory.py:567-569 comment, and memory.py:541 `vi = valid.nonzero(as_tuple=True)[0]` over the whole store",
+   "confidence": "verified"
+  },
+  {
+   "claim": "is_wrong() and is_unverified() both need more than 10 CHECKED entries before they compute a threshold at all; below that they return all-False.",
+   "evidence": "memory.py:585 `if int(checked.sum()) > 10:` and memory.py:605 `if int(checked.sum()) > 10:`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Both flag predicates use an adaptive median + selfcon_k*(MAD+1e-6) threshold, and selfcon_k is the SAME constant (selfcon_thresh, default 2.5) for both.",
+   "evidence": "memory.py:590 and memory.py:607, both `thr = med + self.selfcon_k * (mad + 1e-6)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "delete() decrements nsrc for the removed entries and clamps at zero, so delete_src / sweep_wrong / unlearn all keep the census honest.",
+   "evidence": "memory.py:616-627",
+   "confidence": "verified"
+  },
+  {
+   "claim": "reassign_src recomputes nsrc exactly for the two ids involved rather than applying a delta, but only if each id is already inside the census table.",
+   "evidence": "memory.py:637-641 `for _s in (int(old), int(new)): if 0 <= _s < self.nsrc.numel(): self.nsrc[_s] = float(((self.src == _s) & self.active).sum())`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "rebuild_census GROWS the census tables to max(src)+1 rather than clamping into them, and is called exactly once, from the resume path.",
+   "evidence": "memory.py:330-343; self_organize.py:4980 `_nsrc_live = mem.rebuild_census()`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "In the product loop mem.read() contributes nothing to the training loss: all four call sites that consume its distribution are eval-only (generate, the periodic eval, bpb_true); the training-time call is a fire-and-forget probe.",
+   "evidence": "self_organize.py:3870, 5101, 8838 consume dist; self_organize.py:7561/7563 `mem.read(_pq)` discards the return",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEM_PROBE_EVERY (default 25) is what makes EVICT=lru/usage a real signal at all; without it `use` stays 0 and `last` stays at write time and both rules degenerate to FIFO.",
+   "evidence": "memory.py:53-57 comment; self_organize.py:4881 `MEM_PROBE_EVERY = _i(\"MEM_PROBE_EVERY\", 25)`; self_organize.py:7551-7563",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DynamicTokenizer starts as the 256 raw bytes and is byte-grounded, so any input round-trips and blen()/bytes_per_id give true bytes-per-token for bits/byte reporting.",
+   "evidence": "tokenizer.py:131-132 `self.id2bytes = [bytes([i]) for i in range(256)]` / `self.seq2id = {bytes([i]): i for i in range(256)}`; tokenizer.py:388",
+   "confidence": "verified"
+  },
+  {
+   "claim": "vmax is a hard refusal checked before any candidate is formed, which is why a tokenizer loaded from a file saved at a smaller vmax mints nothing.",
+   "evidence": "tokenizer.py:243 `if self.vocab_size >= self.vmax or not self.pair: return None`; repaired at self_organize.py:1245-1247",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The candidate window width _k is 1 unless a re-ranker is on: novel>0 raises it to novel_k (32), pmin>0 raises it to gate_k (1024).",
+   "evidence": "tokenizer.py:257-260",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Novelty re-ranking scores candidates as (c - seen)/(1+seen)**novel and then records pair_seen only for the candidates it actually looked at.",
+   "evidence": "tokenizer.py:262-269",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The predictability gate is a probability, p(b|a) >= pmin, not an entropy; branch_entropy is computed and reported but never gated on.",
+   "evidence": "tokenizer.py:224-236 `_p = self.pair[(a, b)] / r[0]` / `return _p >= self.pmin`; tokenizer.py:219-222 'Reported, not gated on.'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A left token never seen as a left half is allowed through the gate, so an empty tally cannot stall minting at the start of a run.",
+   "evidence": "tokenizer.py:233 `if r is None or r[0] <= 0: return True`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The gate is fail-open by construction: if nothing in the window passes p(b|a), the most frequent candidate clearing min_pair is taken anyway and gate_forced is incremented.",
+   "evidence": "tokenizer.py:308-312",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A candidate is rejected as unmintable only for two permanent reasons: the merged bytes exceed max_tok, or the byte sequence is already in seq2id.",
+   "evidence": "tokenizer.py:328-331 `return None if (len(_ns) > self.max_tok or _ns in self.seq2id) else _ns`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "When every candidate in the window is unmintable, maybe_grow re-queries most_common(max(256, _k*4)) exactly once (mint_widened) before giving up.",
+   "evidence": "tokenizer.py:346-350",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every candidate the mintable-walk examines has its pair count zeroed, chosen or not, so it will not be re-picked.",
+   "evidence": "tokenizer.py:340 `self.pair[_pr] = 0   # consumed either way: it will not be re-picked`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A minted token is recorded as provisional in self.prov as a 3-tuple (a, b, birth_step=-1); the caller stamps the birth step.",
+   "evidence": "tokenizer.py:370 `self.prov[nid] = (a, b, -1)`; self_organize.py:7623 `if g[0] in TOK.prov: TOK.prov[g[0]] = (g[1], g[2], step)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "retire() is SOFT: it only pops the byte string from seq2id so segmentation stops producing the id; the id, its id2bytes entry and its embedding row remain, because ids are positional and renumbering would invalidate every checkpoint.",
+   "evidence": "tokenizer.py:406-418",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Retirement is inert by default: TOK_PROBATION's registry default is 0, which short-circuits the whole probation/retire block.",
+   "evidence": "self_organize.py:127 `\"TOK_PROBATION\": (\"i\", 0)`; self_organize.py:7591 `if ONLINE and TOK_PROBATION > 0 and TOK.prov and _due(\"probation\", GROW_EVERY):`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "segment() is greedy-longest-match bounded by mlbf[first byte], never tries L=1 (range stops at 2), and always falls back to the raw byte, which is always in vocab.",
+   "evidence": "tokenizer.py:189-194",
+   "confidence": "verified"
+  },
+  {
+   "claim": "segment(count=True) is the only place segment tallies pairs, and the live training loop does NOT use it \u2014 it writes TOK.pair directly.",
+   "evidence": "tokenizer.py:196-197; self_organize.py:6794 `for a, b in zip(w[:-1], w[1:]): TOK.pair[(a, b)] += 1`; the only count=True call is the seed loop at self_organize.py:1264",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DynamicTokenizer.save persists only merges, vmax, min_pair, max_tok, dropout, max_pairs; load reconstructs id2bytes/seq2id/bytes_per_id/mlbf/maxlen by replaying merges in order.",
+   "evidence": "tokenizer.py:473-488",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The append-only property (id2bytes never changes meaning, ids are positional) is what makes remap_mem_ctx's re-segmentation of every stored memory context exact in id space.",
+   "evidence": "tokenizer.py:409-411 docstring; self_organize.py:3225-3227 'The remap is exact in id space because minting is APPEND-ONLY: id2bytes never changes meaning'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "maybe_grow bounds memory by trimming the pair tally to max_pairs//2 most-common entries whenever it exceeds max_pairs.",
+   "evidence": "tokenizer.py:241-242",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MmapConcat presents N files as one byte sequence via a cumulative bounds list and bisect; slicing walks file by file and concatenates into a bytearray.",
+   "evidence": "datastream.py:41-54",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The cap in MmapConcat stops opening further files once the cumulative size reaches it, and then clips total to the cap, so the last file stays fully mapped but is logically truncated.",
+   "evidence": "datastream.py:34-36 `if cap is not None and self.bounds[-1] >= cap: break` / `self.total = self.bounds[-1] if cap is None else min(self.bounds[-1], cap)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "open_corpus filters out any file whose basename starts with '_' or that ends in '.json', specifically to keep fetch_big.py's _fetch_manifest.json out of the training corpus.",
+   "evidence": "datastream.py:72-73",
+   "confidence": "verified"
+  },
+  {
+   "claim": "open_corpus raises SystemExit naming the domain and the fetch command when a DOMAINS entry has no files.",
+   "evidence": "datastream.py:74-76",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Under DISK_STREAM the held-out tail STAYS inside CORP (the mmap is not sliced) and SEG_LEN is the only thing preventing training from sampling it; under RAM mode CORP is physically truncated to the head.",
+   "evidence": "self_organize.py:1166-1172; seg_from bounds on SEG_LEN at self_organize.py:1305 and 1307",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The world model's forward core predicts the CHANGE, not the state: ForwardModel returns z + net(x), which is what keeps a multi-step rollout stable.",
+   "evidence": "world_model.py:38-40 `return z + s.net(x)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The anti-collapse regularizer is VICReg-style: hinge on per-dim std below 1, plus squared off-diagonal covariance normalized by d.",
+   "evidence": "world_model.py:44-53",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DynamicsPopulation routes with a learned query projection against per-predictor key vectors, adds log(alive) to the logits, and softmaxes at temperature tau (default 1.0; self_organize never passes tau).",
+   "evidence": "world_model.py:87-90; self_organize.py:4156 constructs DynamicsPopulation(WLAT, WORLD_N0, WORLD_NMAX, WHID, WORLD_ROUTE) with no tau",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DynamicsPopulation.forward evaluates EVERY predictor on every row and blends by routing weight; routing is soft, not sparse, so a 'culled' predictor still costs compute and still receives gradient.",
+   "evidence": "world_model.py:92-97 `outs = torch.stack([p(z) for p in s.preds], 1)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fit, mass and alive are registered buffers sized nmax, so they DO survive a state_dict save/load; s.grown is a plain Python int and does not.",
+   "evidence": "world_model.py:79-82 `s.register_buffer(...)` vs world_model.py:75 `s.grown = 0`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "grow() clones the state_dict of the FITTEST (lowest fit) predictor, appends a routing key seeded from the mean of qproj(z_seed), and returns the new params so the caller must add them to the optimizer.",
+   "evidence": "world_model.py:108-119",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The resume path replays grow() in a loop to reconstruct the population size and captures each return so the optimizer's param-group structure matches the checkpoint; it raises SystemExit rather than spinning when the checkpoint holds more predictors than WORLD_NMAX allows.",
+   "evidence": "self_organize.py:4589-4601",
+   "confidence": "verified"
+  },
+  {
+   "claim": "pop_loss adds a load-balance term n*sum(mean_w^2), which is 1 at uniform routing and n at total collapse, and calls update_fitness on the detached next latent.",
+   "evidence": "world_model.py:131-138",
+   "confidence": "verified"
+  },
+  {
+   "claim": "wm_loss and ByteBPE are never imported by the live system; self_organize imports only WorldEncoder, DynamicsPopulation, pop_loss and _var_cov from world_model, and only DynamicTokenizer from tokenizer.",
+   "evidence": "self_organize.py:22 `from world_model import WorldEncoder, DynamicsPopulation, pop_loss, _var_cov`; self_organize.py:1200 `from tokenizer import DynamicTokenizer`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "self_organize reads MAX_DOMAINS with default 32 when sizing the memory census and with default FAB_NMAX (4096) elsewhere; this is only legal because MAX_DOMAINS is in _DERIVED and therefore exempt from _env's default-mismatch refusal, and it makes n_src_hint 64 in every default run.",
+   "evidence": "self_organize.py:4874 `n_src_hint=max(64, _i(\"MAX_DOMAINS\", 32) * 2)` vs self_organize.py:598 `MAX_DOMAINS = _i(\"MAX_DOMAINS\", _i(\"FAB_NMAX\", 4096))`; exemption at self_organize.py:90,95,520",
+   "confidence": "verified"
+  },
+  {
+   "claim": "memory source ids ARE domain ids from the assembler and climb monotonically; memory.py records having seen 125 source ids against 27 live domains on a real run.",
+   "evidence": "memory.py:381-383 docstring; self_organize.py:7528/7536 pass `src=_bd[_b]` (the domain id); self_organize.py:6699 `mem.set_live_src(asm.cent.keys())`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The checkpoint saves mem_keys/tok/src/ctx/pos/use/selfcon/own/last/n_own/quota/tick compacted to active entries only; it does NOT save prob, recon, nsrc, nsrc_max, gate_theta, or any of the accounting counters.",
+   "evidence": "self_organize.py:5349-5354",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selfcheck() \u2014 the only writer of mem.selfcon \u2014 is called exactly once, from the end-of-run report, never from the training loop.",
+   "evidence": "self_organize.py:4047-4060 (definition) and self_organize.py:8881 (sole call site)",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "MEM_WRONG_READ",
+   "effect": "1 = the self-consistency wrong flag excludes entries from EVERY retrieval; 0 = the flag is still reported but does not gate reads. Read directly from os.environ inside EditableMemory.__init__ so the config registry sees the read.",
+   "owner": "memory.EditableMemory.read",
+   "couples_with": [
+    "WRONG_SWEEP",
+    "MEM_PROBE_EVERY"
+   ],
+   "evidence": "memory.py:67 `self.wrong_read = bool(int(os.environ.get(\"MEM_WRONG_READ\", 1)))`; used at memory.py:520"
+  },
+  {
+   "name": "MEM_CAP",
+   "effect": "Number of slots in the store \u2014 but only when MEM_PER_EXPERT=0. With the partition on it is discarded in favour of n_own*quota.",
+   "owner": "memory.EditableMemory.__init__",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "MEM_OWNERS",
+    "MEM_QUOTA"
+   ],
+   "evidence": "self_organize.py:4868; memory.py:36 `if self.n_own > 1: cap = self.n_own * self.quota`"
+  },
+  {
+   "name": "MEM_PER_EXPERT",
+   "effect": "Turns on the per-owner partition (n_own = min(FAB_NMAX, MEM_OWNERS)). Also silently switches off probation, the per-source floor, and the pressure() counters, because the per-owner _store path returns before all of them.",
+   "owner": "memory.EditableMemory._store",
+   "couples_with": [
+    "FABRIC",
+    "MEM_OWNERS",
+    "MEM_QUOTA",
+    "MEM_CAP",
+    "MEM_SRC_FLOOR",
+    "MEM_PROB_FRAC",
+    "KEY_PREGATE",
+    "KEY_BATCH",
+    "KEY_SRC"
+   ],
+   "evidence": "self_organize.py:4866 `MEM_PER_EXPERT = bool(_i(\"MEM_PER_EXPERT\", 0)) and FABRIC`; memory.py:212-241"
+  },
+  {
+   "name": "MEM_OWNERS",
+   "effect": "Number of memory partitions, folded down from expert id space (expert_id % n_own). Sets n_own = min(FAB_NMAX, MEM_OWNERS).",
+   "owner": "memory.EditableMemory",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "FAB_NMAX",
+    "MEM_QUOTA"
+   ],
+   "evidence": "self_organize.py:4873; self_organize.py:7523 `int(_w[...].argmax()) % max(1, mem.n_own)`"
+  },
+  {
+   "name": "MEM_QUOTA",
+   "effect": "Entries per owner block. With MEM_PER_EXPERT on this, not MEM_CAP, determines the store size.",
+   "owner": "memory.EditableMemory",
+   "couples_with": [
+    "MEM_OWNERS",
+    "MEM_CAP",
+    "MEM_PER_EXPERT"
+   ],
+   "evidence": "self_organize.py:4867, 4873; memory.py:35-36"
+  },
+  {
+   "name": "EVICT",
+   "effect": "'recency' = circular FIFO on write order, 'usage' = LFU on decayed retrieval mass, 'lru' = least-recently-retrieved. Only 'usage' and 'lru' reach the probation/floor machinery, and only when the store is full.",
+   "owner": "memory.EditableMemory._store",
+   "couples_with": [
+    "MEM_PROBE_EVERY",
+    "USE_DECAY",
+    "DECAY_EVERY",
+    "MEM_PER_EXPERT"
+   ],
+   "evidence": "memory.py:242; self_organize.py:479 default 'lru'"
+  },
+  {
+   "name": "MEM_PROBE_EVERY",
+   "effect": "How often the training loop issues real reads against the store. Zero makes `use` and `last` constants, which turns EVICT=lru/usage into write-order eviction and makes probation promotion impossible.",
+   "owner": "self_organize training loop (feeds memory.read)",
+   "couples_with": [
+    "EVICT",
+    "MEM_PROBE_N",
+    "MEM_PROB_FRAC",
+    "MEM_SRC_FLOOR",
+    "KEY_SRC"
+   ],
+   "evidence": "self_organize.py:4881, 7551-7563; memory.py:53-57"
+  },
+  {
+   "name": "MEM_PROBE_N",
+   "effect": "Rows per probe read. Bounds how many entries can be promoted out of probation per probe.",
+   "owner": "self_organize training loop",
+   "couples_with": [
+    "MEM_PROBE_EVERY",
+    "MEM_PROB_FRAC"
+   ],
+   "evidence": "self_organize.py:4882"
+  },
+  {
+   "name": "MEM_SRC_FLOOR",
+   "effect": "Fraction of cap reserved across live sources; floor_i = src_floor*cap/live. 0 disables protection entirely. Only consulted on the global sampled-eviction path.",
+   "owner": "memory.EditableMemory._unprotected",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "EVICT",
+    "MEM_PROB_FRAC",
+    "DOM_MANAGE_EVERY"
+   ],
+   "evidence": "memory.py:345-375; self_organize.py:4874"
+  },
+  {
+   "name": "MEM_PROB_FRAC",
+   "effect": "Share of the store the never-retrieved (probation) region may occupy before eviction narrows to it. At this system's write:read ratio it is permanently exceeded, so the probation branch is the rule rather than the exception.",
+   "owner": "memory.EditableMemory._store",
+   "couples_with": [
+    "MEM_PROBE_EVERY",
+    "MEM_PRESSURE",
+    "MEM_SRC_FLOOR"
+   ],
+   "evidence": "memory.py:98, 269; self_organize.py:6584-6595"
+  },
+  {
+   "name": "MEM_PRESSURE",
+   "effect": "Threshold on pressure() (share of evictions destroying promoted entries) above which a capacity warning prints. Cannot be reached while probation is over budget.",
+   "owner": "memory.EditableMemory.pressure + self_organize epoch report",
+   "couples_with": [
+    "MEM_PROB_FRAC",
+    "MEM_PROBE_EVERY",
+    "MEM_PRESSURE_ACT"
+   ],
+   "evidence": "memory.py:401-416; self_organize.py:6561-6562"
+  },
+  {
+   "name": "MEM_PRESSURE_ACT",
+   "effect": "1 turns the pressure warning into an actual fabric-growth trigger (fabgrow.note_shift). Default 0 = report only.",
+   "owner": "self_organize epoch report",
+   "couples_with": [
+    "MEM_PRESSURE",
+    "FABRIC"
+   ],
+   "evidence": "self_organize.py:6570-6572"
+  },
+  {
+   "name": "WRITE_GATE",
+   "effect": "Fixed surprise threshold; an item is stored only if 1 - p_model(true token) >= this. Used only when WRITE_ADAPTIVE=0. Also the seed value of gate_theta.",
+   "owner": "memory.EditableMemory._gate",
+   "couples_with": [
+    "WRITE_ADAPTIVE",
+    "WRITE_TARGET",
+    "WRITE_QUANTILE"
+   ],
+   "evidence": "memory.py:40, 152; self_organize.py:4868 default 0.3"
+  },
+  {
+   "name": "WRITE_ADAPTIVE",
+   "effect": "Turns on the self-calibrating gate. Registry default 0, which leaves both the additive controller and the quantile gate dead.",
+   "owner": "memory.EditableMemory._gate",
+   "couples_with": [
+    "WRITE_QUANTILE",
+    "WRITE_TARGET",
+    "WRITE_GATE"
+   ],
+   "evidence": "memory.py:133, 147; self_organize.py:503 default 0"
+  },
+  {
+   "name": "WRITE_QUANTILE",
+   "effect": "Honours WRITE_TARGET by quantile instead of an absolute threshold. Nested inside the adaptive branch, so it is inert unless WRITE_ADAPTIVE=1.",
+   "owner": "memory.EditableMemory._gate",
+   "couples_with": [
+    "WRITE_ADAPTIVE",
+    "WRITE_TARGET"
+   ],
+   "evidence": "memory.py:133; self_organize.py:6111-6115"
+  },
+  {
+   "name": "WRITE_TARGET",
+   "effect": "Target kept-write fraction for the adaptive/quantile gate.",
+   "owner": "memory.EditableMemory._gate",
+   "couples_with": [
+    "WRITE_ADAPTIVE",
+    "WRITE_QUANTILE",
+    "MEM_CAP"
+   ],
+   "evidence": "memory.py:44, 141"
+  },
+  {
+   "name": "USE_DECAY / DECAY_EVERY",
+   "effect": "Multiplicative decay of the retrieval-count vector, applied once every DECAY_EVERY WRITES (not per step, not per read).",
+   "owner": "memory.EditableMemory._commit",
+   "couples_with": [
+    "EVICT",
+    "MEM_PROBE_EVERY"
+   ],
+   "evidence": "memory.py:58, 494-496"
+  },
+  {
+   "name": "TOPK",
+   "effect": "Neighbours per retrieval; also the width of the hit/weight tensors read() returns (both discarded by every product call site).",
+   "owner": "memory.EditableMemory.read",
+   "couples_with": [],
+   "evidence": "memory.py:73, 545-552"
+  },
+  {
+   "name": "WRONG_SWEEP",
+   "effect": "1 deletes every currently-flagged-wrong entry at the end of the run. Default 0 \u2014 but 0 does NOT make the flag inert, because read() filters on the same predicate.",
+   "owner": "memory.EditableMemory.sweep_wrong + self_organize report",
+   "couples_with": [
+    "MEM_WRONG_READ"
+   ],
+   "evidence": "memory.py:644-646; self_organize.py:8900-8903"
+  },
+  {
+   "name": "VERIFY / VERIFY_SWEEP",
+   "effect": "VERIFY=recon builds a Reconstructor and populates mem.recon at the end of the run, activating is_unverified(); VERIFY_SWEEP additionally deletes those entries. Default VERIFY=selfcon leaves recon all -1 and is_unverified() a no-op.",
+   "owner": "verification.verify + memory.is_unverified",
+   "couples_with": [
+    "RECON_W",
+    "VERIFY_FIT"
+   ],
+   "evidence": "self_organize.py:528, 8882-8891; memory.py:599-610"
+  },
+  {
+   "name": "TOK_ONLINE",
+   "effect": "1 = mint throughout training (model sized to VMAX, corpora stay bytes); 0 = build the vocabulary up front, tokenize the corpora once, and set V to the achieved vocab size.",
+   "owner": "self_organize tokenizer block",
+   "couples_with": [
+    "VMAX",
+    "SEED_VOCAB",
+    "GROW_EVERY",
+    "RETOK_EVERY",
+    "TOK_MINT_UNTIL"
+   ],
+   "evidence": "self_organize.py:987, 1224, 1282-1290"
+  },
+  {
+   "name": "VMAX",
+   "effect": "Softmax width AND the tokenizer's hard mint ceiling. On a resume the tokenizer's saved vmax travels with the file and must be explicitly raised to match a widened emb/head.",
+   "owner": "tokenizer.DynamicTokenizer.maybe_grow / self_organize model width",
+   "couples_with": [
+    "TOK_ONLINE",
+    "TOKENIZER_PATH",
+    "RESUME",
+    "TOK_COMPOSE"
+   ],
+   "evidence": "tokenizer.py:243; self_organize.py:1223, 1245-1254"
+  },
+  {
+   "name": "MIN_PAIR",
+   "effect": "Minimum pair count to be mintable. Registry default 50; the tokenizer module's own default is 200. On a LOAD the value comes from the saved json and the env variable is ignored.",
+   "owner": "tokenizer.DynamicTokenizer.maybe_grow",
+   "couples_with": [
+    "GROW_BURST",
+    "GROW_EVERY",
+    "TOKENIZER_PATH"
+   ],
+   "evidence": "tokenizer.py:130, 297; self_organize.py:1256; tokenizer.py:481-482"
+  },
+  {
+   "name": "MAX_TOK",
+   "effect": "Maximum bytes per minted token. A candidate exceeding it is skipped (gate_skipped). On a LOAD the value comes from the saved json.",
+   "owner": "tokenizer.DynamicTokenizer._mintable / apply_merge",
+   "couples_with": [
+    "VMAX",
+    "TOKENIZER_PATH"
+   ],
+   "evidence": "tokenizer.py:329-330, 481"
+  },
+  {
+   "name": "TOK_DROPOUT",
+   "effect": "Probability of skipping a merge during count=True segmentation, letting byte-level material through. Draws from the GLOBAL random module. On a LOAD the value comes from the saved json.",
+   "owner": "tokenizer.DynamicTokenizer.segment",
+   "couples_with": [
+    "TOKENIZER_PATH"
+   ],
+   "evidence": "tokenizer.py:188, 190; self_organize.py:1256"
+  },
+  {
+   "name": "TOK_MINT_PMIN",
+   "effect": "Minimum p(b|a) for a merge to pass the predictability gate; 0 = mint on frequency alone. Read from os.environ inside __init__ AND mirrored from self_organize on the fresh-construct path only.",
+   "owner": "tokenizer.DynamicTokenizer._predictable",
+   "couples_with": [
+    "TOK_MINT_GATE_K",
+    "TOK_MINT_NOVEL"
+   ],
+   "evidence": "tokenizer.py:157; self_organize.py:1257"
+  },
+  {
+   "name": "TOK_MINT_GATE_K",
+   "effect": "How far down the frequency ranking the predictability gate may look. Deliberately generous (1024) so the window is not itself the limiter.",
+   "owner": "tokenizer.DynamicTokenizer.maybe_grow",
+   "couples_with": [
+    "TOK_MINT_PMIN"
+   ],
+   "evidence": "tokenizer.py:160-164, 259"
+  },
+  {
+   "name": "TOK_MINT_NOVEL / TOK_MINT_NOVEL_K",
+   "effect": "Re-ranks the top candidates by growth since last look, (c-seen)/(1+seen)^novel, so minting follows NEW material. 0 reproduces plain most-frequent minting. Turning it on also destroys the frequency ordering the min_pair early-exit and the gate_forced fallback assume.",
+   "owner": "tokenizer.DynamicTokenizer.maybe_grow",
+   "couples_with": [
+    "TOK_MINT_PMIN",
+    "TOK_MINT_GATE_K",
+    "MIN_PAIR"
+   ],
+   "evidence": "tokenizer.py:137-138, 262-269, 296-302, 308-312"
+  },
+  {
+   "name": "GROW_EVERY / GROW_BURST",
+   "effect": "Cadence and burst size of maybe_grow calls during training; together with the run length they, not VMAX, often decide how full the vocabulary gets.",
+   "owner": "self_organize training loop",
+   "couples_with": [
+    "VMAX",
+    "TOK_ONLINE",
+    "TOK_PROBATION",
+    "MIN_PAIR"
+   ],
+   "evidence": "self_organize.py:5266, 7618-7621, 6064-6086"
+  },
+  {
+   "name": "TOK_PROBATION / TOK_PROBATION_STEPS / TOK_PROBATION_BY / TOK_PROBATION_MIN",
+   "effect": "Appearances a minted token must earn (or a deadline to earn them by) before it is kept; failures are retire()d. Default 0 = the whole path, including retire(), never runs.",
+   "owner": "self_organize probation block + tokenizer.retire",
+   "couples_with": [
+    "GROW_EVERY",
+    "TOK_COMPOSE",
+    "TOK_ONLINE"
+   ],
+   "evidence": "self_organize.py:127-130, 7591-7616; tokenizer.py:406-418"
+  },
+  {
+   "name": "TOKENIZER_PATH",
+   "effect": "Which vocabulary file indexes the checkpoint's embedding rows. Unset on a resume it now prefers <RESUME>.dyntok.json over the shared data/dyntok.json. Loading from it also imports that file's min_pair/max_tok/dropout/max_pairs.",
+   "owner": "self_organize tokenizer block + DynamicTokenizer.load",
+   "couples_with": [
+    "RESUME",
+    "SAVE_CKPT",
+    "VMAX",
+    "MIN_PAIR",
+    "MAX_TOK"
+   ],
+   "evidence": "self_organize.py:1214-1227, 1011-1012; tokenizer.py:479-483"
+  },
+  {
+   "name": "DISK_STREAM",
+   "effect": "mmap the corpus instead of reading it into RAM. Also changes what the held-out set IS (VAL_CAP-truncated slice of the mmap vs the full RAM tail), and enables per-epoch resampling.",
+   "owner": "datastream.open_corpus + self_organize corpus block",
+   "couples_with": [
+    "CORPUS_CAP",
+    "VAL_FRAC",
+    "VAL_CAP",
+    "EPOCHS",
+    "SEG_CONTIG"
+   ],
+   "evidence": "datastream.py:65-82; self_organize.py:1122-1124, 1166-1172, 6510-6513"
+  },
+  {
+   "name": "CORPUS_CAP",
+   "effect": "Per-domain byte cap. On the disk path it stops opening files and clips total; on the RAM path it slices the concatenated bytes.",
+   "owner": "datastream.open_corpus",
+   "couples_with": [
+    "DISK_STREAM",
+    "DOMAINS",
+    "STREAM_LEN",
+    "EPOCHS"
+   ],
+   "evidence": "datastream.py:34-36, 78-81; self_organize.py:1124"
+  },
+  {
+   "name": "DOMAINS / DATA_DIR",
+   "effect": "Which per-domain corpora are opened and in what index order. CORP and DN must stay index-aligned; the 5000-byte drop filter re-aligns both.",
+   "owner": "datastream.open_corpus + self_organize corpus block",
+   "couples_with": [
+    "DISK_STREAM",
+    "CORPUS_CAP"
+   ],
+   "evidence": "datastream.py:68-76; self_organize.py:1121, 1143-1147"
+  },
+  {
+   "name": "WORLD_MODEL",
+   "effect": "Builds WorldEncoder + DynamicsPopulation (+ world_proj under WORLD_FEEDBACK) and adds the latent forward-prediction and anti-collapse terms to the loss.",
+   "owner": "self_organize world block",
+   "couples_with": [
+    "WORLD_GROW",
+    "WORLD_FEEDBACK",
+    "WORLD_W",
+    "WORLD_VAR",
+    "WORLD_LAT",
+    "WORLD_HID"
+   ],
+   "evidence": "self_organize.py:4144-4158, 7056-7063"
+  },
+  {
+   "name": "WORLD_GROW",
+   "effect": "Enables grow-on-plateau and soft_cull of the dynamics population on the MANAGE_EVERY cadence. Explicitly ANDed with WORLD_MODEL because its step hook dereferences world_fwd outside the WORLD_MODEL block.",
+   "owner": "self_organize MANAGE cadence + DynamicsPopulation.grow/soft_cull",
+   "couples_with": [
+    "WORLD_MODEL",
+    "WORLD_NMAX",
+    "WORLD_N0",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:4147-4149, 6768-6773"
+  },
+  {
+   "name": "WORLD_N0 / WORLD_NMAX",
+   "effect": "Starting and maximum number of dynamics predictors. NMAX also sizes the fit/mass/alive buffers and is what a resume's grow-replay loop must be able to reach.",
+   "owner": "world_model.DynamicsPopulation",
+   "couples_with": [
+    "WORLD_GROW",
+    "RESUME"
+   ],
+   "evidence": "world_model.py:70, 79-82, 109; self_organize.py:4156, 4589-4601"
+  },
+  {
+   "name": "WORLD_K",
+   "effect": "Prediction horizon in positions: z[:, :-K] predicts z[:, K:]. Changes what 'the next latent' means without changing anything the loss reports.",
+   "owner": "self_organize world loss + world eval",
+   "couples_with": [
+    "WORLD_MODEL",
+    "WIN"
+   ],
+   "evidence": "self_organize.py:4144, 7058, 8222"
+  },
+  {
+   "name": "WORLD_W / WORLD_VAR",
+   "effect": "Weights on the population forward-prediction term and on the encoder anti-collapse term respectively; WORLD_VAR is applied at full strength because under-weighting it produced latent collapse.",
+   "owner": "self_organize world loss",
+   "couples_with": [
+    "WORLD_MODEL"
+   ],
+   "evidence": "self_organize.py:4144-4145, 7061"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "A newly grown dynamics predictor is soft-culled in the same block that created it",
+   "severity": "critical",
+   "where": "world_model.py:121-127 (soft_cull) driven by self_organize.py:6768-6772",
+   "symptom": "grow() appends a predictor and never initialises its mass; soft_cull runs immediately afterwards in the same MANAGE_EVERY block and culls anything with mass < 1e-3. mass is a zeros buffer sized nmax and grow() does not touch it, so the newborn is at 0.0 and is deactivated before update_fitness has ever seen it. The world-model population therefore cannot actually grow in the product loop: world.grow's DID IT FIRE row counts a mint that was undone microseconds later, and the eval line's '(n live)' is the only place the discrepancy surfaces.",
+   "evidence": "world_model.py:81 `s.register_buffer(\"mass\", torch.zeros(nmax))`; world_model.py:108-119 grow() never writes s.mass; world_model.py:126 `if float(s.mass[i]) < min_mass and s.alive[i] > 0:`; self_organize.py:6770-6772 `_newp = world_fwd.grow(...)` ... `_wcull = world_fwd.soft_cull()`",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Resume reactivates slots 0..n unconditionally, undoing the per-owner partition restore",
+   "severity": "high",
+   "where": "self_organize.py:4954, 4962, 4972",
+   "symptom": "The per-owner restore path deliberately clears active and then activates only the reconstructed owner blocks. Six lines later `mem.active[:_mn] = True` runs in BOTH branches and reactivates the first _mn slots regardless of ownership. Those slots still hold the uncompacted bulk copy made at line 4945-4948, so the same checkpoint row exists twice (once at its bulk position, once at its owner-block position), the bulk copies carry own=-1 and last=0, and rebuild_census then counts both.",
+   "evidence": "self_organize.py:4954 `mem.active[:] = False`; 4962 `mem.own[_dst] = _o; mem.last[_dst] = _la[_sel]; mem.active[_dst] = True`; 4972 `mem.active[:_mn] = True; mem.ptr = _mn % mem.cap`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "The synthetic wrong-entry injection uses src=99, which collides with a real domain id",
+   "severity": "high",
+   "where": "self_organize.py:8880 and 8945",
+   "symptom": "The wrongness evaluation force-writes synthetic entries tagged src=99, then computes precision/recall against `mem.src == 99` and finally calls delete_src(99). Domain ids come from the same namespace and climb monotonically; memory.py's own docstring records 125 source ids on a real run. On any run whose assembler reached domain 99, the genuine domain's entries are counted as 'injected' (inflating recall, deflating the false-positive count) and are then permanently deleted from the store.",
+   "evidence": "self_organize.py:8880 `mem.write(mem_key(XW), YW.reshape(-1), src=99, surprise=None, ctx=mem_ctx(XW))`; 8884 `_inj = (mem.src == 99) & mem.active`; 8945 `if ninj > 0: mem.delete_src(99)`; memory.py:381 '125 source ids held entries while 27 domains were live'",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "The per-owner write path bypasses probation and the per-source floor entirely, while every report still prints them",
+   "severity": "high",
+   "where": "memory.py:212-241 vs memory.py:242-296",
+   "symptom": "With MEM_PER_EXPERT=1 the store never reaches the sampled-eviction branch, so _unprotected is never called, the probation-first narrowing never runs, and n_prob_evict/n_main_evict stay 0 \u2014 which also makes pressure() return None forever (tot < 1000). Meanwhile _commit still sets prob=True on every write, src_report() still reports a floor and a probation budget, and the [memory] banner still prints 'src floor 0.5'.",
+   "evidence": "memory.py:241 `return self._commit(idx, k, tok, src, ctx, pos, m)` (per-owner path returns here); memory.py:284 `cand = self._unprotected(cand, m)` (unreachable from that path); memory.py:414-416; self_organize.py:4887-4889 banner",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The wrong-flag read filter is structurally inert during training, and the code knows it",
+   "severity": "high",
+   "where": "memory.py:519-532 + self_organize.py:8881",
+   "symptom": "read() filters on is_wrong(), which needs more than 10 entries with selfcon >= 0. selfcon is written only by selfcheck(), which is called exactly once from the end-of-run report, and _commit resets selfcon to -1 on every write. So during the entire run is_wrong() returns all-False, n_wrong_blocked stays 0, and the per-run 'N of M active entries are excluded from EVERY retrieval' figure describes the state after a pass the report itself just ran, not anything that happened.",
+   "evidence": "memory.py:585 `if int(checked.sum()) > 10:`; memory.py:492 `self.selfcon[idx] = -1.0`; self_organize.py:8881 sole selfcheck call; self_organize.py:8934-8944 states this explicitly",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "pressure() cannot reach its own threshold because probation is permanently over budget",
+   "severity": "high",
+   "where": "memory.py:401-416 with memory.py:268-280",
+   "symptom": "Every write lands on probation and only a retrieval promotes out of it. At the observed write:read ratio probation covers most of the store, so `_over` is almost always true, eviction takes the probation branch, n_main_evict stays near zero, and pressure() = main/(main+prob) reads ~0 for the whole run whatever the store is actually suffering. A signal that cannot reach its threshold is indistinguishable from a healthy one.",
+   "evidence": "memory.py:269 `_over = _pn > int(self.prob_frac * self.cap)`; memory.py:276 `cand = _pc; self.n_prob_evict += m`; self_organize.py:6584-6595 documents the measurement (11.7M writes into 200k slots against 1469 read probes)",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "retire() is not persisted: a retired token comes back live after save/load",
+   "severity": "high",
+   "where": "tokenizer.py:406-418 and tokenizer.py:479-488",
+   "symptom": "retire() only pops the byte string from seq2id and records the id in self.retired. save() writes only `merges`, and load() replays every merge into seq2id unconditionally. So a token retired for failing probation is fully re-armed on the next resume, and self.retired and self.prov are both empty after a load. The probation verdict does not survive the run boundary that continual learning is supposed to cross.",
+   "evidence": "tokenizer.py:412 `gone = self.seq2id.pop(self.id2bytes[tid], None) is not None`; tokenizer.py:473-475 save writes only merges/vmax/min_pair/max_tok/dropout/max_pairs; tokenizer.py:483-487 load replays every merge into seq2id",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "Memory probation state and reconstruction errors are not in the checkpoint",
+   "severity": "medium",
+   "where": "self_organize.py:5349-5354 (save) vs memory.py:99, 77 (state)",
+   "symptom": "mem.prob and mem.recon are never saved. After a resume every restored entry has prob=False, i.e. is treated as already promoted, so the scan-resistance the probation region exists to provide is off until enough new writes accumulate; and the `_pn` probation census restarts from whatever the new writes produce. n_promoted / n_prob_evict / n_main_evict / _floor_blocked / n_dup_slot / n_src_underflow / n_wrong_* all restart at 0 too, so every DID IT FIRE row about memory measures only the current segment.",
+   "evidence": "self_organize.py:5349-5354 lists mem_keys/tok/src/ctx/pos/use/selfcon/own/last/n_own/quota/tick and nothing else; memory.py:99-108",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "nsrc_max (the starvation alarm's only baseline) does not survive a resume",
+   "severity": "medium",
+   "where": "memory.py:342 with self_organize.py:4980",
+   "symptom": "The MEMORY STARVATION alarm fires only for sources whose HIGH-WATER mark once reached the floor. nsrc_max is not checkpointed; rebuild_census sets it to `maximum(zeros, restored nsrc)`, i.e. equal to the current count. So immediately after a resume no source can be reported as having lost ground, and a domain that was driven to zero before the checkpoint is invisible to the alarm for the rest of the run.",
+   "evidence": "memory.py:342 `self.nsrc_max = torch.maximum(self.nsrc_max, self.nsrc)` inside rebuild_census; nsrc_max absent from self_organize.py:5349-5354",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "gate_theta is not checkpointed, so the adaptive/quantile write gate re-seeds after every resume",
+   "severity": "medium",
+   "where": "memory.py:46, 143-144 vs self_organize.py:5349-5354",
+   "symptom": "Under WRITE_QUANTILE the controller seeds gate_theta from the FIRST batch it sees and then EMAs. A resume constructs a fresh store, so gate_theta restarts at float(write_gate) and is re-seeded from the first post-resume batch \u2014 a different write rate on the same material, with nothing in the log saying so.",
+   "evidence": "memory.py:143-145 `if not torch.is_tensor(self.gate_theta): self.gate_theta = q.detach().clone()  # seed from the first batch`",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "soft_cull is irreversible despite both docstrings calling it reversible",
+   "severity": "medium",
+   "where": "world_model.py:82, 121-128",
+   "symptom": "alive is only ever written to 0.0; nothing in world_model.py or self_organize.py ever restores a predictor to 1.0. The routing penalty log(1e-6) is soft, so the predictor keeps consuming forward compute and gradient forever while contributing ~1e-6 of the blend, and grow() still counts it against nmax so capacity is permanently lost to it.",
+   "evidence": "world_model.py:82 `s.register_buffer(\"alive\", torch.ones(nmax))   # soft-cull mask (reversible: params kept)`; world_model.py:127 `s.alive[i] = 0.0` is the only write anywhere (grep over the live tree)",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "grow() refuses at nmax even when culled slots exist",
+   "severity": "medium",
+   "where": "world_model.py:109",
+   "symptom": "`if s.n() >= s.nmax: return None` counts total predictors, not live ones. Once soft_cull has deactivated k predictors the population is capped at nmax with only nmax-k doing work, and the plateau trigger silently stops firing. Combined with the immediate-newborn-cull above, a run can reach nmax with almost nothing live.",
+   "evidence": "world_model.py:109 `if s.n() >= s.nmax: return None`; s.n() is `len(s.preds)` at world_model.py:84",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "world_fwd.grown is a plain int: lost on resume and inflated by the resume's own replay",
+   "severity": "medium",
+   "where": "world_model.py:75, 111 with self_organize.py:4589-4600 and 8686",
+   "symptom": "grown is assigned as an ordinary attribute, not a buffer, so it is absent from state_dict and restarts at 0 on every resume. Worse, the resume replays grow() in a loop to rebuild the population size, and each replay increments it \u2014 so the DID IT FIRE row 'world.grow' reports the checkpoint's population size as this run's growth events.",
+   "evidence": "world_model.py:75 `s.grown = 0` (plain attribute); world_model.py:111 `s.grown = getattr(s, \"grown\", 0) + 1`; self_organize.py:4591-4592 `while world_fwd.n() < _want2: _np2 = world_fwd.grow()`; self_organize.py:8686 `_r(\"world.grow\", lambda: world_fwd.grown, ...)`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "_floor_blocked counts candidates it blocked even when the floor was then dropped for that call",
+   "severity": "medium",
+   "where": "memory.py:374-375",
+   "symptom": "The counter is incremented before the never-deadlock escape hatch. When protection would leave too few victims, `cand` is returned unfiltered and NOTHING was actually protected \u2014 but _floor_blocked has already been credited with the full difference. The DID IT FIRE row memory.floor_block can therefore be large on a run where the floor never once changed an eviction outcome.",
+   "evidence": "memory.py:374 `self._floor_blocked += int(cand.numel() - out.numel())` followed by memory.py:375 `return out if out.numel() >= need else cand`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "flag_min_w is a dead knob with a live-sounding comment",
+   "severity": "medium",
+   "where": "memory.py:65-66",
+   "symptom": "Its comment says it gates which retrievals an entry is JUDGED on ('only JUDGE an entry on retrievals where it was a CLOSE match'). Nothing reads it \u2014 the retrieval-weight signal it belonged to was removed when wrongness became self-consistency. The three knobs beside it are explicitly documented as unused; this one is not, and cl_bench.py passes it a non-default value (0.12) on all three of its stores.",
+   "evidence": "memory.py:65 is the only occurrence besides the parameter at memory.py:23; cl_bench.py:181-182, 260 pass `flag_min_w=_f(\"WRONG_MIN_W\", 0.12)`",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "reassign_src does not grow the census table, so a merge into an unseen id makes that source invisible to the floor",
+   "severity": "medium",
+   "where": "memory.py:637-641",
+   "symptom": "The recount is guarded by `if 0 <= _s < self.nsrc.numel()`. _commit and rebuild_census both GROW the table when an id exceeds it; reassign_src does not. If the domain manager folds b into a and `a` has never itself written to memory (or exceeds the table), the relabelled entries are active with src=a while nsrc has no bucket for a \u2014 so `has = (nsrc > 0)` is false, the merged source is never eligible for floor protection, and _unprotected's clamp maps it onto the LAST source's protection status instead.",
+   "evidence": "memory.py:637-641; contrast memory.py:478-482 in _commit and memory.py:330-341 in rebuild_census; caller at self_organize.py:3591 `if mem is not None: mem.reassign_src(b, a)`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "_unprotected and delete clamp out-of-range source ids into the last census bucket",
+   "severity": "medium",
+   "where": "memory.py:369 and memory.py:623",
+   "symptom": "Both do `.clamp(min=0, max=self.nsrc.numel() - 1)`, which is exactly the pattern rebuild_census's own docstring identifies as a re-break ('a RESUME ... then this clamped every id past the end into the last bucket'). Any src id past the table silently borrows or corrupts the last bucket's count and protection status. It is only latent because _commit normally grows the table first \u2014 which reassign_src can defeat.",
+   "evidence": "memory.py:369 `cs = self.src[cand].clamp(min=0, max=self.nsrc.numel() - 1)`; memory.py:623-624; memory.py:326-329 docstring warning against exactly this",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "After any deletion the store stops being full and eviction silently reverts to circular FIFO",
+   "severity": "medium",
+   "where": "memory.py:242 vs memory.py:297",
+   "symptom": "The sampled/probation/floor branch is guarded on `int(self.active.sum()) >= self.cap`. delete_src (domain cull), sweep_wrong and the unlearn tests all drop the active count below cap, so until the store refills every write uses `(arange(m)+ptr) % cap` \u2014 which can overwrite still-active entries while free slots exist elsewhere, with no floor and no probation. Nothing reports that the eviction rule changed.",
+   "evidence": "memory.py:242; memory.py:297 `idx = (torch.arange(m, device=self.dev) + self.ptr) % self.cap`; delete callers at self_organize.py:3696 and 8890",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "is_wrong / is_unverified compute their adaptive threshold over INACTIVE entries too",
+   "severity": "low",
+   "where": "memory.py:584-591 and memory.py:603-608",
+   "symptom": "`checked = self.selfcon >= 0` (resp. recon) is not intersected with `active` before taking the median and MAD; only the final mask is. delete() leaves selfcon/recon untouched on deactivated slots, so a store that has just swept or culled computes its median+k*MAD partly over entries that no longer exist, shifting the threshold for the ones that do.",
+   "evidence": "memory.py:584-590 `checked = self.selfcon >= 0` / `v = self.selfcon[checked]; med = v.median()` then `selfc = self.active & checked & (self.selfcon >= thr)`; delete() at memory.py:612-628 does not clear selfcon",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "delete() does not clear the probation flag, so deleted slots keep inflating the probation census",
+   "severity": "low",
+   "where": "memory.py:612-628 vs memory.py:268",
+   "symptom": "`_pn = int(self.prob.sum())` counts every slot with prob=True, active or not. A deactivated slot keeps prob=True from its last write, so after a delete_src the probation region looks larger than it is and `_over` trips more readily than the store warrants.",
+   "evidence": "memory.py:627 `self.active[mask] = False` with no touch to self.prob; memory.py:268-269",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "read() returns hit indices and retrieval weights that every product call site discards",
+   "severity": "low",
+   "where": "memory.py:509 with self_organize.py:3870, 5101, 8838",
+   "symptom": "The signature is (dist, conf, hit_idx, weights). All three product call sites unpack as `dist, _cf, _, _`, and the probe call sites discard the whole tuple. hit and wfull are computed (an extra (B,topk) allocation per read) and never read outside cl_bench and mem_evict_test \u2014 they are the inputs flag_min_w was written for.",
+   "evidence": "memory.py:509 docstring `q:(B,d) -> (dist:(B,V), conf:(B,), hit_idx:(B,topk))`; memory.py:552 `wfull = torch.zeros(B, self.topk, ...)`; self_organize.py:3870 `dist, _cf, _, _ = mem.read(...)`",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "read()'s softmax temperature tau is not a knob",
+   "severity": "low",
+   "where": "memory.py:509",
+   "symptom": "tau defaults to 0.1 and no call site anywhere in the live tree passes it, so the sharpness of the retrieval vote \u2014 which directly sets how much a single neighbour dominates the returned distribution \u2014 is a hardcoded constant that no ablation can reach.",
+   "evidence": "memory.py:509 `def read(self, q, tau=0.1)`; every call site (self_organize.py:3870/5101/7561/7563/8838, cl_bench.py:160) passes only q",
+   "bug_class": "other"
+  },
+  {
+   "title": "gate_forced claims to take the most FREQUENT candidate but iterates a novelty-sorted list",
+   "severity": "medium",
+   "where": "tokenizer.py:308-312 with tokenizer.py:262-269",
+   "symptom": "The fail-open fallback comment says 'take the most frequent candidate clearing min_pair -- exactly what the ungated path would have chosen'. When TOK_MINT_NOVEL>0, _top has already been re-sorted by (c-seen)/(1+seen)^novel, so the fallback takes the most NOVEL candidate above min_pair. The two re-rankers were designed to compose; the fallback silently inherits one of them.",
+   "evidence": "tokenizer.py:266-268 `_top = [_top[i] for i in sorted(range(len(_top)), key=lambda k: -_sc[k])]`; tokenizer.py:308-311 `for _pr, _c in _top: if _c >= self.min_pair: _pick = (_pr, _c); self.gate_forced += 1; break`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The successor cache is invalidated on len(pair), which does not change when counts do",
+   "severity": "medium",
+   "where": "tokenizer.py:203",
+   "symptom": "_succ rebuilds only `if self._sstamp != len(self.pair)`. The training loop increments existing pair counts far more often than it introduces new keys, and maybe_grow itself zeroes counts without changing len. So H(next|a) and the p(b|a) denominator the predictability gate divides by can be arbitrarily stale relative to the numerator `self.pair[(a,b)]`, which is read live \u2014 the gate can compare a current count against an old total and produce p > 1 or a badly wrong ratio.",
+   "evidence": "tokenizer.py:203 `if self._sstamp != len(self.pair):`; tokenizer.py:234 `_p = self.pair[(a, b)] / r[0]` where r comes from the cache; tokenizer.py:340 `self.pair[_pr] = 0` does not change len",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "Retire followed by a re-mint of the same byte string creates two vocabulary ids with identical bytes",
+   "severity": "medium",
+   "where": "tokenizer.py:328-331 with tokenizer.py:412",
+   "symptom": "_mintable rejects a candidate whose bytes are already in seq2id. retire() removes the bytes from seq2id but leaves them in id2bytes. So after a retirement the same pair can be minted again at a NEW id: seq2id then maps the bytes to the new id, the old id becomes unreachable by segmentation but is still emittable by the softmax, and the model holds two rows meaning the same string with the statistics split between them.",
+   "evidence": "tokenizer.py:329-330 `return None if (len(_ns) > self.max_tok or _ns in self.seq2id) else _ns`; tokenizer.py:412 `gone = self.seq2id.pop(self.id2bytes[tid], None) is not None`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "Loading a tokenizer silently overrides MIN_PAIR, MAX_TOK, TOK_DROPOUT and max_pairs from the file",
+   "severity": "medium",
+   "where": "tokenizer.py:479-483 with self_organize.py:1226-1256",
+   "symptom": "On the load branch the constructor arguments all come from the saved json. VMAX is the only one the resume path explicitly repairs (with a printed message). So a resume that sets MIN_PAIR=200 or MAX_TOK=6 runs with the parent's values and nothing says so \u2014 a silent config override of exactly the kind _env's default-mismatch refusal exists to prevent, sitting one level below where that check applies.",
+   "evidence": "tokenizer.py:481-483 `t = cls(d.get(\"vmax\", 8192), d.get(\"min_pair\", 200), d.get(\"max_tok\", 16), d.get(\"dropout\", 0.0), d.get(\"max_pairs\", 60000))`; self_organize.py:1227 vs 1256; the VMAX repair at 1245-1254 has no counterpart for the others",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "seg() is defined twice; the first definition is dead",
+   "severity": "low",
+   "where": "tokenizer.py:389-392 and tokenizer.py:394-401",
+   "symptom": "Two consecutive `def seg(self, blist, count=False)` bodies. The second shadows the first, so the usage-tracking variant is the one that exists and the first is unreachable. Neither is called anywhere in the live tree.",
+   "evidence": "tokenizer.py:389 `def seg(self, blist, count=False):` and tokenizer.py:394 `def seg(self, blist, count=False):`",
+   "bug_class": "other"
+  },
+  {
+   "title": "self.retired is written and never read",
+   "severity": "low",
+   "where": "tokenizer.py:141, 416",
+   "symptom": "retire() adds the id to a set that nothing anywhere consults \u2014 not save(), not load(), not the vocabulary report, not any test in the live tree. retire_stale(), which retires in bulk, does not even add to it, so the two retirement paths disagree about their own bookkeeping.",
+   "evidence": "tokenizer.py:141 `self.retired = set()`; tokenizer.py:416 `self.retired.add(tid)`; tokenizer.py:420-428 retire_stale never touches it; grep for `.retired` over the non-archive tree returns only these",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "The maybe_grow lock protects a Counter that the live training loop mutates without it",
+   "severity": "low",
+   "where": "tokenizer.py:241 with self_organize.py:6794",
+   "symptom": "maybe_grow holds self.lock 'so a background batch-prefetch thread can tally pair concurrently'. No such thread exists in the live tree (self_organize imports no threading and spawns no Thread); the pair tally is written inline at self_organize.py:6794 without the lock. The lock is therefore pure overhead and, if a prefetch thread is ever reintroduced, the tally site is already outside it.",
+   "evidence": "tokenizer.py:239-241; self_organize.py:6794 `for a, b in zip(w[:-1], w[1:]): TOK.pair[(a, b)] += 1`; the only lock-taking tally is archive/legacy/data_utils.py:52",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Two comments in maybe_grow contradict each other about whether a gate-rejected pair is zeroed",
+   "severity": "low",
+   "where": "tokenizer.py:292-294 vs tokenizer.py:340",
+   "symptom": "The gate section states 'A rejected pair is NOT zeroed. It is not spent ... so it stays in the tally at full count and is reconsidered.' The mintable walk builds _cands from the whole window (including pairs the gate rejected) and zeroes each one it examines. Whenever the leading candidate is unmintable, gate-rejected pairs behind it are zeroed and can never be reconsidered.",
+   "evidence": "tokenizer.py:292-294 comment; tokenizer.py:333 `_cands = [_pick] + [(_pr, _c) for _pr, _c in _top if _c >= self.min_pair and _pr != _pick[0]]`; tokenizer.py:340 `self.pair[_pr] = 0`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "h_pmin_seen grows without bound",
+   "severity": "low",
+   "where": "tokenizer.py:234",
+   "symptom": "_predictable appends one float per candidate judged, for the whole run, purely so the end-of-run report can take a median. With TOK_MINT_GATE_K=1024 and a burst every GROW_EVERY steps this is a per-run list of millions of floats. Only reachable with TOK_MINT_PMIN>0 (default 0).",
+   "evidence": "tokenizer.py:234 `self.h_pmin_seen.append(_p)`; consumed once at self_organize.py:7879-7881",
+   "bug_class": "other"
+  },
+  {
+   "title": "segment()'s merge dropout draws from the global random module",
+   "severity": "low",
+   "where": "tokenizer.py:190",
+   "symptom": "`random.random()` is the process-global generator, which this project otherwise guards carefully (frozen_rng / no_rng_drift exist because diagnostics were silently editing runs). With TOK_DROPOUT>0 every segmentation \u2014 including maintenance passes \u2014 consumes global draws and shifts the run. Latent only because the default is 0.0.",
+   "evidence": "tokenizer.py:190 `if p and random.random() < p: continue`; contrast self_organize.py:4046 `@no_rng_drift`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "MmapConcat.__getitem__ silently ignores a slice step",
+   "severity": "low",
+   "where": "datastream.py:56-60",
+   "symptom": "Only key.start and key.stop are read. `corp[a:b:2]` returns the contiguous slice a..b, a different answer from the `bytes` object it is a drop-in for, with no error. The correctness probe tests random forward slices, an int index and a negative slice, but never a step.",
+   "evidence": "datastream.py:57-60; the probe at datastream.py:95-101 covers only s:s+L, mc[123] and mc[-500:]",
+   "bug_class": "other"
+  },
+  {
+   "title": "MmapConcat never closes its files or mmaps",
+   "severity": "low",
+   "where": "datastream.py:20-36",
+   "symptom": "The file objects `f` are local and dropped; the mmaps are held in self.maps with no close(), __del__ or context-manager support. Harmless in the single long-lived run the class was written for, but any caller that constructs MmapConcat repeatedly leaks mappings.",
+   "evidence": "datastream.py:30-32 `f = open(p, \"rb\"); mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ); self.maps.append(mm)` \u2014 no close path anywhere in the file",
+   "bug_class": "other"
+  },
+  {
+   "title": "The datastream docstring names an interface the DISK_STREAM path must not use",
+   "severity": "medium",
+   "where": "datastream.py:3-4 vs self_organize.py:1167 and 1305-1307",
+   "symptom": "The module says the training loop's access is 'CORP[p][s:s+L] (random segments) + len(CORP[p])'. Under DISK_STREAM the mmap is deliberately NOT sliced, so len(CORP[p]) includes the held-out validation tail; the only thing keeping training off the held-out data is SEG_LEN, which is computed in self_organize. Any future caller that follows the documented interface trains on the eval set.",
+   "evidence": "datastream.py:3-4; self_organize.py:1167 `SEG_LEN = [int(len(c) * (1 - VAL_FRAC)) for c in CORP]   # bound sampling to the training HEAD; keep CORP the full mmap`; self_organize.py:1305 `s = _SRNG[0].randint(0, SEG_LEN[p] - L - 1)`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "The held-out set is a different object depending on DISK_STREAM",
+   "severity": "medium",
+   "where": "self_organize.py:1166-1172",
+   "symptom": "On the disk path VALC is the tail truncated to VAL_CAP (4 MB) and CORP keeps the whole corpus; on the RAM path VALC is the entire VAL_FRAC tail and CORP is physically truncated. So every held-out number \u2014 the memorization check, the anchors, ACROSS THE RUN BOUNDARY \u2014 is computed over a different amount of text depending on a knob that is nominally about where bytes live.",
+   "evidence": "self_organize.py:1168 `VALC = [bytes(CORP[p][SEG_LEN[p]:min(len(CORP[p]), SEG_LEN[p] + _i(\"VAL_CAP\", 4000000))]) ...]` vs 1170 `VALC = [c[int(len(c) * (1 - VAL_FRAC)):] for c in CORP]`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "mem.pos points into a stream that no longer exists after a DISK_STREAM epoch boundary",
+   "severity": "medium",
+   "where": "self_organize.py:6513 and 5440-5441 with memory.py:59 and prompt.py:94-112",
+   "symptom": "mem.pos records a byte offset into the CURRENT byte_stream. Under DISK_STREAM each epoch calls _resample(), which builds an entirely new byte_stream from fresh corpus samples, while memory entries persist across epochs. source.bin, which prompt.py's grounded recall indexes with mem_pos, is written from whatever byte_stream is current at checkpoint time. Every entry written before the final epoch therefore quotes an unrelated passage. The same failure mode is documented and fixed for the partial batch at an epoch boundary but not for the store itself.",
+   "evidence": "self_organize.py:6513 `stream, byte_stream, ... = _resample()`; self_organize.py:5440-5441 `_srcf.write(bytes(byte_stream) ...)`; memory.py:59-61; self_organize.py:6528-6533 documents the narrower partial-batch case",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "_probe_population prints K=3 while the world it built has K=5 regimes",
+   "severity": "medium",
+   "where": "world_model.py:206 vs world_model.py:267",
+   "symptom": "The headline of the separated-world-model verdict states the number of distinct physics regimes, and it is wrong by construction. Anyone reading the probe output will attribute the population-vs-monolithic gap to a 3-regime world.",
+   "evidence": "world_model.py:206 `M, D_OBS, D_LAT, T, NPER, K = 6, 24, 12, 10, 1500, 5`; world_model.py:267 `print(\"\\n=== SEPARATED WORLD MODEL \u2014 population vs monolithic on a MULTI-REGIME world (K=3 different physics) ===\")`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "_probe_population's two arms see different training data",
+   "severity": "medium",
+   "where": "world_model.py:216, 233, 246-247",
+   "symptom": "The batch-index sampler uses the module-level generator g, which is created once and consumed sequentially: train(False) runs 6000 steps advancing g, then train(True) continues from the advanced state. torch.manual_seed(0) inside train() only controls weight init. So the monolithic and population arms are trained on different index sequences, and the reported 'population beats monolithic by X%' includes that confound.",
+   "evidence": "world_model.py:202 `g = torch.Generator().manual_seed(1)`; world_model.py:233 `idx = torch.randint(0, o_t.size(0), (512,), generator=g)` inside train(); world_model.py:246-247 `enc_m, mono = train(False)` then `enc_p, pop = train(True)`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "grow()'s key is seeded from the whole batch, not the mispredicted region its docstring names",
+   "severity": "low",
+   "where": "world_model.py:113-118 with self_organize.py:6770",
+   "symptom": "The docstring says 'keyed at the mispredicted region'. The caller passes every latent in the batch, and grow() takes their mean, so the new predictor's routing key is the batch centroid \u2014 the point most likely to be already well served by the existing predictors, not the one that is being mispredicted.",
+   "evidence": "world_model.py:110 docstring; world_model.py:117 `k = (s.qproj(z_seed).detach().mean(0) if z_seed is not None else ...)`; self_organize.py:6770 `world_fwd.grow(_wz.reshape(-1, WLAT).detach())`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The MEM_PER_EXPERT fallback warning describes behaviour the code does not have",
+   "severity": "low",
+   "where": "self_organize.py:5610-5615 vs memory.py:212",
+   "symptom": "The startup warning says 'write() has no owner argument -- every entry will land in partition 0'. In fact `if self.n_own > 1 and own is not None` is false, so _store falls through to the GLOBAL eviction path and writes anywhere across the whole n_own*quota range with self.own left at -1 \u2014 which then also breaks the per-owner restore on the next resume, since (own == o) matches none of them.",
+   "evidence": "self_organize.py:5613-5615; memory.py:212 `if self.n_own > 1 and own is not None:`; memory.py:240 `self.own[idx] = o` only on that branch; self_organize.py:4956 `_sel = (_ow == _o).nonzero(...)`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "world_model.py imports os and never uses it",
+   "severity": "low",
+   "where": "world_model.py:16",
+   "symptom": "The module docstring says it is 'standalone + gated (WORLD_MODEL=0 by default in the product loop)', but the module itself reads no environment variable \u2014 all gating lives in self_organize. The import is a leftover that makes the file look self-gating when it is not.",
+   "evidence": "world_model.py:16 `import os`; grep for `os.` in world_model.py returns zero matches",
+   "bug_class": "other"
+  },
+  {
+   "title": "The random-offset stream sampler can raise on a corpus barely above the drop floor",
+   "severity": "low",
+   "where": "self_organize.py:1305 with datastream/open_corpus sizing",
+   "symptom": "`_SRNG[0].randint(0, SEG_LEN[p] - L - 1)` with L drawn from [SEG_MIN, SEG_MAX]. The corpus floor is 5000 bytes and SEG_MAX defaults to 1800, so the default is safe \u2014 but rerun.sh runs SEG_MIN=8000 SEG_MAX=20000, where any corpus between 5000 and ~21000 bytes makes the upper bound negative and randint raises.",
+   "evidence": "self_organize.py:1305; self_organize.py:1142 `_keep = [_i0 for _i0, _c0 in enumerate(CORP) if len(_c0) > 5000]`; rerun.sh:163 `DOMAINS=eng,py,num,c SEG_MIN=8000 SEG_MAX=20000`",
+   "bug_class": "crash"
+  }
+ ],
+ "junk": [
+  {
+   "what": "The entire ByteBPE class (tokenizer.py:20-120) and build_from_corpus (tokenizer.py:491-509) plus the __main__ block",
+   "why": "Nothing in the live tree imports ByteBPE or calls build_from_corpus; self_organize imports only DynamicTokenizer. It is the superseded offline path, kept as `python tokenizer.py`.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The first of the two seg() definitions (tokenizer.py:389-392)",
+   "why": "Immediately shadowed by the second definition at 394. Neither is called anywhere in the live tree.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "apply_merge, retire_stale, track_usage, set_fuzzy, fuzzy_segment, build_fuzzy_index, _fuzzy_lookup, branch_entropy",
+   "why": "Defined and never called from any non-archive module. The repo's own notes record a call-site audit reaching this conclusion. build_fuzzy_index/fuzzy_segment additionally carry a lossy-segmentation contract nothing exercises; set_fuzzy clears a self._seg_cache that is never created in this file.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "self.retired set in DynamicTokenizer (tokenizer.py:141, 416)",
+   "why": "Written by retire(), never read by anything, not persisted by save(), and not maintained by retire_stale().",
+   "safe_to_drop": true
+  },
+  {
+   "what": "EditableMemory._src_counts (memory.py:305-309)",
+   "why": "A one-line accessor returning self.nsrc. No caller anywhere in the tree; every consumer reads self.nsrc directly.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "wrong_thresh, wrong_margin, wrong_min_n (memory.py:62-64)",
+   "why": "Explicitly documented as accepted-but-unused API-compat leftovers from the removed retrieval running-mean signal. cl_bench.py still passes non-default values to all three.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "flag_min_w (memory.py:65-66)",
+   "why": "Same category as the three above but NOT documented as dead \u2014 its comment describes an active behaviour. Dropping it means also correcting the comment and the cl_bench call sites that set it to 0.12.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The `dist` and `conf` pre-initialisations in read (memory.py:534-535)",
+   "why": "conf is unconditionally reassigned at memory.py:550; the zeros allocation only matters on the empty-store early return, which could construct them there.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`import os` in world_model.py:16",
+   "why": "No os.* reference anywhere in the file.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "wm_loss (world_model.py:55-63)",
+   "why": "Not imported by self_organize; used only by _probe. The product loop builds its own loss from pop_loss + _var_cov.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "hit_idx and wfull in read()'s return tuple (memory.py:547, 552)",
+   "why": "Discarded by all three product call sites; only cl_bench and mem_evict_test read them. They were the input to the removed weight-gated wrongness signal.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "MmapConcat._probe's `n` counter (datastream.py:94-100)",
+   "why": "Counted and printed but never compared against 300; a probe that breaks at slice 3 prints '3 random slices identical' beside a MISMATCH verdict, which is correct but the counter carries no assertion of its own.",
+   "safe_to_drop": false
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "Minting is APPEND-ONLY and ids are positional. id2bytes[i] must never change meaning, and no id may ever be removed or renumbered.",
+   "why": "Three separate mechanisms depend on it: remap_mem_ctx re-segments every stored memory context and is only exact because an entry's bytes can always be recovered; DynamicTokenizer.load replays merges in order and every later token is built on earlier indices; and the LM's emb/head rows are indexed by token id across resumes. This is why retire() is soft rather than a removal.",
+   "evidence": "tokenizer.py:409-411; self_organize.py:3225-3227 'The remap is exact in id space because minting is APPEND-ONLY'; tokenizer.py:483-487"
+  },
+  {
+   "item": "cap is DERIVED from the partition. Setting MEM_PER_EXPERT=1 discards MEM_CAP in favour of n_own*quota.",
+   "why": "At the defaults this is a 24x reduction in store size (200000 -> 8192) and every memory result scales with it. The startup warning exists precisely because this was invisible.",
+   "evidence": "memory.py:35-36; self_organize.py:5622-5628"
+  },
+  {
+   "item": "nsrc is the per-source floor's ONLY input, and `has = (nsrc > 0)` is what makes a source eligible for protection at all. Any path that sets `active` directly must call rebuild_census().",
+   "why": "The resume path bypassed _commit and left nsrc at zeros, silently disabling MEM_SRC_FLOOR for the whole run while the banner kept printing 'src floor 0.5'. A source whose count has drifted to zero is unprotected by the very floor that exists to stop it being driven to zero.",
+   "evidence": "memory.py:310-343; self_organize.py:4980"
+  },
+  {
+   "item": "ONE SLOT, ONE ROW. Any code path that builds an eviction `idx` must not name a slot twice.",
+   "why": "Index assignment collapses a repeat silently (later row wins), so the store reports more writes than it holds; worse, _commit decrements the displaced source once per occurrence while crediting the new source idx.numel() times, which drove a per-source count to -2 against a peak of 111230. The dedup in _commit is the backstop and n_dup_slot is how a third producer stays visible.",
+   "evidence": "memory.py:437-461; mem_evict_test.py:317-334"
+  },
+  {
+   "item": "`last` is the USE clock and must be stamped by BOTH write and read. It was once gated on n_own>1, so on the global store it stayed all-zero for entire runs and any rule consulting it chose arbitrarily.",
+   "why": "Write-recency evicts a domain that has gone quiet by construction; use-recency evicts a domain nothing is asking for. That distinction is the whole reason the store has a floor and a probe at all.",
+   "evidence": "memory.py:299-301 and memory.py:559-566"
+  },
+  {
+   "item": "EVICT=lru/usage are only real if reads HAPPEN during training. Without MEM_PROBE_EVERY, `use` stays 0 and `last` stays at write time, and both rules degenerate to FIFO regardless of what EVICT says.",
+   "why": "Before the read probe existed, mem.read() was called only from generate() and bpb_true() \u2014 both eval \u2014 so every run in the project that claimed retrieval-based eviction was doing write-order eviction.",
+   "evidence": "memory.py:53-57; self_organize.py:7540-7550, 4889-4891"
+  },
+  {
+   "item": "Writes compartmentalise, READS stay global. An expert's memory is its own to keep and to lose, but any query must still be able to reach it.",
+   "why": "This is the 'partially, not fully, isolate' property the per-owner partition exists to provide. A future change that scopes reads to the querying owner would destroy the only mechanism by which information mixes across experts.",
+   "evidence": "memory.py:567-569; memory.py:28-33"
+  },
+  {
+   "item": "The per-owner _store path is a SECOND, independent eviction implementation. It shares only _commit with the global path, and it implements neither probation nor the per-source floor.",
+   "why": "Every future fix to eviction has to be applied twice or deliberately not applied twice, and every report that reads src_report() / pressure() must state which path produced the numbers.",
+   "evidence": "memory.py:212-241 vs memory.py:242-296"
+  },
+  {
+   "item": "There are TWO write paths and only one carries the owner: write_batch(owners=...) honours the partition, write() cannot. Which one runs is decided by KEY_PREGATE / KEY_BATCH / KEY_SRC \u2014 knobs about key ENCODING, not about memory ownership.",
+   "why": "At the defaults (1/1/model) the partition is honoured, so this is latent. It becomes live the moment anything pushes the run onto the fallback, and nothing else in the run would say so.",
+   "evidence": "memory.py:159 vs memory.py:185; self_organize.py:5606-5615"
+  },
+  {
+   "item": "Memory source ids and assembler domain ids share ONE namespace, and no id is reserved. The wrongness injection's src=99 is a collision waiting for a run whose assembler reaches 99 domains.",
+   "why": "delete_src(99) then deletes real material, and the precision/recall figures reported for the wrongness detector are computed against a contaminated positive set.",
+   "evidence": "self_organize.py:8880, 8884, 8945; memory.py:381 records 125 source ids on a real run"
+  },
+  {
+   "item": "The wrong flag gates RETRIEVAL, not just deletion. 'Detect-only' (WRONG_SWEEP=0) does not make it inert \u2014 read() filters on the same predicate.",
+   "why": "63,146 genuine entries were flagged at 3% precision out of 200,000 active, i.e. about a third of the store unreachable, while the log printed 'sweep OFF ... too low to delete safely' and read as reassurance. MEM_WRONG_READ is the knob that separates detecting from acting.",
+   "evidence": "memory.py:511-518; self_organize.py:8904-8917"
+  },
+  {
+   "item": "A gate must be MEASURED WHERE IT GATES, not from the state left at the end of the run. Every write resets that entry's selfcon to -1, so an end-of-run snapshot of the flag says nothing about what any read actually saw.",
+   "why": "The first version of the DID IT FIRE row for this gate armed on `(selfcon >= 0).sum() > 10` at report time and printed 'read() filters nothing' in the same report as '61,952 of 200,000 active entries are excluded from EVERY retrieval'. Both were honestly computed; only one was about what happened.",
+   "evidence": "memory.py:521-532; self_organize.py:8601-8614"
+  },
+  {
+   "item": "The probation region's 10% budget is not achievable at this system's write:read ratio, so pressure() reads ~0 whatever the store is suffering. Treat it as unavailable, not as a healthy signal.",
+   "why": "A pilot wrote 11.7M times into 200k slots against 1469 read probes; probation was 82% of the store, permanently over budget, so eviction always took the probation branch and n_main_evict stayed near zero.",
+   "evidence": "memory.py:401-416; self_organize.py:6584-6595"
+  },
+  {
+   "item": "Probation decides WHICH POOL is drawn from; the floor decides who inside it is off limits. Both questions have to be asked \u2014 narrowing to probation and going straight to the ranking cancelled the floor and took a domain-switch test from 49 survivors back to 0.",
+   "why": "It is the one place in the code where two protective mechanisms compose rather than override, and the composition order is load-bearing.",
+   "evidence": "memory.py:281-284"
+  },
+  {
+   "item": "The predictability gate may REORDER what gets minted and may never PREVENT it. Dead softmax rows are the worst failure this system has, so a quality filter that creates them is strictly worse than no filter.",
+   "why": "Measured: gated minting decelerated and stopped at 1439 of 2048, leaving 609 rows (29.7% of the width) never minted, and the run scored 3.600 b/B against an ungated ~1.96. Both the gate_forced fallback and the mintable-walk exist to enforce this.",
+   "evidence": "tokenizer.py:303-312 and 313-327"
+  },
+  {
+   "item": "A rejected CANDIDATE is not an exhausted VOCABULARY. maybe_grow returning None is read by every caller as 'stop the burst', so the max_tok / already-exists rejection must walk on rather than return None.",
+   "why": "Measured: max_tok=16 vmax=2048 stalled at 1845/2048 with 3940 pairs still above min_pair; max_tok=6 vmax=4000 stalled at 658/4000 with 1866 still above. mint_rescued and mint_widened exist so the repair's own firing is distinguishable from a run where the hole was never in the path.",
+   "evidence": "tokenizer.py:313-327, 351-357"
+  },
+  {
+   "item": "The tokenizer file carries its own vmax, min_pair, max_tok, dropout and max_pairs. Only vmax is repaired on resume; the rest silently override the environment.",
+   "why": "A tokenizer saved full at vmax=2048 comes back full and refuses every candidate before a candidate is even formed \u2014 a new area gets new experts and no tokens. The same shape applies to MIN_PAIR and MAX_TOK and is not yet handled.",
+   "evidence": "tokenizer.py:473-483; self_organize.py:1229-1254"
+  },
+  {
+   "item": "soft_cull must not run in the same cadence block as grow, and grow must initialise the new predictor's mass, or every growth is undone immediately.",
+   "why": "This is the generic 'a new unit cannot survive a competition scored on evidence it has not had time to gather' failure that memory.py's probation comment names as ONE problem occurring three times over in this project \u2014 and the world model is the fourth instance, without the protection.",
+   "evidence": "memory.py:86-97 (the general statement); world_model.py:81,108-127; self_organize.py:6768-6772"
+  },
+  {
+   "item": "Soft-culling a world-model predictor is one-way: alive is only ever set to 0, never back to 1, and grow() still counts dead slots against nmax.",
+   "why": "Both docstrings call it reversible, so a future reader will assume a revival path exists. It does not, in either module.",
+   "evidence": "world_model.py:82, 109, 121-128; grep for alive[ over the live tree returns only reads plus the single 0.0 write"
+  },
+  {
+   "item": "mem.pos is a byte offset into the TRAINING STREAM, not into any corpus file, and source.bin is the stream that was current at checkpoint time.",
+   "why": "Under DISK_STREAM the stream is rebuilt per epoch while memory persists, so grounded recall for pre-final-epoch entries reads unrelated text. The narrower version of this (windows queued across an epoch boundary) is already fixed and documented; the store-wide version is not.",
+   "evidence": "memory.py:59-61; self_organize.py:5440-5441, 6513, 6528-6533; prompt.py:87-112"
+  },
+  {
+   "item": "Under DISK_STREAM the held-out tail STAYS inside CORP. SEG_LEN, computed in self_organize, is the only thing keeping training off it.",
+   "why": "datastream.py's own docstring advertises len(CORP[p]) as part of the interface, which under that mode is the whole corpus including the eval set.",
+   "evidence": "self_organize.py:1166-1172, 1303-1308; datastream.py:3-4"
+  },
+  {
+   "item": "MAX_DOMAINS is read with default 32 when sizing the memory census and with default FAB_NMAX (4096) everywhere else; this is only legal because it is in _DERIVED and therefore exempt from _env's default-mismatch refusal.",
+   "why": "It is the one surviving instance of exactly the disagreement _env exists to make impossible, and it is what fixes n_src_hint at 64 while real runs reach 125 source ids. _commit's table growth is the only reason it self-heals.",
+   "evidence": "self_organize.py:4874 vs 598; exemption at self_organize.py:90/95/520; growth at memory.py:478-482"
+  },
+  {
+   "item": "torch.unique SORTS, so a de-duplicated candidate pool must be re-permuted before a topk whose ties resolve toward the earlier position \u2014 otherwise low-numbered slots systematically lose every tie, and under EVICT=usage ties are the common case (every never-retrieved entry has use=0).",
+   "why": "A non-obvious interaction between two library behaviours that silently turns a uniform sample into a biased one; the permutation costs nothing on a few hundred indices.",
+   "evidence": "memory.py:255-264"
+  }
+ ],
+ "open_questions": [
+  "Has MEM_PER_EXPERT=1 ever been run end to end? The registry default is 0, but self_organize.py:4853 says 'the code read _i(\"MEM_PER_EXPERT\", 1), so every run in this project used the partition the comment records'. If earlier runs did use it, every memory result from those runs was produced with probation and the per-source floor bypassed and with a store 24x smaller than MEM_CAP.",
+  "Has the world-model grow/soft_cull collision been observed in an actual log? The eval line prints 'dynamics predictors: N (M live)', so N>M with M==WORLD_N0 would confirm it directly, but I have not read any run output.",
+  "Does the resume path's `mem.active[:_mn] = True` corruption actually manifest? It requires MEM_PER_EXPERT=1 plus a resume plus mem_n_own matching; I verified the code paths but have not run it.",
+  "Has reassign_src ever been called with a `new` id at or beyond nsrc.numel()? That depends on whether the assembler ever merges into a domain that has not itself written to memory, which I could not determine from the code alone.",
+  "Is the src=99 injection collision reachable in practice? It needs a run whose assembler reached domain id 99 AND WRONG_INJECT>0 with two or more source processes. memory.py:381 records 125 source ids on a real run, so the id range is reachable, but I did not confirm the two conditions co-occurred.",
+  "How stale does the _succ cache actually get with TOK_MINT_PMIN>0? The invalidation stamp is len(self.pair), and the training loop's tally mostly increments existing keys, but I could not measure the rate at which new keys appear relative to count changes.",
+  "Does the DISK_STREAM + EPOCHS>1 + prompt.py combination occur in any real workflow? The mem.pos/source.bin mismatch only bites when someone prompts a checkpoint from a multi-epoch disk run.",
+  "None of the numbers quoted in the source comments (63,146 flagged at 3% precision; 11.7M writes into 200k slots; 1845/2048 stall; 3.600 vs 1.96 b/B; 82.3% of contexts re-segmenting) were verified here \u2014 they are the code's own claims about past runs, not measurements I reproduced.",
+  "Whether MmapConcat's lack of a close path matters depends on whether open_corpus is ever called more than once per process; I confirmed _resample() reuses the existing CORP, but did not audit every entry point (cl_bench, holdout.py, the probe scripts).",
+  "Whether torch.quantile's input-size limit is ever approached by _gate \u2014 surprise is one window at a time in the paths I traced, but a caller batching many windows into one surprise tensor would hit it."
+ ]
+}

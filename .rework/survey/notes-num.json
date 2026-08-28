@@ -1,0 +1,935 @@
+{
+ "area": "notes-num",
+ "summary": "`notes/00`\u2013`10` plus `CURRENT_DEFAULTS.md` and `DOC_PLAN.md` are a ~1 MB self-documenting corpus produced 2026-08-15..16 by a set of agents working from a frozen commit log (`notes/_evidence/commit_log.txt`, 267 commits, `8150f8a` 2026-07-21 \u2192 `95aa336` 2026-08-15), a `runs.csv` snapshot (42 data rows), and a 455-turn chat transcript. `DOC_PLAN.md` is the specification; `01_TIMELINE.md` is the commit spine with 15 ancestry-verified epoch boundaries E1\u2013E15; `05_ERRORS.md` is the defect catalogue and holds the authoritative invalidation list INV-01..INV-44; `03_EXPERIMENTS.md` (X01\u2013X56, O01\u2013O16), `04_RESULTS.md` (the 42 rows re-rendered with instrument-era and corpus-era columns), `06_CONTINUAL_LEARNING.md` (the target, n=1), `07_WIP.md` (unfinished/inert/never-run), `08_GLOSSARY.md` (16 terms that changed meaning), `09_COMMENT_AUDIT.md` (a plan, nothing applied), `10_HISTORY_FINDINGS.md` (what only the transcript knows) all cite those two by id. The corpus' own discipline is exactly the \"DID IT FIRE\" audit: nearly every entry is a mechanism that was armed and never ran, a quantity computed in one unit and consumed in another, data recorded and never read, or a guard nothing could trip. Its central verified claim is that no arm comparison in the record predates the instrument fixes `5f4f117` (08-07) and `c76dc74` (08-13) safely, and that the seed floor (1.227 b/B on one nominal arm) exceeds every architectural difference ever claimed. The corpus is now substantially stale: it was written against branch `rm-predict` at HEAD `92a967b`, and this checkout is `rm-predict-DC`/`rm-predict` at `aee4a52` (2026-08-28) whose git history does not contain any of the cited hashes; five of the thirteen files have not been touched since 2026-08-15/16, `runs/` no longer exists, `self_organize.py` has grown 7,238 \u2192 9,859 lines invalidating every line citation in `09`, `_SPEC` has grown 310 \u2192 328 knobs, and a 2026-08-27 automated drift check (`notes_check.py`) altered at least one verbatim commit quotation and one historical table cell to satisfy itself.",
+ "facts": [
+  {
+   "claim": "The notes corpus was written against branch `rm-predict` at HEAD `92a967b` (2026-08-15); this checkout's branch is `rm-predict-DC` at `aee4a52` (2026-08-28), and `git cat-file -t` cannot resolve 92a967b, a5cc7ea, c76dc74, 5f4f117, cc0a377, a9d7258, e9f2e58, daf9f89 or 9645050 \u2014 the entire hash vocabulary of the notes is unreachable from any branch in this checkout.",
+   "evidence": "notes/01_TIMELINE.md:37 \"HEAD at time of writing is `92a967b` (2026-08-15)\"; `git rev-parse --short HEAD` \u2192 aee4a52; `git cat-file -t c76dc74` \u2192 \"fatal: Not a valid object name\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`notes/_evidence/commit_log.txt` is therefore the ONLY surviving record of the commits the whole corpus cites. It contains exactly 267 commits, first `95aa336` (2026-08-15) and last `8150f8a` (2026-07-21).",
+   "evidence": "`grep -cE '^[0-9a-f]{40}$' notes/_evidence/commit_log.txt` \u2192 267; first/last 40-hex lines are 95aa336\u2026 and 8150f8a\u2026",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Five of the thirteen in-scope files have not been updated since 2026-08-15/16: 01_TIMELINE, 03_EXPERIMENTS, 04_RESULTS (all last committed at `d3d2bdc`, 2026-08-15), 09_COMMENT_AUDIT (`a5666ff`, 08-15) and 10_HISTORY_FINDINGS (`d1870b4`, 08-16).",
+   "evidence": "`git log -1 --format='%h %ad' -- notes/01_TIMELINE.md` \u2192 d3d2bdc 2026-08-15; same for 03, 04; a5666ff for 09; d1870b4 for 10",
+   "confidence": "verified"
+  },
+  {
+   "claim": "00_INDEX, 02_IDEAS, 05_ERRORS, 06_CONTINUAL_LEARNING, 07_WIP, 08_GLOSSARY and DOC_PLAN received a partial refresh at `0065372` (2026-08-27, \"resolve the audit: the drift is now uncatchable, not just corrected\"), which also added `notes/CURRENT_DEFAULTS.md` and `notes_check.py`.",
+   "evidence": "`git show --stat 0065372 -- notes/` lists 00_INDEX(12), 02_IDEAS(11), 05_ERRORS(14), 06_CONTINUAL_LEARNING(4), 07_WIP(17), 08_GLOSSARY(7), DOC_PLAN(6), CURRENT_DEFAULTS(+352)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`notes/CURRENT_DEFAULTS.md` is machine-generated from `_SPEC` by `python3 notes_check.py --write`, and `notes_check.py` is wired into `selftest.sh`. It currently passes and reports 328 knobs over 20 live markdown files.",
+   "evidence": "notes/CURRENT_DEFAULTS.md:3-4; selftest.sh:68-69; `python3 notes_check.py` \u2192 \"notes_check: 328 knobs, 20 live markdown files, no default stated that _SPEC disagrees with\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`notes_check.py` only flags a line if the value is syntactically attached to a default-claiming phrase (five regexes) or the line quotes `_SPEC reads/says/has` AND contains `KNOB=VALUE`; lines containing \"was\"/\"used to\"/a commit cite are exempted as history. Table cells of the form `| KNOB | 0.0 |` and prose of the form \"`_SPEC` has `LR_DECAY` at 0.0\" therefore evade it.",
+   "evidence": "notes_check.py:103-111 (CLAIMS regexes), notes_check.py:110 (SPEC_LINE), notes_check.py:141 (`if HISTORICAL.search(line): continue`)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_SPEC` at HEAD has 328 keys, not the 310 the notes state (and not the 274/279 earlier figures they narrate).",
+   "evidence": "AST count of the `_SPEC` dict in self_organize.py \u2192 328; notes/07_WIP.md:375 \"`_SPEC` holds **310 knobs** at HEAD\"; notes/08_GLOSSARY.md:209 \"At HEAD `_SPEC` holds **310**\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The four documented population-2x2 arms and their seeds: A (`FAB_GROW=0 FAB_N0=3`, ~6 experts) 2.047/2.315/1.989 mean 2.117 spread 0.326; B (`FAB_GROW=0 FAB_N0=2048`) 1.998/1.960/2.040 mean 1.999 spread 0.080; C (`FAB_GROW=1 FAB_NMAX=64`) 2.163/2.127/1.983 mean 2.091 spread 0.180; D (`FAB_GROW=1 FAB_NMAX=4096`) 4.327/3.572/2.253 mean 3.384 spread 2.074.",
+   "evidence": "notes/04_RESULTS.md:382-385; notes/03_EXPERIMENTS.md:624-627; notes/01_TIMELINE.md:360",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Arm B \u2014 the best result on record \u2014 is recorded as having run with ZERO culls for its entire life, because `s.born` was written only by `grow()` so the founding population read as age 0 forever and `soft_cull` skips anything inside `FAB_GRACE`. Measured on the same config and seed: before 0 culls, after 6 culls, population 24 \u2192 8.",
+   "evidence": "notes/05_ERRORS.md:656-675 (E6.4); notes/01_TIMELINE.md:368 (`a5cc7ea`); INV-15 at notes/05_ERRORS.md:2326",
+   "confidence": "verified"
+  },
+  {
+   "claim": "HEAD's fabric defaults are now `FAB_GROW=1`, `FAB_N0=2048`, `FAB_NMAX=4096`, with a `_SPEC` comment saying \"the population is BUILT, not ramped to\" and \"ON; the ramp is neutered by FAB_RAMP_TO\" (`FAB_RAMP_TO`=0.5, so the ramp is armed only while n < 2048 and never arms).",
+   "evidence": "self_organize.py:186 `\"FAB_GROW\": (\"env\", 1)`, :195 `\"FAB_N0\": (\"i\", 2048)`, :196 `\"FAB_NMAX\": (\"i\", 4096)`; notes/CURRENT_DEFAULTS.md:60,128 `FAB_RAMP_LATCH` 1 / `FAB_RAMP_TO` 0.5",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The two named instrument fixes are in ancestry order `5f4f117` (08-07) \u2192 `c76dc74` (08-13) \u2192 HEAD, so nothing is post-`c76dc74` but pre-`5f4f117`; every `runs.csv` row that carries a commit is post-`5f4f117`; 18 rows are pre-`c76dc74`, 19 post, 5 have no commit.",
+   "evidence": "notes/01_TIMELINE.md:49-52 and Appendix A at :384-385",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`runs.csv` has exactly 42 data rows (43 lines with header) and is byte-identical to `notes/_evidence/runs_snapshot.csv` today. DOC_PLAN's \"43 rows\" is a counting error that 04_RESULTS corrects explicitly.",
+   "evidence": "`wc -l runs.csv` \u2192 43; `diff runs.csv notes/_evidence/runs_snapshot.csv` \u2192 identical; notes/04_RESULTS.md:40-42",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`runs.csv` has NOT been updated since 2026-08-15 \u2014 its last commit is `d3d2bdc` \u2014 so none of the 2026-08-26..28 work (the 0.75 GB run, rounds 15\u201318, the two CL arms that \"disagree by 10x\") appears in it, and 04_RESULTS' master table is the complete run record only up to 08-15.",
+   "evidence": "`git log -1 --format='%h %ad' -- runs.csv` \u2192 d3d2bdc 2026-08-15; `git log --oneline` shows commits b990c9d/3174460/934789d/271f875 dated 2026-08-26..27 describing runs absent from the CSV",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`held_out` in every `runs.csv` row is the FINAL model's end-of-run re-tokenised memorization-check figure, never `.best`; `runs.py` never parses the `.best` value. The `past_min` column already states the final-vs-best gap and is `+0.000` on 19 of 42 rows.",
+   "evidence": "notes/03_EXPERIMENTS.md:860-899 (Part IV); notes/04_RESULTS.md:51-73 (\u00a70.1)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The one continual-learning run (`continual_eng_py`, row 30, commit `b92f358`, recorded at `a9d7258`) is n=1 with no seed replication, its log was lost to the `pilot-add` mkdir bug, and its numbers are hand-transcribed from a terminal copy: `eng` 1.998 \u2192 2.050, +0.052 \u00b1 0.075 HELD; `py` 2.276 \u00b1 0.086 NEW; combined 2.243 vs order-1 3.644; ACTIVE +0.116 vs ABSENT \u22120.029 b/B per 2000 steps; fabric +0.373 with six experts; memory \u22120.111 with every English entry evicted.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:297-307; notes/04_RESULTS.md:625-640; notes/03_EXPERIMENTS.md:665-675",
+   "confidence": "verified"
+  },
+  {
+   "claim": "06_CONTINUAL_LEARNING \u00a77 establishes from local sources that `pilot-add` writes no `.cfg`, that no checkpoint from the run survives in the checkout, and that `pilot-add` sets no fabric flags at all \u2014 so the run inherited the defaults of its day and \"RESUME from nogrow_s2\" names the checkpoint, not the arm.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:415-479",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`holdout.py` was verified working during the writing of 06: run against the surviving `61b9d23` parent/child checkpoint pair it reproduced that commit's live-log numbers byte-for-byte (eng 5.171 \u2192 4.466, \u22120.706 \u00b1 0.162).",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:426-441",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The 15 epoch boundaries E1\u2013E15 are: E1 `a5cd9ed` D_MODEL_B unread; E2 `c8ba635` four cadences below the batch accumulator; E3 `7a42f90`/`51889b7` six subsystems off; E4 `98e3301`/`2a682d7`/`3440634` signature encoder reading 42%; E5 `e44b5b0` batch-granularity routing; E6 `1593c70`/`c33f078` no LR schedule; E7 `18fdd6c` `_VALT` frozen segmentation; E8 `5f4f117` eval passes training the router; E9 `d0728fe` `_due` consumed twice; E10 `0f96784`/`79dac6c` VMAX re-rolling every weight; E11 `c76dc74` diagnostics editing the run; E12 `8bdeca4` memory queried in the wrong segmentation; E13 `37100fb` bytes/token bias; E14 `91fd815`/`a5cc7ea` founders immortal; E15 `e25d9b5`/`daf9f89` MEM_PER_EXPERT actually on and eviction ranking a constant.",
+   "evidence": "notes/01_TIMELINE.md:56-70",
+   "confidence": "verified"
+  },
+  {
+   "claim": "05_ERRORS' own index claims 226 catalogued errors, but its \"How these were found\" tally says it counted \"over the ~180 entries above\".",
+   "evidence": "notes/05_ERRORS.md:57 \"**226 catalogued errors, 44 invalidated results.**\" vs notes/05_ERRORS.md:2440 \"Counted over the ~180 entries above.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The E-entry numbering in 05_ERRORS is non-contiguous and out of order within \u00a77 \u2014 it jumps E7.3 \u2192 E7.9 \u2192 E7.10 \u2192 E7.11 \u2192 E7.12 \u2192 E7.26 \u2192 E7.6 \u2192 E7.8 \u2192 E7.25 \u2192 E7.5, and E7.4 / E7.19 / E7.20 / E7.28 / E7.35 / E10.40 / E10.42 / E10.45 never appear.",
+   "evidence": "notes/05_ERRORS.md:772 (E7.3) \u2192 :785 (E7.9); :831 (E7.26) \u2192 :843 (E7.6); \u00a710 runs E10.38 \u2192 E10.41 \u2192 E10.39 \u2192 E10.43",
+   "confidence": "verified"
+  },
+  {
+   "claim": "04_RESULTS records that 12 of the 42 rows lose to their own order-1 bigram anchor, and that two of those (`seedfloor_s0` \u22120.887, `seedfloor_s1` \u22120.133) were the then-default configuration at two of three seeds.",
+   "evidence": "notes/04_RESULTS.md:819-823",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The one architecture-independent effect far outside seed spread is the LR schedule: cosine held-out 2.101 vs none 4.193, with the constant-LR arm oscillating 3.4\u20137.8 for the whole run and ending at 5.16, English text vs noise.",
+   "evidence": "notes/04_RESULTS.md:512-524 (\u00a76.1); notes/03_EXPERIMENTS.md:428-437 (X30); notes/01_TIMELINE.md:265",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The measured noise floor is per-arm, not pooled: \u03c3 estimated from range at n=3 ranges 0.047 (arm B) to 1.225 (arm D) \u2014 26\u00d7 across four arms of one experiment, same day, same instrument. 04_RESULTS states this \u03c3 column is \"indicative, not measured\" and that the actual sample std was never computed.",
+   "evidence": "notes/04_RESULTS.md:319-332 (\u00a72.2)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The corpus lineage is reconstructed from the `order1`/`uniform` anchors into seven eras C1\u2013C7 because `runs.csv` has no corpus column; era C2 (order-1 3.438\u20133.440) holds 18 rows and straddles `c76dc74`, making it the only group where the instrument boundary is isolated.",
+   "evidence": "notes/01_TIMELINE.md:456-464 (Appendix B); notes/04_RESULTS.md:202-211, :98-102",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`\u0394 order-1 = order1 \u2212 held_out` is the only column comparable across corpora; computed from the CSV it reproduces `ac79e92`'s published 1.411 / 1.441 pair exactly.",
+   "evidence": "notes/04_RESULTS.md:108-111, :191",
+   "confidence": "verified"
+  },
+  {
+   "claim": "03_EXPERIMENTS' tally: of 56 genuine experiments, 26 stand as concluded, 11 stand only in part, 4 are superseded, 15 are INVALIDATED/UNATTRIBUTABLE; of 16 incidental observations, 14 are VOID/UNATTRIBUTABLE/RELABELLED.",
+   "evidence": "notes/03_EXPERIMENTS.md:921-938",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every experiment in the record that shipped with a pre-specified control or permutation null still stands (X20, X21, X22, X23); almost every one that did not, does not.",
+   "evidence": "notes/03_EXPERIMENTS.md:930-932; notes/04_RESULTS.md:746-747",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The informativeness result stands as a NEGATIVE: on a single English corpus with 64\u201368 well-formed recurring domains, own\u2212foreign +0.286 is BELOW a null of +0.341 (excess \u22120.055); on four corpora own\u2212foreign +0.360 vs null +0.265 (excess +0.095).",
+   "evidence": "notes/04_RESULTS.md:734-736 (X20); notes/01_TIMELINE.md:179",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`did` (the domain id) is consumed in exactly three places \u2014 `mem.src`, `dom_exp` and the clustering report \u2014 and routing does not use it, so domain count sets the granularity of forgetting, not prediction quality (25 domains \u2192 20 deletes of ~1.6%; 4 domains \u2192 one delete of 30%).",
+   "evidence": "notes/08_GLOSSARY.md:409-413; notes/01_TIMELINE.md:179",
+   "confidence": "verified"
+  },
+  {
+   "claim": "07_WIP \u00a79.1 aggregated every log then under `runs/` and found the world model had been measured 413 more times since `51889b7`, with 0 positive \"beats baseline\" readings (range \u221213.6% to \u221294.2%) and no latent std above 0.15 \u2014 refuting 05_ERRORS' own E8.29 premise that it had not been re-measured.",
+   "evidence": "notes/07_WIP.md:455-469",
+   "confidence": "verified"
+  },
+  {
+   "claim": "07_WIP \u00a78.1 establishes that `LR` itself has never been varied in any run, arm, script, doc or commit command line in the whole 267-commit history \u2014 every run trained at the declared default 2e-3, and only `LR_SCHED`/`LR_EPOCHS`/`LR_RESTARTS` were moved.",
+   "evidence": "notes/07_WIP.md:400-411; notes/08_GLOSSARY.md:811-814",
+   "confidence": "verified"
+  },
+  {
+   "claim": "07_WIP \u00a76 verifies that `retire_stale`, `fuzzy_segment` and `track_usage` are defined and never called in the live tree; this is still true at HEAD \u2014 `fuzzy_segment` is reached only behind `getattr(self,'_use_fuzzy',False)` which nothing sets, and `retire_stale`/`track_usage` have no live caller.",
+   "evidence": "notes/07_WIP.md:309-313; tokenizer.py:391,396 (`_use_fuzzy` guard), tokenizer.py:402,420 (definitions); grep over the live tree finds no call site",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`runs/equiv_noise_*` still does not exist at HEAD, so `c6f54e6`'s INERT verdicts remain untrusted \u2014 E9.32 and 07_WIP \u00a711.1 are still accurate on this point.",
+   "evidence": "`ls runs/equiv_noise_*` \u2192 No such file or directory; notes/05_ERRORS.md:1824-1829; notes/07_WIP.md:611-614",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The stale GPT-2 anchor (\"GPT-2-small sits near 1.0-1.2 b/B on comparable text\") is still printed unconditionally, for code domains included \u2014 R45/D4 \"NOT FIXED\" is still true, though the line has moved from :5986 to :8023.",
+   "evidence": "self_organize.py:8023; notes/10_HISTORY_FINDINGS.md:337-345, :577-580",
+   "confidence": "verified"
+  },
+  {
+   "claim": "09_COMMENT_AUDIT is explicitly a plan: 354 comment blocks classified (279 KEEP / 51 MOVE / 19 WRONG / 5 STALE) with no source file modified, and it states that fact twice.",
+   "evidence": "notes/09_COMMENT_AUDIT.md:10, :122-128, :492-508",
+   "confidence": "verified"
+  },
+  {
+   "claim": "09_COMMENT_AUDIT \u00a76.2 records that `runs.csv`'s `SOURCE:` line pointers (`self_organize.py:4624`, `:928-929`) had already drifted to unrelated code, and prescribes citing comments by heading text instead of line number \u2014 the exact failure mode the file itself has since suffered.",
+   "evidence": "notes/09_COMMENT_AUDIT.md:368-383",
+   "confidence": "verified"
+  },
+  {
+   "claim": "10_HISTORY_FINDINGS catalogues 210 retractions and separates the 20 that reached the repo record (R1\u2013R20, each with an INV id) from 29 that exist only in the conversation (R21\u2013R49, each marked \"\u2014 not in INV\"), which it names as live hazards because the withdrawn claim is still asserted somewhere durable.",
+   "evidence": "notes/10_HISTORY_FINDINGS.md:53, :72-93, :95-99",
+   "confidence": "verified"
+  },
+  {
+   "claim": "10 \u00a72.4 tabulates GPU work lost: a ~22-hour H100 run with no checkpoint (07-23), a 4.5-hour wrong-test run (08-10), the 1.19M-token phantom bisect (08-06), and the one continual-learning run's lost log (08-14) \u2014 and \u00a72.5 concludes that one item is infrastructure and every other is a verification gap.",
+   "evidence": "notes/10_HISTORY_FINDINGS.md:500-534",
+   "confidence": "verified"
+  },
+  {
+   "claim": "10 \u00a74 documents five instruction threads the researcher had to repeat: checkpointing (7 raises over 22 days), \"optimise for output not our metrics\" (5 over 16 days), \"split the levers\" (7 over 5 days, still open), \"audit it again\" (5 in 5 days), \"you take too long, give it to me\" (6 over 12 days) \u2014 and notes the repeated instruction was vindicated by later measurement in four of five.",
+   "evidence": "notes/10_HISTORY_FINDINGS.md:629-733",
+   "confidence": "verified"
+  },
+  {
+   "claim": "02_IDEAS consolidates 354 extracted ideas into 103 entries A01\u2013A103 citing 164 distinct researcher turns and 216 verified quotations; 26 extracted quotes could not be located in a genuine turn and none of those 26 is reproduced as a quotation.",
+   "evidence": "notes/02_IDEAS.md:45-57",
+   "confidence": "verified"
+  },
+  {
+   "claim": "02_IDEAS records that 9 of the 455 \"user\" turns are auto-compaction summaries written by Claude and injected as user turns (U0032, U0082, U0147, U0177, U0264, U0309, U0370, U0417, U0448), leaving 446 genuine turns, and that `AskUserQuestion` answers are absent from `user_turns.md` entirely \u2014 so the north-star statement survives only as paraphrase.",
+   "evidence": "notes/02_IDEAS.md:34-43; notes/00_INDEX.md:88-89; `grep -c U0 notes/_evidence/chat/user_turns.md` \u2192 455",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A86 (\"Why are we trying to measure the noise? Let's fix the issue\") is named as the single most consequential call in the record: it produced E11/INV-13 and the planned noise-floor measurement would have characterised an artefact.",
+   "evidence": "notes/02_IDEAS.md:2013-2032; notes/05_ERRORS.md:2399-2402",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The evidence tree is complete and re-checkable: `notes/_evidence/` holds commit_log.txt (267 commits), runs_snapshot.csv, chat/user_turns.md (455 turns) + .jsonl, chat/chunks/ (13 entries), chat/extracts/ (12), and litreview/ (17 files including pile_bits_per_byte.csv).",
+   "evidence": "`ls notes/_evidence/*` and per-directory counts",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The bits/byte code anchor correction is applied throughout 04 and 06: GPT-2-small is 1.0878 on Pile-CC, 1.1111 on OpenWebText2, 1.2253 on the Pile aggregate and 1.7912 on GitHub, so `continual_eng_py` is the only row containing code and its `py 2.276` had been read against the wrong scale.",
+   "evidence": "notes/04_RESULTS.md:148-163, :793-806; notes/06_CONTINUAL_LEARNING.md:309-317",
+   "confidence": "verified"
+  },
+  {
+   "claim": "04_RESULTS flags one unresolved discrepancy it declines to guess at: arm A's `FAB_N0` is 3 per `cc0a377`/X46 but `longrun.sh:255` defines the arm `nogrow` as `FAB_GROW=0 FAB_N0=1024`, and the same three held-out values are assigned to both accounts.",
+   "evidence": "notes/04_RESULTS.md:279-286, :387-388",
+   "confidence": "verified"
+  },
+  {
+   "claim": "06 \u00a73 catches a citation error in DOC_PLAN: DOC_PLAN cites `4713186` for the held-out-probe mechanism, a hash that does not exist; the real commit is `471318c`. DOC_PLAN still carries the bad hash in three places.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:186-189; notes/DOC_PLAN.md:284, :285, :309",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`holdout_bpb` at HEAD takes a `use_mem` argument and the report now prints the matched pair (`weights-only X | + memory Y | memory contributes Z`) plus BWT and a Forgetting Measure \u2014 i.e. the \"Step 0\" code change 06 \u00a79 recommends as \"the highest-value change in the file\" has been implemented since the notes were written.",
+   "evidence": "self_organize.py:5066 `def holdout_bpb(use_mem=False)`; :5098 comment \"R_full consults the store\"; :5134 `_full = holdout_bpb(use_mem=True)`; :5141 the matched-pair print; :906 `def bwt_of`, :919 `def forgetting_of`, :5200 the BWT/F print",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The eval path no longer fabricates a zero gist unconditionally: `_eval_logits` now passes `gist=_eval_sig(x)`, and `_eval_sig` builds a real signature under `EVAL_GIST` (default 1), falling back to the zero placeholder only when it cannot. 06 \u00a72's \"the fabric routes held-out windows without a real signature\" is superseded.",
+   "evidence": "self_organize.py:3930-3934; :3907-3915; notes/CURRENT_DEFAULTS.md:215 `EVAL_GIST` 1; notes/06_CONTINUAL_LEARNING.md:148-153",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`main()` is now 5,794 lines (4062\u20139855) \u2014 worse than the 3,953 lines / 574 locals 07_WIP re-measured at `eecb277`, which was itself 33% worse than the 2,940 / 658 figure 05_ERRORS carries.",
+   "evidence": "AST measurement of `main` in self_organize.py \u2192 lineno 4062, end_lineno 9855; notes/07_WIP.md:129-135; notes/05_ERRORS.md:1888",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`longrun.sh`'s `_flags_for` now defines 99 arms, against the 52 recorded in 03 Part III and 07 \u00a77 and the 46 in 08_GLOSSARY \u2014 so the \"29 run / 23 never run\" inventory is measured against a list that has nearly doubled.",
+   "evidence": "`sed -n '163,533p' longrun.sh | grep -cE '^\\s{4}[a-z0-9_|]+\\)\\s+echo'` \u2192 99; notes/03_EXPERIMENTS.md:800; notes/07_WIP.md:330; notes/08_GLOSSARY.md:725",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`runs/` does not exist in this checkout at all and is gitignored, so it was never tracked. Every log-derived count in the corpus (07_WIP's 413 world-model readings across 47 directories, 09's \"420 logs\", 06 \u00a77's checkpoint survey, DOC_PLAN Q10/Q11) rests on files that cannot be re-checked here.",
+   "evidence": "`ls runs` \u2192 No such file or directory; `.gitignore` contains `runs/`; `git ls-files runs` \u2192 0 entries; notes/07_WIP.md:459, :613; notes/09_COMMENT_AUDIT.md:506",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The frozen historical trees the notes warn about have been moved: `STATE.md`, `CL_TESTBED.md`, `docs/`, `handoff/`, `garry/` and `legacy/` are now under `archive/`, documented by a new top-level `ARCHIVE.md`. Only `README.md` remains at top level.",
+   "evidence": "`ls STATE.md docs handoff garry` \u2192 No such file or directory; `ls archive/` \u2192 CL_TESTBED.md STATE.md docs garry handoff legacy; ARCHIVE.md:10-20",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`MEM_PER_EXPERT` genuinely defaults to 0 at HEAD, `EVICT` defaults to `lru`, `MEM_PROBE_EVERY`=25 and `MEM_PROBE_N`=64 \u2014 the E15 fixes are in force.",
+   "evidence": "self_organize.py:308 `\"MEM_PER_EXPERT\": (\"i\", 0)`, :479 `\"EVICT\": (\"env\", \"lru\")`; notes/CURRENT_DEFAULTS.md:287-288, :38",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`GROW_CAP` still defaults to 0 and `GROW_LIFT` is now a FRACTION of the current cap (0.08) with `GROW_LIFT_MIN`=8 as an absolute floor \u2014 the third of three incompatible unit systems this knob has had (multiplier 2.0 \u2192 flat count 256 \u2192 fraction).",
+   "evidence": "self_organize.py:252 `\"GROW_CAP\": (\"i\", 0)`, :262 `\"GROW_LIFT\": (\"f\", 0.08)  # capacity -- FRACTION of the current cap per lift`; notes/07_WIP.md:426-430; notes/08_GLOSSARY.md:815-817",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`ENC_WARMUP`=800 and `ENC_WARMUP_MIN`=200 at HEAD, with the `_SPEC` comment \"MUST be < ENC_WARMUP or the early stop\" \u2014 so the adaptive warmup stop is reachable at defaults.",
+   "evidence": "self_organize.py:336, :338; self_organize.py:5021 `_wfloor = min(_i(\"ENC_WARMUP_MIN\", 200), wu)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`EXPERTS`/`FABRIC` mutual exclusivity is still in place at HEAD (`EXPERTS`=0, `FABRIC`=1 by default), so the legacy `ExpertBank` path costs nothing today \u2014 07_WIP \u00a72.1 is still accurate on substance.",
+   "evidence": "notes/CURRENT_DEFAULTS.md:217 `EXPERTS` 0, :223 `FABRIC` 1; self_organize.py:4268 `ExpertBank(...) if EXPERTS else None`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "07_WIP \u00a72.9 corrects 05_ERRORS \u00a711's E2.14 entry: `ENC_WARMUP` is 800 in `_SPEC` and 2000 in every pilot/grid path (inside the measured 1000\u20134000 optimum band), and the flagged 30000 survives only in `sweep_domains.sh:92` and `docs/FILES.md:96`.",
+   "evidence": "notes/07_WIP.md:174-194",
+   "confidence": "verified"
+  },
+  {
+   "claim": "07_WIP \u00a72.12 corrects 05_ERRORS \u00a711's E6.7 entry: `MANAGE_EVERY` is 500 not 50 and `FAB_CULL_FRAC` is 0.02 not 0.08, so the growth-vs-cull asymmetry has flipped direction from what `6d5e6d7` was guarding against, and the source comment still says \"(50)\".",
+   "evidence": "notes/07_WIP.md:200-219; notes/CURRENT_DEFAULTS.md:275 `MANAGE_EVERY` 500, :116 `FAB_CULL_FRAC` 0.02",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`FAB_GRACE` changed units at `9146136` from 3000 wall-clock steps to 48 SELECTIONS, and three different graces with three different units coexist: `FAB_GRACE`=48 selections, `DOM_GRACE`=500 steps, `EXPERT_GRACE`=3000 steps.",
+   "evidence": "notes/08_GLOSSARY.md:83-97; notes/CURRENT_DEFAULTS.md:228 `FAB_GRACE` 48, :193 `DOM_GRACE` 500, :220 `EXPERT_GRACE` 3000",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`SOCIETY=0` no longer means \"chaining\": at HEAD the default path is the chained society (`SOCIETY=0` + `CHAIN_ROUTE=soc`), and any knob documented as \"gated on SOCIETY\" is therefore off at defaults \u2014 a trap the record says has bitten repeatedly (`DIV_W`, per-expert memory, the affiliation map, utilization).",
+   "evidence": "notes/08_GLOSSARY.md:99-115; notes/CURRENT_DEFAULTS.md:321 `SOCIETY` 0, :149 `CHAIN_ROUTE` soc",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`TOK_ANCHOR`=0.05 is still printed on the EFFECTIVE line of every run while inert, because it is a method of `ByteComposer` which is only constructed under `TOK_COMPOSE=1` (default 0); 08 \u00a75 Q13 verifies the report now says so three separate ways.",
+   "evidence": "notes/08_GLOSSARY.md:824-848; notes/CURRENT_DEFAULTS.md:156 `TOK_ANCHOR` 0.05, :326 `TOK_COMPOSE` 0",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The three comment-sourced `707f1af` rows (`base` 1.962 / `frozen` 2.072 / `frozen_nr` 2.365) exist only as a source comment mirrored into `runs.csv` as `(no log)` rows, and are the reason `runs.py` has a `manual --source` subcommand.",
+   "evidence": "notes/04_RESULTS.md:227-229; notes/03_EXPERIMENTS.md:519-521; notes/09_COMMENT_AUDIT.md:363-366",
+   "confidence": "verified"
+  },
+  {
+   "claim": "09 \u00a75.3 verified by direct check that `tokenizer.py`'s module docstring is about a different project \u2014 it names \"Greg\", `continual_tokenizer.py`, `data_utils`, `system` and `chat`, none of which exist here \u2014 and prescribes REWRITE rather than migrate.",
+   "evidence": "notes/09_COMMENT_AUDIT.md:309-347",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The corpus' own \"what survives\" list is five items: CPU determinism given (config, commit, seed); the LR schedule effect; the retok-on-unchanged-vocabulary cost (magnitude unattributable); arm B's 0.080 spread (explained by INV-15); and the code defects themselves.",
+   "evidence": "notes/05_ERRORS.md:2357-2375; notes/04_RESULTS.md:832-838",
+   "confidence": "verified"
+  },
+  {
+   "claim": "04_RESULTS adds three structural survivors of its own: the interaction structure of the 2x2 (ramping, not size, is the damage), that every null-carrying experiment stands, and that `\u0394 order-1` is the only cross-corpus-comparable column.",
+   "evidence": "notes/04_RESULTS.md:840-848",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The nine recurring defect classes are named with the countermeasure each escaped: unread knob, cadence-never-coincides, diagnostic-writes-training-state, read-but-unreachable, section-vanishes-silently, maintenance-path-with-no-counter, comment-records-a-measurement, fix-that-is-itself-broken, and comparison-at-the-wrong-scale.",
+   "evidence": "notes/05_ERRORS.md:2383-2393",
+   "confidence": "verified"
+  },
+  {
+   "claim": "05_ERRORS' \"how these were found\" tally: ~40% by reading the code, ~15% by a gate/guard/registry firing, ~15% by a run failing or producing an impossible number, ~8% by running the thing twice, ~8% by writing a test, ~7% by measuring at real scale after a toy, ~4% by an outside reader, ~3% by the researcher pushing back.",
+   "evidence": "notes/05_ERRORS.md:2442-2451",
+   "confidence": "verified"
+  },
+  {
+   "claim": "07_WIP names the disproportion operationally: nine mechanisms are ON by default and have never been validated at pilot scale (`FAB_NEW_FRAC`, `FAB_BURST`, `FAB_LR_OWN`, `FAB_LR_BOOST`, `FAB_LR_CYCLE/_GAMMA/_AMIN`, `EVICT=lru`+`MEM_PROBE_*`, `MEM_PER_EXPERT=0`, `LR_RESTARTS`, the retok guard), and it calls this \"the most dangerous list in the file\".",
+   "evidence": "notes/07_WIP.md:223-240",
+   "confidence": "verified"
+  },
+  {
+   "claim": "07_WIP \u00a712 gives a prioritised one-GPU-day plan: `equiv.sh HEAD HEAD` first, then a 3-seed default pilot, then `frozen2k`, then `WORLD_MODEL=0` at pilot scale, then the `grid ablate`/`grid tokens` 2x2, then an LR sweep \u2014 plus one zero-GPU item, fixing the ACROSS THE RUN BOUNDARY wording.",
+   "evidence": "notes/07_WIP.md:669-688",
+   "confidence": "verified"
+  },
+  {
+   "claim": "06 \u00a79 costs the continual-learning programme concretely: 9 pilot-shape runs (3 `A_add`, 3 `A_joint`, 3 `A_py`) plus two code changes, on the order of a day of GPU plus a morning of code, with two preconditions (re-run or pin the parent, and choose the add-run's fabric configuration deliberately with `pilot-add` writing a `.cfg`).",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:576-648",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The literature review's own contribution is three claims that changed a project reading (the GPT-2 code anchor, per-arm \u03c3, and LRU-on-retrieval as a scan pathology) and two warnings that were checked and rejected \u2014 and its sources could not be opened because WebFetch was blocked for every paper host.",
+   "evidence": "notes/02_IDEAS.md:2407-2411; notes/04_RESULTS.md:803-806",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "LR_DECAY",
+   "effect": "Scales each successive cosine restart cycle's peak by global run progress. At HEAD it is gated on `_n > 1` so it is a no-op for single-cycle schedules; on multi-cycle runs it multiplies `_cyc` (which already contains the `LR_MIN_FRAC` floor) by an envelope that itself bottoms at `LR_MIN_FRAC`, so the effective floor is `LR_MIN_FRAC\u00b2`.",
+   "owner": "self_organize.py `_lr_at` (the LR schedule block)",
+   "couples_with": [
+    "LR_MIN_FRAC",
+    "LR_RESTARTS",
+    "LR_EPOCHS",
+    "EPOCHS",
+    "LR_RESTART_DAMP"
+   ],
+   "evidence": "self_organize.py:377 (`\"LR_DECAY\": (\"f\", 1.0)`), :4845-4849 (the gated envelope), :4832 (\"LR_DECAY=1 IS THE DEFAULT\")"
+  },
+  {
+   "name": "FAB_N0 / FAB_GROW / FAB_NMAX",
+   "effect": "Together they select which arm of the population 2x2 a run is. At HEAD `FAB_GROW=1`, `FAB_N0=2048`, `FAB_NMAX=4096` \u2014 the population is built at 2048 with `FAB_RAMP_TO=0.5` making the ramp arm-condition (n < 0.5*cap = 2048) unreachable, which is why `_SPEC` calls the ramp \"neutered\".",
+   "owner": "self_organize.py `Fabric` / `PlateauGrowth`",
+   "couples_with": [
+    "FAB_RAMP_TO",
+    "FAB_RAMP_LATCH",
+    "FAB_NEW_FRAC",
+    "FAB_BURST",
+    "MAX_DOMAINS",
+    "MEM_QUOTA"
+   ],
+   "evidence": "self_organize.py:186,195,196; notes/CURRENT_DEFAULTS.md:128 `FAB_RAMP_TO` 0.5; self_organize.py:186 comment \"ON; the ramp is neutered by FAB_RAMP_TO\""
+  },
+  {
+   "name": "MAX_DOMAINS",
+   "effect": "DERIVED \u2014 defaults to `FAB_NMAX`. A cross-subsystem tie nothing stated until `f279fd0`; the two populations designed as duals once ran 15,625x apart because launchers set MAX_DOMAINS=1e6 while FAB_NMAX sat at 64.",
+   "owner": "self_organize.py `_DERIVED` / DomainAssembler",
+   "couples_with": [
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:90 `\"MAX_DOMAINS\": (\"FAB_NMAX\",)`, :598; notes/05_ERRORS.md:141-147 (E1.7); notes/05_ERRORS.md:2133-2142 (E10.32)"
+  },
+  {
+   "name": "EPOCHS / LR_EPOCHS",
+   "effect": "`EPOCHS` once set BOTH the run length and the cosine horizon, so two runs differing only in EPOCHS were two different schedules \u2014 measured 11.0x apart in LR at step 44000. `LR_EPOCHS` splits the horizon out and is clamped to `min(8, EPOCHS)`.",
+   "owner": "self_organize.py `_lr_at` / `_proj_steps`",
+   "couples_with": [
+    "LR_RESTARTS",
+    "LR_DECAY",
+    "LR_MIN_FRAC",
+    "STREAM_LEN"
+   ],
+   "evidence": "notes/05_ERRORS.md:1313-1322 (E8.4); notes/03_EXPERIMENTS.md:439-447 (X31); notes/CURRENT_DEFAULTS.md:269 `LR_EPOCHS` 8"
+  },
+  {
+   "name": "MEM_PER_EXPERT",
+   "effect": "Partitions the store into `MEM_OWNERS` blocks for eviction only (reads stay global). Documented DEFAULT OFF while the code read `_i(...,1)` for the project's entire life, so every recorded memory figure used a partition measured at \u22120.555 b/B against the global store. Now genuinely 0.",
+   "owner": "memory.py `EditableMemory`",
+   "couples_with": [
+    "MEM_OWNERS",
+    "MEM_QUOTA",
+    "MEM_CAP",
+    "EVICT",
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:308 `\"MEM_PER_EXPERT\": (\"i\", 0)`; notes/05_ERRORS.md:246-258 (E2.7); notes/05_ERRORS.md:1015-1022 (E7.40 \u2014 turning it on silently shrank the store 24x)"
+  },
+  {
+   "name": "EVICT / MEM_PROBE_EVERY / MEM_PROBE_N",
+   "effect": "`EVICT=lru` evicts least-recently-RETRIEVED. It only means anything because `MEM_PROBE_EVERY`/`MEM_PROBE_N` added a cadenced read probe inside the training loop on a deterministic stride; before that `mem.read()` was eval-only, `use` stayed 0 and every path evicted by write order whatever the knob said.",
+   "owner": "memory.py eviction + the training-loop read probe",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "MEM_CAP",
+    "MEM_QUOTA",
+    "WRITE_GATE"
+   ],
+   "evidence": "self_organize.py:479 `\"EVICT\": (\"env\", \"lru\")`; notes/CURRENT_DEFAULTS.md:287-288; notes/05_ERRORS.md:992-1004 (E7.24); notes/06_CONTINUAL_LEARNING.md:344-354"
+  },
+  {
+   "name": "GROW_CAP family (GROW_CAP, _EVERY, _FAB, _FAB0, _VOCAB, _VOCAB0, _PLATEAU, GROW_LIFT, GROW_LIFT_MIN)",
+   "effect": "A soft cap below `FAB_NMAX`/`VMAX` that lifts on an earned plateau; nothing lowers it. `GROW_CAP=0` makes the whole family inert. `GROW_LIFT` is now a FRACTION of the current cap (0.08) with `GROW_LIFT_MIN`=8 as an absolute floor \u2014 its third incompatible unit system.",
+   "owner": "self_organize.py capacity block",
+   "couples_with": [
+    "FAB_NMAX",
+    "VMAX",
+    "FAB_GROW",
+    "GROW_CAP_PLATEAU"
+   ],
+   "evidence": "self_organize.py:252 `\"GROW_CAP\": (\"i\", 0)`, :262 `\"GROW_LIFT\": (\"f\", 0.08)`; notes/08_GLOSSARY.md:815-817; notes/07_WIP.md:426-430"
+  },
+  {
+   "name": "TOK_COMPOSE / TOK_ANCHOR / TOK_ANCHOR_TAU / TOK_ANCHOR_USES",
+   "effect": "`TOK_ANCHOR` and its two release knobs are methods of `ByteComposer`, which is constructed only under `TOK_COMPOSE=1`. With `TOK_COMPOSE=0` they print on the EFFECTIVE line of every run and contribute nothing; the never-fired audit fires on every default run saying so.",
+   "owner": "self_organize.py `ByteComposer` + the `[config-audit]` never-fired layer",
+   "couples_with": [
+    "TOK_COMPOSE",
+    "RETOK_EVERY",
+    "WARMSTART"
+   ],
+   "evidence": "notes/CURRENT_DEFAULTS.md:326 `TOK_COMPOSE` 0, :156-158; notes/08_GLOSSARY.md:824-848; notes/05_ERRORS.md:131-139 (E1.6)"
+  },
+  {
+   "name": "SEED_CKPT / GRID_CKPT / SAVE_CKPT",
+   "effect": "Whether a run leaves a checkpoint at all \u2014 and `SAVE_CKPT` also gates extra `holdout_bpb` passes, so toggling it once moved a same-seed result by 1.594 b/B. `SEED_CKPT` defaulted 0 while `GRID_CKPT` defaulted 1, so the sweep producing the models worth continuing from was the one discarding them.",
+   "owner": "longrun.sh subcommands + self_organize.py `_save_ckpt`",
+   "couples_with": [
+    "HOLDOUT_N",
+    "EVAL_N",
+    "CKPT_EVERY",
+    "RESUME"
+   ],
+   "evidence": "notes/05_ERRORS.md:260-266 (E2.8); notes/04_RESULTS.md:190; notes/05_ERRORS.md:467-484 (E4.3)"
+  },
+  {
+   "name": "HOLDOUT_N / EVAL_N / PROBE",
+   "effect": "Report-only cadences that must not touch training. Before `c76dc74` they did: changing `HOLDOUT_N` 4\u219216 moved 48 report lines including a verdict sign flip, because `build_stream()` drew segment lengths from the global RNG that the diagnostics also drew from.",
+   "owner": "self_organize.py report battery, guarded by `frozen_rng()` / `@no_rng_drift`",
+   "couples_with": [
+    "SEED",
+    "EPOCHS",
+    "SAVE_CKPT",
+    "PROBE"
+   ],
+   "evidence": "notes/05_ERRORS.md:446-448, :486-515 (E4.4); notes/CURRENT_DEFAULTS.md:260,216,298"
+  },
+  {
+   "name": "RETOK_EVERY",
+   "effect": "Re-segmentation cadence. `RETOK_EVERY=0` did NOT stop re-segmentation (`_resample()` re-tokenises at every epoch boundary) and additionally disabled signature batching, because `_due` returns False on n<=0 before recording \u2014 so every `RETOK_EVERY=0` arm differed from its comparator in two ways.",
+   "owner": "self_organize.py `_retok` / `_due`",
+   "couples_with": [
+    "GROW_EVERY",
+    "SIG_BATCH",
+    "TOK_MINT_UNTIL",
+    "REKEY_EVERY",
+    "TOK_ANCHOR_TAU"
+   ],
+   "evidence": "notes/05_ERRORS.md:380-388 (E3.5); notes/01_TIMELINE.md:331; notes/CURRENT_DEFAULTS.md:306 `RETOK_EVERY` 3000"
+  },
+  {
+   "name": "SIG_WIN / SIG_PROJ_BPT / SIG_SPACE",
+   "effect": "How much of the stream the signature encoder actually reads. `SIG_WIN=0` meant WIN bytes against a loop striding WIN tokens (~42% coverage, worsening as compression improves); `SIG_PROJ_BPT` pinned at 2.4 made projected coverage read 100% at every VMAX and suppressed the warning; `SIG_SPACE=tokens` crashed the first time a smoke arm exercised it.",
+   "owner": "self_organize.py SigEncoder / the `[signature]` banner",
+   "couples_with": [
+    "WIN",
+    "VMAX",
+    "ENC_EVERY",
+    "TOK_ONLINE"
+   ],
+   "evidence": "notes/05_ERRORS.md:938-948 (E7.32), :924-936 (E7.14); notes/CURRENT_DEFAULTS.md:153,77"
+  },
+  {
+   "name": "MANAGE_EVERY / DOM_MANAGE_EVERY / MANAGE_MERGE",
+   "effect": "`MANAGE_EVERY=500` was once longer than the whole run, so domain merge/cull/fold executed zero times on 60 kB and once on 120 kB; `DOM_MANAGE_EVERY=100` split domains onto their own cadence. `MANAGE_MERGE=0.12` overrode the `MERGE_FRAC*NEW_DIST`=0.28 fallback for the project's life, so creation ran at 0.35 and consolidation at 0.12.",
+   "owner": "self_organize.py DomainAssembler.manage / Fabric.manage",
+   "couples_with": [
+    "MERGE_FRAC",
+    "NEW_DIST",
+    "MANAGE_MIN",
+    "MANAGE_STALE",
+    "FAB_CULL_FRAC"
+   ],
+   "evidence": "notes/05_ERRORS.md:216-233 (E2.4, E2.5); notes/CURRENT_DEFAULTS.md:275 `MANAGE_EVERY` 500, :194 `DOM_MANAGE_EVERY` 100, :140 `MANAGE_MERGE` 0.28"
+  },
+  {
+   "name": "EVAL_GIST",
+   "effect": "Gates whether the eval path builds a real signature for the fabric to route on (`_eval_sig`) or falls back to the zero-gist placeholder. Default 1 at HEAD \u2014 this is what removes 06 \u00a72's \"routed without a real signature\" limitation.",
+   "owner": "self_organize.py `_eval_sig` / `_eval_logits`",
+   "couples_with": [
+    "FABRIC",
+    "ROUTE_GROUNDED",
+    "HOLDOUT_N"
+   ],
+   "evidence": "self_organize.py:3914 `if not _i(\"EVAL_GIST\", 1) or _ENC[0] is None: return None`; notes/CURRENT_DEFAULTS.md:215"
+  },
+  {
+   "name": "WORLD_MODEL / WORLD_GROW / WORLD_FEEDBACK and the WORLD_* sizing family",
+   "effect": "The forward-dynamics world model, ON by default and costed every step, whose only full-stack readings all say it has not learned dynamics. The entire sizing family (`WORLD_HID/_K/_LAT/_N0/_NMAX/_ROUTE/_VAR`) has never been set, so it has only ever run in one shape.",
+   "owner": "world_model.py + the `if WORLD_MODEL:` block in self_organize.py",
+   "couples_with": [
+    "WORLD_GROW",
+    "WORLD_FEEDBACK",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:358 `\"WORLD_MODEL\": (\"i\", 1)`; notes/07_WIP.md:448-487; notes/08_GLOSSARY.md:818-819"
+  },
+  {
+   "name": "VERIFY / RECON_W / VERIFY_SWEEP",
+   "effect": "`VERIFY=recon` is the only thing that constructs the `Reconstructor`; `RECON_W=0` means even then the in-loop term is multiplied by zero. Nothing in any script or arm sets `VERIFY=recon`, so the reconstruction path is unreachable at defaults and the retired \"B\" self-consistency mechanism is what actually runs.",
+   "owner": "verification.py, gated from self_organize.py",
+   "couples_with": [
+    "RECON_W",
+    "VERIFY_FIT",
+    "VERIFY_SWEEP",
+    "WRONG_*"
+   ],
+   "evidence": "notes/07_WIP.md:489-522; notes/CURRENT_DEFAULTS.md:80 `VERIFY` selfcon, :149 `RECON_W` 0.0, :336 `VERIFY_SWEEP` 0"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "07_WIP and 05_ERRORS \u00a711 still state `LR_DECAY` defaults to 0; `_SPEC` says 1.0",
+   "severity": "high",
+   "where": "notes/07_WIP.md:84, :146, :263; notes/05_ERRORS.md:2282 \u2014 vs self_organize.py:377",
+   "symptom": "Three separate places tell a reader the known-broken `LR_DECAY` envelope is inert (\"BUILT, NEVER RUN (inert: LR_DECAY=0)\", \"`_SPEC` has `LR_DECAY` at **0.0**, so nothing measured is affected and nothing ever will be until someone sets it\", \"| `LR_DECAY` | 0.0 | never run\"). It has defaulted to 1.0 since 2026-08-26, so the envelope is live on every multi-cycle schedule.",
+   "evidence": "self_organize.py:377 `\"LR_DECAY\": (\"f\", 1.0)`; the same file's own correction at notes/05_ERRORS.md:2241 says \"`LR_DECAY` now defaults to **1.0**\", directly contradicting notes/05_ERRORS.md:2282 seventy lines later",
+   "bug_class": "other"
+  },
+  {
+   "title": "A verbatim commit quotation in 06 was silently altered to satisfy the automated drift check",
+   "severity": "high",
+   "where": "notes/06_CONTINUAL_LEARNING.md:94",
+   "symptom": "The block quote is introduced as \"worth quoting in full\" from `c316813`, but reads \"PHASED was 0 at the time and it had never been executed\"; the commit says \"PHASED defaults to 0 and it had never been executed\". A file whose whole value is that quotations are checkable now contains an edited quotation with no marker.",
+   "evidence": "notes/_evidence/commit_log.txt:5614 `PHASED defaults to 0 and it had never been executed in any run of this project.`; `git show 0065372 -- notes/06_CONTINUAL_LEARNING.md` shows the -/+ pair",
+   "bug_class": "other"
+  },
+  {
+   "title": "A historical table cell in 06 was rewritten to the CURRENT default, making it factually wrong for the commit its own column names",
+   "severity": "high",
+   "where": "notes/06_CONTINUAL_LEARNING.md:461",
+   "symptom": "The table is headed \"default at `b92f358`\" (2026-08-14) and the `FAB_N0` cell now reads \"**2048** (was **3** until 2026-08-17)\" \u2014 self-contradictory, since the parenthetical says the value at that date was 3. Anyone reconstructing what the one continual-learning run inherited gets the wrong founding population.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:458 (column header \"default at `b92f358`\"), :461; `git show 0065372` shows the cell changed from **3** to **2048**; notes/10_HISTORY_FINDINGS.md:376 independently says the run inherited `FAB_GROW=1, FAB_N0=3, FAB_NMAX=4096`",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "04_RESULTS still asserts in the present tense that the default configuration is arm D and not arm B",
+   "severity": "high",
+   "where": "notes/04_RESULTS.md:417-420, :822-823",
+   "symptom": "\"HEAD's fabric defaults (`FAB_GROW=1`, `FAB_N0=3`, `FAB_NMAX=4096`) are arm D \u2026 **not arm B.** A default run today is not arm B\" and \"Two of them (`seedfloor_s0`, `seedfloor_s1`) are the **HEAD default configuration** at two of three seeds\". `FAB_N0` has been 2048 since 2026-08-17. The drift check did not catch it because the claim is attributed to a commit, which its HISTORICAL regex exempts.",
+   "evidence": "self_organize.py:195 `\"FAB_N0\": (\"i\", 2048)`; notes_check.py:141 exempts any line reading as history; 00_INDEX and 07_WIP were corrected for the identical claim at `0065372` but 04_RESULTS was not touched by that commit",
+   "bug_class": "other"
+  },
+  {
+   "title": "07_WIP contradicts itself about the default arm within one file",
+   "severity": "medium",
+   "where": "notes/07_WIP.md:286 vs notes/07_WIP.md:242-245",
+   "symptom": "\u00a75 item 4 says \"**The default configuration is arm D**\", while \u00a73's dated RESOLVED paragraph forty lines earlier says `6380519`/`25aba88` set `FAB_N0=2048` so \"the default IS arm B's population\". A reader gets opposite answers depending on which section they open.",
+   "evidence": "notes/07_WIP.md:286 and notes/07_WIP.md:242-245",
+   "bug_class": "other"
+  },
+  {
+   "title": "Every line citation in 09_COMMENT_AUDIT is stale; the file is now the victim of the exact failure it diagnoses",
+   "severity": "high",
+   "where": "notes/09_COMMENT_AUDIT.md:114 and the whole of \u00a73, \u00a75, \u00a77",
+   "symptom": "The file states `self_organize.py` is 7,238 lines and cites ~120 exact line ranges. The file is now 9,859 lines. Its own top-priority item, W01 at \"`self_organize.py:1084-1093`\" (\"the single most consequential line in the file\"), now points at `make_proc`, a synthetic-stream helper. \u00a76.2 of the same file prescribes citing by heading text \"because line numbers do not [survive edits], and this file has proven it twice\".",
+   "evidence": "`wc -l self_organize.py` \u2192 9859; notes/09_COMMENT_AUDIT.md:114; `sed -n '1084,1093p' self_organize.py` prints `def make_proc(...)`; notes/09_COMMENT_AUDIT.md:379-383",
+   "bug_class": "other"
+  },
+  {
+   "title": "09_COMMENT_AUDIT's MOVE count and its own reconciliation note both disagree with its table",
+   "severity": "medium",
+   "where": "notes/09_COMMENT_AUDIT.md:125, :233-235",
+   "symptom": "\u00a72.2 records 51 MOVE blocks; \u00a73 says \"51 rows\" then continues the table to M60. The reconciliation note at :233-235 claims \"42 in `self_organize.py`, 3 in `tokenizer.py`, 1 in `memory.py`, 5 in `longrun.sh`\". Counting the table: 51 `self_organize.py` + 3 `tokenizer.py` + 1 `memory.py` + 5 `longrun.sh` = 60. Neither 51 nor 42 is right.",
+   "evidence": "`grep -cE '^\\| M[0-9]+ \\|' notes/09_COMMENT_AUDIT.md` \u2192 60; per-file breakdown 51/3/1/5; notes/09_COMMENT_AUDIT.md:125, :233-235",
+   "bug_class": "other"
+  },
+  {
+   "title": "09 \u00a75.2 S4's ENC_WARMUP_MIN premise is contradicted by `_SPEC`",
+   "severity": "medium",
+   "where": "notes/09_COMMENT_AUDIT.md:306",
+   "symptom": "S4 argues \"At HEAD `ENC_WARMUP = 800` and `ENC_WARMUP_MIN = 3000` \u2026 so the adaptive stop is OFF in the default configuration\" and prescribes a replacement comment saying \"which is the DEFAULT (3000 >= 800)\". `ENC_WARMUP_MIN` is 200, so `_wfloor = min(200, 800) = 200 < 799` and the adaptive stop IS reachable. Applying the prescribed comment would install a false statement.",
+   "evidence": "self_organize.py:338 `\"ENC_WARMUP_MIN\": (\"i\", 200),  # encoder -- MUST be < ENC_WARMUP or the early stop`; self_organize.py:5021 `_wfloor = min(_i(\"ENC_WARMUP_MIN\", 200), wu)`; 07_WIP.md:182 independently records the `_SPEC` default as 800/inside-band",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "05_ERRORS \u00a711 and 07_WIP \u00a72.3 record E7.41 (ACROSS THE RUN BOUNDARY is weights-only) as NOT FIXED; the matched-pair fix is in the code",
+   "severity": "high",
+   "where": "notes/05_ERRORS.md:2280; notes/07_WIP.md:113-121; notes/06_CONTINUAL_LEARNING.md:576-584",
+   "symptom": "Three files call this \"the cheapest open item in this document\" and 06 \u00a79 makes it \"Step 0 \u2014 the highest-value change in the file\". At HEAD `holdout_bpb` already takes `use_mem`, the report prints `weights-only X | + memory Y | memory contributes Z`, and BWT and the Forgetting Measure are computed. Following the notes would re-implement work that exists, or leave a reader believing the project's retention metric still cannot see memory.",
+   "evidence": "self_organize.py:5066 `def holdout_bpb(use_mem=False)`, :5098 (\"R_full consults the store\"), :5134 `_full = holdout_bpb(use_mem=True)`, :5141 (the matched-pair line), :906/:919 (`bwt_of`/`forgetting_of`), :5197-5200 (the BWT/F print)",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "06 \u00a72's zero-gist limitation is superseded by `_eval_sig`",
+   "severity": "medium",
+   "where": "notes/06_CONTINUAL_LEARNING.md:148-153",
+   "symptom": "\"at `fab_logits:3232` the eval path **fabricates a zero gist** \u2026 So the number is weights-plus-fabric-without-routing-signal\". `_eval_logits` now passes `gist=_eval_sig(x)`, and `_eval_sig` builds a real read-only signature under `EVAL_GIST=1` (default), falling back to the placeholder only when it cannot.",
+   "evidence": "self_organize.py:3930-3934 `return fab_logits(model, fab if FABRIC else None, model.encode(x), gist=_eval_sig(x))`; :3907-3915",
+   "bug_class": "other"
+  },
+  {
+   "title": "07_WIP and 08_GLOSSARY state `_SPEC` holds 310 knobs; it holds 328",
+   "severity": "medium",
+   "where": "notes/07_WIP.md:375-382; notes/08_GLOSSARY.md:209, :687, :760, :783",
+   "symptom": "08 \u00a71.15 presents \"274 \u2192 279 \u2192 310\" as the knob-count history and 07 \u00a78's whole never-set analysis (223 of 310, 90 of 310) is denominated in 310. The registry has 328 keys, so both the fractions and the 90-name list are out of date; several names on the never-set list (`MEM_PROBE_EVERY`, `MEM_PROBE_N`, `FAB_LR_AMIN/_CYCLE/_GAMMA`) are described elsewhere in the same file as on-by-default mechanisms.",
+   "evidence": "AST count of `_SPEC` \u2192 328; `python3 notes_check.py` prints \"328 knobs\"; notes/07_WIP.md:375, :393-397 vs notes/07_WIP.md:235-236",
+   "bug_class": "other"
+  },
+  {
+   "title": "00_INDEX says `commit_log.txt` holds 282 commits; it holds 267, and 01_TIMELINE says 267",
+   "severity": "low",
+   "where": "notes/00_INDEX.md:85 vs notes/01_TIMELINE.md:18",
+   "symptom": "The provenance section \u2014 the part that tells a reader the record is checkable \u2014 states a count that does not match the file or the timeline's own header.",
+   "evidence": "`grep -cE '^[0-9a-f]{40}$' notes/_evidence/commit_log.txt` \u2192 267; notes/00_INDEX.md:85; notes/01_TIMELINE.md:18",
+   "bug_class": "other"
+  },
+  {
+   "title": "01_TIMELINE states the commit log runs to `92a967b`; the log's newest entry is `95aa336`",
+   "severity": "low",
+   "where": "notes/01_TIMELINE.md:18",
+   "symptom": "\"267 commits on `rm-predict`, `8150f8a` 2026-07-21 \u2192 `92a967b` 2026-08-15\". `92a967b` is the commit that CREATED the log and therefore cannot be in it; the log's first (newest) hash is `95aa336`. The range as stated is unverifiable against the artefact it names.",
+   "evidence": "first 40-hex line of notes/_evidence/commit_log.txt is `95aa336da4cadbef\u2026`; `grep -c '^92a967b' notes/_evidence/commit_log.txt` \u2192 0",
+   "bug_class": "other"
+  },
+  {
+   "title": "Six files still cite top-level paths that were moved to `archive/` on 2026-08-27",
+   "severity": "medium",
+   "where": "notes/00_INDEX.md:15-20; notes/08_GLOSSARY.md:30-33, :221-236; notes/09_COMMENT_AUDIT.md:462-470; notes/07_WIP.md:587-605; notes/02_IDEAS.md:113, :2529; notes/DOC_PLAN.md:48-52, :113-115, :333-338",
+   "symptom": "The staleness warnings themselves are stale: `STATE.md`, `CL_TESTBED.md`, `docs/`, `handoff/`, `garry/` and `legacy/` no longer exist at top level. Every pointer into `handoff/designed-but-not-built/` and `handoff/open-questions/` \u2014 the source for 07_WIP \u00a710 and \u00a711.2 and for 02_IDEAS' north-star paraphrase \u2014 resolves nowhere.",
+   "evidence": "`ls STATE.md docs handoff garry legacy` \u2192 No such file or directory; `ls archive/` \u2192 CL_TESTBED.md STATE.md docs garry handoff legacy; ARCHIVE.md:10-20",
+   "bug_class": "other"
+  },
+  {
+   "title": "09 asserts \"`00_INDEX.md` does not yet exist\"",
+   "severity": "low",
+   "where": "notes/09_COMMENT_AUDIT.md:472",
+   "symptom": "\"`00_INDEX.md` does not yet exist; when written, its staleness warning should cite this section.\" It exists and has since 2026-08-15; the citation it asks for was never added.",
+   "evidence": "notes/00_INDEX.md exists (130 lines); notes/09_COMMENT_AUDIT.md:472",
+   "bug_class": "other"
+  },
+  {
+   "title": "The arm inventory in 03 Part III and 07 \u00a77 is denominated against 52 arms; `longrun.sh` now defines 99",
+   "severity": "medium",
+   "where": "notes/03_EXPERIMENTS.md:799-803, :810, :823; notes/07_WIP.md:330-331; notes/08_GLOSSARY.md:725",
+   "symptom": "\"29 of 52 run at pilot scale, 23 never\" and \"52 case labels\" and (in the glossary) \"46 of them\". The arm list has nearly doubled, so the never-run set is much larger than recorded and the glossary's 46 was already superseded by the same corpus.",
+   "evidence": "`sed -n '163,533p' longrun.sh | grep -cE '^\\s{4}[a-z0-9_|]+\\)\\s+echo'` \u2192 99; notes/03_EXPERIMENTS.md:800; notes/08_GLOSSARY.md:725",
+   "bug_class": "other"
+  },
+  {
+   "title": "07_WIP \u00a72.4's `main()` measurement is stale by a further 47%",
+   "severity": "medium",
+   "where": "notes/07_WIP.md:129-139",
+   "symptom": "The table gives `main()` at 3,953 lines / 574 locals at `eecb277` and frames the finding as \"~1,000 lines and 78 locals in five days\". `main()` is now 5,794 lines (4062\u20139855) in a 9,859-line file. The trend the entry exists to flag has accelerated and the recorded number understates it.",
+   "evidence": "AST: `main` lineno 4062, end_lineno 9855 \u2192 5794 lines; notes/07_WIP.md:132",
+   "bug_class": "other"
+  },
+  {
+   "title": "07_WIP \u00a71 states the tree is clean and `rm-predict` is in sync with origin, and 09 \u00a710 states `git status --porcelain` is empty",
+   "severity": "low",
+   "where": "notes/07_WIP.md:34-53; notes/09_COMMENT_AUDIT.md:492-506",
+   "symptom": "Both are point-in-time assertions about a working tree from 2026-08-15, written without a marker that they expire. They close `DOC_PLAN` \"know NOW\" #3 and satisfy the standing mitigation for E9.30 on evidence that cannot be re-checked at any later commit.",
+   "evidence": "notes/07_WIP.md:42-53 (a pasted `git status` transcript); notes/09_COMMENT_AUDIT.md:503-505",
+   "bug_class": "other"
+  },
+  {
+   "title": "07_WIP \u00a74 files the GROW_CAP family as \"never been set anywhere in the project's history\" while \u00a78.2 of the same file corrects exactly that claim",
+   "severity": "medium",
+   "where": "notes/07_WIP.md:261 vs notes/07_WIP.md:426-430",
+   "symptom": "The \u00a74 table cell still reads \"Also \u00a78: all seven have **never been set anywhere in the project's history**\", but the \u00a78.2 entry it points at was corrected on 2026-08-26 to say the family drives ~20 arms and has run for over a million steps. `notes_check.py`'s own docstring names this entry as one of the two errors that motivated building the checker.",
+   "evidence": "notes/07_WIP.md:261; notes/07_WIP.md:426-430; notes_check.py:7-9",
+   "bug_class": "other"
+  },
+  {
+   "title": "All log-derived evidence in 06, 07 and 09 rests on a `runs/` directory that does not exist and was never tracked",
+   "severity": "medium",
+   "where": "notes/07_WIP.md:455-469 (413 world-model readings), :613 (47 directories); notes/09_COMMENT_AUDIT.md:506 (420 logs); notes/06_CONTINUAL_LEARNING.md:420-424 (no surviving checkpoint)",
+   "symptom": "07 \u00a79.1's correction of E8.29 \u2014 the single strongest empirical claim any of these files makes on its own authority \u2014 is unre-checkable. So are DOC_PLAN Q10 (\"what did `runs/equiv_c14f876_vs_37ecb20` conclude?\") and Q11 (\"how many of the 481 logs are useful?\").",
+   "evidence": "`ls runs` \u2192 No such file or directory; `.gitignore` line `runs/`; `git ls-files runs` \u2192 0 entries",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "DOC_PLAN still cites the non-existent hash `4713186` three times after 06 identified it",
+   "severity": "low",
+   "where": "notes/DOC_PLAN.md:284, :285, :309",
+   "symptom": "06 \u00a73 explicitly records \"`DOC_PLAN` cites this last mechanism as `4713186`. That hash does not exist \u2026 Recorded here so the citation can be fixed rather than re-derived.\" The citation was never fixed, and DOC_PLAN was edited at `0065372` after 06 was written.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:186-189; `grep -n 4713186 notes/DOC_PLAN.md` \u2192 284, 285, 309",
+   "bug_class": "other"
+  },
+  {
+   "title": "00_INDEX's reading-order line counts are wrong for four of eleven files",
+   "severity": "low",
+   "where": "notes/00_INDEX.md:59-69",
+   "symptom": "02_IDEAS listed as 2500 (actual 2532), 05_ERRORS as 2455 (actual 2463), 07_WIP as 687 (actual 688), 08_GLOSSARY as 847 (actual 848). Harmless individually, but the table is the corpus' only self-description of its own size.",
+   "evidence": "`wc -l notes/*.md`; notes/00_INDEX.md:59-69",
+   "bug_class": "other"
+  },
+  {
+   "title": "05_ERRORS' index count (226) disagrees with its own methodology section (~180)",
+   "severity": "low",
+   "where": "notes/05_ERRORS.md:57 vs :2440",
+   "symptom": "The header advertises \"226 catalogued errors\" and the per-class table sums to 226 by counting \u00a711's 12 cross-links; the tally section then says it counted \"over the ~180 entries above\". The E-id sequence is also non-contiguous, so neither number can be reconstructed by counting entries.",
+   "evidence": "notes/05_ERRORS.md:44-57; notes/05_ERRORS.md:2440; the \u00a77 sequence runs E7.3 \u2192 E7.9 and E7.26 \u2192 E7.6",
+   "bug_class": "other"
+  },
+  {
+   "title": "09 \u00a75.1's W16/D3 finding \u2014 `nocompose` is a duplicate of `base` \u2014 is recorded in three files and still unfixed",
+   "severity": "medium",
+   "where": "notes/09_COMMENT_AUDIT.md:294; notes/10_HISTORY_FINDINGS.md:569-575; notes/03_EXPERIMENTS.md:842",
+   "symptom": "`longrun.sh` states \"TOK_COMPOSE is now ON by default\" (reverted at `be50e3a`, `_SPEC` = 0), so the `nocompose` arm changes nothing and \"will read as a control\" in the `ablate` and `tokens` presets \u2014 the identical defect the corpus already flagged for `pgate`.",
+   "evidence": "notes/CURRENT_DEFAULTS.md:326 `TOK_COMPOSE` 0; notes/09_COMMENT_AUDIT.md:294; notes/10_HISTORY_FINDINGS.md:569-575",
+   "bug_class": "armed-but-inert"
+  }
+ ],
+ "junk": [
+  {
+   "what": "The `handoff/GLOSSARY.md` `Fabric` \u2192 `Router` + `Compositor` rename, and everything downstream of it",
+   "why": "Declared settled on 2026-07-21 (`3500b78`), never carried into code, and abandoned in practice. At HEAD the class is `Fabric`, the node class `FabricNode`, the knob `FABRIC`. 08_GLOSSARY \u00a71.2 already says to treat the handoff entry as wrong; the file is now under `archive/`.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The `-0.0009 collateral` headline and `run_full_unfrozen.sh` as the entry command",
+   "why": "A frozen `garry/` milestone number that is not reproducible at HEAD and not the project's stated goal; the harness has been `longrun.sh` since 2026-07-25. Still the lead of `README.md`.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`tokenizer.py`'s module docstring",
+   "why": "Verified by direct check to be about a different project \u2014 it names \"Greg\", `continual_tokenizer.py`, `data_utils`, `system` and `chat`, none of which exist here. 09 \u00a75.3 classifies it REWRITE, not migrate, and supplies the replacement text.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The `+0.709 b/B` FABRIC justification wherever it survives (source comment, `runs.csv` notes column, `rerun.sh` header)",
+   "why": "An eval-time knockout retracted at `e60b8e0`/`9d90416`; the retrained ablation is 3.089 vs 3.090. Its fallback justification (coherence 0.75 vs 0.50) is INV-20, a four-sample mean with SE 0.25. The default was justified twice and both justifications are void.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The dead-row series \"0% \u2192 ~2.2, 41% \u2192 3.561, 75% \u2192 6.114\" wherever it is quoted as monotone and causal",
+   "why": "INV-34: three arms run for three different reasons on three different corpora, two of them VOID as named (INV-42); `vmax8k@18ep` filled its vocabulary completely and is the worst of four. The first controlled test gives +0.060 against SE 0.055 = 1.1\u03c3.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The 09_COMMENT_AUDIT line-number tables (\u00a73, \u00a75, \u00a77) as actionable targets",
+   "why": "`self_organize.py` grew 7,238 \u2192 9,859 lines; every range now points at unrelated code. The classifications and replacement drafts are worth keeping; the coordinates are not. \u00a76.2 of the same file already prescribes citing by heading text.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "07_WIP \u00a78's 90-name never-set knob list and its 223-of-310 fraction",
+   "why": "Denominated against a 310-knob registry that now has 328, and several names on it (`MEM_PROBE_EVERY`, `MEM_PROBE_N`, `FAB_LR_AMIN/_CYCLE/_GAMMA`, `GROW_CAP`, `GROW_LIFT`) are contradicted by the same file's \u00a73 and \u00a78.2. The two singled-out findings (`LR` never varied, the `WORLD_*` family never sized) are the durable part.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The \"310 knobs\" / \"279 knobs\" / \"274 knobs\" progression in 08_GLOSSARY \u00a71.15",
+   "why": "Superseded by `notes/CURRENT_DEFAULTS.md`, which is generated and cannot drift. Keeping a hand-written count in a hand-written file is the exact class the generated file exists to abolish.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "04_RESULTS \u00a73's present-tense \"a default run today is not arm B\" and \u00a710.3's \"the HEAD default configuration\" gloss on `seedfloor_*`",
+   "why": "Both rest on `FAB_N0=3`, changed 2026-08-17. The seed values and the invalidation reasoning behind them are unaffected; only the mapping to \"today's default\" is dead.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The `pgate` arm and any arm whose flags equal the current defaults",
+   "why": "`pgate` became an alias for `base` the moment `TOK_MINT_PMIN=0.10` became the default and was renamed to `nogate`. `nocompose` has been in the same state since `be50e3a` and is still shipped inside the `ablate`/`tokens` presets, where it reads as a control.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "07_WIP \u00a71's pasted `git status` transcript",
+   "why": "A point-in-time assertion about a working tree from 2026-08-15 used to close `DOC_PLAN` \"know NOW\" #3. It cannot be true or false at any later commit and should be a dated note, not a section.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Duplicate statements of the E14/E15/INV-15 story across 01, 03, 04, 06, 07 and 08",
+   "why": "The arm-B-ran-with-no-culling finding is restated in full in at least six places with slightly different wording. Not wrong, but it is the largest single source of restatement in the corpus and a rebuild should carry it once with cross-references.",
+   "safe_to_drop": false
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "`notes/_evidence/commit_log.txt` is the ONLY surviving record of the 267 commits this entire corpus cites. The git history in this checkout does not contain a single one of the referenced hashes.",
+   "why": "Every claim in every file is anchored to a short hash. If that file is lost, the corpus becomes unverifiable prose. It must be preserved verbatim through any rebuild, and any regenerated documentation must keep citing it rather than assuming `git show` works.",
+   "evidence": "`git cat-file -t c76dc74` \u2192 \"fatal: Not a valid object name\"; notes/_evidence/commit_log.txt contains 267 full commit messages"
+  },
+  {
+   "item": "The two instrument fixes and their ancestry order: `5f4f117` (2026-08-07) is an ancestor of `c76dc74` (2026-08-13). `c76dc74`'s own verdict \u2014 \"No result in the record predates these fixes safely: every arm comparison was measured through an instrument that was changing the thing it measured\" \u2014 is the single most load-bearing sentence in the corpus.",
+   "why": "It is the reason `04_RESULTS` carries an INSTRUMENT column that `runs.csv` does not, and the reason 23 of 42 rows cannot be compared to the other 19. Losing it re-opens every voided comparison.",
+   "evidence": "notes/01_TIMELINE.md:49-52, :66; notes/05_ERRORS.md:2324 (INV-13)"
+  },
+  {
+   "item": "The mechanism behind INV-13, stated once and worth carrying verbatim: `build_stream()` draws every segment length from the GLOBAL RNG and the stream is rebuilt each epoch, so what epoch 2 trains on is a function of where the global generator was standing \u2014 and every diagnostic drew from that same generator. Measured: 23,835 of 250,027 global draws (9.5%) taken inside evaluation passes.",
+   "why": "It is why 'how much you measured decided what you trained on', why two arms differing in a training knob got different text in epoch 2, and it is the root cause of the levers-not-isolated problem the researcher raised seven times. The countermeasure (`frozen_rng()` / `@no_rng_drift` plus a dedicated stream generator seeded from `(SEED, epoch)`) must survive any rewrite of the eval battery.",
+   "evidence": "notes/05_ERRORS.md:437-448, :486-515; notes/02_IDEAS.md:2022-2027"
+  },
+  {
+   "item": "Seed variance is a property of the ARM, not of the instrument. Across four arms of one 2x2 measured the same day on the same instrument, estimated \u03c3 ranges 0.047 to 1.225 \u2014 26x \u2014 and instability tracks ramping. Never pool it.",
+   "why": "It changes seed-budget arithmetic by orders of magnitude (D-vs-B \u2248 12 paired seeds; 2.009-vs-1.999 \u2248 1,450) and it means 'the noise floor' is not a single number anyone can quote. The corpus flags that whether the VARIANCE difference or the MEAN difference is the real phenomenon has never been asked, and the variance is the larger effect.",
+   "evidence": "notes/04_RESULTS.md:165-175, :319-346"
+  },
+  {
+   "item": "`_due` is not a predicate: it RECORDS the step and returns True, so calling it twice in one `if`/`elif` consumes the event. This killed re-segmentation entirely for three 18-epoch runs, was separately armed for `grow`, and its early-return on n<=0 silently disabled signature batching for every `RETOK_EVERY=0` arm.",
+   "why": "Three distinct bugs from one helper's contract, and the third one is what makes the `frozen` vs `frozen_nr` pair \u2014 quoted in the source as the largest single effect on record \u2014 not a single-knob comparison. Any cadence helper in a rebuild needs this contract stated at its definition.",
+   "evidence": "notes/05_ERRORS.md:353-388 (E3.3, E3.4, E3.5); notes/08_GLOSSARY.md:537-539"
+  },
+  {
+   "item": "A maintenance path with no counter cannot be told from one that silently stopped. The corpus names `retire_stale`, `fuzzy_segment`, `track_usage`, `FAB_RESCUE`, `remap_mem_ctx`, the memory probe and the domain-prior section as instances, and now ships a count with every new maintenance path.",
+   "why": "05_ERRORS calls this \"the single most transferable rule the record produces\". It is the generalisation of the whole DID-IT-FIRE discipline and it is applied by construction in the current code.",
+   "evidence": "notes/05_ERRORS.md:2390, :2461-2463; notes/07_WIP.md:315-321; still true at HEAD \u2014 tokenizer.py:391,396,402,420 have no live caller"
+  },
+  {
+   "item": "A value can be wrong (banner), unread (typo), or read-but-unreachable \u2014 and each needed its own check because each is invisible to the others. The three layers are the derived `[config] EFFECTIVE` banner, the NOTHING-READ-THESE/not-verified audit, and the never-fired loss-term audit.",
+   "why": "`DIV_W` cost a 20-minute pilot to the third layer after the first two certified it correct; `TOK_ANCHOR` printed on the EFFECTIVE line of every run in the project while contributing nothing. A rebuild that ships only one of the three re-opens the other two.",
+   "evidence": "notes/05_ERRORS.md:2021-2032 (E10.21), :2397-2398; notes/08_GLOSSARY.md:716-719"
+  },
+  {
+   "item": "Purity rises MONOTONICALLY with fragmentation (one window per cluster scores 1.0); completeness falls with it; neither can see whether anything recurs. V-measure against the four seeded corpora is the WRONG target \u2014 the corpora are a scaffold, and V actively penalises the intended behaviour.",
+   "why": "Weeks were spent steering by these metrics and the two headline results of that campaign were both retracted. The corpus' replacement headline is RECURRENCE (visits per domain, fraction visited once, fraction recurring \u22653 times), and domain counts/purity/silhouette/V/specialization are labelled DIAGNOSTICS, NOT TARGETS.",
+   "evidence": "notes/05_ERRORS.md:752-761 (E7.1), :1441-1453 (E8.17); notes/08_GLOSSARY.md:134-144, :451-461"
+  },
+  {
+   "item": "Prefer a RETRAINED ablation to an eval-time KNOCKOUT. They disagree badly: the FABRIC knockout said +0.709 b/B, the retrained pair said 3.089 vs 3.090.",
+   "why": "The knockout number justified a default for two months and was retracted. This is the cleanest methodological lesson in the corpus and it is one line to state.",
+   "evidence": "notes/08_GLOSSARY.md:640-643; notes/04_RESULTS.md:549-559"
+  },
+  {
+   "item": "Every verdict needs a null (shuffled / permuted / matched-size), and the null needs an error bar. Two 4 MB runs differing only in SEED printed OPPOSITE informativeness conclusions against a hard cutoff of 0.010; the true null spread was \u00b10.020.",
+   "why": "Every experiment in the record that shipped with a pre-specified null still stands; almost every one that did not, does not. This is the strongest predictor of survival in the whole corpus.",
+   "evidence": "notes/05_ERRORS.md:867-876 (E7.8); notes/03_EXPERIMENTS.md:930-932; notes/04_RESULTS.md:728-747"
+  },
+  {
+   "item": "Quote every held-out figure against its OWN run's order-1 anchor, never against another row's. The corpus was re-fetched and order-1 moved 3.440 \u2192 3.747; raw numbers suggested 18 epochs cost 0.34 b/B, own-anchor numbers say they bought and cost nothing (1.411 vs 1.441).",
+   "why": "`runs.csv` has no corpus column, so raw `held_out` cannot be read down the table. `\u0394 order-1` is the only cross-corpus-comparable quantity and it is reproducible from the CSV to three decimals.",
+   "evidence": "notes/01_TIMELINE.md:466-468; notes/04_RESULTS.md:104-111, :777-786"
+  },
+  {
+   "item": "There is no single bits/byte scale marker across text and code: GPT-2-small is 1.0878 on Pile-CC, 1.1111 on OpenWebText2, 1.2253 on the Pile aggregate and 1.7912 on GitHub. Every Python result in this project was read against the web-text anchor and looked worse than it was.",
+   "why": "`continual_eng_py` is the only row containing code and it is the project's one continual-learning result. The correction is recorded in LITREVIEW_FINDINGS and applied in 04 and 06, but `self_organize.py` still prints the 1.0\u20131.2 line unconditionally for every domain.",
+   "evidence": "notes/04_RESULTS.md:148-163, :793-806; self_organize.py:8023"
+  },
+  {
+   "item": "`ACROSS THE RUN BOUNDARY` was a WEIGHTS-ONLY number: `holdout_bpb` \u2192 `_eval_logits` never consults the store. The literature's own framing: 'there is no weights-only version of BWT \u2014 you are computing BWT on a different, ablated system'.",
+   "why": "It is the one number the continual-learning claim rests on, and the corpus' own \u00a79 Step 0 prescribes the fix (report the matched pair R_full/R_weights so their difference IS the memory's contribution, and it separates an eviction problem from a forgetting problem). That fix is now in the code and the notes do not know it.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:106-169, :528-535; self_organize.py:5066, :5134, :5141"
+  },
+  {
+   "item": "Plain reservoir sampling GUARANTEES the observed failure mode as a theorem: E[slots held by A] = M\u00b7N_A/N \u2192 0 as a new domain streams indefinitely \u2014 'the old domain is not evicted by a bad decision, it is diluted to zero by a correct one'. The remedy in the replay-CL literature is per-source / class-balanced quotas (CBRS, iCaRL); this project's partition is keyed on EXPERT, not domain, and both domains route to overlapping experts, so it is not a per-source quota.",
+   "why": "It explains why every English memory entry vanished in the one continual-learning run, and it means the researcher's recorded rejection of a per-domain quota (`5c711cf`) should be re-decided rather than inherited. It also flags that this project is in the replay-CL regime, not the kNN-LM regime.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:550-565, :692-696"
+  },
+  {
+   "item": "`EVICT=lru` (least-recently-RETRIEVED) was made the default before the test that would price it was run, and the caching literature says LRU-on-retrieval is precisely the pattern that field spent five years moving away from \u2014 a new domain flooding the store is the textbook SCAN pathology, which plain LRU has no defence against.",
+   "why": "It is a live, cheap, internal test (compare the new domain's occupancy share under `EVICT=lru` vs `EVICT=recency` after a domain switch, using `mem_evict_test.py`'s existing harness shape) and it bears directly on the project's stated target.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:684-690 (Q8); notes/10_HISTORY_FINDINGS.md:363-371 (R48)"
+  },
+  {
+   "item": "Reading beat running by a wide margin: ~40% of catalogued defects were found by reading the code, and the five most expensive (`FABRIC=0`, `PHASED=0`, `MANAGE_MERGE=0.12`, `MEM_PER_EXPERT=1`, no culling at all) produced no crash and no implausible number. Running the same thing twice found what one run could not, every time it was tried, and it was tried rarely.",
+   "why": "It is the operational conclusion of the whole error catalogue and it directly sizes where audit effort should go in any rebuild.",
+   "evidence": "notes/05_ERRORS.md:2442-2463"
+  },
+  {
+   "item": "29 retractions exist ONLY in the conversation and never reached the repo record (R21\u2013R49 in 10_HISTORY_FINDINGS, each marked '\u2014 not in INV'). Several are still asserted in durable places: the shared-`q_route` refactor that made the chain memoryless, the 'single runs are valid' methodology that governed a week of collection, the `be50e3a` commit message, and the GPT-2 anchor.",
+   "why": "A claim withdrawn only in chat will be rediscovered from the commit log, the code comments, or the run logs, all of which still assert it. This list is the only place they are recorded and the transcript that sourced it is the corpus' most perishable input.",
+   "evidence": "notes/10_HISTORY_FINDINGS.md:95-99, :217-224 (R32), :246-265 (R35, R36), :278-283 (R38), :337-345 (R45)"
+  },
+  {
+   "item": "The two documentation errors that cost real work, named by `notes_check.py` itself: 02_IDEAS filed A91 as 'NEVER IMPLEMENTED' for a mechanism that had been built, and that entry was 'read during the 0.75 GB planning and used to tell the user the mechanism did not exist'; and nine files stated `FAB_N0=3` a week after it became 2048, including 00_INDEX's 'five things to know before spending any GPU time' item #1.",
+   "why": "It is why `CURRENT_DEFAULTS.md` is generated and `notes_check.py` is wired into `selftest.sh`. Any regenerated corpus must keep that split: one generated file states current defaults, every other file is a dated record and must SAY it is a record.",
+   "evidence": "notes_check.py:4-27; notes/CURRENT_DEFAULTS.md:3-10"
+  },
+  {
+   "item": "The automated drift check has a failure mode of its own: it rewrites history to satisfy a check about the present. At `0065372` it produced an altered verbatim commit quotation (06:94) and a historical table cell that contradicts its own column header (06:461), and its regexes still miss table cells and 'has X at Y' prose (07_WIP's LR_DECAY=0.0 survives).",
+   "why": "A checker that can silently make a record wrong is worse than one that only reports. Any rebuild should make the check report-only for lines inside block quotes and inside tables whose header names a commit or date, and should widen the value-detection to table cells.",
+   "evidence": "notes_check.py:103-111, :141; `git show 0065372 -- notes/06_CONTINUAL_LEARNING.md`; notes/07_WIP.md:146 still reads '`_SPEC` has `LR_DECAY` at **0.0**' while _SPEC says 1.0"
+  },
+  {
+   "item": "A gate only covers what it exercises. The 12 kB smoke certified a change that killed both pilot arms in under two minutes; the `no_experts` gate arm was vacuous and had passed in every run since it was added; `_flags_for` defined inside a `case` branch would have resolved every smoke arm to the empty string, reporting seven identical runs as seven passing arms.",
+   "why": "Three separate false-pass mechanisms in the same harness. It is why `equiv.sh` exists alongside the smoke gate, and why `equiv.sh HEAD HEAD` (the per-machine determinism self-test) must run before any verdict is believed on a new device.",
+   "evidence": "notes/05_ERRORS.md:1737-1741 (E9.18), :1721-1723 (E9.16), :1649-1659 (E9.8), :2423-2424"
+  },
+  {
+   "item": "The disproportion, dated: the target was stated on day one, the mechanism that tests it (`PHASED`) was off until day 8 and was found by the researcher not by an audit, and the first continual-learning measurement ran on day 25 of 26 \u2014 n=1, with its log lost. One of 42 `runs.csv` rows and 2 of 56 experiments bear on the stated target.",
+   "why": "It is the corpus' own answer to 'what should be run next', and the operational conclusion is concrete: replicating that one run across seeds buys more than any further arm.",
+   "evidence": "notes/06_CONTINUAL_LEARNING.md:36-57; notes/10_HISTORY_FINDINGS.md:787-809; notes/DOC_PLAN.md:497-499"
+  }
+ ],
+ "open_questions": [
+  "Was the alteration of the `c316813` quotation in 06_CONTINUAL_LEARNING.md:94 driven by `notes_check.py` or by a hand edit in the same commit? I can reproduce the diff but not the checker's verdict on the original line, because the check requires a default-claiming phrase attached to the value and the original line has none.",
+  "Is E10.46's 'LR_DECAY multiplies the floor' bug still live at HEAD? The multiplication at self_organize.py:4848 still squares `LR_MIN_FRAC` on paper, but it is now gated on `_n > 1` and the surrounding comment claims the gating makes it safe. I did not run the schedule to confirm the effective floor of a multi-cycle run.",
+  "Does `LR_RESTART_DAMP` (added at the same time as the LR_DECAY flip, default 0.5) change any conclusion in 03 \u00a78 or 04 \u00a76? It appears in no note, and no `runs.csv` row postdates it.",
+  "How many arms does `_flags_for` actually define? My count of 99 case labels includes any `a|b)` alternation as one label and may include non-arm dispatch cases; the true arm count needs a parse of the function rather than a grep.",
+  "What happened to `runs/`? It is gitignored and absent, so I cannot tell whether the 481/420 logs and 47 directories the notes analysed were deleted, moved, or simply never existed in this container. Without them 07_WIP \u00a79.1's 413-reading world-model refutation cannot be re-checked.",
+  "Does the checkpoint pair for the one continual-learning run (`a9d7258`) still exist on the GPU box? 06 \u00a77 proves `holdout.py` can reconstruct the boundary figure and that it reproduces a commit-recorded result byte-for-byte, so this is the cheapest recoverable result in the project.",
+  "Was `FAB_GROW=0` exported on the command line for the `a9d7258` run? Only the lost log could say, and the residue 06 \u00a77 finding 6 records \u2014 growth on at cap 4096 yet the run ended with six experts \u2014 is unexplained either way.",
+  "Which of 05_ERRORS' 12 'not fixed at HEAD' entries are still open after the 2026-08-26..28 work? I verified E9.32 (no noise baseline), the never-called maintenance paths, and E2.10 as still open, and E7.41 as now largely addressed; E2.6, E2.14, E6.7, E7.15 and E10.2 I checked only against the notes' own re-verification at `eecb277`.",
+  "Arm A's `FAB_N0`: 3 per `cc0a377`/X46 or 1024 per `longrun.sh:255`/X52? 04_RESULTS flags this and declines to guess; it needs the run's own config banner, which is in a log that no longer exists here.",
+  "Did the six `_flags_for` arms that 07_WIP \u00a77a names as highest-value (`frozen2k`, the `nocompose`/`compose`/`mintnovel`/`composenov`/`noanchor` 2x2, `prob_use`/`prob_emb`) ever run in the 2026-08-16..28 work? None of them appears in `runs.csv`, which is itself stale.",
+  "What is the current state of `09_COMMENT_AUDIT`'s 19 WRONG comment blocks? The file records that none had been applied; I could not check whether the 2026-08-26..28 commits (several of which are explicitly comment corrections) closed any, because every line reference has drifted.",
+  "Does the corrected claim 'FAB_N0=2048 means the default IS arm B' hold as an equivalence? HEAD is `FAB_GROW=1` with `FAB_RAMP_TO=0.5`, which the `_SPEC` comment says neuters the ramp \u2014 but arm B was `FAB_GROW=0`, and `spawn_from` historically ignored `FAB_GROW`. The measured arm closest to HEAD's config is `rampfrom2048` (mean 2.009, spread 0.160, INV-19-relabelled), not arm B (1.999 / 0.080).",
+  "Is the `EXPERTS`/`FABRIC` `elif` exclusivity still at `self_organize.py:427` as 07_WIP \u00a72.1 states? I confirmed the exclusivity persists in behaviour (`ExpertBank(...) if EXPERTS else None`) but not the specific line, which has drifted with the file.",
+  "The corpus' provenance chain assumes `notes/_evidence/chat/` is durable. Nothing verifies it against a source; the 455-turn extraction, the 12 chunks and the 12 structured extracts are the sole record behind 02_IDEAS and 10_HISTORY_FINDINGS and cannot be regenerated.",
+  "How many of the 44 INV rows would change status if re-adjudicated against the 2026-08-26..28 code? INV-25 has demonstrably moved (the matched pair is implemented); I did not attempt the other 43."
+ ]
+}

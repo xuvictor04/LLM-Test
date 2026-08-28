@@ -1,0 +1,1243 @@
+{
+ "area": "chat-a",
+ "summary": "Owner transcript lines 1-2700 of the LLM-Test session. The range opens mid-session (a compaction summary at L2, a second at L1888) and runs from committing the DIV_W/FAB_LR_OWN default changes through fifteen numbered pilot \"rounds\" on the owner's GPU box. The dominant activity is a loop: the assistant edits self_organize.py / longrun.sh in a container that has no GPU and (after a rebuild) no torch, pushes to branch rm-predict, hands the owner a single `git pull && ... bash longrun.sh ...` line, and the owner runs it on a rented Ubuntu GPU box and pastes back the grid summary plus uploaded .log files. The scientific arc: growth-off was proposed and reverted on the owner's objection; the ramp was found to starve the REGRESSION/stall growth triggers; identity collapse turned out to be already fixed at HEAD and FAB_EMB_VAR was found to *cause* it; mintok's apparent win was a per-token units artifact; the utilization cull gate was found shut in every run since FAB_N0=2048 landed (a regression the assistant introduced), fixed by FAB_PRESSURE=0.45; the GROW_CAP capacity valve was chased through five separate defects (two of them unit mismatches between flush-counts and step-counts) before it fired; a 0.75 GB / 8-epoch run and a 16-epoch run both failed, the latter blowing up at the epoch-2 LR peak. Specialization read INTERCHANGEABLE in every arm measured (up to 32). Every number below is n=1 or n=2 on 4-25 MB pilots against a measured replication floor of 0.039-0.131 b/B, so almost nothing in this range separates from noise.",
+ "facts": [
+  {
+   "claim": "Standing constraint carried into this range verbatim: \"the runs folder and its internal contents should not be overwritten\"; plus confirm before action on perf changes; no compromises (do not remove/downgrade functionality for speed); default to bash unless python specified; do not use AgentTool or workflows unless requested; commit and push to `rm-predict` only; do not create PRs unless explicitly asked; no model identifiers in commits/PRs/code.",
+   "evidence": "/root/.claude/projects/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70.jsonl:2 and :1888 (\"**Standing constraints (still in force):**\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The owner's two definitive goals are restated at the top of both compaction summaries: \"language quality and continual learning without catastrophic forgetting\" \u2014 explicitly NOT optimizing the tokenizer, VMAX, or expert count for their own sake.",
+   "evidence": "/root/.claude/projects/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70.jsonl:2",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner works exclusively on branch `rm-predict` in private repo `xuvictor04/LLM-Test`.",
+   "evidence": "jsonl:2; confirmed by git output in owner pastes, e.g. :1450 \"96660b3..4efd754  rm-predict -> origin/rm-predict\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L248): \"Growth off? That sounds anti continual learning.\" \u2014 the owner rejected the assistant's FAB_GROW=0 default. Same turn: \"We can pause the domain measuring, if it doesn't affect too much else. Memory will have to be per expert then. We had a way to get halt to work before. I believe by using min tokenizer. We can try it again with the new setup. Continual learning we can try after that\"",
+   "evidence": "jsonl:248",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L366): \"Since growth seems to be an issue, lets best utilize the other ways, mechanism, and variations for growth. And perhaps explore more. / Fix the defect then / I still want to test a run with minimum tokenizer with these new configs. Regarless, lets look at the ways for Halt fixing. / Nice that per expert memory is already on. But we can try without domains for a run.\"",
+   "evidence": "jsonl:366",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L534): \"Let's run all 3.\" \u2014 approving the base/keynorm/embvar identity-space ladder that became the 10-arm round3 grid.",
+   "evidence": "jsonl:534",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PREFERENCE (L698): \"I don't want to say that mintok is required, but lets do a few, and see what results are, before possibly pivoting.\" \u2014 owner resists adopting a config before replication.",
+   "evidence": "jsonl:698",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PUSHBACK ON OVER-SPECIFICATION (L715): \"Why 4 seeds though? And so many runs and for what?\" \u2014 the assistant had proposed SEEDS=\"0 1 2 3\"; it cut to 2 seeds after this.",
+   "evidence": "jsonl:715; assistant reply at :718 (\"Fair \u2014 I over-specified, and the fourth seed was padding, not information\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L809): \"How about this, should we try a big run, with much expanded size (in terms of experts and length) for the 40GB run that we've thought of way back when?\"",
+   "evidence": "jsonl:809",
+   "confidence": "verified"
+  },
+  {
+   "claim": "BINDING PROCESS CONSTRAINT (L837): \"Explain the steps. We need to decide configs together, since I want to make sure things are set up in a way I'd like it, otherwise we waste many you hours. Instead of 40GB, let's do 0.75 GB\"",
+   "evidence": "jsonl:837",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LONG-RUN CONFIG SET BY OWNER (L858): \"Fabric has been essential, at least by my understanding previously. Let's not remove it / English only. / No tokenizer freeze, with the expanding vmax as pressure is hit long enough. / Expert pop at 4k, with ability to expand when pressure hit long enough. 8 passes (assuming it is read at the same estimated time) / Only one seed, since multiple would possibly be redundant / Also, tell me the defaults, so I know what is off and on\"",
+   "evidence": "jsonl:858",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PREFERENCE (L858, restated L1950): the owner wants to be told the full on/off default state before committing GPU hours \u2014 \"tell me the defaults, so I know what is off and on\".",
+   "evidence": "jsonl:858",
+   "confidence": "verified"
+  },
+  {
+   "claim": "OWNER'S DESIGN INTENT FOR THE CAPACITY VALVE (L877): \"My conception of ramp was entirely different from what it seems you implemented. It should have no hard cap, and expands gradually, as a mini pressure valve, as learning progresses and the count saturates. Not open up half when available, but rather increase by a few hundred every 50k steps or so. / I meant 8 epochs by passes / Maybe we can add weight decay later on? / Also what about the other new stuff?\" Also: \"I thought we built a mechanism for allowing caps to be expanded after certain time? For vmax as well?\" \u2014 the owner was right and the assistant was wrong; GROW_CAP existed.",
+   "evidence": "jsonl:877; assistant concession at :908 (\"You're right and I was wrong \u2014 the mechanism exists\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COURSE CORRECTION (L910): \"It doesnt look like we are ready for the 40GB run. Or even close to it, since there is so much stuff we have unsettled, while we have been looking at a minor change, min token or not, when that has been tried a while ago, been a relative success, and I just wanted a simple rerun. / Instead of heading to the 0.75 GB run, lets fully settle on everything. Also, for the 50k steps, I am thinking instead, it should be 20k steps after the cap is hit. And not a percentage based growth, but linear (so not 1.1x)\"",
+   "evidence": "jsonl:910",
+   "confidence": "verified"
+  },
+  {
+   "claim": "OWNER CRITICISM (L910): the assistant turned a requested simple rerun of mintok into a full grid. The assistant accepted this: \"You're right, and the criticism lands. Mintok was a known result you wanted re-confirmed, and I turned a rerun into a grid.\"",
+   "evidence": "jsonl:910; assistant at :913",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L1016): \"Since they have never been run, let's try them out. Let's add them on top of our existing infrastructure. / For frozen runs, does it also freeze the embedding learning for the tokens as well? That would be bad for the system.\" \u2014 the answer was no: TOK_MINT_UNTIL sets only `_mint_frozen`, which gates pair tallying and TOK.maybe_grow(); no requires_grad=False / .detach() near embeddings, delta, dbias or head.",
+   "evidence": "jsonl:1016; assistant answer at :1092",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L1125): \"Yes, fix then prep the diagnosis\" \u2014 authorising the _proj_steps fix plus the fabric.rescue/fabric.spare diagnosis.",
+   "evidence": "jsonl:1125",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L1343): \"Yes, lets do it and see what happens\"; (L1391) \"I think it is best for the tests to determine which one\" \u2014 owner delegated the choice of cull-gate option to measurement rather than to argument, producing round5's five arms.",
+   "evidence": "jsonl:1343, jsonl:1391",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION (L1511): \"The new fab pressure can be the default\" \u2014 authorising FAB_PRESSURE 0.75 -> 0.45 as the shipped default.",
+   "evidence": "jsonl:1511; shipped in commit 8bf825f per assistant at :1538",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION (L1542): \"1 let's keep at 94000000 for now, but this can be changed through more pilots. / 2 then let's first measure grow cap. Let's make the initial cap very low just for the test to measure if it works before the long run. / For the long run, I want to checkpoint every local low point (the areas with best performance).\" \u2014 this is the origin of BEST_KEEP.",
+   "evidence": "jsonl:1542",
+   "confidence": "verified"
+  },
+  {
+   "claim": "QUESTION/CONSTRAINT (L1653): \"We still havent ever gotten a lift for expert. / How does your cadence work? it should only fire after being maxed out for a while. / Also, suppose I wanted to keep this feature, how would we resolve the worsening of quality?\" \u2014 the owner's stated cadence semantics (maxed out for a while, THEN lift) is what the implementation was checked against.",
+   "evidence": "jsonl:1653",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L1721): \"The vocabulary size increse looks liek too much, 640 when at 2k, is almost 30%. / The increase should be more like 5-10% each time. Similarly for the experts, at a similar percentage.. / It works, now lets see it in action, and run some more pilots to see if it improves.\" \u2014 this reverses the owner's own earlier \"linear (so not 1.1x)\" instruction; the assistant flagged the reversal explicitly rather than switching silently.",
+   "evidence": "jsonl:1721; assistant at :1776 (\"This does reverse your earlier 'linear, not percentage' instruction, so I want to be explicit rather than quietly switch\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "QUESTION (L1853): \"Why would no fabric seem to have a lower loss?\" and (L1877) \"Now are we ready for the extended run? for a 0.75 GB set?\"",
+   "evidence": "jsonl:1853, jsonl:1877",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION (L1950): \"FAB_N0=2048 NMAX=8192 GROW_CAP_FAB0=3000 (~3686 final, 16\u201322 h) / Sure to the pilot. / Only english\" \u2014 owner picked the larger population option, approved a pre-flight pilot, and re-confirmed English-only.",
+   "evidence": "jsonl:1950",
+   "confidence": "verified"
+  },
+  {
+   "claim": "QUESTION (L2254): \"Are these enough?\" (round11); (L2331) \"What happened? It didn't go down, and never reached the loss of the short runs\" (the 0.75 GB run); (L2473) \"Looks worse again\" (round13).",
+   "evidence": "jsonl:2254, jsonl:2331, jsonl:2473",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DESIGN INSTRUCTION (L2560): \"Maybe the issue is that it should be 8 epochs for the original, 94MB I believe, but something different for an expanded size, since the length of an epoch is now very different. Let's make it step based instead\" \u2014 this produced the LR_STEPS knob.",
+   "evidence": "jsonl:2560; implemented per assistant at :2690 (commit 4366dbf)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "INSTRUCTION (L2570): \"Let's add your design change to a pilot for a test as well.\" \u2014 approving LR_SHIFT_WARM as a round15 arm alongside LR_STEPS.",
+   "evidence": "jsonl:2570",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the owner runs everything on a rented Ubuntu GPU box reached as user `ubuntu`, and the box's address changes between rounds \u2014 192-222-56-84, 192-222-51-135, 192-222-50-114, 192-222-58-178, 192-222-57-12, 209-20-158-46 all appear in pasted shell prompts.",
+   "evidence": "jsonl:651, :1093, :1266, :1450, :1609, :2254, :2430",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the boxes differ in speed. The assistant measured 1135 steps/min on the 209-20-158-46 box against 2155 steps/min on an earlier one, and warned that comparing across boxes/corpus re-fetches is how a prior conclusion went wrong.",
+   "evidence": "assistant at jsonl:2469 (\"the box is ~2x slower here (1135 vs 2155 steps/min)\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the assistant's own container has NO GPU and, after a rebuild partway through the range, NO torch. \"I can't run it here \u2014 no torch and no GPU in this container. Send me the two logs and I'll read them.\"",
+   "evidence": "assistant at jsonl:2112; also :1189 (\"The container rolled back and torch is gone\"), :1251, :1605",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: consequence of the missing torch \u2014 proj_test.py, cap_test.py and ramp_test.py were deliberately written to load their function by AST from the shipped source so they run without importing self_organize. mem_evict_test and growth_test fail in-container purely on the torch import.",
+   "evidence": "assistant at jsonl:1194, :1217, :1251",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the assistant's container rolled back repeatedly \u2014 \"this container has rolled back roughly a dozen times this session\" \u2014 and on one occasion moved HEAD onto the harness default branch `claude/hub-addition-1ueehb`, causing push rejections until an explicit `HEAD:refs/heads/rm-predict` refspec was used.",
+   "evidence": "assistant at jsonl:1262; rollbacks also at :326/:331, :384, :544, :729, :1189",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the assistant left the stray local branch `claude/hub-addition-1ueehb` in place rather than deleting it, on the grounds that deleting branches unprompted is not something to do, and never pushed it.",
+   "evidence": "assistant at jsonl:1262",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: uploaded log files expire. \"The uploads have expired, so I can't re-check those logs.\" This blocked a check of end-of-run LR that would have separated two hypotheses.",
+   "evidence": "assistant at jsonl:1059 and :1092",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the workflow is strictly hand-off \u2014 the assistant produces one copy-pasteable command, the owner runs it and pastes back the GRID SUMMARY plus attaches the .log files; the assistant repeatedly has to ask the owner to run a grep over runs/*.log because the summary table omits the DID IT FIRE lines.",
+   "evidence": "assistant at jsonl:605 (\"On your GPU box:\"), :654 (\"Could you paste the output of: cd runs/grid && for f in *.log ...\"), :1097; owner compliance at :656, :1102",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: `longrun.sh grid` is resume-safe by design \u2014 \"re-running this command SKIPS completed arms and never overwrites a finished log\" \u2014 which is how the standing no-overwrite constraint on runs/ is enforced mechanically.",
+   "evidence": "owner-pasted output at jsonl:651, :1093, :1609",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: a Stop hook (~/.claude/stop-hook-git-check.sh) fires on uncommitted or unpushed changes and is visible in the transcript as user-role feedback.",
+   "evidence": "jsonl:180, :954, :1252",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the pilot corpus is fetched fresh from HuggingFaceFW/fineweb-edu (sample-10BT) into data_pilot/train/eng, 0.06 GB, unauthenticated (\"Please set a HF_TOKEN\"), and `--resume given but no manifest found -- starting fresh` each time. The corpus is therefore NOT stable across rounds, which the assistant later identified as a confound.",
+   "evidence": "jsonl:1093, :1266, :2430; assistant at :2469 (\"data_pilot was re-fetched between them\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT: the owner began prefixing `DEVICE=cuda` on the run command from round11 onward.",
+   "evidence": "jsonl:2254 (\"DEVICE=cuda bash longrun.sh grid round11\"), :2430, :2473",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSISTANT ASSUMPTION THAT WAS WRONG: throughput. It first quoted ~1.6 GB/day -> 0.75 GB in ~11 h, then revised to 0.8-1.1 GB/day -> 16-22 h at the larger population, then MEASURED 2.24 GB/day at pop 3000 and 2.54 GB/day at pop 3932 -> 7-8 h. \"Throughput: I was wrong by 2.5x, in your favour... Launch cost is not linear in population \u2014 sparse top-k means only k experts run per window.\"",
+   "evidence": "assistant at jsonl:835, :1943, :2250",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSISTANT ASSUMPTION THAT WAS WRONG: it told the owner per-expert memory was already on. \"Correction: I told you earlier per-expert memory was already on. It isn't. MEM_PER_EXPERT defaults to 0 at HEAD.\" The owner had planned around it (\"Memory will have to be per expert then\", L248; \"Nice that per expert memory is already on\", L366).",
+   "evidence": "assistant at jsonl:631 and :650; owner at :248, :366",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSISTANT ASSUMPTION THAT WAS WRONG: it claimed the GROW_CAP soft-cap mechanism did not exist and had to be built, when the owner remembered correctly that it did. \"You're right and I was wrong \u2014 the mechanism exists. I missed it because it isn't in the groups I dumped, and because GROW_CAP defaults to 0, so it has never run.\" The proximate cause was a stale note: notes/02_IDEAS.md A91 said \"NEVER IMPLEMENTED\" while citing the very commit (e2db890) that implemented it.",
+   "evidence": "assistant at jsonl:908, :1015",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSISTANT ASSUMPTION THAT WAS WRONG: it estimated \"roughly 20 min/arm on a GH200\" for round3; actual arm times in the owner's paste were 488-2034 s (8-34 min), with nodom arms at ~500 s because routing had collapsed.",
+   "evidence": "assistant at jsonl:605; owner-pasted timings at :651",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DEFAULTS AS OF THE 0.75 GB PLANNING TURN \u2014 ON: FABRIC, WORLD_MODEL+WORLD_GROW, SELF_ORG+MANAGE, TOKENIZER+TOK_ONLINE, PHASED, chaining (SOCIETY=0, CHAIN_ROUTE=soc, CHAIN_VOTE=1, 4 hops), FAB_GROW=1, culling 2%, crossover 0.35, mutation 0.25, exploration 15%, memory 200k slots LRU with read probe every 25 steps. OFF: EXPERTS, MEM_PER_EXPERT=0, FAB_KEY_NORM=0, FAB_EC_W=0, TOK_COMPOSE=0 (making TOK_ANCHOR=0.05 inert), DROPOUT=0, WEIGHT_DECAY=0, RECON_W=0, TOK_MINT_UNTIL=0, GROW_CAP=0, LOSS_MASK_DEAD=0.",
+   "evidence": "assistant at jsonl:875 and :908",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Fixed run parameters the assistant declared not worth debating for the long run: MODEL=gru (2.3x faster than transformer on this box), D_MODEL=768, WIN=256, BATCH_W=16, CKPT_EVERY=50000, MEM_CAP=200000.",
+   "evidence": "assistant at jsonl:856",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round3 grid, runs/grid, 4000 kB/epoch x 8 epochs, freshly fetched 58M corpus, n=1 per arm): base 2.048 held-out / +1.392 d-order1 / 666 experts / 5.4% top-share; keynorm 2.003/+1.436/1930/7.2%; embvar4 2.109/+1.330/631; mintok 2.001/+1.523/483/8.1%; nodom 1.975/+1.464/443/96.2%; nodom_mem 1.969/+1.470/443/96.4%; embvar16 2.161/+1.279/1095; mintok_kn 2.027/+1.498/1552; nodom_mem_kn 2.231/+1.209/1694/2.6%; keynorm_ev 2.083/+1.357/1918.",
+   "evidence": "owner-pasted GRID SUMMARY at jsonl:651",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round3 logs): base reports IDENTITY SPACE nearest-neighbour 0.1443 \u2014 NOT collapsed. embvar16 at FAB_EMB_VAR=16 reports NN 0.0017 and is the only COLLAPSED arm in the grid. The report's own advice line \"Raise FAB_EMB_VAR\" is therefore backwards; it was replaced (commit 80fa009).",
+   "evidence": "assistant at jsonl:696",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round3): HALT mass associates perfectly with FAB_KEY_NORM \u2014 keynorm/keynorm_ev/mintok_kn all 0.9999 at routed depth 0.10-0.15, nodom_mem_kn 0.9999 at depth 0.49, everything else 0.0000 at depth 1.00. HALT flips from never halting to always halting on hop 0; no intermediate regime was found.",
+   "evidence": "assistant at jsonl:696, :953",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (mintok pair, runs/mintok, SEEDS=\"0 1\", pair 2 TOK_MINT_UNTIL=0 -- TOK_MINT_UNTIL=1): the arms saw DIFFERENT corpora (order-1 anchors 3.44 vs 3.52) so held_out is not comparable; compare.py refused it. On d_order1: MINT=0 1.406/1.472 (mean 1.439), MINT=1 1.513/1.378 (mean 1.446) \u2014 difference 0.0065 with the sign flipping between seeds. Mintok is a dead heat.",
+   "evidence": "owner paste at jsonl:719; assistant analysis at :807",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (mintok pair): the `curve` column replicated 4/4 \u2014 MINT=0 gave +0.285/+0.365, MINT=1 gave exactly +0.000/+0.000 \u2014 but this was later shown to be a per-token units artifact, not a model property.",
+   "evidence": "assistant at jsonl:807 then retracted at :1336",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round4, runs/round4, 7 arms, n=1): base 2.034/+1.406; frozen2k (TOK_MINT_UNTIL=1 SEED_VOCAB=2048 VMAX=2048) 1.967/+1.681; mask (LOSS_MASK_DEAD=1) 2.086/+1.353; growcap 1.968/+1.514; ecw (FAB_EC_W=0.5) 1.965/+1.475/1112 experts/4.4% top-share; rescue (FAB_RESCUE=0.35) 2.048/+1.392; prob_use (TOK_PROBATION=200) 2.061/+1.579.",
+   "evidence": "owner paste at jsonl:1093",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round4 logs): growcap's capacity valve NEVER fired \u2014 `grep -c \"\\[capacity @\" growcap.log` = 0 and its vocabulary sat at its 1024 soft start all run. Its apparent +0.161 win over `mask` was therefore not attributable to the valve. FAB_RESCUE=0.35 fired ZERO times (\"ZERO fabric.rescue 0 ARMED AND INERT\") and every cull line in every arm read `spared 0`.",
+   "evidence": "assistant at jsonl:1120 and :1000",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round5, runs/round5, cull-gate arms, judged on DID IT FIRE as pre-committed): base 23 culls all sustained-error, 0 utilization culls, 0 spares, rescue unreachable; gate_nmax 296/5/291/1578; gate_press 220/16/204/1253; gate_soft 484/35/449/2749; gate_nmax_resc 104/16/88/3211 with FAB_RESCUE firing 203 times \u2014 the first ever measurement of A92.",
+   "evidence": "assistant at jsonl:1499; grid summary at :1450",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round5 b/B): base 1.968/+1.471/674 experts/8.4% top-share; gate_press 1.964/+1.476/515/13.7%; gate_soft 2.097/+1.386/620/14.7%; gate_nmax 2.047/+1.392/315/34.7%. gate_nmax's 34.7% top-share is 4-6x outside the 5.4-8.4% observed range.",
+   "evidence": "owner paste at jsonl:1450; assistant at :1499",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED: FAB_PRESSURE behaves as a SETPOINT, not a threshold \u2014 the population equilibrates at pressure x cap. Predicted 0.45 x 4096 = 1843, measured 1838. This corrected the assistant's own objection that 0.45 was \"a magic number fitted to one population size\".",
+   "evidence": "assistant at jsonl:1499",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round6, runs/round6, n=1): gc_real 2.045/+1.451/154 experts (FAILED rc=1 after 1662 s on a report-line crash, though the numbers were produced); gc_fast 2.273/+1.172/208; gc_loose 2.380/+1.065/198. Vocabulary lifts: gc_real 0, gc_fast 6, gc_loose 6 \u2014 gc_fast and gc_loose identical (same count, same first step 32047), proving the plateau condition was never the blocker; the blocker was GROW_CAP_EVERY=20000 against a 60k-step run.",
+   "evidence": "owner paste at jsonl:1609; assistant at :1649",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round6): expert caps lifted 0 times in every arm because the population equilibrates BELOW its soft cap \u2014 sustained-error culls remove 2-5 per manage pass while ramp growth adds +1 per event, settling ~165 against a cap of 256 (65% occupancy). The valve correctly declined; it was never pinned.",
+   "evidence": "assistant at jsonl:1689",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round7): the expert soft cap lifted for the first time in the project's history \u2014 \"[capacity @ 32047] experts pinned at 160 for 2001 steps and the loss has stalled (improving -0.0280 < 0.002) -> soft cap 160 -> 416 (+256)\" \u2014 only because GROW_CAP_FAB0=160 sat BELOW the settling point. Peak occupancy 1.60 of its soft cap.",
+   "evidence": "assistant at jsonl:1703, :1717; owner paste at :1695",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round7 decomposition, n=1): holding vocabulary at 2048, the valve costs 0.074 d-order1 (gc_ctrl +1.246 -> gc_fast +1.172); moving vocabulary 640 -> 2048 costs 0.205 (gc_real +1.451 -> gc_ctrl +1.246). Seed spread on this metric measured 0.066-0.131, so the valve's cost is inside noise and the size effect is 2-3x it.",
+   "evidence": "assistant at jsonl:1717; grid summary at :1695",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round8, n=1): gc8_p5 +1.411/2.075, gc8_p10 +1.405/2.072, gc8_small (VMAX=640 fixed) +1.237/2.259, gc8_big (VMAX=2048 fixed) +1.057/2.383. But both valve arms lifted only ONCE, by 32 and 64 tokens, so they effectively ran at gc8_small's vocabulary \u2014 the win is not attributable to the valve.",
+   "evidence": "owner paste at jsonl:1780; assistant at :1806",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round9 controlled population ladder, FAB_N0 alone varied): pop128 +1.150/199 experts used, pop256 +1.257/326, pop512 +1.251/426, pop1024 +1.335/479 \u2014 Pearson r = +0.93, slope +0.06 d-order1 per 100 experts. Bigger population is mildly better when it is the only thing moving.",
+   "evidence": "owner paste at jsonl:1810; assistant at :1849",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round9 nofabric, re-run after the crash fix): nofabric 2.043/+1.396. Against pop1024 +1.335 the gap is 0.061, inside the 0.066-0.131 seed spread \u2014 the fabric at its best tested size TIES with not having one.",
+   "evidence": "owner paste at jsonl:1853; assistant at :1873",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round9 decomposition, same corpus and anchor): nofabric model-ALONE 1.937 -> +memory 1.899 (memory contributes 0.038); pop1024 model-ALONE 2.222 -> +memory 2.011 (memory contributes 0.211). The base model is 0.285 b/B WORSE when the fabric is present \u2014 the fabric makes the base delegate and then hands back roughly what it took. SUFFICIENCY: 479 experts buy -0.002 over the best single rank-slot.",
+   "evidence": "assistant at jsonl:1866, :1873",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round10, runs/grid, n=1): lr_pilot 1.971/+1.468/vocab 2048/experts 3000/spare 0 (ARMED AND INERT); lr_novalve 2.336/+0.985/vocab 4808/experts 3932/spared 3586. lr_novalve independently reached 3932, confirming the ~3686 settling-point prediction. Peak occupancy 1.00 confirmed the ramp/pool fix.",
+   "evidence": "owner paste at jsonl:2116; assistant at :2250",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round11, runs/grid, n=1): lr_pilot2 2.037/+1.402/1303 experts/11.5% top-share; lr_vcap 2.178/+1.262/679/11.5%. lr_pilot vs lr_pilot2 are identical flags with no behavioural code change between them and landed 0.066 apart \u2014 that is the run-to-run replication floor at this config.",
+   "evidence": "owner paste at jsonl:2254; assistant at :2327",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (the 0.75 GB run, STREAM_LEN=94000000 EPOCHS=8, lr_pilot2 config): held-out ~2.288 with final vocabulary 8192; mean held-out by thirds 2.70 / 2.79 / 2.66; minimum 2.18 at step ~194,000. The capacity valve fired 24 times (5 expert lifts, 19 vocabulary lifts, 2048 -> 8192). Routing was NOT collapsed: 1654 distinct experts won a window, top share 1.7%, half the traffic across 91 \u2014 the log's \"1 of 3948 nodes used\" is the 32-window eval probe, not the run.",
+   "evidence": "owner paste at jsonl:2331; assistant at :2426",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round12, runs/sat, STREAM_LEN=25000000 EPOCHS=8, one knob apart, same box, adjacent runs): lr_vcap (VMAX=2048, frozen) 2.021/+1.426/805 experts/21.2% top-share; lr_pilot2 (grown to 3784) 2.162/+1.126/841/6.3%. 0.141 b/B against a 0.066 replication floor, 0.300 on the margin. lr_vcap's 2.021 is the best held-out of the session. Runtimes 15471 s and 14506 s.",
+   "evidence": "owner paste at jsonl:2430; assistant at :2469",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round12): both arms were STILL IMPROVING at the end \u2014 lr_vcap thirds 3.12/2.12/1.98, minimum 1.96 at step 258,000 of 282,000; lr_pilot2 thirds 3.22/2.58/2.20, minimum 2.14 at 216,000 of 260,000. All 13 lifts across both arms fired inside the +/-0.002 band after the band fix.",
+   "evidence": "assistant at jsonl:2469",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round13, runs/passes, STREAM_LEN=25000000 EPOCHS=16 LR_EPOCHS=0, arm lr_expvalve, 26612 s): held-out 3.476, vs-order-1 blank (worse than the order-1 anchor at 3.446), curve +1.118, 1275 experts, 3.6% top-share, region 0% weight 100%. It reached 2.226 at step 38,000 then went 2.23 -> 3.40 -> 4.05 -> 6.80 within 6,000 steps and never recovered; ~520,000 further steps (about seven hours) were spent below a level it had already reached.",
+   "evidence": "owner paste at jsonl:2473; assistant at :2556",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round13 vs round12, identical epoch boundaries at 25 MB/epoch): the epoch-2 fresh resample shocks both runs; what differs is LR at the boundary. lr_vcap (8-epoch cosine) was at 96/80/59/38/19% of peak at successive boundaries and recovered to 2.03; lr_expvalve (16-epoch cosine) was at 99/90/79/65/50% and settled near 3.4. Stretching the wavelength did not lower the peak, it lengthened the time spent near it.",
+   "evidence": "assistant at jsonl:2556",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (LR_STEPS test, lr_test.py): at the same step, the epoch-derived path differs by up to 93% of peak between two corpus sizes while the LR_STEPS path differs by zero. LR_EPOCHS=8 has meant 48,000 steps at STREAM_LEN=4e6 and 840,000 at 94e6 \u2014 a 17x range from one number.",
+   "evidence": "assistant at jsonl:2690",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Specialization read INTERCHANGEABLE in every single arm measured across this range \u2014 10 arms at round3, 12 after the mintok pair, 19 after round4, 24 by round5/6, 29 by round9, 30 at the 0.75 GB run, 32 by round12. Nothing has ever moved it, including FAB_EC_W which visibly restructured routing (1112 vs 674 experts, top-share 4.4% vs 6.8%).",
+   "evidence": "assistant at jsonl:696, :807, :1000, :1538, :1873, :2426, :2469",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Measured domain-partition genuineness: on a single-corpus run the assembler made 33 live domains, 30 scored `weak`, over ~2100 ephemeral source ids, and the partition failed its own shuffled-provenance null (own-domain 1.924 vs random-other 2.144, gap +0.220, null floor +0.223 +/- 0.003, excess -0.003) while probe_ckpt_geometry.py measured the encoder healthy (true-corpus silhouette +0.24, 1-NN 0.984).",
+   "evidence": "assistant at jsonl:179",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The continual-learning chain (eng -> add py -> eng) has NEVER been run in this range, and the assistant repeatedly flagged it as the only measurement that can currently justify the fabric.",
+   "evidence": "assistant at jsonl:953, :1538, :1873, :2327",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Growth mechanism firing counts from the DID IT FIRE audit are wildly unbalanced: replicate 412, crossover 124, explore 27095, but fabric.spawn 5. spawn stays at 1-9 per run regardless of any intervention tried, including after identity collapse was ruled out.",
+   "evidence": "assistant at jsonl:533, :696, :953",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The assistant used the Workflow tool at the end of the range (L2699, launching a 'round15-log-audit' fan-out) despite the recorded standing constraint \"do not use AgentTool or workflows unless requested\"; no request for it appears in the owner turns within lines 1-2700.",
+   "evidence": "jsonl:2699 (tool_use Workflow); constraint at jsonl:2 and :1888",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "FAB_GROW",
+   "effect": "Master switch for fabric population growth. Set to 0 then reverted to 1 in this range.",
+   "owner": "Fabric / PlateauGrowth in self_organize.py",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_RAMP_TO",
+    "FAB_NMAX"
+   ],
+   "evidence": "assistant at jsonl:179 (change), :365 (revert, commit 25aba88)"
+  },
+  {
+   "name": "FAB_N0",
+   "effect": "Initial live expert count. Changed 3 -> 2048 in commit 6380519. Building the population beats ramping to it.",
+   "owner": "Fabric",
+   "couples_with": [
+    "FAB_NMAX",
+    "FAB_PRESSURE",
+    "FAB_RAMP_TO",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "assistant at jsonl:190, :1387"
+  },
+  {
+   "name": "FAB_NMAX",
+   "effect": "Hard preallocation ceiling for experts. Only preallocation \u2014 the real operating ceiling is FAB_PRESSURE x FAB_NMAX.",
+   "owner": "Fabric",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "FAB_N0",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "assistant at jsonl:1387, :2250"
+  },
+  {
+   "name": "FAB_RAMP_TO",
+   "effect": "Fraction of cap at which the population-building ramp latches off. Set to 0.5 so the ramp latches at step 1 and stops starving the REGRESSION/stall triggers.",
+   "owner": "PlateauGrowth",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_NMAX",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "assistant at jsonl:365, :2112"
+  },
+  {
+   "name": "FAB_PRESSURE",
+   "effect": "Occupancy threshold gating the utilization cull route; behaves as a SETPOINT \u2014 population equilibrates at pressure x cap. Default changed 0.75 -> 0.45 (commit 8bf825f) on owner approval.",
+   "owner": "Fabric.manage()",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_NMAX",
+    "FAB_RESCUE",
+    "FAB_PRESS_SOFT",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "assistant at jsonl:1387, :1499, :1538"
+  },
+  {
+   "name": "FAB_PRESS_SOFT",
+   "effect": "New knob: judge occupancy against the GROW_CAP soft cap rather than FAB_NMAX. Built so option 3 could compete fairly; measured worse and later found to unpin the population (0.45 x 3000 = 1350).",
+   "owner": "Fabric.manage(cap=...)",
+   "couples_with": [
+    "GROW_CAP",
+    "FAB_PRESSURE",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "assistant at jsonl:1446, :2250"
+  },
+  {
+   "name": "FAB_RESCUE",
+   "effect": "Mutate-instead-of-cull rate. Lives INSIDE the utilization-gated branch, so it is unreachable whenever occupancy < FAB_PRESSURE. Fired 203 times once the gate opened \u2014 first measurement since it was built 2026-08-14.",
+   "owner": "Fabric.manage() gated branch",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "FAB_N0",
+    "FAB_NMAX"
+   ],
+   "evidence": "assistant at jsonl:1387, :1499"
+  },
+  {
+   "name": "FAB_KEY_NORM",
+   "effect": "Decides whether the HALT logit (and routing keys) is a raw dot product or a cosine over route_t. 0 -> HALT mass 0.0000 at depth 1.00; 1 -> HALT 0.9999 at depth 0.10. Controls HALT 4/4 but has no calibrated regime.",
+   "owner": "halt_key / routing in self_organize.py (~lines 1524, 1656)",
+   "couples_with": [
+    "ROUTE_REGION_W",
+    "PONDER"
+   ],
+   "evidence": "assistant at jsonl:365, :533, :696"
+  },
+  {
+   "name": "FAB_EMB_VAR",
+   "effect": "Expert identity-embedding variance. The report advised raising it to fix collapse; measurement shows it CAUSES collapse \u2014 NN distance 0.1443 (1.0) -> 0.1166 (4.0) -> 0.0017 COLLAPSED (16.0), with held-out worsening monotonically 2.048 -> 2.109 -> 2.161.",
+   "owner": "Fabric identity space",
+   "couples_with": [
+    "FAB_KEY_NORM"
+   ],
+   "evidence": "assistant at jsonl:654, :696"
+  },
+  {
+   "name": "FAB_EC_W",
+   "effect": "Entry-logit deficit bonus. At 0.5 it restructured routing hard (1112 experts vs 674, top-share 4.4% vs 6.8%) without moving specialization.",
+   "owner": "Fabric.entry_logits",
+   "couples_with": [
+    "DIV_W"
+   ],
+   "evidence": "assistant at jsonl:1092, :1000"
+  },
+  {
+   "name": "DIV_W",
+   "effect": "Expert distinctness reward. Default changed 0.0 -> 0.02 (commit 0809563) on n=1 evidence at the replication floor; the comment records it as a placeholder to be re-tested.",
+   "owner": "loss / Fabric.div_mass",
+   "couples_with": [
+    "FAB_EC_W",
+    "FAB_N0"
+   ],
+   "evidence": "assistant at jsonl:179, :190"
+  },
+  {
+   "name": "FAB_LR_OWN",
+   "effect": "Per-expert LR clone. Default changed 1 -> 0 (commit 0809563); measured effect 0.0040 and it explains the flat FAB_LR_CYCLE ladder; turning it off saves a ~50MB per-step clone.",
+   "owner": "Fabric optimizer path",
+   "couples_with": [
+    "FAB_LR_CYCLE",
+    "FAB_LR_GAMMA"
+   ],
+   "evidence": "jsonl:2 (summary), assistant at :179"
+  },
+  {
+   "name": "GROW_CAP",
+   "effect": "Master switch for the soft capacity valve (both experts and vocabulary). Defaults to 0 and had never run before this range. Lifts only when the cap is BOTH pinned AND the loss has plateaued.",
+   "owner": "capacity valve in self_organize.py",
+   "couples_with": [
+    "LOSS_MASK_DEAD",
+    "GROW_CAP_FAB0",
+    "GROW_CAP_VOCAB0",
+    "GROW_LIFT",
+    "GROW_CAP_EVERY",
+    "GROW_CAP_PLATEAU",
+    "PLATEAU_WARM",
+    "FAB_PRESSURE",
+    "FAB_RAMP_TO"
+   ],
+   "evidence": "assistant at jsonl:908, :953"
+  },
+  {
+   "name": "GROW_CAP_FAB0 / GROW_CAP_VOCAB0",
+   "effect": "Soft starting caps. CRITICAL: the expert soft cap must sit AT OR BELOW the cull settling point (FAB_PRESSURE x FAB_NMAX) or the population never pins and the valve is dead.",
+   "owner": "capacity valve",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "FAB_NMAX",
+    "FAB_N0",
+    "FAB_RAMP_TO"
+   ],
+   "evidence": "assistant at jsonl:1689, :1943"
+  },
+  {
+   "name": "GROW_LIFT",
+   "effect": "Size of each cap lift. Was a MULTIPLIER of 2.0 (runaway), changed to a flat count of 256 at owner instruction, then changed again to a FRACTION of 0.08 at owner instruction, with GROW_LIFT_MIN=8 as an absolute floor.",
+   "owner": "lift_to() at module level",
+   "couples_with": [
+    "GROW_LIFT_MIN",
+    "GROW_CAP_FAB0",
+    "GROW_CAP_VOCAB0"
+   ],
+   "evidence": "assistant at jsonl:953, :1776"
+  },
+  {
+   "name": "GROW_CAP_EVERY",
+   "effect": "Minimum interval between lifts. Semantics changed from steps-since-last-lift to STEPS-PINNED; default 2000 -> 20000. Was compared against a flush-count clock twice (two separate unit bugs).",
+   "owner": "capacity valve pin clock",
+   "couples_with": [
+    "BATCH_W",
+    "GROW_CAP_PLATEAU",
+    "PLATEAU_WARM"
+   ],
+   "evidence": "assistant at jsonl:953, :2250, :2327"
+  },
+  {
+   "name": "GROW_CAP_PLATEAU",
+   "effect": "Improvement threshold below which the loss counts as stalled (default 0.002). The gate was `improving < PLATEAU`, which admits every negative value \u2014 i.e. a run getting worse read as a stall. Changed to a two-sided band.",
+   "owner": "capacity valve plateau test",
+   "couples_with": [
+    "GROW_CAP_EVERY",
+    "PLATEAU_WARM"
+   ],
+   "evidence": "assistant at jsonl:2426"
+  },
+  {
+   "name": "PLATEAU_WARM",
+   "effect": "New constant (1000, deliberately NOT a knob): number of slow-EMA observations before 'not improving' is a reading rather than an initialisation. Replaces the misused GROW_CAP_EVERY warmup gate.",
+   "owner": "capacity valve",
+   "couples_with": [
+    "GROW_CAP_EVERY",
+    "BATCH_W"
+   ],
+   "evidence": "assistant at jsonl:2327"
+  },
+  {
+   "name": "LOSS_MASK_DEAD",
+   "effect": "Excludes unminted vocabulary rows from the softmax denominator. MANDATORY for the vocabulary half of GROW_CAP \u2014 without it the run measures the reservation, not the mechanism. Measured ALONE it is the worst arm of round4 (+1.353).",
+   "owner": "output head / loss",
+   "couples_with": [
+    "GROW_CAP",
+    "GROW_CAP_VOCAB",
+    "VMAX"
+   ],
+   "evidence": "assistant at jsonl:908, :1097"
+  },
+  {
+   "name": "VMAX",
+   "effect": "Fixes the softmax width at startup; the vocabulary grows into it by minting. It is a CEILING, not something that expands \u2014 it saturated at 2048 on a ~70k-step pilot. Vocabulary size is the largest single lever measured (0.141-0.205 b/B).",
+   "owner": "tokenizer / output head",
+   "couples_with": [
+    "GROW_CAP_VOCAB0",
+    "GROW_EVERY",
+    "GROW_BURST",
+    "LOSS_MASK_DEAD",
+    "SEED_VOCAB"
+   ],
+   "evidence": "assistant at jsonl:875, :1717, :2469"
+  },
+  {
+   "name": "TOK_MINT_UNTIL",
+   "effect": "Freezes vocabulary MINTING (sets _mint_frozen, gating pair tallying and TOK.maybe_grow). Does NOT freeze embedding learning and does NOT freeze segmentation. Measured a dead heat against base on d_order1.",
+   "owner": "tokenizer",
+   "couples_with": [
+    "RETOK_EVERY",
+    "SEED_VOCAB",
+    "VMAX"
+   ],
+   "evidence": "assistant at jsonl:1092, :807"
+  },
+  {
+   "name": "RETOK_EVERY",
+   "effect": "Re-segmentation cadence (3000). Independent of TOK_MINT_UNTIL \u2014 a frozen arm still pays a retok tax and still has fabric growth periodically blacked out, for no benefit.",
+   "owner": "tokenizer",
+   "couples_with": [
+    "TOK_MINT_UNTIL",
+    "note_shift blackout",
+    "GROW_CAP"
+   ],
+   "evidence": "assistant at jsonl:1092"
+  },
+  {
+   "name": "SELF_ORG",
+   "effect": "Domain self-assembly. SELF_ORG=0 is the no-domains lever, but it also collapses MEM_OWNERS to 1 unless MEM_PER_EXPERT=1 \u2014 so it is 'no partition at all', not 'partition by expert'.",
+   "owner": "self-organizing domain partition",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "MEM_OWNERS",
+    "MANAGE",
+    "ROUTE_REGION_W"
+   ],
+   "evidence": "assistant at jsonl:650"
+  },
+  {
+   "name": "MEM_PER_EXPERT",
+   "effect": "Partitions the memory store by expert. Defaults to 0 (assistant twice stated otherwise). Recorded cost at its own read site: global 200k slots -> memory contributes -0.097 b/B; 32 owners x 64 -> -0.652 b/B. It once made a faded domain vanish entirely.",
+   "owner": "memory.py",
+   "couples_with": [
+    "MEM_OWNERS",
+    "MEM_QUOTA",
+    "SELF_ORG",
+    "FABRIC"
+   ],
+   "evidence": "assistant at jsonl:631, :650"
+  },
+  {
+   "name": "MEM_OWNERS",
+   "effect": "Number of memory ownership buckets (64). Ownership is `own % n_own`, so at 2048 experts 32 experts share each partition \u2014 it is per-64-buckets memory, not per-expert.",
+   "owner": "memory.py",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "MEM_QUOTA",
+    "FAB_N0"
+   ],
+   "evidence": "assistant at jsonl:365"
+  },
+  {
+   "name": "BEST_KEEP / BEST_KEEP_TOL",
+   "effect": "New: retains the n most recent local lows as .best1..bestN, rotating, gated on being within BEST_KEEP_TOL (2%) of the best so far. Implements the owner's 'checkpoint every local low point'. Defaults to 0 \u2014 must be set explicitly. Rule is really 'a descent into a good region', a superset of true local minima.",
+   "owner": "_save_ckpt suffix path",
+   "couples_with": [
+    "CKPT_EVERY",
+    "MEM_CAP"
+   ],
+   "evidence": "assistant at jsonl:1605, :1649, :1943"
+  },
+  {
+   "name": "LR_EPOCHS",
+   "effect": "Cosine wavelength in epochs. LR_EPOCHS=0 (span all epochs) was the assistant's recommendation and broke round13 by holding the LR near peak across the epoch-2 resample shock.",
+   "owner": "_lr_at / _lr_total",
+   "couples_with": [
+    "EPOCHS",
+    "STREAM_LEN",
+    "LR_STEPS"
+   ],
+   "evidence": "assistant at jsonl:2469, :2556"
+  },
+  {
+   "name": "LR_STEPS",
+   "effect": "New knob (default 0, schedule bit-identical when unset): states the cosine wavelength directly in steps, skipping the epoch projection entirely. Built at owner instruction after 'LR_EPOCHS=8' meant 48,000 steps in one run and 840,000 in another.",
+   "owner": "_lr_total",
+   "couples_with": [
+    "LR_EPOCHS",
+    "EPOCHS",
+    "STREAM_LEN"
+   ],
+   "evidence": "assistant at jsonl:2690"
+  },
+  {
+   "name": "LR_SHIFT_WARM",
+   "effect": "New knob (default 0): attenuates the cosine for N steps after note_shift() marks our own distribution change (retok / epoch resample / LR restart). Multiplicative so it can only lower the rate, never raise it mid-anneal.",
+   "owner": "_lr_at",
+   "couples_with": [
+    "note_shift",
+    "RETOK_EVERY",
+    "EPOCHS"
+   ],
+   "evidence": "assistant at jsonl:2690"
+  },
+  {
+   "name": "STREAM_LEN",
+   "effect": "Bytes per epoch. Owner fixed it at 94000000 for the 0.75 GB run (94 MB x 8 epochs) and later ran pilots at 25000000. This is the number that makes 'EPOCHS=8' mean anything.",
+   "owner": "corpus streaming",
+   "couples_with": [
+    "EPOCHS",
+    "LR_EPOCHS",
+    "LR_STEPS",
+    "CORPUS_CAP"
+   ],
+   "evidence": "owner at jsonl:1542; used at :2430, :2473"
+  },
+  {
+   "name": "BATCH_W",
+   "effect": "Windows per flush (16). Everything below the batch early-out runs once per FLUSH while `step` advances once per WINDOW \u2014 the source of two separate 16x unit-mismatch bugs in the capacity valve.",
+   "owner": "main training loop",
+   "couples_with": [
+    "GROW_CAP_EVERY",
+    "PLATEAU_WARM"
+   ],
+   "evidence": "assistant at jsonl:2250, :2327"
+  },
+  {
+   "name": "FABRIC",
+   "effect": "Master fabric switch. FABRIC=0 crashed on an unguarded `_F0.div_mass` in the _EFF banner list; now covered by a static check in levers.py.",
+   "owner": "self_organize.py _EFF banner",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "DIV_W"
+   ],
+   "evidence": "assistant at jsonl:1849"
+  },
+  {
+   "name": "GRID_DIR / PAIR_DIR / SEEDS / DEVICE",
+   "effect": "longrun.sh harness controls: output directory (used to keep rounds from overwriting each other), seed list for paired arms, and device selection. Owner set DEVICE=cuda explicitly from round11.",
+   "owner": "longrun.sh",
+   "couples_with": [
+    "GRID_ARMS_DEFAULT",
+    "_flags_for"
+   ],
+   "evidence": "owner pastes at jsonl:1093, :1609, :2254"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "Utilization cull, spare and rescue silently unreachable in every run for several commits",
+   "severity": "critical",
+   "where": "Fabric.manage() early return in self_organize.py; introduced by commit 6380519 (FAB_N0 3 -> 2048)",
+   "symptom": "`if s.n_live <= 2 or (s.n_live / max(1, s.cap)) < pressure: return culled, spared` sits above FAB_RESCUE and the utilization spare. With FAB_N0=2048 against FAB_NMAX=4096, occupancy is 0.50 against FAB_PRESSURE=0.75, so the gated route never executed once. The owner had called culling 'semicritical to our evolutionary mechanism'.",
+   "evidence": "assistant at jsonl:1387: \"2035 live of 4096 = 0.50 occupancy vs FAB_PRESSURE = 0.75 / SELECTION OUT: 24 culled total, of which 24 for SUSTAINED error\"; \"I introduced this\"",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "Cull report line named a route that did not run, and DID IT FIRE conflated unreachable with inert",
+   "severity": "high",
+   "where": "cull report line and DID IT FIRE audit in self_organize.py; fixed in 95da3fe",
+   "symptom": "The line claimed 'cull under capacity pressure, bottom N% by utilization' for all 24 culls that actually came from the sustained-error route; fabric.rescue printed ARMED AND INERT, which reads as 'the idea does not work' when it means 'the run never asked'.",
+   "evidence": "assistant at jsonl:1387",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Ramp starves the REGRESSION and stall growth triggers",
+   "severity": "critical",
+   "where": "PlateauGrowth.step() in self_organize.py",
+   "symptom": "The ramp re-fires every cool//8 = 187 steps and each firing sets s.last, so the `t - s.last < s.cool` gate below it never opens. Direct probe: N0=3 cap=4096 to=1.0 gave 107 ramp / 0 REGRESSION / 0 stall. On the old default the continual-learning growth path was unreachable by construction.",
+   "evidence": "assistant at jsonl:365 (probe table)",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "REGRESSION shares its cooldown with stall, so the rare important event is suppressed by the common one",
+   "severity": "high",
+   "where": "PlateauGrowth in self_organize.py; fixed in 383c7e5, covered by growth_test.py",
+   "symptom": "At an injected regression the machine is in state W with unexpected=True and is dropped anyway on t - s.last = 772 against cool = 1500, because s.last had been set by a routine stall 772 steps earlier. Every archived run reads '0x on a REGRESSION'.",
+   "evidence": "assistant at jsonl:365, :461; fix verified to fail on pre-fix code for the right reason at :450",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "Capacity valve pin clock counted flushes, not steps (16x slow at BATCH_W=16)",
+   "severity": "critical",
+   "where": "pin_tick() below the batch early-out in self_organize.py; fixed in d195618, covered by cap_test.py",
+   "symptom": "Pinned from step 4495 to 48140 = 43,645 steps, clock read 2,650 (= 42,400/16). GROW_CAP_EVERY=20000 actually demanded 320,000 steps at BATCH_W=16. The report said 'reached the cap but never held it long enough' \u2014 a true sentence about a false clock.",
+   "evidence": "assistant at jsonl:2250",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "Second units fault one layer up: fabgrow.n counts calls, gating the valve behind a step-count threshold",
+   "severity": "critical",
+   "where": "`if GROW_CAP and fabgrow.slow is not None and fabgrow.n >= GROW_CAP_EVERY` in self_organize.py; fixed in f8c28aa by replacing it with PLATEAU_WARM=1000",
+   "symptom": "After the pin clock was fixed, the valve still lifted nothing at 42,425 pinned steps against a threshold of 20,000, because a second gate compared a flush count to a step count and demanded 320,000 steps before the valve could even be considered. The first clock masked the second.",
+   "evidence": "assistant at jsonl:2327",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "Valve plateau test admitted every negative improvement \u2014 a run getting worse read as a stall",
+   "severity": "critical",
+   "where": "capacity valve plateau gate; fixed in 4a29000, covered by cap_test.py using the five real lifts as the known answer",
+   "symptom": "`improving` is (slow - fast)/|slow|, so negative means the loss is climbing; the gate was `improving < GROW_CAP_PLATEAU`. A logged lift reads 'the loss has stalled (improving -0.1937 < 0.002)' \u2014 a 19% degradation authorising capacity. Three of the five expert lifts in the 0.75 GB run went to a run that was actively getting worse.",
+   "evidence": "assistant at jsonl:2426",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "Capacity valve ignored the note_shift() blackout, so vocabulary lifts fed on their own damage",
+   "severity": "high",
+   "where": "capacity valve vs note_shift() in self_organize.py; fixed in 4a29000",
+   "symptom": "note_shift() marks retok/epoch-resample/LR-restart as 'the loss jump is OURS, not the data's' and PlateauGrowth refuses to grow inside that blackout; the valve read the same EMA pair without checking the flag. A vocabulary lift mints tokens -> retok rebuilds the stream -> loss jumps -> the jump reads as a stall -> next lift. 19 vocabulary lifts, 2048 -> 8192.",
+   "evidence": "assistant at jsonl:2426",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "Growth call site passed the soft cap for both the ramp latch and the growth clamp \u2014 turning the valve on disarmed the mechanism that makes the valve fire",
+   "severity": "critical",
+   "where": "`_nb = fabgrow.step(_lf, step, fab.n(), _cap_fab[0])` in self_organize.py; fixed in dc6a6dd by taking a separate `pool` argument; covered by ramp_test.py",
+   "symptom": "The latch wants the hardware pool ('is the population BUILT?'), the clamp wants the operating ceiling ('may it grow FURTHER?'). ramp_test measured: valve OFF, cap arg 8192 -> latch at 4096 -> 22 ramp events; valve ON, cap arg 3000 -> latch at 1500 -> 0 ramp events, latched on step 1. The population would have sat at 2048, never reached 3000, never pinned, and the valve would have declined for 16 hours \u2014 and the symptom is indistinguishable from 'never plateaued'.",
+   "evidence": "assistant at jsonl:2112",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "Pin clock required contiguous steps at the cap and reset to zero on any dip",
+   "severity": "high",
+   "where": "capacity valve pin accounting; fixed to accumulate/decay (`_pin_fab[0] = (_pin_fab[0]+1) if _fabpin else max(0, _pin_fab[0]-1)`)",
+   "symptom": "Harmless for a vocabulary, which never shrinks \u2014 which is exactly why the vocabulary half of the valve worked and the expert half never did. A brief cull-induced dip cost the entire accumulated pin time.",
+   "evidence": "assistant at jsonl:1689; second refinement at :2189 (\"2650 measured against 2727 predicted, the 3% being the dips after each cull\")",
+   "bug_class": "other"
+  },
+  {
+   "title": "GROW_CAP_EVERY measured steps since the last LIFT, not steps PINNED",
+   "severity": "high",
+   "where": "capacity valve gate; fixed in 31874a5 (each cap now carries its own pin timestamp)",
+   "symptom": "A population pinned five minutes ago and one pinned two hours ago were treated identically, and a cap never reached still aged toward eligibility \u2014 so the first plateau after a quiet stretch could lift a cap nothing was pressing against.",
+   "evidence": "assistant at jsonl:953, :970",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "`_pin_fab[0]` read after being cleared in the same print",
+   "severity": "medium",
+   "where": "capacity valve report line; fixed before commit",
+   "symptom": "The lift message would report a pin duration of zero because the clock was cleared by the lift before the print consumed it.",
+   "evidence": "assistant at jsonl:923 (\"I left a bug in that print \u2014 it reads `_pin_fab[0]` after clearing it\")",
+   "bug_class": "other"
+  },
+  {
+   "title": "`_keep` name collision destroyed a completed 60,227-step run in its report line",
+   "severity": "critical",
+   "where": "self_organize.py:7621 in main(); fixed in 8f624e6 (renamed _bkeep, block wrapped in try/except)",
+   "symptom": "`for _st, _bb, _sl in _keep: _live[_sl] = (_st, _bb)` -> TypeError: 'int' object is not iterable. `_keep` is reused as a throwaway local in five other places in a ~7,800-line function. The arm (gc_real) had completed and produced a full result set; it died in a print. On the 0.75 GB job the same fault would have cost eleven hours.",
+   "evidence": "assistant at jsonl:1613, :1649; owner-visible as 'gc_real: FAILED rc=1 after 1662s' at :1609",
+   "bug_class": "crash"
+  },
+  {
+   "title": "Unguarded `_F0.div_mass` in the _EFF banner crashes every FABRIC=0 run",
+   "severity": "high",
+   "where": "self_organize.py ~line 4677, base (unguarded) _EFF list; fixed at 0d0b8f3 plus a new static check in levers.py",
+   "symptom": "AttributeError: 'NoneType' object has no attribute 'div_mass'. The assistant spotted this two rounds earlier and declined to fix it, reasoning 'the nofabric arm has run since, so something must be catching it'. Nothing was \u2014 nofabric is in GRID_ARMS_DEFAULT but that list had never been run. It cost a grid arm (round9 nofabric FAILED rc=1 after 18s).",
+   "evidence": "assistant at jsonl:1446 (declining), :1849 (\"I inferred coverage from a name in a config file instead of from a log\"); crash visible in owner paste at :1810",
+   "bug_class": "crash"
+  },
+  {
+   "title": "GRID SUMMARY `curve` column grepped the per-TOKEN divergence line while the unit-stable bits/byte figure sat three lines below it in the same log",
+   "severity": "critical",
+   "where": "longrun.sh line ~734; fixed in 4cb7f0c",
+   "symptom": "Every arm's `curve` was a units artifact \u2014 minted tokens carry more bytes, so per-token loss rises mechanically while bits/byte falls. On the unit-stable metric base and mintok are both +0.000. Arithmetic: base 4.10/token / 1.97 b/B = 2.08 bytes/token; mintok 2.64 / 1.97 = 1.34. The log already printed 'NOT DIVERGING -- the per-token rise is the growing vocabulary, not the model. Judge this run on bits/byte.'",
+   "evidence": "assistant at jsonl:1319, :1323, :1336",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "compare.py hardcoded lower-is-better for --metric d_order1, which is a margin (higher better)",
+   "severity": "critical",
+   "where": "compare.py; fixed in 2c527d4 with LOWER_IS_BETTER map and _orient(); second sign fault in that file",
+   "symptom": "Header, P(A better), verdict sentence and three per-seed blocks all inverted and all agreeing with each other. It matters because d_order1 is the only cross-corpus-comparable column and compare.py TELLS you to switch to it whenever the anchors differ \u2014 routing you onto the one metric it got wrong.",
+   "evidence": "assistant at jsonl:742, :807",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "_proj_steps priced every remaining epoch at the current epoch's length while minting keeps shortening them",
+   "severity": "high",
+   "where": "_proj_steps / proj_arith in self_organize.py; fixed in 96660b3, hoisted to module level, covered by proj_test.py",
+   "symptom": "Worst error 18.7%, mean 6.8% from epoch 2 onward; the cosine was stretched over a horizon it never reached. In one pair base projected 67,872 total steps at step 2000 and ended at 48,140 \u2014 a 41% overestimate. Epochs 0-1 remain uncorrected by design (no completed pair to estimate from), and proj_test asserts that rather than weakening the check.",
+   "evidence": "assistant at jsonl:1251, :1336",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "End-of-run verdict called a blown-up run 'PLATEAUED, not diverging'",
+   "severity": "high",
+   "where": "end-of-run report; fixed in 0ef2fca (new BLEW UP AND STAYED DOWN verdict plus an in-run alarm at the probe it happens on)",
+   "symptom": "round13 reached 2.226 at step 38,000, went to 6.80 within 6,000 steps, and spent ~520,000 further steps (about seven hours) below a level it had already reached, while the report said 'nothing is degrading'. The tail tells you whether a run is STILL falling apart; the height tells you whether it already did.",
+   "evidence": "assistant at jsonl:2491, :2556",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Diagnostics attached to _EFF's `note` field are inert \u2014 that field only renders when the asked value differs from the live one",
+   "severity": "high",
+   "where": "_EFF banner in self_organize.py; hit twice \u2014 the FAB_PRESSURE occupancy warning (made an unconditional [config] CULL GATE line) and nearly again for the LR_STEPS COUPLING note",
+   "symptom": "The occupancy warning never printed once in all of round5, which is how the shut cull gate hid for a round. 'Writing an inert diagnostic while fixing an inert mechanism is the joke this file keeps making.'",
+   "evidence": "assistant at jsonl:1480, :1499, :2676",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Config banner listed DIV_W under 'OFF ON PURPOSE' while it was on",
+   "severity": "medium",
+   "where": "config banner; fixed in 6380519",
+   "symptom": "Printed '[config] OFF ON PURPOSE ... DIV_W=0.02' two lines above 'DIV_W=0.02 IS applied on this path (ON)' \u2014 a hardcoded list rather than a read of the live value.",
+   "evidence": "assistant at jsonl:163, :247",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Report line advising 'Raise FAB_EMB_VAR' recommends the knob that produces the condition it warns about",
+   "severity": "medium",
+   "where": "IDENTITY SPACE report line; replaced with measured numbers in 80fa009",
+   "symptom": "The line was written on no measurement and sent the assistant down a whole grid; FAB_EMB_VAR=16 is the only COLLAPSED arm in round3 (NN 0.0017).",
+   "evidence": "assistant at jsonl:675, :696",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "`_i('FAB_N0',3)` call site missed by the config checker because of single quotes",
+   "severity": "medium",
+   "where": "self_organize.py; fixed in 6380519",
+   "symptom": "Default-mismatch audit did not catch it until an end-to-end CPU run printed the mismatch warning on the FABRIC line.",
+   "evidence": "assistant at jsonl:110, :179, :205",
+   "bug_class": "other"
+  },
+  {
+   "title": "First [config] CULL GATE insert landed inside the ROUTE_REGION_W conditional",
+   "severity": "medium",
+   "where": "config banner; caught by reading output, not by syntax check",
+   "symptom": "The unconditional diagnostic would have printed only when a different, unrelated knob was on.",
+   "evidence": "assistant at jsonl:1491",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "Arm definitions placed in the longrun.sh ARMS preset `case` instead of `_flags_for` \u2014 twice",
+   "severity": "medium",
+   "where": "longrun.sh; caught both times by testing preset resolution in isolation",
+   "symptom": "The arm name resolves in the preset list but carries no flags, so the arm silently runs as base.",
+   "evidence": "assistant at jsonl:1682, :1766",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "TOK_ANCHOR=0.05 is armed and has never once entered the loss",
+   "severity": "high",
+   "where": "self_organize.py, gated on TOK_COMPOSE=0",
+   "symptom": "Reported as on in the config banner; the file's own header says it has never entered the loss. Not fixed in this range.",
+   "evidence": "assistant at jsonl:179, :953",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "HALT has no working regime",
+   "severity": "high",
+   "where": "halt_key path, self_organize.py ~1524/1656",
+   "symptom": "FAB_KEY_NORM=0 -> HALT mass 0.0000 at routed depth 1.00 (all 4 hops at full strength on every window, PONDER=0.01 could not lift it); FAB_KEY_NORM=1 -> 0.9999 at depth 0.10-0.15 (halts on hop 0, chains nothing). At 0 it is a raw dot with spread ~0.075 competing in the same softmax against a region term at 3.7. Not fixed.",
+   "evidence": "assistant at jsonl:365, :696, :953",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "fabric.spawn fires 1-9 times per run regardless of any intervention",
+   "severity": "medium",
+   "where": "Fabric spawn gate",
+   "symptom": "Against replicate 412, crossover 124, explore 27095. The assistant's hypothesis that identity collapse starved it was refuted \u2014 the identity space is distinct at HEAD and spawn still does not fire, so the gate is the problem, not the geometry. Not fixed.",
+   "evidence": "assistant at jsonl:533, :696",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "verification.py's report line appears in zero logs under runs/",
+   "severity": "medium",
+   "where": "verification.py",
+   "symptom": "Built, shipped, and never observed to run. Not investigated in this range.",
+   "evidence": "assistant at jsonl:953",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Nothing protects the optimizer from the epoch resample shift",
+   "severity": "high",
+   "where": "LR schedule vs note_shift() in self_organize.py",
+   "symptom": "note_shift() tells growth (and now the valve) that a loss jump is ours, but the LR meets the fresh sample at whatever the cosine says \u2014 96-99% of peak at the second boundary in every run measured. This is what destroyed round13. LR_SHIFT_WARM was built as the fix but defaults to 0 and was only pilot-tested at round15.",
+   "evidence": "assistant at jsonl:2556, :2690",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "Domain layer produces routing targets carrying no information on a single corpus",
+   "severity": "high",
+   "where": "self-assembling domain partition",
+   "symptom": "33 live domains, 30 scored `weak`, over ~2100 ephemeral source ids; own-domain 1.924 vs random-other 2.144 (gap +0.220) against a shuffled-provenance floor of +0.223 +/- 0.003, excess -0.003 \u2014 fails its own null. The encoder underneath measures healthy (silhouette +0.24, 1-NN 0.984). Not fixed.",
+   "evidence": "assistant at jsonl:179",
+   "bug_class": "wrong-measurement"
+  }
+ ],
+ "junk": [
+  {
+   "what": "FAB_GROW=0 with FAB_N0=2048 as the shipped default (commit 6380519)",
+   "why": "Reverted in 25aba88 after the owner objected 'Growth off? That sounds anti continual learning.' Growth-on-demand IS the continual-learning mechanism; the broken thing was the ramp, not growth. Replaced with FAB_GROW=1, FAB_N0=2048, FAB_RAMP_TO=0.5.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "GROW_LIFT as a multiplier (default 2.0)",
+   "why": "One lift doubled the cap and every later lift handed out more than the one before \u2014 capacity growing fastest where there was already most of it. Superseded twice.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "GROW_LIFT as a flat count (default 256)",
+   "why": "Owner-instructed ('linear (so not 1.1x)') but the same 256 meant +160% on an expert cap of 160, +40% on a vocabulary of 640, +28.6% at 896 and +12.5% at VMAX 2048. Superseded by a fraction (0.08) plus GROW_LIFT_MIN=8 at owner instruction; spread across those four sizes collapses from 148% to 0.5%.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "FAB_PRESSURE=0.75",
+   "why": "Superseded by 0.45 (commit 8bf825f) with owner approval, because 0.75 against FAB_N0=2048/FAB_NMAX=4096 kept the utilization cull gate shut in every run.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Every conclusion drawn from the GRID SUMMARY `curve` column before commit 4cb7f0c",
+   "why": "Explicitly voided by the assistant: 'frozen2k eliminates the post-minimum divergence' (there was no divergence), 'growcap +0.000' (same artifact), 'curve separates perfectly on whether the vocabulary was fixed' (it separates on unit stability and nothing more), plus the reasoning in proj_test.py's docstring and commit 96660b3's message.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The LR-horizon hypothesis for the curve column",
+   "why": "Refuted by its own test: base ran on the fix (96660b3) and came back +0.282/+0.314, unchanged from +0.285 before it. The real explanation was three lines below in every log.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The identity-collapse premise that motivated the whole round3 grid",
+   "why": "base measured NN 0.1443 \u2014 not collapsed. All 31 collapsed archived runs are from the ramp regime; building the population at FAB_N0=2048 with a latched ramp removed the churn the collapse was defined over. It was fixed by the growth work before the grid ever ran.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "'Raise FAB_EMB_VAR' as advice, and FAB_EMB_VAR as a collapse remedy",
+   "why": "Monotonically worse across three points and the knob CAUSES collapse at 16.0. Replaced with measured numbers in 80fa009.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "'mintok is the real finding' / mintok as a required or preferred configuration",
+   "why": "Fully settled as a dead heat: 0.0065 on the comparable metric with the sign flipping between seeds, and its one apparent advantage (curve +0.000) was a units artifact. The history recorded at the code site also says minting the whole run is BEST (base 1.962, frozen 2.072, frozen_nr 2.365) and that the earlier apparent success was measuring the LR schedule.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "'growcap's valve is doing real work, +0.161 over its own mask'",
+   "why": "Overturned by the logs: grep -c '[capacity @' growcap.log = 0. The arm measured a vocabulary capped at 1024, not the valve.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "'fewer experts is better, r = -0.64, this outranks any remaining valve question'",
+   "why": "Refuted by the controlled round9 ladder: r = +0.93 with FAB_N0 as the only variable. The earlier figure was a correlation over arms differing in soft caps, LOSS_MASK_DEAD, VMAX width and the valve all at once. The refuted version was deliberately kept in the source next to the correction.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "'The system saturates around 0.2 GB of processed text; 0.75 GB was ~4x more than it can use'",
+   "why": "Explicitly retracted. Both round12 arms were still steeply falling at the end (minima at step 258,000 of 282,000 and 216,000 of 260,000). The 0.75 GB run was not comparable \u2014 different corpus fetch, ~2x slower box, and it asked for 94 MB an epoch from a corpus whose size the log does not record. One run, over-read.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "'MEM_PER_EXPERT defaults to 1 and is live'",
+   "why": "It defaults to 0. Caught by a CPU smoke; the owner had already planned around the wrong statement.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "'The GROW_CAP soft-cap mechanism does not exist / notes/02_IDEAS.md A91 NEVER IMPLEMENTED'",
+   "why": "A91 cited commit e2db890 \u2014 titled 'capacity that is earned: rescue-before-cull, and soft caps that lift on plateau' \u2014 as evidence it was not built. Corrected in 241d7d0. This stale note propagated straight into a live design conversation and cost a wrong answer to the owner.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "SEEDS=\"0 1 2 3\" / pair 4 for the mintok comparison",
+   "why": "Owner pushback ('Why 4 seeds though?'). The fourth seed was a spare in case a run died, not information, and the b/B verdict it bought is the least informative output. Cut to 2 seeds.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The 40 GB run",
+   "why": "Owner replaced it with 0.75 GB ('Instead of 40GB, let's do 0.75 GB'), then deferred even that ('It doesnt look like we are ready for the 40GB run... lets fully settle on everything'). At the measured 1.6 GB/day 40 GB would have been ~25 days.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The 11-hour and then 16-22-hour estimates for 0.75 GB",
+   "why": "Both superseded by measurement: 2.24-2.54 GB/day at pop 3000-3932 gives 7-8 h. Launch cost is not linear in population because sparse top-k runs only k experts per window.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "LR_EPOCHS=0 (cosine spanning all 16 epochs) as a recommendation",
+   "why": "It is what broke round13 \u2014 it held the LR at 50% of peak across the fifth epoch boundary where the 8-epoch schedule was at 19%. The assistant had steered the owner away from LR_EPOCHS=8 calling it 'a different experiment'; it was the safer option.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "FAB_PRESS_SOFT=1 as a fix for the cull-gate/valve conflict",
+   "why": "Examined and rejected: pressure against the soft cap settles the population at 0.45 x 3000 = 1350, which unpins it and kills the valve. The correct reading is that FAB_PRESSURE x FAB_NMAX is the true ceiling and the valve owns the range below it \u2014 a handoff, not a conflict.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Attaching explanatory diagnostics to the _EFF banner's `note` field",
+   "why": "That field renders only when the asked value differs from the live one, so the diagnostic is invisible for any run that got what it asked for. Abandoned twice in this range.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The learner-collusion hypothesis as the explanation for DIV_W doing nothing",
+   "why": "Superseded once the identity-space and routing findings landed: 'DIV_W penalises expert OUTPUT correlation while the identity KEYS routing actually uses were collapsed regardless... the brief's learner collusion hypothesis is probably not even needed.' The research brief itself (notes/RESEARCH_BRIEF_DIFFERENTIATION.md) still stands as an external artefact.",
+   "safe_to_drop": false
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "The owner decides configs; the assistant proposes and measures. \"We need to decide configs together, since I want to make sure things are set up in a way I'd like it, otherwise we waste many you hours.\" Defaults are not to be changed unprompted.",
+   "why": "Every default the assistant changed on its own judgment in this range either regressed something (FAB_N0=2048 shutting the cull gate) or had to be reverted (FAB_GROW=0). The assistant itself adopted the rule: 'I'm not touching defaults unprompted again after this one.'",
+   "evidence": "owner at jsonl:837; assistant at jsonl:1499"
+  },
+  {
+   "item": "When an instruction of the owner's is being reversed by new evidence, say so explicitly rather than switching quietly. The GROW_LIFT fraction change was flagged as reversing the owner's own 'linear, not percentage' instruction, with the reason the original instruction had been right about the case it addressed.",
+   "why": "Keeps the owner's model of the system accurate and preserves the audit trail of why an instruction stopped applying.",
+   "evidence": "assistant at jsonl:1776"
+  },
+  {
+   "item": "FAB_PRESSURE is a SETPOINT, not a threshold: the expert population equilibrates at FAB_PRESSURE x cap. Predicted 1843, measured 1838; predicted 3686, lr_novalve measured 3932. FAB_NMAX is preallocation, not the operating ceiling.",
+   "why": "Every capacity decision downstream depends on this \u2014 the cull gate, the valve's eligibility window, and whether a soft cap can ever pin.",
+   "evidence": "assistant at jsonl:1499, :2250"
+  },
+  {
+   "item": "The GROW_CAP expert valve can only fire if GROW_CAP_FAB0 sits AT OR BELOW the cull settling point (FAB_PRESSURE x FAB_NMAX). Above it the population settles below the soft cap, is never pinned, and the valve correctly declines forever. This killed the valve in round6 and would have killed it in the 0.75 GB run.",
+   "why": "It is the single arithmetic relation that decides whether the owner's 'pressure valve' exists at runtime, and its failure mode (silence) is indistinguishable from 'never plateaued'.",
+   "evidence": "assistant at jsonl:1689, :1943"
+  },
+  {
+   "item": "The vocabulary valve and the expert valve are structurally asymmetric: minting refills the vocabulary within a few steps so it re-pins immediately, while expert growth comes only from rare REGRESSION/stall bursts so the population never refills to a lifted cap. One GROW_LIFT knob serving both is a known mismatch.",
+   "why": "Explains why the vocabulary lifted 6-19 times while experts lifted 0-5 in every measurement, and why an over-eager vocabulary valve is the mechanism that spent the 0.75 GB run.",
+   "evidence": "assistant at jsonl:980, :1649"
+  },
+  {
+   "item": "Everything below the batch early-out (`if len(_bx) < BATCH_W: step += 1; continue`) runs once per FLUSH while `step` advances once per WINDOW. Any counter or cadence written there is 1/BATCH_W of what its name says. This produced two independent 16x unit bugs in the same mechanism.",
+   "why": "The file already warns that modulo cadences down there fire ZERO times, which is loud; a +1-per-call clock fires at the wrong RATE, which reads as the mechanism declining on the merits.",
+   "evidence": "assistant at jsonl:2250, :2327"
+  },
+  {
+   "item": "`d_order1` (= order1 - held_out) is a MARGIN \u2014 higher is better \u2014 and it is the only cross-corpus-comparable column. `held_out` is not comparable whenever the order-1 anchors differ, which happens whenever the corpus is re-fetched or the vocabulary policy changes the bytes covered by a fixed step budget.",
+   "why": "compare.py had this backwards and routed users onto the metric it got wrong exactly when they could not eyeball the answer. Two grids were nearly misread on held_out alone.",
+   "evidence": "assistant at jsonl:742, :807"
+  },
+  {
+   "item": "`since the minimum` in a log is per-TOKEN cross-entropy and rises mechanically as minted tokens carry more bytes. The unit-stable figure is the `UNIT-STABLE CROSS-CHECK (held-out bits/byte)` line three lines below it, which the log itself annotates 'Judge this run on bits/byte.'",
+   "why": "An entire session's worth of conclusions was drawn from the wrong one of two adjacent lines, and the grid summary was surfacing the misleading number while hiding the correct one.",
+   "evidence": "assistant at jsonl:1319, :1336"
+  },
+  {
+   "item": "Measured noise floors at pilot scale: unpaired replication floor ~0.039 b/B (older regime); seed spread on d_order1 measured 0.066-0.131 this session; two runs with identical flags and no behavioural code change landed 0.066 apart. Pairing collapses the floor a lot (compare_test: per-arm spread 0.456/0.384 vs paired 0.113).",
+   "why": "The four best arms in the project sit inside 0.06 b/B of each other, so nearly every single-arm difference reported in this range is inside noise and must be labelled as such.",
+   "evidence": "assistant at jsonl:714, :2327; owner-pasted seeds summary at jsonl:719"
+  },
+  {
+   "item": "Judge structural interventions on DID IT FIRE, not on bits/byte, and commit to that before seeing the numbers. 'An arm that changes nothing AND never fires is a different finding from one that fires and changes nothing \u2014 only the second is about the idea.'",
+   "why": "Round5 was decided correctly this way; round4's `rescue` arm was misread as evidence about the idea when it was evidence about the configuration.",
+   "evidence": "assistant at jsonl:1092, :1446"
+  },
+  {
+   "item": "'Unreachable' is not the same as 'inert', and the audit must distinguish them \u2014 they have different fixes. A mechanism reported as ARMED AND INERT when the run simply never asked reads as 'the idea does not work'.",
+   "why": "This misreading is what let the shut cull gate survive an entire round, and it is the central discipline of the DID IT FIRE audit.",
+   "evidence": "assistant at jsonl:1376, :1387"
+  },
+  {
+   "item": "Never infer coverage from a config file \u2014 infer it from a log. `nofabric` was in GRID_ARMS_DEFAULT, which was taken as proof the FABRIC=0 path had run; that list had never been run and the crash was real.",
+   "why": "It cost a grid arm and it is the exact reasoning error the DID IT FIRE audit exists to prevent.",
+   "evidence": "assistant at jsonl:1849"
+  },
+  {
+   "item": "Pure arithmetic used by the training loop must be hoisted to module level and tested by loading it from the shipped source (by AST, not by importing self_organize), so the test exercises the real text and still runs when torch is missing. proj_arith, lift_to, and the ramp latch are all covered this way; proj/cap/ramp/lr tests run torch-free.",
+   "why": "This arithmetic has been wrong twice in opposite directions in the same knob, and the assistant's container has no torch, so a torch-dependent test would be unrunnable exactly when it is needed.",
+   "evidence": "assistant at jsonl:1194, :1251, :1746, :2112"
+  },
+  {
+   "item": "A report bug must never be able to destroy a finished run. `_keep` killed a completed 60,227-step arm in a print; the block is now wrapped, and on an 11-hour job that fault would have cost the whole run.",
+   "why": "Long runs are the expensive resource; a summary line is not.",
+   "evidence": "assistant at jsonl:1649"
+  },
+  {
+   "item": "The 8-epoch cosine wavelength survives the epoch-2 resample shock and a 16-epoch one does not. Both runs take the shock at the boundary; the difference is that an 8-epoch schedule is at 19% of peak by the fifth boundary while a 16-epoch one is still at 50%. Prefer LR_STEPS (absolute) over LR_EPOCHS (corpus-dependent, 17x range observed).",
+   "why": "This is the only identified cause of a catastrophic, unrecovered blow-up in this range, and it was caused by an assistant recommendation.",
+   "evidence": "assistant at jsonl:2556, :2690"
+  },
+  {
+   "item": "On pure language quality the fabric is a wash: nofabric ties pop1024 within noise (0.061 vs a 0.066-0.131 spread), because the fabric makes the base model 0.285 b/B WORSE standalone and then hands back roughly what it took. SUFFICIENCY says 479 experts buy -0.002 over the best single rank-slot. The fabric therefore earns its keep ONLY on continual learning \u2014 and the eng -> add py -> eng chain has still never been run.",
+   "why": "This is the load-bearing open question for the whole architecture, and every single-corpus pilot in this range is structurally incapable of answering it.",
+   "evidence": "assistant at jsonl:1866, :1873, :2327"
+  },
+  {
+   "item": "Specialization has read INTERCHANGEABLE in every arm ever measured (32 by the end of this range), across DIV_W at three settings, FAB_KEY_NORM, FAB_EMB_VAR at three, frozen vocabulary, domains off, FAB_EC_W, and every population size 128-4103. Load-spreading and competence-differentiation are unrelated in this system.",
+   "why": "Any future intervention aimed at differentiation must be measured against this baseline, and no intervention tried so far has moved it.",
+   "evidence": "assistant at jsonl:696, :1000, :2469"
+  },
+  {
+   "item": "Vocabulary SIZE is the largest quality lever measured at pilot scale (0.141-0.205 b/B), and it moves the wrong way \u2014 every run ending near 2048 tokens scored ~2.0-2.18, both runs past 4800 landed ~2.3, at 4 MB and 94 MB alike. This is measured only on small corpora, so it may invert with more data per token.",
+   "why": "It is the reason the 0.75 GB run never reached the short runs' loss, and it directly contradicts the owner's 'expanding VMAX under pressure' spec at these scales.",
+   "evidence": "assistant at jsonl:2426, :2469"
+  },
+  {
+   "item": "data_pilot is re-fetched fresh from fineweb-edu at the start of many rounds, so the corpus is NOT stable across rounds and held_out is not comparable across a re-fetch. Order-1 anchors of 3.44 vs 3.52 and 3.742 vs 3.440 have both been observed.",
+   "why": "Comparing across a re-fetch is exactly how the 'system saturates at 0.2 GB' claim went wrong, and it is invisible unless the anchor is checked.",
+   "evidence": "assistant at jsonl:807, :2469"
+  },
+  {
+   "item": "The assistant's container rolls back frequently (roughly a dozen times in this range) and once moved HEAD onto the harness branch `claude/hub-addition-1ueehb`. Commit and push early; after any rollback check `git rev-parse --abbrev-ref HEAD`; if a push is rejected against a stale upstream while the server tip is demonstrably the parent, use the explicit `HEAD:refs/heads/rm-predict` refspec.",
+   "why": "Uncommitted work has been lost this way before, and the branch move silently redirected commits away from rm-predict.",
+   "evidence": "assistant at jsonl:331, :1251, :1262"
+  },
+  {
+   "item": "Uploaded logs expire. Extract everything needed from a log in the turn it arrives, because re-checking it later may be impossible.",
+   "why": "A check of end-of-run LR that would have separated two live hypotheses was blocked by expiry.",
+   "evidence": "assistant at jsonl:1059, :1092"
+  },
+  {
+   "item": "`longrun.sh grid` skips completed arms and never overwrites a finished log; `pair` runs both arms over the SAME seeds so they cannot be compared unpaired by accident. These are the mechanical enforcement of the owner's no-overwrite constraint and of paired comparison.",
+   "why": "It is what makes a stopped/restarted round safe on the owner's box and what keeps runs/ intact.",
+   "evidence": "owner-pasted harness output at jsonl:651; assistant at :714"
+  },
+  {
+   "item": "TOK_MINT_UNTIL freezes MINTING only \u2014 not embeddings (no requires_grad=False or .detach() anywhere near embeddings, delta, dbias or the head) and not SEGMENTATION (RETOK_EVERY keeps re-segmenting, clearing the lookahead queue and blacking out fabric growth). RETOK_EVERY=0 is a separate knob and neither implies the other.",
+   "why": "The owner explicitly worried that freezing would stop token embedding learning; it does not, but a frozen arm still pays a retok tax for no benefit, which is what frozen_nr exists to measure.",
+   "evidence": "assistant at jsonl:1092"
+  },
+  {
+   "item": "BEST_KEEP implements 'checkpoint every local low point' as 'a descent into a good region' \u2014 a superset containing every local minimum plus points on the way down \u2014 because a true local minimum can only be confirmed one probe after the weights have moved past it. Defaults to 0; must be set explicitly. Estimated ~420-515 save events over a long run rotating through n resident slots, so n is a disk budget, not a coverage decision.",
+   "why": "The owner asked for local-minimum checkpointing specifically; this records what was actually built and why it deliberately over-saves.",
+   "evidence": "assistant at jsonl:1605, :1649, :1943"
+  },
+  {
+   "item": "Per-expert memory (MEM_PER_EXPERT=1) is off by default for a recorded reason and is a retest of a known-bad configuration: it once made a faded domain vanish entirely (every English entry evicted, the unlearn test skipped as vacuous) because owners are experts folded mod MEM_OWNERS and eviction inside a block was LRU on WRITE-recency. The eviction-clock work (last-retrieval + read probe) repaired it \u2014 round3's nodom_mem drift was +0.015 against base +0.010 \u2014 but only on a single stationary corpus.",
+   "why": "Read nodom_mem on the retention section, never on bits/byte, and treat the repair as unproven under a real domain switch.",
+   "evidence": "assistant at jsonl:650, :696"
+  }
+ ],
+ "open_questions": [
+  "Round15 (sched_ctl / sched_step / sched_warm / sched_both, STREAM_LEN=25000000 EPOCHS=8) results were pasted by the owner at L2694 but the analysis had not been produced by L2700 \u2014 the assistant had only launched a Workflow fan-out. The verdict on LR_STEPS and LR_SHIFT_WARM is outside this range.",
+  "The assistant launched a Workflow at L2699 despite the recorded standing constraint 'do not use AgentTool or workflows unless requested'. No authorising owner turn appears in lines 1-2700; whether the owner relaxed this earlier (before compaction) or later cannot be determined from this range.",
+  "The owner said 'Maybe we can add weight decay later on?' (L877). The assistant deferred it (memorization check reads UNDERFIT, where regularization would hurt; there is no staged-WD mechanism today). No decision was recorded.",
+  "The owner asked to 'pause the domain measuring, if it doesn't affect too much else' (L248). The assistant traced that memory owners key off the expert rather than the domain, but explicitly did not finish tracing everything else that reads domain ids (the priors, the boundary report, `src` labelling), and never came back to it.",
+  "Whether MEM_OWNERS should be raised (trading quota per expert against 32 experts sharing each partition at 2048 experts) was put to the owner at L365 and never answered.",
+  "gate_nmax_resc measured FAB_RESCUE on top of gate_nmax rather than gate_press; the assistant flagged that it needs re-running on gate_press before FAB_RESCUE gets a fair verdict. Not done in this range.",
+  "notes/09_COMMENT_AUDIT is still a plan: 51 MOVEs and 19 WRONG comments unapplied, including self_organize.py:1090's voided +0.709 justifying FABRIC=1.",
+  "The frozen2k result (+1.681 d-order1, +0.275 over base, ~4x the seed spread) is the only arm in the session to clear seed noise on the comparable metric, but it is n=1 and was never re-run after the curve column was shown to be an artifact. Its status is unresolved.",
+  "Why fabric.spawn fires only 1-9 times per run is unexplained \u2014 the identity-collapse explanation was refuted and the gate itself was never read.",
+  "Whether the 'smaller vocabulary is better' ordering inverts at larger scale is unknown; every measurement of it is on 4-25 MB, exactly the regime where a big vocabulary has least data per token.",
+  "The exact held-out number for the 0.75 GB run appears in the assistant's analysis as ~2.288 with vocabulary 8192, but the owner's paste of that run's summary line was not reproduced in full in this range, so the figure is second-hand from the assistant's own table.",
+  "Whether the round13 blow-up was caused solely by the LR at the epoch-2 boundary or also by the expert valve's five lifts in that window was not separated; the per-lift correlation was described as 'weaker than I expected' (worse after 9 of 24 lifts, not worse after 15)."
+ ]
+}

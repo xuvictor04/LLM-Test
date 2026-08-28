@@ -1,0 +1,1227 @@
+{
+ "area": "chat-b",
+ "summary": "Transcript lines 2700-5400 cover rounds 15-18 plus the first-ever continual-learning run. The arc: (1) round15's four LR-schedule arms are analysed \u2014 the control wins and the assistant's own blow-up alarm fires 4/4 false positives; (2) the 0.75 GB run is prepped, launched by the owner, and destroyed by three LR restarts the assistant configured in; (3) the owner rejects launch-config fixes (\"modify code not the run setup\") and demands a deeper fix, producing closed-loop restart damping; (4) the owner orders a full-system audit, then \"resolve all the reported issues\", then sidelining of old trees and testing of untested code; (5) round18 runs three arms to make repairs visible in a log, but its resume half dies on a gated HF dataset and then on a fabric shape mismatch; (6) after fixing corpus, fetch, and fabric-widening faults, the continual-learning chain finally runs: English 2.096 -> 2.139 (+0.043 +/- 0.075, inside noise), Python 1.932, BWT +0.0431. That run then exposed four more instruments reading their own results backwards. Almost every \"finding\" in this range is a SIGNAL from single unreplicated runs on a system with known confounds (exposure imbalance 5.6x, a 10x over-cull, a full vocabulary, a sign-inverted retention metric); the assistant repeatedly caught and reversed its own conclusions. The recurring bug class named by the project \u2014 armed-but-inert, unit mismatch, recorded-never-read, untrippable guard \u2014 is confirmed at ~30 distinct sites in this range alone.",
+ "facts": [
+  {
+   "claim": "Owner instruction (verbatim): \"Why are we going back to lr being determined by epochs? I thought we were making it step determined. Also, we are trying to move on to the 0.75GB run, and prep for it.\"",
+   "evidence": "transcript:L2807",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"I want you to modify code not the run setup. This error needs a deeper fix\" \u2014 the single most binding constraint in this range; it forbade fixing recurring failures by choosing launch flags.",
+   "evidence": "transcript:L3009",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner question (verbatim): \"Are we using the cyc that we made before?\" \u2014 asking whether the new LR work reused the existing _cyc/LR_DECAY machinery rather than building a parallel path. The owner then interrupted the reply.",
+   "evidence": "transcript:L3091, L3093",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"We likely need an audit of the full system to clean it out, and determine timeline of what we are working on, at different times, their branches, etc...\"",
+   "evidence": "transcript:L3096",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Resolve all the reported issues\"",
+   "evidence": "transcript:L3239",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Lets sideline old parts. Lets test the untested, later the next pilot\" \u2014 establishing the order: archive dead trees first, test untested code second, run the next pilot last.",
+   "evidence": "transcript:L3415",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Continue from where you left off.\" \u2014 issued after the assistant hit a session limit mid-workflow.",
+   "evidence": "transcript:L3506",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Continue on the outstanding, and prep the pilots for them all\" \u2014 i.e. every outstanding finding must get a pilot arm that would make it visible in a log.",
+   "evidence": "transcript:L3640",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner correction (verbatim): \"No, ultracode is on\" \u2014 issued immediately after the assistant said \"Ultracode's off, so I'll work these directly\". This re-enables workflow/subagent fan-out, which the standing constraint otherwise forbids.",
+   "evidence": "transcript:L3646, L3663",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"There is an error of corpus size being too small, provide respective pull\" \u2014 a request for a corpus-fetch command, which the assistant expanded into a three-fault investigation.",
+   "evidence": "transcript:L4237",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner environment fact + realignment (verbatim): \"I can use HF on my system\\n\\nAlso, for alignment reasons, I want to remind you that the final goal is A good language production, and B continual learning capabilities (we designed modularity, and able to strap additional modalities)\"",
+   "evidence": "transcript:L4264",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Fix all the issues you have found.\\n\\nAct on your workflow findings.\\n\\nOnce we have finished these threads, I'll provide the next initiative\" \u2014 sent with the pilot_gru_py.log continual-learning result.",
+   "evidence": "transcript:L4974",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Lets first fix all theissues that you have drawn up\" \u2014 an explicit ordering: clear the drawn-up list before anything new.",
+   "evidence": "transcript:L5179",
+   "confidence": "verified"
+  },
+  {
+   "claim": "OWNER MACHINE: the owner runs training on a remote Ubuntu host with prompt `ubuntu@192-222-50-5:~/LLM-Test$`; the repo lives at /home/ubuntu/LLM-Test there and runs on cuda.",
+   "evidence": "transcript:L3919 (\"ubuntu@192-222-50-5:~/LLM-Test$ STREAM_LEN=4000000 ...\"), L4551 (traceback path /home/ubuntu/LLM-Test/self_organize.py)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "OWNER WORKFLOW: the owner runs the commands the assistant writes, then pastes the raw terminal output and uploads the .log files; the assistant reads them from /root/.claude/uploads/e880caf7-.../. 37 real logs were present in that directory at the time of the analysis audit.",
+   "evidence": "transcript:L2942, L3919, L3774 (\"logs: 37\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSISTANT CONTAINER: /home/user/LLM-Test, has NO torch installed, so mem_evict_test.py and growth_test.py cannot be run there \u2014 they are written for the owner's box and shipped unrun.",
+   "evidence": "transcript:L3697 (\"ModuleNotFoundError: No module named 'torch'\"), L4448, L5309 (\"those four checks are unrun until you run them on your box\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSISTANT CONTAINER: 4 CPU cores, workflow concurrency cap 2 \u2014 the assistant stopped one workflow because it had been idle nine minutes at that cap.",
+   "evidence": "transcript:L4486 (\"idle for nine minutes on a 4-core box (concurrency cap 2)\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSISTANT CONTAINER: huggingface.co is UNREACHABLE through the agent proxy (CONNECT tunnel failed, 403); pypi.org and files.pythonhosted.org return 200 and `pip download` works at ~56 MB/s.",
+   "evidence": "transcript:L4034, L4037, L4246, L4251",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSUMPTION THE ASSISTANT GOT WRONG: it assumed HF gated datasets were a hard blocker for the owner too, and built fetch_local.py (a corpus from the machine's own Python source) as the unblock. The owner corrected this with \"I can use HF on my system\", after which the gated pull was back on the table and fetch_local was demoted to a no-account fallback.",
+   "evidence": "transcript:L4176 (fetch_local.py written), L4264 (owner correction), L4267 (\"HF works on your side, so the gated pull is back on the table\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSUMPTION THE ASSISTANT GOT WRONG: it assumed ultracode/workflows were disabled and said \"Ultracode's off, so I'll work these directly\"; the owner corrected it in the next message.",
+   "evidence": "transcript:L3646, L3663",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSUMPTION THE ASSISTANT GOT WRONG: the documented prep command `PILOT_DIR=data_075 PILOT_GB=1.0 bash longrun.sh fetch` fetched into $DATA_DIR (default data_big) at $ENG_GB, not into $PILOT_DIR at $PILOT_GB \u2014 i.e. it fetched somewhere the run would not look. Corrected to call fetch_big.py directly.",
+   "evidence": "transcript:L2870 (\"`fetch` uses `DATA_DIR`/`ENG_GB`, not `PILOT_DIR`/`PILOT_GB` \u2014 my prep line was wrong\"), L2871",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT MISMATCH the assistant flagged to the owner: the assistant's task setup names `claude/hub-addition-1ueehb` as its development branch, while the owner has directed all work to `rm-predict`. Both hub-addition branches (local 96660b3, origin 6f9b998) are strict ancestors of rm-predict with 0 unique commits.",
+   "evidence": "transcript:L3119, L3124, L3140, L3235",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The assistant hit a hard session limit mid-work twice: the untested-code workflow returned \"[find:reports] failed: You've hit your session limit \u00b7 resets 2:30am (UTC)\" for 5 of 8 finders and ALL verify agents.",
+   "evidence": "transcript:L3494, L3501",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The session's container was restarted mid-task, killing background workflow witxbvkuk (\"Make a fabric resume across a changed FAB_NMAX correct\") with no result; committed work survived and all suites were re-verified green afterwards.",
+   "evidence": "transcript:L4743, L4744, L4747, L4750",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every commit in this range was pushed to branch rm-predict of github.com/xuvictor04/LLM-Test. Sequence: 934789d, 3174460, c19b2af, b990c9d, 704c432, d267864, 0065372, 2d5c89a, 398b679, 87c3eac, eb88369, fe51d2d, d6546f9, e1542a9, 37401bd, cfe47fc, 63191a0, 4aaca4a, 4be0a8b, 3478465, d3b31e3.",
+   "evidence": "transcript:L2790, L2881, L2936, L3003, L3085, L3233, L3409, L3454, L3490, L3632, L3754, L3841, L3913, L4231, L4543, L4737, L4820, L4968, L5171, L5318",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round15, four arms, one knob each, same corpus, adjacent runs, 8 epochs of ~25 MB, ~282,000 steps): sched_ctl held-out 1.956, d-order-1 +1.490, curve +0.036, 3685 experts; sched_step (LR_STEPS=100000) 2.075/+1.371/+0.012/3794; sched_warm (LR_SHIFT_WARM=4000) 2.084/+1.362/+0.003/3687; sched_both 2.127/+1.320/+0.133/3810. The CONTROL won.",
+   "evidence": "transcript:L2717, L2803",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CONFOUND stated by the assistant for round15: the 0.119 and 0.128 gaps sit INSIDE the 0.066-0.131 seed spread, so the honest reading is that neither knob did anything measurable \u2014 not that either hurt.",
+   "evidence": "transcript:L2803",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED: sched_ctl's 1.956 was the best held-out this project had recorded at that point (round12's lr_vcap was 2.021 on the same corpus).",
+   "evidence": "transcript:L2803",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED: three DIFFERENT held-out numbers describe the same sched_ctl run \u2014 1.956 (24-window MEMORIZATION CHECK, what the grid summary prints), 1.979 (final learning-curve probe), 1.943 (curve minimum at step 244000). Different estimators, not disagreement.",
+   "evidence": "transcript:L2887, L2938",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (sched_ctl): final step 282744, vocab 2048/2048, population 3685/8192, 3160 grown / 1523 removed / net +1637, 5 capacity-valve lifts (3000->3240->3499->3778->4080->4406), longest spell at cap 39363 steps against GROW_CAP_EVERY=20000. The final soft cap 4406 was never used.",
+   "evidence": "transcript:L2887",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED: the epoch-2 resample shock did NOT recur in round15. Jumps across step 38,576: sched_ctl +0.30, sched_step -0.03, sched_warm -0.37, sched_both -0.05 \u2014 against +0.53 (round12) and +1.17 (round13). LR_SHIFT_WARM therefore could not be evaluated by the run built to evaluate it.",
+   "evidence": "transcript:L2721, L2803",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED: none of the four round15 worst mid-run excursions is at an epoch boundary \u2014 15,754 / 13,754 / 24,576 steps away. So the instability is not resample-aligned, and LR_SHIFT_WARM (which acts only at resamples) could not have touched it.",
+   "evidence": "transcript:L2900, L2938",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (0.75 GB run, arm lr_075, PILOT_DIR=data_075 STREAM_LEN=94000000 EPOCHS=8, ~1,051,405 steps in 8.4 hours on cuda): best held-out 2.030 at step 252,000; final 2.848; train 2.807 +/- 0.040, held-out 2.848 +/- 0.057, gap +0.040; ANCHORS uniform 3.888 / order-0 3.658 / order-1 3.573 / THIS MODEL 2.84. 81% of the run was spent getting worse.",
+   "evidence": "transcript:L2947, L3005",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (0.75 GB run): three cosine restarts at steps 263,965 / 504,894 / 756,851, each 1.00e-04 -> 2.00e-03 (a 20x jump onto a converged model). Probe sequences before/after each: r1 2.03 2.04 2.03 2.03 -> 2.05 2.18 2.26 2.21 2.31; r2 2.10 x4 -> 2.14 3.59 2.23 3.12 3.06; r3 2.20 x4 -> 2.31 2.26 2.37 2.29 2.46. Each restart ratcheted it worse.",
+   "evidence": "transcript:L2952, L2961, L3005",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (0.75 GB run): everything except the LR worked \u2014 no STREAM_LEN warning (the fetch was adequate), the vocabulary held at 2048, and the expert valve fired five times to a cap of 4406 with every lift inside the band.",
+   "evidence": "transcript:L3005",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (0.75 GB run): the repaired blow-up alarm fired correctly at step 516,000 \u2014 127 probes with no new best, median 3.062 against a best of 2.029 \u2014 with half the run still to save, and the end-of-run verdict said BLEW UP AND STAYED DOWN rather than PLATEAUED. Both instruments had got this exact shape wrong one round earlier.",
+   "evidence": "transcript:L2950, L3005",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (the 4x-corpus comparison, on the cross-corpus-comparable margin): lr_075 best 2.030 @252k, order-1 3.573 -> d-order-1 +1.543; sched_ctl best 1.943 @244k, order-1 3.446 -> d-order-1 +1.503. Four times the unique text bought the same floor at the same step. Assistant's own caveat: \"Two runs isn't a law.\"",
+   "evidence": "transcript:L3005",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (simulation of the repaired schedule against the 0.75 GB run's own arithmetic): restart peaks go from 100%/100%/100% of peak to 45%/15%/3%; the highest rate the converged model sees after step 252,000 drops from 100% to 45% of peak.",
+   "evidence": "transcript:L3082, L3087",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (full-system audit, 35 agents / 7 dimensions): _SPEC holds 324 knobs (self_organize.py:96-505); 227 are never assigned anywhere in longrun.sh; only 55 are set by an actual arm flag string in _flags_for(); 21 knobs at inert defaults can be turned on by no arm at all.",
+   "evidence": "transcript:L3144",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (project timeline, computed from git): 76 commits, 2026-08-15 to 2026-08-26. Themes by subject keyword: 19 fabric/experts, 19 notes/docs, 17 instruments, 17 rounds/arms, 9 capacity valve, 6 LR schedule, 4 memory, 2 tokenizer/vocab. The LR schedule was fixed six times in eleven days; the capacity valve nine.",
+   "evidence": "transcript:L3132, L3140, L3235",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (notes drift checker calibration): matching every KNOB=VALUE reported 319 note lines; requiring the word \"default\" on the line gave 34; requiring the keyword to attach to the VALUE gave 5, all real. After correction: 0.",
+   "evidence": "transcript:L3257, L3268, L3282, L3301, L3411",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (tokenizer minting stall, on real English from data/train/eng): before the fix, max_tok=16 vmax=2048 stopped at 1845/2048 (9.9% of the softmax width never minted) with 3940 pairs still at/above min_pair=50; max_tok=6 vmax=4000 stopped at 658/4000 (83.5% dead) with 1866 candidates left. After the fix: 2048/2048 and 4000/4000, 0.0% dead.",
+   "evidence": "transcript:L3519, L3594, L3634",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (cadence residue arithmetic): with `step % MANAGE_EVERY == 0` below the batch early-out, BATCH_W=16 MANAGE_EVERY=500 fires for only 4 of 16 possible flush residues (zero for the other 12); BATCH_W=16 ME=1000 fires for 2 of 16; BATCH_W=4 ME=50 for 2 of 4; BATCH_W=1 always.",
+   "evidence": "transcript:L3532, L3535",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (harness_test): 59 distinct arms across all 19 presets, every one defined; no arm sets the same knob twice; _reserve returns 100 distinct paths over 100 consecutive reservations.",
+   "evidence": "transcript:L3477, L3481",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (compare.py audit): the string `SEED=` appears in 0 of 37 real logs, because SEED was never in _EFF. compare_test.py:31 fabricated `SEED={seed}` into its own fixture, so the paired path passed against a log format the project has never produced. On real logs 33 of 37 get seed=None and the tool dies with ZeroDivisionError \u2014 reproduced on four real arms.",
+   "evidence": "transcript:L3767, L3774, L3779, L3915",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (two identically-labelled held-out numbers): 36 finished logs carry BOTH the MEMORIZATION CHECK figure (what compare.py and runs.py read) and the `SAMPLED FROM ... (X held-out bits/byte)` figure (what a human greps). 27 of 36 disagree by more than compare.py's own 0.03 \"worth resolving\" floor; the largest gap is 0.190 (lr_vcap 2.178 vs 1.988), then pop1024 2.104/1.966 (+0.138) and pop128 2.289/2.156 (+0.133). Signs go both ways.",
+   "evidence": "transcript:L3767, L3785, L3788",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round18 grid, STREAM_LEN=4000000 EPOCHS=4 GRID_DIR=runs/fix, cuda): fix_cadence held-out 2.091 / vs-order-1 +1.370 / curve +0.000 / 283 experts / top-share 5.5% / routing region 27% weight 73% (950s); fix_vocab 2.127 / +1.384 / +0.000 / 238 / 9.1% / 36-64 (970s); fix_resume 2.071 / +1.388 / +0.000 / 234 / 8.0% / 31-69 (921s). NONE of round18 is read on bits/byte \u2014 at that size they are noise by design.",
+   "evidence": "transcript:L3919, L3763",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round18 cadence fix, the intended read): fix_cadence at BATCH_W=12 and fix_resume at BATCH_W=1 produced fabric.spawn 39 vs 41, fabric.grow 312 vs 327, fabric.crossover 95 vs 97, fabric.replicate 273 vs 286 \u2014 within 5% on the same corpus and same FAB_NMAX. That BATCH_W-invariance is the entire content of the fix. `SPAWNED BY SPECIFICATION: 39 expert(s)` appeared as round18 asked.",
+   "evidence": "transcript:L3948, L3963, L4233",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round18): fix_vocab reached final `vocab 1024/1024` at step 6016 of 27528 \u2014 N == M, the documented read. But the assistant then noted the arm was weaker than designed: a run where the fail-open hole was never in the path prints N == M too, so it could not distinguish \"the fix saved the vocabulary\" from \"the fix was never needed\".",
+   "evidence": "transcript:L4233",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round18): all three logs contain ZERO `[resume]` lines \u2014 the resume half of round18 never ran, because pilot-add died at the data fetch on the gated dataset bigcode/the-stack-dedup. fix_resume.log's ACROSS THE RUN BOUNDARY reads \"no earlier probe to compare against\".",
+   "evidence": "transcript:L3919, L4022, L4233",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (round18, all three logs): `!! ZERO loss.TOK_ANCHOR 0 ARMED AND INERT` and `>> 1 ARMED MECHANISM(S) DID NOTHING: loss.TOK_ANCHOR`. TOK_ANCHOR defaults to 0.05 but its loss term has never once entered the loss.",
+   "evidence": "transcript:L3985, L3994",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (fetch_local root discovery): sysconfig-only roots found 530 unique files / 10.7 MB; adding site.getsitepackages() plus the user site found 1802 unique files / 26.9 MB across 4 roots. Two whole install roots (/usr/lib/python3/dist-packages and ~/.local/...) were being missed on Debian/Ubuntu.",
+   "evidence": "transcript:L4183, L4515, L4518",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (PHASE_SCHED generator, verified by executing the real _phases): NP=1 -> [[0],[0],[0],[0]]; NP=2 -> [[0],[0],[1],[1]]; NP=3 -> [[0,1],[0,1],[1,2],[1,2]]; NP=4 -> [[0,1],[1,2],[1,2],[2,3]]. For two corpora this means English for the first half of each epoch and the added area for the second, REPEATED every epoch \u2014 i.e. rehearsal, which confounds \"modularity protected the old area\".",
+   "evidence": "transcript:L4292, L4545",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (fetch_big preset alias bug, proven offline by stubbing `datasets`): `--dataset the-stack-dedup` resolved field='content'; `--dataset bigcode/the-stack-dedup` \u2014 the id printed on the dataset page and in fetch_big.py's own instructions and round18's note \u2014 missed the preset table and fell through to field='text', producing a KeyError after authenticating that reads like an auth problem.",
+   "evidence": "transcript:L4403, L4417, L4545",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (the fabric-resume crash, on the owner's box): RuntimeError size mismatch for A: checkpoint [1024,768,8] vs current model [4096,768,8]; same for B, SRC_p, K_p. The checkpoint held 523 live experts in a cap of 1024; pilot-add set neither FAB_N0 nor FAB_NMAX, so the resume built the registry defaults 2048/4096.",
+   "evidence": "transcript:L4551, L4608, L4612",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (what printed before that crash): \"1525 of 2048 experts had no recorded birth step\", \"1525 ... no recorded USE-age\", \"1813 of 2048 ... no recorded UTILIZATION -- backfilled to the population mean 383.45\". 2048 - 1525 = 523, the checkpoint's live count; the other 1525 slots held random initialisation and were being entered as mature veterans.",
+   "evidence": "transcript:L4551, L4739",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (occupancy vs the cull gate, FAB_PRESSURE=0.45, 523 experts): cap 1024 -> 0.511 gate OPEN; cap 2048 -> 0.255 CLOSED (opens at 921); cap 4096 -> 0.128 CLOSED (opens at 1843); cap 8192 -> 0.064 (opens at 3686). Even a doubled population (1046) stays shut at 4096.",
+   "evidence": "transcript:L4766, L4970",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (ramp re-arm, simulated against the real PlateauGrowth over 20,000 steps on a FLAT loss): cap 2048 with the latch not restored grew +594 from the RAMP (625 total) vs 0 ramp / 32 total with the latch restored; cap 4096 grew +1649 (1679 total) vs 0/32. At FAB_NMAX=2048, 95% of the run's growth would have been the ratio n/cap and nothing else \u2014 the ramp never reads the loss.",
+   "evidence": "transcript:L4923, L4970",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 THE HEADLINE CONTINUAL-LEARNING RESULT (runs/long/pilot_gru_py.log, commit 63191a0, cap 1024 so no widening): `eng was 2.096 @ step 24707 -> now 2.139  +0.043 +/- 0.075  HELD (inside the noise)`; `py 1.932 +/- 0.139 NEW this run`; BWT +0.0431, forgetting F 0.0431. Adding a second language cost English 0.043 bits/byte, inside its own noise band. This number had never once been measured before.",
+   "evidence": "transcript:L4984, L4987, L5173",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CONFOUND on that headline number, printed by the run itself: `!! CONFIG WARNING: EXPOSURE IMBALANCE 5.6x (EXPOSURE_SKEW=3): eng 0.28x, py 1.56x` \u2014 the corpora get the same SHARE of the stream but are different SIZES, so the small added area is seen many times over while the large original is skimmed.",
+   "evidence": "transcript:L5020",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (the CL run's population): 84 grown, 159 removed, net -75 -> 448 live of 1024; \"100% of all growth was replaced rather than added\"; growth fired 0x on the RAMP, 5x on a REGRESSION, 35x on a stall, with 1 REGRESSION detected and refused by the cooldown. The population SHRANK from 523 to 448 while adding a language.",
+   "evidence": "transcript:L5020, L5173",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (the CL run's vocabulary): `[tokenizer] ONLINE: minted throughout -> grew 2048 -> 2048 during training (+0)`. VMAX was already filled by English, so the new language got ZERO tokens of its own and was segmented entirely with English's merges. 20 retoks were skipped because nothing had been minted; the final re-segmentation moved 0 of 200000 stored contexts.",
+   "evidence": "transcript:L5027, L5033, L5173",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (the CL run's resume): `288 of 523 RESTORED experts had no recorded UTILIZATION -- backfilled to the population mean 383.45`; `source census rebuilt from 197880 restored entries -- 31 source id(s)`. The census-rebuild and restored/new partition fixes both fired in a real run.",
+   "evidence": "transcript:L4979, L5173",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (the CL run's memory): `model ALONE (weights only) 2.233 -> model + MEMORY 2.148 (memory contributes +0.085)`; and `WRONGNESS (B): injected 1961 cross-domain WRONG entries | caught 1820 (recall 93%) | flagged genuine 63146 (precision 3%)`. Top-8 retrieval spans 1.54 distinct segments per position.",
+   "evidence": "transcript:L5248, L5254",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (the cull budget over-cull, from the CL run's own numbers): n_live was 523 while only 84 experts were eligible (past the USE grace). The budget was int(0.02 x 523) = 10 where the correct budget is int(0.02 x 84) = 1 \u2014 a 10x over-cull, taken entirely from experts that had had their chances. Totals for the run: 159 culled, 1520 spared.",
+   "evidence": "transcript:L5044, L5048, L5051",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (ACCUM below the batch early-out, simulated against the real loop): at BATCH_W=16 ACCUM=4 the optimizer either steps on EVERY flush (so ACCUM accumulates nothing) or never steps at all for the epoch \u2014 3 of 4 starting offsets give zero om.step() calls. bench_gpu.sh ships BATCH_W=16 ACCUM=2.",
+   "evidence": "transcript:L5354, L5363, L3844",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (LM-curve collapse under PHASED, on the CL run): the old dict-keyed-on-step comprehension took 5.75 at step 26000 \u2014 Python's ABSENT value \u2014 where the mean over ACTIVE processes is 2.12. The printed second-half endpoints 1.77 -> 1.74 are py's to the digit; eng's are 2.17 -> 2.08. eng moved 3.3x more than the sentence the run printed.",
+   "evidence": "transcript:L5324, L5389",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED (SPECIALIZATION reads a dead module): the run's own audit prints `never gradiented -> ctrl, q_entry` (log line 770), and SPECIALIZATION built its winner partition from fab.q_entry. The diagnostic found 5 of 448 winners while ROUTER SELECTION found 415 distinct experts (top expert 27.8%, half the traffic to 11). INTERCHANGEABLE across 32 arms was thirty-two arms reading a randomly-initialised projection.",
+   "evidence": "transcript:L5324, L5337",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive move sidelined garry/, legacy/, handoff/, docs/, STATE.md and CL_TESTBED.md into archive/. Sizes before: notes/ 11M, data/ 9.1M, legacy/ 504K, handoff/ 352K, garry/ 164K, docs/ 24K. Nothing live imported or executed any of them \u2014 only two comment references, both amended.",
+   "evidence": "transcript:L3379, L3439, L3634",
+   "confidence": "verified"
+  },
+  {
+   "claim": "STATE.md, moved to archive, carried the header \"PROTOCOL (binding, for the assistant): 1. Update this file BEFORE responding, every turn.\" It had not been updated for eleven days and still stated FAB_N0=3 and FAB_NMAX=6. The assistant called it \"the sharpest hazard\" and it was not on the audit's list.",
+   "evidence": "transcript:L3429, L3437, L3634",
+   "confidence": "verified"
+  },
+  {
+   "claim": "archive/garry/self_organize.py still reads `_i(\"FAB_N0\", 3)` in a file that looks exactly like the live one \u2014 a repo-wide grep returns it. That is how the belief \"FAB_N0 defaults to 3\" propagated into nine notes files.",
+   "evidence": "transcript:L3392, L3411, L3634",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The instrument suite grew during this range to twelve-plus torch-free instruments: levers.py, notes_check.py, blowup_test.py, curve_test.py, tok_test.py, corpus_test.py, resume_test.py, harness_test.sh, lr_test.py, ramp_test.py, cap_test.py, proj_test.py, compare_test.py. resume_test grew 34 -> 48 -> 75 -> 90 -> 101 checks. Knob count in notes_check went 324 -> 326 -> 327.",
+   "evidence": "transcript:L3477, L4666, L4962, L5099, L5164, L5275",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "LR_STEPS",
+   "effect": "Sets the cosine wavelength in STEPS rather than deriving it from LR_EPOCHS. 0 = derive from LR_EPOCHS. Set to 280000 for round16 (matching what sched_ctl's 8 epochs actually spanned), 260000 for lr_075_short, 90000 for lr_075_rst.",
+   "owner": "the LR schedule (_lr_at in self_organize.py)",
+   "couples_with": [
+    "LR_EPOCHS",
+    "LR_RESTARTS",
+    "EPOCHS",
+    "STREAM_LEN"
+   ],
+   "evidence": "transcript:L2846, L2883, L3000"
+  },
+  {
+   "name": "LR_RESTARTS",
+   "effect": "Whether the cosine wraps into repeated cycles. LR_RESTARTS=0 forces `_p = min(1.0, _prog); _n, _ci = 1, 0`, which makes BOTH LR_RESTART_DAMP and LR_DECAY structurally unreachable.",
+   "owner": "the LR schedule",
+   "couples_with": [
+    "LR_STEPS",
+    "LR_RESTART_DAMP",
+    "LR_DECAY"
+   ],
+   "evidence": "transcript:L3144, L3166"
+  },
+  {
+   "name": "LR_RESTART_DAMP",
+   "effect": "NEW in this range, default 0.5. Each cycle records the best held-out it inherited; a cycle that fails to beat it halves the next restart's swing, cumulatively. Cannot reach cycle 1 at all.",
+   "owner": "the LR schedule",
+   "couples_with": [
+    "LR_RESTARTS",
+    "LR_DECAY"
+   ],
+   "evidence": "transcript:L3047, L3087"
+  },
+  {
+   "name": "LR_DECAY",
+   "effect": "A decaying envelope over restart cycles. Pre-existing but shipped at 0.0 (off) since it was written; flipped to default 1.0 in this range and gated on `_n > 1` so it is an exact no-op on any single-cycle schedule. Ungated it squeezed single-cycle runs too, ending them at LR_MIN_FRAC squared.",
+   "owner": "the LR schedule",
+   "couples_with": [
+    "LR_RESTARTS",
+    "LR_STEPS"
+   ],
+   "evidence": "transcript:L3020, L3031, L3047, L3087"
+  },
+  {
+   "name": "LR_SHIFT_WARM",
+   "effect": "Re-warms the LR after an epoch resample, as an attenuation of the cycle. Left at 0 (off): none of round15's worst excursions were resample-aligned, so it acts nowhere near the instability.",
+   "owner": "the LR schedule",
+   "couples_with": [
+    "EPOCHS",
+    "LR_STEPS"
+   ],
+   "evidence": "transcript:L2900, L2938"
+  },
+  {
+   "name": "BLOWUP_RISE / BLOWUP_STALE",
+   "effect": "NEW module-level constants, 0.5 bits/byte and 80 probes. The divergence alarm fires only when the median of the last three probes sits >=0.5 above the best AND 80 probes have passed with no new best. Chosen because 80 gave clean separation (zero wrong) across all nine real runs.",
+   "owner": "blowup_stale() in self_organize.py, exercised by blowup_test.py",
+   "couples_with": [
+    "the probe cadence (every 2000 steps)"
+   ],
+   "evidence": "transcript:L2747, L2751, L2752"
+  },
+  {
+   "name": "CURVE_RISE_BLEWUP / CURVE_FLAT / CURVE_TOK_RISE",
+   "effect": "0.5 / 0.05 / 0.05. Thresholds of the hoisted curve_verdict(), returning vocab|blewup|recovering|plateau|diverging|none.",
+   "owner": "curve_verdict() in self_organize.py, exercised by curve_test.py",
+   "couples_with": [
+    "the per-token vs bits/byte curves"
+   ],
+   "evidence": "transcript:L3324, L3352"
+  },
+  {
+   "name": "FAB_PRESSURE",
+   "effect": "0.45. A SETPOINT, not a limit: cull_gate_open is n_live/cap >= FAB_PRESSURE, and the population equilibrates at pressure x cap. Three mechanisms live behind that gate \u2014 the utilization cull, the utilization spare, and FAB_RESCUE.",
+   "owner": "cull_gate_open() in self_organize.py",
+   "couples_with": [
+    "FAB_NMAX",
+    "FAB_N0",
+    "GROW_CAP_FAB0",
+    "FAB_RAMP_TO"
+   ],
+   "evidence": "transcript:L4758, L4766, L4970"
+  },
+  {
+   "name": "FAB_NMAX",
+   "effect": "The preallocated slot pool (cap). Changing it on a resume moves the cull gate, the ramp latch, and the pressure setpoint all at once. pilot-add now sets it to double the checkpoint's cap automatically.",
+   "owner": "Fabric.__init__ / longrun.sh pilot-add and add",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_PRESSURE",
+    "FAB_RAMP_TO",
+    "GROW_CAP_FAB0",
+    "MAX_DOMAINS"
+   ],
+   "evidence": "transcript:L4766, L4784, L4886, L4970"
+  },
+  {
+   "name": "FAB_N0",
+   "effect": "Starting population. pilot-add now reads it from the checkpoint's fab_cfg[\"n\"] (523 in the real case) rather than taking the registry default 2048 \u2014 which would manufacture 1525 identity experts at step 0 that growth never asked for.",
+   "owner": "longrun.sh pilot-add / add",
+   "couples_with": [
+    "FAB_NMAX",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "transcript:L4621, L4719, L4739"
+  },
+  {
+   "name": "GROW_CAP_FAB0",
+   "effect": "The soft cap the capacity valve starts from; the valve only ever lifts it. `_cap_fab = [int(_i(\"GROW_CAP_FAB0\", 0)) or FAB_NMAX]` is rebuilt from the environment on every resume, and the clamp `_nb = min(_nb, _cap_fab[0] - fab.n())` goes NEGATIVE \u2014 freezing growth for the whole run \u2014 whenever fab.n() exceeds the soft cap.",
+   "owner": "the capacity valve in self_organize.py",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_NMAX",
+    "GROW_CAP",
+    "GROW_CAP_EVERY"
+   ],
+   "evidence": "transcript:L5190, L5193, L5201, L5320"
+  },
+  {
+   "name": "MANAGE_EVERY / BATCH_W",
+   "effect": "MANAGE_EVERY=500 default, BATCH_W=1 default (16 in the pilots, 12 in fix_cadence). The management cadence was `step % MANAGE_EVERY == 0` below the batch early-out; changed to `_nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0` at five sites so the cadence is BATCH_W-invariant.",
+   "owner": "the training loop's flush block",
+   "couples_with": [
+    "ACCUM",
+    "the batch early-out"
+   ],
+   "evidence": "transcript:L3532, L3618, L3971, L4233"
+  },
+  {
+   "name": "ACCUM",
+   "effect": "Gradient accumulation. Was `(step + 1) % ACCUM == 0` below the batch early-out, so at BATCH_W=16 ACCUM=4 it either fires on every flush or never for the epoch; changed to `_nbwd % ACCUM` so it counts backward passes.",
+   "owner": "the optimizer step site",
+   "couples_with": [
+    "BATCH_W",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "transcript:L3844, L5354, L5363"
+  },
+  {
+   "name": "VMAX",
+   "effect": "The softmax width, distinct from the tokenizer's vocabulary. Under TOK_ONLINE the model is built to it and the tokenizer mints into it for the whole run. It was full at 2048 before Python arrived, so the new area got zero tokens. pilot-add now doubles it from the checkpoint via VMAX=${VMAX:-2048}.",
+   "owner": "the model geometry / longrun.sh pilot-add",
+   "couples_with": [
+    "SEED_VOCAB",
+    "TOK_ONLINE",
+    "GROW_CAP_VOCAB"
+   ],
+   "evidence": "transcript:L5027, L5033, L5104, L5153, L5173"
+  },
+  {
+   "name": "EXPOSURE_MAX / EXPOSURE_SKEW",
+   "effect": "NEW knobs (2.0 and 3.0). Whole-run guards on per-corpus repetition and per-corpus exposure imbalance. Registered next to VAL_FRAC. Fired on the real CL run as \"EXPOSURE IMBALANCE 5.6x\".",
+   "owner": "the startup _warn block in self_organize.py",
+   "couples_with": [
+    "STREAM_LEN",
+    "EPOCHS",
+    "PHASE_SCHED",
+    "VAL_FRAC"
+   ],
+   "evidence": "transcript:L4355, L4369, L5020"
+  },
+  {
+   "name": "MEM_WRONG_READ",
+   "effect": "NEW knob, default 1. Separates DETECTING a self-inconsistent memory entry from ACTING on it. Previously Memory.read filtered on the same is_wrong() predicate that WRONG_SWEEP gated, so \"detect-only\" excluded 63,146 genuine entries from every retrieval.",
+   "owner": "memory.py Memory.read",
+   "couples_with": [
+    "WRONG_SWEEP",
+    "WRONG_THRESH"
+   ],
+   "evidence": "transcript:L5268, L5274, L5320"
+  },
+  {
+   "name": "WRITE_QUANTILE / WRITE_ADAPTIVE",
+   "effect": "WRITE_QUANTILE defaults to 1 but memory.py gates it as `if self.adaptive_gate and self.quantile_gate:`, and adaptive_gate comes from WRITE_ADAPTIVE which defaults to 0. So the quantile write gate reads as a live tuned setting and can never execute. Now surfaced as a COUPLING line.",
+   "owner": "memory.py write gate",
+   "couples_with": [
+    "WRITE_ADAPTIVE",
+    "WRITE_GATE",
+    "WRITE_TARGET"
+   ],
+   "evidence": "transcript:L3757, L5337, L5399"
+  },
+  {
+   "name": "MEM_SRC_FLOOR",
+   "effect": "0.5. The per-source eviction floor. Its ONLY input is nsrc, which is maintained incrementally in _commit \u2014 a path a resume never takes \u2014 so the floor protected nothing after any resume until rebuild_census() was added.",
+   "owner": "memory.py EditableMemory",
+   "couples_with": [
+    "MEM_CAP",
+    "MAX_DOMAINS (n_src_hint)"
+   ],
+   "evidence": "transcript:L3648, L3682, L3763"
+  },
+  {
+   "name": "MEM_PER_EXPERT / KEY_PREGATE / KEY_BATCH / KEY_SRC",
+   "effect": "MEM_PER_EXPERT=0 default. Which of two write paths runs is decided by KEY_PREGATE/KEY_BATCH/KEY_SRC \u2014 knobs about KEY ENCODING with no visible connection to whether the per-expert partition works. write_batch honours owners; the per-window write() fallback has no owner parameter at all. Latent, not live, at defaults.",
+   "owner": "the memory write site in self_organize.py",
+   "couples_with": [
+    "KEY_PREGATE",
+    "KEY_BATCH",
+    "KEY_SRC",
+    "MEM_OWNERS"
+   ],
+   "evidence": "transcript:L3746, L3749, L3763"
+  },
+  {
+   "name": "ENC_WARMUP_MIN",
+   "effect": "Registry 200 (corrected from 3000 in d267864). MUST be < ENC_WARMUP (800) or `_wfloor = min(MIN, WARMUP)` collapses onto the full warmup and the adaptive stop is unreachable. The call site was left at 3000 for five commits, which would SystemExit every run.",
+   "owner": "the encoder warmup in self_organize.py",
+   "couples_with": [
+    "ENC_WARMUP",
+    "ENC_WARMUP_EPS",
+    "ENC_WARMUP_PROBE"
+   ],
+   "evidence": "transcript:L3235, L3853, L3861, L3915"
+  },
+  {
+   "name": "PURE_ADD",
+   "effect": "NEW flag making the pure continual-learning arm first-class: it replaces a hand-typed PHASE_SCHED index that goes wrong the moment DOMAINS order changes. Under the default [[0],[0],[1],[1]] the original area is REHEARSED every epoch, which confounds a modularity claim.",
+   "owner": "longrun.sh pilot-add",
+   "couples_with": [
+    "PHASE_SCHED",
+    "PHASED",
+    "DOMAINS"
+   ],
+   "evidence": "transcript:L5232, L4545, L5320"
+  },
+  {
+   "name": "FAB_CULL_FRAC (the cull budget)",
+   "effect": "The cull budget was `int(cull_frac * s.n_live)` while `order` is drawn from `_elig` (experts past the USE grace). Sizing the budget on the wrong set gave a 10x over-cull. Changed to size on the eligible set at both the cull and the LR-boost site.",
+   "owner": "Fabric.manage / the LR-boost site",
+   "couples_with": [
+    "FAB_GRACE",
+    "FAB_PRESSURE"
+   ],
+   "evidence": "transcript:L5040, L5051, L5056"
+  },
+  {
+   "name": "MIN_PAIRS (compare.py)",
+   "effect": "3. Was checked against len(pairs), which the UNPAIRED cross-product inflated to n_a x n_b \u2014 two runs an arm became \"4 pairs\", cleared the guard, and printed SIGNIFICANT AND MEANINGFUL with CI [1.000, 1.000]. Now checked against _n_indep = len(shared) if shared else min(len(da), len(db)).",
+   "owner": "compare.py",
+   "couples_with": [
+    "SEED",
+    "the _reserve rerun naming"
+   ],
+   "evidence": "transcript:L3798, L3833, L3915"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "The divergence alarm fired on 4 of 4 healthy runs, then could never fire again",
+   "severity": "critical",
+   "where": "self_organize.py, the blow-up alarm (`_blew = [False]`, `if not _blew[0]`)",
+   "symptom": "It compared ONE probe against the best-so-far at +0.5 b/B. Across round15 it went off at steps 8,000-12,000 in every arm \u2014 on runs that went on to produce the session's best result. And because `_blew[0]` was never cleared, all four arms spent their single warning on that false positive and were then SILENT through mid-run excursions of +2.34, +2.05, +2.04 and +2.16 bits/byte.",
+   "evidence": "transcript:L2734 (\"hold=1 (shipped) !! @8000 ... want quiet\"), L2803, L2938 (\"sched_ctl, steps 94k-150k: 2.06 2.07 ... 4.03 4.40 ...\")",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The plateau verdict used a one-sided threshold for the third time in one session",
+   "severity": "high",
+   "where": "self_organize.py, `elif _bpb_dir[1] <= 0.05:`",
+   "symptom": "`<= 0.05` passes for every negative value, so sched_ctl \u2014 whose last two thirds FELL -0.086 \u2014 was told \"PLATEAUED... more steps at this setting will not help\" two lines after the LM curve block said \"clearly still improving \u2014 more steps will buy more\". Both numbers were computed correctly; one was described backwards, and they gave opposite advice about the same run.",
+   "evidence": "transcript:L2905, L2911, L2938 (\"That's the third instance of this exact fault this session \u2014 the capacity valve's plateau gate, the blow-up verdict, and now this.\")",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "A corpus smaller than STREAM_LEN duplicates itself, silently",
+   "severity": "high",
+   "where": "build_stream() in self_organize.py, and _pilot_corpus() in longrun.sh",
+   "symptom": "build_stream draws random segments until it has STREAM_LEN bytes and stops \u2014 it never checks whether that many DISTINCT bytes exist. And _pilot_corpus returns early if ANY part file exists, never checking size. So data_pilot fetched at 0.06 GB for round12 would be reused unchanged by a run configured for 0.75 GB, repeating the corpus ~1.6x per epoch with nothing in any log saying so.",
+   "evidence": "transcript:L2815, L2830, L2837, L2883",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The LR schedule was open-loop: a losing restart was re-taken identically, forever",
+   "severity": "critical",
+   "where": "self_organize.py _lr_at / the cosine restart site",
+   "symptom": "A warm restart is a bet \u2014 give up the anneal, explore, re-anneal into something at least as good \u2014 and nothing connected that bet to its outcome. On the 0.75 GB run it lost three times and the schedule took it again at full amplitude each time, ratcheting the model from 2.030 to 2.848. Three rounds of launch-config fixes did not hold because the defect was in the schedule.",
+   "evidence": "transcript:L2961, L3005, L3009 (owner: \"modify code not the run setup\"), L3087",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "LR_DECAY: an envelope built for this exact failure, shipped off at 0.0, and unsafe to turn on",
+   "severity": "high",
+   "where": "self_organize.py:368 `\"LR_DECAY\": (\"f\", 0.0)`",
+   "symptom": "LR_DECAY was written against an 18-epoch run whose curve \"swings 1.5 b/B and never resettles\" after a restart \u2014 the same failure, long before this session \u2014 and sat at 0.0 ever since. Turning it on was never safe either: written as a function of GLOBAL progress with no reference to cycle count, it also squeezed SINGLE-cycle runs, multiplying one cosine by another so a run that should end at LR_MIN_FRAC ended at its square.",
+   "evidence": "transcript:L3017, L3020, L3031, L3087",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The two newest LR mechanisms were unreachable on the arms the same commits recommended, and DID IT FIRE had no LR row at all",
+   "severity": "critical",
+   "where": "self_organize.py:4128 / 4158; longrun.sh:484, 489; the DID IT FIRE rows at 7364-7410",
+   "symptom": "704c432 added closed-loop restart damping; b990c9d, one commit earlier, fixed the same failure by setting LR_RESTARTS=0, which forces `_n, _ci = 1, 0`. Neither LR_DECAY= nor LR_RESTART_DAMP= appears anywhere in longrun.sh (0 occurrences each). And the audit built to catch \"armed and inert\" had 20 rows, none about the learning rate \u2014 the part of the system that has broken the most runs.",
+   "evidence": "transcript:L3144, L3166, L3235",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "TOK_ANCHOR is armed by default but its loss term can never fire",
+   "severity": "medium",
+   "where": "self_organize.py:121 `\"TOK_ANCHOR\": (\"f\", 0.05)`",
+   "symptom": "Armed at a nonzero default, its loss term has never once entered the loss, so every default run emits a guaranteed false \"ARMED AND INERT\" for it. Confirmed present in all three round18 logs.",
+   "evidence": "transcript:L3144, L3985, L3994",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "ENC_WARMUP_MIN: the registry was corrected and the call site was not \u2014 every run would have SystemExit'd for five commits",
+   "severity": "critical",
+   "where": "self_organize.py:4410 `_wfloor = min(_i(\"ENC_WARMUP_MIN\", 3000), wu)` against registry 200",
+   "symptom": "d267864 corrected the registry (3000 -> 200) and left the read site at 3000. _env() raises SystemExit on exactly that mismatch and the encoder warmup runs in EVERY run, so every arm launched from d267864 onward would have exited immediately. Five commits shipped, none run on a GPU. levers.py checked declaration and derivation but not default agreement.",
+   "evidence": "transcript:L3853, L3861, L3883, L3915",
+   "bug_class": "crash"
+  },
+  {
+   "title": "maybe_grow returned None for 'candidate rejected' as well as for 'nothing left to mint'",
+   "severity": "critical",
+   "where": "tokenizer.py maybe_grow()",
+   "symptom": "One unmintable top pair ended the burst with thousands of pairs still above min_pair \u2014 six lines below a comment forbidding exactly that. Measured on real English: 1845/2048 (9.9% of the softmax width never minted, 3940 candidates left) and 658/4000 (83.5% dead, 1866 left). The first fix did not work: with both re-rankers off `_k` is 1, so the candidate window is a SINGLE pair and \"walk to the next candidate\" had nothing to walk.",
+   "evidence": "transcript:L3511, L3519, L3574, L3586, L3594, L3634",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "Five management cadences ran below the batch early-out, firing for a minority of flush residues",
+   "severity": "high",
+   "where": "self_organize.py, `step % MANAGE_EVERY == 0` at the FAB_SPAWN, SOCIETY-merge and chain-order sites (plus ACCUM later)",
+   "symptom": "`step` advances once per WINDOW while the block runs once per FLUSH, so at BATCH_W=16 MANAGE_EVERY=500 the gate fires for 4 of 16 possible flush residues and ZERO for the other 12. FAB_SPAWN did fire in real runs (34-144), so the shipped pairing was lucky, not correct.",
+   "evidence": "transcript:L3529, L3532, L3535, L3618",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "The checkpoint carried fab_uage and fab_born but not fab_use, and use is the cull's only ranking key",
+   "severity": "critical",
+   "where": "self_organize.py checkpoint save/restore; Fabric cull `order = sorted(_elig, key=lambda i: s.use.get(i, 0.0))`",
+   "symptom": "After a resume every expert reads past-grace with utilization 0.0, the stable sort degenerates to slot order, and the utilization cull removes the LOWEST-NUMBERED slots \u2014 the founders \u2014 while printing an ordinary line. Only reachable on the continual-learning path.",
+   "evidence": "transcript:L3536, L3547, L3551, L3634",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "The memory source census (nsrc) was never rebuilt on resume, so MEM_SRC_FLOOR protected nothing",
+   "severity": "critical",
+   "where": "memory.py nsrc (maintained incrementally in _commit); the resume block in self_organize.py",
+   "symptom": "A resume restores the arrays and sets `active` directly, never touching _commit, so nsrc stayed at the zeros a fresh store starts with. `has = (nsrc > 0)` all False, `prot` all False. Silent in the worst way: mem_evict_test.py proves the floor works, the banner prints `src floor 0.5`, selftest.sh asserts that line is present, and the mechanism is off.",
+   "evidence": "transcript:L3648, L3650, L3682, L3763",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "rebuild_census (the fix for the above) clamped source ids into a 64-wide table instead of growing it",
+   "severity": "high",
+   "where": "memory.py rebuild_census(), self_organize.py:4309 `n_src_hint=max(64, _i(\"MAX_DOMAINS\", 32) * 2)`",
+   "symptom": "memory.py's own docstring records 125 source ids on a real run, so the fix for the resume floor would have re-broken it at exactly the scale it was written for. The assistant's own fix, caught by the follow-on audit.",
+   "evidence": "transcript:L3896, L3900, L3915",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "compare.py could not pair a single log the project has ever produced",
+   "severity": "critical",
+   "where": "compare.py:80 `row[\"seed\"] = _grab(r\"\\bSEED=(\\d+)\", eff) or ...`; compare_test.py:31",
+   "symptom": "SEED was never in _EFF, so `SEED=` appears in 0 of 37 real logs. 33 of 37 get seed=None, the tool falls to the UNPAIRED path and dies with ZeroDivisionError. compare_test.py FABRICATED `SEED={seed}` into its own fixture, so the paired path passed against a format that has never existed. Reproduced on four real arms.",
+   "evidence": "transcript:L3767, L3774, L3779, L3915",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "compare.py's unpaired branch counted a cross-product as independent observations",
+   "severity": "high",
+   "where": "compare.py `pairs = [(x, y) for x in da.values() for y in db.values()]`",
+   "symptom": "Two runs per arm became 4 \"pairs\", clearing MIN_PAIRS=3 and printing P(A better) = 1.000, CI [1.000, 1.000], SIGNIFICANT AND MEANINGFUL \u2014 reproducing the exact collapse the docstring says MIN_PAIRS exists to prevent.",
+   "evidence": "transcript:L3767, L3798, L3833, L3915",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Two different numbers in every log are both labelled 'held-out bits/byte'",
+   "severity": "high",
+   "where": "self_organize.py, the MEMORIZATION CHECK line vs the `SAMPLED FROM ... (X held-out bits/byte)` line",
+   "symptom": "27 of 36 finished logs disagree by more than compare.py's own 0.03 floor, max gap 0.190 \u2014 larger than most arm effects this project has claimed. runs.csv puts one in `held_out` and a figure from the other instrument in `past_min`. Nothing reconciled them.",
+   "evidence": "transcript:L3767, L3785, L3826, L3915",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "grid never wrote $LOG.cfg, so the documented skip-and-resume workflow could never work",
+   "severity": "medium",
+   "where": "longrun.sh grid",
+   "symptom": "`seeds` and `repeat` both stamp a .cfg; grid is the only sweep that calls _reusable and never wrote one, and _reusable returns 1 on a MISSING .cfg. So the documented `sleep 2h && git pull && bash longrun.sh grid` exited 1 on the first completed arm.",
+   "evidence": "transcript:L3901, L3903, L3915",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The vs-order-1 column matched only the winning branch, so a loss printed identically to 'not measured'",
+   "severity": "medium",
+   "where": "longrun.sh:1204 `grep -a -oE \"beats order-1 by \\+[0-9.]+\"`",
+   "symptom": "self_organize.py prints \"beats order-1 by +X\" OR \"DOES NOT BEAT ORDER-1 (-X)\", and the pattern only matched the first. An arm that LOSES to a two-line frequency table printed `-`. The report's own gate is \"if it does not beat order-1, nothing below is worth reading\".",
+   "evidence": "transcript:L3906, L3915",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The world-model resume replay could hang forever with no output",
+   "severity": "high",
+   "where": "self_organize.py `while world_fwd.n() < _RD[\"world_cfg\"][\"n\"]: world_fwd.grow()`",
+   "symptom": "grow() returns None WITHOUT appending at capacity (world_model.py:105), so a checkpoint with more predictors than this run's WORLD_NMAX spins forever \u2014 no output, no traceback, no timeout. Bounded now with a SystemExit naming WORLD_NMAX.",
+   "evidence": "transcript:L3888, L3893, L3915",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "pilot -> pilot-add could never work: the tokenizer went to the shared path",
+   "severity": "critical",
+   "where": "longrun.sh pilot (SAVE_CKPT set, no TOKENIZER_PATH)",
+   "symptom": "self_organize.py wrote the vocabulary to the default data/dyntok.json while pilot-add searches beside the checkpoint, so pilot-add exited 1 before touching the GPU. That is the continual-learning demo \u2014 the one thing that had never run. The same gap also broke the append-only invariant: a second pilot gets pilot_gru-2 for its checkpoint and then OVERWRITES the shared vocabulary, orphaning the first run's weights.",
+   "evidence": "transcript:L3202, L3218, L3222, L3235",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "A corpus dropped by the 5000-byte floor did not take its name with it",
+   "severity": "critical",
+   "where": "self_organize.py `CORP = [c for c in CORP if len(c) > 5000]` with DN left untouched",
+   "symptom": "open_corpus returns one entry per name in DOMAINS order so CORP[i] is DN[i]; filtering CORP alone desyncs them. Reproduced: DN=['eng','py'] sizes [1880, 84000] -> after filter sizes [84000], NP=1, and VALC[0] is the PYTHON corpus which report_holdout names 'eng'. ACROSS THE RUN BOUNDARY looks up the previous run's score BY NAME, so a short English corpus makes the next run compare this run's Python against last run's English and report the difference as forgetting \u2014 the number goal B rests on. Trigger is an undersized corpus, exactly what the owner hit.",
+   "evidence": "transcript:L4322, L4323, L4330, L4545",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "The resampling guard summed the corpora instead of checking each one",
+   "severity": "high",
+   "where": "self_organize.py, the STREAM_LEN vs sum(SEG_LEN) startup warning",
+   "symptom": "build_stream draws PER CORPUS in PHASE_SCHED's proportions; the guard compared STREAM_LEN against sum(SEG_LEN). 60 MB English + 8 MB Python reads as 68 MB against a 4 MB stream and passes. The assistant's first replacement was PER-EPOCH and still missed it \u2014 exposure is a whole-run quantity: at EPOCHS=8 the added area is seen 2.1x over while the original is 28% sampled. Writing the exposure check in epoch units is the same units fault the check exists to catch.",
+   "evidence": "transcript:L4337, L4354, L4355, L4545",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "fetch_big presets were findable only by short key, so the documented command could not have worked",
+   "severity": "high",
+   "where": "fetch_big.py `p = PRESETS.get(a.dataset, dict(path=a.dataset, ..., field=\"text\"))`",
+   "symptom": "`--dataset the-stack-dedup` resolved field='content'; `--dataset bigcode/the-stack-dedup` \u2014 the id on the dataset page, in fetch_big.py's own instructions, and in round18's note \u2014 missed the table and fell through to field='text', producing \"a KeyError after authenticating, which reads like an auth problem and is not one\".",
+   "evidence": "transcript:L4399, L4403, L4407, L4417, L4545",
+   "bug_class": "other"
+  },
+  {
+   "title": "fetch_local's root discovery missed two whole install roots on Debian/Ubuntu",
+   "severity": "medium",
+   "where": "fetch_local.py roots_for() using sysconfig.get_paths() only",
+   "symptom": "purelib and platlib both collapse to /usr/local/lib/pythonX/dist-packages while system packages live in /usr/lib/python3/dist-packages. Found 10.7 MB where 26.9 MB existed \u2014 a 2.5x undercount that produced the 'corpus too small' error the owner reported.",
+   "evidence": "transcript:L4183, L4505, L4515, L4545",
+   "bug_class": "other"
+  },
+  {
+   "title": "A resume could not change the fabric's size: fab_cfg recorded cap/rank/dk and nothing on the restore path read them",
+   "severity": "critical",
+   "where": "self_organize.py `_mk = fab.load_state_dict(_RD[\"fab\"], strict=False)`; longrun.sh pilot-add / add",
+   "symptom": "fix_resume was trained at FAB_N0=256 FAB_NMAX=1024; pilot-add pins sixteen env vars and neither of those is among them, so the resume built 2048/4096 and died inside torch with five tensor shapes and no knob name. It cost a run with the tokenizer resolved, the corpus pulled and the GPU warm. Data recorded and never read.",
+   "evidence": "transcript:L4551, L4591, L4598, L4739",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "The resume backfill could not tell 'the checkpoint did not annotate this slot' from 'this slot never existed'",
+   "severity": "critical",
+   "where": "self_organize.py, the fab_born / fab_uage / fab_use backfill",
+   "symptom": "1525 of 2048 slots held random initialisation and were being entered as MATURE VETERANS \u2014 past grace (so cullable, on the mature per-expert LR) yet ranked mid-population in a utilization cull where they would displace genuinely trained experts. The rule 'unknown means experienced' is right for an unannotated restored slot and exactly wrong for a slot the checkpoint never had. The crash was the lucky outcome.",
+   "evidence": "transcript:L4551, L4653, L4739",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "A widened fabric would have loaded stale Adam moments and crashed on the first step, not at load",
+   "severity": "high",
+   "where": "self_organize.py `om.load_state_dict(_RD[\"opt_m\"])`",
+   "symptom": "exp_avg and exp_avg_sq are shaped like the parameter they track, so a checkpoint holds [1024,d,r] moments for an A that is now [4096,d,r]. torch's Optimizer.load_state_dict does NOT validate shape \u2014 it would load cleanly and fail minutes into training with nothing connecting it to the resume.",
+   "evidence": "transcript:L4678, L4696, L4739",
+   "bug_class": "crash"
+  },
+  {
+   "title": "FAB_NMAX=4096 (the assistant's own recommendation) would have silently removed three mechanisms for the whole run",
+   "severity": "critical",
+   "where": "cull_gate_open(n_live, cap, pressure) in self_organize.py",
+   "symptom": "Widening divides n_live/cap without touching the population: 523 experts at cap 1024 = 0.511 OPEN; the same 523 at 4096 = 0.128 SHUT; even 1046 at 4096 = 0.255 still SHUT. The utilization cull, the utilization spare and FAB_RESCUE all live behind that gate and would read ARMED AND INERT as an artefact of the cap. Worse for goal B, FAB_PRESSURE is a SETPOINT, so 4096 also invites the population toward ~1843 whether or not the new area needs the experts.",
+   "evidence": "transcript:L4758, L4766, L4769, L4970",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The population ramp re-armed against the widened cap and grew on no evidence",
+   "severity": "critical",
+   "where": "self_organize.py PlateauGrowth latch `n >= s.ramp_to * _pool` judged against fab.cap; fabgrow rebuilt from env at 3905 and never checkpointed",
+   "symptom": "523 experts in a cap of 1024 have latched (523 >= 512) and the ramp exists to build the population once. Resume into any larger cap and the threshold moves out from under it \u2014 and since the controller was never in the checkpoint, every resume started ramp_done=False. Simulated on a FLAT loss: cap 2048 grew +594 from the ramp (625 total) vs 0/32 with the latch restored; cap 4096 grew +1649 vs 0/32. The ramp never reads the loss.",
+   "evidence": "transcript:L4831, L4838, L4923, L4970",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The regression trigger \u2014 'the only signal continual learning has' \u2014 was structurally blind at the boundary",
+   "severity": "critical",
+   "where": "self_organize.py PlateauGrowth `s.slow = loss if s.slow is None else ...`",
+   "symptom": "The EMAs are seeded from the first loss they see, which on a resume is the first loss on the NEW material, so `(loss - slow) > z * dev` has no jump left to detect. The file itself calls this trigger \"the arrival of a new area and the only signal continual learning has\", and it could not fire at the one moment an area arrives. Measured: EMAs carried across -> REGRESSION fires twice; fresh -> zero.",
+   "evidence": "transcript:L4856, L4863, L4970",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "One flag (_wide_by) gated two unrelated optimizers",
+   "severity": "high",
+   "where": "self_organize.py `om.load_state_dict(...); oe.load_state_dict(...)` sharing a line",
+   "symptom": "_wide_by is a fact about the FABRIC's cap-shaped parameters, all in om. oe is AdamW(enc.parameters()) and holds nothing sized by fab.cap, so widening cannot invalidate its moments \u2014 yet they were dropped and the message blamed the fabric. enc produces gist: the routing query and the space every centroid lives in, so resetting its Adam state at the boundary where a new area's signatures first arrive is the worst available moment. Committed WHILE fixing that exact class of bug.",
+   "evidence": "transcript:L4941, L4945, L4954, L4970",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "Growth events were counted before the clamp that declines them",
+   "severity": "medium",
+   "where": "self_organize.py, n_regr incremented inside PlateauGrowth.step, returned before the call-site cap/FAB_NEW_FRAC clamp",
+   "symptom": "A declined regression still reported as fired \u2014 and the diagnostic built to catch exactly this (\"the REGRESSION trigger never fired... the arrival was invisible to growth\") is gated on n_regr == 0, so it stayed silent precisely when it was needed.",
+   "evidence": "transcript:L4851, L4873, L4879, L4970",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "RETENTION had the subtraction inverted, on the line the continual-learning claim rests on",
+   "severity": "critical",
+   "where": "self_organize.py:7446 `drift {_e - _l:+.3f}` on a lower-is-better metric",
+   "symptom": "process 0 (eng) went 2.114 -> 2.223 (WORSE) and was reported -0.109; process 1 (py) went 1.447 -> 1.103 (BETTER) and was reported +0.344, against a legend saying \"positive is FORGETTING\". The verdict DRIFTING printed BECAUSE Python improved. Additionally, a mean over processes lets a domain that arrived THIS run cancel an old domain's forgetting.",
+   "evidence": "transcript:L4989, L4996, L5004, L5014, L5173",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The cull budget was sized on n_live while the candidates came from the eligible set",
+   "severity": "critical",
+   "where": "self_organize.py:2051 `for i in list(order[:max(1, int(cull_frac * s.n_live))]):` with `order` drawn from `_elig`",
+   "symptom": "In the real CL run n_live was 523 while only 84 were eligible: budget int(0.02*523)=10 against a correct int(0.02*84)=1. Ten removed per pass instead of one, drawn entirely from the experts that had had their chances \u2014 159 removed against 84 grown, 523 -> 448 live WHILE ADDING A LANGUAGE, churn reading \"100% of all growth was replaced rather than added\". The same defect existed in the LR-boost budget.",
+   "evidence": "transcript:L5040, L5044, L5051, L5320",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "The LM-curve verdict collapses every process to one under PHASED",
+   "severity": "critical",
+   "where": "self_organize.py:7800 and :7811, twice: `_bp = sorted({st: b for st, _p, b, _a in _CURVE}.items())`",
+   "symptom": "_CURVE rows are (step, process, bits/byte, was_active); keying on step alone drops both the process and the active flag, so each step keeps whichever process was appended LAST \u2014 systematically the highest-indexed, i.e. the NEWEST corpus, the one that cannot have been forgotten. Reliably wrong in the direction that hides goal B's failure mode. Also, _a is discarded, so an ABSENT window can enter rise_since_min: at step 26000 it took 5.75 where the active mean is 2.12.",
+   "evidence": "transcript:L5324, L5332, L5389",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "SPECIALIZATION partitions held-out windows with a projection that was never gradiented",
+   "severity": "critical",
+   "where": "self_organize.py:8548, building the winner from fab.q_entry",
+   "symptom": "Both live entry paths fork to entry_logits under s.grounded, which scores with s.q_route \u2014 a different nn.Linear. ROUTE_GROUNDED defaults to 1 and the pilot ran with 1. The run's own audit prints \"never gradiented -> ctrl, q_entry\". So SPECIALIZATION partitions with a randomly-initialised projection and then asks whether that beats a random partition of the same sizes \u2014 it is drawn from its own null. INTERCHANGEABLE across 32 arms is thirty-two arms reading a dead input. The file even noticed the symptom (5 of 448 winners vs ROUTER SELECTION's 415) and rationalised it away as \"a probe, not the run\".",
+   "evidence": "transcript:L5324, L5330, L5337, L5366",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "'Detect-only' covered deletion but not reads: a third of the memory store was unreachable",
+   "severity": "critical",
+   "where": "memory.py Memory.read `valid = self.active & (~self.is_wrong()) & (~self.is_unverified())`, sharing the predicate WRONG_SWEEP gates",
+   "symptom": "WRONG_SWEEP gates sweep_wrong(); read() filters on the SAME predicate. So the 63,146 genuine entries flagged at 3% precision were already excluded from every retrieval \u2014 about a third of the store unreachable, to keep 1,820 corrupt entries out of the vote, while memory was contributing +0.085 b/B and the log read as reassurance. is_wrong() also had NO DID IT FIRE row despite gating every query, and opens with `if checked.sum() > 10`, below which the whole filter is inert \u2014 inert and over-eager printed the same nothing.",
+   "evidence": "transcript:L5248, L5254, L5257, L5259, L5320",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "A soft cap below the population freezes growth for the entire run, silently",
+   "severity": "critical",
+   "where": "self_organize.py:4874 `_cap_fab = [int(_i(\"GROW_CAP_FAB0\", 0)) or FAB_NMAX]` and the clamp `_nb = min(_nb, _cap_fab[0] - fab.n())`",
+   "symptom": "Once fab.n() exceeds the soft cap that expression is NEGATIVE and nothing ever grows \u2014 and nothing says so, because the trigger counts still increment and the pin counter reads exactly as it would on a population legitimately at its cap. Unreachable on a fresh run; entirely reachable now that FAB_N0 comes from the checkpoint: 523 experts against any GROW_CAP arm's GROW_CAP_FAB0=160 gives -363. Also _cap_fab is accumulated state (the valve only lifts) that was re-read from the environment on every resume.",
+   "evidence": "transcript:L5190, L5193, L5201, L5320",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "pilot-add's fetch guard skipped on 'any part file exists', not on size",
+   "severity": "high",
+   "where": "longrun.sh pilot-add `if [ -z \"$(ls \"$P_DD/train/$NAME\"/part*.txt 2>/dev/null)\" ]; then`",
+   "symptom": "This is exactly how the first continual-learning run got its 5.6x exposure imbalance: an earlier `pilot-add py local 0.03` had left ~10 MB, the next invocation asked for 0.06 GB, saw part000.txt, and skipped. The identical defect was already documented for _pilot_corpus.",
+   "evidence": "transcript:L5223, L5227, L5320",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The geometry gate had three blind spots",
+   "severity": "high",
+   "where": "self_organize.py:4171 `_ck_cap = int(_fc.get(\"cap\") or 0)` and the widened-count report at :4359",
+   "symptom": "(a) a fab_cfg without \"cap\" slid through all three branches (each guarded on `_ck_cap and ...`) straight to load_state_dict and the original five-shape dump; (b) FAB_NMAX was named as the remedy for trailing-dimension mismatches that are not about the cap; (c) the widened count was never compared to anything, so a checkpoint missing `cent` would restore every adapter and silently leave every restored expert's routing region at random init.",
+   "evidence": "transcript:L5189, L5190, L5216, L5320",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "ACCUM was the last modulo cadence below the batch early-out",
+   "severity": "high",
+   "where": "self_organize.py `if (step + 1) % ACCUM == 0:`",
+   "symptom": "At BATCH_W=16 ACCUM=4 the optimizer either steps on EVERY flush (ACCUM accumulates nothing) or never steps at all for the epoch \u2014 3 of 4 starting offsets give zero om.step() calls. bench_gpu.sh ships BATCH_W=16 ACCUM=2. Harmless only at ACCUM=1.",
+   "evidence": "transcript:L3844, L5354, L5363",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "The quantile write gate is a default that cannot fire, with no DID IT FIRE row",
+   "severity": "medium",
+   "where": "memory.py:119 `if self.adaptive_gate and self.quantile_gate:`",
+   "symptom": "quantile_gate defaults True but adaptive_gate comes from WRITE_ADAPTIVE=0, so WRITE_QUANTILE reads as a live tuned setting and can never execute. Same shape as TOK_ANCHOR \u2014 which at least has a DID IT FIRE row; this did not. Surfaced as a COUPLING line at the end of this range; whether a DID IT FIRE row was added is not shown.",
+   "evidence": "transcript:L3757, L5337, L5399",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The vocabulary was full before the second modality arrived",
+   "severity": "critical",
+   "where": "VMAX in self_organize.py; longrun.sh pilot-add hardcoding VMAX=2048",
+   "symptom": "`grew 2048 -> 2048 (+0)` on the first-ever continual-learning run. VMAX was already filled by English, so the new language got ZERO tokens of its own and was segmented entirely with English's merges. New experts, no new tokens \u2014 half of what 'strap on another modality' means. Also, tokenizer.mint reported this as `ZERO -- ARMED AND INERT`, which reads as 'minting is broken' rather than 'the vocabulary is full'.",
+   "evidence": "transcript:L5027, L5033, L5072, L5173",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The DomainAssembler / sweep_domain_report mem delta column reads the wrong line",
+   "severity": "medium",
+   "where": "sweep_domain_report.py, the `mem db/B` column",
+   "symptom": "It reads the FIRST \"memory contributes\" in the log, which is the per-domain retention line, not the run-level ablation its own header documents. On real logs this flips the sign of the documented \"POSITIVE means memory helped\" reading. Reported by the analysis audit; whether it was fixed is not shown in this range.",
+   "evidence": "transcript:L3767",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "holdout.py and runs.py have no tests, and runs.py asserts staleness about knobs a run demonstrably set",
+   "severity": "medium",
+   "where": "holdout.py (four unguarded rules), runs.py",
+   "symptom": "runs.py will ingest a log whose entire config line failed to parse, then assert in `stale` that the run \"predates\" knobs it demonstrably set. Reported by the analysis audit; no fix shown in this range.",
+   "evidence": "transcript:L3767",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The assistant's own first read of round15 was wrong",
+   "severity": "medium",
+   "where": "the log-extraction grep for 'held-out'",
+   "symptom": "It caught the BLOW-UP ALARM line rather than the final report, which made all four arms look identical (sched_ctl and sched_warm the same, sched_step and sched_both the same) and produced a wrong table before it was corrected from the ANCHORS block.",
+   "evidence": "transcript:L2703, L2706, L2715, L2803",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The system-audit workflow's verify stage crashed on a JS bug, so none of its findings were adversarially checked",
+   "severity": "medium",
+   "where": "the round15 deep-read workflow script",
+   "symptom": "The agents returned `arm` as a descriptive string, so the file lookup found nothing and the verify stage produced nothing. The assistant verified each claim by hand instead; three of four held.",
+   "evidence": "transcript:L2887, L2890, L2938",
+   "bug_class": "other"
+  },
+  {
+   "title": "Test-fixture faults the assistant made and caught",
+   "severity": "low",
+   "where": "blowup_test.py, tok_test.py, curve_test.py, harness_test.sh, resume_test.py, corpus_test.py",
+   "symptom": "Defaults referencing module constants not in the exec namespace; `(a, b), cnt, ns = None, 0, None` (invalid unpack); max_tok=3 never rejecting anything so the skip counter stayed 0 (needed max_tok=2); `base` (the legitimately empty control arm) treated as undefined; curve_test asserting two different answers for identical inputs two lines apart; PlateauGrowth built with its signature default ramp=0 so every ramp assertion passed vacuously; and THREE separate anchor drifts where an inserted block made an extract-and-exec test run code it was never written for.",
+   "evidence": "transcript:L2771, L3566, L3359, L3475, L4709, L4808, L4904, L4921, L5286",
+   "bug_class": "other"
+  }
+ ],
+ "junk": [
+  {
+   "what": "The recommendation LR_EPOCHS=8 for round14",
+   "why": "REVERSED by owner challenge at L2807. The assistant had added LR_STEPS to remove the epoch-derived wavelength and then recommended the epoch-determined path one message later. round14 now reads LR_STEPS=280000.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The recommendation LR_STEPS=280000 for the 1.05M-step 0.75 GB run",
+   "why": "REVERSED. sched_ctl \u2014 the arm whose wavelength was copied \u2014 had ZERO restarts; its wavelength WAS its run length. Applying 280,000 steps to a run 3.7x longer turned a no-restart schedule into a four-cycle one with three restarts, which destroyed the run.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The claim that sched_step's harmless restart at step 119,157 was evidence that restarts are safe",
+   "why": "SUPERSEDED. That restart landed on an UNCONVERGED model with a full cycle left to re-anneal into; the 0.75 GB restarts landed on a converged model already at its floor.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Three rounds of fixing the LR failure in the launch config (pick a wavelength, pick LR_RESTARTS)",
+   "why": "REVERSED by the owner's instruction 'modify code not the run setup'. The assistant's own words: 'I was choosing settings that avoided the trap instead of removing it.'",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The stated reason for dropping LR_SHIFT_WARM ('the epoch-2 shock didn't happen this time, so the runs were smooth')",
+   "why": "WRONG REASON, right call. The runs were NOT smooth \u2014 excursions of +2.0 to +2.3 b/B occurred, just 13,754-24,576 steps from any epoch boundary. The correct reason is that the instability is not resample-aligned and LR_SHIFT_WARM acts only at resamples.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The workflow claim that _plumb suppressed SEED from the log",
+   "why": "REFUTED by the assistant's own new check, which failed immediately. _plumb suppresses nothing \u2014 it is the allowlist for the 'you set a knob nothing read' audit, and SEED belongs there. SEED was missing simply because it was never in _EFF. The wrong explanation had already been written into a source comment and was corrected.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The audit claim that TOK_MINT_NOVEL is inert after the first mint of a burst",
+   "why": "REFUTED by direct experiment: sequences differ at positions 1-5 between novel=0.0 and novel=1.0. No change was made.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The audit framing '21 of ~40 scripts have one commit and haven't been touched, therefore dead'",
+   "why": "PREMISE DID NOT SURVIVE CHECKING. One commit means imported and never needing a change. Only three scripts have no code reference at all.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The audit claim that MEM_PER_EXPERT is a no-op because write() has no owner parameter",
+   "why": "NARROWER THAN REPORTED. The loop's PRIMARY path is write_batch, which computes _own from routing weights and passes owners=. At defaults (KEY_PREGATE=1, KEY_BATCH=1, KEY_SRC=model) the batched path runs. Latent, not live; a startup guard was added rather than a restructure.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "fetch_local.py and the `local` dataset preset, built as the unblock for gated HF datasets",
+   "why": "SUPERSEDED IN PURPOSE by the owner's 'I can use HF on my system'. Retained as the no-account fallback and still carries a real fix (site-based root discovery), but it is no longer the path to the second corpus.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The recommendation FAB_NMAX=4096 for the resumed run",
+   "why": "REVERSED ONE COMMIT LATER to 2048, twice over: it would shut the cull gate (523/4096 = 0.128, and even a doubled 1046 = 0.255, both below FAB_PRESSURE=0.45) removing three mechanisms silently, AND it re-arms the population ramp against a moved latch threshold, which simulation shows would make 95%+ of the run's growth a function of n/cap on a flat loss.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The manual workaround `FAB_N0=523 FAB_NMAX=1024 ... bash longrun.sh pilot-add`",
+   "why": "SUPERSEDED by pilot-add reading fab_cfg[\"n\"] and fab_cfg[\"cap\"] from the checkpoint automatically. The assistant explicitly called pinning the cap 'the wrong long-term answer for goal B'.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The first exposure guard, written in per-EPOCH units",
+   "why": "REVERSED. Caught by corpus_test: exposure is a whole-run quantity, and writing the check in epoch units is the same units fault the check exists to catch.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "_wide_by gating BOTH om and oe (the encoder optimizer)",
+   "why": "REVERSED. oe is AdamW(enc.parameters()) and holds nothing sized by fab.cap. It now has its own, different skip reason (a resized emb.weight from _load_enc).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The workflow's proposed resolution of E4 (the two contradicting cull-gate diagnostics)",
+   "why": "RESOLVED THE OPPOSITE WAY. The assistant's ramp-latch persistence flipped the premise: a resumed run will never fire the ramp, so it is the banner promising 'the gate OPENS once the population is built' that is now wrong, not the new warning. Both now consult ramp_done.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The first version of the WIDENING-CLOSED-THE-CAPACITY-GATE warning, which fired whenever widening pushed occupancy below pressure",
+   "why": "REVERSED \u2014 it fires on the HEALTHY case (round18's own logs show the cull sitting closed at 0.27 for thousands of steps before the population grows into it) and warned at the recommended cap while suggesting that same cap. 'A warning that fires on the healthy case is one nobody reads.' It now fires only when DOUBLE the current population still stays under pressure.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "resume_test's assertion `str(e).count(\"FAB_NMAX\") <= 1`",
+   "why": "THE ASSERTION WAS WRONG, not the message: FAB_NMAX is named twice on purpose, once for the genuine shrink case and once to disclaim it for trailing-dimension mismatches.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "garry/, legacy/, handoff/, docs/, STATE.md, CL_TESTBED.md at the repo root",
+   "why": "MOVED TO archive/ on the owner's 'sideline old parts'. Nothing live imports or executes any of them. Their danger was greps: archive/garry/self_organize.py still reads _i(\"FAB_N0\", 3) in a file that looks exactly like the live one.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "Both claude/hub-addition-1ueehb branches (local 96660b3, origin 6f9b998)",
+   "why": "Strict ancestors of rm-predict with ZERO unique commits. `git branch -d` will succeed. The assistant explicitly did not touch the remote without the owner's word, and no such word appears in this range.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The claim in notes/ that FAB_N0 defaults to 3 (nine files), that GROW_CAP has 'never been set anywhere in the project's history', GROW_LIFT's three unit systems, and 'LR_DECAY defaults to 0, so nothing measured is affected'",
+   "why": "All corrected as DATED ADDITIONS rather than rewrites \u2014 the corpus is a log of what was believed and when, and deleting that destroys what it is for. The LR_DECAY line was made false by the assistant's own commit two days earlier.",
+   "safe_to_drop": false
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "NEVER fix a recurring failure by choosing launch flags. The owner's standing instruction is 'I want you to modify code not the run setup. This error needs a deeper fix.'",
+   "why": "Three rounds of LR config fixes did not hold because the defect was in the schedule, not the settings. The first fix that closed a loop (704c432) is the only one that survived.",
+   "evidence": "transcript:L3009, L3087"
+  },
+  {
+   "item": "THE TWO DEFINITIVE GOALS, restated by the owner mid-session: A = good language production, B = continual learning capabilities (modularity was designed so additional modalities can be strapped on). Everything else is a signal.",
+   "why": "The owner issued this as an explicit realignment while the assistant was chasing a corpus-fetch problem, and it changed what the second corpus should BE, not just how big it is.",
+   "evidence": "transcript:L4264, L4267"
+  },
+  {
+   "item": "A fix that lands only in code and never inside a run has not been demonstrated. round18 exists precisely to make each repair visible in a log; unit tests hold the arithmetic, only a run shows the mechanism firing inside the system.",
+   "why": "Four defects were found and fixed WITHOUT a run, and that distinction is the entire basis of the DID IT FIRE report. Two of round18's four questions still went unanswered because the resume half never ran.",
+   "evidence": "transcript:L3763, L3919, L4233"
+  },
+  {
+   "item": "An arm designed to prove a fix must be able to FAIL. fix_vocab printed `vocab 1024/1024` \u2014 but a run where the fail-open hole was never in the path prints that too, so the arm could not distinguish 'the fix saved the vocabulary' from 'the fix was never needed'. Instrument the repair itself (mint_rescued / mint_widened / gate_skipped), not just its outcome.",
+   "why": "This is the difference between evidence and a coincidence, and it was only caught after the run.",
+   "evidence": "transcript:L4233, L4067, L4077"
+  },
+  {
+   "item": "The correct pairing of an added-area resume: FAB_N0 = the checkpoint's live count, FAB_NMAX = DOUBLE the checkpoint's cap, VMAX = double the checkpoint's vocabulary. Not the registry defaults, and not four times anything.",
+   "why": "523 live in cap 1024 ended at 0.51 occupancy; cap 2048 puts a doubled 1046 back in that same regime, while cap 4096 shuts the cull gate for the whole run AND re-arms the population ramp. Registry defaults (2048/4096) crash outright or, after the widening fix, produce a number nobody can interpret.",
+   "evidence": "transcript:L4766, L4784, L4970, L5153"
+  },
+  {
+   "item": "fab_cfg records n, rank, cap, dk and the checkpoint now also carries fab_use, fab_born, fab_uage, cap_fab, and PlateauGrowth's learned state (EMAs, ramp latch, clocks, counters). Anything a resume needs must TRAVEL WITH THE CHECKPOINT, not be re-read from the environment.",
+   "why": "Every one of those was, at some point in this range, either recorded and never read or rebuilt from env on a resume \u2014 and each produced a silent wrong answer rather than a crash. PlateauGrowth's state is the sharpest: without it, the regression trigger (the only signal continual learning has) is structurally blind at the exact moment an area arrives.",
+   "evidence": "transcript:L4598, L4863, L4870, L4970, L5208"
+  },
+  {
+   "item": "cull_gate_open is n_live/cap >= FAB_PRESSURE, and THREE mechanisms live behind it \u2014 the utilization cull, the utilization spare, and FAB_RESCUE. FAB_PRESSURE is a SETPOINT: the population equilibrates at pressure x cap. Changing the cap therefore changes what the population wants to be, not just what it may become.",
+   "why": "A wrong answer at that gate does not fail \u2014 it silently removes three things from the run and they read ARMED AND INERT as an artefact of the cap rather than a finding. The docstring records it having already done that once.",
+   "evidence": "transcript:L4758, L4766, L4970"
+  },
+  {
+   "item": "Two preallocated geometries in this system grow by advancing a counter rather than reallocating \u2014 the fabric's expert slots (FAB_NMAX) and the softmax width (VMAX) \u2014 so a smaller checkpoint is a genuine PREFIX of a larger live model. widen_prefix() serves both. Narrowing is refused (it discards trained work); a changed FAB_RANK or FAB_DK is refused (inner dimensions).",
+   "why": "Refusing to widen would mean a resume can never add capacity for the area it is adding, which is the whole exercise. Getting the prefix relation right is what made goal B runnable.",
+   "evidence": "transcript:L4657, L4739, L5123, L5173"
+  },
+  {
+   "item": "bits/byte is LOWER-IS-BETTER, so forgetting is LATEST MINUS EARLIEST. Any drift/BWT/retention number must use that convention, and any mean must be taken over domains that PREDATE the run \u2014 a domain that arrived this run can cancel an old domain's forgetting.",
+   "why": "RETENTION had the subtraction inverted on the exact line the CL claim rests on, and printed DRIFTING because Python IMPROVED. bwt_of's own docstring records the same fault, in the section directly beneath it.",
+   "evidence": "transcript:L4989, L4996, L5014, L5173"
+  },
+  {
+   "item": "Anything below the batch early-out (`if len(_bx) < BATCH_W: step += 1; continue`) counts FLUSHES, not steps. Any `step % N == 0` there is a unit mismatch that fires for a minority of residues. Use `_nbwd % max(1, N // max(1, BATCH_W))`.",
+   "why": "This was found at five sites in this range (three management cadences, then ACCUM). At BATCH_W=16 MANAGE_EVERY=500 the gate fires for 4 of 16 residues; at BATCH_W=16 ACCUM=4 the optimizer either steps every flush or NEVER for the epoch.",
+   "evidence": "transcript:L3532, L3618, L5354, L5363"
+  },
+  {
+   "item": "A budget must be sized on the set it can be SPENT on. The cull ranks within _elig (experts past the USE grace) but sized its budget on n_live.",
+   "why": "In the only continual-learning run ever performed: n_live 523, eligible 84, budget 10 instead of 1 \u2014 a 10x over-cull aimed precisely at the population a resume exists to preserve. Nearly the whole 523 -> 448 loss is this bug.",
+   "evidence": "transcript:L5040, L5051, L5320"
+  },
+  {
+   "item": "'Detect-only' must be checked for EVERY consumer of the flag, not just the obvious one. WRONG_SWEEP gated deletion; Memory.read filtered on the same predicate.",
+   "why": "63,146 genuine entries at 3% precision were excluded from every retrieval \u2014 about a third of the store \u2014 while the log read as reassurance and memory still contributed +0.085 b/B. MEM_WRONG_READ now separates the two decisions.",
+   "evidence": "transcript:L5254, L5257, L5320"
+  },
+  {
+   "item": "DN and CORP are index-aligned; open_corpus returns one entry per name in DOMAINS order. Any filter on CORP must drop the matching name. Name-keying in report_holdout stops a REORDER, not a DROP, because the name is read out of the desynced list.",
+   "why": "An undersized first corpus makes the next run compare this run's Python against last run's English and report the difference as forgetting \u2014 the number goal B rests on, computed across two languages. And the trigger is precisely the 'corpus too small' error the owner reported.",
+   "evidence": "transcript:L4323, L4330, L4545"
+  },
+  {
+   "item": "Exposure is a WHOLE-RUN quantity. build_stream draws per corpus in PHASE_SCHED's proportions; a guard that sums the corpora, or that measures per epoch, misses the imbalance entirely. EXPOSURE_MAX=2.0 and EXPOSURE_SKEW=3.0 encode this.",
+   "why": "60 MB English + 8 MB Python reads as 68 MB against a 4 MB stream and passes a summed check. The real run then printed EXPOSURE IMBALANCE 5.6x: eng 0.28x, py 1.56x \u2014 a live confound on the headline continual-learning number.",
+   "evidence": "transcript:L4355, L4545, L5020"
+  },
+  {
+   "item": "PHASE_SCHED for two corpora is [[0],[0],[1],[1]] \u2014 the original area for the first half of each epoch, the added area for the second, REPEATED EVERY EPOCH. At EPOCHS=8 the original is rehearsed eight times during the run that measures what forgot it. PURE_ADD=1 is the arm the modularity claim actually rests on.",
+   "why": "Rehearsal is a legitimate CL method, but under it 'modularity protected the old area' is not what is being measured. The owner should decide which arm they want.",
+   "evidence": "transcript:L4292, L4545, L5232, L5320"
+  },
+  {
+   "item": "A default that cannot fire is worse than one that is off: WRITE_QUANTILE=1 gated behind WRITE_ADAPTIVE=0; TOK_ANCHOR=0.05 whose loss term never enters the loss; LR_DECAY/LR_RESTART_DAMP unreachable on every arm that would be run. Every such knob needs a DID IT FIRE row that distinguishes 'off by arithmetic' from 'armed and inert'.",
+   "why": "'Armed and inert' is the project's core discipline, and the audit built to catch it was itself blind to the LR schedule (20 rows, none about the learning rate) and to is_wrong() (which gates every memory retrieval).",
+   "evidence": "transcript:L3144, L3235, L5277, L5399"
+  },
+  {
+   "item": "levers.py now includes default_mismatches(), a static AST mirror of the runtime _env guard. Any call-site default that disagrees with _SPEC is a SystemExit on the first run.",
+   "why": "ENC_WARMUP_MIN shipped mismatched for five commits and would have killed every run; nothing caught it statically because levers checked declaration and derivation but not agreement.",
+   "evidence": "transcript:L3861, L3878, L3883, L3915"
+  },
+  {
+   "item": "notes/CURRENT_DEFAULTS.md is GENERATED from _SPEC and is the only file in notes/ that states a current default; notes_check.py checks every markdown OUTSIDE archive/ against _SPEC and fails on any line stating a contradicted default unless the line reads as history. Calibrating the matcher took three passes (319 -> 34 -> 5 -> 0 hits) and both wrong versions are kept in comments.",
+   "why": "The notes corpus was wrong about defaults twice, expensively \u2014 02_IDEAS filed a built mechanism as 'NEVER IMPLEMENTED' and that was read during the 0.75 GB planning. Scanning only notes/ was not enough: STATE.md, a 'binding' ledger abandoned eleven days earlier, slipped through.",
+   "evidence": "transcript:L3249, L3411, L3437, L3443, L3634"
+  },
+  {
+   "item": "The extract-and-exec test technique (AST-lift or text-slice the REAL source block and run it, rather than restating it) works, and its anchor breakage is a FEATURE. Anchors must be distinctive banner comments; end anchors must be the next banner.",
+   "why": "Three separate anchor drifts occurred in one session \u2014 resume_test when a second `_wide_by = 0` was added, corpus_test when a warning landed between its anchors, resume_test again when a restore block was inserted. Each failed LOUDLY rather than reporting on the wrong text. Also: build the object the way the RUN does, not the way the signature defaults do \u2014 PlateauGrowth's signature has ramp=0 while the call site passes _i(\"FAB_RAMP\", 4000), so a signature-default fixture made every ramp assertion pass vacuously.",
+   "evidence": "transcript:L4709, L4808, L4904, L4921, L4970"
+  },
+  {
+   "item": "A workflow's verify stage failing is not a licence to act on its findings. Every claim must be re-verified by hand before it is acted on.",
+   "why": "Three workflows in this range had their verify stage die (a JS bug, then session limits twice). Of the claims that were then checked by hand, two were REFUTED (TOK_MINT_NOVEL inertness; the _plumb causal claim), one was narrower than reported (MEM_PER_EXPERT), and one indicted the assistant's own just-shipped fix (_wide_by gating oe).",
+   "evidence": "transcript:L2890, L3494, L3509, L3634, L3915, L4945"
+  },
+  {
+   "item": "Every result in this project is a signal from an unreplicated run. The replication floor is a seed spread of 0.066-0.131 in d-order-1; sched_ctl's 1.956 and the CL run's +0.043 +/- 0.075 both sit inside their own noise bands. Three DIFFERENT held-out numbers can describe the same run (24-window probe / final curve probe / curve minimum), and two of them share a label.",
+   "why": "'Two runs isn't a law \u2014 I over-read exactly this once already.' Reading the bits/byte column of a small pilot is the error the instruments exist to prevent.",
+   "evidence": "transcript:L2803, L2938, L3005, L3763, L3785, L4987"
+  },
+  {
+   "item": "The single hardest-won result of this range: the continual-learning chain RAN. eng 2.096 -> 2.139 (+0.043 +/- 0.075, HELD), py 1.932, BWT +0.0431. It was blocked first by the pilot/pilot-add tokenizer path, then by a gated HF dataset, then by a fabric geometry mismatch \u2014 three separate blockers, none of them the science.",
+   "why": "This is the number the project exists to produce and it had never once been measured. It was produced at commit 63191a0, BEFORE the retention sign fix, the cull-budget fix, the VMAX widening and the ramp-latch persistence \u2014 so it must be re-measured before it is trusted.",
+   "evidence": "transcript:L4984, L4987, L5173"
+  }
+ ],
+ "open_questions": [
+  "Was round17 (lr_075_short + lr_075_rst, ~2 h each, PILOT_DIR=data_075 STREAM_LEN=94000000 EPOCHS=2 GRID_DIR=runs/075b) ever actually run? It is prepped and described as 'the quality pilot' at L3763 and L4233 but no result for it appears anywhere in lines 2700-5400.",
+  "Did the four new torch-requiring memory checks (census_survives_resume, wrong_gates_reads, and the set_selfcon/is_wrong/read tests) ever pass on the owner's box? They were shipped UNRUN \u2014 the assistant's container has no torch \u2014 and no result is reported in this range (transcript:L3697, L5309).",
+  "growth_test.py and mem_evict_test.py were reported FAIL throughout this range in the assistant's container. It is stated this is because torch is missing, but the transcript never shows growth_test.py's failure being confirmed as the torch import specifically.",
+  "Was the remaining workflow finding E5 ever read or acted on? E1-E4 and E6 are addressed; the brief's section list at L4937 shows '## E4 \u2014 self_organize.py:5056 vs...' and the assistant read E2/E3/E4/E6 but E5 is never quoted.",
+  "Did the assistant ever add a DID IT FIRE row for the quantile write gate (WRITE_QUANTILE/WRITE_ADAPTIVE)? A COUPLING line was added at L5399, and the missing row was noted at L3763, but no row addition is shown.",
+  "Was sweep_domain_report.py's 'mem db/B' column (reading the per-domain retention line rather than the run-level ablation, flipping the documented sign) ever fixed? It is reported at L3767 and never revisited.",
+  "Do holdout.py and runs.py now have tests? Both were reported as having none at L3767; no test file for either is created in this range.",
+  "Did the owner ever authorise deleting the remote claude/hub-addition-1ueehb branch? The assistant offered twice ('say the word and I'll do the remote too') and no answer appears.",
+  "Was the residual LR drift ever addressed \u2014 the restart steps a run actually takes (263,965 / 504,894 / 756,851) differ from the schedule's own boundaries (263,601 / 526,202 / 788,803) because _run_end is a projection that shrinks as minting lengthens tokens? The assistant explicitly left it and noted it at L3232.",
+  "What is the owner's decision on the rehearsal question raised at L4545 and L5320 \u2014 whether the modularity claim should be measured under the default rehearsing PHASE_SCHED or under PURE_ADD=1? The assistant put it to the owner and no answer appears in this range.",
+  "Whether the headline continual-learning number (+0.043 +/- 0.075) survives re-measurement after the retention sign fix, the 10x cull-budget correction, the VMAX widening and the ramp-latch persistence. It was produced at commit 63191a0, before all four."
+ ]
+}

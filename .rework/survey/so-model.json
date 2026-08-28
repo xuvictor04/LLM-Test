@@ -1,0 +1,1134 @@
+{
+ "area": "so-model",
+ "summary": "self_organize.py:3600-5600 covers four things. (1) The eval-side logits path: `mask_dead` (3970), `fab_logits` (4001) \u2014 the single hidden-state\u2192logits route, ensembling expert OUTPUTS in SOCIETY mode and spending HALT mass on the base head via `halt_blend` (4035) \u2014 plus `_eval_sig` (3907)/`_eval_logits` (3930), `generate` (3857), `selfcheck` (4048) and `compose_test` (3715). (2) `main()`'s construction block (4062-4330): per-module RNG seeding, world model, Fabric, PlateauGrowth, the timing PROBE, and the LR schedule (4708-4849). (3) The two-part RESUME path: part 1 (4363-4696) checks the tokenizer vocabulary, then fabric geometry (rank/dk/cap), widens by prefix, restores fab born/uage/use with asymmetric backfills for restored-vs-new slots, restores the growth controller, replays world-model growth into param groups, and loads weights; part 2 (4893-5010) restores optimizer moments (skipped when anything widened), the memory store, the domain assembler, and the held-out baseline. (4) `holdout_bpb` (5066) / `report_holdout` (5150) / `_decompose` (5127) \u2014 the only measurement that spans a run boundary \u2014 and `_save_ckpt` (5332), which writes ckpt.pt atomically plus a probe.pt sidecar and source.bin. The dominant defect pattern here is state that is SAVED but never READ, state that is READ but computed in a different unit than it was written in, and derived counters the resume rebuilds wrongly or not at all.",
+ "facts": [
+  {
+   "claim": "fab_logits is the only hidden\u2192logits path when a fabric exists; with fab None it is mask_dead(model.head(h)), and in SOCIETY mode it sums per-expert head outputs weighted by the router's renormalised top-k weights, then applies halt_blend and mask_dead.",
+   "evidence": "self_organize.py:4006, 4024-4032",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every fab_logits call on the eval path passes learn_regions=False so a diagnostic cannot train the router's regions.",
+   "evidence": "self_organize.py:4022 `fab(h, gist, nov, head=..., learn_regions=False)`; 4025 `fab.society(h, gist, nov, k=kk, learn_regions=False)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "When gist is None fab_logits substitutes an all-zero gist, which makes the grounded router rank the population identically for every window \u2014 the file states every held-out/retention/boundary figure in the project was produced that way before _eval_sig existed.",
+   "evidence": "self_organize.py:4014-4019",
+   "confidence": "verified"
+  },
+  {
+   "claim": "halt_blend is applied ONLY on the SOCIETY branch of fab_logits; the chaining branch returns fab._votelg or model.head(_hh) without it.",
+   "evidence": "self_organize.py:4023 vs 4032",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mask_dead masks both the never-minted suffix [vocab_size:] and RETIRED ids (which sit below vocab_size), cached on the key (vocab_size, len(retired)).",
+   "evidence": "self_organize.py:3989-3998",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mask_dead is reached on eval only through fab_logits; anything that calls model(x) or model.head directly is unmasked.",
+   "evidence": "self_organize.py:3978-3979 \"Training reaches the loss directly (fab.society()/fab()), eval reaches it through fab_logits\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_eval_logits is the declared single eval path: `fab_logits(model, fab if FABRIC else None, model.encode(x), gist=_eval_sig(x))`, documented as \"the one line that must never drift between the six evaluation sites\".",
+   "evidence": "self_organize.py:3930-3934",
+   "confidence": "verified"
+  },
+  {
+   "claim": "holdout_bpb uses _eval_logits, so the held-out probe does go through the fabric and mask_dead.",
+   "evidence": "self_organize.py:5092 `_lg = _eval_logits(model, fab, FABRIC, _X)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compose_test does NOT use _eval_logits; it takes logits from model(X)[0], i.e. the base LM head, bypassing the fabric and mask_dead entirely.",
+   "evidence": "self_organize.py:3727 `pm = F.softmax(model(X)[0], -1).reshape(-1, V)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selfcheck calls fab_logits with no gist argument, so the wrongness sweep is scored through the zero-gist (blind) router.",
+   "evidence": "self_organize.py:4056 `fab_logits(model, fab, model.encode(c))[:, -1]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selfcheck is called exactly once, from the end-of-run report, and never from the training loop.",
+   "evidence": "self_organize.py:8881 (only call site); 8934 \"selfcheck() is called once, from this report, and never from the training loop\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_eval_sig returns None on any exception and the caller silently falls back to the zero gist; nothing counts how often that happens.",
+   "evidence": "self_organize.py:3926-3927 `except Exception: return None`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "In byte signature space _eval_sig builds each eval window from the LAST max(1, SIG_WIN) bytes of the decoded token row.",
+   "evidence": "self_organize.py:3919",
+   "confidence": "verified"
+  },
+  {
+   "claim": "SIG_WIN defaults to 0.",
+   "evidence": "self_organize.py:3136 `SIG_WIN = _i(\"SIG_WIN\", 0)`; registry entry 351 `\"SIG_WIN\": (\"i\", 0)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The TRAINING-side signature width resolves SIG_WIN=0 to at least WIN bytes: `_sigwidth()` returns WIN when not (ONLINE and bytes), otherwise max(WIN, int(WIN*bytes_per_token)).",
+   "evidence": "self_organize.py:5675-5680",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The training loop slices the signature window FORWARD from the window's byte position (`byte_stream[bpos:bpos+_sigw]`), while _eval_sig slices BACKWARD from the end of the window.",
+   "evidence": "self_organize.py:6646, 6674 vs 3919",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compose_test scores windows drawn from the TRAINING stream and says so, and prints the held-out with/without-memory pair from _HELDOUT_MEM as the honest counterpart.",
+   "evidence": "self_organize.py:3753-3767, 3711",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_HELDOUT_MEM is written only by _decompose (called from report_holdout at 8028) and read only by compose_test (called at 8949), so the ordering the module comment claims does hold.",
+   "evidence": "self_organize.py:3711, 5140, 3760, 8028, 8949",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The partition-informativeness test compares own-domain vs a random-other-domain retrieval and subtracts a shuffled-provenance null averaged over INFO_NULLS permutations, declaring information only when the excess exceeds 2 sigma of the null.",
+   "evidence": "self_organize.py:3820-3846",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compose_test returns silently (no output at all) when there are no windows or no valid memory entries.",
+   "evidence": "self_organize.py:3724 `if not wins: return`; 3730 `if vi.numel() == 0: return`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "generate sanitises the sampling distribution and reports how many steps were repaired, explicitly framing the repair as evidence of a real run failure rather than a sampler failure.",
+   "evidence": "self_organize.py:3881-3891",
+   "confidence": "verified"
+  },
+  {
+   "claim": "nbytes() reads the module global BLEN, which is None until the final re-tokenisation sets it at 7820 \u2014 so nbytes is unusable mid-run under USE_TOK.",
+   "evidence": "self_organize.py:3852-3853, 7820, 6402",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The resume refuses to load when the live tokenizer's vocab_size or merge count differs from the checkpoint's tok_vocab/tok_merges, and offers an exact recovery (trim the merges list to the checkpoint's prefix into a NEW file) when the live file has more merges.",
+   "evidence": "self_organize.py:4377-4408",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Fabric geometry is checked BEFORE anything is restored: a missing fab_cfg[\"cap\"], a differing rank, a differing dk, or a checkpoint cap larger than this run's cap each raise SystemExit naming the knob.",
+   "evidence": "self_organize.py:4434-4462",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Widening the fabric is allowed and is the point: cap-shaped tensors are copied into the leading rows by widen_prefix and the remainder keeps its initialisation (B is zero = exact identity).",
+   "evidence": "self_organize.py:4463-4468, 846-876",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Restored slots [0, ck_n) and slots live-here-but-not-in-the-checkpoint [ck_n, n_live) get OPPOSITE conservative defaults: restored missing born\u21920, missing uage\u2192FAB_GRACE, missing use\u2192population mean; new slots get born=ck_step, uage=0.0, and use POPPED (matching grow()).",
+   "evidence": "self_organize.py:4497-4539",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fab.use is filtered to keys < ck_n on restore, so any recorded utilization for slots beyond the checkpoint's live count is discarded.",
+   "evidence": "self_organize.py:4530",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The growth controller's LEARNED state (fast, slow, dev, n, ramp_done, last, last_regr, blackout, t0, state, n_ramp, n_stall, n_regr, n_regr_supp) is saved and restored; its CONFIG (rate, ramp_to, cooldowns, z) is deliberately not.",
+   "evidence": "self_organize.py:5424-5427, 4546-4563, 5417-5418",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Because the growth counters are cumulative across a chain, _fg_base records the values the checkpoint arrived with so POPULATION CHURN can report this run's events alone.",
+   "evidence": "self_organize.py:4559-4560, 8440",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The world-model population is replayed by repeatedly calling world_fwd.grow() until n() reaches the checkpoint's count, capturing each returned param list into _regrown so the optimizer can be rebuilt with the same group structure and order.",
+   "evidence": "self_organize.py:4590-4598, 4701-4707, 4749",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fab.grow() returns [] (rows are preallocated and already in the optimizer), so fabric growth never adds a param group \u2014 only world-model growth does.",
+   "evidence": "self_organize.py:7488-7492, 2152",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Model tensors are widened by prefix for a larger VMAX; the resume refuses (SystemExit) any other shape change and names the reason.",
+   "evidence": "self_organize.py:4611-4617",
+   "confidence": "verified"
+  },
+  {
+   "claim": "After widening the model the resume also reports the TOKENIZER's own vmax and whether there is headroom, because emb/head widening alone does not raise the cap maybe_grow checks.",
+   "evidence": "self_organize.py:4621-4634; TOK.vmax raised at load in 1245-1248",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The fabric state dict is loaded with strict=False and any missing/unexpected keys are printed, so a resume across a code change works.",
+   "evidence": "self_organize.py:4688-4691",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The model state dict is loaded STRICTLY (default), so a key added to the model by a code change makes every existing checkpoint unresumable.",
+   "evidence": "self_organize.py:4635 `model.load_state_dict(_msd)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Optimizer moments are skipped for the MODEL optimizer whenever the fabric was widened OR model tensors were widened, and for the ENCODER optimizer only when its embedding was resized \u2014 the two flags are now independent.",
+   "evidence": "self_organize.py:4934-4937, 4903-4910",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A group-count mismatch on optimizer load is caught (KeyError, ValueError) and the moments simply restart with a printed explanation.",
+   "evidence": "self_organize.py:4937-4942",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Memory is restored by writing the saved compacted arrays into the leading _mn rows, with _mn clamped to mem.cap, then mem.active[:_mn]=True and mem.ptr = _mn % mem.cap.",
+   "evidence": "self_organize.py:4943-4947, 4972",
+   "confidence": "verified"
+  },
+  {
+   "claim": "On the global-store path the LRU clock is restored and mem.tick is set to max(saved tick, max restored last) so restored entries are not the oldest thing in the store.",
+   "evidence": "self_organize.py:4964-4970",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mem.rebuild_census() is called after the restore because nsrc is maintained incrementally in _commit and a resume bypasses _commit \u2014 without it MEM_SRC_FLOOR would protect nothing while the banner kept printing it.",
+   "evidence": "self_organize.py:4973-4983; memory.py:310-343",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The domain assembler restores cent, size, last, next_id, merged, visits, bornb, nb, rad, _radp, born and act; wins is reset to empty lists and cur is forced to -1 regardless of the saved value.",
+   "evidence": "self_organize.py:4986-5005, 5373-5382",
+   "confidence": "verified"
+  },
+  {
+   "claim": "asm.born defaults to the resume step and asm.act defaults to the recorded size for any domain the checkpoint lacked them for, so nothing looks unused on the first manage().",
+   "evidence": "self_organize.py:4998-5005",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The held-out baseline (_hb) and its step (_hbs) are declared BEFORE the resume block so a later assignment cannot clobber the loaded value, and _HIST is updated from holdout_hist.",
+   "evidence": "self_organize.py:4357-4360, 5006-5007",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The encoder contrastive warmup is skipped entirely on a resume (`if SIG_MODE == \"learned\" and _RD is None`).",
+   "evidence": "self_organize.py:5011",
+   "confidence": "verified"
+  },
+  {
+   "claim": "step is initialised to _resume_step and the cadence table _fired is seeded with that step, so cadences are resume-safe and elapsed-based rather than modulo-based.",
+   "evidence": "self_organize.py:5057, 5280-5285, 5267-5275",
+   "confidence": "verified"
+  },
+  {
+   "claim": "holdout_bpb draws HOLDOUT_N window starts with a Random seeded by a deterministic hash of the domain NAME, so the probe is index-independent \u2014 but the draw range is len(_v), the length of the TOKENISED validation text.",
+   "evidence": "self_organize.py:5060-5063, 5087-5088",
+   "confidence": "verified"
+  },
+  {
+   "claim": "holdout_bpb caches the tokenised validation text in _VALT, and that cache is cleared on every in-loop retok and again after the final re-tokenisation.",
+   "evidence": "self_organize.py:5082-5085, 7771, 7833",
+   "confidence": "verified"
+  },
+  {
+   "claim": "holdout_bpb reports a per-window mean AND standard error, deliberately not a pooled figure, and report_holdout's verdict tests against 2 sigma while printing both 1 and 2 sigma.",
+   "evidence": "self_organize.py:5106-5120, 5174-5176",
+   "confidence": "verified"
+  },
+  {
+   "claim": "report_holdout prints BWT (negative = old domains improved, on a lower-is-better metric) and the forgetting measure F against each domain's best ever.",
+   "evidence": "self_organize.py:5196-5204; bwt_of 906-916; forgetting_of 919-927",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_decompose re-scores the SAME held-out windows with the memory store blended in, so \"forgotten\" (weights moved) can be separated from \"evicted\" (store lost it), and prints per-source occupancy beside it.",
+   "evidence": "self_organize.py:5127-5148",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The checkpoint stores holdout (weights-only), holdout_step and holdout_hist, computed by calling holdout_bpb() inline at save time.",
+   "evidence": "self_organize.py:5360-5361",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_save_ckpt returns whether it actually saved; SAVE_CKPT spellings \"0\"/\"\"/off/no/none/false are normalised to unset once, before any call site.",
+   "evidence": "self_organize.py:5329-5334",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The checkpoint write is atomic (ckpt.pt.tmp then os.replace) and one previous generation is kept as ckpt.prev.pt; probe.pt is written the same way, but source.bin is written non-atomically after the replace.",
+   "evidence": "self_organize.py:5434-5441, 5451-5452",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CKPT_EVERY defaults to 0, so periodic mid-run checkpointing is OFF by default; SIGUSR1 checkpoint-on-demand is installed and announced when SAVE_CKPT is set.",
+   "evidence": "self_organize.py:5321, 5458-5466",
+   "confidence": "verified"
+  },
+  {
+   "claim": "TOK.save(_TOK_SAVE) is called on EVERY _save_ckpt, always to the base path, before the suffix is applied to the checkpoint directory.",
+   "evidence": "self_organize.py:5335-5337",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_TOK_SAVE is SAVE_CKPT + \".dyntok.json\"; when SAVE_CKPT is off and RESUME is set it is the empty string, so a resume with no checkpoint saves no vocabulary at all rather than overwriting its parent's.",
+   "evidence": "self_organize.py:1007-1012",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The soft fabric cap (_cap_fab) is restored from the checkpoint's cap_fab only when GROW_CAP_FAB0 is absent from the environment, and only upward \u2014 an explicit request wins.",
+   "evidence": "self_organize.py:5209-5227, 5423",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A soft cap below the starting population is refused with SystemExit, because the growth clamp min(burst, soft_cap - n) would be negative and nothing would ever grow, silently.",
+   "evidence": "self_organize.py:5228-5249; clamp at 7446",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A widening resume warns when the capacity gate (n_live/cap >= FAB_PRESSURE) cannot reopen within the run \u2014 the utilization cull, the utilization spare and FAB_RESCUE all live behind it \u2014 and the test is \"even double the population stays under pressure AND the ramp is latched\".",
+   "evidence": "self_organize.py:5554-5601",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEM_PER_EXPERT defaults to 0 and is ANDed with FABRIC; a warning fires if it is on while the run takes the per-window write path, which has no owner argument.",
+   "evidence": "self_organize.py:4866, 5602-5615",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The timing PROBE uses torch.autograd.grad rather than backward() specifically so it leaves no .grad residue \u2014 a previous version let a random-token batch's world-model gradients enter the first real optimizer step and split PROBE=1 from PROBE=0 runs permanently.",
+   "evidence": "self_organize.py:4283-4300",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Each module is seeded from its own offset of SEED so a change to VMAX cannot shift the RNG stream for modules that are not VMAX-shaped.",
+   "evidence": "self_organize.py:4131-4173",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WORLD_FEEDBACK wraps model.encode so the world forecast is added to h centrally, keeping model._raw_encode for _model_key so stored keys stay comparable with re-encoded ones.",
+   "evidence": "self_organize.py:4158-4169",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The LR envelope (LR_DECAY) is gated on _n > 1 so it is a no-op for every single-cycle schedule, and the restart damping is gated on _ci > 0 so it cannot affect a single-cycle run.",
+   "evidence": "self_organize.py:4812-4813, 4845-4848",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LR_SHIFT_WARM multiplies the cycle rather than replacing it, so a re-warm after a resample can only lower the rate.",
+   "evidence": "self_organize.py:4814-4820",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MiniLM.forward returns (logits, h) and applies dropout inside encode; DROPOUT defaults to 0.0.",
+   "evidence": "self_organize.py:1558-1562, 1417",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Under TOK_COMPOSE the model's forward decodes through the composed byte table while every fab_logits path uses model.head \u2014 two different output layers.",
+   "evidence": "self_organize.py:1562 vs 4006/4023/4030/4043; TOK_COMPOSE default 0 at 979",
+   "confidence": "verified"
+  },
+  {
+   "claim": "EXPERTS defaults to 0; when on, only the ExpertBank's nn parameters are checkpointed \u2014 the ExpertRouter's cent/use/last/born/free dictionaries are not saved anywhere.",
+   "evidence": "self_organize.py:3018, 5383 `\"experts\": (experts.state_dict() if EXPERTS else None)`, 3038",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mem.read() mutates store state on every call: it adds to use, promotes entries off probation, and stamps last.",
+   "evidence": "memory.py:553-559",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every memory write resets that entry's selfcon to -1.0.",
+   "evidence": "memory.py:492",
+   "confidence": "verified"
+  },
+  {
+   "claim": "In the per-owner store, allocation is purely block-arithmetic (base = owner*quota) and self.own is written but never read for allocation; own is initialised to -1, not 0.",
+   "evidence": "memory.py:38, 216-240",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "RESUME",
+   "effect": "path to a checkpoint dir or .pt; when set, loads _RD and runs both resume blocks, sets step to the checkpoint's step, and suppresses the encoder warmup.",
+   "owner": "main() resume block (4361-5010)",
+   "couples_with": [
+    "TOKENIZER_PATH",
+    "SAVE_CKPT",
+    "FAB_NMAX",
+    "FAB_N0",
+    "VMAX",
+    "WORLD_NMAX",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "self_organize.py:4361-4364, 5011, 5057"
+  },
+  {
+   "name": "TOKENIZER_PATH",
+   "effect": "which vocabulary file the run loads; compared against the checkpoint's tok_vocab/tok_merges and refused on mismatch.",
+   "owner": "tokenizer setup (1230-1260) + resume gate (4377-4412)",
+   "couples_with": [
+    "RESUME",
+    "SAVE_CKPT",
+    "VMAX"
+   ],
+   "evidence": "self_organize.py:4379-4390"
+  },
+  {
+   "name": "SAVE_CKPT",
+   "effect": "checkpoint directory; also derives _TOK_SAVE (SAVE_CKPT+\".dyntok.json\"). Disabled spellings are normalised to unset. Empty means _save_ckpt returns False immediately.",
+   "owner": "_save_ckpt (5332)",
+   "couples_with": [
+    "CKPT_EVERY",
+    "BEST_TRACK",
+    "BEST_KEEP",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:1010-1012, 5329-5334"
+  },
+  {
+   "name": "CKPT_EVERY",
+   "effect": "steps between periodic mid-run saves; 0 disables periodic saving entirely (default).",
+   "owner": "training loop (7709)",
+   "couples_with": [
+    "SAVE_CKPT"
+   ],
+   "evidence": "self_organize.py:5321, 7709"
+  },
+  {
+   "name": "HOLDOUT_N",
+   "effect": "number of held-out windows drawn per domain in holdout_bpb; read fresh on every call.",
+   "owner": "holdout_bpb (5066)",
+   "couples_with": [
+    "WIN",
+    "VAL_FRAC",
+    "VAL_CAP",
+    "TOKENIZER"
+   ],
+   "evidence": "self_organize.py:5088"
+  },
+  {
+   "name": "SIG_WIN",
+   "effect": "byte width of the signature window in byte space. 0 means \"WIN, widened by bytes/token\" in the training path but is read literally (\u21921 byte) in _eval_sig.",
+   "owner": "should be main()'s _sigwidth (5675); _eval_sig re-derives it",
+   "couples_with": [
+    "SIG_SPACE",
+    "WIN",
+    "VMAX",
+    "EVAL_GIST"
+   ],
+   "evidence": "self_organize.py:3136, 3919, 5675-5680"
+  },
+  {
+   "name": "EVAL_GIST",
+   "effect": "1 = build a real signature for eval windows; 0 restores the blind zero-gist eval path.",
+   "owner": "_eval_sig (3907)",
+   "couples_with": [
+    "SIG_SPACE",
+    "SIG_WIN",
+    "SIG_MODE",
+    "FABRIC"
+   ],
+   "evidence": "self_organize.py:3914, 4018"
+  },
+  {
+   "name": "INFO_NULLS",
+   "effect": "number of shuffled-provenance permutations used as the null for the partition-informativeness test; the mean is the floor and the sd is the verdict threshold.",
+   "owner": "compose_test (3830-3846)",
+   "couples_with": [
+    "EVAL_N",
+    "MEM_CAP"
+   ],
+   "evidence": "self_organize.py:3831-3836"
+  },
+  {
+   "name": "EVAL_N",
+   "effect": "windows per process drawn for compose_test.",
+   "owner": "compose_test (3715)",
+   "couples_with": [
+    "INFO_NULLS",
+    "TOPK"
+   ],
+   "evidence": "self_organize.py:3720-3723, 8949"
+  },
+  {
+   "name": "LOSS_MASK_DEAD",
+   "effect": "gates mask_dead; when on, never-minted and retired ids are set to -inf wherever logits become a distribution.",
+   "owner": "mask_dead (3970)",
+   "couples_with": [
+    "TOKENIZER",
+    "VMAX",
+    "TOK_PROBATION"
+   ],
+   "evidence": "self_organize.py:3980"
+  },
+  {
+   "name": "ENS_K",
+   "effect": "how many experts fab_logits ensembles at the output layer (society path).",
+   "owner": "fab_logits (4024)",
+   "couples_with": [
+    "SOCIETY",
+    "FABRIC"
+   ],
+   "evidence": "self_organize.py:4024-4025"
+  },
+  {
+   "name": "FAB_NMAX",
+   "effect": "fabric slot cap; the resume refuses a checkpoint whose cap exceeds it and widens by prefix when it is larger.",
+   "owner": "Fabric + resume geometry gate (4442-4468)",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_PRESSURE",
+    "FAB_RAMP_TO",
+    "GROW_CAP_FAB0",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:4188, 4457-4468"
+  },
+  {
+   "name": "FAB_N0",
+   "effect": "initial live population; when larger than the checkpoint's n, the extra slots are entered as NEWBORNS rather than veterans.",
+   "owner": "resume slot-split (4485-4539)",
+   "couples_with": [
+    "FAB_NMAX",
+    "GROW_CAP_FAB0",
+    "FAB_GRACE"
+   ],
+   "evidence": "self_organize.py:4485-4494"
+  },
+  {
+   "name": "FAB_RANK",
+   "effect": "expert adapter rank; a mismatch with the checkpoint is a hard SystemExit because rank is an inner dimension.",
+   "owner": "resume geometry gate (4445-4450)",
+   "couples_with": [
+    "RESUME",
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:4445-4450"
+  },
+  {
+   "name": "FAB_DK",
+   "effect": "router key dimensionality; a mismatch is a hard SystemExit because every identity and key would be reinterpreted.",
+   "owner": "resume geometry gate (4451-4456)",
+   "couples_with": [
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:4451-4456"
+  },
+  {
+   "name": "FAB_GRACE",
+   "effect": "use-age threshold; restored experts with no recorded uage are backfilled to it so they read as experienced.",
+   "owner": "resume uage backfill (4515)",
+   "couples_with": [
+    "RESUME",
+    "FAB_N0"
+   ],
+   "evidence": "self_organize.py:4515"
+  },
+  {
+   "name": "FAB_PRESSURE",
+   "effect": "occupancy setpoint gating the utilization cull, the utilization spare and FAB_RESCUE; widening the cap divides the ratio and can shut all three for a whole run.",
+   "owner": "cull gate; warned about at 5573-5601",
+   "couples_with": [
+    "FAB_NMAX",
+    "FAB_RAMP_TO",
+    "FAB_RAMP"
+   ],
+   "evidence": "self_organize.py:5573-5601"
+  },
+  {
+   "name": "FAB_RAMP_TO",
+   "effect": "fraction of the pool the ramp builds toward; a RESTORED ramp_done means the ramp will not fire at all, which is what makes the widening warning correct on a resume.",
+   "owner": "PlateauGrowth; read at 5585-5587",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "FAB_RAMP",
+    "FAB_NMAX",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:4564-4579, 5585-5588"
+  },
+  {
+   "name": "GROW_CAP_FAB0",
+   "effect": "starting soft fabric cap; restored from the checkpoint's cap_fab only when this key is ABSENT from the environment, and a value below the starting population is a hard SystemExit.",
+   "owner": "main() (5209-5249)",
+   "couples_with": [
+    "FAB_NMAX",
+    "GROW_CAP",
+    "RESUME",
+    "FAB_N0"
+   ],
+   "evidence": "self_organize.py:5209-5249, 5221"
+  },
+  {
+   "name": "GROW_CAP_VOCAB0",
+   "effect": "lowers TOK.vmax to this value when GROW_CAP is on; interacts with the vmax the resume just raised from VMAX.",
+   "owner": "main() (5262)",
+   "couples_with": [
+    "GROW_CAP",
+    "VMAX",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:5262, 1245-1248"
+  },
+  {
+   "name": "VMAX",
+   "effect": "softmax width; raising it across a resume widens emb.weight/head.weight/head.bias by prefix and (at load) raises the tokenizer's own vmax, but also disables the model optimizer's moment restore.",
+   "owner": "build_lm + widen_prefix + resume (4599-4634, 4911-4916)",
+   "couples_with": [
+    "TOKENIZER_PATH",
+    "RESUME",
+    "GROW_CAP_VOCAB0",
+    "LOSS_MASK_DEAD"
+   ],
+   "evidence": "self_organize.py:4599-4634, 4911-4916"
+  },
+  {
+   "name": "WORLD_NMAX",
+   "effect": "cap on the dynamics population; a checkpoint with more predictors raises a named SystemExit, but a DIFFERENT nmax silently breaks the fit/mass/alive buffer shapes at load_state_dict.",
+   "owner": "resume world replay (4590-4598)",
+   "couples_with": [
+    "WORLD_MODEL",
+    "WORLD_N0",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:4590-4598; world_model.py:81-83"
+  },
+  {
+   "name": "WORLD_MODEL",
+   "effect": "master switch for world encoder/dynamics/proj; WORLD_GROW is ANDed with it because the growth hook lives outside the WORLD_MODEL block.",
+   "owner": "main() (4144-4157)",
+   "couples_with": [
+    "WORLD_GROW",
+    "WORLD_FEEDBACK",
+    "WORLD_NMAX"
+   ],
+   "evidence": "self_organize.py:4144-4151"
+  },
+  {
+   "name": "WORLD_FEEDBACK",
+   "effect": "wraps model.encode so the forecast conditions the base LM everywhere at once, keeping _raw_encode for memory keys.",
+   "owner": "main() (4158-4169)",
+   "couples_with": [
+    "WORLD_MODEL",
+    "KEY_SRC",
+    "PROBE"
+   ],
+   "evidence": "self_organize.py:4158-4169"
+  },
+  {
+   "name": "PROBE / PROBE_WAIT",
+   "effect": "runs a timing probe under frozen_rng using autograd.grad; PROBE_WAIT=0 skips the human pause.",
+   "owner": "main() (4276-4325)",
+   "couples_with": [
+    "SEED",
+    "FABRIC",
+    "SOCIETY",
+    "WORLD_FEEDBACK"
+   ],
+   "evidence": "self_organize.py:4276-4325"
+  },
+  {
+   "name": "SEED",
+   "effect": "base seed; +101 for the encoder, +202 for the world model, +303 for the fabric, so no module's init depends on how much RNG another consumed.",
+   "owner": "main() (4137-4173)",
+   "couples_with": [
+    "VMAX",
+    "PROBE"
+   ],
+   "evidence": "self_organize.py:4137-4173"
+  },
+  {
+   "name": "LR_SCHED / LR / LR_WARMUP / LR_MIN_FRAC / LR_STEPS",
+   "effect": "cosine-with-warmup schedule; LR_SCHED=none returns a constant LR, LR_STEPS names the wavelength in steps rather than epochs.",
+   "owner": "_lr_at (4751)",
+   "couples_with": [
+    "LR_RESTARTS",
+    "LR_DECAY",
+    "LR_RESTART_DAMP",
+    "LR_SHIFT_WARM",
+    "EPOCHS"
+   ],
+   "evidence": "self_organize.py:4716-4759"
+  },
+  {
+   "name": "LR_RESTARTS / LR_DECAY / LR_RESTART_DAMP / LR_SHIFT_WARM",
+   "effect": "warm restarts fitted to a whole number of cycles, a decaying peak envelope active only when _n>1, amplitude damping after a cycle that failed to beat its inherited best, and a re-warm after a resample.",
+   "owner": "_lr_at (4777-4848)",
+   "couples_with": [
+    "LR_SCHED",
+    "EPOCHS",
+    "DISK_STREAM"
+   ],
+   "evidence": "self_organize.py:4777-4848"
+  },
+  {
+   "name": "WEIGHT_DECAY",
+   "effect": "explicit AdamW decay for both optimizers; default 0.0 because decoupled decay is an uncontrolled forgetting term applied to dormant experts.",
+   "owner": "main() (4329, 4748-4750)",
+   "couples_with": [
+    "DROPOUT"
+   ],
+   "evidence": "self_organize.py:4326-4329, 4748-4750"
+  },
+  {
+   "name": "MEM_PER_EXPERT / MEM_OWNERS / MEM_QUOTA",
+   "effect": "partitions the store into owner blocks; default 0 (measured worse) and ANDed with FABRIC. Determines which restore branch the resume takes.",
+   "owner": "main() (4866-4875) + resume (4950-4963)",
+   "couples_with": [
+    "KEY_PREGATE",
+    "KEY_BATCH",
+    "KEY_SRC",
+    "FAB_NMAX",
+    "MEM_CAP"
+   ],
+   "evidence": "self_organize.py:4866-4873, 4950-4963, 5610-5615"
+  },
+  {
+   "name": "MEM_CAP",
+   "effect": "store size; on resume, entries beyond it are silently truncated in save order.",
+   "owner": "EditableMemory + resume (4945)",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "MEM_SRC_FLOOR",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:4868, 4945"
+  },
+  {
+   "name": "MEM_SRC_FLOOR",
+   "effect": "per-source reserved fraction; entirely dependent on nsrc, which the resume must rebuild via rebuild_census or the protection is off for the run.",
+   "owner": "EditableMemory._unprotected; rebuilt at 4980",
+   "couples_with": [
+    "MEM_CAP",
+    "MAX_DOMAINS",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:4874, 4973-4983; memory.py:310-343"
+  },
+  {
+   "name": "MEM_PROBE_EVERY / MEM_PROBE_N",
+   "effect": "issues real reads during training so EVICT=lru/usage have a non-constant signal; without it eviction degenerates to write-order.",
+   "owner": "main() (4876-4891)",
+   "couples_with": [
+    "EVICT",
+    "USE_DECAY"
+   ],
+   "evidence": "self_organize.py:4876-4891"
+  },
+  {
+   "name": "BEST_TRACK / BEST_KEEP / BEST_KEEP_TOL",
+   "effect": "saves a .best snapshot on each new best learning-curve probe and up to BEST_KEEP rotating .bestN local lows within tolerance.",
+   "owner": "main() (4234-4243) + 6432-6488",
+   "couples_with": [
+    "SAVE_CKPT",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:4234-4243, 6437-6487"
+  },
+  {
+   "name": "EPOCHS / EXPOSURE_MAX / EXPOSURE_SKEW",
+   "effect": "EPOCHS drives whole-run exposure; the two thresholds decide when the corpus-repetition and per-corpus-imbalance warnings fire.",
+   "owner": "startup guards (5467-5553)",
+   "couples_with": [
+    "STREAM_LEN",
+    "PHASE_SCHED",
+    "DISK_STREAM",
+    "DATA_MODE"
+   ],
+   "evidence": "self_organize.py:5467-5553"
+  },
+  {
+   "name": "REKEY_AMORTIZED / REKEY_CHUNK / REKEY_EVERY",
+   "effect": "spreads the whole-store re-encode across steps; the snapshot only contains entries that are active, not-wrong and not-unverified.",
+   "owner": "_rekey_amortized (5295-5305)",
+   "couples_with": [
+    "KEY_SRC",
+    "RETOK_EVERY",
+    "MEM_WRONG_READ"
+   ],
+   "evidence": "self_organize.py:5287-5305"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "_eval_sig builds the eval signature from ONE BYTE at the default SIG_WIN=0",
+   "severity": "critical",
+   "where": "self_organize.py:3919 (vs the training width at 5675-5680, 6646)",
+   "symptom": "On the default configuration (SIG_SPACE=bytes, TOKENIZER=1, EVAL_GIST=1, SIG_WIN=0) every eval window's routing gist is encoded from the LAST SINGLE BYTE of the decoded window, while training encodes a >=256-byte window from the window's start. The router is scored at eval against centroids built in an incommensurable space, so every held-out/retention/boundary number is produced by a router that is routing on one byte.",
+   "evidence": "3919: `_w = [list(TOK.decode(r.tolist()).encode(\"utf-8\", \"replace\"))[-max(1, SIG_WIN):] or [0] for r in x]`; 3136: `SIG_WIN = _i(\"SIG_WIN\", 0)`; 5676-5679: `if SIG_WIN > 0: return SIG_WIN ... return max(WIN, int(WIN * max(1.0, _b)))`; 6646: `ew = list(byte_stream[bpos:bpos + _sigw]) ...`",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "compose_test scores the BASE model, not the system",
+   "severity": "high",
+   "where": "self_organize.py:3727 (compose_test), contradicting 3930-3934 (_eval_logits)",
+   "symptom": "The \"PERFORMANCE: does the memory earn its keep?\" and \"CROSS-SEGMENT COMPOSITION\" and \"IS THE PARTITION INFORMATIVE?\" sections all build pm from model(X)[0], which is the plain LM head. With FABRIC=1 (the default) the fabric is entirely absent from these numbers, and mask_dead is never applied so never-minted and retired ids stay in the denominator.",
+   "evidence": "3727: `pm = F.softmax(model(X)[0], -1).reshape(-1, V)`; 3933-3934: \"`fab if FABRIC else None` is the whole of it, and getting that wrong scores the base model while claiming to score the system.\"",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "holdout_hist can never contain this run's probe, so F is structurally identical to a clipped BWT forever",
+   "severity": "high",
+   "where": "self_organize.py:5161/5205 (the only _HIST appends) vs 5361 (save) and the call order 7917 -> 8028",
+   "symptom": "_HIST is appended to only inside report_holdout, which is called once at line 8028 \u2014 AFTER the final _save_ckpt at 7917. So every checkpoint's holdout_hist is whatever it inherited (i.e. {} in the first run of any chain), the F measure can never draw on more than the single `prev` value, and the caveat printed at 5202-5204 (\"The two separate once a chain has two or more prior probes\") describes a condition the code can never reach.",
+   "evidence": "5205: `for k in now: _HIST.setdefault(k, []).append(_ms(now[k])[0])`; 5361: `\"holdout_hist\": {_k: list(_v) for _k, _v in _HIST.items()}`; 7917: `_save_ckpt(stream)`; 8028: `report_holdout(_hb, _hbs, ...)`",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The across-run-boundary held-out probe does not score the same text when the vocabulary grows",
+   "severity": "high",
+   "where": "self_organize.py:5087-5088, against the docstring claim at 5074-5076 and the save comment at 5356-5359",
+   "symptom": "Window starts are drawn as `_rs.randint(0, len(_v) - WIN - 2)`, where `_v` is the TOKENISED validation text. Under TOK_ONLINE the segmentation changes (every retok clears _VALT at 7771, and 7833 clears it again after the final re-tokenisation), so len(_v) shrinks over a run and differs between a parent run and its child. The seed is fixed but the index space is not, so `prev` and `now` in report_holdout are measured on DIFFERENT held-out windows \u2014 the one number the file calls \"the ONLY number that spans the run boundary\".",
+   "evidence": "5087-5088; 5076: \"so a domain is scored on exactly the same held-out text whatever position it now occupies\"; 5357-5358: \"the next run scores the SAME held-out windows\"; 7771 and 7833: `_VALT.clear(); _BL.clear()`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Per-expert memory resume: the un-partitioned prefix copy is resurrected on top of the partitioned one",
+   "severity": "high",
+   "where": "self_organize.py:4943-4972",
+   "symptom": "On the MEM_PER_EXPERT path the code first writes the saved compacted arrays into rows 0.._mn-1 (4946-4948), then the owner loop does `mem.active[:] = False` and re-places entries at owner*quota+slot, and then line 4972 unconditionally sets `mem.active[:_mn] = True`. Rows 0.._mn-1 therefore come back ACTIVE holding the un-partitioned copy with own=-1 (memory.py:38) and last=0 \u2014 duplicate entries in the wrong owner blocks, immediately the oldest under per-owner LRU. Additionally mem.use (4949) and mem.selfcon (4971) are written by compacted row index while the real entries live at _dst, so retrieval fitness and wrongness are attached to the wrong entries.",
+   "evidence": "4946-4947, 4954-4962, 4972: `mem.active[:_mn] = True; mem.ptr = _mn % mem.cap`; memory.py:38 `self.own = torch.full((cap,), -1, ...)`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "mem_selfcon is saved and restored but is always -1.0",
+   "severity": "medium",
+   "where": "self_organize.py:5352 (save), 4971 (restore), 4060 (only writer), 8881 (only call site)",
+   "symptom": "set_selfcon is called only from selfcheck, selfcheck is called only from the end-of-run report at 8881, and every memory write resets selfcon to -1 (memory.py:492). The final checkpoint is written at 7917, before 8881, and 8946 wipes the flags again afterwards. So mem_selfcon in every checkpoint ever written is entirely -1, the restore at 4971 carries no information, and is_wrong() (which needs >10 checked entries) is a no-op on every resumed run.",
+   "evidence": "4060 `mem.set_selfcon(ii, torch.cat(fr))`; 8881 `selfcheck(model, mem, fab if FABRIC else None)`; 7917 `_save_ckpt(stream)`; 8946 `mem.selfcon.fill_(-1.0)`; memory.py:492",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "World-model geometry is recorded in the checkpoint and never checked on resume",
+   "severity": "high",
+   "where": "self_organize.py:4590 reads only world_cfg[\"n\"]; lat/hid/nmax/route are saved at 5365-5366 and never read here",
+   "symptom": "DynamicsPopulation registers fit/mass/alive as buffers of size nmax (world_model.py:81-83). A resume with a different WORLD_NMAX (even a LARGER one, which is otherwise harmless) reaches world_fwd.load_state_dict at 4694 with mismatched buffer shapes and dies inside torch naming no knob \u2014 exactly the failure the fabric geometry gate at 4413-4462 exists to replace. The same applies to WORLD_LAT / WORLD_HID / WORLD_ROUTE.",
+   "evidence": "4590 `_want2 = int(_RD[\"world_cfg\"][\"n\"])`; 4694 `world_enc.load_state_dict(...); world_fwd.load_state_dict(_RD[\"world_fwd\"])`; 5365-5366 saves lat/hid/nmax/route; world_model.py:81-83",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "A checkpoint with FEWER dynamics predictors than WORLD_N0 crashes opaquely",
+   "severity": "medium",
+   "where": "self_organize.py:4591-4598 then 4694",
+   "symptom": "The replay is `while world_fwd.n() < _want2`, which handles only the grow direction. If the checkpoint holds fewer predictors than this run builds, the loop never runs and load_state_dict raises \"Missing key(s) preds.N.*\" \u2014 a shape dump with no knob name, the very thing the fabric's narrowing refusal (4457-4462) was written to avoid.",
+   "evidence": "4591 `while world_fwd.n() < _want2:`; 4694 `world_fwd.load_state_dict(_RD[\"world_fwd\"])`",
+   "bug_class": "crash"
+  },
+  {
+   "title": "holdout_bpb's `finally: model.train()` clobbers the report's enclosing eval() mode",
+   "severity": "medium",
+   "where": "self_organize.py:5123-5124, inside the eval battery bracketed by 7953 (model.eval) and 8206 (model.train)",
+   "symptom": "report_holdout at 8028 calls holdout_bpb, whose finally block unconditionally puts the model back into TRAIN mode. Everything measured after that point in the eval battery \u2014 RETENTION at 8046+, and every later section up to 8206 \u2014 runs with the model in training mode. Inert at the default DROPOUT=0.0, live and silent the moment anyone sets DROPOUT>0, which is exactly what the memorisation section tells them to do (7990).",
+   "evidence": "5078 `model.eval()`; 5123-5124 `finally: model.train()`; 7953 `model.eval()`; 8206 `model.train()`; 1550 `s.drop = nn.Dropout(DROPOUT)`; 7990 \"now turn on DROPOUT=0.1-0.2\"",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "A resume overwrites the parent's .best checkpoint on its first probe",
+   "severity": "medium",
+   "where": "self_organize.py:4243 (_best_bpb never restored) and 6437-6446",
+   "symptom": "_best_bpb starts [None, -1, False] on every process and nothing in the checkpoint carries it. On a resume the first learning-curve probe therefore satisfies `_best_bpb[0] is None` and writes SAVE_CKPT+\".best\", replacing the parent's best-by-held-out snapshot with whatever the resumed model scores at its first probe \u2014 which the file itself says is usually the post-resume Adam re-warm bump (4921-4922).",
+   "evidence": "4243 `_best_bpb = [None, -1, False]`; 6437 `if _best_bpb[0] is None or _cm < _best_bpb[0] - 1e-6:`; 6446 `_save_ckpt(stream, quiet=True, suffix=\".best\")`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": ".best/.bestN snapshots point at a tokenizer file that keeps growing under them",
+   "severity": "medium",
+   "where": "self_organize.py:5335-5337, 5344-5348",
+   "symptom": "`ck = ck + suffix` is applied to the checkpoint directory but `TOK.save(_TOK_SAVE)` always writes the BASE vocabulary path, and the ckpt records `tok_path: _TOK_SAVE` plus tok_vocab/tok_merges as of that moment. Every later save overwrites the base file with a larger vocabulary, so by the end of a run a .best checkpoint's recorded merge count no longer matches the file it names and resuming from it trips the VOCABULARY MISMATCH refusal (4380-4408). Recoverable via the printed prefix-trim, but .best is not directly resumable.",
+   "evidence": "5335-5337: `ck = ck + suffix; os.makedirs(ck, exist_ok=True); if USE_TOK and _TOK_SAVE: TOK.save(_TOK_SAVE)`; 5344 `\"tok_path\": (_TOK_SAVE if USE_TOK else None)`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "selfcheck scores every stored entry through a blind router",
+   "severity": "medium",
+   "where": "self_organize.py:4056",
+   "symptom": "selfcheck calls fab_logits without a gist, so the zero-gist placeholder is used and the grounded router ranks the population identically for every entry. The wrongness score that gates retrieval (memory.py:520-534) is therefore computed under a routing configuration that never occurs in training \u2014 the exact defect _eval_sig/_eval_logits were introduced to remove, on a site that was not converted.",
+   "evidence": "4056: `logits = (fab_logits(model, fab, model.encode(c))[:, -1] if fab is not None else model(c)[0][:, -1])`; 4014-4017 documents what a zero gist does",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The 'cent is missing' warning is unreachable on a same-cap resume",
+   "severity": "medium",
+   "where": "self_organize.py:4651-4671",
+   "symptom": "The _capshaped/_absent audit \u2014 whose whole purpose is to catch a cap-shaped tensor (notably `cent`, each expert's routing region) being absent from the checkpoint so restored experts \"keep their adapters and lose their addresses\" \u2014 is nested inside `if _wide_by:`. On a same-cap resume _fsd is just `dict(_RD[\"fab\"])` and only the generic missing_keys line at 4690 prints, without the explanation. A guard that cannot trip on the common path is the defect class this file exists to catch.",
+   "evidence": "4650-4651 `_fsd = dict(_RD[\"fab\"]); if _wide_by:`; 4662 `_absent = [_k for _k in _capshaped if _k not in _RD[\"fab\"]]`; 4665-4671",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The model state dict is loaded strictly while the fabric's is tolerant",
+   "severity": "medium",
+   "where": "self_organize.py:4635 vs 4688",
+   "symptom": "`model.load_state_dict(_msd)` uses strict=True. widen_prefix returns `dict(ck_sd)` (846:864), so any key the live model has and the checkpoint lacks is simply absent and torch raises. Adding one parameter to MiniLM/TinyTransformer therefore makes every existing checkpoint unresumable, with a raw torch error \u2014 while the fabric explicitly loads strict=False for exactly this reason and prints what did not match.",
+   "evidence": "4635 `model.load_state_dict(_msd)`; 4688 `_mk = fab.load_state_dict(_fsd, strict=False)`; 4637-4641 (the rationale, applied only to the fabric); 864 `out = dict(ck_sd)`",
+   "bug_class": "crash"
+  },
+  {
+   "title": "Lowering MEM_CAP on a resume silently drops the tail of the store",
+   "severity": "medium",
+   "where": "self_organize.py:4944-4945",
+   "symptom": "`_mn = min(_mn, mem.cap)` truncates the restored entries to the first mem.cap rows IN SAVE ORDER (the order they appeared under mem.active), with no message. Every other narrowing in this path (fabric cap, model VMAX) is refused with a named SystemExit; the memory store's is not even reported.",
+   "evidence": "4943-4945: `_mk = _RD[\"mem_keys\"]; _mn = _mk.size(0); if _mn > 0: _mn = min(_mn, mem.cap)`; contrast 4457-4462 and 4612-4617",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "asm.comp / comp_glob, asm.tokc and the adaptive threshold histories are not checkpointed",
+   "severity": "medium",
+   "where": "self_organize.py:5373-5382 (save) vs 3430-3442 (fields)",
+   "symptom": "The saved `asm` dict carries cent/size/last/next_id/merged/cur/visits/bornb/nb/born/act/rad/radp. It does NOT carry comp or comp_glob (so COMP_PROTECT at 3694 protects nothing after a resume until competence is re-accumulated), tokc (so the DOM_PRIOR token histogram restarts empty), or _dh/_sh (so the adaptive spawn and shift thresholds recalibrate from scratch at exactly the boundary where new material arrives).",
+   "evidence": "5373-5382; 3430-3442; 3694 `if COMP_PROTECT and s.comp_glob is not None and d in s.comp ...`; 3437-3438 `s._dh`, `s._sh`",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "mem.prob is not restored, disarming scan resistance at the run boundary",
+   "severity": "medium",
+   "where": "self_organize.py:4943-4972 (no prob restore); memory.py:99, 265-275",
+   "symptom": "Every restored entry comes back with prob=False, so after a resume `_pn = int(self.prob.sum())` is 0 and `_over` is False: the probation-first eviction branch \u2014 the mechanism that makes a flood of new material eat itself rather than the working set \u2014 cannot engage until new writes alone exceed prob_frac*cap. That is precisely the moment (a new area arriving) it was written for.",
+   "evidence": "memory.py:99, 268-271, 491; self_organize.py:4943-4972 restores keys/tok/src/pos/ctx/use/own/last/tick/selfcon/active/ptr and nothing else",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The per-source high-water mark is reset by rebuild_census on every resume",
+   "severity": "medium",
+   "where": "self_organize.py:4980; memory.py:339-342",
+   "symptom": "rebuild_census zeroes nsrc, recounts, then does `nsrc_max = maximum(nsrc_max, nsrc)` on a freshly constructed (zero) nsrc_max. The peak occupancy a source ever reached is therefore lost across a run boundary, and the starvation alarm \u2014 whose stated purpose is to distinguish \"never wrote that much yet\" from \"HAD it and lost it\" \u2014 cannot tell them apart for anything that predates the resume.",
+   "evidence": "self_organize.py:4980 `_nsrc_live = mem.rebuild_census()`; memory.py:339-342; memory.py:122-126 (nsrc_max rationale)",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "INFO_NULLS=0 crashes the report with ZeroDivisionError and compose_test is unguarded",
+   "severity": "low",
+   "where": "self_organize.py:3831-3835, called at 8949",
+   "symptom": "`for _s in range(_i(\"INFO_NULLS\", 5))` produces an empty _nl when INFO_NULLS=0, and `_null = sum(_nl) / len(_nl)` then divides by zero. compose_test at 8949 has no try/except (the very next section at 8951 does), so the whole remainder of the report is lost.",
+   "evidence": "3831-3835; 8949 `compose_test(model, mem, stream, labels, WIN, V, DEV, EVAL_N=_i(\"EVAL_N\", 64))`; 8951 `try:` on the next section",
+   "bug_class": "crash"
+  },
+  {
+   "title": "INFO_NULLS=1 makes the 2-sigma verdict a rubber stamp",
+   "severity": "low",
+   "where": "self_organize.py:3836, 3843",
+   "symptom": "`_sd = (sum(...) / max(1, len(_nl) - 1)) ** 0.5` is exactly 0.0 with a single permutation, so the test `_real - _null > 2 * _sd + 1e-9` reduces to \"any excess above 1e-9\" and prints \"the partition CARRIES INFORMATION\" on noise \u2014 the failure mode the multi-permutation comment at 3826-3829 was added to prevent.",
+   "evidence": "3836, 3842-3846",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "compose_test can vanish from the report with no explanation",
+   "severity": "low",
+   "where": "self_organize.py:3724, 3730",
+   "symptom": "`if not wins: return` and `if vi.numel() == 0: return` produce no output at all, so the PERFORMANCE and CROSS-SEGMENT sections silently disappear \u2014 inconsistent with the explicit \"CANNOT BE MEASURED\" block added two paragraphs later (3788-3795) for exactly this reason.",
+   "evidence": "3724, 3730 vs 3788-3795",
+   "bug_class": "other"
+  },
+  {
+   "title": "holdout_bpb swallows a mid-loop exception and returns a PARTIAL domain set",
+   "severity": "medium",
+   "where": "self_organize.py:5077-5125",
+   "symptom": "The try wraps the whole per-domain loop, so an exception on domain 3 of 4 prints one line and returns `out` containing domains 0-2. report_holdout then computes _kept, the mean change, BWT and F over a silently reduced domain set, and _save_ckpt stores that truncated dict as the next run's baseline.",
+   "evidence": "5077 `out = {}`; 5121-5122 `except Exception as _e: print(f\"[holdout probe skipped: ...]\")`; 5125 `return out`; 5360 `\"holdout\": holdout_bpb()`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "_step0 (\"the step THIS run started at\") is only assigned inside the fabric branch",
+   "severity": "low",
+   "where": "self_organize.py:4349-4353 (declaration) vs 4487 (only assignment)",
+   "symptom": "`_step0[0] = _ck_step` sits inside `if FABRIC and _RD.get(\"fab_cfg\"):`. A resume with FABRIC=0, or from a checkpoint saved with FABRIC=0 (fab_cfg is None), leaves _step0 at 0 while step starts at the chain-wide resume step \u2014 so any age-against-this-run's-span calculation reads the chain total instead.",
+   "evidence": "4469 `if FABRIC and _RD.get(\"fab_cfg\"):`; 4487 `_step0[0] = _ck_step`; 9289 `_span = max(1, step - _step0[0])`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "mem.tick is not max'd against the restored last-use clock on the per-owner path",
+   "severity": "low",
+   "where": "self_organize.py:4963 vs 4970",
+   "symptom": "The global path does `mem.tick = max(int(_RD.get(\"mem_tick\", 0)), int(mem.last[:_mn].max()))`; the per-owner path does only `mem.tick = int(_RD.get(\"mem_tick\", 0))`. A checkpoint whose mem_tick is behind its stored `last` values leaves the clock behind the entries it is supposed to order.",
+   "evidence": "4963 `mem.tick = int(_RD.get(\"mem_tick\", 0))`; 4970 `mem.tick = max(int(_RD.get(\"mem_tick\", 0)), int(mem.last[:_mn].max()))`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "_decompose's memory-blended probe mutates the store's eviction state",
+   "severity": "low",
+   "where": "self_organize.py:5100-5101, 5134; memory.py:553-559",
+   "symptom": "holdout_bpb(use_mem=True) calls mem.read, which index_adds into `use`, clears `prob` for every hit, and stamps `last`. The @no_rng_drift decorator protects only the RNG stream, not the store. Report-time only today (the only use_mem=True call is from _decompose at 5134, reached from 8028), so the damage is confined to metrics computed after it.",
+   "evidence": "5065 `@no_rng_drift`; 5100-5101 `_md, _mc, _, _ = mem.read(mem_key(_X))`; memory.py:553-559",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "ExpertRouter's population state is not checkpointed at all",
+   "severity": "medium",
+   "where": "self_organize.py:5383 (only experts.state_dict() is saved); 3038",
+   "symptom": "When EXPERTS=1, the checkpoint carries the ExpertBank's nn parameters but nothing of ExpertRouter's cent/use/last/born/free dictionaries. A resume therefore restores trained adapters with no centroids (every expert unroutable), no ages (all cullable or all newborn depending on defaults), no utilization, and `free = list(range(cap))` \u2014 so newly created experts overwrite trained slots. This is the identical failure the fab_born/fab_uage/fab_use fixes at 4497-4539 were written for, unfixed on the parallel population. Latent: EXPERTS defaults to 0.",
+   "evidence": "5383 `\"experts\": (experts.state_dict() if EXPERTS else None)`; 3038 `s.bank = bank; s.cent = {}; s.use = {}; s.last = {}; s.born = {}; s.free = list(range(bank.A.size(0)))`; 3018 `EXPERTS = bool(_i(\"EXPERTS\", 0))`",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "The optimizer moment restore does not verify that the module composition matches the checkpoint",
+   "severity": "low",
+   "where": "self_organize.py:4702-4707, 4934-4942",
+   "symptom": "_base is built from model + experts + fab + recon + world_enc + world_fwd + world_proj in a fixed order, and om.load_state_dict is attempted whenever nothing widened. torch validates group counts and per-group parameter counts, not identities \u2014 so a resume that changes EXPERTS, VERIFY=recon or WORLD_FEEDBACK while leaving the total parameter count in a group unchanged would attach moments to the wrong tensors, the outcome the code explicitly refuses to risk two lines away (4899-4902).",
+   "evidence": "4702-4707; 4934-4937; 4929-4932 \"remapping moments across a different flattening would silently attach them to the wrong tensors -- worse than restarting them\"",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "fab_logits decodes through model.head while MiniLM.forward decodes through the composed byte table",
+   "severity": "low",
+   "where": "self_organize.py:1562 vs 4006/4023/4030/4043",
+   "symptom": "Under TOK_COMPOSE=1 the model's own forward uses `h @ table.t() + bias`, but every fabric path (and halt_blend) uses model.head. Training goes through model.head (6889, 6899), so fab_logits agrees with training \u2014 but compose_test (3727) and generate's non-fab branch (3865) call model(x) and therefore decode through a different output layer than the one being trained. Latent: TOK_COMPOSE defaults to 0.",
+   "evidence": "1562 `return ((h @ _t[0].t() + _t[1]) if _t is not None else s.head(h)), h`; 4006, 4030, 4043; 3727, 3865; 979 `TOK_COMPOSE = bool(_i(\"TOK_COMPOSE\", 0))`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "source.bin is written non-atomically after the atomic checkpoint replace",
+   "severity": "low",
+   "where": "self_organize.py:5438-5441",
+   "symptom": "ckpt.pt and probe.pt are written to .tmp and os.replace'd; source.bin is opened and written in place afterwards. A kill between the ckpt replace and the source.bin write leaves a valid checkpoint beside a truncated or stale corpus file that retrieval positions point into.",
+   "evidence": "5438 `os.replace(f\"{ck}/ckpt.pt.tmp\", f\"{ck}/ckpt.pt\")`; 5440-5441 `with open(f\"{ck}/source.bin\", \"wb\") as _srcf: _srcf.write(...)`",
+   "bug_class": "other"
+  }
+ ],
+ "junk": [
+  {
+   "what": "The comment block at 5238-5241: \"AND THE VALVE'S OWN STATE IS NOT IN THE CHECKPOINT. _cap_fab is rebuilt from the environment on every resume ... Saving it is the honest fix, but the refusal has to come first\"",
+   "why": "Superseded by the code 15 lines above it (5221-5227 restores cap_fab from the checkpoint) and by the save at 5423. The prose now describes the opposite of what the file does, and it is the stated justification for the refusal that follows.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Checkpoint fields D, V, KW, KEY_SRC, model_type, layers, heads, maxlen, sig_d, win, topk",
+   "why": "None are read by the RESUME path \u2014 they exist for prompt.py, which reads all of them (prompt.py:27-28, 55, 151). Worth keeping, but they should not be read as resume state.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "Checkpoint field mem_quota",
+   "why": "Saved at 5354 and read nowhere. mem_n_own IS read (4950) and gates the partition restore; quota is not consulted, so a resume into a different MEM_QUOTA at the same n_own silently reinterprets the block layout.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "fab_cfg fields alpha, max_steps, hid_mult, min_steps, norm_only, society, grounded, route_t, route_learn, ens_k, halt_on, halt_max",
+   "why": "Saved at 5428-5433; the resume reads only n, cap, rank and dk. A resume that flips SOCIETY or changes route_t against the checkpoint's recorded value is neither checked nor reported.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The saved asm[\"cur\"] value",
+   "why": "Written at 5374 and explicitly discarded on restore: 4989 sets `asm.cur = -1` unconditionally.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "probe.pt sidecar fields size, sig_space, domains, enc_v, use_tok, tok_path",
+   "why": "The file itself annotates use_tok/tok_path as \"written, not read\" (5450). probe_ckpt_geometry.py reads only enc, sig_d, win, cent and step, and takes the domain names from os.environ[\"DOMAINS\"] (probe_ckpt_geometry.py:47-48, 57, 89) rather than from the sidecar's own \"domains\" key.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "mem_selfcon in the checkpoint",
+   "why": "Always -1.0 for every entry (selfcheck runs only at 8881, after the final save at 7917, and 8946 clears it). The field and its restore at 4971 carry no information.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The `nov` parameter of fab_logits",
+   "why": "Every call site in the eval path leaves it None, so it is always the zero placeholder at 4020. Only the training path supplies a real novelty value, and training does not go through fab_logits (4013).",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The historical note at 7873-7877 about the _hb/_hp name collision",
+   "why": "Documents a bug that is already fixed (the block now uses _gp/_gb). Useful as a warning about short names in a 5000-line function, but it is archaeology, not description of live behaviour.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "compose_test's `_own_vs_foreign` recomputing `sim = normalize(keys) @ K.t()` from scratch inside every call",
+   "why": "It is called 1 + INFO_NULLS times (6 at the default), each recomputing the identical similarity matrix over the whole store; only `prov` changes between calls.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The `k` parameter of fab_logits",
+   "why": "`kk = int(k or ENS_K)` \u2014 no call site in the scope passes it, and k=0 would silently fall back to ENS_K rather than meaning \"zero experts\".",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "Fabric geometry must be validated BEFORE anything is restored, and the check must be reachable: a missing fab_cfg[\"cap\"] slid through all three branches (each guarded on `_ck_cap and ...`) and reached load_state_dict as the exact five-shape torch dump the gate exists to replace.",
+   "why": "It cost a run that was otherwise ready \u2014 tokenizer resolved, corpus pulled, GPU warm \u2014 and the failure arrived as a tensor dump naming no knob.",
+   "evidence": "self_organize.py:4413-4441"
+  },
+  {
+   "item": "Widening is a prefix relation ONLY because both grown geometries preallocate to cap and advance a counter: the fabric's slots (slot i stays slot i) and the softmax width (token id i stays token id i). Narrowing must be refused by name, never handled.",
+   "why": "It is what lets a resume add capacity for the area it is adding; the run that motivated it had BOTH ceilings pressed (523/1024 experts, 2048/2048 tokens) and the new language got zero tokens of its own.",
+   "evidence": "self_organize.py:846-862, 4423-4426, 4599-4610"
+  },
+  {
+   "item": "On a resume, a MISSING record about a RESTORED unit must read as EXPERIENCED, and a slot that was never in the checkpoint at all must read as a NEWBORN. The split is exact because fab_cfg[\"n\"] is recorded: [0, ck_n) came from the checkpoint, [ck_n, n_live) did not.",
+   "why": "Getting it backwards enters 1525 randomly-initialised slots as mature veterans at mean utilization \u2014 past grace, on the mature LR, ranked mid-population in the cull where they displace genuinely trained experts.",
+   "evidence": "self_organize.py:4470-4494, 4506-4539"
+  },
+  {
+   "item": "Restoring uage WITHOUT use is worse than restoring neither: every expert reads past-grace and every utilization reads 0.0, so `sorted(elig, key=use.get)` degenerates to SLOT ORDER and the cull removes the founders while printing an ordinary line.",
+   "why": "It is invisible in the log and selftest.sh runs a real resume without seeing it. Any new per-unit clock added to the fabric must be saved together with its ranking key.",
+   "evidence": "self_organize.py:4521-4538, 5390-5397"
+  },
+  {
+   "item": "Adam moments must NOT be restored when any tracked tensor was widened. torch's Optimizer.load_state_dict does not validate shape \u2014 it casts dtype/device and assigns \u2014 so the load SUCCEEDS and dies minutes later inside exp_avg.mul_().add_() with nothing connecting it to the resume.",
+   "why": "The cost of restarting is bounded (~1/(1-beta2) \u2248 1000 steps); the cost of a clean load followed by a mid-training shape error is a lost run.",
+   "evidence": "self_organize.py:4894-4902, 4934-4937"
+  },
+  {
+   "item": "The widening flag must be per-optimizer. _wide_by is a fact about the FABRIC's cap-shaped parameters (all in om); oe is AdamW(enc.parameters()) and nothing in SigEncoder is sized by fab.cap. One flag gating both dropped the encoder's moments at the exact boundary where a new area's signatures first arrive.",
+   "why": "enc produces the gist \u2014 the routing query and the space every centroid lives in. It is the worst available moment to reset its optimizer state.",
+   "evidence": "self_organize.py:4903-4910, 4934-4935"
+  },
+  {
+   "item": "Param-group STRUCTURE must be replayed, not just population size. Growth calls om.add_param_group during training, so a post-growth checkpoint has more groups than a freshly built optimizer and load_state_dict refuses the whole thing. Capture what each replayed grow() returns and re-add in the same order.",
+   "why": "Without it every Adam moment was silently discarded on every resume. Note that fab.grow() returns [] (preallocated), so only world-model growth creates groups \u2014 adding a group for an empty list creates phantom groups that break the count.",
+   "evidence": "self_organize.py:4580-4598, 4697-4707, 4749, 7489-7492"
+  },
+  {
+   "item": "A run's vocabulary goes BESIDE that run's own checkpoint and nothing else may write to it. _TOK_SAVE = SAVE_CKPT + \".dyntok.json\"; a resume with no SAVE_CKPT writes no vocabulary at all rather than overwriting its parent's.",
+   "why": "A previous run wrote over its input and destroyed the parent's vocabulary; a checkpoint's vocabulary is part of the checkpoint.",
+   "evidence": "self_organize.py:1000-1012, 5341-5344"
+  },
+  {
+   "item": "Minting is APPEND-ONLY, so a tokenizer file with MORE merges than a checkpoint contains that checkpoint's vocabulary as its exact prefix. That is what makes the vocabulary-mismatch refusal recoverable rather than terminal.",
+   "why": "It is the property the whole prefix-widening design rests on, and the only route back from a run that saved its grown vocabulary over its parent's file.",
+   "evidence": "self_organize.py:4391-4408"
+  },
+  {
+   "item": "Any path that sets mem.active directly bypasses _commit and must call mem.rebuild_census(), and the census table must be GROWN to max(src)+1, not clamped into n_src_hint.",
+   "why": "nsrc is MEM_SRC_FLOOR's only input. Without the rebuild, `has = (nsrc > 0)` is all False and the floor protects nothing while the banner keeps printing \"src floor 0.5\". Clamping instead of growing re-breaks it at the 125-source scale it was written for.",
+   "evidence": "self_organize.py:4973-4983; memory.py:310-343"
+  },
+  {
+   "item": "The growth controller's LEARNED state must travel and its CONFIG must not. Carrying fast/slow/dev/ramp_done keeps the ramp latched at the new cap and lets the REGRESSION trigger see the boundary; carrying rate/ramp_to/z would make the knobs unsettable.",
+   "why": "A re-armed ramp mints experts on no evidence (simulated +503 at cap 2048, +1527 at cap 4096 \u2014 96% of all growth), and a reseeded slow EMA makes the arrival of a new area invisible to the one signal continual learning has.",
+   "evidence": "self_organize.py:4540-4579, 5398-5418"
+  },
+  {
+   "item": "The held-out probe must be keyed by domain NAME, not index, and BWT's sign runs opposite to the literature (lower-is-better \u21d2 negative BWT is good).",
+   "why": "Adding a domain shifts every index after it, so an index-keyed probe silently compares eng against py; and reversing the BWT subtraction passed every selftest assertion while inverting the project's headline claim.",
+   "evidence": "self_organize.py:5074-5076, 906-916"
+  },
+  {
+   "item": "Any cadence that sits below the batch early-out must be elapsed-since-last-fire, never `step % N == 0`: the block only executes on flush steps, which land on a fixed residue mod BATCH_W, so the modulo asks for a simultaneous solution to two congruences that usually has none.",
+   "why": "At BATCH_W \u2208 {2,8,15,16,32} the mint and re-tokenisation fired ZERO times, and CKPT_EVERY sat in the same block \u2014 a long run would never have checkpointed.",
+   "evidence": "self_organize.py:5267-5285"
+  }
+ ],
+ "open_questions": [
+  "Was SIG_WIN ever set explicitly in the runs that produced this project's reported held-out/retention numbers? If it was left at 0, the eval router was routing on a single byte (bug 1) for all of them; if it was set, the eval window is still the trailing slice while training takes the leading slice from bpos.",
+  "Is there a reason _eval_sig re-derives the signature width from the environment instead of reading main()'s _sigw through a module-level holder, the way _ENC[0] holds the live encoder (3903-3904)? Adding a _SIGW holder looks like the direct fix but I have not checked for a construction-order constraint.",
+  "Was compose_test's use of model(X)[0] deliberate (a base-model reference distribution for the memory-blend comparison) or a site that was missed when _eval_logits was introduced? The section headings and the surrounding prose read as claims about the whole system.",
+  "Does anything outside 3600-5600 append to _HIST, or is report_holdout at 8028 genuinely the only writer? I grepped the whole file and found only 5161 and 5205, but a dynamic write through getattr would not show.",
+  "How large is the segmentation effect on the across-run-boundary probe in practice? Comparing len(_v) at run A's final vocabulary against run B's would quantify how much of the reported drift is a moving window rather than a moving model.",
+  "Is the per-owner memory restore path (4950-4963) exercised by any test? mem_evict_test.py and resume_test.py exist; I did not check whether either runs a MEM_PER_EXPERT=1 resume.",
+  "Is the ExpertRouter population (EXPERTS=1) intended to be checkpointed at all, or is that whole path considered superseded by the Fabric? Nothing in the save site says either way.",
+  "Does resume_test.py assert anything about which fields survive a round trip? If it does, the mem_selfcon and holdout_hist findings would be visible to it, which would suggest they are known-and-accepted rather than missed.",
+  "What sets mem.recon on a VERIFY=recon run, and is it saved anywhere? is_unverified() gates _rekey_amortized's snapshot (5298), and recon is not in the checkpoint dict.",
+  "Is the `.best` snapshot meant to be resumable at all? If yes it needs its own .dyntok.json; if no, the ckpt should probably not record tok_path at all rather than recording one that will not match."
+ ]
+}

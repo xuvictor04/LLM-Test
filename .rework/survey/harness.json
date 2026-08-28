@@ -1,0 +1,1063 @@
+{
+ "area": "harness",
+ "summary": "The shell layer is ~4,060 lines across 13 scripts. `longrun.sh` (1,968 lines, 161 kB \u2014 most of it commentary/lab notebook) is the live entry point: it dispatches 12 subcommands (`fetch`, `run|resume`, `pilot`, `pilot-add`, `add`, `grid`, `seeds`, `repeat`, `smoke`, `ladder`, `pair`, `watch`) and holds a single `_flags_for()` table of 99 named arms plus 21 curated presets (`pilots`/`ablate`/`tokens`/`fabric`/`round3`..`round18`). Its own invariants are an append-only `runs/` tree (`_reserve`), a config fingerprint written beside every finished log (`_cfgsig`/`_reusable`), a completion marker (`_done`) that drives resume-skip, and a corpus bootstrapper (`_pilot_corpus`). `preflight.sh` gates a fresh (aarch64/GH200) box, `selftest.sh` is the project test entry point (16 unit suites + a CPU train + a CPU resume; it passes at HEAD), and `harness_test.sh` is the only test of the shell itself. `equiv.sh` answers \"did this commit change behaviour\" by running two git worktrees and diffing normalised logs. The remaining scripts are older strata: `rerun.sh`, `run_full_unfrozen.sh`, `run_cl_test.sh`, `bench_gpu.sh`, `sweep_domains.sh`, `sweep_domain_grid.sh`, `fetch_data.sh`, `fetch_40g.sh` \u2014 none is exercised by `selftest.sh`, several grep for report lines that no longer exist, one (`sweep_domain_grid.sh`) cannot start at all, and one (`run_full_unfrozen.sh`) is still the README's headline command while hardcoding pre-2026-08-17 fabric geometry. The dominant live bug class here is exactly the project's own: arms that are armed but inert \u2014 six arm names resolve to a flag set identical to the shipped defaults, and three of those sit in the same curated list as `base`.",
+ "facts": [
+  {
+   "claim": "longrun.sh dispatches 12 subcommands: fetch, run|resume, pilot, pilot-add, add, grid, seeds, repeat, smoke, ladder, pair, watch.",
+   "evidence": "longrun.sh:547 fetch) :565 run|resume) :590 pilot) :668 pilot-add) :952 add) :1049 grid) :1622 seeds) :1716 repeat) :1807 smoke) :1857 ladder) :1915 pair) :1960 watch)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_flags_for()` defines 99 distinct arm names between longrun.sh:162 and its closing brace, plus a `*)` wildcard that returns the sentinel `__UNKNOWN_ARM__`.",
+   "evidence": "longrun.sh:162 `_flags_for() {`; longrun.sh:532 `*)         echo \"__UNKNOWN_ARM__\" ;;`; count verified by slicing the function and de-duplicating arm labels (99)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "There are 21 curated preset arm-lists plus a default list; harness_test.sh sees 62 distinct arms across the presets it scans.",
+   "evidence": "longrun.sh:1125-1534 (pilots/ablate/tokens/fabric/round3..round18/\"\"); `bash harness_test.sh` prints \"ok    62 distinct arms across all presets, every one defined\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "18 defined arms are named in no preset and no default list, reachable only by passing the name explicitly to `grid`: base_nr, bytes, freeze20k, freeze6k, frozen1k, frozvocab, lr_075_norst, lr_075_voc, mintinit, nodom_kn, nogrow_s, nomem, pgate_c, softroute, stateq, vmax4k, vmax8k, wt_div.",
+   "evidence": "set difference of _flags_for arm names against all `ARMS=\"...\"` presets + GRID_ARMS_DEFAULT (longrun.sh:1116) + the SMOKE_ARMS default (longrun.sh:1821); `*) ARMS=\"$2\" ;;` at longrun.sh:1535 is what makes them still reachable",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The arms the project's own harness test names as \"the arms the next runs use\" are lr_075, lr_075_short, lr_075_rst, lr_075_norst and sched_ctl.",
+   "evidence": "harness_test.sh:145 `for a in lr_075 lr_075_short lr_075_rst lr_075_norst sched_ctl; do`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_done()` \u2014 the predicate every resume-skip and equiv.sh reuse-check depends on \u2014 greps for the literal sentence \"SIG_MODE=learned -- learned = the unfrozen product path\".",
+   "evidence": "longrun.sh:133 `_done() { [ -f \"$1\" ] && grep -aq \"SIG_MODE=learned -- learned = the unfrozen product path\" \"$1\"; }`; equiv.sh:87 and equiv.sh:95 use the same string",
+   "confidence": "verified"
+  },
+  {
+   "claim": "That sentence is produced by the final print of self_organize.main(), formatted with the live SIG_MODE, so it exists only when SIG_MODE == \"learned\".",
+   "evidence": "self_organize.py:9855 `print(\"\\n(SIG_MODE={} -- learned = the unfrozen product path; deltas + purity + locality are what matter.)\".format(SIG_MODE))`; self_organize.py:9858-9859 is `if __name__ == \"__main__\": main()`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_knobs()` derives the knob inventory for `_cfgsig` by sed-ing `_SPEC` out of self_organize.py; the pattern matches, yielding 328 knob names.",
+   "evidence": "longrun.sh:80-82 `sed -n 's/^    \"\\([A-Z][A-Z0-9_]*\\)\": (.*/\\1/p'`; self_organize.py:96 `_SPEC = {` \u2026 self_organize.py:513 ` }`; extraction produced 328 entries",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_cfgsig` fingerprints commit + PILOT_DIR + a corpus fingerprint + ARMFLAGS + every _SPEC knob present in the environment + DEVICE; `_reusable` refuses to reuse a finished log whose stored .cfg differs, and also refuses a finished log with no .cfg at all.",
+   "evidence": "longrun.sh:96-104 (_cfgsig), longrun.sh:106-121 (_reusable)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_corpsig` fingerprints only `${PILOT_DIR:-data_pilot}/train`: total bytes of *.txt, file count, and a sha1 of the first 1 MB of the alphabetically first file.",
+   "evidence": "longrun.sh:88-95",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_reserve` shares one counter between the `<name>` and `<name>.log` forms (its while-loop tests both `${p%.log}-N.log` and `$p-N`), which is what keeps a checkpoint and its log on the same suffix when one of the two is missing.",
+   "evidence": "longrun.sh:51-59, specifically `while [ -e \"${_rp%.log}-$_rn.log\" ] || [ -e \"$_rp-$_rn\" ]; do`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_stopped` implements a cooperative stop: `touch <dir>/STOP` (or STOP_FILE=<path>) finishes the run in flight and then breaks the loop. It is honoured by grid, seeds, repeat and ladder.",
+   "evidence": "longrun.sh:126-131; call sites at longrun.sh:1543 (grid), :1643 (seeds), :1737 (repeat), :1893 (ladder)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Arm flags are appended LAST on every env line, so an arm flag wins over the harness's own hardcoded value of the same knob.",
+   "evidence": "longrun.sh:1560-1571 (grid, `$FLAGS` immediately before `python3`), :1665-1673 (seeds, `$ARMFLAGS SEED=$SEED`), :1756-1764 (repeat), :1840 (smoke, `$SX python3`)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "grid/seeds/repeat all hardcode VMAX=2048 on the env line, so `vmax4k` (VMAX=4096, the registry default) is a real change inside those subcommands even though it is a no-op against _SPEC.",
+   "evidence": "longrun.sh:1564 `WIN=256 BATCH_W=16 VMAX=2048 ...`; longrun.sh:226 `vmax4k)    echo \"VMAX=4096\" ;;`; self_organize.py:_SPEC \"VMAX\": (\"i\", 4096)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The registry defaults that make six arms inert are: TOK_MINT_PMIN 0.0, TOK_COMPOSE 0, TOK_MINT_NOVEL 0.0, MEM_PER_EXPERT 0, FAB_PRESSURE 0.45, CHAIN_VOTE 1, CHAIN_ROUTE \"soc\".",
+   "evidence": "self_organize.py:126 TOK_MINT_PMIN (\"f\",0.0); :132 TOK_COMPOSE (\"i\",0); :135 TOK_MINT_NOVEL (\"f\",0.0); :209 FAB_PRESSURE (\"f\",0.45); :153 CHAIN_VOTE (\"env\",1); :149 CHAIN_ROUTE (\"env\",\"soc\"); MEM_PER_EXPERT (\"i\",0)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_env`/`_i`/`_f` read defaults out of _SPEC and self_organize.py raises if a read site declares a default different from the registry, so the registry value IS the effective default.",
+   "evidence": "self_organize.py:61 `v = os.environ.get(k, _SPEC.get(k, (None, None))[1])`; self_organize.py:520-522 raise on `_SPEC[k][1] != d`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`smoke` runs 7 arms at 40 kB / 3 epochs with a tiny fabric (FAB_N0=3 FAB_NMAX=32, D_MODEL=64, WIN=32, VMAX=512, SEED_VOCAB=256), and asserts only that each reaches its report.",
+   "evidence": "longrun.sh:1821 default list; longrun.sh:1827-1840 env line",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`grid` never overwrites a log: a complete log is skipped after a `_reusable` check, a partial log is moved to `<arm>.log.partial-N`, and the checkpoint path goes through `_reserve`.",
+   "evidence": "longrun.sh:1544-1549, longrun.sh:1569",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`grid` now writes `$LOG.cfg` on success; the comment records that it previously did not, which made the documented `sleep 2h && git pull && bash longrun.sh grid` continue-workflow exit 1 on the first completed arm.",
+   "evidence": "longrun.sh:1576-1580",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`seeds` and `repeat` default to writing checkpoints (SEED_CKPT:-1); `repeat` hardcodes SAVE_CKPT=0.",
+   "evidence": "longrun.sh:1671 `SAVE_CKPT=$([ \"${SEED_CKPT:-1}\" = 1 ] && _reserve \"$SD/${TAG}_seed$SEED.ckpt\" || echo 0)`; longrun.sh:1763 `SAVE_CKPT=0`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`ladder` is a thin wrapper that re-invokes `bash \"$0\" seeds` once per rung with SEED_DIR pointed at the rung directory, then calls compare.py rung-vs-baseline; `pair` does the same for two arms.",
+   "evidence": "longrun.sh:1889 `SEED_DIR=\"$_d\" bash \"$0\" seeds \"$N\" -- \"$KNOB=$_v\"`; longrun.sh:1950 `SEED_DIR=\"$_d\" bash \"$0\" seeds \"$N\" -- $_f`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`seeds`, `repeat`, `pair` and `ladder` accept free-form KEY=VALUE flags that are never validated against _SPEC; only `_flags_for`-resolved arms get the unknown-arm guard, and only preset arms get the harness_test _SPEC check.",
+   "evidence": "longrun.sh:1636 `ARMFLAGS=\"$*\"`, longrun.sh:1673 `$ARMFLAGS SEED=$SEED`; the guard at longrun.sh:1551 applies to `_flags_for` output only; harness_test.sh:92-115 checks only preset arms",
+   "confidence": "verified"
+  },
+  {
+   "claim": "pilot-add reads the parent checkpoint's geometry with torch map_location=\"meta\" and exports FAB_N0 (from fab_cfg n), FAB_NMAX (2x cap), VMAX (2x V), FAB_RANK and FAB_DK, each behind its own `[ -z \"${X:-}\" ]` test.",
+   "evidence": "longrun.sh:747-780 and the per-knob guards at longrun.sh:786-807",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`add` performs the same geometry read and exports the same five knobs, so the geometry fix reached both paths.",
+   "evidence": "longrun.sh:977-1012",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Both pilot-add and add resolve the checkpoint's tokenizer file before launching, with the shared data/dyntok.json as an explicitly-warned last resort.",
+   "evidence": "longrun.sh:701-717 (pilot-add), longrun.sh:1023-1035 (add)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A run's vocabulary is now saved beside its own checkpoint (SAVE_CKPT + \".dyntok.json\"), never back to the TOKENIZER_PATH it read the parent's from; a resume with SAVE_CKPT=0 saves no vocabulary at all.",
+   "evidence": "self_organize.py:1010-1012 `_TOK_SAVE = ((_ck0 + \".dyntok.json\") if ... else (\"\" if _env(\"RESUME\", \"\") else _env(\"TOKENIZER_PATH\", ...)))`; save sites self_organize.py:5337 and :7843",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`run`/`resume` set no TOKENIZER_PATH, which is safe only because self_organize.py falls back to `<RESUME>.dyntok.json` on a resume and refuses to load a shared vocabulary into a fresh online run.",
+   "evidence": "longrun.sh:578-583 (no TOKENIZER_PATH); self_organize.py:1214-1222 (resume fallback); self_organize.py:1225 `if os.path.exists(_tp) and (not TOK_ONLINE or _env(\"RESUME\", \"\"))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PURE_ADD (the pure catastrophic-forgetting arm, English removed from the stream) exists only in `pilot-add`; `add` has no PURE_ADD and no PHASE_SCHED handling.",
+   "evidence": "longrun.sh:930-936 (pilot-add PURE_ADD block); longrun.sh:952-1047 (`add` branch, no PURE_ADD reference)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`fetch` pulls into $DATA_DIR (default data_big) at $ENG_GB (default 20) and reads neither PILOT_DIR nor PILOT_GB, while grid/seeds/repeat/pilot train out of $PILOT_DIR \u2014 the two halves of the harness use different variables for the same idea.",
+   "evidence": "longrun.sh:538 `DD=${DATA_DIR:-data_big}`; longrun.sh:559 `python3 fetch_big.py --dataset ${ENG_SRC:-fineweb-edu} --domain eng --gb ${ENG_GB:-20} --out \"$DD\"`; longrun.sh:141 `_pc=\"${1:-data_pilot}\"`; the file documents this at longrun.sh:1372-1376",
+   "confidence": "verified"
+  },
+  {
+   "claim": "preflight.sh's KNOB TRAP (section 6) currently passes: all 80 documented knob names appear quoted in self_organize.py.",
+   "evidence": "preflight.sh:152-174; reproduced the check in-place, result: no missing knobs",
+   "confidence": "verified"
+  },
+  {
+   "claim": "preflight.sh's end-to-end smoke (section 9) is the only place in the repo that runs DATA_MODE=synthetic, and it requires CUDA.",
+   "evidence": "preflight.sh:199-216 `DEVICE=cuda DATA_MODE=synthetic STREAM_LEN=40000 ...`; no other .sh sets DATA_MODE=synthetic",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A CPU run of the synthetic path at HEAD reached PHASE 3, printed [rate] and [profile], and produced no traceback in 10 minutes before the timeout killed it \u2014 so the 2026-08-15 synthetic crash is not reproducible in that window, but full completion was not observed.",
+   "evidence": "scratchpad run of `DEVICE=cpu DATA_MODE=synthetic STREAM_LEN=8000 ... self_organize.py`: 0 Tracebacks, 0 completion markers, last line `[PHASE 3] active processes [2, 3]`",
+   "confidence": "likely"
+  },
+  {
+   "claim": "selftest.sh --quick passes completely at HEAD: 16 checks green, including harness_test and levers.",
+   "evidence": "`SELFTEST_DIR=... bash selftest.sh --quick` -> rc=0, \"quick selftest passed (training not exercised)\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selftest.sh is the only script that wires the shell tests in, and the only shell file it tests is longrun.sh (via harness_test.sh). preflight.sh, equiv.sh, rerun.sh, bench_gpu.sh, sweep_domains.sh, sweep_domain_grid.sh, fetch_data.sh, fetch_40g.sh, run_cl_test.sh and run_full_unfrozen.sh have no test at all.",
+   "evidence": "selftest.sh:48-96 (test list) \u2014 only `bash harness_test.sh` at selftest.sh:82 is a shell test",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selftest.sh deliberately ignores $DEVICE and trains on CPU unless SELFTEST_DEVICE is set, because longrun.sh exports DEVICE=cuda and an inherited value would put a training job on a busy GPU.",
+   "evidence": "selftest.sh:103-109 `ST_DEV=${SELFTEST_DEVICE:-cpu}`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "equiv.sh treats \"same commit twice\" as a determinism self-test of the machine and writes a per-device noise baseline of line SHAPES (all numbers replaced by NUM/N) that later comparisons subtract.",
+   "evidence": "equiv.sh:46-47, equiv.sh:116-129",
+   "confidence": "verified"
+  },
+  {
+   "claim": "equiv.sh runs each side inside a detached git worktree under /tmp and keeps the log outside it, so removing the worktree cannot destroy the result.",
+   "evidence": "equiv.sh:88-94",
+   "confidence": "verified"
+  },
+  {
+   "claim": "rerun.sh's smoke gate runs 11 arms in parallel at SMOKE_JOBS (default nproc) plus a checkpoint read-back through prompt.py.",
+   "evidence": "rerun.sh:102-129 and rerun.sh:133-142",
+   "confidence": "verified"
+  },
+  {
+   "claim": "sweep_domains.sh's own unread-knob guard passes at HEAD (it only requires the knob name to appear quoted anywhere in self_organize.py).",
+   "evidence": "sweep_domains.sh:20-28; reproduced -> \"all sweep knobs are read\", rc=0",
+   "confidence": "verified"
+  },
+  {
+   "claim": "sweep_domain_grid.sh patches a COPY of self_organize.py into $OUT and never modifies the original; it verifies the patch applied and that the copy parses.",
+   "evidence": "sweep_domain_grid.sh:212-258",
+   "confidence": "verified"
+  },
+  {
+   "claim": "bench_gpu.sh gates on torch.cuda.is_available() before the 1 GB fetch, because every arm hardcodes DEVICE=cuda.",
+   "evidence": "bench_gpu.sh:41-45",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fetch_40g.sh runs the fetch detached under nohup with a pidfile, supports `status`/`stop`, and isolates `datasets` in a throwaway venv so numpy cannot break the training torch's ABI.",
+   "evidence": "fetch_40g.sh:47-54, :57-59, :68-74, :81-83",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fetch_data.sh writes one file per domain named `<domain>.txt`, while fetch_big.py and fetch_local.py write `part%03d.txt`.",
+   "evidence": "fetch_data.sh:18 `: > \"$OUT/train/eng/eng.txt\"`; fetch_big.py:270 and fetch_local.py:184 `f\"part{shard:03d}.txt\"`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "self_organize.py's corpus loader globs `train/<domain>/*`, so it reads either naming; only the shell gates care about `part*.txt`.",
+   "evidence": "datastream.py:72 `paths = [p for p in sorted(glob.glob(f\"{data_dir}/train/{d}/*\"))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The bundled data/train/eng uses the `<name>.txt` convention (a.txt, alice.txt, ...), and data_pilot/train/eng uses part000.txt.",
+   "evidence": "`ls data/train/eng` -> a.txt alice.txt candle.txt dorian.txt dracula.txt frank.txt pride.txt tom.txt ; `ls data_pilot/train/*/` -> part000.txt",
+   "confidence": "verified"
+  },
+  {
+   "claim": "data/ is git-tracked (43 files) and data/dyntok.json is gitignored, so equiv.sh's worktrees have a data/ directory to write into and no stale vocabulary to load.",
+   "evidence": "`git ls-files data | wc -l` -> 43; .gitignore contains `data/dyntok.json`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ARCHIVE.md states that the only current sources of truth are self_organize.py and longrun.sh at HEAD, and that four directories plus STATE.md/CL_TESTBED.md were moved under archive/ on 2026-08-27.",
+   "evidence": "ARCHIVE.md \"**Current behaviour:** `self_organize.py` and `longrun.sh` at HEAD. Nothing else.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "README.md still tells the reader to start at `garry/GARRY.md` and `STATE.md` (both now under archive/) and presents `bash run_full_unfrozen.sh` as \"the whole system in one command\".",
+   "evidence": "README.md \"- `garry/GARRY.md` \u2014 the frozen known-good milestone\", \"- `bash run_full_unfrozen.sh` \u2014 the whole system in one command\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "harness_test.sh sources only `_reserve` and `_flags_for` out of longrun.sh by sed-slicing, so running it cannot start a training run.",
+   "evidence": "harness_test.sh:39-40",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`pilot` reserves the checkpoint path once into `_PCK` and passes TOKENIZER_PATH=\"$_PCK.dyntok.json\", which is what made pilot-add's continual-learning chain resolvable at all.",
+   "evidence": "longrun.sh:628 `_PCK=\"$(_reserve \"$OUT/pilot_$ARCH\")\"`; longrun.sh:636 `SAVE_CKPT=\"$_PCK\" TOKENIZER_PATH=\"$_PCK.dyntok.json\"`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "pilot-add refuses to reuse a corpus directory whose _fetch_manifest.json records a different source than the dataset argument, and tops up a directory holding less than 90% of the requested bytes.",
+   "evidence": "longrun.sh:851-870 (manifest check), longrun.sh:872-886 (size check)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "pilot-add supplies `--data-dir data/<lang>` automatically for any the-stack dataset unless FETCH_ARGS already contains one, resolving the language through fetch_big.STACK_DIR.",
+   "evidence": "longrun.sh:905-916; fetch_big.py:40 `STACK_DIR = {\"py\": \"python\", ...}`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "longrun.sh's header block documents only 8 of the 12 subcommands; grid, seeds, pair, ladder and repeat appear only in the usage string at the bottom.",
+   "evidence": "longrun.sh:5-16 vs longrun.sh:1967",
+   "confidence": "verified"
+  },
+  {
+   "claim": "round11 and round12 resolve to the identical arm list (lr_pilot2 lr_vcap), and round13 and round14 to the identical arm list (lr_expvalve); the difference between the rounds lives only in the STREAM_LEN/EPOCHS/LR_STEPS the notes tell you to export.",
+   "evidence": "longrun.sh:1257, :1284, :1304, :1332",
+   "confidence": "verified"
+  },
+  {
+   "claim": "lr_pilot and lr_pilot2 resolve to byte-identical flag sets, as do lr_expvalve and sched_ctl, and gc_ctrl and gc8_big.",
+   "evidence": "longrun.sh:430 vs :440; :446 vs :461; :406 vs :412",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`pilot`'s step estimate divides bytes by the literal 614 \u2014 the mature loop stride, numerically equal to the SIG_WIN the file pins but a different quantity \u2014 so the estimate does not follow WIN or an overridden SIG_WIN.",
+   "evidence": "longrun.sh:619 `~$((P_SL*P_EP/614)) steps`; longrun.sh:27-31 explains 614 as the stride and longrun.sh:634 sets SIG_WIN=${SIG_WIN:-614}",
+   "confidence": "verified"
+  },
+  {
+   "claim": "bash restores a variable set as an assignment-prefix to a function call, so sweep_domains.sh's `SL=$L run 3 ...` does not leak the 480000 stream length into stages 3b/4/5 under bash 5.2.",
+   "evidence": "sweep_domains.sh:129-131; verified empirically: `SL=100; for L in 200 300; do SL=$L f; done; echo $SL` -> 100 on bash 5.2.21",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "OUT",
+   "effect": "root for pilot/pilot-add/run/resume/add artefacts; also the whole output dir for rerun.sh (defaults to runs/rerun_<date>).",
+   "owner": "longrun.sh (and separately rerun.sh)",
+   "couples_with": [
+    "GRID_DIR",
+    "SEED_DIR",
+    "REPEAT_DIR",
+    "SMOKE_DIR",
+    "PAIR_DIR",
+    "LADDER_DIR"
+   ],
+   "evidence": "longrun.sh:537 `OUT=${OUT:-runs/long}`; rerun.sh:47"
+  },
+  {
+   "name": "DATA_DIR",
+   "effect": "corpus root for fetch/run/resume/add (the GB-scale half of the harness). Never consulted by pilot/grid/seeds/repeat.",
+   "owner": "longrun.sh `fetch`/`run`/`add`",
+   "couples_with": [
+    "PILOT_DIR",
+    "ENG_GB"
+   ],
+   "evidence": "longrun.sh:538 `DD=${DATA_DIR:-data_big}`"
+  },
+  {
+   "name": "PILOT_DIR",
+   "effect": "corpus root for pilot/pilot-add/grid/seeds/repeat/smoke, and the ONLY directory `_corpsig` fingerprints.",
+   "owner": "longrun.sh pilot-scale subcommands",
+   "couples_with": [
+    "PILOT_GB",
+    "STREAM_LEN",
+    "DATA_DIR"
+   ],
+   "evidence": "longrun.sh:141, :591, :1051, :88-95"
+  },
+  {
+   "name": "PILOT_GB",
+   "effect": "size `_pilot_corpus` pulls when train/eng has no part*.txt, and the default fourth argument of `pilot-add`.",
+   "owner": "longrun.sh `_pilot_corpus`",
+   "couples_with": [
+    "STREAM_LEN",
+    "EPOCHS",
+    "PILOT_SRC",
+    "FETCH_ARGS"
+   ],
+   "evidence": "longrun.sh:143, :673 `GB=${4:-${PILOT_GB:-0.06}}`"
+  },
+  {
+   "name": "STREAM_LEN",
+   "effect": "bytes per epoch. Independent of PILOT_GB, so a 0.06 GB corpus will happily serve a 94 MB/epoch stream with only a runtime warning.",
+   "owner": "self_organize.py; set on every harness env line",
+   "couples_with": [
+    "PILOT_GB",
+    "EPOCHS",
+    "LR_STEPS",
+    "LR_EPOCHS"
+   ],
+   "evidence": "longrun.sh:543, :617, :1121; the coupling is documented at longrun.sh:1362-1370"
+  },
+  {
+   "name": "EPOCHS",
+   "effect": "passes over the stream. An arm may override it (vmax8k sets EPOCHS=18) and the grid banner still prints the harness value.",
+   "owner": "self_organize.py",
+   "couples_with": [
+    "STREAM_LEN",
+    "LR_EPOCHS",
+    "LR_STEPS"
+   ],
+   "evidence": "longrun.sh:544, :1121, :225, banner at :1538"
+  },
+  {
+   "name": "DEVICE",
+   "effect": "cuda/cpu for every subcommand except `run|resume`, which hardcodes DEVICE=cuda. selftest.sh deliberately ignores it.",
+   "owner": "longrun.sh env lines",
+   "couples_with": [
+    "SELFTEST_DEVICE"
+   ],
+   "evidence": "longrun.sh:578 `DEVICE=cuda` (hardcoded); longrun.sh:631,:1562 `DEVICE=${DEVICE:-cuda}`; selftest.sh:108"
+  },
+  {
+   "name": "SIG_WIN",
+   "effect": "signature window; pinned to 614 on every long/pilot/grid env line so the encoder covers the mature loop stride.",
+   "owner": "longrun.sh (deliberate pin, explained at longrun.sh:27-31)",
+   "couples_with": [
+    "WIN",
+    "VMAX"
+   ],
+   "evidence": "longrun.sh:580, :634, :1565"
+  },
+  {
+   "name": "GRID_DIR",
+   "effect": "output directory for `grid`. Separating rounds by directory is the only thing that stops round11/round12 (identical arm lists) colliding.",
+   "owner": "longrun.sh `grid`",
+   "couples_with": [
+    "GRID_ARMS",
+    "STREAM_LEN"
+   ],
+   "evidence": "longrun.sh:1050 `GRID=${GRID_DIR:-runs/grid}`"
+  },
+  {
+   "name": "GRID_ARMS",
+   "effect": "overrides the arm list \u2014 including an explicitly-passed preset name, silently.",
+   "owner": "longrun.sh `grid`",
+   "couples_with": [
+    "GRID_ARMS_DEFAULT",
+    "$2 preset"
+   ],
+   "evidence": "longrun.sh:1534 and longrun.sh:1537 `ARMS=${GRID_ARMS:-$ARMS}`"
+  },
+  {
+   "name": "GRID_CKPT",
+   "effect": "1 (default) reserves a checkpoint dir per arm; anything else passes SAVE_CKPT=0, which also moves the tokenizer save target to TOKENIZER_PATH.",
+   "owner": "longrun.sh `grid`",
+   "couples_with": [
+    "TOKENIZER_PATH",
+    "BEST_KEEP"
+   ],
+   "evidence": "longrun.sh:1569; self_organize.py:1010-1012"
+  },
+  {
+   "name": "SEED_CKPT",
+   "effect": "1 (default) writes a checkpoint per seed \u2014 changed from 0 because continual learning needs something to resume from.",
+   "owner": "longrun.sh `seeds`",
+   "couples_with": [
+    "MEM_CAP",
+    "SEED_DIR"
+   ],
+   "evidence": "longrun.sh:1671 and the note at longrun.sh:1626-1630"
+  },
+  {
+   "name": "SEEDS",
+   "effect": "explicit seed list, overriding the count argument. Exported by `pair` and `ladder` so the child `seeds` invocations are paired by construction.",
+   "owner": "longrun.sh `seeds`",
+   "couples_with": [
+    "SEED_DIR",
+    "PAIR_DIR",
+    "LADDER_DIR"
+   ],
+   "evidence": "longrun.sh:1638 `SEEDLIST=${SEEDS:-$(seq 0 $((N-1)))}`; :1877, :1937"
+  },
+  {
+   "name": "SEED",
+   "effect": "read by `repeat` as the fixed seed to repeat; not read by `seeds` (which varies it).",
+   "owner": "longrun.sh `repeat`",
+   "couples_with": [
+    "SEEDS"
+   ],
+   "evidence": "longrun.sh:1730 `RSEED=${SEED:-0}`"
+  },
+  {
+   "name": "STOP_FILE",
+   "effect": "overrides the default `<dir>/STOP` cooperative-stop path for grid/seeds/repeat/ladder.",
+   "owner": "longrun.sh `_stopped`",
+   "couples_with": [
+    "GRID_DIR",
+    "SEED_DIR",
+    "REPEAT_DIR",
+    "LADDER_DIR"
+   ],
+   "evidence": "longrun.sh:127"
+  },
+  {
+   "name": "SMOKE_ARMS",
+   "effect": "arm list for `smoke`. Default is 7 tokenizer-focused arms; the banner calls it \"every pilot arm\".",
+   "owner": "longrun.sh `smoke`",
+   "couples_with": [
+    "SMOKE_DIR"
+   ],
+   "evidence": "longrun.sh:1817, :1821"
+  },
+  {
+   "name": "RESUME_FROM",
+   "effect": "points `pilot-add` at any checkpoint directory instead of $OUT/pilot_<arch>. Consumed by the shell and stripped with `env -u` so the config audit does not flag it.",
+   "owner": "longrun.sh `pilot-add`",
+   "couples_with": [
+    "TOKENIZER_PATH",
+    "FAB_N0",
+    "FAB_NMAX",
+    "VMAX"
+   ],
+   "evidence": "longrun.sh:698 `FROM=${RESUME_FROM:-$OUT/pilot_$PA}`; longrun.sh:937 `env -u RESUME_FROM`"
+  },
+  {
+   "name": "PURE_ADD",
+   "effect": "1 sets PHASE_SCHED so ONLY the added area is streamed \u2014 the arm the catastrophic-forgetting claim rests on. pilot-add only.",
+   "owner": "longrun.sh `pilot-add`",
+   "couples_with": [
+    "PHASE_SCHED",
+    "DOMAINS"
+   ],
+   "evidence": "longrun.sh:930-936"
+  },
+  {
+   "name": "FETCH_ARGS",
+   "effect": "passthrough to fetch_big.py / fetch_local.py (--data-dir, --token, --allow-short). An explicit --data-dir suppresses the automatic the-stack language directory.",
+   "owner": "longrun.sh `pilot-add`",
+   "couples_with": [
+    "HF_TOKEN",
+    "PILOT_GB"
+   ],
+   "evidence": "longrun.sh:897, :918, :908-914"
+  },
+  {
+   "name": "PILOT_ARCH / PILOT_ADD_ARCH / TF_LAYERS",
+   "effect": "base LM for pilot and pilot-add. Defaults to gru only; the transformer arm is documented as answered and switched off.",
+   "owner": "longrun.sh `pilot`/`pilot-add`",
+   "couples_with": [
+    "LAYERS",
+    "HEADS",
+    "D_MODEL"
+   ],
+   "evidence": "longrun.sh:624, :674, :630"
+  },
+  {
+   "name": "LADDER_BASE",
+   "effect": "reuse a completed baseline rung from another ladder instead of re-running it; compare.py checks commit and corpus but nothing else.",
+   "owner": "longrun.sh `ladder`",
+   "couples_with": [
+    "LADDER_DIR",
+    "SEEDS"
+   ],
+   "evidence": "longrun.sh:1880-1888"
+  },
+  {
+   "name": "SELFTEST_DIR / SELFTEST_DEVICE / SELFTEST_DATA",
+   "effect": "artefact dir, training device (cpu unless set), and corpus dir for selftest.sh's end-to-end legs.",
+   "owner": "selftest.sh",
+   "couples_with": [
+    "DEVICE"
+   ],
+   "evidence": "selftest.sh:25, :108, :114"
+  },
+  {
+   "name": "SCALE / LEN / SEED",
+   "effect": "equiv.sh's configuration: fast (default, ~2-4 min/side) vs deep (~15-25 min/side), stream length override, and seed. None of the three appears in the output directory name or in any config stamp.",
+   "owner": "equiv.sh",
+   "couples_with": [
+    "DEVICE",
+    "PILOT_DIR"
+   ],
+   "evidence": "equiv.sh:50-61, equiv.sh:66, equiv.sh:68"
+  },
+  {
+   "name": "SMOKE",
+   "effect": "preflight.sh section 9 on/off. SMOKE=0 skips the only check that actually runs the product path.",
+   "owner": "preflight.sh",
+   "couples_with": [],
+   "evidence": "preflight.sh:199, :216"
+  },
+  {
+   "name": "FIX",
+   "effect": "NOTHING. Documented in preflight.sh's usage header as \"also install what is missing\"; the name appears nowhere else in the file.",
+   "owner": "preflight.sh (nominally)",
+   "couples_with": [],
+   "evidence": "preflight.sh:12 is the only occurrence of FIX in the file"
+  },
+  {
+   "name": "STEPS / BPT / WIN / ONLY / SKIP_FETCH / DATA / GB / TRF_LAYERS",
+   "effect": "bench_gpu.sh matrix control. STEPS is a target, not a count: STREAM_LEN = STEPS*WIN*BPT and BPT is a hand-set 1.85 bytes/token estimate.",
+   "owner": "bench_gpu.sh",
+   "couples_with": [
+    "VMAX",
+    "SEED_VOCAB"
+   ],
+   "evidence": "bench_gpu.sh:26-30, :71-77"
+  },
+  {
+   "name": "SMOKE_JOBS / SMOKE_LEN",
+   "effect": "parallelism and stream length of rerun.sh's smoke gate. SMOKE_JOBS defaults to nproc; all parallel arms share one tokenizer output path.",
+   "owner": "rerun.sh",
+   "couples_with": [
+    "TOKENIZER_PATH",
+    "SAVE_CKPT"
+   ],
+   "evidence": "rerun.sh:83, :102"
+  },
+  {
+   "name": "STAGES / JOBS / MAX_MIN / KEY_SRC / BIG / FORCE / DRY / SKIP_GPU_CHECK",
+   "effect": "sweep_domain_grid.sh control. FORCE=1 bypasses the unpinned-knob (4b) and inherited-knob (4c) guards but NOT the section-4 knob check, which currently kills the script unconditionally.",
+   "owner": "sweep_domain_grid.sh",
+   "couples_with": [
+    "SET_KNOBS"
+   ],
+   "evidence": "sweep_domain_grid.sh:114-122, :278, :299, :310"
+  },
+  {
+   "name": "GB / OUT / DATASET / DOMAIN / VENV / LOG",
+   "effect": "fetch_40g.sh pull parameters. GB is not persisted, so `status` always compares on-disk bytes against whatever GB is set in the status invocation.",
+   "owner": "fetch_40g.sh",
+   "couples_with": [],
+   "evidence": "fetch_40g.sh:19-26, :38-40"
+  },
+  {
+   "name": "BIG",
+   "effect": "fetch_data.sh: 1 adds two large GitHub-hosted Gutenberg corpora on top of the ~45 MB NLTK set.",
+   "owner": "fetch_data.sh",
+   "couples_with": [],
+   "evidence": "fetch_data.sh:32-46"
+  },
+  {
+   "name": "RUN_NAME",
+   "effect": "run_full_unfrozen.sh: namespaces log (~/$RUN.txt), checkpoint (runs/$RUN) and tokenizer (data/tok_$RUN.json).",
+   "owner": "run_full_unfrozen.sh",
+   "couples_with": [
+    "SAVE_CKPT",
+    "TOKENIZER_PATH"
+   ],
+   "evidence": "run_full_unfrozen.sh:26-27, :68, :79"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "Six arm names resolve to a flag set identical to the shipped defaults \u2014 they are `base` under another name",
+   "severity": "critical",
+   "where": "longrun.sh:173 (vote), :174 (socloop), :269 (nogate), :278 (nocompose), :304 (nomem), :378 (gate_press)",
+   "symptom": "Each of these arms writes its own log, its own .cfg and its own row in the GRID/SEEDS summary, describing an experiment that was never performed: the child process receives environment values identical to the registry defaults, so the run is bit-identical to `base` at the same seed.",
+   "evidence": "`vote) echo \"CHAIN_VOTE=1\"` vs self_organize.py:153 `\"CHAIN_VOTE\": (\"env\", 1)`; `socloop) echo \"CHAIN_ROUTE=soc CHAIN_VOTE=1\"` vs :149 `\"CHAIN_ROUTE\": (\"env\", \"soc\")`; `nogate) echo \"TOK_MINT_PMIN=0\"` vs :126 `(\"f\", 0.0)`; `nocompose) echo \"TOK_COMPOSE=0 TOK_MINT_NOVEL=0\"` vs :132 `(\"i\", 0)` and :135 `(\"f\", 0.0)`; `nomem) echo \"MEM_PER_EXPERT=0\"` vs _SPEC MEM_PER_EXPERT (\"i\",0); `gate_press) echo \"FAB_PRESSURE=0.45\"` vs :209 `(\"f\", 0.45)`. Computed by diffing every arm's flags against _SPEC overlaid with each subcommand's hardcoded env line.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Three arms in the DEFAULT grid list are the same run, and three more are a second identical triple",
+   "severity": "high",
+   "where": "longrun.sh:1116-1117 (GRID_ARMS_DEFAULT), resolved at :164 base, :173 vote, :174 socloop, :175 socloop_w, :176 vote_w, :292 weights",
+   "symptom": "`bash longrun.sh grid` with no arguments runs 20 arms that describe only 17 configurations. base/vote/socloop all resolve to the defaults; socloop_w/vote_w/weights all resolve to exactly `ROUTE_REGION_W=0 FAB_KEY_NORM=1`. Six logs, six named arms, two experiments \u2014 and the GRID SUMMARY prints them as six independent rows, inviting a reader to treat identical numbers as replication.",
+   "evidence": "Effective-flag computation with the grid env line overlaid (longrun.sh:1560-1571): socloop/vote/base -> '' ; socloop_w/vote_w/weights -> 'FAB_KEY_NORM=1 ROUTE_REGION_W=0'. Same analysis finds round5 (longrun.sh:1170) contains base and gate_press, both '' , and the smoke list (longrun.sh:1821) contains base and nogate, both ''.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Three arm comments state defaults the registry contradicts, and each one inverts the arm's meaning",
+   "severity": "high",
+   "where": "longrun.sh:267-268, longrun.sh:276-277, longrun.sh:363",
+   "symptom": "The comments justify each arm's existence with a default that is not the default. 'TOK_MINT_PMIN 0.10 IS NOW THE DEFAULT, so `pgate` would have been an alias for `base`' \u2014 the default is 0.0, so it is `nogate` that is the alias. 'TOK_COMPOSE is now ON by default, so every arm below states BOTH knobs explicitly' \u2014 it is OFF, so `nocompose` states nothing. 'occupancy 0.50, permanently below FAB_PRESSURE=0.75, so the utilization cull never runs' \u2014 FAB_PRESSURE is 0.45, so at FAB_N0=2048/FAB_NMAX=4096 the gate is OPEN by default and round5's whole premise is stale.",
+   "evidence": "longrun.sh:267 `# 0.10 IS NOW THE DEFAULT, so \\`pgate\\` would have been an alias for \\`base\\``; self_organize.py:126 `\"TOK_MINT_PMIN\": (\"f\", 0.0)`. longrun.sh:276 `# --- TOKEN PARAMETERISATION. TOK_COMPOSE is now ON by default`; self_organize.py:132 `\"TOK_COMPOSE\": (\"i\", 0)`. longrun.sh:363 `# ... permanently below FAB_PRESSURE=0.75`; self_organize.py:209 `\"FAB_PRESSURE\": (\"f\", 0.45)`.",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "`pilot`'s SIDE BY SIDE summary greps the unsuffixed log, so every pilot after the first reports the FIRST pilot's numbers",
+   "severity": "high",
+   "where": "longrun.sh:637 (write) vs longrun.sh:645 (read)",
+   "symptom": "The run writes to `$(_reserve \"$OUT/pilot_$ARCH.log\")`, which becomes pilot_gru-2.log on the second pilot, but the summary reads the fixed path `$OUT/pilot_$ARCH.log`. The second, third, ... pilot therefore prints run #1's `order-1 X | THIS MODEL Y` under the banner 'SIDE BY SIDE (the only number that compares them directly)'. With `2>/dev/null | head -1` the failure is silent, and the value printed is a real-looking number from a different run.",
+   "evidence": "longrun.sh:637 `... python3 self_organize.py 2>&1 | tee \"$(_reserve \"$OUT/pilot_$ARCH.log\")\"`; longrun.sh:645 `printf \"  %-12s %s\\n\" \"$ARCH\" \"$(grep -a -oE 'order-1 [0-9.]+ \\| THIS MODEL [0-9.]+' \"$OUT/pilot_$ARCH.log\" 2>/dev/null | head -1)\"`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "`add` never received the three corpus protections that `pilot-add` was fixed with",
+   "severity": "high",
+   "where": "longrun.sh:962-966",
+   "symptom": "`add` \u2014 the branch whose own comment says it 'runs the real experiment' \u2014 skips the fetch whenever ANY part*.txt exists, with no size check, no _fetch_manifest.json provenance check, and no automatic `--data-dir` for the-stack. All three holes are documented at length in pilot-add (longrun.sh:838-916) as the cause of the 5.6x exposure imbalance and of a corpus labelled the-stack that was actually this machine's Python. At GB scale the same skip means the multi-day continual-learning run can train on a 10 MB leftover while every line of the log names a 10 GB dataset.",
+   "evidence": "longrun.sh:962 `if [ -z \"$(ls \"$DD/train/$NAME\"/part*.txt 2>/dev/null)\" ]; then` ... :965 `echo \"$DD/train/$NAME already has data -- skipping the pull\"`. Compare longrun.sh:851-870 (manifest refusal) and :872-886 (90%-of-target top-up), both pilot-add only.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "`run`, `resume` and `add` are exempt from the append-only guarantee the file header claims for every subcommand",
+   "severity": "high",
+   "where": "longrun.sh:45-48 (the claim) vs longrun.sh:583 and longrun.sh:1044",
+   "symptom": "The header states 'Every subcommand here used to write $OUT/<name>.log and SAVE_CKPT=$OUT/<name> directly, so re-running a pilot silently destroyed the previous one ... Results are the expensive part of this project; they are now append-only.' But `run` still uses the fixed SAVE_CKPT=\"$OUT/ck\" and `add` the fixed SAVE_CKPT=\"$OUT/ck_$NAME\", neither through `_reserve`. A second `bash longrun.sh run` (as opposed to `resume`) starts a fresh multi-day run that overwrites the previous run's checkpoint in place \u2014 the exact artefact `pilot-add` and `add` need as their baseline. There is also no pidfile, so two `run` invocations write to the same checkpoint concurrently.",
+   "evidence": "longrun.sh:583 `SAVE_CKPT=\"$OUT/ck\" nohup python3 self_organize.py >> \"$OUT/run.log\" 2>&1 &`; longrun.sh:1044 `SAVE_CKPT=\"$OUT/ck_$NAME\" nohup python3 self_organize.py >> \"$OUT/add_$NAME.log\" 2>&1 &`; contrast longrun.sh:628, :831, :1569, :1671 which all call `_reserve`.",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "sweep_domain_grid.sh cannot start: its own knob-verification step reports eight knobs as unread that are in fact read",
+   "severity": "high",
+   "where": "sweep_domain_grid.sh:274-279",
+   "symptom": "Section 4's grep recognises only `_i(\"X\"`, `_f(\"X\"` and `os.environ.get(\"X\"` \u2014 it does not recognise `_env(\"X\"`. DEVICE, DATA_MODE, DATA_DIR, DOMAINS, MODEL, SIG_MODE, KEY_SRC and AMP are all read through `_env`, so the check reports them missing and calls `die`, unconditionally, before any cell runs. FORCE=1 bypasses 4b and 4c but not this. The whole 488-line sweep is dead at HEAD, and the failure message accuses the engine of a bug that is in the checker.",
+   "evidence": "sweep_domain_grid.sh:276 `grep -qE \"(_i|_f)\\(\\\"$k\\\"|os\\.environ\\.get\\(\\\"$k\\\"\" self_organize.py || miss=\"$miss $k\"`; sweep_domain_grid.sh:278 `[ -z \"$miss\" ] || die \"these knobs are NOT read by self_organize.py:$miss`. Reproduced: MISSING = DEVICE DATA_MODE DATA_DIR DOMAINS MODEL SIG_MODE KEY_SRC AMP. self_organize.py:541 `SIG_MODE = _env(\"SIG_MODE\", \"learned\")` shows the knob is read.",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "sweep_domain_grid.sh's unpinned-assembly-knob guard also fires on eight DOM_* knobs added since it was written",
+   "severity": "medium",
+   "where": "sweep_domain_grid.sh:287-302",
+   "symptom": "Even if section 4 were fixed, 4b dies on DOM_CULL_EMPTY, DOM_CULL_FLOOR, DOM_FOLD_MULT, DOM_MANAGE_EVERY, DOM_MIN_VISITS, DOM_PRIOR, DOM_RECUR, DOM_RECUR_HORIZON unless FORCE=1 \u2014 and FORCE=1 is precisely the flag that lets them run at their defaults and confound the axes the guard exists to protect. The guard has become a permanent stop rather than a check.",
+   "evidence": "Reproduced the 4b python with the script's own SET_KNOBS: NEWK = DOM_CULL_EMPTY DOM_CULL_FLOOR DOM_FOLD_MULT DOM_MANAGE_EVERY DOM_MIN_VISITS DOM_PRIOR DOM_RECUR DOM_RECUR_HORIZON; sweep_domain_grid.sh:299 `|| die \"self_organize.py has assembly knobs this sweep does not pin:$NEWK`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "equiv.sh caches and reuses per-commit logs in a directory that encodes neither SCALE nor LEN, SEED or DEVICE, with no config stamp",
+   "severity": "high",
+   "where": "equiv.sh:68 and equiv.sh:87",
+   "symptom": "`SCALE=fast bash equiv.sh <ref>` then `SCALE=deep bash equiv.sh <ref>` writes and reads the same $ROOT/runs/equiv_<A>_vs_<B>/<sha>.log. run_side reuses any log containing the completion marker without asking what produced it, so the deep-scale verdict is printed from fast-scale logs \u2014 the very failure longrun.sh built `_cfgsig`/`_reusable` to stop, unfixed here. The script's own header advertises 'confirm with SCALE=deep before trusting it', which is the command that silently does not re-run.",
+   "evidence": "equiv.sh:68 `OUT=$ROOT/runs/equiv_${SA}_vs_${SB}`; equiv.sh:87 `if [ -s \"$_log\" ] && grep -aq \"SIG_MODE=learned -- learned = the unfrozen product path\" \"$_log\"; then echo \"  $_sha: already done, reusing\"; return 0; fi`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "equiv.sh's noise baseline is keyed by device but applied across scales, and can subtract a real behavioural change",
+   "severity": "medium",
+   "where": "equiv.sh:116-129",
+   "symptom": "The baseline file is $ROOT/runs/equiv_noise_${DEV}.txt and holds line SHAPES with every number replaced by NUM/N. A shape recorded as noisy at SCALE=fast is then subtracted from a SCALE=deep comparison, and because normalisation erases the values, 'this line varies run to run' and 'this line changed because of the commit' are the same pattern. An INERT verdict is only as strong as the noise set is small, and nothing bounds or reports its size at verdict time.",
+   "evidence": "equiv.sh:116 `NOISE=$ROOT/runs/equiv_noise_${DEV}.txt`; equiv.sh:118 `... | sed -E 's/[0-9]+\\.[0-9]+/NUM/g; s/[0-9]+/N/g' | sort -u > \"$NOISE\"`; equiv.sh:147 `if [ \"$SELFTEST\" != 1 ] && [ -s \"$NOISE\" ] && [ \"$_real\" = 0 ]; then` -> prints INERT",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "`watch`'s progress filter cannot match the rate lines it exists to show",
+   "severity": "medium",
+   "where": "longrun.sh:1962",
+   "symptom": "The pattern is `\\[rate\\]` \u2014 the literal string '[rate]'. self_organize.py prints '  [rate @ 12345] 3200 steps/min | ...'. The most frequent progress line in a multi-day run (RATE_EVERY=5000) is invisible to `bash longrun.sh watch`; only [epoch, [PHASE and [saved checkpoint survive, plus the three prose sentences that happen to contain the literal '[rate]' at startup and after a resume, which `tail -12` then scrolls off.",
+   "evidence": "longrun.sh:1962 `grep -a -E \"\\[rate\\]|\\[epoch |\\[PHASE |\\[saved checkpoint\" \"$OUT/run.log\" | tail -12`; self_organize.py:6495 `print(f\"  [rate @ {step}] {_rate*60:.0f} steps/min | ...\")`. equiv.sh:108 filters the same line correctly with `\\[rate @`.",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "rerun.sh's per-arm summary greps two report lines that no longer exist",
+   "severity": "medium",
+   "where": "rerun.sh:68-69",
+   "symptom": "`go` prints a fixed set of extracted lines; two of its seven patterns can never match at HEAD. 'mean drift' appears nowhere in self_organize.py (the retention verdict now reads 'RETAINED --' / 'DRIFTING -- earlier material is measurably worse'), and 'model ALONE .*model\\+MEMORY .*ceiling' requires all three tokens on one line while the printed line is 'model ALONE (weights only) X  ->  model + MEMORY Y   (memory contributes Z)' with no 'ceiling'. The summary silently prints two blank rows where two of its headline numbers should be.",
+   "evidence": "rerun.sh:68-69 `for k in \"order-1 .* THIS MODEL\" \"beats order-1|DOES NOT BEAT\" \"model ALONE .*model\\+MEMORY .*ceiling\" \"mean drift\" ...`; `grep -c 'mean drift' self_organize.py` -> 0; self_organize.py:3752 is the actual model-ALONE line; self_organize.py:8097 is the actual retention verdict.",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "rerun.sh's smoke gate runs 11 arms in parallel that all write the same shared tokenizer file",
+   "severity": "medium",
+   "where": "rerun.sh:112 (with TINY setting SAVE_CKPT=0 at rerun.sh:84)",
+   "symptom": "With SAVE_CKPT=0 and no TOKENIZER_PATH, self_organize.py's vocabulary save target falls back to TOKENIZER_PATH's default data/dyntok.json. SMOKE_JOBS (default nproc) arms run concurrently and every one of them writes that single file at end of run, racing each other and leaving the repo's shared vocabulary as whichever arm finished last.",
+   "evidence": "rerun.sh:84 `... SAVE_CKPT=0 ...`; rerun.sh:112 `( env $TINY $E python3 self_organize.py > \"$OUT/smoke_$L.log\" 2>&1; ... ) &`; self_organize.py:1011-1012 `_TOK_SAVE = ... else (\"\" if _env(\"RESUME\", \"\") else _env(\"TOKENIZER_PATH\", \"data/dyntok.json\"))`; self_organize.py:7843 `if _TOK_SAVE: TOK.save(_TOK_SAVE)`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "bench_gpu.sh writes FAILED rows space-separated into a file the summary parses as tab-separated",
+   "severity": "medium",
+   "where": "bench_gpu.sh:111 (write) vs bench_gpu.sh:118 (write) and bench_gpu.sh:131 (read)",
+   "symptom": "The success path writes 8 tab-separated fields; the failure path writes 6 space-padded fields. The summary reads with `IFS=$'\\t' read -r tag model amp fuse wall util bench prof`, so a failed arm lands entirely in $tag and every other variable is empty. SUMMARY.txt then shows a line like '[A gru off 1 FAILED (exit 1) n/a] MODEL= AMP= ENC_FUSE=' followed by three blank lines \u2014 the one row a reader most needs to parse is the one that is mangled.",
+   "evidence": "bench_gpu.sh:111 `printf \"%-3s %-12s %-5s %-5s %-28s %s\\n\" ... >> \"$OUT/rows.txt\"`; bench_gpu.sh:118 `printf \"%s\\t%s\\t%s\\t%s\\t%ss\\t%s\\t%s\\t%s\\n\" ...`; bench_gpu.sh:131 `while IFS=$'\\t' read -r tag model amp fuse wall util bench prof; do`",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "bench_gpu.sh pip-installs `datasets` into the training environment, which preflight.sh explicitly forbids",
+   "severity": "medium",
+   "where": "bench_gpu.sh:51",
+   "symptom": "preflight.sh's install notes say 'numpy is NOT needed ... Install it only for `datasets`, and never into the same env as an NGC torch (upgrading numpy under NGC's torch breaks its ABI). Fetch in a THROWAWAY env'. bench_gpu.sh does the opposite unconditionally when $DATA is missing, and preflight section 3b exists specifically to detect the resulting ABI break.",
+   "evidence": "bench_gpu.sh:49-52 `if [ \"${SKIP_FETCH:-0}\" != \"1\" ] && [ ! -d \"$DATA/train/eng\" ]; then ... pip install -q datasets 2>&1 | tail -1`; preflight.sh:240-243 and preflight.sh:88-103",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "preflight.sh documents a FIX=1 knob that nothing in the file reads",
+   "severity": "medium",
+   "where": "preflight.sh:12",
+   "symptom": "'FIX=1 bash preflight.sh        # also install what is missing' is the second line of the usage block. The string FIX appears exactly once in the file. Setting it does nothing; a user following the header believes missing dependencies were installed. This is the D_MODEL_B failure mode inside the script written to catch the D_MODEL_B failure mode.",
+   "evidence": "`grep -n FIX preflight.sh` -> only `12:#   FIX=1 bash preflight.sh        # also install what is missing`",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "`bash longrun.sh pilot-add <name> local` at its own recommended size exits 1 on most machines",
+   "severity": "medium",
+   "where": "longrun.sh:665 (the recommendation) and longrun.sh:897 (the call)",
+   "symptom": "The fourth argument now defaults to PILOT_GB (0.06 GB) so the two corpora match, and `pilot` closes by printing exactly that command. fetch_local.py refuses a short corpus with a non-zero exit unless --allow-short, and the run recorded in longrun.sh's own round18 note produced 10.26 MB of local Python. So the advertised continual-learning demo aborts before touching the GPU on any box with under ~54 MB of local Python source, and neither the recommendation nor the usage text mentions FETCH_ARGS=\"--allow-short\".",
+   "evidence": "longrun.sh:665 `echo \"then add an area and see what it costs:  bash longrun.sh pilot-add py local ${PILOT_GB:-0.06}\"`; longrun.sh:897 `python3 fetch_local.py --domain \"$NAME\" --gb \"$GB\" --out \"$P_DD\" ${FETCH_ARGS:-} || exit 1`; fetch_local.py:229-230 `if not a.allow_short: sys.exit(msg + \"\\n  Pass --allow-short to proceed anyway.\")`; longrun.sh:1465 records 'The py corpus was 10.26 MB'",
+   "bug_class": "crash"
+  },
+  {
+   "title": "`smoke`'s banner says 'every pilot arm'; the default list is 7 of 99 and contains none of the arms the current rounds use",
+   "severity": "medium",
+   "where": "longrun.sh:1817 vs longrun.sh:1821, and the header claim at longrun.sh:15",
+   "symptom": "The header sells `smoke` as 'does every pilot arm still REACH ITS REPORT? minutes, run before any grid' and the banner interpolates `${SMOKE_ARMS:-every pilot arm}`. The actual default set is base nogate frozen pgate_t prob_use prob_emb compose \u2014 all tokenizer arms \u2014 and one of those (nogate) is a duplicate of base. No lr_*, gc_*, gate_*, sched_* or fix_* arm is covered, so running smoke before `grid round17` greenlights nothing about round17.",
+   "evidence": "longrun.sh:1817 `echo \"smoke: ${SMOKE_ARMS:-every pilot arm} at 40 kB / 3 epochs on ${DEVICE:-cuda}.\"`; longrun.sh:1821 `for ARM in ${SMOKE_ARMS:-base nogate frozen pgate_t prob_use prob_emb compose}; do`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "harness_test.sh's arm-resolution check does not cover the DEFAULT grid list or the smoke list",
+   "severity": "medium",
+   "where": "harness_test.sh:49",
+   "symptom": "The scan regex requires a preset case-label and `ARMS=\"...\"` on one line. GRID_ARMS_DEFAULT (an assignment spanning two lines) and the SMOKE_ARMS default (a `${...:-...}` expansion in a for-loop) match neither. So the arm list that `bash longrun.sh grid` runs with no arguments, and the arm list `bash longrun.sh smoke` runs, are exactly the two lists the harness test does not check \u2014 while the test's own header cites 'an arm defined in the ARMS preset case instead of _flags_for' as the failure it exists to catch.",
+   "evidence": "harness_test.sh:49 `ARMS_ALL=\"$(grep -oE '^[[:space:]]+[a-z0-9_\\\"]+\\)[[:space:]]+ARMS=\\\"[^\\\"]*\\\"' \"$LR\" | ...)\"`; longrun.sh:1116-1117 is a two-line `GRID_ARMS_DEFAULT=\"... \\` assignment; longrun.sh:1821 is a for-loop default. Test output confirms 62 arms scanned, not 99.",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "`seeds` and `repeat` SUMMARY glob every matching log in the directory, including ones this invocation never validated",
+   "severity": "medium",
+   "where": "longrun.sh:1686 and longrun.sh:1776",
+   "symptom": "`_reusable` is only consulted for seeds in this invocation's SEEDLIST. The end-of-run python then globs `{tag}_seed*.log` and prints held-out / vs-order-1 / specialization for every file that matches, including logs from an earlier invocation at a different EPOCHS or STREAM_LEN that this run never touched. Running `SEEDS=\"0 1 2\" seeds` and later `SEEDS=\"3 4\" seeds` with a different config prints five rows and a mean/spread across two configurations \u2014 the exact failure the file's own _cfgsig note at longrun.sh:60-70 says was fixed.",
+   "evidence": "longrun.sh:1686 `for f in sorted(glob.glob(f\"{sd}/{tag}_seed*.log\")):` (no .cfg consulted); the skip-path validation is at longrun.sh:1645 `if _done \"$LOG\"; then _reusable \"$LOG\" || exit 1;` and only runs `for SEED in $SEEDLIST`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "`pilot-add`'s log path is derived from the checkpoint reservation, so an orphaned log is overwritten by tee",
+   "severity": "medium",
+   "where": "longrun.sh:831",
+   "symptom": "`_PA_CK=$(_reserve \"$OUT/pilot_${PA}_$NAME\"); _PA_LOG=\"$_PA_CK.log\"` reserves against the CHECKPOINT path. `_reserve` returns the base path unchanged when the checkpoint directory does not exist, even if `<base>.log` does. So if the checkpoint directory was deleted, moved, or never written (a run killed before its first save), the next pilot-add returns the unsuffixed path and `tee` truncates the existing log \u2014 losing the ACROSS THE RUN BOUNDARY result that is the one number the command exists to produce.",
+   "evidence": "longrun.sh:831 `_PA_CK=$(_reserve \"$OUT/pilot_${PA}_$NAME\"); _PA_LOG=\"$_PA_CK.log\"`; longrun.sh:52-53 `if [ ! -e \"$_rp\" ]; then echo \"$_rp\"; return; fi` \u2014 the existence test is on the checkpoint path only; longrun.sh:949 `... | tee \"$_PA_LOG\"`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "`run_full_unfrozen.sh` \u2014 still the README's headline command \u2014 pins fabric geometry from the archived era and omits CORPUS_CAP/DISK_STREAM",
+   "severity": "high",
+   "where": "run_full_unfrozen.sh:45 and run_full_unfrozen.sh:67-80",
+   "symptom": "It passes FAB_N0=3 FAB_NMAX=6 explicitly, so it runs a 3-expert fabric while HEAD's default is 2048/4096 \u2014 precisely the stale value ARCHIVE.md names as the repository's most expensive trap. Its PART B env line sets neither CORPUS_CAP nor DISK_STREAM, so each corpus is capped at the 2,000,000-byte default while STREAM_LEN asks for 6,000,000 \u2014 the failure preflight.sh's own header lists as 'a multi-day run that would have trained on 2 MB'. README.md nonetheless presents it as 'the whole system in one command' and 'Start here'.",
+   "evidence": "run_full_unfrozen.sh:45 `FAB=${FABRIC:-1}; FN0=${FAB_N0:-3}; FNMAX=${FAB_NMAX:-6}` then :71 `FABRIC=$FAB FAB_N0=$FN0 FAB_NMAX=$FNMAX`; run_full_unfrozen.sh:67-80 contains no CORPUS_CAP and no DISK_STREAM; self_organize.py:98 `\"CORPUS_CAP\": (\"i\", 2000000)` and :101 `\"DISK_STREAM\": (\"i\", 0)`; ARCHIVE.md 'The live default has been **2048** since 6380519/25aba88 (2026-08-17)'; preflight.sh:6-8",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "fetch_data.sh's closing recommendation sets WIN=256, which run_full_unfrozen.sh silently overrides with WIN=96",
+   "severity": "medium",
+   "where": "fetch_data.sh:75 vs run_full_unfrozen.sh:67",
+   "symptom": "fetch_data.sh ends by printing the exact command to run next: `DATA_DIR=$OUT CORPUS_CAP=100000000 STREAM_LEN=80000000 WIN=256 BATCH_W=16 ACCUM=4 bash run_full_unfrozen.sh`. DATA_DIR, CORPUS_CAP, BATCH_W and ACCUM reach the child through the inherited environment, but WIN is re-assigned on run_full_unfrozen.sh's own env line, which wins. The user gets a 96-byte window while believing they asked for 256, and nothing says so.",
+   "evidence": "fetch_data.sh:75 `echo \"  DATA_DIR=$OUT CORPUS_CAP=100000000 STREAM_LEN=80000000 WIN=256 BATCH_W=16 ACCUM=4 bash run_full_unfrozen.sh\"`; run_full_unfrozen.sh:67 `env DEVICE=cuda DATA_MODE=real DOMAINS=$DOMS D_MODEL=$DB STREAM_LEN=$STREAM WIN=96 SEG_MIN=800 SEG_MAX=2000 \\`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "run_cl_test.sh part 3 asks for a 2,000,000-byte stream against the 2,000,000-byte default corpus cap, with DISK_STREAM off",
+   "severity": "medium",
+   "where": "run_cl_test.sh:17 and run_cl_test.sh:34-46",
+   "symptom": "STREAM=${STREAM_LEN:-2000000} and none of the three self_organize.py invocations sets CORPUS_CAP or DISK_STREAM. Each corpus is therefore truncated at 2 MB and the stream is materialised from that truncation. The same omission preflight.sh lists as a known past failure.",
+   "evidence": "run_cl_test.sh:17 `MEMCAP=${MEM_CAP:-300000}; DOMS=${DOMAINS:-eng,py,num,c}; STREAM=${STREAM_LEN:-2000000}`; run_cl_test.sh:34-46 (three env lines, no CORPUS_CAP, no DISK_STREAM); self_organize.py:_SPEC CORPUS_CAP 2000000 / DISK_STREAM 0",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "fetch_40g.sh `status` reports progress against GB's default, not against the pull actually in flight",
+   "severity": "medium",
+   "where": "fetch_40g.sh:19, :38, :40",
+   "symptom": "GB is read fresh on every invocation and never persisted. After `GB=60 bash fetch_40g.sh`, a plain `bash fetch_40g.sh status` prints 'target  : 40 GB' and computes progress as have/(40e9) \u2014 a fetch 40 GB into a 60 GB pull reports 100%. The manifest line beside it is printed raw, so the two disagree with no note.",
+   "evidence": "fetch_40g.sh:19 `GB=${GB:-40}`; fetch_40g.sh:38 `echo \"  target  : ${GB} GB\"`; fetch_40g.sh:40 `awk -v h=\"${have:-0}\" -v g=\"$GB\" 'BEGIN{printf \"  progress: %.1f%%\\n\", (h/(g*1e9))*100}'`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "fetch_40g.sh, selftest.sh, harness_test.sh, rerun.sh, bench_gpu.sh, fetch_data.sh and sweep_domains.sh all depend on the caller's cwd",
+   "severity": "medium",
+   "where": "fetch_40g.sh:81, selftest.sh:48-96, sweep_domains.sh:22",
+   "symptom": "Only preflight.sh, run_cl_test.sh, run_full_unfrozen.sh (and sweep_domain_grid.sh via `cd \"$REPO\"`) resolve their own directory. `bash /path/to/fetch_40g.sh` from anywhere else nohups a python that cannot find fetch_big.py, writes the pidfile into the wrong directory, and then reports success because the pidfile exists for the first three seconds. selftest.sh has the same exposure for all 16 relative `python3 X.py` calls and for `bash harness_test.sh`. preflight.sh:14 fixed exactly this class and left the others.",
+   "evidence": "`grep -c '^cd ' *.sh` -> preflight.sh:1 run_cl_test.sh:1 run_full_unfrozen.sh:1, all others 0; preflight.sh:14 `cd \"$(dirname \"$(readlink -f \"$0\")\")\"   # sections 5/6/7 open repo files by RELATIVE path`; fetch_40g.sh:81 `nohup \"$VENV/bin/python\" fetch_big.py ...`",
+   "bug_class": "crash"
+  },
+  {
+   "title": "`set -e 2>/dev/null || true` silently enables errexit for the rest of a script whose header sets only `set -u`",
+   "severity": "low",
+   "where": "longrun.sh:1573, :1679, :1769, :1843",
+   "symptom": "The idiom reads as 'restore the previous state' but `set -e` cannot fail, so it unconditionally turns errexit ON after the first arm/seed/run. Everything after the loops \u2014 the grid summary greps, the seeds/repeat python heredocs, the smoke tally \u2014 then runs under errexit that the file never opted into. It survives today only because each extractor pipeline ends in awk/sed (exit 0) and each bare test sits in an AND-OR list; any future non-conditional command that returns non-zero will abort the sweep between the last arm and its summary.",
+   "evidence": "longrun.sh:44 `set -u` (no `set -e`); longrun.sh:1573 `set -e 2>/dev/null || true`; same at :1679, :1769, :1843",
+   "bug_class": "other"
+  },
+  {
+   "title": "`_AI=1` is hand-typed while the comment two lines above claims it is computed from the DOMAINS order",
+   "severity": "low",
+   "where": "longrun.sh:928-932",
+   "symptom": "The comment says 'Computed from the DOMAINS order rather than hand-typed: DOMAINS=\"eng,$NAME\" makes the added area index 1, and a hand-written PHASE_SCHED=\"1|1|1|1\" silently becomes wrong the moment that order changes.' The code then writes `_AI=1` as a literal. Nothing reads DOMAINS. The stated fix was not made, so the failure mode it names is still live and now looks handled.",
+   "evidence": "longrun.sh:928 `# Computed from the DOMAINS order rather than hand-typed: DOMAINS=\"eng,$NAME\" makes the added area index 1,`; longrun.sh:931 `    _AI=1                                     # DOMAINS is \"eng,$NAME\", so the added area is index 1`",
+   "bug_class": "other"
+  },
+  {
+   "title": "grid's config stamp records an empty flags field, because `_cfgsig` reads ARMFLAGS and grid uses FLAGS",
+   "severity": "low",
+   "where": "longrun.sh:97 vs longrun.sh:1550 and :1580",
+   "symptom": "`_cfgsig` interpolates `\"${ARMFLAGS:-}\"`, a variable only `seeds` and `repeat` set. In `grid` the arm's flag set lives in `$FLAGS`, so every grid .cfg reads `flags=`. Arm identity survives only through the log filename and through `commit=`, which means an UNCOMMITTED edit to `_flags_for` changes what an arm means without changing its signature, and the completed log is then reused as if interchangeable.",
+   "evidence": "longrun.sh:97 `\"$(_corpsig)\" \"${ARMFLAGS:-}\"`; longrun.sh:1550 `FLAGS=\"$(_flags_for \"$ARM\")\"`; longrun.sh:1580 `if [ \"$_rc\" = 0 ] && _done \"$LOG\"; then _cfgsig > \"$LOG.cfg\";`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "`_done` \u2014 and therefore every resume-skip and equiv.sh verdict \u2014 is false whenever SIG_MODE is not \"learned\"",
+   "severity": "low",
+   "where": "longrun.sh:133 and equiv.sh:87/95",
+   "symptom": "The marker is produced by `.format(SIG_MODE)`, so an arm or ARMFLAGS setting SIG_MODE=bigram prints '(SIG_MODE=bigram -- learned = ...)' and never matches. Such a run would be re-run forever by `grid` (its complete log moved aside as .partial-N each time) and reported by equiv.sh as 'did not reach the report' despite finishing cleanly. Latent today because no arm sets SIG_MODE, but seeds/pair/ladder accept arbitrary flags and sweep_domains.sh:170 already runs SIG_MODE=bigram.",
+   "evidence": "longrun.sh:133; self_organize.py:9855 `print(\"\\n(SIG_MODE={} -- learned = ...\".format(SIG_MODE))`; sweep_domains.sh:170 `run 5 \"bigram\" SIG_MODE=bigram ...`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "`fix_resume` sets MEM_SRC_FLOOR to its own default value",
+   "severity": "low",
+   "where": "longrun.sh:521",
+   "symptom": "The arm comment describes it as 'Small, checkpointed, and with a memory floor and a live population so the resume has something to restore', implying the floor is being switched on. MEM_SRC_FLOOR's registry default is already 0.5, so the flag pins rather than enables. Harmless as a pin, but the arm reads as testing a condition it does not create.",
+   "evidence": "longrun.sh:521 `fix_resume)   echo \"FAB_N0=256 FAB_NMAX=1024 VMAX=2048 MEM_SRC_FLOOR=0.5 CKPT_EVERY=4000 BEST_KEEP=2\" ;;`; self_organize.py:314 `\"MEM_SRC_FLOOR\": (\"f\", 0.5)`",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "selftest.sh's fresh leg passes TOKENIZER_PATH=$OUT/t.json, a file that is never read and never written",
+   "severity": "low",
+   "where": "selftest.sh:122 and the comment at selftest.sh:139-143",
+   "symptom": "With SAVE_CKPT set, the vocabulary save target is SAVE_CKPT+'.dyntok.json'; with TOK_ONLINE=1 and no RESUME the read path is not consulted. So t.json never comes into existence. The comment nevertheless states 't.json now keeps the 256-token seed it was written with, so pointing a resume at it is a genuine mismatch and the engine says so' \u2014 describing the contents of a file that does not exist.",
+   "evidence": "selftest.sh:122 `env $COMMON SEED=0 SAVE_CKPT=\"$OUT/ck\" TOKENIZER_PATH=\"$OUT/t.json\" \\`; self_organize.py:1010-1012 (_TOK_SAVE from SAVE_CKPT); self_organize.py:1225 `if os.path.exists(_tp) and (not TOK_ONLINE or _env(\"RESUME\", \"\"))`",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "`repeat` writes its tokenizer artefact to a path that omits the seed, so two SEEDs collide",
+   "severity": "low",
+   "where": "longrun.sh:1762",
+   "symptom": "The log is `${TAG}_seed${RSEED}_run$R.log` but the tokenizer is `${TAG}_run$R.dyntok.json`. `SEED=0 repeat 3` then `SEED=1 repeat 3` overwrite each other's vocabulary files. With SAVE_CKPT=0 that file IS the run's saved vocabulary, and it is the only record of what the run's tokenizer became.",
+   "evidence": "longrun.sh:1737 `LOG=\"$RD/${TAG}_seed${RSEED}_run$R.log\"` vs longrun.sh:1762 `TOKENIZER_PATH=\"$RD/${TAG}_run$R.dyntok.json\"`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "`GRID_ARMS` silently overrides an explicitly-named preset",
+   "severity": "low",
+   "where": "longrun.sh:1537",
+   "symptom": "`ARMS=${GRID_ARMS:-$ARMS}` runs after the case that resolves `$2`. An exported GRID_ARMS left over from an earlier command therefore makes `bash longrun.sh grid round16` run something other than round16, with the banner printing the arms it actually used but nothing saying the preset was discarded.",
+   "evidence": "longrun.sh:1534-1537 (`\"\") ARMS=${GRID_ARMS:-$GRID_ARMS_DEFAULT} ;; *) ARMS=\"$2\" ;; esac` then `ARMS=${GRID_ARMS:-$ARMS}`)",
+   "bug_class": "other"
+  },
+  {
+   "title": "The grid banner prints the harness's EPOCHS even when an arm overrides it",
+   "severity": "low",
+   "where": "longrun.sh:1538 vs longrun.sh:225",
+   "symptom": "`vmax8k` sets EPOCHS=18 and arm flags come last, so it wins \u2014 but the banner has already printed '$((G_SL/1000)) kB/epoch x $G_EP epochs each', i.e. 8. The per-arm header at longrun.sh:1552 does print the flag set, so the information is recoverable, but the summary line that names the sweep is wrong for that arm.",
+   "evidence": "longrun.sh:1538 `echo \"grid -> $GRID | arms: $ARMS | $((G_SL/1000)) kB/epoch x $G_EP epochs each\"`; longrun.sh:225 `vmax8k)    echo \"VMAX=8192 EPOCHS=18\" ;;`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The default-grid comment block documents five arms the default list does not contain",
+   "severity": "low",
+   "where": "longrun.sh:1050-1084 vs longrun.sh:1116-1117",
+   "symptom": "The 'WHY DOES IT DIVERGE? each arm removes one suspect' block describes frozvocab, nomem, softroute, stateq and wt_div as members of the sweep. GRID_ARMS_DEFAULT lists none of them. A reader planning around the comment expects a control that will not run.",
+   "evidence": "longrun.sh:1057 (frozvocab), :1059 (nomem), :1062 (softroute), :1065 (stateq), :1073 (wt_div); longrun.sh:1116-1117 `GRID_ARMS_DEFAULT=\"socloop socloop_w vote vote_w society base noban nolatch vote_soc weights nofabric \\ balance keynorm divw smallpop curric wt_bal chainsup explore kitchen\"`",
+   "bug_class": "other"
+  },
+  {
+   "title": "longrun.sh's header usage block omits the five sweep subcommands the file is mostly about",
+   "severity": "low",
+   "where": "longrun.sh:5-16 vs longrun.sh:1967",
+   "symptom": "The header lists pilot, pilot-add, fetch, add, run, resume, smoke and watch. grid, seeds, repeat, pair and ladder \u2014 which occupy roughly 900 of the file's 1,968 lines and are how every recorded round was run \u2014 appear only in the error-path usage string, which a user sees only after mistyping a subcommand.",
+   "evidence": "longrun.sh:5-16; longrun.sh:1967 `*) echo \"usage: bash longrun.sh [pilot|grid|seeds <n> [FLAGS]|pair ...|ladder ...|repeat <n> [FLAGS]|smoke|pilot-add ...|fetch|run|resume|add ...|watch]\"; exit 1 ;;`",
+   "bug_class": "other"
+  },
+  {
+   "title": "fetch_data.sh depends on curl, unzip, tar and bc, none of which preflight.sh checks",
+   "severity": "low",
+   "where": "fetch_data.sh:22-23, :49-50, :69 vs preflight.sh:106-109",
+   "symptom": "preflight section 4 checks awk sed grep du sort head tail date and warns about /usr/bin/time. fetch_data.sh runs under `set -e` and needs curl, unzip, tar and bc; fetch_40g.sh needs numfmt and df; sweep_domain_grid.sh needs sha256sum; sweep_domains.sh needs column; equiv.sh needs diff and comm. A missing bc aborts fetch_data.sh at its final summary after the whole download has completed.",
+   "evidence": "fetch_data.sh:12 `set -e`; fetch_data.sh:69 `printf \"  %-4s %12d bytes (%.1f MB)\\n\" \"$d\" \"$b\" \"$(echo \"$b/1000000\" | bc -l)\"`; preflight.sh:106 `for t in awk sed grep du sort head tail date; do`",
+   "bug_class": "crash"
+  }
+ ],
+ "junk": [
+  {
+   "what": "`socloop`, `socloop_w`, `vote`, `vote_w`, `vote_soc`, `noban`, `nolatch`, `curric`, `chainsup`, `stateq` \u2014 the CHAIN_* family of arms",
+   "why": "They date from the era when CHAIN_ROUTE/CHAIN_VOTE were off by default. Both are now defaults (CHAIN_ROUTE=\"soc\", CHAIN_VOTE=1), so socloop and vote ARE base and socloop_w/vote_w ARE weights. longrun.sh's own round-2 note says 'The first grid answered its question: chaining loses to FABRIC=0 and society wins outright.' Nothing since round3 references any of them.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`nogate`, `pgate_c`, `nocompose`, `nomem`, `gate_press`",
+   "why": "Every knob each sets equals the registry default; they cost a full arm's GPU to reproduce `base` under a name that says otherwise. If they are kept as explicit pins, the arm comments must be corrected \u2014 three of them currently justify themselves with a default that is not the default.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`vmax8k`, `vmax4k`, `base_nr`, `bytes`, `frozvocab`, `mintinit`, `freeze6k`, `freeze20k`, `frozen1k`, `nogrow_s`, `softroute`, `nodom_kn`, `wt_div`",
+   "why": "Named in no preset and in no default list; reachable only by typing the name. The 2x2 VMAX/EPOCHS table they produced is written out in full in the comments at longrun.sh:196-224, so the arms have already yielded their result.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`lr_pilot` (duplicate of `lr_pilot2`), `sched_ctl` (duplicate of `lr_expvalve`), `gc8_big` (duplicate of `gc_ctrl`)",
+   "why": "Byte-identical flag sets under different names. They exist so a round's notes can name the arm the round intended; the cost is that the same configuration is run and filed twice, and `_cfgsig` cannot tell the two apart.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "round6/round7/round8/round9 gate and capacity-valve arms: gate_nmax, gate_soft, gate_nmax_resc, gc_real, gc_fast, gc_loose, gc_pin, gc_ctrl, gc8_small, gc8_big, gc8_p5, gc8_p10, pop128/256/512/1024",
+   "why": "All were answered: round12's note records the valve firing 24 times end to end and the vocabulary/expert handoff at FAB_PRESSURE x FAB_NMAX. The population-size question (round9) produced the -0.14 delta-order-1 per 100 experts correlation quoted at longrun.sh:1206-1212. They remain as reproducible records of settled questions.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`rerun.sh` (198 lines)",
+   "why": "Written 2026-08-18 and untouched. Its 4-corpus/eng/ablate arms use DOMAINS=eng,py,num,c, which longrun.sh's header explicitly rejects ('Splitting English into eng and web was us imposing a partition on material that has none'). Two of its seven summary greps no longer match any report line, its parallel smoke races on a shared tokenizer file, and its role is covered by `longrun.sh smoke` plus `selftest.sh`. equiv.sh's header still points at `rerun.sh smoke`.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`run_full_unfrozen.sh` (82 lines) and `run_cl_test.sh` (49 lines)",
+   "why": "Pre-longrun.sh entry points. They pin FAB_N0=3/FAB_NMAX=6 (the archived default ARCHIVE.md warns about), drive the retired EXPERTS/ExpertBank knob family, and omit CORPUS_CAP/DISK_STREAM. Archived copies of both already exist under archive/garry/. Dropping them requires editing README.md (which calls run_full_unfrozen.sh 'the whole system in one command'), preflight.sh:255 and fetch_data.sh:75, all of which still recommend them.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`sweep_domain_grid.sh` (488 lines) and `sweep_domain_report.py`",
+   "why": "The sweep cannot start: its section-4 knob check dies on eight knobs that are read via `_env`, and section 4b dies on eight DOM_* knobs added since. Its subject matter \u2014 whether MAX_DOMAINS drives the live-domain count \u2014 was superseded when the assembler's own metrics started printing `capped`. Its distinctive contribution (a merge-resolved V-measure) is a print-only patch to a copy of self_organize.py.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`fetch_data.sh` (77 lines)",
+   "why": "Builds a ~45 MB NLTK/CPython 4-domain corpus with one `<domain>.txt` per domain, a naming convention longrun.sh's own gates (`ls .../part*.txt`) treat as an empty directory. Superseded by fetch_big.py (streamed HF datasets, sharded, resumable, with a provenance manifest) and fetch_local.py.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`bench_gpu.sh` (155 lines)",
+   "why": "Its five questions were answered and the answers are written into its own SUMMARY prose (dispatch-count bound, transformer loses on aten-op count, GRU wins). It is not wired into selftest.sh, it pip-installs into the training env against preflight's instruction, and its FAILED rows do not parse.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "README.md's 'Start here' section",
+   "why": "Points at `garry/GARRY.md`, `STATE.md` and `CL_TESTBED.md`, all three moved under archive/ on 2026-08-27, and names run_full_unfrozen.sh as the entry point. ARCHIVE.md states the current sources of truth are self_organize.py and longrun.sh 'Nothing else'. notes_check.py does not catch this because it only checks stated defaults, not paths.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "preflight.sh's `FIX=1` usage line",
+   "why": "Documents an install-what-is-missing mode that does not exist anywhere in the file.",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "An arm's flag set must be diffed against _SPEC OVERLAID WITH the subcommand's own hardcoded env line \u2014 not against _SPEC alone. `vmax4k` (VMAX=4096) is inert against the registry but live inside `grid`, which hardcodes VMAX=2048; `frozen`'s SEED_VOCAB=512 is inert against the registry but live inside `smoke`, which hardcodes 256.",
+   "why": "Either baseline used alone gives the wrong answer about which arms are real, in opposite directions.",
+   "evidence": "longrun.sh:1564 (grid `VMAX=2048`), longrun.sh:1832 (smoke `VMAX=512 SEED_VOCAB=256`), longrun.sh:226 and :241"
+  },
+  {
+   "item": "Arm flags MUST be the last assignments on the env line. `env A=1 A=2` keeps the last, and every subcommand hardcodes VMAX/WIN/BATCH_W/CKPT_EVERY/GROW_*/SEG_*/DATA_DIR after which the arm's own value must come.",
+   "why": "With flags first, `grid 3 VMAX=512` ran at 2048 and labelled the log 512. The invariant is stated four times in the file and is what makes arm-level overrides mean anything.",
+   "evidence": "longrun.sh:1557-1571 (comment + `$FLAGS` last), repeated at :1665, :1756"
+  },
+  {
+   "item": "`_reserve` deliberately shares one counter between `<name>` and `<name>.log`; its while-loop tests BOTH forms. This is what keeps a run's checkpoint and its log on the same numeric suffix when one of the two is missing. Do not 'simplify' it to test only the path it was given.",
+   "why": "Without the coupling, a crashed run that wrote a log but no checkpoint puts the next run's ckpt at -2 and its log at -3, filing a result under a name that does not match the model that produced it.",
+   "evidence": "longrun.sh:55 `while [ -e \"${_rp%.log}-$_rn.log\" ] || [ -e \"$_rp-$_rn\" ]; do`"
+  },
+  {
+   "item": "A run's vocabulary is saved to SAVE_CKPT+'.dyntok.json', never back to the TOKENIZER_PATH it read; and a RESUME with SAVE_CKPT=0 saves no vocabulary at all. Any harness that sets TOKENIZER_PATH without SAVE_CKPT is choosing the save target; any harness that sets both is choosing read and write independently.",
+   "why": "The old coupling let a resume overwrite its parent's vocabulary, which made the parent checkpoint permanently unloadable (VOCABULARY MISMATCH). This is the single most load-bearing shell/engine contract.",
+   "evidence": "self_organize.py:1010-1012; longrun.sh:636 (`SAVE_CKPT=\"$_PCK\" TOKENIZER_PATH=\"$_PCK.dyntok.json\"`)"
+  },
+  {
+   "item": "On a resume with no TOKENIZER_PATH, self_organize.py defaults to `<RESUME>.dyntok.json`, and a FRESH online run never loads a vocabulary file at all (`os.path.exists(_tp) and (not TOK_ONLINE or RESUME)`). That is why `run|resume` can omit TOKENIZER_PATH safely and why equiv.sh's worktrees are deterministic despite a tracked data/ directory.",
+   "why": "Removing either half of that condition silently re-enables the shared-data/dyntok.json pairing that pilot-add's fallback warns about.",
+   "evidence": "self_organize.py:1214-1222 and :1225"
+  },
+  {
+   "item": "Both `pilot-add` and `add` must read the checkpoint's fab_cfg and export FAB_N0, FAB_NMAX (2x cap), VMAX (2x V, NOT 2x tok_vocab), FAB_RANK and FAB_DK, each behind its OWN `[ -z \"${X:-}\" ]` test. Nesting them inside one gate meant that setting FAB_N0 by hand silently reverted VMAX to 2048 and FAB_NMAX to 4096.",
+   "why": "rank and dk are INNER tensor dimensions and cannot be widened; cap and V are outer and must be doubled or the added area gets experts but no tokens, and the cull gate stays shut for the run.",
+   "evidence": "longrun.sh:770-807 (pilot-add), longrun.sh:990-1010 (add); the V-vs-tok_vocab reasoning is inline at longrun.sh:752-757"
+  },
+  {
+   "item": "`bash longrun.sh fetch` pulls into $DATA_DIR at $ENG_GB; grid/seeds/repeat/pilot train out of $PILOT_DIR at $PILOT_GB. The two halves of the harness use different variables for the same directory, and `_pilot_corpus` returns early if ANY part*.txt exists regardless of size. Fetch a large pilot corpus by calling fetch_big.py directly with an explicit --out.",
+   "why": "The obvious command fetches somewhere the run will not look, and a directory fetched at 0.06 GB is silently reused by a run configured for 0.75 GB, repeating the corpus inside each epoch with nothing in the log to say so.",
+   "evidence": "longrun.sh:538, :559, :141-143; the warning is written out at longrun.sh:1367-1376"
+  },
+  {
+   "item": "The completion marker every skip/reuse path keys on is the full sentence 'SIG_MODE=learned -- learned = the unfrozen product path', which is the LAST print of self_organize.main() and is formatted with the live SIG_MODE. Matching the shorter 'SIG_MODE=learned' counts a run that died at startup as complete, because that string is also on line 8 of every log.",
+   "why": "equiv.sh made exactly that mistake and produced verdicts from logs that were never comparable.",
+   "evidence": "equiv.sh:80-84 (the recorded fix), longrun.sh:133, self_organize.py:4084 vs :9855"
+  },
+  {
+   "item": "`_cfgsig` derives its knob list from _SPEC by sed, so adding a knob to the registry automatically extends the run fingerprint. Do not replace it with a hand-picked list: the FAB_LR_CYCLE bisect lost two arms to one log because the log NAME derived from ARMFLAGS and an exported knob reached neither the name nor the signature.",
+   "why": "This is the mechanism that stops a config change becoming a result nobody can trace.",
+   "evidence": "longrun.sh:71-82 and longrun.sh:96-104"
+  },
+  {
+   "item": "`grid`, `seeds` and `repeat` stop cleanly via `touch <dir>/STOP` (or STOP_FILE=<path>): the run in flight finishes and writes its report and checkpoint, then the loop breaks. Ctrl-C kills the current run; killing the shell orphans the python.",
+   "why": "There is no other way to end a multi-hour sweep without losing the arm in flight.",
+   "evidence": "longrun.sh:122-131"
+  },
+  {
+   "item": "selftest.sh trains on CPU and deliberately ignores $DEVICE, reading SELFTEST_DEVICE instead, because longrun.sh exports DEVICE=cuda. Restoring `DEVICE=${DEVICE:-cpu}` would put a test training job on a GPU already running an 18-epoch arm.",
+   "why": "The suite is only safe to run often if running it cannot cost anything.",
+   "evidence": "selftest.sh:103-109"
+  },
+  {
+   "item": "sweep_domains.sh's stage-3 stream-length sweep relies on bash restoring an assignment-prefix after a FUNCTION call (`SL=$L run 3 ...`). Under `sh`/POSIX mode the assignment persists and SL=480000 leaks into stages 3b, 4 and 5. Always invoke it as `bash sweep_domains.sh`; `has()` also uses `[[ ]]`.",
+   "why": "The leak would silently quadruple the stream length of 20+ downstream cells without changing a single label.",
+   "evidence": "sweep_domains.sh:129-131, sweep_domains.sh:72; verified on bash 5.2.21 that SL is restored"
+  },
+  {
+   "item": "`_reusable` returns 1 on a MISSING .cfg, not 0. Any new sweep that calls it must also WRITE `$LOG.cfg` on success, or the documented continue-a-sweep workflow exits 1 on the first completed unit instead of skipping it. grid shipped without that write and its skip path could never have worked.",
+   "why": "The failure looks like a config mismatch and is actually a missing stamp; it silently disables unattended resumption.",
+   "evidence": "longrun.sh:108-113 and the fix note at longrun.sh:1576-1580"
+  },
+  {
+   "item": "harness_test.sh sources ONLY the `_reserve` and `_flags_for` function bodies out of longrun.sh by sed-slicing, never sourcing the file, because longrun.sh dispatches on $1 at the bottom. Any new function the test needs must be added to that slice list explicitly.",
+   "why": "Sourcing longrun.sh whole would start a training run from inside the test suite.",
+   "evidence": "harness_test.sh:36-40"
+  },
+  {
+   "item": "`_flags_for` must live at TOP LEVEL, not inside `grid)`. A function defined in one case branch does not exist in another; when it lived under grid), `smoke` ran seven arms with an EMPTY flag set and reported seven identical runs as seven passing arms.",
+   "why": "The failure is invisible: every arm reaches its report and the logs look fine.",
+   "evidence": "longrun.sh:157-161 and harness_test.sh:11-13"
+  },
+  {
+   "item": "An unknown arm name must return the `__UNKNOWN_ARM__` sentinel, and EMPTY is not the same as UNKNOWN \u2014 `base` is a real arm that correctly sets no knobs. Both callers (grid at :1551, smoke at :1822) refuse the sentinel.",
+   "why": "Returning \"\" for a typo ran the DEFAULT configuration under the misspelled arm's log name: a result filed against an experiment that never happened.",
+   "evidence": "longrun.sh:527-532, harness_test.sh:54-59"
+  }
+ ],
+ "open_questions": [
+  "Does DATA_MODE=synthetic reach the end-of-run report at HEAD? A CPU run got as far as PHASE 3 with no traceback in 10 minutes before the timeout, but the completion marker was never printed. preflight.sh section 9 is the only caller and it requires CUDA, so this cannot be settled on this box.",
+  "Are the six inert arms (nogate, nocompose, nomem, gate_press, vote, socloop) inert because the DEFAULTS moved under them, or were they authored against a different registry? If the intent was 'pin this knob explicitly', the arms are correct and only the comments are wrong; if the intent was 'change this knob', six results in the archive are mislabelled. The comments at longrun.sh:267 and :276 assert defaults that never matched _SPEC, which points at the second reading, but I cannot date the drift without walking the history of _SPEC.",
+  "How many completed logs already on disk under runs/ were produced by an arm that is inert, or by one of the three duplicate triples? runs/ is empty in this checkout, so the blast radius of the duplicate-arm finding on past results is unknown.",
+  "Does `smallpop` (FAB_NMAX=256 against the default FAB_N0=2048) construct a fabric whose starting population exceeds its own slot pool, and if so what does self_organize.py do \u2014 clamp, widen, or crash? The same question applies to `gate_nmax` (FAB_NMAX=2048 == FAB_N0). Determining this needs a run.",
+  "Does the retention/BWT section print at all when PURE_ADD makes `faded` vacuous, or does the vacuity propagate into ACROSS THE RUN BOUNDARY? longrun.sh:934-936 asserts the boundary probe still scores English, but no log in this tree demonstrates it.",
+  "Was `sweep_domain_grid.sh`'s section-4 grep ever correct, i.e. did self_organize.py once read DEVICE/DATA_MODE/DATA_DIR/DOMAINS/MODEL/SIG_MODE/KEY_SRC/AMP through `_i`/`_f`/`os.environ.get` before `_env` was introduced? If so the script died the day `_env` landed and has been dead ever since; if not it never ran.",
+  "Is `_corpsig`'s single-file hash (`find ... | sort | head -1 | head -c 1048576`) sufficient to distinguish two fetches of the same dataset at the same size? A re-fetch with a different shuffle buffer but the same first shard would produce an identical fingerprint. The recorded incident (order-1 3.742 vs 3.440 in the same path) would have been caught by byte count alone, so the hash's discriminating power is untested.",
+  "Does prompt.py's reliance on the checkpoint-recorded `tok_path` survive moving a runs/ directory between machines? rerun.sh's readback check and the README's `python3 prompt.py CKPT=runs/<tag>` both assume the path recorded at train time still resolves.",
+  "Is there any consumer of `$GRID/_status.tsv` other than the human? It is appended per arm and only mentioned in a closing pointer line, so it may be a recorded-never-read artefact \u2014 but a downstream notes/ or reporting script outside my scope could read it."
+ ]
+}

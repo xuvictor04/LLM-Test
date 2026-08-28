@@ -1,0 +1,1272 @@
+{
+ "area": "chat-c",
+ "summary": "Transcript lines 5400-8072 of the owner's session (2026-08-27 20:36 UTC to 2026-08-28 03:17 UTC). The span covers four phases: (1) closing out a fix backlog and then actually EXECUTING every refusal/warning path that had only been argued from source, after discovering torch could be installed in the assistant's container; (2) running every test entry point on the owner's GH200 and the assistant's CPU container, which exposed that two suites written this session were in no entry point and that the DATA_MODE=synthetic path had been dead since 2026-08-15; (3) three real pilot runs on the owner's GH200 (pilot A English-only, pilot-add with local Python, pilot-add with bigcode/the-stack-dedup Python) each of which returned defects, including a domain-population collapse to one domain, a tokenizer that could not mint for a newly added area, and a held-out tail that was a contiguous block rather than a sample; (4) a fourth run that failed with VOCABULARY MISMATCH because a previous run had overwritten a file inside runs/ \u2014 the one thing the owner had forbidden. The span ends with the owner cancelling further runs and issuing \"the initiative\": a full system rework on a new branch rm-predict-DC. All numbers in this span are signals from an unoptimized system with known bugs; several verdicts printed by the system contradicted other lines in the same report.",
+ "facts": [
+  {
+   "claim": "Owner instruction (verbatim): \"Lets keep on going until everything is resolved from what we have right now.\"",
+   "evidence": "chat L5427",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Are any tests for confirmation needed?\" \u2014 this prompted the assistant to execute the refusal and warning paths it had only argued from source, which found a further defect.",
+   "evidence": "chat L5633",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Let's run them before the initiative\" \u2014 establishing that an \"initiative\" the owner would supply was already pending at 21:35 UTC on 2026-08-27.",
+   "evidence": "chat L5723",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"Lets run the tests first\" \u2014 the assistant then discovered it had been running nine python suites and calling that \"all\"; there are fourteen entry points.",
+   "evidence": "chat L5989; assistant at L5997 \"I've been running nine suites and calling it 'all' \u2014 there are more.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner correction (verbatim): \"I thought I was running them on GPU\" \u2014 the assistant had been reporting CPU-only runs without saying so.",
+   "evidence": "chat L6126",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSUMPTION THE ASSISTANT GOT WRONG ABOUT OPERATION: it let the owner believe test runs were on GPU. Correction at L6166: \"this container has no GPU at all. preflight says nvidia-smi missing, torch.cuda.is_available() False. Every run I've reported this session ... was CPU. Your box is where GPU behaviour actually gets tested.\"",
+   "evidence": "chat L6129, L6166",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner observation (verbatim): \"The export does not say anything. Since the tests are done, lets do a few pilots seeing the changes and any bugs that arise\" \u2014 the owner expected `export OMP_NUM_THREADS=8 MALLOC_ARENA_MAX=4` to print confirmation.",
+   "evidence": "chat L6314",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Assistant's answer to that: \"`export` is silent by design \u2014 it prints nothing on success. `echo $OMP_NUM_THREADS` will show `8` if it took.\" This is an operating-environment gotcha worth restating in any regenerated instructions.",
+   "evidence": "chat L6317, L6327",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim): \"I didn't accept the HF earlier, but now did. Fix the issues. Then lets run again\" \u2014 confirming the owner has a Hugging Face account and had NOT accepted the bigcode/the-stack-dedup per-dataset terms until 2026-08-28 02:04 UTC.",
+   "evidence": "chat L7531",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Owner instruction (verbatim, ending a pasted terminal session): \"Lets work on the initiative instead.\" \u2014 issued after the fourth run died at [resume] VOCABULARY MISMATCH. This cancels further pilot runs.",
+   "evidence": "chat L7915 (final line of the pasted block)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "THE INITIATIVE (owner's own words, chat L8042): \"This is the initiative: I want a full system rework. There is a lot of unnecessary material present, and we need to filter through it.\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Regenerate all files / Regenerate all documentation / Regenerate a new set of needed research. / Updated history/timeline / Remake goals, ideas, etc\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Levers need to be cleanly delineated within the code, they should not affect each other\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Re established instructions: specificities like my system, what I can do, and stuff that you've assumed but were wrong about the operation (not the project assumptions) should be stated (as reference)\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Detailed references and similar material should be included\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim), the epistemic constraint: \"Do not treat code or program results as 100% definitive, but as signals. The system is not optimized, and likely bugs and other unintentional confounding is occurring. Results should be in context with what is going on. The only difinitives are my final goals: target of language with room for additional inclusions, and continual learning.\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Other than the final goals, things can be noted as preferences that have come up, should be noted\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"I want everything to be regenerated to ensure minimal junk.\" and \"Proper organization and implementation is needed. I expect a full and thorough regeneration of everything.\" and \"First implementation instructions and details are needed.\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Create a bugs/ issues list, for stuff that needs to be addressed\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Ultimately, anything to be documented can be documented separately.\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"All files should be new. Don't use memory as basis for everything\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Everything from all our messages must be fully documented\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Benchmark as a new branch, let's call rm-predict-DC.\" The assistant created it: `git checkout -b rm-predict-DC` from rm-predict, confirmed by `git branch --show-current` returning rm-predict-DC.",
+   "evidence": "chat L8042; L8069 (command); L8074 (result: \"Switched to a new branch 'rm-predict-DC'\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"Along with all these, document and provide me any questions as they come up. Clarification is encouraged\" \u2014 the owner explicitly invites questions rather than guesses.",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Initiative item (verbatim): \"This will likely take a long time and require many agents\"",
+   "evidence": "chat L8042",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Standing constraints still in force at the compaction boundary, recorded verbatim in the session summary: \"the runs folder and its internal contents should not be overwritten\"; confirm before action on perf changes; no compromises (do not remove/downgrade functionality for speed); default to bash unless python specified; commit and push to `rm-predict` only; do not create PRs unless explicitly asked; no model identifiers in commits/PRs/code.",
+   "evidence": "chat L6544",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The runs/ constraint was VIOLATED in this span. Assistant at L8035: \"I broke that, and it's the one thing you told me never to do: the run overwrote a file inside `runs/`.\"",
+   "evidence": "chat L8035",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT \u2014 owner's machine: shell prompt is `ubuntu@192-222-50-5:~/LLM-Test$`. User `ubuntu`, repo checked out at ~/LLM-Test.",
+   "evidence": "chat L6235, L7915",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT \u2014 owner's GPU box (preflight output): NVIDIA GH200 480GB, 97871 MiB, driver 580.105.08; arch aarch64 (Grace); kernel 6.8.0-1046-nvidia-64k; page size 65536 (64K); host RAM 525 GiB; 3797 GB free disk.",
+   "evidence": "chat L6235, L6536",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT \u2014 owner's software stack: torch 2.7.0 with CUDA 12.8 on aarch64, torch.cuda.is_available() True, device sm_90, 94.5 GiB; python 3.10; glibc 2.35; numpy 1.21.5 (ABI-compatible with torch).",
+   "evidence": "chat L6235, L6536",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT \u2014 owner's box passes: fp32 matmul, bf16 matmul, cuDNN GRU(B=1,T=256,d=768) fwd/bwd all execute; MmapConcat verified page-size agnostic at 65536 bytes/page; \"all 83 documented knobs are READ by self_organize.py\"; atomic checkpoint written + reloadable (48 keys, 7 model tensors).",
+   "evidence": "chat L6235, L6536",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT \u2014 required host env settings on the owner's Grace box, flagged as WARN by preflight and then applied: `export OMP_NUM_THREADS=8 MALLOC_ARENA_MAX=4` (and `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` recommended). Without OMP_NUM_THREADS torch spawned 64 intra-op threads for batch-1 work; without MALLOC_ARENA_MAX glibc creates up to 512 arenas.",
+   "evidence": "chat L6235 (WARNs), L6536 (\"PASS OMP_NUM_THREADS=8 on 8 cores\"), L6327",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT \u2014 owner's benchmark on the GH200 during preflight smoke: \"[BENCH] 312 steps in 0.27 min = 1163 steps/min | 2.5 kB/s | 0.214 GB/day | 1.6M params | peak GPU mem 0.35 GiB\".",
+   "evidence": "chat L6536",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT \u2014 assistant's container: NO GPU at all (nvidia-smi missing, torch.cuda.is_available() False), x86_64, python 3.11, torch 2.13.0+cu130 installed from PyPI, numpy absent, 4 CPU cores, ~30 GB free disk.",
+   "evidence": "chat L6021 (\"torch 2.13.0+cu130 | cuda 13.0 | x86_64 | avail False\"), L6129, L6411 (\"a 4-core CPU box\"), L5440",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENVIRONMENT \u2014 network in the assistant's container: `download.pytorch.org` is BLOCKED but `pypi.org` and `files.pythonhosted.org` are in the proxy allowlist, so `pip install torch` works. This was the unlock that let the assistant run the real system instead of arguing from extracted source blocks.",
+   "evidence": "chat L5463, L5627 (\"The unlock was finding that pypi.org is reachable here even though download.pytorch.org isn't\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "OPERATING MODEL \u2014 the owner runs the real experiments on their GH200 and hands results back by pasting terminal output or uploading .log files; the assistant cannot run GPU work. Assistant at L7764: \"I have no GPU in this container, so the run itself is yours \u2014 everything is staged for it.\"",
+   "evidence": "chat L7764; uploads at L6536, L7145, L7161, L7770; pasted terminal at L6235, L7915",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSUMPTION THE ASSISTANT GOT WRONG: it assumed the owner's checkout was current. The owner's traceback showed self_organize.py line 5770 where the assistant's was 6157 \u2014 the owner's checkout was ~340 lines behind and missing the whole session's work. `git pull origin rm-predict` must precede every run.",
+   "evidence": "chat L6377 (\"your checkout was older than HEAD (your traceback showed line 5770 where mine is 6157, so you were missing this session's work entirely)\"), L6402",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSUMPTION THE ASSISTANT GOT WRONG: the owner re-uploaded the same file twice. The assistant verified by md5 that the second upload was byte-identical to the first (\"same md5 (d0d4d605\u2026), same 819 lines\") and contained pre-fix markers, so it predated the pushed fixes.",
+   "evidence": "chat L7157",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSUMPTION THE ASSISTANT GOT WRONG: it assumed data_pilot/train/py held the-stack-dedup material. It actually held 57 MB of local Python (the owner's interpreter source), and the size check would have accepted it, skipped the fetch, and trained on it while labelling every log line `the-stack-dedup`. The assistant told the owner to `mv data_pilot/train/py data_pilot/train/py.local` by hand because the pre-existing directory has no provenance manifest.",
+   "evidence": "chat L7764",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ASSUMPTION THE ASSISTANT GOT WRONG: `run_verify_test.py` was thought to require CUDA. Its DEFAULTS dict sets DEVICE: cuda but os.environ wins, so `DEVICE=cpu python3 run_verify_test.py` works; its own docstring documents the CPU form.",
+   "evidence": "chat L6038, L6043, L6094 (\"run_verify_test.py needs DEVICE=cpu to run here; its docstring already documents that form, and os.environ wins over its DEFAULTS dict\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "OPERATING FACT \u2014 the GPU test entry point is `SELFTEST_DEVICE=cuda bash selftest.sh` ($DEVICE is deliberately ignored by selftest) plus `bash preflight.sh`. The owner ran exactly this and pasted the output.",
+   "evidence": "chat L6166, L6235",
+   "confidence": "verified"
+  },
+  {
+   "claim": "OPERATING FACT \u2014 the owner's HF token works; only per-dataset terms acceptance was missing. The gated failure printed \"Token seen by this process: yes\" alongside DatasetNotFoundError. The no-account alternative is `bash longrun.sh pilot-add py local 0.06`, which uses fetch_local.py.",
+   "evidence": "chat L6544, L7141",
+   "confidence": "verified"
+  },
+  {
+   "claim": "REPO INVENTORY at the start of the initiative: 310 tracked files, 393,812 total lines; directories archive/ (145 files), notes/ (66 files), data/ (43 files); root sources led by self_organize.py 9,859 lines, longrun.sh 1,968, resume_test.py 872, memory.py 654, tokenizer.py 509, sweep_domain_grid.sh 488, probe_signature.py 467, mem_evict_test.py 435, compare.py 354, corpus_test.py 353, fetch_big.py 337, sweep_domain_report.py 326, cl_bench.py 299, world_model.py 280, preflight.sh 258, prompt.py 255, fetch_local.py 235, vocab.py 228, runs.py 228, lr_test.py 212, rerun.sh 198, sweep_domains.sh 187, cap_test.py 185, notes_check.py 182. Root files total 22,950 lines.",
+   "evidence": "chat L8049, L8054, L8059",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NOTES INVENTORY: notes/00_INDEX.md, 01_TIMELINE.md, 02_IDEAS.md, 03_EXPERIMENTS.md, 04_RESULTS.md, 05_ERRORS.md, 06_CONTINUAL_LEARNING.md, 07_WIP.md, 08_GLOSSARY.md, 09_COMMENT_AUDIT.md, 10_HISTORY_FINDINGS.md, CURRENT_DEFAULTS.md, DOC_PLAN.md, EXTERNAL_RESEARCH_BRIEF.md, LITREVIEW_FINDINGS.md, RESEARCH_BRIEF_DIFFERENTIATION.md, plus notes/_evidence/chat/ with chunked transcripts and user_turns.md (11,645 lines).",
+   "evidence": "chat L8061, L8049",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CHAT HISTORY COVERAGE: notes/_evidence/chat/chunks/ holds an earlier span (chunk_01 from 2026-07-21T18:04:47 onward) and this session's transcript covers 2026-08-17T20:30:03 to 2026-08-28, 8,072 entries with 111 user turns. Assistant at L8077: \"two spans of chat history (Jul 21\u2013Aug 15 in notes/_evidence/chat/, Aug 17\u201328 in this session's transcript, 8,072 entries / 111 of your turns)\".",
+   "evidence": "chat L8065, L8073, L8077",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Commits pushed to rm-predict within this span, in order: 9176e72, 634b03d, 271f875, 3f12acb, 87c41e7, e67a792, 042ff86, 8265189, 8b961a2, dae4744, a0d7fe6, ff4fea7, 87e9842, 12ab640, aee4a52.",
+   "evidence": "chat L5423, L5627, L5719, L5810, L5985, L6122, L6164, L6196, L6310, L6528, L7141, L7527, L7764, L7908, L8035",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 Pilot A (`bash longrun.sh pilot`, GH200, one English corpus 0.06 GB / ~57 MB fineweb-edu, d768, 2 hidden processes, stream 4,000,000, win 256, EPOCHS=8, ~52,117 steps, 2090 fabric nodes, vocab 2048, DEVICE=cuda, fp32 \u2014 pilot does not set AMP): ANCHORS on held-out text \"uniform 3.793 | order-0 3.562 | order-1 3.459 | THIS MODEL 2.100\", beats order-1 by +1.359 b/B; memorization check UNDERFIT (held-out 2.100 better than train 2.160); 24 live domains; generation word-shaped English, not coherent.",
+   "evidence": "chat L6536, L7051, L7141",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 Pilot A memory statistics: the per-source floor blocked 6,728,733 of 11,677,625 writes; 61,952 of 200,000 active entries were excluded from every retrieval; MEMORY STARVATION named 200+ sources; one source count went negative (`s779 (-2 now, peaked 111230)`).",
+   "evidence": "chat L7033, L7036, L7141",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 run 2, the first run that ever added an area to a trained system (`RESUME_FROM=runs/long/pilot_gru bash longrun.sh pilot-add py local 0.06`, resume from pilot A at step 47064, FAB_N0=2090 VMAX=4096 FAB_NMAX=8192, PHASE_SCHED=0|0|1|1, EPOCHS=8, corpora 57.01 vs 57.03 MB): ACROSS THE RUN BOUNDARY eng was 2.125 -> now 2.154, +0.029 \u00b1 0.075, HELD (inside the noise); py 2.278 \u00b1 0.121 NEW this run. Beats order-1 by 1.523 b/B; UNDERFIT (held-out 2.051 better than train 2.155).",
+   "evidence": "chat L7168, L7527",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 run 2 pathology: the system collapsed to ONE live domain from epoch 4 (144 domains created), one source owning the whole 200,000-entry store (`s1046:200000`), `node mass: 1 of 2191 nodes carry any, top node 100%`, `experts serving >1 domain: 0`, 159 experts grown. DID IT FIRE reported \"5 ARMED MECHANISM(S) DID NOTHING: memory.wrong_block, tokenizer.mint, tokenizer.mint_reject, loss.TOK_ANCHOR, lr.damp\".",
+   "evidence": "chat L7172, L7183, L7240, L7527",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 run 3 (`RESUME_FROM=runs/long/pilot_gru bash longrun.sh pilot-add py bigcode/the-stack-dedup 0.06`, commit 87e9842, GH200): tokenizer.mint 2048 (vocabulary 2048 -> 4096, all minted for Python); 3.09 bytes/token as used, up from 2.08 (48% better compression); live domains oscillating 8-22, never 1, no DOMAIN COLLAPSE line; domains.spare 436 (COMP_PROTECT refusing culls); domains.held 0 (the new memory-floor brake never bound); IS THE PARTITION INFORMATIVE +0.031 over a null of \u00b10.002.",
+   "evidence": "chat L7908",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 run 3 continual-learning numbers: \"eng was 2.125 @ step 47064 -> now 2.273 +0.149 +/- 0.092 HELD (inside the noise)\"; \"py 5.061 +/- 0.560 NEW this run\". MEMORIZATION/ANCHORS: train 2.334 \u00b1 0.067 | held-out 2.522 \u00b1 0.270 | gap +0.189; uniform 3.853 | order-0 3.725 | order-1 3.629 | THIS MODEL 2.522, beats order-1 by +1.107 b/B; GPT-2-small is quoted at ~1.0-1.2 b/B for scale.",
+   "evidence": "chat L7786",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 run 3 domain quality: domain 686 size 22672, nearest-separation 1.09, silhouette +0.42; 16 experts serve domains with 3 shared between them; ROUTER SELECTION over the whole run 2108 distinct experts, top 6.1%.",
+   "evidence": "chat L7908, L7905",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 CPU toy comparison of the two continual-learning arms (D_MODEL=64, 24 experts, 0.38 MB corpora, 3 epochs, same checkpoint and corpora, only PHASE_SCHED differing): rehearsed 0|0|1|1 gave eng 4.649 -> 4.695, +0.046 \u00b1 0.161, HELD; pure 1|1|1|1 (PURE_ADD) gave eng 4.890 -> 5.334, +0.444 \u00b1 0.189, WORSE (forgetting). The exposure table confirmed English drew 0.00 MB/epoch and was seen 0.00x in the pure arm while still being scored across the boundary.",
+   "evidence": "chat L5712, L5716, L5719",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The assistant explicitly bounded that toy result: \"To be clear about what this is not: a toy run \u2014 D_MODEL=64, 24 experts, 0.38 MB corpora, three epochs. It is not evidence about your system's continual-learning capability. It is evidence that the two arms answer different questions, and that only one of them asks the question goal B is about.\"",
+   "evidence": "chat L5719",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 ACCUM gate, two CPU runs identical but for one line, BATCH_W=4 ACCUM=4, ~52 backward passes: old gate took 55 om.step() calls, new gate 13. 55 is one per backward pass, i.e. ACCUM accumulated nothing at any value.",
+   "evidence": "chat L5606, L5624, L5627",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 cull budget, two CPU runs identical but for one line, FAB_N0=120 FAB_NMAX=240 FAB_CULL_FRAC=0.30, n_elig 21 against n_live 120: OLD budget (n_live) removed 18, population 120 -> 102; NEW budget (n_elig) removed 8, population 120 -> 113.",
+   "evidence": "chat L5696, L5716",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 the SPECIALIZATION probe fix: on the pilot with the dead q_entry partition the probe found 5 distinct winners against ROUTER SELECTION's 415 (83x disagreement); on a post-fix CPU smoke run the probe found 20 winners against the run's 19.",
+   "evidence": "chat L5423, L5544, L5627",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 memory census duplicate-slot defect, measured directly: \"23 then 6 rows into a 25-slot block stored FOUR of the six and charged the source for six\". The unit test fails on pre-fix code with drift of 9 entries out of 200 after 400 writes.",
+   "evidence": "chat L7033, L7141",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 domain cull budget unit test: forty manage passes over a dead population settle at 9 live domains with the fix and at 1 without it (DOM_CULL_FLOOR=1; 0 reproduces the collapse).",
+   "evidence": "chat L7711, L7764",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 the held-out block-vs-sample signature in run 3: \"py held out 5.061 +/- 0.560, in-stream 2.922, gap 2.1 b/B, error bar 4x\" against \"eng held out 2.273 +/- 0.092, in-stream 2.303, no gap\". eng came from fineweb-edu which is shuffled upstream; py came from The Stack written in arrival order.",
+   "evidence": "chat L7905, L7908",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 declined-growth counter defect: 107 declines counted against 9 real growth asks.",
+   "evidence": "chat L5867, L5985",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEASURED \u2014 WRONGNESS in run 2: \"injected 2048 cross-domain WRONG entries | caught 1964 (recall 96%) | flagged genuine 65894 (precision 3%)\" and \"67858 of 200000 active entries (34% of the store) are excluded from EVERY retrieval\", with \"DURING TRAINING the gate ran on 1875 read(s) and excluded at least one entry on 0 of them\".",
+   "evidence": "chat L7262, L7172",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The test inventory: fourteen entry points exist. selftest.sh's unit phase now runs 13 suites including resume_test (126 checks) and corpus_test (59 checks) added this session; run_verify_test.py and verify_console_test.py are deliberately excluded as A/B experiments rather than regression tests, with the reason written into the file.",
+   "evidence": "chat L6094, L6122, L6235",
+   "confidence": "verified"
+  },
+  {
+   "claim": "preflight.sh's knob trap reports \"all 83 documented knobs are READ by self_organize.py\" and passed on both boxes; the wider _SPEC knob registry holds 327 knobs per the session summary.",
+   "evidence": "chat L6235, L6536, L6544",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The final state the assistant reported against the two definitive goals: \"A \u2014 2.522 b/B held-out against GPT-2-small's ~1.0\u20131.2, UNDERFIT on its own check, and generation is word-shaped but not coherent. The lever the report keeps pointing at is more data/passes, not regularization. B \u2014 English HELD across the boundary twice now, 12 live domains with one genuinely separated, and Python earned 2048 tokens of its own. The open weakness is that SPECIALIZATION still reads INTERCHANGEABLE: 2108 experts get selected but they don't differ from a random split of the same windows. Capacity is being allocated; competence isn't differentiating.\"",
+   "evidence": "chat L8035",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PREFERENCE (inferred from repeated owner behaviour, stated as a pattern): the owner asks for tests to be run before experiments and for pilots to be run to surface bugs \u2014 \"Let's run them before the initiative\", \"Lets run the tests first\", \"Since the tests are done, lets do a few pilots seeing the changes and any bugs that arise\".",
+   "evidence": "chat L5723, L5989, L6314",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PREFERENCE \u2014 the owner tolerates and expects long fix-then-verify loops (\"Lets keep on going until everything is resolved from what we have right now\") and does not want work stopped at the first passing result.",
+   "evidence": "chat L5427",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The assistant asked the owner for a direction call and did not receive one: \"modularity did not happen: 159 experts grew and routing sends everything to one. That's the next thing worth attacking, and I'd want your call on direction before touching the merge criterion or MEM_CAP.\"",
+   "evidence": "chat L7527",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The assistant declined to guess the initiative: \"You said earlier you'd provide the next initiative and haven't yet, so I don't want to guess at it. ... Tell me which of those the initiative is \u2014 or what it is if it's neither \u2014 and I'll start there.\"",
+   "evidence": "chat L8035",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "ACCUM",
+   "effect": "Number of backward passes to accumulate before an optimizer step. Was gated on `(step + 1) % ACCUM == 0` where `step` advances per WINDOW while the gate body runs per FLUSH, so it accumulated nothing at any value; now `if _nbwd % ACCUM == 0`, counting backward passes.",
+   "owner": "self_organize.py training loop",
+   "couples_with": [
+    "BATCH_W",
+    "EPOCHS",
+    "AMP"
+   ],
+   "evidence": "chat L5423, L5606, L5624"
+  },
+  {
+   "name": "BATCH_W",
+   "effect": "Batch width in windows; determines flush cadence. fetch_big.py printed `BATCH_W=16 ACCUM=4` as the recommended heavy-run command while ACCUM appeared in no print anywhere.",
+   "owner": "self_organize.py training loop",
+   "couples_with": [
+    "ACCUM"
+   ],
+   "evidence": "chat L5423"
+  },
+  {
+   "name": "VMAX",
+   "effect": "Softmax width \u2014 preallocates emb.weight, head.weight, head.bias. A hard ceiling on the tokenizer's vocabulary because emb has exactly that many rows. pilot-add sets it to double the checkpoint's value so an added area can mint its own tokens.",
+   "owner": "self_organize.py geometry gate; longrun.sh pilot-add/add derive it from the checkpoint",
+   "couples_with": [
+    "FAB_NMAX",
+    "FAB_N0",
+    "TOKENIZER_PATH",
+    "TOK_V0"
+   ],
+   "evidence": "chat L5985, L7521, L7915"
+  },
+  {
+   "name": "FAB_NMAX",
+   "effect": "Fabric slot pool \u2014 preallocates the five cap-shaped tensors A, B, SRC_p, K_p, cent. Was nested under `if [ -z \"${FAB_N0:-}\" ]` in longrun.sh so setting FAB_N0 silently reverted it to 4096.",
+   "owner": "self_organize.py Fabric; longrun.sh derives it from the checkpoint",
+   "couples_with": [
+    "FAB_N0",
+    "VMAX",
+    "FAB_PRESSURE",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "chat L5856, L5985"
+  },
+  {
+   "name": "FAB_N0",
+   "effect": "Starting expert population. Read from the checkpoint on resume (2090 for pilot A) rather than the 2048 default, because net growth is measured as fab.n() - FAB_N0 and the default would credit the run with experts the restore brought back.",
+   "owner": "longrun.sh pilot-add/add geometry block",
+   "couples_with": [
+    "FAB_NMAX",
+    "VMAX"
+   ],
+   "evidence": "chat L5985, L7039, L7915"
+  },
+  {
+   "name": "FAB_RANK",
+   "effect": "Inner rank of each low-rank adapter; A is [cap, d, rank]. An INNER dimension, so it cannot be prefix-widened and a mismatch on resume is fatal by design. Was not inherited by the harness until this span.",
+   "owner": "self_organize.py geometry gate",
+   "couples_with": [
+    "FAB_DK"
+   ],
+   "evidence": "chat L5942, L5985"
+  },
+  {
+   "name": "FAB_DK",
+   "effect": "Key dimension; SRC_p and K_p are [cap, dk]. Also an inner dimension, also fatal on mismatch, also newly inherited.",
+   "owner": "self_organize.py geometry gate",
+   "couples_with": [
+    "FAB_RANK"
+   ],
+   "evidence": "chat L5942, L5985"
+  },
+  {
+   "name": "GROW_CAP_FAB0",
+   "effect": "Explicit cap lift for the fabric. Its refusal guard was unreachable because the checkpoint's saved cap_fab was restored over the explicit request first; now the checkpoint only fills in the cap when the environment did not ask for one.",
+   "owner": "self_organize.py resume path",
+   "couples_with": [
+    "FAB_NMAX"
+   ],
+   "evidence": "chat L5650, L5716"
+  },
+  {
+   "name": "FAB_PRESSURE",
+   "effect": "Setpoint for the cull gate; population equilibrates near pressure x cap. cull_gate_open(n_live, cap, pressure) gates the utilization cull, the utilization spare and FAB_RESCUE.",
+   "owner": "self_organize.py Fabric",
+   "couples_with": [
+    "FAB_NMAX",
+    "FAB_CULL_FRAC"
+   ],
+   "evidence": "chat L6235, L6544"
+  },
+  {
+   "name": "FAB_CULL_FRAC",
+   "effect": "Fraction culled per pass. Budget was sized on n_live; now on len(_elig), the experts that have actually had their chances. Measured 18 vs 8 removed.",
+   "owner": "self_organize.py cull",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "FAB_NMAX"
+   ],
+   "evidence": "chat L5696, L5716"
+  },
+  {
+   "name": "DOM_CULL_FRAC",
+   "effect": "Fraction of domains culled per manage pass. `max(1, int(DOM_CULL_FRAC * n))` made it a MINIMUM of one for any population under ten, driving the domain population to 1. Now floored by DOM_CULL_FLOOR.",
+   "owner": "self_organize.py domain manager",
+   "couples_with": [
+    "DOM_CULL_FLOOR",
+    "DOM_DECAY",
+    "MANAGE_STALE",
+    "PHASE_SCHED",
+    "MEM_SRC_FLOOR"
+   ],
+   "evidence": "chat L7711, L7764"
+  },
+  {
+   "name": "DOM_CULL_FLOOR",
+   "effect": "New knob (default 1) below which the domain-cull budget is not forced to remove anything; 0 reproduces the collapse.",
+   "owner": "self_organize.py domain manager",
+   "couples_with": [
+    "DOM_CULL_FRAC"
+   ],
+   "evidence": "chat L7711"
+  },
+  {
+   "name": "MEM_SRC_FLOOR",
+   "effect": "Per-source memory floor (0.5) reserving cap*floor/live_sources per domain. Protects against EVICTION only; the domain cull's mem.delete_src() destroyed entries the floor forbids evicting. `nsrc > 0` is what makes a source eligible for protection at all, so the duplicate-slot undercount removed protection from the sources it exists for.",
+   "owner": "memory.py",
+   "couples_with": [
+    "DOM_CULL_FRAC",
+    "MEM_CAP",
+    "MEM_QUOTA"
+   ],
+   "evidence": "chat L7033, L7711, L6590"
+  },
+  {
+   "name": "PHASE_SCHED / PURE_ADD",
+   "effect": "Which processes stream in which phase. Default for NP=2 is [[0],[0],[1],[1]] (rehearsed); PURE_ADD=1 sets 1|1|1|1 so only the new area streams. The default rehearses the old area, which is what made English HELD; the pure arm is the one that tests modularity. The default also makes every non-streaming domain trip the cull's staleness test by construction.",
+   "owner": "self_organize.py phase scheduler; longrun.sh pilot-add",
+   "couples_with": [
+    "DOM_CULL_FRAC",
+    "DOM_DECAY",
+    "MANAGE_STALE",
+    "EPOCHS"
+   ],
+   "evidence": "chat L5712, L5719, L7711"
+  },
+  {
+   "name": "RATE_EVERY",
+   "effect": "Cadence of the rate meter, which also gates the per-process curve probe. Setting RATE_EVERY=100000 in smoke runs suppressed the curve table entirely \u2014 the assistant did this in every smoke run and so never saw the table populate.",
+   "owner": "self_organize.py training loop",
+   "couples_with": [
+    "VALC",
+    "EVAL_N"
+   ],
+   "evidence": "chat L5743, L5810"
+  },
+  {
+   "name": "AMP",
+   "effect": "Autocast precision. Accepts bf16 and fp16, guarded on `AMP in (\"bf16\",\"fp16\") and DEV == \"cuda\"`. fp16 is now REFUSED with a SystemExit because there is no GradScaler anywhere in the file. Not reachable by any test unless SELFTEST_DEVICE=cuda.",
+   "owner": "self_organize.py precision block",
+   "couples_with": [
+    "ACCUM",
+    "SELFTEST_DEVICE",
+    "DEVICE"
+   ],
+   "evidence": "chat L6152, L6166, L6163"
+  },
+  {
+   "name": "DATA_MODE",
+   "effect": "real | synthetic. The synthetic path generates from Markov processes and holds nothing out, so VALC and CORP are undefined there. preflight.sh's END-TO-END SMOKE is the SOLE caller that sets DATA_MODE=synthetic.",
+   "owner": "self_organize.py data setup",
+   "couples_with": [
+    "VALC",
+    "CORP",
+    "TOKENIZER",
+    "VAL_FRAC"
+   ],
+   "evidence": "chat L6243, L6310, L6528"
+  },
+  {
+   "name": "TOKENIZER_PATH",
+   "effect": "Had TWO jobs \u2014 the file a resume READS its parent's vocabulary from, and the file the run SAVES its own to \u2014 which caused a run to overwrite its parent's vocabulary inside runs/. Now a run's vocabulary goes beside its own checkpoint (SAVE_CKPT + \".dyntok.json\") and tok_path records where it was WRITTEN.",
+   "owner": "self_organize.py tokenizer save/load; longrun.sh pilot-add resolution",
+   "couples_with": [
+    "SAVE_CKPT",
+    "RESUME_FROM",
+    "VMAX"
+   ],
+   "evidence": "chat L8032, L8035"
+  },
+  {
+   "name": "TOK_V0",
+   "effect": "Module-level baseline vocabulary size, set to TOK.vocab_size where TOK is resolved; the baseline the mint count is measured against. `tokenizer.mint`'s arming test asked \"is there room NOW\" at report time instead of using TOK_V0.",
+   "owner": "self_organize.py tokenizer",
+   "couples_with": [
+    "VMAX",
+    "TOK_ONLINE"
+   ],
+   "evidence": "chat L7036, L7141"
+  },
+  {
+   "name": "TOK_ANCHOR / TOK_ANCHOR_TAU / TOK_ANCHOR_USES",
+   "effect": "Anchor loss weight and release schedule. ARMED AND INERT in every run: the anchor lives on ByteComposer which only exists under TOK_COMPOSE, and TOK_COMPOSE defaults to 0, so model.compose is None and the term never enters the loss. A COUPLING line now says so; the knob was NOT fixed.",
+   "owner": "self_organize.py loss assembly",
+   "couples_with": [
+    "TOK_COMPOSE"
+   ],
+   "evidence": "chat L6727, L7051, L7183"
+  },
+  {
+   "name": "MEM_WRONG_READ",
+   "effect": "Gates the wrong-flag read filter. Structurally cannot gate the training loop: selfcheck() is called once, from the report, and every write resets selfcon to -1. It gates the report's own evaluations only. Reported, not fixed.",
+   "owner": "memory.py read path",
+   "couples_with": [
+    "WRONG_SWEEP",
+    "MEM_CAP"
+   ],
+   "evidence": "chat L7527, L7172"
+  },
+  {
+   "name": "WRITE_GATE / WRITE_TARGET / WRITE_ADAPTIVE / WRITE_QUANTILE",
+   "effect": "Memory write gating. Added to the [config] EFFECTIVE banner this session \u2014 previously on no line of any log. WRITE_QUANTILE=1 has NO EFFECT (a COUPLING line now states it); torch.quantile is CUDA-sensitive but sits behind WRITE_ADAPTIVE=0.",
+   "owner": "memory.py write path",
+   "couples_with": [
+    "WRITE_ADAPTIVE"
+   ],
+   "evidence": "chat L5549, L5627, L6166"
+  },
+  {
+   "name": "VAL_FRAC",
+   "effect": "Held-out fraction, taken as the LAST slice of each corpus. Only a SAMPLE if the corpus was written in no particular order \u2014 hence the shuffle requirement in the fetchers.",
+   "owner": "self_organize.py corpus setup",
+   "couples_with": [
+    "--shuffle-buffer (fetch_big.py)",
+    "DATA_MODE"
+   ],
+   "evidence": "chat L7865, L7905, L7915"
+  },
+  {
+   "name": "--shuffle-buffer (fetch_big.py)",
+   "effect": "New knob, default 10000 documents with a recorded seed, writing corpora through a shuffle reservoir so the held-out tail is a sample rather than a block. Buffer and seed are recorded in _fetch_manifest.json; --resume is refused if it would skip the first N of a different ordering. `--shuffle-buffer 0` restores arrival order.",
+   "owner": "fetch_big.py",
+   "couples_with": [
+    "VAL_FRAC",
+    "--resume"
+   ],
+   "evidence": "chat L7905, L7915"
+  },
+  {
+   "name": "EXPOSURE_MAX / EXPOSURE_SKEW",
+   "effect": "Per-corpus exposure guard thresholds (2.0 whole-run repetition, 3.0 imbalance). Both fired correctly in a forced test with py at 2.81x repetition and 26.7x imbalance.",
+   "owner": "self_organize.py corpus exposure guard",
+   "couples_with": [
+    "EPOCHS",
+    "STREAM_LEN",
+    "PHASE_SCHED"
+   ],
+   "evidence": "chat L5669, L5716"
+  },
+  {
+   "name": "EPOCHS",
+   "effect": "Sets run length AND the cosine horizon, so it changes the LR at every step, not only how many steps there are \u2014 the run's own COUPLING line says two runs differing only in EPOCHS are two different schedules.",
+   "owner": "self_organize.py LR schedule",
+   "couples_with": [
+    "LR_EPOCHS",
+    "LR_STEPS",
+    "LR_RESTARTS",
+    "STREAM_LEN"
+   ],
+   "evidence": "chat L7168, L7227"
+  },
+  {
+   "name": "SELFTEST_DEVICE",
+   "effect": "The only way to make selftest.sh train on CUDA; $DEVICE is deliberately ignored by selftest. This is the entry point that covers the AMP path and TF32 behaviour, neither of which the assistant's container can reach.",
+   "owner": "selftest.sh",
+   "couples_with": [
+    "DEVICE",
+    "AMP"
+   ],
+   "evidence": "chat L6166, L6235"
+  },
+  {
+   "name": "FETCH_ARGS / --data-dir",
+   "effect": "Extra arguments to the fetcher. `--data-dir data/python` is now supplied by pilot-add itself because The Stack is organised by language as directories; without it the pull is every language mixed together labelled 'py'. An explicit --data-dir in FETCH_ARGS still wins, including to ask for the mixture.",
+   "owner": "longrun.sh pilot-add; fetch_big.py",
+   "couples_with": [
+    "PILOT_GB",
+    "DATA_DIR"
+   ],
+   "evidence": "chat L7746, L7764, L7915"
+  },
+  {
+   "name": "PILOT_GB",
+   "effect": "Corpus size for pilot and pilot-add (0.06 GB default). Both corpora get the same share of the stream whatever their sizes, so a mismatched size is a straight confound; pilot's closing hint used to print a hardcoded 0.03.",
+   "owner": "longrun.sh",
+   "couples_with": [
+    "PHASE_SCHED",
+    "STREAM_LEN"
+   ],
+   "evidence": "chat L7039, L6327"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "ACCUM gate counted windows, not backward passes \u2014 the knob accumulated nothing at any value",
+   "severity": "high",
+   "where": "self_organize.py training loop; gate was `if (step + 1) % ACCUM == 0`",
+   "symptom": "om.step() and om.zero_grad() are the only calls to either in the loop and both sat inside a gate keyed on `step`, which advances per WINDOW, while the body runs per FLUSH. Measured: old gate 55 om.step() calls vs new gate 13, over ~52 backward passes at BATCH_W=4 ACCUM=4 \u2014 i.e. it stepped roughly once per backward pass whatever ACCUM was set to.",
+   "evidence": "chat L5423, L5606, L5624 \u2014 \"55 is one per backward pass. The real defect is that ACCUM accumulated nothing\"",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "SPECIALIZATION partitioned held-out windows with a projection that never trained",
+   "severity": "high",
+   "where": "self_organize.py SPECIALIZATION section, built its winner from fab.q_entry",
+   "symptom": "Entry moved to the shared grounded router (entry_logits, scoring with q_route) and this copy was never updated. ROUTE_GROUNDED defaults to 1, and the run's own ROUTER LEARNING audit printed `never gradiented -> ctrl, q_entry`. The section was drawn from its own null and would read INTERCHANGEABLE whatever the population did. Symptom visible as 5 probe winners against 415 run winners and explained away as \"a probe, not the run\".",
+   "evidence": "chat L5423; post-fix 20 probe winners vs 19 run winners at L5544",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The curve verdict read one process, always the newest corpus",
+   "severity": "high",
+   "where": "self_organize.py curve verdict, `{st: b for st, _p, b, _a in _CURVE}`",
+   "symptom": "Keying on step alone means the last-appended process wins; appends ascend by id so it is always the highest, which under \"add an area\" is the NEWEST corpus \u2014 the one that cannot have been forgotten. Confirmed on a live table: the old series is process 1's row verbatim, and 7 of its 12 samples were windows where process 1 was ABSENT.",
+   "evidence": "chat L5423, L5772, L5810",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "GROW_CAP_FAB0 refusal guard was unreachable on every checkpoint",
+   "severity": "medium",
+   "where": "self_organize.py resume path",
+   "symptom": "The checkpoint's saved cap_fab=48 was restored over the explicit GROW_CAP_FAB0=8 request BEFORE the guard ran, so the guard the assistant had just added could never trip on any checkpoint written from then on (they all carry cap_fab). Found only by firing it.",
+   "evidence": "chat L5650, L5716, L5719",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "Cull budget sized on the whole population instead of the eligible experts",
+   "severity": "medium",
+   "where": "self_organize.py cull, `order[:max(1, int(cull_frac * s.n_live))]`",
+   "symptom": "2.25x more experts culled than intended. Measured with n_elig 21 against n_live 120: 18 removed (old) vs 8 (new), population 120->102 vs 120->113.",
+   "evidence": "chat L5696, L5716",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "\"holds 0 MB\" printed for a directory holding 40 kB",
+   "severity": "low",
+   "where": "longrun.sh top-up message; same fault in fetch_local.py (\"target 0 MB\" for a 400 kB request)",
+   "symptom": "Integer division by 1e6 floors anything under a megabyte to 0, and \"0\" reads as EMPTY \u2014 the one thing the message exists to distinguish from. An empty directory is a fetch that never happened; a short one stopped early, and they want different responses. Both print two decimals now.",
+   "evidence": "chat L5790, L5804, L5810",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "`longrun.sh add` \u2014 the command that runs the real experiment \u2014 could not resume at all",
+   "severity": "critical",
+   "where": "longrun.sh add) branch, line ~866-903",
+   "symptom": "It set no TOKENIZER_PATH, so the child fell back to data/dyntok.json, minted a fresh 512-token vocabulary, and self_organize.py refused with `[resume] VOCABULARY MISMATCH` \u2014 AFTER the block had computed the correct FAB_N0 and FAB_NMAX, which were then discarded. It also hardcoded VMAX=2048 and DEVICE=cuda. The branch's own comment says it \"runs the real experiment\".",
+   "evidence": "chat L5832 (audit brief), L5871, L5985",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "One shell gate for three unrelated derivations \u2014 setting FAB_N0 silently reverted VMAX and FAB_NMAX",
+   "severity": "high",
+   "where": "longrun.sh:717, VMAX and FAB_NMAX nested inside `if [ -z \"${FAB_N0:-}\" ]`",
+   "symptom": "Setting FAB_N0 \u2014 which the block's OWN failure message instructs you to do \u2014 silently reverted VMAX to 2048 and FAB_NMAX to 4096 and re-created both round18 defects with no message. FAB_N0 is a population count; the other two are the softmax width and the slot pool.",
+   "evidence": "chat L5832, L5856, L5985",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "Model optimizer moments skipped on `_wide_by` alone \u2014 a VMAX-only widening crashes at the first om.step()",
+   "severity": "high",
+   "where": "self_organize.py optimizer restore",
+   "symptom": "emb.weight, head.weight and head.bias are all in om, so widening the SOFTMAX invalidates its moments exactly as widening the fabric does. A resume raising VMAX without touching FAB_NMAX loaded moments shaped for the old vocabulary cleanly and died at the first om.step(). Masked on both harness paths only by accident, because both currently widen the fabric too. Same bug class as the fix it was written for.",
+   "evidence": "chat L5832, L5849, L5985",
+   "bug_class": "crash"
+  },
+  {
+   "title": "Declined-growth counter tested a leftover string \u2014 107 declines against 9 real asks",
+   "severity": "medium",
+   "where": "self_organize.py growth controller, tested `fabgrow.why`",
+   "symptom": "`fabgrow.why` is a leftover from the last firing that is never cleared, so every non-growth flush counted as a decline. A counter meant to expose a silent failure was producing one.",
+   "evidence": "chat L5867, L5985",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "Growth counters ride in the checkpoint, so POPULATION CHURN attributed the previous run's events to this one",
+   "severity": "medium",
+   "where": "self_organize.py POPULATION CHURN / fabgrow checkpoint state",
+   "symptom": "The counters are saved and restored, so the section reported a chain total as if it were this run. Fixed with `_fg_base` recording the baseline; the chain total is now printed alongside.",
+   "evidence": "chat L5832, L5985",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Self-inflicted: a replace-first-occurrence patched `run)` instead of `add)`",
+   "severity": "medium",
+   "where": "longrun.sh \u2014 `replace(..., 1)` hit line 576 (run\\)) rather than line 873 (add\\))",
+   "symptom": "`run)` got VMAX made overridable (an unintended change) and, having no $TOKENIZER_PATH, may have been broken under `set -u`; `add)`'s VMAX stayed hardcoded. Caught because the child still printed `vocab 2048`.",
+   "evidence": "chat L5915, L5921, L5929",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "FAB_RANK and FAB_DK were not inherited by the harness",
+   "severity": "high",
+   "where": "longrun.sh pilot-add / add geometry inheritance",
+   "symptom": "The harness inherited n, cap and the softmax width and left rank and dk on registry defaults. Both are INNER dimensions (A is [cap,d,rank]; SRC_p/K_p are [cap,dk]) so no prefix of a rank-4 adapter is a valid rank-8 one and a mismatch is fatal by design. It bit the moment `add` first met a real checkpoint.",
+   "evidence": "chat L5942, L5985",
+   "bug_class": "crash"
+  },
+  {
+   "title": "corpus_test.py and resume_test.py \u2014 185 checks \u2014 were in no test entry point",
+   "severity": "high",
+   "where": "selftest.sh",
+   "symptom": "Both were written this session and never wired into selftest.sh, the file anyone runs before a launch. The project's own gate silently skipped 59+126 checks covering the widening, the geometry refusals, the newborn split, the growth controller, the cull budget, the exposure guards and the ACCUM gate. They passed the whole time; nothing was asking them.",
+   "evidence": "chat L6062, L6094, L6122",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "AMP=fp16 autocasts without a GradScaler",
+   "severity": "high",
+   "where": "self_organize.py precision block, guarded on `AMP in (\"bf16\",\"fp16\") and DEV == \"cuda\"`",
+   "symptom": "The comment justifies bf16 correctly (\"same exponent range as fp32, so no loss scaling and no GradScaler\") but the knob also accepts fp16, whose exponent range is far smaller. Small gradients underflow to zero: the model trains, the loss curve looks plausible, an unknown fraction of every update is discarded, and the run prints a confident `[precision] LM step in fp16 autocast`. REFUSED (SystemExit naming the reason and pointing at bf16) rather than fixed, deliberately \u2014 adding a scaler changes the optimizer step, which is now gated on accumulated backward passes, and an unscale at the wrong point in that cycle silently breaks accumulation instead.",
+   "evidence": "chat L6152, L6163, L6166",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "`609% precision` \u2014 a hardcoded constant from one investigation left in a general report line",
+   "severity": "medium",
+   "where": "self_organize.py WRONGNESS report, `100 * 1820 / max(1, flg)`",
+   "symptom": "1820 was the pilot's caught-count baked into a line that runs on every run; against a fresh run's 299 flagged it printed 609%. Worse, it asserted a precision figure at all on a run where none was measured \u2014 `fb` only exists inside `if ninj > 0` and that run injected nothing, and said so eleven lines earlier. Found only because \"run the tests\" meant all fourteen this time.",
+   "evidence": "chat L6176, L6195, L6198",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Self-inflicted process bug: editing selftest.sh while bash was executing it produced exit 0 with the end-to-end phase never running",
+   "severity": "high",
+   "where": "selftest.sh (harness), assistant's own workflow",
+   "symptom": "Bash reads scripts incrementally by byte offset, so inserting two lines shifted the file under the running interpreter. It resumed mid-token, printed `line 101: ts:: command not found`, re-printed the header and exited 0 without training anything. `ts::` appears nowhere in the file. \"An exit code of 0 on a suite whose main phase silently didn't execute is precisely the failure mode this project exists to catch \u2014 a mechanism that runs and does nothing \u2014 and I produced it in the test harness itself while auditing for it.\"",
+   "evidence": "chat L6212, L6217, L6232",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "VALC NameError \u2014 DATA_MODE=synthetic has crashed since 2026-08-15",
+   "severity": "critical",
+   "where": "self_organize.py training loop, `if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark and VALC:`",
+   "symptom": "VALC is built only inside `if DATA_MODE == \"real\":` and the loop reads it unguarded, so every synthetic run dies the first time the rate meter comes round. Introduced in d3d2bdc (2026-08-15), twelve days before this session, confirmed by merge-base. Nothing caught it because nothing runs the synthetic path: preflight.sh's END-TO-END SMOKE is the sole caller, and it reported \"FAILED on CUDA\" for a defect with nothing to do with the architecture \u2014 which on a GH200 sends you hunting wheels and drivers. Fixed with `VALC = []` declared before the branch.",
+   "evidence": "chat L6235 (owner's GH200 traceback), L6243, L6262, L6290, L6310",
+   "bug_class": "crash"
+  },
+  {
+   "title": "IndexError in the cross-domain injection \u2014 a guard written FOR this exact crash checked the wrong quantity",
+   "severity": "high",
+   "where": "self_organize.py injection, `sp = random.choice([s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p])` behind `if ninj > 0 and len(procs) < 2`",
+   "symptom": "`procs` is sorted(set(labels)) \u2014 every label present ANYWHERE in the stream \u2014 while the sampler only takes positions that are MULTIPLES of WIN. A process can be in labels and have no window-aligned start at all (narrow bands, short streams, PHASED schedules), so the guard passes and the comprehension is still empty. The guard's own comment describes this exact failure. Crashed after training and the checkpoint had completed. Fixed by building the candidate lists first and keeping only processes that have one.",
+   "evidence": "chat L6479, L6510, L6520, L6528",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "CORP NameError laundered by a catch-all into a message indistinguishable from a real failure",
+   "severity": "medium",
+   "where": "self_organize.py memorization check, broad try/except printing \"[memorization check skipped: NameError: name 'CORP' is not defined]\"",
+   "symptom": "CORP is real-path-only like VALC. The catch-all made the run print something that reads as a bug in the check rather than as a configuration that cannot support it \u2014 and a GENUINE failure of that battery on the real-data path arrives at the same except and prints in the same shape, so one of the two is background noise and neither is legible. Fixed with a named `_NoHeldOut` sentinel raise at the top of the existing try, moving no code (re-indenting the ~270-line body was deliberately rejected as the kind of edit that introduces bugs).",
+   "evidence": "chat L6483, L6488, L6499, L6520, L6528",
+   "bug_class": "other"
+  },
+  {
+   "title": "Self-inflicted: `pkill -f \"DATA_MODE=synthetic\"` matched its own wrapper and killed the run it had just launched",
+   "severity": "low",
+   "where": "assistant's own shell commands",
+   "symptom": "Three `exit 144`s attributed to the run were the pkill killing its own wrapper's command line.",
+   "evidence": "chat L6446, L6456",
+   "bug_class": "other"
+  },
+  {
+   "title": "A memory write named the same slot twice, so a count of active entries went negative",
+   "severity": "critical",
+   "where": "memory.py \u2014 the global victim path used torch.randint (WITH replacement); the per-owner path ranked the whole block by `last`, where free slots read 0 (the oldest possible)",
+   "symptom": "Pilot A printed `s779 (-2 now, peaked 111230)`. A repeat costs twice: index assignment collapses it silently so the store holds fewer rows than the caller was told, and `_commit` decrements the displaced owner once per occurrence. Measured directly: 23 then 6 rows into a 25-slot block stored FOUR of the six and charged the source for six. This matters because nsrc is the per-source floor's only input and `nsrc > 0` is what makes a source eligible for protection at all \u2014 an undercounted source loses the protection of the floor that exists to stop it being driven to zero. On that run the floor blocked 6,728,733 of 11,677,625 writes.",
+   "evidence": "chat L7033, L7141",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "The probe-vs-run guard the assistant added compared quantities in different units and could not be satisfied",
+   "severity": "high",
+   "where": "self_organize.py SPECIALIZATION probe check, `len(_used) * 10 < len(_uv)`",
+   "symptom": "8 probe winners against 633 run winners \u2014 but the probe scores only 32 windows, so len(_used) can never exceed 32. A perfect probe picking a different expert every window gives 320 < 633 and still trips, voiding every SPECIALIZATION verdict. Replaced with MEMBERSHIP (dimensionless) plus the coupon-collector expectation sum_i (1-(1-p_i)^W) for 32 draws from the run's own distribution.",
+   "evidence": "chat L7036, L7141",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "Probe guard second false alarm: newly-grown experts flagged as \"never selected\"",
+   "severity": "medium",
+   "where": "self_organize.py SPECIALIZATION probe check",
+   "symptom": "It flagged experts 106 and 2182 as \"never selected once in 720144 routed windows \u2014 every SPECIALIZATION verdict above is void\", forty lines below EXPERT INDEPENDENCE calling 106 the BUSIEST expert at routing mass 1.00. Both were newly grown: seed_key aims a newborn at traffic the router already sends, so it wins a probe window before a training one, and the cull's swap-with-last drops late arrivals into low slot ids. Fixed: age checked against this run's span, the two cases print separately, and the alarm names each id's eval routing mass beside its zero.",
+   "evidence": "chat L7527",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "tokenizer.mint reported \"off \u2014 the vocabulary was already FULL\" over 1536 mints",
+   "severity": "high",
+   "where": "self_organize.py DID IT FIRE arming test for tokenizer.mint",
+   "symptom": "It asked \"is there room NOW\" at report time and printed \"off -- the vocabulary was already FULL at 512/2048 when this run started, so there was no room to mint\" while discarding a count of 1536 and with the log directly above showing vocab climbing 512 -> 824 -> 1148 -> 1304. Room at the start is a question about TOK_V0, which is already the count's own baseline.",
+   "evidence": "chat L7036, L7141",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "memory.wrong_block said \"read() filters nothing\" in the same report as \"61,952 of 200,000 entries excluded from EVERY retrieval\"",
+   "severity": "high",
+   "where": "self_organize.py DID IT FIRE arming test, `(selfcon >= 0).sum() > 10` evaluated at report time",
+   "symptom": "Every write resets selfcon to -1 and the pilot wrote 11.7M times into 200k slots, so the final snapshot said nothing could be flagged. Memory.read counts its own exclusions now and WRONGNESS states the training-time number beside the end-of-run snapshot.",
+   "evidence": "chat L7036, L7141",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "MEMORY PRESSURE cannot reach its threshold on this configuration",
+   "severity": "medium",
+   "where": "memory.py pressure() = main/(main+probation) evictions",
+   "symptom": "Every write lands on probation and only retrieval promotes out of it, so at 11.7M writes against 1469 read probes probation is 82% of the store rather than a 10% region \u2014 permanently over budget, so eviction always takes the probation branch, n_main_evict stays near zero and the signal is pinned at ~0 for the run. Its silence reads as a healthy store. REPORTED, NOT CHANGED.",
+   "evidence": "chat L7036, L7141",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "\"Does the memory earn its keep?\" was scored on the training stream",
+   "severity": "high",
+   "where": "self_organize.py compose_test, draws its windows from `stream`",
+   "symptom": "A retrieval that returns the very window being scored counts as a hit, so the section is partly a memorisation score \u2014 and it is the one in the biggest type. The pilot printed both answers 127 lines apart: `+0.212` on the training stream against `-0.100` on eng's held-out tail. The generation samples settle it: two different seeds produced the identical span \"elements are visitors to 1,0,000,000,000 and Maryland, CTA area of fuels\". Nothing computed was changed; the held-out pair now prints beside it and the verdict separates the two questions.",
+   "evidence": "chat L7133, L7141",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "pilot-add printed \"would enter -42 identity experts at step 0\"",
+   "severity": "low",
+   "where": "longrun.sh pilot-add geometry message, `$((2048 - _CKN))` with a hardcoded FAB_N0 default",
+   "symptom": "Only the right sentence while the checkpoint holds FEWER experts than the default; the pilot's holds 2090. The default is now read from the same _SPEC line the arm list reads, and the other direction gets its own sentence.",
+   "evidence": "chat L7039, L7141, L6544",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "pilot's closing hint recommended a corpus half the size of the one it just pulled",
+   "severity": "medium",
+   "where": "longrun.sh pilot closing message, hardcoded `pilot-add py local 0.03` against PILOT_GB=0.06",
+   "symptom": "Both corpora get the same share of the stream whatever their sizes, so following the printed advice builds the added area at half the size and draws it just as often from half as much text \u2014 the exact confound pilot-add's fourth-argument default was changed to remove. Now resolves PILOT_GB.",
+   "evidence": "chat L7039, L7141",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "DynamicTokenizer.load reconstructed vmax from the saved json, so a resumed run could not mint a single token",
+   "severity": "critical",
+   "where": "tokenizer.py DynamicTokenizer.load; maybe_grow's first line `if vocab_size >= vmax: return None`",
+   "symptom": "pilot-add doubled VMAX to 4096 and the resume widened emb/head and printed \"the tokenizer stays at 2048 tokens and now has room above it\" \u2014 but the tokenizer came back capped at pilot A's 2048, full, so maybe_grow refused before forming a candidate. `tokenizer.mint 0`, `mint_reject 0` \u2014 not one token for Python, not one candidate formed, for 52,000 steps. The NON-STATIONARY table showed `vocab | 2048` at every phase. Fixed at the load path (never below what is already minted; VMAX is a hard ceiling because emb has exactly that many rows). resume_test now fails on the old code with `got 2048`.",
+   "evidence": "chat L7521, L7527",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Every resume reported a phantom cosine restart on its second step, suppressing the regression reading exactly when a new area arrives",
+   "severity": "high",
+   "where": "self_organize.py LR schedule, `_lr_prev` starts at 0.0",
+   "symptom": "`[lr @ 47079] cosine restart 1: 0.00e+00 -> 1.15e-03 (57% of peak, x1145648405)`. A fresh run's warmup holds early rates under the `> 0.5 * LR` bar until a real previous value exists; a resume skips warmup so the first rate computed is already 57% of peak and is compared against zero. The x1.1-billion multiplier is _lrv over the 1e-12 floor, not a ratio. It cost more than a log line: note_shift() told the growth controller the loss jump was self-inflicted, suppressing the regression reading on the exact step a new area arrives \u2014 the one moment that controller exists for.",
+   "evidence": "chat L7521, L7527",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "lr.restart audit row asserted the mechanism could not have run, over a run that had run it",
+   "severity": "medium",
+   "where": "self_organize.py DID IT FIRE, lr.restart / lr.damp arming tests",
+   "symptom": "`lr.restart` printed \"one cycle fits this run, so there is nothing to restart\" over a run that had taken one, discarding the count; lr.damp armed on that phantom restart and reported ZERO/ARMED AND INERT. Same shape as tokenizer.mint the round before: an arming test asserting the mechanism could not have run, printed above a number showing it did. The row now arms if a restart actually happened.",
+   "evidence": "chat L7521, L7527, L7183",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The wrong-flag read gate has never gated anything and structurally cannot",
+   "severity": "medium",
+   "where": "memory.py selfcheck() / MEM_WRONG_READ",
+   "symptom": "selfcheck() is called once, from the report, never from the training loop, while every write resets selfcon to -1. It ran on 1875 reads and blocked zero. So \"67,858 entries excluded from EVERY retrieval\" is the state after a pass the report itself just ran \u2014 MEM_WRONG_READ gates the report's own evaluations, not the run. REPORTED, NOT CHANGED.",
+   "evidence": "chat L7527, L7172, L7262",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The domain cull budget was a minimum, not a fraction \u2014 it drove the domain population to one",
+   "severity": "critical",
+   "where": "self_organize.py domain manager, `max(1, int(DOM_CULL_FRAC * n))`",
+   "symptom": "`int(0.10 * n)` is 0 for any population under ten, so \"cull at most a tenth\" was \"cull at least one, every manage pass, forever\", and only `len(cent) <= 1` could stop it \u2014 which is exactly where it stopped, three separate times (`[manage @ 96500] merged 0 culled 1 -> 3 live domains` ... `-> 1 live domains`). Reproduced as a unit test: forty passes over a dead population settle at 9 with the fix, 1 without.",
+   "evidence": "chat L7711, L7764",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "\"Nobody fed this domain\" was the phase schedule talking, and the cull destroyed memory the floor forbids evicting",
+   "severity": "critical",
+   "where": "self_organize.py domain cull; calls mem.delete_src()",
+   "symptom": "`act` decays every pass and `last` only moves when a domain is fed, so under PHASE_SCHED [[0],[0],[1],[1]] every domain of the process not currently streaming trips `act < min_size AND stale` BY CONSTRUCTION within MANAGE_STALE steps of a switch. The cull then destroys entries MEM_SRC_FLOOR forbids EVICTING \u2014 while the lossless empty-cull directly above it DOES check whether the domain still owns memory. The branch that destroys everything had the weaker test. 145 culls with every guard either off or never reached looked the same as 145 healthy ones because the cull had a counter and its brakes had none.",
+   "evidence": "chat L7711, L7764",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "A local corpus would have been trained on and reported as the-stack-dedup",
+   "severity": "high",
+   "where": "longrun.sh pilot-add size check; fetch_big.py / fetch_local.py had no provenance record",
+   "symptom": "data_pilot/train/py held 57 MB of the owner's local Python. The size check would have accepted it, skipped the fetch entirely, and trained on the interpreter's source with `the-stack-dedup` in every line of the log, with nothing downstream able to detect it. Both fetchers now write `_fetch_manifest.json` and refuse a source mismatch \u2014 but directories that predate the manifest only get a warning, so the owner had to `mv` it by hand.",
+   "evidence": "chat L7764",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "fetch_big.py printed a --data-dir path that does not exist on the Hub, in the very warning fetch_local.py has a comment about not printing",
+   "severity": "medium",
+   "where": "fetch_big.py fallback advice, printed `--data-dir data/{a.domain}` i.e. `data/py`",
+   "symptom": "fetch_local.py carries the note \"Printing '--data-dir data/py' in the fallback advice below would hand the user a path that does not exist on the Hub, which is a worse failure than printing nothing\" \u2014 in the file that cannot download. The mapping now lives in fetch_big.py and fetch_local.py imports it.",
+   "evidence": "chat L7746, L7764",
+   "bug_class": "other"
+  },
+  {
+   "title": "The held-out tail was a contiguous block of the last repositories, not a sample",
+   "severity": "critical",
+   "where": "fetch_big.py wrote documents in arrival order; VAL_FRAC holds out the LAST 5% of each corpus",
+   "symptom": "The Stack is organised by repository, so py's held-out 5% was whichever repos the stream ended on. Signature in the numbers: py held out 5.061 \u00b1 0.560 vs in-stream 2.922 (gap 2.1 b/B, error bar 4x eng's); eng held out 2.273 \u00b1 0.092 vs in-stream 2.303 (no gap) \u2014 eng came from fineweb-edu, shuffled upstream. Every held-out number about py (the memorization check, the anchors, ACROSS THE RUN BOUNDARY, the continual-learning claim itself) was a measurement of that block.",
+   "evidence": "chat L7905, L7908, L7915",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The FABRIC node-mass line measured a batch of exactly one window and diagnosed a routing collapse from it",
+   "severity": "high",
+   "where": "self_organize.py FABRIC report line, measured stream[:WIN]",
+   "symptom": "Printed \"1 of 2214 nodes carry any, top node 100%\" under a note saying \"all mass on one node = collapsed\", in the SAME report as \"ROUTER SELECTION over the whole run: 2108 distinct experts | top 6.1%\". A single window puts its mass on one node whatever the router does, so the line could not have said anything else. The assistant's own previous-round conclusion that routing had collapsed was wrong. Now averages over EVAL_N windows and names its sample.",
+   "evidence": "chat L7905, L7908",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "A verdict tested against a number it did not print",
+   "severity": "medium",
+   "where": "self_organize.py ACROSS THE RUN BOUNDARY verdict",
+   "symptom": "`+0.149 +/- 0.092 HELD (inside the noise)` reads as a contradiction. The rule is 2\u03c3 and 0.184 appeared nowhere in the output. Both are printed now.",
+   "evidence": "chat L7905, L7908",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "A resume wrote its vocabulary over the file it read the parent's from, inside runs/",
+   "severity": "critical",
+   "where": "self_organize.py tokenizer save sites, both writing through TOKENIZER_PATH",
+   "symptom": "TOKENIZER_PATH had two jobs \u2014 read the parent's vocabulary, save this run's own. Harmless only while minting was broken; once the tokenizer-cap fix let Python mint 2048 tokens, pilot_gru_py-3 wrote 4096 merges over pilot A's 2048. The next resume died with `[resume] VOCABULARY MISMATCH -- refusing to load` naming the SAME file on both lines. This violated the owner's standing rule that runs/ must not be overwritten. Fix: a run's vocabulary goes beside its own checkpoint (SAVE_CKPT + \".dyntok.json\"), tok_path records where it was WRITTEN, and a resume with SAVE_CKPT off saves no vocabulary at all.",
+   "evidence": "chat L7915 (the failure), L8032, L8035",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "Second tokenizer clobber, latent: grid and seed arms all wrote to the shared data/dyntok.json",
+   "severity": "high",
+   "where": "sweep/grid/seed harness paths leaving TOKENIZER_PATH at its default",
+   "symptom": "Every arm wrote its vocabulary to one file and each checkpoint's tok_path named it, so any arm's checkpoint would restore embeddings indexed by whichever arm last wrote. pilot-add's own fallback already warned about that file (\"if any other pilot has run since, this vocabulary is that one's\"). Each arm now writes beside its own checkpoint; an unset TOKENIZER_PATH on a resume defaults to <RESUME>.dyntok.json.",
+   "evidence": "chat L8032, L8035",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "TOK_ANCHOR is armed and inert in every run and is still on the EFFECTIVE line",
+   "severity": "medium",
+   "where": "self_organize.py loss assembly; the anchor lives on ByteComposer which only exists under TOK_COMPOSE",
+   "symptom": "TOK_COMPOSE defaults to 0, so model.compose is None and the TOK_ANCHOR term has never once entered the loss \u2014 while TOK_ANCHOR=0.05 TOK_ANCHOR_TAU=4000 print on the EFFECTIVE line of every run in the project. DID IT FIRE reports `!! ZERO loss.TOK_ANCHOR 0 ARMED AND INERT`. A COUPLING line now states it; the knob itself was NOT fixed.",
+   "evidence": "chat L6590, L6727, L7051, L7183",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "levers.py caught the assistant reading a knob with a non-registry default to test whether it was set",
+   "severity": "low",
+   "where": "assistant's first attempt at the TOKENIZER_PATH \"was it set\" check",
+   "symptom": "`_env`/`_i`/`_f` raise SystemExit on call-site/registry mismatch; levers.py checks statically. \"levers.py caught my first attempt at the 'was it set' check \u2014 reading a knob with a non-registry default \u2014 which is what it exists for.\"",
+   "evidence": "chat L8035, L8032",
+   "bug_class": "other"
+  },
+  {
+   "title": "Two-domain run_verify_test reported as pending a result when it had been killed by the assistant's own timeout",
+   "severity": "low",
+   "where": "assistant's `timeout 1500` on a CPU run",
+   "symptom": "exit=124 at 25 minutes, right before the WRONGNESS block it exists to produce. \"I shouldn't have framed it as pending a result.\" Not re-queued; it is an A/B experiment rather than a regression test, so it blocks nothing.",
+   "evidence": "chat L6365, L6377",
+   "bug_class": "other"
+  }
+ ],
+ "junk": [
+  {
+   "what": "The claim that the old ACCUM gate took ZERO optimizer steps for a whole epoch on three of four offsets",
+   "why": "Retracted by the assistant after measuring. The simulation assumed flushes sit at a fixed residue mod BATCH_W; they do not \u2014 the batch also flushes at segment boundaries and clears at the epoch roll, so positions drift. Measured reality: old gate 55 om.step(), new gate 13 (chat L5606, L5627). The confirmed defect is that ACCUM accumulated nothing, not that it stepped zero times.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The conclusion that routing had collapsed in run 2 (\"1 of 2191 nodes carry any, top node 100%\")",
+   "why": "Retracted at chat L7905/L7908: \"I was wrong about the routing collapse last round.\" The FABRIC line measured a batch of exactly one window, which puts its mass on one node whatever the router does; the same report showed 2108 distinct experts with top 6.1% over the whole run. The DOMAIN and memory collapse in run 2 were real; the routing collapse was a measurement artifact.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The first local selftest.sh result (exit 0)",
+   "why": "Void \u2014 the assistant edited the script while bash was executing it, so the end-to-end phase never ran and it still exited 0. Superseded by a clean re-run from a frozen copy (selftest_frozen.sh), which passed (chat L6212, L6232, L6456).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The two-domain run_verify_test \"result\"",
+   "why": "Never produced one \u2014 exit=124 from the assistant's own timeout 1500. Explicitly not re-queued and not blocking (chat L6365, L6377).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The patch that landed in longrun.sh's `run)` branch instead of `add)`",
+   "why": "An unintended change from `replace(..., 1)` hitting the first occurrence in the file; `run)` only got VMAX made overridable and, having no $TOKENIZER_PATH, risked breaking under set -u. Corrected in the same turn (chat L5915-L5937).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The attempt to wrap the ~270-line held-out battery in an `else` branch",
+   "why": "Reverted deliberately \u2014 re-indenting 270 lines \"is exactly the kind of edit that introduces bugs\". Replaced by a named `_NoHeldOut` sentinel raise at the top of the existing try, which moves no code (chat L6499, L6520).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The A / B / C pilot plan (baseline English, then rehearsed vs PURE_ADD from the same checkpoint)",
+   "why": "Never executed as designed. B and C were blocked first by the gated dataset, then by the tokenizer-cap bug, then by the domain collapse, then by the vocabulary clobber; the owner ended the sequence with \"Lets work on the initiative instead.\" The PURE_ADD arm \u2014 the one that actually tests modularity \u2014 has still only been run on a CPU toy (chat L6327, L7141, L7915).",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`FETCH_ARGS=\"--data-dir data/python\"` as something the owner must set",
+   "why": "Superseded \u2014 pilot-add supplies `--data-dir data/python` itself now. An explicit FETCH_ARGS still wins, including to ask for the mixture (chat L7746, L7764).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Resuming from runs/long/pilot_gru_py-2",
+   "why": "Superseded \u2014 that checkpoint carries the collapsed domain population and the vocabulary that never minted. All later runs resume from pilot A (runs/long/pilot_gru) for like-for-like comparison (chat L7764).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The `100 * 1820 / max(1, flg)` precision clause with the pilot's caught-count hardcoded",
+   "why": "Removed. It printed 609% and asserted a precision on runs where none was measured (chat L6187, L6195, L6198).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The probe-vs-run guard `len(_used) * 10 < len(_uv)`",
+   "why": "Removed \u2014 it compared 32-window probe winners against whole-run winners, so it could not be satisfied. Replaced by membership plus the coupon-collector expectation (chat L7036).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Using data/dyntok.json as the default tokenizer path for grid/seed arms and unset resumes",
+   "why": "Replaced \u2014 each arm now writes beside its own checkpoint, and an unset TOKENIZER_PATH on a resume defaults to <RESUME>.dyntok.json (chat L8032).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Running \"nine python suites\" as the test gate",
+   "why": "Superseded \u2014 there are fourteen entry points; selftest.sh runs thirteen unit suites plus preflight, and the two suites written this session (corpus_test.py, resume_test.py, 185 checks) had been in none of them (chat L5997, L6094, L6122).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Reporting CPU results without saying they were CPU",
+   "why": "Corrected after the owner's \"I thought I was running them on GPU\". Every result the assistant produced in this container is CPU-only and cannot cover the AMP path, TF32 matmul behaviour, or cuDNN nondeterminism (chat L6126, L6166).",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The suggestion to add AMP=bf16 to pilot C only",
+   "why": "Never acted on; C never ran. The three pilots ran fp32 by default because `pilot` does not set AMP (chat L6377).",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "NEVER edit a shell script while bash is executing it \u2014 bash reads scripts incrementally by byte offset, so an insertion shifts the file under the running interpreter. It resumed mid-token, printed `line 101: ts:: command not found`, and exited 0 with its main phase never running. Run long shell suites from a frozen copy.",
+   "why": "It produced a false PASS in the test harness itself, while auditing for exactly that failure mode. An exit code of 0 on a suite whose main phase silently did not execute is the project's canonical bug class.",
+   "evidence": "chat L6212, L6217, L6232"
+  },
+  {
+   "item": "Never use `pkill -f <pattern>` where the pattern can match the killer's own wrapper command line.",
+   "why": "`pkill -f \"DATA_MODE=synthetic\"` matched its own wrapper and killed the run it had just launched, producing three exit-144s that looked like crashes of the code under test.",
+   "evidence": "chat L6446, L6456"
+  },
+  {
+   "item": "The owner's GH200 is the only GPU. The assistant's container has no GPU at all (nvidia-smi missing, torch.cuda.is_available() False), 4 CPU cores, x86_64. `download.pytorch.org` is blocked; `pypi.org` and `files.pythonhosted.org` are allowed, so `pip install torch` works and the real system CAN be exercised on CPU.",
+   "why": "Everything the assistant verifies locally is CPU-only. It structurally cannot cover the AMP path (guarded on DEV == \"cuda\"), TF32 matmul behaviour, cuDNN nondeterminism, or numerical differences that could move a threshold a verdict is read off.",
+   "evidence": "chat L6021, L6129, L6166, L5463, L5627, L6411"
+  },
+  {
+   "item": "The checkpoint loads with `map_location=DEV`, so widen_prefix's source and destination tensors are always on the same device \u2014 the widening cannot cross devices. `torch.quantile` in memory.py is CUDA-sensitive but sits behind WRITE_ADAPTIVE=0.",
+   "why": "This is the specific reason CPU verification of the resume/widening path is trustworthy, and the two exceptions worth naming.",
+   "evidence": "chat L6137, L6163, L6166"
+  },
+  {
+   "item": "`SELFTEST_DEVICE=cuda bash selftest.sh` is the GPU test entry point ($DEVICE is deliberately ignored by selftest); `bash preflight.sh` is the fresh-box check. selftest.sh must include resume_test.py and corpus_test.py; it deliberately EXCLUDES run_verify_test.py and verify_console_test.py because they are A/B experiments (\"which gate is better\"), not regression tests \u2014 and that omission is now written into the file as a decision.",
+   "why": "A test nobody runs is a test that does not exist. 185 checks sat unwired for a whole session.",
+   "evidence": "chat L6070, L6094, L6122, L6166"
+  },
+  {
+   "item": "preflight.sh's END-TO-END SMOKE is the SOLE caller of DATA_MODE=synthetic, and its stated purpose is \"the only check that proves the product path runs on this arch\". selftest.sh trains on real data, so it passes on the same box in the same minute a synthetic-path bug is killing preflight.",
+   "why": "The one instrument aimed at a fresh box was the only thing failing, and it printed \"FAILED on CUDA\" for a defect with nothing to do with the architecture \u2014 which on a GH200 sends you hunting wheels and drivers. Three separate bugs (VALC, IndexError, CORP) lived on that path, one behind the other.",
+   "evidence": "chat L6243, L6290, L6310, L6528"
+  },
+  {
+   "item": "Token minting is APPEND-ONLY \u2014 an id never changes meaning, which is the property prefix-widening already rests on. A clobbered .dyntok.json is therefore recoverable exactly by truncating merges to the parent's count; verified by round trip that the truncated file segments identically on unseen bytes.",
+   "why": "This is what made the runs/ overwrite recoverable rather than fatal, and it is the invariant the whole widening design depends on.",
+   "evidence": "chat L8032, L8035"
+  },
+  {
+   "item": "A checkpoint's vocabulary is part of the checkpoint. A run's vocabulary belongs beside its own checkpoint (SAVE_CKPT + \".dyntok.json\"); tok_path must record where it was WRITTEN, not where it was read; a resume with SAVE_CKPT off must save no vocabulary at all, because the only file it could write is its parent's.",
+   "why": "TOKENIZER_PATH doing double duty (read parent / save own) caused the runs/ overwrite that violated the owner's one absolute constraint.",
+   "evidence": "chat L8032, L8035"
+  },
+  {
+   "item": "There are TWO preallocated geometries and they must be reasoned about separately: the fabric slot pool (FAB_NMAX \u2192 A, B, SRC_p, K_p, cent) and the softmax width (VMAX \u2192 emb.weight, head.weight, head.bias). emb/head/bias are in the MODEL optimizer, so widening the softmax invalidates om's moments exactly as widening the fabric does. FAB_RANK and FAB_DK are INNER dimensions \u2014 they cannot be prefix-widened and a mismatch is fatal by design.",
+   "why": "Treating the two geometries as one produced a latent crash at the first om.step(), and gating three unrelated derivations behind `if [ -z \"${FAB_N0:-}\" ]` silently reverted two of them.",
+   "evidence": "chat L5849, L5856, L5942, L5985"
+  },
+  {
+   "item": "A resume harness must inherit n, cap, V (vocabulary), rank and dk from the checkpoint \u2014 all five, not the three that can be widened. And it must resolve TOKENIZER_PATH the way pilot-add does, or the child seeds a fresh vocabulary and the resume is refused after the geometry has already been computed and thrown away.",
+   "why": "`longrun.sh add` \u2014 \"the one that runs the real experiment\" \u2014 could not resume at all until this was fixed.",
+   "evidence": "chat L5871, L5942, L5985"
+  },
+  {
+   "item": "VAL_FRAC holds out the LAST slice of each corpus, so the held-out side is a SAMPLE only if the corpus was written in no particular order. The Stack is organised by repository and C4 by crawl; fineweb-edu is shuffled upstream. Corpora must be written through a shuffle reservoir (fetch_big.py --shuffle-buffer, default 10000, seed recorded in _fetch_manifest.json) or every held-out number about them is a measurement of one block.",
+   "why": "py's held-out 5.061 \u00b1 0.560 against an in-stream 2.922 (error bar 4x eng's) was the signature. Every held-out figure about py \u2014 memorization check, anchors, ACROSS THE RUN BOUNDARY, the continual-learning claim \u2014 was affected.",
+   "evidence": "chat L7865, L7905, L7908, L7915"
+  },
+  {
+   "item": "Corpora must be provenance-stamped. Both fetchers now write `_fetch_manifest.json` and refuse a source mismatch \u2014 but directories that predate the manifest only get a warning, so a pre-existing data_pilot/train/py must be moved by hand before a fetch that is supposed to replace it.",
+   "why": "57 MB of the owner's local Python would have been trained on and labelled `the-stack-dedup` in every line of the log, with nothing downstream able to detect it.",
+   "evidence": "chat L7764"
+  },
+  {
+   "item": "`bigcode/the-stack-dedup` needs `--data-dir data/python` (pilot-add now supplies it) because The Stack is organised by language as directories; without it the pull is every language mixed together labelled 'py'. Both code presets in fetch_big.py are GATED (HF_TOKEN plus per-dataset terms accepted in a browser); fetch_local.py is the no-account path, invoked as `bash longrun.sh pilot-add py local 0.06`.",
+   "why": "Two pilot-add attempts died on the gated dataset with a correct-looking token; the failure message did not mention the no-account path the repo already ships.",
+   "evidence": "chat L7039, L7141, L7746, L7764"
+  },
+  {
+   "item": "RATE_EVERY gates the per-process curve probe as well as the rate meter. Setting RATE_EVERY high to suppress smoke-run output silently removes the table you are trying to verify.",
+   "why": "The curve fix went unverified on a live table for a whole round because every smoke run set RATE_EVERY=100000.",
+   "evidence": "chat L5743, L5810"
+  },
+  {
+   "item": "PHASE_SCHED for two corpora defaults to [[0],[0],[1],[1]] \u2014 rehearsed. PURE_ADD=1 gives 1|1|1|1. On a CPU toy the two arms disagreed by 10x (+0.046 \u00b1 0.161 HELD vs +0.444 \u00b1 0.189 WORSE), and the exposure table confirmed English drew 0.00 MB/epoch in the pure arm while still being scored across the boundary. Only the pure arm asks the question goal B is about; the default arm's \"no forgetting\" may be rehearsal doing the work.",
+   "why": "Every real English-HELD result in this span (+0.029, +0.149) came from the REHEARSED arm. The modularity claim has never been tested at pilot scale.",
+   "evidence": "chat L5712, L5719, L6327, L7527"
+  },
+  {
+   "item": "The default PHASE_SCHED also breaks the domain manager: `act` decays every pass and `last` only moves when a domain is fed, so every domain of the non-streaming process trips `act < min_size AND stale` by construction. Evict first, then cull \u2014 never cull in order to evict; a domain still holding MEM_SRC_FLOOR's worth of entries must not be culled, and the brake must self-release once eviction genuinely drains it.",
+   "why": "This plus the DOM_CULL_FRAC minimum destroyed 143 of 144 domains and left a 200,000-entry store under one source id.",
+   "evidence": "chat L7711, L7764"
+  },
+  {
+   "item": "`max(1, int(FRAC * n))` is a MINIMUM, not a fraction, for any n below 1/FRAC. Audit every budget expression of that shape.",
+   "why": "DOM_CULL_FRAC=0.10 meant \"cull at least one, every pass, forever\" below n=10, and nothing but len(cent)<=1 could stop it. Forty passes settle at 1 without the floor and 9 with it.",
+   "evidence": "chat L7711, L7764"
+  },
+  {
+   "item": "Every arming test in the DID IT FIRE audit must be evaluated against the run's own history, not against a report-time snapshot. Three rows failed this way: tokenizer.mint asked \"is there room now\" (baseline is TOK_V0), memory.wrong_block armed on `(selfcon>=0).sum()>10` when every write resets selfcon to -1, and lr.restart said \"nothing to restart\" over a run that had restarted.",
+   "why": "The audit that exists to catch silent mechanisms was itself printing confident falsehoods, in the same report as the numbers contradicting them.",
+   "evidence": "chat L7036, L7141, L7521, L7527"
+  },
+  {
+   "item": "Every guard must be expressed in the same units as the thing it guards. Two failed on this: `len(_used) * 10 < len(_uv)` compared 32-window probe winners with whole-run winners; `if ninj > 0 and len(procs) < 2` used set(labels) where the sampler needs window-aligned positions. Build the candidate list first and test IT, so the guard and the consumer cannot disagree.",
+   "why": "Both guards were written for the exact failures they then failed to prevent, and one voided every SPECIALIZATION verdict on a real run.",
+   "evidence": "chat L7036, L6479, L6520"
+  },
+  {
+   "item": "Never leave a constant from one investigation in a general report line. `100 * 1820 / max(1, flg)` printed 609%.",
+   "why": "Same defect class as a counter that never fires \u2014 it runs, it prints, and what it prints is about a different run.",
+   "evidence": "chat L6198"
+  },
+  {
+   "item": "Diagnostics must name their sample size. The FABRIC node-mass line measured stream[:WIN] \u2014 one window \u2014 and printed \"top node 100%\" under a note reading \"all mass on one node = collapsed\", producing a false routing-collapse diagnosis in the same report as \"2108 distinct experts | top 6.1%\".",
+   "why": "It caused the assistant to report a collapse that had not happened; the fix averages over EVAL_N windows and names the sample.",
+   "evidence": "chat L7905, L7908"
+  },
+  {
+   "item": "The ACROSS THE RUN BOUNDARY verdict rule is 2\u03c3, and both the drift and the 2\u03c3 figure must be printed. `+0.149 +/- 0.092 HELD` reads as a contradiction until 0.184 is on the page.",
+   "why": "A verdict that tests against a number it does not print cannot be checked by a reader.",
+   "evidence": "chat L7905, L7908"
+  },
+  {
+   "item": "\"Does the memory earn its keep?\" (compose_test) draws from `stream` \u2014 the text the store was written from \u2014 so it is partly a memorisation score. The held-out pair must be printed beside it. The pilot showed +0.212 on the training stream and -0.100 on held-out, 127 lines apart, and two generation seeds produced the identical memorised span.",
+   "why": "The flattering number was the headline and the honest one was buried.",
+   "evidence": "chat L7133, L7141"
+  },
+  {
+   "item": "levers.py enforces the _SPEC knob registry statically and `_env`/`_i`/`_f` raise SystemExit on a call-site/registry mismatch \u2014 including reading a knob with a non-registry default to test whether it was set. preflight.sh's knob trap separately verifies all 83 documented knobs are READ by self_organize.py.",
+   "why": "levers.py caught a real mistake during the tokenizer fix; this is the mechanism the owner's \"levers must be cleanly delineated and not affect each other\" requirement should build on.",
+   "evidence": "chat L8035, L6235, L6536"
+  },
+  {
+   "item": "On the owner's Grace box, `export OMP_NUM_THREADS=8 MALLOC_ARENA_MAX=4 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` must be in the launch, not the shell history. `export` prints nothing on success \u2014 verify with `echo $OMP_NUM_THREADS`.",
+   "why": "Without them torch spawns 64 intra-op threads for batch-1 work and glibc creates up to 512 arenas; the owner asked why export said nothing.",
+   "evidence": "chat L6235, L6314, L6317, L6536"
+  },
+  {
+   "item": "`git pull origin rm-predict` before every run on the owner's box. The owner's checkout was ~340 lines behind at one point and the resulting traceback pointed at a line number that no longer existed in the assistant's copy.",
+   "why": "It made a fixed bug look live and cost a round of diagnosis.",
+   "evidence": "chat L6377, L6402, L7157"
+  },
+  {
+   "item": "The owner re-uploads files; verify by md5 and line count before analysing, and name the pre-fix markers that distinguish an old log from a new one.",
+   "why": "One upload was byte-identical to the previous one and predated all the pushed fixes; the assistant caught it by hash rather than by reading.",
+   "evidence": "chat L7157"
+  },
+  {
+   "item": "Three items were REPORTED AND DELIBERATELY NOT FIXED and must survive into the bugs/issues list: MEMORY PRESSURE cannot reach its threshold on this configuration (probation is 82% of the store, so the signal is pinned at ~0 and its silence reads as health); MEM_WRONG_READ gates only the report's own evaluations because selfcheck() is called once from the report while every write resets selfcon to -1; TOK_ANCHOR has never once entered the loss because it is gated on TOK_COMPOSE=0 while printing on the EFFECTIVE line of every run.",
+   "why": "All three are live armed-but-inert mechanisms that a rebuild would otherwise re-inherit silently.",
+   "evidence": "chat L7036, L7141, L7527, L6727"
+  },
+  {
+   "item": "AMP=fp16 is REFUSED, not fixed, and on purpose: adding a GradScaler changes the optimizer step, which is now gated on accumulated backward passes, and an unscale at the wrong point in that cycle silently breaks accumulation instead. bf16 is what an H100/GH200 wants anyway.",
+   "why": "This is a deliberate deferred decision with a stated reason, not an oversight \u2014 it must not be quietly \"fixed\" in a rebuild without redoing the ACCUM interaction.",
+   "evidence": "chat L6152, L6163, L6166"
+  },
+  {
+   "item": "The open weakness on goal B, stated by the assistant and never answered by the owner: \"SPECIALIZATION still reads INTERCHANGEABLE: 2108 experts get selected but they don't differ from a random split of the same windows. Capacity is being allocated; competence isn't differentiating.\" The assistant asked for a direction call before touching the merge criterion or MEM_CAP and did not get one.",
+   "why": "It is the standing open technical question at the moment the initiative was issued.",
+   "evidence": "chat L7527, L8035"
+  }
+ ],
+ "open_questions": [
+  "preflight.sh reported \"cores: 64\" on the owner's box at chat L6235 and \"cores: 8\" at chat L6536, with section 7 headed \"72 cores is a LIABILITY\". Whether the owner's box has 64/72 physical cores and preflight is reading an affinity- or OMP-constrained count, or whether the owner moved to a differently-sized instance, is not determinable from the transcript.",
+  "Run 3 printed two different verdicts about the same phenomenon: ACROSS THE RUN BOUNDARY said \"eng +0.149 +/- 0.092 HELD (inside the noise)\" while RETENTION said \"process 0 (eng): 2.162 -> 2.303 drift +0.141 ... DRIFTING -- earlier material is measurably worse\" (chat L7786). Whether this is a genuine inconsistency between two sections, or two legitimately different measurements (boundary probe vs earliest-vs-latest windows within the run), was never resolved in this span.",
+  "The live-domain count for run 3 is reported as \"twelve live domains\" in the commit message (chat L7905), \"live domains 8 min, oscillating 8-22\" in the chat summary (chat L7908), and \"12 live domains\" in the final status (chat L8035). Which figure is canonical is not stated.",
+  "Pilots B and C as originally designed (rehearsed vs PURE_ADD from the same pilot-A checkpoint, at pilot scale) were never run. The 10x arm disagreement remains a CPU-toy result only. Whether the owner still wants that comparison after the rework is unknown.",
+  "Whether the owner's data_pilot/train/py was ever re-pulled with the shuffle reservoir. The last attempt (`mv data_pilot/train/py data_pilot/train/py.arrival-order` then pilot-add) died at VOCABULARY MISMATCH before training, so py's held-out 5.061 has never been re-measured on a properly-sampled cut.",
+  "Whether the vocabulary recovery command the assistant supplied (truncating runs/long/pilot_gru.dyntok.json merges to the first 1792 into a .recovered.json) was ever executed on the owner's box. No output confirming it appears in this range.",
+  "The exact value/handling of the owner's HF_TOKEN and whether it is exported persistently or per-shell is not stated; the assistant's instructions always include `export HF_TOKEN=hf_...` as a placeholder.",
+  "Whether `preflight.sh` came back all-PASS on the owner's GH200 after commit dae4744 (the VALC + IndexError + CORP fixes). The assistant asked for a re-run; no post-dae4744 preflight output from the owner appears in this range.",
+  "Whether the assistant's local synthetic-path fix was ever confirmed on the owner's CUDA box, as opposed to the assistant's CPU container where it reached [rate @ 50] and [rate @ 100].",
+  "How \"levers should not affect each other\" is to be reconciled with genuinely coupled quantities the code documents as coupled (EPOCHS setting both run length and the cosine horizon; VMAX bounding the tokenizer cap; FAB_PRESSURE times cap setting the population equilibrium). The owner's requirement may mean clean ownership and explicit declared coupling rather than literal independence \u2014 this was not clarified.",
+  "Whether the ~145 archive/ files and the 66 notes/ files are to be deleted, migrated, or left in place under \"All files should be new. Don't use memory as basis for everything\". The assistant began surveying rather than deleting; no decision was recorded before the range ends.",
+  "What \"Benchmark as a new branch\" means precisely \u2014 whether rm-predict-DC is to carry the regenerated system as a benchmark baseline, or is simply the working branch for the rework. The assistant created the branch without asking."
+ ]
+}

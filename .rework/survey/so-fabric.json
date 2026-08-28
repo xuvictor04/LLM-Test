@@ -1,0 +1,1251 @@
+{
+ "area": "so-fabric",
+ "summary": "self_organize.py 1500-3600 holds the Fabric expert population and its selective machinery. Fabric (1629-2875) preallocates FAB_NMAX low-rank experts as three dense tensors (A, B, cent) so growth never reallocates and the optimizer never sees new parameters; routing identity (K, SRC) is DERIVED from each expert's full weights through a shared embedder `eemb`, with `edec` as its inverse so the router can decode a query into a newborn expert (spawn-by-specification). Routing has two summed terms \u2014 a grounded cosine of the signature to each expert's owned centroid region, and a learned bilinear identity term \u2014 plus HALT as a real operator on both paths. There are three distinct forward paths: society (SOCIETY=1, one hop, blend at the prediction), transition chaining (CHAIN_ROUTE=transition, learned successor matrix R, per-hop vote), and the DEFAULT soc-loop (CHAIN_ROUTE=soc, re-route from scratch each hop with the current state in the query). Selection is: PlateauGrowth (2877-3016) for ramp/regression/stall growth, Fabric.manage (2196-2292) for a sustained-error cull at any occupancy plus a utilization cull behind a capacity-pressure gate, replicate-with-mutation and rank-slice crossover in grow(), FAB_RESCUE as a mutation-instead-of-death, and exploration/discovery to keep cold experts reachable. DomainAssembler (3405-3706) is the domain partition with its own merge/cull/recurrence-fold. The recurring failure mode found here is not absent mechanism but mechanism wired to the non-default path: the load-balance loss, the leave-one-out counterfactual, per-hop spawn and deep supervision are all computed on the transition path and are inert or meaningless under the shipped CHAIN_ROUTE=soc default.",
+ "facts": [
+  {
+   "claim": "FABRIC defaults ON (1) and SOCIETY defaults OFF (0), so the default forward path is Fabric.forward (chaining), not society().",
+   "evidence": "self_organize.py:1611 `FABRIC = bool(_i(\"FABRIC\", 1))`; :1619 `SOCIETY = bool(_i(\"SOCIETY\", 0))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Within Fabric.forward the default sub-path is the soc-loop, not the transition matrix: CHAIN_ROUTE defaults to \"soc\".",
+   "evidence": "self_organize.py:1843 `s.loop_soc = (_env(\"CHAIN_ROUTE\", \"soc\") == \"soc\")`; registry :149 `\"CHAIN_ROUTE\": (\"env\", \"soc\")`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The soc-loop branch returns early at the end of its hop loop, before every line of the transition-matrix path.",
+   "evidence": "self_organize.py:2694 `return h, _dep2 / steps, _mass2 / steps, h.new_zeros(())`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The population is three preallocated tensors sized to cap = max(n0, FAB_NMAX); growth only advances n_live, so parameter identity never changes and nothing is added to the optimizer.",
+   "evidence": "self_organize.py:1657-1661; :2151 `return []  # rows of EXISTING Parameters`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every expert is born an identity map because B is zero-initialised for all cap rows.",
+   "evidence": "self_organize.py:1660 `s.B = nn.Parameter(torch.zeros(cap, s.r, d))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "cent is a registered buffer (so it is saved and moved to device), one region per expert slot.",
+   "evidence": "self_organize.py:1662 `s.register_buffer(\"cent\", F.normalize(torch.randn(cap, sig_d), dim=-1))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Routing keys K and source marks SRC are computed from each expert's FULL flattened weights (2*d*r numbers) by `eemb`, cached on the FAB_EMB_EVERY cadence, live within a step and detached across steps.",
+   "evidence": "self_organize.py:1947-1953; :1942-1946",
+   "confidence": "verified"
+  },
+  {
+   "claim": "With FAB_DERIVE_IDS=1 (default) the free parameters K_p and SRC_p are never read for routing; the K/SRC properties exist only so old write sites (grow) still work.",
+   "evidence": "self_organize.py:1930 `if not s.derive_ids: return s.K_p[:N], s.SRC_p[:N]`; :2008-2016 property K/SRC docstring \"simply unused while FAB_DERIVE_IDS=1\"; :2143-2145 writes",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The default depth budget is steps = min(depth_now, max_steps, 2 + N//2); with CHAIN_CURRIC=0 depth_now is max_steps (FAB_STEPS=4), so 4 hops run on every window.",
+   "evidence": "self_organize.py:1802 `s.depth_now = int(_env(\"CHAIN_DEPTH0\",1)) if s.curric else max_steps`; :2609",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_MIN_STEPS is force-zeroed whenever CHAIN_VOTE=1 (the default), and an explicit non-zero env value raises SystemExit rather than being silently discarded.",
+   "evidence": "self_organize.py:1860-1868",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Because min_steps is 0 under the default CHAIN_VOTE=1, the `if _t_ < s.min_steps` HALT-blocking block in the transition path can never execute.",
+   "evidence": "self_organize.py:1868 `s.min_steps = 0`; :2713-2715",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The load-balance quantity `bal` is only accumulated in the transition branch; the soc-loop returns a fresh zero scalar in its place.",
+   "evidence": "self_organize.py:2717 `bal = bal + N * (nm.mean(0) ** 2).sum()` (transition only); :2694 returns `h.new_zeros(())`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The training loss adds FAB_BALANCE * _bw * _bal where _bal is that fourth return value, so on the default path the balance term is exactly 0 and carries no gradient.",
+   "evidence": "self_organize.py:7031 `tot = loss + ((PONDER * _pw) * _dep + FAB_BAL * _bw * _bal if FABRIC else 0.0)`; :6850 `h, _dep, _mass, _bal = fab(...)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`use` (utilization) and `uage` (use-age/grace clock) are incremented by the same amount in the same loop, so for any expert that has never been rescued they are numerically identical.",
+   "evidence": "self_organize.py:2048-2051 `s.use[_e] = s.use.get(_e,0.0)+1.0; s.uage[_e] = s.uage.get(_e,0.0)+1.0`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_RESCUE defaults to 0.0, so the one path that makes use and uage diverge (rescue keeps use, zeroes uage) never runs by default.",
+   "evidence": "self_organize.py:694 `FAB_RESCUE = _f(\"FAB_RESCUE\", 0.0)`; :2280-2290",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Utilization is credited only to the rank-0 (argmax) expert of each window, on every path: soc-loop, transition, and society (via the caller).",
+   "evidence": "self_organize.py:2647 `s.bump_use(_i2[:, 0].tolist())`; :2759 `s.bump_use(_ci[:, 0].tolist())`; :6866-6872 `_tops = _w.argmax(-1).tolist()` then `fab.note_use(_tops)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`use` is never decayed anywhere in Fabric (unlike ExpertRouter, which decays by 0.9 each manage), so it is a lifetime count.",
+   "evidence": "grep shows bump_use (self_organize.py:2050) as the only increment and no decay; contrast :3110 `for i in s.use: s.use[i] *= 0.9`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The utilization cull ranks within the eligible set only, and eligibility is use_age >= grace \u2014 which, given use == uage, means the ranking key and the eligibility key are the same number.",
+   "evidence": "self_organize.py:2250-2251 `_elig = [i ... if s.use_age(i) >= grace]` then `order = sorted(_elig, key=lambda i: s.use.get(i, 0.0))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The utilization cull's budget is `max(1, int(cull_frac * len(_elig)))`, so whenever the pressure gate is open and any expert is eligible, at least one expert is removed per manage pass regardless of the fraction.",
+   "evidence": "self_organize.py:2263",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The DomainAssembler cull deliberately removed exactly that max(1, ...) floor and documents it as a ratchet that drove a population to one member; the Fabric cull still has it.",
+   "evidence": "self_organize.py:3653-3667 `for d in order[:int(DOM_CULL_FRAC * len(s.cent))]` with the ratchet comment; vs :2263",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The capacity-pressure gate is open at the shipped defaults: n_live starts at FAB_N0=2048 against cap 4096 = 0.50 occupancy, and FAB_PRESSURE is 0.45.",
+   "evidence": "self_organize.py:823-836 cull_gate_open; :2234; registry :195-196, :209",
+   "confidence": "verified"
+  },
+  {
+   "claim": "manage() has two independent removal routes: a sustained-error route that runs at any occupancy, and the utilization route behind the pressure gate; FAB_RESCUE and the utilization spare both live inside the gated branch.",
+   "evidence": "self_organize.py:2235-2243 (error route, then `if not s.cull_ran: return`); :2268-2291",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`failing()` returns False whenever the fast error EMA exceeds the slow one by more than shift_tol, so an adapting expert cannot be culled by the error route by construction.",
+   "evidence": "self_organize.py:2189-2194",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The marginal-contribution counterfactual on the chaining path calls fab(..., ban1=_n3) \u2014 and the soc-loop never applies ban1 to any logit; it only uses it to skip ground_update, use recording, div and _wrun.",
+   "evidence": "self_organize.py:2599 `if ban1 is not None: _elg[:, ban1] = float(\"-inf\")` applies to `c`, which the soc branch never reads after :2603; the loop at :2618-2694 references ban1 only in `if ban1 is None` guards (2634, 2637, 2645, 2656, 2687)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The counterfactual walk is therefore identical for every candidate expert on the default path, and its logits come from model.head(h) while the real loss came from the vote logits fab._votelg.",
+   "evidence": "self_organize.py:6991-6993 `_h3 = fab(model.encode(x), ..., ban1=_n3)[0]` then `F.cross_entropy(model.head(_h3)...) - loss`; :6896-6897 `lg = fab._votelg`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The society branch of the same measurement explicitly re-blends through halt_blend so the counterfactual matches the function that produced `loss`; the chaining branch does not.",
+   "evidence": "self_organize.py:6968-6970 comment + `_lg2 = halt_blend(model, fab, h, _lg2)`; vs :6992",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fab.contrib is the primary selection signal: it gates both cull routes' spare and is the fitness used to pick a replication parent.",
+   "evidence": "self_organize.py:2240; :2269-2270; :2084 `_fit = {i: (s.contrib[i] if i in s.contrib else 0.0) ...}`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "grow()'s parent fitness falls back to 0.0 when no contribution has been measured, not to utilization, although the comment above it says \"Fitness = marginal contribution where measured, utilization otherwise\".",
+   "evidence": "self_organize.py:2073 comment vs :2084 `_fit = {i: (s.contrib[i] if i in s.contrib else 0.0) for i in range(s.n_live)}`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The novelty term on the grounded router is reduced to a per-row scalar and added to all N expert logits identically, so it cannot change which expert is selected \u2014 it can only shift experts against HALT.",
+   "evidence": "self_organize.py:2361 `logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The HALT logit on both chaining paths is always the normalized cosine / route_t, while the expert learned term is the RAW dot product when FAB_KEY_NORM=0 (the default), so the two competing operators are on different scales.",
+   "evidence": "self_organize.py:2359-2360 `... if FAB_KEY_NORM else (_qq @ _Kd.t())`; :2595-2597 and :2626-2628 always normalized; contrast _with_halt :2440-2441 which does respect FAB_KEY_NORM",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`nov` at the training call site is a single scalar (the previous step's mean surprise) expanded across the batch, so novelty is identical for every window in a batch.",
+   "evidence": "self_organize.py:7495 `if FABRIC: _fab_nov = surprise.mean()`; :6846 and :6850 `_fab_nov.expand(x.size(0))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_DISCOVER's recipient is chosen with min() over use, which returns the LOWEST-INDEXED expert among ties, and discovery does not credit use \u2014 so with most of the population at use=0 the same slot receives every discovery, each time overwriting half of its centroid.",
+   "evidence": "self_organize.py:2421-2426 `_cold = min(range(N), key=lambda i: s.use.get(i, 0.0))` then `s.cent[_cold] = F.normalize(0.5*s.cent[_cold] + 0.5*_g1)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The exploration cold set is `sorted(range(N), key=use)[:max(8, N//16)]`; Python's sort is stable, so with ties at 0.0 the set is deterministically the lowest-indexed unused experts.",
+   "evidence": "self_organize.py:2504, :2638, :2735",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Exploration substitutes the LAST rank slot and gives the cold expert its own (bottom-of-distribution) routing mass, and use is credited only to rank 0, so an explored expert receives near-zero weight and never accrues use-age from being explored.",
+   "evidence": "self_organize.py:2643 `_i2[_r, -1] = random.choice(_cold); _v2[_r, -1] = _wn[_r, _i2[_r, -1]]`; :2647 credits `_i2[:, 0]` only",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Exploration and eval are correctly separated: all three exploration blocks are gated on learn_regions, so an evaluation pass no longer routes 15% of windows to a cold expert.",
+   "evidence": "self_organize.py:2503, :2637, :2734",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ground_update moves the top-FAB_CENT_TOPK centroids (default 8) toward the batch-mean signature, share-weighted, and it runs once per hop on the soc path \u2014 8 centroid writes per hop, 4 hops per step.",
+   "evidence": "self_organize.py:2410-2417; :2634 `if s.grounded and ban1 is None and learn_regions: s.ground_update(gist, _wn, N)` inside the hop loop",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ground_update round-trips each updated centroid through the host: it reads `.to(gist.device)` and writes back `.cpu()`, while `cent` is a buffer that lives on DEV because the whole Fabric is .to(DEV).",
+   "evidence": "self_organize.py:2417 `s.cent[_jj] = F.normalize(... ).cpu()`; :4172 `Fabric(...).to(DEV)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The per-hop router mass vector (N+1 entries) is accumulated on every hop and returned as the third value, and the caller assigns it to `_mass` and never reads it.",
+   "evidence": "self_organize.py:2632 `_mass2 = _mass2 + _cc.mean(0).detach()`; :6850 `h, _dep, _mass, _bal = fab(...)` and no later read of that `_mass`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_hopq` (per-hop router queries) and `_hops` (per-hop states) are appended only in the transition branch, and are reset only at line 2705 which the soc branch returns before reaching.",
+   "evidence": "self_organize.py:2705 `if ban1 is None: s._hops = []; s._hopq = []`; :2819 `_hops.append`; :2837 `_hopq.append`; soc return at :2694",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The mid-chain spawn is gated on `fab._hopq` being non-empty, so under CHAIN_ROUTE=soc it can never fire.",
+   "evidence": "self_organize.py:7337 `if FAB_SPAWN and fab._hopq and fab.n() < _cap_fab[0]`; :1810 `s._hopq = []`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Deep supervision is gated on len(fab._hops) > 1, so CHAIN_SUP is unreachable under CHAIN_ROUTE=soc even if set above its 0.0 default.",
+   "evidence": "self_organize.py:7003 `if FABRIC and not SOCIETY and fab.sup_w > 0 and len(getattr(fab, \"_hops\", [])) > 1`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "maybe_deepen returns immediately unless CHAIN_CURRIC=1, which defaults to 0, so `deepened` is always empty and staged depth never runs in a default run.",
+   "evidence": "self_organize.py:2522 `if not s.curric or s.depth_now >= s.max_steps: return None`; registry :145 `\"CHAIN_CURRIC\": (\"env\", 0)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DIV_W now defaults to 0.02 and the soc-loop computes its own distinctness term, so the expert-disagreement pressure IS active on the default path (it was a documented silent no-op before).",
+   "evidence": "self_organize.py:1813 `s.div_w = float(_env(\"DIV_W\", 0.02))`; :2656-2671; :7035-7036",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_EC_W (the expert-choice deficit bonus) defaults to 0.0, so that whole allocation-by-construction block is inert unless explicitly set.",
+   "evidence": "self_organize.py:1922 `s.ec_w = float(_env(\"FAB_EC_W\", 0.0))`; :2390 `if s.ec_w > 0.0 and N > 1:`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The soc-loop's hop mixture is a convex combination by construction: alive starts at 1, each round takes alive*p_halt and passes alive*(1-p_halt), with the never-halted remainder taking the last round's logits.",
+   "evidence": "self_organize.py:2679-2685",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The soc-loop does NOT scale the residual state update by the surviving (non-halted) mass; the transition path does (`_alive`), so HALT shrinks the state update only on the non-default path.",
+   "evidence": "self_organize.py:2683 `h = s.norm(h + s.alpha * (_cw2[...] * _O2).sum(1) - s.alpha * h)`; contrast :2813-2814 `_alive = nm.sum(-1,...)` then `h = s.norm(h + s.alpha * _alive * (upd - h))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The convex-combination invariant check (`[chain-vote] !! hop weights sum to ...`) exists only in the transition-vote branch; the soc-vote branch has no such check.",
+   "evidence": "self_organize.py:2857-2863 inside `if _vote:` of the transition path",
+   "confidence": "verified"
+  },
+  {
+   "claim": "halt_ema (and _record_halt, _with_halt, route_w, halt_blend, s._halt) are reached only on the society path; the chaining paths report halt through _mass_ema instead.",
+   "evidence": "self_organize.py:2475 route_w is called only from society(); :8410-8422 the report gates halt_ema on SOCIETY and _mass_ema on not SOCIETY",
+   "confidence": "verified"
+  },
+  {
+   "claim": "remove() swaps the last slot down across A, B, K, SRC, cent and renumbers use, uage, born, ef, es, births, comp, contrib, dom_of and rescued \u2014 but not parent or mutscale.",
+   "evidence": "self_organize.py:2545-2563",
+   "confidence": "verified"
+  },
+  {
+   "claim": "When j == last, remove() pops only comp and contrib; use/uage/born/ef/es/births entries for that index are left behind, and grow() reusing the slot clears use/comp/contrib but not ef/es.",
+   "evidence": "self_organize.py:2555-2556; :2149 `s.use.pop(j, None); s.comp.pop(j, None); s.contrib.pop(j, None)`; contrast spawn_from :2004 which pops ef and es too",
+   "confidence": "verified"
+  },
+  {
+   "claim": "spawn_from's threshold is relative: it fires only when the query's distance to the nearest identity exceeds max(FAB_SPAWN_MULT * population median nearest-neighbour distance, FAB_SPAWN_FLOOR).",
+   "evidence": "self_organize.py:1989-1997",
+   "confidence": "verified"
+  },
+  {
+   "claim": "spawn_from calls _ids under torch.no_grad(), which overwrites the same-step identity cache with detached tensors and does not clear _kcl when it declines to spawn.",
+   "evidence": "self_organize.py:1978-1980 inside `with torch.no_grad():`; :1950-1952 cache writes; :2005 clears only `s._kc` on success",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ae_loss trains the eemb/edec round trip on up to 256 experts every step (decoupled from the embed cadence) and includes a variance+covariance anti-collapse term weighted by FAB_EMB_VAR.",
+   "evidence": "self_organize.py:1955-1972; :7030 `_ael = fab.ae_loss(min(fab.n(), 256)) if (FABRIC and FAB_SPAWN)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The identity embed is O(N * 2*d*r * hid) every step at FAB_EMB_EVERY=1: at N=2048, d=768, r=8, hid=128 that is a (2048 x 12288) @ (12288 x 128) matmul per step, plus its backward.",
+   "evidence": "self_organize.py:1947-1948; :1698-1699; :1719",
+   "confidence": "likely"
+  },
+  {
+   "claim": "PlateauGrowth's ramp latches off on the first call at the shipped defaults: FAB_N0=2048 >= FAB_RAMP_TO(0.5) * pool(fab.cap=4096).",
+   "evidence": "self_organize.py:2987 `if s.latch and n is not None and _pool is not None and n >= s.ramp_to * _pool: s.ramp_done = True`; :7443 passes `pool=fab.cap`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A regression now has its own cooldown clock (last_regr) and is tested before the RECOVER early-return and before the shared cooldown, with suppressed detections counted in n_regr_supp.",
+   "evidence": "self_organize.py:3003-3008",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The stall trigger uses a one-sided test `improving < s.rel`, so a RISING loss (negative improving) also satisfies it and grows one expert \u2014 the same defect the GROW_CAP valve fixed for itself with an abs() band.",
+   "evidence": "self_organize.py:3013 `if t >= s.warm and improving < s.rel:`; contrast :7411 `if abs(_improving) < GROW_CAP_PLATEAU:`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "grow() always returns [] because the rows already belong to preallocated Parameters, so the caller's add_param_group branch is dead by design.",
+   "evidence": "self_organize.py:2151-2152; :7487 `if _fp: om.add_param_group({\"params\": _fp})`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Crossover copies whole rank slices from another shortlisted parent before mutation, and fires with probability FAB_XOVER=0.35 when r>1 and the shortlist has more than one member.",
+   "evidence": "self_organize.py:2128-2134",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The parent quota filter is a no-op early in a run: `_recent = sum(s.births.values()) or 1` and an empty births dict makes every candidate's share 0.0 < FAB_PARENT_MAX.",
+   "evidence": "self_organize.py:2099-2100",
+   "confidence": "verified"
+  },
+  {
+   "claim": "dom_ban is now computed and passed on both paths (society unconditionally, chaining behind CHAIN_BAN=1), and inside the soc-loop the ban is re-applied at every hop through entry_logits.",
+   "evidence": "self_organize.py:6845, :6849-6851; :2624 `_lgr = s.entry_logits(..., ban=ban, ...)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The breadth cap bans an expert only once it serves >= max(EXP_DOM_MIN=4, 0.10 * live domains) domains and only for domains it does not already hold.",
+   "evidence": "self_organize.py:2158-2164",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DomainAssembler.manage runs recurrence-fold, then the empty cull, then pairwise merges, then the activity cull, then decays act by DOM_DECAY.",
+   "evidence": "self_organize.py:3606-3699",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every live domain holds at least one reservoir window from the moment it is created (update() appends immediately after _assign), and the only code that empties reservoirs is the resume path.",
+   "evidence": "self_organize.py:3450 `s.wins[i] = []` then :3494-3501 appends in the same update() call; :4988 `asm.wins = {i: [] for i in asm.cent}`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The recurrence fold refuses to act without a pooled radius and folds only within DOM_FOLD_MULT * pooled radius; a doomed domain removed from `ds` by that failsafe becomes available as a fold TARGET for later victims.",
+   "evidence": "self_organize.py:3613-3625",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The Voronoi radius guard caps each domain's acceptance radius at DOM_RCAP * (distance to nearest other centroid), and DOM_RCAP defaults to 2.0.",
+   "evidence": "self_organize.py:3577-3588; registry :274 `\"DOM_RCAP\": (\"f\", 2.0)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The domain cull's memory brake reproduces memory.py's own floor formula exactly (src_floor * cap / live eligible sources), so the two agree on units.",
+   "evidence": "self_organize.py:3688 `_fl = int(getattr(mem, \"src_floor\", 0.0) * mem.cap / max(1, mem._eligible().sum().item()))`; memory.py:367 `floor = int(self.src_floor * self.cap / live)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The assembler's adaptive-spawn sample `_dh` is appended only inside the `d < thr` branch and is skipped entirely when the per-domain radius accepts, so the sample is still censored; DOM_ADAPTIVE defaults to 0 so nothing reads it.",
+   "evidence": "self_organize.py:3545 (radius accept, no append), :3551-3553 (append inside the accept branch), :3547 `if DOM_ADAPTIVE and len(s._dh) >= 64`; registry :238 DOM_ADAPTIVE 0",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DOM_RELATIVE also defaults to 0, so the relative-margin assign rule (3539-3544), including its own MAX_DOMAINS absorb branch, does not execute in a default run.",
+   "evidence": "self_organize.py:3539; registry :277 `\"DOM_RELATIVE\": (\"i\", 0)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ExpertBank/ExpertRouter (3019-3110) are the legacy per-domain expert population gated on EXPERTS, which defaults to 0 and is mutually exclusive with the Fabric in practice.",
+   "evidence": "self_organize.py:3018 `EXPERTS = bool(_i(\"EXPERTS\", 0))`; :6767-6769 `if EXPERTS and MANAGE_ON ...: router.manage(step)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_env raises SystemExit when a call site's default disagrees with the registry, so every default quoted from a read site in this range is guaranteed to match the registry.",
+   "evidence": "self_organize.py:515-523",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Fabric.manage does not update s.removed / s.spared itself; the training loop adds its return values to those attributes, and the DID IT FIRE audit reads the attributes.",
+   "evidence": "self_organize.py:2219 `culled = spared = 0` (locals) and :2292 return; :6722 `fab.removed += _fc; fab.spared += _fs`; :8568-8569",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The end-of-run FABRIC section describes the default path as \"Mass flows expert -> expert through the transition matrix\", which is the branch that does not run under CHAIN_ROUTE=soc.",
+   "evidence": "self_organize.py:8399-8401; also the banner :8478 \"soft routing + transition matrix + HALT\"",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "FABRIC",
+   "effect": "Master switch for the routed expert population; 0 removes the fabric from the forward pass entirely.",
+   "owner": "Fabric / main loop",
+   "couples_with": [
+    "SOCIETY",
+    "EXPERTS",
+    "CHAIN_ROUTE"
+   ],
+   "evidence": "self_organize.py:1611"
+  },
+  {
+   "name": "SOCIETY",
+   "effect": "1 = one hop, experts blended at the prediction level; 0 (default) = Fabric.forward, which is then further split by CHAIN_ROUTE.",
+   "owner": "Fabric.forward / society",
+   "couples_with": [
+    "CHAIN_ROUTE",
+    "CHAIN_VOTE",
+    "FAB_MIN_STEPS",
+    "IND_W",
+    "PONDER"
+   ],
+   "evidence": "self_organize.py:1619; :6843-6851"
+  },
+  {
+   "name": "CHAIN_ROUTE",
+   "effect": "\"soc\" (default) re-routes from scratch each hop with the state in the query; \"transition\" uses the learned successor matrix R with SRC marks. Decides which half of forward() exists.",
+   "owner": "Fabric.forward",
+   "couples_with": [
+    "CHAIN_STATE_Q",
+    "CHAIN_SUP",
+    "FAB_BALANCE",
+    "BAL_FLOOR",
+    "DIV_W",
+    "FAB_SPAWN"
+   ],
+   "evidence": "self_organize.py:1843; :2618; :2696"
+  },
+  {
+   "name": "CHAIN_VOTE",
+   "effect": "1 (default) makes each hop's experts vote on the OUTPUT and the halting hop select its answer; it also forces FAB_MIN_STEPS to 0 and refuses a conflicting explicit setting.",
+   "owner": "Fabric.forward",
+   "couples_with": [
+    "FAB_MIN_STEPS",
+    "ENS_K",
+    "FAB_HALT"
+   ],
+   "evidence": "self_organize.py:1848; :1860-1868"
+  },
+  {
+   "name": "FAB_MIN_STEPS",
+   "effect": "Blocks HALT for the first N hops on the transition path. Meaningless (and forced to 0) under CHAIN_VOTE.",
+   "owner": "Fabric.forward",
+   "couples_with": [
+    "CHAIN_VOTE",
+    "SOCIETY"
+   ],
+   "evidence": "self_organize.py:1639; :1868; :2713"
+  },
+  {
+   "name": "FAB_STEPS",
+   "effect": "max_steps, the hop budget; effective depth is min(depth_now, max_steps, 2 + N//2).",
+   "owner": "Fabric.forward",
+   "couples_with": [
+    "CHAIN_CURRIC",
+    "CHAIN_DEPTH0",
+    "PONDER"
+   ],
+   "evidence": "self_organize.py:2609; :4172"
+  },
+  {
+   "name": "FAB_CHAIN_K",
+   "effect": "How many experts are COMPUTED per hop (top-k by current routing mass); cost per hop is k, not N.",
+   "owner": "Fabric.forward",
+   "couples_with": [
+    "ENS_K",
+    "FAB_EXPLORE",
+    "DIV_W"
+   ],
+   "evidence": "self_organize.py:1765; :2635; :2726"
+  },
+  {
+   "name": "ENS_K",
+   "effect": "How many of the computed experts actually decode logits per hop / per window.",
+   "owner": "Fabric.forward, society caller",
+   "couples_with": [
+    "FAB_CHAIN_K",
+    "IND_K"
+   ],
+   "evidence": "self_organize.py:1612; :2673; :2777"
+  },
+  {
+   "name": "ROUTE_GROUNDED",
+   "effect": "1 (default) routes on centroid-region cosine + learned identity term via entry_logits; 0 drops to the old q_entry free-key router and skips regions and centroid updates entirely.",
+   "owner": "Fabric.route_w / entry_logits",
+   "couples_with": [
+    "ROUTE_LEARN",
+    "ROUTE_REGION_W",
+    "CENT_EMA",
+    "FAB_CENT_TOPK",
+    "FAB_DISCOVER"
+   ],
+   "evidence": "self_organize.py:1919; :2303-2325; :2584-2591"
+  },
+  {
+   "name": "ROUTE_LEARN",
+   "effect": "Adds the learned bilinear identity term (and, incidentally, the novelty scalar) to the grounded logits; 0 leaves pure region cosine and removes the only gradient into q_route/eemb from routing.",
+   "owner": "Fabric.entry_logits",
+   "couples_with": [
+    "FAB_KEY_NORM",
+    "FAB_DERIVE_IDS",
+    "ROUTE_REGION_W"
+   ],
+   "evidence": "self_organize.py:1920; :2352-2361"
+  },
+  {
+   "name": "ROUTE_REGION_W",
+   "effect": "Scales the signature-region term; 0 routes on predicted weights alone.",
+   "owner": "Fabric.entry_logits",
+   "couples_with": [
+    "ROUTE_GROUNDED",
+    "ROUTE_LEARN",
+    "ROUTE_T"
+   ],
+   "evidence": "self_organize.py:1799; :2351"
+  },
+  {
+   "name": "ROUTE_T",
+   "effect": "Routing temperature applied to both the region cosine and the normalized learned term; 0.1 sharpens a near-uniform cosine distribution into something selectable.",
+   "owner": "Fabric.entry_logits/_with_halt",
+   "couples_with": [
+    "FAB_KEY_NORM",
+    "ROUTE_REGION_W",
+    "FAB_HALT"
+   ],
+   "evidence": "self_organize.py:1910; :2350; :2441"
+  },
+  {
+   "name": "FAB_KEY_NORM",
+   "effect": "0 (default) uses a RAW dot for the learned expert term while HALT stays a normalized cosine/T on the chaining paths \u2014 the two operators then sit on different scales.",
+   "owner": "Fabric.entry_logits/_with_halt/forward",
+   "couples_with": [
+    "ROUTE_T",
+    "FAB_HALT",
+    "ROUTE_LEARN"
+   ],
+   "evidence": "self_organize.py:2359-2360; :2440-2441; :2595-2597"
+  },
+  {
+   "name": "FAB_DERIVE_IDS",
+   "effect": "1 (default) derives K and SRC from each expert's full weights through eemb; 0 falls back to free K_p/SRC_p parameters.",
+   "owner": "Fabric._ids",
+   "couples_with": [
+    "FAB_EMB_EVERY",
+    "FAB_EMB_HID",
+    "FAB_EMB_VAR",
+    "FAB_AE_W",
+    "FAB_SPAWN"
+   ],
+   "evidence": "self_organize.py:1721; :1930"
+  },
+  {
+   "name": "FAB_EMB_EVERY",
+   "effect": "Identity re-embed cadence. >1 makes routing keys stale AND throttles the one gradient channel that reaches every expert to 1-in-N steps.",
+   "owner": "Fabric._ids",
+   "couples_with": [
+    "FAB_DERIVE_IDS",
+    "FAB_EMB_HID"
+   ],
+   "evidence": "self_organize.py:1719; :1942-1946"
+  },
+  {
+   "name": "FAB_EMB_VAR",
+   "effect": "Weight on the variance+decorrelation term that stops every expert embedding to one point (the measured 0.000 nearest-neighbour collapse).",
+   "owner": "Fabric.ae_loss",
+   "couples_with": [
+    "FAB_AE_W",
+    "FAB_SPAWN_MULT",
+    "FAB_SPAWN_FLOOR"
+   ],
+   "evidence": "self_organize.py:1709; :1971-1972"
+  },
+  {
+   "name": "FAB_SPAWN / FAB_SPAWN_MULT / FAB_SPAWN_FLOOR",
+   "effect": "Spawn-by-specification: decode the router's query into a new expert when it is further from every identity than spawn_mult x the population's own median nearest-neighbour distance (floored). FAB_SPAWN also gates ae_loss.",
+   "owner": "Fabric.spawn_from",
+   "couples_with": [
+    "FAB_DERIVE_IDS",
+    "FAB_EMB_VAR",
+    "FAB_NMAX",
+    "GROW_CAP_FAB0",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:1710-1713; :1996; :7030; :6836"
+  },
+  {
+   "name": "FAB_N0",
+   "effect": "Founding population size; also decides whether the ramp latches immediately (N0 >= FAB_RAMP_TO * cap).",
+   "owner": "Fabric.__init__ / PlateauGrowth.step",
+   "couples_with": [
+    "FAB_NMAX",
+    "FAB_RAMP_TO",
+    "FAB_PRESSURE"
+   ],
+   "evidence": "self_organize.py:1658; :2987; :4172"
+  },
+  {
+   "name": "FAB_NMAX",
+   "effect": "Preallocated slot count (cap = max(N0, NMAX)); memory cost is 2*cap*d*r floats and it is the hard ceiling on every growth path.",
+   "owner": "Fabric.__init__",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_RANK",
+    "GROW_CAP_FAB0",
+    "FAB_PRESSURE",
+    "MAX_DOMAINS"
+   ],
+   "evidence": "self_organize.py:1655-1657; :4171"
+  },
+  {
+   "name": "FAB_RANK",
+   "effect": "Low-rank width r of every expert; also the number of crossover-able rank slices and the size of the eemb input (2*d*r).",
+   "owner": "Fabric.__init__",
+   "couples_with": [
+    "FAB_XOVER",
+    "FAB_EMB_HID",
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:1656; :1698; :2128-2133"
+  },
+  {
+   "name": "FAB_PRESSURE",
+   "effect": "Occupancy setpoint below which the utilization cull, the utilization spare and FAB_RESCUE are all unreachable; it effectively chooses the operating population size.",
+   "owner": "cull_gate_open / Fabric.manage",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_NMAX",
+    "FAB_PRESS_SOFT",
+    "FAB_RESCUE",
+    "COMP_PROTECT"
+   ],
+   "evidence": "self_organize.py:823-836; :2234; registry :200-209"
+  },
+  {
+   "name": "FAB_PRESS_SOFT",
+   "effect": "0 (default) measures capacity pressure against the preallocation cap; 1 measures it against the operating soft cap the GROW_CAP valve lifts.",
+   "owner": "Fabric.manage caller",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "GROW_CAP",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "self_organize.py:2233; :6721"
+  },
+  {
+   "name": "FAB_GRACE",
+   "effect": "Cull grace measured in SELECTIONS, not steps; an expert must have been the argmax this many times before it is answerable.",
+   "owner": "Fabric.manage / use_age",
+   "couples_with": [
+    "FAB_CULL_FRAC",
+    "BAL_FLOOR",
+    "FAB_EXPLORE",
+    "FAB_LR_CYCLE"
+   ],
+   "evidence": "self_organize.py:2214-2224; :2238; :2250"
+  },
+  {
+   "name": "FAB_CULL_FRAC",
+   "effect": "Fraction of the ELIGIBLE set removed per manage pass, floored at one by max(1, ...).",
+   "owner": "Fabric.manage",
+   "couples_with": [
+    "FAB_GRACE",
+    "FAB_PRESSURE",
+    "COMP_PROTECT",
+    "FAB_RESCUE"
+   ],
+   "evidence": "self_organize.py:2263"
+  },
+  {
+   "name": "FAB_RESCUE",
+   "effect": "0.0 default. >0 gives an expert about to be culled one heavy mutation and a reset use-clock instead of deletion \u2014 but only inside the capacity-pressure branch.",
+   "owner": "Fabric.manage",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "FAB_MUT_BIG",
+    "FAB_GRACE"
+   ],
+   "evidence": "self_organize.py:694; :2280-2290"
+  },
+  {
+   "name": "COMP_PROTECT",
+   "effect": "Enables both spare rules: positive marginal contribution, or (where no contribution exists) a competence EMA better than the population's.",
+   "owner": "Fabric.manage / DomainAssembler.manage",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "MANAGE_EVERY",
+    "COMP_EMA"
+   ],
+   "evidence": "self_organize.py:2240; :2268-2272; :3694-3695"
+  },
+  {
+   "name": "FAB_ERR_FAST / FAB_ERR_SLOW / FAB_SHIFT_TOL / FAB_FAIL_TOL",
+   "effect": "The fast/slow per-expert error EMAs and the two tolerances that separate \"adapting\" (protect) from \"sustained failure\" (cull at any occupancy).",
+   "owner": "Fabric.note_err / failing",
+   "couples_with": [
+    "COMP_PROTECT",
+    "FAB_GRACE",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:1757-1761; :2186-2194"
+  },
+  {
+   "name": "FAB_REPLICATE / FAB_PARENT_K / FAB_PARENT_MAX / FAB_MUT / FAB_MUT_BIG / FAB_MUT_BIG_P / FAB_XOVER / BIRTH_JITTER",
+   "effect": "The birth rule: shortlist by region relevance, sample by fitness under a per-parent birth quota, clone, optionally take whole rank slices from a second parent, then mutate by a fraction of the parent's own std with a heavy tail; the newborn's centroid is the birth signature plus jitter.",
+   "owner": "Fabric.grow",
+   "couples_with": [
+    "FAB_BIRTH_WIN",
+    "FAB_RANK",
+    "CENT_EMA",
+    "FAB_GROW"
+   ],
+   "evidence": "self_organize.py:1751-1754; :1762-1764; :1921; :2082-2145"
+  },
+  {
+   "name": "FAB_EXPLORE",
+   "effect": "Fraction of ROWS whose lowest-ranked computed slot is swapped for a randomly chosen low-use expert, on training passes only.",
+   "owner": "Fabric.society / forward",
+   "couples_with": [
+    "FAB_CHAIN_K",
+    "FAB_GRACE",
+    "BAL_FLOOR",
+    "FAB_DISCOVER"
+   ],
+   "evidence": "self_organize.py:1873; :2503-2510; :2637-2644"
+  },
+  {
+   "name": "FAB_DISCOVER / CENT_EMA / FAB_CENT_TOPK",
+   "effect": "Centroid learning: the top-k routed centroids EMA toward the served signature at rate CENT_EMA*share, and a signature further than FAB_DISCOVER from every centroid is handed to the least-used expert.",
+   "owner": "Fabric.ground_update",
+   "couples_with": [
+    "ROUTE_GROUNDED",
+    "FAB_EXPLORE",
+    "ROUTE_T"
+   ],
+   "evidence": "self_organize.py:1924; :2411-2426; :965"
+  },
+  {
+   "name": "FAB_HALT / FAB_HALT_MAX",
+   "effect": "HALT as a real operator on both paths with a learned prior halt_b; halt mass is clamped at halt_max so the population always keeps >= 1-halt_max of the blend and its gradient.",
+   "owner": "Fabric._with_halt / _record_halt / forward",
+   "couples_with": [
+    "ROUTE_T",
+    "FAB_KEY_NORM",
+    "CHAIN_VOTE",
+    "PONDER"
+   ],
+   "evidence": "self_organize.py:1733-1738; :2459; :2630"
+  },
+  {
+   "name": "DIV_W / DIV_MASS",
+   "effect": "Rewards the two experts a hop leans on for producing different outputs, optionally weighted by the product of their routing weights so drifting out of the ensemble earns nothing.",
+   "owner": "Fabric.forward (both branches) + loss site",
+   "couples_with": [
+    "FAB_BALANCE",
+    "BAL_FLOOR",
+    "FAB_CHAIN_K",
+    "CHAIN_ROUTE"
+   ],
+   "evidence": "self_organize.py:1813; :1923; :2656-2671; :7035-7036"
+  },
+  {
+   "name": "FAB_BALANCE / BAL_WARM / BAL_FLOOR",
+   "effect": "Load-balance pressure on the routing distribution, decaying to a permanent floor so every expert keeps accruing use-age. Multiplies the fourth return of forward(), which is zero on the soc path.",
+   "owner": "loss site / Fabric.forward",
+   "couples_with": [
+    "CHAIN_ROUTE",
+    "SOCIETY",
+    "FAB_GRACE",
+    "DIV_W"
+   ],
+   "evidence": "self_organize.py:2717; :2694; :7023; :7031"
+  },
+  {
+   "name": "PONDER / PONDER_WARM",
+   "effect": "Charges for routed depth using the second return of forward(); identically zero on the society path, real on both chaining paths.",
+   "owner": "loss site / Fabric.forward",
+   "couples_with": [
+    "FAB_HALT",
+    "CHAIN_VOTE",
+    "SOCIETY"
+   ],
+   "evidence": "self_organize.py:2694; :6847; :7031; :8408"
+  },
+  {
+   "name": "EXP_DOM_FRAC / EXP_DOM_MIN",
+   "effect": "Breadth cap: an expert serving more than this share of the live domain population is masked out of routing for domains it does not already hold.",
+   "owner": "Fabric.dom_ban",
+   "couples_with": [
+    "CHAIN_BAN",
+    "MAX_DOMAINS",
+    "DOM_MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:1899-1900; :2158-2164"
+  },
+  {
+   "name": "CHAIN_BAN",
+   "effect": "Whether dom_ban is passed to the chaining path at all; 1 by default. It was the untested half of a two-change regression.",
+   "owner": "main loop",
+   "couples_with": [
+    "EXP_DOM_FRAC",
+    "SELF_ORG"
+   ],
+   "evidence": "self_organize.py:1798; :6849"
+  },
+  {
+   "name": "CHAIN_CURRIC / CHAIN_DEPTH0 / CHAIN_PATIENCE / CHAIN_STAGE_MAX / CHAIN_EPS",
+   "effect": "Staged depth: start at DEPTH0 and add a hop on a plateau or after STAGE_MAX checks. All inert at the default CHAIN_CURRIC=0.",
+   "owner": "Fabric.maybe_deepen",
+   "couples_with": [
+    "FAB_STEPS",
+    "CHAIN_SUP",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:1801-1806; :2522"
+  },
+  {
+   "name": "CHAIN_SUP",
+   "effect": "Per-hop deep supervision weight; needs fab._hops, which only the transition branch fills.",
+   "owner": "Fabric.forward + loss site",
+   "couples_with": [
+    "CHAIN_ROUTE",
+    "CHAIN_CURRIC"
+   ],
+   "evidence": "self_organize.py:1808-1809; :2819; :7003"
+  },
+  {
+   "name": "CHAIN_STATE_Q",
+   "effect": "Adds the current state to the TRANSITION query; only read in the transition branch, so inert under CHAIN_ROUTE=soc (where the state is in the query unconditionally via hproj).",
+   "owner": "Fabric.forward",
+   "couples_with": [
+    "CHAIN_ROUTE"
+   ],
+   "evidence": "self_organize.py:1800; :2832; :2625"
+  },
+  {
+   "name": "FAB_GROW / FAB_RAMP / FAB_RAMP_TO / FAB_RAMP_RATE / FAB_RAMP_LATCH",
+   "effect": "The geometric early ramp: grow rate*n experts every cool//8 steps until n >= ramp_to * pool, then latch off permanently. At the defaults it latches on the first call.",
+   "owner": "PlateauGrowth.step",
+   "couples_with": [
+    "FAB_N0",
+    "FAB_NMAX",
+    "GROW_CAP_FAB0",
+    "FAB_COOLDOWN"
+   ],
+   "evidence": "self_organize.py:2938-2947; :2987-2991"
+  },
+  {
+   "name": "FAB_Z / FAB_COOLDOWN / FAB_WARMUP / FAB_PLATEAU / FAB_BURST / FAB_RECOVER_MIN / FAB_RECOVER_MAX",
+   "effect": "The regression and stall triggers: an unexpected worsening of z robust deviations bursts FAB_BURST experts on its own cooldown; a flat (or falling) improvement past FAB_WARMUP grows one; RECOVER blocks re-arming until improvement flattens or rmax elapses.",
+   "owner": "PlateauGrowth.step",
+   "couples_with": [
+    "FAB_NEW_FRAC",
+    "GROW_CAP_FAB0",
+    "note_shift/blackout"
+   ],
+   "evidence": "self_organize.py:2893-2897; :3003-3016"
+  },
+  {
+   "name": "FAB_NEW_FRAC / FAB_NEW_WIN",
+   "effect": "Caps how much of the population may be newborn at once; applied at the growth call site AFTER the trigger has already counted its firing.",
+   "owner": "main growth call site",
+   "couples_with": [
+    "FAB_BURST",
+    "GROW_CAP_FAB0",
+    "FAB_COOLDOWN"
+   ],
+   "evidence": "self_organize.py:733-734; :7450-7462"
+  },
+  {
+   "name": "DOM_CULL_EMPTY / DOM_CULL_FLOOR / DOM_CULL_FRAC / DOM_GRACE / DOM_DECAY",
+   "effect": "The domain cull: lossless removal of reservoir-empty domains, a per-source memory floor brake, a bottom-fraction activity ranking with an age grace, and per-pass decay of the activity counter.",
+   "owner": "DomainAssembler.manage",
+   "couples_with": [
+    "MEM_SRC_FLOOR",
+    "COMP_PROTECT",
+    "DOM_MANAGE_EVERY",
+    "MANAGE_STALE"
+   ],
+   "evidence": "self_organize.py:3635-3699"
+  },
+  {
+   "name": "DOM_RECUR / DOM_MIN_VISITS / DOM_RECUR_HORIZON / DOM_FOLD_MULT",
+   "effect": "Recurrence fold: a domain entered fewer than MIN_VISITS times within RECUR_HORIZON BOUNDARIES of its birth is folded into its nearest neighbour, bounded by FOLD_MULT x the pooled radius.",
+   "owner": "DomainAssembler.manage",
+   "couples_with": [
+    "DOM_RQ",
+    "DOM_RMULT",
+    "DOM_RCAP",
+    "SUSTAIN"
+   ],
+   "evidence": "self_organize.py:3608-3625"
+  },
+  {
+   "name": "DOM_RADIUS / DOM_RQ / DOM_RMULT / DOM_RCAP",
+   "effect": "Per-domain acceptance radius measured from the reservoir at rekey (quantile x multiplier), capped by DOM_RCAP x distance to the nearest other centroid.",
+   "owner": "DomainAssembler.rekey / _assign",
+   "couples_with": [
+    "NEW_DIST",
+    "DOM_WINS",
+    "DOM_RELATIVE",
+    "DOM_ADAPTIVE"
+   ],
+   "evidence": "self_organize.py:3535-3545; :3574-3588"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "Load-balance loss is identically zero on the default routing path",
+   "severity": "critical",
+   "where": "self_organize.py:2694 (soc-loop return) consumed at :7031",
+   "symptom": "FAB_BALANCE, BAL_WARM and BAL_FLOOR are read, printed in the config banner and reasoned about at length as the mechanism that keeps every expert receiving occasional traffic, but under CHAIN_ROUTE=soc (the shipped default) the quantity they multiply is a freshly allocated zero scalar with no graph, so the balance pressure is exactly 0.0 for the entire run and there is no DID IT FIRE row for it.",
+   "evidence": "`bal` is only accumulated in the transition branch (:2717 `bal = bal + N * (nm.mean(0) ** 2).sum()`); the soc branch returns `h.new_zeros(())` as the fourth value (:2694); the loss site multiplies exactly that value (:7031 `+ FAB_BAL * _bw * _bal`). Banner prints BAL_FLOOR/BAL_WARM at :5882-5883.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The leave-one-out counterfactual does not remove the expert on the default path",
+   "severity": "critical",
+   "where": "self_organize.py:2618-2694 (soc-loop ignores ban1); called from :6991",
+   "symptom": "fab.contrib -- the marginal-contribution signal that gates both cull-spare rules and picks replication parents -- is measured by re-walking with ban1 set. The soc-loop never applies ban1 to any logit, so the walk is bit-identical for every candidate; the same number is written to contrib for every expert measured, carrying zero information about which expert matters.",
+   "evidence": "ban1 is masked into `_elg` at :2599, but `c` is used only for the entry ground_update at :2603 and is never read inside `if s.loop_soc:`; every other reference to ban1 in that branch is a `if ban1 is None` guard (:2634, :2637, :2645, :2656, :2687). Consumers: :2240 `if protect and s.contrib.get(i, 0.0) > 0`, :2269-2270, :2084.",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The chaining counterfactual is scored against a different function than the loss it is subtracted from",
+   "severity": "high",
+   "where": "self_organize.py:6992",
+   "symptom": "`_d3 = CE(model.head(_h3)) - loss` where `loss` came from the vote logits (fab._votelg). The baseline gap between the plain head and the trained per-hop vote blend is added to every contribution, so contrib's SIGN -- the thing both spare rules test -- is set by that offset rather than by the expert. If the offset is positive, every measured expert reads load-bearing and the utilization cull spares everything it can reach.",
+   "evidence": ":6896-6897 `lg = fab._votelg`; :6919 `loss = _plw.mean()` from that lg; :6991-6993 counterfactual uses `model.head(_h3)` with no head= argument passed to fab(). The society branch does the opposite and says why: :6968-6970 `_lg2 = halt_blend(model, fab, h, _lg2)` \"or the counterfactual is measured against a different function than the one that produced `loss`\".",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Cull eligibility and cull ranking are the same counter, so only heavily-used experts can ever be culled",
+   "severity": "high",
+   "where": "self_organize.py:2044-2051, :2224, :2250-2251",
+   "symptom": "bump_use increments `use` and `uage` together by 1, so (absent FAB_RESCUE, which defaults to 0) they are numerically identical. Eligibility is uage >= grace and the ranking key is use, so the eligible set is exactly the most-used experts and the cull removes whichever of them has least use -- i.e. the expert that just crossed the grace line. An expert the router never selects has use = uage = 0, is permanently ineligible, and can never be culled at all.",
+   "evidence": ":2048-2051 both dicts incremented in one loop; :2224 `s.n_elig = sum(1 for i in range(s.n_live) if s.use_age(i) >= grace)`; :2250-2251 `_elig = [...use_age(i) >= grace]` then `sorted(_elig, key=lambda i: s.use.get(i, 0.0))`. The counterweight named in the code for exactly this (:1892-1895 \"That is what the balance-loss floor (BAL_FLOOR) is for\") is the term that is zero on the default path.",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "Only the argmax expert is ever credited with use, so the use-age clock cannot reach the population",
+   "severity": "high",
+   "where": "self_organize.py:2647, :2759, :6866-6872",
+   "symptom": "Utilization and the grace clock advance for one expert per window per hop. Every other computed expert -- including the one exploration deliberately inserted so it would get traffic -- receives nothing. With a concentrated router this means almost the whole population stays at use-age 0 forever, which the manage() diagnostic reports as \"the population is not under selection\".",
+   "evidence": ":2647 `s.bump_use(_i2[:, 0].tolist())`; :2759 `s.bump_use(_ci[:, 0].tolist())`; :6866-6872 `_tops = _w.argmax(-1).tolist()` / `fab.note_use(_tops)`; exploration writes the cold expert to the LAST slot (:2643 `_i2[_r, -1] = random.choice(_cold)`), never slot 0. Diagnostic at :6757-6763.",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "Discovery always targets the lowest-indexed unused expert and overwrites it every time",
+   "severity": "high",
+   "where": "self_organize.py:2421-2426",
+   "symptom": "`min(range(N), key=use)` returns the FIRST minimum, and with most of a 2048-expert population at use=0 that is deterministically the same slot on every call. Discovery does not credit use, so the recipient never leaves the minimum. Each novel signature overwrites half of that one centroid, so 'discovery' cannot accumulate -- the last novel signature wins and every earlier discovery is erased -- while the `discovered` counter reports it firing.",
+   "evidence": ":2424 `_cold = min(range(N), key=lambda i: s.use.get(i, 0.0))`; :2425 `s.cent[_cold] = F.normalize(0.5 * s.cent[_cold] + 0.5 * _g1, dim=-1).cpu()`; no bump_use anywhere in ground_update; counter at :2426, reported at :9430.",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "The exploration cold set is index-biased, so most of the population is never explored",
+   "severity": "medium",
+   "where": "self_organize.py:2504, :2638, :2735",
+   "symptom": "`sorted(range(N), key=use)` is a stable sort over a mostly-tied key, so the cold set is the max(8, N//16) LOWEST-INDEXED zero-use experts. Exploration therefore samples a fixed prefix of the slot array rather than the population, and high-index experts can only ever be reached once the low-index ones accrue use -- which requires them to win the argmax first.",
+   "evidence": ":2638 `_cold = sorted(range(N), key=lambda i: s.use.get(i, 0.0))[:max(8, N // 16)]` then `random.choice(_cold)` at :2643. Verified stable-tie behaviour: sorted(range(10), key=lambda i: {}.get(i,0.0)) == [0,1,2,...].",
+   "bug_class": "other"
+  },
+  {
+   "title": "Mid-chain spawn-by-specification can never fire under the default CHAIN_ROUTE",
+   "severity": "medium",
+   "where": "self_organize.py:7337 gated on fab._hopq, filled only at :2837",
+   "symptom": "The per-hop spawn reads fab._hopq[-1]; _hopq is appended only in the transition branch and is reset only at line 2705, which the soc-loop returns before reaching. Under CHAIN_ROUTE=soc it stays the empty list it was initialised to, so the branch is dead and its print can never appear.",
+   "evidence": ":1810 `s._hopq = []`; :2694 soc return; :2705 `if ban1 is None: s._hops = []; s._hopq = []`; :2837 `s._hopq.append(Q[:1, 0].detach())`; :7337 `if FAB_SPAWN and fab._hopq and fab.n() < _cap_fab[0]`.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "CHAIN_SUP deep supervision is unreachable on the default path",
+   "severity": "medium",
+   "where": "self_organize.py:7003 gated on fab._hops, filled only at :2819",
+   "symptom": "Same mechanism as _hopq: _hops is populated only in the transition branch, so setting CHAIN_SUP > 0 under CHAIN_ROUTE=soc adds nothing to the loss and nothing says so at the config layer (the _termfired audit would report it, but only after a full run).",
+   "evidence": ":1809 `s._hops = []`; :2819 `if ban1 is None and s.sup_w > 0: s._hops.append(h)` (transition branch only); :7003 `... and len(getattr(fab, \"_hops\", [])) > 1`.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The novelty/surprise term cannot influence which expert is routed to",
+   "severity": "medium",
+   "where": "self_organize.py:2361",
+   "symptom": "`s.nov(nov[:, None]).sum(-1, keepdim=True)` is a per-row scalar broadcast identically across all N expert logits, so it cancels in the softmax over experts. It survives only as a shift of experts against HALT. The class docstring and the `nb  # surprise -> routing bias` comment describe it as biasing expert selection, which it structurally cannot do on the grounded path.",
+   "evidence": ":2361 `logits = logits + _lrn + s.nov(nov[:, None]).sum(-1, keepdim=True)`; contrast the non-grounded path :2591 `_nlg = ((s.q_entry(gist) + nb) @ _Kd.t())` where nb is a dk-vector and does vary per expert. The value fed in is itself a batch-mean scalar from the previous step (:7495, :6850).",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "HALT and the experts are scored on different scales at FAB_KEY_NORM=0",
+   "severity": "medium",
+   "where": "self_organize.py:2359-2360 vs :2595-2597 and :2626-2628",
+   "symptom": "With the default FAB_KEY_NORM=0 the learned expert term is an unbounded raw dot product of two trained vectors, while the HALT logit on both chaining paths is always a normalized cosine divided by route_t. As key norms grow during training the expert side can drift arbitrarily against a bounded HALT, so the whether-to-halt decision is decided by key magnitude rather than by the query. _with_halt (society) does respect FAB_KEY_NORM; the chaining sites do not.",
+   "evidence": ":2359-2360 `_lrn = (... normalized ... ) if FAB_KEY_NORM else (_qq @ _Kd.t())`; :2595-2596 and :2626-2627 both use `F.normalize(...) @ F.normalize(s.halt_key ...) / route_t` unconditionally; :2440-2441 `_hl = ((_qh @ s.halt_key[:, None]) if (s.route_learn and not FAB_KEY_NORM) else ...)`.",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "HALT does not gate the state update on the default path",
+   "severity": "medium",
+   "where": "self_organize.py:2683",
+   "symptom": "The transition path scales the residual step by the mass that has not halted (`_alive`), which is the fix documented as \"HALT NOW ACTUALLY HALTS\". The soc-loop applies the mixture at full strength on every hop regardless of how much probability has already halted, so the hidden state keeps changing after the router has decided to answer.",
+   "evidence": ":2683 `h = s.norm(h + s.alpha * (_cw2[:, :, None, None] * _O2).sum(1) - s.alpha * h)` (no alive factor); contrast :2813-2814 `_alive = nm.sum(-1, keepdim=True)[:, :, None]` / `h = s.norm(h + s.alpha * _alive * (upd - h))`.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The per-operator routing mass is accumulated every hop and never read",
+   "severity": "low",
+   "where": "self_organize.py:2621/2632 (and :2696/:2820) returned to :6850",
+   "symptom": "An (N+1,) vector is allocated and accumulated with a `_cc.mean(0)` reduction on every hop of every step, returned as the third value, assigned to `_mass` at the call site, and never referenced again. At N=2048 that is a 2049-wide reduction over the batch four times per step for nothing.",
+   "evidence": ":2621 `_mass2 = torch.zeros(N + 1, device=h.device)`; :2632 `_mass2 = _mass2 + _cc.mean(0).detach()`; :6850 `h, _dep, _mass, _bal = fab(...)`; no other read of that local (the `_mass` at :9274 is an unrelated report-time dict).",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "Replication lineage and mutation scale are written and never read",
+   "severity": "low",
+   "where": "self_organize.py:2137-2138",
+   "symptom": "s.parent (child -> parent) and s.mutscale (child -> mutation multiplier) are the only record of ancestry and of how far each newborn jumped, and nothing anywhere reads either. s.parent is additionally NOT renumbered by remove(), which swaps slot indices, so even if something started reading it the mapping would be stale after the first cull.",
+   "evidence": "grep: `s.parent` appears at :1749 (init), :2137 (write); `s.mutscale` at :1755 (init), :2138 (write); remove() renumbers use/uage/born/ef/es/births/comp/contrib/dom_of/rescued at :2549-2562 and touches neither.",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "deepened and _spawn_typ are recorded for a report that never reads them",
+   "severity": "low",
+   "where": "self_organize.py:2536, :1995",
+   "symptom": "`s.deepened.append((step, s.depth_now))` is described as \"for the report\" and has no reader; `s._spawn_typ` is stored alongside `_spawn_gap` as \"WHY it did or did not fire\" but only `_spawn_gap` is printed, so the report shows the gap with no scale to compare it against.",
+   "evidence": "grep `deepened`: only :1807 and :2536. grep `_spawn_typ`: only :1714 and :1995, while `_spawn_gap` is read at :9429.",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "grow() leaves stale fast/slow error EMAs on a reused slot",
+   "severity": "low",
+   "where": "self_organize.py:2149",
+   "symptom": "grow() clears use, comp and contrib for the slot it is about to occupy but not ef/es, so a newborn can inherit a dead expert's error history (remove() also leaves ef/es behind when it removes the top slot). spawn_from clears all five, so the two birth paths disagree.",
+   "evidence": ":2149 `s.use.pop(j, None); s.comp.pop(j, None); s.contrib.pop(j, None)`; contrast :2004 `for _D in (s.use, s.comp, s.contrib, s.ef, s.es): _D.pop(j, None)`; :2555-2556 pops only comp/contrib when j == last.",
+   "bug_class": "other"
+  },
+  {
+   "title": "The sustained-error cull loop lacks the out-of-range guard the utilization loop has",
+   "severity": "low",
+   "where": "self_organize.py:2236-2242",
+   "symptom": "The loop iterates a list built from the pre-removal n_live while remove() shrinks n_live, so later indices can exceed the live range. A remove() called on an out-of-range index would copy the last live expert into a dead slot and decrement n_live, silently deleting a live expert. It is unreachable only by accident: remove() moves the dict entries away from the tail, so failing() returns False for those indices.",
+   "evidence": ":2236 `for i in list(range(s.n_live)):` with `s.remove(i)` at :2242; the utilization loop does guard, :2265 `if i >= s.n_live: continue  # remove() renumbers by swapping the last slot down`.",
+   "bug_class": "other"
+  },
+  {
+   "title": "The Fabric cull keeps the max(1, ...) ratchet the domain cull removed",
+   "severity": "medium",
+   "where": "self_organize.py:2263",
+   "symptom": "`max(1, int(cull_frac * len(_elig)))` guarantees at least one removal per manage pass whenever the pressure gate is open and anything is eligible, regardless of how small the eligible set is -- the exact pattern the DomainAssembler documents as having ratcheted a population down to a single member and deliberately deleted.",
+   "evidence": ":2263 `for i in list(order[:max(1, int(cull_frac * len(_elig)))]):`; contrast :3653-3667 (\"THE BUDGET IS A FRACTION, AND max(1, ...) MADE IT A MINIMUM\") and its fixed form `order[:int(DOM_CULL_FRAC * len(s.cent))]`.",
+   "bug_class": "other"
+  },
+  {
+   "title": "spawn_from poisons the identity cache for the step it runs on",
+   "severity": "low",
+   "where": "self_organize.py:1978-1980 with :1950-1952",
+   "symptom": "spawn_from calls _ids inside torch.no_grad(), which writes detached tensors into _kcl/_kc and stamps _kstep with the current step. When it declines to spawn it does not clear the cache, so the routing pass later in that same step reuses no-grad identities and the eemb/A/B gradient channel through routing is cut for that step (it fires once per MANAGE_EVERY).",
+   "evidence": ":1978 `with torch.no_grad():` then :1979 `Kd, _ = s._ids(s.n_live, step)`; :1950-1952 cache writes; :2005 clears `s._kc` only on a successful spawn; :1942-1943 same-step reuse returns `s._kcl`. Call order at the site: spawn block :6836 runs before the routing call at :6846/:6850.",
+   "bug_class": "other"
+  },
+  {
+   "title": "The Voronoi radius guard does not enforce the non-overlap invariant it claims",
+   "severity": "medium",
+   "where": "self_organize.py:3577-3588",
+   "symptom": "The comment states the cap exists \"so acceptance regions cannot overlap and no domain can eat a neighbour whole\", but the cap is DOM_RCAP x the distance to the nearest other centroid with DOM_RCAP defaulting to 2.0. At 2.0 a domain's acceptance region reaches twice as far as its nearest neighbour's centroid -- it contains that neighbour outright. Non-overlap would require DOM_RCAP <= 0.5.",
+   "evidence": ":3586 `cap = DOM_RCAP * float(_nn[k])` where `_nn = 1 - M.max(1).values`; registry :274 `\"DOM_RCAP\": (\"f\", 2.0)`.",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "DOM_CULL_EMPTY can only fire on a resumed run",
+   "severity": "medium",
+   "where": "self_organize.py:3635-3642",
+   "symptom": "The empty-domain cull selects domains with no reservoir windows, but update() appends a window to a newly created domain in the same call that created it, and no other code path empties a reservoir except the resume restore. In a fresh run the mechanism is armed and structurally unable to fire, while its DID IT FIRE row tests only DOM_CULL_EMPTY and would report it as armed-and-inert without the reason.",
+   "evidence": ":3450 `s.wins[i] = []` immediately followed by the append at :3494-3501; the only other write that can empty it is :4988 `asm.wins = {i: [] for i in asm.cent}` in the resume block; audit row :8637.",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The end-of-run report describes the default path as the transition matrix",
+   "severity": "medium",
+   "where": "self_organize.py:8399-8401 and :8478",
+   "symptom": "The FABRIC section prints \"CHAINING ACTIVE (the default). Mass flows expert -> expert through the transition matrix over multiple hops\" and the banner prints \"soft routing + transition matrix + HALT\". Under CHAIN_ROUTE=soc no transition matrix, no SRC mark and no ctrl summary are ever evaluated -- each hop re-routes from scratch. Anyone reading the report attributes the results to a mechanism that did not run.",
+   "evidence": ":8399-8401; :8478; the transition build is at :2830-2845, after the soc branch has returned at :2694.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "ground_update round-trips centroids through the host inside the training step",
+   "severity": "medium",
+   "where": "self_organize.py:2417",
+   "symptom": "cent is a device buffer, but each of the FAB_CENT_TOPK updated centroids is written back with `.cpu()` (and `float(_share[_q5])` forces a sync per expert). At 8 centroids per hop and 4 hops that is dozens of device/host synchronisations per training step for a slow-moving EMA.",
+   "evidence": ":2417 `s.cent[_jj] = F.normalize((1 - _rate) * s.cent[_jj].to(gist.device) + _rate * _g1, dim=-1).cpu()`; :2416 `float(_share[_q5])`; :1662 registers cent as a buffer; :4172 `Fabric(...).to(DEV)`.",
+   "bug_class": "other"
+  },
+  {
+   "title": "Exploration pays an O(N log N) sort every hop even when no row explores",
+   "severity": "low",
+   "where": "self_organize.py:2638 and :2735",
+   "symptom": "The cold-set sort over the whole population is computed before the per-row exploration draw, so at N=2048 and 4 hops the training step sorts 2048 entries four times per step regardless of whether any row is actually explored (the draw is 15% per row).",
+   "evidence": ":2637-2639 `if s.explore > 0 ...:` then `_cold = sorted(range(N), key=...)` then `_rw = [r for r in range(_i2.size(0)) if random.random() < s.explore]`.",
+   "bug_class": "other"
+  },
+  {
+   "title": "The soc-loop never resets _votelg, so a head-less walk leaves the previous walk's logits standing",
+   "severity": "low",
+   "where": "self_organize.py:2686 vs :2700",
+   "symptom": "The transition branch clears s._votelg at the top of the walk; the soc branch only assigns it when head is not None. A walk called without a head (the contribution counterfactual) therefore leaves the previous walk's logits in place, and the consumer at :6896 tests only `fab._votelg is not None`. Harmless in the current call order, but it makes a stale-logits read a one-line change away.",
+   "evidence": ":2700 `s._votelg = None` (transition path only); :2684-2686 `if head is not None and _last is not None: ... s._votelg = _lgv`; consumer :6896-6897; head-less call :6991.",
+   "bug_class": "other"
+  },
+  {
+   "title": "The stall growth trigger fires on a rising loss",
+   "severity": "medium",
+   "where": "self_organize.py:3013",
+   "symptom": "`improving = (slow - fast)/|slow|` is negative when the loss is climbing, and the test is one-sided, so a degrading run satisfies the stall condition and grows an expert -- capacity added in answer to divergence. The GROW_CAP valve fixed exactly this for itself with an absolute-value band and documented why; PlateauGrowth.step still has the one-sided form.",
+   "evidence": ":2956 `improving = (s.slow - s.fast) / max(1e-6, abs(s.slow))`; :3013 `if t >= s.warm and improving < s.rel:`; contrast :7411 `if abs(_improving) < GROW_CAP_PLATEAU:` and its comment at :7404-7410.",
+   "bug_class": "other"
+  },
+  {
+   "title": "Stale comment claims the regression/stall cooldown collision is unfixed",
+   "severity": "low",
+   "where": "self_organize.py:2917-2921",
+   "symptom": "The block comment says \"STILL BROKEN ... REGRESSION and stall share ONE cooldown through s.last, and stall keeps re-arming it ... Not fixed here\", while the code twenty lines below gives REGRESSION its own last_regr clock and tests it before every shared gate. Two comments in the same class now describe opposite states of the same mechanism.",
+   "evidence": "stale text at :2917-2921; the fix at :2992-3008 (`if t - s.last_regr >= s.cool:` / `s.last = s.last_regr = t`) and its own comment at :2992-3002.",
+   "bug_class": "other"
+  }
+ ],
+ "junk": [
+  {
+   "what": "class FabricNode (self_organize.py:1620-1627)",
+   "why": "The full-MLP node the population was made of before it became preallocated low-rank tensors. Nothing in the live file constructs one; the only remaining references are a comment at :1645 and copies under archive/.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Fabric.age() (self_organize.py:2025-2036)",
+   "why": "A 12-line method with a docstring about failing toward OLD, and no caller anywhere in the repo -- every reader moved to use_age(). s.born survives because the FAB_NEW_FRAC budget and the checkpoint read it directly.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Fabric.seed_key() and the s.K[j] / s.SRC[j] writes in grow() (self_organize.py:2143-2145, 2564-2567)",
+   "why": "With FAB_DERIVE_IDS=1 (default) routing identity comes from eemb over the weights, so these write to K_p/SRC_p, which nothing reads. The K/SRC properties exist solely to keep those writes from crashing.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "s.parent and s.mutscale (self_organize.py:1749, 1755, 2137-2138)",
+   "why": "Write-only lineage bookkeeping with no reader, and s.parent is not renumbered by remove() so it is stale the moment anything is culled.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "s.deepened (self_organize.py:1807, 2536)",
+   "why": "Written 'for the report' and never read; it can only be non-empty under CHAIN_CURRIC=1, which defaults off.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "s._spawn_typ (self_organize.py:1714, 1995)",
+   "why": "Stored so the report can say why a spawn did or did not fire, but only _spawn_gap is printed (:9429), so the surviving number has no scale.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The third return value of Fabric.forward (per-operator mass) (self_organize.py:2621-2632, 2696, 2820)",
+   "why": "Accumulated on every hop of every step in both branches, returned, assigned to `_mass` at :6850 and never read.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "ExpertBank / ExpertRouter (self_organize.py:3019-3110)",
+   "why": "The legacy per-domain expert bank, gated on EXPERTS which defaults to 0. Its manage()/route() are reached only when EXPERTS=1, and the Fabric replaces it; its comp_of injection at :6767-6768 is likewise dead by default.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The transition-path machinery under CHAIN_ROUTE=soc: SRC marks, s.ctrl, the R einsum, CHAIN_STATE_Q, _hops, _hopq, min_steps blocking, the _vchk invariant check (self_organize.py:2696-2875)",
+   "why": "Roughly 180 lines that the default configuration never executes. Keeping it is defensible (it is the documented alternative arm) but every mechanism wired only to it -- balance, per-hop spawn, deep supervision -- is inert by default, and the report still describes it as what ran.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The three staged-depth flags CHAIN_SUP / CHAIN_CURRIC / CHAIN_STATE_Q (self_organize.py:1766-1808)",
+   "why": "All three default off and are documented at their definition as measured worse or neutral. They are kept deliberately as evidence, which is the right call, but nothing in a default run touches them.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "FAB_EC_W deficit-bonus block (self_organize.py:2372-2396)",
+   "why": "25 lines of comment and a Python loop over N experts, gated on ec_w > 0 which defaults to 0.0. The comment itself argues it attacks the wrong symptom.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The stale 'STILL BROKEN' cooldown comment (self_organize.py:2917-2921)",
+   "why": "Superseded by the last_regr fix at :3003-3008; it now contradicts both the code and the comment at :2992.",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "There are three forward paths in one class (society, transition chaining, soc-loop) and the shipped default is the soc-loop. Any new mechanism must be wired to the branch that runs, or verified against CHAIN_ROUTE=soc specifically.",
+   "why": "Every inert mechanism found in this scope -- the balance loss, the leave-one-out ban, per-hop spawn, deep supervision, the alive-gated residual, the _votelg reset -- is present and correct in the transition branch and missing or meaningless in the branch that actually executes.",
+   "evidence": "self_organize.py:1843, :2618-2694 (soc branch, returns early), :2696-2875 (transition branch)"
+  },
+  {
+   "item": "The population tensors are preallocated to cap and only n_live moves; remove() renumbers by swapping the last slot down.",
+   "why": "Every per-expert dict is keyed by SLOT INDEX, so any new dict must be added to the renumbering list in remove() or it silently attaches to the wrong expert after the first cull. s.parent and s.mutscale already fail this.",
+   "evidence": "self_organize.py:1652-1658; :2539-2563"
+  },
+  {
+   "item": "Routing identity is a function of the expert's weights (eemb), not a free parameter, and edec is its inverse used at birth; ae_loss is the only thing that keeps the pair consistent and it must run every step, not on the embed cadence.",
+   "why": "A collapsed embedder explains every routing symptom at once (identical keys, argmax lands arbitrarily, specialization reads 0.000, spawn can never fire), and the decoder's own gradient signal from births is far too sparse to shape it.",
+   "evidence": "self_organize.py:1689-1708; :1955-1972; :7030 with the comment at :7026-7029"
+  },
+  {
+   "item": "Grace is counted in SELECTIONS (use-age), not steps -- and use-age is currently incremented in lockstep with utilization, which makes the two indistinguishable.",
+   "why": "Any future change to the cull must decide whether 'has it had its chances' and 'what did it do with them' are the same number. Today they are, so the utilization cull can only reach experts that have been used, and never the dead ones.",
+   "evidence": "self_organize.py:2044-2051; :2214-2224; :2250-2251"
+  },
+  {
+   "item": "Missing per-expert records fail toward OLD (age 0 / use_age 1e9), deliberately, so that a creation path which forgets to stamp cannot produce an immortal expert.",
+   "why": "The opposite convention (`born.get(i, step)`) made the entire founding population permanently exempt from culling and gave every founder the newborn learning rate for a whole run. The DomainAssembler still uses the old fail-young idiom and is protected only because the resume path backfills born.",
+   "evidence": "self_organize.py:2025-2042; contrast :3638 and :3669 `step - s.born.get(d, step)` with the backfill at :5001-5005"
+  },
+  {
+   "item": "An eval pass must not mutate training state: learn_regions=False gates the centroid EMA, the use/uage credit, exploration and the halt EMA.",
+   "why": "Exploration draws from the global RNG stream, so a diagnostic that explored shifted which bytes the next epoch read; the centroid updates from a fabricated zero gist dragged the top experts' regions toward the origin. Two runs differing only in how much they measured trained on different text.",
+   "evidence": "self_organize.py:2306-2316; :2491-2503; :2758-2759; :2447-2463"
+  },
+  {
+   "item": "cull_gate_open (module level, pure arithmetic) decides the reachability of three mechanisms at once: the utilization cull, the utilization spare and FAB_RESCUE.",
+   "why": "A wrong pressure setting does not fail, it silently removes three things from the run -- FAB_PRESSURE=0.75 against a 0.50 occupancy did exactly that for a whole investigation. It is module level precisely so it can be tested without torch.",
+   "evidence": "self_organize.py:823-836; :2225-2234; :8583-8586"
+  },
+  {
+   "item": "FAB_PRESSURE is a SETPOINT for the operating population, not a threshold: the population equilibrates at roughly pressure x cap, with FAB_NMAX as preallocation and the difference as growth headroom.",
+   "why": "It is the knob that decides how large the trained population actually is, and reading it as a safety threshold leads to setting it where the cull never runs.",
+   "evidence": "self_organize.py:200-209 (registry comment: gate_press predicted 0.45 x 4096 = 1843, ended at 1838 live)"
+  },
+  {
+   "item": "The ramp exists to BUILD the population once and must latch off; growth after that has to come from a regression or a stall. Judge the latch against the hardware pool (fab.cap), never against the liftable soft cap.",
+   "why": "An unlatched ramp re-fires every cool//8 steps, refills whatever the cull removed within 187 steps, and starves the on-demand triggers by re-arming the shared cooldown -- selection cannot win against it. Judging it against the soft cap made GROW_CAP_FAB0 silently disarm the ramp.",
+   "evidence": "self_organize.py:2960-2991; :7439-7443"
+  },
+  {
+   "item": "A counterfactual must be blended exactly the way the real forward pass was, or the contribution it reports is offset by whatever the two paths differ by.",
+   "why": "The society branch does this (halt_blend on the counterfactual logits) and says why; the chaining branch does not, and its contributions are the selection signal for both cull-spare rules and for choosing replication parents.",
+   "evidence": "self_organize.py:6968-6970 vs :6991-6993"
+  },
+  {
+   "item": "Growth events are counted inside PlateauGrowth.step, but both clamps (soft cap, FAB_NEW_FRAC) run at the call site afterwards, so 'the trigger fired' and 'experts were created' are different facts.",
+   "why": "A regression whose whole burst is declined still increments n_regr, and the diagnostic that exists to catch an invisible arrival is gated on n_regr being zero -- so it stays silent in exactly the case it was written for.",
+   "evidence": "self_organize.py:3006; :7444-7462; :7465-7477"
+  },
+  {
+   "item": "Cadence bugs are endemic: blocks below the batch accumulator run once per FLUSH while `step` advances once per WINDOW, so `step % N == 0` samples the intersection of two unrelated congruences and can be empty. The correct form counts flushes (`_nbwd % max(1, MANAGE_EVERY // BATCH_W)`).",
+   "why": "maybe_deepen was never called in a real run because of this; FAB_SPAWN fires today only because BATCH_W=1 happens to land on a working residue. Fabric.manage is safe only because it sits ABOVE the accumulator.",
+   "evidence": "self_organize.py:6795-6796 (the early-out), :6716 (manage, above it, uses step), :6836 and :7324-7325 (below it, use _nbwd)"
+  },
+  {
+   "item": "_env() raises SystemExit when a read site's default disagrees with the registry, and _cfg() reads the registry directly so the audit cannot restate a default.",
+   "why": "It is the only reason the defaults quoted anywhere in this file can be trusted, and it is what makes 'one knob, one meaning' enforceable at import time rather than at the first index error.",
+   "evidence": "self_organize.py:515-523; :51-64"
+  },
+  {
+   "item": "Utilization alone cannot distinguish a niche expert from a dead one; that is why contrib (counterfactual) and comp (EMA on what it wins) exist, with contrib preferred and comp as the fallback.",
+   "why": "Every cull in this system ranks on a utilization-like resource, and rarely-called is what both a valuable specialist and a corpse look like. If contrib is broken (as it currently is on the default path), the whole protection degrades to the EMA, which can be fooled by easy material.",
+   "evidence": "self_organize.py:1902-1906; :2268-2272; :6929-6996"
+  }
+ ],
+ "open_questions": [
+  "Does fab.contrib come out uniformly positive or uniformly negative on the default path? The counterfactual walk is identical for every candidate, so the sign is set entirely by CE(model.head(h_final)) - CE(vote logits). If positive, `protect and s.contrib.get(i,0.0) > 0` spares every expert it has an entry for and the utilization cull removes nothing; if negative, it spares none of them. This is one print away from being settled but I did not run it.",
+  "How much of the population ever reaches use_age >= FAB_GRACE=48 in a real run? At BATCH_W=1 and 4 hops only 4 selections are credited per step, all to argmax winners, against N=2048. `fab.n_elig` is already printed at :6743 -- the run logs would answer it directly.",
+  "Is the identity embed the actual step-time bottleneck at FAB_EMB_EVERY=1? The forward is a (N x 2dr) @ (2dr x hid) matmul every step plus its backward, plus ae_loss on up to 256 experts. The file asserts the cost is 'real' but I found no measurement of it at the launch config.",
+  "Whether `s.cent[_jj] = <cpu tensor>` into a CUDA buffer is a correctness issue as well as a synchronisation one -- basic-index assignment dispatches to copy_ and should be legal cross-device, but I did not execute it on a GPU to confirm.",
+  "What the ROUTING MIX report actually reads at the defaults: entry_logits samples `_rmix` only when `_sample_mix` is set, and in the soc-loop that means the FIRST hop of the armed step only. Whether that is representative of the other three hops is unmeasured.",
+  "Whether the breadth cap ever binds on the default path: dom_ban needs an expert serving >= max(4, 0.10 * live domains) domains, and the live domain count in a real run is not something I could read from the source.",
+  "Whether DIV_W=0.02 on the soc path is helping or hurting -- the file's own note (:4255-4262) says the 0.039 b/B gain is exactly at the largest difference ever measured between two identical configurations, i.e. at the noise floor, and that all of it was measured while the population was still being built.",
+  "How often DOM_CULL_EMPTY actually fires on resumed runs: reservoirs come back empty and refill only as the stream re-enters each domain, so the answer depends on DOM_GRACE against the manage cadence and on how many restored domains own memory (`mem.src == d`), which I did not trace.",
+  "Whether anything downstream depends on `_mass` (the discarded third return) being computed -- I verified it is unread at the training call site, but not that no probe or report path calls forward() for that value alone.",
+  "Whether the soc-loop's missing `_alive` gate on the residual update is deliberate (under CHAIN_VOTE the halting hop selects its own answer, so a settled h may not matter) or an omission carried over when the branch was written. The comment justifying `_alive` sits only in the transition branch."
+ ]
+}

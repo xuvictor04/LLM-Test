@@ -1,0 +1,831 @@
+{
+ "area": "tests",
+ "summary": "The suite is 17 files driven by one entry point, `selftest.sh`, which runs 16 unit gates (15 python + 1 shell) and then, unless `--quick`, one real 9,000-token/2-epoch CPU training run plus one resume, checked by 13 fixed-string greps, and finally one `compare.py` invocation checked by a single grep. Nothing else in the repo invokes it (`preflight.sh`, `equiv.sh`, `rerun.sh` do not). Verified state: all 16 unit gates pass, the full end-to-end run passes, exit 0. Roughly 420 static assertions live in the python files, 110 of them in `resume_test.py` alone. Coverage is deliberately split into three styles: real-import (`mem_evict_test`\u2192memory.py, `compare_test`\u2192compare.py, `tok_test`\u2192tokenizer.py, `growth_test`\u2192self_organize.py), AST-lift of module-level defs (`proj_test`, `cap_test`, `ramp_test`, `blowup_test`, `curve_test`, parts of `resume_test`), and raw-source `exec` against hand-written stubs (`domain_test`, `corpus_test`, most of `resume_test`). There are 17 source-text/AST anchors into `self_organize.py`; every one currently resolves and is unique except `\"    if USE_TOK:\"` (4 occurrences, disambiguated only by search offset), and a rebuild that renames a banner comment or moves a function out of module scope breaks them. The suite is honest about restating code in several places, but four of its headline claims overstate what is actually checked, and its own end-to-end run reports 14 ARMED AND INERT mechanisms \u2014 including several that the unit tests exist to protect \u2014 while passing. `world_model.py`, `verification.py`, `datastream.py`, `vocab.py`, `holdout.py`, `prompt.py`, `fetch_*.py`, and every other shell script have no test at all.",
+ "facts": [
+  {
+   "claim": "selftest.sh is the sole driver: 16 unit gates, then (unless --quick) a fresh train + a resume + one compare.py call. Nothing else in the repo invokes it.",
+   "evidence": "selftest.sh:48-96 (unit gates), :120-123 (fresh), :144-145 (resume), :163 (compare); `grep -ln selftest *.sh` returns only selftest.sh",
+   "confidence": "verified"
+  },
+  {
+   "claim": "All 16 unit gates and the full end-to-end run pass on the current tree (exit 0). Timing: unit gates ~seconds, full run ~25 min on this CPU box.",
+   "evidence": "ran `bash selftest.sh --quick` (exit 0) and `bash selftest.sh` (exit 0, 'selftest passed -- all three instruments report and are self-consistent.')",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selftest.sh guarantees only that the three instruments RENDER and are internally consistent, explicitly not that the numbers are good.",
+   "evidence": "selftest.sh:111-113 \"this asserts the instruments produce their sections and are self-consistent, NOT that the numbers are any good. At this size they are noise.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selftest.sh deliberately ignores $DEVICE and uses SELFTEST_DEVICE instead, because longrun.sh exports DEVICE=cuda and running the suite must cost nothing.",
+   "evidence": "selftest.sh:103-109 `ST_DEV=${SELFTEST_DEVICE:-cpu}`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The end-to-end config is DOMAINS=eng, i.e. NP=1, so every NP>1 path is unreachable in the only real run the suite performs.",
+   "evidence": "selftest.sh:114 `DOMAINS=eng`; self_organize.py:5497 `if DATA_MODE == \"real\" and NP > 1:`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The selftest's own fresh run prints '>> 14 ARMED MECHANISM(S) DID NOTHING' and the suite still passes; nothing asserts on inert rows.",
+   "evidence": "fresh.log: 'fabric.grow, fabric.spawn, fabric.cull, fabric.failed_out, fabric.crossover, fabric.replicate, fabric.explore, memory.wrong_block, domains.cull, domains.held, domains.spare, domains.empty, tokenizer.mint_reject, loss.TOK_ANCHOR'; selftest.sh:127-130 checks only presence of the section and of one 'fired' and one 'off' row",
+   "confidence": "verified"
+  },
+  {
+   "claim": "loss.TOK_ANCHOR reads ARMED AND INERT in the selftest's own run \u2014 the exact condition selftest.sh's header cites as a founding motivation.",
+   "evidence": "selftest.sh:8 \"TOK_ANCHOR's loss term has never once entered the loss\"; fresh.log '!! ZERO loss.TOK_ANCHOR 0 ARMED AND INERT'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "levers.py guarantees: every knob read via _i/_f/_env is declared in _SPEC; every computed default is declared in _DERIVED and vice versa; _SPEC_FREE == _DERIVED; no call-site default disagrees with the registry; and no unguarded _F0 dereference sits in the pre-guard part of the _EFF banner.",
+   "evidence": "levers.py:98-100, :126-127, :136-147, :156-161",
+   "confidence": "verified"
+  },
+  {
+   "claim": "levers.py does NOT cover: whether a declared knob is ever read at all, whether a knob's declared TYPE matches its use, or whether the values in _SPEC are sane. It is a declaration-consistency check, not a semantics check.",
+   "evidence": "levers.py:93-163 \u2014 the only comparisons are set differences over names plus literal default equality",
+   "confidence": "verified"
+  },
+  {
+   "claim": "levers.py's _EFF FABRIC=0 guard is live and correctly clears the one real _F0 dereference, which is guarded inline on the same line.",
+   "evidence": "self_organize.py:5880 `(\"DIV_MASS\", _F0.div_mass if _F0 is not None else 0)`; levers.py:142 excludes lines containing '_F0 is not None'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "notes_check.py guarantees: notes/CURRENT_DEFAULTS.md is byte-identical to what generate() produces from _SPEC; ARCHIVE.md exists whenever archive/ does; and no non-historical line in a scanned .md states a default value _SPEC contradicts. _SPEC currently holds 328 knobs and 20 files are scanned.",
+   "evidence": "notes_check.py:155-163, :165-169, :171-181; run output 'notes_check: 328 knobs, 20 live markdown files'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "notes_check.py scans only ROOT/*.md (minus ARCHIVE.md) and notes/*.md (minus CURRENT_DEFAULTS.md). os.listdir is non-recursive, so 30 markdown files under notes/_evidence/ are never opened.",
+   "evidence": "notes_check.py:128-131; `find notes/_evidence -name '*.md' | wc -l` = 30",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Of 42 live-markdown lines that match a default-CLAIM shape and name a known knob, 31 are skipped by the HISTORICAL regex and only 11 are actually checked.",
+   "evidence": "instrumented run of notes_check.CLAIMS/HISTORICAL over notes_check._live_markdown(): 'tot 42; skipped as HISTORICAL 31; actually checked 11'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mem_evict_test.py guarantees, against the real memory.EditableMemory: retrieval buys survival under EVICT=lru and EVICT=usage but not under recency (the stated control); an unread+unwritten domain is fully evicted under lru; MEM_SRC_FLOOR=0.5 keeps an unqueried domain alive without starving the active one; rebuild_census() restores nsrc exactly after a simulated resume and counts ACTIVE rows; is_wrong()'s >10 floor holds, flags only the tail, gates read(), and mem.wrong_read toggles gating without changing the flag; and _store/_commit never name a slot twice, never underflow nsrc, and keep the incremental census equal to an exact recount on both the global and per-owner paths.",
+   "evidence": "mem_evict_test.py:353-395, :419-427, :137-152, :175-226, :260-333",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mem_evict_test.py is seeded with torch.manual_seed(0) because the suite failed 3 times in 20 on unchanged code; the store's victim sampling uses the global RNG.",
+   "evidence": "mem_evict_test.py:337-343",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mem_evict_test.py's scan_resistance results are REPORTED, not asserted (only a one-sided 'not materially worse' guard); the flood-occupancy return value is printed and never checked.",
+   "evidence": "mem_evict_test.py:399-417; `f_off`/`f_on` appear only in the print at :401-402",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare_test.py guarantees: a 0.30 effect under 0.35 shared seed noise is called SIGNIFICANT AND MEANINGFUL and the paired std is below the effect while both per-arm stds are above it; a null with A winning 4/5 is NOT SIGNIFICANT; n<3 gives NO VERDICT and n=3 gives a verdict; flags after `--` parse as flags; an arm losing 3/3 is never named the winner and the mirror case is named correctly; a 0.004 b/B gap is NEGLIGIBLE with no seed budget while 0.35 is judged normally; four guards (different commits, different corpora, disjoint seeds, unfinished run) warn without crashing; and --metric d_order1 flips the header to 'HIGHER is better'.",
+   "evidence": "compare_test.py:86-227, :231-258",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare_test.py additionally anchors on self_organize.py's source: it requires the literal `(\"SEED\",` to appear, because compare.py pairs runs by the SEED printed on the [config] EFFECTIVE line and that regex once matched 0 of 37 real logs.",
+   "evidence": "compare_test.py:63-71 `if not re.search(r'\\(\\s*\"SEED\"\\s*,', src)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "growth_test.py guarantees, against the real self_organize.PlateauGrowth: a sustained loss step-up fires REGRESSION at least once with the ramp latched off; a stationary curve fires no REGRESSION and no refusals while stall growth still fires; every injection point in 8000..16000 either fires or is COUNTED as refused; a regression inside a note_shift blackout fires nothing; and a sustained regression is refused-and-counted after its first burst while the cooldown bounds it to <=2 firings.",
+   "evidence": "growth_test.py:56-97",
+   "confidence": "verified"
+  },
+  {
+   "claim": "growth_test.py is the ONLY unit test that imports self_organize as a module; every other python gate reads it as text or AST.",
+   "evidence": "growth_test.py:25 `import self_organize as S`; the rest use ast.parse / open().read()",
+   "confidence": "verified"
+  },
+  {
+   "claim": "domain_test.py guarantees, by exec'ing the real cull block: int(DOM_CULL_FRAC*n)==0 populations are not culled at all (n=2,3,5,9), 10 gives 1 and 40 gives 4, 40 passes over a dead 12-domain population settle at 9 not 1; a domain holding at least a per-source floor's worth of memory is refused and COUNTED in asm.held; DOM_CULL_FLOOR=0 reproduces the pre-fix deletion; and a domain drained to 5 entries is culled normally.",
+   "evidence": "domain_test.py:111-169",
+   "confidence": "verified"
+  },
+  {
+   "claim": "domain_test.py's CULL anchor is the banner comment `        if len(s.cent) > 1:                                               # CULL:` deliberately, because the bare `if len(s.cent) > 1:` also appears as the merge loop's guard; the end anchor is the DOM_DECAY line.",
+   "evidence": "domain_test.py:56-59; self_organize.py:3652 (start), :3699 (end), 47-line span",
+   "confidence": "verified"
+  },
+  {
+   "claim": "proj_test.py guarantees, against the AST-lifted module-level proj_arith: from epoch 2 on the projection is within 2% of the true end on a shrinking-epoch run while the old flat formula is not; epochs 0-1 are bit-identical to the old formula by design; a fixed-length run is exactly EP*len; the horizon is never at or before the current step; one completed epoch falls back; a ratio >1 is clamped; a 10x collapse is clamped at 0.5; and a shorter horizon projects a shorter end.",
+   "evidence": "proj_test.py:71-133",
+   "confidence": "verified"
+  },
+  {
+   "claim": "cap_test.py sections 1-5 guarantee, against the AST-lifted lift_to and pin_tick: one lift is ~8% at 160/640/896/2048/4096 with the spread across sizes at least 10x tighter than a flat +256; doubling 640\u21921280 needs >=8 lifts; the GROW_LIFT_MIN floor still moves small caps and a zero fraction moves by exactly the floor; lift_to returns an int and is monotone in the fraction; and pin_tick counts STEPS not flushes, with a spread across BATCH_W in {1,8,16,32} of at most 32 steps.",
+   "evidence": "cap_test.py:48-126",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ramp_test.py guarantees, against the AST-lifted PlateauGrowth class: with ONE cap argument, turning the soft cap down from 8192 to 3000 kills the ramp entirely at n=2048; the effect is attributable to the cap argument alone; with a separate `pool` the valve's setting makes NO difference to ramp events; the call-site clamp still binds (a 299-node burst is cut to the 5 that fit, 0 at the cap); and the latch never re-arms after the population is culled from 4096 to 1000.",
+   "evidence": "ramp_test.py:69-137",
+   "confidence": "verified"
+  },
+  {
+   "claim": "lr_test.py guarantees: five source fragments still appear inside _lr_at's unparsed body; and against a REIMPLEMENTATION of the schedule, that LR_STEPS makes the rate a function of step alone across corpus sizes, warmup hands over to the cosine continuously at full peak, one cycle ends at LR_MIN_FRAC, LR_SHIFT_WARM only ever lowers the rate and rejoins exactly, a 16-epoch wavelength is >2x hotter than an 8-epoch one at the fifth boundary, restart damping plus envelope cut each successive failed restart, and single-cycle runs are bit-identical under both new mechanisms.",
+   "evidence": "lr_test.py:40-60 (fragments), :64-86 (reimplementation), :89-205",
+   "confidence": "verified"
+  },
+  {
+   "claim": "lr_test.py's reimplementation is currently faithful to the shipped _lr_at, line for line, on every computational step.",
+   "evidence": "compared lr_test.py:64-86 against self_organize.py:4751-4808; warmup clamp, span/prog, restart n/per_c/p/ci, cosine, rst_amp damping, LR_SHIFT_WARM, LR_DECAY envelope all match",
+   "confidence": "verified"
+  },
+  {
+   "claim": "lr_test.py's reimplementation drops the shipped function's SIDE EFFECTS `_ncyc[0] = _n` and `_nenv[0] += 1`, which are the counters feeding the DID IT FIRE rows lr.restart and lr.envelope. Those counters have no test.",
+   "evidence": "self_organize.py:4790 `_ncyc[0] = _n`, :4807 `_nenv[0] += 1`; absent from lr_test.py:64-86; consumed at self_organize.py:8707-8723",
+   "confidence": "verified"
+  },
+  {
+   "claim": "blowup_test.py guarantees, against the AST-lifted blowup_stale and module constants: the two real healthy curve openings that defeated the old rule fire the old rule and not the new one; a single 4.82 spike cannot fire it; two blow-up-shaped curves fire with most of the run left; BLOWUP_STALE sits above every measured healthy run (max 50) and below both blow-ups (min 261) with >=1.5x margin; the rule needs >=3 probes, a best, elevation AND staleness; and it re-arms on a new best so a run can be warned twice but does not chatter.",
+   "evidence": "blowup_test.py:92-159",
+   "confidence": "verified"
+  },
+  {
+   "claim": "blowup_test.py's fires() driver is a re-typed copy of the call site's re-arm loop, not extracted source; section 5's re-arming guarantee therefore holds about the test's own driver.",
+   "evidence": "blowup_test.py:72-80 vs self_organize.py:6436-6459 (`_blew[2].append(_cm); del _blew[2][:-5]` / `_blew[1]=0; _blew[0]=False` / `_blew[1]+=1`)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "curve_test.py guarantees, against four AST-lifted module-level functions and the CURVE_* constants: seven real runs' (rise, tail, tok_rise) triples produce the verdict each must produce; height and tail are read separately; the flat band is two-sided; a per-token rise with a flat b/B curve is 'vocab' and outranks everything but a blow-up; bwt_of's sign is negative-is-improvement, is a mean over shared domains only, and returns 0.0 on no overlap; forgetting_of clips at zero; and cull_gate_open is n_live/cap>=pressure with an n_live<=2 floor and no division by zero.",
+   "evidence": "curve_test.py:51-131",
+   "confidence": "verified"
+  },
+  {
+   "claim": "curve_test.py does NOT cover how curve_verdict's INPUTS are computed. `_bpb_dir` (rise since minimum, change over the last two thirds) is built inline in main() inside a bare `except Exception: _bpb_dir = None`, so a failure there silently removes the whole verdict with no message.",
+   "evidence": "self_organize.py:8255-8262, :8290-8294",
+   "confidence": "verified"
+  },
+  {
+   "claim": "tok_test.py guarantees, against the real stdlib-only tokenizer.DynamicTokenizer: minting never stops while candidates above min_pair remain; gate_skipped and mint_rescued/mint_widened increment on the max_tok=2 case; None still means exhausted and vmax still binds; every minted token respects max_tok, is unique, and seq2id/id2bytes/bytes_per_id/maxlen agree; segmentation round-trips 5 probes including unseen and binary bytes; and save/load preserves the vocabulary, order, byte lengths and segmentation.",
+   "evidence": "tok_test.py:64-158",
+   "confidence": "verified"
+  },
+  {
+   "claim": "corpus_test.py guarantees: the DN/CORP filter keeps names and corpora aligned across 5 cases and reproduces the pre-fix mislabelling; _phases (loaded from real source by regex) gives [[0],[0],[1],[1]] for NP=2 and degenerates for NP=1; a restated predict() matches a restated simulate() within 2% over 5 configurations and 12 seeds; the whole-run exposure guard fires on 60+8 MB where the per-epoch one did not; and the REAL source blocks for DN realignment, the exposure warning, and the held-out-tail manifest check all execute against stubs and produce the expected warning counts and message text.",
+   "evidence": "corpus_test.py:50-107, :108-171, :173-221, :223-345",
+   "confidence": "verified"
+  },
+  {
+   "claim": "resume_test.py guarantees, mostly by exec'ing real source against stubs: the geometry gate widens on a larger FAB_NMAX and refuses narrowing/rank/dk changes BY KNOB NAME; slots the checkpoint never held are born at the resume step with zero use-age and no utilization record while restored slots keep theirs and get the mean of the RESTORED ones only; widen_prefix copies a prefix and names cap-shaped tensors missing from the checkpoint; an unreconcilable tensor is refused with both shapes and an explicit 'not FAB_NMAX' disclaimer; the capacity gate moves when the cap widens and the startup warning fires exactly when the gate cannot reopen AND the ramp is latched; the growth controller's latch, EMAs and counter baseline come back; om/oe are skipped for three independent reasons; the cull budget is sized on the eligible set; retention's subtraction runs latest-minus-earliest; VMAX widens like the slot pool; the tokenizer's own cap is raised to this run's VMAX; the probe-vs-run guard separates a new expert from a path mismatch; _TOK_SAVE writes beside the run's own checkpoint; a clobbered vocabulary file's prefix segments identically to the parent's; the ACCUM gate counts backward passes; and _curve_by_step keeps the process and the active flag.",
+   "evidence": "resume_test.py:114-147, :149-201, :203-264, :266-320, :321-455, :457-526, :528-572, :574-659, :662-717, :719-785, :788-864",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NONE of resume_test.py's or corpus_test.py's source-block subjects execute in the selftest's end-to-end run. Greps for 'WIDENING', 'cap-shaped fabric tensor', 'LIVE here but were not in the checkpoint', 'NOT IN THE CHECKPOINT', \"the tokenizer's OWN cap travelled\", 'DROPPED', 'HELD-OUT TAIL IS A BLOCK' and 'exposure over the whole run' all return 0 in both fresh.log and resume.log.",
+   "evidence": "grep -acF over the selftest's own fresh.log and resume.log after a full passing run",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The growth-controller restore and the memory source-census rebuild DO fire end-to-end in the selftest's resume.",
+   "evidence": "resume.log:9-13 '[resume] growth controller restored: slow EMA 5.7661 ... ramp LATCHED' and '[resume] source census rebuilt from 1500 restored entries -- 2 source id(s) hold memory'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "harness_test.sh guarantees, by sourcing only _reserve and _flags_for out of longrun.sh without executing it: every arm named in a preset ARMS= list resolves; an unknown arm returns the __UNKNOWN_ARM__ sentinel while `base` resolves to an empty flag set; no covered arm sets a knob twice; every knob those arms set is in _SPEC; _reserve never returns an existing path, suffixes .log before the extension, and gives 100 distinct paths in 100 calls; and five named arms resolve with lr_075_short pinning LR_RESTARTS=0 and lr_075_rst not.",
+   "evidence": "harness_test.sh:44-162",
+   "confidence": "verified"
+  },
+  {
+   "claim": "harness_test.sh's arm discovery regex only matches presets whose ARMS= is on the same line as the case label, yielding 62 distinct arms; _flags_for actually defines ~99 case labels, so ~37 defined arms are never checked for duplicate knobs or _SPEC membership.",
+   "evidence": "harness_test.sh:49; measured: covered=62, `sed -n '/^_flags_for()/,/^}/p' longrun.sh | grep -oE '^\\s+[a-z0-9_|]+\\)'` yields 99 unique labels including kitchen, society, vmax4k, vmax8k, nolatch, nomem, softroute, lr_075_norst",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Re-running the dup-knob and _SPEC checks over ALL 99 defined arms finds no violations today, so the gap is coverage rather than a live defect.",
+   "evidence": "ran both checks over the full label set: 'undeclared knobs across ALL defined arms: none'; no DUP lines",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Seventeen anchors reach into self_organize.py from the tests; all currently resolve, and their spans range from 2 lines (TOKSAVE) to 86 lines (levers' _EFF scan).",
+   "evidence": "scripted resolution of every block()/regex/AST anchor: GATE L4413-4469, BOOK L4469-4540, COPY L4650-4688, WIDEN L846-905, CULLGATE L823-905, WARN L5554-5602, RESTORE L4540-4580, OPT L4903-4943, LOADENC L3146-3162, GUARD L9273-9312, TOKLOAD L1227-1255, TOKSAVE L1010-1012, CURVEBY L879-905, CULL L3652-3699, DN L1142-1156, EXP L5497-5554, TAIL L1182-1199",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Three anchors share the end marker `\\ndef bwt_of(`, so resume_test's cull_gate_open extraction exec's 82 lines covering cull_gate_open, _NoHeldOut, widen_prefix and _curve_by_step; any new module-level def inserted in that span is exec'd too.",
+   "evidence": "resume_test.py:274 and :68 and :838 all end at \"\\ndef bwt_of(\"; self_organize.py:823-905",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Every AST-lifted function's free globals are supplied by its test's namespace, so the extractions are sound today: proj_arith/lift_to/pin_tick/bwt_of/forgetting_of/cull_gate_open/widen_prefix/_curve_by_step have none, curve_verdict needs the three CURVE_* constants, blowup_stale needs BLOWUP_RISE/BLOWUP_STALE, _load_enc needs ENC_V.",
+   "evidence": "scripted free-variable analysis over self_organize.py's module-level defs; curve_test.py:26-28, blowup_test.py:39-42, resume_test.py:520 supply exactly those",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ramp_test.py and resume_test.py stub `_env` as `lambda k, d=None: d`, so the PlateauGrowth class under test always sees registry defaults for FAB_GROW and FAB_RAMP_LATCH and is immune to ambient environment.",
+   "evidence": "ramp_test.py:38, resume_test.py:334",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The suite touches only self_organize.py, compare.py, memory.py, tokenizer.py and longrun.sh. world_model.py, verification.py, datastream.py, vocab.py, holdout.py, prompt.py, cl_bench.py, runs.py, fetch_big.py, fetch_local.py, rescue_ckpt.py, keystone_probe.py, probe_*.py, sweep_domain_report.py and every shell script except longrun.sh have no test.",
+   "evidence": "import/anchor map across all 17 files; self_organize.py:20-22 imports memory/verification/world_model so those only execute during the end-to-end run, with no assertions about them",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selftest.sh explicitly documents two heavyweight A/B experiments it will not run: run_verify_test.py and verify_console_test.py, on the grounds that they answer 'which gate is better', not 'did this still work'.",
+   "evidence": "selftest.sh:84-94",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare.py's MIN_PAIRS is 3, so the selftest's end-to-end compare of two single-seed logs can only ever produce NO VERDICT.",
+   "evidence": "compare.py:52 `MIN_PAIRS = 3`; compare.py:292-297; cmp_real.txt from the passing run: '>> NO VERDICT -- 1 independent observation(s) is below the 3'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selftest.sh's fresh and resume logs differ by SEED (0 vs 1), so the end-to-end compare exercises compare.py's UNPAIRED fallback, not the paired path that every architecture claim in the project rests on.",
+   "evidence": "selftest.sh:122 SEED=0, :144 SEED=1; cmp_real.txt: 'UNPAIRED (1x1 = 1 crossings, but only 1 independent observation(s) per arm ...) -- the arms share no seed'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mem_evict_test.py and compare_test.py are the only two python gates with no check() helper; they set `ok = False` inline (23 and 20 sites respectively), so a skipped branch prints nothing.",
+   "evidence": "`grep -c 'ok = False'` = 23 and 20; `grep -c 'check('` = 0 for both; the other 11 files define check() and print one line per assertion",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Static assertion counts: resume_test 110, curve_test 32, cap_test 31, corpus_test 29, lr_test 28, mem_evict 23, tok_test 23, blowup_test 21, compare_test 20, ramp_test 15, proj_test 12, growth_test 11, domain_test 10, harness_test ~25 shell assertions, selftest 16 unit gates + 16 _ck/_nck greps.",
+   "evidence": "grep counts of `check(`, `ok = False`, and `^_ck |^_nck ` across the suite",
+   "confidence": "verified"
+  },
+  {
+   "claim": "cap_test \u00a77's blackout cooldown constant is 1500, but the shipped valve reads fabgrow.cool, which the call site sets from FAB_COOLDOWN whose registry default is 400.",
+   "evidence": "cap_test.py:165 `COOL = 1500`; self_organize.py:7397 `_blackout = fabgrow is not None and (step - fabgrow.blackout) < fabgrow.cool`; self_organize.py:4181 `_i(\"FAB_COOLDOWN\", 400)`; self_organize.py:169 `\"FAB_COOLDOWN\": (\"i\", 400)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "growth_test.py builds PlateauGrowth from its SIGNATURE defaults (cooldown=1500, warmup=2000, burst=3), while the run builds it with FAB_COOLDOWN=400, FAB_WARMUP=300, FAB_BURST=1.",
+   "evidence": "growth_test.py:37 `S.PlateauGrowth(ramp=4000, **kw)`; PlateauGrowth signature `cooldown=1500, warmup=2000, burst=3`; self_organize.py:4181-4184",
+   "confidence": "verified"
+  },
+  {
+   "claim": "resume_test.py already documents this exact trap and builds the controller the way the run does; growth_test.py and ramp_test.py do not.",
+   "evidence": "resume_test.py:338-347 \"BUILD IT THE WAY THE RUN DOES, NOT THE WAY THE SIGNATURE DEFAULTS DO ... Mirror the call site exactly\" then PlateauGrowth(0.002, 400, 300, 4.0, 1, 4000, 600, 20000, 0.10, 0.5)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Constants read from source: blowup_test (BLOWUP_RISE/BLOWUP_STALE) and curve_test (CURVE_*). Constants hardcoded in the test: cap_test (0.08/8/0.002/1500), ramp_test (0.5), growth_test, domain_test (0.10/0.5), corpus_test (2.0/3.0), resume_test (0.45/0.02). All except cap_test's 1500 currently match the registry.",
+   "evidence": "blowup_test.py:39-42, curve_test.py:26-28; cap_test.py:44,135,165; domain_test.py:101; corpus_test.py:181; resume_test.py:277,536; registry dump of _SPEC",
+   "confidence": "verified"
+  },
+  {
+   "claim": "self_organize.py's `_cs` for the blow-up alarm is built WITHOUT filtering on the was-active flag, while `_curve_by_step` \u2014 the function resume_test \u00a79 tests precisely for excluding absent windows \u2014 does filter. Two consumers of the same curve, one filtered and one not, and blowup_test never touches the construction.",
+   "evidence": "self_organize.py:6433 `_cs = [b for st, _p, b, _a in _CURVE if st == step]`; self_organize.py:899 `rows = [(st, b) for st, _p, b, _a in curve if _a] or ...`; resume_test.py:852-856",
+   "confidence": "verified"
+  },
+  {
+   "claim": "memory.EditableMemory reads MEM_WRONG_READ directly from os.environ at construction, so mem_evict_test inherits it from the ambient environment.",
+   "evidence": "memory.py:67 `self.wrong_read = bool(int(os.environ.get(\"MEM_WRONG_READ\", 1)))`; mem_evict_test.py:169 constructs without setting it",
+   "confidence": "verified"
+  },
+  {
+   "claim": "domain_test.py's Mem._eligible stub counts only 'sources with entries' and ignores live_src, so the orphan-source semantics that actually set the floor divisor in a real run are never exercised.",
+   "evidence": "domain_test.py:73-74 vs memory.py:389-394 `has = (self.nsrc > 0); if self.live_src is None: return has; ... return has & lv`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "self_organize.py's cull_gate_open docstring says it is module level 'so manage_test.py can exercise it'. There is no manage_test.py in the repo; curve_test.py and resume_test.py are what exercise it.",
+   "evidence": "self_organize.py:833; `ls manage_test.py` -> No such file; curve_test.py:121-131, resume_test.py:274-285",
+   "confidence": "verified"
+  },
+  {
+   "claim": "preflight.sh solves the working-directory problem that selftest.sh has, with an explicit cd and a comment naming the failure mode.",
+   "evidence": "preflight.sh:14-15 `cd \"$(dirname \"$(readlink -f \"$0\")\")\"   # sections 5/6/7 open repo files by RELATIVE path`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selftest.sh's _ck returns on the FIRST missing pattern in a multi-pattern check, so later patterns in that call are not reported.",
+   "evidence": "selftest.sh:31-35 `for pat in \"$@\"; do if ! grep ...; then echo FAIL; FAIL=1; return; fi; done`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "selftest.sh has `set -u` but not `set -e`, and continues running the log assertions after a nonzero run exit, producing cascading failures rather than one.",
+   "evidence": "selftest.sh:22 `set -u`; :125 and :147 record the RC then fall through to _ck/_nck",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare_test's DIRECTION fixture cannot distinguish the two metrics by winner: with held_out A=2.20..2.23 and B=2.00..2.03 and a shared order-1 anchor of 3.742, B has both the lower loss and the larger d_order1 margin, so BB wins under both metrics.",
+   "evidence": "compare_test.py:28 (o1=3.742 default), :239-252; run output 'DIR held_out -> lower is better, BB wins' and 'DIR d_order1 -> HIGHER is better, BB wins'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare.py's DIRTY-tree warning has no coverage: compare_test's _w fixture hardcodes 'clean' in the [build] line.",
+   "evidence": "compare_test.py:31 writes '| clean |'; compare.py:222-223 `if any(r.get(\"dirty\") ...)`; no occurrence of DIRTY in compare_test.py",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare.py's filename SEED fallback is never the sole source of a seed in the tests: every fixture writes both `SEED=` on the EFFECTIVE line and `_seed{n}` in the filename.",
+   "evidence": "compare.py:80 `_grab(r\"\\bSEED=(\\d+)\", eff) or _grab(r\"_seed(\\d+)\", basename)`; compare_test.py:32 and all filename patterns",
+   "confidence": "verified"
+  },
+  {
+   "claim": "corpus_test.py's exposure block anchor deliberately ends at the NEXT banner comment, and both corpus_test and resume_test have already caught an anchor drift this way \u2014 the documented argument for banner anchors over ordinary lines.",
+   "evidence": "corpus_test.py:262-269; resume_test.py:49-61",
+   "confidence": "verified"
+  },
+  {
+   "claim": "resume_test.py hardcodes computed magic numbers in message assertions, e.g. 'FAB_NMAX=2048', '1843' (0.45x4096) and 'FAB_RAMP_TO<=0.1277' (523/4096).",
+   "evidence": "resume_test.py:314-317, :453-455",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "SELFTEST_DEVICE",
+   "effect": "Device for the two end-to-end training runs. Defaults to cpu. $DEVICE is deliberately NOT consulted, so an ambient DEVICE=cuda (which longrun.sh exports) cannot put a selftest job on the GPU.",
+   "owner": "selftest.sh",
+   "couples_with": [],
+   "evidence": "selftest.sh:103-109 `ST_DEV=${SELFTEST_DEVICE:-cpu}`"
+  },
+  {
+   "name": "SELFTEST_DIR",
+   "effect": "Where artefacts go. Unset -> a fresh mktemp -d. Everything the log assertions grep lives under it.",
+   "owner": "selftest.sh",
+   "couples_with": [],
+   "evidence": "selftest.sh:25 `OUT=${SELFTEST_DIR:-$(mktemp -d -t selftest-XXXXXX)}`"
+  },
+  {
+   "name": "SELFTEST_DATA",
+   "effect": "DATA_DIR for the end-to-end runs; defaults to `data`. With a missing or tiny corpus the two runs fail and 13 log assertions cascade.",
+   "owner": "selftest.sh",
+   "couples_with": [
+    "SELFTEST_DEVICE"
+   ],
+   "evidence": "selftest.sh:114 `DATA_DIR=${SELFTEST_DATA:-data}`"
+  },
+  {
+   "name": "FAB_GROW",
+   "effect": "Read by PlateauGrowth.__init__ from the real environment. growth_test.py imports self_organize and does NOT stub _env, so FAB_GROW=0 in the ambient environment turns off every growth path and produces 5 spurious failures plus 2 vacuously-passing 'no false positive' checks.",
+   "owner": "growth_test.py (should stub _env as ramp_test.py and resume_test.py do)",
+   "couples_with": [
+    "FAB_RAMP_LATCH"
+   ],
+   "evidence": "self_organize.py:2938 `s.grow_on = bool(int(_env(\"FAB_GROW\", 1)))`; verified: `FAB_GROW=0 python3 growth_test.py` exits 1 with 5 failures"
+  },
+  {
+   "name": "FAB_RAMP_LATCH",
+   "effect": "Also read by PlateauGrowth.__init__ from the real environment; 0 restores the never-terminating ramp. Ambient FAB_RAMP_LATCH=0 makes growth_test.py fail 3 checks.",
+   "owner": "growth_test.py",
+   "couples_with": [
+    "FAB_GROW"
+   ],
+   "evidence": "self_organize.py:2939 `s.latch = bool(int(_env(\"FAB_RAMP_LATCH\", 1)))`; verified: `FAB_RAMP_LATCH=0 python3 growth_test.py` exits 1"
+  },
+  {
+   "name": "MEM_WRONG_READ",
+   "effect": "Read by EditableMemory.__init__ from os.environ. mem_evict_test.py constructs the store without setting it, so an ambient MEM_WRONG_READ=0 makes wrong_gates_reads() fail and the whole gate exit 1.",
+   "owner": "mem_evict_test.py (should pass it explicitly or set os.environ before import)",
+   "couples_with": [],
+   "evidence": "memory.py:67; verified: `MEM_WRONG_READ=0 python3 mem_evict_test.py` exits 1"
+  },
+  {
+   "name": "DATA_MODE / BENCH / WORLD_MODEL / FABRIC / EXPERTS / TOKENIZER",
+   "effect": "growth_test.py sets these with os.environ.setdefault before importing self_organize, so an ambient value WINS. FABRIC=1 ambient changes what module-scope self_organize builds during the import (it still passed here).",
+   "owner": "growth_test.py",
+   "couples_with": [
+    "FAB_GROW",
+    "FAB_RAMP_LATCH"
+   ],
+   "evidence": "growth_test.py:21-23; verified: `FABRIC=1 python3 growth_test.py` still passes"
+  },
+  {
+   "name": "working directory",
+   "effect": "Not an env var but behaves as one. domain_test.py, corpus_test.py and resume_test.py open self_organize.py by RELATIVE path, and selftest.sh invokes every gate by bare filename, so the whole suite requires cwd == repo root.",
+   "owner": "selftest.sh (should cd like preflight.sh does)",
+   "couples_with": [
+    "SELFTEST_DIR"
+   ],
+   "evidence": "domain_test.py:47, corpus_test.py:34, resume_test.py:40 `SRC = open(\"self_organize.py\").read()`; verified: `cd /tmp && bash /home/user/LLM-Test/selftest.sh --quick` fails all 16 gates"
+  },
+  {
+   "name": "--quick",
+   "effect": "Skips both end-to-end runs and the compare gate; runs only the 16 unit gates. Everything the DID IT FIRE / FORGOTTEN-EVICTED sections guarantee is skipped.",
+   "owner": "selftest.sh",
+   "couples_with": [
+    "SELFTEST_DEVICE",
+    "SELFTEST_DATA"
+   ],
+   "evidence": "selftest.sh:23, :98-101"
+  },
+  {
+   "name": "--quiet (levers.py)",
+   "effect": "Documented as 'drift only'. Currently raises UnboundLocalError before printing any verdict, so the flag is unusable.",
+   "owner": "levers.py",
+   "couples_with": [],
+   "evidence": "levers.py:20, :154-157; verified: `python3 levers.py --quiet` -> UnboundLocalError, exit 1"
+  },
+  {
+   "name": "--write (notes_check.py)",
+   "effect": "Regenerates notes/CURRENT_DEFAULTS.md from _SPEC instead of failing on drift. Without it, a stale generated file is a hard exit 1.",
+   "owner": "notes_check.py",
+   "couples_with": [],
+   "evidence": "notes_check.py:154-163"
+  },
+  {
+   "name": "FIX=1 (preflight.sh)",
+   "effect": "Not part of the test suite but the neighbouring gate; noted because preflight.sh is the file that already contains the cwd fix selftest.sh lacks.",
+   "owner": "preflight.sh",
+   "couples_with": [],
+   "evidence": "preflight.sh:11, :14"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "levers.py --quiet crashes with UnboundLocalError",
+   "severity": "high",
+   "where": "levers.py:154-157",
+   "symptom": "`python3 levers.py --quiet`, the mode its own docstring advertises, dies before printing anything. `_mm` is assigned only inside `if not quiet:` but read unconditionally on the next line.",
+   "evidence": "levers.py:154 `if not quiet:` / :156 `_mm = default_mismatches()` / :157 `if _mm:`; docstring line 20 `python3 levers.py --quiet   # drift only`. Verified: UnboundLocalError: cannot access local variable '_mm', exit 1. selftest.sh:95 runs it without --quiet, so the suite never sees it.",
+   "bug_class": "crash"
+  },
+  {
+   "title": "tok_test's headline section never enters the mechanism it tests",
+   "severity": "high",
+   "where": "tok_test.py:64-86",
+   "symptom": "All three 'MINTING REACHES THE CAP' fixtures stop at 353 tokens of a 1024/800 cap and pass because `left == 0`, i.e. the corpus ran out of candidates. All three report `0 skipped`, so the candidate-rejection path \u2014 the entire subject of the file \u2014 is never entered and the fixtures cannot distinguish the fixed code from the pre-fix code. Only the max_tok=2 case (7 skipped, 4 rescued) exercises it.",
+   "evidence": "Run output: 'max_tok=16 vmax=1024 -> 353/1024 (65.5% dead, 0 candidates still above min_pair, 0 skipped)' and identical for max_tok=6 and max_tok=4. Assertion at tok_test.py:74 is `not (got < vmax and left > 0)`. The docstring at :18-19 advertises a real-English reproduction ('stalled at 1845/2048 ... 3940 candidates left') that the shipped synthetic fixture at :57-60 cannot produce. The file already caught this exact failure once, at :82-84.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "lr_test claims a line-for-line check of its reimplementation but does five substring greps",
+   "severity": "high",
+   "where": "lr_test.py:22-23 vs :55-60",
+   "symptom": "The docstring says 'the FIRST test checks that reimplementation still matches the real one line for line -- so this file fails loudly if the schedule is edited without it.' What it actually does is assert five identifier/expression fragments appear anywhere in ast.unparse(_lr_at). Changing `total // 10` to `total // 20`, moving the warmup clamp, or altering the restart cycle arithmetic all leave every fragment present and the reimplementation silently wrong.",
+   "evidence": "lr_test.py:55-60 checks only 'LR_SCHED == \\'none\\'', 'LR_WARMUP', the cosine expression, 'LR_RESTARTS', 'LR_SHIFT_WARM'. The reimplementation at :64-86 encodes ~12 further decisions (warmup clamp, span, per_c, ci, damping guard, envelope guard) none of which is anchored.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "cap_test sections 6 and 7 test re-typed local copies, not shipped code",
+   "severity": "high",
+   "where": "cap_test.py:138-139, :168",
+   "symptom": "The file's header justifies AST-lifting precisely so a re-typed copy cannot 'pass happily while the real code was wrong'. Sections 6 (the stalled band) and 7 (the retok blackout) then define `stalled_old`/`stalled_new`/`valve_may_run` locally. Both shipped predicates live inside main() and are unreachable by AST, so 11 of cap_test's 31 checks assert nothing about self_organize.py.",
+   "evidence": "cap_test.py:138-139 `def stalled_old(improving): return improving < PLATEAU` / `def stalled_new(improving): return abs(improving) < PLATEAU`; :168 `def valve_may_run(step, blackout): return (step - blackout) >= COOL`; shipped at self_organize.py:7411 `if abs(_improving) < GROW_CAP_PLATEAU:` and :7397 `_blackout = ... (step - fabgrow.blackout) < fabgrow.cool`, both inside main(). Header claim at cap_test.py:15-16.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "cap_test's blackout cooldown is 1500 against a shipped default of 400",
+   "severity": "high",
+   "where": "cap_test.py:165",
+   "symptom": "`COOL = 1500` is PlateauGrowth's SIGNATURE default, not the operating value. The call site builds the controller with `_i(\"FAB_COOLDOWN\", 400)`, and the shipped blackout test reads `fabgrow.cool`. So every numeric claim in section 7 ('...for the whole cooldown', the 41935+1499 case) describes a 1500-step window no default run produces \u2014 a 3.75x mismatch between the test's constant and the code's.",
+   "evidence": "cap_test.py:165 `COOL = 1500`; self_organize.py:7397 uses fabgrow.cool; self_organize.py:4181 `_i(\"FAB_COOLDOWN\", 400)`; self_organize.py:169 `\"FAB_COOLDOWN\": (\"i\", 400)`. resume_test.py:338-342 names this exact trap and avoids it.",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "growth_test measures a controller no run builds",
+   "severity": "high",
+   "where": "growth_test.py:37",
+   "symptom": "`S.PlateauGrowth(ramp=4000, **kw)` takes the class's signature defaults cooldown=1500, warmup=2000, burst=3. The run builds it with FAB_COOLDOWN=400, FAB_WARMUP=300, FAB_BURST=1. Every timing claim in the file \u2014 the cooldown bounding firings to 'a burst or two', the 8000..16000 suppression scan, the blackout window \u2014 is about a configuration that never ships.",
+   "evidence": "growth_test.py:37; PlateauGrowth signature `cooldown=1500, warmup=2000, burst=3`; self_organize.py:4181-4184 `_f(\"FAB_PLATEAU\",0.002), _i(\"FAB_COOLDOWN\",400), _i(\"FAB_WARMUP\",300), _f(\"FAB_Z\",4.0), _i(\"FAB_BURST\",1), ...`; resume_test.py:338-347 does it correctly",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "growth_test inherits ambient FAB_GROW and FAB_RAMP_LATCH",
+   "severity": "high",
+   "where": "growth_test.py:21-25",
+   "symptom": "It is the only gate that imports self_organize without stubbing _env, so PlateauGrowth reads the real environment. FAB_GROW=0 exported (an arm sets exactly that) produces 5 failures; FAB_RAMP_LATCH=0 produces 3. Worse, under FAB_GROW=0 the two 'no false positives' checks pass vacuously, because zero growth trivially satisfies REGRESSION==0.",
+   "evidence": "growth_test.py:23 sets only WORLD_MODEL/FABRIC/EXPERTS/TOKENIZER via setdefault; self_organize.py:2938-2939 read FAB_GROW and FAB_RAMP_LATCH via _env. Verified: `FAB_GROW=0 python3 growth_test.py` -> exit 1, 5 failures, while growth_test.py:66-67 and :91 still print ok.",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "selftest's 'read probe is live' passes when the read probe is OFF",
+   "severity": "medium",
+   "where": "selftest.sh:134",
+   "symptom": "The check greps the fresh log for the fixed string 'read probe'. The banner prints `| read probe OFF` when MEM_PROBE_EVERY=0 and `| read probe 64 queries every 25 steps` otherwise, so the substring is present either way. The assertion's label claims liveness it cannot establish.",
+   "evidence": "selftest.sh:134 `_ck  \"read probe is live\" \"$OUT/fresh.log\" \"read probe\"`; self_organize.py:4889 `f\"| read probe {'OFF' if not MEM_PROBE_EVERY else f'{MEM_PROBE_N} queries every {MEM_PROBE_EVERY} steps'}\"`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "selftest's 'memory floor is live' is a startup-banner grep the source itself records as having passed while the floor protected nothing",
+   "severity": "medium",
+   "where": "selftest.sh:133",
+   "symptom": "It greps for 'src floor 0.5', which is printed on line 11 of a 276-line log before training starts. It cannot distinguish a live floor from a disabled one, and self_organize.py names this check by file as the thing that kept passing through the nsrc-not-rebuilt bug.",
+   "evidence": "selftest.sh:133; self_organize.py:4887 prints the banner; self_organize.py:4977 'the banner keeps printing \"src floor 0.5\" and selftest.sh keeps asserting that line is present'. Verified: the string is at fresh.log line 11 of 276.",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "resume_test's retention-sign mirror check is a tautology",
+   "severity": "medium",
+   "where": "resume_test.py:560-561",
+   "symptom": "`check((e - l > 0) != worse or not worse, ...)` where `worse = l > e`. When worse is False the `or not worse` arm makes it True; when worse is True then l>e so e-l<0 so the first arm is True. The condition cannot be False for any inputs. The check that is supposed to demonstrate the OLD subtraction says the opposite proves nothing.",
+   "evidence": "resume_test.py:556 `worse = l > e`, :560; evaluated over (2.114,2.223), (1.447,1.103), (2,2), (5,1), (1,5) -> True in every case",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "blowup_test's constants check cannot fail",
+   "severity": "low",
+   "where": "blowup_test.py:90",
+   "symptom": "`check(RISE is not None and STALE is not None, \"both constants are module-level in the shipped source\")` sits 44 lines after a `sys.exit(1)` on exactly that condition, so it is unreachable-false and adds a passing line to the report for a property already enforced.",
+   "evidence": "blowup_test.py:43-46 `if RISE is None or STALE is None: print(...); sys.exit(1)` then :90",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "selftest.sh cannot be run from anywhere but the repo root",
+   "severity": "medium",
+   "where": "selftest.sh:48-96",
+   "symptom": "Every gate is invoked by bare filename and three of them open self_organize.py by relative path. `bash /home/user/LLM-Test/selftest.sh --quick` from /tmp fails all 16 gates with 'can't open file'. The fix already exists in this repo, one file over.",
+   "evidence": "verified: `cd /tmp && bash /home/user/LLM-Test/selftest.sh --quick` -> 16 FAILs; domain_test.py:47, corpus_test.py:34, resume_test.py:40 use bare `open(\"self_organize.py\")`; preflight.sh:14 `cd \"$(dirname \"$(readlink -f \"$0\")\")\"` with a comment naming this exact failure",
+   "bug_class": "crash"
+  },
+  {
+   "title": "compare_test never asserts compare.py's exit code",
+   "severity": "medium",
+   "where": "compare_test.py:92-246",
+   "symptom": "`rc, out = _run(...)` appears at 13 call sites; `rc` is never read. compare.py returns 0, 1 and 2 on different paths (2 = 'no pairs to compare'), and none of that is checked. Any caller that branches on compare.py's status has no coverage.",
+   "evidence": "`grep -n '\\brc\\b' compare_test.py` -> 13 assignments, zero uses; compare.py:270 `return 2`, :304 `return 0`, :336 `return 0`, :350 `return 0`",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "selftest section 3's stated expected answer is wrong and unasserted",
+   "severity": "medium",
+   "where": "selftest.sh:160-164",
+   "symptom": "The comment says 'there is nothing to find -- which makes NOT SIGNIFICANT the right answer'. With one log per arm and MIN_PAIRS=3, compare.py must return NO VERDICT, and it does. The only assertion is that the literal 'P(A better)' appears, so neither the correct nor the claimed verdict is checked, and the check is satisfied by the UNPAIRED fallback rather than the paired path.",
+   "evidence": "selftest.sh:160-161, :164; compare.py:52 `MIN_PAIRS = 3`; cmp_real.txt from the passing full run: 'UNPAIRED (1x1 = 1 crossings ...)' and '>> NO VERDICT -- 1 independent observation(s) is below the 3'",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "notes_check's HISTORICAL escape hatch swallows live drift",
+   "severity": "medium",
+   "where": "notes_check.py:86-90",
+   "symptom": "The regex treats any line containing 'was', 'were', 'then', 'before', 'previously', 'recorded' etc. as a historical record and skips it entirely. 31 of the 42 candidate lines in the live corpus are skipped, and 9 of those state values _SPEC contradicts. notes/07_WIP.md:499 says 'on the default VERIFY=recon' while _SPEC says 'selfcon', and is skipped only because the word 'then' appears elsewhere on the line.",
+   "evidence": "notes_check.py:86-90; instrumented run: 42 candidate lines, 31 skipped, 11 checked, 9 of the skipped disagree with _SPEC; notes/07_WIP.md:499 'a term *\"that was computed then multiplied by 0.0 on the default VERIFY=recon'; notes_check.DEFAULTS['VERIFY'] == 'selfcon'",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "notes_check does not scan notes/_evidence, contradicting its own scope claim",
+   "severity": "medium",
+   "where": "notes_check.py:128-131",
+   "symptom": "_live_markdown's docstring says 'Everything outside archive/ is now in scope'. os.listdir is non-recursive, so 30 .md files under notes/_evidence/ are silently excluded. Re-running the drift check over them would report 19 lines stating defaults _SPEC contradicts (FAB_NMAX=6, SOCIETY=1, CORPUS_CAP=2, MAX_DOMAINS=64, LAYERS=4...).",
+   "evidence": "notes_check.py:120-131 (docstring claim at :124-125), :173 prints '20 live markdown files'; measured: 30 unscanned .md under notes/_evidence, 19 would-be drift lines",
+   "bug_class": "other"
+  },
+  {
+   "title": "corpus_test section 3 claims to check build_stream and never touches it",
+   "severity": "medium",
+   "where": "corpus_test.py:112-171",
+   "symptom": "The banner reads 'THE PREDICTED PER-CORPUS SHARE MATCHES WHAT build_stream ACTUALLY DRAWS'. Both `predict` and `simulate` are hand restatements in the test file; build_stream (self_organize.py:1393) is never read, extracted or executed. The section validates the test's model of the guard against the test's model of the sampler.",
+   "evidence": "corpus_test.py:112 (banner), :115-127 `\"\"\"The guard's arithmetic, as written in self_organize.py.\"\"\"`, :130-152 `\"\"\"build_stream's draw loop, byte-for-byte on the accounting\"\"\"`; self_organize.py:1393 `def build_stream():` referenced nowhere in the suite",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "domain_test can never reach the COMP_PROTECT branch",
+   "severity": "medium",
+   "where": "domain_test.py:81-98",
+   "symptom": "The Asm stub sets `comp_glob = None` and `comp = {}`, and the exec'd cull block guards competence protection on `s.comp_glob is not None`. Every domain_test case passes comp=True, but the branch is never entered, `asm.protected` is never incremented, and no check reads it. One of the two brakes in the cull block has zero coverage.",
+   "evidence": "domain_test.py:92-96 `s.comp = {}` / `s.comp_glob = None` / `s.protected = 0`; self_organize.py:3694 `if COMP_PROTECT and s.comp_glob is not None and d in s.comp and s.comp[d] < s.comp_glob:`; no assertion on asm.protected anywhere in domain_test.py",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "domain_test's memory stub omits the live_src semantics that set the floor divisor",
+   "severity": "medium",
+   "where": "domain_test.py:73-74",
+   "symptom": "The stub's _eligible returns 'any source with entries'. The real one returns `has & lv` where lv is live_src, and its docstring records a measured run where 125 sources held entries against 27 live domains \u2014 a 4.6x difference in the divisor `int(src_floor * cap / eligible)` that decides whether a domain is held or deleted. That divergence is invisible to the test.",
+   "evidence": "domain_test.py:73-74 vs memory.py:389-394 and its docstring at memory.py:380-384; the divisor is computed at self_organize.py:3688",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "harness_test's dup-knob and _SPEC checks cover 62 of ~99 defined arms",
+   "severity": "medium",
+   "where": "harness_test.sh:49",
+   "symptom": "The arm list is scraped with a regex requiring `ARMS=\"...\"` on the same line as a case label, which yields 62 arms. _flags_for defines ~99. Arms like kitchen, society, vmax4k, vmax8k, nolatch, nomem, softroute and lr_075_norst are never checked for a knob set twice or a knob missing from _SPEC \u2014 which is the exact class the section exists to catch.",
+   "evidence": "harness_test.sh:49; measured 62 covered vs 99 case labels in _flags_for; re-running both checks over all 99 finds no violation today, so it is coverage not a live defect",
+   "bug_class": "other"
+  },
+  {
+   "title": "selftest passes with 14 armed-and-inert mechanisms and asserts nothing about them",
+   "severity": "medium",
+   "where": "selftest.sh:127-130",
+   "symptom": "The DID IT FIRE checks assert the section renders, that the audit did not throw, that no row is uncountable, and that at least one 'fired' and one 'off' row exist. They do not fail on '!! ZERO ... ARMED AND INERT'. The suite's own run reports 14, including domains.cull, domains.held, memory.wrong_block, fabric.cull, tokenizer.mint_reject and loss.TOK_ANCHOR \u2014 several of which are the exact subjects of domain_test, mem_evict_test and tok_test.",
+   "evidence": "selftest.sh:127-130; fresh.log '>> 14 ARMED MECHANISM(S) DID NOTHING: fabric.grow, fabric.spawn, fabric.cull, fabric.failed_out, fabric.crossover, fabric.replicate, fabric.explore, memory.wrong_block, domains.cull, domains.held, domains.spare, domains.empty, tokenizer.mint_reject, loss.TOK_ANCHOR'; resume.log reports 14 as well",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "mem_evict_test inherits ambient MEM_WRONG_READ",
+   "severity": "medium",
+   "where": "mem_evict_test.py:169",
+   "symptom": "EditableMemory reads MEM_WRONG_READ from os.environ at construction and the test never sets it. `MEM_WRONG_READ=0 python3 mem_evict_test.py` exits 1. The docstring claims the section 'checks all three: the floor, the gating, and the knob', but the knob is exercised only by mutating `m.wrong_read` directly, so the env->attribute plumbing at memory.py:67 has no coverage.",
+   "evidence": "memory.py:67 `os.environ.get(\"MEM_WRONG_READ\", 1)`; mem_evict_test.py:165 (claim), :214 `m.wrong_read = False`; verified exit 1 under MEM_WRONG_READ=0",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "The blow-up alarm's input is not filtered on the active flag, and no test covers the construction",
+   "severity": "medium",
+   "where": "self_organize.py:6433",
+   "symptom": "`_cs = [b for st, _p, b, _a in _CURVE if st == step]` averages every process at that step including ones the phase schedule is not streaming. _curve_by_step \u2014 the function resume_test \u00a79 tests precisely for excluding absent windows, quoting a +2.13 b/B absent-window step against a 0.5 threshold \u2014 does filter. blowup_test drives blowup_stale on synthetic curves and never touches how _cs is built, so the same defect class survives at the other consumer.",
+   "evidence": "self_organize.py:6433 vs :899 `rows = [(st, b) for st, _p, b, _a in curve if _a] or ...`; resume_test.py:852-856; blowup_test.py:63-86 constructs curves by hand",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "levers.py prints an unverified OVERRIDE paragraph as if it were a finding",
+   "severity": "low",
+   "where": "levers.py:113-117",
+   "symptom": "Four print statements assert that FAB_MIN_STEPS is forced to 0 by CHAIN_VOTE, that CHAIN_VOTE defaults to 1, that the declared default of 2 never runs, and that self_organize refuses the combination. None of it is checked against the source. If the mechanism were removed the paragraph would keep printing in the same tool whose entire purpose is catching declaration/source drift.",
+   "evidence": "levers.py:113-117 are unconditional prints inside `if not quiet:`; the claims correspond to self_organize.py:1848, :1861-1867, :4174, :191 but nothing in levers.py reads them",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "levers.py's _F0 guard is line-scoped",
+   "severity": "low",
+   "where": "levers.py:142",
+   "symptom": "`if \"_F0.\" in _code and \"_F0 is not None\" not in _code` excludes a whole physical line as soon as one guard appears on it. The _EFF list packs multiple tuples per line \u2014 line 5880 already holds three \u2014 so a second, UNGUARDED _F0 dereference on a line whose first reference is guarded would pass. That is exactly the AttributeError that cost a grid arm.",
+   "evidence": "levers.py:140-144; self_organize.py:5880 holds `(\"DIV_W\", DIV_W), (\"DIV_MASS\", _F0.div_mass if _F0 is not None else 0), (\"IND_W\", ...)` on one line",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "tok_test's clean control self-disables when the fixture changes",
+   "severity": "low",
+   "where": "tok_test.py:102",
+   "symptom": "`check(tc.mint_rescued == 0 if tc.gate_skipped == 0 else True, ...)` reduces to `True` the moment the max_tok=16 fixture starts rejecting anything, while still printing an ok line whose message reports the counts. It is correct today only because gate_skipped happens to be 0.",
+   "evidence": "tok_test.py:100-103; run output '  ok    no rejects (0) means no rescues (0)'",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "compare_test's DIRECTION comment claims two opposite verdicts from one fixture; both name the same arm",
+   "severity": "low",
+   "where": "compare_test.py:236 vs :239-252",
+   "symptom": "'Arm A is worse on the loss and therefore better on the margin -- one fixture, two opposite correct verdicts.' With a shared order-1 anchor of 3.742, B has both the lower loss and the larger margin, so BB wins under held_out and under d_order1. The direction bug is still caught (by the header string and the per-seed column), but not by the mechanism the comment describes.",
+   "evidence": "compare_test.py:28 `o1=3.742`, :239-240, :236; run output 'DIR held_out -> lower is better, BB wins' / 'DIR d_order1 -> HIGHER is better, BB wins'",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "ramp_test's comment about what PlateauGrowth reads is stale",
+   "severity": "low",
+   "where": "ramp_test.py:38",
+   "symptom": "'the class reads only FAB_RAMP_LATCH, and the default is what we want'. It also reads FAB_GROW. The `lambda k, d=None: d` stub happens to return the right default for both, so the test is correct while its stated justification is not \u2014 and the stub will silently absorb any further knob the class starts reading.",
+   "evidence": "ramp_test.py:38; self_organize.py:2938-2939 `_env(\"FAB_GROW\", 1)` and `_env(\"FAB_RAMP_LATCH\", 1)`",
+   "bug_class": "other"
+  },
+  {
+   "title": "compare.py's DIRTY-tree guard has no test",
+   "severity": "low",
+   "where": "compare_test.py:28-36",
+   "symptom": "The `_w` fixture hardcodes '| clean |' in the [build] line, so `row[\"dirty\"]` is always False and the warning at compare.py:222-223 never fires. compare_test's GUARDS section covers four of compare.py's five pre-comparison guards.",
+   "evidence": "compare_test.py:31; compare.py:85 and :222-223; no occurrence of 'DIRTY' in compare_test.py",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "selftest continues asserting after the run it is asserting about has failed",
+   "severity": "low",
+   "where": "selftest.sh:125, :147",
+   "symptom": "A nonzero RC from self_organize.py records one FAIL and then thirteen log greps run against a truncated log, so a single crash reports as fourteen failures with no indication which one is the cause.",
+   "evidence": "selftest.sh:22 `set -u` only; :125 `[ \"$RC\" = 0 ] || { ...; FAIL=1; }` falls through to :127-135",
+   "bug_class": "other"
+  },
+  {
+   "title": "self_organize.py points at a test file that does not exist",
+   "severity": "low",
+   "where": "self_organize.py:833",
+   "symptom": "cull_gate_open's docstring says it is module level 'so manage_test.py can exercise it'. There is no manage_test.py. A reader looking for the coverage of the gate that hides three mechanisms is sent to a file that was never written; the real coverage is in curve_test.py and resume_test.py.",
+   "evidence": "self_organize.py:833; `ls manage_test.py` -> No such file; curve_test.py:121-131, resume_test.py:274-285",
+   "bug_class": "other"
+  }
+ ],
+ "junk": [
+  {
+   "what": "compare_test.py:25 `D, V = 16, 50`",
+   "why": "Module-level constants, never referenced anywhere in the file. Left over from a fixture that used a memory store.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "compare_test.py:100 `import re` inside main()",
+   "why": "Duplicates the module-level `import re` at line 17.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "compare_test.py:62 `import ast` inside fixture_matches_the_real_format()",
+   "why": "Imported and never used; the function reads the source with re.search, not ast.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "tok_test.py:147 `import json`",
+   "why": "Imported alongside tempfile for the save/load section; only tempfile is used. DynamicTokenizer.save/load handle the json themselves.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "resume_test.py:439-442 (ns_fresh) and :449-455 (ns2)",
+   "why": "Two identical `_RD={}` namespaces run through the same RESTORE block; the first discards its output, the second captures it. One construction serves both assertions.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "domain_test.py Asm stub fields tokc, rad, visits, bornb, size, wins, protected",
+   "why": "Present only so the exec'd cull block's `.pop(d, None)` sweep does not KeyError. No assertion reads any of them, and `protected` in particular can never be incremented because comp_glob is None.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "mem_evict_test.py flood-occupancy return from scan_resistance",
+   "why": "Computed and printed at :401-402, never asserted. The file says so honestly at :403-409 ('REPORTED, NOT ASSERTED') but it is still a number in the output that binds nothing.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "self_organize.py:833 'so manage_test.py can exercise it'",
+   "why": "Names a file that does not exist. Should point at curve_test.py and resume_test.py, which do exercise cull_gate_open.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "blowup_test.py:90 `check(RISE is not None and STALE is not None, ...)`",
+   "why": "Unreachable-false: a sys.exit(1) 44 lines earlier already enforces it. It only adds a passing line.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "levers.py:113-117 the OVERRIDE prose block",
+   "why": "Four unconditional prints stating an unverified claim about FAB_MIN_STEPS/CHAIN_VOTE inside a tool whose whole job is verifying declarations against source. Either check it or move it to a comment.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "selftest.sh:160-161 the section-3 comment",
+   "why": "States NOT SIGNIFICANT is the correct answer for two single-seed logs. The tool must and does return NO VERDICT. Misleads anyone reading the gate to understand what it proves.",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "There are exactly 17 anchors from the tests into self_organize.py, and a rebuild breaks every one. Six are AST anchors requiring a name to stay MODULE LEVEL: proj_arith, lift_to, pin_tick, PlateauGrowth (class), blowup_stale, and the four of curve_verdict/bwt_of/forgetting_of/cull_gate_open; plus widen_prefix, _curve_by_step, _load_enc and _lr_at reached the same way. Eleven are raw source-text anchors on exact strings.",
+   "why": "Moving any of these back into main() or a closure silently or loudly disables between 10 and 110 assertions. Several tests say so in their own refusal messages ('back inside main() it is untestable again').",
+   "evidence": "proj_test.py:41-45, cap_test.py:27-34, ramp_test.py:33-37, blowup_test.py:47-51, curve_test.py:29-36, lr_test.py:46-51, resume_test.py:68/274/330/838"
+  },
+  {
+   "item": "The anchoring convention that survived three separate drift incidents: anchor the START on a distinctive BANNER COMMENT (not an ordinary line, which may repeat), and end at the NEXT banner so that inserting a block between two of them fails LOUDLY with a NameError rather than reporting on the wrong text.",
+   "why": "Three anchors have already grabbed the wrong span in this project \u2014 resume_test twice (a duplicate `_wide_by = 0`; the growth-controller restore landing between two banners) and corpus_test once (the capacity-gate warning landing inside its span). All three failed correctly.",
+   "evidence": "resume_test.py:49-61, corpus_test.py:262-267, domain_test.py:56-57"
+  },
+  {
+   "item": "`\"    if USE_TOK:\"` occurs 4 times in self_organize.py and is corpus_test's held-out-tail end anchor, disambiguated only by the search offset from `\"    _unshuf = []\"`. Every other anchor is unique.",
+   "why": "An inserted `if USE_TOK:` between lines 1182 and 1199 would silently truncate the block and the test would exec a fragment.",
+   "evidence": "scripted anchor scan: TAIL start L1182 end L1199, endcount=4; every other anchor endcount=1"
+  },
+  {
+   "item": "Build PlateauGrowth the way the CALL SITE does, never from its signature defaults. Signature: cooldown=1500, warmup=2000, burst=3. Call site: FAB_COOLDOWN=400, FAB_WARMUP=300, FAB_BURST=1. resume_test already got burned by this (the first version had ramp=0 and every ramp assertion passed vacuously).",
+   "why": "growth_test.py and cap_test.py \u00a77 still use the signature values, so their timing claims describe a controller no run builds.",
+   "evidence": "resume_test.py:338-347; self_organize.py:4181-4184; growth_test.py:37; cap_test.py:165"
+  },
+  {
+   "item": "mem_evict_test must stay seeded with torch.manual_seed(0). The store's victim sampling calls torch.randint/randperm on the GLOBAL RNG, and unseeded the suite failed 3 times in 20 on unchanged code.",
+   "why": "A regression test that fails 15% of the time cannot be used to judge a change; the instinct on a red run is to re-run it, which is the instinct that lets a real regression through.",
+   "evidence": "mem_evict_test.py:337-343"
+  },
+  {
+   "item": "The suite must be run from the repo root. domain_test.py, corpus_test.py and resume_test.py open self_organize.py by relative path, and selftest.sh invokes every gate by bare filename. preflight.sh already carries the one-line fix (`cd \"$(dirname \"$(readlink -f \"$0\")\")\"`).",
+   "why": "From any other directory all 16 gates fail with 'can't open file', which reads as catastrophic breakage.",
+   "evidence": "domain_test.py:47, corpus_test.py:34, resume_test.py:40, preflight.sh:14-15; verified from /tmp"
+  },
+  {
+   "item": "selftest.sh must not read $DEVICE. longrun.sh exports DEVICE=cuda, and the suite is meant to be run often and at any time, which is only safe if running it cannot cost anything. SELFTEST_DEVICE is the opt-in.",
+   "why": "An earlier version used DEVICE=${DEVICE:-cpu} and would have quietly put a training job on the GPU beside an 18-epoch run.",
+   "evidence": "selftest.sh:103-109"
+  },
+  {
+   "item": "Anything selftest.sh does not name explicitly is skipped. Two tests (corpus_test, resume_test) sat unwired for a whole session, silently omitting ~120 checks. The file now states what it deliberately does NOT run and why.",
+   "why": "'A TEST NOBODY RUNS IS A TEST THAT DOES NOT EXIST.' A rebuild must re-wire every gate into the entry point or repeat the omission.",
+   "evidence": "selftest.sh:72-77, :84-94"
+  },
+  {
+   "item": "compare.py pairs runs by the SEED printed on the `[config] EFFECTIVE` line. SEED must stay in _EFF or the regex matches 0 logs and every paired comparison falls back to a filename heuristic or crashes.",
+   "why": "That regex once matched 0 of 37 real logs while compare_test passed against a fixture the shipped code could not emit.",
+   "evidence": "compare_test.py:49-71; compare.py:79-80"
+  },
+  {
+   "item": "Registry facts the tests depend on: _SPEC has 328 knobs; MIN_PAIRS=3; FAB_COOLDOWN=400; FAB_BURST=1; FAB_WARMUP=300; FAB_RAMP_TO=0.5; FAB_PRESSURE=0.45; GROW_LIFT=0.08; GROW_LIFT_MIN=8; MEM_SRC_FLOOR=0.5; DOM_CULL_FRAC=0.1; FAB_CULL_FRAC=0.02; EXPOSURE_MAX=2.0; EXPOSURE_SKEW=3.0; BLOWUP_RISE=0.5; BLOWUP_STALE=80; CURVE_RISE_BLEWUP=0.5; CURVE_FLAT=0.05; CURVE_TOK_RISE=0.05.",
+   "why": "blowup_test and curve_test read theirs from source; every other test hardcodes them. A rebuild that changes a default silently invalidates the hardcoding tests without failing them.",
+   "evidence": "scripted _SPEC dump; self_organize.py:748-749, :782-784, :169, :266; compare.py:52"
+  },
+  {
+   "item": "notes/CURRENT_DEFAULTS.md is GENERATED from _SPEC by `python3 notes_check.py --write` and is the only file in notes/ allowed to state a current default. Everything else must either match _SPEC or read as history.",
+   "why": "Nine notes stated FAB_N0=3 a week after it became 2048, and that claim was 00_INDEX's 'five things to know before spending any GPU time' item #1.",
+   "evidence": "notes_check.py:20-24, :61-80, :155-163"
+  },
+  {
+   "item": "harness_test.sh must SOURCE longrun.sh's functions with sed rather than execute the script, because longrun.sh dispatches on $1 at the bottom and sourcing it whole would start a run.",
+   "why": "A harness test that can start a training job is not safe to run before every launch.",
+   "evidence": "harness_test.sh:36-40"
+  },
+  {
+   "item": "`__UNKNOWN_ARM__` is the sentinel that separates 'defined with no overrides' (base, the control every comparison is measured against) from 'never defined'. Empty is not undefined.",
+   "why": "Treating empty as missing makes the test fail on the one arm the whole project baselines against; treating undefined as empty runs the defaults under a misspelled arm's log name.",
+   "evidence": "harness_test.sh:54-59, :63-71"
+  },
+  {
+   "item": "The suite currently touches only self_organize.py, compare.py, memory.py, tokenizer.py and longrun.sh. world_model.py, verification.py, datastream.py, vocab.py, holdout.py, prompt.py, cl_bench.py, runs.py, fetch_big.py, fetch_local.py, rescue_ckpt.py, keystone_probe.py, probe_*.py and every shell script but longrun.sh have zero coverage.",
+   "why": "world_model.py and verification.py are imported at self_organize module scope, so they execute in the end-to-end run with nothing asserted about them; the rest are not exercised at all.",
+   "evidence": "import/anchor map across all 17 files; self_organize.py:20-22"
+  },
+  {
+   "item": "The selftest's end-to-end run uses DOMAINS=eng (NP=1) and resumes at identical geometry, so the DN/CORP realignment, the exposure guard, the held-out-tail check, the fabric widening, the newborn split and the tokenizer cap raise NEVER execute there. All of resume_test's 110 checks and corpus_test's source-block sections are stub-only.",
+   "why": "A rebuild that changes those paths gets no end-to-end signal at all; the stubs are the entire safety net.",
+   "evidence": "selftest.sh:114; verified 0 hits for 'WIDENING', 'cap-shaped fabric tensor', 'LIVE here but were not in the checkpoint', 'DROPPED', 'HELD-OUT TAIL IS A BLOCK', 'exposure over the whole run' in both logs of a passing full run"
+  }
+ ],
+ "open_questions": [
+  "Was tok_test's synthetic corpus meant to reach the cap? The docstring quotes real-English reproductions (1845/2048 with 3940 candidates left; 658/4000 with 1866 left) but the shipped 168 kB / 36-distinct-word fixture exhausts at 353 tokens with 0 candidates left, so the headline assertion is satisfied by exhaustion rather than by the fix. A richer fixture, or asserting gate_skipped > 0 in each case, would restore the discrimination.",
+  "Should notes/_evidence/ be inside notes_check's scope? It is a chat/commit transcript archive, so excluding it may be intended \u2014 but the exclusion is accidental (non-recursive os.listdir), the docstring claims the opposite, and 19 drift lines sit there. Either move it under archive/ or exclude it by name.",
+  "Is the unfiltered `_cs` at self_organize.py:6433 deliberate? The blow-up alarm averages absent processes while _curve_by_step filters them for the end-of-run verdict. If unintended, this is the same defect the _curve_by_step fix removed, still live at the other consumer.",
+  "Are the 14 ARMED AND INERT mechanisms in the selftest's own run expected at STREAM_LEN=9000/FAB_NMAX=8, or do some of them indicate genuinely dead code? I could not distinguish 'too small to fire' from 'never fires' without a larger run. domains.cull, domains.held, memory.wrong_block and tokenizer.mint_reject are the ones whose unit tests would be most reassuring to see fire once end-to-end.",
+  "Should harness_test scrape arms from _flags_for's case labels instead of from preset ARMS= lines? That would raise coverage from 62 to 99 arms. Both checks pass over all 99 today, so the change is free \u2014 but I do not know whether some of the 37 uncovered labels are intentionally retired.",
+  "Can the two predicates cap_test \u00a76/\u00a77 restate be hoisted to module level, the way lift_to/pin_tick/blowup_stale/cull_gate_open were? Both currently live inside main() (self_organize.py:7397 and :7411), which is exactly the condition every other section of cap_test refuses to accept.",
+  "Does anything read compare.py's exit code in practice (a wrapper script, a sweep report)? If so, the 13 unasserted `rc` values in compare_test are a live gap; if compare.py is only ever read by eye, they are noise.",
+  "selftest.sh's fresh run scored 4.353 b/B and the resume 4.231 at this size. Both are far above the order-0 anchor, which the file says is expected ('at this size they are noise'), but I have no way to confirm from the suite alone that the end-to-end run is training at all rather than just executing.",
+  "Is `bytes_per_id` / `maxlen` consistency (tok_test \u00a73) sufficient to guarantee the bits/byte denominator, or does the denominator also depend on state the test does not reach? tok_test asserts the arrays agree; whether the reported bits/byte actually uses them is untested."
+ ]
+}

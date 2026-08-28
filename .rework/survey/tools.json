@@ -1,0 +1,949 @@
+{
+ "area": "tools",
+ "summary": "Thirteen standalone analysis/utility scripts sit around the training engine (self_organize.py) and read its logs, checkpoints and corpora. They fall into four groups: (1) log/record analysis \u2014 compare.py (paired bootstrap P(A>B) decision rule) and runs.py (a CSV registry of finished runs); (2) checkpoint readers \u2014 holdout.py (per-domain held-out probe out of a ckpt), prompt.py (generation, the deliverable), vocab.py (tokenizer cohort audit); (3) probes \u2014 probe_signature.py, probe_stability.py, probe_ckpt_geometry.py, keystone_probe.py, cl_bench.py; (4) corpus builders \u2014 fetch_big.py (HF streaming) and fetch_local.py (this machine's own Python source), plus sweep_domain_report.py which summarises sweep_domain_grid.sh. Only compare.py, sweep_domain_report.py, fetch_big.py, fetch_local.py, prompt.py and cl_bench.py have any automated caller; runs.py, vocab.py, holdout.py and all four probes are hand-run only. All thirteen parse; I executed compare.py, runs.py, vocab.py, prompt.py, holdout.py, cl_bench.py, keystone_probe.py, probe_stability.py, probe_ckpt_geometry.py, probe_signature.py, sweep_domain_report.py and fetch_local.py against a real checkpoint/log I generated. probe_signature.py is dead on its default settings (crashes in its own control arm); several report lines in compare.py, cl_bench.py and sweep_domain_report.py print verdicts that contradict the numbers printed beside them, or that no data can make fail. Every number produced by any of these is a signal about the configuration it ran under, not a fact about the architecture.",
+ "facts": [
+  {
+   "claim": "compare.py is the paired-comparison decision rule (Bouthillier et al. 2021): it pairs runs by SEED, reports P(A better) with a 10,000-draw percentile bootstrap CI, applies a three-way verdict, and reports the Noether seed budget.",
+   "evidence": "compare.py:1-34, :43-45 (GAMMA=0.75, ALPHA,BETA=0.05,0.20, BOOT=10000), :141-166",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare.py is WIRED: selftest.sh runs it end-to-end on two real logs, and longrun.sh calls it from both the `ladder` and `ab` arms. compare_test.py is its known-answer suite and is run by selftest.sh.",
+   "evidence": "selftest.sh:163 `python3 compare.py \"$OUT/x_A_seed0.log\" -- \"$OUT/x_B_seed1.log\"`; longrun.sh:1907, longrun.sh:1955; selftest.sh:51 `python3 compare_test.py`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare.py's SEED regex now matches real logs: self_organize.py prints SEED on the `[config] EFFECTIVE` line, and compare.read_log recovered seed=0 from a log I generated at HEAD.",
+   "evidence": "self_organize.py:5906 `(\"SEED\", _i(\"SEED\", 0)),`; self_organize.py:5987 `print(\"[config] EFFECTIVE  \" + ...)`; ran compare.read_log on a fresh log -> {'seed': 0, 'held_out': 4.797, 'commit': 'aee4a523c7'}",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare.py negates higher-is-better metrics for the statistics only, keeping printed values raw; LOWER_IS_BETTER declares held_out/train True and d_order1 False.",
+   "evidence": "compare.py:133, :136-138 `_orient`, :273 `opairs = [(_sgn * x, _sgn * y) ...]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "runs.py is a CSV registry (runs.csv) with subcommands add/list/stale/manual; every column is parsed out of a log except in `manual`, which demands --source and stamps `(no log)` into the commit column.",
+   "evidence": "runs.py:10-17, :26 `CSV = os.path.join(ROOT, \"runs.csv\")`, :193-205 cmd_manual, :215-222",
+   "confidence": "verified"
+  },
+  {
+   "claim": "runs.py has NO automated caller anywhere in the repo. The only live references are two comments inside self_organize.py telling a reader to run it by hand.",
+   "evidence": "grep for `runs.py` across *.sh/*.py outside archive/ returns only compare.py's docstring, self_organize.py:1606 and self_organize.py:7571, plus notes/*.md",
+   "confidence": "verified"
+  },
+  {
+   "claim": "runs.csv has 42 rows and its newest row is dated 2026-08-15, while HEAD is dated 2026-08-28 \u2014 the registry has not been fed for the last ~13 days of development (roughly 30 commits).",
+   "evidence": "`python3 -c \"import csv; print(len(list(csv.DictReader(open('runs.csv')))))\"` -> 42; tail of runs.csv: `ep18_big_s2,bf53d404e4,2026-08-15,...`; git log HEAD `aee4a52`, build line of a fresh run reads `2026-08-28`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "runs.py and compare.py use DIFFERENT regexes for the same EFFECTIVE line (runs.py requires two spaces after EFFECTIVE, compare.py requires none), despite compare.py's docstring claiming they share patterns. Both happen to match the current format.",
+   "evidence": "runs.py:53 `r\"^\\[config\\] EFFECTIVE  (.*)$\"` vs compare.py:79 `r\"^\\[config\\] EFFECTIVE(.*)$\"`; compare.py:69-70 \"Parsed with the same patterns as runs.py\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "runs.py's parse() and spec_defaults() both work against HEAD: on a fresh log it extracted all 11 KNOBS plus steps/vocab/minted/never_minted/held_out/train/gap/uniform/order1/held_out_se, and spec_defaults read 11 defaults out of _SPEC.",
+   "evidence": "executed runs.parse on a fresh log -> {'epochs':'2','lr_epochs':'2','vmax':'320','fab_nmax':'8','held_out':'4.797','held_out_se':'0.433', ...}; runs.spec_defaults() -> {'EPOCHS':'1','LR_EPOCHS':'8','VMAX':'4096','FAB_NMAX':'4096', ...}",
+   "confidence": "verified"
+  },
+  {
+   "claim": "vocab.py reads a saved DynamicTokenizer file and reports minted tokens grouped into equal MINT-ORDER cohorts, with optional corpus coverage (--corpus) and a corpus-free merge-tree audit (--tree). It re-implements greedy longest-match locally rather than importing tokenizer.py, deliberately.",
+   "evidence": "vocab.py:1-23, :86-89 \"Kept local rather than importing so this tool still reads a tokenizer file produced by a version of tokenizer.py that has since moved on\", :167-215",
+   "confidence": "verified"
+  },
+  {
+   "claim": "vocab.py works: run against a tokenizer written by a fresh run it printed the cohort table, the merge-tree table and (with --corpus data/train/eng, 3.3 MB) per-cohort uses/%tokens/%bytes/unused.",
+   "evidence": "ran `python3 vocab.py <ck>/ck.dyntok.json --corpus data/train/eng --cohorts 4` -> \"corpus: 3.3 MB -> 2208343 tokens (1.52 bytes/token)\" and four cohort rows",
+   "confidence": "verified"
+  },
+  {
+   "claim": "vocab.py has no automated caller; the only live reference is a comment in self_organize.py.",
+   "evidence": "self_organize.py:7792 \"`vocab.py` reads the whole list afterwards from TOKENIZER_PATH\"; no .sh invokes it",
+   "confidence": "verified"
+  },
+  {
+   "claim": "vocab.py's default path `data/dyntok.json` does not exist in this tree, so a bare `python3 vocab.py` exits with its own guidance message rather than doing anything.",
+   "evidence": "vocab.py:106; `ls data/*.json` -> no matches; ran `python3 vocab.py` -> \"!! data/dyntok.json not found.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "prompt.py loads a checkpoint and generates; it imports build_lm/Fabric/SigEncoder/fab_logits from self_organize rather than redefining them, and forces SOCIETY from the checkpoint's fab_cfg so the routing path matches training.",
+   "evidence": "prompt.py:31-34, :49, :57-60 `if FAB_CFG: _so.SOCIETY = FAB_SOC`, :204 `logits = fab_logits(model, FAB, _h, GIST, _n0, k=ENS_K)[0, -1]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "prompt.py works at HEAD: it loaded a fabric checkpoint and generated text on all three of the plain, MEM=1 and GROUND=1 paths.",
+   "evidence": "ran `PROMPT=\"The quick brown\" GEN_LEN=30 python3 prompt.py CKPT=<ck>` -> \"[loaded ... | expanding tokenizer, vocab 320 + fabric (3 nodes) ...]\" then a continuation",
+   "confidence": "verified"
+  },
+  {
+   "claim": "prompt.py's only automated caller is rerun.sh's read-back gate; preflight.sh only ast.parse()s it. longrun.sh (the project's main driver) never invokes it.",
+   "evidence": "rerun.sh:135 `python3 prompt.py CKPT=\"$OUT/smoke_ck\" PROMPT=\"The \" N=16`; preflight.sh:113 lists prompt.py in an ast.parse loop; grep of longrun.sh finds no prompt.py invocation",
+   "confidence": "verified"
+  },
+  {
+   "claim": "holdout.py reads the per-domain held-out probe (`holdout`, `holdout_step`) back out of a checkpoint and, given two checkpoints, reconstructs the ACROSS-THE-RUN-BOUNDARY comparison with the same 2-sigma test the in-run report uses.",
+   "evidence": "holdout.py:1-16, :69-88; self_organize.py:5356 `\"holdout\": holdout_bpb(), \"holdout_step\": step,`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "holdout.py works and its pooled error bar is computed correctly: sqrt(sum of per-domain variances)/k.",
+   "evidence": "ran `python3 holdout.py <ck> <ck.best>` -> per-domain rows and \"mean change on the 2 domain(s) ... +0.014 +/- 0.208 bits/byte\"; holdout.py:83-84; hand-check sqrt(.246^2+.251^2+.157^2+.157^2)/2 = 0.208",
+   "confidence": "verified"
+  },
+  {
+   "claim": "holdout.py is hand-run only: longrun.sh echoes the command as advice in the pilot-add arm but never executes it.",
+   "evidence": "longrun.sh:949 `echo \">>   python3 holdout.py $FROM $_PA_CK\"`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "cl_bench.py is the continual-learning testbed: four forgetting arms (weights-only / +REPLAY / +memory[frozen key] / +memory[model key]), an editability test (delete-from-memory vs gradient-ascent unlearn), and a wrongness/self-consistency sweep. ESTIMATE=1 gives a wall-clock projection instead.",
+   "evidence": "cl_bench.py:1-17, :178-253 main, :256-294 estimate, :297-299",
+   "confidence": "verified"
+  },
+  {
+   "claim": "cl_bench.py's only automated callers are run_full_unfrozen.sh and run_cl_test.sh, both of which hard-exit if CUDA is absent; run_cl_test.sh itself has no caller anywhere in the repo.",
+   "evidence": "run_full_unfrozen.sh:58,64; run_cl_test.sh:23,28; both scripts line ~20 `python3 -c \"import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)\" || { echo \"NO CUDA -- run on the H100\"; exit 1; }`; grep for run_cl_test.sh outside itself returns nothing",
+   "confidence": "verified"
+  },
+  {
+   "claim": "cl_bench.py runs to completion on CPU with small settings and produces all three sections.",
+   "evidence": "ran `STEPS_PER_DOMAIN=30 N_DOMAINS=3 D_MODEL=32 SEQ=32 BATCH=8 UNLEARN_STEPS=10 MEM_CAP=2000 python3 cl_bench.py` -> FORGETTING / EDITABILITY / WRONGNESS sections printed",
+   "confidence": "verified"
+  },
+  {
+   "claim": "keystone_probe.py is a self-contained synthetic probe asking whether an embedding can encode the OPERATION rather than the operands, by contrasting a transfer-coded (functional) encoder with a reconstruction (surface) one on k-NN op-purity.",
+   "evidence": "keystone_probe.py:1-17, :57-69 train(), :70-73 op_purity",
+   "confidence": "verified"
+  },
+  {
+   "claim": "keystone_probe.py still runs and reproduces its recorded 2026-07-21 result: functional 0.803 vs surface 0.500 against chance 0.20.",
+   "evidence": "ran `python3 keystone_probe.py` -> \"FUNCTIONAL ... 0.803 | SURFACE ... 0.500 | gap +0.303\"; notes/01_TIMELINE.md:99 records \"0.80 vs 0.50 surface (chance 0.20)\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "keystone_probe.py is wired to nothing and was never integrated into the router; the notes themselves record it as OPEN.",
+   "evidence": "notes/02_IDEAS.md:241 \"**Outcome.** **OPEN.** The probe supported the keystone; it was never integrated into the real...\"; no .sh or .py invokes it",
+   "confidence": "verified"
+  },
+  {
+   "claim": "probe_signature.py measures the domain signature's corpus-discriminativeness directly through self_organize's own code path (build_stream / SigEncoder / contrastive_step / sig_of_batch): within/between distances, AUC/d', the operational centroid query at run-widths R, a separation-vs-byte-gap curve, boundary-detector SNR, untrained controls, and a rekey-lag drift probe.",
+   "evidence": "probe_signature.py:1-32, :137-161 pair_metrics, :164-175 centroid_metrics, :178-204 adjacent_metrics, :313-353 drift_probe",
+   "confidence": "verified"
+  },
+  {
+   "claim": "probe_signature.py's drift-only path (PROBE_SWEEP=0) works and prints the REKEY LAG table.",
+   "evidence": "ran `PROBE_STREAM_LEN=20000 PROBE_SWEEP=0 PROBE_DRIFT_BASE=5 PROBE_DRIFT=0,5 python3 probe_signature.py` -> \"[REKEY LAG | ENC_POS_MAX 2*WIN ...]\" with lag rows and \"[probe done in 3s]\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "probe_stability.py compares two independently-seeded runs as LABELLING FUNCTIONS over a common probe set and scores NMI agreement against a size-preserving shuffled null; it refuses to score when either run assembled fewer than 2 domains.",
+   "evidence": "probe_stability.py:1-21, :71-80 (the <2-domain refusal), :113-118 (null)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "probe_stability.py works and prefers the small probe.pt sidecar over the multi-GB ckpt.pt.",
+   "evidence": "ran `python3 probe_stability.py A=<ck> B=<ck.best> N=64 NULLS=5` -> \"A: .../probe.pt -> 4 domains ...\", \"AGREEMENT A vs B ... 0.606\", \"EXCESS OVER THE FLOOR +0.574\"; probe_stability.py:50-55",
+   "confidence": "verified"
+  },
+  {
+   "claim": "probe_ckpt_geometry.py measures how well a trained encoder separates the TRUE corpora (cohesion, nearest-centroid separation, a silhouette-like margin, 1-NN accuracy) \u2014 the null the in-run COLLAPSE CHECK cannot supply.",
+   "evidence": "probe_ckpt_geometry.py:1-18, :74-98",
+   "confidence": "verified"
+  },
+  {
+   "claim": "probe_ckpt_geometry.py works and is the one probe self_organize.py itself points at from its own report.",
+   "evidence": "ran `python3 probe_ckpt_geometry.py CKPT=<ck> N=64` -> per-corpus rows plus \"MEAN TRUE SILHOUETTE -0.00\"; self_organize.py:8804 `print(f\"  >> {_sv}. To settle it: python3 probe_ckpt_geometry.py CKPT=<your SAVE_CKPT>\"`; rerun.sh:197",
+   "confidence": "verified"
+  },
+  {
+   "claim": "sweep_domain_report.py is a pure-stdlib scraper for sweep_domain_grid.sh: it parses each cell log, emits SUMMARY.md (verdict list K1-K7, main table, diagnostics table, reproduce block) or, with --pick, the four-knob env string for the best Stage-B cell.",
+   "evidence": "sweep_domain_report.py:1-9, :15-26 regexes, :178-248 verdicts, :251-322 main",
+   "confidence": "verified"
+  },
+  {
+   "claim": "sweep_domain_report.py is wired only to sweep_domain_grid.sh, which itself has no caller in the repo.",
+   "evidence": "sweep_domain_grid.sh:413 `BEST=$(python3 sweep_domain_report.py \"$OUT\" --pick ...)`, sweep_domain_grid.sh:485 `python3 sweep_domain_report.py \"$OUT\" > \"$OUT/SUMMARY.md\"`; grep for sweep_domain_grid.sh outside itself returns only notes/*.md and sweep_domain_report.py",
+   "confidence": "verified"
+  },
+  {
+   "claim": "All of sweep_domain_report.py's scraped patterns still match lines self_organize.py prints today (boundary detection, clustering purity, memory contributes, rate, SELF-ASSEMBLED, true processes).",
+   "evidence": "self_organize.py:8483, :8509-8510, :3752, :6495-6500, :8357; sweep_domain_report.py:18-26",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fetch_big.py streams a slice of an HF dataset into the DATA_DIR layout, with presets, a gated-dataset diagnosis, a source-provenance refusal, resume-by-manifest, and a streaming shuffle buffer.",
+   "evidence": "fetch_big.py:1-31, :43-56 PRESETS, :128-151 provenance refusal, :190-210 gated diagnosis, :235-266 shuffle+resume",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fetch_big.py is the most heavily wired tool here: longrun.sh calls it in four places, plus bench_gpu.sh, fetch_40g.sh, and preflight.sh advice; fetch_local.py imports STACK_DIR from it.",
+   "evidence": "longrun.sh:150,559,918,963; bench_gpu.sh:52; fetch_40g.sh:81; preflight.sh:243; fetch_local.py:47 `from fetch_big import STACK_DIR`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fetch_big.py cannot be exercised in this environment: the `datasets` package is not installed, and its own docstring says the download path was never tested end to end.",
+   "evidence": "`python3 -c \"import datasets\"` -> ModuleNotFoundError; fetch_big.py:5-6 \"this sandbox's network is allowlisted to GitHub/PyPI only, so I cannot reach HuggingFace/S3 to test the streaming path end-to-end\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fetch_local.py builds the second continual-learning area from Python source already on the machine, exists because both of fetch_big.py's code presets are gated, and refuses to hand back a short corpus unless --allow-short.",
+   "evidence": "fetch_local.py:1-26, :211-231",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fetch_local.py works and its root discovery finds all four install roots (stdlib, dist-packages x2, user site) as its comment claims sysconfig alone would miss.",
+   "evidence": "ran `python3 fetch_local.py --domain py --out <tmp> --gb 0.002` -> 4 roots listed including /usr/lib/python3/dist-packages and /root/.local/lib/python3.11/site-packages; \"found 5139 unique files, 99.1 MB\"; wrote 2.0 MB + _fetch_manifest.json",
+   "confidence": "verified"
+  },
+  {
+   "claim": "fetch_local.py is invoked by longrun.sh's pilot-add arm when the dataset argument is the literal `local`.",
+   "evidence": "longrun.sh:895 `python3 fetch_local.py --domain \"$NAME\" --gb \"$GB\" --out \"$P_DD\" ${FETCH_ARGS:-} || exit 1`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "preflight.sh syntax-checks only 7 modules and NONE of compare.py, runs.py, vocab.py, holdout.py, cl_bench.py, the four probes, sweep_domain_report.py, fetch_big.py or fetch_local.py.",
+   "evidence": "preflight.sh:113 `for f in ['self_organize.py','memory.py','world_model.py','tokenizer.py','datastream.py','prompt.py','verification.py']:`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "levers.py \u2014 the knob-registry audit that selftest.sh runs \u2014 parses ONLY self_organize.py, so every environment variable read by cl_bench.py, prompt.py and the probes is outside the registry check entirely.",
+   "evidence": "levers.py:28 `SRC = os.path.join(ROOT, \"self_organize.py\")`; levers.py:15 \"re-derives all three from the AST of self_organize.py\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The checkpoint's probe sidecar carries `domains`, `sig_space`, `enc_v`, `use_tok` and `tok_path`, and self_organize.py's own comment on that line says \"# written, not read\".",
+   "evidence": "self_organize.py:5448-5451, the trailing comment `# written, not read`; loaded a real probe.pt -> keys ['cent','domains','enc','enc_v','sig_d','sig_space','size','step','tok_path','use_tok','win'], domains='eng,py', sig_space='bytes', enc_v=256",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Archived superseded copies of two in-scope tools exist under archive/garry/ and are frozen records, not live code.",
+   "evidence": "archive/garry/cl_bench.py, archive/garry/prompt.py; ARCHIVE.md \"Nothing live imports, executes or reads any of it\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "compare.py's per-seed table block is written out three times verbatim (once in the NO-VERDICT branch, once in the NEGLIGIBLE branch, once at the end).",
+   "evidence": "compare.py:299-302, :331-334, :345-348 \u2014 identical four-line block",
+   "confidence": "verified"
+  },
+  {
+   "claim": "prompt.py does not read the checkpoint's `mem_selfcon` field, so it retrieves from entries that the training-time reader would refuse (memory.read filters `is_wrong()` when MEM_WRONG_READ=1, the default).",
+   "evidence": "self_organize.py:5352 saves `\"mem_selfcon\": mem.selfcon[act].cpu()`; memory.py read(): `_w = self.is_wrong(); ... valid = valid & (~_w)`; prompt.py:153 uses only `d[\"mem_keys\"]` and `d[\"mem_tok\"]`",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "--metric (compare.py)",
+   "effect": "selects held_out | d_order1 | train. Also selects the DIRECTION of every statistic via LOWER_IS_BETTER, and gates the cross-corpus warning.",
+   "owner": "compare.py",
+   "couples_with": [
+    "LOWER_IS_BETTER",
+    "--gamma",
+    "--negligible"
+   ],
+   "evidence": "compare.py:178-179, :133, :225 `if len(o1) > 1 and a.metric == \"held_out\"`"
+  },
+  {
+   "name": "--gamma (compare.py)",
+   "effect": "Bouthillier meaningfulness threshold; splits 'significant' into meaningful vs not, and enters the Noether seed budget.",
+   "owner": "compare.py",
+   "couples_with": [
+    "--metric"
+   ],
+   "evidence": "compare.py:181, :279 `need = seeds_needed(p, gamma=a.gamma)`, :314-317"
+  },
+  {
+   "name": "--negligible (compare.py)",
+   "effect": "effect-size floor in b/B (default 0.03, the measured replication floor); below it the tool suppresses the seed-budget advice.",
+   "owner": "compare.py",
+   "couples_with": [
+    "--metric"
+   ],
+   "evidence": "compare.py:53-60, :182-184, :327-336"
+  },
+  {
+   "name": "MIN_PAIRS / NEGLIGIBLE / GAMMA / ALPHA / BETA / BOOT (compare.py)",
+   "effect": "module constants, not CLI-settable: 3 independent observations minimum, 0.03 b/B floor, 0.75, 0.05, 0.20, 10000 bootstrap draws.",
+   "owner": "compare.py",
+   "couples_with": [],
+   "evidence": "compare.py:43-45, :52, :60"
+  },
+  {
+   "name": "KNOBS (runs.py)",
+   "effect": "the 11 knobs recorded per row and compared against _SPEC in `stale`. Adding a knob here without it being on the EFFECTIVE line makes every parsed row read '<predates this knob>'.",
+   "owner": "runs.py",
+   "couples_with": [
+    "self_organize.py _SPEC",
+    "the _EFF list"
+   ],
+   "evidence": "runs.py:30-31, :162-181"
+  },
+  {
+   "name": "BYTES_PER_COHORT_CAP (vocab.py)",
+   "effect": "caps the corpus bytes read for --corpus. Named per-cohort but used as a whole-corpus cap.",
+   "owner": "vocab.py",
+   "couples_with": [
+    "--corpus"
+   ],
+   "evidence": "vocab.py:30, :135 `read_corpus(a.corpus, BYTES_PER_COHORT_CAP)`"
+  },
+  {
+   "name": "CKPT / DEVICE / GEN_LEN / GEN_TEMP / TOPK / REP_PENALTY / REP_WINDOW (prompt.py)",
+   "effect": "checkpoint path, device, generation length (default 200) and temperature (0.6), memory top-k, and the repetition penalty and its window. Settable as env or as KEY=VALUE on the command line.",
+   "owner": "prompt.py",
+   "couples_with": [
+    "MEM"
+   ],
+   "evidence": "prompt.py:20-25, :151, :168-169"
+  },
+  {
+   "name": "MEM (prompt.py)",
+   "effect": "0/1. Enables the memory blend AND is the hidden precondition for GROUND \u2014 _recall returns [] when MEM=0.",
+   "owner": "prompt.py",
+   "couples_with": [
+    "GROUND",
+    "GROUND_K",
+    "GROUND_CHARS",
+    "TOPK"
+   ],
+   "evidence": "prompt.py:150, :98 `if SRC is None or not USE_MEM: return []`"
+  },
+  {
+   "name": "GROUND / GROUND_K / GROUND_CHARS (prompt.py)",
+   "effect": "retrieve source passages and silently prime the context with them. Inert unless MEM=1.",
+   "owner": "prompt.py",
+   "couples_with": [
+    "MEM"
+   ],
+   "evidence": "prompt.py:223, :234-238, :98"
+  },
+  {
+   "name": "DATA_MODE (cl_bench.py)",
+   "effect": "'synthetic' (default) uses order-2 Markov domains; 'real' loads data/train/<domain>/ and REPLACES N with the number of surviving corpora.",
+   "owner": "cl_bench.py",
+   "couples_with": [
+    "DOMAINS",
+    "N_DOMAINS",
+    "OVERLAP",
+    "CORPUS_CAP",
+    "DATA_DIR"
+   ],
+   "evidence": "cl_bench.py:57-67, :66 `N = len(_CORPORA)`"
+  },
+  {
+   "name": "MEM_CAP (cl_bench.py)",
+   "effect": "store capacity. cl_bench main defaults it to 20000, cl_bench estimate to 300000, self_organize's registry to 200000 \u2014 three defaults for one name.",
+   "owner": "cl_bench.py (and self_organize.py _SPEC)",
+   "couples_with": [
+    "ESTIMATE",
+    "EVICT"
+   ],
+   "evidence": "cl_bench.py:181 `_i(\"MEM_CAP\", 20000)`, cl_bench.py:260 `_i(\"MEM_CAP\", 300000)`, self_organize.py:304 `\"MEM_CAP\": (\"i\", 200000)`"
+  },
+  {
+   "name": "LAMBDA (cl_bench.py)",
+   "effect": "nominal memory blend weight in bpb(). Because the memory distribution always sums to exactly 1, LAMBDA is the WHOLE blend weight with no quality gating.",
+   "owner": "cl_bench.py",
+   "couples_with": [
+    "MEM_CAP",
+    "TOPK",
+    "KEY_WIN_MODEL"
+   ],
+   "evidence": "cl_bench.py:29, :161-162"
+  },
+  {
+   "name": "REKEY (cl_bench.py)",
+   "effect": "re-encode every stored key with the current model after each domain (the drift fix). Default 0, but both shipped callers set REKEY=1.",
+   "owner": "cl_bench.py",
+   "couples_with": [
+    "KEY_WIN_MODEL",
+    "MEM_CAP"
+   ],
+   "evidence": "cl_bench.py:31, :192; run_cl_test.sh:18 `... REKEY=1 ...`; run_full_unfrozen.sh:57"
+  },
+  {
+   "name": "WRITE_ADAPTIVE / WRITE_TARGET / WRITE_GATE (cl_bench.py)",
+   "effect": "memory write gate. WRITE_ADAPTIVE defaults 0, which leaves memory.py's quantile gate dead inside the adaptive branch and the fixed WRITE_GATE threshold running \u2014 the same coupling self_organize.py prints a banner note about.",
+   "owner": "memory.py",
+   "couples_with": [
+    "WRITE_QUANTILE"
+   ],
+   "evidence": "cl_bench.py:29, :181-182; self_organize.py:5934-5936 \"the quantile gate lives inside the adaptive branch, so WRITE_ADAPTIVE=0 leaves the fixed WRITE_GATE threshold running\""
+  },
+  {
+   "name": "CORRUPT_MODE (cl_bench.py)",
+   "effect": "'cross' (default) pairs a domain-1 context with another domain's token; 'shuffle' permutes within domain 1.",
+   "owner": "cl_bench.py",
+   "couples_with": [
+    "N_DOMAINS"
+   ],
+   "evidence": "cl_bench.py:234-239"
+  },
+  {
+   "name": "ESTIMATE (cl_bench.py)",
+   "effect": "1 = run the wall-clock projection instead of the benchmark.",
+   "owner": "cl_bench.py",
+   "couples_with": [
+    "MEM_CAP",
+    "REKEY",
+    "STEPS_PER_DOMAIN"
+   ],
+   "evidence": "cl_bench.py:298"
+  },
+  {
+   "name": "PROBE_SWEEP / PROBE_DRIFT_ON (probe_signature.py)",
+   "effect": "SWEEP=0 skips sections (a)-(g) and runs only the rekey-lag probe; DRIFT_ON appends the drift probe after the sweep. SWEEP=0 is currently the only setting under which the file completes.",
+   "owner": "probe_signature.py",
+   "couples_with": [
+    "PROBE_STEPS",
+    "PROBE_POSMAX"
+   ],
+   "evidence": "probe_signature.py:58-59, :407-412, :458"
+  },
+  {
+   "name": "PROBE_STEPS / PROBE_POSMAX / PROBE_RUNS / PROBE_K_CENT / PROBE_MAXEVAL / PROBE_ENC_LR / PROBE_SEED / PROBE_STREAM_LEN / PROBE_JSON",
+   "effect": "encoder training checkpoints, ENC_POS_MAX multiples of WIN, run-smoothing widths, centroid pool size, eval cap per class, encoder LR, seed, stream length, optional JSON dump.",
+   "owner": "probe_signature.py",
+   "couples_with": [
+    "ENC_POS_MAX",
+    "S.WIN",
+    "S.DOM_WINS"
+   ],
+   "evidence": "probe_signature.py:42, :51-60"
+  },
+  {
+   "name": "PROBE_DRIFT / PROBE_DRIFT_BASE / PROBE_DRIFT_POSMAX / PROBE_DRIFT_R",
+   "effect": "lag ladder, encoder steps before the centroids are frozen, positive radius and run width for the rekey-lag probe.",
+   "owner": "probe_signature.py",
+   "couples_with": [
+    "REKEY_EVERY",
+    "ENC_EVERY"
+   ],
+   "evidence": "probe_signature.py:321-324"
+  },
+  {
+   "name": "A= / B= / N= / NULLS= (probe_stability.py)",
+   "effect": "the two checkpoints, probe windows per corpus (512), and the number of size-preserving shuffles for the null floor (20).",
+   "owner": "probe_stability.py",
+   "couples_with": [
+    "DOMAINS",
+    "DATA_DIR"
+   ],
+   "evidence": "probe_stability.py:25-30"
+  },
+  {
+   "name": "CKPT= / N= (probe_ckpt_geometry.py)",
+   "effect": "checkpoint (directory or .pt; prefers probe.pt) and probe windows per corpus (256).",
+   "owner": "probe_ckpt_geometry.py",
+   "couples_with": [
+    "DOMAINS",
+    "DATA_DIR"
+   ],
+   "evidence": "probe_ckpt_geometry.py:21-23, :39-44"
+  },
+  {
+   "name": "DOMAINS / DATA_DIR / DATA_MODE / STREAM_LEN / ENC_WARMUP / BENCH (all three probes)",
+   "effect": "set with os.environ.setdefault BEFORE importing self_organize, because self_organize builds its corpora at import time. BENCH=1 is inert here: it only gates main(), which the probes never call.",
+   "owner": "self_organize.py",
+   "couples_with": [
+    "CORPUS_CAP",
+    "VAL_FRAC"
+   ],
+   "evidence": "probe_stability.py:31-37, probe_ckpt_geometry.py:24-30, probe_signature.py:39-43; self_organize.py:7807 `if bool(_i(\"BENCH\", 0)):` inside main()"
+  },
+  {
+   "name": "GATE_COMP / GATE_V / GATE_REC / NP_TRUE (sweep_domain_report.py)",
+   "effect": "the pre-registered K3/K4 pass thresholds (0.80 completeness, 0.85 V, 0.85 boundary recall) and the true class count. NP_TRUE is a module global that parse() overwrites from whichever cell log it last saw.",
+   "owner": "sweep_domain_report.py",
+   "couples_with": [
+    "the order in which cell logs are parsed"
+   ],
+   "evidence": "sweep_domain_report.py:12-13, :69-71, :203"
+  },
+  {
+   "name": "--dataset / --config / --field / --split / --data-dir (fetch_big.py)",
+   "effect": "which HF dataset, config, text field, split and in-repo subdirectory to stream. A preset resolves by short key OR by full dataset id.",
+   "owner": "fetch_big.py",
+   "couples_with": [
+    "--domain",
+    "--token"
+   ],
+   "evidence": "fetch_big.py:61-64, :95-96, :112-122"
+  },
+  {
+   "name": "--shuffle-buffer / --seed (fetch_big.py)",
+   "effect": "streaming shuffle reservoir (default 10000) so self_organize's held-out TAIL is a sample rather than a block. Both are recorded in the manifest and a --resume with different values is refused.",
+   "owner": "fetch_big.py",
+   "couples_with": [
+    "--resume",
+    "VAL_FRAC in self_organize.py"
+   ],
+   "evidence": "fetch_big.py:77-94, :235-245, :247-258"
+  },
+  {
+   "name": "--min-score / --score-field (fetch_big.py)",
+   "effect": "drop documents below a dataset-native quality score; silently a no-op if the field is absent, so the file prints a NOTE when it skipped nothing.",
+   "owner": "fetch_big.py",
+   "couples_with": [
+    "--dataset"
+   ],
+   "evidence": "fetch_big.py:70-76, :281-286, :308-311"
+  },
+  {
+   "name": "--resume / --shard-mb / --min-chars / --gb / --out / --domain / --token (fetch_big.py)",
+   "effect": "continue from the manifest, shard size in MB (512), minimum document length, target GB of text, output root, target domain directory, HF token.",
+   "owner": "fetch_big.py",
+   "couples_with": [
+    "_fetch_manifest.json"
+   ],
+   "evidence": "fetch_big.py:65-103"
+  },
+  {
+   "name": "--domain / --out / --gb / --root / --ext / --min-bytes / --include-tests / --seed / --allow-short (fetch_local.py)",
+   "effect": "corpus name (also picks default extensions and search roots), output root, target GB, extra walk roots, extensions, minimum file size, whether to keep test trees, shuffle seed, and whether a short corpus is fatal.",
+   "owner": "fetch_local.py",
+   "couples_with": [
+    "EXT",
+    "SKIP_DIRS",
+    "SHARD_MB"
+   ],
+   "evidence": "fetch_local.py:139-153"
+  },
+  {
+   "name": "SHARD_MB / SEP (fetch_local.py)",
+   "effect": "shard size (256 MB) and document separator. The stated purpose is byte-compatibility with fetch_big.py so 'eng vs py' is not also 'downloaded vs local'.",
+   "owner": "fetch_local.py",
+   "couples_with": [
+    "fetch_big.py --shard-mb"
+   ],
+   "evidence": "fetch_local.py:30-33"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "probe_signature.py cannot complete on its default settings: the `frozen` control crashes on an undefined name",
+   "severity": "critical",
+   "where": "probe_signature.py:415-427 (control loop) -> self_organize.py:3259",
+   "symptom": "With SWEEP on (the default, PROBE_SWEEP=1) the run reaches the second control and dies with `NameError: name 'FROZEN' is not defined. Did you mean: '_FROZEN'?`. The bigram control has already printed; the learned-encoder sweep (c), the separation curve (e), the drift probe and the entire verdict() never run. The file's headline question \u2014 'if a trivial featurizer separates the corpora and the learned encoder does not, the encoder is the problem' \u2014 cannot be answered because the run dies between the two halves of that comparison.",
+   "evidence": "ran `PROBE_STREAM_LEN=20000 PROBE_STEPS=0,10 PROBE_POSMAX=2 python3 probe_signature.py` -> traceback at probe_signature.py:418 -> self_organize.py:3259 `return F.normalize(FROZEN[t].mean(0), dim=0)`. self_organize.py:3170-3173 define `_FROZEN = [None]` and a lazy getter; there is no bare `FROZEN` in the module. probe_signature.py:415 `for mode in (\"bigram\", \"frozen\"):`",
+   "bug_class": "crash"
+  },
+  {
+   "title": "SIG_MODE=frozen is a guaranteed NameError everywhere, not only in the probe",
+   "severity": "high",
+   "where": "self_organize.py:3259, reachable from sweep_domain_report.py:173-174 and probe_signature.py:415",
+   "symptom": "Any code path that calls sig_of() with SIG_MODE not in ('learned','bigram') raises NameError. sweep_domain_report.full_env_of() will happily emit `SIG_MODE=frozen` into a 'reproduce it' command block for a cell that could never have run. The bigram branch also falls through to the same line when a window has <=1 element.",
+   "evidence": "self_organize.py:3253-3259 `if SIG_MODE == \"learned\": ...; if SIG_MODE == \"bigram\" and t.numel() > 1: ...; return F.normalize(FROZEN[t].mean(0), dim=0)`; sweep_domain_report.py:173-174 `if a.get(\"sig_mode\") and a[\"sig_mode\"] != \"learned\": out.append(\"SIG_MODE=%s\" % a[\"sig_mode\"])`",
+   "bug_class": "crash"
+  },
+  {
+   "title": "prompt.py's memory blend is the exact ungated 50/50 mix that self_organize.py fixed \u2014 measured hp is identically 1.0",
+   "severity": "critical",
+   "where": "prompt.py:154-162 (mem_dist) and prompt.py:212-215 (the blend)",
+   "symptom": "MEM=1 always takes exactly 50% of the probability mass from retrieval, however bad the nearest neighbour. `hp = dm.sum().clamp(max=1.0)` is meant to gate on match quality, but mem_dist scatters a softmax, so the sum is exactly 1.0 by construction. This is the same defect self_organize.py documents and fixed with MEM_GATE/MEM_CONF0/MEM_W ('hp was therefore identically 1.0 and this was an UNCONDITIONAL 50/50 mix at every position ... memory measured NET-NEGATIVE at every store size'). prompt.py is the tool the deliverable \u2014 generations \u2014 is read with, and it never got the fix.",
+   "evidence": "I instrumented a real checkpoint: `SUM of memory distribution = 1.0 -> hp = 1.0`, `blend weight on memory = 0.5*hp = 0.5`. prompt.py:160-161 `w = torch.softmax(tv / 0.1, -1); dist.scatter_add_(0, MT[ti], w)`; prompt.py:213-214 `hp = dm.sum().clamp(max=1.0); p = (1 - 0.5 * hp) * pm + 0.5 * hp * dm`. Contrast self_organize.py:3260-3278 `_mem_w`, and its comment 'hp was dist.sum(), but read() scatters a SOFTMAX over the top-k, so dist ALWAYS sums to exactly 1.0 -- verified numerically.'",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "cl_bench.py's memory arms use the same ungated 50/50 mix and bind `conf` only to discard it",
+   "severity": "critical",
+   "where": "cl_bench.py:159-163 (bpb)",
+   "symptom": "Every 'weights + memory' number this testbed produces \u2014 the whole editable-memory thesis, both key modes, both forgetting arms and the wrongness recovery \u2014 is measured with retrieval taking a fixed LAMBDA share regardless of match quality. `dist, conf, hit, w = mem.read(...)` binds conf and never uses it; `hp = pmem.sum(-1)` is 1.0 whenever the store has a valid entry. In my run the memory arms came out WORSE than weights-only (+1.003 and +1.360 vs +0.495), which is exactly the signature self_organize.py attributes to this bug.",
+   "evidence": "cl_bench.py:160-162 `dist, conf, hit, w = mem.read(...)` / `hp = pmem.sum(-1, keepdim=True).clamp(max=1.0)` / `p = (1 - lam * hp) * pm + (lam * hp) * pmem`; `conf` appears nowhere else in the file. memory.py read(): `w = torch.softmax(tv / tau, dim=-1); dist.scatter_add_(1, toks, w)`. self_organize.py:3262-3264 'Meanwhile `conf` (the top cosine similarity) was computed by read() and discarded by every caller.'",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "cl_bench.py prints '(forgotten)' unconditionally, even when zero entries were deleted and the score improved",
+   "severity": "high",
+   "where": "cl_bench.py:218-219",
+   "symptom": "The word '(forgotten)' is a hardcoded literal in the format string. In my run it printed `MEMORY delete : 0 entries in 0.1 ms | domain0 5.785->5.762 (forgotten)` \u2014 no entries were deleted (the store had already evicted domain 0) and the loss went DOWN, and the line still asserted forgetting. This is the headline of the EDITABILITY section, the claim the file exists to support, and no data can make it fail.",
+   "evidence": "cl_bench.py:218 `print(f\"  MEMORY delete : {rm} entries in {dt_mem:.1f} ms | domain0 {Rmf[0][N-1]:.3f}->{mem_after0:.3f} (forgotten) | \"`; observed output `MEMORY delete : 0 entries in 0.1 ms | domain0 5.785->5.762 (forgotten) | collateral 0.1162 (leaked)`; the preceding line read `after domain 2: mem {1: 976, 2: 1024}` \u2014 source 0 was already gone",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "cl_bench.py's 'editability edge' sentence cannot express memory losing, and printed '0x less collateral' when memory had 2.3x MORE collateral",
+   "severity": "high",
+   "where": "cl_bench.py:227",
+   "symptom": "`{w_coll/max(mem_coll,1e-4):.0f}x less collateral` formats a ratio below 1 as '0x' and wraps it in the word 'less'. In my run w_coll=0.0512 and mem_coll=0.1162, so memory leaked more than twice as much as gradient-ascent unlearning, and the report announced 'memory is 1895x faster and 0x less collateral' as an edge.",
+   "evidence": "cl_bench.py:227 `print(f\"  >> editability edge: memory is {dt_w*1000/max(dt_mem,1e-3):.0f}x faster and {w_coll/max(mem_coll,1e-4):.0f}x less collateral\")`; observed `>> editability edge: memory is 1895x faster and 0x less collateral` on the same run whose two collateral figures were 0.1162 (memory) and 0.0512 (weights)",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "cl_bench.py's DRIFT verdict is computed from a different comparison than the number printed beside it",
+   "severity": "high",
+   "where": "cl_bench.py:208-209",
+   "symptom": "The line prints `model-key vs frozen-key = {meanforget(Rmm)-meanforget(Rmf)}` and then a verdict decided by `meanforget(Rmm) < meanforget(Rwo)-0.05` \u2014 Rmm against WEIGHTS-ONLY, not against the frozen key. A reader sees a frozen-vs-model number and a verdict that was never about it. The two can disagree in sign.",
+   "evidence": "cl_bench.py:208-209 `print(f\"  >> DRIFT verdict: model-key vs frozen-key = {meanforget(Rmm)-meanforget(Rmf):+.3f} \" f\"({'survives drift' if meanforget(Rmm) < meanforget(Rwo)-0.05 else 'DRIFT BREAKS IT (keys go stale)'})\")`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "cl_bench.py's before/after comparisons are measured on freshly drawn random data, so every editability and recovery delta is confounded by resampling noise",
+   "severity": "high",
+   "where": "cl_bench.py:92-101 (batch) used by cl_bench.py:155-166 (bpb), called at :214-215, :223, :242, :251",
+   "symptom": "bpb() draws 6 NEW random batches on every call; there is no fixed evaluation set. So `Rmf[0][N-1] -> mem_after0`, the collateral columns, and `domain1 b1 -> a1` compare independent samples. In my run the memory-delete 'before' and 'after' differed by 0.023 b/B even though delete_src removed 0 entries \u2014 pure sampling noise reported as an edit effect. self_organize.py's own unlearn report uses a fixed EVAL_N-window eval for exactly this reason.",
+   "evidence": "cl_bench.py:94-98 `st = torch.randint(0, len(b) - (SEQ + 1), (BATCH,))` / `bb = DOMAINS[di]((SEQ + 1) * BATCH)`; cl_bench.py:157 `for _ in range(6): x, y = batch(di)`; observed `0 entries ... | domain0 5.785->5.762`; self_organize.py (end of file) `... = {'LOCAL' if abs(ao-bo) < 0.05 else 'LEAKED'})  [fixed {EVAL_N}-window eval]`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "compare.py's seed-budget adequacy line counts CROSSINGS, not independent observations \u2014 the exact error the MIN_PAIRS guard above it was fixed for",
+   "severity": "high",
+   "where": "compare.py:337-343",
+   "symptom": "On the unpaired branch `pairs` is the n_a x n_b cross product. `_n_indep` was introduced at compare.py:292 with a comment saying MIN_PAIRS 'was always meant to be counting' independent observations \u2014 and then the very next block reverts to `len(pairs)`. With 4 runs an arm and need=5 it printed 'sample size is adequate (16 >= 5 needed)'. Both the adequate branch and the 'you have N' branch report crossings.",
+   "evidence": "compare.py:339-343 `elif len(pairs) < need: ... you have {len(shared) if shared else len(pairs)}. else: print(f\"  >> sample size is adequate ({len(pairs)} >= {need} needed).\")`; reproduced: 4 unpaired logs an arm -> `UNPAIRED (4x4 = 16 crossings, but only 4 independent observation(s) per arm -- a crossing is not a sample)` followed two lines later by `>> sample size is adequate (16 >= 5 needed).`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "compare.py's per-seed 'diff' column has the OPPOSITE sign to the 'mean difference' line above it on higher-is-better metrics",
+   "severity": "high",
+   "where": "compare.py:282-284 vs compare.py:300-302 / :332-334 / :346-348",
+   "symptom": "The headline prints the ORIENTED mean (`_mean(diffs)` over negated pairs), labelled '(A - B, oriented: + means A is worse)'. The per-seed table prints the RAW `da[s]-db[s]`. On --metric d_order1 the two disagree in sign for every row: my run printed `mean difference (A - B, oriented: + means A is worse) -0.6000` immediately above five rows each reading `+0.6000`. A reader who averages the column gets the negation of the headline.",
+   "evidence": "compare.py:282-284 `print(f\"  mean difference ({a.label_a} - {a.label_b}\" + (\"\" if _sgn > 0 else \", oriented: + means A is worse\") + f\") {_mean(diffs):+.4f}\"`; compare.py:302 `print(f\"    seed {s:<4} {da[s]:.3f}  {db[s]:.3f}  {da[s]-db[s]:+.4f}   {_win(da[s], db[s])}\")`; reproduced with --metric d_order1",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "compare.py prints 'SIGNIFICANT AND MEANINGFUL ... by enough to act on' immediately followed by 'NEGLIGIBLE ... not worth resolving'",
+   "severity": "medium",
+   "where": "compare.py:310-325 then compare.py:326-336",
+   "symptom": "The three-way verdict is printed before the effect-size floor is checked, so both `>>` verdict lines appear for any consistent-but-tiny effect. Reproduced with 5 paired seeds differing by 0.005 b/B: `>> SIGNIFICANT AND MEANINGFUL -- A is better, and by enough to act on.` then `>> NEGLIGIBLE -- the arms differ by 0.0050 b/B ... an effect this size would not change a decision if it were.` The word MEANINGFUL is Bouthillier's gamma sense, but nothing in the output says so.",
+   "evidence": "compare.py:314 and compare.py:328, both prefixed `>>`; reproduced on synthetic paired logs",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "compare.py accepts unknown flags as log filenames instead of erroring \u2014 a mistyped --metric silently reverts to the default metric",
+   "severity": "medium",
+   "where": "compare.py:198-203 (`_sides` uses ap.parse_known_args)",
+   "symptom": "parse_known_args returns unrecognised tokens, which the code treats as paths. `compare.py --metrics d_order1 A.log -- B.log` reports '--metrics has no held-out line -- EXCLUDED' and 'd_order1 has no held-out line -- EXCLUDED', then runs the whole comparison on the DEFAULT metric held_out and prints '[held_out, lower is better]' as if that were what was asked for. argparse's own unknown-argument error is bypassed.",
+   "evidence": "compare.py:199 `_ns, paths = ap.parse_known_args(tokens)`; reproduced: `!! A: --metrics has no held-out line ... EXCLUDED` / `!! A: held_out has no held-out line ... EXCLUDED` / `=== A  vs  B   [held_out, lower is better] ===`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "probe_ckpt_geometry.py and probe_stability.py label per-corpus rows from the ENVIRONMENT's DOMAINS, ignoring the checkpoint's own recorded `domains` \u2014 and ignoring self_organize's post-drop realignment",
+   "severity": "high",
+   "where": "probe_ckpt_geometry.py:89 and probe_signature.py:395,398; probe_stability.py:85 (corpus set)",
+   "symptom": "self_organize.py drops corpora under 5000 bytes and explicitly realigns DN so 'the per-domain scores below are labelled correctly'; the probes re-split os.environ['DOMAINS'] instead of reading S.DN, so after any drop every 'corpus p (name)' row names the wrong corpus. Worse, the probe sidecar RECORDS which domains the checkpoint trained on and neither probe reads it: I probed a checkpoint trained on 'eng,py' and probe_ckpt_geometry printed four rows labelled eng/py/num/c plus a confident VERDICT.",
+   "evidence": "probe_ckpt_geometry.py:89 `names = os.environ[\"DOMAINS\"].split(\",\")`; probe_signature.py:395 `dn = os.environ.get(\"DOMAINS\", \"eng,py,num,c\").split(\",\")`; self_organize.py:1146-1147 `DN = [DN[_i0] ... for _i0 in _keep]; NP = len(CORP)` with the comment 'names re-aligned to the corpora that survived, so the per-domain scores below are labelled correctly'; probe.pt of my eng,py run contains `domains = 'eng,py'`; grep shows none of the three probes reads 'domains', 'sig_space' or 'enc_v'",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "The probe sidecar's sig_space/enc_v/use_tok/tok_path fields are written and read by nothing \u2014 self_organize.py says so in the code",
+   "severity": "medium",
+   "where": "self_organize.py:5448-5451 (`# written, not read`) consumed by probe_ckpt_geometry.py, probe_stability.py, prompt.py",
+   "symptom": "A checkpoint trained with SIG_SPACE=tokens has a signature encoder over the TOKEN alphabet (ENC_V = V). All three consumers feed it raw BYTES from S.CORP / the message string, with no check, and still print a verdict. sig_space and enc_v exist in the sidecar precisely to make that detectable. rerun.sh runs a `sig_tokens:SIG_SPACE=tokens` smoke arm, so such checkpoints do get produced.",
+   "evidence": "self_organize.py:5449-5450 `\"sig_space\": SIG_SPACE, \"domains\": _env(\"DOMAINS\", ...), \"enc_v\": ENC_V, \"use_tok\": USE_TOK, \"tok_path\": (...)},   # written, not read`; self_organize.py:3137 `ENC_V = V if (USE_TOK and (not TOK_ONLINE or SIG_SPACE == \"tokens\")) else 256`; probe_ckpt_geometry.py:65-71 builds byte windows unconditionally; prompt.py:178 `b = list(text.encode(\"utf-8\", \"replace\"))[-WIN:]`; rerun.sh:118 `\"sig_tokens:SIG_SPACE=tokens\"`",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "prompt.py's GROUND=1 is silently inert unless MEM=1 is also set",
+   "severity": "medium",
+   "where": "prompt.py:223 / :234-238 / :98",
+   "symptom": "respond() checks `if GROUND and SRC is not None:` and then calls _recall, which returns [] whenever USE_MEM is false. So GROUND=1 alone changes nothing and says nothing. Verified: `GROUND=1 PROMPT=... python3 prompt.py` produced byte-identical output to the plain run, and the load banner did not mention memory. The GROUND knob is documented in the comment at :223-224 with no mention of the MEM dependency.",
+   "evidence": "prompt.py:98 `if SRC is None or not USE_MEM: return []`; prompt.py:234 `if GROUND and SRC is not None:`; ran both -> `model> tsinIste re gr(\\nchigiliflf lerhi  r` identical in both cases",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "rerun.sh's read-back gate passes `N=16` to prompt.py, which reads no such knob",
+   "severity": "medium",
+   "where": "rerun.sh:135 against prompt.py:20-22, :168",
+   "symptom": "prompt.py's KEY=VALUE loop sets os.environ['N']='16' and nothing reads it; the generation length knob is GEN_LEN (default 200). The one automated gate that exercises the deliverable therefore generates 200 tokens while its author intended 16 \u2014 the knob is armed and inert, and levers.py cannot see it because it only audits self_organize.py.",
+   "evidence": "rerun.sh:135 `python3 prompt.py CKPT=\"$OUT/smoke_ck\" PROMPT=\"The \" N=16`; prompt.py:168 `GEN_LEN = int(os.environ.get(\"GEN_LEN\", 200))`; grep of prompt.py for a bare `\"N\"` env read returns nothing; levers.py:28 `SRC = os.path.join(ROOT, \"self_organize.py\")`",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "sweep_domain_report.py reports 'K2 capped==0 \u2014 all cells clean' for a directory containing zero cells",
+   "severity": "medium",
+   "where": "sweep_domain_report.py:194-196",
+   "symptom": "`voids` is empty both when every cell passed and when nothing was parsed, and the message only distinguishes 'clean' from 'VOID'. K1 and K5 correctly say 'Stage A/D incomplete'; K2 does not. Run against an empty directory the report printed a PASS for a pre-registered kill criterion on no data at all.",
+   "evidence": "sweep_domain_report.py:194-196 `voids = [c[\"name\"] for c in cells.values() if c[\"ok\"] and c[\"void\"]]` / `L.append(\"**K2 capped==0** \u2014 %s\" % (\"all cells clean.\" if not voids else ...))`; ran `python3 sweep_domain_report.py <empty dir>` -> `- **K2 capped==0** \u2014 all cells clean.`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "sweep_domain_report.py's --pick prints nothing and exits 0 when no Stage-B cell parsed, and the sweep then substitutes a hardcoded 'winner'",
+   "severity": "medium",
+   "where": "sweep_domain_report.py:255-259 with sweep_domain_grid.sh:413-415",
+   "symptom": "When pick() returns None the --pick branch does nothing at all, so BEST is empty; sweep_domain_grid.sh then falls back to a literal `ENC_POS_MAX=1024 ENC_WARMUP=800 NEW_DIST=0.65 SHIFT_DIST=0.557` and announces it as 'Stage-B winner carried into stages R/C/D/E'. Stages R/C/D/E then all run at a config no cell measured, and every downstream verdict is about it.",
+   "evidence": "sweep_domain_report.py:255-259 `if \"--pick\" in sys.argv: if best: ... ; return` \u2014 no else branch; sweep_domain_grid.sh:413-415 `BEST=$(...--pick...)` / `[ -n \"$BEST\" ] || BEST=\"ENC_POS_MAX=1024 ...\"` / `say \"Stage-B winner carried into stages R/C/D/E:  $BEST\"`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "sweep_domain_report.py's NP_TRUE is a module global that parse() overwrites from whichever cell log is parsed last",
+   "severity": "medium",
+   "where": "sweep_domain_report.py:69-71, consumed at :146, :203, :207, :300",
+   "symptom": "`global NP_TRUE; NP_TRUE = int(m.group(1))` runs inside per-cell parsing, so the true-class count that gates K3 ('live must be between NP_TRUE and 2*NP_TRUE') and orders the pick tiebreak is set by log filename sort order. If one cell's log is truncated before that line, NP_TRUE silently retains the previous cell's value.",
+   "evidence": "sweep_domain_report.py:68-71 `m = R_NPT.search(txt); if m: global NP_TRUE; NP_TRUE = int(m.group(1))`; sweep_domain_report.py:203 `passed = comp >= GATE_COMP and V >= GATE_V and NP_TRUE <= (best.get(\"live\") or 0) <= 2 * NP_TRUE`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "sweep_domain_report.py's 'median wins/dom' threshold hardcodes STREAM_LEN=120000 and WIN=128, which Stage D deliberately varies",
+   "severity": "medium",
+   "where": "sweep_domain_report.py:298-300",
+   "symptom": "The diagnostics note computes `120000 // (128 * NP_TRUE) // 2` as the level below which 'each domain is about one splice segment'. Stage D runs cells at len 120000/240000/480000, so for two thirds of that stage the printed threshold is 2x or 4x too small and the guidance is wrong for exactly the rows the reader is comparing.",
+   "evidence": "sweep_domain_report.py:299-300 `P(\"has it at ~0. `median wins/dom` below ~%d means each 'domain' is about one splice segment.\" % (120000 // (128 * NP_TRUE) // 2))`; sweep_domain_report.py:214 `dcells = [cells.get(\"D_len120000\"), cells.get(\"D_len240000\"), cells.get(\"D_len480000\")]`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "fetch_big.py's dialogue formatting keys off the raw --dataset string, so the full dataset id resolves the preset but loses the turn markers",
+   "severity": "high",
+   "where": "fetch_big.py:212 vs fetch_big.py:112-114",
+   "symptom": "Lines 105-114 were explicitly rewritten so a preset is found by short key OR by full id. Line 212 was not: `is_dialogue = a.dataset == \"oasst1\"`. So `--dataset OpenAssistant/oasst1` \u2014 the id printed on the dataset page \u2014 resolves field='text' from the preset and then writes plain text with no `<|user|>` / `<|assistant|>` markers. The preset's entire stated purpose ('DIALOGUE. Formats as turn-marked conversations', 'teaches TURN-TAKING') is silently discarded, and nothing downstream can detect it. Same bug class, one line below the fix.",
+   "evidence": "fetch_big.py:112-114 `_by_path = {v[\"path\"]: k for k, v in PRESETS.items()}` / `_key = a.dataset if a.dataset in PRESETS else _by_path.get(a.dataset)`; fetch_big.py:212 `is_dialogue = a.dataset == \"oasst1\"`; fetch_big.py:11 `python3 fetch_big.py --dataset oasst1 --gb 1        # dialogue: teaches TURN-TAKING`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "fetch_big.py's shuffle/seed resume guard cannot fire on the manifests most at risk",
+   "severity": "medium",
+   "where": "fetch_big.py:250-258",
+   "symptom": "`if _sb is not None and (...)` disables the check for any manifest written before the shuffle fields existed \u2014 i.e. every arrival-order pull, which is precisely the case where resuming with the now-default shuffle_buffer=10000 skips documents the first pass never saw and re-writes ones it did. Separately, if the datasets version cannot shuffle a stream, a.shuffle_buffer is mutated to 0 at :245 BEFORE the comparison at :251, so a manifest recording 10000 hard-exits with advice ('Pass --shuffle-buffer 10000') that this library version cannot honour.",
+   "evidence": "fetch_big.py:250-251 `_sb, _sd = man.get(\"shuffle_buffer\"), man.get(\"seed\")` / `if _sb is not None and (_sb != a.shuffle_buffer or _sd != a.seed):`; fetch_big.py:241-245 `except (AttributeError, TypeError) as e: ... a.shuffle_buffer = 0`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "fetch_local.py's SHARD_MB is 256 while fetch_big.py's --shard-mb default is 512, directly contradicting fetch_local.py's own load-bearing comment",
+   "severity": "medium",
+   "where": "fetch_local.py:30-32 vs fetch_big.py:68",
+   "symptom": "The comment says 'The shard size and the document separator match fetch_big.py exactly ... a corpus assembled here has to be indistinguishable from a downloaded one -- otherwise \"eng vs py\" would also be \"downloaded vs local\"'. SEP does match; SHARD_MB does not. Content is unaffected (open_corpus concatenates part*.txt in sorted order), but the invariant the comment asserts as the reason the file is trustworthy is false, and shard COUNT is a visible difference between a local and a downloaded corpus.",
+   "evidence": "fetch_local.py:30-32 `# The shard size and the document separator match fetch_big.py exactly. ... SHARD_MB = 256`; fetch_big.py:68 `ap.add_argument(\"--shard-mb\", type=int, default=512, ...)`",
+   "bug_class": "other"
+  },
+  {
+   "title": "fetch_local.py has no provenance check and no cleanup, so a re-run into a populated directory can leave a mixed corpus",
+   "severity": "medium",
+   "where": "fetch_local.py:181-198 and :207-209, called from longrun.sh:895",
+   "symptom": "fetch_local always starts at part000 and never removes existing shards. longrun.sh's 'topping up' branch sets _HAVE=0 and calls it on a NON-empty directory. If the new --gb yields fewer shards than what is on disk, the stale higher-numbered shards survive, open_corpus concatenates them, and the manifest is overwritten with a byte count that describes only the new write. fetch_big.py has an explicit source-provenance refusal for exactly this failure (fetch_big.py:128-151); fetch_local.py, which wrote the lesson down, has none.",
+   "evidence": "fetch_local.py:184 `f = open(os.path.join(outdir, f\"part{shard:03d}.txt\"), \"w\", encoding=\"utf-8\")` with no prior cleanup and no source check anywhere in the file; longrun.sh:881-895 (the top-up branch sets `_HAVE=0` then calls fetch_local); datastream.py:69-73 globs `{data_dir}/train/{d}/*` sorted",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "probe_signature.py carries a workaround for a self_organize bug that has since been fixed, and now double-clamps the training stream",
+   "severity": "medium",
+   "where": "probe_signature.py:217-229",
+   "symptom": "The docstring asserts 'BUG WORKAROUND (self_organize.py:589) -- contrastive_step bounds the ANCHOR with hi = seen - 3*WIN' and proposes 'Fix in self_organize: hi = seen - WIN - max(2*WIN, _pmax)'. That fix is now in the code verbatim. The workaround still runs, passing a reduced `seen`, so the probe trains its encoder on a shorter stream than a real run at the same ENC_POS_MAX \u2014 the clamp is applied twice. The cited line number (589) is also ~2700 lines stale.",
+   "evidence": "probe_signature.py:220-228 (comment + `seen = min(len(stream), len(stream) + 2 * WIN - pmax)`); self_organize.py:3311-3312 `_pmax = max(2 * WIN, _i(\"ENC_POS_MAX\", 2 * WIN))` / `hi = seen - WIN - _pmax`; contrastive_step is defined at self_organize.py:3305, not 589",
+   "bug_class": "other"
+  },
+  {
+   "title": "probe_ckpt_geometry.py's verdict turns on a knife-edge at zero while printing the deciding number rounded to 2 dp",
+   "severity": "medium",
+   "where": "probe_ckpt_geometry.py:96, :99-109",
+   "symptom": "The three branches are msil > 0.10, msil < 0.0, else 'borderline'. My run printed 'MEAN TRUE SILHOUETTE -0.00' and then the categorical 'the encoder does NOT separate the true kinds ... fix the ENCODER'. At the printed precision +0.001 and -0.001 are the same number and produce opposite verdicts, and the docstring's own reading guide says '~ 0 or < 0 -> the encoder genuinely cannot separate', which the code does not implement.",
+   "evidence": "probe_ckpt_geometry.py:96 `print(f\"\\n  mean cohesion {mc:.2f} | mean nearest separation {ms:.2f} | MEAN TRUE SILHOUETTE {msil:+.2f}\")`; :104 `if msil > 0.10 else`, :107 `if msil < 0.0 else`; observed `MEAN TRUE SILHOUETTE -0.00` -> 'does NOT separate'; docstring :14-15",
+   "bug_class": "other"
+  },
+  {
+   "title": "runs.py `stale` flags FAB_NMAX as '<predates this knob>' for any run with FABRIC=0, because that row is emitted only when the fabric exists",
+   "severity": "medium",
+   "where": "runs.py:162-181 against self_organize.py:5936-5942",
+   "symptom": "FAB_NMAX appears on the EFFECTIVE line only inside `if _F0 is not None:` (_F0 is None when FABRIC=0). runs.py treats a blank parsed column as 'the run predates the knob' and appends it to the reproduce list. So every FABRIC=0 baseline in the registry is reported as needing a FAB_NMAX override it never had, and the one row type where the knob is genuinely irrelevant is the one flagged.",
+   "evidence": "runs.py:173-175 `if not manual and str(d) not in (\"0\", \"0.0\"): diffs.append(f\"{k}=<predates this knob>\")`; self_organize.py:5936 `if _F0 is not None: _EFF += [...]` with `(\"FAB_NMAX\", _F0.cap)` at :5942; self_organize.py:5844 `_F0 = fab if FABRIC else None`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "cl_bench.py mislabels its corpora when the size filter drops one",
+   "severity": "medium",
+   "where": "cl_bench.py:65-67",
+   "symptom": "`_CORPORA` is filtered by size and `N = len(_CORPORA)`, but the banner prints `DNAMES[:N]` \u2014 the first N NAMES, not the names of the corpora that survived. If DOMAINS=eng,py,num,c and `num` is too small, the run prints \"3 domains ['eng','py','num']\" while actually training on eng, py and c, and every subsequent per-domain index is off. self_organize.py fixed exactly this realignment for itself.",
+   "evidence": "cl_bench.py:65-67 `_CORPORA = [c for c in (_load(d) for d in DNAMES) if len(c) > (SEQ + 1) * BATCH * 2]` / `N = len(_CORPORA)` / `print(f\"[real data] {N} domains {DNAMES[:N]} | ...\")`; contrast self_organize.py:1126-1147",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "cl_bench.py's ESTIMATE arm measures memory-read cost at a 15x larger store than the benchmark it is estimating",
+   "severity": "medium",
+   "where": "cl_bench.py:260 vs cl_bench.py:181-182",
+   "symptom": "estimate() defaults MEM_CAP to 300000, main() to 20000. Both callers leave MEM_CAP unset in some invocations, so the 'eval+read' per-op time \u2014 explicitly described as growing with store size \u2014 is measured against a store 15x bigger than the run it prices. One knob name, three defaults across two functions in one file plus the engine's registry (200000).",
+   "evidence": "cl_bench.py:260 `mem = EditableMemory(_i(\"MEM_CAP\", 300000), ...)` and cl_bench.py:181 `EditableMemory(_i(\"MEM_CAP\", 20000), ...)`; cl_bench.py:286 `print(f\"store at estimate: {store} entries (grows the kNN-read cost)\")`; self_organize.py:304 `\"MEM_CAP\": (\"i\", 200000)`",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "prompt.py rebinds MT from the model type to the memory-token tensor",
+   "severity": "low",
+   "where": "prompt.py:28 and prompt.py:153",
+   "symptom": "`MT = d.get(\"model_type\", \"gru\")` is used at :37 to set the MODEL env, then :153 rebinds MT to `d[\"mem_tok\"]`. It currently works only because the first use precedes the second; any future read of the model type after line 153 gets a tensor.",
+   "evidence": "prompt.py:28 `MT = d.get(\"model_type\", \"gru\"); ...`; prompt.py:37 `_os.environ.update(D_MODEL=str(D), VMAX=str(V), MODEL=MT, ...)`; prompt.py:153 `MK = ...; MT = d[\"mem_tok\"].to(DEV)`; prompt.py:161 `dist.scatter_add_(0, MT[ti], w)`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "probe_ckpt_geometry.py computes `med` and never reads it",
+   "severity": "low",
+   "where": "probe_ckpt_geometry.py:86",
+   "symptom": "`med = C.masked_fill(torch.eye(...), float(\"nan\"))` builds a masked centroid-distance matrix that appears nowhere else in the file.",
+   "evidence": "grep for `\\bmed\\b` in probe_ckpt_geometry.py returns exactly one line, :86",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "probe_ckpt_geometry.py's path resolver builds a nonsense path when given a non-existent .pt",
+   "severity": "low",
+   "where": "probe_ckpt_geometry.py:39-45",
+   "symptom": "`_resolve` returns `os.path.join(c, \"ckpt.pt\")` for anything that is not an existing .pt, so `CKPT=/x/ck.pt` reports 'no checkpoint at /x/ck.pt/ckpt.pt' \u2014 a path the user never typed.",
+   "evidence": "probe_ckpt_geometry.py:39-43; ran `python3 probe_ckpt_geometry.py CKPT=/nonexistent/ck.pt` -> `no checkpoint at /nonexistent/ck.pt/ckpt.pt`",
+   "bug_class": "other"
+  },
+  {
+   "title": "vocab.py --list prints a header describing a token range it does not then print",
+   "severity": "low",
+   "where": "vocab.py:127-131",
+   "symptom": "The header uses `lo` but the loop clamps to `max(256, lo)`. With `--from 100 --list 40` the header announces 'tokens 100..139' and the loop iterates range(256, 140) \u2014 nothing.",
+   "evidence": "vocab.py:129 `print(f\"\\n=== tokens {lo}..{min(V, lo + a.list) - 1} in MINT ORDER ...\")` vs vocab.py:130 `for i in range(max(256, lo), min(V, lo + a.list)):`",
+   "bug_class": "other"
+  },
+  {
+   "title": "sweep_domain_report.py treats argv[1] as the output directory unconditionally, so a bare --pick reads a directory named '--pick'",
+   "severity": "low",
+   "where": "sweep_domain_report.py:252, :255",
+   "symptom": "`out = sys.argv[1] if len(sys.argv) > 1 else \"sweep_out\"` runs before the --pick check, so `python3 sweep_domain_report.py --pick` globs `--pick/cells/*.log`, finds nothing, and exits 0 silently. The shipped caller passes the directory first, so this is latent.",
+   "evidence": "sweep_domain_report.py:252 `out = sys.argv[1] if len(sys.argv) > 1 else \"sweep_out\"`; ran `python3 sweep_domain_report.py --pick` -> no output, exit 0",
+   "bug_class": "other"
+  },
+  {
+   "title": "compare.py suppresses the cross-corpus warning for --metric train, which is just as corpus-dependent as held_out",
+   "severity": "low",
+   "where": "compare.py:224-227",
+   "symptom": "The order-1 anchor mismatch check fires only when metric == 'held_out'. A `--metric train` comparison across two corpora prints no warning at all, even though train bits/byte is not comparable across corpora either.",
+   "evidence": "compare.py:225 `if len(o1) > 1 and a.metric == \"held_out\":`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "keystone_probe.py does not re-seed between its two arms, so the functional and surface encoders differ in initialisation as well as in objective",
+   "severity": "low",
+   "where": "keystone_probe.py:20, :75",
+   "symptom": "torch.manual_seed(0)/random.seed(0) run once at import; train('func') then train('surf') consume the same RNG stream sequentially, so the surface arm starts from a different init and different data. The reported gap (0.303 in my run) mixes the objective difference with an unmatched init. The probe is also entirely unparameterised \u2014 steps=6000 and n=2000 are hardcoded.",
+   "evidence": "keystone_probe.py:20 `torch.manual_seed(0); random.seed(0)`; keystone_probe.py:75 `enc_f = train(\"func\"); enc_s = train(\"surf\")`; keystone_probe.py:57 `def train(kind, steps=6000):`",
+   "bug_class": "other"
+  },
+  {
+   "title": "probe_stability.py never checks that the two checkpoints and the probe corpora describe the same experiment",
+   "severity": "medium",
+   "where": "probe_stability.py:31-33, :85-90",
+   "symptom": "The probe corpus set comes from the ambient DOMAINS/DATA_DIR (setdefault 'eng,py,num,c'), while each checkpoint's own `domains` field is ignored. I compared two encoders trained on 'eng,py' against a four-corpus probe set and got a confident 'the two runs found SUBSTANTIALLY THE SAME partition' verdict with no warning. The only cross-checkpoint guard is WIN.",
+   "evidence": "probe_stability.py:31-33 `os.environ.setdefault(\"DOMAINS\", \"eng,py,num,c\")`; probe_stability.py:70 `if winA != winB: sys.exit(...)` \u2014 the only compatibility check; ran A=<eng,py ck> B=<eng,py ck.best> -> \"probe: 256 windows over 4 corpora\" then \"VERDICT: the two runs found SUBSTANTIALLY THE SAME partition\"",
+   "bug_class": "untrippable-guard"
+  }
+ ],
+ "junk": [
+  {
+   "what": "compare.py's per-seed table block, duplicated verbatim three times",
+   "why": "compare.py:299-302, :331-334 and :345-348 are byte-identical four-line blocks in three exit paths. One helper would do, and the sign inconsistency with the mean-difference line would only need fixing once.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "probe_signature.py's train_steps() `seen` workaround and its accompanying 9-line BUG WORKAROUND comment",
+   "why": "The self_organize bug it works around was fixed (self_organize.py:3311-3312 is now literally the fix the comment proposes). The workaround now only shortens the probe's own training stream, and the comment misdescribes live code and cites a line number ~2700 lines stale.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "probe_ckpt_geometry.py:86 `med = C.masked_fill(...)`",
+   "why": "Computed and never referenced again.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`os.environ[\"BENCH\"] = \"1\"` in probe_stability.py:36 and probe_ckpt_geometry.py:29",
+   "why": "BENCH is read only inside self_organize.main() (self_organize.py:7807), which the probes never call \u2014 they import the module for its globals. The line does nothing.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "fetch_big.py's preset `data_dir` plumbing",
+   "why": "No entry in PRESETS defines a data_dir key, so `p.get(\"data_dir\")` at :120 and :162 is always None and the `data_dir={...!r}` fragment at :120 can never print. --data-dir on the command line is the only live path.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "runs.csv's `vocab`, `minted`, `never_minted` columns for the pre-2026-08-14 rows",
+   "why": "They are empty for most rows because the `[vocab] softmax width N | minted M` line postdates them. cmd_add prints `vocab {minted}/{vocab}` and would render `/` for those. The columns parse correctly at HEAD.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "runs.csv itself as a current record",
+   "why": "42 rows, newest 2026-08-15, no automated writer, and ~30 commits of engine changes since. `stale` correctly reports almost every row as needing overrides. It is a historical record, not a live registry.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "run_cl_test.sh",
+   "why": "The dedicated driver for cl_bench.py. Nothing in the repo references it; run_full_unfrozen.sh duplicates its cl_bench invocations (PART A) and is itself referenced only from docs and preflight advice.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "archive/garry/cl_bench.py and archive/garry/prompt.py",
+   "why": "Frozen T33-milestone copies. ARCHIVE.md states nothing live imports or executes them; they exist as a record and are the documented grep trap.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "cl_bench.py's synthetic DOMAINS construction when DATA_MODE=real",
+   "why": "cl_bench.py:55 builds N=_i('N_DOMAINS',3) Markov closures unconditionally; in real mode N is immediately overwritten at :66 and DOMAINS is never indexed. Harmless (closures only) but dead on the path both shipped callers use.",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "The memory blend weight `hp = dist.sum()` is ALWAYS exactly 1.0, because every reader scatters a softmax over the top-k. Any blend written as `(1 - lam*hp)*pm + lam*hp*pmem` is an unconditional lam-share mix with no quality gating. self_organize.py fixed this with `_mem_w` (MEM_GATE / MEM_CONF0 / MEM_W); prompt.py and cl_bench.py did not.",
+   "why": "This single formula is the reason memory measured net-negative at every store size in the engine, and it is still live in both the tool that reads the deliverable and the tool that produces the continual-learning numbers. A rebuild must have ONE gated blend function that every caller imports.",
+   "evidence": "self_organize.py:3260-3278 (`_mem_w` and its comment 'hp was therefore identically 1.0'); memory.py read(): `w = torch.softmax(tv / tau, dim=-1); dist.scatter_add_(1, toks, w)`; prompt.py:213-214; cl_bench.py:161-162; measured live: `SUM of memory distribution = 1.0`"
+  },
+  {
+   "item": "A crossing is not a sample. On compare.py's unpaired branch, n_a x n_b crossings are NOT n_a*n_b independent observations \u2014 each run appears in n_other of them. Every threshold must count `min(len(A), len(B))` (or the shared-seed count when paired), never len(pairs).",
+   "why": "This was already found and fixed once for the MIN_PAIRS guard and immediately re-committed four lines later in the seed-budget line. Any rebuild should compute the effective n ONCE and forbid len(pairs) downstream.",
+   "evidence": "compare.py:256-267 and :289-292 (the fix) vs compare.py:339-343 (the same error surviving); reproduced: 'UNPAIRED (4x4 = 16 crossings, but only 4 independent observation(s) per arm)' followed by 'sample size is adequate (16 >= 5 needed)'"
+  },
+  {
+   "item": "Direction is per-metric and must be applied to EVERY printed quantity, not just the statistics. compare.py orients the pairs for the bootstrap but leaves the per-seed diff column raw, so the headline and the table disagree in sign on d_order1.",
+   "why": "The file's own header records that hardcoding lower-is-better once made every --metric d_order1 verdict name the wrong arm. The orientation is now half-applied, which is a subtler version of the same trap.",
+   "evidence": "compare.py:126-133 (the header note), :273 (opairs), :282-284 (oriented mean) vs :302 (raw per-seed diff); reproduced -0.6000 headline against +0.6000 per-seed rows"
+  },
+  {
+   "item": "The probe sidecar (probe.pt) already records `domains`, `sig_space`, `enc_v`, `use_tok`, `tok_path` \u2014 and self_organize.py's own comment on that line reads '# written, not read'. Every consumer re-derives corpus names and the input alphabet from the ambient environment instead.",
+   "why": "It is the difference between a probe that refuses an incompatible checkpoint and one that prints a confident verdict about the wrong corpora in the wrong alphabet. The data to make the check is already in the file; only the read is missing.",
+   "evidence": "self_organize.py:5448-5451; grep of probe_ckpt_geometry.py / probe_stability.py / prompt.py for sig_space|enc_v|domains -> no matches; demonstrated by probing an eng,py checkpoint and getting rows labelled eng/py/num/c"
+  },
+  {
+   "item": "self_organize.py drops corpora under 5000 bytes and REALIGNS DN to match, exposing the aligned list as the module global S.DN. Any tool that splits os.environ['DOMAINS'] instead is mislabelling per-corpus rows after a drop.",
+   "why": "self_organize.py fixed this alignment inside itself with an explicit note that per-domain scores are 'labelled correctly'; three external tools (probe_ckpt_geometry, probe_signature, cl_bench) reintroduce the bug by reading the env.",
+   "evidence": "self_organize.py:1142-1147 and the warning text at :1152-1155; probe_ckpt_geometry.py:89; probe_signature.py:395; cl_bench.py:67"
+  },
+  {
+   "item": "Every before/after measurement in cl_bench.py is taken on freshly drawn random batches \u2014 there is no fixed evaluation set. self_organize.py's equivalent unlearn report uses a fixed EVAL_N-window eval and says so in its own output.",
+   "why": "Without a fixed eval set, an editability delta of 0.02 b/B is indistinguishable from resampling noise; I observed a 0.023 b/B 'effect' from deleting zero entries.",
+   "evidence": "cl_bench.py:92-101 (stochastic batch), :155-166 (bpb draws 6 fresh batches per call), :214-215/:223/:242/:251; self_organize.py end-of-file `... [fixed {EVAL_N}-window eval]`"
+  },
+  {
+   "item": "levers.py \u2014 the knob-registry audit selftest.sh runs \u2014 parses ONLY self_organize.py. Every env var read by cl_bench.py, prompt.py, the probes and the fetchers is unregistered and unaudited, and knob names collide across files with different defaults (MEM_CAP: 20000 / 300000 / 200000; CORPUS_CAP: 3000000 / 2000000).",
+   "why": "This is why `N=16` in rerun.sh's readback gate and the triple MEM_CAP default both survived. A rebuild should either put tool knobs in the same registry or give each tool a private prefix.",
+   "evidence": "levers.py:28 `SRC = os.path.join(ROOT, \"self_organize.py\")`; cl_bench.py:181 vs :260 vs self_organize.py:304; cl_bench.py:64 `_i(\"CORPUS_CAP\", 3000000)` vs self_organize.py:98"
+  },
+  {
+   "item": "preflight.sh syntax-checks 7 modules and none of the 13 tools in this area; selftest.sh executes only compare.py (via compare_test.py and one end-to-end call). Nine of the thirteen have no automated exercise at all.",
+   "why": "probe_signature.py has been dead on its default settings and nothing noticed. prompt.py's history is three silent breakages found only by hand. Any rebuild needs a cheap smoke arm per tool, of the kind rerun.sh:130-141 already does for prompt.py.",
+   "evidence": "preflight.sh:113 (the 7-module list); selftest.sh:51,:159-165; probe_signature.py crashes on defaults"
+  },
+  {
+   "item": "fetch_big.py's preset lookup accepts both the short key and the full dataset id (fetch_big.py:112-114), but `is_dialogue` at :212 still compares only the short key \u2014 so `--dataset OpenAssistant/oasst1` silently loses the turn markers the preset exists for.",
+   "why": "Exactly the failure mode the lines above it were written to fix, left in place one line below the fix. It is invisible: the pull succeeds, the manifest is correct, and only the turn structure is missing.",
+   "evidence": "fetch_big.py:105-114 (the fix, with its own commentary) vs fetch_big.py:212 `is_dialogue = a.dataset == \"oasst1\"`"
+  },
+  {
+   "item": "The held-out TAIL is the last VAL_FRAC of each corpus, so a corpus written in arrival order makes every held-out number a measurement of whichever documents the stream ended on. fetch_big.py measured this concretely: py held out at 5.061 +/- 0.560 against 2.922 in-stream, while shuffled-upstream eng showed 2.273 vs 2.303.",
+   "why": "It is the single largest documented distortion of the project's headline metric, and the fix (a streaming shuffle reservoir, and shuffle-then-cut in fetch_local) lives in the corpus builders, not in the trainer.",
+   "evidence": "fetch_big.py:77-92 (the measurement and the fix); fetch_local.py:175-179 ('SHUFFLE, THEN CUT'); fetch_big.py:235-245"
+  },
+  {
+   "item": "A verdict word ('forgotten', 'all cells clean', 'sample size is adequate') must be computed from the same quantity it is printed beside, or it is a guard nothing can trip. Three separate report lines in this area fail that test.",
+   "why": "This is the project's own core discipline, and it is violated in the exact place it matters most: the lines a reader quotes as the result.",
+   "evidence": "cl_bench.py:218 ('(forgotten)' as a literal); sweep_domain_report.py:194-196 ('all cells clean' on zero cells); compare.py:343 ('adequate' counted in crossings); cl_bench.py:208-209 (number and verdict from different comparisons)"
+  },
+  {
+   "item": "self_organize.py's `sig_of` references a bare `FROZEN` that no longer exists (the module has `_FROZEN = [None]` plus a lazy getter). SIG_MODE=frozen is an unconditional NameError, and it is what kills probe_signature.py.",
+   "why": "It is a one-line fix that restores a whole probe and a legitimate ablation mode, and sweep_domain_report.py will emit `SIG_MODE=frozen` into reproduce commands that could never have run.",
+   "evidence": "self_organize.py:3259 `return F.normalize(FROZEN[t].mean(0), dim=0)` vs :3170-3173 `_FROZEN = [None]` and the getter; sweep_domain_report.py:173-174"
+  }
+ ],
+ "open_questions": [
+  "Why does probe_signature.py's frozen control still reference `FROZEN` \u2014 was the rename to `_FROZEN` in self_organize.py made without running the probe, or was the probe already known to be dead? Nothing in notes/ names probe_signature.py as broken; git log would date the rename.",
+  "Has probe_signature.py ever completed a full default sweep and produced its verdict()? I found no saved PROBE_JSON output, no sweep report referencing it, and no caller. If it has never completed, sections (c), (e) and the verdict have produced no data at all.",
+  "Does probe_signature.py's split_pools crash on a class with only one usable segment? `while need > 0 and si < len(segs) - 1` can leave cent_idx[c] empty, and centroids_of would then index with an empty float tensor. I did not construct that case; it may only arise on very short streams.",
+  "Are there any real sweep_out/ directories anywhere for sweep_domain_report.py to have been run against? None exist in this tree, and sweep_domain_grid.sh has no caller \u2014 so K1-K7 may never have been scored on real cells.",
+  "Did any run ever produce a checkpoint with SIG_SPACE=tokens that was then fed to probe_ckpt_geometry.py or prompt.py? rerun.sh:118 runs a sig_tokens smoke arm, so such checkpoints exist in principle; whether the byte/token alphabet mismatch has actually distorted a reported number is unverified.",
+  "runs.csv's last row is 2026-08-15 \u2014 was `runs.py add` deliberately abandoned in favour of the log-based tools (compare.py, holdout.py), or did it just stop being run? The engine still tells readers to consult it (self_organize.py:1606, :7571).",
+  "cl_bench.py's editability comparison deletes from a memory attached to the `base` model but gradient-ascends the `rep` (replay-trained) model. Is the cross-model comparison intentional, and how much of the reported 'edge' is the model difference rather than the mechanism? cl_bench.py:213-226 discloses which model each side uses but never quantifies the confound.",
+  "cl_bench.py's REPLAY arm substitutes a replay batch for the current batch with probability REPLAY_FRAC, so it sees ~30% fewer new-domain steps than the weights-only arm. Is that intended (standard rehearsal) or does it mean the two forgetting arms saw different amounts of new data? cl_bench.py:115-117.",
+  "fetch_big.py's streaming path has never been executed in this environment (`datasets` is not installed, and its docstring says the download was never tested end to end). Whether --resume, the shuffle buffer and the shard/manifest interaction actually work against a live HF stream is unverified anywhere I can see.",
+  "Does `--metric train` have any live user? compare.py supports it but the corpus-comparability guard is disabled for it, and I found no caller passing it.",
+  "How much does probe_signature.py's double clamp on `seen` actually move its numbers at PROBE_POSMAX=8? At WIN=128 it removes 768 bytes of a 120000-byte stream, which looks negligible \u2014 but I did not measure it, and the clamp interacts with `hi < ENC_BATCH` on short streams."
+ ]
+}

@@ -1,0 +1,1948 @@
+{
+ "area": "so-config",
+ "summary": "Lines 1-1500 of self_organize.py are the configuration spine of the whole system: a 328-entry knob registry (`_SPEC`, lines 96-513), the three accessors that read it (`_env`/`_i`/`_f`, lines 515-526) plus a deliberately-separate audit reader (`_cfg`, line 51), the module-level materialisation of ~115 of those knobs into globals, the corpus/held-out split and tokenizer bring-up under `DATA_MODE=real` (lines 1102-1312), the phase-schedule generator and stream builder (lines 1317-1412), and the model classes `ByteComposer`/`MiniLM`/`TinyTransformer` (1437-1600). The registry exists because five knobs previously had different defaults at different read sites; `_env` now raises SystemExit when a call-site default disagrees with the table (line 520), and `levers.py` re-derives the declaration/derivation sets from the AST so the table cannot silently go stale. Nine knobs are exempt because their default is an expression (`_DERIVED`, lines 84-94), and `_SPEC_FREE` is exactly that set. The region is unusually well-instrumented against its own failure modes -- `frozen_rng` (1019), `_srng` (1375), `pin_tick` (930), `_curve_by_step` (879) each exist because a specific silent-wrong-number bug shipped. The remaining defects are almost all of the project's own named classes: values that are declared but unreachable on the default path (FAB_MIN_STEPS=2, TOK_ANCHOR_TAU, MERGE_FRAC, GROW_PASSES), quantities computed in one unit and consumed as another (`PHASE_W` follows the PROCESS count while the registry says PHASES; `true_sw` is segment starts but is printed as \"true switches\"), and module globals that exist only down the `DATA_MODE=real` branch while being read unguarded later (`DISK_STREAM`). The default configuration as declared is not runnable: TOKENIZER=1 and DATA_MODE=synthetic contradict each other and a bare `python3 self_organize.py` exits at line 1104.",
+ "facts": [
+  {
+   "claim": "_SPEC declares exactly 328 knobs (lines 96-513) and every one of them is read somewhere in self_organize.py via _env/_i/_f; nothing is declared-but-unread and nothing is read-but-undeclared within this file.",
+   "evidence": "self_organize.py:96-513; verified by AST scan: 'in _SPEC but NEVER read via _env/_i/_f: []' and 'READ BUT NOT DECLARED: []'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The knob count by stated owner-subsystem comment is: fabric 91, misc 41, domains 37, tokenizer 29, memory 26, encoder 20, optim 17, report 16, data 15, world 11, capacity 9, plumbing 9, lr 1, and 5 knobs whose comment begins 'DEFAULT IS COMPUTED' with no owner tag at all (FAB_MIN_STEPS@191, SEG_CONTIG@289, ENC_POS_MAX@332, SIG_LOOK@347, LAYERS@466), plus 1 with no comment at all (LR_RESTARTS@375).",
+   "evidence": "self_organize.py:96-513, parsed",
+   "confidence": "verified"
+  },
+  {
+   "claim": "'lr' is an owner tag with exactly one member, LR_DECAY, while every other optimiser knob is tagged 'optim'. The tag vocabulary is not closed.",
+   "evidence": "self_organize.py:377 '\"LR_DECAY\": (\"f\", 1.0),                            # lr -- envelope over RESTART cycles' vs :371-386 all '# optim'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The owner-subsystem comment disagrees with the section header block for at least 5 knobs: LOSS_MASK_DEAD (line 251) is tagged '# tokenizer' but sits inside the '--- domains' section; FAB_RESCUE/FAB_NEW_FRAC/FAB_NEW_WIN (270-272) are tagged '# fabric' but sit inside the capacity block; FAB_LR_OWN/FAB_LR_MAXR/FAB_LR_BOOST (378-380) are tagged '# fabric' but sit inside '--- optim'.",
+   "evidence": "self_organize.py:237 '# --- domains', :251, :252 '# --- capacity', :270-272, :364 '# --- optim', :378-380",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The 'misc: not yet grouped' section (lines 471-512) holds 41 knobs that plainly belong to named subsystems: EXPERT_* (expert router), WRITE_*/EVICT/USE_DECAY/TOPK/DECAY_EVERY (memory), WRONG_* (verification), RECON_HID/RECON_TOK (verification), N_PROCESSES/VAL_CAP (data), TEMP (encoder InfoNCE temperature), FABRIC (fabric master switch), GENERATE (report).",
+   "evidence": "self_organize.py:471-512; TEMP's actual consumer is self_organize.py:3356 'logits = za @ zp.t() / TEMP'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The first element of each _SPEC tuple (the type tag 'i'/'f'/'env') is never consumed by any code. self_organize.py reads only element [1] (the default), at lines 61 and 520; levers.py's regex captures the type as group(2) and uses only group(1) and group(3).",
+   "evidence": "self_organize.py:61 '_SPEC.get(k, (None, None))[1]', :520 '_SPEC[k][1] != d'; levers.py:75-76",
+   "confidence": "verified"
+  },
+  {
+   "claim": "44 of the 328 knobs are declared with type tag 'env' yet have numeric defaults (e.g. DIV_W=0.02, FAB_EXPLORE=0.15, ROUTE_T=0.1, CENT_EMA=0.02). The tag records HOW the knob is read (raw _env plus a manual cast at the call site) rather than what type it is.",
+   "evidence": "self_organize.py:143-235 and :472-473, parsed; e.g. :155 '\"DIV_W\": (\"env\", 0.02)' read at :1873-1874 style 'float(_env(\"FAB_EXPLORE\", 0.15))'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_env() enforces the registry at every read: 'if k in _SPEC and k not in _SPEC_FREE and _SPEC[k][1] != d: raise SystemExit'. There is therefore no place in the file where a knob is read with a default that differs from the registry -- levers.py's static check confirms zero mismatches.",
+   "evidence": "self_organize.py:520-522; `python3 levers.py` prints 'levers: declarations match the source; no call-site default disagrees with it.'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_cfg (line 51) deliberately bypasses _env so the report's own reads do not enter _ENV_READ and make the 'nothing read this' audit think a knob is live. It reads the default straight out of _SPEC and float()-casts, falling back to the raw string.",
+   "evidence": "self_organize.py:51-63, especially the docstring at :59-60 and 'v = os.environ.get(k, _SPEC.get(k, (None, None))[1])'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_cfg is never called with any of the 9 derived knobs, which is necessary: their _SPEC default is None and float(None) would return None from _cfg, silently making an 'armed' predicate false.",
+   "evidence": "AST scan of all 40 _cfg call sites (self_organize.py:8566-8722); none names a key in _DERIVED",
+   "confidence": "verified"
+  },
+  {
+   "claim": "There are exactly 9 derived knobs and their declared parents are: D_MODEL<-D_MODEL_B (alias), ENC_EVERY_IDLE<-ENC_EVERY, ENC_POS_MAX<-WIN, FAB_MIN_STEPS<-SOCIETY, LAYERS<-MODEL, MAX_DOMAINS<-FAB_NMAX, PHASE_W<-PHASES, SEG_CONTIG<-DOMAINS, SIG_LOOK<-ENC_EVERY_IDLE (two hops from ENC_EVERY).",
+   "evidence": "self_organize.py:84-94; `python3 levers.py` DERIVED table",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PHASE_W's actual default expression is (n + 1) // 2 where n is the PROCESS count passed into _phases (i.e. NP), not the phase count. _DERIVED declares it follows PHASES and the registry comment says '(n_phases + 1) // 2'. Both are wrong about which quantity it tracks.",
+   "evidence": "self_organize.py:1345 'w = w or max(1, min(n, _i(\"PHASE_W\", (n + 1) // 2)))' inside 'def _phases(n, p=None, w=None)' :1326, called as _phases(NP) via :1369 'PHASE_SCHED = _phases_env(NP)'; contradicted by :91 '\"PHASE_W\": (\"PHASES\",)' and :107 '# data -- DEFAULT IS COMPUTED: (n_phases + 1) // 2'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "SEG_CONTIG's declared parent is DOMAINS, but its actual default is '1 if NP == 1 else 0' where NP is len(CORP) AFTER the 5000-byte drop filter -- so it also depends on DATA_DIR contents and CORPUS_CAP, and a partially-fetched corpus can silently flip the stream from random-offset splicing to contiguous reading.",
+   "evidence": "self_organize.py:1299 'SEG_CONTIG = bool(_i(\"SEG_CONTIG\", 1 if NP == 1 else 0))'; NP set at :1147 'NP = len(CORP)' after the filter at :1142-1146; declared parent at :92",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MAX_DOMAINS reads FAB_NMAX eagerly as its default, so FAB_NMAX is always entered into _ENV_READ even on a run that sets MAX_DOMAINS explicitly; the same eager pattern applies to D_MODEL/D_MODEL_B.",
+   "evidence": "self_organize.py:598 'MAX_DOMAINS = _i(\"MAX_DOMAINS\", _i(\"FAB_NMAX\", 4096))'; :534 'D = _i(\"D_MODEL\", _i(\"D_MODEL_B\", 128))'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_NEW_WIN is a hidden coupling that levers.py structurally cannot see: 'FAB_NEW_WIN = _i(\"FAB_NEW_WIN\", 0) or _i(\"FAB_COOLDOWN\", 400)'. The default arg is a literal 0, so the AST check for computed defaults never flags it, yet FAB_NEW_WIN=0 (the declared default) means FAB_COOLDOWN.",
+   "evidence": "self_organize.py:734; levers.py:46 'if len(n.args) >= 2 and not isinstance(n.args[1], ast.Constant): computed[k] = ...'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A bare `python3 self_organize.py` with no environment cannot run: TOKENIZER defaults to 1 and DATA_MODE defaults to 'synthetic', and lines 1103-1106 raise SystemExit on exactly that combination.",
+   "evidence": "self_organize.py:121 '\"TOKENIZER\": (\"i\", 1)', :100 '\"DATA_MODE\": (\"env\", \"synthetic\")', :1103-1106; verified by running `env -u DATA_MODE -u TOKENIZER python3 -c 'import self_organize'` which prints the refusal",
+   "confidence": "verified"
+  },
+  {
+   "claim": "On the synthetic path the module globals DISK_STREAM, SEG_CONTIG, VMAX, VAL_FRAC, SEG_LEN, CORP and DN are never defined -- only VALC was given a both-paths declaration (line 1119).",
+   "evidence": "verified by importing with DATA_MODE=synthetic TOKENIZER=0 and probing getattr: all seven report '<<UNDEFINED>>', while VALC=[] , V=256, NP=4, TOK_V0=256, PHASE_SCHED=[[0,1],[1,2],[1,2],[2,3]]",
+   "confidence": "verified"
+  },
+  {
+   "claim": "V serves two purposes: it is the byte alphabet size 256 at line 971 and the model's vocabulary width (VMAX under TOK_ONLINE, else TOK.vocab_size) at 1283/1287. MiniLM and TinyTransformer size emb/head from whichever it is.",
+   "evidence": "self_organize.py:971 'KW = _i(\"KEY_WIN\", 8); V = 256'; :1283 'V = VMAX; BLEN = None'; :1287 'V = TOK.vocab_size'; :1548 's._V = nv or V'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NP serves two purposes: it is the N_PROCESSES knob value on the synthetic path and the surviving-corpus count on the real path. N_PROCESSES therefore has no effect whatsoever under DATA_MODE=real.",
+   "evidence": "self_organize.py:539 'NP = _i(\"N_PROCESSES\", 4)'; :1147 'NP = len(CORP)'; N_PROCESSES appears nowhere else (grep)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "TOKENIZER_PATH is the READ path only; the WRITE path is the separate _TOK_SAVE, computed at import as SAVE_CKPT + '.dyntok.json' when SAVE_CKPT is enabled, else '' on a resume, else TOKENIZER_PATH. This split exists because a run used to overwrite its parent's vocabulary.",
+   "evidence": "self_organize.py:1010-1012; consumed at :5337 'if USE_TOK and _TOK_SAVE: TOK.save(_TOK_SAVE)' and :7843",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The disabled-spellings tuple ('0','','off','no','none','false') is written out twice, at line 1011 (for _TOK_SAVE) and line 5329 (for the SAVE_CKPT normalisation), with no shared constant.",
+   "evidence": "self_organize.py:1011 and :5329",
+   "confidence": "verified"
+  },
+  {
+   "claim": "On the tokenizer LOAD path, MIN_PAIR, MAX_TOK and TOK_DROPOUT are never read from the environment -- DynamicTokenizer.load reconstructs them from the saved json. They are read only in the fresh-construction else-branch.",
+   "evidence": "self_organize.py:1226 'if os.path.exists(_tp) and (not TOK_ONLINE or _env(\"RESUME\", \"\")):' -> load; :1256 is in the else branch; tokenizer.py:481-482 't = cls(d.get(\"vmax\", 8192), d.get(\"min_pair\", 200), d.get(\"max_tok\", 16), d.get(\"dropout\", 0.0), ...)'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "VMAX is the one saved-tokenizer field that IS corrected on a resume, and only when it is a widening: 'if TOK.vmax != VMAX and VMAX >= TOK.vocab_size'. A narrowing silently does nothing here and is caught later.",
+   "evidence": "self_organize.py:1245-1254; the later refusal is ByteComposer.set_vocab at :1476-1481 (TOK_COMPOSE only) and the resume geometry gate near :4616",
+   "confidence": "verified"
+  },
+  {
+   "claim": "TOK.pmin and TOK.gate_k are mirrored from _SPEC-read values onto a FRESHLY CONSTRUCTED tokenizer only (line 1257-1258), but DynamicTokenizer.__init__ itself reads TOK_MINT_PMIN and TOK_MINT_GATE_K from os.environ, and load() goes through __init__, so a loaded tokenizer does pick them up. The comment at 1260 is correct.",
+   "evidence": "self_organize.py:1256-1260; tokenizer.py:158 'self.pmin = float(os.environ.get(\"TOK_MINT_PMIN\", 0.0))', :162 'self.gate_k = int(os.environ.get(\"TOK_MINT_GATE_K\", 1024))', :479-482",
+   "confidence": "verified"
+  },
+  {
+   "claim": "GROW_PASSES is never read at the default configuration: line 1225 evaluates '_i(\"SEED_PASSES\", 2) if TOK_ONLINE else _i(\"GROW_PASSES\", 8)' and TOK_ONLINE defaults to 1. Symmetrically SEED_VOCAB (1224) and SEED_PASSES are never read when TOK_ONLINE=0.",
+   "evidence": "self_organize.py:1224-1225; :137 '\"TOK_ONLINE\": (\"i\", 1)'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "VAL_CAP is only read under DISK_STREAM, which defaults to 0. On the in-RAM path VALC is the whole VAL_FRAC tail with no cap.",
+   "evidence": "self_organize.py:1166-1172, VAL_CAP read only at :1168 inside 'if DISK_STREAM:'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "EXPOSURE_MAX and EXPOSURE_SKEW are read only inside 'if DATA_MODE == \"real\" and NP > 1', so on a single-corpus run -- the configuration for goal A -- neither is ever read and the exposure/imbalance warnings cannot fire.",
+   "evidence": "self_organize.py:5497 guard; reads at :5535, :5538, :5544, :5546",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The corpus drop floor is a hardcoded 5000 bytes, not a knob, and it is what re-aligns DN to CORP. Dropping a corpus changes NP, which changes SEG_CONTIG's default and the phase schedule.",
+   "evidence": "self_organize.py:1142 '_keep = [_i0 for _i0, _c0 in enumerate(CORP) if len(_c0) > 5000]'; :1147, :1159-1164, :1299, :1369",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PHASE_SCHED (the module variable) is assigned exactly once, at line 1369, after NP is already final. Its trailing comment '# rebuilt after NP is known on the real-data path (below)' points at a rebuild that does not exist.",
+   "evidence": "self_organize.py:1369; grep for 'PHASE_SCHED =' finds only this assignment",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_phases clamps PHASES up to a minimum of 2 ('p = p or max(2, _i(\"PHASES\", 4))') and clamps PHASE_W down to n-1 ('if w >= n: w = n - 1') so that the last phase always excludes at least one process, because `faded` is computed from PHASE_SCHED[-1].",
+   "evidence": "self_organize.py:1343, :1345-1346, docstring :1330-1333; consumer at :9810 'act_set = sorted(set(PHASE_SCHED[-1])); faded = [...]'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PHASE_SCHED= (the env string) is validated at startup for empty phases and for process ids outside 0..n-1, and raises SystemExit with the format string; only ValueError is caught.",
+   "evidence": "self_organize.py:1354-1366",
+   "confidence": "verified"
+  },
+  {
+   "claim": "build_stream returns its third element as the set of SEGMENT START positions, and the end-of-run report prints that count as 'true switches' for boundary precision/recall, unguarded by NP.",
+   "evidence": "self_organize.py:1407 'sw.append(pos)', :1412 'return buf[:STREAM_LEN], lab[:STREAM_LEN], set(x for x in sw if x < STREAM_LEN)'; consumed at :8481-8483 'boundary detection: {len(bounds)} found for {len(true_sw)} true switches'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_srng seeds the stream generator from (SEED, epoch) alone -- '(SEED * 1000003) ^ (_STREAM_EPOCH[0] * 2654435761)' -- so what text a run reads no longer depends on how many draws every other subsystem took first. seg_from's contiguous cursor _CUR persists across epochs.",
+   "evidence": "self_organize.py:1375-1390, :1300-1309, :1394 '_SRNG[0] = _srng()'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "frozen_rng saves and restores random, torch CPU and (when initialised) all CUDA generator states; no_rng_drift is its decorator form and is applied to at least four diagnostics (generation, the wrongness sweep, ENC_WARMUP_PROBE, the held-out probe).",
+   "evidence": "self_organize.py:1019-1055; applied at :3855, :4046, :5013, :5065",
+   "confidence": "verified"
+  },
+  {
+   "claim": "AMP is the only string knob in the region that is case-normalised. DATA_MODE, SIG_MODE, MODEL, VERIFY, KEY_SRC, LR_SCHED, SIG_SPACE, WARMSTART_MODE, TOK_PROBATION_BY, CHAIN_ROUTE, CULL_MODE and EVICT are all compared case-sensitively, so DATA_MODE=Real silently takes the synthetic branch.",
+   "evidence": "self_organize.py:1063 'AMP = _env(\"AMP\", \"off\").lower()' vs :1102/:1120 'DATA_MODE = _env(...)' then 'if DATA_MODE == \"real\":' with no normalisation",
+   "confidence": "verified"
+  },
+  {
+   "claim": "AMP=fp16 is explicitly refused with SystemExit because there is no GradScaler anywhere in the file and the optimizer step is gated on ACCUM; the refusal is only reachable on CUDA.",
+   "evidence": "self_organize.py:1063-1081",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_i and _f are bare int()/float() over the env string, with no error message of their own, so a non-integer value for an 'i' knob (e.g. WIN=2.5) dies with a bare ValueError rather than a config diagnostic.",
+   "evidence": "self_organize.py:525-526 'def _i(k, d): return int(_env(k, d))' / 'def _f(k, d): return float(_env(k, d))'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ByteComposer sizes its per-token residual tables from the environment directly, not from the module-level VMAX, using _env with the registry default so the read is still audited.",
+   "evidence": "self_organize.py:1455-1456 's.delta = nn.Parameter(torch.zeros(int(_env(\"VMAX\", 4096)), d))' and the matching dbias line",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ByteComposer.anchor takes the appearances branch whenever uses>0 and never touches tau; TOK_ANCHOR_USES defaults to 400, so TOK_ANCHOR_TAU=4000 is inert at the default configuration.",
+   "evidence": "self_organize.py:1529-1535 'if uses and uses > 0: ... _w = torch.exp(-seen[:s._v] / max(1.0, float(uses))) else: ... _w = torch.exp(-_age / max(1.0, tau))'; :125 default 400.0; banner says so at :4227",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The whole anchor mechanism is gated on TOK_COMPOSE, which defaults to 0, so TOK_ANCHOR/TOK_ANCHOR_TAU/TOK_ANCHOR_USES contribute nothing on a default run. The file documents this and has a dedicated audit line for it.",
+   "evidence": "self_organize.py:1549 's.compose = ByteComposer(d) if TOK_COMPOSE else None'; :132 '\"TOK_COMPOSE\": (\"i\", 0)'; audit at :5810-5816 and coupling note at :6033-6037",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MANAGE_MERGE's default of 0.28 is numerically identical to MERGE_FRAC*NEW_DIST (0.8 * 0.35), and manage() only uses the MERGE_FRAC fallback when merge_dist <= 0, so MERGE_FRAC is inert unless MANAGE_MERGE is explicitly set to 0.",
+   "evidence": "self_organize.py:588 MANAGE_MERGE=0.28, :599 MERGE_FRAC=0.8, :540 NEW_DIST=0.35; :3643 'md = merge_dist if merge_dist > 0 else MERGE_FRAC * NEW_DIST'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MANAGE_EVERY (500) and DOM_MANAGE_EVERY (100) are two separate cadences, split because at 500 the domain merge/cull/fold ran zero or one times on typical run lengths. DOM_MANAGE_EVERY additionally doubles as the ARMED predicate for three DID IT FIRE rows.",
+   "evidence": "self_organize.py:558, :649-655; :8617-8618 and :8630-8639 use _cfg(\"DOM_MANAGE_EVERY\") as the armed test",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ENC_WARMUP_MIN must be strictly below ENC_WARMUP or the adaptive early stop is unreachable, because the code takes min(ENC_WARMUP_MIN, ENC_WARMUP). The registry default 200 against ENC_WARMUP 800 satisfies this; the shipped state was once 3000 against 800.",
+   "evidence": "self_organize.py:336-342",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_PRESSURE=0.45 is documented as a SETPOINT that chooses the operating population (pressure x cap), not a threshold; at the previous 0.75 against FAB_N0=2048/FAB_NMAX=4096 occupancy parked at 0.50 and the utilization cull, the utilization spare and FAB_RESCUE -- all three of which live behind cull_gate_open -- were unreachable.",
+   "evidence": "self_organize.py:201-209; cull_gate_open at :823-836 'return not (n_live <= 2 or (n_live / max(1, cap)) < pressure)'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_PRESS_SOFT switches which ceiling the pressure test is judged against (the GROW_CAP soft cap vs FAB_NMAX preallocation), so it changes the MEANING of FAB_PRESSURE.",
+   "evidence": "self_organize.py:692-693 'FAB_PRESS_SOFT = bool(_i(\"FAB_PRESS_SOFT\", 0))  # 1 = capacity pressure is judged against the OPERATING ceiling'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "pin_tick advances the pinned-at-cap clock by a STEP DELTA rather than +/-1 per call, because the valve block sits below the BATCH_W early-out and previously ticked at 1/BATCH_W the rate GROW_CAP_EVERY is written in (measured: 2650 clock against 43,645 real steps at BATCH_W=16).",
+   "evidence": "self_organize.py:930-948",
+   "confidence": "verified"
+  },
+  {
+   "claim": "lift_to is proportional with an absolute floor: 'int(cap) + max(int(floor_), int(float(frac) * int(cap)))', so GROW_LIFT means the same thing at cap 160 and cap 4096, and GROW_LIFT_MIN keeps small caps moving.",
+   "evidence": "self_organize.py:742-745, defaults at :262 and :265",
+   "confidence": "verified"
+  },
+  {
+   "claim": "blowup_stale keys on the MEDIAN of recent probes and requires since_best >= 80 while elevated; the first version fired on 4 healthy runs out of 4. It is called once, at line 6459.",
+   "evidence": "self_organize.py:748-779; call site :6459 'if not _blew[0] and blowup_stale(_blew[2], _best_bpb[0], _blew[1]):'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "curve_verdict is a pure function of three numbers with five module-level thresholds (CURVE_RISE_BLEWUP 0.5, CURVE_FLAT 0.05, CURVE_TOK_RISE 0.05) and is called twice in the report.",
+   "evidence": "self_organize.py:782-820; called at :8294 and :8334",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_curve_by_step averages only rows flagged ACTIVE and falls back to all rows if nothing is flagged; the previous dict-comprehension kept whichever process was appended last, which is systematically the newest corpus.",
+   "evidence": "self_organize.py:879-903, especially :899 'rows = [(st, b) for st, _p, b, _a in curve if _a] or [(st, b) for st, _p, b, _a in curve]'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "bwt_of's sign runs OPPOSITE to the accuracy-based literature: negative means the old domains improved, because the metric is bits/byte (lower is better). forgetting_of clips at zero so improvement cannot cancel regression.",
+   "evidence": "self_organize.py:906-916 and :919-927",
+   "confidence": "verified"
+  },
+  {
+   "claim": "widen_prefix copies a smaller checkpoint tensor into the leading rows of a larger live tensor and returns (state_dict, widened, unreconcilable); it only handles dim-0 growth with all trailing dims equal, and explicitly does not handle narrowing.",
+   "evidence": "self_organize.py:846-876, especially :869 'if v.dim() >= 1 and tuple(v.shape[1:]) == tuple(c.shape[1:]) and v.shape[0] < c.shape[0]'; used at :4611 and :4652",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PLATEAU_WARM=1000 is deliberately NOT a knob: it is described as a property of the hardcoded EMA rates inside PlateauGrowth.step, in OBSERVATIONS not steps.",
+   "evidence": "self_organize.py:951-953",
+   "confidence": "verified"
+  },
+  {
+   "claim": "BLOWUP_RISE/BLOWUP_STALE and CURVE_RISE_BLEWUP/CURVE_FLAT/CURVE_TOK_RISE are module constants, not registry knobs, so they cannot be swept from the environment and do not appear in the config audit.",
+   "evidence": "self_organize.py:748-749 and :782-784; neither name appears in _SPEC",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The config-audit's typo detector derives its knob families from _SPEC prefixes (first underscore-delimited token, >=3 alpha chars, excluding a generic set) and flags any environment variable in a known family that never entered _ENV_READ.",
+   "evidence": "self_organize.py:5785-5795",
+   "confidence": "verified"
+  },
+  {
+   "claim": "_plumb (line 5761-5765) exempts 40 names from both audit checks because they are read conditionally by design; VMAX, DISK_STREAM, SEG_MIN, SEG_MAX, DOM_MANAGE_EVERY and SEED are on that list.",
+   "evidence": "self_organize.py:5761-5766",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_MIN_STEPS is an OVERRIDE, not a default: under CHAIN_VOTE=1 (the default) Fabric.__init__ forces s.min_steps=0, and only an EXPLICIT non-zero setting is refused with SystemExit. The declared default of 2 (SOCIETY=0) is therefore never the value that runs.",
+   "evidence": "self_organize.py:1860-1868; declared at :191 and :88; levers.py:113-117 prints this as the sole OVERRIDE entry",
+   "confidence": "verified"
+  },
+  {
+   "claim": "SEG_MIN and SEG_MAX are tagged '# domains' in the registry but are the stream segment-length bounds read inside build_stream, i.e. data-stream knobs.",
+   "evidence": "self_organize.py:290-291 tags; read at :1406 and :1410 inside build_stream",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The registry's stated purpose is that it is the complete inventory of environment knobs THIS FILE reads; three env knobs read by tokenizer.py (TOK_MINT_NOVEL_K, VOCAB, BPE_TRAIN_CAP) and one read by memory.py (MEM_WRONG_READ, which is also in _SPEC) live outside it.",
+   "evidence": "self_organize.py:65-77; tokenizer.py:140 'self.novel_k = int(os.environ.get(\"TOK_MINT_NOVEL_K\", 32))', :492, :496; memory.py:67",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`glob` is imported at line 18 and never used anywhere in the file.",
+   "evidence": "self_organize.py:18 'import os, math, random, glob, json, sys, contextlib, functools'; `grep -c 'glob\\.'` returns 0",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MiniLM under TOK_COMPOSE bypasses both s.emb and s.head: encode uses the composed table and forward uses 'h @ _t[0].t() + _t[1]'.",
+   "evidence": "self_organize.py:1556-1562",
+   "confidence": "verified"
+  },
+  {
+   "claim": "TinyTransformer has no ByteComposer at all -- no s.compose attribute, and forward is 's.head(h)' unconditionally -- so TOK_COMPOSE has no effect on MODEL=transformer.",
+   "evidence": "self_organize.py:1563-1594; the composer hookup at :4219 requires 'getattr(model, \"compose\", None) is not None'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "build_lm writes the LAYERS default rule twice (4 for transformer at :1599, 1 for gru at :1600) and the checkpoint writer writes it a third time as a single conditional expression at :5340.",
+   "evidence": "self_organize.py:1598-1600 and :5340 '\"layers\": _i(\"LAYERS\", 4 if MODEL_TYPE==\"transformer\" else 1)'",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The DISK_STREAM branch keeps CORP as the full mmap and derives SEG_LEN as the train-head boundary; the in-RAM branch truncates CORP to the head and sets SEG_LEN = len(CORP). Downstream code reads SEG_LEN as 'the training head length' in both cases, but only the disk branch leaves the held-out tail reachable through CORP.",
+   "evidence": "self_organize.py:1166-1172; consumed at :1305, :1307, :5482, :7968",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The unshuffled-corpus warning reads each domain's data/train/<domain>/_fetch_manifest.json and warns when shuffle_buffer is 0/absent, because a held-out tail of an arrival-ordered corpus is a block rather than a sample (measured: py 5.061 held out vs 2.922 in-stream, eng 2.273 vs 2.303).",
+   "evidence": "self_organize.py:1173-1198",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "DEVICE",
+   "effect": "torch device string used for every .to(dev); also gates the AMP branch.",
+   "owner": "plumbing (as tagged)",
+   "couples_with": [
+    "AMP",
+    "TF32"
+   ],
+   "evidence": "self_organize.py:527, :462"
+  },
+  {
+   "name": "VERIFY",
+   "effect": "'selfcon' (old B self-consistency) or 'recon' (Reconstructor-based verification) for the memory store.",
+   "owner": "memory (as tagged)",
+   "couples_with": [
+    "VERIFY_SWEEP",
+    "VERIFY_FIT",
+    "RECON_W"
+   ],
+   "evidence": "self_organize.py:528, :322"
+  },
+  {
+   "name": "RECON_W",
+   "effect": "weight on joint Reconstructor training during the loop; 0 = post-hoc fit only (VERIFY_FIT).",
+   "owner": "memory (as tagged)",
+   "couples_with": [
+    "VERIFY",
+    "VERIFY_FIT"
+   ],
+   "evidence": "self_organize.py:529-531, :318"
+  },
+  {
+   "name": "VERIFY_SWEEP",
+   "effect": "under VERIFY=recon, also DELETE unverified entries rather than only flagging them.",
+   "owner": "memory (as tagged)",
+   "couples_with": [
+    "VERIFY"
+   ],
+   "evidence": "self_organize.py:532-533, :324"
+  },
+  {
+   "name": "D_MODEL",
+   "effect": "model width D. Default is D_MODEL_B (an alias, not a coupling).",
+   "owner": "plumbing (as tagged)",
+   "couples_with": [
+    "D_MODEL_B"
+   ],
+   "evidence": "self_organize.py:534, :463, :85"
+  },
+  {
+   "name": "D_MODEL_B",
+   "effect": "the alias name every launcher/doc uses; read eagerly as D_MODEL's default so a direct D_MODEL_B=768 invocation no longer silently runs at 128.",
+   "owner": "plumbing (as tagged)",
+   "couples_with": [
+    "D_MODEL"
+   ],
+   "evidence": "self_organize.py:534-538, :464"
+  },
+  {
+   "name": "N_PROCESSES",
+   "effect": "number of synthetic Markov processes. Overwritten by len(CORP) on the real path, so it does nothing under DATA_MODE=real.",
+   "owner": "registry says misc; is a data knob",
+   "couples_with": [
+    "DATA_MODE",
+    "DOMAINS"
+   ],
+   "evidence": "self_organize.py:539, :1147, :496"
+  },
+  {
+   "name": "STREAM_LEN",
+   "effect": "bytes/tokens per epoch of stream; divided by len(PHASE_SCHED) to size each phase.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "PHASES",
+    "PHASE_SCHED",
+    "EPOCHS",
+    "SEG_MIN",
+    "SEG_MAX"
+   ],
+   "evidence": "self_organize.py:539, :1402, :108"
+  },
+  {
+   "name": "WIN",
+   "effect": "training/eval window width; also sizes ENC_POS_MAX's default (2*WIN) and the boundary-detection tolerance (WIN*2 or WIN*3).",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "ENC_POS_MAX",
+    "SEG_MIN",
+    "TOK_ONLINE"
+   ],
+   "evidence": "self_organize.py:539, :3311, :8480, :112"
+  },
+  {
+   "name": "NEW_DIST",
+   "effect": "distance beyond which a window spawns a new domain; also the base of the merge fallback MERGE_FRAC*NEW_DIST.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "MERGE_FRAC",
+    "MANAGE_MERGE",
+    "DOM_RELATIVE",
+    "DOM_RADIUS"
+   ],
+   "evidence": "self_organize.py:540, :3643, :288"
+  },
+  {
+   "name": "SHIFT_DIST",
+   "effect": "absolute adjacent-signature jump that counts as a boundary; superseded by SHIFT_REL's relative rule when that is on.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "SHIFT_REL",
+    "SHIFT_Q",
+    "SHIFT_MULT",
+    "SUSTAIN"
+   ],
+   "evidence": "self_organize.py:540, :293"
+  },
+  {
+   "name": "SUSTAIN",
+   "effect": "consecutive over-threshold observations required before a boundary is declared.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "SHIFT_DIST",
+    "SHIFT_REL"
+   ],
+   "evidence": "self_organize.py:540, :297"
+  },
+  {
+   "name": "SIG_D",
+   "effect": "signature embedding dimension; also the sqrt(SIG_D) rescale the VICReg variance hinge needs for L2-normalised outputs.",
+   "owner": "encoder (as tagged)",
+   "couples_with": [
+    "ENC_VREG",
+    "SIG_DIM"
+   ],
+   "evidence": "self_organize.py:541, :3364-3366, :345"
+  },
+  {
+   "name": "SIG_DIM",
+   "effect": "width of the frozen random projection / signature feature space.",
+   "owner": "encoder (as tagged)",
+   "couples_with": [
+    "SIG_MODE",
+    "SIG_D"
+   ],
+   "evidence": "self_organize.py:541, :346"
+  },
+  {
+   "name": "SIG_MODE",
+   "effect": "'learned' (online InfoNCE encoder, the product path) or 'bigram'/'unigram' frozen byte-statistic baselines; gates whether contrastive_step runs at all.",
+   "owner": "encoder (as tagged)",
+   "couples_with": [
+    "ENC_EVERY",
+    "ENC_EVERY_IDLE",
+    "SIG_SPACE",
+    "SELF_ORG"
+   ],
+   "evidence": "self_organize.py:541, :6648, :348"
+  },
+  {
+   "name": "SELF_ORG",
+   "effect": "0 disables domain self-assembly entirely (one bucket, no provenance, no management). Does NOT remove the SigEncoder, which also feeds fabric routing.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "SIG_MODE",
+    "MANAGE",
+    "DOM_MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:553-555, :292"
+  },
+  {
+   "name": "ENC_BATCH",
+   "effect": "InfoNCE batch size; also the minimum viable anchor range ('if hi < ENC_BATCH: return') and the ln(ENC_BATCH) collapse loss value.",
+   "owner": "encoder (as tagged)",
+   "couples_with": [
+    "ENC_FUSE",
+    "ENC_VREG",
+    "WIN",
+    "ENC_POS_MAX"
+   ],
+   "evidence": "self_organize.py:556, :3313, :3360, :326"
+  },
+  {
+   "name": "ENC_EVERY",
+   "effect": "encoder cadence near a boundary; also the parent of ENC_EVERY_IDLE's default max(ENC_EVERY*6, 12), which is in turn SIG_LOOK's default.",
+   "owner": "encoder (as tagged)",
+   "couples_with": [
+    "ENC_EVERY_IDLE",
+    "SIG_LOOK",
+    "ENC_SHIFT_WIN"
+   ],
+   "evidence": "self_organize.py:556, :5306, :5314, :328, :86, :93"
+  },
+  {
+   "name": "REKEY_EVERY",
+   "effect": "cadence of memory re-keying as the encoder improves; 0 disarms the rekey DID IT FIRE row.",
+   "owner": "memory (as tagged)",
+   "couples_with": [
+    "REKEY_AMORTIZED",
+    "REKEY_CHUNK",
+    "KEY_SRC"
+   ],
+   "evidence": "self_organize.py:556, :8598, :321"
+  },
+  {
+   "name": "TEMP",
+   "effect": "InfoNCE softmax temperature ('logits = za @ zp.t() / TEMP').",
+   "owner": "registry says misc; is an encoder knob",
+   "couples_with": [
+    "ENC_BATCH",
+    "SIG_D"
+   ],
+   "evidence": "self_organize.py:556, :3356, :499"
+  },
+  {
+   "name": "ENC_FUSE",
+   "effect": "encode anchor+positive in ONE pass; mathematically identical but not bit-identical (different reduction order).",
+   "owner": "encoder (as tagged)",
+   "couples_with": [
+    "ENC_BATCH"
+   ],
+   "evidence": "self_organize.py:557, :3351-3355, :331"
+  },
+  {
+   "name": "MANAGE_EVERY",
+   "effect": "expert-bank and world-model management cadence. Domains do NOT use it (they use DOM_MANAGE_EVERY).",
+   "owner": "domains (as tagged); really fabric/world",
+   "couples_with": [
+    "DOM_MANAGE_EVERY",
+    "MANAGE",
+    "FAB_CULL_FRAC",
+    "FAB_NEW_WIN"
+   ],
+   "evidence": "self_organize.py:558, :283, :725-728"
+  },
+  {
+   "name": "MANAGE_MERGE",
+   "effect": "domain consolidation distance. Non-zero OVERRIDES the MERGE_FRAC*NEW_DIST fallback; the default 0.28 equals that product exactly.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "MERGE_FRAC",
+    "NEW_DIST",
+    "MANAGE",
+    "DOM_MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:559-588, :3643, :284"
+  },
+  {
+   "name": "FAB_NMAX",
+   "effect": "preallocated expert slot pool (hard ceiling); also MAX_DOMAINS' default, so it silently sets the domain cap too.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "MAX_DOMAINS",
+    "FAB_N0",
+    "FAB_PRESSURE",
+    "GROW_CAP_FAB0",
+    "FAB_PRESS_SOFT"
+   ],
+   "evidence": "self_organize.py:598, :196, :90"
+  },
+  {
+   "name": "MAX_DOMAINS",
+   "effect": "hard cap on the live domain population, defaulted to FAB_NMAX so the two dual populations stay tied.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:589-598, :246"
+  },
+  {
+   "name": "MERGE_FRAC",
+   "effect": "merge threshold as a fraction of NEW_DIST. Unreachable unless MANAGE_MERGE is explicitly 0.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "MANAGE_MERGE",
+    "NEW_DIST"
+   ],
+   "evidence": "self_organize.py:599, :3643, :287"
+  },
+  {
+   "name": "DOM_DECAY",
+   "effect": "per-manage decay of a domain's activity counter (ExpertRouter's rule).",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_MANAGE_EVERY",
+    "DOM_CULL_FRAC"
+   ],
+   "evidence": "self_organize.py:600, :242"
+  },
+  {
+   "name": "DOM_GRACE",
+   "effect": "minimum domain age before it may be culled.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_CULL_FRAC",
+    "DOM_CULL_EMPTY",
+    "DOM_MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:601, :244"
+  },
+  {
+   "name": "DOM_CULL_FRAC",
+   "effect": "per-manage cull budget: bottom fraction by DECAYED activity.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_DECAY",
+    "DOM_GRACE",
+    "DOM_CULL_FLOOR",
+    "COMP_PROTECT"
+   ],
+   "evidence": "self_organize.py:602, :241"
+  },
+  {
+   "name": "DOM_CULL_FLOOR",
+   "effect": "refuse to cull a domain still holding a per-source floor's worth of memory; 0 reproduces the collapse-to-one-domain arm.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "MEM_SRC_FLOOR",
+    "DOM_CULL_FRAC"
+   ],
+   "evidence": "self_organize.py:603-605, :240"
+  },
+  {
+   "name": "DOM_WINS",
+   "effect": "reservoir of sample windows kept per domain; the basis for re-keying and for the measured acceptance radius.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RADIUS",
+    "DOM_RQ",
+    "ENC_PROTO",
+    "REKEY_EVERY"
+   ],
+   "evidence": "self_organize.py:606, :281"
+  },
+  {
+   "name": "DOM_ADAPTIVE",
+   "effect": "calibrate the spawn threshold to measured within-domain scatter (censored median). OFF: measured worse than the constant it replaces.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_SPAWN_K",
+    "NEW_DIST"
+   ],
+   "evidence": "self_organize.py:607-616, :238"
+  },
+  {
+   "name": "DOM_SPAWN_K",
+   "effect": "spawn only beyond median + K*MAD of recent assign distances. Only read when DOM_ADAPTIVE is on.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_ADAPTIVE"
+   ],
+   "evidence": "self_organize.py:617, :280"
+  },
+  {
+   "name": "DOM_RELATIVE",
+   "effect": "assign on the relative margin (scale-free) rather than an absolute distance. OFF: never validated end to end.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_MARGIN",
+    "NEW_DIST"
+   ],
+   "evidence": "self_organize.py:618, :277"
+  },
+  {
+   "name": "DOM_MARGIN",
+   "effect": "re-identify when d(nearest) <= DOM_MARGIN * d(runner-up). Only meaningful under DOM_RELATIVE.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RELATIVE"
+   ],
+   "evidence": "self_organize.py:619, :247"
+  },
+  {
+   "name": "SHIFT_REL",
+   "effect": "boundary test relative to the recent adjacent-distance scale instead of the constant SHIFT_DIST. OFF.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "SHIFT_Q",
+    "SHIFT_MULT",
+    "SHIFT_DIST"
+   ],
+   "evidence": "self_organize.py:620, :296"
+  },
+  {
+   "name": "SHIFT_Q",
+   "effect": "quantile of recent adjacent distances used as the relative base. Only under SHIFT_REL.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "SHIFT_REL",
+    "SHIFT_MULT"
+   ],
+   "evidence": "self_organize.py:621, :295"
+  },
+  {
+   "name": "SHIFT_MULT",
+   "effect": "trip when the jump is this many times the SHIFT_Q base. Only under SHIFT_REL.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "SHIFT_REL",
+    "SHIFT_Q"
+   ],
+   "evidence": "self_organize.py:622, :294"
+  },
+  {
+   "name": "DOM_RADIUS",
+   "effect": "per-domain acceptance radius measured from that domain's own reservoir, instead of the global NEW_DIST constant. ON; one of the two changes that beat the constants on a controlled test.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RQ",
+    "DOM_RMULT",
+    "DOM_RCAP",
+    "DOM_WINS",
+    "NEW_DIST"
+   ],
+   "evidence": "self_organize.py:623-633, :273"
+  },
+  {
+   "name": "DOM_RQ",
+   "effect": "the quantile of d(reservoir window, own centroid) that defines the radius.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RADIUS",
+    "DOM_RMULT"
+   ],
+   "evidence": "self_organize.py:634, :279"
+  },
+  {
+   "name": "DOM_RMULT",
+   "effect": "multiplier applied to that quantile.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RADIUS",
+    "DOM_RQ"
+   ],
+   "evidence": "self_organize.py:635, :278"
+  },
+  {
+   "name": "DOM_RCAP",
+   "effect": "Voronoi guard: radius <= DOM_RCAP x distance to the nearest other centroid. 0 removes the guard; >=1.5 measured indistinguishable from off.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RADIUS"
+   ],
+   "evidence": "self_organize.py:636-644, :274"
+  },
+  {
+   "name": "DOM_RECUR",
+   "effect": "fold domains that never RECUR into their nearest neighbour. ON; with the radius this is what made the domain count intensive rather than a log of splices.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_MIN_VISITS",
+    "DOM_RECUR_HORIZON",
+    "DOM_FOLD_MULT"
+   ],
+   "evidence": "self_organize.py:645, :275"
+  },
+  {
+   "name": "DOM_MIN_VISITS",
+   "effect": "'recurs' means entered on at least this many SEPARATE occasions.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RECUR",
+    "DOM_RECUR_HORIZON"
+   ],
+   "evidence": "self_organize.py:646, :248"
+  },
+  {
+   "name": "DOM_RECUR_HORIZON",
+   "effect": "a domain is judged for recurrence only after this many BOUNDARIES since birth (not steps).",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RECUR",
+    "SUSTAIN",
+    "SHIFT_DIST"
+   ],
+   "evidence": "self_organize.py:647, :276"
+  },
+  {
+   "name": "DOM_FOLD_MULT",
+   "effect": "refuse to fold further than this multiple of the pooled radius; unguarded this collapses to one domain.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_RECUR",
+    "DOM_RADIUS"
+   ],
+   "evidence": "self_organize.py:648, :243"
+  },
+  {
+   "name": "DOM_MANAGE_EVERY",
+   "effect": "domain merge/cull/fold cadence, split off from MANAGE_EVERY because at 500 it fired zero or one times per run. Doubles as the ARMED predicate for three DID IT FIRE rows.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "MANAGE_EVERY",
+    "MANAGE",
+    "DOM_CULL_FLOOR",
+    "DOM_CULL_EMPTY",
+    "COMP_PROTECT"
+   ],
+   "evidence": "self_organize.py:649-655, :8617-8639, :245"
+  },
+  {
+   "name": "DOM_PRIOR",
+   "effect": "blend weight of a per-domain token histogram into prediction at eval; 0 disables the accounting entirely.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "TOKC_DECAY",
+    "RETOK_EVERY"
+   ],
+   "evidence": "self_organize.py:656-658, :249"
+  },
+  {
+   "name": "TOKC_DECAY",
+   "effect": "what a domain's token histogram keeps across a re-segmentation; 1.0 restores cumulative-forever counts.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_PRIOR",
+    "RETOK_EVERY"
+   ],
+   "evidence": "self_organize.py:659-664, :250"
+  },
+  {
+   "name": "LOSS_MASK_DEAD",
+   "effect": "exclude never-minted ids from the softmax denominator; it is the enabling change that makes reserved VMAX headroom free, and GROW_CAP_VOCAB is only honest with it on.",
+   "owner": "tokenizer (as tagged) though filed in the domains block",
+   "couples_with": [
+    "VMAX",
+    "GROW_CAP_VOCAB",
+    "GROW_CAP"
+   ],
+   "evidence": "self_organize.py:665-669, :686-688, :251"
+  },
+  {
+   "name": "FAB_PRESS_SOFT",
+   "effect": "judge capacity pressure against the GROW_CAP soft cap instead of FAB_NMAX preallocation -- i.e. it changes what FAB_PRESSURE means.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "GROW_CAP",
+    "GROW_CAP_FAB",
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:692-693, :210"
+  },
+  {
+   "name": "FAB_RESCUE",
+   "effect": "size of the mutation an expert gets INSTEAD of being culled the first time, in units of its own weight scale (same units as FAB_MUT). 0 = cull on first selection. Lives behind cull_gate_open.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_MUT",
+    "FAB_PRESSURE",
+    "FAB_PRESS_SOFT",
+    "COMP_PROTECT"
+   ],
+   "evidence": "self_organize.py:689-694, :823-836, :270"
+  },
+  {
+   "name": "FAB_NEW_FRAC",
+   "effect": "cap on the fraction of the LIVE population born within the last FAB_NEW_WIN steps; 0 restores the uncapped ramp. Inert under FAB_GROW=0.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_NEW_WIN",
+    "FAB_COOLDOWN",
+    "FAB_RAMP_RATE",
+    "FAB_BURST",
+    "FAB_CULL_FRAC",
+    "FAB_GROW"
+   ],
+   "evidence": "self_organize.py:695-733, :271"
+  },
+  {
+   "name": "FAB_NEW_WIN",
+   "effect": "the window the newborn-fraction is measured over; 0 (the declared default) silently means FAB_COOLDOWN.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_COOLDOWN",
+    "FAB_NEW_FRAC",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:734, :272"
+  },
+  {
+   "name": "FAB_COOLDOWN",
+   "effect": "minimum steps between growth events; also the fallback value of FAB_NEW_WIN.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_NEW_WIN",
+    "FAB_NEW_FRAC"
+   ],
+   "evidence": "self_organize.py:734, :169"
+  },
+  {
+   "name": "GROW_CAP",
+   "effect": "master switch for both soft caps (fabric and vocabulary). OFF by default, so the whole earned-capacity valve is disarmed.",
+   "owner": "capacity (as tagged)",
+   "couples_with": [
+    "GROW_CAP_FAB",
+    "GROW_CAP_VOCAB",
+    "GROW_CAP_EVERY",
+    "GROW_CAP_PLATEAU",
+    "GROW_LIFT",
+    "GROW_LIFT_MIN",
+    "FAB_PRESS_SOFT"
+   ],
+   "evidence": "self_organize.py:735, :670-688, :252"
+  },
+  {
+   "name": "GROW_CAP_FAB",
+   "effect": "under GROW_CAP, apply the soft cap to the expert population.",
+   "owner": "capacity (as tagged)",
+   "couples_with": [
+    "GROW_CAP",
+    "GROW_CAP_FAB0",
+    "FAB_NMAX",
+    "FAB_PRESS_SOFT"
+   ],
+   "evidence": "self_organize.py:736, :253"
+  },
+  {
+   "name": "GROW_CAP_VOCAB",
+   "effect": "under GROW_CAP, apply the soft cap to the vocabulary. Only honest with LOSS_MASK_DEAD=1, otherwise it measures the reservation.",
+   "owner": "capacity (as tagged)",
+   "couples_with": [
+    "GROW_CAP",
+    "GROW_CAP_VOCAB0",
+    "VMAX",
+    "LOSS_MASK_DEAD"
+   ],
+   "evidence": "self_organize.py:737, :686-688, :254"
+  },
+  {
+   "name": "GROW_LIFT",
+   "effect": "fraction of the current cap handed out per earned lift (proportional, so it means the same at 160 and 4096).",
+   "owner": "capacity (as tagged)",
+   "couples_with": [
+    "GROW_LIFT_MIN",
+    "GROW_CAP"
+   ],
+   "evidence": "self_organize.py:255-262, :738, :742-745"
+  },
+  {
+   "name": "GROW_LIFT_MIN",
+   "effect": "absolute floor on a lift so a small cap still moves.",
+   "owner": "capacity (as tagged)",
+   "couples_with": [
+    "GROW_LIFT"
+   ],
+   "evidence": "self_organize.py:263-265, :739"
+  },
+  {
+   "name": "GROW_CAP_PLATEAU",
+   "effect": "relative slow-loss improvement below which the run counts as stalled -- the second half of the pinned-AND-plateaued conjunction.",
+   "owner": "capacity (as tagged)",
+   "couples_with": [
+    "GROW_CAP",
+    "GROW_CAP_EVERY"
+   ],
+   "evidence": "self_organize.py:949, :266"
+  },
+  {
+   "name": "GROW_CAP_EVERY",
+   "effect": "steps a cap must stay PINNED before a lift is earned; counted with pin_tick in real step deltas, not in flushes.",
+   "owner": "capacity (as tagged)",
+   "couples_with": [
+    "BATCH_W",
+    "GROW_CAP",
+    "GROW_CAP_PLATEAU"
+   ],
+   "evidence": "self_organize.py:950, :930-948, :267"
+  },
+  {
+   "name": "MANAGE",
+   "effect": "master ablation switch for merge/cull across populations; 0 lets domains grow unbounded and disarms the fabric.cull DID IT FIRE row.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "MANAGE_EVERY",
+    "DOM_MANAGE_EVERY",
+    "COMP_PROTECT"
+   ],
+   "evidence": "self_organize.py:954, :8568, :282"
+  },
+  {
+   "name": "DOM_CULL_EMPTY",
+   "effect": "cull a domain holding no memory and no windows immediately, without waiting for the act/stale conjunction it can fail forever.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOM_MANAGE_EVERY",
+    "MANAGE_MIN",
+    "MANAGE_STALE"
+   ],
+   "evidence": "self_organize.py:955-956, :239"
+  },
+  {
+   "name": "MANAGE_MIN",
+   "effect": "cull domains holding fewer than this many windows (when also stale).",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "MANAGE_STALE",
+    "DOM_CULL_EMPTY"
+   ],
+   "evidence": "self_organize.py:957, :285"
+  },
+  {
+   "name": "MANAGE_STALE",
+   "effect": "steps unseen before a small domain counts as stale.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "MANAGE_MIN"
+   ],
+   "evidence": "self_organize.py:957, :286"
+  },
+  {
+   "name": "COMP_EMA",
+   "effect": "EMA rate for per-domain / per-node COMPETENCE (bits on the material it wins).",
+   "owner": "registry says misc; is a domains/fabric selection knob",
+   "couples_with": [
+    "COMP_PROTECT"
+   ],
+   "evidence": "self_organize.py:958, :474"
+  },
+  {
+   "name": "FAB_SPAWN",
+   "effect": "let the router specify a non-existent expert and decode it into being, so the LM loss backpropagates into q_route.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_AE_W",
+    "FAB_REPLICATE",
+    "FAB_GROW"
+   ],
+   "evidence": "self_organize.py:959-961, :220"
+  },
+  {
+   "name": "FAB_AE_W",
+   "effect": "weight on the weights->identity->weights round trip that keeps the expert decoder honest.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_SPAWN"
+   ],
+   "evidence": "self_organize.py:962, :162"
+  },
+  {
+   "name": "FAB_KEY_NORM",
+   "effect": "normalise the LEARNED routing term so it cannot swamp the grounded region term. Principled but UNVALIDATED.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "ROUTE_LEARN",
+    "ROUTE_GROUNDED",
+    "ROUTE_REGION_W"
+   ],
+   "evidence": "self_organize.py:963-964, :190"
+  },
+  {
+   "name": "FAB_DISCOVER",
+   "effect": "cosine distance beyond which a signature is treated as unowned material and handed to the least-used expert; 0 disables discovery-by-novelty.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_EXPLORE",
+    "ROUTE_T"
+   ],
+   "evidence": "self_organize.py:965-966, :172"
+  },
+  {
+   "name": "FAB_REPLICATE",
+   "effect": "grow by cloning the fittest expert plus jitter rather than minting a blank identity that can never earn traffic.",
+   "owner": "fabric (as tagged)",
+   "couples_with": [
+    "FAB_GROW",
+    "BIRTH_JITTER",
+    "FAB_MUT",
+    "FAB_XOVER"
+   ],
+   "evidence": "self_organize.py:967-968, :218"
+  },
+  {
+   "name": "COMP_PROTECT",
+   "effect": "protect a unit that beats the population on its own material from culling however rarely used; 0 restores pure-utilization selection. Also the ARMED predicate for fabric.spare and fabric.failed_out.",
+   "owner": "registry says misc; is fabric/domains selection",
+   "couples_with": [
+    "COMP_EMA",
+    "MANAGE",
+    "DOM_MANAGE_EVERY",
+    "FAB_CULL_FRAC"
+   ],
+   "evidence": "self_organize.py:969-970, :8569-8573, :8635, :475"
+  },
+  {
+   "name": "KEY_WIN",
+   "effect": "context window length used to build a memory key (KW); recorded in the checkpoint so a loader reproduces it.",
+   "owner": "memory (as tagged)",
+   "couples_with": [
+    "KEY_SRC",
+    "KEY_LAYERS",
+    "KEY_PREGATE"
+   ],
+   "evidence": "self_organize.py:971, :5339, :303"
+  },
+  {
+   "name": "TOK_COMPOSE",
+   "effect": "token vector = composite(bytes) + learned residual. Gates construction of ByteComposer, and with it TOK_ANCHOR/TAU/USES and the whole no-warm-start story. Has NO effect on MODEL=transformer.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ANCHOR",
+    "TOK_ANCHOR_TAU",
+    "TOK_ANCHOR_USES",
+    "VMAX",
+    "MAX_TOK",
+    "MODEL",
+    "WARMSTART"
+   ],
+   "evidence": "self_organize.py:972-979, :1549, :1563-1594, :132"
+  },
+  {
+   "name": "TOK_ANCHOR",
+   "effect": "weight of the penalty holding a new token's residual near its composite. Never enters the loss when TOK_COMPOSE=0 (the default).",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_COMPOSE",
+    "TOK_ANCHOR_TAU",
+    "TOK_ANCHOR_USES"
+   ],
+   "evidence": "self_organize.py:980, :6033-6037, :123"
+  },
+  {
+   "name": "TOK_ANCHOR_TAU",
+   "effect": "release horizon in STEPS of the token's own life. Unused whenever TOK_ANCHOR_USES > 0, which is the default.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ANCHOR_USES",
+    "TOK_COMPOSE",
+    "RETOK_EVERY"
+   ],
+   "evidence": "self_organize.py:981, :1529-1535, :124"
+  },
+  {
+   "name": "TOK_ANCHOR_USES",
+   "effect": "release horizon in APPEARANCES; >0 selects the appearances branch and makes the anchor independent of re-segmentation.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ANCHOR_TAU",
+    "TOK_COMPOSE",
+    "TOK_PROBATION"
+   ],
+   "evidence": "self_organize.py:982-985, :1529-1531, :125"
+  },
+  {
+   "name": "TOK_MINT_PMIN",
+   "effect": "minimum p(b|a) required to allow a merge; 0 = mint on frequency alone. Mirrored onto TOK.pmin and also read inside DynamicTokenizer.__init__.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_MINT_GATE_K",
+    "MIN_PAIR",
+    "TOK_ONLINE"
+   ],
+   "evidence": "self_organize.py:986, :1257, tokenizer.py:158, :260, :126"
+  },
+  {
+   "name": "TOKENIZER",
+   "effect": "master switch for subword mode (USE_TOK). TOKENIZER=1 REQUIRES DATA_MODE=real or the run exits at startup.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "DATA_MODE",
+    "TOK_ONLINE",
+    "VMAX",
+    "TOK_COMPOSE"
+   ],
+   "evidence": "self_organize.py:987, :1103-1106, :121"
+  },
+  {
+   "name": "TOK_ONLINE",
+   "effect": "mint during training (model sized to VMAX, corpora stay bytes) vs build a fixed vocabulary up front (corpora pre-tokenized, model sized to TOK.vocab_size). Selects SEED_VOCAB/SEED_PASSES vs VMAX/GROW_PASSES.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "VMAX",
+    "SEED_VOCAB",
+    "SEED_PASSES",
+    "GROW_PASSES",
+    "RETOK_EVERY",
+    "TOKENIZER_PATH",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:987, :1224-1226, :1282-1288, :137"
+  },
+  {
+   "name": "SAVE_CKPT",
+   "effect": "checkpoint DIRECTORY. '0'/''/off/no/none/false all mean disabled. Also determines _TOK_SAVE (SAVE_CKPT + '.dyntok.json').",
+   "owner": "plumbing (as tagged)",
+   "couples_with": [
+    "TOKENIZER_PATH",
+    "RESUME",
+    "CKPT_EVERY",
+    "BEST_KEEP"
+   ],
+   "evidence": "self_organize.py:1010-1012, :5329-5337, :470"
+  },
+  {
+   "name": "RESUME",
+   "effect": "checkpoint to resume from (a directory, or a .pt file). Forces the tokenizer LOAD branch even under TOK_ONLINE, suppresses vocabulary saving when SAVE_CKPT is off, and supplies the sibling-tokenizer guess.",
+   "owner": "plumbing (as tagged)",
+   "couples_with": [
+    "TOKENIZER_PATH",
+    "SAVE_CKPT",
+    "VMAX",
+    "TOK_ONLINE"
+   ],
+   "evidence": "self_organize.py:1012, :1216-1222, :1226, :4361-4364, :469"
+  },
+  {
+   "name": "TOKENIZER_PATH",
+   "effect": "the file the vocabulary is READ from. On a resume with it unset, <RESUME>.dyntok.json is preferred when it exists. The WRITE path is _TOK_SAVE, not this.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "RESUME",
+    "SAVE_CKPT",
+    "TOK_ONLINE",
+    "VMAX"
+   ],
+   "evidence": "self_organize.py:1012, :1201-1222, :122"
+  },
+  {
+   "name": "SEED",
+   "effect": "seeds torch and python RNG at import, and is one of the two inputs to the stream generator _srng (SEED, epoch).",
+   "owner": "optim (as tagged)",
+   "couples_with": [
+    "EPOCHS",
+    "DISK_STREAM"
+   ],
+   "evidence": "self_organize.py:1016, :1390, :387"
+  },
+  {
+   "name": "TF32",
+   "effect": "enable TF32 for matmul and cuDNN; changes how matmuls execute, not what is computed.",
+   "owner": "optim (as tagged)",
+   "couples_with": [
+    "AMP",
+    "DEVICE"
+   ],
+   "evidence": "self_organize.py:1061-1062, :388"
+  },
+  {
+   "name": "AMP",
+   "effect": "'off' or 'bf16'; 'fp16' is refused with SystemExit because there is no GradScaler and the step is gated on ACCUM.",
+   "owner": "optim (as tagged)",
+   "couples_with": [
+    "DEVICE",
+    "ACCUM",
+    "TF32"
+   ],
+   "evidence": "self_organize.py:1063-1081, :366"
+  },
+  {
+   "name": "DATA_MODE",
+   "effect": "'real' (corpora on disk) or 'synthetic' (Markov processes). Gates the entire corpus/tokenizer block, and with it whether DISK_STREAM/SEG_CONTIG/VMAX/VAL_FRAC/SEG_LEN/CORP/DN exist at all. Compared case-sensitively.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "TOKENIZER",
+    "DOMAINS",
+    "DATA_DIR",
+    "N_PROCESSES",
+    "DISK_STREAM"
+   ],
+   "evidence": "self_organize.py:1102, :1120, :1313-1315, :100"
+  },
+  {
+   "name": "DOMAINS",
+   "effect": "comma-separated corpus names, index-aligned with CORP; sets NP after the 5000-byte filter, and hence SEG_CONTIG and the phase schedule. Names label every held-out score.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "DATA_DIR",
+    "CORPUS_CAP",
+    "SEG_CONTIG",
+    "PHASES",
+    "PHASE_W",
+    "MAX_DOMAINS"
+   ],
+   "evidence": "self_organize.py:1121, :1126-1155, :1299, :102"
+  },
+  {
+   "name": "DISK_STREAM",
+   "effect": "mmap the corpora so training data can exceed RAM; also the only thing that makes _resample draw fresh data per epoch, and the only path that reads VAL_CAP. Defined ONLY on the real-data path.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "EPOCHS",
+    "VAL_CAP",
+    "VAL_FRAC",
+    "CORPUS_CAP",
+    "DATA_MODE"
+   ],
+   "evidence": "self_organize.py:1122, :1166-1172, :5470-5472, :6511, :101"
+  },
+  {
+   "name": "CORPUS_CAP",
+   "effect": "bytes read per domain by open_corpus.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "DATA_DIR",
+    "DOMAINS",
+    "DISK_STREAM",
+    "VAL_FRAC"
+   ],
+   "evidence": "self_organize.py:1124, :98"
+  },
+  {
+   "name": "DATA_DIR",
+   "effect": "root of train/<domain>/part*.txt; also where the _fetch_manifest.json shuffle check looks.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "DOMAINS",
+    "CORPUS_CAP"
+   ],
+   "evidence": "self_organize.py:1124, :1184, :99"
+  },
+  {
+   "name": "VAL_FRAC",
+   "effect": "held-out TAIL fraction of each corpus, never sampled into the training stream. It is a sample only if the corpus was written unordered -- hence the manifest warning.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "VAL_CAP",
+    "DISK_STREAM",
+    "HOLDOUT_N"
+   ],
+   "evidence": "self_organize.py:1165-1198, :109"
+  },
+  {
+   "name": "VAL_CAP",
+   "effect": "cap on held-out bytes per corpus. Read only under DISK_STREAM; on the in-RAM path the tail is uncapped.",
+   "owner": "registry says misc; is a data knob",
+   "couples_with": [
+    "DISK_STREAM",
+    "VAL_FRAC"
+   ],
+   "evidence": "self_organize.py:1168, :502"
+  },
+  {
+   "name": "VMAX",
+   "effect": "hard vocabulary ceiling: emb/head row count and the width of ByteComposer's residual tables. On a resume it is pushed into TOK.vmax so a full saved tokenizer can mint again. Read separately from the environment inside ByteComposer.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ONLINE",
+    "SEED_VOCAB",
+    "LOSS_MASK_DEAD",
+    "GROW_CAP_VOCAB",
+    "TOKENIZER_PATH",
+    "RESUME",
+    "TOK_COMPOSE"
+   ],
+   "evidence": "self_organize.py:1223, :1245-1256, :1283, :1455-1456, :1476-1481, :138"
+  },
+  {
+   "name": "SEED_VOCAB",
+   "effect": "target vocabulary for the pre-training seed passes under TOK_ONLINE. Not read when TOK_ONLINE=0. The seed loop breaks early on convergence, so this is a target, not the achieved size.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ONLINE",
+    "SEED_PASSES",
+    "MIN_PAIR",
+    "VMAX"
+   ],
+   "evidence": "self_organize.py:1224, :1266-1271, :1274-1281, :120"
+  },
+  {
+   "name": "SEED_PASSES",
+   "effect": "number of tally-and-mint passes for the online seed. Not read when TOK_ONLINE=0.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ONLINE",
+    "SEED_VOCAB",
+    "TOK_GROW_CAP"
+   ],
+   "evidence": "self_organize.py:1225, :119"
+  },
+  {
+   "name": "GROW_PASSES",
+   "effect": "number of passes for the offline (TOK_ONLINE=0) expanding build. Never read at the default configuration.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ONLINE",
+    "VMAX"
+   ],
+   "evidence": "self_organize.py:1225, :114"
+  },
+  {
+   "name": "MIN_PAIR",
+   "effect": "minimum pair count before a merge is a candidate. Read only on the fresh-construction branch; a loaded tokenizer keeps the json's value.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ONLINE",
+    "RESUME",
+    "TOKENIZER_PATH",
+    "TOK_MINT_PMIN"
+   ],
+   "evidence": "self_organize.py:1256, tokenizer.py:481, :116"
+  },
+  {
+   "name": "MAX_TOK",
+   "effect": "maximum token length in bytes for the tokenizer. ByteComposer's maxb is hardcoded at 16 and does not follow it. Read only on the fresh-construction branch.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_COMPOSE",
+    "VMAX",
+    "TOKENIZER_PATH",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:1256, :1441-1445, :1487, :115"
+  },
+  {
+   "name": "TOK_DROPOUT",
+   "effect": "BPE-dropout probability during segmentation. Read only on the fresh-construction branch.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_ONLINE",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:1256, :133"
+  },
+  {
+   "name": "TOK_MINT_GATE_K",
+   "effect": "how far down the candidate ranking the predictability gate may look. Mirrored onto TOK.gate_k and also read in DynamicTokenizer.__init__. Measured: at 64 the window itself starved minting.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "TOK_MINT_PMIN"
+   ],
+   "evidence": "self_organize.py:1258, tokenizer.py:162-165, :260, :131"
+  },
+  {
+   "name": "TOK_GROW_CAP",
+   "effect": "bytes taken from the head of each corpus for the tokenizer's seed/grow passes.",
+   "owner": "tokenizer (as tagged)",
+   "couples_with": [
+    "SEED_PASSES",
+    "GROW_PASSES",
+    "CORPUS_CAP"
+   ],
+   "evidence": "self_organize.py:1261, :134"
+  },
+  {
+   "name": "SEG_CONTIG",
+   "effect": "read each corpus in order (only text-intrinsic boundaries) instead of seeking to a random offset every segment. Default 1 when exactly one corpus survives the filter.",
+   "owner": "domains (as tagged)",
+   "couples_with": [
+    "DOMAINS",
+    "DATA_DIR",
+    "CORPUS_CAP",
+    "SEG_MIN",
+    "SEG_MAX",
+    "EPOCHS"
+   ],
+   "evidence": "self_organize.py:1289-1312, :289"
+  },
+  {
+   "name": "PHASED",
+   "effect": "non-stationary stream: processes ENTER and FADE per phase. 0 is the stationary ablation and leaves PH_BOUNDS empty.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "PHASES",
+    "PHASE_W",
+    "PHASE_SCHED",
+    "STREAM_LEN",
+    "N_PROCESSES"
+   ],
+   "evidence": "self_organize.py:1317-1323, :1396-1411, :104"
+  },
+  {
+   "name": "PHASES",
+   "effect": "number of phases in the generated schedule; clamped up to a minimum of 2.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "PHASED",
+    "PHASE_W",
+    "PHASE_SCHED",
+    "STREAM_LEN"
+   ],
+   "evidence": "self_organize.py:1343, :105"
+  },
+  {
+   "name": "PHASE_W",
+   "effect": "how many processes are live at a time. Default (n+1)//2 where n is the PROCESS count, clamped to at most n-1 so something can always fade.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "PHASES",
+    "DOMAINS",
+    "N_PROCESSES"
+   ],
+   "evidence": "self_organize.py:1345-1346, :107"
+  },
+  {
+   "name": "PHASE_SCHED",
+   "effect": "explicit pipe-separated schedule overriding the generator; validated at startup for empty phases and out-of-range ids.",
+   "owner": "data (as tagged)",
+   "couples_with": [
+    "PHASES",
+    "PHASE_W",
+    "PHASED",
+    "DOMAINS"
+   ],
+   "evidence": "self_organize.py:1354-1369, :106"
+  },
+  {
+   "name": "SEG_MIN",
+   "effect": "minimum segment length drawn per splice; each segment start is recorded as a 'true switch'.",
+   "owner": "registry says domains; is a data/stream knob",
+   "couples_with": [
+    "SEG_MAX",
+    "SEG_CONTIG",
+    "STREAM_LEN",
+    "WIN",
+    "ENC_POS_MAX"
+   ],
+   "evidence": "self_organize.py:1406, :1410, :291"
+  },
+  {
+   "name": "SEG_MAX",
+   "effect": "maximum segment length drawn per splice.",
+   "owner": "registry says domains; is a data/stream knob",
+   "couples_with": [
+    "SEG_MIN",
+    "SEG_CONTIG",
+    "STREAM_LEN"
+   ],
+   "evidence": "self_organize.py:1406, :1410, :290"
+  },
+  {
+   "name": "MODEL",
+   "effect": "'gru' (MiniLM) or 'transformer' (TinyTransformer). Sets LAYERS' default (1 vs 4) and decides whether ByteComposer exists at all.",
+   "owner": "plumbing (as tagged)",
+   "couples_with": [
+    "LAYERS",
+    "HEADS",
+    "MAXLEN",
+    "TOK_COMPOSE",
+    "D_MODEL"
+   ],
+   "evidence": "self_organize.py:1416, :1598-1600, :468, :89"
+  },
+  {
+   "name": "DROPOUT",
+   "effect": "dropout on embeddings and GRU hidden states (multi-layer only for the inter-layer dropout). Default OFF because the model is underfit.",
+   "owner": "optim (as tagged)",
+   "couples_with": [
+    "LAYERS",
+    "WEIGHT_DECAY",
+    "MODEL"
+   ],
+   "evidence": "self_organize.py:1417, :1550-1551, :370"
+  },
+  {
+   "name": "ENC_VREG",
+   "effect": "VICReg-style variance hinge on the encoder, scaled by sqrt(SIG_D) because the outputs are L2-normalised. ON by default; it is the anti-collapse term for single-corpus material.",
+   "owner": "encoder (as tagged)",
+   "couples_with": [
+    "SIG_D",
+    "ENC_CREG",
+    "ENC_BATCH"
+   ],
+   "evidence": "self_organize.py:1418, :3358-3372, :335"
+  },
+  {
+   "name": "ENC_CREG",
+   "effect": "covariance term of the same regulariser; 0 by default.",
+   "owner": "encoder (as tagged)",
+   "couples_with": [
+    "ENC_VREG",
+    "SIG_D"
+   ],
+   "evidence": "self_organize.py:1418, :3371-3372, :327"
+  },
+  {
+   "name": "WEIGHT_DECAY",
+   "effect": "AdamW weight decay. Default OFF because the model is underfit.",
+   "owner": "optim (as tagged)",
+   "couples_with": [
+    "DROPOUT",
+    "LR"
+   ],
+   "evidence": "self_organize.py:1420-1421, :389"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "DISK_STREAM is undefined on the synthetic path but read unguarded in main()",
+   "severity": "high",
+   "where": "self_organize.py:1122 (definition), :5470 and :6511 (reads)",
+   "symptom": "DATA_MODE=synthetic with EPOCHS>1 raises 'NameError: name DISK_STREAM is not defined' at the startup-guard block, before training. EPOCHS=1 short-circuits ('if EPOCHS > 1 and not DISK_STREAM') so it hides at the default.",
+   "evidence": "DISK_STREAM is assigned only at :1122, inside 'if DATA_MODE == \"real\":'. Verified by importing with DATA_MODE=synthetic TOKENIZER=0: getattr(module,'DISK_STREAM') is undefined. This is the identical defect the VALC declaration at :1107-1119 was added to fix, one variable over.",
+   "bug_class": "crash"
+  },
+  {
+   "title": "'true switches' are segment starts, not process changes -- the boundary metric is measured against artifacts",
+   "severity": "high",
+   "where": "self_organize.py:1407 / :1411 / :1412 (production), :8481-8483 (consumption)",
+   "symptom": "boundary precision/recall is scored against every splice segment start, including consecutive segments drawn from the SAME process. On a single-corpus run (NP==1, the goal-A configuration) every one of the ~96 'true switches' is a boundary we manufactured, and with SEG_CONTIG=1 there is not even a discontinuity there.",
+   "evidence": "build_stream appends 'sw.append(pos)' for every segment regardless of whether p changed (:1407 under PHASED, :1411 otherwise) and returns 'set(x for x in sw if x < STREAM_LEN)'. The report prints 'boundary detection: {len(bounds)} found for {len(true_sw)} true switches | precision {prec:.2f} recall {rec:.2f}' at :8483 with no NP guard. Under PHASED with PHASE_W>=2, '_rs.choice(act)' can and does repeat a process.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "PHASE_W's declared parent is PHASES; its actual parent is the process count",
+   "severity": "medium",
+   "where": "self_organize.py:1345, declared at :91 and :107",
+   "symptom": "Anyone reading _DERIVED or the registry comment believes PHASE_W tracks the number of phases. It tracks NP. Changing PHASES leaves PHASE_W's default untouched; adding a corpus (or losing one to the 5000-byte filter) silently changes it.",
+   "evidence": "'w = w or max(1, min(n, _i(\"PHASE_W\", (n + 1) // 2)))' at :1345 inside 'def _phases(n, p=None, w=None)', called as _phases(NP) via 'PHASE_SCHED = _phases_env(NP)' at :1369. _DERIVED says '\"PHASE_W\": (\"PHASES\",)' at :91 and _SPEC says '# data -- DEFAULT IS COMPUTED: (n_phases + 1) // 2' at :107. levers.py cannot catch this: it checks only THAT the default is computed, never from what.",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "The resume-side tokenizer path guess does not match the save-side _TOK_SAVE convention",
+   "severity": "medium",
+   "where": "self_organize.py:1010-1012 (write) vs :1216-1219 (resume read guess)",
+   "symptom": "A run started with SAVE_CKPT=runs/x writes its vocabulary to 'runs/x.dyntok.json'. Resuming with RESUME=runs/x/ckpt.pt (a supported form) computes the candidate 'runs/x/ckpt.dyntok.json', which does not exist, and falls through to the shared data/dyntok.json. The same happens for SAVE_CKPT with a trailing slash, because _ck0 is only .strip()ed while _rz is .rstrip('/')ed.",
+   "evidence": "_TOK_SAVE = (_ck0 + '.dyntok.json') at :1011 with '_ck0 = _env(\"SAVE_CKPT\", \"\").strip()' at :1010; the resume guess is '_rz = _env(\"RESUME\", \"\").rstrip(\"/\")' then '_cand = ((_rz[:-3] if _rz.endswith(\".pt\") else _rz) + \".dyntok.json\")' at :1216-1217. That RESUME may name the .pt is confirmed by :4364 'torch.load(RESUME if RESUME.endswith(\".pt\") else f\"{RESUME}/ckpt.pt\")'. Usually caught loudly by the vocabulary-mismatch refusal at :4380, but only because the counts differ.",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "Registry defaults are mutually contradictory: the default configuration cannot run",
+   "severity": "medium",
+   "where": "self_organize.py:121 and :100 (declarations), :1103-1106 (refusal)",
+   "symptom": "`python3 self_organize.py` with a clean environment exits immediately with 'TOKENIZER=1 requires DATA_MODE=real'. The registry, whose whole purpose is to be the single statement of what the system does when unconfigured, declares a combination the system refuses.",
+   "evidence": "Verified: `env -u DATA_MODE -u TOKENIZER python3 -c 'import self_organize'` prints the refusal text from :1104-1106. _SPEC declares '\"TOKENIZER\": (\"i\", 1)' at :121 and '\"DATA_MODE\": (\"env\", \"synthetic\")' at :100.",
+   "bug_class": "other"
+  },
+  {
+   "title": "ByteComposer.maxb is hardcoded 16 and does not follow MAX_TOK",
+   "severity": "medium",
+   "where": "self_organize.py:1441 (signature), :1549 (construction), :1487 (truncation)",
+   "symptom": "With TOK_COMPOSE=1 and MAX_TOK>16, every token longer than 16 bytes is silently truncated in its composite, so two distinct long tokens that share their first 16 bytes get IDENTICAL composites and identical starting vectors. The 'a token that shares bytes with known tokens starts out near them' property becomes 'starts out identical to them'.",
+   "evidence": "'def __init__(s, d, maxb=16)' at :1441; constructed as 'ByteComposer(d)' at :1549 with no maxb; set_vocab truncates with 'b = bs[:s.maxb]' at :1487 and clamps '_len ... .clamp(max=s.maxb)' at :1495. MAX_TOK is read at :1256 and passed only to DynamicTokenizer.",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "TOK_COMPOSE=1 is a silent no-op on MODEL=transformer, and the coupling note asserts the opposite",
+   "severity": "medium",
+   "where": "self_organize.py:1563-1594 (TinyTransformer), :4219 (hookup), :6038-6046 (coupling note)",
+   "symptom": "TinyTransformer has no compose attribute and forwards through s.head unconditionally, so with MODEL=transformer TOK_COMPOSE=1 nothing composite happens. The coupling block at :6038 takes the 'if TOK_COMPOSE and TOK_ANCHOR > 0' branch and prints 'a new token is held near its composite until it has APPEARED that many times' -- a statement about a mechanism that does not exist in this model.",
+   "evidence": "TinyTransformer.__init__ :1565-1572 defines emb/pos/tr/head and no compose; forward at :1594 is 's.head(h)'. The composer hookup at :4219 requires 'getattr(model, \"compose\", None) is not None'. The negative-case warning at :6033 is guarded on 'not TOK_COMPOSE', so it cannot fire here. (The loss-term audit at :5811 does still fire, but with the generic reason at :5814.)",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Under TOK_COMPOSE the MiniLM emb and head tensors are allocated, checkpointed and never used",
+   "severity": "low",
+   "where": "self_organize.py:1550, :1552, :1556-1562",
+   "symptom": "Both nn.Embedding(V, d) and nn.Linear(d, V) are constructed and enter the optimizer and the checkpoint, but once set_vocab has run neither receives any gradient (encode reads the composed table, forward computes 'h @ _t[0].t() + _t[1]'). At VMAX=4096, d=768 that is ~6.3M parameters counted in every reported model size and written to every checkpoint.",
+   "evidence": "':1558 _e = (_t[0][x] if _t is not None else s.emb(x))' and ':1562 return ((h @ _t[0].t() + _t[1]) if _t is not None else s.head(h)), h'. _tbl returns non-None once compose._idx is set, which happens at :4220.",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "TOK_COMPOSE=1 with TOKENIZER=0 builds the composer and never initialises it",
+   "severity": "low",
+   "where": "self_organize.py:1549 vs :4219",
+   "symptom": "ByteComposer is constructed whenever TOK_COMPOSE is set, but set_vocab is only called under 'TOK_COMPOSE and USE_TOK', so with TOKENIZER=0 the composer's _idx stays None, _tbl() returns None forever, and every composer parameter (byte/pos/length/proj/bias/delta/dbias, delta alone being VMAX x d) is dead weight in the optimizer and the checkpoint.",
+   "evidence": "':1549 s.compose = ByteComposer(d) if TOK_COMPOSE else None' has no USE_TOK term; ':4219 if TOK_COMPOSE and USE_TOK and getattr(model, \"compose\", None) is not None:'; ':1554 if s.compose is None or s.compose._idx is None: return None'",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Knobs read only in sibling modules are invisible to the registry, so the typo detector reports them as unread",
+   "severity": "medium",
+   "where": "tokenizer.py:140 / :492 / :496 vs self_organize.py:5786-5795",
+   "symptom": "TOK_MINT_NOVEL_K is read by DynamicTokenizer.__init__ but is absent from _SPEC, so it never enters _ENV_READ. Its family prefix 'TOK' IS in _fam (from TOKENIZER, TOK_ANCHOR, ...), so setting TOK_MINT_NOVEL_K=64 makes the audit print 'NOTHING READ THESE: TOK_MINT_NOVEL_K ... This run used the DEFAULTS for whatever was meant' -- which is false; the tokenizer did read it and did use it.",
+   "evidence": "tokenizer.py:140 'self.novel_k = int(os.environ.get(\"TOK_MINT_NOVEL_K\", 32))'; TOK_MINT_NOVEL_K does not appear in _SPEC (self_organize.py:96-513) and is not in _plumb (:5761-5765); the flag logic is '_typo = sorted(k for k in os.environ if k not in _ENV_READ and k not in _plumb and k.split(\"_\")[0] in _fam)' at :5788-5789. The project's own remedy for this class (TOK_MINT_PMIN, TOK_MINT_GATE_K, MEM_WRONG_READ) was to MIRROR the read through _env; TOK_MINT_NOVEL and TOK_MINT_NOVEL_K were only half-mirrored (TOK_MINT_NOVEL is in _SPEC, its _K partner is not).",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "ENC_POS_MAX below 2*WIN is silently ignored",
+   "severity": "low",
+   "where": "self_organize.py:3311, declared at :332 and :87",
+   "symptom": "'_pmax = max(2 * WIN, _i(\"ENC_POS_MAX\", 2 * WIN))' means the knob can only WIDEN the positive-pair radius. Setting ENC_POS_MAX=64 at WIN=128 runs at 256 with no message. The comment above it explains only the opposite problem (values above 2*WIN used to IndexError), so a reader concludes the knob is now fully usable.",
+   "evidence": "self_organize.py:3306-3311; the offset draw at :3323 is 'off = [random.randint(WIN // 2, max(WIN // 2 + 1, _pmax)) for _ in st]'",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "FAB_MIN_STEPS' declared default of 2 is unreachable, and only an explicit setting is refused",
+   "severity": "low",
+   "where": "self_organize.py:191 / :88 (declaration), :1860-1868 (override)",
+   "symptom": "With the defaults (SOCIETY=0 so the derived default is 2, CHAIN_VOTE=1) Fabric.__init__ sets s.min_steps = 0 unconditionally. The SystemExit only triggers when FAB_MIN_STEPS was explicitly set to something other than '' or '0', so the DEFAULT silently disagrees with what runs.",
+   "evidence": "':1860 if s.vote:' then ':1861 _fms = os.environ.get(\"FAB_MIN_STEPS\", \"\")' , ':1862 if _fms.strip() not in (\"\", \"0\") and min_steps: raise SystemExit', ':1868 s.min_steps = 0'. Known and documented: levers.py:113-117 prints this as the sole OVERRIDE.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The unshuffled-manifest advisory can crash the run it is only supposed to warn about",
+   "severity": "low",
+   "where": "self_organize.py:1182-1190",
+   "symptom": "The try/except covers only open()+json.load(). The following line does '_mj.get(...)' and 'int(...)' outside it, so a manifest whose shuffle_buffer is a non-numeric string, or whose top level is a list, raises AttributeError/ValueError at import with a bare traceback -- from a block whose entire output is one advisory print.",
+   "evidence": "self_organize.py:1185-1189: 'try: with open(_mf) as _fh: _mj = json.load(_fh) / except Exception: continue' then, unindented from the try, 'if not int(_mj.get(\"shuffle_buffer\") or 0):'",
+   "bug_class": "crash"
+  },
+  {
+   "title": "The out-of-range-process filter in build_stream cannot fire",
+   "severity": "low",
+   "where": "self_organize.py:1404",
+   "symptom": "'act = [a for a in act if a < NP] or list(range(NP))' is dead: PHASE_SCHED is built at :1369 from the final NP, _phases can only emit indices in 0..n-1, and _phases_env validates 'j < 0 or j >= n'. Nothing can put an out-of-range id into a phase, so neither the filter nor the all-processes fallback is reachable.",
+   "evidence": "self_organize.py:1349-1350 'lo = round(i * (n - w) / max(1, p - 1)); out.append(list(range(lo, lo + w)))' with w <= n-1; :1362 'if any(j < 0 or j >= n for ph in sched for j in ph): raise ValueError'; :1369 PHASE_SCHED built after NP is final at :1147",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "MERGE_FRAC is inert at every default configuration",
+   "severity": "low",
+   "where": "self_organize.py:599 / :287 (declaration), :3643 (only consumer)",
+   "symptom": "The fallback 'MERGE_FRAC * NEW_DIST' only runs when merge_dist <= 0, and MANAGE_MERGE defaults to 0.28. Worse, 0.8 * 0.35 == 0.28 exactly, so even setting MANAGE_MERGE=0 to reach the fallback produces the identical number -- MERGE_FRAC can only be observed by changing MERGE_FRAC or NEW_DIST *and* zeroing MANAGE_MERGE.",
+   "evidence": "':3643 md = merge_dist if merge_dist > 0 else MERGE_FRAC * NEW_DIST'; defaults at :588 (0.28), :599 (0.8), :540 (0.35)",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "Several tokenizer knobs are never read on the branch the default configuration takes",
+   "severity": "low",
+   "where": "self_organize.py:1224-1226, :1256",
+   "symptom": "GROW_PASSES is unreachable at TOK_ONLINE=1 (the default); SEED_VOCAB and SEED_PASSES are unreachable at TOK_ONLINE=0; MIN_PAIR, MAX_TOK and TOK_DROPOUT are unreachable whenever the tokenizer is LOADED from disk (every resume). Setting any of them on the wrong branch is silently ignored AND produces a 'NOTHING READ THESE' line whose stated cause (a typo, or a knob from a different commit) is wrong.",
+   "evidence": "':1224 _target = _i(\"SEED_VOCAB\", 512) if TOK_ONLINE else VMAX', ':1225 _passes = _i(\"SEED_PASSES\", 2) if TOK_ONLINE else _i(\"GROW_PASSES\", 8)', ':1226 if os.path.exists(_tp) and (not TOK_ONLINE or _env(\"RESUME\", \"\")):' selects load, so :1256 (MIN_PAIR/MAX_TOK/TOK_DROPOUT) is the else branch only; tokenizer.py:481-482 restores them from the json instead",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "EXPOSURE_MAX and EXPOSURE_SKEW cannot fire on a single-corpus run",
+   "severity": "low",
+   "where": "self_organize.py:5497 (guard), :5535 / :5544 (reads), :110-111 (declaration)",
+   "symptom": "Both are read only inside 'if DATA_MODE == \"real\" and NP > 1'. The whole-run repetition and imbalance warnings are therefore unavailable on exactly the one-corpus language-quality configuration, which is where corpus-repetition is easiest to reach accidentally.",
+   "evidence": "self_organize.py:5497, :5535 '_rep = [... if _exp[_p0] > _f(\"EXPOSURE_MAX\", 2.0)]', :5544 '_hi / _lo > _f(\"EXPOSURE_SKEW\", 3.0)'",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "String knobs other than AMP are compared case-sensitively with no normalisation or refusal",
+   "severity": "medium",
+   "where": "self_organize.py:1102 / :1120 (DATA_MODE) and every other env-typed knob in the region",
+   "symptom": "DATA_MODE=Real takes the SYNTHETIC branch silently -- and then, with TOKENIZER at its default 1, hits the SystemExit at :1104 with a message that reads as if the user had asked for synthetic. Same class for SIG_MODE, MODEL, VERIFY, LR_SCHED, KEY_SRC, SIG_SPACE, EVICT, CULL_MODE, WARMSTART_MODE, TOK_PROBATION_BY, CHAIN_ROUTE: an unrecognised value falls into whichever branch is the else, rather than being refused.",
+   "evidence": "AMP is the only one normalised: ':1063 AMP = _env(\"AMP\", \"off\").lower()' and ':1075 if AMP == \"fp16\": raise SystemExit'. DATA_MODE at :1102 has no .lower() and :1120 is 'if DATA_MODE == \"real\":' with an else at :1313.",
+   "bug_class": "other"
+  },
+  {
+   "title": "Phase fill uses integer division and overshoots by a whole segment, so phase widths drift and the stream can be short",
+   "severity": "low",
+   "where": "self_organize.py:1402-1407",
+   "symptom": "'per = STREAM_LEN // len(PHASE_SCHED)' truncates, and each inner loop appends a whole 700-1800 byte segment past its bound, so phase k's start is the previous phase's overshoot rather than k*per. With STREAM_LEN not divisible by the phase count the final stream is shorter than STREAM_LEN, and PH_BOUNDS -- which the phase-snapshot line reads -- reflects the drifted positions.",
+   "evidence": "self_organize.py:1402 'per = STREAM_LEN // len(PHASE_SCHED)', :1405 'while pos < min((pi + 1) * per, STREAM_LEN) and pos < STREAM_LEN:', :1407 'pos += len(seg)'; consumed at :6637 '_p = sum(1 for b in PH_BOUNDS if bpos >= b) - 1'",
+   "bug_class": "other"
+  },
+  {
+   "title": "_phases returns p aliases of a single list when n <= 1",
+   "severity": "low",
+   "where": "self_organize.py:1344",
+   "symptom": "'return [[0] if n else []] * p' produces p references to ONE list object. Nothing currently mutates a phase in place, so it is latent -- but any future in-place edit of PHASE_SCHED[i] silently edits every phase.",
+   "evidence": "self_organize.py:1344",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "cull_gate_open's docstring names a test file that does not exist",
+   "severity": "low",
+   "where": "self_organize.py:833-834",
+   "symptom": "'Module level so manage_test.py can exercise it' -- there is no manage_test.py in the repo. The function IS tested, by curve_test.py and resume_test.py, so the pointer sends a reader to nothing while the real coverage is elsewhere.",
+   "evidence": "self_organize.py:833-834; `ls` shows no manage_test.py; curve_test.py:29/:38/:121 and resume_test.py:274-276 both exercise cull_gate_open",
+   "bug_class": "other"
+  },
+  {
+   "title": "The _SPEC type tag is recorded and never read",
+   "severity": "low",
+   "where": "self_organize.py:96-513 (element 0 of every tuple)",
+   "symptom": "Nothing consumes _SPEC[k][0]. It is also internally inconsistent -- 44 knobs are tagged 'env' while carrying numeric defaults (DIV_W=0.02, FAB_EXPLORE=0.15, ROUTE_T=0.1, CENT_EMA=0.02, ...) because the tag actually records the READER used at the call site, not the type. A reader treating it as a type declaration will mis-predict what _env returns.",
+   "evidence": "self_organize.py:61 '_SPEC.get(k, (None, None))[1]' and :520 '_SPEC[k][1] != d' are the only accesses; levers.py:75-76 captures the tag as group(2) and uses only group(1) and group(3)",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "Setting both D_MODEL and D_MODEL_B silently discards D_MODEL_B with no OVERRIDE note",
+   "severity": "low",
+   "where": "self_organize.py:534",
+   "symptom": "'D = _i(\"D_MODEL\", _i(\"D_MODEL_B\", 128))' reads D_MODEL_B eagerly and then throws the value away whenever D_MODEL is set. Both are recorded in _ENV_ASKED and both are in _ENV_READ, so the config audit reports them as read and accounted for, while only one of them affected the run. levers.py's OVERRIDE section lists only FAB_MIN_STEPS.",
+   "evidence": "self_organize.py:534; _env records both at :523; levers.py:113-117",
+   "bug_class": "silent-overwrite"
+  }
+ ],
+ "junk": [
+  {
+   "what": "`import glob` at self_organize.py:18",
+   "why": "never used anywhere in the 9,859-line file (grep for 'glob.' returns 0 hits)",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The disabled-spellings tuple ('0','','off','no','none','false') duplicated at self_organize.py:1011 and :5329",
+   "why": "two literal copies of the same predicate with no shared constant; the comment at :5328 says 'Normalise the disabled spellings once, here, so all four call sites see a clean value' while :1011 is a fifth site that normalises independently",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The LAYERS default rule written three times: '_i(\"LAYERS\", 4)' at :1599, '_i(\"LAYERS\", 1)' at :1600, '_i(\"LAYERS\", 4 if MODEL_TYPE==\"transformer\" else 1)' at :5340",
+   "why": "one rule, three expressions; _SPEC_FREE exempts LAYERS from the registry check so a divergence between them would not be caught",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The unused loop variable in 'for _p, _nm in enumerate(DN)' at self_organize.py:1183",
+   "why": "_p is never used inside the body; a plain 'for _nm in DN' would do",
+   "safe_to_drop": true
+  },
+  {
+   "what": "'set(_keep)' rebuilt inside the comprehension at self_organize.py:1144",
+   "why": "O(n^2) over the domain list; n is tiny so it is cosmetic, but it is a set literal reconstructed per iteration",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The redundant second clause in 'while pos < min((pi + 1) * per, STREAM_LEN) and pos < STREAM_LEN:' at self_organize.py:1405",
+   "why": "min() already bounds by STREAM_LEN, so the trailing conjunct can never be the deciding term",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The 48-line refuted-correlation block at self_organize.py:399-446 (BEST_KEEP's comment) and the 39-line FAB_NEW_FRAC history at :695-733",
+   "why": "large blocks of superseded measurement inside the knob table. The file argues explicitly for keeping them ('Kept here rather than deleted: the refuted version is the more useful record'), and the FAB_NEW_FRAC block documents a case where two halves of the same comment disagreed by 11 lines. They are records, not dead code -- but they make the registry hard to read as an inventory",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The type tag (element 0) of every _SPEC entry",
+   "why": "read by nothing, and inconsistent with itself for 44 entries. Either consume it (validate the reader used at the call site) or drop it",
+   "safe_to_drop": false
+  },
+  {
+   "what": "'Module level so manage_test.py can exercise it' at self_organize.py:833-834",
+   "why": "manage_test.py does not exist; the real coverage is curve_test.py and resume_test.py",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The two extra-space misalignments in _SPEC at lines 309 (MEM_PROBE_EVERY) and 313 (MEM_WRONG_READ)",
+   "why": "purely cosmetic column drift in an otherwise column-aligned table",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "The registry is the declaration and every call site is a use: _env raises SystemExit when a call-site default differs from _SPEC. Only _SPEC_FREE (== set(_DERIVED), 9 knobs) is exempt, and levers.py re-derives both sets from the AST and fails on drift. Any rebuild must keep this contract or the five-knobs-with-two-defaults failure returns.",
+   "why": "VMAX once sized one tensor for 4096 and another for 2048; DOMAINS was read with default '' in the checkpoint path, keying report_holdout on an empty domain list",
+   "evidence": "self_organize.py:65-95, :515-524; levers.py:57-90"
+  },
+  {
+   "item": "The audit reader must NOT be the ordinary reader. _cfg reads _SPEC directly and deliberately does not enter _ENV_READ; routing it through _env would make the 'nothing read this' audit think a knob is live merely because the report looked at it. And _cfg must never restate a default.",
+   "why": "an earlier version of _cfg guessed FAB_RESCUE=0.35 against a declared 0.0 and killed the run at the report",
+   "evidence": "self_organize.py:51-63"
+  },
+  {
+   "item": "Any clock compared against a knob written in STEPS must be advanced by a step delta, not by one per call, whenever it lives below the BATCH_W flush early-out.",
+   "why": "GROW_CAP_EVERY=20000 silently meant 320,000 steps at BATCH_W=16; the population sat pinned for 43,645 real steps while the clock read 2,650",
+   "evidence": "self_organize.py:930-948 (pin_tick), tested by cap_test.py:101, :121"
+  },
+  {
+   "item": "Diagnostics must not move the run: wrap every probe in frozen_rng/@no_rng_drift, and give the STREAM its own generator seeded from (SEED, epoch) only.",
+   "why": "build_stream draws segment lengths and seg_from turns a length into a read cursor, so two arms differing only in a probation threshold read DIFFERENT TEXT from epoch 2 onward; every single-knob A/B was partly a data difference",
+   "evidence": "self_organize.py:1019-1055, :1375-1390"
+  },
+  {
+   "item": "PH_BOUNDS must be CLEARED at the top of each build_stream, not appended to. It is read as 'sum(1 for b in PH_BOUNDS if bpos >= b) - 1'.",
+   "why": "accumulating gave 4 entries per epoch, so by epoch 3 that index read 8 for a position whose phase was 2 -- PHASED=1 would have failed in exactly the multi-epoch configuration it exists for",
+   "evidence": "self_organize.py:1397-1401, :6637"
+  },
+  {
+   "item": "DN and CORP are index-aligned and any filter must drop from BOTH. Name-keying a probe does not save you, because the name is itself read out of the possibly-desynchronised list.",
+   "why": "with DOMAINS='eng,py' and an undersized eng corpus, VALC[0] was the PYTHON corpus and report_holdout named it 'eng'; the next run then compared this run's Python against the last run's English and reported the difference as forgetting",
+   "evidence": "self_organize.py:1126-1155"
+  },
+  {
+   "item": "A checkpoint's vocabulary is part of the checkpoint. TOKENIZER_PATH is the READ path; the WRITE path must be derived from SAVE_CKPT (_TOK_SAVE), and a resume with no checkpoint of its own must write no vocabulary at all.",
+   "why": "both save sites once wrote back through TOKENIZER_PATH, so a run that minted anything overwrote its parent's vocabulary and the NEXT resume from the same parent died on a vocabulary mismatch that the previous run had created",
+   "evidence": "self_organize.py:988-1012, :5337, :7843"
+  },
+  {
+   "item": "A saved tokenizer carries its OWN vmax, min_pair, max_tok and dropout in the json. On a resume only vmax is corrected from the environment; the other three are silently the parent's.",
+   "why": "a tokenizer saved full at 2048 comes back full at 2048 and refuses every candidate before one is even formed -- DID IT FIRE reported 'ZERO tokenizer.mint / ZERO tokenizer.mint_reject ARMED AND INERT' on the first run that ever added an area to a trained system",
+   "evidence": "self_organize.py:1229-1254; tokenizer.py:474-482"
+  },
+  {
+   "item": "FAB_NMAX and VMAX are preallocated-and-counter-advanced geometries, so a smaller checkpoint is a genuine PREFIX of a larger live tensor. Widening on resume is the point; narrowing must be refused by the knob's name.",
+   "why": "the run that motivated widen_prefix had both ceilings pressed: the cull opened immediately at 523/1024 while a new language arrived, and the vocabulary was full at 2048/2048 so the new language got zero tokens of its own",
+   "evidence": "self_organize.py:846-876, :4423-4426"
+  },
+  {
+   "item": "cull_gate_open (n_live/cap >= FAB_PRESSURE, with an n_live<=2 floor) hides THREE mechanisms behind it: the utilization cull, the utilization spare, and FAB_RESCUE. Any change to FAB_PRESSURE, FAB_N0, FAB_NMAX or FAB_PRESS_SOFT changes whether all three run at all.",
+   "why": "FAB_N0=2048 against FAB_NMAX=4096 parked occupancy at 0.50 below a FAB_PRESSURE of 0.75 and fabric.spare read ARMED AND INERT for a whole investigation; at 0.45 the same code produced 204 utilization culls and 1253 spares against 0 and 0",
+   "evidence": "self_organize.py:201-209, :823-836, :5554"
+  },
+  {
+   "item": "ENC_WARMUP_MIN must be strictly below ENC_WARMUP; the code takes min(ENC_WARMUP_MIN, ENC_WARMUP), so an inverted pair collapses the floor onto the full warmup and the adaptive early stop can never fire.",
+   "why": "3000 against ENC_WARMUP=800 was the shipped default state; every launcher happened to pass a valid pair, so only default-configured runs were affected and nothing measured caught it",
+   "evidence": "self_organize.py:338-342"
+  },
+  {
+   "item": "Every subsystem now defaults ON; 'off' is the deliberate ablation. The exceptions are exceptions for stated reasons: EXPERTS is mutually exclusive with FABRIC (the forward pass is an elif chain and FABRIC wins), DISK_STREAM is a data-source choice, and DOM_ADAPTIVE/DOM_RELATIVE/SHIFT_REL each measured WORSE than the constant they replace.",
+   "why": "an audit found six subsystems silently defaulting off, so the 'full system' being measured was the base LM plus memory plus domains and nothing else",
+   "evidence": "self_organize.py:542-552"
+  },
+  {
+   "item": "MANAGE_MERGE is a POLICY knob, not a correctness one: `did` is consumed only by mem.src provenance, dom_exp reporting and the clustering report -- routing uses the continuous gist, so the domain COUNT sets the granularity of FORGETTING, not prediction quality. Never read the domain count without purity and homogeneity beside it; 0.80 also reaches '4 domains' with purity 0.71.",
+   "why": "0.45 maximises V-measure against four SEEDED corpora, which is a reconstruction score against a scaffold we spliced in; 0.28 = MERGE_FRAC*NEW_DIST restores create/consolidate consistency without forcing the population to the seeded count",
+   "evidence": "self_organize.py:559-588"
+  },
+  {
+   "item": "Domain management needs its OWN cadence. At the shared MANAGE_EVERY=500 a 60 kB run (468 steps) never satisfied step % 500 == 0 and merge/cull/fold executed ZERO times; every domain-population number the project reported was produced with the consolidation half switched off by arithmetic.",
+   "why": "the same modulo-cadence class of fault has produced multiple published conclusions about code paths that never ran",
+   "evidence": "self_organize.py:649-655"
+  },
+  {
+   "item": "The default configuration is not runnable (TOKENIZER=1 + DATA_MODE=synthetic exit at startup), and the synthetic path is structurally under-tested: selftest.sh trains on real data, and preflight.sh's end-to-end smoke -- the only thing that sets DATA_MODE=synthetic -- is the one instrument aimed at a fresh box.",
+   "why": "a VALC NameError on every synthetic run since 2026-08-15 was reported as 'self_organize.py FAILED on CUDA', an architecture problem it had nothing to do with; DISK_STREAM is the same defect still present",
+   "evidence": "self_organize.py:1103-1119; verified undefined-globals probe on the synthetic path"
+  },
+  {
+   "item": "The held-out tail is a SAMPLE only if the corpus was written unordered. Corpora written in arrival order put a contiguous block of whichever documents came last on the held-out side, and the headline becomes a measurement of that block.",
+   "why": "measured: the-stack Python held out at 5.061 +/- 0.560 against 2.922 in-stream, while shuffled fineweb-edu English was 2.273 against 2.303 -- the gap was the ordering",
+   "evidence": "self_organize.py:1173-1198"
+  },
+  {
+   "item": "bwt_of's sign runs opposite to the accuracy literature (negative = old domains IMPROVED) because the metric is bits/byte, and forgetting_of clips at zero so improvement cannot cancel a real regression.",
+   "why": "selftest.sh only ever checked that the words 'BWT' and 'negative = old domains IMPROVED' appear in the log, so reversing the subtraction would pass every assertion while inverting the project's headline continual-learning claim",
+   "evidence": "self_organize.py:906-927"
+  },
+  {
+   "item": "Collapse a per-process learning curve by averaging over ACTIVE processes at each step, never by keying a dict on the step alone.",
+   "why": "the old expression kept whichever process was appended last -- always the highest-indexed, i.e. under the add-an-area schedule the NEWEST corpus, the one that cannot have been forgotten. Every 'is it still learning' sentence one CL run printed was about Python only. Absent windows must also be excluded: py went 2.51 ACTIVE to 4.64 ABSENT, a +2.13 b/B step into a test whose threshold is 0.5",
+   "evidence": "self_organize.py:879-903"
+  }
+ ],
+ "open_questions": [
+  "Is 'for _c2 in CORP[:1]' at self_organize.py:9671 reachable on a DATA_MODE=synthetic run? CORP is undefined there. It appears to sit inside a USE_TOK-gated block (and USE_TOK forces DATA_MODE=real), but I did not trace the enclosing guard, so I cannot assert it is safe.",
+  "Was 'true_sw' ever INTENDED to be process-change positions rather than segment starts? If it was always meant to be segment starts, the report's label 'true switches' at :8483 is the only thing wrong; if it was meant to be shifts, the set construction at :1407/:1411/:1412 is. The difference changes whether the fix is one word or one line.",
+  "Should SEG_CONTIG's declared parent be DOMAINS (as _DERIVED says) or the post-filter corpus count? As written a partially-fetched corpus can flip contiguous vs random-offset reading without anyone setting anything, which changes what the domain assembler is even looking at.",
+  "Is FAB_NEW_FRAC=0.04 against FAB_CULL_FRAC=0.02 intended? The comment at :718-732 states plainly that growth can now outpace selection 2:1 and explicitly declines to re-balance it as 'a design decision and not a typo to fix in passing'. Unresolved by the file itself.",
+  "Do the FAB_NEW_WIN (=FAB_COOLDOWN, 400) and MANAGE_EVERY (500) cadences need to match? The comment at :725-728 says the mismatch flipped direction and is now unmatched in the other direction, and leaves it open.",
+  "The registry's stated invariant is that it lists 'EVERY environment knob this file reads'. Should it instead list every knob the SYSTEM reads (adding TOK_MINT_NOVEL_K, VOCAB, BPE_TRAIN_CAP from tokenizer.py)? Without that, the typo detector's families are derived from an incomplete inventory and can accuse a real knob of doing nothing.",
+  "Should TOK_COMPOSE be refused on MODEL=transformer, or should TinyTransformer grow a composer? Today it is accepted, does nothing, and the coupling report describes the composite path as live.",
+  "MAX_TOK vs ByteComposer.maxb: is 16 a deliberate cap on how much of a token the composite may see, or an unpropagated default? The docstring at :1441-1448 does not say.",
+  "Does anything downstream depend on the exact stream length being STREAM_LEN? The phase fill truncates with integer division and overshoots by a whole segment, so the returned stream can be short by up to len(PHASE_SCHED) segments' worth of remainder.",
+  "_cfg float-casts everything, so an 'env'-typed knob with a numeric default returns a float while _env returns the raw string or the int literal. Are there any DID IT FIRE predicates where that difference matters (e.g. an equality test against a string)? I only verified LR_SCHED, which is compared as a string and works."
+ ]
+}

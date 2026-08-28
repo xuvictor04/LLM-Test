@@ -1,0 +1,851 @@
+{
+ "area": "so-report",
+ "summary": "self_organize.py lines 7900-9859 are the end-of-run report battery inside main(): ~30 printed sections plus the final `_config_audit()`. It opens with a final re-tokenisation sanity pass and `_save_ckpt`, then runs the held-out battery (MEMORIZATION CHECK + ANCHORS, ACROSS THE RUN BOUNDARY via `report_holdout`, RETENTION, LEARNING CURVE, CAN A DOMAIN PREDICT, WORLD MODEL), the LM-curve verdict cascade, the fabric/domain structural sections (CHAINING, POPULATION CHURN, DID IT FIRE, domain genuineness), then the memory sections (WRONGNESS, PERFORMANCE / CROSS-SEGMENT COMPOSITION / IS THE PARTITION INFORMATIVE \u2014 all three live in `compose_test` at 3715-3846 and are printed from the call at 8949), then the expert sections (AFFILIATION, EXPERT INDEPENDENCE, FABRIC, SIGNATURE SPACE, SPECIALIZATION/ROUTER SELECTION/CHAIN ORDER/SUFFICIENCY), then GENERATION, IS IT COMPOSING, COHERENCE, NON-STATIONARY and the UNLEARN edits. The samples split three ways and the headings mostly do not say which: the held-out tail `VALC` (memorization, anchors, boundary probe, learning curve, domain-prior), the TRAINING stream `stream` via `eval_win` (retention, fabric ablation, expert independence, specialization, non-stationary, unlearn, compose_test), and report-time probes that call a forward path the run may never have trained (the fabric mass/depth probe, SUFFICIENCY's `fab.society` call). Almost every section is individually wrapped in try/except so a broken instrument degrades to a one-line skip.",
+ "facts": [
+  {
+   "claim": "MEMORIZATION CHECK scores the held-out tail VALC with at most min(24, EVAL_N) random windows per domain, and the matched TRAIN sample is the LAST len(VALC[p]) bytes of the training region \u2014 not a uniform sample of train.",
+   "evidence": "self_organize.py:7958 `_st = [random.randint(...) for _ in range(min(24, _i(\"EVAL_N\", 64)))]`; :7968 `_src = CORP[_p][max(0, SEG_LEN[_p] - len(VALC[_p])):SEG_LEN[_p]]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The headline `train X +/- a | held-out Y +/- b` prints a mean and an error bar computed by two different estimators: the mean (`_tr`,`_va`) is the average over domains of a POOLED bits/byte (sum bits / sum bytes over the 24 windows), while the +/- is the standard error of the unweighted PER-WINDOW mean.",
+   "evidence": "self_organize.py:7980 `_tr = sum(_tb)/len(_tb); _va = sum(_vb)/len(_vb)`; :7982 `_, _tse = _mu_se(_tw); _, _vse = _mu_se(_vw)` (the means returned by `_mu_se` are discarded)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The MEMORIZATION verdict is binary at gap>0.5 while the guidance printed one line above defines a three-way scheme; a gap of 0.3-0.5 is unclassified by the guidance and is printed as 'UNDERFIT -> more data/passes, not regularization'.",
+   "evidence": "self_organize.py:7989-7991 `gap < ~0.3 = UNDERFIT ... gap > ~0.5 = MEMORIZING ...` then `'MEMORIZING ...' if _gap > 0.5 else 'UNDERFIT ...'`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ANCHORS claims uniform/order-0/order-1 and THIS MODEL are 'scored on the SAME held-out text', but the model figure `_va` comes from the 24 random windows per domain while the anchors are scored on `_cat`, the FIRST 20000 units of each held-out corpus, and are pooled across domains rather than averaged per domain.",
+   "evidence": "self_organize.py:8000-8002 `_cat += _v[:20000]`; :8018 `ANCHORS -- fitted on TRAIN, scored on the SAME held-out text`; :8020 `THIS MODEL {_va:.3f}`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The order-1 anchor forms bigrams across the concatenation of all domains' held-out text, so pairs spanning a domain join are counted as real bigrams.",
+   "evidence": "self_organize.py:8013 `_c2 = Counter(zip(_trn[:-1], _trn[1:]))`; :8015-8016 `for a, b2 in zip(_cat[:-1], _cat[1:])` where `_cat` is a concatenation over `range(len(VALC))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ACROSS THE RUN BOUNDARY is the only cross-run figure; it is computed by `report_holdout(_hb, _hbs, ...)` on HOLDOUT_N=32 windows per domain drawn from VALC with a seed derived from the domain NAME, so the same text is scored run after run.",
+   "evidence": "self_organize.py:8028 `report_holdout(_hb, _hbs, \"ACROSS THE RUN BOUNDARY: ...\")`; :5086-5088 `_rs = random.Random(_namehash(nm))` / `range(_i(\"HOLDOUT_N\", 32))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_hb` (the baseline the boundary section compares against) is empty on any run without RESUME, so on a fresh run the boundary section prints per-domain values with '(no earlier probe to compare against)' and BWT/F are not computed.",
+   "evidence": "self_organize.py:4359 `_hb, _hbs = {}, 0`; :5006 `_hb, _hbs = _RD.get(\"holdout\") or {}, ...`; :5157-5161 the `if not prev:` branch",
+   "confidence": "verified"
+  },
+  {
+   "claim": "BWT and the forgetting measure F are computed only over domains present in BOTH the checkpoint probe and now (`_kept`); F's per-domain best is min(prev, _HIST[k]) and the report says F can only equal a clipped BWT when no history arrived with the checkpoint.",
+   "evidence": "self_organize.py:5196-5203",
+   "confidence": "verified"
+  },
+  {
+   "claim": "RETENTION is measured on the TRAINING stream, not on held-out text: `_bpb_at` scores windows taken directly out of `stream`, weights-only (no memory blend).",
+   "evidence": "self_organize.py:8047-8053 `_X = torch.tensor([list(stream[a:a + WIN]) for a in starts] ...)`, `_lg = _eval_logits(model, fab, FABRIC, _X)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "RETENTION conditions on the process label and compares each process's earliest windows against its latest (k = min(48, len(_at)//3), requires >=32 windows), so both ends are the same material.",
+   "evidence": "self_organize.py:8055-8059",
+   "confidence": "verified"
+  },
+  {
+   "claim": "RETENTION's verdict is taken over the WORST drift among processes that existed before this run (`_old_names = set(_hb or {})`), and falls back to all processes with an explicit 'this is acquisition, not retention' caveat when no process predates the run.",
+   "evidence": "self_organize.py:8080-8094; :8089 `_d = max(l - e for ...)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "RETENTION's drift is `latest - earliest` (positive = forgetting), matching the sentence printed below it; the docstring records that the subtraction used to be reversed.",
+   "evidence": "self_organize.py:8085 `drift {_l - _e:+.3f}`; :8095-8096 `a positive number is FORGETTING`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LEARNING CURVE is computed from `_CURVE`, which is sampled on the RATE_EVERY cadence on HELD-OUT text (16 fixed windows per domain from VALC), so it is a different sample from RETENTION printed immediately above it; the section heading does not say held-out.",
+   "evidence": "self_organize.py:6385 `if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark and VALC:`; :6396-6413; :8111 heading",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LEARNING CURVE splits consecutive-probe deltas by the was-ACTIVE flag: deltas measured while active are summed into acquisition, while absent into decay, and the ABSENT column is empty unless PHASED fills it.",
+   "evidence": "self_organize.py:8121-8133",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CAN A DOMAIN PREDICT is on held-out text, needs >=16 collected windows and draws min(48, EVAL_N) per domain; below 16 it prints an explicit NOT RUN line naming DOM_PRIOR as paid-for-and-unread rather than falling silent.",
+   "evidence": "self_organize.py:8163 `for _ in range(min(48, _i(\"EVAL_N\", 64)))`; :8173-8177",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CAN A DOMAIN PREDICT assigns each held-out window to a domain by encoding a WIN-length BYTE window of the raw validation text and taking the nearest `asm.cent` centroid, i.e. the assembler's own rule, and the random arm is guaranteed to be a different domain.",
+   "evidence": "self_organize.py:8162-8168 `_ds.append(list(_vb[_b0:_b0 + WIN]))`; :8182 `_own = (_C @ _sg.t()).argmax(0)`; :8184 `_rnd = (_own + torch.randint(1, len(_ids), ...)) % len(_ids)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The whole block from MEMORIZATION CHECK through CAN A DOMAIN PREDICT is inside one try; `_NoHeldOut` is raised deliberately when VALC is empty so a configuration that cannot support the battery is distinguishable from a genuine failure, and the message says BWT/F are skipped with it.",
+   "evidence": "self_organize.py:7952 `if not VALC: raise _NoHeldOut(...)`; :8207-8212",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WORLD MODEL is evaluated on held-out VALC windows against a persistence baseline (`F.mse_loss(_zt, _zn)`) plus a latent-std collapse check; the verdict requires positive beat AND std > ~0.5.",
+   "evidence": "self_organize.py:8217-8234",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`[LM training curve]` is the trailing-2000-step mean of the pure LM cross-entropy on the TRAINING stream (per TOKEN), not the composite objective \u2014 `loss` is `_plw.mean()` and the auxiliary terms are added into `tot` afterwards.",
+   "evidence": "self_organize.py:6919 `loss = _plw.mean()`; :7031 `tot = loss + ...`; :7317-7320 `_lf = float(loss.detach()); _lm_run.append(_lf)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The unit-stable cross-check for the LM curve uses `_curve_by_step(_CURVE)`, which averages only rows whose was-ACTIVE flag is set, falling back to all rows when nothing is marked active.",
+   "evidence": "self_organize.py:8256-8260; :879-892 `rows = [(st, b) for st, _p, b, _a in curve if _a] or [...]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`curve_verdict` is a pure function of three numbers with five module-level thresholds (CURVE_RISE_BLEWUP=0.5, CURVE_FLAT=0.05, CURVE_TOK_RISE=0.05) and has a companion test file, curve_test.py.",
+   "evidence": "self_organize.py:780-782, 787-818",
+   "confidence": "verified"
+  },
+  {
+   "claim": "'SELF-ASSEMBLED N LIVE domains' counts `len(asm.cent)` and reports recurrence as entries per live domain against DOM_MIN_VISITS.",
+   "evidence": "self_organize.py:8357-8365",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CHAINING prints no measurement of its own except the training HALT mass; it is a prose description of which forward path SOCIETY selected, and it states outright that on SOCIETY=1 the DEPTH figure below is a report-time probe of a path the run did not use.",
+   "evidence": "self_organize.py:8375-8430; :8404-8408",
+   "confidence": "verified"
+  },
+  {
+   "claim": "POPULATION CHURN's growth-reason counts are per-run deltas (`getattr(fabgrow,k) - _fg_base[k]`) and are explicitly documented as counting TRIGGERS, with a separate `declined_why` line for events that produced no expert.",
+   "evidence": "self_organize.py:8440-8459",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DID IT FIRE builds every row through `_r(name, get_n, get_armed, why)` with each lambda individually try/except'd, so a broken row degrades to '?' and the rest still print; config is read through `_cfg`, which reads `_SPEC` rather than restating defaults.",
+   "evidence": "self_organize.py:8551-8566; :51-63",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The DID IT FIRE print loop drops the counter entirely for any row whose armed test is False \u2014 it prints `off <name> -- <why>` with no number \u2014 so a mechanism that fired but whose arming test says it could not have shows no count.",
+   "evidence": "self_organize.py:8729-8733",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DID IT FIRE runs BEFORE the WRONGNESS section that calls `selfcheck()`, which is the only caller of selfcheck in the file; the report says so in prose in the wrongness section.",
+   "evidence": "self_organize.py:8741 `try: _fire_report()`; :8881 `selfcheck(model, mem, fab if FABRIC else None)`; :8925-8928",
+   "confidence": "verified"
+  },
+  {
+   "claim": "domain genuineness scores each live domain by re-encoding its stored reservoir windows (`asm.wins[d]`, captured during training at the assembler's own signature width) against the final centroids; sil = cohesion - cosine to the NEAREST other centroid, silm uses the MEDIAN other centroid.",
+   "evidence": "self_organize.py:8757-8775",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A live domain with an empty reservoir is skipped (`continue`) but still counts in the denominator of the printed '{genuine}/{len(live)} live domains GENUINE'.",
+   "evidence": "self_organize.py:8756-8757 `for d in sorted(live, ...): if not asm.wins[d]: continue`; :8778-8780",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The SPREAD line explicitly refuses to call the space collapsed from a random-unit-vector null and defers to probe_ckpt_geometry.py, saying the report cannot separate a poor encoder from a fragmented population.",
+   "evidence": "self_organize.py:8783-8796",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`eval_win` \u2014 the fixed window set used by EXPERT INDEPENDENCE, FABRIC, EXPERTS, NON-STATIONARY and both UNLEARN tests \u2014 is drawn from the TRAINING stream, EVAL_N windows per process.",
+   "evidence": "self_organize.py:8811-8814 `idx = [s for s in range(0, len(stream) - (WIN + 1), WIN) if labels[s] == p]; random.shuffle(idx); eval_win[p] = idx[:EVAL_N]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`bpb_true` takes the fabric path through `fab_logits` when use_fab, but the no-fabric ablation goes straight to `model.head(h)`, so the two arms of the FABRIC comparison do not pass through the same logits function.",
+   "evidence": "self_organize.py:8824-8830 and :8837 `if h is not None: pm = F.softmax(model.head(h), -1)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WRONGNESS injects WRONG_INJECT cross-domain windows as memory writes with src=99, bypassing the write gate, and skips the injection with an explanatory line when fewer than two processes have a window-aligned sample.",
+   "evidence": "self_organize.py:8858-8878; :8879 `mem.write(mem_key(XW), YW.reshape(-1), src=99, surprise=None, ctx=mem_ctx(XW))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The line labelled 'DURING TRAINING the gate ran on N read(s)' reads `mem.n_wrong_reads`, which `Memory.read` increments on every call including the report's own `holdout_bpb(use_mem=True)` decomposition run earlier in the same report.",
+   "evidence": "self_organize.py:8930-8932; memory.py:520-533 `if self.wrong_read: ... self.n_wrong_reads += 1`; self_organize.py:5128 `_full = holdout_bpb(use_mem=True)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PERFORMANCE, CROSS-SEGMENT COMPOSITION and IS THE PARTITION INFORMATIVE are all printed from `compose_test`, whose windows come from the TRAINING stream; PERFORMANCE says so in its own body and cross-references the held-out pair carried in `_HELDOUT_MEM`.",
+   "evidence": "self_organize.py:3720-3724, 3751-3768; :8949 the call site",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`compose_test` computes its base distribution as `F.softmax(model(X)[0], -1)` \u2014 the bare LM head, with no fabric \u2014 so on a FABRIC run the PERFORMANCE, CROSS-SEGMENT and PARTITION numbers describe a model path that is not the one `_eval_logits` uses everywhere else.",
+   "evidence": "self_organize.py:3727 `pm = F.softmax(model(X)[0], -1)`; :1594 `def forward(s, x): h = s.encode(x); return s.head(h), h`; contrast :3934 `_eval_logits ... fab_logits(model, fab if FABRIC else None, ...)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "IS THE PARTITION INFORMATIVE compares own-domain against a random-other-domain retrieval at matched restriction and subtracts a shuffled-provenance null averaged over INFO_NULLS=5 permutations, with the verdict at 2 sigma of the null spread.",
+   "evidence": "self_organize.py:3805-3846",
+   "confidence": "verified"
+  },
+  {
+   "claim": "AFFILIATION reads `dom_exp`, accumulated during training, resolves merged domains through `asm.resolve` and keeps only live ones; an expert 'serves' a domain at AFF_MIN=0.10 share, and the blast-radius rows are the 5 domains with the most accumulated mass.",
+   "evidence": "self_organize.py:8951-8991",
+   "confidence": "verified"
+  },
+  {
+   "claim": "EXPERT INDEPENDENCE picks the busiest expert from a SINGLE probe window (`stream[:WIN]` paired with a signature from `ENC_SEQ[WIN*3:WIN*4]`), deletes it, re-scores every process on the same fixed eval windows, and prints mean collateral against a hard |0.3| threshold.",
+   "evidence": "self_organize.py:8995-9020",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The FABRIC section's node-mass probe pairs token windows `stream[q:q+WIN]` with signature windows read at the SAME index into ENC_SEQ, without going through `encpos()`, which is the function that exists to convert a token index to an ENC_SEQ index.",
+   "evidence": "self_organize.py:9048-9055; contrast :4106-4114 `def encpos(s): ... return tok_bs[s] ...`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The FABRIC section prints an explicit caveat that 'model ALONE' is an ablation of a component the model trained with (it also removes the fabric's LayerNorm) and names the honest cross-run comparison instead.",
+   "evidence": "self_organize.py:9081-9084",
+   "confidence": "verified"
+  },
+  {
+   "claim": "SIGNATURE SPACE encodes up to 200 windows taken from the FIRST 200*WIN positions of the TRAINING stream and prints them as 'held-back windows'.",
+   "evidence": "self_organize.py:9093 `_sw2 = [encwin(encpos(a)) for a in range(0, min(len(stream) - WIN - 2, 200 * WIN), WIN)][:200]`; :9104 `{len(_sw2)} held-back windows`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "SIGNATURE SPACE's DEGENERATE verdict fires on `mean pairwise cosine distance < 0.10 OR participation ratio < 2.0`, both of which are printed on the line above it.",
+   "evidence": "self_organize.py:9107-9115",
+   "confidence": "verified"
+  },
+  {
+   "claim": "SPECIALIZATION partitions windows using the router that actually ran \u2014 `fab.entry_logits` when `fab.grounded`, falling back to the old `q_entry` expression otherwise \u2014 and the comment records that the un-updated q_entry copy made every earlier INTERCHANGEABLE verdict void.",
+   "evidence": "self_organize.py:9136-9152",
+   "confidence": "verified"
+  },
+  {
+   "claim": "SPECIALIZATION's per-node bits/byte `_bw` is the FULL population prediction (`fab_logits`) on each window, grouped by which node won the window at entry \u2014 not that node's own prediction. The shuffled null therefore tests whether entry-winner identity groups windows of differing difficulty.",
+   "evidence": "self_organize.py:9144-9147 `_pp = F.softmax(fab_logits(model, fab, model.encode(_X), _G), -1).gather(...)`; :9153-9159 `_per`, `_spread`, `_nulls`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "ROUTER SELECTION reads `fab.use`, which counts TRAINING top-1 wins only (both bump_use sites are gated on learn_regions), and is compared to the probe's winners by MEMBERSHIP plus a coupon-collector coverage null, after an earlier version's units-mismatched `len(_used)*10 < len(_uv)` guard was removed as unsatisfiable.",
+   "evidence": "self_organize.py:9218-9235, 9253-9262",
+   "confidence": "verified"
+  },
+  {
+   "claim": "GRADIENT REACH reports the mean of `_greach`, sampled on a cadence during training, as 'experts that received a nonzero gradient on a typical step'.",
+   "evidence": "self_organize.py:9327-9331; :7092 `_greach.append(_gn)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CHAIN ORDER computes H(hop1|hop0) from `fab._ord`, gated to the non-SOCIETY path with an explicit note that on the society path forward() only runs in the report probe and would report a 1-sample artifact.",
+   "evidence": "self_organize.py:9384-9399",
+   "confidence": "verified"
+  },
+  {
+   "claim": "SUFFICIENCY calls `fab.society(...)` unconditionally, including on the default SOCIETY=0 chaining run, so the 'population blended' and 'best single rank-slot' figures come from a forward path the default run never trained.",
+   "evidence": "self_organize.py:9487-9489 `_ws, _Os, _os = fab.society(_hs, _G, torch.zeros(...), k=max(ENS_K, 2), learn_regions=False)`; contrast :8385-8388 which describes society() as the non-default path",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The EXPERTS (adapters) section only runs when EXPERTS is on and separates PINNED (the expert the span trained with, via `route_at`) from ROUTED (nearest centroid at eval), which is the routing-mismatch cost.",
+   "evidence": "self_organize.py:9520-9531; :8826-8834",
+   "confidence": "verified"
+  },
+  {
+   "claim": "GENERATION samples from the FINAL model and prints an explicit note that the final model is typically worse than the best, naming the best step and whether it was saved.",
+   "evidence": "self_organize.py:9536-9560",
+   "confidence": "verified"
+  },
+  {
+   "claim": "IS IT COMPOSING measures 'generated words that appear in the training text' against a vocabulary built from the FIRST corpus only (`CORP[:1]`, first 4 MB), while the generated words are pooled across every sampled process.",
+   "evidence": "self_organize.py:9670-9677 `for _c2 in CORP[:1]: _voc = set(bytes(_c2[:4_000_000]).decode(...).split())`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "IS IT COMPOSING pools only the MODEL-ONLY generations into `_gw`; the model+memory continuations are collected in `_gen_keep` and never scored.",
+   "evidence": "self_organize.py:9674-9676 `for _p3, _sd3, _a3, _b3 in _gen_keep: _t3 = TOK.decode(_a3)` (`_b3`, the model+mem sample, is unused)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COHERENCE draws its OWN sample (COH_N=16 seeds x COH_LEN=384 tokens), prints a standard error and an explicit 'inside the noise' clause, and brackets the score with a real-text ceiling and a 1/len(_cent) chance floor.",
+   "evidence": "self_organize.py:9748-9808",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COHERENCE falls back to the SELF-ASSEMBLED domains as the reference when fewer than two true-corpus centroids exist, labels that as weaker evidence in the printed output, and measures the seed's home domain by encoding the seed rather than by looking up a label.",
+   "evidence": "self_organize.py:9721-9724, 9767-9769, 9787-9791",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NON-STATIONARY runs only under PHASED, scores ACTIVE vs FADED processes on the TRAINING stream via `bpb_true` (memory ON by default), and reports surviving memory entries per process by mapping mem.src through `s2t`.",
+   "evidence": "self_organize.py:9810-9826",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The per-process surviving-memory line silently drops any memory whose source domain is not a key of `s2t` (a domain with no window in `assigns`, or the injected src=99), so the printed counts need not sum to the active store.",
+   "evidence": "self_organize.py:9822-9824 `for _d, _c in Counter(mem.src[mem.active].tolist()).items(): if _d in s2t: _cnt[s2t[_d]] += _c`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The UNLEARN edits are destructive and sequential: `_edit_test` deletes an ACTIVE process's domains, then a FADED one's, then the final whole-process UNLEARN deletes another; each later test measures on a store already stripped by the earlier ones.",
+   "evidence": "self_organize.py:9835-9842 and :9843-9853",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The two unlearn tests use different LOCAL/LEAKED thresholds for the same word: 0.1 in `_edit_test` and 0.05 in the final UNLEARN.",
+   "evidence": "self_organize.py:9839 `{'LOCAL' if abs(_dl) < 0.1 else 'LEAKED'}`; :9852 `{'LOCAL' if abs(ao-bo) < 0.05 else 'LEAKED'}`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The final UNLEARN target is the true process with the most SELF-DOMAINS, not the most windows or the most memory entries.",
+   "evidence": "self_organize.py:9843 `tgt = Counter([s2t[d] for d in by]).most_common(1)[0][0]`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "clustering reports purity, homogeneity, completeness and V-measure together with the fragmentation ratio, and the code comments record that reporting purity alone read 0.96 on a 96-domain partition of 4 corpora.",
+   "evidence": "self_organize.py:8489-8511",
+   "confidence": "verified"
+  },
+  {
+   "claim": "RECURRENCE counts a 'visit' as a maximal run of consecutive windows assigned to the same domain and calls artifacts dominant when >50% of domains are visited once.",
+   "evidence": "self_organize.py:8518-8530",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The final `_save_ckpt(stream)` at the top of the report writes a fresh `holdout` probe into the checkpoint, so the baseline the NEXT run compares against is computed before any of the report's destructive edits.",
+   "evidence": "self_organize.py:7917 `_save_ckpt(stream)`; :5360 `\"holdout\": holdout_bpb(), \"holdout_step\": step`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`LOSS_MASK_DEAD` defaults to 0, so `mask_dead` is an identity on the default configuration and the masked/unmasked asymmetry between `fab_logits` and bare `model.head` paths has no numeric effect unless the knob is turned on.",
+   "evidence": "self_organize.py:669 `LOSS_MASK_DEAD = bool(_i(\"LOSS_MASK_DEAD\", 0))`; :3973 `if not (LOSS_MASK_DEAD and USE_TOK and TOK is not None): return lg`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "On the default configuration (TOKENIZER=1, TOK_ONLINE=1) CORP stays raw bytes and SEG_LEN is a byte offset, so the memorization check's train slice is well-formed; CORP is replaced by token lists only when TOK_ONLINE=0.",
+   "evidence": "self_organize.py:987 defaults; :1282-1286 `if TOK_ONLINE: ... else: CORP = [TOK.segment(c, count=False) for c in CORP]`",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "EVAL_N",
+   "effect": "Sets four different sample sizes in the report: the memorization check caps at min(24, EVAL_N) windows/domain, CAN A DOMAIN PREDICT draws min(48, EVAL_N)/domain and needs 16 total or it does not run, `eval_win` (the fixed per-process window set for independence/fabric/experts/non-stationary/unlearn) is EVAL_N/process, compose_test draws EVAL_N/process, and the fabric mass probe uses min(EVAL_N, ...) windows.",
+   "owner": "the report battery in main() (7942-9856) plus compose_test",
+   "couples_with": [
+    "HOLDOUT_N",
+    "COH_N",
+    "GEN_N",
+    "WIN",
+    "STREAM_LEN"
+   ],
+   "evidence": "self_organize.py:7958, 8163, 8173-8177, 8810-8814, 8949, 9042"
+  },
+  {
+   "name": "HOLDOUT_N",
+   "effect": "Windows per domain in `holdout_bpb`, which produces ACROSS THE RUN BOUNDARY, the memory decomposition, BWT, F and the checkpoint's stored baseline. Independent of EVAL_N, so the two 'held-out bits/byte' figures in the report are different samples.",
+   "owner": "holdout_bpb (5066-5122)",
+   "couples_with": [
+    "EVAL_N",
+    "VAL_FRAC",
+    "VAL_CAP",
+    "DOMAINS"
+   ],
+   "evidence": "self_organize.py:5088 `range(_i(\"HOLDOUT_N\", 32))`; :9553-9558 the note that the two disagree by up to 0.190"
+  },
+  {
+   "name": "DOM_PRIOR",
+   "effect": "Both the gate for the CAN A DOMAIN PREDICT section (`if DOM_PRIOR > 0.0 and asm.tokc and len(asm.cent) >= 2 and VALC`) and the blend weight used in its four arms. At 0 the per-window asm.tokc histogram is still accumulated during training but never read.",
+   "owner": "the CAN A DOMAIN PREDICT block (8146-8205)",
+   "couples_with": [
+    "EVAL_N",
+    "VAL_FRAC",
+    "MAX_DOMAINS"
+   ],
+   "evidence": "self_organize.py:8147, 8187, 8176-8177"
+  },
+  {
+   "name": "GENUINE_MIN / GENUINE_SIL",
+   "effect": "The two conjuncts of the GENUINE verdict: size >= GENUINE_MIN AND silhouette >= GENUINE_SIL. Sizes come from asm.size (per-window, incremented in update()), not from the report's own `by` counts.",
+   "owner": "the domain genuineness block (8534-8798)",
+   "couples_with": [
+    "DOM_WINS",
+    "DOM_MANAGE_EVERY",
+    "SIG_D",
+    "MAX_DOMAINS"
+   ],
+   "evidence": "self_organize.py:8535 `MIN_SIZE = _i(\"GENUINE_MIN\", 20); SIL_MIN = _f(\"GENUINE_SIL\", 0.10)`; :8777"
+  },
+  {
+   "name": "WRONG_CHECK / WRONG_INJECT / WRONG_SWEEP",
+   "effect": "WRONG_CHECK gates the whole wrongness block. WRONG_INJECT is the number of synthetic cross-domain entries written with src=99 (bypassing the write gate) to give precision/recall a positive class. WRONG_SWEEP=1 takes the sweep branch \u2014 which is also the branch that does NOT delete the injected entries or clear selfcon before the rest of the report runs.",
+   "owner": "the WRONGNESS block (8846-8947)",
+   "couples_with": [
+    "MEM_WRONG_READ",
+    "MEM_PROBE_EVERY",
+    "VERIFY",
+    "VERIFY_SWEEP",
+    "MEM_CAP"
+   ],
+   "evidence": "self_organize.py:8847-8848, 8879, 8898-8901, 8945-8946"
+  },
+  {
+   "name": "MEM_WRONG_READ",
+   "effect": "Whether the wrongness flag gates retrieval in Memory.read. In the report it also zeroes the '_nblk excluded from EVERY retrieval' figure when off, and is one of the two conjuncts arming the memory.wrong_block DID IT FIRE row.",
+   "owner": "memory.py Memory.read; reported at self_organize.py:8911-8944",
+   "couples_with": [
+    "WRONG_CHECK",
+    "WRONG_SWEEP",
+    "MEM_PROBE_EVERY"
+   ],
+   "evidence": "self_organize.py:8912-8913; memory.py:67, 520-533"
+  },
+  {
+   "name": "EXPERT_NULLS",
+   "effect": "Number of assignment shuffles used as the null for SPECIALIZATION; the verdict is `_spread > _nm + 2*_nsd`, so this knob sets the resolution of the only thing standing between SPECIALIZED and INTERCHANGEABLE.",
+   "owner": "the SPECIALIZATION block (9125-9178)",
+   "couples_with": [
+    "EVAL_N",
+    "DIV_W",
+    "BAL_WARM",
+    "ROUTE_GROUNDED"
+   ],
+   "evidence": "self_organize.py:9155 `for _ in range(_i(\"EXPERT_NULLS\", 20))`; :9165-9166"
+  },
+  {
+   "name": "INFO_NULLS",
+   "effect": "Number of provenance permutations forming the floor for IS THE PARTITION INFORMATIVE; the verdict is `excess > 2*sd + 1e-9`, and the comment records two identical runs printing opposite conclusions when this was 1.",
+   "owner": "compose_test (3830-3846)",
+   "couples_with": [
+    "MEM_CAP",
+    "EVICT",
+    "DOM_MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:3831 `for _s in range(_i(\"INFO_NULLS\", 5))`; :3843"
+  },
+  {
+   "name": "COH_N / COH_LEN",
+   "effect": "Sample size and continuation length for COHERENCE. The section explicitly exists because scoring the GEN_PROCS printed samples gave a four-sample mean with SE 0.25.",
+   "owner": "the COHERENCE block (9709-9808)",
+   "couples_with": [
+    "GEN_TEMP",
+    "GEN_N",
+    "GEN_PROCS",
+    "SIG_MODE",
+    "WIN"
+   ],
+   "evidence": "self_organize.py:9748 `_cn, _cl = _i(\"COH_N\", 16), _i(\"COH_LEN\", 384)`; :9738-9747"
+  },
+  {
+   "name": "GEN_N / GEN_PROCS / GEN_LEN / GEN_TEMP / GENERATE",
+   "effect": "Number of distinct seed passages per process, number of processes sampled, continuation length and sampling temperature for the printed generations; GENERATE gates the whole generation/composing/coherence group.",
+   "owner": "the GENERATION block (9533-9808)",
+   "couples_with": [
+    "COH_N",
+    "COH_LEN",
+    "BEST_TRACK",
+    "SAVE_CKPT"
+   ],
+   "evidence": "self_organize.py:9533, 9634-9651"
+  },
+  {
+   "name": "AFF_MIN",
+   "effect": "Share threshold at which an expert counts as 'serving' a domain; drives the exclusive/shared/idle counts, the domains-per-expert histogram and the blast-radius orphan counts.",
+   "owner": "the AFFILIATION block (8950-8992)",
+   "couples_with": [
+    "EXP_DOM_FRAC",
+    "EXP_DOM_MIN",
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:8973 `(_p >= _f(\"AFF_MIN\", 0.10))`; :8986"
+  },
+  {
+   "name": "ENS_K",
+   "effect": "Number of experts blended in SUFFICIENCY's population arm (`k=max(ENS_K, 2)`), so it sets both the 'population' figure and how many rank slots the best-single-member baseline is minimised over.",
+   "owner": "the SUFFICIENCY block (9481-9505)",
+   "couples_with": [
+    "SOCIETY",
+    "FAB_HALT",
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:9488-9490, 9494"
+  },
+  {
+   "name": "SIG_WIN",
+   "effect": "Declared as the signature window width (0 = derive it from the vocabulary in `_sigwidth`), but `_eval_sig` uses it as a raw length via `[-max(1, SIG_WIN):]`, so at the default 0 every eval-path signature is one byte long.",
+   "owner": "_sigwidth() (5675-5680) should own it; _eval_sig (3907-3927) reads it directly",
+   "couples_with": [
+    "SIG_SPACE",
+    "EVAL_GIST",
+    "WIN",
+    "TOKENIZER",
+    "TOK_ONLINE"
+   ],
+   "evidence": "self_organize.py:351 `\"SIG_WIN\": (\"i\", 0)`; :3136; :3919; :5676"
+  },
+  {
+   "name": "EVAL_GIST",
+   "effect": "1 = eval windows get a real signature from `_eval_sig`; 0 = every eval call falls back to the all-zero placeholder gist, which ranks the population identically for every window.",
+   "owner": "_eval_sig / fab_logits (3907-3927, 4014-4020)",
+   "couples_with": [
+    "SIG_WIN",
+    "SIG_SPACE",
+    "ROUTE_GROUNDED",
+    "FABRIC"
+   ],
+   "evidence": "self_organize.py:478, 3914, 4019-4020"
+  },
+  {
+   "name": "FAB_N0",
+   "effect": "Read at report time as the baseline for POPULATION CHURN's net-growth figure and for the FABRIC one-liner's 'grown on plateau from N'. It is the environment value, not the population size this run actually started at.",
+   "owner": "the POPULATION CHURN block (8431-8477)",
+   "couples_with": [
+    "FAB_NMAX",
+    "RESUME",
+    "GROW_CAP_FAB0",
+    "FAB_RAMP_TO"
+   ],
+   "evidence": "self_organize.py:8435 `_net = fab.n() - _i(\"FAB_N0\", 2048)`; :8478; :4487-4490"
+  },
+  {
+   "name": "PHASED",
+   "effect": "Gates the entire NON-STATIONARY section and both `_edit_test` unlearn probes; also changes what RETENTION means (it adds a caveat line when PHASED=0 saying retention is easy by construction) and whether the LEARNING CURVE's ABSENT column can be non-empty.",
+   "owner": "the NON-STATIONARY block (9810-9842)",
+   "couples_with": [
+    "PHASE_SCHED",
+    "MEM_CAP",
+    "RATE_EVERY",
+    "N_PROCESSES"
+   ],
+   "evidence": "self_organize.py:8099-8101, 8132-8133, 9810"
+  },
+  {
+   "name": "RATE_EVERY",
+   "effect": "Cadence of the held-out per-process probe that fills `_CURVE`; the LEARNING CURVE prints its acquisition/decay rates per RATE_EVERY steps, and `_curve_by_step` (the unit-stable cross-check for the LM curve) is built from the same series.",
+   "owner": "the training-loop probe at 6385-6417",
+   "couples_with": [
+    "EVAL_N",
+    "STREAM_LEN",
+    "EPOCHS",
+    "VAL_FRAC"
+   ],
+   "evidence": "self_organize.py:6385, 8125-8126, 8256-8260"
+  },
+  {
+   "name": "BEST_TRACK / BEST_KEEP / BEST_KEEP_TOL / SAVE_CKPT",
+   "effect": "Gate the 'SAMPLED FROM: the FINAL model, not the best' block, the rotating BEST-KEEP slot listing and the 'to sample the BEST model' hint; with SAVE_CKPT off every save returns False and the report says 'not saved' rather than printing a path.",
+   "owner": "the GENERATION preamble (9536-9628)",
+   "couples_with": [
+    "GROW_CAP",
+    "RATE_EVERY"
+   ],
+   "evidence": "self_organize.py:9536, 9545-9558, 9610-9623"
+  },
+  {
+   "name": "GROW_CAP / GROW_CAP_FAB / GROW_CAP_VOCAB / GROW_CAP_EVERY / GROW_CAP_PLATEAU / PLATEAU_WARM",
+   "effect": "Gate and parameterise the CAPACITY VALVE report, which distinguishes never-reached-cap, reached-but-not-held, earned-but-plateau-test-never-ran, and earned-but-never-flat using the high-water marks in `_pin_seen` and `_plat_seen`.",
+   "owner": "the capacity-valve block (9563-9604)",
+   "couples_with": [
+    "FAB_NMAX",
+    "VMAX",
+    "TOK_ONLINE",
+    "FABRIC"
+   ],
+   "evidence": "self_organize.py:9565-9603"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "Every eval-path signature is built from ONE BYTE: `_eval_sig` uses SIG_WIN raw, whose default 0 becomes max(1,0)=1",
+   "severity": "critical",
+   "where": "self_organize.py:3919 (read by _eval_logits at 3934, consumed throughout 7900-8205)",
+   "symptom": "On the default config (SIG_SPACE=bytes, TOKENIZER=1, SIG_WIN unset), `_eval_sig` decodes each eval window back to bytes and then keeps only the last `max(1, SIG_WIN)` = 1 byte before encoding it. Every held-out and retention figure that goes through `_eval_logits` therefore routes the fabric on a signature derived from a single byte of context, while training routed on a `_sigw`-byte window (`_sigwidth()` returns max(WIN, WIN*bytes_per_token) when SIG_WIN==0). The router is not blind \u2014 the zero-gist fallback that `_eval_sig` was written to replace \u2014 but it is near-blind, and nothing in the report says so. Affected: MEMORIZATION CHECK (train and held-out), ANCHORS' THIS MODEL, RETENTION, LEARNING CURVE / `_CURVE`, `holdout_bpb` and hence ACROSS THE RUN BOUNDARY / BWT / F / the checkpoint's stored baseline, and CAN A DOMAIN PREDICT's model term.",
+   "evidence": "`_w = [list(TOK.decode(r.tolist()).encode(\"utf-8\", \"replace\"))[-max(1, SIG_WIN):] or [0] for r in x]` (self_organize.py:3919); `SIG_WIN = _i(\"SIG_WIN\", 0)` (:3136); registry default `\"SIG_WIN\": (\"i\", 0)` (:351); `def _sigwidth(): if SIG_WIN > 0: return SIG_WIN; ... return max(WIN, int(WIN * max(1.0, _b)))` (:5675-5679) shows 0 means 'derive', not 'one'.",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "The LM-curve verdict cascade prints 'still improving or flat' immediately after BLEW UP / PLATEAUED / RECOVERED / NOT DIVERGING",
+   "severity": "high",
+   "where": "self_organize.py:8290-8356",
+   "symptom": "The bits/byte verdict block (`if _bpb_dir is not None:` at 8290) prints one of vocab / blewup / recovering / plateau. The NEXT statement is an independent if/elif/else: the `if` only fires on 'diverging', the `elif` requires `_bpb_dir is None`, so whenever `_bpb_dir` exists and the verdict is anything but 'diverging' the `else` fires and prints '>> still improving or flat: falling = more passes/steps will help; flat = the model has converged...'. A run told 'BLEW UP AND STAYED DOWN... something broke, the run never recovered it' is told two lines later that it is still improving or flat and needs more capacity or data.",
+   "evidence": "self_organize.py:8290 `if _bpb_dir is not None:` ... :8307 `print(f\"  >> BLEW UP AND STAYED DOWN...\")` ... :8334 `if (_bi < len(_lm_curve) - 2 and curve_verdict(...) == \"diverging\"):` ... :8346 `elif _fl - _bl > 0.05 and _bpb_dir is None:` ... :8354 `else:` :8355 `print(f\"  >> still improving or flat: ...\")`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "EXPERT INDEPENDENCE restores only 5 tensors and n_live; every per-expert dict stays permuted for the rest of the report",
+   "severity": "high",
+   "where": "self_organize.py:9010-9024, Fabric.remove at :2539-2563",
+   "symptom": "`fab.remove(_j2)` is a swap-with-last that also mutates `use, uage, born, ef, es, births, comp, contrib, dom_of, rescued` \u2014 it pops key `_j2` and re-keys `_last` to `_j2`. The restore puts back only `A, B, K, SRC, cent` for rows `[_j2, _last]` plus `n_live`. So after the section claims '(expert restored -- GENERATION and the remaining evals run on the INTACT model)', the busiest expert's utilization/birth/affiliation/contribution records are gone and the last slot's records are filed under the wrong id. Every later expert diagnostic reads those dicts: ROUTER SELECTION (`fab.use`), the never-selected/young analysis (`fab.born`), LINEAGE (`fab.births`), BREADTH (`fab.dom_of`), marginal contribution (`fab.contrib`), COMPETENCE PROTECTION. In particular the deleted expert was chosen as the BUSIEST, so 'top expert took X%' and 'half the traffic went to N experts' are computed after the largest use count has been deleted, and slot `_last` now has no `born` entry, so `fab.born.get(n, 0)` returns 0 and it reads as maximally old \u2014 which is the exact condition that trips the '!! THE PROBE PARTITION IS NOT THE RUN'S ROUTER' false alarm.",
+   "evidence": "`_bak = {nm: getattr(fab, nm)[[_j2, _last]].detach().clone() for nm in (\"A\", \"B\", \"K\", \"SRC\", \"cent\")}` (self_organize.py:9012-9013); `for _D in (s.use, s.uage, s.born, s.ef, s.es, s.births): _D.pop(j, None); if last in _D: _D[j] = _D.pop(last)` (:2549-2551); `print(\"  (expert restored -- ... run on the INTACT model...\")` (:9023)",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "SPECIALIZATION scores the whole population on every window and calls the result each node's competence",
+   "severity": "high",
+   "where": "self_organize.py:9119-9178",
+   "symptom": "The section header asks 'does the material each node WINS get modelled better by that node than by the population at large?'. The per-window bits/byte `_bw` is computed once, from `fab_logits(...)` \u2014 the full routed/blended prediction \u2014 and then grouped by entry winner. Both the observed spread and the shuffled null are computed from the same population-scored values, so the statistic measures only whether the entry partition groups windows of differing difficulty. No per-node prediction is ever computed. A population in which every node is identical but the router sends hard text to node A and easy text to node B would read SPECIALIZED.",
+   "evidence": "self_organize.py:9144-9147 `_pp = F.softmax(fab_logits(model, fab, model.encode(_X), _G), -1).gather(-1, _Y.unsqueeze(-1))...`; :9153 `_per = {int(n): [float(_bw[i]) ... if int(_win[i]) == n] ...}`; :9163 `_spread = sum(abs(sum(v)/len(v) - _tot) for v in _per.values()) / len(_per)`; header at :9122-9124",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "SUFFICIENCY measures the society forward path on a default chaining run",
+   "severity": "high",
+   "where": "self_organize.py:9481-9505",
+   "symptom": "`fab.society(...)` is called unconditionally. On the default SOCIETY=0 the run trains and evaluates through `Fabric.forward` (chaining); society() is a path nothing trained. The CHAINING section 130 lines earlier prints an explicit warning when the reverse happens ('The DEPTH figure below is a report-time probe of a path this run did not use'), but SUFFICIENCY carries no such note, so 'AGGREGATE: no member is sufficient alone, together they are -- which is the design claim, measured on the outcome rather than assumed' is asserted about a forward path the run never used.",
+   "evidence": "self_organize.py:9487-9489 `_ws, _Os, _os = fab.society(_hs, _G, torch.zeros(_Xs.size(0), device=DEV), k=max(ENS_K, 2), learn_regions=False)`; :8385-8388 describes society() as the SOCIETY=1 path; :8404-8408 the analogous warning for the depth probe",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The fabric mass probe pairs token windows with signature windows read at token indices into a byte stream",
+   "severity": "high",
+   "where": "self_organize.py:9046-9055",
+   "symptom": "`_pos` are STREAM (token) indices used to slice `stream`. The paired signature windows are read as `ENC_SEQ[q:q+WIN]` for the same q. Under the default ONLINE + SIG_SPACE=bytes, ENC_SEQ is the byte stream and a token index is roughly 1/bytes-per-token of the corresponding byte offset, so every signature is drawn from the wrong place \u2014 and all of them from the first len(stream) bytes of a much longer byte stream. `encpos()` exists precisely to do this conversion and is not used here. The section then reports 'over N windows: X of Y nodes carry mass, top node Z%' as the router's answer to varied material.",
+   "evidence": "self_organize.py:9046-9049 `_pos = [min(i * _stp, len(stream) - WIN - 1) ...]`, `_mx = torch.tensor([list(stream[q:q + WIN]) for q in _pos] ...)`; :9052-9054 `_sq = [q for q in _pos if q + WIN <= len(ENC_SEQ)] or [0]` / `_sg = enc(torch.tensor([list(ENC_SEQ[q:q + WIN]) for q in ...]))`; contrast :4106-4114 `def encpos(s): ... return tok_bs[s] ...`",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "WRONG_SWEEP=1 leaves the synthetic src=99 entries and the selfcon flags in the store for every downstream section",
+   "severity": "high",
+   "where": "self_organize.py:8898-8946",
+   "symptom": "`mem.delete_src(99)` and `mem.selfcon.fill_(-1.0)` are inside the `else:` (detect-only) branch. With WRONG_SWEEP=1 the sweep branch prints and returns, so the injected cross-domain WRONG entries stay active and the self-consistency flags stay set. Every subsequent measurement then runs on a contaminated, partly-filtered store: compose_test's PERFORMANCE / CROSS-SEGMENT / PARTITION INFORMATIVENESS (which builds `valid = mem.active & (~mem.is_wrong())` and its provenance set from mem.src, now containing a domain 99 that is not a domain), `bpb_true(use_mem=True)` in FABRIC / NON-STATIONARY, and both UNLEARN tests.",
+   "evidence": "self_organize.py:8898-8901 `if _i(\"WRONG_SWEEP\", 0): print(f\"  swept {mem.sweep_wrong()} ...\")` / `else:`; :8945-8946 `if ninj > 0: mem.delete_src(99)` and `mem.selfcon.fill_(-1.0)` sit inside the else; :3729 `valid = mem.active & (~mem.is_wrong())`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "POPULATION CHURN's net growth subtracts the environment's FAB_N0 from a population that may have been restored from a checkpoint",
+   "severity": "medium",
+   "where": "self_organize.py:8435-8440, 8478",
+   "symptom": "`_net = fab.n() - _i(\"FAB_N0\", 2048)` uses the env knob, but on a resume `fab.n_live = max(fab.n_live, _ck_n)` so the run may start well above FAB_N0, while `fab.grown` and `fab.removed` are per-run counters (initialised in __init__ and never restored). `_chn = (fab.grown - max(0, _net)) / max(1, fab.grown)` can therefore go strongly negative and print a nonsense '% of all growth was replaced', and the FABRIC one-liner's 'N grown on plateau from FAB_N0' names a starting population the run did not have.",
+   "evidence": "self_organize.py:8435-8436; :8478; :4487 `fab.n_live = max(fab.n_live, _ck_n)`; :1897 `s.removed = 0 ...`; :1908 `s.grown = 0` with no restore path (grep for `fab.grown` finds only the three report reads)",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "DID IT FIRE's fabric.rescue arms on a snapshot (`cull_ran`) while its counter is cumulative",
+   "severity": "medium",
+   "where": "self_organize.py:8583-8586, Fabric.manage at :2234",
+   "symptom": "`s.cull_ran = cull_gate_open(...)` is reassigned on every manage() call, so at report time it holds only the LAST pass's answer. The row arms on `FAB_RESCUE > 0.0 and getattr(_fb, \"cull_ran\", False)`, while the count `_fb.n_rescued` is cumulative over the run. A run whose occupancy fell below FAB_PRESSURE by the end prints `off fabric.rescue -- UNREACHABLE: ... occupancy < FAB_PRESSURE` and discards a nonzero rescue count, because the print loop drops the number entirely for unarmed rows. This is the exact failure the tokenizer.mint and lr.restart rows were rewritten to avoid (both now OR in 'or the count is nonzero').",
+   "evidence": "self_organize.py:8583 `_resc_reach = (FAB_RESCUE > 0.0 and getattr(_fb, \"cull_ran\", False))`; :2234 `s.cull_ran = cull_gate_open(s.n_live, _cap, pressure)`; :8729-8730 `if not armed: print(f\"  off     {nm:24s}       --   {why}\")`; contrast :8712 `... or _nrst[0] > 0`",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "DID IT FIRE's fabric.cull_eligible reports a snapshot as if it were a run total, and its off-reason does not match its arming test",
+   "severity": "medium",
+   "where": "self_organize.py:8590-8592, Fabric.manage at :2224",
+   "symptom": "`s.n_elig = sum(1 for i in range(s.n_live) if s.use_age(i) >= grace)` is an assignment at each manage() pass, so the audit reads the LAST pass only. A run in which thousands of experts were cull-eligible for most of its length but none at the end prints '!! ZERO fabric.cull_eligible ARMED AND INERT'. Separately, the row's `why` string ('nobody reached the use-grace, so the cull had nothing to rank') is only ever printed when the row is UNARMED, and the arming test is `_cfg(\"MANAGE\")` \u2014 so the reason printed for MANAGE=0 describes a different cause entirely.",
+   "evidence": "self_organize.py:8590-8592 `_r(\"fabric.cull_eligible\", lambda: _fb.n_elig, lambda: _cfg(\"MANAGE\"), \"nobody reached the use-grace, so the cull had nothing to rank\")`; :2224; :1897 comment `# experts past their USE-grace at the last manage pass`",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "`_ragged` counts windows dropped from the genuineness reservoir and is never printed",
+   "severity": "medium",
+   "where": "self_organize.py:8754, 8768",
+   "symptom": "The ragged-window guard keeps only the modal length in each domain's reservoir and accumulates the number dropped into `_ragged[0]`, with a comment saying to 'say how many were dropped rather than dying on the stack'. Nothing reads `_ragged` afterwards, so cohesion/separation/silhouette can be computed on a fraction of a domain's stored windows with no indication in the output. The condition is reachable exactly when tokens are retired mid-run.",
+   "evidence": "self_organize.py:8754 `... silms = []; _ragged = [0]`; :8768 `if _drop: _ragged[0] += _drop`; grep for `_ragged` returns only those two lines",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "'{genuine}/{len(live)} live domains GENUINE' uses a denominator that includes domains never evaluated",
+   "severity": "medium",
+   "where": "self_organize.py:8756-8780",
+   "symptom": "Domains in `live` whose reservoir is empty are skipped with `continue` before cohesion is computed, and domains whose kept window list is empty are skipped again \u2014 but `len(live)` is the denominator of the printed fraction and of the '(N domains merged/culled ...)' accounting. The genuine fraction is therefore diluted by domains that were not measured, not by domains that failed the test.",
+   "evidence": "self_organize.py:8756-8757 `for d in sorted(live, key=...): if not asm.wins[d]: continue`; :8770 `if not _keep: continue`; :8778 `print(f\"  >> {genuine}/{len(live)} live domains GENUINE ...\")`",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "'DURING TRAINING the gate ran on N read(s)' includes the report's own retrieval reads",
+   "severity": "medium",
+   "where": "self_organize.py:8930-8944",
+   "symptom": "`mem.n_wrong_reads` is incremented inside `Memory.read` on every call while the gate is on, including `holdout_bpb(use_mem=True)` which the retention decomposition runs earlier in this same report. The line is labelled DURING TRAINING and is the basis for the 'ZERO, AND STRUCTURALLY SO' explanation, so the denominator can be nonzero purely because the report read the store.",
+   "evidence": "self_organize.py:8930-8932; memory.py:520-533 `if self.wrong_read: ... self.n_wrong_reads += 1`; self_organize.py:5128 `_full = holdout_bpb(use_mem=True)` inside `_decompose`, called from report_holdout at :8028",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "IS IT COMPOSING checks generated words against the FIRST corpus only",
+   "severity": "medium",
+   "where": "self_organize.py:9668-9686",
+   "symptom": "`_voc` is built from `CORP[:1]` \u2014 one corpus, first 4 MB \u2014 while `_gw` pools words from generations seeded in every sampled process. On a multi-corpus splice (the default DOMAINS=eng,py,num,c) the Python, numeric and C continuations are checked for membership in the English word set, so '% of generated words appear in the training text' is systematically deflated and the 'the rest are word-SHAPED but novel' reading is wrong for every non-first corpus.",
+   "evidence": "self_organize.py:9670-9672 `_voc = set()` / `for _c2 in CORP[:1]: _voc = set(bytes(_c2[:4_000_000]).decode(\"utf-8\", \"replace\").split())`; :9674-9676 pools `_gen_keep` across all processes",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The memorization gap's train sample is the slice of training text immediately adjacent to the held-out tail",
+   "severity": "medium",
+   "where": "self_organize.py:7968",
+   "symptom": "`_src = CORP[_p][max(0, SEG_LEN[_p] - len(VALC[_p])):SEG_LEN[_p]]` takes the LAST len(VALC) bytes of the train region. On a corpus written in arrival order (which the code's own comment at 1173-1180 says fetch_big.py produces) that is the material most similar to the held-out block, so the train figure is biased low against the rest of train and the train-vs-heldout gap \u2014 the number the MEMORIZING/UNDERFIT verdict is computed from \u2014 is systematically understated.",
+   "evidence": "self_organize.py:7968; :1173-1180 the arrival-order note",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "'SAMPLED FROM' averages the last learning-curve probe over ALL processes, including absent ones, contradicting `_curve_by_step`",
+   "severity": "medium",
+   "where": "self_organize.py:9540",
+   "symptom": "`_lastc = [b for st, _p, b, _a in _CURVE if st == max(...)]` ignores the was-active flag, while `_curve_by_step` \u2014 used a few hundred lines earlier for the unit-stable cross-check \u2014 filters on it precisely because an absent process's rise 'asks whether the model is blowing up and answers with the phase schedule' (2.51 ACTIVE to 4.64 ABSENT in the recorded case). Under PHASED the printed 'final model at X b/B on the LEARNING-CURVE probe', and hence the 'the final model is +N bits/byte worse than the best' claim, is inflated by processes that had left the stream.",
+   "evidence": "self_organize.py:9540; :879-892 `rows = [(st, b) for st, _p, b, _a in curve if _a] or [...]` and the docstring's ABSENT-WINDOWS-ARE-EXCLUDED paragraph",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The three unlearn edits are sequenced destructively, so the last one can measure a store the first one already emptied",
+   "severity": "medium",
+   "where": "self_organize.py:9828-9853",
+   "symptom": "`_edit_test('an ACTIVE')`, `_edit_test('a FADED')` and the final whole-process UNLEARN each call `mem.delete_src` and are not undone. The final UNLEARN picks the true process with the most self-domains, which under PHASED can be the same process `_edit_test` just deleted; `rm` is then 0 and the delta ~0, and the line prints 'LOCAL' from an edit that removed nothing. The final block also runs unconditionally, outside the `if PHASED:` guard that holds the first two.",
+   "evidence": "self_organize.py:9835-9842 (inside `if PHASED:`), :9843-9853 (outer indent); :9836 `_rm = sum(mem.delete_src(d) for d in _dd)`; :9847 `rm = sum(mem.delete_src(d) for d in to_del)`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "SIGNATURE SPACE and SPECIALIZATION call training-stream windows 'held-back' / 'held-out'",
+   "severity": "low",
+   "where": "self_organize.py:9093/9104 and 9128-9131/9180",
+   "symptom": "SIGNATURE SPACE encodes the FIRST 200 windows of `stream` and prints '{len(_sw2)} held-back windows'. SPECIALIZATION uses `eval_win`, drawn from `stream`, and prints 'win at least one of {len(_bw)} held-back windows'. Both are training text. A reader comparing these against the genuinely held-out sections has no way to know from the output which is which.",
+   "evidence": "self_organize.py:9093 `_sw2 = [encwin(encpos(a)) for a in range(0, min(len(stream) - WIN - 2, 200 * WIN), WIN)][:200]`; :9104; :8811-8814; :9180",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "Report-time forward passes can append to `fab._ord` / `fab._rmix` if the last training step left the sampling flags armed",
+   "severity": "low",
+   "where": "self_organize.py:6819-6820, 2649, 2765-2766, 2370",
+   "symptom": "`fab._sample_mix` and `fab._sample_ord` are set each training step from a cadence expression and are never cleared before the report. If the final flush step armed them, the report's own `fab(...)` calls (the EXPERT INDEPENDENCE busiest-expert probe at 9000-9003, the FABRIC mass probe at 9055) and `fab.society(...)` (SUFFICIENCY at 9488) would append eval samples into the run-wide CHAIN ORDER and ROUTING MIX statistics.",
+   "evidence": "self_organize.py:6819-6820 `_armed = (_nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0)` / `fab._sample_mix = _armed; fab._sample_ord = _armed`; :2765-2766 `if ban1 is None and getattr(s, \"_sample_ord\", False) and _t_ < 2: s._ord.append(...)`; :9384 `if fab._ord and not SOCIETY:`",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "The memorization headline prints a pooled mean with the standard error of a different (per-window) mean",
+   "severity": "low",
+   "where": "self_organize.py:7980-7988",
+   "symptom": "`_tr`/`_va` are means over domains of a byte-pooled bits/byte; `_tse`/`_vse` are standard errors of the unweighted per-window mean pooled across domains (`_mu_se` returns both and the code discards the mean). The printed '+/-' therefore does not belong to the printed number, and the '>> a difference smaller than ~2*(_tse+_vse) is inside this instrument's noise' rule is applied to a value the interval was not computed for.",
+   "evidence": "self_organize.py:7980 `_tr = sum(_tb) / len(_tb); _va = sum(_vb) / len(_vb)`; :7982 `_, _tse = _mu_se(_tw); _, _vse = _mu_se(_vw)`; :7985-7988",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "MEMORIZATION's current-verdict line is binary while the guidance beside it is three-way",
+   "severity": "low",
+   "where": "self_organize.py:7989-7991",
+   "symptom": "The printed rule says gap<~0.3 UNDERFIT and gap>~0.5 MEMORIZING, leaving 0.3-0.5 deliberately unclassified; the verdict then prints UNDERFIT for everything at or below 0.5. A run at gap 0.45 is told 'more data/passes, not regularization' by a line whose own guidance does not claim that band is underfit.",
+   "evidence": "self_organize.py:7989-7991",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "tokenizer.mint_reject reads TOK.gate_skipped directly, so a non-tokenizer run reports '?' rather than off",
+   "severity": "low",
+   "where": "self_organize.py:8676-8679",
+   "symptom": "`_tk_rej` is defined with a `if USE_TOK else 0` guard, but the row itself passes `lambda: TOK.gate_skipped`. With USE_TOK=0, TOK is None, the lambda raises, the count becomes None and the row prints '? tokenizer.mint_reject -- NO COUNTER'. The arming test `_cfg(\"TOK_ONLINE\")` reads the env knob, which can still be 1 while TOKENIZER=0, so the row lands in the `_blind` list ('a missing counter is indistinguishable from a mechanism that never ran') for a configuration where the mechanism structurally cannot exist.",
+   "evidence": "self_organize.py:8676 `_tk_rej = (lambda: (getattr(TOK, \"gate_skipped\", 0) if USE_TOK else 0))`; :8677 `_r(\"tokenizer.mint_reject\", lambda: TOK.gate_skipped, lambda: _cfg(\"TOK_ONLINE\"), \"TOK_ONLINE=0\")`; :8735-8737",
+   "bug_class": "other"
+  },
+  {
+   "title": "On the TOK_ONLINE=0 path the memorization check indexes a token list with byte offsets",
+   "severity": "low",
+   "where": "self_organize.py:7968, 8005",
+   "symptom": "With TOKENIZER=1 and TOK_ONLINE=0, `CORP` is replaced by token lists at 1286 while `SEG_LEN` was computed as byte lengths at 1167-1172 and `VALC` stays bytes. `CORP[_p][SEG_LEN[_p] - len(VALC[_p]):SEG_LEN[_p]]` then slices a token list with byte offsets (start index typically past the end), and `_units(TOK, USE_TOK, _src)` re-segments already-segmented token ids as if they were bytes. The likely outcome is an empty `_tb`, which suppresses the entire MEMORIZATION/ANCHORS block silently (the `if _vb and _tb:` guard).",
+   "evidence": "self_organize.py:1286 `CORP = [TOK.segment(c, count=False) for c in CORP]`; :1167-1172 SEG_LEN/VALC in bytes; :7968; :7979 `if _vb and _tb:`; :3900 `return TOK.segment(text, count=False) if USE_TOK else list(text)`",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "The wrongness precision/recall denominators mix active and all-slot counts",
+   "severity": "low",
+   "where": "self_organize.py:8890-8896",
+   "symptom": "`tb = int((sr == 99).sum())` counts slots whose src is 99 without ANDing `mem.active`, while `flg = int(iw.sum())` counts only active flagged entries (is_wrong ANDs active). Recall `fb/tb` and precision `fb/flg` are therefore computed against differently-scoped populations. The VERIFY branch a few lines above uses the consistent form `(mem.src == 99) & mem.active`.",
+   "evidence": "self_organize.py:8892 `sr = mem.src; iw = mem.is_wrong(); flg = int(iw.sum())`; :8894-8896; :8890 `_inj = (mem.src == 99) & mem.active`; memory.py:591 `selfc = self.active & checked & (self.selfcon >= thr)`",
+   "bug_class": "wrong-measurement"
+  }
+ ],
+ "junk": [
+  {
+   "what": "`biggest = max(by, key=lambda d: sum(by[d].values())); tgt = s2t[biggest]` at self_organize.py:8532",
+   "why": "Neither name is read before `tgt` is unconditionally reassigned at :9843 by a different rule (most self-domains rather than most windows). Dead assignment carrying a stale definition of 'biggest'.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`_ragged` accumulator in the genuineness block (self_organize.py:8754, 8768)",
+   "why": "Incremented and never printed; the comment beside it says the whole point is to 'say how many were dropped'. Either print it or drop it.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`_tk_rej` lambda at self_organize.py:8676",
+   "why": "Defined with a USE_TOK guard that the two rows using it as an arming test rely on, but the rows' count lambdas bypass it (`lambda: TOK.gate_skipped`, `lambda: TOK.mint_rescued`), so half the guard is decorative.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The `else:` branch printing '>> still improving or flat' at self_organize.py:8354-8356",
+   "why": "Superseded by the four-way `curve_verdict` cascade above it for every run where `_bpb_dir` exists; in that case it can only contradict the verdict already printed. Only its `_bpb_dir is None` behaviour is still needed.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "Hardcoded historical reference numbers printed as if live: 'reference points: memory-delete collateral ~0.02-0.03 | weights gradient-ascent ~22-25 bits' (self_organize.py:9026) and 'GPT-2-small sits near 1.0-1.2 b/B' (:8023)",
+   "why": "Constants from earlier runs printed adjacent to this run's measurements with no provenance in the line itself.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`_edit_test` under PHASED duplicating the unconditional final UNLEARN block",
+   "why": "Two implementations of the same edit-locality test with different LOCAL thresholds (0.1 vs 0.05) and different target-selection rules, run one after the other on a store the first one already mutated.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`_gen_keep`'s model+memory sample `_b3` (self_organize.py:9653, 9675)",
+   "why": "Stored for every generation and read by nothing \u2014 the composing check decodes only `_a3`.",
+   "safe_to_drop": false
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "There are TWO 'held-out bits/byte' instruments and they are not the same measurement: the MEMORIZATION CHECK's mean over <=min(24,EVAL_N) random windows per corpus, and the learning-curve/holdout probe over HOLDOUT_N windows seeded per domain NAME. Across 36 logs they disagreed in 27 by more than 0.03 and by up to 0.190, sign going both ways.",
+   "why": "0.190 is larger than most arm effects this project has claimed; quoting one as the other silently invalidates comparisons.",
+   "evidence": "self_organize.py:9553-9558 (the note printed in GENERATION); :7958 vs :5088"
+  },
+  {
+   "item": "Three different signature window widths coexist: the contrastive encoder is TRAINED on WIN-byte windows, the assembler/router uses `_sigw` = max(WIN, WIN*bytes_per_token) bytes during training, the report's `encwin()` uses WIN bytes, and `_eval_sig` uses `max(1, SIG_WIN)` = 1 byte by default. Any rebuild must pick one and route every site through it.",
+   "why": "Centroids are means of encoded windows, so signatures taken at different widths are not comparable \u2014 the file already documents that a width that MOVES mid-run is wrong in principle; a width that differs between training and the report has the same defect.",
+   "evidence": "self_organize.py:3323/3330 (contrastive: WIN), :6646 `ew = list(byte_stream[bpos:bpos + _sigw])`, :4116-4122 `encwin`, :3919 `_eval_sig`"
+  },
+  {
+   "item": "`Fabric.remove` is a swap-with-last that mutates ten per-expert dicts, not just the five parameter tensors. Any code that removes an expert temporarily must restore `use, uage, born, ef, es, births, comp, contrib, dom_of, rescued` or accept that every later expert diagnostic is reading a permuted mapping.",
+   "why": "The EXPERT INDEPENDENCE ablation currently restores only the tensors and then prints 'expert restored ... the INTACT model', and four later sections read the corrupted dicts.",
+   "evidence": "self_organize.py:2539-2563; :9010-9024"
+  },
+  {
+   "item": "An armed test that reads a SNAPSHOT (`cull_ran`, `n_elig`) against a CUMULATIVE counter is the DID IT FIRE audit's own recurring bug. The rows that were fixed (tokenizer.mint, lr.restart) all OR in 'or the count is nonzero'; fabric.rescue and fabric.cull_eligible still do not.",
+   "why": "An unarmed row prints no number at all, so the disagreement between the arming test and the count \u2014 which is itself the finding \u2014 is thrown away.",
+   "evidence": "self_organize.py:8583-8586, 8590-8592, 8707-8715, 8729-8730; :2224, :2234"
+  },
+  {
+   "item": "`compose_test` scores through the bare `model(X)[0]` head, not through `_eval_logits`/`fab_logits`. On a FABRIC run its PERFORMANCE, CROSS-SEGMENT COMPOSITION and PARTITION INFORMATIVENESS numbers describe a different model than every other section.",
+   "why": "`_eval_logits` exists specifically as 'the one line that must never drift between the six evaluation sites'; compose_test is a seventh site that never adopted it.",
+   "evidence": "self_organize.py:3727; :3930-3934"
+  },
+  {
+   "item": "`_curve_by_step` filters the per-process curve to ACTIVE rows because an absent process's rise is the phase schedule, not divergence (2.51 -> 4.64 recorded). Any new consumer of `_CURVE` must apply the same filter; the GENERATION preamble currently does not.",
+   "why": "Feeding absent-process rows to a divergence or best-vs-final comparison answers a question about the schedule while claiming to answer one about the model.",
+   "evidence": "self_organize.py:879-892; :9540"
+  },
+  {
+   "item": "Almost every report section is wrapped in its own try/except that prints a one-line skip. That is deliberate \u2014 a diagnostic must not end a run that has already trained and checkpointed \u2014 but it means a section vanishing is a signal, and the DID IT FIRE audit and the expert-specialization block additionally print a traceback because a bare message could not locate the fault.",
+   "why": "Several past failures (a NameError on _hb, an AttributeError on fab.keys, an int() of a whole row in SUFFICIENCY) removed entire sections from the report for many runs with only a one-line note.",
+   "evidence": "self_organize.py:7873-7879, 8741-8744, 9509-9514, 9497-9500"
+  },
+  {
+   "item": "The final `_save_ckpt(stream)` runs BEFORE the report, and the checkpoint's `holdout` field is a fresh `holdout_bpb()` call. Keep that ordering: everything after it (wrongness injection, delete_src, the unlearn edits) mutates the memory store destructively.",
+   "why": "If the save moved below the report, the next run's cross-boundary baseline would be measured on a store the report had already deleted two processes from.",
+   "evidence": "self_organize.py:7917; :5360; :8879, 8945, 9836, 9847"
+  },
+  {
+   "item": "Section verdict thresholds are hardcoded and inconsistent across sections that use the same words: LOCAL is |delta|<0.1 in `_edit_test` and <0.05 in the final UNLEARN; INDEPENDENT is |mean collateral|<0.3; DOMAINS PREDICT needs both gaps >0.01; SPECIALIZED needs >2 sigma of an EXPERT_NULLS-sized shuffle; PARTITION INFORMATIVE needs >2 sigma of an INFO_NULLS-sized permutation; RETAINED/DRIFTING/CATASTROPHIC at 0.10/0.40.",
+   "why": "Two sections can print opposite-sounding verdicts about comparable effect sizes purely because of which threshold they inherited.",
+   "evidence": "self_organize.py:9839, 9852, 9021, 8199, 9166, 3843, 8097"
+  },
+  {
+   "item": "`_HELDOUT_MEM` is the only channel by which the held-out with/without-memory pair reaches the PERFORMANCE section; it is filled by `_decompose` inside `report_holdout` and read 5200 lines later in `compose_test`. If report_holdout is skipped (no held-out data, or an exception before it), PERFORMANCE correctly prints the 'no held-out comparison was produced' branch.",
+   "why": "A module-level dict is the coupling between two sections that answer the same question on different text and print 127 lines apart; breaking it silently reverts PERFORMANCE to being a memorisation score with no counterweight.",
+   "evidence": "self_organize.py:3710-3711, 5140, 3760-3768"
+  }
+ ],
+ "open_questions": [
+  "Is `_eval_sig`'s `max(1, SIG_WIN)` intended to be `_sigw` (the assembler's derived width) or WIN? `_sigw` is a main() local and `_eval_sig` is module-level, which is the same visibility problem `_ENC` was introduced to solve \u2014 so the fix may need a second holder. I could not find any run log in the repo to confirm what the one-byte signature does to the held-out numbers empirically.",
+  "Does the report's `enc(...)` on raw BYTE windows (CAN A DOMAIN PREDICT at 8168, COHERENCE's `_stay` at 9729-9733) break under SIG_SPACE=tokens, where ENC_SEQ and the encoder's embedding table are sized to the token vocabulary (ENC_V = V)? Byte values <256 are valid token ids, so it would not raise \u2014 it would silently encode in the wrong space \u2014 but I did not trace whether any caller guards on SIG_SPACE.",
+  "In COHERENCE's self-reference branch the centroids come from `asm.cent` (built from `_sigw`-byte reservoir windows) while `_stay` encodes WIN-byte windows of the continuation. Whether the resulting scale mismatch systematically biases the 'stay home' fraction up or down is not determinable from the source alone.",
+  "Whether `fab._sample_ord` / `fab._sample_mix` are actually left armed at the end of a real run depends on `_nbwd` modulo `MANAGE_EVERY // BATCH_W` at the final flush; I could not determine this statically for a given configuration.",
+  "`bpb_true` defaults `use_mem=True`, so NON-STATIONARY's ACTIVE/FADED figures and both UNLEARN baselines include the memory blend, while RETENTION and ACROSS THE RUN BOUNDARY's headline are weights-only. I did not find a line in the report that states this difference to the reader.",
+  "EPOCHS defaults to 1, but with EPOCHS>1 the training loop resets to the stream start each epoch, so RETENTION's 'earliest windows' are revisited at the start of every epoch and are not 'what it saw first' in training time. I did not verify whether the per-epoch reset re-splices the stream (which would also change `labels`).",
+  "`fab.grown`/`fab.removed` appear never to be restored from a checkpoint, which I inferred from the absence of any assignment other than the constructor; I did not read the full checkpoint-load block for the fabric to rule out an indirect restore.",
+  "The DID IT FIRE row `fabric.grow` reads `_fb.grown`, which is incremented by BOTH `grow()` and `spawn_from()` (self_organize.py:2005 and 2150), so `fabric.grow` and `fabric.spawn` are not disjoint counts. Whether that is intended is not stated anywhere in the audit."
+ ]
+}

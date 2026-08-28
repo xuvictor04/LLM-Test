@@ -1,0 +1,1575 @@
+{
+ "area": "so-loop",
+ "summary": "self_organize.py:5600-7900 is the tail of the config-warning block, the config banner (`_banner`), the end-of-run config audit (`_config_audit`), and the entire main training loop (`while True:` at 6377). The banner builds one declarative `_EFF` table of env-name -> LIVE value, diffs it against `_ENV_ASKED` to print \"OVERRIDDEN\"/\"adjusted\", then emits a `[config] COUPLING` line for each of ten detected knob-interaction states, plus unconditional SUBSYSTEMS / PATH / ROUTING / CULL GATE / DERIVED lines. `_config_audit` runs at the very end and does two things the banner cannot: flag environment variables shaped like registry knobs that no code path read (`_typo`, family-prefix net derived from `_SPEC`), and flag loss-weight knobs that were >0 but whose `_term()` never fired. The loop itself is structured around a batch accumulator (`_bx.._bp`, flushed at `BATCH_W` windows): everything ABOVE the early-out at 6795 runs per WINDOW and legitimately uses `step % N`, everything BELOW runs once per FLUSH and must use the `_nbwd` backward counter or `_due()` elapsed-since-last, because `step % N == 0` on a flush-only block asks for a simultaneous solution to two congruences and can fire zero times. That single defect class (\"the cadence fault\") is documented at six separate sites in this range. The loop also carries the held-out learning curve + best-checkpoint tracking, the rate meter, the epoch roll (with per-epoch length recording that feeds the LR horizon projection), domain/fabric/world management, memory writes and the read probe, the LR schedule with warm restarts and closed-loop restart damping, per-expert Smith triangular2 learning rates on a USE clock, the earned-capacity soft-cap valve, tokenizer minting/probation, and re-tokenization. Almost every mechanism has a counter wired into the end-of-run \"DID IT FIRE\" report.",
+ "facts": [
+  {
+   "claim": "The training loop is `while True:` at line 6377; the batch early-out `if len(_bx) < BATCH_W: i += WIN; step += 1; continue` is at 6795-6796, and it is the dividing line between per-WINDOW code (above) and per-FLUSH code (below).",
+   "evidence": "self_organize.py:6377, 6795-6796",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`step` is incremented in exactly two places, once per window on each: the early-out at 6796 and the tail of the flush body at 7708. The epoch-roll branch `continue`s at 6632 WITHOUT incrementing step.",
+   "evidence": "self_organize.py:6796 `i += WIN; step += 1; continue`; 7708 `i += WIN; step += 1`; 6632 `continue`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_nbwd` (backward-pass counter) is incremented once per flush at 7076, and is the cadence base for five flush-only blocks: fabric sample-arming (6819), FAB_SPAWN (6836), society marginal contribution (6961), chaining marginal contribution (6988), gradient-reach measurement (7077), and maybe_deepen (7325).",
+   "evidence": "self_organize.py:7076 `_nbwd += 1`; 6819, 6836, 6961, 6988, 7077, 7325 all use `_nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`om.step()` and `om.zero_grad()` are called in exactly one place, inside `if _nbwd % ACCUM == 0:` at 7193-7287. The backward is `(tot / ACCUM).backward()` at 7065.",
+   "evidence": "self_organize.py:7193, 7287 `om.step(); om.zero_grad()`; 7065",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The ACCUM gate was previously written against `step` (windows) rather than `_nbwd` (backward passes); the recorded measurement is that the old gate produced 55 om.step() calls against 52 backward passes at BATCH_W=4 ACCUM=4 -- i.e. ACCUM was accumulating nothing at any value -- and the new gate produces 13.",
+   "evidence": "self_organize.py:7182-7185 \"old gate 55 om.step() calls / new gate 13 om.step() calls ... ACCUM=4 was not accumulating ANYTHING\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Ten distinct COUPLING messages can be emitted; they are collected into `_cpl` and printed by `for _c in _cpl: print(f\"[config] COUPLING    {_c}\")`.",
+   "evidence": "self_organize.py:5997 `_cpl = []`; 6116",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 1 (LR_STEPS): when `LR_SCHED != \"none\" and LR_STEPS`, the cosine wavelength is in STEPS and LR_EPOCHS/EPOCHS do not reach the learning rate at all. Quoted magnitude: \"'LR_EPOCHS=8' has meant 48,000 steps at STREAM_LEN=4e6 and 840,000 at 94e6.\"",
+   "evidence": "self_organize.py:5998-6012",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 2 (EPOCHS<->LR): when LR_SCHED != none and LR_STEPS is unset, EPOCHS sets run length AND the cosine horizon. Recorded measurement on the vmax4k pair: step 20000 E8 1.263e-03 vs E18 1.807e-03 (1.4x); step 40000 1.683e-04 vs 1.275e-03 (7.6x); step 44000 1.046e-04 vs 1.148e-03 (11.0x).",
+   "evidence": "self_organize.py:6013-6029, 6261-6264",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 3 (TOK_ANCHOR without TOK_COMPOSE): fires when `TOK_ANCHOR > 0 and not TOK_COMPOSE`. The anchor is a method of ByteComposer, constructed only under TOK_COMPOSE=1, so model.compose is None and the term never enters the loss. TOK_ANCHOR defaults to 0.05 and TOK_COMPOSE defaults to 0, so this coupling fires on the default configuration.",
+   "evidence": "self_organize.py:6033-6037; defaults at 979-980 `TOK_COMPOSE = bool(_i(\"TOK_COMPOSE\", 0))` / `TOK_ANCHOR = _f(\"TOK_ANCHOR\", 0.05)`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 4 (TOK_ANCHOR_USES vs TOK_ANCHOR_TAU): when TOK_COMPOSE and TOK_ANCHOR>0, USES>0 makes TAU unused and makes the anchor independent of RETOK_EVERY; USES=0 makes release depend on STEPS while RETOK_EVERY re-segments inside that window.",
+   "evidence": "self_organize.py:6038-6048",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 5 (CHAIN_VOTE -> FAB_MIN_STEPS): fires when `FABRIC and not SOCIETY and CHAIN_VOTE=1`; CHAIN_VOTE forces FAB_MIN_STEPS to 0 inside Fabric.__init__, against a declared default of 2 (0 under SOCIETY).",
+   "evidence": "self_organize.py:6049-6052; header note at 5991",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 6 (TOK_MINT_UNTIL + RETOK_EVERY>0): minting stops but re-segmentation continues for the whole run; after the freeze each retok rebuilds an identical stream while still clearing the lookahead queue and blacking out fabric growth.",
+   "evidence": "self_organize.py:6053-6058",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 7 (TOK_MINT_UNTIL + RETOK_EVERY=0): the benign case -- nothing about the segmentation moves after the freeze and growth is never blacked out by a retok.",
+   "evidence": "self_organize.py:6059-6061",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 8 (TOK_MINT_UNTIL vs VMAX): when a frozen vocabulary leaves VMAX - vocab_size > 0 rows, those rows can never be a target and sit in the loss denominator. Recorded: the frozen arm ran at VMAX=2048 with 512 tokens (75% dead) and scored 6.114 b/B against base's 2.239.",
+   "evidence": "self_organize.py:6077-6084, 6071-6076",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 9 (VMAX vs the minting BUDGET): when minting cannot fill VMAX, the projected reach is `TOK.vocab_size + EPOCHS * ((len(stream)//WIN)//GROW_EVERY)*GROW_BURST`. The message names EPOCHS as the lever that buys mints without changing minting behaviour.",
+   "evidence": "self_organize.py:6085-6100",
+   "confidence": "verified"
+  },
+  {
+   "claim": "COUPLING 10 (WRITE_QUANTILE inert): `if _i(\"WRITE_QUANTILE\", 1) and not _i(\"WRITE_ADAPTIVE\", 0)` -- memory.py gates the quantile write gate behind `adaptive_gate and quantile_gate`, so at the registry defaults (QUANTILE=1, ADAPTIVE=0) writes take the fixed `surprise >= WRITE_GATE` threshold. The comment states longrun.sh sets no WRITE_* knob anywhere.",
+   "evidence": "self_organize.py:6101-6115",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The COUPLINGS header comment claims \"Three do\" and names CHAIN_VOTE->FAB_MIN_STEPS, TOK_MINT_UNTIL/RETOK_EVERY, and SOCIETY+CHAIN_ROUTE -- but SOCIETY+CHAIN_ROUTE has NO `_cpl` entry. It is instead covered by the unconditional `[config] PATH` line.",
+   "evidence": "self_organize.py:5988-5996 vs 6136-6153 (`print(f\"[config] PATH        \"...)`)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Seven CONFIG WARNINGs are appended to `_warn` in this range: MEM_PER_EXPERT on the per-window write path (5610), CORPUS_CAP<=2MB on real data (5616), SAVE_CKPT with CKPT_EVERY=0 (5619), MEM_CAP overridden by the per-expert partition (5622), PHASED=0 with NP>1 (5629), EXPERTS and FABRIC both on (5634), and SEGMENT/WINDOW < 8 windows per splice segment (5708).",
+   "evidence": "self_organize.py:5610, 5616, 5619, 5622, 5629, 5634, 5708; printed at 5713-5714",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_bpt` (bytes per token) is computed as `len(byte_stream)/len(stream)` -- the use-weighted, measured quantity -- explicitly because `sum(bytes_per_id)/vocab_size` is a mean over the VOCABULARY whose sign of error FLIPS with vocabulary size (reads 1.50 unweighted vs 1.85 as used at 512 tokens; reads HIGH at pilot vocabularies).",
+   "evidence": "self_organize.py:5645-5657",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The signature window width is FIXED for the lifetime of the run by design: making it recompute live crashed both pilot arms at the first rekey (asm.wins held windows at the OLD width; rekey concatenates them and a ragged batch is a ValueError), and changing the width mid-run makes centroids taken before and after incomparable.",
+   "evidence": "self_organize.py:5667-5674, 5675-5680",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The projected end-of-run bytes/token used for the signature-coverage warning is `0.5*log2(max(256,V)) - 2.59`, fitted to three measured points (2048->2.91, 4096->3.41, 8192->3.93) to within 0.02 B/token, overridable by SIG_PROJ_BPT. It affects only the WARNING, never the run.",
+   "evidence": "self_organize.py:5692-5696",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The config audit's typo net derives knob FAMILIES from `_SPEC` itself (first underscore-delimited token, alphabetic, length>=3, not in `_generic = {MAX, MIN, USE, NEW, SET, GET, RUN, OUT}`), so adding a knob to _SPEC extends the net automatically. It is a DENY-list of system vars, not an ALLOW-list of prefixes; the previous allowlist missed six deliberately-set knobs (GROW_CAP, GROW_CAP_FAB0, GROW_CAP_VOCAB0, GROW_CAP_EVERY, GROW_CAP_PLATEAU, LOSS_MASK_DEAD).",
+   "evidence": "self_organize.py:5767-5789",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The loss-term audit checks four weights against `_termfired`: DIV_W, IND_W (gated on SOCIETY), CHAIN_SUP (fab.sup_w gated on FABRIC), and TOK_ANCHOR. TOK_ANCHOR was added because TOK_ANCHOR=0.05 printed on the EFFECTIVE line of every run in the project while contributing nothing.",
+   "evidence": "self_organize.py:5800-5819",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_config_audit` must run at the END rather than in the banner because several knobs (FAB_CULL_FRAC, FAB_CENT_TOPK) are read only inside the report and at banner time would look like typos.",
+   "evidence": "self_organize.py:5755-5760, 5983-5985",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The `_EFF` third field (a note) is only rendered when the ASKED value differs from the LIVE one, so a note attached to a knob that ran as requested never renders -- which is why the CULL GATE diagnostic was moved out of a note and into an unconditional line.",
+   "evidence": "self_organize.py:5893-5896, 6164-6167",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`!!` in the banner is reserved for a divergence nobody registered; a known benign adjustment (a note is present) reports plainly via `[config] adjusted:`.",
+   "evidence": "self_organize.py:5976-5982",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The CULL GATE line computes occupancy against the SOFT cap when FAB_PRESS_SOFT else `_F.cap` (the preallocation), and states that when SHUT the utilization cull, the utilization spare and FAB_RESCUE are all unreachable because the latter two live inside that gate.",
+   "evidence": "self_organize.py:6168-6177",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Two follow-up CULL GATE lines disambiguate 'SHUT': one for a latched ramp (population built in an earlier run, latch travelled in the checkpoint) and one for a ramp still building toward FAB_RAMP_TO x cap.",
+   "evidence": "self_organize.py:6190-6207",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The learning-curve probe fires at the top of the loop on `RATE_EVERY` cadence under `frozen_rng()`, samples 16 fixed windows per process (`random.Random(1234 + _p)`), and computes bits/byte using a live per-vocab-size byte-length denominator cached in `_BL` because `nbytes()` reads BLEN, which is None until the final re-tokenization under TOK_ONLINE.",
+   "evidence": "self_organize.py:6385-6415, 6402-6410",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The learning-curve `except` deliberately prints once rather than swallowing silently: \"a silent except here hid the whole learning curve, printing nothing at all\".",
+   "evidence": "self_organize.py:6417-6420",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The blow-up alarm re-arms on every new best (`_blew[0] = False` at 6444). It was one-shot before, and all four round15 arms spent their single warning on a spurious step-8000 trigger and were then silent through mid-run excursions of +2.0 to +2.3 bits/byte.",
+   "evidence": "self_organize.py:6437-6444, 6438-6443",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`blowup_stale` fires on 80 probes with no new best while elevated by >=0.5 b/B, not on excursion size: measured healthy runs reached 11-50 probes, blow-ups 261 and 309.",
+   "evidence": "self_organize.py:752-770 (BLOWUP_RISE=0.5, BLOWUP_STALE=80); called at 6459",
+   "confidence": "verified"
+  },
+  {
+   "claim": "BEST_KEEP retains 'descent into a good region' (this probe below the last AND within BEST_KEEP_TOL of the best) rather than confirmed local minima, deliberately as a superset -- a true local minimum can only be confirmed one probe later, by which time the weights have moved.",
+   "evidence": "self_organize.py:6471-6487",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The rate meter recomputes `_bpw = WIN * (len(byte_stream)/len(stream))` each time because bytes-per-step moves with the vocabulary; it previously quoted kB/s and GB/day at the SEED vocabulary for the whole run.",
+   "evidence": "self_organize.py:6491-6497",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The partial batch is DROPPED at the epoch roll (`_bx = []; _by = []; _bg = []; _bd = []; _bp = []` at 6535) because `_bp` holds (bpos, i) indexing the OLD tok_bs; after `_resample()` those entries wrote memory with provenance pointing at unrelated text, and prompt.py's grounded recall then quoted a passage that was not the one stored.",
+   "evidence": "self_organize.py:6526-6535",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_eplen` records OBSERVED epoch step counts (`if step > _ep_start: _eplen.append(step - _ep_start)` at 6524) and feeds `proj_arith`, which estimates a per-epoch shrink ratio from completed epochs, clamped to (0.5, 1.0], falling back to a flat projection with fewer than two completed epochs.",
+   "evidence": "self_organize.py:6522-6525; proj_arith at 3940-3969",
+   "confidence": "verified"
+  },
+  {
+   "claim": "There are TWO separate monotone-clamped projections with separate state: `_proj` (ETA, horizon EPOCHS) and `_proj_lr` (LR wavelength, horizon LR_EPOCHS), because one shared running minimum would let the shorter horizon drag the longer one down.",
+   "evidence": "self_organize.py:6335-6337, 6363-6376",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Under LR_RESTARTS the LR wavelength is read as the LATCHED minimum `_proj_lr[0]` directly, because `_project` returns `max(step+1, latched)` and using that would make the wavelength grow with the step and the cycles get longer and longer.",
+   "evidence": "self_organize.py:6373-6376",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The _total_steps overestimate is documented with four measured runs: E8 projected 63,024 ran 48,130 (+31%); E12 94,536 vs 70,368 (+34%); E18 141,804 vs 103,805 (+37%); FROZEN vocab 118,776 vs 118,743 (0%). Only the frozen-vocabulary run ever annealed.",
+   "evidence": "self_organize.py:6247-6255",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEMORY PRESSURE is REPORTED, NOT ACTED ON by default: MEM_PRESSURE_ACT=1 is required for it to call `fabgrow.note_shift(step)`, the same entry point a regression uses.",
+   "evidence": "self_organize.py:6558-6571",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The code itself declares that `mem.pressure()` CANNOT reach its own threshold on this configuration: eviction narrows to probation whenever probation is over budget, every write lands on probation, and only retrieval promotes out of it -- at a measured 11.7M writes into 200k slots against 1469 read probes, probation is 82% of the store and permanently over budget, so n_main_evict stays near zero.",
+   "evidence": "self_organize.py:6572-6581; the PROBATION IS Nx ITS BUDGET alarm at 6582-6593",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The MEMORY STARVATION alarm ranks by amount LOST (peak minus now) and prints only the worst 12 plus a count, because printing every row reached 200+ entries on one 5 kB line, eight times a run.",
+   "evidence": "self_organize.py:6594-6615",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A MEMORY CENSUS DRIFT check (`dup_slot`, `src_underflow`) gates the trustworthiness of the starvation alarm; a prior run printed \"s779 (-2 now, peaked 111230)\", a negative entry count.",
+   "evidence": "self_organize.py:6616-6628",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DOMAIN COLLAPSE is announced once, at the manage site, when `len(asm.cent) <= 1 and NP > 1`; it happened three separate times in the run that added Python with nothing saying so.",
+   "evidence": "self_organize.py:6701-6715",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`fab.manage` is called on the per-WINDOW `step % MANAGE_EVERY == 0` cadence at 6716 (above the batch early-out), and its cull is split into `_fc_err = fab.failed_out - _fo_before` (sustained-error route, runs at any occupancy) and `_fc_util = _fc - _fc_err` (utilization route, only under capacity pressure), so the log names the route that actually fired. Previously it said 'cull under capacity pressure' for every cull, including a measured run where all 24 culls were for sustained error.",
+   "evidence": "self_organize.py:6716-6752, 6736-6741",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`mem.set_live_src(asm.cent.keys())` is called on the DOMAIN manage cadence so the per-source floor does not divide its reservation among orphaned source ids left behind by folds.",
+   "evidence": "self_organize.py:6695-6699",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Per-window bookkeeping (`assigns.append(...)` and the tokenizer pair tally) sits ABOVE the batch early-out; below it they saw 6.2% of the stream at BATCH_W=16, which is what every clustering metric (purity/homogeneity/completeness/V-measure and the RECURRENCE histogram) was computed from.",
+   "evidence": "self_organize.py:6775-6794",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_tok_seen` is a single VMAX-sized counter of token APPEARANCES incremented from the flushed batch `x` (`_tok_seen.index_add_(0, x.reshape(-1), ...)`), read by both the TOK_ANCHOR release and TOK_PROBATION; it is sized to VMAX so no mint ever reallocates it.",
+   "evidence": "self_organize.py:6307, 6800-6804, 7011, 7592",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Expert affiliation (`fab.note_dom`) is recorded for EVERY window in the batch (`_w.argmax(-1).tolist()`), not row 0; the row-0 version produced a measured 'experts serving none: 4053' of 4096 and made the percentage breadth cap able to ban only ~30 experts.",
+   "evidence": "self_organize.py:6856-6866",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`fab.note_use(_tops)` is called only on the SOCIETY path here because the chaining paths already record utilization per row inside forward(); before the fix the two paths measured utilization at rates differing by BATCH_W while their ROUTER SELECTION figures were compared to each other.",
+   "evidence": "self_organize.py:6867-6872",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Marginal contribution is computed two different ways: leave-one-out re-weighting of already-computed head outputs `_hd` on the SOCIETY path (nearly free), and an extra `fab(...)` forward per candidate with `ban1=` on the chaining path (8 forwards per 500 steps at MANAGE_EVERY=500, FAB_CHAIN_K=8). Both are on the `_nbwd` flush cadence.",
+   "evidence": "self_organize.py:6949-6994",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The society counterfactual must re-apply `halt_blend` (`_lg2 = halt_blend(model, fab, h, _lg2)`) or the contribution is offset by whatever HALT was spending on the base head.",
+   "evidence": "self_organize.py:6972-6975",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The balance pressure decays to a FLOOR, not zero: `_bw = max(BAL_FLOOR, 1.0 - step / max(1, BAL_WARM))`. At BAL_FLOOR=0.15 x FAB_BALANCE=0.01 that is 0.0015 against an LM loss of order 2 -- too weak to prevent specialization, strong enough that every expert keeps accruing use-age and stays cullable.",
+   "evidence": "self_organize.py:7013-7023",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_ael = fab.ae_loss(min(fab.n(), 256))` is computed EVERY step rather than on the embed-refresh cadence; tying them gave the embedder one update per 50 steps at weight 0.05 and it stayed collapsed, while isolated the same loss separates identities from 0.021 to 0.217 in 300 updates.",
+   "evidence": "self_organize.py:7025-7030",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A cosine restart is detected by the RATE RISING (`_lr_prev[0] > 0 and _lrv > _lr_prev[0] * 1.5 and _lrv > 0.5 * LR`), and requires a previous rate and a large fraction of peak specifically because a RESUME skips warmup and compared the first computed rate against zero, producing `[lr @ 47079] cosine restart 1: 0.00e+00 -> 1.15e-03 (57% of peak, x1145648405)` on every resume.",
+   "evidence": "self_organize.py:7101-7120",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A detected restart calls `fabgrow.note_shift(step)` so PlateauGrowth does not read the self-inflicted loss jump as a regression; without it the controller fires a growth burst and can enter a RECOVER lockout of up to FAB_RECOVER_MAX steps, and maybe_deepen resets dp_wait on the same spike.",
+   "evidence": "self_organize.py:7095-7100, 7120",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Restart damping is closed-loop: if `_best_bpb[0]` did not beat `_cyc_best[0]`, `_rst_amp[0] *= LR_RESTART_DAMP` (default 0.5), and `_lr_at` applies it as `_cyc = LR_MIN_FRAC + (_cyc - LR_MIN_FRAC) * _rst_amp[0]` only when `_ci > 0`. Recorded motivation: three restarts on the 0.75 GB run cost +0.725 b/B that never came back (best 2.029, final 2.848, 81% of the run spent getting worse).",
+   "evidence": "self_organize.py:7132-7151; _lr_at at 4812-4813",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Per-expert learning rates are implemented by rescaling the realised UPDATE (`fab.A[:_nl] = _pa + _r3 * (fab.A[:_nl] - _pa)`), not by param_groups or gradient scaling, because fab.A/fab.B are single (cap,d,r) tensors and Adam's update m_hat/(sqrt(v_hat)+eps) is invariant to a constant factor on the gradient.",
+   "evidence": "self_organize.py:7161-7168, 7286-7292",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The per-expert schedule is Smith triangular2 clocked on `fab.use_age` (SELECTIONS, not steps), phase-shifted by one half-cycle (`_t = use_age + _ss`) so a newborn starts at the PEAK rather than the base.",
+   "evidence": "self_organize.py:7197-7214, 7230-7234",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_LR_OWN is OFF by default on measurement: FAB_LR_OWN=1 vs =0 over three paired seeds gave 2.023 vs 2.019 b/B (0.0040 apart), against a same-configuration reproducibility spread of up to 0.039 -- thirty times below the floor. Turning it off also saves cloning every live row of A and B (~50 MB at 2048 experts, d=768, r=8) per optimizer step.",
+   "evidence": "self_organize.py:6292-6302",
+   "confidence": "verified"
+  },
+  {
+   "claim": "FAB_LR_CYCLE=24 (the 'degenerate-looking' regime) beat FAB_LR_CYCLE=2000 in both measured comparisons: 18 epochs / 2048 experts, 1.981-2.188 vs 3.702 held-out; 8 epochs paired on seed 0, 2.158 vs 2.451.",
+   "evidence": "self_organize.py:7215-7229",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The per-expert envelope has a floor `FAB_LR_AMIN` (default 0.15) because gamma^(cyc-1) goes to zero and use-age has no horizon -- a heavily-selected expert reached cycle 90 on a 6-expert population and would otherwise be pinned at LR_MIN_FRAC for the rest of the run.",
+   "evidence": "self_organize.py:7235-7250",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The FAB_LR_BOOST bottom-fraction is sized off the ELIGIBLE count (`_nb2 = max(1, int(FAB_CULL_FRAC * len(_elig)))`), not the population; sizing it off `_nl` gave every past-grace expert the boost whenever len(_rank) < FAB_CULL_FRAC * _nl, which is the normal case on a resume (523 live, 84 eligible).",
+   "evidence": "self_organize.py:7262-7284",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The soft-cap valve requires a BAND, not a one-sided threshold: `abs(_improving) < GROW_CAP_PLATEAU`. The one-sided version passed for every negative value, so the valve fired hardest when the run was degrading worst -- three of five expert lifts in the 0.75 GB run went to a degrading run, reported as \"the loss has stalled (improving -0.1937 < 0.002)\".",
+   "evidence": "self_organize.py:7403-7411",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The valve also respects the growth blackout (`_blackout = fabgrow is not None and (step - fabgrow.blackout) < fabgrow.cool`), because a vocabulary lift mints tokens, the retok rebuilds the stream, the loss jumps, the jump reads as a stall, and the stall authorises the next lift -- the 0.75 GB run walked the vocabulary 2048 -> 8192 in 19 lifts that way.",
+   "evidence": "self_organize.py:7391-7399",
+   "confidence": "verified"
+  },
+  {
+   "claim": "PLATEAU_WARM is in OBSERVATIONS (1000, two time constants of the 0.998 slow EMA) rather than steps; the prior guard `fabgrow.n >= GROW_CAP_EVERY` demanded 20000 flushes = 320,000 steps at BATCH_W=16. Round11 fixed the pin clock, which then read 42425 against GROW_CAP_EVERY=20000, and still lifted nothing because this outer gate never opened -- two clocks in the same units fault, one behind the other.",
+   "evidence": "self_organize.py:7379-7390; PLATEAU_WARM at 951",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`fabgrow.step(...)` is passed `cap=_cap_fab[0]` (the operating ceiling the valve lifts) and `pool=fab.cap` (the hardware preallocation, which never moves) as two separate arguments; passing the soft cap for both meant GROW_CAP_FAB0 set the ramp's latch threshold, so switching the valve on switched the ramp off.",
+   "evidence": "self_organize.py:7436-7444",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Growth declines are counted off the TRIGGER's own return value (`if _nb_asked > 0 and _nb <= 0 and ... fabgrow.why`), not off `fabgrow.why` alone -- `why` holds the reason of the LAST firing and is never cleared, which produced a measured 107 declines against 9 asks.",
+   "evidence": "self_organize.py:7465-7483",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`om.add_param_group({\"params\": _fp})` is guarded on `if _fp:` because grow() returns [] with preallocated tensors; adding an empty group anyway appended one phantom param group per growth event, so load_state_dict refused the count mismatch and every Adam moment was discarded on every resume.",
+   "evidence": "self_organize.py:7484-7492",
+   "confidence": "verified"
+  },
+  {
+   "claim": "There are TWO memory write paths: the batched path (`mem.write_batch(..., owners=_own)`), taken when `KEY_PREGATE and KEY_SRC == \"model\" and _C is not None and KEY_BATCH`, and the per-window fallback (`mem.write(...)`), whose signature has no owner argument. Owner is `int(_w[b].argmax()) % max(1, mem.n_own)`, folded because expert ids run to FAB_NMAX (4096+) while the store has MEM_OWNERS (64) partitions.",
+   "evidence": "self_organize.py:7517-7538; 5602-5615 for the warning",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_posv` maps token index to TRUE byte position via `tok_bs[_it:_it+_n]`; the previous `arange(bpos, bpos+WIN)` walked one BYTE per TOKEN, so provenance drifted 200+ bytes by the end of a WIN=256 window while prompt.py's _recall reads only a 220-byte span.",
+   "evidence": "self_organize.py:7507-7516",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The memory read probe exists because `mem.read()` was called only from generate() and bpb_true(), both EVAL -- so `use` was zero for every entry that had not been through an eval and every eviction rule claiming to select on utility was selecting on write order. It uses a deterministic stride, not a random draw, so the probe cadence cannot change the training trajectory.",
+   "evidence": "self_organize.py:7539-7563",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Probation uses its own `_due(\"probation\", GROW_EVERY)` key rather than `_due(\"grow\")`, because `_due` RECORDS the step and returns True -- asking it under the grow key would consume the grow event and the minting block would never fire.",
+   "evidence": "self_organize.py:7583-7591; _due at 5283-5285",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Branching entropy cannot be a post-probation test because minting DESTROYS the evidence: greedy longest-match consumes a+b into the merged token so the pair never occurs again and p(b|a) is 0 from the merge onward (measured 0 after forty more passes). Entropy is therefore a PRE-mint criterion, which is where TOK_MINT_PMIN already is.",
+   "evidence": "self_organize.py:6314-6319",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`model.compose.set_vocab(...)` and `note_born(...)` are called UNCONDITIONALLY on each mint, outside the WARMSTART block, because with WARMSTART=0 and TOK_COMPOSE=1 the composer's byte table had no row for a new id -- an all-zero mask, hence an identical composite proj(length(0)) for every token minted that way, and note_born never fired so `born` stayed -1e9 and the anchor held nothing.",
+   "evidence": "self_organize.py:7624-7634",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WARMSTART_OPT (optimizer-moment inheritance) is off by default because the motivating argument was falsified: Adam's step counter is PER-TENSOR, so bias correction already reflects thousands of steps and DAMPS a fresh row. Measured on a 5-step toy: first update 5.4e-4 with v=0 vs 1.0e-3 with inherited moments -- inheritance makes the first step LARGER.",
+   "evidence": "self_organize.py:7637-7646",
+   "confidence": "verified"
+  },
+  {
+   "claim": "WARMSTART_MODE default remains 'mean' despite an 18-trial measurement favouring last/first (1.4822 vs 1.8222 immediate post-mint loss, -0.340 at 31x its own sd), because the one end-to-end check disagreed (5.214 vs 5.100 held-out on a short toy) and the 18-trial result only measures immediate post-mint recovery.",
+   "evidence": "self_organize.py:7653-7681",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A retok whose vocabulary AND match table are unchanged is skipped: the guard stamps `(TOK.vocab_size, len(TOK.seq2id))` because retire() pops from seq2id and deliberately leaves id2bytes alone, so a retirement changes the segmentation while vocab_size is unchanged.",
+   "evidence": "self_organize.py:7733-7746, 7734-7739",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The no-op-retok damage is the largest single effect in the project's records: two arms with identical vocabularies (512 minted, 441 used, 0% dead) differing only in RETOK_EVERY scored held-out 4.364 / 26% real words (RETOK_EVERY=3000, 23 retoks, 22 adding zero tokens) against 2.175 / 94% real words (RETOK_EVERY=0).",
+   "evidence": "self_organize.py:7712-7725",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A single `_due` call guards the retok if/else: asking `_due` twice in one if/elif CONSUMED the event, so the retok never ran, `_last_vsz` (written only inside the retok body) stayed at the seed value, and the skip branch could never fire either -- BOTH paths were dead across three 18-epoch runs.",
+   "evidence": "self_organize.py:7726-7733",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A live retok clears `_sigq`, `_VALT`, `_BL`, re-points ENC_SEQ under SIG_SPACE=tokens, calls `remap_mem_ctx(mem, TOK)`, resets the amortized rekey cursor, decays `asm.tokc` by TOKC_DECAY, and calls `fabgrow.note_shift(step)`.",
+   "evidence": "self_organize.py:7762-7787",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`_VALT` staleness explains the historical held-out curve shape exactly: the curve degraded over the minting window (~steps 3000-21000) and went flat the moment minting stopped, and 'best' landed at ~6000 in every arm at every seed -- the last sample where the cache still matched.",
+   "evidence": "self_organize.py:7763-7770",
+   "confidence": "verified"
+  },
+  {
+   "claim": "RETOK_TAIL=1 (default) re-segments only the unconsumed remainder; the full re-tokenization taxed throughput ~x0.77 at a 10 MB stream and ~x0.25 at 100 MB. It is safe because DynamicTokenizer minting is APPEND-ONLY, so a stream whose prefix uses the older vocab still decodes correctly.",
+   "evidence": "self_organize.py:7751-7759; RETOK_TAIL default at 5294",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The final post-loop re-tokenization now also clears `_VALT`/`_BL`, re-points ENC_SEQ under SIG_SPACE=tokens, and remaps + rekeys the memory store, because it invalidates everything the in-loop retok invalidates and was doing none of it.",
+   "evidence": "self_organize.py:7818-7842",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The tokenizer is NOT saved when a run is a resume with no SAVE_CKPT, because the only file to write to is the one the parent's vocabulary was read from and new tokens would make that checkpoint unloadable.",
+   "evidence": "self_organize.py:7843-7849",
+   "confidence": "verified"
+  },
+  {
+   "claim": "BENCH=1 returns immediately after the training loop, before the eval battery, and reports steps/min, kB/s, GB/day, param count and peak GPU memory.",
+   "evidence": "self_organize.py:7807-7817",
+   "confidence": "verified"
+  },
+  {
+   "claim": "`mask_dead(lg)` is applied to the training logits at 6917 before the cross-entropy, and (per its own docstring) also in fab_logits for eval, because masking at the loss only measured worse than not masking at all: 4.746 unmasked vs 6.100 masked-at-the-loss-only on a config with 86.7% of the width never minted.",
+   "evidence": "self_organize.py:6917; mask_dead at 3970-3980",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LOSS_MASK_DEAD is off by default and the dead-fraction-vs-bits/byte curve is recorded as 0% -> ~2.2, 29.7% -> 3.600, 41% -> 3.561, 75% -> 6.114; the vmax8k arm was retired for 'too large a vocabulary' when it actually had 41% unused softmax width.",
+   "evidence": "self_organize.py:6903-6916; LOSS_MASK_DEAD default at 669",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Per-window loss is kept (`reduction=\"none\"` then `.mean()`) at identical cost, because COMPETENCE tracking cannot be done without the per-window numbers.",
+   "evidence": "self_organize.py:6900-6902, 6918-6919",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Per-expert competence and `fab.note_err` are tracked on BOTH paths now; society-only tracking left a chaining run with no fast/slow error pair, so the sustained-error cull route had no inputs and never fired.",
+   "evidence": "self_organize.py:6936-6948",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Checkpointing uses `_due(\"ckpt\", CKPT_EVERY)` short-circuited behind `CKPT_EVERY and`, OR the SIGUSR1 flag `_ckpt_req[\"on\"]`.",
+   "evidence": "self_organize.py:7709-7711",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "BATCH_W",
+   "effect": "windows accumulated before a flush; sets the divisor in every `MANAGE_EVERY // max(1, BATCH_W)` flush cadence and the step-delta the pin clock advances by",
+   "owner": "the training loop's batch accumulator (self_organize.py:6795)",
+   "couples_with": [
+    "MANAGE_EVERY",
+    "ACCUM",
+    "GROW_CAP_EVERY",
+    "MEM_OWNERS"
+   ],
+   "evidence": "self_organize.py:6795, 6819, 6836, 6961, 6988, 7077, 7325, 7368; declared in _EFF at 5922"
+  },
+  {
+   "name": "ACCUM",
+   "effect": "optimizer steps only when `_nbwd % ACCUM == 0`; loss is scaled by 1/ACCUM before backward",
+   "owner": "the optimizer-step gate (self_organize.py:7193)",
+   "couples_with": [
+    "BATCH_W",
+    "LR"
+   ],
+   "evidence": "self_organize.py:7065 `(tot / ACCUM).backward()`, 7193 `if _nbwd % ACCUM == 0:`; _EFF row at 5922"
+  },
+  {
+   "name": "MANAGE_EVERY",
+   "effect": "cadence for fabric manage, expert-bank manage, world-model growth (per WINDOW, at 6716/6764/6768) and for FAB_SPAWN, marginal contribution, gradient-reach, maybe_deepen (per FLUSH, via `MANAGE_EVERY // BATCH_W`)",
+   "owner": "the fabric/world management block",
+   "couples_with": [
+    "BATCH_W",
+    "MANAGE",
+    "FAB_GRACE",
+    "FAB_CULL_FRAC"
+   ],
+   "evidence": "self_organize.py:6716, 6764, 6768, 6819, 6836, 6961, 6988, 7077, 7325"
+  },
+  {
+   "name": "DOM_MANAGE_EVERY",
+   "effect": "separate, faster cadence for domain merge/cull/fold and `mem.set_live_src`",
+   "owner": "the domain manager call site (self_organize.py:6693)",
+   "couples_with": [
+    "MANAGE",
+    "MANAGE_MERGE",
+    "MANAGE_MIN",
+    "MANAGE_STALE",
+    "DOM_DECAY"
+   ],
+   "evidence": "self_organize.py:6693-6700; default 100 at line 655"
+  },
+  {
+   "name": "MANAGE",
+   "effect": "master gate (MANAGE_ON) on domain manage, fabric manage, expert manage, marginal contribution and maybe_deepen",
+   "owner": "management ablation switch",
+   "couples_with": [
+    "DOM_MANAGE_EVERY",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:6693, 6716, 6764, 6961, 6988, 7324"
+  },
+  {
+   "name": "LR_SCHED",
+   "effect": "'none' bypasses the entire LR block at 7093-7154 (rates are never written to param_groups); anything else runs warmup + cosine",
+   "owner": "_lr_at / the LR block",
+   "couples_with": [
+    "LR_STEPS",
+    "LR_EPOCHS",
+    "LR_RESTARTS",
+    "FAB_LR_OWN"
+   ],
+   "evidence": "self_organize.py:7093; default 'cosine' at 4716"
+  },
+  {
+   "name": "LR_STEPS",
+   "effect": "when non-zero, `_lr_total` returns it directly -- the cosine wavelength is in STEPS and LR_EPOCHS/EPOCHS do not reach the rate at all",
+   "owner": "_lr_total (self_organize.py:6367-6376)",
+   "couples_with": [
+    "LR_EPOCHS",
+    "EPOCHS",
+    "LR_RESTARTS"
+   ],
+   "evidence": "self_organize.py:6371 `if LR_STEPS: return LR_STEPS`; COUPLING at 6002-6012"
+  },
+  {
+   "name": "LR_EPOCHS",
+   "effect": "cosine wavelength in epochs, `min(_i(\"LR_EPOCHS\",8) or EPOCHS, EPOCHS)`; 0 restores horizon-follows-EPOCHS",
+   "owner": "self_organize.py:6284",
+   "couples_with": [
+    "EPOCHS",
+    "LR_STEPS",
+    "LR_RESTARTS",
+    "STREAM_LEN",
+    "VMAX"
+   ],
+   "evidence": "self_organize.py:6284, 6372, 6376; COUPLING at 6013-6029"
+  },
+  {
+   "name": "LR_RESTARTS",
+   "effect": "1 = the cosine repeats (wavelength latched from `_proj_lr[0]`); 0 = the rate HOLDS at the LR_MIN_FRAC floor after one wavelength",
+   "owner": "self_organize.py:6290 and _lr_at:4777",
+   "couples_with": [
+    "LR_EPOCHS",
+    "LR_STEPS",
+    "LR_DECAY",
+    "LR_RESTART_DAMP",
+    "EPOCHS"
+   ],
+   "evidence": "self_organize.py:6290, 6376, 4777"
+  },
+  {
+   "name": "LR_DECAY",
+   "effect": "envelope scaling each successive restart cycle's peak by run progress; 0 restores full-peak restarts. No-op on a single-cycle run",
+   "owner": "_lr_at (self_organize.py:4845)",
+   "couples_with": [
+    "LR_RESTARTS",
+    "LR_EPOCHS"
+   ],
+   "evidence": "self_organize.py:6291, 4845-4848"
+  },
+  {
+   "name": "LR_RESTART_DAMP",
+   "effect": "multiplies `_rst_amp[0]` when a completed cycle failed to beat the best held-out it inherited; applied inside _lr_at only past the first cycle",
+   "owner": "the restart-detection block (self_organize.py:7138)",
+   "couples_with": [
+    "LR_RESTARTS",
+    "BEST_TRACK",
+    "RATE_EVERY"
+   ],
+   "evidence": "self_organize.py:7137-7139, 4812-4813; default 0.5 at 4739"
+  },
+  {
+   "name": "LR_SHIFT_WARM",
+   "effect": "on a DISK_STREAM epoch resample, sets `_shift_at[0] = step` so _lr_at attenuates the rate over that many steps",
+   "owner": "the epoch-roll resample branch (self_organize.py:6518)",
+   "couples_with": [
+    "DISK_STREAM",
+    "EPOCHS",
+    "LR_SCHED"
+   ],
+   "evidence": "self_organize.py:6518-6521, 4819-4820"
+  },
+  {
+   "name": "LR_MIN_FRAC",
+   "effect": "the cosine floor; also the base of the per-expert own-rate `_lo = LR * LR_MIN_FRAC`",
+   "owner": "_lr_at and the per-expert schedule",
+   "couples_with": [
+    "LR",
+    "FAB_LR_AMIN",
+    "LR_RESTARTS"
+   ],
+   "evidence": "self_organize.py:7251, 4812"
+  },
+  {
+   "name": "LR_WARMUP",
+   "effect": "linear warmup length, clamped to total//10 inside _lr_at; its ramp is why restart detection requires `_lrv > 0.5 * LR`",
+   "owner": "_lr_at (self_organize.py:4756)",
+   "couples_with": [
+    "LR_SCHED",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:4756, 7102-7106"
+  },
+  {
+   "name": "FAB_LR_OWN",
+   "effect": "enables per-expert Smith triangular2 rates; clones every live row of A and B per optimizer step to rescale the realised update",
+   "owner": "self_organize.py:6302 / the block at 7195-7292",
+   "couples_with": [
+    "FAB_LR_CYCLE",
+    "FAB_LR_GAMMA",
+    "FAB_LR_AMIN",
+    "FAB_LR_BOOST",
+    "FAB_LR_MAXR",
+    "LR_SCHED"
+   ],
+   "evidence": "self_organize.py:6302 `FAB_LR_OWN = bool(_i(\"FAB_LR_OWN\", 0))`, 7195-7292"
+  },
+  {
+   "name": "FAB_LR_CYCLE",
+   "effect": "half-cycle length IN SELECTIONS for the per-expert triangle; a rarely-selected expert cycles slowly",
+   "owner": "self_organize.py:7230",
+   "couples_with": [
+    "FAB_LR_OWN",
+    "FAB_LR_GAMMA",
+    "FAB_LR_AMIN",
+    "FAB_GRACE"
+   ],
+   "evidence": "self_organize.py:7230; measured comparison 24 vs 2000 at 7215-7229"
+  },
+  {
+   "name": "FAB_LR_GAMMA",
+   "effect": "envelope decay per cycle; 0.5 IS triangular2 exactly, 1.0 degenerates to plain triangular",
+   "owner": "self_organize.py:7249",
+   "couples_with": [
+    "FAB_LR_CYCLE",
+    "FAB_LR_AMIN"
+   ],
+   "evidence": "self_organize.py:7249, 7205-7206"
+  },
+  {
+   "name": "FAB_LR_AMIN",
+   "effect": "floor on the decaying envelope (`clamp_min`), so an aged expert oscillates between ~5% and ~19% of peak instead of being pinned at LR_MIN_FRAC",
+   "owner": "self_organize.py:7250",
+   "couples_with": [
+    "FAB_LR_GAMMA",
+    "FAB_LR_CYCLE",
+    "LR_MIN_FRAC"
+   ],
+   "evidence": "self_organize.py:7249-7250, 7235-7248"
+  },
+  {
+   "name": "FAB_LR_BOOST",
+   "effect": "multiplies the own-rate for the bottom FAB_CULL_FRAC of PAST-GRACE experts by utilization; counted in `_lrboost[0]`",
+   "owner": "self_organize.py:7262-7284",
+   "couples_with": [
+    "FAB_CULL_FRAC",
+    "FAB_GRACE",
+    "FAB_LR_OWN",
+    "FAB_RESCUE"
+   ],
+   "evidence": "self_organize.py:6304, 7262-7284"
+  },
+  {
+   "name": "FAB_LR_MAXR",
+   "effect": "cap on own-rate / global-rate ratio, so a newborn at a late-run global rate cannot be handed an unbounded multiple",
+   "owner": "self_organize.py:7285",
+   "couples_with": [
+    "FAB_LR_OWN",
+    "LR_MIN_FRAC"
+   ],
+   "evidence": "self_organize.py:6303, 7285"
+  },
+  {
+   "name": "FAB_GRACE",
+   "effect": "selections (not steps) before an expert is cull-eligible; used both by fab.manage and by the FAB_LR_BOOST eligibility filter",
+   "owner": "fab.manage / the boost eligibility list",
+   "couples_with": [
+    "FAB_CULL_FRAC",
+    "FAB_LR_BOOST",
+    "BAL_FLOOR",
+    "MANAGE_EVERY"
+   ],
+   "evidence": "self_organize.py:6718, 7270-7271; _EFF note 'IN SELECTIONS, not steps' at 5889"
+  },
+  {
+   "name": "FAB_CULL_FRAC",
+   "effect": "bottom fraction by utilization culled per manage pass, and the same fraction sized off `len(_elig)` for the LR boost",
+   "owner": "fab.manage",
+   "couples_with": [
+    "FAB_GRACE",
+    "FAB_PRESSURE",
+    "FAB_LR_BOOST"
+   ],
+   "evidence": "self_organize.py:6718, 6742, 7279"
+  },
+  {
+   "name": "FAB_PRESSURE",
+   "effect": "occupancy threshold below which the utilization cull, the utilization spare and FAB_RESCUE are all unreachable",
+   "owner": "fab.manage / the CULL GATE banner line",
+   "couples_with": [
+    "FAB_PRESS_SOFT",
+    "FAB_NMAX",
+    "FAB_N0",
+    "FAB_RAMP_TO",
+    "GROW_CAP_FAB0"
+   ],
+   "evidence": "self_organize.py:6719, 6168-6177, 6749-6751"
+  },
+  {
+   "name": "FAB_PRESS_SOFT",
+   "effect": "judges capacity pressure against the SOFT operating cap `_cap_fab[0]` instead of the FAB_NMAX preallocation; passed as `cap=` to fab.manage",
+   "owner": "self_organize.py:6721",
+   "couples_with": [
+    "FAB_PRESSURE",
+    "GROW_CAP",
+    "GROW_CAP_FAB0",
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:6721, 6168, 5937-5939"
+  },
+  {
+   "name": "FAB_NMAX",
+   "effect": "hard ceiling on the soft-cap lift (`min(FAB_NMAX, lift_to(...))`); also the default value of `_cap_fab[0]`",
+   "owner": "the capacity valve",
+   "couples_with": [
+    "FAB_N0",
+    "GROW_CAP_FAB0",
+    "FAB_PRESSURE",
+    "MAX_DOMAINS"
+   ],
+   "evidence": "self_organize.py:7420, 5209"
+  },
+  {
+   "name": "FAB_SPAWN",
+   "effect": "lets a router query with no near match decode a new expert; runs at entry (flush cadence) and per-hop on the deepest hop; also gates `fab.ae_loss`",
+   "owner": "self_organize.py:6836 and 7337",
+   "couples_with": [
+    "MANAGE_EVERY",
+    "BATCH_W",
+    "GROW_CAP",
+    "FAB_AE_W",
+    "FAB_GROW"
+   ],
+   "evidence": "self_organize.py:6836-6841, 7030, 7337-7341"
+  },
+  {
+   "name": "FAB_NEW_FRAC",
+   "effect": "the most of the population allowed to be newborn at once; growth takes whatever is left of the budget rather than being refused outright, with `max(1, ...)` so a tiny population is not deadlocked",
+   "owner": "self_organize.py:7450-7464",
+   "couples_with": [
+    "FAB_NEW_WIN",
+    "FAB_COOLDOWN",
+    "GROW_CAP",
+    "FAB_N0"
+   ],
+   "evidence": "self_organize.py:7450-7464"
+  },
+  {
+   "name": "FAB_NEW_WIN",
+   "effect": "the window in steps over which newborns are counted for FAB_NEW_FRAC; defaults to FAB_COOLDOWN",
+   "owner": "self_organize.py:7451",
+   "couples_with": [
+    "FAB_NEW_FRAC",
+    "FAB_COOLDOWN"
+   ],
+   "evidence": "self_organize.py:7451, 7460-7461; default at 734"
+  },
+  {
+   "name": "GROW_CAP",
+   "effect": "master switch for the earned-capacity valve (both the expert soft cap and the vocabulary soft cap)",
+   "owner": "self_organize.py:7398",
+   "couples_with": [
+    "GROW_CAP_FAB",
+    "GROW_CAP_VOCAB",
+    "GROW_CAP_FAB0",
+    "GROW_CAP_VOCAB0",
+    "GROW_CAP_EVERY",
+    "GROW_CAP_PLATEAU",
+    "PLATEAU_WARM",
+    "FAB_PRESS_SOFT"
+   ],
+   "evidence": "self_organize.py:7398; default 0 at 735"
+  },
+  {
+   "name": "GROW_CAP_EVERY",
+   "effect": "accumulated STEPS a cap must stay pinned before a lift is earned (accumulates while pinned, decays while below, via pin_tick)",
+   "owner": "self_organize.py:7418/7426 with pin_tick at 930",
+   "couples_with": [
+    "BATCH_W",
+    "GROW_CAP",
+    "PLATEAU_WARM"
+   ],
+   "evidence": "self_organize.py:7418, 7426, 7368-7370"
+  },
+  {
+   "name": "GROW_CAP_PLATEAU",
+   "effect": "band on `abs((slow-fast)/|slow|)` inside which the loss counts as stalled and a lift is authorised",
+   "owner": "self_organize.py:7411",
+   "couples_with": [
+    "GROW_CAP",
+    "PLATEAU_WARM",
+    "FAB_COOLDOWN"
+   ],
+   "evidence": "self_organize.py:7400-7411"
+  },
+  {
+   "name": "GROW_LIFT / GROW_LIFT_MIN",
+   "effect": "a lift is `cap + max(GROW_LIFT_MIN, GROW_LIFT * cap)` -- a fraction so it means the same at 160 and 4096, with an absolute floor",
+   "owner": "lift_to (self_organize.py:742), called at 7420 and 7428",
+   "couples_with": [
+    "GROW_CAP",
+    "FAB_NMAX",
+    "VMAX"
+   ],
+   "evidence": "self_organize.py:7420, 7428, 742-745"
+  },
+  {
+   "name": "MEM_PROBE_EVERY",
+   "effect": "cadence of the training-time read probe that gives eviction rules a real `use`/`last` signal; 0 makes them write-order rules",
+   "owner": "self_organize.py:7551",
+   "couples_with": [
+    "MEM_PROBE_N",
+    "EVICT",
+    "KEY_SRC",
+    "MEM_PROB_FRAC"
+   ],
+   "evidence": "self_organize.py:7551-7563; _EFF note at 5864-5866; alarm at 6629-6631"
+  },
+  {
+   "name": "MEM_PROBE_N",
+   "effect": "rows read per probe, by deterministic stride so the probe cannot consume RNG draws",
+   "owner": "self_organize.py:7555-7559",
+   "couples_with": [
+    "MEM_PROBE_EVERY"
+   ],
+   "evidence": "self_organize.py:7555-7563"
+  },
+  {
+   "name": "MEM_PRESSURE",
+   "effect": "threshold on `mem.pressure()` above which the store is declared genuinely short of room",
+   "owner": "self_organize.py:6562",
+   "couples_with": [
+    "MEM_PRESSURE_ACT",
+    "MEM_PROB_FRAC",
+    "MEM_PROBE_EVERY",
+    "MEM_CAP"
+   ],
+   "evidence": "self_organize.py:6562, 6591"
+  },
+  {
+   "name": "MEM_PRESSURE_ACT",
+   "effect": "turns the pressure signal into an actual growth trigger by calling `fabgrow.note_shift(step)`; default 0 = report only",
+   "owner": "self_organize.py:6569",
+   "couples_with": [
+    "MEM_PRESSURE",
+    "FABRIC",
+    "FAB_GROW"
+   ],
+   "evidence": "self_organize.py:6569-6571"
+  },
+  {
+   "name": "MEM_PER_EXPERT",
+   "effect": "partitions the store per expert; DERIVES mem.cap as n_own x quota, overriding MEM_CAP; requires the batched write path to carry owners",
+   "owner": "memory.py partition; warned at self_organize.py:5610 and 5622",
+   "couples_with": [
+    "MEM_CAP",
+    "MEM_QUOTA",
+    "MEM_OWNERS",
+    "KEY_PREGATE",
+    "KEY_BATCH",
+    "KEY_SRC",
+    "FABRIC",
+    "FAB_NMAX"
+   ],
+   "evidence": "self_organize.py:5610-5615, 5622-5628, 7522-7527"
+  },
+  {
+   "name": "KEY_PREGATE / KEY_BATCH / KEY_SRC",
+   "effect": "decide which of the two memory write paths runs; only the batched path (`KEY_PREGATE=1 KEY_BATCH=1 KEY_SRC=model`) passes owners=",
+   "owner": "self_organize.py:7517-7538",
+   "couples_with": [
+    "MEM_PER_EXPERT",
+    "BATCH_W"
+   ],
+   "evidence": "self_organize.py:7518-7538; warning at 5610-5615"
+  },
+  {
+   "name": "WRITE_ADAPTIVE / WRITE_QUANTILE / WRITE_GATE / WRITE_TARGET",
+   "effect": "select the memory write gate; WRITE_QUANTILE is nested inside the adaptive branch in memory.py, so at defaults (QUANTILE=1, ADAPTIVE=0) the fixed WRITE_GATE threshold runs",
+   "owner": "memory.py write gate; surfaced at self_organize.py:5922-5927 and 6111-6115",
+   "couples_with": [
+    "WRITE_ADAPTIVE",
+    "WRITE_QUANTILE"
+   ],
+   "evidence": "self_organize.py:5922-5927, 6101-6115"
+  },
+  {
+   "name": "RETOK_EVERY",
+   "effect": "cadence of stream re-segmentation; also bounds the SIG_BATCH lookahead horizon (`_H = min(_H, RETOK_EVERY - (step - _fired[\"retok\"]))`)",
+   "owner": "self_organize.py:7733",
+   "couples_with": [
+    "TOK_MINT_UNTIL",
+    "GROW_EVERY",
+    "SIG_BATCH",
+    "SIG_LOOK",
+    "TOK_ANCHOR_TAU",
+    "FAB_COOLDOWN"
+   ],
+   "evidence": "self_organize.py:7733, 6663-6664; COUPLINGs at 6053-6061"
+  },
+  {
+   "name": "RETOK_TAIL",
+   "effect": "1 = re-segment only the unconsumed remainder (i unchanged); 0 = full re-tokenization and `i = bisect_left(tok_bs, cur_byte)`",
+   "owner": "self_organize.py:7751-7761",
+   "couples_with": [
+    "RETOK_EVERY",
+    "STREAM_LEN"
+   ],
+   "evidence": "self_organize.py:7751-7761"
+  },
+  {
+   "name": "GROW_EVERY / GROW_BURST",
+   "effect": "minting cadence and mints per event; together with EPOCHS they set the total minting budget and therefore whether VMAX can be filled. GROW_EVERY is also the probation judging cadence",
+   "owner": "self_organize.py:7619-7622 and 7591",
+   "couples_with": [
+    "VMAX",
+    "EPOCHS",
+    "TOK_MINT_UNTIL",
+    "TOK_PROBATION",
+    "RETOK_EVERY"
+   ],
+   "evidence": "self_organize.py:7619-7622, 7591; COUPLING at 6085-6100"
+  },
+  {
+   "name": "TOK_MINT_UNTIL",
+   "effect": "sets `_mint_frozen[0]` at that step, stopping the pair tally and minting; does NOT stop retok",
+   "owner": "self_organize.py:7578-7582",
+   "couples_with": [
+    "RETOK_EVERY",
+    "VMAX",
+    "GROW_EVERY"
+   ],
+   "evidence": "self_organize.py:6793, 7578-7582, 7618; COUPLINGs at 6053-6084"
+  },
+  {
+   "name": "TOK_PROBATION / TOK_PROBATION_STEPS / TOK_PROBATION_BY / TOK_PROBATION_MIN",
+   "effect": "post-mint judging: a token must reach TOK_PROBATION appearances within TOK_PROBATION_STEPS, judged by 'use' or by embedding residual ratio; failures are un-merged via TOK.retire",
+   "owner": "self_organize.py:7583-7617",
+   "couples_with": [
+    "GROW_EVERY",
+    "TOK_COMPOSE",
+    "LOSS_MASK_DEAD",
+    "RETOK_EVERY"
+   ],
+   "evidence": "self_organize.py:6328-6331, 7591-7617"
+  },
+  {
+   "name": "TOK_COMPOSE",
+   "effect": "constructs ByteComposer; gates TOK_ANCHOR entirely, gates the 'embed' probation test, and makes WARMSTART a no-op (`continue`) since the vector is determined by bytes",
+   "owner": "model.compose",
+   "couples_with": [
+    "TOK_ANCHOR",
+    "TOK_ANCHOR_TAU",
+    "TOK_ANCHOR_USES",
+    "TOK_PROBATION_BY",
+    "WARMSTART",
+    "WARMSTART_MODE"
+   ],
+   "evidence": "self_organize.py:7011-7012, 7601, 7632-7634, 7682-7686"
+  },
+  {
+   "name": "TOK_ANCHOR / TOK_ANCHOR_TAU / TOK_ANCHOR_USES",
+   "effect": "holds a new token near its byte composite; USES>0 releases on APPEARANCES (from `_tok_seen`) making TAU unused, USES=0 releases on STEPS",
+   "owner": "self_organize.py:7011, 7034",
+   "couples_with": [
+    "TOK_COMPOSE",
+    "RETOK_EVERY",
+    "BATCH_W"
+   ],
+   "evidence": "self_organize.py:7008-7012, 7034; COUPLINGs at 6033-6048"
+  },
+  {
+   "name": "WARMSTART / WARMSTART_OPT / WARMSTART_MODE",
+   "effect": "initialises a minted token's emb/head rows; 'mean' averages both sides, anything else sets emb[ab]=emb[b] and head[ab]=head[a]; WARMSTART_OPT additionally inherits Adam moments",
+   "owner": "self_organize.py:7635-7705",
+   "couples_with": [
+    "TOK_COMPOSE",
+    "SIG_SPACE",
+    "GROW_BURST"
+   ],
+   "evidence": "self_organize.py:7635-7705"
+  },
+  {
+   "name": "SIG_WIN / SIG_SPACE / SIG_PROJ_BPT",
+   "effect": "SIG_WIN sets the signature byte width outright (0 = derived, fixed for the run); SIG_SPACE picks bytes vs tokens; SIG_PROJ_BPT overrides the projected end-of-run bytes/token used only in the coverage warning",
+   "owner": "_sigwidth (self_organize.py:5675-5680)",
+   "couples_with": [
+    "WIN",
+    "VMAX",
+    "ONLINE",
+    "REKEY_EVERY"
+   ],
+   "evidence": "self_organize.py:5675-5703, 6646, 6674"
+  },
+  {
+   "name": "SIG_BATCH / SIG_LOOK",
+   "effect": "batch the signature encoder over a lookahead of up to SIG_LOOK windows, refilled when `_sigq` empties; the horizon is additionally bounded by the encoder cadence and the next retok",
+   "owner": "self_organize.py:6651-6680",
+   "couples_with": [
+    "ENC_EVERY",
+    "ENC_EVERY_IDLE",
+    "RETOK_EVERY",
+    "SIG_MODE",
+    "ENC_SHIFT_WIN"
+   ],
+   "evidence": "self_organize.py:6652-6680; defaults at 5314"
+  },
+  {
+   "name": "ENC_EVERY / ENC_EVERY_IDLE / ENC_SHIFT_WIN",
+   "effect": "shift-gated encoder cadence: `ENC_EVERY if (step - _last_boundary) < ENC_SHIFT_WIN else ENC_EVERY_IDLE`",
+   "owner": "self_organize.py:6647",
+   "couples_with": [
+    "SIG_LOOK",
+    "SIG_MODE",
+    "SELF_ORG"
+   ],
+   "evidence": "self_organize.py:6647-6649; ENC_EVERY_IDLE default derived at 5306"
+  },
+  {
+   "name": "REKEY_EVERY / REKEY_AMORTIZED / REKEY_CHUNK",
+   "effect": "domain centroid re-keying and memory re-encoding cadence; REKEY_AMORTIZED spreads the same work across steps in REKEY_CHUNK-sized calls instead of a periodic spike",
+   "owner": "self_organize.py:6688-6692",
+   "couples_with": [
+    "SIG_MODE",
+    "SELF_ORG",
+    "KEY_SRC"
+   ],
+   "evidence": "self_organize.py:6688-6692"
+  },
+  {
+   "name": "DOM_PRIOR",
+   "effect": "when >0, accumulates a per-domain token histogram `asm.tokc` every window; the histogram is halved by TOKC_DECAY at each retok",
+   "owner": "self_organize.py:6788-6791",
+   "couples_with": [
+    "TOKC_DECAY",
+    "SELF_ORG",
+    "RETOK_EVERY"
+   ],
+   "evidence": "self_organize.py:6788-6791, 7785-7786"
+  },
+  {
+   "name": "TOKC_DECAY",
+   "effect": "multiplies asm.tokc at each segmentation change so the histogram has a memory of a couple of retok intervals; 1 keeps cumulative behaviour",
+   "owner": "self_organize.py:7785-7786",
+   "couples_with": [
+    "DOM_PRIOR",
+    "RETOK_EVERY"
+   ],
+   "evidence": "self_organize.py:7778-7786"
+  },
+  {
+   "name": "BAL_WARM / BAL_FLOOR / FAB_BALANCE",
+   "effect": "load-balance weight `FAB_BAL * max(BAL_FLOOR, 1 - step/BAL_WARM)`; the floor is what keeps every expert accruing use-age and therefore selectable and cullable",
+   "owner": "self_organize.py:7023, 7031",
+   "couples_with": [
+    "FAB_GRACE",
+    "FAB_CULL_FRAC",
+    "FAB_LR_CYCLE"
+   ],
+   "evidence": "self_organize.py:7013-7023, 7031"
+  },
+  {
+   "name": "PONDER / PONDER_WARM",
+   "effect": "depth cost `PONDER * min(1, step/PONDER_WARM) * _dep`, annealed so depth is not charged for before nodes have had a chance",
+   "owner": "self_organize.py:7024, 7031",
+   "couples_with": [
+    "FAB_STEPS",
+    "FAB_HALT",
+    "CHAIN_SUP"
+   ],
+   "evidence": "self_organize.py:7024, 7031"
+  },
+  {
+   "name": "DIV_W",
+   "effect": "expert distinctness reward; applied from `fab._div` on the chaining path and from cosine similarity of `_O[:,0]` vs `_O[:,1]` (RANK slots) on the society path",
+   "owner": "self_organize.py:7035-7044",
+   "couples_with": [
+    "SOCIETY",
+    "FABRIC",
+    "ENS_K"
+   ],
+   "evidence": "self_organize.py:7035-7044; audit row at 5808"
+  },
+  {
+   "name": "IND_W / IND_K",
+   "effect": "independence loss: each of the top IND_K experts must solve the task alone, weighted by its detached routing mass. SOCIETY-only",
+   "owner": "self_organize.py:7045-7052",
+   "couples_with": [
+    "SOCIETY",
+    "ENS_K",
+    "FABRIC"
+   ],
+   "evidence": "self_organize.py:7045-7052; audit row at 5808"
+  },
+  {
+   "name": "ENS_K",
+   "effect": "how many experts are blended at the output layer on the society path; also sizes `_oid` on the chaining path",
+   "owner": "self_organize.py:6846, 6855, 6881",
+   "couples_with": [
+    "IND_K",
+    "SOCIETY",
+    "FAB_CHAIN_K"
+   ],
+   "evidence": "self_organize.py:6846, 6855, 6881-6885"
+  },
+  {
+   "name": "CHAIN_SUP (fab.sup_w)",
+   "effect": "deep supervision: cross-entropy at every hop but the last, averaged, added to the loss. Requires FABRIC and not SOCIETY and len(fab._hops) > 1",
+   "owner": "self_organize.py:7002-7007, 7033",
+   "couples_with": [
+    "SOCIETY",
+    "FAB_STEPS",
+    "CHAIN_ROUTE"
+   ],
+   "evidence": "self_organize.py:7002-7007, 7033; audit row at 5809"
+  },
+  {
+   "name": "FAB_AE_W",
+   "effect": "weight on the fabric weights->identity->weights autoencoder loss, computed every step over min(fab.n(), 256) experts; gated on FAB_SPAWN",
+   "owner": "self_organize.py:7030, 7032",
+   "couples_with": [
+    "FAB_SPAWN",
+    "FAB_DERIVE_IDS",
+    "FAB_EMB_EVERY"
+   ],
+   "evidence": "self_organize.py:7030-7032"
+  },
+  {
+   "name": "RECON_W",
+   "effect": "joint Reconstructor training inside the loop; guarded `RECON_W > 0` to skip a redundant key encode that was otherwise computed and multiplied by 0.0 on the default VERIFY=recon path",
+   "owner": "self_organize.py:7053-7055",
+   "couples_with": [
+    "VERIFY",
+    "KEY_SRC"
+   ],
+   "evidence": "self_organize.py:7053-7055"
+  },
+  {
+   "name": "WORLD_MODEL / WORLD_GROW / WORLD_W / WORLD_VAR / WORLD_K / WLAT",
+   "effect": "world-model latent forward prediction plus anti-collapse; WORLD_GROW adds a dynamics predictor on plateau and soft-culls unused ones on the MANAGE_EVERY cadence",
+   "owner": "self_organize.py:6768-6773, 7056-7063",
+   "couples_with": [
+    "MANAGE_EVERY",
+    "WORLD_GROW"
+   ],
+   "evidence": "self_organize.py:6768-6773, 7056-7063"
+  },
+  {
+   "name": "LOSS_MASK_DEAD",
+   "effect": "removes never-minted and retired ids from the softmax denominator via mask_dead(); off by default because it changes every number in the log",
+   "owner": "mask_dead (self_organize.py:3970), applied at 6917",
+   "couples_with": [
+    "VMAX",
+    "TOK_MINT_UNTIL",
+    "TOK_PROBATION",
+    "GROW_CAP_VOCAB"
+   ],
+   "evidence": "self_organize.py:6903-6917, 7432-7433"
+  },
+  {
+   "name": "RATE_EVERY",
+   "effect": "cadence for the learning-curve probe, the rate/ETA meter, the profiler dump, the once-per-window per-expert LR line and the no-eligible-expert line",
+   "owner": "self_organize.py:6385, 6489",
+   "couples_with": [
+    "BEST_TRACK",
+    "BEST_KEEP",
+    "PROFILE",
+    "VALC"
+   ],
+   "evidence": "self_organize.py:6385, 6489, 7297, 7757-7760"
+  },
+  {
+   "name": "BEST_TRACK / BEST_KEEP / BEST_KEEP_TOL",
+   "effect": "save a .best checkpoint on a new best mean held-out; BEST_KEEP additionally rotates N .bestK slots for local lows within BEST_KEEP_TOL of the best",
+   "owner": "self_organize.py:6432-6488",
+   "couples_with": [
+    "RATE_EVERY",
+    "SAVE_CKPT",
+    "LR_RESTART_DAMP"
+   ],
+   "evidence": "self_organize.py:6432-6488"
+  },
+  {
+   "name": "CKPT_EVERY / SAVE_CKPT",
+   "effect": "periodic checkpoint via `_due(\"ckpt\", CKPT_EVERY)`, OR on SIGUSR1; SAVE_CKPT without CKPT_EVERY means the only save is at the very end",
+   "owner": "self_organize.py:7709-7711",
+   "couples_with": [
+    "BEST_TRACK",
+    "RESUME"
+   ],
+   "evidence": "self_organize.py:7709-7711; warning at 5619-5621"
+  },
+  {
+   "name": "PROFILE",
+   "effect": "enables `_T`/`_t0`/`_t1` wall-clock attribution; on CUDA it must synchronize to attribute time, so it is a diagnostic mode, not the run mode",
+   "owner": "self_organize.py:7726-7751",
+   "couples_with": [
+    "DEVICE",
+    "RATE_EVERY",
+    "BENCH"
+   ],
+   "evidence": "self_organize.py:5726-5751, 6502-6506, 7814-7816"
+  },
+  {
+   "name": "AMP",
+   "effect": "bf16/fp16 autocast around the LM step only (entered/exited explicitly at 6807 and 7064); memory keys stay fp32; ignored on non-CUDA devices",
+   "owner": "self_organize.py:5719-5725",
+   "couples_with": [
+    "DEVICE"
+   ],
+   "evidence": "self_organize.py:5719-5725, 6807, 7064"
+  },
+  {
+   "name": "BENCH",
+   "effect": "returns immediately after the training loop, skipping the whole eval battery",
+   "owner": "self_organize.py:7807-7817",
+   "couples_with": [
+    "PROFILE",
+    "RATE_EVERY"
+   ],
+   "evidence": "self_organize.py:7807-7817"
+  },
+  {
+   "name": "DISK_STREAM",
+   "effect": "at each epoch roll, draws a FRESH sample (`_resample()`), which also triggers `fabgrow.note_shift`, clears `_sigq` and arms LR_SHIFT_WARM",
+   "owner": "self_organize.py:6511-6521",
+   "couples_with": [
+    "EPOCHS",
+    "SEED",
+    "LR_SHIFT_WARM",
+    "CORPUS_CAP"
+   ],
+   "evidence": "self_organize.py:6511-6521"
+  },
+  {
+   "name": "EPOCHS",
+   "effect": "number of passes; the loop breaks when `_epoch >= EPOCHS`. Also the ETA horizon and (unless LR_STEPS/LR_EPOCHS say otherwise) the cosine horizon, and the minting budget multiplier",
+   "owner": "self_organize.py:6510, 6366, 6284",
+   "couples_with": [
+    "LR_EPOCHS",
+    "LR_STEPS",
+    "GROW_EVERY",
+    "GROW_BURST",
+    "VMAX",
+    "DISK_STREAM"
+   ],
+   "evidence": "self_organize.py:6510, 6236, 6284, 6090"
+  },
+  {
+   "name": "PHASED",
+   "effect": "when on, snapshots system state at each PH_BOUNDS crossing and marks which processes are active for the learning curve; PHASED=0 with NP>1 makes the stream stationary and the run not a continual-learning test",
+   "owner": "self_organize.py:6636-6643",
+   "couples_with": [
+    "N_PROCESSES",
+    "DISK_STREAM"
+   ],
+   "evidence": "self_organize.py:6636-6643; warning at 5629-5633"
+  },
+  {
+   "name": "SELF_ORG",
+   "effect": "when off, `did, boundary = 0, False` -- one bucket, no provenance, no domain management",
+   "owner": "self_organize.py:6681-6684",
+   "couples_with": [
+    "MANAGE",
+    "DOM_MANAGE_EVERY",
+    "MAX_DOMAINS",
+    "MEM_SRC_FLOOR"
+   ],
+   "evidence": "self_organize.py:6681-6684"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "`_lrv` is undefined when LR_SCHED=\"none\" and FAB_LR_OWN=1 -> NameError on the first flush",
+   "severity": "high",
+   "where": "self_organize.py:7094 (only assignment) vs 7195, 7285",
+   "symptom": "The run dies with `NameError/UnboundLocalError: _lrv` on the first optimizer step of any configuration that turns the LR schedule off and per-expert rates on.",
+   "evidence": "`_lrv` is assigned ONLY at 7094 inside `if LR_SCHED != \"none\":`. At 7195 the condition is `if FAB_LR_OWN and FABRIC and fab is not None and fab.n_live > 0 and _lrv > 0:` -- Python's `and` short-circuits left to right, so `_lrv` is evaluated as soon as FAB_LR_OWN is truthy, before any guard on LR_SCHED. It is used again at 7285 `_own_lr = (_oa / _lrv).clamp(...)`. Latent only because FAB_LR_OWN defaults to 0 (6302) and LR_SCHED defaults to \"cosine\" (4716).",
+   "bug_class": "crash"
+  },
+  {
+   "title": "The signature width is chosen from the vocabulary-mean bytes/token that the comment 40 lines above declares invalid",
+   "severity": "high",
+   "where": "self_organize.py:5678 inside `_sigwidth()`, against the reasoning at 5645-5655",
+   "symptom": "SIG_WIN=0 (the default) picks a signature width from an estimator whose error changes SIGN with vocabulary size, while the coverage percentage printed on the same `[signature]` line is computed from a different, use-weighted estimator -- so the width and the number that judges it disagree, and neither is comparable across VMAX.",
+   "evidence": "5645-5655: \"`sum(bytes_per_id) / vocab_size` weights a token minted once and never seen again exactly as heavily as one in every window ... THE SIGN FLIPS with vocabulary size ... len(byte_stream)/len(stream) is the same quantity measured rather than estimated\". `_bpt` at 5656 uses the corrected form. But `_sigwidth()` at 5678 still computes `_b = (sum(TOK.bytes_per_id[:TOK.vocab_size]) / max(1, TOK.vocab_size))` and returns `max(WIN, int(WIN * max(1.0, _b)))`, while the coverage at 5682-5683 uses `_stride_b = WIN * max(1.0, _bpt)`. The fix was applied to the reporting variable and not to the variable that decides the run.",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "`route_at` is written with a TOKEN width at a BYTE offset",
+   "severity": "medium",
+   "where": "self_organize.py:6811",
+   "symptom": "Under the online tokenizer, only the first WIN bytes of each ~WIN*bpt-byte window are labelled with the expert that trained on it; the remaining ~46-75% of the span stays -1. Under SIG_SPACE=tokens the array is token-length while the index is a byte position, so writes clip off the end entirely.",
+   "evidence": "`route_at = torch.full(((len(ENC_SEQ) if ONLINE else len(stream)) + WIN + 2,), -1, ...)` at 4123 -- ENC_SEQ is the BYTE stream under SIG_SPACE=bytes and the TOKEN stream under SIG_SPACE=tokens (4108). At 6811 `route_at[bpos:bpos + WIN] = _sl` where `bpos = tok_bs[i]` is a byte coordinate (6635) and WIN is a token count. Read back by byte position at 8830. Latent because EXPERTS defaults to 0 (3018) and route_at is only allocated `if EXPERTS`.",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "`_ep_start` starts at 0 while `step` starts at `_resume_step`, poisoning the first recorded epoch length and the LR horizon on every resume",
+   "severity": "high",
+   "where": "self_organize.py:6333 (`_ep_start = 0`) vs 5057 (`step = _resume_step`); consumed at 6524 and 6356",
+   "symptom": "On a resume, the first `_eplen` entry is `resume_step + this_epoch's_length` instead of the epoch's length. `proj_arith` then computes the shrink ratio as `eplen[-1]/eplen[-2]` = real/inflated, which clamps to the 0.5 floor, so every remaining epoch is priced at half the last -- a geometric under-projection of the run end. The cosine wavelength is latched from that projection and never revised upward (`state[0] = min(state[0], _p)`), so a resumed run anneals against a wavelength derived from a bogus first measurement.",
+   "evidence": "5057 `assigns = []; bounds = []; i = 0; step = _resume_step; ...`; 6333 `_ep_start = 0`; 6524 `if step > _ep_start: _eplen.append(step - _ep_start)`; proj_arith 3961-3963 `r = min(1.0, max(0.5, eplen[-1] / eplen[-2]))`; monotone clamp at 6361. Also `rest = max(0, per - (step - ep_start))` is 0 for the whole first post-resume epoch. `_epoch` is likewise not restored (5467 `_epoch = 0`).",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "`_pin_prev[0] = 0` on a resume hands the capacity valve the whole resume step count in one tick",
+   "severity": "medium",
+   "where": "self_organize.py:5252 (`_pin_prev = [0]`) vs 7368 (`_dstep = step - _pin_prev[0]`)",
+   "symptom": "On a resume at step N, the first flush computes `_dstep = N`. If the population or vocabulary is at its soft cap on that flush, `pin_tick` adds N to a clock that started at 0, so GROW_CAP_EVERY (20000) is satisfied instantly and a soft-cap lift is 'earned' for time the run never spent pinned in this session.",
+   "evidence": "5252 `_pin_prev = [0]` while 5057 sets `step = _resume_step`; 7368 `_dstep = step - _pin_prev[0]; _pin_prev[0] = step`; 7369-7370 `pin_tick(...)`; pin_tick at 946-947 returns `int(held) + dstep` when pinned. Latent because GROW_CAP defaults to 0 (line 735).",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "The in-loop cull message compares occupancy against `fab.cap` even when the gate that ran was judged against the SOFT cap",
+   "severity": "medium",
+   "where": "self_organize.py:6746 and 6749-6751",
+   "symptom": "With FAB_PRESS_SOFT=1 the run prints \"the UTILIZATION cull did not run: n/fab.cap = X is below FAB_PRESSURE=Y\" using the hardware preallocation as the denominator, while fab.manage was actually given `cap=_cap_fab[0]`. The printed X can be far below FAB_PRESSURE while the real gate was open, or vice versa -- an explanation that contradicts the decision it is explaining.",
+   "evidence": "6721 passes `cap=(_cap_fab[0] if FAB_PRESS_SOFT else None)`; 6746 `_occ = fab.n() / max(1, fab.cap)`; 6749-6751 prints `{fab.n()}/{fab.cap} = {_occ:.2f} ... below FAB_PRESSURE={_f('FAB_PRESSURE', 0.45)}`. The BANNER version at 6168 gets this right: `_pc = max(1, (_cap_fab[0] if FAB_PRESS_SOFT else _F.cap))`.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The signature lookahead queue is not cleared at a non-DISK_STREAM epoch roll",
+   "severity": "medium",
+   "where": "self_organize.py:6508-6632; `_sigq = []` appears only inside the `if DISK_STREAM:` branch at 6514",
+   "symptom": "When DISK_STREAM=0, the epoch roll sets `i = 0` but leaves any queued signatures in `_sigq`. Those were encoded from windows at the END of the stream and are then popped as the signature for the FIRST window(s) of the new epoch, so domain assembly (and possibly a spurious boundary) is driven by unrelated text.",
+   "evidence": "6514 `set_enc_tensor(ENC_SEQ); _sigq = []` is inside `if DISK_STREAM:`; 6525 `i = 0; _ep_start = step`; the batch lists are cleared at 6535 but `_sigq` is not. `_sigq` is otherwise cleared only on a boundary (6687) and on a retok (7762). The refill at 6655-6679 only runs `if not _sigq`, and `_H` is bounded by `(len(stream) - 1 - i) // WIN`, which can exceed the number of windows actually consumed before the roll fires at `i + WIN + 1 >= len(stream)` (6508). SIG_BATCH defaults to 1 and SIG_MODE to 'learned', so this is the default path.",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "TOK_PROBATION_BY=\"embed\" silently degrades to \"use\" when TOK_COMPOSE=0",
+   "severity": "medium",
+   "where": "self_organize.py:7601-7613",
+   "symptom": "Setting TOK_PROBATION_BY=embed without TOK_COMPOSE=1 leaves `_emb = None`, so the judging falls through to `_keep = _earned` -- the 'use' test -- with no warning anywhere. The banner prints the requested mode and the end-of-run [vocab] line says \"judged by embed\".",
+   "evidence": "7601 `if TOK_PROBATION_BY == \"embed\" and TOK_COMPOSE and getattr(model, \"compose\", None) is not None:`; 7608-7613 `if _emb is not None: ... else: _keep = _earned`; the report at 7864 prints `judged by {TOK_PROBATION_BY}` unconditionally. TOK_COMPOSE defaults to 0 (line 979).",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "`_collapsed[0]` records the step of domain collapse but nothing ever reads it",
+   "severity": "low",
+   "where": "self_organize.py:4347 (init), 6706-6707 (only write)",
+   "symptom": "The step at which the domain partition collapsed is stored and never surfaced; only the truthiness is used, as a once-only latch for the printed alarm. A post-mortem cannot ask when the partition died.",
+   "evidence": "grep over the whole file returns exactly three hits for `_collapsed`: the init at 4347, the guard `if len(asm.cent) <= 1 and NP > 1 and not _collapsed[0]:` at 6706, and the write `_collapsed[0] = step` at 6707. No report site reads it.",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "`_cyc_seen` is declared with a stated purpose and is never read or written again",
+   "severity": "low",
+   "where": "self_organize.py:4737 (comment), 4740 (init)",
+   "symptom": "The comment describes a mechanism ('the cycle index the loop last acted on, so the decision is taken once per boundary') that does not exist; restart detection is done by rate-rising comparison against `_lr_prev` instead. A reader looking for per-cycle bookkeeping finds a variable that implies it is there.",
+   "evidence": "grep `_cyc_seen` returns only 4737 (comment) and 4740 `_rst_amp = [1.0]; _cyc_best = [None]; _cyc_seen = [0]`. The actual restart detection is 7118 `if (_lr_prev[0] > 0 and _lrv > _lr_prev[0] * 1.5 and _lrv > 0.5 * LR ...)`.",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "The COUPLINGS header comment names three couplings; the code emits none for the third",
+   "severity": "low",
+   "where": "self_organize.py:5988-5996 vs the `_cpl` appends at 6002-6115",
+   "symptom": "The section header says \"Three do:\" and lists SOCIETY + CHAIN_ROUTE as one of them, but no `_cpl` entry covers it. A reader auditing whether every declared coupling is reported will find the declaration and no matching COUPLING line.",
+   "evidence": "5994 \"SOCIETY + CHAIN_ROUTE together choose one of three forward paths; neither alone tells you which.\" The ten `_cpl.append` sites (6002, 6015, 6034, 6039, 6050, 6054, 6060, 6080, 6093, 6112) contain no SOCIETY/CHAIN_ROUTE case. The information is instead in the unconditional `[config] PATH` line at 6136-6153.",
+   "bug_class": "other"
+  },
+  {
+   "title": "The typo net can only catch a misspelling in the SUFFIX of a knob, never in its family token",
+   "severity": "low",
+   "where": "self_organize.py:5786-5789",
+   "symptom": "`FAB_NMXA` is caught; `FAV_NMAX`, `FABRIK_NMAX`, or a single-token typo like `EPOCH` for `EPOCHS` are not -- the family token itself is the key, so the one class of typo the net cannot see is a typo in the part it matches on.",
+   "evidence": "5786-5787 `_fam = {k.split(\"_\")[0] for k in _SPEC if ...}`; 5788-5789 `_typo = sorted(k for k in os.environ if k not in _ENV_READ and k not in _plumb and k.split(\"_\")[0] in _fam)`. Nothing does fuzzy matching against known knob names.",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "The stale comment at 6657-6659 describes an initialisation that no longer exists",
+   "severity": "low",
+   "where": "self_organize.py:6658 vs 5281",
+   "symptom": "The comment says `_fired[\"retok\"]` has a \"-1e9 init\", but `_fired` is a defaultdict whose factory and explicit seeds are all the current `step`. A reader reasoning about the lookahead clamp from this comment will reason from a value the code does not hold.",
+   "evidence": "6658 \"_due returns False on n<=0 BEFORE recording, so _fired['retok'] stays at its -1e9 init\"; 5281 `_fired = _dd(lambda: step, {\"grow\": step, \"retok\": step, \"ckpt\": step, \"lmcurve\": step, \"probation\": step})`.",
+   "bug_class": "other"
+  },
+  {
+   "title": "`_armed` (fabric mix/order sampling) is the one flush cadence with no `_nbwd > 0` guard",
+   "severity": "low",
+   "where": "self_organize.py:6818-6820",
+   "symptom": "`fab._sample_mix` and `fab._sample_ord` are armed on the very first flush (_nbwd == 0), while the four sibling cadences at 6836, 6961, 6988 and 7325 all require `_nbwd > 0`. The first flush's diagnostic samples are taken before any backward pass has occurred.",
+   "evidence": "6819 `_armed = (_nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W)) == 0)` with no `and _nbwd > 0`, against 6836 `... and _nbwd > 0`, 6961 `... and _nbwd > 0`, 6988 `... and _nbwd > 0`, 7324 `_nbwd > 0 and ...`.",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "`_bpw` used by the BENCH report can be stale at the seed vocabulary",
+   "severity": "low",
+   "where": "self_organize.py:6237 (init), 6493 (refresh, RATE_EVERY only), 7811-7812 (consumer)",
+   "symptom": "A short BENCH run that never reaches a RATE_EVERY tick reports kB/s and GB/day computed from the bytes-per-window measured at the SEED vocabulary -- the exact staleness the refresh at 6493 was added to fix for the rate meter.",
+   "evidence": "6237 `_bpw = WIN * (len(byte_stream) / max(1, len(stream))) if ONLINE else WIN`; 6493 recomputes it but only inside `if RATE_EVERY and step % RATE_EVERY == 0 and step > _s_mark:`; 7811-7812 `{_sr*_bpw/1e3:.1f} kB/s | {_sr*_bpw*86400/1e9:.3f} GB/day`.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "BEST_TRACK rescans the whole `_CURVE` list on every window",
+   "severity": "low",
+   "where": "self_organize.py:6432-6433",
+   "symptom": "`_cs = [b for st, _p, b, _a in _CURVE if st == step]` runs once per WINDOW (the block is above the batch early-out) over a list that grows by len(VALC) entries every RATE_EVERY steps, and returns empty on all but 1-in-RATE_EVERY of them. Pure overhead in the hot path.",
+   "evidence": "6432 `if BEST_TRACK and _CURVE:` with no `step % RATE_EVERY == 0` guard, followed by 6433's full-list comprehension; the block sits before 6795.",
+   "bug_class": "other"
+  }
+ ],
+ "junk": [
+  {
+   "what": "Two consecutive `if FABRIC:` blocks at 6818 and 6821 with nothing between them but the `_armed` assignment",
+   "why": "They can be merged; the split is an editing artefact, not a semantic boundary.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`_cyc_seen = [0]` and its two-line explanatory comment (self_organize.py:4737, 4740)",
+   "why": "Never read or written anywhere else; the mechanism it describes (per-cycle-boundary decision) is not implemented -- restart detection is rate-rising against `_lr_prev`.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The `_collapsed[0] = step` write at 6707 stores a step nothing reads",
+   "why": "Only the truthiness is used, as a once-only latch. Either surface the step in the report or make it a plain bool.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The stale '-1e9 init' claim in the lookahead-clamp comment at 6658",
+   "why": "`_fired` is seeded with the current `step` (5281). The prose describes a state the code has not been in since the defaultdict was introduced.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Per-mint `_i(\"GROW_BURST\", 6)`, `_i(\"WARMSTART\", 1)`, `_i(\"WARMSTART_OPT\", 0)`, `_env(\"WARMSTART_MODE\", \"mean\")` reads inside the minting loop (7620, 7635, 7647, 7687)",
+   "why": "Environment reads in an inner loop; every other knob in this file is hoisted to a local. Harmless but inconsistent, and it means the registry's read-tracking is exercised thousands of times.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Per-manage-pass `_i(\"FAB_GRACE\", 48)`, `_f(\"FAB_CULL_FRAC\", 0.02)`, `_f(\"FAB_PRESSURE\", 0.45)` reads at 6718-6719, 6742-6744, 6750, 7270, 7279",
+   "why": "Same knobs re-read from the environment at several sites, so a divergence between two sites is possible in principle and there is no single local holding the value the run used.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`_sl` is reused for two unrelated quantities: the expert route slot at 6810 and a cross-entropy tensor at 7005",
+   "why": "Correct today only because 6810 unconditionally reassigns before the 6878 read. The file's own comment at 4237 warns about exactly this ('`_bkeep`, NOT `_keep`'), so the pattern is known-hazardous here.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "`_occ` names two different things: the per-source occupancy STRING at 6549 and the fabric occupancy FLOAT at 6746",
+   "why": "Same function scope, different types, used in different printed lines. Harmless but makes a grep for the variable misleading.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "`_why` is reused for the cull-route explanation (6742) and the checkpoint reason (7710); `_held` for the pin clock (7419) and the declined growth count (7458); `_sr` for `mem.src_report()` (6548) and the BENCH steps/sec (7809)",
+   "why": "Local name churn in a 3000-line function; the file's own comment at 4237-4241 documents this exact class of collision costing a whole report block.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The DIV_MASS AttributeError post-mortem comment at 5873-5879 now sits above a line that is already guarded",
+   "why": "The fix (`_F0.div_mass if _F0 is not None else 0`) is in place at 5880; the comment is historical. Worth keeping for the lesson, but it is documentation of a fixed bug, not live behaviour.",
+   "safe_to_drop": false
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "THE CADENCE RULE: any block BELOW the batch early-out at 6795 runs once per FLUSH, not once per window, so `step % N == 0` there asks for a simultaneous solution to two congruences and can fire ZERO times. Below the early-out, cadences must be `_nbwd % max(1, N // max(1, BATCH_W))` (backward passes) or `_due(key, N)` (elapsed steps). Above it, `step % N` is correct.",
+   "why": "This is the single most-repeated defect in the file. It killed maybe_deepen entirely (never called in a real run, and 'staged depth did not help' was reported off that), the gradient-reach measurement, FAB_SPAWN, both marginal-contribution paths, ACCUM, minting and re-tokenization (at BATCH_W in {2,8,15,16,32} the mint fired ZERO times), and CKPT_EVERY.",
+   "evidence": "self_organize.py:5267-5275, 6814-6817, 6827-6836, 7072-7075, 7171-7192, 7321-7323"
+  },
+  {
+   "item": "`_due(k, n)` is NOT a predicate -- it RECORDS the step and returns True. Calling it twice for one decision (in an if/elif, or under a borrowed key) consumes the event and kills both branches.",
+   "why": "This bug killed BOTH the retok and the retok-skip branch simultaneously across three 18-epoch runs, and the same trap is documented as still latent for probation if it were ever moved onto the 'grow' key.",
+   "evidence": "self_organize.py:5283-5285, 7726-7733, 7586-7590"
+  },
+  {
+   "item": "GROW_CAP_EVERY is in STEPS but its clock ticks once per FLUSH, so `pin_tick` must be advanced by the step DELTA, not by 1. And PLATEAU_WARM is in OBSERVATIONS, not steps.",
+   "why": "Two clocks in the same units fault, stacked: the pin clock read 2650 against 20000 when the real pinned time was 43,645 steps, and after that was fixed the outer `fabgrow.n >= GROW_CAP_EVERY` gate still demanded 320,000 steps at BATCH_W=16. The first masked the second, and the valve lifted nothing across a whole round.",
+   "evidence": "self_organize.py:930-947, 7368-7370, 7379-7390"
+  },
+  {
+   "item": "Bytes-per-token must be measured as `len(byte_stream)/len(stream)`, never estimated as `sum(bytes_per_id)/vocab_size`. The unweighted mean's error changes SIGN with vocabulary size, so it is not comparable across VMAX -- the axis these runs are compared along. SIG_WIN=614 was picked off the bad estimator.",
+   "why": "It is two len() calls to measure and it silently corrupted a knob that decides how much of the stream the domain encoder ever reads (42% at one point, with nothing downstream able to tell).",
+   "evidence": "self_organize.py:5645-5657"
+  },
+  {
+   "item": "The signature width must be FIXED for the lifetime of a run. Making it track the growing stride crashes at the first rekey (asm.wins holds old-width windows, rekey concatenates them, ragged batch = ValueError) and, more fundamentally, makes every centroid, radius and boundary test straddle two different measurements.",
+   "why": "A width that moves is wrong in principle, not just in implementation -- domain centroids ARE means of encoded windows.",
+   "evidence": "self_organize.py:5667-5674"
+  },
+  {
+   "item": "A knob that WEIGHTS A LOSS TERM must be routed through `_term(name, value)` and listed in the `_config_audit` loop, or it can print as ON for years while contributing nothing. TOK_ANCHOR=0.05 was on the EFFECTIVE line of every run in this project while `model.compose` was None.",
+   "why": "The audit that would have caught it covered a hand-picked three (DIV_W, IND_W, CHAIN_SUP). The cost of covering every such weight is one dict lookup at report time.",
+   "evidence": "self_organize.py:5800-5819, 4203-4206, 6033-6037"
+  },
+  {
+   "item": "The partial batch MUST be dropped at the epoch roll. `_bp` holds (bpos, i) indexing the OLD tok_bs, and `_resample()` replaces tok_bs -- so surviving windows write memory whose provenance points at unrelated text, with no IndexError to reveal it (short-slice padding hides it).",
+   "why": "prompt.py's grounded recall reads a 220-byte span around the stored position, so every such entry quotes a passage that was never stored. Cost of dropping: <=15 windows of ~15,000 per epoch.",
+   "evidence": "self_organize.py:6526-6535"
+  },
+  {
+   "item": "Provenance positions must be per-token byte positions from `tok_bs`, never `arange(bpos, bpos+WIN)`. Under the online tokenizer a token averages ~1.85 bytes, so the naive version drifted 200+ bytes by the end of a WIN=256 window.",
+   "why": "Same failure surface as above -- silent, no exception, and it invalidates every grounded-recall claim.",
+   "evidence": "self_organize.py:7507-7516"
+  },
+  {
+   "item": "A RETOK ON AN UNCHANGED VOCABULARY IS PURE DAMAGE, and the guard must stamp `(vocab_size, len(seq2id))`, not vocab_size alone -- retire() pops from seq2id while leaving id2bytes intact, so a retirement moves the segmentation without moving vocab_size.",
+   "why": "Measured as the largest single effect in the project's records: two arms with identical vocabularies scored 4.364 vs 2.175 held-out and 26% vs 94% real words, purely on whether 23 no-op retoks fired.",
+   "evidence": "self_organize.py:7712-7746"
+  },
+  {
+   "item": "Every cache that belongs to a SEGMENTATION (`_VALT`, `_BL`, `_sigq`, `mem.ctx`, `asm.tokc`, ENC_SEQ under SIG_SPACE=tokens) must be invalidated by BOTH the in-loop retok and the final post-loop retok.",
+   "why": "The final retok was doing none of it, so the end-of-run held-out probe scored validation text in the pre-final vocabulary; and the in-loop _VALT staleness alone explains the historical curve shape exactly (degrades over the minting window, flat once minting stops, 'best' always at ~6000).",
+   "evidence": "self_organize.py:7762-7773, 7818-7842"
+  },
+  {
+   "item": "A resume changes the meaning of every counter that starts at 0 while `step` starts at `_resume_step`: `_ep_start`, `_pin_prev`, `_lr_prev`, `_epoch`. Warmup is skipped on a resume, which is why the restart detector needs both a nonzero previous rate AND `_lrv > 0.5 * LR`.",
+   "why": "The unguarded version reported a cosine restart on the second step of every resume, and the spurious `note_shift()` suppressed the growth controller's regression reading on exactly the step a new area arrives -- the one moment the controller exists for.",
+   "evidence": "self_organize.py:7107-7120, 5057, 6333, 5252"
+  },
+  {
+   "item": "Utilization alone cannot distinguish a niche expert that is excellent from a dead one -- both are called rarely. Competence (EMA of loss on the material a unit WINS, against the population's own EMA) and marginal contribution (leave-one-out) are the two signals that can, and both must be computed on BOTH the society and chaining paths.",
+   "why": "Society-only tracking left chaining with no fast/slow error pair, so the sustained-error cull route had no inputs and never fired, leaving utilization-under-pressure as the only way an expert could die.",
+   "evidence": "self_organize.py:6920-6948, 6949-6994"
+  },
+  {
+   "item": "Balance pressure must decay to a FLOOR, not to zero, and per-expert LR envelopes must have a floor (FAB_LR_AMIN). Otherwise an expert the router stopped choosing has no route back (no traffic -> no gradient -> no traffic), and under the use clock it is frozen at its use-age so the cull can never reach it either.",
+   "why": "Both are 'each expert has a chance' invariants; without them the population becomes unselectable and the only adaptation left is birth and death.",
+   "evidence": "self_organize.py:7013-7023, 7235-7248"
+  },
+  {
+   "item": "A warm restart is a BET, and an open-loop schedule re-takes a losing bet identically forever. Restarts must be counted, must be marked self-inflicted via `note_shift`, and should be damped when the completed cycle failed to beat the best it inherited.",
+   "why": "On the 0.75 GB run three restarts ratcheted the curve from a best of 2.029 to a final 2.848, with 81% of the run spent getting worse -- and the log line printed at each restart said nothing about there being something to lose.",
+   "evidence": "self_organize.py:7095-7151, 4794-4813"
+  },
+  {
+   "item": "The capacity valve's plateau test must be a BAND (`abs(improving) < threshold`), never one-sided. A one-sided test passes for every negative value, so the valve fires hardest exactly when the run is degrading worst -- and a degrading run is what REGRESSION growth is for, which has its own cooldown and blackout precisely so the two are not confused.",
+   "why": "Three of the five expert lifts in the 0.75 GB run went to a degrading run, and the message printed 'the loss has stalled (improving -0.1937 < 0.002)'.",
+   "evidence": "self_organize.py:7403-7411"
+  },
+  {
+   "item": "Never infer that a code path has coverage from a name in a config file. The DIV_MASS AttributeError killed every FABRIC=0 run before it printed a training step; it was spotted, reasoned away as 'the nofabric arm has run since', and left -- but nofabric was only in GRID_ARMS_DEFAULT, a list that had never been run.",
+   "why": "Explicitly recorded as costing round9 an entire arm. Coverage comes from a log, not from a name.",
+   "evidence": "self_organize.py:5873-5879"
+  }
+ ],
+ "open_questions": [
+  "Does `_sigq` actually retain entries across a non-DISK_STREAM epoch roll in practice? The refill horizon `_H` is bounded by `(len(stream) - 1 - i) // WIN`, so the queue *usually* drains as `i` approaches the end, but the `-1` and the ragged-window `break` at 6677 make an off-by-one leftover possible. Instrumenting `len(_sigq)` immediately before line 6525 would settle it in one run.",
+  "Is `_epoch` deliberately not restored from a checkpoint (5467 `_epoch = 0`)? For continual learning a resume plausibly *should* be EPOCHS fresh passes over new material -- but combined with `_ep_start = 0` it silently corrupts `_eplen[0]` and therefore the LR wavelength, so the two decisions need to be separated.",
+  "The banner's `[signature]` coverage line uses `_bpt` (use-weighted) while `_sigwidth()` uses the vocabulary mean. Was leaving `_sigwidth` on the old estimator deliberate (to keep previously-chosen widths reproducible) or an incomplete fix? Nothing in the surrounding comments says.",
+  "`_lrboost[0] += _nb2` counts EXPERTS boosted, cumulatively across steps, and is reported as `fabric.lr_boost` at 8593. Is the report treating it as a count of events or of experts? The two differ by a factor of the boost-list length per step.",
+  "`_memw[0]` accumulates the return values of `mem.write_batch` / `mem.write`. Do both return the same unit (entries accepted vs calls made)? The DID IT FIRE row `memory.write` at 8595 reads it as one number, and the batched and per-window paths are different functions.",
+  "Does `fab.manage`'s internal `n_elig` reflect the same eligibility filter the LR boost builds at 7271 (`fab.use_age(i) >= FAB_GRACE`)? The comment at 7273 says it does ('for the same reason the cull's own budget is'), but the two lists are constructed in different files.",
+  "What is the actual per-step cost of the `_ael = fab.ae_loss(min(fab.n(), 256))` call now that it runs every step rather than on the embed cadence? PROFILE=1 would attribute it, but no measured number appears in the range.",
+  "The `_typo` audit excludes `_plumb`, which contains EPOCHS, OUT, VERIFY, SEED and 30 others. A typo in the VALUE of any of those is invisible to both audits. Is there a reason those cannot be verified against live values in `_EFF` instead of being allowlisted?",
+  "The FAB_LR_OWN 'absent effect' verdict (2.023 vs 2.019 over three paired seeds) was taken on a population that never finished growing -- the ramp was still adding experts 20 steps before the run ended. The comment says this deserves re-testing on a fixed population; has that been done?",
+  "`route_at` is only allocated under EXPERTS=1, which is mutually exclusive with FABRIC. Is the EXPERTS path still expected to run at all, or is 6810-6811 (and its byte/token width mismatch) dead code that should be removed rather than fixed?"
+ ]
+}

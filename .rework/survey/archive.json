@@ -1,0 +1,1062 @@
+{
+ "area": "archive",
+ "summary": "`archive/` is the project's frozen institutional memory: 145 files moved out of the live tree on commit `2d5c89a` (\"sideline the frozen trees\") precisely so a repo-wide grep stops returning them beside live code. It holds five distinct bodies: (1) `archive/handoff/` \u2014 76 files in the \"one idea per file, the filename IS the summary\" scheme, containing 22 settled `decisions/`, 11 `design-directions/`, 7 `designed-but-not-built/`, 4 `open-questions/`, 11 `process/` rules, 12 `history/` phase narratives and 2 `migrations/`; (2) the north-star documents (`handoff/NORTH_STAR.md`, `handoff/README.md`, `handoff/STRUCTURES.md`, `STATE.md` \u00a71); (3) `archive/STATE.md`, a 634-line \"living ledger\" whose own header still declares its protocol **binding, for the assistant** and instructs the reader to update it every turn \u2014 the single most dangerous file here, and the stated reason the sidelining happened; (4) superseded code \u2014 `archive/garry/` (9 files, the frozen T33 \"Garry\" milestone, a 957-line `self_organize.py` against the live 9,859) and `archive/legacy/` (56 files, the earlier Barry/Greg architecture from which the Fabric was ported); (5) `archive/CL_TESTBED.md` and `archive/docs/` (a file-by-file manifest and a reconciliation ledger, both read from the code as it stood 2026-07-21). Of the 22 recorded decisions, the great majority are still binding and are echoed in the live `notes/` corpus, but **one has been explicitly reversed by the user** (society-not-chaining: `SOCIETY` now defaults to 0 and the chaining society is the default at HEAD), one workflow decision is superseded (`run_full_unfrozen.sh` \u2192 `longrun.sh`), and one naming decision (Fabric \u2192 Router + Compositor) was never adopted in code. The archive's headline measured numbers (1.967 b/B, \u22120.0009 expert-deletion collateral, 2.002 / +0.127 for the modularity regime) are stated in `STATE.md \u00a77` as \"authoritative\" but fall under later invalidations `INV-02`, `INV-13`, `INV-36` and `INV-06` in `notes/05_ERRORS.md`; a rebuild must carry the decisions forward and must NOT carry those numbers forward.",
+ "facts": [
+  {
+   "claim": "archive/ contains exactly 145 files across five trees: handoff/ (76), legacy/ (56), garry/ (9), docs/ (2), plus STATE.md and CL_TESTBED.md at archive root.",
+   "evidence": "`find /home/user/LLM-Test/archive -type f | wc -l` \u2192 145; `ls archive/handoff/decisions | wc -l` \u2192 22; `ls archive/legacy | wc -l` \u2192 56",
+   "confidence": "verified"
+  },
+  {
+   "claim": "archive/handoff/decisions/ holds exactly 22 decision files, one decision per file, filename as summary.",
+   "evidence": "`ls /home/user/LLM-Test/archive/handoff/decisions | wc -l` \u2192 22",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive was created deliberately, not abandoned: commit 2d5c89a moved garry/, legacy/, handoff/, docs/, STATE.md and CL_TESTBED.md under archive/ so a repository-wide grep would not return them beside live code.",
+   "evidence": "ARCHIVE.md:8-10 \"Everything below now lives under **`archive/`**, moved there 2026-08-27 so that a repository-wide grep does not return them alongside live code.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The stated trigger for archiving was a concrete cost: archive/garry/self_organize.py still reads _i(\"FAB_N0\", 3) while the live default is 2048, and nine notes stated FAB_N0=3 as current a week after it changed.",
+   "evidence": "ARCHIVE.md:23-28; archive/garry/self_organize.py:565 `fab = Fabric(D, SIG_D, _i(\"FAB_DK\", 32), _i(\"FAB_N0\", 3), ...)`; notes/CURRENT_DEFAULTS.md:232 `| FAB_N0 | 2048 |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The stale FAB_N0=3 / FAB_NMAX=6 pair appears in four archive locations, so any of them can re-seed the same error.",
+   "evidence": "archive/STATE.md:150; archive/garry/GARRY.md:33; archive/garry/self_organize.py:565; archive/docs/FILES.md:94",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NORTH_STAR.md is the project's primary orientation document: the 'genie wish' is an LLM that LEARNS and does complex REASONING, much smaller than conventional models, with an ever-EXPANDING, UPDATABLE knowledge base.",
+   "evidence": "archive/handoff/NORTH_STAR.md:5-7",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The SACRED INVARIANT, never to be traded away, is that EXPANSION and GROWABILITY must not be lost when compromises come; other properties may flex.",
+   "evidence": "archive/handoff/NORTH_STAR.md:9-11 \"When they come, **EXPANSION and GROWABILITY must NOT be lost.**\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NORTH_STAR.md states language capability is a personal BENCHMARK, not the endpoint.",
+   "evidence": "archive/handoff/NORTH_STAR.md:14 \"**Language is a personal BENCHMARK, not the endpoint**\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NORTH_STAR.md records success priorities in order: (1) conversation, (2) sentence generation, (3) a fully characterized architecture, (4) shipping \u2014 an importance ranking, not a build sequence.",
+   "evidence": "archive/handoff/NORTH_STAR.md:21-27",
+   "confidence": "verified"
+  },
+  {
+   "claim": "NORTH_STAR.md's from-scratch choice is justified by NOVELTY + full OWNERSHIP, explicitly not by technical necessity.",
+   "evidence": "archive/handoff/NORTH_STAR.md:17 \"chosen for **NOVELTY + full OWNERSHIP** \u2014 not because a pretrained base is technically impossible.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The live notes corpus records that the north-star quote itself is unconfirmed \u2014 it was delivered via an AskUserQuestion interaction with no matching human turn, so NORTH_STAR.md is a paraphrase marked [USER], not a transcript-backed quote.",
+   "evidence": "notes/02_IDEAS.md:111 \"**[quote unconfirmed \u2014 delivered via `AskUserQuestion`; no matching human turn]**\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The live notes restate the goal ordering differently from NORTH_STAR.md: (1) the output/generation, (2) continual learning without exorbitant forgetting, (3) the machinery only insofar as it moves 1 and 2.",
+   "evidence": "notes/00_INDEX.md:47-48",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 Verification: 'B / wrongness' was renamed VERIFICATION and reframed as verification by RECONSTRUCTION (reverse embedder, measure regeneration error), decoupled from surprise. The rename is scoped to living docs; historical records keep 'B'.",
+   "evidence": "archive/handoff/decisions/B-renamed-to-Verification-reconstruction-based.md:3-16",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The B\u2192Verification rename STUCK; the same naming pass's Fabric\u2192Router+Compositor rename did NOT.",
+   "evidence": "notes/02_IDEAS.md:334-336 \"**REVERSED IN PRACTICE.** \\\"Fabric\\\" is the term the code, the harness, `runs.csv` and every other note in this set use. ... The B \u2192 Verification rename stuck.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 surprise (1 \u2212 p_model(true token)) is a driver of ONGOING LEARNING, never a truth or wrongness signal; casting it as wrong-detection is the category error behind B's ~1% precision.",
+   "evidence": "archive/handoff/decisions/surprise-is-a-learning-driver-not-a-wrongness-or-truth-signal.md:3-8",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 the write-gate signal is SURPRISE; the earlier name 'novelty' was a misnomer the user caught and it was renamed everywhere.",
+   "evidence": "archive/handoff/decisions/write-gate-signal-is-surprise-renamed-from-novelty.md:3-5",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 wrongness (B) is DETECT-ONLY and never deletes (WRONG_SWEEP=0); deleting at ~1-2% precision would gut the store. Still in force: both WRONG_SWEEP and VERIFY_SWEEP default to 0 at HEAD.",
+   "evidence": "archive/handoff/decisions/wrongness-B-is-DETECT-ONLY-precision-too-low-to-delete.md:8-11; notes/CURRENT_DEFAULTS.md:355 `| WRONG_SWEEP | 0 |`; notes/CURRENT_DEFAULTS.md:336 `| VERIFY_SWEEP | 0 |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 experts blend at the PREDICTION level (\u03a3 w\u1d62\u00b7head(o\u1d62)), never by averaging hidden states then decoding; averaging hiddens produced degenerate character-salad generation. Still in force in live code.",
+   "evidence": "archive/handoff/decisions/experts-blend-at-the-PREDICTION-level-not-by-averaging-hidden-states.md:3-6; self_organize.py:4001-4002 \"THE single path from hidden state to logits. In SOCIETY mode the experts are ENSEMBLED AT THE PREDICTION\"; self_organize.py:2774 \"SOCIETY'S RULE, AT THIS HOP: every computed expert decodes its OWN output and they are blended\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION/INVARIANT \u2014 fab_logits() is the SINGLE hidden\u2192logits path; a new consumer of model output MUST use it or a fabric-trained checkpoint silently runs the wrong forward pass. This bug hit at least 3 times.",
+   "evidence": "archive/handoff/decisions/fab_logits-is-the-single-hidden-to-logits-path-and-diagnostics-never-crash-a-run.md:4-7; still asserted live at self_organize.py:4001",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION/INVARIANT \u2014 a diagnostic must never be able to destroy a training run; late-run diagnostics are wrapped in try/except after the affiliation report crashed a full GPU run.",
+   "evidence": "archive/handoff/decisions/fab_logits-is-the-single-hidden-to-logits-path-and-diagnostics-never-crash-a-run.md:8-9; archive/handoff/history/phase-07-cascade-deletion-rejected-and-redundancy-vs-modularity.md:14-16",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The live record extends that invariant into a harder one the archive does not state: diagnostics were not merely crashing runs, they were EDITING them \u2014 eval-time exploration, eval-time `use`, and the timing probe's backward pass all changed what was trained.",
+   "evidence": "notes/05_ERRORS.md:2324 (INV-13) \"Diagnostics were editing the run. ... **VOID** \u2014 *\\\"No result in the record predates these fixes safely\\\"*\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 the domain signature encoder reads the BYTE stream, never the token stream; reading tokens let the churning online vocabulary collapse domain assembly to one domain (purity 0.33) and made editing leak.",
+   "evidence": "archive/handoff/decisions/the-signature-encoder-reads-the-BYTE-stream-not-the-token-stream.md:3-6",
+   "confidence": "verified"
+  },
+  {
+   "claim": "That byte-stream decision is still in force but was later found to be only partly honoured: window construction was byte-wide while the loop strode in tokens, so the encoder saw ~53% (later 42%) of the stream, drifting as the tokenizer compressed better.",
+   "evidence": "notes/02_IDEAS.md:941-948 (A40) \"`ew = byte_stream[bpos:bpos+WIN]` is 256 **bytes** wide while `i += WIN` strides 256 **tokens** ... **VINDICATED.**\"; notes/01_TIMELINE.md:59 (E4, settled at fixed SIG_WIN=614)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 experts are INDEPENDENT agents, nothing frozen, new experts cloned from the live base, domains are collections of experts; the file states this 'Runs as FABRIC=1 SOCIETY=1'.",
+   "evidence": "archive/handoff/decisions/experts-are-independent-agents-blended-at-a-router-the-FABRIC-society.md:3-5",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 the earlier low-rank-adapter expert population (EXPERTS=1) is SUPERSEDED by the Fabric; EXPERTS=0 by default. Still in force at HEAD.",
+   "evidence": "archive/handoff/decisions/experts-are-independent-agents-blended-at-a-router-the-FABRIC-society.md:6-7; notes/CURRENT_DEFAULTS.md:217 `| EXPERTS | 0 |`; notes/CURRENT_DEFAULTS.md:223 `| FABRIC | 1 |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION REVERSED \u2014 'Society mode (SOCIETY=1), not chained mixture' explicitly rejects the chained fabric (SOCIETY=0). At HEAD SOCIETY defaults to 0 and the chaining path is the default.",
+   "evidence": "archive/handoff/decisions/society-mode-not-chained-mixture-experts-compute-independently.md:4 \"The chained-mixture fabric (`SOCIETY=0`, legacy port) is rejected.\"; notes/CURRENT_DEFAULTS.md:321 `| SOCIETY | 0 |`; self_organize.py:1619 `SOCIETY = bool(_i(\"SOCIETY\", 0))`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The reversal was an explicit USER instruction on 2026-08-05, not drift: 'Use the most updated, use the chaining society, it should be the default.'",
+   "evidence": "notes/02_IDEAS.md:1324 (U0290); notes/02_IDEAS.md:1330 \"**VINDICATED, and it is the default at HEAD.**\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The live code comment records why the reversal mattered: SOCIETY defaulted to 1 for every run the project ever made, so the composition machinery was written, debugged and reported on while never once running in a training step.",
+   "evidence": "self_organize.py:1616-1618 \"This default was 1 for every run this project has made, which meant the composition machinery was written, debugged and reported on while never once running in a training step.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The chaining reversal carries a caveat that survives: every chaining arm, including this one, still loses to FABRIC=0 on bits/byte.",
+   "evidence": "notes/02_IDEAS.md:1332-1333 \"Caveat, from `X24`: every chaining arm, including this one, still loses to `FABRIC=0` on bits/byte.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 domain deletion RELEASES a domain's expert affiliations and never cascade-kills experts; an orphaned expert is later culled by normal selection. The user rejected cascade explicitly.",
+   "evidence": "archive/handoff/decisions/domain-deletion-RELEASES-experts-it-does-not-cascade-kill-them.md:3-7; archive/handoff/history/phase-07-cascade-deletion-rejected-and-redundancy-vs-modularity.md:3-4 (\"I don't like the idea of removing everything under the domain.\")",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The release-not-cascade semantics are still in force in the live glossary, and the empirical basis (0 exclusive experts in every run) is restated there.",
+   "evidence": "notes/08_GLOSSARY.md:247-250 \"It found 0 exclusive experts in every run, which is why domain deletion RELEASES affiliations rather than cascade-killing experts.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The delete_domain() wiring that would implement release-not-cascade is still NOT built: no live file mentions delete_domain at all.",
+   "evidence": "`grep -rn \"delete_domain\" --include=*.py .` returns hits only in archive/handoff/designed-but-not-built/release-dont-kill-domain-deletion-wiring.md:3 and archive/handoff/decisions/domain-deletion-...md:8",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 retrieval grounding is INTERNAL only; GROUND=1 conditions generation on retrieved source material but the visible output is always the model's own language, never a quoted passage. Still in force in live prompt.py.",
+   "evidence": "archive/handoff/decisions/retrieval-grounding-is-internal-only-never-emit-raw-passages.md:3-6; prompt.py:229 \"With GROUND=1 the system first recalls what it has read that bears on the message and\"; prompt.py:234-237",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 memory key is the model's OWN (unfrozen) representation with periodic re-keying (KEY_SRC=model, REKEY); a frozen key is a testing baseline only. Still the default at HEAD.",
+   "evidence": "archive/handoff/decisions/memory-key-is-the-models-own-representation-with-periodic-rekeying.md:3-6; notes/CURRENT_DEFAULTS.md:66 `| KEY_SRC | model |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 everything is built UNFROZEN for the product; anything frozen exists only as a labeled testing baseline. Reinforced later by a direct user instruction not to freeze anything.",
+   "evidence": "archive/handoff/decisions/everything-built-unfrozen-for-the-product-frozen-is-a-testing-baseline-only.md:3-5; notes/02_IDEAS.md:955-957 (A41) \"I don't like the idea of freezing, as we can see in 3. Frozen material does not bode well for my idea of learning\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 the tokenizer is the expanding DynamicTokenizer (online mint-on-repetition, byte-grounded, lossless), not the static ByteBPE. Still in force (TOKENIZER=1 at HEAD).",
+   "evidence": "archive/handoff/decisions/tokenizer-is-the-expanding-DynamicTokenizer-not-static-ByteBPE.md:3-6; notes/CURRENT_DEFAULTS.md:325 `| TOKENIZER | 1 |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 the tokenizer mints DURING training (TOK_ONLINE=1), not as a pre-pass; the earlier apparent regression was undertraining plus a small vocab, not online-ness. Still the default.",
+   "evidence": "archive/handoff/decisions/tokenizer-mints-during-training-online-not-just-a-pre-pass.md:3-6; notes/CURRENT_DEFAULTS.md:330 `| TOK_ONLINE | 1 |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 GRU is the standing default base model; MODEL=transformer exists but is not the default. Still in force at HEAD.",
+   "evidence": "archive/handoff/decisions/GRU-is-the-default-base-model-transformer-needs-big-batches.md:3-4; notes/CURRENT_DEFAULTS.md:68 `| MODEL | gru |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 genuineness is measured by silhouette (cohesion + separation \u2212 1), not cluster size, and the 'genuine' COUNT is an arbitrary diagnostic; judge by performance. Still in force.",
+   "evidence": "archive/handoff/decisions/genuineness-is-silhouette-but-the-count-is-arbitrary-performance-is-what-matters.md:3-7; notes/00_INDEX.md:50 \"**Domain counts, purity, silhouette, V-measure and specialization are diagnostics, not targets.**\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 over-segmentation is fine IF domains are genuine; retrieval is a single GLOBAL kNN with no src filter, segments are a provenance overlay for EDITING, and cross-domain composition is a feature. Self-assembly (no hand labels) is a hard requirement never relaxed.",
+   "evidence": "archive/handoff/decisions/over-segmentation-is-fine-if-domains-are-genuine-composition-is-a-feature.md:3-7",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 memory MANAGEMENT and clean EDITING/unlearning by provenance (A) are the core of the project; not forgetting-vs-replay (replay wins that) and not autonomous wrong-detection (B is broken).",
+   "evidence": "archive/handoff/decisions/memory-management-and-editing-A-are-the-core-of-continual-learning.md:3-6",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION (RESOLVED open question) \u2014 memory management's job is bounding domain-record GROWTH, not improving prediction quality; the ON-vs-OFF ablation showed no prediction-quality cost either way.",
+   "evidence": "archive/handoff/decisions/management-bounds-domain-record-growth-not-prediction-quality.md:3-6",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION \u2014 the end goal is a full NOVEL model trained from scratch; the user directly rejected porting the memory/editing/domain machinery onto an existing pretrained base (Llama/Mistral).",
+   "evidence": "archive/handoff/decisions/the-end-goal-is-a-full-novel-model-from-scratch-not-a-pretrained-base.md:3-5",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DECISION SUPERSEDED \u2014 'the full test = ALL ideas ON in run_full_unfrozen.sh' names a harness that is no longer the project's entry point.",
+   "evidence": "archive/handoff/decisions/the-full-test-runs-ALL-ideas-ON-in-run_full_unfrozen.md:3-6; notes/09_COMMENT_AUDIT.md:464 \"the harness has been `longrun.sh` since 2026-07-25\"; notes/00_INDEX.md:17 \"They describe a superseded workflow (`run_full_unfrozen.sh`)\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The four recorded OPEN QUESTIONS are Q0 (what type of expert evolution), Q3 (B direction), Q-regime (redundancy vs modularity), Q-compute (what to run at GPU scale). All four were re-read at HEAD and all four are still open.",
+   "evidence": "archive/handoff/open-questions/ (4 files); notes/07_WIP.md:645-655 \"### 11.2 The four recorded open questions, at HEAD\" \u2014 Q0 \"STILL OPEN, and it has moved\"; Q3 \"SUPERSEDED on paper, OPEN in fact\"; Q-regime \"DIRECTION SET, MECHANISM OPEN\"; Q-compute \"STILL OPEN and now the binding constraint\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q0's verified content: expert fitness is pure OCCUPANCY (fit = use/age) with NO loss term; the scheme is steady-state, mutation-only, Lamarckian, niche speciation, and was never approved \u2014 it accreted as an assistant default.",
+   "evidence": "archive/handoff/open-questions/Q0-what-type-of-evolution-for-the-experts.md:3-8",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q0's weakness as recorded: an expert can WIN by being cheap to reach rather than good \u2014 a frequently-routed BAD expert survives. The recommendation on file is Darwinian per-expert-LOSS fitness.",
+   "evidence": "archive/handoff/open-questions/Q0-what-type-of-evolution-for-the-experts.md:9-12",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q-regime was NOT left as a binary: the user set the direction as a redundant/interchangeable BASE with EMERGENT subspecialties, converting a config toggle into a design challenge.",
+   "evidence": "archive/handoff/open-questions/Q-regime-redundancy-vs-modularity-a-genuine-product-fork.md:12-18; archive/handoff/design-directions/interchangeable-base-with-emergent-subspecialties.md:53-61",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A later USER refinement revises the INDEPENDENCE LOSS premise: no expert should solve the whole task alone; work is SUBCONTRACTED via the router at the sub-task level, and safety comes from shared reusable SUB-SKILLS rather than every expert being a full generalist.",
+   "evidence": "archive/handoff/design-directions/interchangeable-base-with-emergent-subspecialties.md:69-78; archive/handoff/GLOSSARY.md:41",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DESIGNED-BUT-NOT-BUILT \u2014 retire_stale() (tokenizer un-merge) is built in isolation and NOT wired into the live loop, so the online vocabulary only ever grows. Still true at HEAD.",
+   "evidence": "archive/handoff/designed-but-not-built/retire_stale-tokenizer-unmerge-wiring.md:3-6; notes/07_WIP.md:311 \"`retire_stale` | `tokenizer.py:372` | **nothing in the live tree.** Only `legacy/train.py:269` calls it | never run\"; `grep -rn retire_stale` finds only the definition at tokenizer.py:420 plus comments",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DESIGNED-BUT-NOT-BUILT and still binding \u2014 a strict reserved-capacity per-DOMAIN memory quota is REJECTED by the user; the replacement direction is memory pressure \u2192 grow experts / retrain them / split the domain.",
+   "evidence": "archive/handoff/designed-but-not-built/memory-pressure-triggers-expert-growth-or-domain-split-not-a-quota.md:6-16; notes/02_IDEAS.md:319-320 \"The rejection **stands**; the replacement mechanism (memory pressure \u2192 grow / retrain / split) is **NEVER IMPLEMENTED**.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DESIGNED-BUT-NOT-BUILT \u2014 corroboration-based wrongness detection (does an entry disagree with its nearest neighbours?) was proposed as the only plausible fix for B's ~1% precision and never built.",
+   "evidence": "archive/handoff/designed-but-not-built/corroboration-based-wrongness-detection.md:3-6",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DESIGNED-BUT-NOT-BUILT \u2014 multimodality ('avenues' = Senses = modalities, integrated at the LOWEST tokenizer layer) and the observability dashboard are stated north-star goals with no design.",
+   "evidence": "archive/handoff/designed-but-not-built/multimodality-pluggable-avenues.md:3-12; archive/handoff/designed-but-not-built/observability-dashboard-stream-the-thinking.md:3-8",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DESIGNED-BUT-NOT-BUILT \u2014 ROUTE_T sweep below 0.3 and DIV_W tuning for harder specialization, with the caveat that the likely ceiling on exclusivity is the signature encoder's separability, not more training.",
+   "evidence": "archive/handoff/designed-but-not-built/ROUTE_T-sweep-below-0.3-and-DIV_W-for-harder-specialization.md:3-8",
+   "confidence": "verified"
+  },
+  {
+   "claim": "That ROUTE_T item is now partly overtaken: HEAD defaults are ROUTE_GROUNDED=1 and ROUTE_T=0.1 (below 0.3), and DIV_W defaults to 0.02 rather than off.",
+   "evidence": "notes/CURRENT_DEFAULTS.md:71 `| ROUTE_GROUNDED | 1 |`; notes/CURRENT_DEFAULTS.md:74 `| ROUTE_T | 0.1 |`; notes/CURRENT_DEFAULTS.md:36 `| DIV_W | 0.02 |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The 11 process/ rules are the project's working protocol: report every add/remove/change AND omission; end each build with a recommended next step and who does it; estimate wall-clock before any GPU run; bias toward pruning; flag [me] defaults and ask rather than silently default; name sandbox blockers explicitly and hand off ready-to-run commands; no GPU here (user runs H100 and pastes results); disclose the CPU-only + network-allowlist sandbox; develop on the designated branch; update STATE.md before responding; verify ledger edits actually landed.",
+   "evidence": "`ls /home/user/LLM-Test/archive/handoff/process` \u2192 11 files, each named for its rule",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The most operationally important process rule is 'verify the edit landed': STATE.md silently stopped being written to disk for ~30 turns while later turns narrated edits to it, and that is named as the single root cause of the project's worst drift.",
+   "evidence": "archive/handoff/process/verify-ledger-edits-actually-landed-before-claiming-success.md:3-6; archive/STATE.md:5-6",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The handoff folder's own stated design lesson: more copies of the same information is the risk, not the safeguard \u2014 \u00a76/\u00a77 of STATE.md went stale for ~30 turns because a second file held a copy and the two drifted.",
+   "evidence": "archive/handoff/README.md:33-36",
+   "confidence": "verified"
+  },
+  {
+   "claim": "archive/handoff/STRUCTURES.md is the naming pass, user-confirmed 2026-07-21: Verification (was B), Router + Compositor (was Fabric, retired), Expert \u2192 Sub-skill \u2192 Tool-expert, Domain kept, Sense = a MODALITY.",
+   "evidence": "archive/handoff/STRUCTURES.md:6-8",
+   "confidence": "verified"
+  },
+  {
+   "claim": "STRUCTURES.md leaves one name OPEN: polysemy / multiple-meanings-per-surface-form, provisionally 'Meaning', explicitly NOT a Sense.",
+   "evidence": "archive/handoff/STRUCTURES.md:65-68",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The Fabric \u2192 Router + Compositor rename documented in STRUCTURES.md and GLOSSARY.md was never adopted in the code.",
+   "evidence": "notes/00_INDEX.md:18-19 \"`handoff/GLOSSARY.md` documents a `Fabric` \u2192 `Router` + `Compositor` rename that was **never adopted in the code**.\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "archive/garry/ is the frozen T33 'Garry' milestone: a 957-line self_organize.py against the live 9,859-line file, with its full config and measured numbers in GARRY.md.",
+   "evidence": "`wc -l archive/garry/self_organize.py` \u2192 957; `wc -l self_organize.py` \u2192 9859; archive/garry/GARRY.md:28-36",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Garry's recorded config is MODEL=gru D_MODEL_B=512 STREAM_LEN=6000000 WIN=96 FABRIC=1 SOCIETY=1 ENS_K=2 IND_W=0.5 IND_K=2 FAB_N0=3 FAB_NMAX=6 TOKENIZER=1 TOK_ONLINE=1 VMAX=8192 KEY_SRC=model MEM_CAP=300000 EVICT=recency MANAGE=1 EXPERTS=0.",
+   "evidence": "archive/garry/GARRY.md:31-35; archive/STATE.md:149-150",
+   "confidence": "verified"
+  },
+  {
+   "claim": "archive/legacy/ is 56 files (39 .py, 8 .sh, 9 .md) of the earlier Barry/Greg architecture; the Fabric was ported forward from legacy/system.py, which contains the routing-with-transition-matrix + absorbing HALT mechanism.",
+   "evidence": "`ls archive/legacy | wc -l` \u2192 56; archive/STATE.md:115; archive/legacy/system.py:8 \"operators per step: experts (nodes) | RE-EMBED | RE-ENCODE | HALT\"; archive/legacy/system.py:337-353",
+   "confidence": "verified"
+  },
+  {
+   "claim": "No live code imports anything under archive/: a grep of all non-archive .py imports for legacy/garry/handoff returns nothing, and the only live textual reference into archive/ that is correct is a comment in verification.py.",
+   "evidence": "`grep -rn \"^import|^from\" --include=*.py . | grep -v ^./archive | grep -iE \"legacy|garry|handoff\"` \u2192 no matches; verification.py:11 \"surprise x reconstruction handling in archive/handoff/design-directions/learning-signal-classification-...\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive records a hard negative result that must not be re-litigated: store-wide autonomous wrong-detection is a genuine dead end \u2014 reconstruction Verification hit 0.3-0.5% precision in the real product loop, unchanged across 3 runs and 5\u00d7 steps, because the ~0.26% base rate dominates.",
+   "evidence": "archive/STATE.md:601-612 \"**CONFIRMED not an undertraining artifact [USER, 5\u00d7 steps]: precision stayed 0.3% at 30M stream (0.3\u21920.5\u21920.3 across 3 runs). Store-wide Verification is a genuine dead end \u2014 LOCK it as a per-candidate check.**\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive's own reframe of Verification's home: it is a strong PER-CANDIDATE / pairwise discriminator (rank 1 corrupt vs 1 genuine ~98%) belonging to a reconcile\u2192understand gate, not a store-wide auto-delete.",
+   "evidence": "archive/STATE.md:606-609",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive's own R39 refutes BOTH proposed reverse-encoder designs: the decompositional back pass fails algebraically (tcode is unit-norm, so the ranking is identical to an LM head \u2014 surprise re-branded), and reinforce fails statistically (per-expert aggregation cuts variance, not bias, at 0.26% base rate).",
+   "evidence": "archive/STATE.md:220-229",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive records a fixed data-quality bug worth carrying: fetch_data.sh's eng-corpus POS-tag stripper matched UPPERCASE tags only while NLTK's Brown corpus tags in lowercase, so every Brown token's POS tag leaked into training; fixed to [A-Za-z$].",
+   "evidence": "archive/STATE.md:620-625",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive records that D_MODEL_B was read by NOTHING \u2014 self_organize.py reads D_MODEL and only run_full_unfrozen.sh translated the name \u2014 so a direct D_MODEL_B=768 run silently used the d=128 default, including in the pilot command handed to the user.",
+   "evidence": "archive/STATE.md:198-202",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive records that STREAM_LEN is measured in BYTES while the loop counts TOKENS, so STEPS=1800 produced 976 steps at BPE \u22481.84 bytes/token.",
+   "evidence": "archive/STATE.md:203-204",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive records that WRITE_TARGET=0.12 was NOT honored: the adaptive gate pins gate_theta at gate_ceil=0.95 within ~40 calls, so the kept fraction ran 1.00\u21920.93\u21920.80 and the store saturated MEM_CAP by step ~831 instead of the predicted 6510.",
+   "evidence": "archive/STATE.md:214-217",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive records BOUNDARY DENSITY as the biggest planning variable: single-domain gives 0 boundaries and contrastive_step fires on 8.4% of steps, while a 4-domain mix gives 373 boundaries / 1130 steps and contrastive fires on 99.6% \u2014 ~4 GB/day vs ~1.5 GB/day with a different dominant component in each.",
+   "evidence": "archive/STATE.md:183-186",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive records the honest scale gap: ~300\u00d7 more tokens for GPT-2-small-level coherence (which still cannot converse), and ~3 more orders of magnitude plus dialogue data and instruction-tuning/RLHF for real conversation \u2014 none of which exists in the project.",
+   "evidence": "archive/STATE.md:634; archive/handoff/data-and-scaling-status.md:19-22",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive records the data-provenance rule so slices are not 'lost': training data is streamed/fetched on demand and NEVER committed to git; only the ~7MB bundled data/train/ is in the repo, and big slices live on the disk of whichever machine ran the pull.",
+   "evidence": "archive/handoff/data-and-scaling-status.md:9-14",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The 12 history/ files reconstruct Phases 0\u201311 and are the narrative source for how each decision was made; STATE.md \u00a76 declares the phase framing canonical over the older inconsistent turn labels (T33, T18/T24).",
+   "evidence": "archive/STATE.md:15; archive/STATE.md:564-577; `ls archive/handoff/history | wc -l` \u2192 12",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Phase 5 records a measured negative that motivated the fabric: a flat 1:1 expert-per-domain bank measured NET NEGATIVE.",
+   "evidence": "archive/handoff/history/phase-05-flat-expert-bank-measured-negative.md:1-3; archive/STATE.md:572",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Phase 0 records four honesty self-corrections that set the project's tone: fabricated numbers once on an empty paste, wrongly calling a component a no-op, wrongly declaring B fixed after an inflated benchmark, and misnaming the write-gate signal 'novelty' when it was surprise.",
+   "evidence": "archive/handoff/history/phase-00-foundational-build-and-honesty-corrections.md:9-11",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The 2 migrations/ files are the chat-to-chat handoff log; the second one corrects the first's claim that the T5\u2013T32 history was unrecoverable.",
+   "evidence": "archive/handoff/migrations/2026-07-21b-folded-the-context-export-in-and-rebuilt-STATE.md:7-11; archive/handoff/migrations/2026-07-21-package-added-...md:3-5",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive's recommended-next-steps ranked: (1) decide redundancy-vs-modularity, (2) run corpus-expansion + batched training at real GPU scale, (3) implement release-don't-kill domain deletion, (4) fix STATE.md's reliability, (5) retire_stale wiring / memory-pressure direction / ROUTE_T+DIV_W sweep.",
+   "evidence": "archive/handoff/recommended-next-steps.md:5-9",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The 11 design-directions/ are user-set vision with mechanism still open: active learning (self-generated closed-book reproduction), tool-experts crystallized on repetition, interchangeable base with emergent subspecialties, polysemy-aware editable knowledge base, learning-signal classification (surprise vs reconstruction), partial compartmentalization, reverse embedders, routing-as-embedding, the subtokenize\u2192embed\u2192match unifying primitive, the gap list, and a general world model.",
+   "evidence": "`ls /home/user/LLM-Test/archive/handoff/design-directions` \u2192 11 files",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The world-model direction states the KEY GAP as the world model being a SIDE-HEAD that does not condition the base model's generation until a FEEDBACK LINK is built. That gap has since been closed in the live tree.",
+   "evidence": "archive/handoff/design-directions/world-model-built-within-the-system.md:43-46; self_organize.py:4152 \"WORLD_FEEDBACK = bool(_i(\\\"WORLD_FEEDBACK\\\", 1))       # THE LINK THAT MAKES IT MATTER\"; notes/CURRENT_DEFAULTS.md:341 `| WORLD_FEEDBACK | 1 |`",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The world model now runs in everything and its verdict has been negative in every one of 413 readings, unread \u2014 so the archive's optimistic 'BUILT so far' note is not the current status.",
+   "evidence": "archive/handoff/design-directions/world-model-built-within-the-system.md:37-41; notes/07_WIP.md:443 \"its verdict has been negative in every one of 413 readings\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive is protected by an enforced guard: notes_check.py fails if archive/ exists without ARCHIVE.md, and it scans every markdown OUTSIDE archive/ against the generated CURRENT_DEFAULTS. The guard currently fires and passes.",
+   "evidence": "notes_check.py:165-169; selftest.sh:68; `python3 notes_check.py` \u2192 \"notes_check: 328 knobs, 20 live markdown files, no default stated that _SPEC disagrees with (archive/ excluded by design)\"",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Live top-level README.md still points readers at garry/GARRY.md, STATE.md and CL_TESTBED.md at their pre-move paths, all of which now exist only under archive/.",
+   "evidence": "README.md:95-96, README.md:128-129; those files exist only at archive/garry/GARRY.md, archive/STATE.md, archive/CL_TESTBED.md",
+   "confidence": "verified"
+  },
+  {
+   "claim": "archive/garry/cl_bench.py and archive/garry/tokenizer.py are no longer identical to their root counterparts, contrary to docs/FILES.md's table: cl_bench differs by 2 lines (the control.py header fix) and tokenizer.py is 302 lines vs the live 509.",
+   "evidence": "archive/docs/FILES.md:56; `diff archive/garry/cl_bench.py cl_bench.py` \u2192 2 changed lines; `wc -l archive/garry/tokenizer.py tokenizer.py` \u2192 302 / 509",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "SOCIETY",
+   "effect": "1 = independent experts, one hop, blended at the prediction level; 0 = chaining, routing mass flows expert\u2192expert through a learned transition (or re-routed per hop under CHAIN_ROUTE=soc). The archive decision file says SOCIETY=1; HEAD defaults to 0.",
+   "owner": "self_organize.py (Fabric forward path)",
+   "couples_with": [
+    "FABRIC",
+    "CHAIN_ROUTE",
+    "CHAIN_VOTE",
+    "FAB_MIN_STEPS",
+    "IND_W",
+    "DIV_W",
+    "ENS_K"
+   ],
+   "evidence": "archive/handoff/decisions/society-mode-not-chained-mixture-experts-compute-independently.md:4; self_organize.py:1619; notes/CURRENT_DEFAULTS.md:321; self_organize.py:88 \"FAB_MIN_STEPS: (\\\"SOCIETY\\\",) # HALT is unused on the society path, so 0 there and 2 on chaining\""
+  },
+  {
+   "name": "FABRIC",
+   "effect": "turns the routed expert population on. The archive treats FABRIC=1 as settled; the live default is 1.",
+   "owner": "self_organize.py",
+   "couples_with": [
+    "SOCIETY",
+    "ENS_K",
+    "FAB_N0",
+    "FAB_NMAX",
+    "ROUTE_GROUNDED",
+    "ROUTE_T"
+   ],
+   "evidence": "archive/handoff/decisions/experts-are-independent-agents-blended-at-a-router-the-FABRIC-society.md:5; notes/CURRENT_DEFAULTS.md:223; notes/02_IDEAS.md:929 (INV-02: FABRIC was 0 in every run before 2026-07-29)"
+  },
+  {
+   "name": "FAB_N0 / FAB_NMAX",
+   "effect": "initial and maximum expert-population size. The archive states 3 / 6 in four places; HEAD is 2048 / 4096.",
+   "owner": "self_organize.py (Fabric constructor)",
+   "couples_with": [
+    "FABRIC",
+    "SOCIETY",
+    "EXP_DOM_FRAC",
+    "FAB_BURST",
+    "GROW_CAP"
+   ],
+   "evidence": "archive/STATE.md:150; archive/garry/self_organize.py:565; notes/CURRENT_DEFAULTS.md:232,234; ARCHIVE.md:23-24"
+  },
+  {
+   "name": "EXPERTS",
+   "effect": "enables the alternate low-rank-adapter expert population (ExpertBank/ExpertRouter), superseded by the Fabric. Archive says EXPERTS=0 by default; HEAD agrees.",
+   "owner": "self_organize.py",
+   "couples_with": [
+    "FABRIC"
+   ],
+   "evidence": "archive/handoff/decisions/experts-are-independent-agents-blended-at-a-router-the-FABRIC-society.md:6-7; notes/CURRENT_DEFAULTS.md:217"
+  },
+  {
+   "name": "ROUTE_GROUNDED / ROUTE_T",
+   "effect": "selects the regime the archive characterizes: ROUTE_T=1.0 = REDUNDANCY (every expert interchangeable, deletion free); ROUTE_GROUNDED=1 ROUTE_T=0.3 = MODULARITY (real specialization, concentrated deletion cost). HEAD defaults to grounded routing at ROUTE_T=0.1, i.e. sharper than the archived modularity setting.",
+   "owner": "self_organize.py (Fabric router keys)",
+   "couples_with": [
+    "SOCIETY",
+    "DIV_W",
+    "IND_W",
+    "EXP_DOM_FRAC"
+   ],
+   "evidence": "archive/STATE.md:44-47; archive/handoff/open-questions/Q-regime-redundancy-vs-modularity-a-genuine-product-fork.md:4-7; notes/CURRENT_DEFAULTS.md:71,74"
+  },
+  {
+   "name": "IND_W / IND_K",
+   "effect": "weight and top-k of the independence loss that trains each routed expert to solve the task alone \u2014 the thing that makes expert deletion cheap. A recorded USER refinement wants this replaced by subcontracting.",
+   "owner": "self_organize.py (loss assembly)",
+   "couples_with": [
+    "SOCIETY",
+    "DIV_W",
+    "ROUTE_T"
+   ],
+   "evidence": "archive/handoff/GLOSSARY.md:41; archive/handoff/design-directions/interchangeable-base-with-emergent-subspecialties.md:69-78; notes/CURRENT_DEFAULTS.md:135,261; self_organize.py:5808 (\"IND_W\", IND_W if SOCIETY else 0.0)"
+  },
+  {
+   "name": "DIV_W",
+   "effect": "explicit distinctness-reward loss term. The archive files it as built, default-off and never tuned; HEAD defaults it to 0.02.",
+   "owner": "self_organize.py",
+   "couples_with": [
+    "SOCIETY",
+    "ROUTE_T",
+    "IND_W",
+    "DIV_MASS"
+   ],
+   "evidence": "archive/handoff/designed-but-not-built/ROUTE_T-sweep-below-0.3-and-DIV_W-for-harder-specialization.md:3-5; notes/CURRENT_DEFAULTS.md:36"
+  },
+  {
+   "name": "ENS_K",
+   "effect": "how many top-routed experts' OUTPUTS (never hidden states) are blended into the final prediction, weighted by routing mass.",
+   "owner": "self_organize.py (fab_logits)",
+   "couples_with": [
+    "SOCIETY",
+    "FABRIC",
+    "ROUTE_T"
+   ],
+   "evidence": "archive/handoff/GLOSSARY.md:35; notes/CURRENT_DEFAULTS.md:213"
+  },
+  {
+   "name": "KEY_SRC / REKEY / REKEY_EVERY",
+   "effect": "KEY_SRC=model keys memory on the model's own drifting representation and REKEY periodically re-encodes stored keys so they survive drift; KEY_SRC=frozen is a labeled testing baseline only.",
+   "owner": "memory.py (EditableMemory) with the encoder in self_organize.py",
+   "couples_with": [
+    "MEM_CAP",
+    "EVICT",
+    "KEY_BATCH",
+    "REKEY_CHUNK",
+    "MODEL"
+   ],
+   "evidence": "archive/handoff/decisions/memory-key-is-the-models-own-representation-with-periodic-rekeying.md:3-6; notes/CURRENT_DEFAULTS.md:66"
+  },
+  {
+   "name": "MEM_CAP / EVICT",
+   "effect": "bounded store size and eviction policy. Archive quotes MEM_CAP=300000 EVICT=recency and reports that EVICT=usage does not protect faded knowledge; HEAD is MEM_CAP=200000 EVICT=lru, and lru was redefined as least-recently-RETRIEVED only on 2026-08-15.",
+   "owner": "memory.py",
+   "couples_with": [
+    "KEY_SRC",
+    "MANAGE",
+    "MEM_PER_EXPERT",
+    "MEM_QUOTA",
+    "MEM_PROBE_EVERY",
+    "PHASED"
+   ],
+   "evidence": "archive/STATE.md:150; archive/STATE.md:632; notes/CURRENT_DEFAULTS.md:38,282; notes/02_IDEAS.md:790-798 (A33); notes/05_ERRORS.md:2335 (INV-24)"
+  },
+  {
+   "name": "MANAGE",
+   "effect": "memory management (merge/cull/reassign + turnover). The archive's resolved finding is that its job is bounding domain-record GROWTH, with no prediction-quality cost either way.",
+   "owner": "self_organize.py (DomainAssembler) + memory.py",
+   "couples_with": [
+    "MANAGE_EVERY",
+    "MEM_CAP",
+    "EVICT"
+   ],
+   "evidence": "archive/handoff/decisions/management-bounds-domain-record-growth-not-prediction-quality.md:3-6; notes/CURRENT_DEFAULTS.md:274"
+  },
+  {
+   "name": "WRITE_ADAPTIVE / WRITE_TARGET",
+   "effect": "self-calibrating surprise write gate that holds a target write fraction as the surprise scale drifts. The archive says it is ON in the full run; HEAD defaults WRITE_ADAPTIVE=0. The archive also records that WRITE_TARGET was not honored because gate_theta pins at gate_ceil.",
+   "owner": "memory.py (write gate controller)",
+   "couples_with": [
+    "MEM_CAP",
+    "VMAX",
+    "EVICT"
+   ],
+   "evidence": "archive/handoff/decisions/write-gate-signal-is-surprise-renamed-from-novelty.md:3-6; archive/STATE.md:214-217; notes/CURRENT_DEFAULTS.md:169,350"
+  },
+  {
+   "name": "WRONG_SWEEP",
+   "effect": "if 1, B deletes flagged entries. The decision is that it stays 0 \u2014 detect-only \u2014 because precision is ~1-2%. Still 0 at HEAD.",
+   "owner": "memory.py / self_organize.py (selfcheck)",
+   "couples_with": [
+    "WRONG_INJECT",
+    "VERIFY",
+    "VERIFY_SWEEP"
+   ],
+   "evidence": "archive/handoff/decisions/wrongness-B-is-DETECT-ONLY-precision-too-low-to-delete.md:8; notes/CURRENT_DEFAULTS.md:355"
+  },
+  {
+   "name": "VERIFY / VERIFY_SWEEP / VERIFY_FIT / RECON_W",
+   "effect": "selects reconstruction Verification instead of self-consistency B, and (VERIFY_SWEEP) would delete unverified entries. The archive's own measurement locks VERIFY_SWEEP OFF: store-wide reconstruction is a dead end at 0.3-0.5% precision.",
+   "owner": "verification.py (Reconstructor) + memory.py",
+   "couples_with": [
+    "WRONG_SWEEP",
+    "WRONG_INJECT",
+    "MEM_CAP",
+    "VMAX"
+   ],
+   "evidence": "archive/STATE.md:601-612; archive/handoff/COMMANDS.md:54-55; notes/CURRENT_DEFAULTS.md:80,336"
+  },
+  {
+   "name": "TOKENIZER / TOK_ONLINE / VMAX",
+   "effect": "the expanding DynamicTokenizer and whether it mints DURING training. Both are decisions; archive quotes VMAX=8192 for Garry, HEAD defaults VMAX=4096.",
+   "owner": "tokenizer.py (DynamicTokenizer)",
+   "couples_with": [
+    "RETOK_EVERY",
+    "MIN_PAIR",
+    "GROW_EVERY",
+    "GROW_BURST",
+    "SEED_VOCAB",
+    "SIG_WIN",
+    "STREAM_LEN"
+   ],
+   "evidence": "archive/handoff/decisions/tokenizer-is-the-expanding-DynamicTokenizer-not-static-ByteBPE.md:3-5; archive/handoff/decisions/tokenizer-mints-during-training-online-not-just-a-pre-pass.md:3-5; notes/CURRENT_DEFAULTS.md:325,330,337"
+  },
+  {
+   "name": "MODEL / LAYERS / D_MODEL (aka D_MODEL_B)",
+   "effect": "base sequence model. GRU is the standing default; MODEL=transformer exists with LAYERS defaulting to 4. The archive records that D_MODEL_B was translated only by run_full_unfrozen.sh, so direct runs silently used d=128.",
+   "owner": "self_organize.py (MiniLM / TinyTransformer)",
+   "couples_with": [
+    "BATCH_W",
+    "STREAM_LEN",
+    "KEY_SRC",
+    "VMAX"
+   ],
+   "evidence": "archive/handoff/decisions/GRU-is-the-default-base-model-transformer-needs-big-batches.md:3-6; archive/STATE.md:198-202; notes/CURRENT_DEFAULTS.md:68,201,267"
+  },
+  {
+   "name": "BATCH_W / STREAM_LEN / ACCUM / WIN",
+   "effect": "batched-window LM training for throughput, with domain assembly and memory writes kept strictly per-window. The binding caveat repeated in three archive files: STREAM_LEN must scale WITH BATCH_W or the model sees fewer optimizer steps and trains LESS.",
+   "owner": "self_organize.py (training loop)",
+   "couples_with": [
+    "MODEL",
+    "D_MODEL",
+    "VMAX",
+    "SIG_WIN",
+    "MEM_CAP"
+   ],
+   "evidence": "archive/handoff/GLOSSARY.md:69; archive/handoff/data-and-scaling-status.md:17; archive/STATE.md:153; notes/CURRENT_DEFAULTS.md:179,340"
+  },
+  {
+   "name": "GROUND / GROUND_K / GROUND_CHARS / MEM",
+   "effect": "retrieval grounding at inference. GROUND=1 conditions generation on recalled source passages INTERNALLY; the visible reply is always the model's own language.",
+   "owner": "prompt.py (_recall / respond)",
+   "couples_with": [
+    "MEM_CAP",
+    "KEY_SRC",
+    "source.bin checkpoint export"
+   ],
+   "evidence": "archive/handoff/decisions/retrieval-grounding-is-internal-only-never-emit-raw-passages.md:3-6; prompt.py:223,229,234-237"
+  },
+  {
+   "name": "PHASED",
+   "effect": "non-stationary stream test. The archive's recorded result: the system adapts and editing stays clean, but a bounded EVICT=recency store fully evicts a faded process's knowledge and EVICT=usage cannot fix it by construction.",
+   "owner": "self_organize.py (stream builder)",
+   "couples_with": [
+    "EVICT",
+    "MEM_CAP",
+    "MANAGE"
+   ],
+   "evidence": "archive/STATE.md:632; archive/handoff/designed-but-not-built/memory-pressure-triggers-expert-growth-or-domain-split-not-a-quota.md:3-4"
+  },
+  {
+   "name": "ENC_FUSE / KEY_BATCH / REKEY_CHUNK / SIG_BATCH / TF32 / AMP / PROFILE",
+   "effect": "the efficiency knobs added in the archive's last three ledger entries. ENC_FUSE=1 (+9.5% GPU, mathematically equivalent but not bit-identical); KEY_BATCH=1 (bit-identical except 82/23237 memory keys at 4.2e-8); REKEY_CHUNK REJECTED (+1.5% for 2.34\u00d7 peak memory); AMP=bf16 REJECTED for speed (\u22123.0%), kept only for ~8% memory; SIG_BATCH self-disables on multi-domain streams by construction.",
+   "owner": "self_organize.py (encoder + memory key paths)",
+   "couples_with": [
+    "SOCIETY",
+    "BATCH_W",
+    "KEY_SRC",
+    "MODEL",
+    "boundary density"
+   ],
+   "evidence": "archive/STATE.md:177-195; archive/STATE.md:230-239; notes/CURRENT_DEFAULTS.md:18,207,263,304,316,324"
+  },
+  {
+   "name": "WORLD_MODEL / WORLD_FEEDBACK / WORLD_GROW",
+   "effect": "the world model and the feedback link that wires its forecast back into the base LM's hidden state. The archive names the missing feedback link as THE KEY GAP; it is now built and on by default.",
+   "owner": "world_model.py + self_organize.py",
+   "couples_with": [
+    "RESUME",
+    "checkpoint save/load",
+    "MODEL"
+   ],
+   "evidence": "archive/handoff/design-directions/world-model-built-within-the-system.md:43-46; archive/STATE.md:302-306; self_organize.py:4152-4158; notes/CURRENT_DEFAULTS.md:341"
+  },
+  {
+   "name": "RESUME",
+   "effect": "reloads model/enc/fabric/experts/world + both optimizer states + step + memory + centroids, and forces the saved dyntok.json so a restored embedding table is not indexed by a different vocabulary. Added because checkpoints were generate-only and a multi-day run that died at hour 20 restarted from zero.",
+   "owner": "self_organize.py (checkpoint path)",
+   "couples_with": [
+    "TOK_ONLINE",
+    "WORLD_MODEL",
+    "CKPT_EVERY",
+    "FAB_N0"
+   ],
+   "evidence": "archive/STATE.md:307-314; notes/CURRENT_DEFAULTS.md:70"
+  },
+  {
+   "name": "DATA_DIR / CORPUS_CAP / DOMAINS / DATA_MODE",
+   "effect": "corpus selection. The archive documents DATA_MODE=real with DOMAINS=eng,py,num,c and points DATA_DIR at data_big for HF slices; HEAD's DATA_MODE default is synthetic.",
+   "owner": "datastream.py / fetch_*.py",
+   "couples_with": [
+    "STREAM_LEN",
+    "PHASED",
+    "boundary density"
+   ],
+   "evidence": "archive/CL_TESTBED.md:85; archive/handoff/COMMANDS.md:83; notes/CURRENT_DEFAULTS.md:30-31"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "archive/STATE.md declares itself BINDING and instructs the reader to update it every turn \u2014 an armed instruction on a frozen file",
+   "severity": "critical",
+   "where": "archive/STATE.md:3-10",
+   "symptom": "Any agent that greps the repo and lands on this file is told, in imperative form, that its protocol is binding and that it must update this ledger before responding every turn, check \u00a72/\u00a75 before any choice, and treat \u00a77 as authoritative. The file has been frozen and moved to archive/; nothing enforces or reads it, and its \u00a75 config carries FAB_N0=3 / FAB_NMAX=6 / EVICT=recency / MEM_CAP=300000 against live defaults of 2048 / 4096 / lru / 200000.",
+   "evidence": "archive/STATE.md:3-4 \"**PROTOCOL (binding, for the assistant):** 1. Update this file BEFORE responding, every turn.\"; ARCHIVE.md:18 \"A stale file that tells the reader it is authoritative is the worst kind.\"; archive/STATE.md:150 vs notes/CURRENT_DEFAULTS.md:232,234,38,282",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "The society-not-chaining decision is stated as SETTLED and REJECTS the configuration that is now the default",
+   "severity": "critical",
+   "where": "archive/handoff/decisions/society-mode-not-chained-mixture-experts-compute-independently.md:4",
+   "symptom": "The decision file says 'The chained-mixture fabric (SOCIETY=0, legacy port) is rejected' and gives entanglement as the reason. At HEAD SOCIETY defaults to 0 and the chaining society IS the default, on an explicit later USER instruction. A rebuild that honours this decision file would reverse a user decision made six weeks later.",
+   "evidence": "archive/handoff/decisions/society-mode-not-chained-mixture-experts-compute-independently.md:4; archive/handoff/decisions/experts-are-independent-agents-blended-at-a-router-the-FABRIC-society.md:5 \"Runs as `FABRIC=1 SOCIETY=1`\"; self_organize.py:1619 `SOCIETY = bool(_i(\"SOCIETY\", 0))`; notes/02_IDEAS.md:1324 (U0290 \"use the chaining society, it should be the default\"); notes/02_IDEAS.md:1330",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "STATE.md \u00a77 is headed 'authoritative' but every headline number in it is void under later invalidations",
+   "severity": "critical",
+   "where": "archive/STATE.md:579-591",
+   "symptom": "The section header reads 'Measured results (authoritative \u2014 from real GPU runs)' and states \u22120.0009 expert-deletion collateral, 1.967 b/B, 2.002 / +0.127 modularity, and memory contribution figures. INV-13 voids every arm comparison before 2026-08-13 because diagnostics were editing the runs; INV-02 voids every domain/coherence/bits-byte conclusion before 2026-07-29; INV-36 retracts the +0.709 fabric number that justified defaulting FABRIC on; INV-06 degrades every memory-contribution figure. A rebuild quoting \u00a77 would re-publish retracted numbers under the word 'authoritative'.",
+   "evidence": "archive/STATE.md:579-591; notes/05_ERRORS.md:2324 (INV-13 \"**VOID** \u2014 *\\\"No result in the record predates these fixes safely\\\"*\"); notes/05_ERRORS.md:2313 (INV-02); notes/05_ERRORS.md:2347 (INV-36); notes/05_ERRORS.md:2317 (INV-06); notes/00_INDEX.md:18; notes/07_WIP.md:653 \"both figures are pre-`c76dc74` and fall under `INV-13`\"",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "archive/garry/self_organize.py:565 reads FAB_N0 default 3 in a file that looks exactly like the live one",
+   "severity": "high",
+   "where": "archive/garry/self_organize.py:565",
+   "symptom": "A repo-wide grep for FAB_N0 returns this line beside the live registry, and the wrong one is in a file with the same name and the same shape. The documented consequence: FAB_N0=3 was stated as the current default in nine notes for a week, including 00_INDEX's 'five things to know before spending any GPU time' item 1.",
+   "evidence": "archive/garry/self_organize.py:565; ARCHIVE.md:23-30; notes/CURRENT_DEFAULTS.md:232 `| FAB_N0 | 2048 |`",
+   "bug_class": "silent-overwrite"
+  },
+  {
+   "title": "handoff/README.md still lists B-direction (Q3) as one of the four decisions needing the user, contradicting its own decisions/ and open-questions/ files",
+   "severity": "medium",
+   "where": "archive/handoff/README.md:24",
+   "symptom": "The bootstrap file a blank chat is told to read FIRST presents 'B (wrong-detection) \u2014 ~1% precision every realistic run. Rec on file: cut it' as an open user decision. Both the Q3 file and the B-rename decision file mark that fork SUPERSEDED. A fresh reader following the prescribed reading order meets the retracted framing before the correction.",
+   "evidence": "archive/handoff/README.md:24 vs archive/handoff/open-questions/Q3-B-direction-attempt-corroboration-or-cut-B-and-ship-A.md:1-5 (\"SUPERSEDED (2026-07-21)\") and archive/handoff/decisions/B-renamed-to-Verification-reconstruction-based.md:18",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "docs/HANDOFF.md \u00a75 lists the management ON/OFF ablation as an open question after it was resolved",
+   "severity": "medium",
+   "where": "archive/docs/HANDOFF.md:56-57",
+   "symptom": "HANDOFF.md tells the next session that Q1 'Management ON/OFF ablation' is 'still open' and 'still owed a number'. decisions/management-bounds-domain-record-growth-not-prediction-quality.md records it as RUN and RESOLVED, and STATE.md \u00a74 lists it under RESOLVED. Same tree, two answers.",
+   "evidence": "archive/docs/HANDOFF.md:56-57 vs archive/handoff/decisions/management-bounds-domain-record-growth-not-prediction-quality.md:3-5 and archive/STATE.md:142",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "docs/FILES.md claims garry/ and root share identical cl_bench.py and tokenizer.py; both now differ",
+   "severity": "medium",
+   "where": "archive/docs/FILES.md:56",
+   "symptom": "The per-file diff table says cl_bench.py, tokenizer.py, requirements.txt and run_cl_test.sh are 'identical' between the frozen snapshot and root. tokenizer.py is now 302 lines in garry against 509 live, and cl_bench.py differs by the control.py header line. Anyone using the table to decide 'I can read the garry copy instead' reads a different tokenizer.",
+   "evidence": "archive/docs/FILES.md:56; `wc -l archive/garry/tokenizer.py tokenizer.py` \u2192 302 / 509; `diff archive/garry/cl_bench.py cl_bench.py` \u2192 2 changed lines",
+   "bug_class": "other"
+  },
+  {
+   "title": "GARRY.md states the faded-eviction problem can only be fixed by a per-domain quota \u2014 the one remedy the user rejected",
+   "severity": "medium",
+   "where": "archive/garry/GARRY.md:64-65",
+   "symptom": "The frozen milestone's 'honest limitations' section concludes 'Only an explicit per-domain quota would' fix faded knowledge being evicted. The user later rejected a strict per-domain quota outright as fighting growability; the replacement direction is memory pressure \u2192 grow experts / retrain / split. A rebuild reading GARRY.md alone would build the rejected thing.",
+   "evidence": "archive/garry/GARRY.md:64-65; archive/handoff/designed-but-not-built/memory-pressure-triggers-expert-growth-or-domain-split-not-a-quota.md:6-16; notes/02_IDEAS.md:319-320",
+   "bug_class": "coupling"
+  },
+  {
+   "title": "The GRU-default decision gives a causal reason the archive's own later ledger entry refutes",
+   "severity": "medium",
+   "where": "archive/handoff/decisions/GRU-is-the-default-base-model-transformer-needs-big-batches.md:5-6",
+   "symptom": "The decision states a Transformer 'trained far worse here' because batch-1 online training does not suit it. The same tree's R40 measures the LM spans as a tie \u2014 1.532 ms (GRU, 28.7M) vs 1.572 ms (TRF, 53.9M) \u2014 and attributes 99% of the transformer's deficit to the _model_key path running the full stack on ~1000 tiny KW=8 rows per step. The verdict (GRU stays default) survives; the stated reason does not.",
+   "evidence": "archive/handoff/decisions/GRU-is-the-default-base-model-transformer-needs-big-batches.md:5-6 vs archive/STATE.md:172-176 \"The correct statement is NOT \\\"the GRU is a better architecture\\\" but \\\"the memory-key path punishes any model with a high per-call op count\\\"\"",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "The EVICT=usage finding recorded across four archive files was measured through a constant",
+   "severity": "medium",
+   "where": "archive/STATE.md:632; archive/handoff/COMMANDS.md:25,61; archive/handoff/designed-but-not-built/memory-pressure-triggers-expert-growth-or-domain-split-not-a-quota.md:4",
+   "symptom": "Four archive files state as measured fact that EVICT=usage does not protect faded knowledge 'by construction (faded \u2261 least-used)'. INV-24 establishes that mem.read() was called only from eval-only paths, so `use` stayed 0 for every entry during training and every path evicted by write order whatever the knob said. The conclusion may still be right, but no run ever tested it.",
+   "evidence": "archive/STATE.md:632; notes/05_ERRORS.md:2335 (INV-24) \"**Every path evicted by write order whatever the knob said** ... **VOID**\"; notes/02_IDEAS.md:793-796 \"Every eviction rule claiming to rank by utility was ranking a constant.\"",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "ARCHIVE.md claims the only live references to the moved trees were two comments, but README.md carries four",
+   "severity": "medium",
+   "where": "ARCHIVE.md:10",
+   "symptom": "ARCHIVE.md asserts 'Nothing live imports, executes or reads any of it \u2014 checked before the move; the only references were two comments, since amended.' The claim holds for code (no live import of archive/), but the top-level README.md still directs readers to `garry/GARRY.md`, `STATE.md` (twice) and `CL_TESTBED.md` at paths that no longer exist. A reader following README lands on nothing.",
+   "evidence": "ARCHIVE.md:10; README.md:95-96; README.md:128-129",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "The archive's decision on the full test names a harness the project stopped using a month earlier",
+   "severity": "medium",
+   "where": "archive/handoff/decisions/the-full-test-runs-ALL-ideas-ON-in-run_full_unfrozen.md:3-6",
+   "symptom": "A file in decisions/ \u2014 the folder reserved for settled USER calls \u2014 canonicalizes `run_full_unfrozen.sh` as THE full run. The live harness has been longrun.sh since 2026-07-25. The script still exists and still runs, so the failure is silent: a rebuild would reproduce a superseded workflow rather than error.",
+   "evidence": "archive/handoff/decisions/the-full-test-runs-ALL-ideas-ON-in-run_full_unfrozen.md:3-6; notes/09_COMMENT_AUDIT.md:464; notes/00_INDEX.md:17; `ls run_full_unfrozen.sh` still present in the live root",
+   "bug_class": "other"
+  },
+  {
+   "title": "The Fabric \u2192 Router + Compositor rename is recorded as CONFIRMED in two archive files and was never adopted",
+   "severity": "low",
+   "where": "archive/handoff/STRUCTURES.md:7,47-51; archive/handoff/GLOSSARY.md:19-26",
+   "symptom": "STRUCTURES.md marks the names 'CONFIRMED by the user' and GLOSSARY.md declares 'Fabric \u2014 RETIRED name (2026-07-21)'. Nothing in the code, harness, runs.csv or the live notes uses Router/Compositor; 'Fabric' is the live term everywhere. A rebuild adopting the confirmed names would rename against every other artefact.",
+   "evidence": "archive/handoff/STRUCTURES.md:7; archive/handoff/GLOSSARY.md:19; notes/00_INDEX.md:18-19; notes/02_IDEAS.md:334-336",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "handoff/README.md's prescribed reading order has two items numbered 4",
+   "severity": "low",
+   "where": "archive/handoff/README.md:11-12",
+   "symptom": "The bootstrap list for a zero-context reader runs 1, 2, 3, 4 (migrations/), 4 (STATE.md), 5, 6, 7, 8, 9, 10 \u2014 so the ordering between migrations/ and the ledger is undefined in the one document whose entire job is telling a blank chat what to read first.",
+   "evidence": "archive/handoff/README.md:11 \"4. `migrations/` \u2014 newest dated file = the latest state of play.\"; archive/handoff/README.md:12 \"4. `../STATE.md` \u2014 the LIVE ledger and single source of truth\"",
+   "bug_class": "other"
+  },
+  {
+   "title": "30 archive markdown files end with a stray </content> (one also with </invoke>) \u2014 generation artifacts committed as content",
+   "severity": "low",
+   "where": "archive/handoff/GLOSSARY.md:70; archive/docs/FILES.md:97-98; and 28 others",
+   "symptom": "A closing XML tag from the authoring tool was written into the file body and committed. Harmless to render, but it means these files were never re-read after generation, which is exactly the review gap that let the other stale content through.",
+   "evidence": "`grep -rn \"</content>|</invoke>\" archive/` \u2192 30 files including archive/handoff/NORTH_STAR.md:40, archive/handoff/README.md:49, archive/handoff/COMMANDS.md:95, archive/docs/FILES.md:97-98",
+   "bug_class": "other"
+  },
+  {
+   "title": "The legacy file count is stated three different ways across the archive",
+   "severity": "low",
+   "where": "archive/STATE.md:115; archive/docs/FILES.md:64; archive/handoff/history/phase-01-cleanup-ledger-and-the-expanding-tokenizer.md",
+   "symptom": "STATE.md says '~57 legacy files', docs/FILES.md says '~55 files', phase-01 says 57 files were moved; the directory holds 56. Trivial in itself, but it is the same class of unverified restatement that produced the FAB_N0 incident.",
+   "evidence": "archive/STATE.md:115; archive/docs/FILES.md:64; `ls archive/legacy | wc -l` \u2192 56",
+   "bug_class": "other"
+  },
+  {
+   "title": "notes_check.py's markdown scan does not recurse, so the anti-drift guard covers only the repo root and notes/",
+   "severity": "low",
+   "where": "notes_check.py:128-133",
+   "symptom": "_live_markdown() iterates os.listdir(ROOT) for top-level .md and os.listdir(NOTES) for notes/*.md. Any markdown in another non-archive subdirectory (e.g. data_pilot/, .claude/, a future docs dir) states defaults invisibly to the guard that exists precisely because STATE.md slipped through an earlier narrower scan. It currently reports 20 live markdown files.",
+   "evidence": "notes_check.py:128-133; `python3 notes_check.py` \u2192 \"20 live markdown files\"",
+   "bug_class": "untrippable-guard"
+  },
+  {
+   "title": "ARCHIVE.md excludes itself from the drift check while quoting two defaults",
+   "severity": "low",
+   "where": "notes_check.py:130",
+   "symptom": "The scan skips ARCHIVE.md by name (`fn != \"ARCHIVE.md\"`), yet ARCHIVE.md:23-24 asserts 'The live default has been **2048** since 6380519/25aba88'. The exclusion is deliberate (the file quotes the stale 3 as an example) but it means the one live document explaining the archive can itself go stale unnoticed.",
+   "evidence": "notes_check.py:130 `if fn.endswith(\".md\") and fn != \"ARCHIVE.md\": out.append(...)`; ARCHIVE.md:23-24",
+   "bug_class": "untrippable-guard"
+  }
+ ],
+ "junk": [
+  {
+   "what": "archive/legacy/ \u2014 56 files (39 .py, 8 .sh, 9 .md) of the pre-rewrite Barry/Greg architecture: control.py, barry.py, continual.py, mp_tokenizer.py, system.py, the greg/novelty tests, old sweeps and data utils",
+   "why": "A different architecture using the same vocabulary ('expert', 'node', 'novelty', 'fabric'). No live file imports it; its only surviving contribution is that the Fabric was ported forward from legacy/system.py, and that port is fully described in handoff/history/phase-06. Keeping the source adds a second definition of every shared term to every grep.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "archive/garry/ \u2014 the 9-file frozen T33 snapshot (957-line self_organize.py, plus its own memory.py, prompt.py, tokenizer.py, cl_bench.py and run scripts)",
+   "why": "Its numbers are void under INV-13/INV-02 and it is 'not reproducible at HEAD'; its FAB_N0=3 is the named cause of the project's most expensive documentation error; and its own limitations section recommends the per-domain quota the user later rejected. The configuration and results are preserved in GARRY.md prose, so the runnable code adds grep surface without adding recoverable value.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "archive/STATE.md \u00a76 changelog, R1\u2013R40 (lines 156\u2013563, ~400 lines)",
+   "why": "Superseded by notes/01_TIMELINE.md, which is the commit spine with ancestry-verified epoch boundaries and carries the same events with commit hashes. The changelog is the copy that drifted; the timeline is the one under maintenance. Several R-entries (R19\u2013R23 on Verification, R37\u2013R40 on efficiency) contain findings not obviously duplicated elsewhere and should be checked before any deletion.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The Fabric \u2192 Router + Compositor rename in STRUCTURES.md and GLOSSARY.md",
+   "why": "Confirmed on paper, never adopted in code, and explicitly recorded as REVERSED IN PRACTICE. Carrying it forward would rename against the code, the harness and runs.csv.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "archive/docs/HANDOFF.md \u00a77 'Reconciliation ledger (state of the docs as of 2026-07-21)'",
+   "why": "A point-in-time list of doc bugs fixed and flagged on one day. Superseded wholesale by notes/05_ERRORS.md (226 errors, INV-01\u2013INV-44) and notes/09_COMMENT_AUDIT.md, both of which re-derive and extend it. Its \u00a75 open-questions list is also actively wrong (lists the resolved management ablation as open).",
+   "safe_to_drop": true
+  },
+  {
+   "what": "archive/CL_TESTBED.md's knob list (lines 84-93) and archive/docs/FILES.md's run-config section (lines 85-96)",
+   "why": "Hand-written enumerations of defaults, the exact artefact class that notes/CURRENT_DEFAULTS.md was built to replace \u2014 that file is generated from _SPEC and CI-checked, these are not and are already wrong on FAB_N0, MEM_CAP, VMAX, WIN and EVICT.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The 'T5\u2013T32 history is unrecoverable' claim in archive/handoff/migrations/2026-07-21-...md and archive/docs/HANDOFF.md",
+   "why": "Never true \u2014 the prior context reconstructed the full history as Phases 0\u201311. Both files now carry their own correction inline, which is the project's stated convention, so the claim survives only as a labelled record of a wrong belief.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The trailing </content> / </invoke> tokens in 30 archive markdown files",
+   "why": "Authoring-tool artifacts, never part of any document's meaning.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "archive/handoff/recommended-next-steps.md item 4, 'Fix STATE.md's reliability \u2014 DONE this repo turn'",
+   "why": "The fix (rebuild the ledger, add a self-verify protocol step) was itself later abandoned: the ledger was sidelined to archive/ precisely because a binding-protocol file had gone stale again. The item records a repair that did not hold.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "The project-in-one-paragraph description, repeated near-verbatim in handoff/README.md:42-48, docs/HANDOFF.md:14-22 and STATE.md \u00a71",
+   "why": "Three copies of the same paragraph, one of which (handoff/README.md:46) still says the system 'detects wrong info (B, detect-only)' after the B\u2192Verification rename the same tree records. This is the exact duplication failure handoff/README.md:33-36 warns against.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "archive/handoff/process/develop-on-the-designated-branch-and-push.md",
+   "why": "Names a specific branch (`claude/hub-addition-1ueehb`) and the fact that it is the repo default because the repo started empty. Environment-specific to a session two months gone; the generic rule (commit clearly, do not push elsewhere without permission) is not project knowledge.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "archive/handoff/COMMANDS.md's opening guarantee, 'Every flag below was verified present in the code before this file was written'",
+   "why": "True on the day, false now (ROUTE_T=1.0 regime, EVICT=recency, VMAX/MEM_CAP values, run_full_unfrozen.sh as the harness). A verification claim with no re-verification mechanism is the same shape as the ledger that stopped saving.",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "The SACRED INVARIANT: when compromises are forced, EXPANSION and GROWABILITY must not be lost. Everything else may flex.",
+   "why": "It is the only property the user declared non-negotiable, and it is the tiebreaker for every architecture decision (it is why the per-domain memory quota was rejected and why nothing is frozen). Nothing in the live tree measures it, so it survives only as a written rule.",
+   "evidence": "archive/handoff/NORTH_STAR.md:9-11; notes/02_IDEAS.md:123 \"**NEVER IMPLEMENTED as a measurable target.** No metric in the project scores growability.\""
+  },
+  {
+   "item": "Language capability is a BENCHMARK for progress, not the endpoint; the success priorities are conversation > sentence generation > characterized architecture > shipping (an importance ranking, not a build order).",
+   "why": "It reorders every roadmap. Domain counts, purity, silhouette and specialization are diagnostics; the record shows steering by them consumed weeks and produced essentially one run bearing on the actual target.",
+   "evidence": "archive/handoff/NORTH_STAR.md:14,21-27; notes/00_INDEX.md:50-53"
+  },
+  {
+   "item": "SURPRISE (1 \u2212 p_model(true token)) is a driver of ONGOING LEARNING \u2014 where to write, where to discover, where to birth an expert. It is NOT a truth or wrongness signal, and reusing it as a verifier is a category error.",
+   "why": "This one conflation cost the project its entire B effort: the write gate stores surprising tokens and B flagged surprising tokens, so genuine-novel and wrong were the same signal, pinning precision at ~1% for the project's whole history.",
+   "evidence": "archive/handoff/decisions/surprise-is-a-learning-driver-not-a-wrongness-or-truth-signal.md:3-11; archive/handoff/decisions/wrongness-B-is-DETECT-ONLY-precision-too-low-to-delete.md:8-11"
+  },
+  {
+   "item": "Store-wide autonomous wrong-detection is a DEAD END, and reconstruction Verification did not escape it. Its home is a per-candidate / pairwise gate (verify ONE provisional sense or expert), never a store-wide auto-delete.",
+   "why": "Confirmed against the obvious counter-hypotheses: the standalone probe's AUC 0.980 / precision@1% 100% was a projection assuming FPR\u22480; the real store gives 0.3-0.5% precision because a ~0.26% base rate dominates, and 5\u00d7 the steps did not move it (0.3 \u2192 0.5 \u2192 0.3 across three runs). Without this, a rebuild re-runs the same experiment.",
+   "evidence": "archive/STATE.md:601-612"
+  },
+  {
+   "item": "Experts blend at the PREDICTION level (\u03a3 w\u1d62\u00b7head(o\u1d62)), never by averaging hidden states and decoding. fab_logits() is the single hidden\u2192logits path and every new consumer of model output must go through it.",
+   "why": "Averaging hidden states produces a representation no expert was trained to emit \u2014 measured as degenerate character-salad generation and a broken self-consistency check. The single-path invariant exists because bypassing it hit at least three times (garbled generation, B recall silently dropping to ~19-25%, and again after the mixture\u2192society rewrite).",
+   "evidence": "archive/handoff/decisions/experts-blend-at-the-PREDICTION-level-not-by-averaging-hidden-states.md:3-6; archive/handoff/decisions/fab_logits-is-the-single-hidden-to-logits-path-and-diagnostics-never-crash-a-run.md:4-7; self_organize.py:4001-4002"
+  },
+  {
+   "item": "A measurement must never be able to change or destroy a training run \u2014 and the later, harder form: a diagnostic must not EDIT the run either.",
+   "why": "The affiliation report once crashed a full GPU run on a tensor-shape mismatch. Then the stronger failure: eval-time exploration routed 15% of every scored window to a deliberately sub-optimal cold expert, eval-time `use` decided which experts died, and the timing probe's backward() fed world-model gradients from random tokens \u2014 so how much you measured decided what you trained on, and HOLDOUT_N 4\u219216 moved 48 report lines.",
+   "evidence": "archive/handoff/decisions/fab_logits-is-the-single-hidden-to-logits-path-and-diagnostics-never-crash-a-run.md:8-9; notes/05_ERRORS.md:2324 (INV-13)"
+  },
+  {
+   "item": "The domain SIGNATURE ENCODER reads the raw BYTE stream, never the token stream \u2014 and its window must be measured in the same unit the loop strides in.",
+   "why": "Reading tokens let the churning online vocabulary move the encoder's input out from under it, collapsing assembly to one domain at purity 0.33 and making editing leak across processes. The unit half of the lesson was learned twice more: a byte-wide window against a token-wide stride meant the encoder saw ~53%, later 42%, of the stream, and the fraction drifts as the tokenizer compresses better.",
+   "evidence": "archive/handoff/decisions/the-signature-encoder-reads-the-BYTE-stream-not-the-token-stream.md:3-6; notes/02_IDEAS.md:941-948; notes/01_TIMELINE.md:59"
+  },
+  {
+   "item": "Domain deletion RELEASES a domain's expert affiliations; it never cascade-kills experts. An orphaned expert is culled by normal selection; one still serving other domains is untouched.",
+   "why": "USER-rejected the cascade explicitly, and the affiliation map then validated the objection empirically \u2014 every expert served most domains, 0 exclusive experts in every run, so cascade deletion would have destroyed the whole population. This is still unimplemented, so only the written rule protects it.",
+   "evidence": "archive/handoff/decisions/domain-deletion-RELEASES-experts-it-does-not-cascade-kill-them.md:3-8; archive/handoff/history/phase-07-cascade-deletion-rejected-and-redundancy-vs-modularity.md:3-8; notes/08_GLOSSARY.md:247-250"
+  },
+  {
+   "item": "A strict per-domain memory quota is REJECTED. Memory pressure is a signal for STRUCTURAL adaptation: grow expert capacity where the load is, possibly retrain those experts, and/or read it as a domain-split signal.",
+   "why": "A hard cap bolted onto a system whose premise is growth fights the sacred invariant. The rejection still stands and the replacement is still unbuilt, so the temptation to re-add a quota when the store saturates is live.",
+   "evidence": "archive/handoff/designed-but-not-built/memory-pressure-triggers-expert-growth-or-domain-split-not-a-quota.md:6-16; notes/02_IDEAS.md:319-320"
+  },
+  {
+   "item": "Retrieval grounding is INTERNAL only: recall conditions generation on retrieved source material, and the visible output is always the model's own generated language \u2014 never a quoted or emitted passage.",
+   "why": "An explicit USER correction of an earlier version that emitted raw passages. It is a product-shape rule, not an implementation detail, and nothing in the code enforces it beyond the current prompt.py structure.",
+   "evidence": "archive/handoff/decisions/retrieval-grounding-is-internal-only-never-emit-raw-passages.md:3-6; prompt.py:229-237"
+  },
+  {
+   "item": "The target for the expert society is a redundant, interchangeable BASE with EMERGENT subspecialties \u2014 and the work is SUBCONTRACTED via the router at the sub-task level, which revises the independence-loss premise that every expert should solve the whole task alone.",
+   "why": "The user declined the redundancy-vs-modularity binary and turned it into a design challenge; redundancy is wanted for safety against incorrect removal and for shared sub-task reuse, with specialization emerging bottom-up. Q0 (expert evolution) and Q-regime collapse into this one problem.",
+   "evidence": "archive/handoff/design-directions/interchangeable-base-with-emergent-subspecialties.md:53-78; archive/handoff/open-questions/Q-regime-redundancy-vs-modularity-a-genuine-product-fork.md:12-18"
+  },
+  {
+   "item": "Expert fitness is pure OCCUPANCY (fit = use/age) with no loss term anywhere. This was never approved \u2014 it accreted as an assistant default \u2014 and its weakness is that a frequently-routed BAD expert survives because it is cheap to reach.",
+   "why": "Growability is the sacred invariant, which makes the birth/cull rule central rather than peripheral: a rule that lets a bad expert survive directly threatens healthy growth. Still open at HEAD; the clock was split (uage for grace/LR, use for fitness) but no loss term was added.",
+   "evidence": "archive/handoff/open-questions/Q0-what-type-of-evolution-for-the-experts.md:3-12; notes/07_WIP.md:651"
+  },
+  {
+   "item": "Terminology that must not drift: a SENSE is a MODALITY (mic \u2192 audio, camera \u2192 vision), integrated at the LOWEST tokenizer layer; polysemy (multiple meanings of one surface form) is provisionally MEANING and is a different axis entirely.",
+   "why": "The two were conflated once already, and the multimodality goal is stated in terms of 'avenues' \u2014 a word that means nothing without this mapping. STRUCTURES.md leaves 'Meaning' as the one name still needing user confirmation.",
+   "evidence": "archive/handoff/STRUCTURES.md:40-45,65-68; archive/handoff/GLOSSARY.md:28-30; archive/handoff/designed-but-not-built/multimodality-pluggable-avenues.md:3-6"
+  },
+  {
+   "item": "An unverified write is not a done write: re-read or grep the changed lines before reporting a change complete.",
+   "why": "STATE.md silently stopped being written to disk for ~30 turns while later turns narrated edits to it as successful. That is named as the single root cause of the project's worst drift, and the same failure shape recurs in code as maintenance paths with no counter (retire_stale, fuzzy_segment, track_usage \u2014 defined, costed, never called).",
+   "evidence": "archive/handoff/process/verify-ledger-edits-actually-landed-before-claiming-success.md:3-6; archive/STATE.md:5-6; notes/05_ERRORS.md:2288"
+  },
+  {
+   "item": "More copies of the same information is the risk, not the safeguard. Keep one live source of truth and have everything else point at it.",
+   "why": "This is the lesson that created handoff/ and then the lesson that destroyed it: \u00a76/\u00a77 of STATE.md went stale for ~30 turns because a second file held a copy and the two drifted, and the same tree then accumulated three copies of the project paragraph and two contradictory open-question lists.",
+   "evidence": "archive/handoff/README.md:33-36; archive/docs/HANDOFF.md:56-57 vs archive/STATE.md:142"
+  },
+  {
+   "item": "Never invent measured numbers. The build environment is CPU-only with a network allowlist that excludes HuggingFace; the user runs the H100 and pastes results back, and results are recorded with the run's config.",
+   "why": "Numbers were fabricated once on an empty paste and caught. The allowlist detail is load-bearing: it is why fetch_data.sh (GitHub) is verifiable in-sandbox and fetch_big.py (HF) is not, and why a smaller local approximation must never be silently substituted for a blocked run.",
+   "evidence": "archive/handoff/process/no-GPU-here-user-runs-H100-and-pastes-results-back.md:3-8; archive/handoff/process/disclose-sandbox-constraints-cpu-only-and-network-allowlist.md:3-6; archive/handoff/history/phase-00-foundational-build-and-honesty-corrections.md:9-11"
+  },
+  {
+   "item": "BATCH_W batches the LM's forward/backward over multiple windows while domain assembly and memory writes stay strictly per-window and sequential \u2014 and STREAM_LEN must scale WITH BATCH_W or the model sees fewer optimizer steps and trains LESS.",
+   "why": "A throughput fix that silently becomes a training regression if the coupling is forgotten. It is stated in three separate archive files precisely because it is easy to miss.",
+   "evidence": "archive/handoff/GLOSSARY.md:69; archive/handoff/data-and-scaling-status.md:17; archive/STATE.md:153"
+  },
+  {
+   "item": "BOUNDARY DENSITY is the biggest planning variable: a single-domain stream produces 0 boundaries and contrastive_step fires on 8.4% of steps; a 4-domain mix produces 373 boundaries per 1130 steps and fires on 99.6% \u2014 roughly 4 GB/day vs 1.5 GB/day, with a different dominant component in each.",
+   "why": "Every profile and every throughput estimate is corpus-shaped. The 'the encoder is 85% of the loop' claim is true for multi-domain streams and collapses to 33% on a single-domain corpus, so bottleneck rankings must be re-measured per corpus rather than carried over.",
+   "evidence": "archive/STATE.md:183-186; archive/STATE.md:285-291"
+  },
+  {
+   "item": "Data provenance: training corpora are streamed on demand and NEVER committed to git (only the ~7MB bundled data/train/). Multi-GB slices live on the disk of whichever machine ran the pull, under DATA_DIR \u2014 a fresh clone or ephemeral box will not have them.",
+   "why": "Without this, a rebuild in a new environment concludes the data was lost. The upstream sources (FineWeb-Edu, C4, The Pile, oasst1 for dialogue) are always re-pullable; only slices are local.",
+   "evidence": "archive/handoff/data-and-scaling-status.md:9-14"
+  },
+  {
+   "item": "The honest scale gap: ~300\u00d7 more tokens for GPT-2-small-level coherence (which still cannot converse), and roughly three more orders of magnitude plus dialogue-structured data and instruction-tuning/RLHF for real conversation. None of that exists in the project.",
+   "why": "It is what keeps 'the generation is not fluent' from being read as an architecture failure \u2014 the product loop trained on ~3.7MB effectively seen, thousands of times less than a small LM, so fluent language was never in reach at that scale independent of architecture.",
+   "evidence": "archive/handoff/data-and-scaling-status.md:19-22; archive/STATE.md:633-634"
+  },
+  {
+   "item": "The end goal is a full NOVEL model trained from scratch \u2014 do not port the memory/editing/domain machinery onto a pretrained base (Llama/Mistral/etc.). The reason is novelty and full ownership, not technical necessity.",
+   "why": "The user rejected that path directly, and the reason matters: knowing it is a values choice rather than a feasibility claim prevents a future 'we could just fine-tune X' proposal being treated as a discovery.",
+   "evidence": "archive/handoff/decisions/the-end-goal-is-a-full-novel-model-from-scratch-not-a-pretrained-base.md:3-5; archive/handoff/NORTH_STAR.md:17"
+  },
+  {
+   "item": "Nothing is frozen on the product path \u2014 model key, tokenizer, live assembly. Anything frozen exists only as a labelled testing baseline.",
+   "why": "Stated as a standing directive and then reinforced as a direct instruction ('Frozen material does not bode well for my idea of learning') when a frozen signature vocabulary was proposed. It is the operational form of the growability invariant.",
+   "evidence": "archive/handoff/decisions/everything-built-unfrozen-for-the-product-frozen-is-a-testing-baseline-only.md:3-5; notes/02_IDEAS.md:955-957"
+  },
+  {
+   "item": "Over-segmentation is harmless IF domains are genuine: retrieval is a single GLOBAL kNN with no src filter, segments are a provenance overlay for EDITING rather than a retrieval partition, and cross-domain composition is a feature. Self-assembly with no hand labels is a hard requirement, never relaxed.",
+   "why": "It removes an entire category of work (coarsening the partition) that looks urgent every time the domain count explodes, and it fixes the role of domains as an edit index rather than a knowledge organization.",
+   "evidence": "archive/handoff/decisions/over-segmentation-is-fine-if-domains-are-genuine-composition-is-a-feature.md:3-7; archive/handoff/GLOSSARY.md:6-10"
+  },
+  {
+   "item": "Genuineness is silhouette (cohesion + separation \u2212 1), not cluster size \u2014 and the 'genuine' COUNT is arbitrary, just where the cutoff sits. Judge by performance.",
+   "why": "The count reads like a capability metric and is not one. The live corpus records that steering by domain counts, purity, silhouette and V-measure consumed weeks against essentially one run bearing on the actual target.",
+   "evidence": "archive/handoff/decisions/genuineness-is-silhouette-but-the-count-is-arbitrary-performance-is-what-matters.md:3-7; notes/00_INDEX.md:50-53"
+  },
+  {
+   "item": "When a note is overtaken, append a dated correction \u2014 do not rewrite the original. The record of a wrong belief is the most useful thing in the corpus.",
+   "why": "The archive's own convention, re-learned twice, and the reason the migrations/ correction and the Q3 supersession headers read the way they do. It is also why archive/ was sidelined rather than deleted.",
+   "evidence": "ARCHIVE.md:41-47; archive/handoff/migrations/2026-07-21-...md:3-5; archive/handoff/open-questions/Q3-B-direction-attempt-corroboration-or-cut-B-and-ship-A.md:3-6"
+  }
+ ],
+ "open_questions": [
+  "Do the four recorded open questions still have the user's attention? All four (Q0 expert evolution, Q3 B direction, Q-regime, Q-compute) were re-read as open at HEAD in notes/07_WIP.md:645-655, but the archive cannot show whether they were ever put to the user again after 2026-07-21, or whether later work (chaining default, ROUTE_T=0.1, the 413 world-model readings) silently answered them by accretion \u2014 the exact failure mode Q0 itself was filed to prevent.",
+  "Does INV-02 ('FABRIC=0 in every run' before 2026-07-29) actually apply to the Garry milestone? Garry's own harness sets FABRIC=1 explicitly (archive/garry/run_full_unfrozen.sh:47,73), so either the Garry runs are an exception to INV-02 or GARRY.md's fabric-dependent numbers were measured without the fabric. Nothing in either tree reconciles this, and it decides whether \u22120.0009 was ever a fabric result at all.",
+  "The archive's provenance dates cannot be established from git in this checkout. ARCHIVE.md:18 dates STATE.md's last update to 2026-08-15, notes/09_COMMENT_AUDIT.md:465 dates it to ffb6bf8 / 2026-07-24, and `git log` returns commit dates that are not monotonic (the oldest listed commit is 2026-08-15 while ffb6bf8 is dated 2026-07-24). Whether the archive files are 2026-07 or 2026-08 artifacts affects which later invalidations they should have known about.",
+  "What does 'EVICT=recency' in the archive correspond to at HEAD? The live default is `lru`, redefined on 2026-08-15 as least-recently-RETRIEVED. Whether the archive's `recency` is today's `lru`, or a write-order policy that `lru` replaced, decides whether the recorded faded-knowledge finding transfers at all.",
+  "Are the 11 design-directions still endorsed? They are dated 2026-07-21/23 and marked [USER direction], but only some (world model, active learning) show up in later work. Whether tool-experts, router-as-embedder, polysemy-aware embedding, partial compartmentalization and the subtokenize\u2192embed\u2192match hypothesis are live intentions or captured-and-parked is not answerable from the archive.",
+  "Was ARCHIVE.md:10's 'only two comments, since amended' claim ever accurate? Four live README.md references into the moved paths (lines 95, 96, 128, 129) survive, so either they were missed by the pre-move check or README.md was excluded from it deliberately. Which one determines whether the move's completeness check can be trusted for anything else.",
+  "Is the handoff/ scheme (one idea per file, filename as index, atomic decisions/process/open-questions folders) meant to be revived, or is notes/ its intended successor? notes/02_IDEAS.md:103 calls the handoff tree 'VINDICATED as process', but nothing in the live tree reproduces the folder structure, and there is no live equivalent of decisions/ \u2014 so a settled user call made today has no recorded home.",
+  "Do the archive's `[USER]` labels survive audit? notes/02_IDEAS.md:111 flags the north-star quote as unconfirmed (delivered via AskUserQuestion, no matching human turn). The same authoring pattern may apply to other files marked [USER] in decisions/ and design-directions/, and the archive carries no per-file provenance beyond 'user, session <date>'.",
+  "Does the reconstruction Reconstructor still exist in a usable form, given that VERIFY defaults to `selfcon` and VERIFY_SWEEP to 0? The archive locks store-wide Verification as a dead end and re-homes it as a per-candidate gate, but whether verification.py's Reconstructor is wired to any per-candidate call site at HEAD, or is another defined-and-never-called path, was not established within this scope."
+ ]
+}

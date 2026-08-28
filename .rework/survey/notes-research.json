@@ -1,0 +1,887 @@
+{
+ "area": "notes-research",
+ "summary": "The `notes/` research corpus is two distinct bodies of work with very different evidence quality, and conflating them is the main hazard. (1) Four large in-house surveys \u2014 `research_lr_schedules.md` (882 lines), `research_tokenizer.md` (500), `research_experts_routing.md` (1082), `research_continual_memory.md` (943), all compiled 2026-08-15 \u2014 were written by an agent that had WebSearch but whose WebFetch was `EGRESS_BLOCKED` for every paper host; across all four, exactly one primary source was fetched in full (a GitHub README). Every claim in them carries an explicit evidence label ([S]/[V] search-snippet, [M] recollection, [F] fetched, [R]/[CODE] repo-derived), and those labels are the load-bearing metadata. (2) An externally-run literature review, archived verbatim as 17 files under `notes/_evidence/litreview/`, answered 12 numbered questions with 6 primary sources read in full; `notes/LITREVIEW_FINDINGS.md` is the only file that checked any of it against this repo. Two briefs (`EXTERNAL_RESEARCH_BRIEF.md`, `RESEARCH_BRIEF_DIFFERENTIATION.md`) are outbound requests, not results: the first was answered (that answer is the litreview bundle), the second \u2014 13 sources, all `[S]`, none opened \u2014 has no corresponding evidence directory and appears unanswered. The review's most valuable outputs are corrections, not confirmations: the b/B anchor is wrong for code (GPT-2-small is 1.7912 on GitHub, not 1.0\u20131.2), per-source quota exists but in replay-CL (CBRS/iCaRL) not the retrieval literature, the store being read during training puts this project in replay-CL rather than kNN-LM, and the MoE-ecology paper that was supposed to license dropping cull-and-reseed does not contain the ablation. Several of the notes' recommendations have since been implemented (BWT/F, R_full vs R_weights, MEM_SRC_FLOOR, LR_DECAY=1) and several of their warnings were checked and rejected, but the notes themselves were never annotated, so a reader re-derives work already done. The seed-budget arithmetic in the one \"checked\" file contains a double-applied \u221a2 that inflates every published seed requirement by roughly 2\u00d7.",
+ "facts": [
+  {
+   "claim": "The assigned corpus is 7 top-level notes (EXTERNAL_RESEARCH_BRIEF 197 lines, LITREVIEW_FINDINGS 162, RESEARCH_BRIEF_DIFFERENTIATION 302, research_continual_memory 943, research_experts_routing 1082, research_lr_schedules 882, research_tokenizer 500) plus 17 files under notes/_evidence/litreview/ (16 .md + pile_bits_per_byte.csv).",
+   "evidence": "wc -l on the seven files; ls -la /home/user/LLM-Test/notes/_evidence/litreview/",
+   "confidence": "verified"
+  },
+  {
+   "claim": "All four research_*.md surveys were compiled 2026-08-15 by an agent whose WebSearch worked but whose WebFetch was EGRESS_BLOCKED for arxiv.org, openreview.net, aclanthology.org and every other paper host; no full paper was read in any of them.",
+   "evidence": "/home/user/LLM-Test/notes/research_continual_memory.md:9-11; /home/user/LLM-Test/notes/research_experts_routing.md:15-16; /home/user/LLM-Test/notes/research_lr_schedules.md:12-17; /home/user/LLM-Test/notes/research_tokenizer.md:13-15",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Across all four surveys exactly one source was fetched in full: the schedule_free GitHub README. 'Fetched in full this session. Only github.com/facebookresearch/schedule_free qualifies.'",
+   "evidence": "/home/user/LLM-Test/notes/research_lr_schedules.md:25",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The four surveys use four different, mutually incompatible evidence-label schemes: [S]/[M]/[CODE] (continual_memory), [S]/[M]/[I] (experts_routing), [F]/[S]/[M]/[R] (lr_schedules), [V]/[M] (tokenizer).",
+   "evidence": "research_continual_memory.md:13-15; research_experts_routing.md:20-24; research_lr_schedules.md:23-28; research_tokenizer.md:17-19",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The litreview bundle uses a fifth scheme \u2014 [FULL]/[PARTIAL]/[CITED]/[UNVERIFIED]/[NOT FOUND] \u2014 and names exactly 6 sources read in full: arXiv 2605.06415, 2303.01421v1 (SeMem), 2601.02708 (CREAM), 2606.29178 (TraceRetain), 2310.07589 (Goodtriever), 2507.03526 (RLRS), plus 2101.00027 (The Pile).",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/07_sources.md:4-8, 12-51",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The provenance chain is recorded: four surveys committed and flagged as 'model recollection, not sourced literature', then EXTERNAL_RESEARCH_BRIEF.md at commit cc544ce, then 'the researcher ran it elsewhere and returned 16 files, archived verbatim to notes/_evidence/litreview/'.",
+   "evidence": "/home/user/LLM-Test/notes/02_IDEAS.md:2401-2405",
+   "confidence": "verified"
+  },
+  {
+   "claim": "EXTERNAL_RESEARCH_BRIEF.md is an outbound request document, not a result: it names six questions needing full-text access (2a per-group LR phase, 2b MoE dead-expert revival, 2c domain isolation in a bounded store, 2d kNN-LM read-during-training, 2e bits/byte reference points, 2f growth-rate vs final size).",
+   "evidence": "/home/user/LLM-Test/notes/EXTERNAL_RESEARCH_BRIEF.md:78-186",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The litreview bundle answers exactly those six questions as Q1-Q6 (files 01-06) plus an addendum of six more (Q7-Q12, files 08-13) and two tangents (file 14).",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/00_README_AND_CONTRADICTIONS.md:86-96, 143-154",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The single most load-bearing correction: the project's remembered 'GPT-2-small \u2248 1.0\u20131.2 b/B' anchor is correct for English web text only. Pile paper Table 2 gives GPT-2-small at Pile-CC 1.0878, OpenWebText2 1.1111, GitHub 1.7912, Pile aggregate 1.2253.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/05_bits_per_byte_reference.md:15-23; pile_bits_per_byte.csv:2,5,7,24",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Code bits/byte is not a stable quantity: GitHub spans 0.5597 (a 1.3B model trained on the Pile) to 1.7912 (GPT-2-small), a 3.2x range driven purely by training mix; Pile-CC spans only 1.09x.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/05_bits_per_byte_reference.md:30-34",
+   "confidence": "verified"
+  },
+  {
+   "claim": "No published bits-per-byte figures were found for language models in the 1M-100M parameter range on a standard corpus; the Pile table starts at 124M and Gopher's Table A7 (arXiv 2112.11446) is flagged as the likeliest source but was NOT read.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/05_bits_per_byte_reference.md:103-112; 00_README_AND_CONTRADICTIONS.md:81-83",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The bpb conversion is recorded with its constant: bpb = (L_T/L_B)\u00b7l/ln(2), with L_T/L_B = 0.29335 GPT-2-tokens per byte across the Pile \u2014 and the warning that the Pile paper computes perplexity PER DOCUMENT, not concatenated, so concatenated numbers are not comparable to that table.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/05_bits_per_byte_reference.md:124-136, 114-118",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q1 answer: 'No prior art found' for per-group LR schedules with independent wavelength and independent phase anchored to group birth. Every published point (layerwise decay, discriminative fine-tuning, LARS/LAMB, per-layer, LoRA+, RLRS, PBT) collapses to one global clock.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/01_per_group_lr_schedules.md:5-21",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The nearest LR prior art cuts against the repo's design: RLRS (arXiv 2507.03526) Table 4 tunes MoE Experts to lambda_start 0.3 -> lambda_end 1.125 (low early, high late), explicitly to prevent early expert specialization freezing the router. A birth-anchored high-LR newborn is the opposite move.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/01_per_group_lr_schedules.md:64-82",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The litreview corrects the brief's own framing: RLRS is a counterexample to 'everything published is a global schedule times a per-group constant', because lambda_start != lambda_end makes each component trace a differently shaped curve, with components' effective LRs crossing (Figure 2).",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/01_per_group_lr_schedules.md:42-47",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q2 verdict: arXiv 2605.06415 does NOT license dropping cull-and-reseed. The six-condition revival ablation is deferred to reference [14] ('Expert revival: Dead experts can resuscitate...', 'arXiv preprint, 2026', no arXiv ID) which returns no search hits at all; ref [15] is in the same state.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/02_moe_dead_expert_revival.md:71-80; 07_sources.md:111-118",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The balance-loss formula the brief asked for is absent from 2605.06415: only prose and an aggregate weight B = 0.40, with no equation, no KL coefficient and no variance-penalty coefficient.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/02_moe_dead_expert_revival.md:46-56",
+   "confidence": "verified"
+  },
+  {
+   "claim": "2605.06415's language results are unusable: WikiText-2 perplexity 33,163-37,812 against a ~50k BPE vocabulary (uniform \u2248 50,257), i.e. models barely above chance, with DEAD=0 reported across all of them. Expert revival is vision-only (Table 7, TinyImageNet-200).",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/02_moe_dead_expert_revival.md:125-147",
+   "confidence": "verified"
+  },
+  {
+   "claim": "2605.06415 defines DEAD as an absolute threshold: <1% of top-1 test-set routing mass, not gradient norm. The litreview notes this taxonomy does not port: at 16 experts uniform is 6.25%, at this repo's 4096 experts uniform is 0.024%, so every expert would be 'DEAD'.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/02_moe_dead_expert_revival.md:171-190",
+   "confidence": "verified"
+  },
+  {
+   "claim": "2605.06415's one scaling data point points the wrong way for this repo: 16 -> 32 experts took DEAD from 7/16 to 25/32 and LOWERED top-1 accuracy (33.41% -> 26.99%).",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/02_moe_dead_expert_revival.md:152-163",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The review explicitly states it would not cite 2605.06415 for a design decision, listing seven reasons including an internal contradiction (abstract says E>=0.5 removes the need for balance loss; Section 4.7 says balance loss is the sole essential revival mechanism, while B sits in E's denominator) and a bibliography entry for Hartle & Hawking's 'Wave function of the universe'.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/02_moe_dead_expert_revival.md:200-227",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q3 answer: per-source quota is used by NONE of the five retrieval leads. SeMem is unbounded and never evicts; CREAM prunes per-cluster with retain iff SimDist(x,p_c) < mu_c + gamma*sigma_c; TraceRetain is the only one with a real capacity bound (K=50) and its score has no source term; Goodtriever partitions into two physically separate stores; arXiv 2505.00675 was never reached.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/03_domain_isolation_bounded_store.md:5-20, 89-96, 146-160, 220, 258-273",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The gap the litreview identifies as publishable: 'the occupancy dynamics of a bounded shared store under sequential domain arrival' \u2014 nobody has published it, and an older domain driven to zero occupancy by a newly-streaming one would be a novel negative result.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/03_domain_isolation_bounded_store.md:283-286",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q4 answer: kNN-LM retrieval is inference-only in the original and every descendant checked, and the datastore is static. This rests on three secondary descriptions (SeMem s6, Goodtriever App. A, SeMem v2 abstract) \u2014 Khandelwal et al. 2020 was NOT read directly, and the file says so.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/04_knnlm_train_vs_inference.md:5-21; 07_sources.md:90-93",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The most actionable number in Q4: a selectively-populated store is nearly useless with a constant lambda (PPL 14.3) and competitive with a full store once lambda is confidence-gated (8.6 vs 9.0 at 53% of the memory). If a store is aggressively evicted, a constant lambda makes the store look broken when the gate is the problem.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/04_knnlm_train_vs_inference.md:81-92",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q4 flags an unstudied hazard specific to this project: admission and eviction are coupled through a feedback loop when admission is confidence-gated and confidence depends on current store contents \u2014 'Nobody has analyzed this loop.'",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/04_knnlm_train_vs_inference.md:104-116",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q6 answer: no prior art isolates newborn fraction from final size, and there is a structural reason \u2014 'nearly every published growth operator is a doubling', so newborn fraction is pinned at ~100% across the field, and what gets varied is when to grow, how to initialize, which dimension, and how many hops.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/06_growth_rate_vs_final_size.md:5-17",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q6 raises a design flaw in the repo's own strongest experiment: total growth is NOT held constant between 3->4096 (adds 4093) and 2048->4096 (adds 2048), so fraction and absolute count are collinear; separating them needs e.g. 2048->4096 vs 4096->6144 (both +2048, 50% vs 33%).",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/06_growth_rate_vs_final_size.md:148-155",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q6 also offers a reframing worth logging: damage may track the ratio of newborn to mature parameters RECEIVING GRADIENT per step, which in a top-k routed MoE is not the same as newborn fraction of the population.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/06_growth_rate_vs_final_size.md:160-163",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q7 finding: LRU-on-retrieval is 'eager promotion + passive demotion', which is exactly what the caching field spent five years moving away from; the correction is 'lazy promotion + quick demotion'. The repo's new-domain flood is the textbook scan pattern, against which plain LRU has no defence.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/09_cache_eviction.md:5-6, 11-16, 28-35",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q7 gives a concrete alternative with numbers: S3-FIFO across 6,594 traces from 14 datasets beat each of 12 state-of-the-art algorithms, cut LRU's miss ratio by up to 72%, matched LRU's hit ratio with ~46% less memory. Its explicit warning: do NOT adopt SIEVE \u2014 its own authors state it is not scan-resistant.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/09_cache_eviction.md:64-72, 145-146",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q8 gives the theorem the project feared: under reservoir sampling a domain's expected buffer share is E[slots held by A] = M\u00b7N_A/N, so under indefinite new-domain streaming it tends to 0. 'The old domain is not evicted by a bad decision. It is diluted to zero by a correct one.'",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/10_replay_buffer_selection.md:29-48",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q8 supplies the per-source quota that Q3 reported as absent: class-balanced reservoir sampling and iCaRL's fixed per-class exemplar allocation are exactly that, standard in replay-based CL. The review flags this as a correction to its own earlier framing.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/10_replay_buffer_selection.md:59-74; 15_additional_notes.md:54-59",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The single most useful reframing in the bundle: 'Your store is read during training. That single fact puts you in replay-based continual learning, not in semiparametric/kNN-LM territory' \u2014 and four of the twelve questions turned out to be one question in four vocabularies.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/15_additional_notes.md:66-80; 10_replay_buffer_selection.md:171-177",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q8 names a design axis the repo is not using: admission, eviction and retrieval-selection are three distinct rules; the repo has a surprise gate (admission) and LRU (eviction) but no retrieval-selection rule \u2014 it takes cosine top-k. MIR shows the choice of what to replay matters independently.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/10_replay_buffer_selection.md:164-169",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q10 supplies the standard forgetting apparatus with formulas: the T x T matrix R_{i,j}, ACC, BWT = mean(R_{T,j} - R_{j,j}) (negative = forgetting), FWT, and Chaudhry's Forgetting Measure f_j^k = max_l (R_{l,j} - R_{k,j}) (positive = forgetting), with the instruction to report both because they disagree when a task keeps improving after training stops.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/11_forgetting_metrics.md:20-55",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q10 recommends bits-per-byte DIFFERENCES over perplexity ratios specifically because this project mints BPE merges during training: 'a perplexity ratio across a vocabulary change is not a meaningful quantity; a b/B difference is.'",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/11_forgetting_metrics.md:74-84",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q10's central structural point: there is no weights-only version of BWT in the literature \u2014 R_{i,j} is defined on the SYSTEM. The prescribed fix is a matched pair, R^full (retrieval on) minus R^weights (retrieval off), whose difference separates 'eviction problem' from 'forgetting problem'.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/11_forgetting_metrics.md:101-120",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Both of Q10's recommendations have since been implemented in code: `holdout_bpb(use_mem=False)` is called both ways to build the matched pair, and BWT plus the forgetting measure are computed and printed.",
+   "evidence": "/home/user/LLM-Test/self_organize.py:5066, 5098, 5134, 5187-5201",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q11 states the Switch balance loss as alpha\u00b7N\u00b7Sum(f_i\u00b7P_i) with alpha = 1e-2, explains why the factor N is what makes alpha mean the same thing at any expert count, and notes only P is differentiable \u2014 so a fully dead expert (f_i = 0) contributes exactly zero to the loss and receives zero balance pressure. Balance prevents collapse; it does not revive.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/12_moe_aux_loss_expert_choice.md:12-37",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q11 supplies the citation the repo lacked for its balance coefficient: arXiv 2204.09598 swept alpha over {0.05,0.1,1,2} and found the optimal alpha GROWS with expert count (at 4 experts raising alpha hurt 52.83->49.74; at 16 experts it helped 50.44->51.33), so at 4096 experts the 0.01 default 'has no claim on you'.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/12_moe_aux_loss_expert_choice.md:45-49",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q11 recommends auxiliary-loss-free bias balancing (arXiv 2408.15664, DeepSeek-V3) OVER expert-choice routing (2202.09368) for this project, because expert-choice is not causal and because at E=4096 with E\u00b7C = c\u00b7T each expert would see almost nothing per step.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/12_moe_aux_loss_expert_choice.md:86-106, 120-126",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Q12 confirms update-rescaling is safe under Adam ('m_t and v_t depend on g_t alone'), and adds the caveat that matters for a cyclical per-expert schedule: v is an EMA with horizon ~1/(1-beta2) = 1000 steps at beta2=0.999, so a cycle shorter than that never lets v equilibrate to any phase. 'a newborn expert has fewer than 1,000 steps of history by definition'.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/13_adam_cyclical_and_rescaling.md:5-19, 42-57",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The tangents file establishes that the neuroevolution-x-backprop hybrid is a named, decades-old configuration (Lamarckian evolution, memetic algorithms), and maps the repo's operators to standard ones \u2014 notably 'grace period' = NEAT speciation protection, which exists for precisely the same reason.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/14_tangents.md:8-35",
+   "confidence": "verified"
+  },
+  {
+   "claim": "What the tangents file says is NOT covered anywhere: 'Your population lives inside one network, is trained by one shared backward pass, and its fitness is measured on shared routing mass' \u2014 frequency-dependent selection, an ecology rather than a tournament. PathNet is named as the one possible precedent but is explicitly unverified.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/14_tangents.md:37-69",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The tokenizer tangent supplies a failure mode specific to minting-during-training: new tokens become undertrained and weight decay drives their embeddings toward zero, because a late-minted token appears rarely but weight decay applies to its row every step \u2014 'your newest tokens are permanently in the worst regime.' Recommended: exempt new rows from weight decay for a grace period, log per-token L2 norm vs age-since-minting, init as mean of constituents.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/14_tangents.md:105-129",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LITREVIEW_FINDINGS.md is the only file that checked any external claim against this repo, and it corrects the review's headline sigma: the 1.227 b/B spread came from commit 33a9299, which is PRE-c76dc74 (verified with git merge-base --is-ancestor), the era where diagnostics drew from the same RNG as the stream and which 05_ERRORS.md INV-13 voids.",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:8-23",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The review's recommended first step (pin nondeterminism, run 5x with all seeds fixed) was already done and passed: 33a9299's own commit message records 'the determinism check (base and nogate byte-identical)', and longrun.sh's seeds) block records three runs byte-identical in every reported number. 'Do not spend those 5 runs.'",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:25-29",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Post-fix per-arm sigma (range/d2 with d2=1.693 at n=3) ranges 26x across four arms of one experiment: A fixed N0=3 0.193, B fixed N0=2048 0.047, C ramp NMAX=64 0.106, D ramp 3->4096 1.225, ramp 2048->4096 0.095. 'sigma is not a property of the measurement. It is a property of the arm.'",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:35-46 (arithmetic re-checked: 0.326/1.693=0.193, 0.080/1.693=0.047, 2.074/1.693=1.225)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "LITREVIEW_FINDINGS raises a point it says is worth more than the correction itself: instability tracks ramping. Arm D is not merely worse on the mean (3.384) but unstable (sigma 1.225 vs arm B's 0.047), and whether the mean difference or the variance difference is the real phenomenon has never been asked here.",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:47-51",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Two of the review's warnings were checked and REJECTED. (a) The claimed 4096x balance-loss error is not present: fab_bal is `w.size(1) * (w.mean(0) ** 2).sum()`, the factor of N is there. (b) Rescaling weight decay is correct, not a bug, and WEIGHT_DECAY defaults to 0 anyway so it is inert in every recorded run.",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:87-100; verified at /home/user/LLM-Test/self_organize.py:4267 `def fab_bal(w): return w.size(1) * (w.mean(0) ** 2).sum()`; CURRENT_DEFAULTS.md:165 WEIGHT_DECAY 0.0",
+   "confidence": "verified"
+  },
+  {
+   "claim": "One real difference from Switch remains and is stated with the right magnitude: Switch uses N\u00b7Sum(f_i\u00b7P_i) with f the hard dispatch fraction; this repo uses N\u00b7Sum(P_i^2). Near-uniform routing the gradient is 2 for ours against ~1 for Switch \u2014 a factor of 2, not 4096.",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:92-94",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The cache-eviction finding is explicitly accepted as a strong lead rather than a settled result ('I have not verified this against a primary source ... and it contradicts a design decision made here last week') with a cheap internal test proposed: compare the new domain's occupancy share under EVICT=lru vs EVICT=recency after a domain switch.",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:112-124",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A half-implemented mechanism is correctly identified: mem.use accumulates the softmax weight rather than a count (`self.use.index_add_(0, gi.reshape(-1), w.reshape(-1))`), but mem.last \u2014 the clock EVICT=lru ranks on \u2014 is stamped by ANY retrieval regardless of weight (`self.last[gi.reshape(-1)] = self.tick`). The graded signal exists and the eviction rule ignores it.",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:130-135; verified at /home/user/LLM-Test/memory.py:553 and :566",
+   "confidence": "verified"
+  },
+  {
+   "claim": "RESEARCH_BRIEF_DIFFERENTIATION.md records three interventions that all failed in the same shape: DIV_W at 0/0.02/0.1 gave 1.971/1.932/2.103 b/B (the 0.039 gain is exactly the replication floor, and every arm scored below its own shuffled-assignment null); FAB_LR_OWN gave 2.023 vs 2.019 over three paired seeds; FAB_LR_CYCLE was flat across a x64 sweep.",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:27-32",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The strongest single in-house fact in the differentiation brief: a specialization score recomputed after randomly permuting which expert handled which input is not beaten by the real assignment. 'Whatever the router is doing, it is not sorting inputs by anything that makes experts different from each other.'",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:34-37",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The encoder has been measured healthy and is not the bottleneck: two checkpoints scored mean true-corpus silhouette +0.24 with 1-NN corpus accuracy 0.984 and d_between/d_within 1.71, and +0.25 / 0.90 / 2.68, via probe_ckpt_geometry.py with labels used only to score.",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:61-65; /home/user/LLM-Test/probe_ckpt_geometry.py:1-18 confirms the script exists and does this",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The in-house lead the brief calls strongest: the layer between encoder and router shatters one corpus. On DOMAINS=eng the self-assembling domain layer produced 33 live domains, 30 scored 'weak', on top of ~2100 ephemeral source ids; the memory partition scored own-domain 1.924 vs random-other 2.144 (+0.220) against a shuffled-provenance floor of +0.223 +/- 0.003, i.e. excess over null of -0.003.",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:66-76",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The growth pathology has a recorded mechanism: '[fabric @ 48120] ramp -> grew 5 -> 415/4096 experts' on a run that ended at step 48140 \u2014 five experts created twenty steps before the end, use-age spanning 0..36131. 'The ramp never converges on this schedule.'",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:185-190",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Population churn is quantified: 10062 experts grown against 5969 culled to hold a steady 4096, i.e. ~1.5x turnover, with a tenth of the population freshly-initialized noise at any moment, while centroids and expert-embedding keys are defined over exactly that churning set.",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:219-224",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The measurement bar is stated explicitly and applied to the literature as well as to the repo: two runs of an identical configuration have differed by up to 0.039 b/B; any reported effect smaller than that is noise, and readers should 'ask what the paper's own replication spread was'.",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:276-278",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The differentiation brief's own statement of the goal ranking, which matches the project's two definitive goals: 'What we actually care about. Language quality and continual learning without catastrophic forgetting. Expert differentiation is instrumental ... Answers that improve raw perplexity at the cost of making experts less separable are not what we are looking for.'",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:279-282",
+   "confidence": "verified"
+  },
+  {
+   "claim": "All 13 sources in RESEARCH_BRIEF_DIFFERENTIATION are labelled [S] with 'none of these has been opened', and no directory under notes/_evidence/ corresponds to this brief \u2014 unlike EXTERNAL_RESEARCH_BRIEF, which has litreview/.",
+   "evidence": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:286-289; ls of /home/user/LLM-Test/notes/_evidence/ shows only litreview/ and one other dir",
+   "confidence": "verified"
+  },
+  {
+   "claim": "research_experts_routing.md renders a 34-row verdict table classifying each Fabric design choice as SUPPORTED / CONTRADICTED / UNTESTED / MIXED, and names five UNTESTED items as the genuinely novel ones: two summed routers, routing key from expert weights (eemb), expert synthesis from the router query (edec), fast/slow error EMA culling, and rescue mutation.",
+   "evidence": "/home/user/LLM-Test/notes/research_experts_routing.md:960-994",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The strongest external threat identified for the Fabric: 'Equifinality in Mixture of Experts' (arXiv 2604.14419, [S, recent]) reports 62 controlled runs on WikiText-103 at 76-84M params with cosine routing against learned centroids at d_space = 64 \u2014 the same construction and dimension as SIG_D=64 \u2014 finding five cosine-routing variants statistically equivalent within 1 PPL, attributed to 'routing absorption'.",
+   "evidence": "/home/user/LLM-Test/notes/research_experts_routing.md:370-381, 588-594",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The corresponding actionable test is named: run the Hash Layers baseline (arXiv 2106.04426, competitive with Switch and BASE) \u2014 replace the whole router with a fixed balanced hash of the domain id. 'If it matches, the router is not the lever.'",
+   "evidence": "/home/user/LLM-Test/notes/research_experts_routing.md:213-221, 607-609, 1008-1011",
+   "confidence": "verified"
+  },
+  {
+   "claim": "research_experts_routing identifies a specific literature-backed defect in growth: Orthogonal Growth (arXiv 2510.08008) found it crucial to raise the number of ACTIVATED experts proportionally when adding experts, but FAB_CHAIN_K and ENS_K are fixed constants (8 and 2) while n_live grows \u2014 'Every newborn is competing for a slot in a top-8 whose width never grows.'",
+   "evidence": "/home/user/LLM-Test/notes/research_experts_routing.md:750-757; CURRENT_DEFAULTS.md:42 FAB_CHAIN_K 8, :213 ENS_K 2",
+   "confidence": "verified"
+  },
+  {
+   "claim": "research_continual_memory.md's Part C.2 establishes rekey is not novel \u2014 REALM's asynchronous index-builder is the canonical prior art and Memorizing Transformers took the opposite branch (normalise keys/queries instead of re-encoding) \u2014 and names what IS unusual: token-level rather than document-level re-keying, during from-scratch training, with the raw ctx stored to enable it.",
+   "evidence": "/home/user/LLM-Test/notes/research_continual_memory.md:576-611",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The same file names the publishable experiment the project has two points of: the staleness-performance curve (frozen keys / normalise-only / rolling / per-step), citing cl_bench's `mem[frozen key] +1.73` vs `mem[model key + re-key] +1.19`.",
+   "evidence": "/home/user/LLM-Test/notes/research_continual_memory.md:613-619",
+   "confidence": "verified"
+  },
+  {
+   "claim": "research_continual_memory.md's C.5 gives three coherent, mutually exclusive positions on the eviction-of-faded-domains observation \u2014 the SILO position (data that goes only into memory and never into the gradient, making deletion real deletion), the CLS position (eviction of a consolidated domain is correct behaviour; the metric is the with-minus-without gap over time), and the retention position \u2014 and says pick one and defend it.",
+   "evidence": "/home/user/LLM-Test/notes/research_continual_memory.md:813-830",
+   "confidence": "verified"
+  },
+  {
+   "claim": "It also states the consequence for the project's headline unlearn claim plainly: 'Your system trains the weights on the same stream that writes the memory. Every domain is therefore in both places', so the unlearn result on an active domain measures the retrieval channel's contribution, not knowledge removal.",
+   "evidence": "/home/user/LLM-Test/notes/research_continual_memory.md:800-811",
+   "confidence": "verified"
+  },
+  {
+   "claim": "research_tokenizer.md's most useful correspondence: Picky BPE's IoS = count(a,b)/count(a) is algebraically the same statistic as the repo's `p(b|a)` gate, read in the opposite direction (Picky: high IoS -> delete the part; repo: high p(b|a) -> mint the whole). 'Your gate and Picky's pruner are two halves of one criterion, and you have only implemented the minting half.'",
+   "evidence": "/home/user/LLM-Test/notes/research_tokenizer.md:236-243",
+   "confidence": "verified"
+  },
+  {
+   "claim": "research_tokenizer.md names the one real prior art for growing a discrete vocabulary during pretraining \u2014 Vocabulary Curriculum (arXiv 2502.17910), 5 expansions from a base vocabulary of 92 to 4359/7941/11382/14819/18276 \u2014 and flags that how they initialise rows and size the softmax could not be verified.",
+   "evidence": "/home/user/LLM-Test/notes/research_tokenizer.md:256-261",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The standing caution against the project's own compression proxy: PathPiece / 'Tokenization Is More Than Compression' (EMNLP 2024) found 'no clear relationship' between compression and downstream accuracy, with Renyi efficiency offered as a better intrinsic diagnostic.",
+   "evidence": "/home/user/LLM-Test/notes/research_tokenizer.md:88-92",
+   "confidence": "verified"
+  },
+  {
+   "claim": "research_tokenizer.md records a clean in-house negative result and generalises it: branching entropy cannot serve as the post-mint test because greedy longest-match consumes a+b into ab so p(b|a) is 0 from the instant of the merge \u2014 'any criterion computed over the current segmentation is destroyed by acting on it. Nobody hits this in the static-tokenizer literature because nobody re-measures after merging.'",
+   "evidence": "/home/user/LLM-Test/notes/research_tokenizer.md:397",
+   "confidence": "verified"
+  },
+  {
+   "claim": "research_lr_schedules.md's C.2 assembles five independent lines of evidence that full-peak LR restarts are harmful, including the re-warming literature's finding that 'the loss increase is caused by the LR jump itself, not by the data change' and the repo's own measurement of a restart 1.00e-04 -> 2.00e-03 after which the held-out curve swings 1.5 b/B and never resettles.",
+   "evidence": "/home/user/LLM-Test/notes/research_lr_schedules.md:597-654",
+   "confidence": "verified"
+  },
+  {
+   "claim": "It also identifies an implementation-level hazard in the restart: jumping 5% -> 100% in one step with no per-cycle warmup means the first post-restart updates are sized by a v calibrated to small gradients in a converged region \u2014 'the same variance pathology warmup was invented to prevent, arriving at the worst possible moment.'",
+   "evidence": "/home/user/LLM-Test/notes/research_lr_schedules.md:655-663",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The baseline the LR file says the repo's enveloped-restart schedule must beat is not cosine-with-restarts but 'constant-tail + cooldown branches + EMA' \u2014 the infinite-LR-schedule family (arXiv 2503.02844) plus weight averaging, which has direct empirical support in exactly this continual setting.",
+   "evidence": "/home/user/LLM-Test/notes/research_lr_schedules.md:718-723, 801-804",
+   "confidence": "verified"
+  },
+  {
+   "claim": "MEM_SRC_FLOOR (default 0.5) implements a per-source floor in the bounded store \u2014 the mechanism the litreview reported as absent from the retrieval literature (Q3) and located in replay-CL (Q8). The code notes it guards EVICTION only, not deletion.",
+   "evidence": "/home/user/LLM-Test/self_organize.py:314, 604, 3674-3675, 4874; CURRENT_DEFAULTS.md:144",
+   "confidence": "verified"
+  },
+  {
+   "claim": "mem_evict_test.py exists and is the harness LITREVIEW_FINDINGS names for the LRU-vs-recency occupancy test; its docstring records the underlying bug ('EVICT was documented as choosing victims by utility ... but mem.read() was called only from generate() and bpb_true() -- both eval-only').",
+   "evidence": "/home/user/LLM-Test/mem_evict_test.py:1-12; /home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:123",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CURRENT_DEFAULTS.md is machine-generated from _SPEC by notes_check.py and enforced by selftest.sh, and exists specifically because 'the notes have been wrong about the defaults twice at real cost'. It is the only note in the directory that claims to describe current code; all seven research notes are records of a moment.",
+   "evidence": "/home/user/LLM-Test/notes/CURRENT_DEFAULTS.md:3-11",
+   "confidence": "verified"
+  }
+ ],
+ "levers": [
+  {
+   "name": "FAB_BALANCE / BAL_WARM / BAL_FLOOR",
+   "effect": "Weight on the load-balance auxiliary loss and its decay. Code computes `_bw = max(BAL_FLOOR, 1.0 - step/max(1,BAL_WARM))`, so pressure decays to a floor of 0.15, not to zero. The research notes disagree with each other about this.",
+   "owner": "self_organize.py Fabric balance term (fab_bal at :4267, step site at :7023)",
+   "couples_with": [
+    "FAB_GRACE",
+    "FAB_CULL_FRAC",
+    "DIV_W",
+    "EXP_DOM_FRAC",
+    "FAB_NMAX"
+   ],
+   "evidence": "/home/user/LLM-Test/self_organize.py:4251-4252, 7015-7023; CURRENT_DEFAULTS.md:88,115,178"
+  },
+  {
+   "name": "FAB_KEY_NORM",
+   "effect": "L2-normalises routing keys. Default 0 (off). RESEARCH_BRIEF_DIFFERENTIATION calls flipping it to 1 'the cheapest actionable item in the whole brief' because X-MoE (arXiv 2204.09179) identifies unnormalised dot-product routing as collapse-prone.",
+   "owner": "self_organize.py Fabric router",
+   "couples_with": [
+    "ROUTE_T",
+    "SIG_D",
+    "FAB_BALANCE",
+    "ROUTE_GROUNDED",
+    "ROUTE_LEARN"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:229; /home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:116-118, 254"
+  },
+  {
+   "name": "ROUTE_T",
+   "effect": "Router temperature, fixed at 0.1, i.e. a 10x sharpening of routing logits. research_experts_routing rates this CONTRADICTED in direction (ST-MoE's z-loss penalises logit magnitude) and recommends a learnable temperature per X-MoE.",
+   "owner": "self_organize.py Fabric router",
+   "couples_with": [
+    "FAB_KEY_NORM",
+    "SIG_D",
+    "FAB_BALANCE"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:74; /home/user/LLM-Test/notes/research_experts_routing.md:898-912"
+  },
+  {
+   "name": "FAB_LR_OWN / FAB_LR_CYCLE / FAB_LR_MAXR / FAB_LR_BOOST / FAB_LR_GAMMA / FAB_LR_AMIN",
+   "effect": "Per-expert LR clocked from the expert's own birth step, applied by rescaling the realised optimizer update, clamped at x4. FAB_LR_OWN defaults to 0 (off) and its measured effect was 0.0040 b/B, an order of magnitude below the replication floor.",
+   "owner": "self_organize.py main() per-expert LR block (~5100-5156)",
+   "couples_with": [
+    "LR",
+    "LR_MIN_FRAC",
+    "LR_EPOCHS",
+    "LR_RESTARTS",
+    "LR_DECAY",
+    "FAB_GRACE",
+    "FAB_CULL_FRAC",
+    "WEIGHT_DECAY"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:119-123,230; /home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:30; /home/user/LLM-Test/notes/research_lr_schedules.md:725-795"
+  },
+  {
+   "name": "LR_RESTARTS / LR_DECAY / LR_EPOCHS / LR_MIN_FRAC / LR_RESTART_DAMP",
+   "effect": "Cyclical LR with a decaying envelope. LR_DECAY now defaults to 1.0 (the research file's own recommendation, adopted). At LR_DECAY=1 the envelope multiplies the cycle value INCLUDING its floor, so the effective end-of-run LR approaches LR\u00b7min_frac^2 = 5e-6 (0.25% of peak), not the nominal 5% floor.",
+   "owner": "self_organize.py _lr_at (~3542-3605)",
+   "couples_with": [
+    "LR",
+    "LR_WARMUP",
+    "EPOCHS",
+    "FAB_LR_OWN",
+    "WEIGHT_DECAY"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:137-139,269-270; /home/user/LLM-Test/notes/research_lr_schedules.md:700-713"
+  },
+  {
+   "name": "EVICT",
+   "effect": "Memory eviction rule; default 'lru' (least-recently-retrieved). LITREVIEW_FINDINGS flags this as the direction the caching field moved AWAY from, and notes the rank key mem.last is stamped by any retrieval regardless of similarity weight while mem.use is similarity-weighted.",
+   "owner": "memory.py EditableMemory",
+   "couples_with": [
+    "MEM_PROBE_EVERY",
+    "MEM_SRC_FLOOR",
+    "USE_DECAY",
+    "DECAY_EVERY",
+    "MEM_CAP",
+    "WRITE_GATE"
+   ],
+   "evidence": "/home/user/LLM-Test/self_organize.py:479,4871,4887-4891; memory.py:287,553,566"
+  },
+  {
+   "name": "MEM_PROBE_EVERY / MEM_PROBE_N",
+   "effect": "Read probe that gives the eviction rule a real signal during training. Without it, use/last are constants and EVICT degenerates to write-order eviction \u2014 the code prints exactly this warning when the probe is off and evict != recency.",
+   "owner": "memory.py + self_organize.py read-probe block (~7539-7550)",
+   "couples_with": [
+    "EVICT",
+    "MEM_SRC_FLOOR",
+    "USE_DECAY"
+   ],
+   "evidence": "/home/user/LLM-Test/self_organize.py:4876-4891, 5865-5866, 6629-6630"
+  },
+  {
+   "name": "MEM_SRC_FLOOR",
+   "effect": "Per-source floor reserving slots per domain in the bounded store \u2014 the per-source quota the litreview reported as absent from the retrieval literature. Guards EVICTION only; delete_src() bypasses it.",
+   "owner": "memory.py EditableMemory (src_floor)",
+   "couples_with": [
+    "EVICT",
+    "MEM_CAP",
+    "MEM_OWNERS",
+    "MEM_QUOTA",
+    "DOMAINS",
+    "PHASE_SCHED"
+   ],
+   "evidence": "/home/user/LLM-Test/self_organize.py:314, 604, 3672-3675, 4874, 4976-4982, 6610-6613"
+  },
+  {
+   "name": "FAB_GROW / FAB_RAMP / FAB_RAMP_TO / FAB_N0 / FAB_NMAX / FAB_RAMP_LATCH",
+   "effect": "Population growth. FAB_GROW defaults to 1 (ON), with the ramp 'neutered by FAB_RAMP_TO'=0.5 and FAB_N0=2048 into FAB_NMAX=4096 \u2014 i.e. the catastrophic 3->4096 arm is not the default, but growth is not off either.",
+   "owner": "self_organize.py Fabric.grow / PlateauGrowth (~2219)",
+   "couples_with": [
+    "FAB_CHAIN_K",
+    "ENS_K",
+    "FAB_CULL_FRAC",
+    "FAB_GRACE",
+    "FAB_PLATEAU",
+    "FAB_PRESSURE",
+    "FAB_EXPLORE"
+   ],
+   "evidence": "/home/user/LLM-Test/self_organize.py:186, 2938, 6200; CURRENT_DEFAULTS.md:52,127-128,232,234,237"
+  },
+  {
+   "name": "FAB_CHAIN_K / ENS_K",
+   "effect": "Number of experts activated per routing decision. Fixed at 8 and 2 while n_live grows to 4096 \u2014 research_experts_routing rates this CONTRADICTED against Orthogonal Growth's finding that activated count must scale with population, and identifies it as the mechanism starving newborns.",
+   "owner": "self_organize.py Fabric.forward / society()",
+   "couples_with": [
+    "FAB_GROW",
+    "FAB_NMAX",
+    "FAB_EXPLORE",
+    "FAB_GRACE"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:42,213; /home/user/LLM-Test/notes/research_experts_routing.md:750-757, 980"
+  },
+  {
+   "name": "FAB_EXPLORE",
+   "effect": "Fraction of rows whose last top-k slot is hard-overwritten with a uniformly chosen cold expert. 0.15, non-annealed. research_experts_routing rates the motivation canonical (Shazeer noisy top-k) but the form 'more aggressive than anything in the literature' and off-policy, and recommends annealing plus a score-perturbation form.",
+   "owner": "self_organize.py Fabric routing (learn_regions path)",
+   "couples_with": [
+    "FAB_BALANCE",
+    "BAL_WARM",
+    "FAB_CHAIN_K",
+    "FAB_GRACE",
+    "SEED"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:50; /home/user/LLM-Test/notes/research_experts_routing.md:795-831"
+  },
+  {
+   "name": "FAB_CULL_FRAC / FAB_GRACE / FAB_RESCUE / CULL_MODE",
+   "effect": "Evolutionary culling pressure. FAB_CULL_FRAC 0.02, FAB_GRACE 48 use-selections. The litreview's Q2 conclusion is that arXiv 2605.06415 does NOT license dropping cull-and-reseed; the cheap test proposed is one run with balance loss on and culling off.",
+   "owner": "self_organize.py Fabric.manage()/remove()",
+   "couples_with": [
+    "FAB_BALANCE",
+    "BAL_FLOOR",
+    "FAB_GROW",
+    "FAB_LR_BOOST",
+    "FAB_NEW_FRAC"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:31,116,129,228; /home/user/LLM-Test/notes/_evidence/litreview/02_moe_dead_expert_revival.md:94-104"
+  },
+  {
+   "name": "DIV_W / DIV_MASS / IND_W",
+   "effect": "Expert-distinctness reward (negative-correlation-learning term in all but name). Now defaults to 0.02 \u2014 the arm whose 0.039 b/B gain the brief itself says is exactly the replication floor, and which scored below its own shuffled-assignment null.",
+   "owner": "self_organize.py loss assembly (~7036-7044)",
+   "couples_with": [
+    "FAB_BALANCE",
+    "BAL_WARM",
+    "SOCIETY",
+    "ENS_K"
+   ],
+   "evidence": "/home/user/LLM-Test/self_organize.py:155, 4262, 7036-7044; /home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:29"
+  },
+  {
+   "name": "TOK_MINT_PMIN / TOK_MINT_NOVEL / TOK_PROBATION / TOK_PROBATION_BY / TOK_COMPOSE / TOK_ANCHOR",
+   "effect": "The tokenizer mechanisms research_tokenizer.md Part C analyses at length. TOK_MINT_PMIN=0.0 (the p(b|a) gate passes everything), TOK_MINT_NOVEL=0.0 (novelty re-ranking off), TOK_PROBATION=0 (probation off), TOK_COMPOSE=0. The analysis describes a configuration that is not the default one.",
+   "owner": "tokenizer.py DynamicTokenizer + self_organize.py TOK_* block",
+   "couples_with": [
+    "GROW_EVERY",
+    "GROW_BURST",
+    "MIN_PAIR",
+    "VMAX",
+    "LOSS_MASK_DEAD",
+    "RETOK_EVERY",
+    "WARMSTART"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:160-162,326,331-332,156; /home/user/LLM-Test/notes/research_tokenizer.md:32-40"
+  },
+  {
+   "name": "LOSS_MASK_DEAD / VMAX",
+   "effect": "Masks logits of never-minted ids to -inf at every site where logits become a distribution. Default 0 (off) despite research_tokenizer.md C.2 arguing at length that masking is correct at this repo's dead-row fractions (measured up to 86.7%). The measured asymmetry \u2014 masking only at the loss scored 6.100 vs 4.746 unmasked \u2014 is the reason to be careful, and establishes the rule 'mask at every site or not at all'.",
+   "owner": "self_organize.py mask_dead + fab_logits",
+   "couples_with": [
+    "VMAX",
+    "TOK_GROW_CAP",
+    "GROW_CAP_VOCAB",
+    "TOKENIZER"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:268,337; /home/user/LLM-Test/notes/research_tokenizer.md:40, 361-381"
+  },
+  {
+   "name": "HOLDOUT_N",
+   "effect": "Number of held-out windows per domain for the retention probe. 32. research_continual_memory.md warns the 2-sigma rule at n=32 will declare 'HELD (inside the noise)' for real effects of moderate size, and recommends 128-256 if a null result is going to be a claim.",
+   "owner": "self_organize.py holdout_bpb (~5066)",
+   "couples_with": [
+    "EVAL_N",
+    "SEED",
+    "DOMAINS",
+    "PHASE_SCHED"
+   ],
+   "evidence": "CURRENT_DEFAULTS.md:260; /home/user/LLM-Test/notes/research_continual_memory.md:743-745"
+  }
+ ],
+ "bugs": [
+  {
+   "title": "LITREVIEW_FINDINGS's corrected seed table applies the sqrt(2) twice, inflating every seed requirement ~2x",
+   "severity": "high",
+   "where": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:56-62",
+   "symptom": "The table's `d` column is already a z-score, Delta/sqrt(sigma_A^2+sigma_B^2), but the file then applies P(A>B)=Phi(d/sqrt(2)), which is only valid when d is Cohen's d = Delta/sigma with equal sigmas. P(A>B) is understated and the Noether seed counts derived from it are roughly doubled.",
+   "evidence": "Row 1: Delta=1.385, sigma_D=1.225, sigma_B=0.047. sqrt(1.225^2+0.047^2)=1.226; 1.385/1.226=1.13 = the listed d. Correct P(A>B)=Phi(1.13)=0.871, not the listed 0.788. Recomputing with Cohen's d (sigma_pooled=0.867, d=1.597) gives Phi(1.597/sqrt(2))=0.871 and N\u22488, not 12. Rows 2 and 3 are consistent in the same wrong way: 0.010/sqrt(0.095^2+0.047^2)=0.094 (listed 0.09) -> correct P 0.537 not 0.527, N\u2248730 not 1,450; 0.118/sqrt(0.193^2+0.047^2)=0.593 (listed 0.60) -> correct P 0.724 not 0.663, N\u224821 not 39. The stated formula at line 56 is 'P(A>B) = Phi(d/sqrt(2))'.",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "The litreview's headline seed counts (\u22489 and \u224880,000) are not reproducible from the formula it quotes",
+   "severity": "medium",
+   "where": "/home/user/LLM-Test/notes/_evidence/litreview/08_seeds_and_variance.md:26-36; 00_README_AND_CONTRADICTIONS.md:110-118; 15_additional_notes.md:9-12",
+   "symptom": "The file quotes Noether's formula N >= ((Phi^-1(1-alpha) - Phi^-1(beta))/(sqrt(6)*|0.5-gamma|))^2 with alpha=0.05, beta=0.2, then reports N\u22489 at P(A>B)=0.949 and N\u224880,000 at P=0.505. Plugging its own numbers in gives \u22485 and \u224841,000. The '\u22489 paired seeds' figure is the single most-quoted number from the bundle and it is repeated in 15_additional_notes as the top-ranked action.",
+   "evidence": "Phi^-1(0.95)=1.645, Phi^-1(0.2)=-0.8416, numerator 2.4866; sqrt(6)=2.449. At gamma=0.949: 2.4866/(2.449*0.449)=2.261, squared = 5.1. At gamma=0.505: 2.4866/(2.449*0.005)=203.1, squared = 41,250. By contrast LITREVIEW_FINDINGS.md:60-62's counts (12/1,450/39) DO reproduce exactly from the same formula, confirming the formula is being read correctly here.",
+   "bug_class": "wrong-measurement"
+  },
+  {
+   "title": "research_experts_routing.md states the balance loss decays to exactly zero; the code floors it at BAL_FLOOR=0.15",
+   "severity": "high",
+   "where": "/home/user/LLM-Test/notes/research_experts_routing.md:78-79, 861-894, 988",
+   "symptom": "The file's C.12 verdict ('the decay to zero is CONTRADICTED by practice') and its self-declared 'highest-value change in this document' \u2014 replace fab_bal-with-decay and dom_ban with a loss-free per-expert bias \u2014 are both predicated on a premise that is false in current code. A reader acting on it would fix a problem that no longer exists.",
+   "evidence": "Note says 'weighted by max(0, 1 - step/BAL_WARM) -- i.e. decayed to exactly zero by step 4000'. Code: /home/user/LLM-Test/self_organize.py:7023 `_bw = max(BAL_FLOOR, 1.0 - step / max(1, BAL_WARM))` with BAL_FLOOR default 0.15 (:4252, CURRENT_DEFAULTS.md:88), and the comment at :7015 records exactly the reasoning ('decaying it to EXACTLY zero means that after BAL_WARM there is nothing left pushing routing mass'). RESEARCH_BRIEF_DIFFERENTIATION.md:204, written two days later, describes it correctly as 'decaying over BAL_WARM to a BAL_FLOOR'.",
+   "bug_class": "other"
+  },
+  {
+   "title": "RESEARCH_BRIEF_DIFFERENTIATION states FAB_GROW now defaults off; it defaults ON",
+   "severity": "high",
+   "where": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:255",
+   "symptom": "The brief's decision table tells an external reader 'FAB_GROW now defaults off, which sidesteps the problem instead of solving it'. If growth is actually on by default, the growth pathology the brief documents (five experts born twenty steps before the end of a run) is live in the default configuration, not sidestepped \u2014 which changes the priority of the whole \u00a72b question.",
+   "evidence": "/home/user/LLM-Test/self_organize.py:186 `\"FAB_GROW\": (\"env\", 1),  # fabric -- ON; the ramp is neutered by FAB_RAMP_TO`; CURRENT_DEFAULTS.md:52 `FAB_GROW | 1`. Also :2938 `s.grow_on = bool(int(_env(\"FAB_GROW\", 1)))`.",
+   "bug_class": "other"
+  },
+  {
+   "title": "research_continual_memory's 'single most important fix in this document' has already been implemented",
+   "severity": "medium",
+   "where": "/home/user/LLM-Test/notes/research_continual_memory.md:40-43, 720-728, 932-933",
+   "symptom": "The file asserts three times that holdout_bpb() calls _eval_logits with model+fabric and no memory, so 'the headline cross-run retention number currently measures the weights, not the system', and ranks reporting both arms as priority action #1. The function now takes use_mem and is called both ways, and the difference is computed. A reader following the note re-does completed work and mistrusts a number that is now correct.",
+   "evidence": "Note: 'holdout_bpb() and the within-stream RETENTION block call _eval_logits(model, fab, FABRIC, X) -- model + fabric, no memory'. Code: /home/user/LLM-Test/self_organize.py:5066 `def holdout_bpb(use_mem=False):`, :5100 `if use_mem and mem.n > 0:`, :5134 `_full = holdout_bpb(use_mem=True)`, :5098 comment 'the matched pair: R_full consults the store'.",
+   "bug_class": "recorded-never-read"
+  },
+  {
+   "title": "RESEARCH_BRIEF_DIFFERENTIATION gives the Fabric expert rank as 4; FAB_RANK defaults to 8",
+   "severity": "medium",
+   "where": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:268-269",
+   "symptom": "Section 4 ('Context the reader needs about this system') tells an external researcher the experts are 'A: (cap, d, r) and B: (cap, r, d) ... Rank 4 by default'. The A/B (cap,d,r) shape is the Fabric, whose rank knob is FAB_RANK=8. Rank 4 is EXPERT_R, the legacy ExpertBank's knob, which is inert when EXPERTS=0 (the default). Any scale judgement the external reader makes is off by 2x in parameter count.",
+   "evidence": "CURRENT_DEFAULTS.md:61 `FAB_RANK | 8`; :222 `EXPERT_R | 4`; :217 `EXPERTS | 0`. /home/user/LLM-Test/notes/research_experts_routing.md:37 gives it correctly: 'r = FAB_RANK (default 8)'. /home/user/LLM-Test/self_organize.py:4268 shows EXPERT_R feeds ExpertBank, gated on `if EXPERTS`.",
+   "bug_class": "other"
+  },
+  {
+   "title": "research_tokenizer.md's Part C analyses a tokenizer configuration in which every gate it discusses is off by default",
+   "severity": "medium",
+   "where": "/home/user/LLM-Test/notes/research_tokenizer.md:32-40, 361-381, 383-398",
+   "symptom": "The file's system description and its three most substantive comparisons (the p(b|a) merge gate vs Picky BPE's IoS, probation vs Unigram pruning, LOSS_MASK_DEAD vs the glitch-token literature) all describe mechanisms whose defaults are 0. A reader takes the file as a description of what the system does; it is a description of what the system can be configured to do.",
+   "evidence": "CURRENT_DEFAULTS.md: TOK_MINT_PMIN 0.0 (:161), TOK_MINT_NOVEL 0.0 (:160), TOK_PROBATION 0 (:331), TOK_COMPOSE 0 (:326), LOSS_MASK_DEAD 0 (:268). The note at :35 says the gate is 'thresholded on p(b|a) >= TOK_MINT_PMIN' and at :44 that 'the entropy gate is allowed to reorder but never to prevent minting' \u2014 at PMIN=0 it neither reorders nor prevents.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "research_experts_routing describes per-expert LR as part of the design without stating it defaults off",
+   "severity": "medium",
+   "where": "/home/user/LLM-Test/notes/research_experts_routing.md:81-82, 835-857, 986-987",
+   "symptom": "The Fabric description lists 'Per-expert learning rates (FAB_LR_OWN): each expert on its own cosine schedule clocked from its birth step' among the population dynamics, and C.11 spends ~22 lines on it, marked UNTESTED-in-MoE with the principle SUPPORTED. FAB_LR_OWN defaults to 0, and RESEARCH_BRIEF_DIFFERENTIATION later measured it at 0.0040 b/B \u2014 an order of magnitude below the replication floor. The two notes together describe a mechanism as central that is both off and measured null.",
+   "evidence": "CURRENT_DEFAULTS.md:230 `FAB_LR_OWN | 0`; /home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:30 'FAB_LR_OWN | ... | 2.023 vs 2.019 over three paired seeds'.",
+   "bug_class": "armed-but-inert"
+  },
+  {
+   "title": "RESEARCH_BRIEF_DIFFERENTIATION's 'thirty times below the floor' is off by ~3x",
+   "severity": "low",
+   "where": "/home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:30",
+   "symptom": "The FAB_LR_OWN row states the 0.0040 b/B effect is 'thirty times below the floor'. The floor stated in the same document is 0.039 b/B, giving a ratio of 9.75x. The conclusion (the effect is far below the noise floor) survives; the number does not, and it is the kind of figure an external reader would quote.",
+   "evidence": "0.039 / 0.0040 = 9.75. Floor stated at /home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:277 ('differed by up to 0.039 b/B') and derived at :29 (1.971 - 1.932 = 0.039).",
+   "bug_class": "unit-mismatch"
+  },
+  {
+   "title": "research_lr_schedules records LR_DECAY default 0.0 = off; it is now 1.0",
+   "severity": "low",
+   "where": "/home/user/LLM-Test/notes/research_lr_schedules.md:544",
+   "symptom": "The project-configuration block that grounds all of Part C states 'LR_DECAY envelope (default 0.0 = off)'. The default is now 1.0 \u2014 the file's own C.3 item 1 recommendation, adopted. Reading Part C as current would lead someone to think the envelope is inert and to re-run an argument that is settled.",
+   "evidence": "CURRENT_DEFAULTS.md:137 `LR_DECAY | 1.0`; recommendation at /home/user/LLM-Test/notes/research_lr_schedules.md:694-698 ('I would run LR_DECAY=1 as the default').",
+   "bug_class": "other"
+  },
+  {
+   "title": "research_continual_memory's eviction table does not contain the current default eviction mode",
+   "severity": "low",
+   "where": "/home/user/LLM-Test/notes/research_continual_memory.md:32, 636-650",
+   "symptom": "The Part 0 table and the C.3 mapping enumerate evict=\"recency\" (circular FIFO) and evict=\"usage\" (sampled LFU with write-count decay) as the global options, with true LRU appearing only in the partitioned n_own>1 path. The current global default is EVICT=lru. Every C.3 recommendation is therefore aimed at a policy set that no longer includes the one actually running.",
+   "evidence": "/home/user/LLM-Test/self_organize.py:479 `\"EVICT\": (\"env\", \"lru\")`; :4871 `evict=_env(\"EVICT\", \"lru\")`; CURRENT_DEFAULTS.md:38. LITREVIEW_FINDINGS.md:112-124 and EXTERNAL_RESEARCH_BRIEF.md:74 both treat EVICT=lru as current.",
+   "bug_class": "other"
+  },
+  {
+   "title": "Six of the seven research notes are absent from the 00_INDEX reading order",
+   "severity": "medium",
+   "where": "/home/user/LLM-Test/notes/00_INDEX.md:57-69, 93",
+   "symptom": "The reading-order table lists 01-10 plus LITREVIEW_FINDINGS.md only. EXTERNAL_RESEARCH_BRIEF.md, RESEARCH_BRIEF_DIFFERENTIATION.md and the four research_*.md surveys (3,407 lines of literature survey) appear nowhere in it; notes/_evidence/litreview/ appears only as one line under Provenance. A reader following the stated reading order never encounters the differentiation brief, which contains the project's strongest open question for goal (B).",
+   "evidence": "grep for 'research_' in /home/user/LLM-Test/notes/00_INDEX.md returns nothing; the only hits are 00_INDEX.md:69 (LITREVIEW_FINDINGS) and :93 ('litreview/ -- an external literature review, archived verbatim'). The surveys are named only in 02_IDEAS.md:2401-2405.",
+   "bug_class": "recorded-never-read"
+  }
+ ],
+ "junk": [
+  {
+   "what": "The '4096x error in your balance loss' warning, carried in three places and ranked as the litreview's #1 action item ('Five minutes')",
+   "why": "Checked and rejected. fab_bal is `w.size(1) * (w.mean(0)**2).sum()` \u2014 the factor of N is present, and LITREVIEW_FINDINGS verified it numerically at N=8, 64 and 4096. Only a factor-of-2 gradient difference from Switch remains, which folds into FAB_BALANCE.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The 'pin nondeterminism, run 5x with all seeds fixed' diagnostic, ranked #2 in the litreview action list",
+   "why": "Already run and passed before the review was written: 33a9299's commit message records base and nogate byte-identical, and longrun.sh's seeds) block records three runs at one seed and config byte-identical in every reported number. LITREVIEW_FINDINGS.md:29 says outright 'Do not spend those 5 runs.'",
+   "safe_to_drop": true
+  },
+  {
+   "what": "sigma \u2248 0.596 b/B and the \u22489 / \u224880,000 paired-seed table, in litreview files 00_README (107-118), 08 (19-46) and 15 (9-12)",
+   "why": "Superseded by LITREVIEW_FINDINGS \u00a71: the 1.227 spread was measured through the instrument INV-13 voids (pre-c76dc74), and per-arm sigma post-fix ranges 0.047-1.225. The evidence files carry no annotation, so a reader opening 08_seeds_and_variance.md first gets the withdrawn number presented as 'the actionable result'.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "research_experts_routing.md C.12's 'highest-value change in this document' (replace fab_bal-with-decay and dom_ban with a loss-free per-expert bias)",
+   "why": "Its premise \u2014 that the balance weight decays to exactly zero at step 4000 \u2014 is false in current code, which floors at BAL_FLOOR=0.15. The loss-free-bias suggestion may still be worth doing on its own merits, but the argument as written no longer applies.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "research_continual_memory.md's priority action #1 ('Report holdout_bpb with and without memory. Single highest-value change') and the accompanying diagnosis at lines 40-43 and 720-728",
+   "why": "Implemented: holdout_bpb takes use_mem, the matched pair is computed at :5134, and BWT plus the forgetting measure are printed at :5187-5201.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "research_lr_schedules.md C.3 item 1's recommendation to default LR_DECAY to 1",
+   "why": "Adopted; LR_DECAY defaults to 1.0. The surrounding analysis (the floor-squaring at LR_DECAY=1 giving 0.25% of peak, and the loss of run-length invariance) is still live and should be kept.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "RESEARCH_BRIEF_DIFFERENTIATION.md \u00a73's row 'FAB_GROW now defaults off, which sidesteps the problem instead of solving it'",
+   "why": "FAB_GROW defaults to 1. The row understates the urgency of the \u00a72b growth question it is attached to.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "Four independent restatements of the GPT-2 b/B anchor correction",
+   "why": "The same numbers appear in pile_bits_per_byte.csv, 05_bits_per_byte_reference.md:15-23, 00_README_AND_CONTRADICTIONS.md:15-32 and LITREVIEW_FINDINGS.md:143-147. The CSV is the machine-readable source and file 05 has the conversion formula; the other two are prose duplicates.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "Four independent restatements of the reservoir-dilution result E[slots] = M*N_old/N -> 0",
+   "why": "10_replay_buffer_selection.md:29-48 (with the derivation), 00_README:138-139, LITREVIEW_FINDINGS.md:157-158, and research_continual_memory.md:113-114 (as a [S] claim from a different source). Only the first carries the argument.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "EXTERNAL_RESEARCH_BRIEF.md \u00a71a ('The LR schedule shape asked for has a name': triangular2 / exp_range / SGDR)",
+   "why": "Duplicates research_lr_schedules.md A.3 (172-184) and A.2 (151-168), which cover the same ground with sources and with the timm decay_rate precedent. The brief's version is snippet-level and was written to be pasted outward.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "EXTERNAL_RESEARCH_BRIEF.md sections 2a-2f as open requests",
+   "why": "All six were answered by the litreview bundle (files 01-06). The brief carries no annotation saying so, so it still reads as an outstanding to-do list \u2014 including 2b, whose answer was 'the ablation does not exist publicly'.",
+   "safe_to_drop": false
+  },
+  {
+   "what": "arXiv 2605.06415 as a citable source anywhere in the project",
+   "why": "The review that read it in full states 'I would not cite this paper as evidence for a design decision', listing nonexistent load-bearing references, an internal contradiction on the central claim, a null-result language validation, version drift in the claim counts, and a bibliography containing Hartle & Hawking's wave function of the universe.",
+   "safe_to_drop": true
+  },
+  {
+   "what": "The claim in EXTERNAL_RESEARCH_BRIEF.md \u00a71b that a 2026 MoE-ecology paper attributes dead-expert revival solely to the load-balance loss, and the 'K=2 warmup then K=2->4 gives 0% dead experts at 256 experts' figure",
+   "why": "Snippet-level and unverifiable: the ablation is deferred to ref [14], which has no arXiv ID and no search presence; the balance-loss form is not in the paper; and the revival evidence is 16 vision experts on TinyImageNet-200.",
+   "safe_to_drop": true
+  }
+ ],
+ "carry_forward": [
+  {
+   "item": "Every claim in the four research_*.md surveys is snippet-level or recollection, and the per-claim evidence labels ([S]/[V]/[M]/[F]/[R]/[CODE]/[I]) are the only thing distinguishing them. Strip or summarise the labels and 3,407 lines of second-hand material become false authority.",
+   "why": "The project's own record says this material 'all reads as authoritative and none of it has been read at the source', and the [M] class is named as 'the ones that have burned this project before'.",
+   "evidence": "/home/user/LLM-Test/notes/EXTERNAL_RESEARCH_BRIEF.md:29-34, 193-197; /home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:5-14"
+  },
+  {
+   "item": "'No prior art found' in the litreview means 'not in the neighbourhood I searched, and the neighbourhood was largely set by your own leads'. Three of the bundle's four negatives (Q1, Q3, Q6) carry this caveat, and Q3's negative was overturned by Q8 within the same bundle.",
+   "why": "Prevents the project from claiming novelty on the strength of a bounded search, and explains why the per-source-quota negative flipped once a different literature was searched.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/15_additional_notes.md:54-64"
+  },
+  {
+   "item": "There is no single bits-per-byte scale marker across web text and code. Name the corpus next to every number. Code b/B spans 3.2x on training mix alone (0.5597-1.7912 on GitHub); web text spans 1.09x.",
+   "why": "Every result in this project has been read against a remembered '1.0-1.2' anchor, which is correct only for English web text; the Python result (2.276) was read against it.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/05_bits_per_byte_reference.md:25-38; 10_HISTORY_FINDINGS.md:344-345"
+  },
+  {
+   "item": "Bits-per-byte DIFFERENCES, not perplexity ratios, are the only meaningful cross-checkpoint retention metric for this system, because the vocabulary grows during the run. b/B is already log-scale so a difference is a probability ratio, and it is tokenizer-invariant.",
+   "why": "This is a structural advantage the architecture has and it is easy to lose the moment anyone reports a PPL number across a retok.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/11_forgetting_metrics.md:74-84; 14_tangents.md:131-134"
+  },
+  {
+   "item": "sigma is a property of the arm, not of the measurement: post-fix per-arm sigma ranges 26x (0.047 to 1.225) across four arms of one experiment run the same day. A single pooled sigma is the wrong model, and instability itself tracks ramping \u2014 arm D's variance difference is larger than its mean difference.",
+   "why": "Every seed-budget calculation and every 'is this effect real' judgement depends on which sigma is used, and the pooled model is what the external review's arithmetic assumed.",
+   "evidence": "/home/user/LLM-Test/notes/LITREVIEW_FINDINGS.md:35-51"
+  },
+  {
+   "item": "Pair the arms (same seed, same data order, same init) and report P(A>B) with a percentile-bootstrap CI rather than mean\u00b1std. Bouthillier's Figure 6: mean-difference at k=50 misses ~90% of real effects, and single-point comparison has ~10% false positives AND ~75% false negatives.",
+   "why": "Pairing is free, and this project's arms share almost all machinery, so it is worth more here than anywhere else. Also: vary data order and data sampling, not just SEED \u2014 the project varies only the small variance source.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/08_seeds_and_variance.md:97-161; LITREVIEW_FINDINGS.md:70-77"
+  },
+  {
+   "item": "This project's store is read during training, which places it in replay-based continual learning, not in the kNN-LM / semiparametric regime. Reservoir sampling and its class-balanced variants are the baseline; MIR raises retrieval-selection as a design axis; BWT/FM with the two-matrix decomposition are the natural metrics.",
+   "why": "The bundle's single most useful reframing: four of the twelve questions were the same question in four vocabularies, and picking one field as the primary reference saves parallel searching.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/15_additional_notes.md:66-80; 10_replay_buffer_selection.md:171-177; 04_knnlm_train_vs_inference.md:5-21"
+  },
+  {
+   "item": "Plain reservoir sampling GUARANTEES the feared failure mode as a theorem (E[slots held by A] = M*N_A/N -> 0 under indefinite new-domain streaming). The citable fix is a per-source quota, which exists as class-balanced reservoir sampling and iCaRL's per-class exemplar allocation \u2014 in replay-CL, not in the retrieval literature.",
+   "why": "Directly load-bearing for goal (B): it says the retention failure is not a bug in the eviction rule but the correct behaviour of an unbiased sampler, so retention must be bought explicitly.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/10_replay_buffer_selection.md:29-74"
+  },
+  {
+   "item": "Newborn protection is one problem appearing in three places \u2014 newborn experts culled before proving themselves, newly-minted tokens weight-decayed to zero, newly-written store entries with zero retrievals \u2014 and three literatures converge on the same shape of answer: a protected region of BOUNDED SIZE with an EXPLICIT PROMOTION CRITERION (NEAT speciation, cache probationary segment at 1-25%, progressive unfreezing), not a softer scoring function.",
+   "why": "Argues for building one generic mechanism once rather than three ad-hoc ones, and it is the clearest cross-cutting insight in the bundle.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/15_additional_notes.md:19-36"
+  },
+  {
+   "item": "The Switch balance loss needs the factor N to make alpha scale-invariant (this repo has it), only P is differentiable, and a fully dead expert (f_i = 0) contributes exactly zero to the loss and receives ZERO balance pressure. Balance prevents collapse; it does not revive. Optimal alpha grows with expert count, and 4096 is 256x beyond the largest published sweep.",
+   "why": "Settles the culling-vs-balancing question in the direction of keeping culling, and warns that the inherited 0.01 default has no claim on this repo's expert count.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/12_moe_aux_loss_expert_choice.md:25-49"
+  },
+  {
+   "item": "Under Adam, rescale the REALISED UPDATE, not the gradient (Adam is invariant to constant gradient scaling). Rescaling the whole update also scales decoupled weight decay, which is the AdamW convention but is a deliberate choice. And v is an EMA with horizon ~1/(1-beta2) \u2248 1000 steps, so any cycle shorter than that never equilibrates \u2014 newborn experts, with <1000 steps of history by definition, are the risk case.",
+   "why": "The rescale trick is correct and non-obvious; the v-staleness constraint is the one thing that makes a birth-anchored per-expert cycle behave differently from what was designed. FAB_LR_CYCLE is 24 selections, and how many optimizer steps that spans is unmeasured.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/13_adam_cyclical_and_rescaling.md:5-60; LITREVIEW_FINDINGS.md:101-106"
+  },
+  {
+   "item": "Full-peak LR restarts are the one schedule component with BOTH direct in-repo measured harm (a 1.00e-04 -> 2.00e-03 restart after which held-out swings 1.5 b/B and never resettles; final quality determined by where the run stops relative to restart phase) AND direct literature support for that harm (re-warming raises loss even on the same distribution; higher re-warm peak = more forgetting).",
+   "why": "It makes results non-comparable independently of whether restarts help on average, and it is directly adverse to goal (B). If restarts are kept, each cycle needs a short warmup for the stale-v reason.",
+   "evidence": "/home/user/LLM-Test/notes/research_lr_schedules.md:599-663"
+  },
+  {
+   "item": "Any criterion computed over the current segmentation is destroyed by acting on it. Greedy longest-match consumes a+b into ab, so p(b|a) is 0 from the instant of the merge and a post-mint re-test retires 100% of candidates.",
+   "why": "A general trap for online, self-modifying systems, and one nobody in the static-tokenizer literature hits because nobody re-measures after merging. The same shape recurs wherever a mechanism changes the statistic it is scored on.",
+   "evidence": "/home/user/LLM-Test/notes/research_tokenizer.md:397"
+  },
+  {
+   "item": "A mask over the softmax must be applied at EVERY site where logits become a distribution, or not at all. Masking dead rows only at the loss measured 6.100 b/B against 4.746 unmasked on an 86.7%-dead config.",
+   "why": "A measured, unreported result that establishes a rule, and the reason a train/eval mask asymmetry is worse than no mask. LOSS_MASK_DEAD currently defaults to 0.",
+   "evidence": "/home/user/LLM-Test/notes/research_tokenizer.md:40, 373-376"
+  },
+  {
+   "item": "arXiv 2605.06415 does not license dropping cull-and-reseed: its revival ablation is deferred to a reference with no arXiv ID and no search presence, its balance-loss formula is absent, its language results are at PPL 33k-38k against a ~50k vocabulary, and its one scaling data point (16->32 experts: DEAD 7/16 -> 25/32) points the wrong way.",
+   "why": "This was the specific external claim the project hoped would let it delete the culling machinery. The answer is no, and the cheap in-house test is named: one run with balance loss on and culling off.",
+   "evidence": "/home/user/LLM-Test/notes/_evidence/litreview/02_moe_dead_expert_revival.md:71-104, 152-163, 200-227"
+  },
+  {
+   "item": "CURRENT_DEFAULTS.md is the ONLY note that describes current code; it is generated from _SPEC and enforced by notes_check.py in selftest.sh. Every research note is a record of 2026-08-15 or 2026-08-17 and must be read against it, not instead of it.",
+   "why": "Written into the file's own header because 'the notes have been wrong about the defaults twice at real cost'. Four of the twelve documentation defects found in this survey are exactly that failure recurring in the research notes.",
+   "evidence": "/home/user/LLM-Test/notes/CURRENT_DEFAULTS.md:3-11"
+  }
+ ],
+ "open_questions": [
+  "Was RESEARCH_BRIEF_DIFFERENTIATION.md ever dispatched and answered? It is dated 2026-08-17, carries 13 sources all marked [S] with 'none of these has been opened', and unlike EXTERNAL_RESEARCH_BRIEF.md there is no corresponding directory under notes/_evidence/. If it was never run, the project's highest-stated-value external question (\u00a72a: is expert specialization emergent at this scale or does it require supervision?) is still open, and it decides between two completely different work programs.",
+  "Should the seed-budget table in LITREVIEW_FINDINGS.md \u00a71 be recomputed after removing the double-applied sqrt(2)? My recomputation gives \u22488 paired seeds for D-vs-B (not 12), \u2248730 for ramp-vs-fixed (not 1,450), \u224821 for A-vs-B (not 39) \u2014 but I have not confirmed which convention Bouthillier's Appendix C.3 actually uses for Noether's gamma, and the litreview's own \u22489/\u224880,000 figures do not reproduce from the formula it quotes either.",
+  "Was the FAB_KEY_NORM=1 experiment ever run? RESEARCH_BRIEF_DIFFERENTIATION calls it 'the cheapest actionable item in the whole brief' and 'the cheapest item here', on the strength of X-MoE identifying unnormalised dot-product routing as collapse-prone. The default is still 0.",
+  "Was the hash-router baseline ever run? research_experts_routing lists it as actionable item #1 in C.3 and #5 in C.17, as the experiment that falsifies or confirms Equifinality (arXiv 2604.14419) on this system and tells you whether any of the routing machinery earns its place. I found no evidence file or test script for it.",
+  "Was the S3-FIFO probationary segment or the keys-only ghost list ever built? LITREVIEW_FINDINGS calls the ghost list 'the cheapest part' and says it measures the project's own eviction error rate, 'currently unmeasured'. I did not find a ghost list in memory.py.",
+  "Was the mem_evict_test occupancy comparison (new domain's share under EVICT=lru vs EVICT=recency after a domain switch) ever actually run? The harness exists and LITREVIEW_FINDINGS says the mechanism can be confirmed 'with no literature needed', but I found no recorded result.",
+  "Has mem.last been changed to rank on the similarity-weighted signal that mem.use already accumulates? LITREVIEW_FINDINGS identifies this as 'a small change to code we already have'; memory.py:566 still stamps last on any retrieval regardless of weight.",
+  "Gopher's Table A7 (arXiv 2112.11446) remains unread and is the single most likely source of a sub-100M-parameter bits-per-byte anchor \u2014 i.e. the only published number this project's absolute results could be fairly compared against. It is listed as open item #1 in 07_sources.md and I found no evidence it was fetched.",
+  "Khandelwal et al. 2020 (kNN-LM) was never read directly; the Q4 answer rests on three secondary descriptions. The file itself says 'If Q4 is load-bearing for you, read it directly.' Given that the reframing away from kNN-LM toward replay-CL turns on Q4, it may now be load-bearing.",
+  "arXiv 2505.00675 (Rethinking Memory in LLM based Agents) is the one Q3 lead never reached, and CREAM's Appendix A.9 ('Qualitative Analysis of Memory Dynamics') is the one place that might contain the cross-domain occupancy numbers the project wanted.",
+  "Is the network status recorded in EXTERNAL_RESEARCH_BRIEF.md \u00a70 (measured 2026-08-15: WebSearch works, WebFetch EGRESS_BLOCKED to every paper host) still accurate in the current container? The file says to re-measure before assuming. This determines whether the remaining open reads can be done in-session or must be dispatched.",
+  "How many optimizer steps does FAB_LR_CYCLE=24 selections actually span? LITREVIEW_FINDINGS flags this as 'Open, not resolved' \u2014 the caution that a cycle shorter than ~1/(1-beta2) \u2248 1000 steps never lets Adam's v equilibrate cannot be evaluated without the selection rate, and the file says the running pilot was the first thing that would measure it.",
+  "Was the FAB_CHAIN_K / ENS_K scaling change ever made? research_experts_routing rates the fixed top-8 with a growing population CONTRADICTED against Orthogonal Growth, and it is the mechanism it blames for newborn starvation. Both are still constants.",
+  "Does the growth-damage claim survive the collinearity objection? The litreview's Q6 shows fraction and absolute-number-added are collinear across the three existing arms, and proposes a specific decoupling design (2048->4096 vs 4096->6144, both +2048). I found no record of that arm being run \u2014 and it is the project's strongest single result.",
+  "Which of the three positions on faded-domain eviction (SILO / CLS / retention) has the project actually adopted? research_continual_memory says pick one and defend it, because they imply different headline claims and different experiments. MEM_SRC_FLOOR's existence suggests the retention position, but the code comment quoted in the note says whether faded knowledge SHOULD be protected 'is a design decision, not a bug' \u2014 and I found no record of the decision being made.",
+  "Are the tokenizer gates (TOK_MINT_PMIN, TOK_MINT_NOVEL, TOK_PROBATION, LOSS_MASK_DEAD) off by default because they were measured and found harmful, or because they were never measured? research_tokenizer.md Part C argues at length that several of them are correct, and the one recorded measurement (6.100 vs 4.746 for loss-only masking) is about a placement bug rather than about masking itself."
+ ]
+}
