@@ -1150,6 +1150,32 @@ if DATA_MODE == "real":
         if os.path.exists(_tp) and (not TOK_ONLINE or _env("RESUME", "")):
             TOK = DynamicTokenizer.load(_tp)               # RESUME must reuse the SAVED vocab: a fresh online seed would
             #   re-mint different ids, so the restored embedding table would be indexed by a DIFFERENT vocabulary.
+            # THE VOCABULARY'S OWN CEILING TRAVELS WITH THE FILE, AND NOTHING RAISED IT. DynamicTokenizer.load
+            # reconstructs from the saved json, where `vmax` is whatever the run that wrote it was capped at.
+            # maybe_grow's first line is `if self.vocab_size >= self.vmax: return None`, so a tokenizer saved
+            # full at 2048 comes back full at 2048 and refuses every candidate for the whole run -- even though
+            # VMAX here is 4096 and emb/head have just been widened to match.
+            # Measured on the first run that ever added an area to a trained system: VMAX doubled 2048 -> 4096,
+            # emb.weight/head.weight/head.bias all widened, the resume printed "the tokenizer ... now has room
+            # above it, so an area arriving in this run can mint ids of its own" -- and DID IT FIRE reported
+            #     !! ZERO tokenizer.mint 0 ARMED AND INERT
+            #     !! ZERO tokenizer.mint_reject 0 ARMED AND INERT
+            # Not one token for Python, and not one candidate even considered, because the refusal happens
+            # before any candidate is formed. A new area got new EXPERTS and could not get new TOKENS -- the
+            # exact failure the VMAX doubling exists to prevent, one level below where it was fixed.
+            # VMAX is the HARD ceiling here, not a suggestion: emb.weight has exactly VMAX rows, so minting past
+            # it would index off the end of the table. Never lower the cap below what is already minted either
+            # -- that is a narrowing, and the geometry gate below refuses it by name.
+            if TOK.vmax != VMAX and VMAX >= TOK.vocab_size:
+                _wasvm = TOK.vmax
+                TOK.vmax = VMAX
+                print(f"  [resume] the tokenizer's OWN cap travelled with {_tp} at vmax={_wasvm}"
+                      + (f" -- it was FULL there, so every mint this run would have been refused before a "
+                         f"candidate was formed. Raised to VMAX={VMAX}: {VMAX - TOK.vocab_size} id(s) of "
+                         f"headroom for material arriving in this run."
+                         if TOK.vocab_size >= _wasvm else
+                         f". Raised to VMAX={VMAX} to match the widened emb/head "
+                         f"({VMAX - TOK.vocab_size} id(s) of headroom)."))
         else:
             TOK = DynamicTokenizer(vmax=VMAX, min_pair=_i("MIN_PAIR", 50), max_tok=_i("MAX_TOK", 16), dropout=_f("TOK_DROPOUT", 0.0))
             TOK.pmin = TOK_MINT_PMIN          # predictability gate; read from env in __init__ too, set here so
@@ -4209,6 +4235,11 @@ def main():
     #   first om.step(). Masked on both harness paths only because they happen to widen the fabric too.
     _fg_base = {}                                          # growth-event counts the checkpoint arrived with,
     #   so POPULATION CHURN can report THIS run rather than the chain's running total. See the restore below.
+    _step0 = [0]                                           # the step THIS run started at: 0 fresh, the
+    #   checkpoint's step on a resume. Same reason as _fg_base -- `step` is a chain-wide counter, so "how old
+    #   is this expert" and "how long has this run been going" cannot be answered from it alone. A resume that
+    #   starts at 47064 and ends at 99539 has a span of 52475, and reading age against `step` instead calls a
+    #   4000-step-old expert half as old as the run.
     _wide_by = 0                                           # slots this resume added to the fabric beyond the
     #   checkpoint's cap. Initialised HERE, not only inside `if RESUME:`, because part 2 of the resume reads it
     #   and a name that exists only down one branch is a NameError waiting for the branch that skips it.
@@ -4323,6 +4354,7 @@ def main():
             # uage=0.0, and `use` ABSENT rather than zero, which is what grow() leaves behind (s.use.pop(j)).
             _ck_n = min(int(_RD["fab_cfg"]["n"]), fab.cap)
             _ck_step = int(_RD.get("step", 0))
+            _step0[0] = _ck_step                           # everything before this belongs to an earlier run
             fab.n_live = max(fab.n_live, _ck_n)             # rows already exist; never shrink below what was saved
             _new = list(range(_ck_n, fab.n_live))           # live here, absent from the checkpoint: genuinely new
             if _new:
@@ -4456,9 +4488,20 @@ def main():
         if _mgrew:
             _mwide = len(_mgrew)
             print(f"  [resume] widened {len(_mgrew)} model tensor(s) for a larger VMAX: {', '.join(_mgrew)}")
-            print(f"  [resume]   the tokenizer stays at {TOK.vocab_size if USE_TOK else 'n/a'} tokens and now has "
-                  f"room above it, so an area arriving in this run can mint ids of its own instead of being "
-                  f"segmented with the previous one's merges.")
+            # SAY WHERE THE CEILING ACTUALLY IS. This claimed "now has room above it" on the strength of the
+            # emb/head widening alone, and the tokenizer's own vmax -- the one maybe_grow checks -- is a
+            # separate number that travels in the .dyntok.json. On the first area-addition run it was still
+            # 2048 while this line said there was room, and the vocabulary minted nothing. The load path raises
+            # it now; this reports the cap that is actually in force rather than inferring one.
+            _tvm = TOK.vmax if USE_TOK else 0
+            print(f"  [resume]   the tokenizer stays at {TOK.vocab_size if USE_TOK else 'n/a'} tokens against its "
+                  f"own cap of {_tvm if USE_TOK else 'n/a'}"
+                  + ((f" -- {_tvm - TOK.vocab_size} id(s) of headroom, so an area arriving in this run can mint "
+                      f"ids of its own instead of being segmented with the previous one's merges."
+                      if _tvm > TOK.vocab_size else
+                      f" -- NO headroom. maybe_grow refuses before forming a candidate, so this run mints "
+                      f"nothing and the arriving area is segmented entirely with the previous one's merges. "
+                      f"Raise VMAX above {TOK.vocab_size}.") if USE_TOK else "."))
         model.load_state_dict(_msd); _enc_resized = _load_enc(enc, _RD["enc"])
         if FABRIC and _RD.get("fab") is not None:
             # TOLERANT, AND LOUD ABOUT IT. A checkpoint written before a router parameter existed (halt_b is the
@@ -6906,7 +6949,18 @@ def main():
             # of an 18-epoch run, at 2% and 3% of peak. Harmless in effect (nothing has grown that early) but it
             # puts two false entries above the one that matters, and a log that cries restart is a log nobody
             # greps for restarts. A real restart returns the rate to a large fraction of peak; require that.
-            if (_lrv > _lr_prev[0] * 1.5 and _lrv > 0.5 * LR
+            # AND THERE HAS TO BE A PREVIOUS RATE TO RISE FROM. _lr_prev starts at 0.0, and on a FRESH run that
+            # is harmless: warmup holds the first rates below the `> 0.5 * LR` bar until a real previous value
+            # is in hand. A RESUME skips warmup entirely -- `st` comes back at the checkpoint's step, which is
+            # past _w -- so the very first rate computed is already 57% of peak and is compared against zero.
+            # Every resume therefore reported a cosine restart on its second step. Observed:
+            #     [lr @ 47079] cosine restart 1: 0.00e+00 -> 1.15e-03 (57% of peak, x1145648405)
+            # The x1.1-billion multiplier is the tell: it is _lrv divided by the 1e-12 floor, not a ratio of two
+            # rates. It cost more than a wrong log line -- note_shift() told the growth controller the loss jump
+            # was self-inflicted, suppressing the regression reading on exactly the step a new area arrives,
+            # which is the one moment the controller exists for. It also left _nrst at 1, so lr.damp armed on a
+            # restart that never happened while lr.restart printed "nothing to restart" three lines below it.
+            if (_lr_prev[0] > 0 and _lrv > _lr_prev[0] * 1.5 and _lrv > 0.5 * LR
                     and FABRIC and fabgrow is not None):
                 fabgrow.note_shift(step)
                 # SAY WHAT IS BEING RESTARTED ONTO. A restart returns a CONVERGED model to peak, and on the
@@ -8471,7 +8525,11 @@ def main():
         #                armed means either every cycle paid, or none was ever tested.
         #   lr.envelope  whether LR_DECAY actually scaled anything, which it cannot on a single-cycle run.
         _r("lr.restart",  lambda: _nrst[0],
-           lambda: bool(_cfg("LR_RESTARTS")) and _cfg("LR_SCHED") != "none" and _ncyc[0] > 1,
+           # ...OR A RESTART ACTUALLY HAPPENED, whatever the arming arithmetic thinks. The same shape as the
+           # tokenizer.mint row: an armed test that says the mechanism could not have run, printed over a count
+           # showing that it did, and the count discarded. If _nrst is non-zero the row must show it -- the
+           # disagreement between the two is itself the finding.
+           lambda: (bool(_cfg("LR_RESTARTS")) and _cfg("LR_SCHED") != "none" and _ncyc[0] > 1) or _nrst[0] > 0,
            ("LR_SCHED=none" if _cfg("LR_SCHED") == "none" else
             "LR_RESTARTS=0" if not _cfg("LR_RESTARTS") else
             f"one cycle fits this run ({_ncyc[0]}), so there is nothing to restart"))
@@ -8692,6 +8750,15 @@ def main():
             print(f"     DURING TRAINING the gate ran on {mem.n_wrong_reads} read(s) and excluded at least one "
                   f"entry on {mem.n_wrong_read_hit} of them ({mem.n_wrong_blocked} entry-exclusions in total, "
                   f"counting an entry once per read it was withheld from)."
+                  + ("" if mem.n_wrong_read_hit else
+                     "\n     ZERO, AND STRUCTURALLY SO: selfcheck() is called once, from this report, and never "
+                     "from the training loop, while every write resets that entry's selfcon to -1. is_wrong() "
+                     "needs more than 10 CHECKED entries before it computes a threshold at all, and at this "
+                     f"store's turnover nothing stays checked. So the {_nblk} entries counted above were never "
+                     "withheld from a single real retrieval -- they are the state after a pass this report just "
+                     "ran. MEM_WRONG_READ gates the report's own evaluations, not the run. Calling selfcheck on "
+                     "a cadence would change that, at the cost of a full forward over every active entry each "
+                     "time it ran.")
                   if mem.n_wrong_reads else
                   f"     DURING TRAINING read() was never called with the gate on, so nothing above was withheld "
                   f"from any actual retrieval -- MEM_PROBE_EVERY is what makes reads happen during training.")
@@ -8991,12 +9058,52 @@ def main():
                 _W = max(1, len(_bw))
                 _exp = sum(1.0 - (1.0 - _u / _ut) ** _W for _u in _uv) if _uv else 0.0
                 if _uv and _off:
-                    print(f"    !! THE PROBE PARTITION IS NOT THE RUN'S ROUTER: {len(_off)} of {len(_used)} "
-                          f"winner(s) here -- {', '.join(str(n) for n in _off[:8])}"
-                          f"{' ...' if len(_off) > 8 else ''} -- were never selected once in {int(_ut)} routed "
-                          f"windows over the whole run. Every SPECIALIZATION verdict above is void until that is "
-                          f"explained -- check the entry path this block scores with against the one fab_logits "
-                          f"actually takes.")
+                    # NAME THE OTHER NUMBER TOO. fab.use counts TRAINING top-1 wins (both bump_use sites are
+                    # gated on learn_regions, deliberately, so an eval walk cannot vote in the cull); fab._wrun
+                    # is the routing MASS from the most recent walk, which is an eval walk by the time this
+                    # prints. An expert at zero in the first and carrying real mass in the second is the whole
+                    # finding, and leaving the reader to pair it with the EXPERT INDEPENDENCE line forty rows up
+                    # -- where the pilot said "deleted expert 106 (busiest, routing mass 1.00)" about an expert
+                    # this line had just called never-selected -- wastes the one measurement that localises it.
+                    _wr = getattr(fab, "_wrun", None)
+                    _mass = {}
+                    if _wr is not None:
+                        try:
+                            _mv = _wr.mean(0) if _wr.dim() > 1 else _wr
+                            for _n in _off[:8]:
+                                if _n < _mv.numel(): _mass[_n] = float(_mv[_n])
+                        except Exception:
+                            _mass = {}
+                    # A BRAND-NEW EXPERT HAS AN ORDINARY REASON TO BE HERE, and calling that a broken router
+                    # would be this guard's second false alarm. seed_key aims a newborn at where the router
+                    # already sends traffic, so it can win a probe window the day it is born while `use` -- a
+                    # count over the whole run -- is still zero. The cull's swap-with-last also moves a late
+                    # arrival into a LOW slot id, which is why the ids can look old: the pilot flagged 106 and
+                    # 2182, and 106 is a low id. Age is measured against THIS run's span, not `step`, which on
+                    # a resume counts from the start of the chain.
+                    _span = max(1, step - _step0[0])
+                    _young = {n for n in _off if (step - int(fab.born.get(n, 0))) < 0.10 * _span}
+                    _hard = [n for n in _off if n not in _young]
+                    def _idstr(ns):
+                        return ", ".join(
+                            f"{n} (" + (f"eval mass {_mass[n]:.2f}, " if n in _mass else "")
+                            + f"born {int(fab.born.get(n, 0))}, {step - int(fab.born.get(n, 0))} step(s) ago)"
+                            for n in list(ns)[:8])
+                    if _hard:
+                        print(f"    !! THE PROBE PARTITION IS NOT THE RUN'S ROUTER: {len(_hard)} of {len(_used)} "
+                              f"winner(s) here -- {_idstr(_hard)}"
+                              f"{' ...' if len(_hard) > 8 else ''} -- were never selected once in {int(_ut)} "
+                              f"routed windows over the whole run, and are not new enough for that to be why. "
+                              f"fab.use counts TRAINING top-1 wins only; the mass beside each id is from the "
+                              f"latest EVAL walk. An expert at zero in the first and carrying mass in the second "
+                              f"means training and eval are not routing the same way, which is the one thing "
+                              f"that would void every SPECIALIZATION verdict above -- check the entry path this "
+                              f"block scores with against the one fab_logits actually takes.")
+                    if _young:
+                        print(f"    ({len(_young)} probe winner(s) have no run-wide selections because they are "
+                              f"NEW -- {_idstr(sorted(_young))}, against a run span of {_span} step(s). seed_key "
+                              f"aims a newborn at traffic the router is already sending, so it can take a probe "
+                              f"window before it has taken a training one. Not a path mismatch.)")
                 elif _uv and _exp >= 4 and len(_used) < 0.4 * _exp:
                     print(f"    !! THE PROBE IS FAR MORE CONCENTRATED THAN THE RUN: {len(_used)} distinct winner(s) "
                           f"over {_W} probe windows, where drawing {_W} windows from the run's own selection "

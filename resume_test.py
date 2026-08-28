@@ -98,6 +98,10 @@ def run(code, ns):
     out = []
     ns.setdefault("print", lambda *a, **k: out.append(" ".join(str(x) for x in a)))
     ns.setdefault("FABRIC", True)
+    # THIS RUN'S STARTING STEP, which the restore block records so later report lines can ask "how much of
+    # this happened HERE" rather than reading a chain-wide counter. A one-element list for the same reason
+    # _fg_base is a dict: it is written inside the resume and read from the report, in one function scope.
+    ns.setdefault("_step0", [0])
     ns.setdefault("_i", lambda k, d: {"FAB_DK": 32, "FAB_NMAX": 4096, "FAB_N0": 2048, "FAB_GRACE": 48}.get(k, d))
     exec(compile(code, "<self_organize>", "exec"), ns)
     return out
@@ -155,6 +159,12 @@ out = run(BOOK, ns)
 fab = ns["fab"]
 new = list(range(523, 2048))
 check(fab.n_live == 2048, f"n_live stays at FAB_N0 ({fab.n_live}) -- the new capacity is real capacity")
+# THE RUN'S OWN CLOCK STARTS HERE. `step` is chain-wide -- it comes back at 24707 and keeps counting -- so a
+# report line asking "how old is this expert relative to THIS run" reads a span three times too long without
+# it. The stub in run() defaults it to 0, which is what a FRESH run should see; the restore has to overwrite
+# it or the default silently passes for the resume case too.
+check(ns["_step0"][0] == 24707,
+      f"the resume records the step this run started at ({ns['_step0'][0]}), not the chain's total")
 check(any(f"{len(new)} slot(s) are LIVE here but were not in the checkpoint" in l for l in out),
       f"...and the {len(new)} slots the checkpoint never held are named: "
       f"{[l for l in out if 'LIVE here' in l][0][:86] if any('LIVE here' in l for l in out) else '(silent)'}")
@@ -592,6 +602,119 @@ check(not grew_d and len(bad_d) == 1, f"a D_MODEL change is refused rather than 
 # An identical geometry is a complete no-op, so an ordinary resume is untouched.
 sd_s, grew_s, bad_s = WIDEN(cur_m, {k: T(v.shape, "ck") for k, v in cur_m.items()})
 check(not grew_s and not bad_s, "an identical geometry widens nothing and refuses nothing")
+
+# --- 8b. ...AND THE TOKENIZER'S OWN CEILING IS A THIRD NUMBER, WHICH NOTHING RAISED -------------------------
+# Section 8 asserts the model side: emb/head widen and trained ids keep their rows. That is necessary and it
+# is not sufficient. maybe_grow's first line is `if self.vocab_size >= self.vmax: return None`, and vmax is
+# reconstructed by DynamicTokenizer.load from the saved json -- so it is whatever the run that WROTE the file
+# was capped at, not this run's VMAX.
+# Measured on the first run that ever added an area to a trained system, with every widening above working:
+#     [resume] widened 3 model tensor(s) for a larger VMAX: emb.weight (2048,768)->(4096,768), head... 
+#     [resume]   the tokenizer stays at 2048 tokens and now has room above it ...
+#     !! ZERO tokenizer.mint          0   ARMED AND INERT
+#     !! ZERO tokenizer.mint_reject   0   ARMED AND INERT
+# Not one token minted for Python and not one candidate even formed, because the refusal happens before a
+# candidate exists. "New EXPERTS, no new TOKENS" survived the fix for it, one level down.
+print("\nTHE TOKENIZER'S OWN CAP IS RAISED TO THIS RUN'S VMAX ON A RESUME")
+
+
+class _TokStub:
+    """Only what the load path touches: the two numbers maybe_grow compares."""
+    def __init__(s, vocab_size, vmax):
+        s.vocab_size, s.vmax = vocab_size, vmax
+
+    def mints_possible(s): return s.vocab_size < s.vmax          # maybe_grow's first line, as a question
+
+
+def _load_path(saved_vocab, saved_vmax, vmax_now):
+    tok = _TokStub(saved_vocab, saved_vmax)
+    ns = {"DynamicTokenizer": type("D", (), {"load": staticmethod(lambda p: tok)}),
+          "_tp": "x.dyntok.json", "VMAX": vmax_now}
+    run(TOKLOAD, ns)
+    return ns["TOK"]
+
+
+TOKLOAD = block("            TOK = DynamicTokenizer.load(_tp)",
+                "        else:\n            TOK = DynamicTokenizer(vmax=VMAX")
+
+# THE CASE FROM THE RUN: saved full at 2048, VMAX doubled to 4096.
+t = _load_path(2048, 2048, 4096)
+check(t.vmax == 4096, f"a tokenizer saved at vmax=2048 comes back at this run's VMAX (got {t.vmax})")
+check(t.mints_possible(), "  ...so maybe_grow can form a candidate at all -- 2048 ids of headroom for the new area")
+
+# A tokenizer that was NOT full still has its cap raised, or the headroom is only as big as the old cap.
+t2 = _load_path(1200, 2048, 4096)
+check(t2.vmax == 4096 and t2.vocab_size == 1200,
+      f"a partly-filled vocabulary is raised too, and not re-minted (vocab {t2.vocab_size}, cap {t2.vmax})")
+
+# AN ORDINARY RESUME AT THE SAME VMAX IS UNTOUCHED.
+t3 = _load_path(1500, 2048, 2048)
+check(t3.vmax == 2048, "an unchanged VMAX leaves the cap exactly where the file had it")
+
+# A NARROWED VMAX MUST NOT PULL THE CAP BELOW WHAT IS ALREADY MINTED. Those ids exist in the saved merges and
+# the restored embedding is indexed by them; lowering the cap under them is the narrowing the geometry gate
+# refuses by name a few hundred lines below, and this path must not quietly perform it first.
+t4 = _load_path(2048, 2048, 1024)
+check(t4.vmax >= t4.vocab_size,
+      f"a VMAX below the minted vocabulary does not lower the cap under it (vocab {t4.vocab_size}, cap {t4.vmax})")
+
+
+# --- 8c. THE PROBE-VS-RUN GUARD, WHICH THE SUITE OTHERWISE NEVER EXECUTES -----------------------------------
+# The SPECIALIZATION block needs a fabric bigger than any end-to-end test here builds, so this guard's code
+# has never once run under the suite -- and it has already been wrong twice in a way only a real pilot caught:
+# first comparing 8 probe winners against 633 run winners when the probe scores 32 windows (a test nothing
+# could satisfy), then calling a brand-new expert's absence from `use` a broken router. Report code that only
+# executes on the GPU is report code that gets debugged by the run it was supposed to be explaining, so the
+# branch is exec'd here from the actual source against stubs.
+print("\nTHE PROBE-VS-RUN GUARD SEPARATES A NEW EXPERT FROM A PATH MISMATCH")
+
+GUARD = block('                    _wr = getattr(fab, "_wrun", None)', "                elif _uv and _exp >= 4")
+
+
+class _W:
+    """Shape-only stand-in for fab._wrun: one row of per-expert routing mass."""
+    def __init__(s, mass): s._m = mass
+    def dim(s): return 1
+    def numel(s): return len(s._m)
+    def __getitem__(s, i): return s._m[i]
+
+
+class _FabR:
+    def __init__(s, born, mass): s.born, s._wrun = born, _W(mass)
+
+
+def _guard(off, born, step_now, step0, mass=None, used=None, ut=720144):
+    ns = {"_off": list(off), "_used": list(used if used is not None else range(16)), "_ut": ut,
+          "step": step_now, "_step0": [step0],
+          "fab": _FabR(born, mass if mass is not None else [0.0] * (max(off) + 1))}
+    return run(GUARD, ns)
+
+
+# THE PILOT'S CASE: 106 and 2182 flagged, both born late in a run spanning 47064..107057.
+out = _guard([106, 2182], {106: 104000, 2182: 106500}, 107057, 47064, mass=[0.0] * 2183)
+check(not any("IS NOT THE RUN'S ROUTER" in l for l in out),
+      "two experts born in the last 10% of the run do NOT raise a path-mismatch alarm")
+check(any("because they are NEW" in l for l in out),
+      "  ...they are reported as NEW instead, with their birth step and how long ago that was")
+check(any("born 104000, 3057 step(s) ago" in l for l in out),
+      "  ...and the age is measured against THIS run's span, not the chain-wide step counter")
+
+# AN OLD EXPERT WITH NO SELECTIONS IS STILL THE ALARM IT WAS.
+mass = [0.0] * 2183
+mass[106] = 1.0
+out2 = _guard([106], {106: 47100}, 107057, 47064, mass=mass)
+check(any("IS NOT THE RUN'S ROUTER" in l for l in out2),
+      "an expert alive since the START of the run with zero selections still raises the alarm")
+check(any("eval mass 1.00" in l for l in out2),
+      "  ...and the alarm names its EVAL routing mass beside the zero, which is the pair that localises it")
+check(any("not new enough for that to be why" in l for l in out2),
+      "  ...and says explicitly that youth was ruled out")
+
+# MIXED: one new, one old. Both lines print, and neither swallows the other.
+out3 = _guard([106, 2182], {106: 47100, 2182: 106500}, 107057, 47064, mass=mass)
+check(any("IS NOT THE RUN'S ROUTER: 1 of 16" in l for l in out3) and any("1 probe winner(s)" in l for l in out3),
+      "a mixed set splits: the old one alarms, the new one is explained, counts stated separately")
+
 
 # --- 9. FOUR CLAIMS I MADE AND NEVER CHECKED -----------------------------------------------------------
 # Audited after the first continual-learning run. Two were true and worse than stated, one was partly wrong
