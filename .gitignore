@@ -1,2 +1,12 @@
 __pycache__/
 *.pyc
+
+# GENERATED CORPORA AND RUN OUTPUT ARE NOT SOURCE.
+# data_pilot/ is built by the fetchers -- 26 MB of it here, and a full pull is tens of GB. It is
+# reproducible from a dataset id, a size and a seed, all of which the _fetch_manifest.json inside it
+# records, so the manifest is the thing worth keeping and the bytes are not. Committing it would also put
+# a corpus in git whose held-out tail is the thing every reported number is measured on -- a corpus that
+# changed under a commit would silently change what "held out" meant.
+# data/ IS tracked and stays tracked: the owner ruled it is input, not artifact.
+data_pilot/
+runs/
