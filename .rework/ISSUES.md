@@ -20,7 +20,7 @@ Counts: critical 58, high 122, medium 181, low 114 — 475 records total.
 These came from reading the source. They are the work list for the rebuild.
 
 
-### CRITICAL (9)
+### CRITICAL (10)
 
 **C1. Six arm names resolve to a flag set identical to the shipped defaults — they are `base` under another name** *(unverified)*  
 `armed-but-inert` · harness · longrun.sh:173 (vote), :174 (socloop), :269 (nogate), :278 (nocompose), :304 (nomem), :378 (gate_press)  
@@ -58,6 +58,10 @@ MEM=1 always takes exactly 50% of the probability mass from retrieval, however b
 `unit-mismatch` · tools · cl_bench.py:159-163 (bpb)  
 Every 'weights + memory' number this testbed produces — the whole editable-memory thesis, both key modes, both forgetting arms and the wrongness recovery — is measured with retrieval taking a fixed LAMBDA share regardless of match quality. `dist, conf, hit, w = mem.read(...)` binds conf and never uses it; `hp = pmem.sum(-1)` is 1.0 whenever the store has a valid entry. In my run the memory arms came out WORSE than weights-only (+1.003 and +1.360 vs +0.495), which is exactly the signature self_organize.py attributes to this bug.
 
+
+**C10. `import memory` from the repository root returns the OLD system's 654-line module, not `src/memory/`** **[CONFIRMED]**  
+`silent-overwrite` · rework · ./memory.py vs src/memory/ ; measured 2026-08-29  
+`PYTHONPATH=src python3 ...` from the repository root — the natural invocation, and the first one tried — puts the ROOT ahead of `src` on `sys.path`, because PYTHONPATH lands after the script's own directory. `import memory` therefore resolves to the legacy `./memory.py` and not to `src/memory/`, silently, with no error and the wrong module's globals. It surfaced only by luck: the old file has no `levers` attribute, so `import memory.levers` raised `'memory' is not a package`; a plain `import memory`, or an old file that happened to carry the attribute, succeeds and returns the wrong system. None of the ownership checks can see this — O1 through O10 parse `src/` with `ast` and never ask which file a name resolves to. `src/data/` survives the same collision with the tracked `./data/` only because it has an `__init__.py` and a regular package outranks a namespace package found earlier; measured both ways, and removing that one file reverses it. NOT FIXED BY DELETION, because `self_organize.py` imports `memory` by that name and the old tree is the only thing that has ever produced a result. Mitigated by ordering — every entry point does `sys.path.insert(0, <root>/src)` — and tests/test_census.py's N5 re-measures the mitigation in a subprocess rather than asserting the collision is absent.
 
 ### HIGH (50)
 
