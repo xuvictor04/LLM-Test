@@ -2,8 +2,18 @@
 
     python3 tests/test_ownership.py          # PASS/FAIL per check with counts; non-zero exit on any FAIL
 
-WHAT THIS FILE PROVES, AND THE SENTENCE IT MAY NOT SAY. It proves that a module cannot NAME a foreign
-lever. That is all it proves. The design review said so in as many words -- "all ten Spine checks are
+WHAT THIS FILE PROVES, AND THE SENTENCE IT MAY NOT SAY. It proves that a module cannot MINT a foreign
+lever: it cannot name the environment (O1), cannot hold two lever sets under any spelling (O3), and
+cannot call `from_env` outside the wiring file (O8). It does NOT prove that a module cannot READ one. A
+Config is an ordinary object; `build()` returns `{PREFIX: Config}`; and `memory_prune(configs["FAB"])`
+reads FAB's levers with no error at author time and none at run time -- reproduced by a reviewer against
+docstrings in spine/lever.py and spine/assemble.py that called it "an author-time NameError". Those
+docstrings now say what is true, this file's O9 refuses the signature that would hold two packages at
+once, and `Config.owned_by(PREFIX)` is the assertion at the read site. What is left uncovered is an
+unannotated parameter handed a foreign Config: nothing in the source text distinguishes it, so nothing
+here can see it, and it is L3's.
+
+That is all it proves. The design review said so in as many words -- "all ten Spine checks are
 AST/scope, and are blind to coupling through shared mutable state, RNG draw order or the data" -- and the
 finding stands. Two packages that never mention each other still couple if they draw from one RNG in an
 order that depends on a lever, or if one of them changes the bytes the other trains on. Nothing below can
@@ -25,6 +35,17 @@ WHY EACH CHECK EXISTS -- the defect, not the rule:
       so FAB_NMAX entered the read audit on every run whether or not it mattered; and the same name was
       read as _i("MAX_DOMAINS", 32) elsewhere, so one knob had two defaults 128x apart.
   O3  the old `_SPEC` table put all 328 knobs in one module, which is what made "who owns this" a comment.
+      The check itself then had the defect in miniature: it counted lever sets by their local SPELLING, so
+      `from fabric.levers import FabricLevers as _F` followed by `_F.from_env().slots` read FAB_SLOTS and
+      passed all seven checks. Reproduced end to end. It now counts by RESOLVED ORIGIN.
+  O8  the same bypass, answered from the other end. Resolving aliases is a race against spellings; naming
+      the one legal CALL SITE is not, because it constrains where the call may appear rather than what the
+      callee is called. `from_env` is the operation that turns a lever set into readable values, so
+      whatever `_F` is and however it was spelled, `_F.from_env()` outside the wiring file is a finding.
+  O9  `memory_prune(configs["FAB"])` -> 2048. Two docstrings said that was an author-time NameError; it
+      is an ordinary call. A function outside the wiring file may not annotate two Config parameters, and
+      a Config parameter must name its package through `owned_by("PREFIX")` -- which is what makes the
+      wrong hand-off a startup failure instead of a plausible wrong number in a report.
   O4  the review's exact objection: "wires launder couplings -- fab.nmax arrives in domains as
       expert_slots and looks owned." It arrives as `d_expert_slots`, and this check is the audit that
       makes `grep d_` complete in BOTH directions.
@@ -51,8 +72,12 @@ would be a second validator with its own idea of the rule, which is precisely ho
 with a report path and an audit path printing different numbers for one quantity.
 """
 import ast
+import contextlib
+import io
 import os
+import shutil
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src")
@@ -100,7 +125,16 @@ def load(src=SRC):
 
     Skipping an unparseable file would make this whole pass weaker the more broken the tree is, which is
     backwards: a file that does not parse is the one most likely to contain the thing being looked for.
+
+    PATHS ARE RELATIVE TO THE PARENT OF `src`, NOT TO ROOT. For the real tree those are the same thing --
+    SRC is ROOT/src, so `rel` still reads `src/spine/lever.py` and still compares equal to ENV_READER and
+    WIRING_FILE. What the change buys is that this whole pass can be pointed at a SYNTHETIC tree in a
+    temp directory and the exemptions still land on the right files, which is what the self-test at the
+    bottom of this file needs. That is not a convenience: O3 passed the aliased bypass for as long as
+    there was no way to hand it a tree containing one, and a check nobody has ever watched FAIL is
+    indistinguishable from a check that cannot fail -- 60 of the survey's 475 records are that shape.
     """
+    base = os.path.dirname(os.path.abspath(src))
     mods, bad = [], []
     for dirpath, dirnames, filenames in os.walk(src):
         dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
@@ -108,7 +142,7 @@ def load(src=SRC):
             if not fn.endswith(".py"):
                 continue
             path = os.path.join(dirpath, fn)
-            rel = os.path.relpath(path, ROOT)
+            rel = os.path.relpath(path, base)
             with open(path, "r", encoding="utf-8") as fh:
                 text = fh.read()
             try:
@@ -319,19 +353,32 @@ def check_o2_literal_defaults(mods):
 # ==================================================================================================
 #
 # This is L2 stated as something AST can see. A package function receives its own Config as a parameter,
-# so a foreign lever has no name in scope and reading one is a NameError at author time rather than a
-# policy. That guarantee only holds while no module imports two lever sets at once, because a module
-# holding both can hand either to anything.
+# and a module that holds two lever sets can mint and hand out either one -- so the count of sets in
+# scope is the thing to bound. It bounds MINTING, not reading: see O9 and the module docstring for the
+# difference, which two other docstrings in this tree used to get wrong.
+#
+# COUNTED BY RESOLVED ORIGIN, NOT BY LOCAL SPELLING, because this check had the ownership defect itself.
+# It keyed lever sets by class name and matched `ast.Name.id` against those names, so
+#     from fabric.levers import FabricLevers as _F
+#     _F.from_env().slots
+# named zero lever sets as far as it could tell, passed all seven checks, and read FAB_SLOTS at will.
+# A reviewer reproduced that end to end; the self-test case named "the reviewer's module" is that file, and
+# it now fails here. O8 answers the same bypass from the other end, and answers it better: it constrains
+# the CALL SITE, which no spelling can change.
 #
 # The PREFIX duplicate half is checked here too. spine/registry.py refuses it at import, but only for
 # sets that are actually imported -- a package nobody imported yet can sit in the tree for a week with a
 # colliding PREFIX and the runtime check will never see it.
 #
 # CANNOT CATCH:
-#   * a module that references ONE foreign lever set. One is legal here and has to be: the package's own
-#     levers.py defines and references exactly one. This check counts NAMES IN SCOPE, so a module that
-#     imports somebody else's set and none of its own reads as compliant. What stops that is that a
-#     function is only ever handed its own Config -- a structural fact, not something checked here.
+#   * a module that references ONE foreign lever set AND NONE OF ITS OWN. One set in scope is legal and
+#     has to be, since a package's own levers.py declares exactly one, and this check cannot tell whose
+#     it is. That hole is real and it is exactly what a bare alias module looks like -- which is why O8
+#     exists: the module is legal here and fails there, because it CALLS from_env outside the wiring file.
+#     The self-test case "O8 alone" asserts that pair of outcomes -- O3 green, O8 red, on one tree -- so
+#     the division of labour between them cannot silently rot.
+#   * a lever set fetched by string: `getattr(mod, "FabricLevers")`, an entry in a dict of classes, or
+#     one returned by a factory. There is no spelling in the source to resolve.
 #   * a foreign value arriving as a plain function argument. `def cull(pop, nmax)` called with FAB.nmax
 #     from a module that legitimately holds FAB is invisible to every check in this file. The `d_` rule
 #     (O4) is what makes that visible, and only for values that cross via assemble.
@@ -339,22 +386,52 @@ def check_o2_literal_defaults(mods):
 #     PREFIX would defeat the duplicate check entirely.
 
 def _leversets(mods):
-    """Every LeverSet subclass in src/, to a fixed point, with its declared PREFIX literal.
+    """Every LeverSet subclass in src/, to a fixed point, keyed by ORIGIN: (dotted module, class name).
 
-    To a fixed point because a package may reasonably declare an intermediate base (`class Cadenced
-    (LeverSet)`) and its subclasses are lever sets too. A single pass would miss them, and a lever set
-    this function does not know about is one the ownership checks cannot count.
+    KEYED BY ORIGIN AND NOT BY CLASS NAME, and the difference was a live hole in both halves of O3:
+
+      * `found[node.name]` skipped any class whose NAME was already taken, so `class Levers` in
+        fabric/levers.py and `class Levers` in domains/levers.py collapsed into one row and the second one
+        vanished from this function's answer entirely. Reproduced: two packages both declaring
+        PREFIX="DUP" printed "3 distinct PREFIX(es)" over four classes and PASSED the duplicate-prefix
+        half, which is the one check in this file whose entire job is that collision.
+      * a class name is a SPELLING, and O3's other half matched `ast.Name.id` against these keys. A local
+        alias therefore defeated it: `from fabric.levers import FabricLevers as _F` put FAB's set in a
+        memory module under a name this table had never heard of, and `_F.from_env().slots` read FAB_SLOTS
+        through all seven checks. Verified end to end by a reviewer, and by the self-test below.
+
+    TO A FIXED POINT because a package may declare an intermediate base (`class Cadenced(LeverSet)`) whose
+    subclasses are lever sets too. A single pass would miss them, and a lever set this function does not
+    know about is one no check in this file can count.
+
+    BASES ARE MATCHED BY SIMPLE NAME, deliberately, even though the answer is keyed by origin. Discovery
+    and counting want opposite failure modes: a base spelling this pass fails to recognise means a lever
+    set that does not exist as far as every check is concerned, so discovery must over-catch, while a
+    count inflated by two spellings of one class is a false finding, so counting must resolve. Import
+    aliases on the base (`from spine.lever import LeverSet as _LS`) are un-aliased first, for the same
+    reason -- a resolver that resolves nothing passes everything.
     """
-    found = {}                       # class name -> (mod, node, prefix or None)
-    known = {"LeverSet"}
+    unalias = {}                     # mod.rel -> {local name: original name}, for base spellings
+    for mod in mods:
+        _, from_names = _imports(mod)
+        unalias[mod.rel] = {local: orig for local, (base, orig) in from_names.items()}
+
+    found = {}                       # (dotted, class name) -> (mod, node, prefix or None)
+    known = {"LeverSet"}             # simple base spellings known to be lever sets
     for _ in range(8):               # depth bound: 8 levels of lever-set inheritance is already absurd
         added = False
         for mod in mods:
+            back = unalias[mod.rel]
             for node in ast.walk(mod.tree):
-                if not isinstance(node, ast.ClassDef) or node.name in found:
+                if not isinstance(node, ast.ClassDef) or (mod.dotted, node.name) in found:
                     continue
-                bases = {b.id if isinstance(b, ast.Name) else b.attr
-                         for b in node.bases if isinstance(b, (ast.Name, ast.Attribute))}
+                bases = set()
+                for b in node.bases:
+                    spelled = b.id if isinstance(b, ast.Name) else b.attr if isinstance(b, ast.Attribute) else None
+                    if spelled is None:
+                        continue
+                    bases.add(spelled)
+                    bases.add(back.get(spelled, spelled))
                 if not (bases & known):
                     continue
                 prefix = None
@@ -362,12 +439,89 @@ def _leversets(mods):
                     if isinstance(stmt, ast.Assign) and any(
                             isinstance(t, ast.Name) and t.id == "PREFIX" for t in stmt.targets):
                         prefix = stmt.value.value if isinstance(stmt.value, ast.Constant) else _UNKNOWN
-                found[node.name] = (mod, node, prefix)
+                found[(mod.dotted, node.name)] = (mod, node, prefix)
                 known.add(node.name)
                 added = True
         if not added:
             break
     return found
+
+
+def _origins_named(mods_sets, mod):
+    """{origin: the first spelling of it seen} for every lever set this module has IN SCOPE.
+
+    IN SCOPE, not "mentioned": an import BINDING counts on its own. That is what O3's rule says -- "a
+    module with two sets in scope can hand either to anything" -- and the old code did not implement it,
+    because it looked only at ast.Name/ast.Attribute uses. `from fabric.levers import FabricLevers as _F`
+    binds a foreign lever set with no ast.Name anywhere for the old matcher to find.
+
+    THREE SPELLINGS ARE RESOLVED, and one deliberately is not:
+        from fabric.levers import FabricLevers as _F     ->  the binding resolves to the origin
+        import fabric.levers as _fl ... _fl.FabricLevers ->  the attribute chain resolves through it
+        class FabricLevers(LeverSet)                     ->  a set defined here is named here
+    A later `_G = _F` needs no special handling and gets none: the right-hand side is itself one of the
+    spellings above and every expression in the module is walked, so the origin is already counted. A
+    fixed point over assignments would be code that cannot change any answer, which is the untrippable
+    guard this project keeps rediscovering.
+
+    OVER-CATCHES ON PURPOSE, in `snap` below: an attribute whose final component matches a known lever
+    set's class name counts even when the base it hangs off resolves to nothing. `src/` is scanned as a
+    flat package root and a module reached by another sys.path root spells its own name differently, so
+    strict resolution would silently count zero -- and a check that resolves nothing passes everything.
+    The cost is a false positive a human reads once.
+    """
+    sets = mods_sets
+    modules, from_names = _imports(mod)
+    by_simple = {}
+    for (dotted, cname) in sets:
+        by_simple.setdefault(cname, set()).add((dotted, cname))
+
+    def snap(dotted_mod, cname):
+        """A (module, class) candidate, snapped onto a real lever set, or None."""
+        if (dotted_mod, cname) in sets:
+            return (dotted_mod, cname)
+        hits = by_simple.get(cname)
+        if not hits:
+            return None
+        if len(hits) == 1:
+            return next(iter(hits))
+        # Two packages declaring one class name is itself a finding in the other half of O3. Counting it
+        # under a marker keeps this half honest -- the module really does hold A lever set -- without
+        # guessing which one and reporting a package that may not be involved.
+        return ("<ambiguous class name>", cname)
+
+    local = {}                                     # local spelling -> origin
+    for name, (base, orig) in from_names.items():
+        o = snap(base, orig)
+        if o is not None:
+            local[name] = o
+
+    def attr_origin(node):
+        dotted = _attr_name(node)
+        if dotted is None or "." not in dotted:
+            return None
+        head, _, cname = dotted.rpartition(".")
+        if head in local:
+            # An attribute hanging off a lever set (`_F.from_env`) is not itself a lever set.
+            return None
+        first, _, rest = head.partition(".")
+        base = modules.get(first, first)
+        return snap(f"{base}.{rest}" if rest else base, cname)
+
+    out = {}
+    for name, o in sorted(local.items()):
+        out.setdefault(o, name)
+    for node in ast.walk(mod.tree):
+        o = spell = None
+        if isinstance(node, ast.Name) and node.id in local:
+            o, spell = local[node.id], node.id
+        elif isinstance(node, ast.Attribute):
+            o, spell = attr_origin(node), (_attr_name(node) or node.attr)
+        elif isinstance(node, ast.ClassDef) and (mod.dotted, node.name) in sets:
+            o, spell = (mod.dotted, node.name), node.name
+        if o is not None:
+            out.setdefault(o, spell)
+    return out
 
 
 class _Unknown:
@@ -381,41 +535,40 @@ def check_o3_one_leverset_per_module(mods):
     sets = _leversets(mods)
     findings = []
 
-    # -- half one: a module may name at most one lever set --------------------------------------
+    # -- half one: a module may have at most one lever set in scope, under any spelling ----------
     for mod in mods:
-        named = set()
-        for node in ast.walk(mod.tree):
-            if isinstance(node, ast.Name) and node.id in sets:
-                named.add(node.id)
-            elif isinstance(node, ast.Attribute) and node.attr in sets:
-                named.add(node.attr)
-            elif isinstance(node, ast.ClassDef) and node.name in sets:
-                named.add(node.name)
+        named = _origins_named(sets, mod)
         if len(named) > 1 and mod.rel != WIRING_FILE:
-            findings.append(f"{mod.rel}:1  names {len(named)} lever sets ({', '.join(sorted(named))}). "
+            shown = ", ".join(f"{spell} = {d}.{c}" for (d, c), spell in sorted(named.items()))
+            findings.append(f"{mod.rel}:1  has {len(named)} lever sets in scope ({shown}). "
                             f"Only {WIRING_FILE} may hold more than one: a module with two sets in scope "
-                            f"can hand either to anything, which is the read L2 forbids.")
+                            f"can hand either to anything, which is the read L2 forbids. The count is by "
+                            f"resolved ORIGIN, so renaming one at the import line does not reduce it.")
 
     # -- half two: one PREFIX, one owner --------------------------------------------------------
     by_prefix = {}
-    for name, (mod, node, prefix) in sorted(sets.items()):
+    for (dotted, cname), (mod, node, prefix) in sorted(sets.items()):
+        # The class is named with its module, always. Two packages may legally declare a class of the
+        # same name, and a finding that says only "Levers" sends the reader to the wrong file -- which is
+        # the same confusion that let the by-name keying hide one of them from this half entirely.
+        label = f"{cname} ({dotted})"
         if prefix is _UNKNOWN:
-            findings.append(_at(mod, node, f"{name}.PREFIX is not a string literal, so the static "
+            findings.append(_at(mod, node, f"{label}.PREFIX is not a string literal, so the static "
                                            f"duplicate-prefix check cannot see it. Only the import-time "
                                            f"check in spine/registry.py covers this set, and that one "
                                            f"only fires for sets something actually imports."))
             continue
         if prefix is None:
-            findings.append(_at(mod, node, f"{name} declares no PREFIX. Ownership IS the namespace: "
+            findings.append(_at(mod, node, f"{label} declares no PREFIX. Ownership IS the namespace: "
                                            f"without a prefix the environment name cannot be generated."))
             continue
         prior = by_prefix.get(prefix)
         if prior is not None:
             findings.append(_at(mod, node, f"PREFIX {prefix!r} is claimed by both {prior[0]} "
-                                           f"({prior[1].rel}:{prior[2].lineno}) and {name}. "
+                                           f"({prior[1].rel}:{prior[2].lineno}) and {label}. "
                                            f"One prefix, one owner."))
         else:
-            by_prefix[prefix] = (name, mod, node)
+            by_prefix[prefix] = (label, mod, node)
     detail = (f"{len(sets)} LeverSet subclass(es) across {len(mods)} files, "
               f"{len(by_prefix)} distinct PREFIX(es)")
     return _report("O3", "no module outside the wiring file holds two lever sets",
@@ -535,14 +688,34 @@ def check_o4_wires_match_reads(mods):
                                            f"coupling missing from affects(), and affects() is the L3 "
                                            f"sweep's only oracle."))
 
-    # -- backward: every declared destination is read, unless its package does not exist yet ------
-    prefixes = {p for _, _, p in _leversets(mods).values() if isinstance(p, str)}
+    # -- backward: every declared destination is read, unless its package has no BODY yet -----------
+    # THE CONDITION IS "HAS AN IMPLEMENTATION", NOT "HAS A LeverSet". The first version deferred on
+    # whether a package declared levers, which was right while the tree was empty and wrong the moment
+    # thirteen levers.py files landed: four packages acquired declarations, none of them acquired the
+    # code that would READ a wired value, and O4 failed on five rows that were merely not-yet-written.
+    # A package is expected to read its wires once it has a module other than levers.py/__init__.py.
+    # This self-clears as each package gets a body, and it cannot be used to hide a real unread wire in
+    # a finished package -- which is the failure O4 exists for.
+    import os as _os
+    _pkg_dir = {}
+    for _m in mods:
+        _pth = str(_m)
+        if _os.path.basename(_pth) == "levers.py":
+            for _mod, _, _pfx in _leversets([_m]).values():
+                if isinstance(_pfx, str):
+                    _pkg_dir[_pfx] = _os.path.dirname(_pth)
+    def _has_body(prefix):
+        d = _pkg_dir.get(prefix)
+        if not d or not _os.path.isdir(d):
+            return False
+        return any(f.endswith(".py") and f not in ("levers.py", "__init__.py")
+                   for f in _os.listdir(d))
     unread, deferred = [], []
     for dst in dsts:
         prefix, _, field = dst.partition(".")
         if field in reads:
             continue
-        (unread if prefix in prefixes else deferred).append(dst)
+        (unread if _has_body(prefix) else deferred).append(dst)
     for dst in unread:
         findings.append(f"{WIRING_FILE}:1  {dst} is declared and its package is registered, but nothing "
                         f"in src/ reads it. A wire nobody reads spends budget, prints an edge, and "
@@ -550,7 +723,7 @@ def check_o4_wires_match_reads(mods):
 
     detail = (f"{len(dsts)} declared destination(s), {len(reads)} distinct d_ field(s) read at "
               f"{sum(len(v) for v in reads.values())} site(s); {len(unread)} declared-but-unread, "
-              f"{len(deferred)} deferred (package not in src/ yet)")
+              f"{len(deferred)} deferred (receiving package has no implementation yet)")
     ok = not findings
     rc = _report("O4", "every d_ read is a declared wire, and every declared wire is read",
                  ok, detail, findings, vacuous=not reads and not dsts)
@@ -827,6 +1000,529 @@ def check_o7_no_clock_vs_int(mods):
 
 
 # ==================================================================================================
+# O8 -- LeverSet.from_env is called from EXACTLY ONE file, the wiring file
+# ==================================================================================================
+#
+# THE CHECK THAT DOES NOT CARE HOW THE NAME IS SPELLED. O3 counts lever sets, and counting things by name
+# is precisely what an alias defeats: `from fabric.levers import FabricLevers as _F` put FAB's set into a
+# memory module under a name O3 had never heard of, and `_F.from_env().slots` read FAB_SLOTS through all
+# seven checks. O3 now resolves aliases, but resolution is a race against spellings -- a dict of classes,
+# a factory, a getattr with a computed string -- and every round of that race is won by whoever writes
+# the next module. This check does not enter the race. It constrains the CALL SITE: whatever `_F` is and
+# however it was named, a `.from_env(` outside spine/assemble.py is a finding.
+#
+# WHY from_env AND NOT SOMETHING ELSE. It is the operation that turns a declaration into values. A module
+# can import a lever set, subclass it, print it, and read its defaults off the class without ever
+# resolving anything from the environment; the moment it calls from_env it has minted a Config for a
+# package that is not its own, and every lever in that package is one attribute away. Between this and
+# O1, the environment is READ in one file and the read is TRIGGERED from one file, so the only door to a
+# Config is build() and the only caller of build() is the entry point.
+#
+# THE READER MUST EXIST, same clause as O1 and for the same reason. If nothing in the wiring file calls
+# from_env, this check passes over a tree where no lever is ever resolved -- a guard that cannot tell
+# "correct" from "absent" is the untrippable shape this project has 60 records of.
+#
+# CANNOT CATCH:
+#   * `getattr(cls, "from_" + "env")()`, or a resolver wrapped in a helper that lever.py itself exports.
+#     A literal-string getattr IS caught; a computed one is not.
+#   * a Config that arrives some other way -- passed in from the entry point, stashed on a shared object,
+#     or handed over as a plain argument. That is O9's half, and past O9 it is L3's.
+#   * anything outside src/. A test or a script resolving a synthetic set in isolation is what build()'s
+#     `sets=` parameter is for, and scanning tests here would make the check fail on its own self-test.
+# OVER-CATCHES ON PURPOSE: any attribute named `from_env` on any object, including one that has nothing
+# to do with levers. A false positive is read once by a human; a minted foreign Config is silent forever.
+
+FROM_ENV = "from_env"
+
+
+def check_o8_from_env_only_in_wiring_file(mods):
+    findings, per_file = [], {}
+    for mod in mods:
+        _, from_names = _imports(mod)
+        # `from spine.lever import LeverSet as _LS` does not bind from_env, but
+        # `from somewhere import from_env` would. Track the local name, not the spelling.
+        aliased = {local for local, (base, orig) in from_names.items() if orig == FROM_ENV}
+        for node in ast.walk(mod.tree):
+            hit = None
+            if isinstance(node, ast.Attribute) and node.attr == FROM_ENV:
+                hit = _attr_name(node) or f"<expr>.{FROM_ENV}"
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in aliased:
+                hit = f"{node.id} (imported from_env)"
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                  and node.func.id == "getattr" and len(node.args) >= 2
+                  and isinstance(node.args[1], ast.Constant) and node.args[1].value == FROM_ENV):
+                hit = f"getattr(..., {FROM_ENV!r})"
+            if hit is None:
+                continue
+            per_file.setdefault(mod.rel, []).append(node.lineno)
+            if mod.rel != WIRING_FILE:
+                # The source line is quoted for the same reason O1 quotes it: what a reader needs is
+                # WHICH set is being resolved, and `_F.from_env()` only says that in the file itself.
+                findings.append(_at(mod, node, f"resolves a lever set as {hit}: {mod.line(node.lineno)} "
+                                               f"-- only {WIRING_FILE} may call from_env. Minting a "
+                                               f"Config here puts every lever of that package one "
+                                               f"attribute away, whatever the local name says. Take the "
+                                               f"Config your package is given, or declare a wire."))
+    calls_here = len(per_file.get(WIRING_FILE, []))
+    if calls_here == 0:
+        findings.append(f"{WIRING_FILE}  never calls {FROM_ENV}. build() is the only door to a Config; "
+                        f"if it has stopped resolving lever sets, this check is passing over a tree "
+                        f"where nothing reads the environment at all.")
+    detail = (f"{sum(len(v) for v in per_file.values())} from_env reference(s) in {len(per_file)} "
+              f"file(s); {calls_here} in {WIRING_FILE}; {len(mods)} files scanned")
+    return _report("O8", "from_env is called only from the wiring file", not findings, detail, findings)
+
+
+# ==================================================================================================
+# O9 -- no function outside the wiring file receives two packages' Configs, and one that receives a
+#       Config says whose it is
+# ==================================================================================================
+#
+# THE DEFECT, EXACTLY. spine/lever.py and spine/assemble.py both stated that a package receives only its
+# own record, so "reading a foreign lever is a NameError at author time, not a policy". It is not. build()
+# returns a dict keyed by PREFIX, a Config carries no owner check at the point of use, and
+#     def memory_prune(cfg): return cfg.slots        # memory_prune(configs["FAB"]) -> 2048
+# runs, returns FAB's slot count, and raises nothing. A reviewer verified it. The wording in both files is
+# now what is true; this check and `Config.owned_by` are the part that can be enforced.
+#
+# TWO HALVES, AND NEITHER IS THE WHOLE THING:
+#   signature   a function outside the wiring file may not annotate two parameters as Configs. Holding
+#               two packages at once is the thing exactly one file may do, and a signature is the one
+#               form of that AST can read without a type system.
+#   assertion   a Config-annotated parameter outside src/spine/ must be paired with an
+#               `owned_by("PREFIX")` call naming a string literal. Without it the annotation says "some
+#               package's levers", which is not a statement about ownership at all -- and the whole point
+#               of the helper is that it fires on the wrong hand-off at startup, naming both packages,
+#               instead of returning a plausible number.
+#
+# WHY src/spine/ IS EXEMPT FROM THE SECOND HALF ONLY. The spine implements Config; build(), render() and
+# the wiring views necessarily take one that belongs to no package in particular, and demanding they
+# declare a prefix would be demanding a wrong answer. They are NOT exempt from the first half: nothing in
+# the spine outside the wiring file has any business holding two packages in one signature either. The
+# exempt count is printed, because an exemption nobody can see is an exemption nobody re-reads.
+#
+# IF A FUNCTION OUTSIDE THE SPINE GENUINELY TAKES ANY PACKAGE'S CONFIG -- report rendering is the case
+# that will come up -- it is machinery, not a package, and the two fixes are to move it into src/spine/
+# or to have it take the `{PREFIX: Config}` map, which is not a Config and is not annotated as one. The
+# fix that is NOT available is deleting this half, because the assertion is the only thing between a
+# wrong hand-off and a plausible number in a report, and a report is where a wrong number does the most
+# damage: it is read as a result.
+#
+# CANNOT CATCH -- and this is the larger half of the truth:
+#   * an UNANNOTATED parameter. `def prune(cfg)` handed configs["FAB"] is the original defect and it is
+#     invisible here; there is nothing in the text that distinguishes it from correct code. This check
+#     raises the cost of the mistake for annotated code and does nothing at all for the rest, which is
+#     why the docstrings may not go back to calling any of this structural.
+#   * a Config reached through a container: `cfgs["FAB"].slots` inside a package module, a Config stored
+#     on an object, a closure over the build() result. O3 and O8 are what keep the build() result from
+#     being reachable in the first place, and neither is a guarantee about where it goes afterwards.
+#   * whether `owned_by("MEM")` names the RIGHT package for the function it sits in. A literal that
+#     matches no declared PREFIX is caught; a literal that names the wrong existing package is not.
+#   * a call to owned_by in a nested def counting for the enclosing one. The walk does not scope, and
+#     tightening it would trade a real false negative for a rare one.
+# OVER-CATCHES ON PURPOSE: any annotation whose final component is `Config`, resolved or not.
+
+CONFIG_CLASS = "Config"
+SPINE_DIR = os.path.join("src", "spine") + os.sep
+
+
+def _annotates_config(node, unalias):
+    """Does this parameter annotation name spine.lever.Config, however it is spelled?
+
+    `Config`, `lever.Config`, `"Config"`, `"spine.lever.Config"` and `Optional[Config]` all count. String
+    annotations are included because `from __future__ import annotations` turns every annotation in a file
+    into one, and a check that stopped seeing annotations the day someone added that import would be a
+    check that silently stopped running.
+    """
+    if node is None:
+        return False
+    if isinstance(node, ast.Subscript):
+        inner = node.slice
+        elts = inner.elts if isinstance(inner, ast.Tuple) else [inner]
+        return any(_annotates_config(e, unalias) for e in elts)
+    if isinstance(node, ast.Name):
+        name = node.id
+    elif isinstance(node, ast.Attribute):
+        name = node.attr
+    elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+        name = node.value.strip().strip("'\"").rpartition(".")[2].strip()
+    else:
+        return False
+    return unalias.get(name, name) == CONFIG_CLASS
+
+
+def _config_params(mod):
+    """(function node, [parameter names annotated as a Config]) for every def in a module."""
+    _, from_names = _imports(mod)
+    unalias = {local: orig for local, (base, orig) in from_names.items()}
+    out = []
+    for node in ast.walk(mod.tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        a = node.args
+        params = list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)
+        params += [p for p in (a.vararg, a.kwarg) if p is not None]
+        hits = [p.arg for p in params if _annotates_config(p.annotation, unalias)]
+        if hits:
+            out.append((node, hits))
+    return out
+
+
+def _owned_by_calls(fnode):
+    """Every `x.owned_by(...)` inside a function, as (node, the literal prefix or None)."""
+    out = []
+    for n in ast.walk(fnode):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "owned_by":
+            arg = n.args[0] if n.args else None
+            lit = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else None
+            out.append((n, lit))
+    return out
+
+
+def check_o9_one_config_per_signature(mods):
+    prefixes = {p for _, _, p in _leversets(mods).values() if isinstance(p, str)}
+    findings, fns, params, exempt = [], 0, 0, 0
+    for mod in mods:
+        for fnode, hits in _config_params(mod):
+            fns += 1
+            params += len(hits)
+            if len(hits) > 1 and mod.rel != WIRING_FILE:
+                findings.append(_at(mod, fnode,
+                                    f"{fnode.name}({', '.join(hits)}) annotates {len(hits)} Config "
+                                    f"parameters. One function holding two packages' levers is the thing "
+                                    f"only {WIRING_FILE} may do -- it can read across the boundary with "
+                                    f"no wire, no ledger row and nothing in affects() to say so."))
+            if mod.rel == WIRING_FILE or mod.rel.startswith(SPINE_DIR):
+                exempt += 1
+                continue
+            asserted = _owned_by_calls(fnode)
+            if not asserted:
+                findings.append(_at(mod, fnode,
+                                    f"{fnode.name}({hits[0]}: Config) never says WHOSE Config it is. Add "
+                                    f"`{hits[0]} = {hits[0]}.owned_by(\"PREFIX\")`. A Config does not know "
+                                    f"who is holding it: memory_prune(configs[\"FAB\"]) returns FAB's "
+                                    f"levers and raises nothing, and the assertion is the only thing "
+                                    f"that turns that into a startup failure."))
+                continue
+            for node, lit in asserted:
+                if lit is None:
+                    findings.append(_at(mod, node,
+                                        f"owned_by(...) with a non-literal prefix: "
+                                        f"{mod.line(node.lineno)} -- this check reads the source text, so "
+                                        f"a computed prefix is an assertion no static pass can verify."))
+                elif prefixes and lit not in prefixes:
+                    findings.append(_at(mod, node,
+                                        f"owned_by({lit!r}) names no declared PREFIX. Declared in src/: "
+                                        f"{sorted(prefixes)}. An assertion against a prefix that does not "
+                                        f"exist can never fail, and never failing is what it looks like "
+                                        f"from the outside when it is working."))
+    detail = (f"{fns} function(s) with a Config-annotated parameter, {params} such parameter(s); "
+              f"{exempt} exempt from the ownership assertion ({WIRING_FILE} and {SPINE_DIR}*)")
+    return _report("O9", "no function outside the wiring file receives two packages' Configs",
+                   not findings, detail, findings, vacuous=not fns)
+
+
+# ==================================================================================================
+# SELF-TEST -- every check below is run against a tree that CONTAINS the defect it looks for
+# ==================================================================================================
+#
+# WHY THIS IS NOT OPTIONAL HERE. src/ currently holds only the spine: no lever sets, no packages, no
+# Config parameters. O3, O8 and O9 therefore all report VACUOUS on the real tree, and a check that has
+# only ever been run over an empty population is not evidence about anything. Worse, that is exactly the
+# state O3 was in while it was broken -- it printed PASS on every commit for as long as there was nothing
+# for it to look at, and when a reviewer finally handed it the aliased module it printed PASS on that too.
+#
+# EACH CASE ASSERTS BOTH DIRECTIONS. The bypass tree must FAIL, and the control -- the same tree, one file
+# different -- must PASS. Only the failing direction is a regression test; only the passing direction
+# distinguishes a real check from one that fails on everything, and a check that fails on everything gets
+# switched off within a week and is then worth less than no check at all.
+#
+# ONLY THE CHECK A CASE IS ABOUT IS RUN, not all nine. O1 would fail on the stand-in lever.py below (it
+# names no environment), and O4 imports the real spine.assemble to cross-check the live COUPLINGS table
+# against the source text -- correct behaviour for the real tree and meaningless against a synthetic one.
+# Running them anyway would make every case fail for reasons that have nothing to do with what it tests.
+
+_BASE_TREE = {
+    "src/spine/lever.py": '''\
+"""A stand-in for the real spine/lever.py: only what the checks parse."""
+
+
+class Lever:
+    def __init__(self, default, help):
+        self.default, self.help = default, help
+
+
+class LeverSet:
+    PREFIX = None
+
+    @classmethod
+    def from_env(cls, environ=None):
+        return Config(cls)
+
+
+class Config:
+    def owned_by(self, prefix):
+        return self
+''',
+    "src/spine/assemble.py": '''\
+from fabric.levers import FabricLevers
+from memory.store import MemoryLevers
+
+
+def build():
+    return {c.PREFIX: c.from_env() for c in (FabricLevers, MemoryLevers)}
+''',
+    "src/fabric/levers.py": '''\
+from spine.lever import Lever, LeverSet
+
+
+class FabricLevers(LeverSet):
+    PREFIX = "FAB"
+    slots = Lever(2048, "expert slots")
+''',
+    "src/memory/store.py": '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+
+
+def prune(mem: Config):
+    mem = mem.owned_by("MEM")
+    return mem.quota
+''',
+}
+
+# The reviewer's module, character for character in what matters: a foreign lever set bound to a local
+# name, and from_env called on that name. Under the old O3 this named ZERO lever sets.
+_ALIAS_IMPORT = '''\
+from spine.lever import Config, Lever, LeverSet
+from fabric.levers import FabricLevers as _F
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+
+
+def capacity():
+    return _F.from_env().slots * 64
+'''
+
+# The same bypass through a module alias instead of a class alias. The old O3 DID catch this one, because
+# it matched ast.Attribute.attr against class names -- so this case exists to prove that resolving by
+# origin did not trade one hole for another.
+_ALIAS_ATTR = '''\
+import fabric.levers as _fl
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+
+
+def capacity():
+    return _fl.FabricLevers.from_env().slots * 64
+'''
+
+# One lever set in scope, and it is somebody else's. O3 cannot catch this and says so in its CANNOT CATCH
+# block: one set in scope is legal, and nothing in the text says whose it is. O8 catches it on the call.
+_FOREIGN_ONLY = '''\
+from fabric.levers import FabricLevers as _F
+
+
+def capacity():
+    return _F.from_env().slots * 64
+'''
+
+# A lever set that no static resolver can follow -- it is a dict value, reached by subscript. This is the
+# case that shows why O8 constrains the CALL SITE instead of the name: O3 cannot see a set here at all,
+# and O8 does not need to, because `.from_env(` is still written in the file.
+_DICT_OF_SETS = '''\
+from fabric.levers import FabricLevers as _F
+
+SETS = {"FAB": _F}
+
+
+def capacity():
+    return SETS["FAB"].from_env().slots * 64
+'''
+
+# THE HOLE, PINNED OPEN ON PURPOSE. This is the reviewer's original finding in its purest form: an
+# ordinary parameter, no annotation, handed another package's Config by whoever calls it. Nothing in the
+# source text distinguishes it from correct code and no check in this file fires. The case asserts that
+# all three checks PASS, so that the day someone closes the hole this case FAILS and forces them to say
+# so here -- and so that nobody reading the green output above can believe it is already closed. An
+# untested claim is what this whole finding was about.
+_UNANNOTATED = '''\
+def memory_prune(cfg):
+    return cfg.slots
+'''
+
+_TWO_CONFIGS = '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+
+
+def prune(mem: Config, fab: Config):
+    return mem.quota * fab.slots
+'''
+
+_NO_ASSERTION = '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+
+
+def prune(cfg: Config):
+    return cfg.quota
+'''
+
+_WRONG_PREFIX = '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+
+
+def prune(mem: Config):
+    mem = mem.owned_by("MEN")
+    return mem.quota
+'''
+
+_DUP_A = '''\
+from spine.lever import Lever, LeverSet
+
+
+class Levers(LeverSet):
+    PREFIX = "DUP"
+    x = Lever(1, "x")
+'''
+
+_DUP_B = '''\
+from spine.lever import Lever, LeverSet
+
+
+class Levers(LeverSet):
+    PREFIX = "DUP"
+    y = Lever(2, "y")
+'''
+
+# (name, files overlaid on _BASE_TREE, {check tag: (expected exit code, text its output must contain)})
+_CASES = (
+    ("control: no bypass anywhere in the tree", {},
+     {"O3": (0, None), "O8": (0, None), "O9": (0, None)}),
+
+    ("O3/O8: a foreign lever set imported under a local alias -- the reviewer's module",
+     {"src/memory/store.py": _ALIAS_IMPORT},
+     {"O3": (1, "fabric.levers.FabricLevers"), "O8": (1, "_F.from_env")}),
+
+    ("O3/O8: the same bypass spelled through a module alias",
+     {"src/memory/store.py": _ALIAS_ATTR},
+     {"O3": (1, "fabric.levers.FabricLevers"), "O8": (1, "_fl.FabricLevers.from_env")}),
+
+    ("O8 alone: a module holding ONLY the foreign set, which O3 is documented not to catch",
+     {"src/memory/store.py": _FOREIGN_ONLY},
+     {"O3": (0, None), "O8": (1, "only " + WIRING_FILE + " may call from_env")}),
+
+    ("O8 alone: a lever set reached through a dict, which no resolver can follow",
+     {"src/memory/store.py": _DICT_OF_SETS},
+     {"O3": (0, None), "O8": (1, 'SETS["FAB"].from_env')}),
+
+    ("the residual hole, pinned open: an unannotated parameter is caught by NOTHING",
+     {"src/memory/store.py": _UNANNOTATED},
+     {"O3": (0, None), "O8": (0, None), "O9": (0, None)}),
+
+    ("O3: one class name in two packages must not hide a duplicate PREFIX",
+     {"src/a/levers.py": _DUP_A, "src/b/levers.py": _DUP_B},
+     {"O3": (1, "claimed by both")}),
+
+    ("O9: two Config parameters in one signature outside the wiring file",
+     {"src/memory/store.py": _TWO_CONFIGS},
+     {"O9": (1, "annotates 2 Config parameters")}),
+
+    ("O9: a Config parameter that never declares whose package it is",
+     {"src/memory/store.py": _NO_ASSERTION},
+     {"O9": (1, "never says WHOSE Config it is")}),
+
+    ("O9: an ownership assertion against a PREFIX no package declares",
+     {"src/memory/store.py": _WRONG_PREFIX},
+     {"O9": (1, "names no declared PREFIX")}),
+)
+
+_BY_TAG = {
+    "O3": check_o3_one_leverset_per_module,
+    "O8": check_o8_from_env_only_in_wiring_file,
+    "O9": check_o9_one_config_per_signature,
+}
+
+
+def _tree(overlay):
+    """Write _BASE_TREE plus `overlay` to a fresh temp directory and return its path.
+
+    The tree is rooted so that `load(<dir>/src)` produces paths reading `src/spine/assemble.py` -- see
+    load()'s docstring. Without that, WIRING_FILE and ENV_READER would match nothing in a synthetic tree
+    and every exemption in every check would land on the wrong file, which would make these cases pass
+    for the wrong reason.
+    """
+    files = dict(_BASE_TREE)
+    files.update(overlay)
+    d = tempfile.mkdtemp(prefix="ownership_selftest_")
+    for rel, text in files.items():
+        p = os.path.join(d, *rel.split("/"))
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return d
+
+
+def _indent(text):
+    return "\n".join("              " + ln for ln in text.strip().splitlines())
+
+
+def selftest():
+    findings, ran = [], 0
+    for name, overlay, expect in _CASES:
+        d = _tree(overlay)
+        try:
+            mods, bad = load(os.path.join(d, "src"))
+            if bad:
+                findings.append(f"[{name}] the case tree does not parse, so it tests nothing: {bad}")
+                continue
+            for tag, (want, must_say) in sorted(expect.items()):
+                ran += 1
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    got = _BY_TAG[tag](mods)
+                out = buf.getvalue()
+                if got != want:
+                    verb = "passed a tree it must fail" if want else "failed a tree it must pass"
+                    findings.append(f"[{name}] {tag} {verb}:\n{_indent(out)}")
+                elif want and must_say and must_say not in out:
+                    # A check that fails for the wrong reason is a green regression test over a live hole.
+                    findings.append(f"[{name}] {tag} failed as required, but its finding never mentions "
+                                    f"{must_say!r} -- so it may be failing for an unrelated reason:\n"
+                                    f"{_indent(out)}")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+    detail = f"{len(_CASES)} case(s), {ran} check run(s) against synthetic trees in a temp directory"
+    return _report("SELF", "the checks fail on trees that contain the bypass, and pass on ones that do not",
+                   not findings, detail, findings)
+
+
+# ==================================================================================================
 # The runner
 # ==================================================================================================
 
@@ -838,6 +1534,8 @@ CHECKS = (
     check_o5_no_foreign_global_writes,
     check_o6_wires_have_reasons,
     check_o7_no_clock_vs_int,
+    check_o8_from_env_only_in_wiring_file,
+    check_o9_one_config_per_signature,
 )
 
 
@@ -855,11 +1553,20 @@ def main():
     for check in CHECKS:
         failed += check(mods)
         print()
-    print(f"=== {len(CHECKS)} checks, {failed} failing ===")
-    print("These checks prove that a module cannot NAME a foreign lever. They cannot see a coupling")
-    print("through shared mutable state, RNG draw order or the data -- PLAN section 4's L3")
-    print("(tests/test_lever_isolation.py, behavioural, against the test_determinism noise floor) is the")
-    print("load-bearing check for that, and this file is not evidence about it either way.")
+    # LAST, AND COUNTED. Run after the checks so its output sits next to theirs, and counted into the
+    # exit code because a broken check is a worse failure than anything a check reports: O3 spent its
+    # whole life green while an aliased module read FAB_SLOTS through it.
+    failed += selftest()
+    print()
+    print(f"=== {len(CHECKS)} checks + {len(_CASES)} self-test cases, {failed} failing ===")
+    print("These checks prove that a module cannot MINT a foreign lever: it cannot name the environment,")
+    print("cannot hold two lever sets under any spelling, and cannot call from_env outside the wiring")
+    print("file. They do NOT prove it cannot READ one. A Config handed to the wrong package as an")
+    print("ordinary argument is legal Python and returns the wrong package's numbers; O9 and")
+    print("Config.owned_by narrow that to unannotated parameters, and nothing here narrows it further.")
+    print("Nor can any of this see a coupling through shared mutable state, RNG draw order or the data --")
+    print("PLAN section 4's L3 (tests/test_lever_isolation.py, behavioural, against the test_determinism")
+    print("noise floor) is the load-bearing check for that, and this file is not evidence either way.")
     return 1 if failed else 0
 
 

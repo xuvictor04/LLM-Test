@@ -33,6 +33,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
 from spine import derive                                          # noqa: E402
+from spine.units import Clock                                     # noqa: E402
 
 ORACLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".rework", "oracle")
 
@@ -64,7 +65,17 @@ def _as_captured(v):
 
 
 def _comparable(v):
-    """Normalise a result for comparison against JSON. Tuples and lists are the same shape to json."""
+    """Normalise a result for comparison against JSON. Tuples and lists are the same shape to json.
+
+    A CLOCK IS UNWRAPPED TO ITS INT, AND THAT IS A HOLE THIS FUNCTION CANNOT AVOID. `pin_tick` returns
+    Steps; the oracle captured bare ints, because the shipped function had no units. Left wrapped, the
+    comparison would not merely fail -- `Steps(2666) != 2666` RAISES UnitError by design, so the replay
+    would die rather than report. Unwrapping makes the 32 cases replay, and it makes this comparison
+    blind to kind: a Flushes(2666) would pass here exactly as a Steps(2666) does. Nothing in any captured
+    table can cover that, so the unit contract is asserted in smoke() instead, and only there.
+    """
+    if isinstance(v, Clock):
+        return int(v)
     if isinstance(v, (list, tuple)):
         return [_comparable(x) for x in v]
     if isinstance(v, dict):
@@ -159,11 +170,53 @@ def smoke():
         except UnitError:
             pass
 
+    # pin_tick: THE ONE FUNCTION HERE WHOSE ORACLE TABLE CANNOT SEE ITS OWN DEFECT, so these assertions
+    # are not a supplement to pin_tick.json -- they are the entire coverage of its units. The captured
+    # grid passes bare ints in all 32 cases (the shipped function had no types to capture), a bare int
+    # carries no kind, and _comparable unwraps the answer to an int before comparing; a typed
+    # implementation and a completely untyped one therefore replay all 32 cases identically and both
+    # report OK. Everything the table can prove about pin_tick is arithmetic. Everything below is unit.
+    #
+    # This matters more here than anywhere else in the file because pin_tick IS the project's flagship
+    # unit defect: it counted FLUSHES against GROW_CAP_EVERY=20000 declared in STEPS, so at BATCH_W=16
+    # the population sat pinned for 43,645 real steps while the clock read 2,650, and the report printed
+    # a true sentence about a false clock. Untyped, `pin_tick(Flushes(2650), True, Flushes(16))` returned
+    # 2666 and rebuilt that defect exactly, inside the function documenting it.
+    #
+    # THE KIND CHECK COMES BEFORE THE VALUE CHECK and that order is deliberate. `Steps(2666) == 2666`
+    # RAISES rather than returning False, so against an untyped pin_tick the value assertion below fails
+    # as a UnitError traceback out of units.Clock._same -- a real failure, reported as a crash in the
+    # wrong file. Asserting the type first makes the same regression say what it is.
+    assert type(derive.pin_tick(Steps(2650), True, Steps(16))) is Steps, "pin_tick lost its unit type"
+    assert derive.pin_tick(Steps(2650), True, Steps(16)) == Steps(2666)
+    assert type(derive.pin_tick(2650, True, 16)) is Steps          # bare ints coerce IN, Steps comes OUT
+    assert derive.pin_tick(Steps(8), False, Steps(16)) == Steps(0)  # clamped at zero, still carrying kind
+    for bad in (Flushes(2650), Windows(2650), Backwards(2650)):
+        try:
+            derive.pin_tick(bad, True, Steps(16))
+            raise AssertionError(f"foreign clock accepted as held: {bad!r}")
+        except UnitError:
+            pass
+        try:
+            derive.pin_tick(Steps(2650), True, bad)
+            raise AssertionError(f"foreign clock accepted as dstep: {bad!r}")
+        except UnitError:
+            pass
+    # The kind has to survive OUT of the function, because the comparison -- not the accumulation -- is
+    # where the 16x error actually landed. A Steps answer measures against a Steps threshold and REFUSES
+    # the same threshold expressed in flushes, which is the failure the shipped code never got.
+    held = derive.pin_tick(Steps(43645), True, Steps(0))
+    assert held >= Steps(20000)                                   # 43,645 real steps: the lift was earned
+    try:
+        _ = held >= derive.flush_period(Steps(20000), 16)         # the same threshold, in flushes: 1250
+        raise AssertionError("a steps clock compared against a flush threshold and did not raise")
+    except UnitError:
+        pass
+
     # The remaining five are covered by their tables; call each once so an import-time or signature
     # breakage cannot hide behind a table that is only read when the file is run.
     assert derive.cull_gate_open(2090, 4096, 0.45) is True
     assert derive.lift_to(160, 0.05, 16) == 176
-    assert derive.pin_tick(2650, True, 16) == 2666
     assert derive.bwt_of({"eng": 2.273}, {"eng": 2.125}) > 0      # POSITIVE = WORSE = FORGETTING
     assert derive.forgetting_of({"eng": 2.0}, {"eng": 2.125}) == 0.0
     assert derive.curve_verdict(1.118, 0.0, 0.0) == "blewup"      # the run that was called PLATEAUED

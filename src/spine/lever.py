@@ -22,6 +22,18 @@ WHAT REPLACES IT, and why each piece is shaped this way:
 
   RESOLVED ONCE, FROZEN. A Config is immutable. There is no re-read, so the report reads the same object
   the run used and `_cfg` has no reason to exist.
+
+WHAT OWNERSHIP DOES NOT BUY, BECAUSE THE WRONG SENTENCE HERE IS WORSE THAN NO SENTENCE. Everything above
+is about DECLARATION: which name exists, who owns it, where its value comes from. None of it constrains
+where a resolved Config then goes. `assemble.build()` returns `{PREFIX: Config}`; a Config is an ordinary
+object that does not know who is holding it; and a function handed the wrong one reads it happily --
+    def memory_prune(cfg): return cfg.slots        # memory_prune(configs["FAB"]) -> 2048, no error
+which a reviewer ran, against docstrings in this file and in spine/assemble.py that called it an
+"author-time NameError". It is not one. What IS structural is narrower and each clause has a check:
+a module may not name os.environ (O1), may not hold two lever sets under any spelling (O3), and may not
+call `from_env` at all outside spine/assemble.py (O8) -- so a module cannot MINT a foreign Config. Being
+HANDED one is a call the entry point makes on purpose, and `Config.owned_by(PREFIX)` is the assertion at
+the receiving end that turns a wrong-package hand-off into a startup failure instead of a wrong number.
 """
 import os
 from collections import namedtuple as _nt
@@ -73,6 +85,20 @@ class Lever:
                 f"{name!r} cannot be a lever: the d_ namespace belongs to WIRES. A d_ field is a value "
                 f"another package owns, arriving through spine.assemble -- declaring one as a lever "
                 f"silently shadows the wire that writes it.")
+        # THE SECOND TAKEN NAMESPACE: Config's own methods. `Config.__getattr__` runs only when ordinary
+        # attribute lookup FAILS, so a lever named `keys` or `given` is never what `cfg.keys` returns --
+        # the bound method is, and the lever becomes unreadable while every static check still reports it
+        # declared, owned and resolved. That is the same silent-shadow the d_ rule above exists to stop,
+        # from the other side. It was a latent hole and adding `Config.owned_by` widened it into a live
+        # one: a package asserting ownership through a name one of its own levers had shadowed would be
+        # asserting nothing at all, and the assertion is the only thing standing at the read site. Read
+        # off Config itself rather than a hand-typed list, because a hand-typed list of method names is
+        # a second declaration of the interface and it drifts the first time a method is added.
+        if name in _config_attrs():
+            raise LeverError(
+                f"{name!r} cannot be a lever: Config already answers to that name as a method, so "
+                f"`cfg.{name}` would return the method and never this lever. Taken: "
+                f"{sorted(_config_attrs())}.")
         self.name = name
 
     def env_name_for(self, prefix):
@@ -147,6 +173,16 @@ class Config:
 
     Attribute access is the whole interface. Reading a name that was never declared raises with the list
     of what IS available, rather than returning a default nobody wrote down.
+
+    WHAT THAT REFUSAL IS ABOUT, AND WHAT IT IS NOT. It is about the NAME: this object refuses to answer to
+    a name its owner never declared. It is not about the HOLDER. A Config does not know which package is
+    reading it, `build()` hands the whole `{PREFIX: Config}` map to whoever calls it, and passing
+    `configs["FAB"]` into a memory function as an ordinary parameter gives that function every FAB lever
+    with no error at author time and none at run time -- reproduced:
+        def memory_prune(cfg): return cfg.slots        # memory_prune(configs["FAB"]) -> 2048
+    The docstrings here and in spine/assemble.py used to say this was impossible ("an author-time
+    NameError"); they were wrong, and that sentence is the reason a reviewer stops looking. `owned_by`
+    below is the check the read site was missing, and the module header lists what actually is structural.
     """
 
     __slots__ = ("_owner", "_vals", "_given", "_wired", "_frozen")
@@ -198,6 +234,40 @@ class Config:
     def __setattr__(self, k, v):
         raise LeverError(f"{self._owner.__name__} is frozen; levers are resolved once at startup")
 
+    # -- the owner check, at the point of use -----------------------------------------------------
+    def owned_by(self, prefix):
+        """Refuse to be read as some other package's Config. Returns self, so it composes.
+
+            def memory_prune(mem):
+                mem = mem.owned_by("MEM")           # or as a bare statement, at the head of the function
+                ...
+
+        WHY THIS EXISTS: it is the only owner check that happens where the read happens. Every other
+        mechanism in this spine acts at DECLARATION time -- one owner per prefix, one env name per lever,
+        one file that may name os.environ, one file that may call from_env. All of that stops a module
+        MINTING a foreign Config. None of it stops a caller HANDING one over, because a Config is an
+        ordinary object and Python does not type it by package. The gap was verified, not theorised:
+        `memory_prune(configs["FAB"])` returned FAB_SLOTS and nothing anywhere said a word.
+
+        AN ASSERTION, NOT A CAPABILITY, and the difference is the whole honest statement of what this
+        buys. A function that never calls it is exactly as exposed as it was before this method existed;
+        adding the method to the class protects nothing by itself. That is why tests/test_ownership.py's
+        O9 requires the call of any function that annotates a parameter as a Config, and why the prefix
+        must be a string literal there: a computed prefix is invisible to that check, and an assertion no
+        static pass can read is a comment with parentheses.
+
+        WHAT IT STILL CANNOT SEE: a function that takes an UNANNOTATED parameter and never asserts. O9
+        cannot require an assertion it has no way to know is needed, so that case is only reachable by
+        L3 -- flip a lever, run the seeded steps, and see whose fingerprint moves.
+        """
+        if prefix != self.prefix:
+            raise LeverError(
+                f"this is {self.prefix}'s Config and the caller declared {prefix!r}. A package reads its "
+                f"OWN levers; a value from another package must arrive as a d_ wire declared in "
+                f"spine.assemble, so that affects() -- the only oracle the L3 isolation sweep has -- can "
+                f"see the coupling. Available here: {sorted(self._vals)}.")
+        return self
+
     # -- introspection, used by the report and by docs generation ---------------------------------
     @property
     def prefix(self): return self._owner.PREFIX
@@ -215,6 +285,17 @@ class Config:
 
 
 LeverView = _nt("LeverView", "name default help unit choices env_name")
+
+
+def _config_attrs():
+    """The names Config already answers to, so a lever cannot be declared under one of them.
+
+    Computed from the class, not listed by hand, and computed on each call rather than cached at import:
+    the cost is a `dir()` per lever declaration -- a few hundred at startup, once -- and what it buys is
+    that a method added to Config later is covered without anybody remembering to add it here. A cached
+    frozenset built at import would be identical today and stale the day it mattered.
+    """
+    return frozenset(n for n in dir(Config) if not n.startswith("_"))
 
 
 class _Missing:

@@ -317,8 +317,13 @@ def rng_for(subsystem, seed, again=False):
     """THE ENTRY POINT. One independent stream for one named subsystem of one seeded run.
 
     Handed out explicitly and passed down as an argument, never fetched from a module global. That is the
-    same discipline as the lever spine: a package receives what it is allowed to use, so reaching into
-    another subsystem's randomness is a NameError at author time rather than a policy nobody enforces.
+    same discipline as the lever spine -- and it has the same limit, which is written here because the
+    lever spine's docstrings once claimed otherwise and a reviewer caught it. What the discipline stops is
+    a subsystem REACHING for randomness it was not given: there is no module global to fetch, so a stream
+    has to be handed over on purpose. What it does not stop is a stream being handed to the WRONG
+    subsystem. An Rng is an ordinary object, it does not check who is drawing from it, and no author-time
+    error occurs. `issued()` is where that shows up, after the fact and by name: a subsystem drawing on a
+    stream named for another leaves its own name absent from the list entirely.
     """
     return Rng(subsystem, seed, again=again)
 

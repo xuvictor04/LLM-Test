@@ -1,11 +1,37 @@
 """The one place the packages are wired together, and the only file allowed to hold more than one LeverSet.
 
-WHY EXACTLY ONE FILE. Every other module in the tree receives its own `Config` as a parameter. That is
-not a policy, it is an author-time NameError: there is no name in scope for another package's levers, so
-reading one is not "discouraged", it does not compile into anything that runs. The cost of that rule is
-that SOMETHING has to hold all the Configs at once in order to compute the values that genuinely cross
+WHY EXACTLY ONE FILE. Every other module in the tree receives its own `Config` as a parameter, and
+SOMETHING has to hold all of them at once in order to compute the values that genuinely cross
 boundaries. This file is that something, and keeping it to one file is what makes the coupling graph
 finite and printable.
+
+WHAT THAT BUYS, STATED CORRECTLY THIS TIME. The sentence that stood here was false and a reviewer proved
+it. It read: "that is not a policy, it is an author-time NameError: there is no name in scope for another
+package's levers, so reading one is not discouraged, it does not compile into anything that runs." There
+is no NameError. `build()` returns `{PREFIX: Config}`, a Config is an ordinary object that does not know
+who is holding it, and a function handed one reads all of it:
+
+    def memory_prune(cfg): return cfg.slots        # memory_prune(configs["FAB"]) -> 2048, silently
+
+That sentence was load-bearing in the worst way -- an overclaim in a docstring is the reason a reviewer
+stops looking, and this one sat directly over the hole it denied. What is actually true is narrower, and
+every clause of it has a check standing behind it, because a claim with no check is the same overclaim
+written more carefully:
+
+  * A MODULE CANNOT MINT A FOREIGN CONFIG. It may not name os.environ (O1); it may not hold two lever
+    sets, under any alias, since the count is by resolved origin (O3); and it may not call `from_env` at
+    all outside this file (O8). The only door to a Config is `build()`, and the entry point is the only
+    caller of `build()`.
+  * A FUNCTION CANNOT HOLD TWO PACKAGES BY SIGNATURE. O9 refuses a function outside this file with two
+    Config-annotated parameters -- the shape that would let one function read across a boundary with no
+    wire and no ledger row.
+  * A FUNCTION THAT RECEIVES ONE STILL HAS TO SAY WHOSE IT IS. `Config.owned_by("MEM")` is the assertion
+    at the point of use, it raises naming both packages, and O9 requires it of every Config-annotated
+    parameter outside the spine.
+  * WHAT REMAINS UNCOVERED, SAID PLAINLY: an UNANNOTATED parameter handed a foreign Config in a function
+    that never asserts ownership. No static check in this tree can see that -- there is nothing in the
+    text to look at -- and no wording here should imply otherwise. It is one deliberate call at the entry
+    point, and it is L3's territory: flip a lever, run the seeded steps, watch whose fingerprint moves.
 
 THE DESIGN-REVIEW FINDING THIS FILE HAS TO ANSWER, verbatim: "wires can launder couplings, because once
 `fabric.slots` arrives in `domains` as a local named `expert_slots` the read site looks like an owned value
@@ -24,8 +50,14 @@ and all three are structural -- none of them is a convention a reader has to rem
      `{PREFIX: Config}` map can read any package's levers while declaring one source, and the ledger --
      which is the oracle for the L3 isolation sweep (G1) -- then understates that lever's reach and the
      sweep goes green on a real leak. So `compute` is handed `_Reads`, a view that exposes exactly the
-     fields named in `src`, plus the destination package's OWN levers, and raises on anything else. The
-     declared `reads` set is therefore enforced rather than advisory.
+     fields named in `src`, plus the destination package's OWN levers, and raises on anything else.
+
+     THAT IS ONE HALF, AND THE SECOND DRAFT LEAKED THROUGH THE OTHER. `_Reads` restricts the ARGUMENT.
+     It cannot restrict the CLOSURE, and a compute that ignores `r` and calls a helper reads whatever the
+     helper reads -- with every check in the tree still green. So a compute's free names are checked at
+     CONSTRUCTION, against `COMPUTE_ALLOWLIST` below, which is the only place the permitted names are
+     written down. Between the two, the declared `reads` set is enforced rather than advisory: the view
+     covers what arrives through `r`, and the allowlist covers everything that does not.
 
   3. THE COUPLINGS ARE DATA, NOT CALLS. `COUPLINGS` below is a list of records. `render()` prints it
      without resolving a single environment variable, so `docs/03_WIRING.md` can be regenerated on a
@@ -62,7 +94,10 @@ the ledger there is `derive.py`'s: one named function, called once, answer kept 
 tree failed at when it resolved SIG_WIN in two places from one knob whose zero meant 614 bytes in training
 and 1 byte in eval.
 """
+import builtins
+import dis
 import io
+import types
 
 from . import derive
 from . import registry
@@ -70,6 +105,287 @@ from . import units as U
 from .lever import LeverError
 from .units import Steps
 from .wire import WIRE_BUDGET, WireError, Wires, _check_unit, _check_why, _split
+
+
+# ==================================================================================================
+# WHAT A compute() IS ALLOWED TO NAME
+#
+# THE HOLE THIS CLOSES, AS THE REVIEW DEMONSTRATED IT. `_Reads` further down restricts the ARGUMENT
+# handed to a coupling's compute function. It does not restrict the function's CLOSURE, and until this
+# check existed the restriction did not have to be defeated -- only walked around. Changing one row of
+# the table below to
+#
+#     compute=lambda r: max(64, 2 * int(r["FAB"].slots)) + _peek()
+#
+# where `_peek()` is an ordinary module-level helper in this file doing
+#
+#     from fabric.levers import FabricLevers
+#     return int(FabricLevers.from_env().manage_every)
+#
+# left all seven ownership checks PASSING, made MEM.d_source_slots move with FAB_MANAGE_EVERY, and left
+# affects("FAB_MANAGE_EVERY") == {"FAB"}. That is a coupling that is real in the running system and
+# absent from the ledger -- and the ledger is the L3 isolation sweep's only oracle (G1). The sweep would
+# still see MEM's fingerprint move under a FAB lever, but it would report it as MEM leaking rather than
+# as this file under-declaring, which sends the investigation to the wrong package.
+#
+# THE CHECK RUNS AT COUPLING CONSTRUCTION, which is import time for the table below: no environment set,
+# no packages built, no GPU, microseconds. Declaration time is the right moment for the same reason
+# `Lever.__init__` refuses a computed default there -- the alternative is catching it in review, and a
+# review that has to notice a helper call three lines away is the review that missed this one.
+#
+# WHAT THIS IS AND IS NOT. It is a NAME check over the compiled code, not a purity proof. It says that a
+# compute may resolve nothing outside its own body except the handful of names listed here, and that
+# those names mean here what they mean in this file. It cannot say what `derive.flush_period` does; the
+# known-answer tables in tests/test_derive.py do that. _check_names carries the full CANNOT CATCH list.
+# ==================================================================================================
+
+# THE ALLOWLIST. One place, and the whole of it. Every entry says what the name is and why a coupling is
+# permitted to reach it; growing the list is an edit to this dict in a commit, which is exactly the
+# visibility a compute's closure did not have. A `d_` field's value may depend on the levers named in
+# src, on the pure functions below, and on nothing else.
+COMPUTE_ALLOWLIST = types.MappingProxyType({
+    "derive":
+        "spine.derive -- the pure derived quantities, one named function each, replayed case by case "
+        "against the P0 oracle by tests/test_derive.py. A compute calls derive.f(...) rather than "
+        "restating f inline, because a formula written twice is the SIG_WIN defect: one knob resolved "
+        "in two places, 614 bytes in training and 1 byte in eval.",
+    "Steps":
+        "spine.units.Steps -- the clock constructor a compute needs in order to hand "
+        "derive.flush_period a cadence that carries its kind. A bare int there is the 16x-slow clock "
+        "that pinned the population for 43,645 real steps while the clock read 2,650.",
+    "_owner_blocks":
+        "the one pure helper local to this file, defined immediately above the table because two "
+        "couplings need the same fold and a fold written twice can disagree with itself. Its own free "
+        "names are checked by this same rule, transitively -- an allowlisted helper is not a hole.",
+    "int":
+        "narrowing a lever to the integer the receiving package's arithmetic needs.",
+    "max":
+        "the floors the shipped formulas carry: max(64, ...) in the memory source census, max(1, ...) "
+        "in the effective batch.",
+    "min":
+        "the fold the shipped formulas carry: min(slots, owners). Reached through _owner_blocks and not "
+        "from a compute directly, and listed because this check follows helpers.",
+})
+
+# BYTECODE CLASSIFICATION, AND WHY co_names IS NOT USED RAW. `co_names` conflates three different things
+# -- a global load, an attribute load and an import -- so matching it whole against the allowlist would
+# force this dict to contain every LEVER FIELD NAME any compute reads through `r`: slots, owners, quota,
+# vmax, batch_w, grow_cap_every, pressure, accum, and one more for every lever anybody ever wires. A list
+# that has to grow with the levers is a list that rots, and it rots in the direction of "add the name so
+# the import stops failing", which ends with an allowlist that names everything.
+#
+# `dis.hasname` is the set of opcodes that index co_names, and the OPCODE says which of the three a name
+# is. Attribute reads are already policed at run time by `_Fields` (an undeclared one raises, by name),
+# imports are refused outright, and only genuine global and builtin references are matched here.
+#
+# A hasname opcode this does not recognise is treated as a GLOBAL reference, so a future Python that
+# renames LOAD_ATTR makes this check STRICTER -- assemble.py fails to import, loudly, on the first run --
+# rather than looser. A guard must fail toward refusing, because the other direction is silent.
+_HASNAME = frozenset(dis.hasname)
+_ATTR_OPS = frozenset({"LOAD_ATTR", "LOAD_METHOD", "STORE_ATTR", "DELETE_ATTR",
+                       "LOAD_SUPER_ATTR", "LOAD_SUPER_METHOD"})
+_IMPORT_OPS = frozenset({"IMPORT_NAME", "IMPORT_FROM"})
+
+# CO_VARARGS and CO_VARKEYWORDS. Spelled out rather than imported from `inspect`, which pulls a large
+# part of the standard library into every import of this file for two integers that have not moved since
+# Python 2.
+_CO_VARARGS, _CO_VARKEYWORDS = 0x04, 0x08
+
+# The same rule `Lever.__init__` applies to a lever's default, for the same reason: a default that is not
+# a literal is a value the declaration does not show. Here it is also an escape -- see _check_names.
+_LITERALS = (bool, int, float, str, bytes, type(None))
+
+_UNBOUND = object()
+
+
+def _resolve(namespace, name):
+    """What `name` resolves to for code whose globals are `namespace`: the global, else the builtin."""
+    if name in namespace:
+        return namespace[name]
+    b = namespace.get("__builtins__", builtins)
+    # __builtins__ is the module itself in __main__ and the module's dict in every imported module. Both
+    # are ordinary states of a running interpreter, so both are handled rather than one being assumed.
+    if isinstance(b, dict):
+        return b.get(name, _UNBOUND)
+    return getattr(b, name, _UNBOUND)
+
+
+def _referenced(code):
+    """(global names, attribute names, imported names) for `code` and every code object nested in it.
+
+    NESTED CODE IS NOT OPTIONAL. A comprehension or an inner lambda compiles to its own code object with
+    its own co_names, so on Python 3.11 `lambda r: sum(_peek() for _ in (1,))` hides `_peek` from the
+    outer code object completely. Python 3.12 inlines comprehensions and would have shown it: a check
+    whose reach depends on the interpreter version is a check that is off on somebody's machine.
+    """
+    glob, attr, imported = set(), set(), set()
+    todo, seen = [code], set()
+    while todo:
+        c = todo.pop()
+        if id(c) in seen:
+            continue
+        seen.add(id(c))
+        for ins in dis.get_instructions(c):
+            if ins.opcode in _HASNAME and isinstance(ins.argval, str):
+                if ins.opname in _IMPORT_OPS:
+                    imported.add(ins.argval)
+                elif ins.opname in _ATTR_OPS:
+                    attr.add(ins.argval)
+                else:
+                    glob.add(ins.argval)
+        for k in c.co_consts:
+            if isinstance(k, types.CodeType):
+                todo.append(k)
+    return glob, attr, imported
+
+
+def _check_names(fn, dst, what, seen):
+    """Refuse every way `fn` can reach a value the coupling did not declare. Recursive over helpers.
+
+    CANNOT CATCH, said plainly, because a check whose blind spots are not written down gets over-trusted:
+
+      * what an allowlisted name DOES. `derive` is trusted whole: spine/derive.py imports nothing but
+        spine.units, its functions are pure by construction, and tests/test_derive.py replays them
+        against the P0 oracle (575 cases, 0 mismatches). If that file ever grows an import of something
+        that reads the world, this check will not notice and derive.py's own rule is what has to hold.
+      * rebinding after import. `assemble.derive = something_else` between import and build() defeats
+        this, as does mutating spine.derive itself. Catching that needs the compute to run in a sandbox,
+        and a coupling table that is rewritten at runtime is a problem this check is the wrong size for.
+      * a compute that reads the DATA. Every leak travelling through shared state, RNG draw order or the
+        corpus is invisible here exactly as it is invisible to the AST checks in tests/test_ownership.py
+        -- that is L3's job (tests/test_lever_isolation.py), against the test_determinism noise floor.
+      * whether the arithmetic is right. This is a name check: `max(64, 2 * slots)` and
+        `max(64, 3 * slots)` are indistinguishable to it. The reason column and tests/test_derive.py are
+        what stand behind the number itself.
+    """
+    if id(fn) in seen:                      # two helpers that call each other are each checked once
+        return
+    seen.add(id(fn))
+
+    if not isinstance(fn, types.FunctionType):
+        raise WireError(
+            f"{dst}: {what} is a {type(fn).__name__}, not a plain function. A callable object, a "
+            f"functools.partial or a bound method carries its free names on the INSTANCE rather than in "
+            f"a code object, so this check could not read them and the coupling's reach would be "
+            f"undeclarable rather than merely undeclared. Write a lambda or a def.")
+
+    code = fn.__code__
+
+    # A CLOSURE CELL IS THE PURE FORM OF THE DEFECT. `_peek` as a module global is at least greppable in
+    # this file; a cell binds a name to an object chosen somewhere else entirely, and the declaration
+    # site shows nothing at all. Every compute in the table is a module-level lambda, so this is empty
+    # for all of them and no legitimate row loses anything.
+    #
+    # ONLY THE TOP-LEVEL CODE OBJECT IS CHECKED FOR FREEVARS, and that is complete rather than partial:
+    # with this function closing over nothing, a cell that an inner lambda or comprehension binds can
+    # only have come from this function's own locals, which are its parameter and what it computed from
+    # it. Checking nested code objects too would refuse `sorted(xs, key=lambda v: scale * v)` for closing
+    # over a local that is already inside the boundary.
+    if fn.__closure__ or code.co_freevars:
+        raise WireError(
+            f"{dst}: {what} closes over {list(code.co_freevars)}. A coupling's value comes from the "
+            f"levers named in src plus the names in COMPUTE_ALLOWLIST; a closure cell is bound to an "
+            f"object the declaration does not show, which is the coupling-that-is-invisible-in-the-"
+            f"ledger this table exists to prevent. Declare the helper at module level and allowlist it, "
+            f"or read the value through r.")
+
+    # THE DEFAULT-ARGUMENT SMUGGLE. `lambda r, _p=_peek: r["FAB"].slots + _p()` has no suspicious name in
+    # its code at all: `_p` is a parameter, and the binding happened at the declaration site. The rule is
+    # the one Lever.__init__ already applies to a lever's default, for the same reason -- a default that
+    # is not a literal is a value the declaration does not show.
+    for label, defaults in (("__defaults__", tuple(fn.__defaults__ or ())),
+                            ("__kwdefaults__", tuple((fn.__kwdefaults__ or {}).values()))):
+        bad = [d for d in defaults if not isinstance(d, _LITERALS)]
+        if bad:
+            raise WireError(
+                f"{dst}: {what} has a non-literal default ({label} holds "
+                f"{[type(d).__name__ for d in bad]}). A default is a binding made at the declaration "
+                f"site that the code object does not show -- the same laundering as a closure cell, one "
+                f"line shorter. Literals only, exactly as for a lever's default.")
+
+    glob, attr, imported = _referenced(code)
+
+    if imported:
+        raise WireError(
+            f"{dst}: {what} imports {sorted(imported)}. An import inside a coupling reaches the whole "
+            f"tree past every check in it -- the demonstrated escape was literally "
+            f"`from fabric.levers import FabricLevers; FabricLevers.from_env()`, which re-reads the "
+            f"environment for a package this coupling does not name and leaves the ledger, the printed "
+            f"graph and affects() all describing a system other than the one running.")
+
+    for n in sorted(attr):
+        # DUNDERS ARE THE STANDARD WAY OUT OF A NAME CHECK: `derive.__globals__["registry"]`,
+        # `r.__class__.__mro__`, `().__class__.__base__.__subclasses__()`. One rule removes the whole
+        # family and no coupling has ever needed a dunder attribute. ORDINARY attribute names are
+        # deliberately not checked here: `r["FAB"].slots` is an attribute read, and _Fields already
+        # refuses the undeclared ones by name at the moment they happen.
+        if n.startswith("__"):
+            raise WireError(
+                f"{dst}: {what} reads the dunder attribute {n!r}. A compute reads levers through r and "
+                f"calls the functions in COMPUTE_ALLOWLIST; every dunder path out of that -- "
+                f"__globals__, __class__, __subclasses__, __import__ -- reaches values no wire declares "
+                f"and the printed graph cannot show.")
+
+    for n in sorted(glob):
+        if n not in COMPUTE_ALLOWLIST:
+            raise WireError(
+                f"{dst}: {what} names {n!r}, which is not in COMPUTE_ALLOWLIST. A coupling's value may "
+                f"depend on the levers in its src and on the pure helpers listed there, and on nothing "
+                f"else. This is the check for the demonstrated escape: `+ _peek()`, where _peek() "
+                f"re-read another package's levers, left all seven ownership checks green and "
+                f"affects('FAB_MANAGE_EVERY') == {{'FAB'}} while MEM.d_source_slots moved with it. If "
+                f"{n!r} is genuinely pure and genuinely belongs here, add it to COMPUTE_ALLOWLIST with "
+                f"a reason; if it reads a lever, name that lever's owner in src instead. "
+                f"Allowed: {sorted(COMPUTE_ALLOWLIST)}")
+
+        obj = _resolve(fn.__globals__, n)
+        if obj is _UNBOUND:
+            # AN ALLOWLISTED NAME THAT IS NOT BOUND YET IS THE SILENT HALF OF THIS CHECK. `_owner_blocks`
+            # was originally defined BELOW the table, so at the moment each row is constructed the name
+            # does not resolve -- and a check that skipped what it could not resolve would have followed
+            # nothing into the one helper it most needs to follow, and said so nowhere. Helpers are
+            # defined above COUPLINGS instead, and the unresolvable case is a refusal.
+            raise WireError(
+                f"{dst}: {what} names {n!r}, which is allowlisted but is not bound at the moment this "
+                f"coupling is constructed. A pure helper must be defined ABOVE the COUPLINGS table, or "
+                f"this check silently stops following it.")
+
+        if isinstance(obj, types.FunctionType) and obj.__globals__ is fn.__globals__:
+            # TRANSITIVE, AND THIS IS WHAT MAKES THE ALLOWLIST MEAN ANYTHING. Allowlisting a local helper
+            # by name would otherwise move the escape one call deeper: the demonstrated `_peek()` could
+            # equally have been three lines inside _owner_blocks, where nothing at the declaration site
+            # shows it at all. A helper defined in this module is held to the same rule as the compute
+            # that calls it, all the way down.
+            _check_names(obj, dst, f"{what} -> helper {n}()", seen)
+        elif obj is not _resolve(globals(), n):
+            # The name is allowlisted, but HERE it means something else. This is what stops a coupling
+            # declared in another module from getting `derive` or `int` for free by rebinding the
+            # spelling: the allowlist is a statement about the objects this file reaches, not about six
+            # words. tests/test_ownership.py's O4 already refuses a Coupling declared outside this file;
+            # this is the same refusal from the runtime side, where build(couplings=...) can be handed a
+            # table the AST pass never saw.
+            raise WireError(
+                f"{dst}: {what} names {n!r}, which is allowlisted, but in {fn.__module__!r} that name "
+                f"is bound to {type(obj).__name__} rather than to the object it names in spine.assemble. "
+                f"An allowlisted spelling pointing somewhere else is the same laundering with an extra "
+                f"step.")
+
+
+def _check_compute(compute, dst):
+    """Refuse a compute that can reach past its declared src. Called from Coupling.__init__."""
+    if isinstance(compute, types.FunctionType):
+        code = compute.__code__
+        if (code.co_argcount != 1 or code.co_kwonlyargcount
+                or code.co_flags & (_CO_VARARGS | _CO_VARKEYWORDS)):
+            # ONE PARAMETER, AND IT IS THE RESTRICTED VIEW. build() calls compute(_view(c, configs)) and
+            # passes nothing else, so a second parameter can only be there to carry a default -- and a
+            # default is a binding made at the declaration site that the code object does not show.
+            raise WireError(
+                f"{dst}: compute must take exactly one parameter, the restricted reads view. build() "
+                f"calls compute(_view(...)) and passes nothing else, so any further parameter exists "
+                f"only to carry a value in from the declaration site.")
+    _check_names(compute, dst, "compute", set())
+    return compute
 
 
 # ---- the coupling record -------------------------------------------------------------------------
@@ -124,6 +440,12 @@ class Coupling:
                             f"{type(compute).__name__}. The value is computed here, at startup, from the "
                             f"declared sources -- there is no path for a value that arrives later, "
                             f"because Config freezes when build() returns.")
+        # AND IT MAY NOT REACH PAST ITS DECLARED SOURCES. `_Reads` restricts what arrives through the
+        # argument; this restricts what the function can resolve without it. Both halves are needed and
+        # neither is sufficient -- see the COMPUTE_ALLOWLIST block at the top of this file for the
+        # escape that had all seven ownership checks green. Checked here, at construction, so the table
+        # below is validated when this module is IMPORTED: no environment, no packages, no GPU.
+        _check_compute(compute, dst)
 
         object.__setattr__(self, "src", src if isinstance(src, str) else tuple(reads))
         object.__setattr__(self, "reads", tuple(reads))
@@ -276,6 +598,31 @@ def _view(coupling, configs):
 # Everything else here is a coupling this design CHOSE, which means a later design can un-choose it.
 # ==================================================================================================
 
+# ---- the pure helpers a compute may call -----------------------------------------------------------
+# ABOVE THE TABLE, AND THAT POSITION IS NOW LOAD-BEARING. This helper used to sit below COUPLINGS, which
+# reads better and cannot work: `Coupling.__init__` checks each compute's free names at construction and
+# FOLLOWS an allowlisted local helper into its own body, so the name has to be bound by the time the rows
+# are built. A helper declared after the table is refused by name rather than skipped -- see the
+# `_UNBOUND` branch in _check_names, and the reason it is a refusal and not a shrug.
+
+def _owner_blocks(expert_slots, owner_buckets):
+    """How many memory partitions actually exist: min(slots, owners), floored at one.
+
+    ITS HOME IS spine/derive.py and it should move there when that file is next opened -- it is a pure
+    function of two levers, which is exactly what that file is for. It sits here, defined once, because
+    two couplings need it (`MEM.d_owner_blocks` and `MEM.d_capacity`) and a fold written twice is a fold
+    that can disagree with itself. That is not hypothetical for this particular number: memory.py:36 and
+    self_organize.py:4873 each computed the store's size their own way, and the disagreement is the 24x
+    shrink the capacity coupling's reason describes.
+
+    IT NAMES ONLY max, min AND int, and that is checked rather than trusted: COMPUTE_ALLOWLIST covers
+    what a compute may reach, and the check follows this call to hold the helper to the same rule. The
+    escape it would otherwise leave is exact -- the demonstrated `_peek()` reads a foreign package's
+    levers just as invisibly from inside here as it does from inside a lambda.
+    """
+    return max(1, min(int(expert_slots), int(owner_buckets)))
+
+
 COUPLINGS = [
 
     # --- fabric -> domains ------------------------------------------------------------------------
@@ -416,19 +763,6 @@ COUPLINGS = [
 ]
 
 
-def _owner_blocks(expert_slots, owner_buckets):
-    """How many memory partitions actually exist: min(slots, owners), floored at one.
-
-    ITS HOME IS spine/derive.py and it should move there when that file is next opened -- it is a pure
-    function of two levers, which is exactly what that file is for. It sits here, defined once, because
-    two couplings need it (`MEM.d_owner_blocks` and `MEM.d_capacity`) and a fold written twice is a fold
-    that can disagree with itself. That is not hypothetical for this particular number: memory.py:36 and
-    self_organize.py:4873 each computed the store's size their own way, and the disagreement is the 24x
-    shrink the capacity coupling's reason describes.
-    """
-    return max(1, min(int(expert_slots), int(owner_buckets)))
-
-
 # ==================================================================================================
 # CANDIDATES THAT ARE NOT WIRES
 #
@@ -502,6 +836,13 @@ def build(environ=None, sets=None, couplings=None, budget=None):
         configs   {PREFIX: Config}, every one frozen. Attribute access is the whole interface.
         wires     the Wires ledger, containing the CROSS couplings only -- the graph's real edges.
         warnings  list of strings, each one a thing a human should look at and none of them fatal.
+
+    THE CALLER OF THIS FUNCTION HOLDS EVERY PACKAGE'S LEVERS, and that is the one place in the running
+    system where that is true. Handing `configs["FAB"]` to a memory function is a legal Python call that
+    no check here refuses and that the returned object cannot detect -- see the header for what actually
+    constrains it. An entry point passing these out should pass each package its own, and the receiving
+    function should say so with `cfg.owned_by("MEM")`, which is what turns a wrong hand-off into a
+    startup failure rather than a plausible wrong number in a report.
 
     RUNS EXACTLY ONCE, AT STARTUP. Every Config is frozen before this returns, so there is no re-resolve
     and no second reader: the report reads the same object the run used. The old tree needed a SECOND
@@ -683,6 +1024,21 @@ def render(configs, wires, couplings=None):
     for cand, reason in NOT_WIRES:
         L.append(f"  {cand}")
         L.append(f"       why not: {reason}")
+        L.append("")
+
+    L.append("--- what a coupling's value may depend on ---")
+    # PRINTED FOR THE SAME REASON THE REASONS ARE PRINTED. A reader of docs/03_WIRING.md is being asked
+    # to believe that the rows above are the whole coupling graph, and that claim rests entirely on a
+    # compute being unable to read anything else. The boundary is enforced at construction
+    # (COMPUTE_ALLOWLIST, checked by _check_names); it belongs in the document where the claim is made,
+    # because a guarantee nobody can see the edge of is a guarantee nobody audits.
+    L.append("  Every value above is computed from the levers named in its src, through a view that")
+    L.append("  raises on an undeclared read, by a function whose free names are checked at declaration")
+    L.append("  against this list and nothing else:")
+    L.append("")
+    for name, why in COMPUTE_ALLOWLIST.items():
+        L.append(f"  {name}")
+        L.append(f"       {why}")
         L.append("")
 
     L.append("--- the ledger as the isolation sweep's oracle sees it ---")

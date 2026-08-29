@@ -39,7 +39,7 @@ because the table is the only evidence of what the old system actually did. Wher
 reached into the environment from inside its body, the parameter arrives as an argument instead; that is
 the only intended behavioural difference, and it is noted on the function.
 """
-from .units import Backwards, Flushes, Steps, UnitError
+from .units import Backwards, Clock, Flushes, Steps, UnitError
 
 
 # === capacity pressure ===========================================================================
@@ -265,24 +265,65 @@ def accum_due(n_backward, accum):
 def pin_tick(held, pinned, dstep):
     """Advance the pinned-at-the-cap clock by however many steps elapsed, not by one per call.
 
-    UNIT IN: held = the accumulated clock (steps), pinned = on/off, dstep = the step delta (steps).
-    UNIT OUT: steps.
+    UNIT IN: held = Steps (the accumulated clock), pinned = on/off, dstep = Steps (the step delta).
+    UNIT OUT: Steps.
 
     IT MUST BE A STEP DELTA AND IT WAS A BARE +1/-1. See flush_period above for the measurement: at
     BATCH_W=16 this ran once per flush while the threshold it feeds is written in steps, so 43,645 real
     steps read as 2,650. Callers convert with flush_period; this function does the accumulation only.
 
+    THIS IS THE PROJECT'S FLAGSHIP UNIT DEFECT AND, UNTIL THIS CHANGE, THE ONE FUNCTION IN THIS FILE WITH
+    NO UNIT TYPE AT ALL. flush_period refuses a Flushes and accum_due refuses anything but a Backwards;
+    pin_tick accepted whatever it was handed and returned a bare int:
+
+        pin_tick(Flushes(2650), True, Flushes(16))  ->  2666   -- a FLUSH count, labelled steps
+        pin_tick(True, 400, 16)                     ->    17   -- the bool/int swap, below
+
+    The first line is the shipped defect reconstructed exactly, inside the function whose own docstring
+    describes it: flushes accumulate, the answer comes out kindless, and the threshold comparison that
+    was the actual failure site -- `held >= GROW_CAP_EVERY`, 20,000 STEPS -- passes on a clock running at
+    1/BATCH_W. Now `held` and `dstep` are Steps and so is the answer, so that comparison raises UnitError
+    against a Flushes threshold instead of quietly being 16x slow.
+
+    BARE INTS ARE COERCED; FOREIGN CLOCKS RAISE. The 32 captured oracle cases pass plain ints, because the
+    shipped function had no types to capture, and refusing them would throw away the only evidence of what
+    the old code did. So an int (a bool included -- the capture grid passes True as `held`) is read as
+    Steps below, reproducing the shipped `int(...)` truncation, while a Flushes raises. THE TABLE CANNOT
+    SEE THIS DISTINCTION: a typed implementation and an untyped one replay all 32 cases identically, so
+    the typed smoke assertions in tests/test_derive.py are the only thing covering it. That blind spot is
+    named there too.
+
     ARGUMENT ORDER IS THE SHIPPED ORDER, so the oracle table replays. Note what the oracle's own capture
     grid did with it: it passed the BOOLEAN as `held` and the COUNT as `pinned`, and the function
     accepted that silently and produced a full table of confident answers, because a bool and an int are
-    positionally interchangeable here. That is a live hazard in this signature, not a historical one --
-    call it with keywords.
+    positionally interchangeable here. Typing the clocks does NOT close that one -- `bool` IS an `int`,
+    so `pin_tick(True, 400, 16)` still coerces to Steps(1) and still answers 17. It is a live hazard in
+    this signature, not a historical one -- call it with keywords.
 
     Clamped at zero on the way down: an unpinned population that has been unpinned longer than it was
     pinned does not owe the valve negative time.
     """
-    dstep = max(0, int(dstep))
-    return (int(held) + dstep) if pinned else max(0, int(held) - dstep)
+    # THE EXPLICIT TYPE TEST IS FOR THE MESSAGE, not for the refusal: `Steps(Flushes(2650))` already
+    # raises UnitError inside Clock.__init__, but it says only "cannot build Steps from Flushes", which
+    # names neither the argument nor the defect. Written out once per clock argument rather than folded
+    # into a helper, because flush_period and accum_due each state their type test inline and a reader
+    # comparing the three unit-typed functions should meet the same shape three times.
+    if isinstance(held, Clock) and type(held) is not Steps:
+        raise UnitError(f"pin_tick: held must be Steps, got {type(held).__name__}. This clock accumulates "
+                        f"REAL STEPS against a threshold written in steps (GROW_CAP_EVERY=20000); a flush "
+                        f"count here is the defect that read 43,645 steps as 2,650 at BATCH_W=16. If the "
+                        f"caller counts flushes, convert the THRESHOLD with flush_period, not this.")
+    if isinstance(dstep, Clock) and type(dstep) is not Steps:
+        raise UnitError(f"pin_tick: dstep must be Steps, got {type(dstep).__name__}. The delta is how many "
+                        f"steps elapsed since the last call, not how many times the loop body ran -- "
+                        f"ticking once per flush is precisely how the clock came out 16x slow.")
+    # BARE INT -> Steps AT THE BOUNDARY. `Steps(v)` is `int(v)` for anything that is not already a clock,
+    # so this is the shipped `int(held)` / `int(dstep)` truncation unchanged and the 32 oracle cases still
+    # replay through it. It is a concession to the captured table, not a general invitation: an int gets
+    # in because the oracle predates units, a Flushes does not because it is the bug.
+    held = Steps(held)
+    dstep = max(Steps(0), Steps(dstep))
+    return (held + dstep) if pinned else max(Steps(0), held - dstep)
 
 
 # === continual learning: the sign the whole claim rests on =======================================
