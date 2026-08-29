@@ -1,0 +1,489 @@
+"""Derived quantities: one pure named function each, carrying its unit, and nothing else in this file.
+
+THE RULE THIS FILE IS. A value computed from more than one lever exists in exactly ONE place, under ONE
+name, and no consumer recomputes it. Everything here is a pure function of its arguments -- no os.environ,
+no lever import, no module state, no I/O -- so `spine.assemble` can call these once at startup, write the
+answers into `d_`-prefixed wired fields (G5), and every consumer reads the answer instead of deriving it
+again.
+
+WHY THAT RULE, IN NUMBERS FROM THE SURVEY. 130 of 475 defect records are wrong-measurement or
+unit-mismatch. Both of the two defects confirmed by reading the old source are recomputation defects:
+
+  * BYTES PER TOKEN was estimated in three places by three different formulas. One of them,
+    `sum(bytes_per_id) / vocab_size`, is a mean over VOCABULARY ENTRIES rather than over tokens as USED,
+    so it weights a token minted once and never seen again exactly as heavily as one in every window.
+    Its error is a function of the vocabulary's SHAPE and THE SIGN FLIPS with vocabulary size: at 512
+    tokens the 256 single-byte seeds dominate the entry count while the stream prefers the longer merges,
+    measured 1.50 unweighted against 1.85 as used -- reads LOW; at pilot vocabularies most entries are
+    long and rare while the tokens actually carried are the short common merges -- reads HIGH. The
+    signature width SIG_WIN=614 was picked off that estimator, along an axis (VMAX) it is not comparable
+    across. `bytes_per_token` below is the measured quantity and there is no second estimator.
+
+  * THE SIGNATURE WIDTH was resolved in two places from one knob whose zero meant two different things.
+    self_organize.py:5676 resolved SIG_WIN=0 to `max(WIN, int(WIN * bpt))` -- 614 bytes in the last run --
+    while self_organize.py:3919 sliced `[-max(1, SIG_WIN):]`, which resolves the same zero to ONE BYTE.
+    Every eval-path routing decision in every report was therefore made on a one-byte signature while
+    training used 614. Same knob, same zero, opposite meanings. `signature_width_bytes` below is the one
+    width, and it has no sentinel value.
+
+WHAT IS NOT HERE, DELIBERATELY. No class, no constant, no table, no cached value. A module-level constant
+in this file would be a second place for a default to live, which is the L1 violation the spine exists to
+stop. The few bare numbers that appear as keyword defaults below are NOT lever defaults -- each one is a
+threshold that was a hard literal in the shipped tree (never an `_i(...)` read), and each carries the
+measurement that chose it.
+
+RELATIONSHIP TO THE ORACLE. Eight of these functions replay `.rework/oracle/*.json`, captured from the
+shipped code at rm-predict `aee4a52` BEFORE it was frozen (P0, graft G11). Where a shipped function is
+reproduced, its argument ORDER and its arithmetic are preserved exactly even where a tidier form exists,
+because the table is the only evidence of what the old system actually did. Where the shipped function
+reached into the environment from inside its body, the parameter arrives as an argument instead; that is
+the only intended behavioural difference, and it is noted on the function.
+"""
+from .units import Backwards, Flushes, Steps, UnitError
+
+
+# === capacity pressure ===========================================================================
+
+def cull_gate_open(n_live, slots, pressure):
+    """Is the population under enough capacity pressure for the utilization cull to run?
+
+    UNIT IN: n_live = experts (count), slots = slots, pressure = fraction 0..1.
+    UNIT OUT: on/off.
+
+    THREE MECHANISMS LIVE BEHIND THIS ONE ARITHMETIC LINE -- the utilization cull, the utilization spare
+    and FAB_RESCUE -- so a wrong answer here does not fail, it silently removes three things from the run.
+    It has done exactly that: FAB_N0=2048 against FAB_NMAX=4096 parks occupancy at 0.50, below a
+    FAB_PRESSURE of 0.75, and `fabric.spare` read ARMED AND INERT for an entire investigation. That is the
+    untrippable-guard class (60 records) in its most expensive form, because the report showed a mechanism
+    switched on.
+
+    `n_live <= 2` IS A FLOOR, NOT A PRESSURE TEST. It is a separate clause with a separate reason: culling
+    from a population of two can empty it. Reading it as part of the pressure test is what makes people
+    believe the gate is one condition, and it is two.
+
+    Reproduces oracle cull_gate_open exactly, including `max(1, slots)`: the guard against slots=0 is part
+    of the shipped answer, not a tidy-up. At slots=0 the ratio is n_live/1, which is >= any pressure <= 1
+    for any live population, so the gate stands OPEN on a fabric with no slots -- preserved because the
+    table says so, and flagged here because it is surprising.
+    """
+    return not (n_live <= 2 or (n_live / max(1, slots)) < pressure)
+
+
+def operating_population(pressure, slots):
+    """The population the fabric equilibrates at, given the pressure setpoint and the slot count.
+
+    UNIT IN: pressure = fraction 0..1, slots = slots. UNIT OUT: experts (count).
+
+    THIS COUPLING IS IRREDUCIBLE AND THAT IS THE POINT. `pressure` is not a modifier on the cull, it is a
+    SETPOINT: below `pressure x slots` the gate above is shut and nothing is culled, so the population
+    grows; at or above it the cull runs. The steady state is therefore `pressure x slots` and no amount of
+    interface design makes FAB_PRESSURE independent of FAB_NMAX -- they are one control loop with two
+    named ends.
+
+    THIS IS THE EXAMPLE PLAN SECTION 4 USES for why lever independence is stated as three testable
+    properties (L1 single declaration, L2 single reader, L3 no undeclared reach) instead of as
+    independence. "Levers do not affect each other" is not achievable here and a project that claims it
+    is lying about its own control loop. What IS achievable, and what this function makes possible, is
+    that the coupling is DECLARED, NAMED, COMPUTED IN ONE PLACE and printed in docs/03_WIRING.md with its
+    reason. The claim is "every coupling in this system is enumerable", not "there are none".
+
+    Consistency with the gate is a property, not a coincidence: for 0 < pressure <= 1 and slots >= 3,
+    cull_gate_open(operating_population(p, s), s, p) is True and it is False one expert lower.
+
+    The `max(3, ...)` is the same floor as the gate's `n_live <= 2`, restated here rather than shared,
+    because a population of two does not become a population of two for a pressure reason.
+    """
+    n_slots = int(slots)
+    exact = float(pressure) * n_slots
+    # CEILING, because the gate opens at n_live/slots >= pressure, so the setpoint is the first INTEGER
+    # population that satisfies it. The 1e-9 tolerance is not decoration: 0.45 * 4096 is not exactly
+    # 1843.2 in IEEE754, and a product that lands one ULP above an integer would push this a whole expert
+    # higher on one machine and not another. The isolation sweep (L3) compares integer fingerprints, so a
+    # one-expert difference that depends on the host reads as a lever leak rather than as float noise.
+    n = int(exact)
+    if exact - n > 1e-9:
+        n += 1
+    n = max(3, n)
+    # Never above the hard slot count. Reachable whenever pressure > 1, which is a configuration the gate
+    # answers by never opening -- the population then runs to the cap, and this says the cap.
+    return min(n_slots, n) if n_slots >= 3 else n_slots
+
+
+def lift_to(cap, frac, floor):
+    """The new soft cap after one earned lift.
+
+    UNIT IN: cap = slots, frac = fraction 0..1, floor = slots. UNIT OUT: slots.
+
+    PROPORTIONAL, SO ONE EARNED LIFT MEANS THE SAME THING AT EVERY CAP SIZE. A lift written as a fixed
+    +N is a different-sized decision at 160 slots and at 4096, so a run's growth behaviour became a
+    function of where it started rather than of what it earned. The absolute floor exists because the
+    proportional term rounds to zero at small caps: at cap=100, frac=0.05 the proportional lift is 5, but
+    at cap=16 it is 0 and the cap would be pinned forever with the valve reporting that it lifted.
+
+    Reproduces oracle lift_to exactly, including `int(float(frac) * int(cap))` -- truncation, not rounding,
+    so a lift is never larger than what was earned.
+    """
+    return int(cap) + max(int(floor), int(float(frac) * int(cap)))
+
+
+# === the tokenizer's two derived widths ==========================================================
+
+def bytes_per_token(n_bytes, n_tokens):
+    """Compression as MEASURED on the material the loop actually strides through.
+
+    UNIT IN: n_bytes = bytes, n_tokens = tokens. UNIT OUT: bytes/token.
+
+    THIS IS TOTAL BYTES OVER TOTAL TOKENS OF THE SAME TEXT and nothing else. It is not
+    `sum(bytes_per_id) / vocab_size`, which is a mean over vocabulary ENTRIES: that estimator weights a
+    token minted once and never seen again exactly as heavily as one carried in every window, so its
+    error is a function of the vocabulary's shape and ITS SIGN FLIPS WITH VOCABULARY SIZE -- measured 1.50
+    unweighted against 1.85 as used at 512 tokens (reads LOW), and high at pilot vocabularies where most
+    entries are long and rare. A biased estimator is survivable; one whose sign depends on the axis you
+    are comparing along is not, and VMAX was that axis. The signature width 614 was chosen off it.
+
+    Two len() calls. There is no reason this was ever estimated.
+
+    RAISES rather than returning a placeholder on n_tokens <= 0. A zero-token segment means the tokenizer
+    produced nothing for text that exists, which is a defect upstream; returning 1.0 or 0.0 here would
+    convert it into a plausible number that flows into the signature width and the coverage report. The
+    house rule after 98 wrong-measurement records is that a missing number must be missing, loudly.
+    """
+    n_t = int(n_tokens)
+    if n_t <= 0:
+        raise ValueError(f"bytes_per_token: n_tokens={n_tokens!r} -- cannot measure compression over "
+                         f"zero tokens. The caller has an empty segmentation, which is the defect.")
+    return int(n_bytes) / n_t
+
+
+def signature_width_bytes(win_tokens, bytes_per_token):
+    """The ONE signature window width, in bytes, for the whole run.
+
+    UNIT IN: win_tokens = tokens (the loop stride), bytes_per_token = bytes/token.
+    UNIT OUT: bytes.
+
+    CONFIRMED DEFECT THIS REPLACES. The old tree resolved this width in two places from one knob whose
+    zero meant two different things:
+        self_organize.py:5676  `if SIG_WIN > 0: return SIG_WIN` else `max(WIN, int(WIN * bpt))`  -> 614 B
+        self_organize.py:3919  `[-max(1, SIG_WIN):]`                                             ->   1 B
+    SIG_WIN defaults to 0. So training characterised each window from 614 bytes and every eval-path
+    routing decision -- and therefore every routing, specialization and composition number in every
+    report -- was made from ONE BYTE. Nothing failed: every window still produced A signature. There is
+    no sentinel in this function for that reason. Zero is not a value with a meaning here; there is one
+    width, it is computed from the stride and the measured compression, and both paths call this.
+
+    THE WIDTH MUST TRACK THE STRIDE. The window is a BYTE count while the loop advances win_tokens TOKENS,
+    so a width fixed in bytes covers width/(win_tokens x bytes_per_token) of the stream -- and that
+    fraction SHRINKS as the tokenizer compresses better. The historical "SIG_WIN=0 means WIN" made the
+    width 256 bytes against a stride that grew to 614, so the domain encoder was reading 42% of the
+    material it claimed to describe, drifting downward all run, and nobody chose that.
+
+    FIXED FOR THE LIFETIME OF THE RUN, and the caller must keep it so. Recomputing it live as the
+    vocabulary grows crashed both pilot arms at the first rekey (windows captured at the old width
+    concatenate into a ragged batch -> ValueError), but the crash was the lesser problem: domain
+    centroids are MEANS OF ENCODED WINDOWS, so a width that moves mid-run makes signatures taken before
+    and after incomparable, and every centroid, radius and boundary test silently straddles two different
+    measurements. A width that moves is wrong in principle. Compute once at assemble, wire it, freeze it.
+
+    `max(1.0, bytes_per_token)` and the outer `max(win_tokens, ...)` are both floors that keep the width
+    from falling below one loop stride; the first also absorbs a bytes_per_token below 1, which cannot
+    happen on UTF-8 but would silently narrow the window if it ever did.
+    """
+    w = int(win_tokens)
+    if w < 1:
+        raise ValueError(f"signature_width_bytes: win_tokens={win_tokens!r} -- the loop stride is at "
+                         f"least one token, and a width derived from zero stride is the 1-byte defect.")
+    return max(w, int(w * max(1.0, float(bytes_per_token))))
+
+
+# === clocks: the conversions that must exist under a name ========================================
+
+def flush_period(period_steps, batch_w):
+    """A cadence written in STEPS, expressed in the FLUSHES the loop body actually counts.
+
+    UNIT IN: period_steps = Steps, batch_w = windows per flush (count).
+    UNIT OUT: Flushes.
+
+    THE CONVERSION THAT BIT REPEATEDLY, AND THE MEASUREMENT THAT CAUGHT IT. The capacity valve's block
+    sits below the batch early-out, so it runs once per FLUSH while `step` advances once per WINDOW, and
+    its clock therefore ticked at 1/BATCH_W the rate GROW_CAP_EVERY is written in. On the lr_pilot
+    rehearsal at BATCH_W=16 the population sat pinned at its soft cap for 43,645 real steps while the
+    clock read 2,650 against a GROW_CAP_EVERY of 20,000 -- and the valve reported "reached the cap but
+    never held it long enough". 2650 x 16 = 42,400: the entire shortfall was the units. GROW_CAP_EVERY
+    =20000 silently meant 320,000 steps at BATCH_W=16 and 640,000 at 32, so a knob's meaning depended on
+    the batch size.
+
+    TAKES AND RETURNS CLOCK TYPES, NEVER BARE INTS, and that is the whole defence. A bare int carries no
+    kind, so `held >= GROW_CAP_EVERY` compares fine no matter which clock `held` counts. Passing a
+    Flushes here raises UnitError at the call, which is the failure the old code needed and did not have.
+
+    TRUNCATES rather than rounds (via Clock.convert). A period that truncates fires marginally EARLY; a
+    period that rounds up fires late. The defect being repaired was a clock running 16x slow, and biasing
+    the repair toward late would be repeating it in miniature.
+    """
+    if type(period_steps) is not Steps:
+        raise UnitError(f"flush_period: period_steps must be Steps, got "
+                        f"{type(period_steps).__name__}. A cadence is written in steps; if this value "
+                        f"is already in flushes it has been converted twice.")
+    w = int(batch_w)
+    if w < 1:
+        raise UnitError(f"flush_period: batch_w={batch_w!r} -- a flush covers at least one window.")
+    period = period_steps.convert(Flushes, per=w)
+    # A PERIOD OF ZERO IS NEVER THE ANSWER. It is either `n % 0` -- a crash -- or, on the guard forms
+    # that test `period and n % period == 0`, a mechanism that is switched on and never runs, which is
+    # the armed-but-inert class (57 records). One flush is the smallest cadence that exists.
+    return Flushes(1) if period.n < 1 else period
+
+
+def accum_due(n_backward, accum):
+    """Is an optimizer step due, given how many BACKWARD PASSES have accumulated?
+
+    UNIT IN: n_backward = Backwards, accum = backward passes per optimizer step (count).
+    UNIT OUT: on/off.
+
+    ACCUMULATION COUNTS BACKWARD PASSES. Nothing else is the same number. Gating this on a window counter
+    accumulated nothing: measured 55 optimizer steps where 13 were due, i.e. at ACCUM=4 the gate fired on
+    essentially every window and the effective batch size was a quarter of the configured one -- while
+    the run reported the configured one. Every learning-rate result taken against that configuration was
+    taken at a different batch size than its label.
+
+    REQUIRES A Backwards CLOCK, so the window counter cannot be handed to it. `Windows(55)` raises here;
+    `55` raises here. That is the point of the argument type -- the old bug was not a wrong formula, it
+    was the right formula applied to the wrong counter, and no formula can detect that about its input.
+
+    n_backward = 0 is NOT due: no backward pass has happened, so there is nothing to step on. Stepping at
+    zero is how a run takes an optimizer step on an empty gradient before its first batch.
+    """
+    if type(n_backward) is not Backwards:
+        raise UnitError(f"accum_due: n_backward must be Backwards, got {type(n_backward).__name__}. "
+                        f"Accumulation counts backward passes -- a window counter measured 55 steps "
+                        f"where 13 were due.")
+    n = int(n_backward)
+    k = max(1, int(accum))
+    return n > 0 and n % k == 0
+
+
+def pin_tick(held, pinned, dstep):
+    """Advance the pinned-at-the-cap clock by however many steps elapsed, not by one per call.
+
+    UNIT IN: held = the accumulated clock (steps), pinned = on/off, dstep = the step delta (steps).
+    UNIT OUT: steps.
+
+    IT MUST BE A STEP DELTA AND IT WAS A BARE +1/-1. See flush_period above for the measurement: at
+    BATCH_W=16 this ran once per flush while the threshold it feeds is written in steps, so 43,645 real
+    steps read as 2,650. Callers convert with flush_period; this function does the accumulation only.
+
+    ARGUMENT ORDER IS THE SHIPPED ORDER, so the oracle table replays. Note what the oracle's own capture
+    grid did with it: it passed the BOOLEAN as `held` and the COUNT as `pinned`, and the function
+    accepted that silently and produced a full table of confident answers, because a bool and an int are
+    positionally interchangeable here. That is a live hazard in this signature, not a historical one --
+    call it with keywords.
+
+    Clamped at zero on the way down: an unpinned population that has been unpinned longer than it was
+    pinned does not owe the valve negative time.
+    """
+    dstep = max(0, int(dstep))
+    return (int(held) + dstep) if pinned else max(0, int(held) - dstep)
+
+
+# === continual learning: the sign the whole claim rests on =======================================
+
+def bwt_of(now, prev):
+    """Backward transfer: the mean change on OLD material, on a LOWER-IS-BETTER metric.
+
+    UNIT IN: now, prev = {domain: bits/byte}. UNIT OUT: bits/byte (a difference).
+
+    POSITIVE = WORSE = FORGETTING. NEGATIVE = THE OLD DOMAINS IMPROVED. The sign runs OPPOSITE to the
+    continual-learning literature, which reports accuracy, where positive is good -- so anyone reading
+    this number against a paper reads it backwards unless the convention is stated at every use.
+
+    THIS SUBTRACTION WAS INVERTED ONCE, on the single line the project's continual-learning claim rests
+    on, and it shipped. The reason it shipped is the more important half: selftest.sh only ever asserted
+    that the strings "BWT" and "negative = old domains IMPROVED" APPEARED IN THE LOG. A test on the words
+    passes whichever way the arithmetic runs. This function exists as a pure function of two dicts so
+    that a known-answer table can test the NUMBER, and .rework/oracle/bwt_of.json is that table.
+
+    ONLY DOMAINS PRESENT IN BOTH ENTER THE MEAN. A domain that is new has no baseline to have forgotten
+    from, and letting it in makes "we added an area" look like catastrophic forgetting of an area that
+    did not exist. Empty intersection returns 0.0, not an error: no shared domains is "no evidence about
+    forgetting", and the Reading that carries this number carries its own sample size.
+
+    DOES NOT UNWRAP (mean, err) TUPLES, and the oracle records that it raises TypeError on them. Holdout
+    values are otherwise carried in that form throughout the old tree; both call sites happened to unwrap
+    with `_ms(...)[0]` first, so the contract was honoured BY CONVENTION AT THE CALL SITE. Preserved as
+    captured. The rebuild's Reading type is what actually removes the hazard -- value and error are named
+    fields, so no caller has to remember.
+    """
+    ks = [k for k in now if k in prev]
+    if not ks:
+        return 0.0
+    return sum(now[k] - prev[k] for k in ks) / len(ks)
+
+
+def forgetting_of(now, best):
+    """Forgetting measure F: how far each domain sits above its OWN best, clipped at zero, averaged.
+
+    UNIT IN: now, best = {domain: bits/byte}. UNIT OUT: bits/byte (a non-negative difference).
+
+    CLIPPED AT ZERO IS WHAT SEPARATES F FROM BWT. A domain that improved contributes 0 rather than a
+    negative that cancels a real regression elsewhere, so F cannot net a catastrophic loss on one area
+    against a gain on another. BWT can, and will, and that is a legitimate difference between the two
+    measures rather than a defect in either -- they answer different questions and the report must print
+    both or name which one it printed.
+
+    F COMPARES AGAINST THE BEST EVER, NOT THE PREVIOUS PROBE. It therefore differs from BWT exactly when
+    a domain peaked earlier than the last probe, which is the common case on a noisy per-process curve.
+    Two numbers that agree on the clean case and disagree on the ordinary one are the ones most likely to
+    be quoted interchangeably.
+
+    Same shared-key rule and same tuple behaviour as bwt_of; see there. Oracle: forgetting_of.json.
+    """
+    ks = [k for k in now if k in best]
+    if not ks:
+        return 0.0
+    return sum(max(0.0, now[k] - best[k]) for k in ks) / len(ks)
+
+
+# === end-of-run verdicts =========================================================================
+
+def curve_verdict(rise_since_min, tail_change, tok_rise,
+                  rise_blewup=0.5, flat=0.05, tok_rise_thresh=0.05):
+    """Which end-of-run verdict the held-out curve earns. Returns one label; the report supplies prose.
+
+    UNIT IN: rise_since_min, tail_change, flat, rise_blewup = bits/byte; tok_rise, tok_rise_thresh =
+    bits/token. UNIT OUT: a label name.
+
+    THIS CASCADE SHIPPED A WRONG VERDICT FOUR TIMES, and every time it ran without error and printed a
+    confident sentence:
+      - it read its own sign backwards and told a FALLING curve it was rising;
+      - it called a run DIVERGING whose last two thirds were flat to -0.007, because it measured only
+        from the global minimum;
+      - it called a run that lost 1.118 b/B and never recovered PLATEAUED ... nothing is degrading,
+        because it then keyed only on the tail;
+      - and `tail <= flat` is one-sided, so a curve FALLING at -0.086 was described as "flat since".
+    Four wrong verdicts, five thresholds, no test: selftest.sh only ever checked that the SECTION
+    APPEARED. Being a pure function of three numbers it is checkable, and curve_test.py holds each of
+    those four failures as a known answer.
+
+    TWO QUESTIONS, NOT ONE. The HEIGHT (rise_since_min) says whether the run already fell apart; the TAIL
+    (tail_change, over the last two thirds) says whether it still is. A verdict reading only one of them
+    gets the other case wrong, which is precisely the history above.
+
+    THE THRESHOLDS ARE KEYWORD PARAMETERS, NOT LEVERS AND NOT MODULE CONSTANTS. In the shipped tree they
+    were hard literals (CURVE_RISE_BLEWUP, CURVE_FLAT, CURVE_TOK_RISE at self_organize.py:782-784), never
+    `_i(...)` reads, so naming them here creates no second default for any lever. The oracle table was
+    captured at 0.5 / 0.05 / 0.05 and replays through the defaults.
+
+    THE FINAL `diverging` IS GUARDED ON THE PER-TOKEN CURVE AGREEING, and that guard is load-bearing
+    rather than tidy. The original cascade also required `_fl - _bl > 0.05`; dropping it when this was
+    refactored into a function would have made it print DIVERGING for runs the report has always been
+    silent about. This is a refactor of a decision, not a change to one.
+
+    Reproduces oracle curve_verdict exactly, branch order included -- the order IS the decision.
+    """
+    if rise_since_min is None or tail_change is None:
+        return "diverging" if tok_rise > tok_rise_thresh else "none"
+    if tok_rise > tok_rise_thresh and rise_since_min <= flat:
+        return "vocab"          # per-token rose, bits/byte did not: the vocabulary moved, not the model
+    if rise_since_min > rise_blewup:
+        return "blewup"         # left a level it had reached and stayed off it
+    if tail_change < -flat:
+        return "recovering"     # still falling: not flat, whatever the height says
+    if tail_change <= flat:
+        return "plateau"        # genuinely flat
+    return "diverging" if tok_rise > tok_rise_thresh else "none"
+
+
+def blowup_stale(recent, best, since_best, rise=0.5, stale=80):
+    """Has this run left a level it reached and stopped coming back?
+
+    UNIT IN: recent = [bits/byte] probes, best = bits/byte, since_best = probes (count),
+    rise = bits/byte, stale = probes (count). UNIT OUT: on/off.
+
+    THE FIRST VERSION OF THIS ALARM FIRED ON FOUR RUNS OUT OF FOUR, at steps 8,000-12,000, on runs that
+    went on to produce the best held-out number this project has recorded (1.94 b/B). It compared ONE
+    probe against the best-so-far and fired at +0.5. That cannot work: the per-process curve genuinely
+    wanders by more than that, especially early, and the best-so-far is the running MINIMUM of a noisy
+    series, so noise crosses best+0.5 in every healthy run. An alarm that cries wolf is worse than no
+    alarm, because it teaches the reader to skip the line that matters. Then the fix over-corrected and
+    it could never fire again -- both directions of one threshold being wrong, which is why the oracle
+    table for this function is a grid rather than a spot check.
+
+    WHAT ACTUALLY SEPARATES THE TWO, measured across nine real runs, is not the SIZE of the excursion but
+    how long the run goes without setting a new best WHILE ELEVATED:
+
+        healthy    sched_ctl 28   sched_step 20   sched_warm 22   sched_both 50   lr_vcap 22  lr_pilot2 11
+        blown up   round13 261    0.75 GB 309
+
+    Nothing healthy exceeded 50 probes; neither blow-up came in under 261. `stale=80` sits between them
+    with margin on both sides and separates all nine correctly. It is deliberately nearer the healthy
+    end's ceiling than the midpoint, because a late alarm costs some wasted steps and a false one costs
+    the instrument. Both defaults were hard literals in the shipped tree (BLOWUP_RISE, BLOWUP_STALE at
+    self_organize.py:748-749), not levers, so they are not a second default for anything.
+
+    THE MEDIAN of recent probes, not the latest, so a single spike cannot trip it: sched_ctl read 4.82 at
+    step 14,000 on one probe and was back to 2.95 at the next.
+
+    Fewer than three probes returns False. Two probes have no median worth the name, and an alarm that
+    can fire on the second probe of a run is the 4-of-4 failure again.
+
+    Reproduces oracle blowup_stale exactly, including `sorted(recent)[len(recent) // 2]` -- the UPPER
+    median on even-length input, which is the shipped choice.
+    """
+    if best is None or since_best < stale or len(recent) < 3:
+        return False
+    mid = sorted(recent)[len(recent) // 2]
+    return mid > best + rise
+
+
+# === the continual-learning schedule shape =======================================================
+
+def phase_schedule(n_areas, n_phases=None, width=None):
+    """Who is active in each phase -- GENERATED FROM A RULE, not looked up in a table.
+
+    UNIT IN: n_areas = corpora (count), n_phases = phases (count), width = corpora live at once (count).
+    UNIT OUT: list of phases, each a list of area indices.
+
+    A sliding window of `width` areas over `n_areas`, across `n_phases` phases. Every area enters, is
+    active for a contiguous stretch, and fades. THE LAST PHASE EXCLUDES AT LEAST ONE AREA whenever
+    n_areas > 1, and that is a hard requirement rather than an aesthetic one: `faded` is computed from
+    the last phase, so a schedule ending with everything active makes the unlearn-a-faded-area test SKIP
+    ITSELF AS VACUOUS -- a test that reports passing because it had nothing to check.
+
+    A RULE, NOT A TABLE. This replaced a per-n lookup table, which replaced a single fixed 4-area list.
+    Both were arbitrary in exactly the way the splice itself is arbitrary: WE chose who was active when,
+    and then measured the system against our own choice. A rule at least applies the same shape at any n.
+    n_areas <= 1 is genuinely stationary and says so -- one corpus cannot have areas enter and fade, so
+    the non-stationarity has to come from ADDING an area later, which is the real test anyway.
+
+    WHY THE ARGUMENTS ARE ARGUMENTS. The shipped `_phases` read `_i("PHASES")` and `_i("PHASE_W")` from
+    INSIDE its body: a pure-looking generator that reached into the environment. That is the L2 ownership
+    violation the rebuild forbids -- the schedule SHAPE is data, and its parameters belong to whichever
+    package owns those levers. This is the one intended behavioural difference from the oracle capture,
+    which supplied the same values through an explicit reader so the table records defaults rather than
+    ambient state.
+
+    The `or` fallbacks reproduce the shipped resolution exactly and are NOT lever defaults: `n_phases or
+    4` matches the shipped `p or max(2, PHASES)` for every value the table covers, and the floor of two
+    belongs on the lever declaration (one phase cannot have anything fade). `width` falling back to
+    (n_areas + 1) // 2 -- half the areas live at once -- is a property of the SHAPE, computed from n, and
+    genuinely lives here.
+
+    Reproduces oracle _phases exactly, including `round()`'s banker's rounding on the window position and
+    including the fact that a caller-supplied `width` is NOT clamped to n_areas by the first expression
+    (only by the `>= n_areas` line below it).
+
+    THE STATIONARY CASE BUILDS INDEPENDENT LISTS. The shipped form was `[[0] if n else []] * p`, which
+    aliases ONE list p times: appending to one phase appends to all of them, silently. Equal by value to
+    the oracle, so the table still replays; different the moment anyone mutates a phase.
+    """
+    p = n_phases or 4
+    if n_areas <= 1:
+        return [([0] if n_areas else []) for _ in range(p)]
+    w = width or max(1, min(n_areas, (n_areas + 1) // 2))
+    if w >= n_areas:
+        w = n_areas - 1                                    # never all-active: something must be able to fade
+    out = []
+    for i in range(p):
+        lo = round(i * (n_areas - w) / max(1, p - 1))      # window slides from the first area to the last
+        out.append(list(range(lo, lo + w)))
+    return out

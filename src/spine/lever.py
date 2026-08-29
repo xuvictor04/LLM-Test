@@ -24,6 +24,7 @@ WHAT REPLACES IT, and why each piece is shaped this way:
   the run used and `_cfg` has no reason to exist.
 """
 import os
+from collections import namedtuple as _nt
 
 from . import units as U
 
@@ -35,7 +36,7 @@ class LeverError(Exception):
 class Lever:
     """One declared knob. Carries its default, its unit, its purpose, and nothing else."""
 
-    __slots__ = ("default", "help", "unit", "choices", "name", "prefix")
+    __slots__ = ("default", "help", "unit", "choices", "name")
 
     def __init__(self, default, help, unit=U.COUNT, choices=None):
         # THE DEFAULT MUST BE A LITERAL, checked here at declaration time rather than by an AST rule that
@@ -49,17 +50,47 @@ class Lever:
         if choices is not None and default not in choices:
             raise LeverError(f"default {default!r} is not among choices {choices!r}")
         self.default, self.help, self.unit, self.choices = default, help, unit, choices
-        self.name = self.prefix = None                       # filled in by __set_name__/__init_subclass__
+        self.name = None                                     # filled in by __set_name__
 
     def __set_name__(self, owner, name):
+        # THE FIELD NAME IS THE ONLY THING THE DECLARATION LEARNS ABOUT ITS OWNER. The prefix is NOT
+        # recorded here, and the reason is a defect two independent reviewers reproduced in the first
+        # version: __init_subclass__ wrote `v.prefix = cls.PREFIX` onto the Lever OBJECT, so a Lever
+        # reachable from two classes ended up with whichever prefix was defined last --
+        #     class Base(LeverSet):  PREFIX="BASE"; x = Lever(1, ...)
+        #     Base.env_names()                      -> {'BASE_X'}
+        #     class Child(Base):     PREFIX="CHILD"; y = Lever(2, ...)
+        #     Base.env_names()                      -> {'CHILD_X'}      <-- silently retargeted
+        # A base class's lever answering to a subclass's environment name defeats the entire ownership
+        # guarantee, and every static check still passed. Ownership is now read from the OWNER at use
+        # time, so there is no per-object state to corrupt.
+        # NOTE ON WHAT THE CALLER SEES: Python wraps any exception from __set_name__ in a RuntimeError
+        # ("Error calling __set_name__ on 'Lever' instance 'd_capacity' in 'Bad'"), with this LeverError
+        # as its __cause__. The refusal is still loud and still names the field; a caller catching this
+        # must catch RuntimeError, or read .__cause__.
+        if name.startswith("d_"):
+            raise LeverError(
+                f"{name!r} cannot be a lever: the d_ namespace belongs to WIRES. A d_ field is a value "
+                f"another package owns, arriving through spine.assemble -- declaring one as a lever "
+                f"silently shadows the wire that writes it.")
         self.name = name
 
-    @property
-    def env_name(self):
-        return f"{self.prefix}_{self.name.upper()}"
+    def env_name_for(self, prefix):
+        """The environment name this lever answers to WHEN OWNED BY `prefix`. Never cached on self."""
+        return f"{prefix}_{self.name.upper()}"
 
-    def coerce(self, raw):
-        """Turn an environment string into the declared type, or fail by name."""
+    # -- immutable once declared -----------------------------------------------------------------
+    # Config.lever() used to hand out this object live, so `cfg.lever('n').default = 99` rewrote the one
+    # declared default for every later from_env() in the process -- reproduced. L1 says one literal
+    # default and no second default anywhere; a mutable declaration makes that a statement about source
+    # text only.
+    def __setattr__(self, k, v):
+        if getattr(self, "name", None) is not None:
+            raise LeverError(f"{self.name!r} is declared; a lever's default cannot be rewritten at runtime")
+        object.__setattr__(self, k, v)
+
+    def coerce(self, raw, prefix):
+        """Turn an environment string into the declared type, or fail by its OWNED name."""
         d = self.default
         try:
             if isinstance(d, bool):     v = str(raw).strip().lower() not in ("0", "", "off", "no", "none", "false")
@@ -67,9 +98,9 @@ class Lever:
             elif isinstance(d, float):  v = float(raw)
             else:                       v = str(raw)
         except (TypeError, ValueError):
-            raise LeverError(f"{self.env_name}={raw!r} is not a {type(d).__name__}")
+            raise LeverError(f"{self.env_name_for(prefix)}={raw!r} is not a {type(d).__name__}")
         if self.choices is not None and v not in self.choices:
-            raise LeverError(f"{self.env_name}={v!r} must be one of {sorted(self.choices)}")
+            raise LeverError(f"{self.env_name_for(prefix)}={v!r} must be one of {sorted(self.choices)}")
         return v
 
 
@@ -86,8 +117,7 @@ class LeverSet:
         for base in reversed(cls.__mro__):
             for k, v in vars(base).items():
                 if isinstance(v, Lever):
-                    v.prefix = cls.PREFIX
-                    levers[k] = v
+                    levers[k] = v                      # recorded, never written to
         cls._levers = levers
         from .registry import register
         register(cls)
@@ -99,17 +129,17 @@ class LeverSet:
         env = os.environ if environ is None else environ
         vals, given = {}, {}
         for k, lv in cls._levers.items():
-            raw = env.get(lv.env_name)
+            raw = env.get(lv.env_name_for(cls.PREFIX))
             if raw is None:
                 vals[k] = lv.default
             else:
-                vals[k] = lv.coerce(raw)
+                vals[k] = lv.coerce(raw, cls.PREFIX)
                 given[k] = raw
         return Config(cls, vals, given)
 
     @classmethod
     def env_names(cls):
-        return {lv.env_name for lv in cls._levers.values()}
+        return {lv.env_name_for(cls.PREFIX) for lv in cls._levers.values()}
 
 
 class Config:
@@ -135,9 +165,21 @@ class Config:
         if not name.startswith("d_"):
             raise LeverError(f"wired value {name!r} must be d_-prefixed: a value computed from more than "
                              f"one package's levers is a COUPLING, and `grep d_` must find it")
+        # BOTH ENDS OF THE COLLISION. Lever.__set_name__ refuses a d_-named lever; this refuses a wire
+        # landing on a name a lever already holds. Without the pair, __getattr__ resolves _vals before
+        # _wired and the LEVER silently wins -- reproduced: a wire wrote 200000, the reader saw 999.
+        if name in self._vals:
+            raise LeverError(f"wire {name!r} collides with a declared lever of the same name on "
+                             f"{self._owner.__name__}; the reader would silently get the lever")
         self._wired[name] = value
 
     def _freeze(self):
+        # A FLAG IS NOT A STATE. The first version set _frozen and only _wire consulted it, so
+        # `cfg._vals['slots'] = 8` walked straight past the refusal and changed what cfg.slots returned
+        # -- reproduced. Frozen now means the mappings themselves cannot be written.
+        import types
+        object.__setattr__(self, "_vals", types.MappingProxyType(dict(self._vals)))
+        object.__setattr__(self, "_wired", types.MappingProxyType(dict(self._wired)))
         object.__setattr__(self, "_frozen", True)
         return self
 
@@ -162,10 +204,17 @@ class Config:
     def keys(self): return list(self._vals) + list(self._wired)
     def given(self): return dict(self._given)        # what the environment actually supplied
     def wired(self): return dict(self._wired)
-    def lever(self, k): return self._owner._levers[k]
+    def lever(self, k):
+        """A READ-ONLY VIEW of a declaration. Never the declaration itself: handing that out let a caller
+        rewrite the one declared default for the whole process."""
+        lv = self._owner._levers[k]
+        return LeverView(k, lv.default, lv.help, lv.unit, lv.choices, lv.env_name_for(self.prefix))
 
     def __repr__(self):
         return f"<Config {self.prefix} {len(self._vals)} levers, {len(self._wired)} wired>"
+
+
+LeverView = _nt("LeverView", "name default help unit choices env_name")
 
 
 class _Missing:

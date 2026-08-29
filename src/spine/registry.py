@@ -24,10 +24,14 @@ def register(cls):
             f"{cls.__module__}.{cls.__name__}. Ownership is the namespace: one prefix, one owner.")
     _SETS[cls.PREFIX] = cls
     for lv in cls._levers.values():
-        owner = _ENV_OWNER.get(lv.env_name)
+        # THE OWNER SUPPLIES THE PREFIX. The Lever itself no longer carries one: a Lever reachable from
+        # two classes used to end up answering to whichever prefix was declared last, silently
+        # retargeting the first owner's environment name.
+        env = lv.env_name_for(cls.PREFIX)
+        owner = _ENV_OWNER.get(env)
         if owner is not None and owner != cls.PREFIX:
-            raise LeverError(f"{lv.env_name} is declared by both {owner} and {cls.PREFIX}")
-        _ENV_OWNER[lv.env_name] = cls.PREFIX
+            raise LeverError(f"{env} is declared by both {owner} and {cls.PREFIX}")
+        _ENV_OWNER[env] = cls.PREFIX
 
 
 def all_sets():

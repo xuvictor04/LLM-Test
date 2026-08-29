@@ -67,8 +67,16 @@ class Clock:
     def __add__(self, o): return type(self)(self.n + self._same(o, "+").n)
     def __sub__(self, o): return type(self)(self.n - self._same(o, "-").n)
     def __eq__(self, o):
-        if not isinstance(o, Clock): return NotImplemented
-        return type(o) is type(self) and o.n == self.n
+        # EQUALITY RAISES TOO. The first version returned plain False across kinds while <, <=, > and >=
+        # raised, so `Flushes(10) == Steps(10)` was quietly False and `Steps(4000) == 4000` was quietly
+        # False -- a mismatch reported as a legitimate answer, in the module whose entire mechanism is
+        # that a cross-kind comparison cannot pass silently. An `==` against the wrong unit is the same
+        # defect as a `>=` against it, and a cadence written `if clock == period:` is not unusual.
+        # NotImplemented is kept ONLY for genuinely unrelated types, so `clock in [some, list]` and
+        # dict lookups still behave.
+        if isinstance(o, (Clock, int, float, bool)):
+            return self._same(o, "==") is not None and o.n == self.n
+        return NotImplemented
     def __lt__(self, o): return self.n < self._same(o, "<").n
     def __le__(self, o): return self.n <= self._same(o, "<=").n
     def __gt__(self, o): return self.n > self._same(o, ">").n
