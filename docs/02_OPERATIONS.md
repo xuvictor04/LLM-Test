@@ -58,6 +58,8 @@ measured 2.24 GB/day at population 3000. **Do not let me estimate run times; mea
 | cores | VERIFIED 4, 15 GiB RAM, x86_64 |
 | workflow concurrency | VERIFIED capped at 2 (min(16, cores−2)) — 20-agent fan-outs take hours here |
 | torch | VERIFIED present now (2.13.0+cu130, CPU-only). **RECORDED: it has vanished on a container rebuild before**, leaving tests unrunnable |
+| numpy | VERIFIED **absent**. `import numpy` raises ModuleNotFoundError, so every `import torch` prints `UserWarning: Failed to initialize NumPy` on stderr. Two consequences worth writing down: mechanism code in `src/` must not reach for numpy, and any test that asserts on stderr, or that parses a subprocess's output, sees that line first |
+| disk | VERIFIED 22 GiB free of a 252 GiB volume (2026-08-29). The allowance is per-session, so `df` under-reports exhaustion: Avail at 0 with low Used means the allowance is spent |
 | pypi.org | VERIFIED reachable, 200 |
 | **huggingface.co** | VERIFIED **UNREACHABLE** (connection fails through the agent proxy) |
 | github.com | VERIFIED reachable via the GitHub MCP tools and git push |
