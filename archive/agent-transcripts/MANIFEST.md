@@ -20,6 +20,7 @@ Extract with: `tar xzf archive/agent-transcripts/<name>.tar.gz`
 |---|---|---:|---|
 | `wf_9efbeae8-0fa.tar.gz` | — | 70 | **the survey** — 16 readers over the whole repo, docs, archive and both spans of chat history, then 4 architectures, 3 judges and a completeness critic. Produced `.rework/survey/`, and the design that became `.rework/PLAN.md`. |
 | `wf_3ae4e940-e74.tar.gz` | — | 42 | **P1 spine + P2 census** — derive/wire/rng/assemble, the ownership and determinism tests, the 328-knob census across 12 families, and 3 adversarial reviews that found 5 critical defects in the spine. |
+| `wf_ab6c7e95-6d9.tar.gz` | — | 21 | **P2 packages** — the nine remaining lever packages (capacity, ckpt, data, eval, lm, opt, tok, train, world) written against the census, the coupling table corrected by contact with them (three rows named owners nobody had), and 3 adversarial reviews. Its script was not persisted under `workflows/scripts/`; the review that followed produced the O10 import boundary and caught the untrippable O4 patch. |
 | `wf_96172f4a-bf8.tar.gz` | — | 70 | earlier session work |
 | `wf_2f07991a-311.tar.gz` | — | 36 | earlier session work |
 | `wf_cf66ea09-ce5.tar.gz` | — | 24 | earlier session work |
@@ -31,7 +32,7 @@ Extract with: `tar xzf archive/agent-transcripts/<name>.tar.gz`
 | `wf_2d772b2a-99f.tar.gz` | — | 4 | earlier session work |
 | `loose-agents.tar.gz` | (non-workflow subagents) | — | Agent-tool subagents spawned outside a workflow, earlier in the session. |
 
-**12 archives, 62 MB compressed, from 170 MB / 562 files uncompressed.**
+**13 archives, 66 MB compressed, from 181 MB / 631 files uncompressed.**
 
 ## What is NOT here
 
