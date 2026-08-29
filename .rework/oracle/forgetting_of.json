@@ -1,0 +1,90 @@
+{
+ "function": "forgetting_of",
+ "note": "F compares a domain to its BEST ever, not to its previous value; differs from BWT exactly when a domain peaked earlier than the last probe.",
+ "source_file": "self_organize.py",
+ "cases": [
+  {
+   "in": [
+    {
+     "eng": 2.125
+    },
+    {
+     "eng": 2.125
+    }
+   ],
+   "out": 0.0
+  },
+  {
+   "in": [
+    {
+     "eng": 2.273
+    },
+    {
+     "eng": 2.125
+    }
+   ],
+   "out": 0.14800000000000013
+  },
+  {
+   "in": [
+    {
+     "eng": 2.0
+    },
+    {
+     "eng": 2.125
+    }
+   ],
+   "out": 0.0
+  },
+  {
+   "in": [
+    {
+     "eng": 2.1,
+     "py": 5.0
+    },
+    {
+     "eng": 2.0
+    }
+   ],
+   "out": 0.10000000000000009
+  },
+  {
+   "in": [
+    {
+     "eng": [
+      2.273,
+      0.09
+     ]
+    },
+    {
+     "eng": [
+      2.125,
+      0.05
+     ]
+    }
+   ],
+   "out": {
+    "__raised__": "TypeError",
+    "msg": "unsupported operand type(s) for -: 'tuple' and 'tuple'"
+   }
+  },
+  {
+   "in": [
+    {},
+    {
+     "eng": 2.0
+    }
+   ],
+   "out": 0.0
+  },
+  {
+   "in": [
+    {
+     "eng": 2.0
+    },
+    {}
+   ],
+   "out": 0.0
+  }
+ ]
+}

@@ -1,0 +1,90 @@
+{
+ "function": "bwt_of",
+ "note": "POSITIVE = WORSE = FORGETTING, on a lower-is-better metric. The subtraction here was inverted once, on the single line the continual-learning claim rests on. NOTE: it raises TypeError on the (mean, err) tuple form that holdout values are otherwise carried in. Not reachable today -- both call sites unwrap with _ms(...)[0] first -- so this is a contract honoured by CONVENTION AT THE CALL SITE rather than by the function. The rebuild's Reading type removes the convention: value and error are named fields, so no caller has to remember to unwrap.",
+ "source_file": "self_organize.py",
+ "cases": [
+  {
+   "in": [
+    {
+     "eng": 2.125
+    },
+    {
+     "eng": 2.125
+    }
+   ],
+   "out": 0.0
+  },
+  {
+   "in": [
+    {
+     "eng": 2.273
+    },
+    {
+     "eng": 2.125
+    }
+   ],
+   "out": 0.14800000000000013
+  },
+  {
+   "in": [
+    {
+     "eng": 2.0
+    },
+    {
+     "eng": 2.125
+    }
+   ],
+   "out": -0.125
+  },
+  {
+   "in": [
+    {
+     "eng": 2.1,
+     "py": 5.0
+    },
+    {
+     "eng": 2.0
+    }
+   ],
+   "out": 0.10000000000000009
+  },
+  {
+   "in": [
+    {
+     "eng": [
+      2.273,
+      0.09
+     ]
+    },
+    {
+     "eng": [
+      2.125,
+      0.05
+     ]
+    }
+   ],
+   "out": {
+    "__raised__": "TypeError",
+    "msg": "unsupported operand type(s) for -: 'tuple' and 'tuple'"
+   }
+  },
+  {
+   "in": [
+    {},
+    {
+     "eng": 2.0
+    }
+   ],
+   "out": 0.0
+  },
+  {
+   "in": [
+    {
+     "eng": 2.0
+    },
+    {}
+   ],
+   "out": 0.0
+  }
+ ]
+}

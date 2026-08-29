@@ -1,0 +1,263 @@
+{
+ "function": "pin_tick",
+ "note": "Counted FLUSHES while its threshold was declared in STEPS -- 16x slow at BATCH_W=16. The unit-mismatch class in its purest form.",
+ "source_file": "self_organize.py",
+ "cases": [
+  {
+   "in": [
+    true,
+    0,
+    0
+   ],
+   "out": 1
+  },
+  {
+   "in": [
+    true,
+    0,
+    1
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    true,
+    0,
+    16
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    true,
+    0,
+    100
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    true,
+    1,
+    0
+   ],
+   "out": 1
+  },
+  {
+   "in": [
+    true,
+    1,
+    1
+   ],
+   "out": 2
+  },
+  {
+   "in": [
+    true,
+    1,
+    16
+   ],
+   "out": 17
+  },
+  {
+   "in": [
+    true,
+    1,
+    100
+   ],
+   "out": 101
+  },
+  {
+   "in": [
+    true,
+    5,
+    0
+   ],
+   "out": 1
+  },
+  {
+   "in": [
+    true,
+    5,
+    1
+   ],
+   "out": 2
+  },
+  {
+   "in": [
+    true,
+    5,
+    16
+   ],
+   "out": 17
+  },
+  {
+   "in": [
+    true,
+    5,
+    100
+   ],
+   "out": 101
+  },
+  {
+   "in": [
+    true,
+    400,
+    0
+   ],
+   "out": 1
+  },
+  {
+   "in": [
+    true,
+    400,
+    1
+   ],
+   "out": 2
+  },
+  {
+   "in": [
+    true,
+    400,
+    16
+   ],
+   "out": 17
+  },
+  {
+   "in": [
+    true,
+    400,
+    100
+   ],
+   "out": 101
+  },
+  {
+   "in": [
+    false,
+    0,
+    0
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    false,
+    0,
+    1
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    false,
+    0,
+    16
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    false,
+    0,
+    100
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    false,
+    1,
+    0
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    false,
+    1,
+    1
+   ],
+   "out": 1
+  },
+  {
+   "in": [
+    false,
+    1,
+    16
+   ],
+   "out": 16
+  },
+  {
+   "in": [
+    false,
+    1,
+    100
+   ],
+   "out": 100
+  },
+  {
+   "in": [
+    false,
+    5,
+    0
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    false,
+    5,
+    1
+   ],
+   "out": 1
+  },
+  {
+   "in": [
+    false,
+    5,
+    16
+   ],
+   "out": 16
+  },
+  {
+   "in": [
+    false,
+    5,
+    100
+   ],
+   "out": 100
+  },
+  {
+   "in": [
+    false,
+    400,
+    0
+   ],
+   "out": 0
+  },
+  {
+   "in": [
+    false,
+    400,
+    1
+   ],
+   "out": 1
+  },
+  {
+   "in": [
+    false,
+    400,
+    16
+   ],
+   "out": 16
+  },
+  {
+   "in": [
+    false,
+    400,
+    100
+   ],
+   "out": 100
+  }
+ ]
+}
