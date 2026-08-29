@@ -90,3 +90,17 @@ This connects to the owner's own foundational statement of what the fabric is fo
 If **aggregate** sufficiency is the goal, then overlap among experts serving overlapping skills is the
 expected state, not a fault. The instrument must therefore be able to report "interchangeable, and that is
 correct here" — which the current binary verdict cannot express. Filed as a requirement on P6.
+
+## D2 · 2026-08-28 · `PURE_ADD` is the default continual-learning protocol
+> "Pure add seems to be for testing of adding new domains, lets keep it as default for now."
+
+**Ruling: `PURE_ADD=1` is the default.** The added area streams alone; the previously-learned area is not
+rehearsed. Rehearsed (`PHASE_SCHED` `[[0],[0],[1],[1]]`) is retained as a named comparison arm.
+
+The reasoning that settled it: rehearsal is a *solution*, not a *measurement*. With it on by default the
+architecture's own contribution to retention cannot be separated from replay's. The two arms disagreed 10x
+on the same toy (`+0.046 HELD` rehearsed vs `+0.444 WORSE` pure), so the choice decides whether the system
+appears to satisfy goal B.
+
+"for now" is recorded: this is a default, not a definitive, and it is expected to be revisited once the
+rebuilt instruments can measure the two arms against each other honestly.
