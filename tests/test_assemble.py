@@ -11,7 +11,7 @@ marking the P3 plug point. That is this project's ARMED-BUT-INERT class -- 57 of
 ever run is a wiring layer whose first execution happens on the run that needed it.
 
 WHAT IS DIFFERENT HERE FROM tests/test_couplings.py, which lands beside this file and also builds. That
-file's C4 proves the ten declared rows COMPUTE the right numbers, using plain-object doubles that carry
+file's C4 proves the declared rows COMPUTE the right numbers, using plain-object doubles that carry
 only PREFIX and from_env and deliberately register nothing -- for a good reason, quoted from its header:
 a `class Fab(LeverSet): PREFIX = "FAB"` in a test claims "FAB" in the process-wide registry, and the day
 P3 lands the real fabric package any runner importing both gets `PREFIX 'FAB' is claimed by both ...`
@@ -83,6 +83,11 @@ from spine.wire import WIRE_BUDGET, WireError                          # noqa: E
 
 MAX_SHOWN = 12
 
+# The registry as this file found it: thirteen real packages, because importing spine.assemble imports
+# every levers.py. Snapshotted at module level so the runner can tell "the sandbox restored what was
+# here" from "the registry happens to be non-empty" -- see the note at the bottom of main().
+REGISTRY_ON_ENTRY = registry.all_sets()
+
 
 def _report(tag, title, ok, detail, findings, vacuous=False):
     """One check's verdict, with the size of the population it examined ALWAYS printed.
@@ -110,7 +115,7 @@ def _report(tag, title, ok, detail, findings, vacuous=False):
 
 @contextlib.contextmanager
 def packages():
-    """Six real LeverSets for the six PREFIXes the coupling table names, in a sandboxed registry.
+    """Nine real LeverSets for the PREFIXes the coupling table names, in a sandboxed registry.
 
     WHY REAL SUBCLASSES AND NOT DOUBLES. Three things build() uses come from the registry and only from
     the registry, and every one of them is a claim this file has to check:
@@ -131,10 +136,22 @@ def packages():
     two dicts are named directly because there is no public API for this and inventing one to serve a
     test would be a production surface that exists for a test.
 
-    THE DEFAULTS MATCH tests/test_couplings.py's LEVERS TABLE (slots 4096, owners 64, quota 128, vmax
-    32768, batch_w 16, accum 4, grow_cap_every 20000, manage_every 2000, pressure 0.75) on purpose. Two
-    test files disagreeing about what the shipped table computes would be the report-path/audit-path
-    split all over again, one quantity with two answers depending on which file you read.
+    THE DEFAULTS MATCH tests/test_couplings.py's LEVERS TABLE (slots 4096, owners 64, quota 128,
+    vocab_slots 32768, ctx 128, batch_windows 16, accum 4, pin_windows 20000, manage_every 2000,
+    pressure 0.75, and the two CKPT paths) on purpose. Two test files disagreeing about what the shipped
+    table computes would be the report-path/audit-path split all over again, one quantity with two
+    answers depending on which file you read.
+
+    THESE ARE STAND-INS AND NOT THE REAL PACKAGES, WHICH NOW EXIST -- and the reason is A3, not inertia.
+    src/*/levers.py declares 259 levers across thirteen packages; A3 requires a stated reach for EVERY
+    declared lever, because an oracle checked only where somebody remembered to check it is not an
+    oracle. Nine stand-ins carrying the fourteen fields the coupling table actually names keep that
+    requirement meetable and keep the fixture readable. What the stand-ins may NOT do is drift from the
+    real declarations: the PREFIXes and the field names below are exactly the ones src/*/levers.py
+    declares, which is what makes the real COUPLINGS table resolve against them. The VALUES are chosen
+    to exercise the arithmetic -- OPT_BATCH_WINDOWS really defaults to 1, and at 1 every flush period is
+    the identity, so the conversion that pinned the population for 43,645 ticks would be untested by the
+    only case anyone reads. tests/test_couplings.py's table carries the same note.
     """
     sets_before = dict(registry._SETS)
     envs_before = dict(registry._ENV_OWNER)
@@ -144,7 +161,7 @@ def packages():
         class Fabric(LeverSet):
             PREFIX = "FAB"
             slots = Lever(4096, "hard ceiling on the expert slot pool", U.SLOTS)
-            manage_every = Lever(2000, "management cadence, written in STEPS", U.COUNT)
+            manage_every = Lever(2000, "management cadence, written in WINDOWS", U.Windows)
             pressure = Lever(0.75, "occupancy setpoint the cull equilibrates at", U.FRACTION)
 
         class Memory(LeverSet):
@@ -162,21 +179,38 @@ def packages():
 
         class Tokenizer(LeverSet):
             PREFIX = "TOK"
-            vmax = Lever(32768, "hard vocabulary ceiling", U.ENTRIES)
+            # A PURE SINK WITH NO LEVER OF ITS OWN in this fixture: TOK receives four wires (the
+            # vocabulary ceiling, the cap-lift cadence and the two vocabulary paths) and sources none.
+            # The real TOKLevers declares 18; none of them appears in any coupling, so declaring one
+            # here would only add a lever A3 has to write an expectation for.
+            pass
 
-        class Train(LeverSet):
-            PREFIX = "TRAIN"
-            batch_w = Lever(16, "windows per flush", U.COUNT)
-            accum = Lever(4, "flushes per optimizer step", U.COUNT)
-            grow_cap_every = Lever(20000, "cap-lift cadence, written in STEPS", U.COUNT)
-            seed = Lever(1234, "the run seed every subsystem stream is derived from", U.COUNT)
+        class Optimizer(LeverSet):
+            PREFIX = "OPT"
+            batch_windows = Lever(16, "windows accumulated into one flush", U.Windows)
+            accum = Lever(4, "backward passes per optimizer step", U.Backwards)
+
+        class Capacity(LeverSet):
+            PREFIX = "CAP"
+            pin_windows = Lever(20000, "windows pinned at the soft cap before a lift is earned",
+                                U.Windows)
+
+        class Checkpoint(LeverSet):
+            PREFIX = "CKPT"
+            dir = Lever("runs/a/ckpt", "this run's checkpoint root", U.PATH)
+            resume = Lever("runs/parent/ckpt", "the checkpoint this run continues from", U.PATH)
 
         class Model(LeverSet):
             PREFIX = "LM"
-            layers = Lever(12, "transformer blocks", U.COUNT)
+            vocab_slots = Lever(32768, "rows in emb.weight and head.weight", U.SLOTS)
+            ctx = Lever(128, "tokens in one window, and the height of the positional table", U.TOKENS)
 
-        yield {"FAB": Fabric, "MEM": Memory, "DOM": Domains,
-               "TOK": Tokenizer, "TRAIN": Train, "LM": Model}
+        class Run(LeverSet):
+            PREFIX = "RUN"
+            seed = Lever(1234, "the run seed every subsystem stream is derived from", U.COUNT)
+
+        yield {"FAB": Fabric, "MEM": Memory, "DOM": Domains, "TOK": Tokenizer,
+               "OPT": Optimizer, "CAP": Capacity, "CKPT": Checkpoint, "LM": Model, "RUN": Run}
     finally:
         registry._SETS.clear()
         registry._SETS.update(sets_before)
@@ -195,12 +229,15 @@ EXPECTED_DEFAULT = {
     "MEM.d_owner_blocks":              64,             # min(4096, 64) -- the store has 64 partitions
     "MEM.d_capacity":                  8192,           # 64 x 128; the 200,000 that got silently shrunk
     "MEM.d_source_slots":              8192,           # max(64, 2 x 4096), not the 64 of the wrong default
-    "FAB.d_manage_period":             Flushes(125),   # 2000 steps / 16 windows per flush
+    "FAB.d_manage_period":             Flushes(125),   # 2000 windows / 16 windows per flush
     "FAB.d_cap_lift_period":           Flushes(1250),  # 20000 / 16 -- the clock that read 2,650
     "TOK.d_cap_lift_period":           Flushes(1250),  # the same valve, wired separately on purpose
-    "LM.d_softmax_width":              32768,          # one number named twice
+    "TOK.d_vocab_ceiling":             32768,          # one number named twice, from LM's row count
+    "TOK.d_vocab_save_path":           "runs/a/ckpt.dyntok.json",       # _TOK_SAVE's shipped rule
+    "TOK.d_vocab_read_path":           "runs/parent/ckpt.dyntok.json",  # the parent's, by the same rule
     "FAB.d_operating_population":      3072,           # ceil(0.75 x 4096); LOCAL, no edge, no budget
-    "TRAIN.d_effective_batch_windows": 64,             # 16 x 4; LOCAL. The batch the run actually trains at
+    "OPT.d_effective_batch_windows":   64,             # 16 x 4; LOCAL. The batch the run actually trains at
+    "LM.d_pos_max":                    128,            # LOCAL: the positional table is ctx rows tall
 }
 
 # What it computes with FAB_SLOTS=1024 in the environment and nothing else set. This is the whole point
@@ -230,7 +267,7 @@ TYPO_MEANT = "FAB_SLOTS"
 FOREIGN_KNOB = "CUDA_VISIBLE_DEVICES"
 ENV = {GOOD_KNOB: GOOD_VALUE, TYPO_KNOB: TYPO_VALUE, FOREIGN_KNOB: "0"}
 
-LOCAL_DSTS = {"FAB.d_operating_population", "TRAIN.d_effective_batch_windows"}
+LOCAL_DSTS = {"FAB.d_operating_population", "OPT.d_effective_batch_windows", "LM.d_pos_max"}
 
 
 def _landed(configs):
@@ -505,19 +542,21 @@ def check_a3_affects():
     # Written out rather than derived from COUPLINGS: deriving the expectation from the same table
     # affects() reads would assert only that two loops agree. These are read off the reason column.
     EXPECT = {
-        "FAB_SLOTS":           {"FAB", "DOM", "MEM"},   # bounds the domain namespace and sizes the store
-        "TRAIN_BATCH_W":       {"TRAIN", "FAB", "TOK"}, # both cap-lift cadences and the manage cadence
-        "TRAIN_GROW_CAP_EVERY": {"TRAIN", "FAB", "TOK"},
-        "TOK_VMAX":            {"TOK", "LM"},           # emb.weight and head.weight have exactly V rows
-        # ---- levers that feed no WIRE. Three different shapes, all of which must read {owner}: ----
+        "FAB_SLOTS":           {"FAB", "DOM", "MEM"},  # bounds the domain namespace and sizes the store
+        "OPT_BATCH_WINDOWS":   {"OPT", "FAB", "TOK"},  # both cap-lift cadences and the manage cadence
+        "CAP_PIN_WINDOWS":     {"CAP", "FAB", "TOK"},  # the valve's threshold, converted for both caps
+        "LM_VOCAB_SLOTS":      {"LM", "TOK"},          # emb.weight and head.weight have exactly V rows
+        "CKPT_DIR":            {"CKPT", "TOK"},        # the run's own vocabulary lands beside its ckpt
+        "CKPT_RESUME":         {"CKPT", "TOK"},        # the parent's vocabulary is read by the same rule
+        # ---- levers that feed no WIRE. Four different shapes, all of which must read {owner}: ----
         "FAB_MANAGE_EVERY":    {"FAB"},   # read by a coupling, but through the DESTINATION's own levers
         "MEM_QUOTA":           {"MEM"},   # same shape, on the receiving side of a cross wire
         "MEM_OWNERS":          {"MEM"},   # folded with FAB.slots by two wires, and read as MEM's own
-        "TRAIN_ACCUM":         {"TRAIN"}, # feeds a LOCAL coupling: a d_ field, and still no edge
-        "FAB_PRESSURE":        {"FAB"},   # the other half of the local coupling
+        "OPT_ACCUM":           {"OPT"},   # feeds a LOCAL coupling: a d_ field, and still no edge
+        "FAB_PRESSURE":        {"FAB"},   # the other half of the fabric's local coupling
+        "LM_CTX":              {"LM"},    # a single-source LOCAL coupling: still a d_ field, still no edge
         "DOM_MIN_SUPPORT":     {"DOM"},   # feeds nothing at all
-        "LM_LAYERS":           {"LM"},    # a pure sink's own lever
-        "TRAIN_SEED":          {"TRAIN"}, # deliberately NOT wired -- see NOT_WIRES, and A7
+        "RUN_SEED":            {"RUN"},   # deliberately NOT wired -- see NOT_WIRES, and A7
     }
     with packages():
         configs, wires, warnings = assemble.build(environ=ENV)
@@ -557,7 +596,8 @@ def check_a3_affects():
                             f"a smaller oracle makes the sweep pass by having nothing to compare.")
 
         # The package graph is the same claim at package granularity, which is where the sweep measures.
-        want_graph = {"FAB": ("DOM", "MEM"), "TOK": ("LM",), "TRAIN": ("FAB", "TOK")}
+        want_graph = {"CAP": ("FAB", "TOK"), "CKPT": ("TOK",), "FAB": ("DOM", "MEM"),
+                      "LM": ("TOK",), "OPT": ("FAB", "TOK")}
         if wires.graph() != want_graph:
             findings.append(f"wires.graph() = {wires.graph()}, expected {want_graph}. Packages that only "
                             f"receive must appear as targets and never as keys -- a sink cannot leak "
@@ -770,8 +810,10 @@ def check_a6_deferred_is_visible():
     THIS IS THE FILE'S OWN SUBJECT, TURNED ON ITSELF. Skipping an unbuildable coupling in silence is the
     untrippable-guard shape (60 of the survey's 475 records): the printed graph would show an edge that
     was never made, and affects() would hand the isolation sweep a reach the run does not have -- which
-    reads as the sweep passing. Today's tree is entirely in that state, with no package registered and
-    all ten rows deferred, so the state has to be loud.
+    reads as the sweep passing. The whole tree was in that state until the packages landed: no package
+    registered, every row deferred, and a wrong endpoint indistinguishable from a right one. It is not
+    any more (spine/assemble.py imports all thirteen and _check_endpoints refuses a name nobody owns), so
+    the deferral is exercised HERE, on a deliberately partial build, rather than being the default.
 
     AND THE ORACLE SHRINKS WITH THE BUILD, which is the part worth staring at. affects() is computed
     from the ledger, and a deferred coupling books no edge, so on a partial build a lever's declared
@@ -780,7 +822,7 @@ def check_a6_deferred_is_visible():
     oracle got smaller.
     """
     findings = []
-    present = ("FAB", "MEM", "TRAIN")
+    present = ("FAB", "MEM", "OPT")
     with packages() as P:
         part = {p: P[p] for p in present}
         configs, wires, warnings = assemble.build(environ=ENV, sets=part)
@@ -815,10 +857,15 @@ def check_a6_deferred_is_visible():
             findings.append("a deferred row prints a quoted placeholder where every other row has a "
                             "number.")
 
-        # The oracle really did shrink, and only the warning says so.
-        if set(wires.affects("TOK_VMAX")) != {"TOK"}:
-            findings.append(f"affects('TOK_VMAX') = {sorted(wires.affects('TOK_VMAX'))} on a build where "
-                            f"LM is absent; the edge was not made, so the reach cannot include LM.")
+        # The oracle really did shrink, and only the warning says so. LM_VOCAB_SLOTS reaches TOK on a
+        # full build; here TOK is absent, the edge was never made, and affects() -- which is computed
+        # from the LEDGER and not from the table -- answers with the owner alone. It does not raise:
+        # every stand-in is registered, only `sets=` is narrowed, so the lever is declared and its reach
+        # is honestly smaller.
+        if set(wires.affects("LM_VOCAB_SLOTS")) != {"LM"}:
+            findings.append(f"affects('LM_VOCAB_SLOTS') = {sorted(wires.affects('LM_VOCAB_SLOTS'))} on a "
+                            f"build where TOK is absent; the edge was not made, so the reach cannot "
+                            f"include TOK.")
 
     detail = (f"{len(present)} of {len(P)} package(s) registered: {len(made)} coupling(s) made, "
               f"{len(absent)} deferred, {len(deferred_warnings)} warning(s), {len(wires)} wire(s)")
@@ -850,7 +897,7 @@ def _issued_sandbox():
 def check_a7_rng_accounting():
     """issued() must distinguish drew / armed-but-inert / never asked -- graft G4's three states.
 
-    WHY THIS IS IN THE ASSEMBLE TEST. spine/assemble.py's NOT_WIRES rejects `TRAIN.seed -> every
+    WHY THIS IS IN THE ASSEMBLE TEST. spine/assemble.py's NOT_WIRES rejects `RUN.seed -> every
     package's d_seed` and names its replacement explicitly: "The check that catches that is rng.issued(),
     which records every stream handed out, so a subsystem with zero draws reads armed-but-inert and a
     subsystem that never asked does not appear at all -- two different statements the report must be able
@@ -866,7 +913,7 @@ def check_a7_rng_accounting():
     findings = []
     with packages(), _issued_sandbox():
         configs, _wires, _warnings = assemble.build(environ=ENV)
-        seed = configs["TRAIN"].seed
+        seed = configs["RUN"].seed
 
         if rng.issued():
             findings.append(f"the stream ledger was not empty at the start: {sorted(rng.issued())}")
@@ -930,7 +977,7 @@ def check_a7_rng_accounting():
             findings.append("reset_issued() left entries behind; the isolation sweep runs many 200-step "
                             "runs in one interpreter and needs a clean ledger between them.")
 
-    detail = ("2 stream(s) issued from the assembled TRAIN_SEED: 1 drew 3 time(s), 1 armed with 0 draws, "
+    detail = ("2 stream(s) issued from the assembled RUN_SEED: 1 drew 3 time(s), 1 armed with 0 draws, "
               "1 subsystem never asked; duplicate refused, again=True admitted, reset clears")
     return _report("A7", "rng.issued() reflects the streams actually handed out",
                    not findings, detail, findings, vacuous=False)
@@ -956,7 +1003,7 @@ def main():
     print(f"{len(assemble.COUPLINGS)} declared coupling(s), {WIRE_BUDGET} wire budget; "
           f"Python {sys.version.split()[0]}")
     print(f"registry on entry: {len(registry.all_sets())} package(s), "
-          f"{len(registry.all_env_names())} declared lever(s) -- the six below are sandboxed and "
+          f"{len(registry.all_env_names())} declared lever(s) -- the nine below are sandboxed and "
           f"restored")
     print()
     failed = 0
@@ -969,9 +1016,17 @@ def main():
             for line in traceback.format_exc().strip().splitlines():
                 print(f"      {line}")
         print()
-    if registry.all_sets():
-        print(f"NOTE  the registry was left holding {sorted(registry.all_sets())} -- the sandbox in "
-              f"packages() failed to restore it")
+    # WHAT "RESTORED" MEANS CHANGED WHEN THE PACKAGES LANDED, and the first form of this line became a
+    # false alarm the moment they did. It read `if registry.all_sets():`, which was a correct statement of
+    # "the sandbox leaked" only while the registry was expected to be EMPTY -- and spine.assemble now
+    # imports thirteen real LeverSets, so a perfectly restored registry holds all thirteen. A check that
+    # cannot tell a leak from the tree working is worse than no check, because it trains a reader to skip
+    # the line. The comparison is against the snapshot taken before the first sandbox instead.
+    if registry.all_sets() != REGISTRY_ON_ENTRY:
+        leaked = sorted(set(registry.all_sets()) - set(REGISTRY_ON_ENTRY))
+        lost = sorted(set(REGISTRY_ON_ENTRY) - set(registry.all_sets()))
+        print(f"NOTE  the registry does not match what this file found on entry -- extra: {leaked}, "
+              f"missing: {lost}. The sandbox in packages() failed to restore it.")
     print(f"=== {len(CHECKS)} checks, {failed} failing ===")
     print("These checks prove the wiring RUNS and that its declarations, its warnings and its printed")
     print("graph describe the same build. They do not prove the coupling graph is COMPLETE: a value")

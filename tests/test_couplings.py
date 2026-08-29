@@ -1,4 +1,4 @@
-"""The coupling table, exercised: what a compute may name, and what the ten declared rows actually build.
+"""The coupling table, exercised: what a compute may name, and what the declared rows actually build.
 
     python3 tests/test_couplings.py          # PASS/FAIL per check with counts; non-zero exit on any FAIL
 
@@ -22,8 +22,8 @@ THE TWO THINGS PROVED HERE, and each of them was unproved until this file existe
      would pass C2 perfectly.
 
   2. THE TEN COUPLINGS ACTUALLY RESOLVE. Every package in the table is unregistered on today's tree, so
-     `build()` defers all ten rows and prints a warning per row -- which means nothing in this repository
-     has ever RUN a compute. The name check would be equally green over ten rows that raise ZeroDivision
+     `build()` deferred every row and printed a warning per row -- which meant nothing in the repository
+     had ever RUN a compute. The name check would be equally green over rows that raise ZeroDivision
      the day a package appears. C4 assembles stand-in packages, builds the real table against them, and
      compares every landed value against a known-answer table written out by hand. It is the first thing
      in the tree that executes the wiring at all.
@@ -143,7 +143,7 @@ def _coupling(compute, dst="MEM.d_probe", src="FAB.slots"):
 # ten computes are re-run through the check explicitly, and the count is printed. A silent proof and a
 # printed count are not the same evidence.
 #
-# The four hand-written shapes matter as much as the ten rows. A name check that refuses everything would
+# The four hand-written shapes matter as much as the shipped rows. A name check that refuses everything would
 # pass C2 completely, and C2 is where the attention naturally goes. These are the shapes a future
 # coupling will be written in -- a bare view read, arithmetic with the allowlisted builtins, a
 # derive.f(Steps(...)) call, and a `def` with a docstring and locals -- and they are written HERE, in a
@@ -292,7 +292,7 @@ def check_c2_escapes_refused():
                                 f"the message, got: {msg[:160]}")
             elif "MEM.d_probe" not in msg:
                 findings.append(f"{label}: refused without naming the coupling. A startup failure in a "
-                                f"table of ten rows must say which row: {msg[:120]}")
+                                f"table this size must say which row: {msg[:120]}")
             continue
         except Exception as e:                                # noqa: BLE001 -- reported, never swallowed
             findings.append(f"{label}: raised {type(e).__name__} rather than WireError, so it fails as "
@@ -350,7 +350,7 @@ def check_c3_allowlist_is_a_declaration():
 
 
 # ==================================================================================================
-# C4 -- the ten declared couplings resolve, against stand-in packages
+# C4 -- the declared couplings resolve, against stand-in packages
 # ==================================================================================================
 #
 # THE KNOWN-ANSWER TABLE IS WRITTEN OUT BY HAND. Calling derive.flush_period here to produce the expected
@@ -367,26 +367,44 @@ def check_c3_allowlist_is_a_declaration():
 LEVERS = {
     "FAB":   {"slots": 4096, "pressure": 0.75, "manage_every": 2000},
     "MEM":   {"owners": 64, "quota": 128},
-    "TRAIN": {"batch_w": 16, "grow_cap_every": 20000, "accum": 4},
-    "TOK":   {"vmax": 32768},
+    "OPT":   {"batch_windows": 16, "accum": 4},
+    "CAP":   {"pin_windows": 20000},
+    "LM":    {"vocab_slots": 32768, "ctx": 128},
+    "CKPT":  {"dir": "runs/a/ckpt", "resume": "runs/parent/ckpt"},
     "DOM":   {},        # declares no lever of its own; its namespace bound arrives as a wire
-    "LM":    {},        # same: the softmax width IS the tokenizer's vmax, named twice
+    "TOK":   {},        # same: its vocabulary ceiling and both vocabulary paths arrive as wires
 }
+# THE PREFIXES AND FIELD NAMES ARE THE REAL ONES; THE VALUES ARE NOT ALL THE REAL DEFAULTS, AND THAT
+# DIFFERENCE IS DELIBERATE. `OPT_BATCH_WINDOWS` really defaults to 1, and at 1 every flush_period is the
+# identity -- 20000 windows would be 20000 flushes, 2000 would be 2000, and the whole conversion this
+# table exists to pin would be untested by the only case anyone reads. 16 is the batch width the measured
+# defect was recorded at (43,645 pinned ticks against a clock reading 2,650, and 2650 x 16 = 42,400), so
+# it is what the known-answer table is written against. FAB_SLOTS 4096, MEM_OWNERS 64, MEM_QUOTA 128,
+# FAB_MANAGE_EVERY (real 500, here 2000) and LM_CTX 128 follow the same rule -- real where the real value
+# exercises the row, and the previous fixture's number where it does not. Two are deliberately NOT the
+# real default because the coupling reasons quote them: FAB_PRESSURE is 0.75 (real 0.45), the setpoint an
+# occupancy of 0.50 sat below for a whole investigation, and LM_VOCAB_SLOTS is 32768 (real 4096), the
+# width the softmax-row argument is written at.
+# CKPT_DIR and CKPT_RESUME really default to "" -- meaning saving off and no parent -- and both computes
+# return "" for that, so the fixture sets non-empty paths in order to exercise the branch that builds one.
 
 EXPECTED = {
-    "DOM.d_expert_slots":             4096,          # the slot pool bounds the domain id namespace
-    "MEM.d_owner_blocks":             64,            # min(4096, 64): the fold that is 32 experts deep
-    "MEM.d_capacity":                 8192,          # 64 blocks x 128 quota, not the declared 200,000
-    "MEM.d_source_slots":             8192,          # max(64, 2 x 4096), not the 64 of the wrong default
-    "FAB.d_manage_period":            Flushes(125),  # 2000 steps / 16 windows per flush
-    "FAB.d_cap_lift_period":          Flushes(1250), # 20000 / 16 -- the clock that read 2650
-    "TOK.d_cap_lift_period":          Flushes(1250), # the same valve, wired separately on purpose
-    "LM.d_softmax_width":             32768,         # one number named twice
-    "FAB.d_operating_population":     3072,          # ceil(0.75 x 4096); LOCAL, no edge, no budget
-    "TRAIN.d_effective_batch_windows": 64,           # 16 x 4; LOCAL. The batch the run actually trains at
+    "DOM.d_expert_slots":              4096,          # the slot pool bounds the domain id namespace
+    "MEM.d_owner_blocks":              64,            # min(4096, 64): the fold that is 32 experts deep
+    "MEM.d_capacity":                  8192,          # 64 blocks x 128 quota, not the declared 200,000
+    "MEM.d_source_slots":              8192,          # max(64, 2 x 4096), not the 64 of the wrong default
+    "FAB.d_manage_period":             Flushes(125),  # 2000 windows / 16 windows per flush
+    "FAB.d_cap_lift_period":           Flushes(1250), # 20000 / 16 -- the clock that read 2650
+    "TOK.d_cap_lift_period":           Flushes(1250), # the same valve, wired separately on purpose
+    "TOK.d_vocab_ceiling":             32768,         # one number named twice, from LM's row count
+    "TOK.d_vocab_save_path":           "runs/a/ckpt.dyntok.json",       # _TOK_SAVE's shipped rule
+    "TOK.d_vocab_read_path":           "runs/parent/ckpt.dyntok.json",  # the parent's, by the same rule
+    "FAB.d_operating_population":      3072,          # ceil(0.75 x 4096); LOCAL, no edge, no budget
+    "OPT.d_effective_batch_windows":   64,            # 16 x 4; LOCAL. The batch the run actually trains at
+    "LM.d_pos_max":                    128,           # LOCAL: the positional table is ctx rows tall
 }
 
-LOCAL_DSTS = {"FAB.d_operating_population", "TRAIN.d_effective_batch_windows"}
+LOCAL_DSTS = {"FAB.d_operating_population", "OPT.d_effective_batch_windows", "LM.d_pos_max"}
 
 
 def _package(prefix, values):
@@ -406,7 +424,7 @@ def check_c4_table_resolves():
     try:
         configs, wires, warnings = assemble.build(environ={}, sets=sets)
     except Exception as e:                                    # noqa: BLE001 -- reported, never swallowed
-        return _report("C4", "the ten declared couplings resolve against stand-in packages", False,
+        return _report("C4", "the declared couplings resolve against stand-in packages", False,
                        f"build() raised {type(e).__name__}: {e}", [])
 
     landed = {f"{p}.{f}": v for p, cfg in configs.items() for f, v in cfg.wired().items()}
@@ -482,7 +500,7 @@ def check_c4_table_resolves():
     detail = (f"{len(EXPECTED)} coupling(s) resolved against {len(sets)} stand-in package(s); "
               f"{len(wires)} wire(s) of {wires.budget} budgeted, {len(LOCAL_DSTS)} intra-package; "
               f"{len(text.splitlines())} line(s) rendered")
-    return _report("C4", "the ten declared couplings resolve to the known-answer table",
+    return _report("C4", "the declared couplings resolve to the known-answer table",
                    not findings, detail, findings, vacuous=not EXPECTED)
 
 

@@ -39,7 +39,7 @@ because the table is the only evidence of what the old system actually did. Wher
 reached into the environment from inside its body, the parameter arrives as an argument instead; that is
 the only intended behavioural difference, and it is noted on the function.
 """
-from .units import Backwards, Clock, Flushes, Steps, UnitError
+from .units import Backwards, Clock, Flushes, Steps, UnitError, Windows
 
 
 # === capacity pressure ===========================================================================
@@ -231,6 +231,54 @@ def flush_period(period_steps, batch_w):
     # A PERIOD OF ZERO IS NEVER THE ANSWER. It is either `n % 0` -- a crash -- or, on the guard forms
     # that test `period and n % period == 0`, a mechanism that is switched on and never runs, which is
     # the armed-but-inert class (57 records). One flush is the smallest cadence that exists.
+    return Flushes(1) if period.n < 1 else period
+
+
+def flush_period_windows(period_windows, batch_windows):
+    """A cadence written in WINDOWS, expressed in the FLUSHES the loop body actually counts.
+
+    UNIT IN: period_windows = Windows, batch_windows = windows per flush (count).
+    UNIT OUT: Flushes.
+
+    WHY THIS EXISTS BESIDE `flush_period` RATHER THAN INSIDE IT. The two differ only in the kind they
+    accept, and that is the entire point: a conversion has to name BOTH ends or it is not a conversion,
+    it is a division. `flush_period` is pinned to Steps by tests/test_derive.py, which asserts that
+    `flush_period(Windows(20000), 16)` RAISES -- correctly, because a cadence denominated in optimizer
+    steps and one denominated in stream windows are not the same number the moment ACCUM is greater than
+    one. Widening `flush_period` to accept either kind would delete that refusal and put the project's
+    most repeated defect back with a broader signature.
+
+    WHY THE CADENCES THE COUPLING TABLE CONVERTS ARE WINDOWS AND NOT STEPS. Read from the source rather
+    than from the label. self_organize.py advances the loop counter as `i += WIN; step += 1` (:6796 in
+    the batch early-out, :7708 at the flush tail), so `step` counts WINDOWS; the management gates above
+    the early-out then test `step % MANAGE_EVERY == 0` (:6716, :6764, :6768), which compares that window
+    counter against the knob. MANAGE_EVERY is therefore a threshold in windows. The same knob is ALSO
+    read below the early-out as `_nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W))` at five sites (:6819,
+    :6836, :6961, :6988, :7077, :7325) against `_nbwd`, which counts flushes -- one number compared
+    against two clock kinds, in one file, which is the family this module exists to remove. This function
+    is that second reading, written down once.
+
+    AND THE ARITHMETIC IS THE HONEST ONE, WHICH `flush_period` IS NOT. `batch_windows` is windows per
+    flush; dividing WINDOWS by it yields FLUSHES and the kinds cancel. `flush_period` divides STEPS by
+    the same windows-per-flush, which only balances while one step is one window -- true in the shipped
+    loop and exactly the identity that made the conflation invisible. Both functions are kept because
+    a genuinely step-denominated cadence (an LR-schedule horizon) still needs the first one; nothing in
+    spine/assemble.py's table needs it today, and that is stated at the allowlist entry for `Steps`.
+
+    TRUNCATES rather than rounds, and floors at one flush, for the reasons `flush_period` gives: a period
+    that rounds up fires late, and the defect being repaired was a clock running 16x slow; a period of
+    zero is either `n % 0` or a mechanism that is switched on and never runs (57 armed-but-inert records).
+    """
+    if type(period_windows) is not Windows:
+        raise UnitError(f"flush_period_windows: period_windows must be Windows, got "
+                        f"{type(period_windows).__name__}. This cadence is compared against `step`, and "
+                        f"`step` advances once per window (`i += WIN; step += 1`); if the value is "
+                        f"already in flushes it has been converted twice.")
+    w = int(batch_windows)
+    if w < 1:
+        raise UnitError(f"flush_period_windows: batch_windows={batch_windows!r} -- a flush covers at "
+                        f"least one window.")
+    period = period_windows.convert(Flushes, per=w)
     return Flushes(1) if period.n < 1 else period
 
 

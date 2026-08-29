@@ -699,7 +699,15 @@ def check_o4_wires_match_reads(mods):
     import os as _os
     _pkg_dir = {}
     for _m in mods:
-        _pth = str(_m)
+        # _m.rel, NOT str(_m). Module defines __repr__ as f"<Module {self.rel}>" and no __str__, so
+        # str(_m) is "<Module src/memory/levers.py>" and basename() of it is "levers.py>" -- with the
+        # angle bracket -- which never equals "levers.py". The first version of this block used str(_m),
+        # which left _pkg_dir permanently empty, _has_body() permanently False, and every declared wire
+        # permanently "deferred": O4's backward half was green on every commit and printed "their
+        # packages are not in src/ yet" about thirteen packages that were all in src/.
+        # That is the untrippable-guard shape this file counts 60 of in the survey, introduced BY a patch
+        # that was fixing a different O4 problem, in the check whose subject is that class of defect.
+        _pth = _m.rel
         if _os.path.basename(_pth) == "levers.py":
             for _mod, _, _pfx in _leversets([_m]).values():
                 if isinstance(_pfx, str):
@@ -731,7 +739,7 @@ def check_o4_wires_match_reads(mods):
         # Printed on a pass as well as a failure. The backward direction is untested for these rows and
         # saying so is the difference between a result and a green tick over an empty set.
         print(f"          note: the backward direction is UNTESTED for {len(deferred)} of {len(dsts)} "
-              f"rows -- their packages are not in src/ yet:")
+              f"rows -- their receiving packages have no implementation yet:")
         for d in deferred[:MAX_SHOWN]:
             print(f"                {d}")
     return rc
@@ -1526,6 +1534,87 @@ def selftest():
 # The runner
 # ==================================================================================================
 
+
+# =====================================================================================================
+def check_o10_no_backdoor_imports(mods):
+    """O10 -- a package may not reach the spine's assembly, the registry, or a foreign levers module.
+
+    WHY THIS EXISTS, and it is the check O1-O9 needed. O8 constrains the CALL SITE of from_env, which
+    only works while from_env is the only way to mint a foreign Config. It is not. Three routes were
+    demonstrated end to end against the shipped suite, each returning a foreign package's env-overridden
+    value with all nine checks passing:
+
+      build()          `from spine.assemble import build` in a memory module, then build()[0]["FAB"] --
+                       every package's Config, through the one door that is a legal from_env call site
+                       by construction. With FAB_ALPHA=0.9 the memory module returned 900.
+      the registry     `registry.all_sets()["FAB"]` hands back the class, and getattr(cls, "from_" +
+                       "env") or LeverSet.__dict__["from_env"].__func__ mints from it. O8 matches
+                       spellings -- an Attribute named from_env, a from-import of it, getattr with a
+                       CONSTANT second argument -- and a computed string, a subscript and an
+                       importlib.import_module all walk past. Its own header claimed naming the one
+                       legal call site "is not a race against spellings"; it was.
+      the declaration  `FABLevers._levers["alpha"].default` reads a foreign lever with no from_env call
+                       and no Config at all. Editing FAB's literal then changes MEM's behaviour, and
+                       affects() cannot see it -- precisely the coupling G1 exists to detect.
+
+    So the boundary moves from the CALL to the IMPORT, which is a much smaller surface: a module that
+    cannot name spine.assemble, spine.registry or a foreign levers module has nothing to call.
+
+    WHAT IT CANNOT CATCH: a module already inside src/spine/, which is exempt by construction; and a
+    value handed to a package as an ordinary argument, which is legal Python and is O9's territory.
+    """
+    findings = []
+    _PKG_DIRS = {m.rel.split("/")[1] for m in mods
+                 if m.rel.startswith("src/") and m.rel.count("/") >= 2} - {"spine"}
+    for m in mods:
+        if m.rel.startswith("src/spine/"):
+            continue                                   # the spine is the assembly; it must import both
+        pkg = m.rel.split("/")[1] if m.rel.startswith("src/") and "/" in m.rel[4:] else ""
+        for node in ast.walk(m.tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                names = [base] + [f"{base}.{a.name}" for a in node.names]
+            for n in names:
+                tail = n.split(".")
+                if "assemble" in tail or "registry" in tail:
+                    findings.append(f"{m.rel}:{node.lineno}  imports {n!r} -- the assembly and the "
+                                    f"registry hand out every package's Config; only src/spine/ may "
+                                    f"name them.  {m.line(node.lineno)}")
+                else:
+                    # NO PACKAGE MAY IMPORT ANOTHER PACKAGE AT ALL. Banning only foreign *levers* left
+                    # the natural form of the leak open, and a reviewer demonstrated it: the OWNER
+                    # writes its own module global (`SLOTS = None`, then `install(cfg)` sets it) and the
+                    # foreign package only READS it (`from fabric import state`; `state.SLOTS // 2`).
+                    # Every step is legal on its own, O5 only inspects the WRITE side, and with
+                    # FAB_SLOTS=901 the memory function returned 450 with all checks green. There was no
+                    # wire, no ledger row, and nothing in affects().
+                    # The whole architecture says cross-package values arrive as arguments the spine
+                    # assembled -- so a package importing another package IS the coupling, whatever it
+                    # then reads. Measured before adopting: 0 cross-package imports across all 13
+                    # packages, so the strongest boundary costs nothing today.
+                    head = tail[0] if tail and tail[0] else ""
+                    if pkg and head in _PKG_DIRS and head != pkg:
+                        findings.append(f"{m.rel}:{node.lineno}  imports {n!r} -- {head!r} is another "
+                                        f"package. Cross-package values arrive as arguments the spine "
+                                        f"assembled; an import is a coupling with no wire and nothing "
+                                        f"in affects().  {m.line(node.lineno)}")
+            if isinstance(node, ast.Call):
+                f = node.func
+                nm = (f.attr if isinstance(f, ast.Attribute) else
+                      f.id if isinstance(f, ast.Name) else "")
+                if nm in ("import_module", "__import__"):
+                    findings.append(f"{m.rel}:{node.lineno}  calls {nm}() -- a dynamic import has no "
+                                    f"import statement for any of these checks to resolve.  "
+                                    f"{m.line(node.lineno)}")
+    n_out = sum(1 for m in mods if not m.rel.startswith("src/spine/"))
+    return _report("O10", "no package reaches the assembly, the registry, or another package",
+                   not findings,
+                   f"{n_out} module(s) outside src/spine/ examined", findings, vacuous=not n_out)
+
+
 CHECKS = (
     check_o1_one_env_reader,
     check_o2_literal_defaults,
@@ -1536,6 +1625,7 @@ CHECKS = (
     check_o7_no_clock_vs_int,
     check_o8_from_env_only_in_wiring_file,
     check_o9_one_config_per_signature,
+    check_o10_no_backdoor_imports,
 )
 
 

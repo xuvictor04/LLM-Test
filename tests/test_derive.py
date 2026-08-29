@@ -159,6 +159,22 @@ def smoke():
         except UnitError:
             pass
 
+    # flush_period_windows: THE SAME DIVISION, THE OTHER KIND, AND THE PAIR IS THE POINT. MANAGE_EVERY
+    # and the capacity valve's pin threshold are compared against `step`, and `step` advances once per
+    # WINDOW (`i += WIN; step += 1` at self_organize.py:6796 and :7708) -- so spine/assemble.py converts
+    # them with this function and not with flush_period. Each function must refuse the other's kind, or
+    # there is one function with two meanings again.
+    assert derive.flush_period_windows(Windows(2000), 16) == Flushes(125)
+    assert derive.flush_period_windows(Windows(20000), 16) == Flushes(1250)
+    assert derive.flush_period_windows(Windows(20000), 1) == Flushes(20000)
+    assert derive.flush_period_windows(Windows(8), 16) == Flushes(1)   # never a period of zero
+    for bad in (20000, Flushes(20000), Steps(20000)):
+        try:
+            derive.flush_period_windows(bad, 16)
+            raise AssertionError(f"bare/foreign clock accepted as a window cadence: {bad!r}")
+        except UnitError:
+            pass
+
     # accum_due counts BACKWARD PASSES. At ACCUM=4 exactly a quarter of them are due; the window counter
     # that produced 55 steps where 13 were due cannot even be passed in.
     assert sum(derive.accum_due(Backwards(n), 4) for n in range(1, 53)) == 13

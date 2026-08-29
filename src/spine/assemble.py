@@ -85,6 +85,25 @@ TWO KINDS OF COUPLING LIVE IN THE TABLE, AND ONLY ONE OF THEM IS A WIRE.
   edge, and it spends no budget. Recording it as a wire would inflate the coupling graph with edges that
   cannot leak anywhere, which makes the graph less useful exactly in proportion to how carefully it is read.
 
+WHAT CHANGED WHEN THE REAL PACKAGES ARRIVED, because a table that was written against stand-ins and then
+silently kept working would be the worst possible outcome. Thirteen levers.py files landed under src/,
+this file now imports all thirteen, and four of the ten declared rows turned out to name declarations
+that do not exist:
+
+  * `TRAIN` IS NOT A PACKAGE. The loop is `RUN` (7 levers) and the batch width is OPT's. Three rows read
+    `TRAIN.batch_w`, `TRAIN.grow_cap_every` and `TRAIN.accum`; they are now `OPT.batch_windows`,
+    `CAP.pin_windows` and `OPT.accum`, and `TRAIN.d_effective_batch_windows` is `OPT.d_...`, still local.
+  * `TOK.vmax` DOES NOT EXIST. The census gives VMAX to LM as `vocab_slots` and says TOK receives it as
+    `d_vocab_ceiling`, so the edge is reversed rather than the field re-declared -- declaring `vmax` on
+    TOK as well would put the softmax width in two packages at once.
+  * `MANAGE_EVERY` IS WINDOWS, NOT STEPS. See the row's own reason: `step` advances per window and the
+    gate compares against it. The conversion is `derive.flush_period_windows`, added for this.
+
+None of that was detectable before, and the reason it was not is the interesting part: with no package
+registered, `build()` DEFERRED every row with a warning, so a table of thirteen correct names and a table
+of nine correct names produced identical output. `_check_endpoints` below closes that at import, which is
+where the rest of this file's declaration faults are already caught.
+
 WHAT THIS FILE CANNOT DO, said plainly. A wire's value must be computable from levers alone, at startup,
 because `Config` freezes when `build()` returns and there is no such thing as a late wire. The signature
 width is the clearest casualty: `derive.signature_width_bytes(win_tokens, bytes_per_token)` needs a
@@ -103,8 +122,49 @@ from . import derive
 from . import registry
 from . import units as U
 from .lever import LeverError
-from .units import Steps
+from .units import Steps, Windows
 from .wire import WIRE_BUDGET, WireError, Wires, _check_unit, _check_why, _split
+
+# ==================================================================================================
+# THE THIRTEEN REAL PACKAGES. This is the import block the whole "one file may hold more than one
+# LeverSet" rule exists for, and until now it was empty -- the table below was written against names
+# that no declaration owned, and `build()` answered by DEFERRING every row with a warning. A deferral
+# is the untrippable-guard shape (60 of the survey's 475 records): the printed graph shows an edge that
+# was never made, affects() hands the L3 sweep a reach the run does not have, and the sweep reads as
+# passing because nothing moved. Importing the declarations here is what turns each of those rows from
+# a claim into either a value or a startup failure.
+#
+# THE PATH FORM IS ABSOLUTE, `from capacity.levers import ...`, and that is forced rather than chosen:
+# every entry point in this tree puts `src/` itself on sys.path, which makes `capacity` a TOP-LEVEL
+# package, and `from ..capacity.levers import ...` raises "attempted relative import beyond top-level
+# package" at import time. Each levers.py file records the same constraint at its own import line.
+#
+# IMPORTING THEM IS ALSO WHAT REGISTERS THEM. LeverSet.__init_subclass__ calls registry.register, so
+# after this block registry.all_sets() holds all thirteen and build(sets=None) -- the production call --
+# resolves the real tree. Nothing else in src/ may import two of these (O3), and nothing else at all may
+# call from_env (O8), so this block is the single door.
+# ==================================================================================================
+from capacity.levers import CAPLevers          # noqa: E402
+from ckpt.levers import CKPTLevers             # noqa: E402
+from data.levers import DATALevers             # noqa: E402
+from domains.levers import DOMLevers           # noqa: E402
+from eval.levers import EVALLevers             # noqa: E402
+from fabric.levers import FABLevers            # noqa: E402
+from lm.levers import LMLevers                 # noqa: E402
+from memory.levers import MEMLevers            # noqa: E402
+from opt.levers import OPTLevers               # noqa: E402
+from sig.levers import SIGLevers               # noqa: E402
+from tok.levers import TOKLevers               # noqa: E402
+from train.levers import RUNLevers             # noqa: E402
+from world.levers import WORLDLevers           # noqa: E402
+
+# Keyed by PREFIX, and built from the classes rather than read back out of the registry, so that the
+# endpoint check below is a statement about what THIS FILE holds. Reading the registry instead would
+# make the check pass or fail depending on what some other module happened to import first, which is
+# the kind of guard that is green for the wrong reason.
+PACKAGES = types.MappingProxyType({cls.PREFIX: cls for cls in (
+    CAPLevers, CKPTLevers, DATALevers, DOMLevers, EVALLevers, FABLevers, LMLevers,
+    MEMLevers, OPTLevers, SIGLevers, TOKLevers, RUNLevers, WORLDLevers)})
 
 
 # ==================================================================================================
@@ -152,7 +212,18 @@ COMPUTE_ALLOWLIST = types.MappingProxyType({
     "Steps":
         "spine.units.Steps -- the clock constructor a compute needs in order to hand "
         "derive.flush_period a cadence that carries its kind. A bare int there is the 16x-slow clock "
-        "that pinned the population for 43,645 real steps while the clock read 2,650.",
+        "that pinned the population for 43,645 real steps while the clock read 2,650. NO ROW BELOW "
+        "REACHES IT TODAY: both cadences this table converts turned out to be denominated in WINDOWS, "
+        "not steps (see FAB.d_manage_period). It stays because a genuinely step-denominated cadence -- "
+        "an LR-schedule horizon -- is the next coupling of this shape, and because removing it would "
+        "make derive.flush_period unreachable from any compute while derive.flush_period_windows is "
+        "reachable, which reads as a claim that the steps form is wrong rather than unused.",
+    "Windows":
+        "spine.units.Windows -- the same constructor for the kind the loop counter actually counts. "
+        "`step` advances once per window (`i += WIN; step += 1`, self_organize.py:6796 and :7708) and "
+        "every management gate compares against it, so MANAGE_EVERY and the capacity valve's pin "
+        "threshold are Windows and are handed to derive.flush_period_windows. Passing them through the "
+        "Steps form instead is the conflation this whole module is written against, one layer up.",
     "_owner_blocks":
         "the one pure helper local to this file, defined immediately above the table because two "
         "couplings need the same fold and a fold written twice can disagree with itself. Its own free "
@@ -638,9 +709,13 @@ COUPLINGS = [
             "three consequences. FAB_NMAX was entered into the read audit on every run whether or not it "
             "mattered; the same name was ALSO read as _i('MAX_DOMAINS', 32) at :4874 when sizing the "
             "memory source census, so one knob had two defaults 128x apart; and that was only legal "
-            "because MAX_DOMAINS sat in _DERIVED and was exempt from the default-mismatch refusal. It is "
-            "marked reducible because domains could legitimately own a smaller namespace than the slot "
-            "pool; what it may not do is own a DIFFERENT one silently."),
+            "because MAX_DOMAINS sat in _DERIVED and was exempt from the default-mismatch refusal. Worse "
+            "in practice than in principle: every launcher set MAX_DOMAINS=1000000 while FAB_NMAX sat at "
+            "64, so two populations designed as duals ran 15,625x apart and dom_exp affiliation mapped "
+            "hundreds of domains onto each expert (notes 05_ERRORS E1.7/E10.32). This is the census's "
+            "MAX_DOMAINS promote-to-wire (CENSUS.md:208), landing on DOM. It is marked reducible because "
+            "domains could legitimately own a smaller namespace than the slot pool; what they may not do "
+            "is own a DIFFERENT one silently."),
 
     # --- fabric -> memory -------------------------------------------------------------------------
     Coupling(
@@ -664,7 +739,9 @@ COUPLINGS = [
             "no size independent of its partition. The old tree declared it anyway and memory.py:36 then "
             "silently overrode it -- 'if self.n_own > 1: cap = self.n_own * self.quota' -- so a requested "
             "MEM_CAP of 200,000 became 64 x 128 = 8,192, a 24x shrink recorded as E7.40 with no line in "
-            "any log. Deriving it here means the number that gets discarded is the one nobody wrote."),
+            "any log. This is the census's MEM_CAP promote-to-wire (CENSUS.md:249); after it the operator "
+            "sizes the store through quota and owners, and 200,000 is no longer a number anyone types. "
+            "Deriving it here means the number that gets discarded is the one nobody wrote."),
     Coupling(
         src="FAB.slots",
         dst="MEM.d_source_slots",
@@ -676,39 +753,59 @@ COUPLINGS = [
             "MAX_DOMAINS with the WRONG default (32), so the table was 64 rows wide on every default run "
             "while memory.py's own docstring records 125 source ids on a real one, and the fix that "
             "clamped ids into the 64-wide table would have re-broken it at exactly the scale it was "
-            "written for. The formula is the shipped one; only its input was wrong. Reducible: a census "
-            "that grows on demand needs no bound at all, and that is the better repair when it is written."),
+            "written for. This is the SECOND landing of the census's MAX_DOMAINS promote-to-wire, which "
+            "names both (CENSUS.md:208: 'it lands on DOM as d_expert_slots and on MEM as d_src_hint'); "
+            "the field is named d_source_slots because memory/levers.py:69 declares that spelling as what "
+            "it expects to receive. The formula is the shipped one; only its input was wrong. Reducible: "
+            "a census that grows on demand needs no bound at all, and that is the better repair when it "
+            "is written."),
 
-    # --- the training loop -> the per-flush cadences -----------------------------------------------
+    # --- the training loop's batch width -> the per-flush cadences ---------------------------------
     Coupling(
-        src="TRAIN.batch_w",
+        src="OPT.batch_windows",
         dst="FAB.d_manage_period",
-        compute=lambda r: derive.flush_period(Steps(r["FAB"].manage_every), r["TRAIN"].batch_w),
+        compute=lambda r: derive.flush_period_windows(Windows(r["FAB"].manage_every),
+                                                      r["OPT"].batch_windows),
         unit=U.Flushes,
         irreducible=True,
-        why="MANAGE_EVERY is written in STEPS and the management block sits below the batch early-out, so "
-            "it runs once per FLUSH. The old tree wrote the conversion inline as "
-            "'MANAGE_EVERY // max(1, BATCH_W)' at each of eight call sites (self_organize.py:6795, 6819, "
-            "6836, 6961, 6988, 7077, 7325, 7368). Irreducible: a cadence in steps handed to a loop that "
-            "counts flushes has no meaning until batch_w is known, which is why the value is a Flushes "
-            "clock and not an int -- an int compares fine against a threshold in the wrong unit."),
+        why="MANAGE_EVERY is a cadence on the WINDOW counter, and five call sites consume it per FLUSH. "
+            "The management gates above the batch early-out test `step % MANAGE_EVERY == 0` "
+            "(self_organize.py:6716, :6764, :6768) where `step` advances once per window "
+            "(`i += WIN; step += 1`, :6796 and :7708); the sites BELOW the early-out run once per flush "
+            "and wrote the conversion inline as `_nbwd % max(1, MANAGE_EVERY // max(1, BATCH_W))` at "
+            ":6819, :6836, :6961, :6988, :7077 and :7325 -- one number compared against two clock kinds "
+            "in one file. Irreducible: a cadence in windows handed to a block that counts flushes has no "
+            "meaning until the batch width is known, which is why the value is a Flushes clock and not an "
+            "int -- an int compares fine against a threshold in the wrong unit. UNIT RESOLVED HERE: this "
+            "row used to read `derive.flush_period(Steps(r['FAB'].manage_every), ...)` and its reason "
+            "said 'MANAGE_EVERY is written in STEPS'; the census (CENSUS.md, FAB family) and "
+            "fabric/levers.py:648 both type it Windows, and the source agrees with them, so the Steps "
+            "assumption is withdrawn and the conversion is derive.flush_period_windows."),
     Coupling(
-        src=("TRAIN.batch_w", "TRAIN.grow_cap_every"),
+        src=("OPT.batch_windows", "CAP.pin_windows"),
         dst="FAB.d_cap_lift_period",
-        compute=lambda r: derive.flush_period(Steps(r["TRAIN"].grow_cap_every), r["TRAIN"].batch_w),
+        compute=lambda r: derive.flush_period_windows(Windows(r["CAP"].pin_windows),
+                                                      r["OPT"].batch_windows),
         unit=U.Flushes,
         irreducible=True,
         why="The measured case for this whole mechanism. The capacity valve's pin clock ticked per flush "
-            "against a threshold in steps, so GROW_CAP_EVERY=20000 silently demanded 320,000 steps at "
-            "BATCH_W=16 and 640,000 at 32: the population sat pinned for 43,645 real steps while the "
+            "against a threshold in windows, so GROW_CAP_EVERY=20000 silently demanded 320,000 windows at "
+            "BATCH_W=16 and 640,000 at 32: the population sat pinned for 43,645 real ticks while the "
             "clock read 2,650 (= 42,400/16) and the report said 'reached the cap but never held it long "
             "enough' -- a true sentence about a false clock. A second gate one layer up then compared "
-            "fabgrow.n (calls) to the same steps threshold and lifted nothing for a further whole round, "
-            "the first fault masking the second."),
+            "fabgrow.n (calls) to the same threshold and lifted nothing for a further whole round, the "
+            "first fault masking the second. The knob is now CAP.pin_windows (census GROW_CAP_EVERY -> "
+            "CAP_PIN_STEPS, re-typed and re-named to CAP_PIN_WINDOWS at capacity/levers.py:305 because "
+            "the counter it is compared against is `step`). CAVEAT THE VALVE PORT MUST SETTLE, recorded "
+            "rather than papered over: derive.pin_tick still types its accumulated clock as Steps, so a "
+            "Windows threshold and a Steps clock cannot meet -- capacity/levers.py:88-108 sets out the "
+            "two legal repairs, and applying both at once fires the valve 16x too EARLY. This row "
+            "converts the threshold and nothing else."),
     Coupling(
-        src=("TRAIN.batch_w", "TRAIN.grow_cap_every"),
+        src=("OPT.batch_windows", "CAP.pin_windows"),
         dst="TOK.d_cap_lift_period",
-        compute=lambda r: derive.flush_period(Steps(r["TRAIN"].grow_cap_every), r["TRAIN"].batch_w),
+        compute=lambda r: derive.flush_period_windows(Windows(r["CAP"].pin_windows),
+                                                      r["OPT"].batch_windows),
         unit=U.Flushes,
         irreducible=True,
         why="The vocabulary soft cap is lifted by the same valve on the same clock, and it was blocked by "
@@ -718,20 +815,60 @@ COUPLINGS = [
             "separately from the fabric's period because the two caps are lifted by two mechanisms and a "
             "shared field would make one of them read a value the other's package owns."),
 
-    # --- tokenizer -> the model geometry ------------------------------------------------------------
+    # --- the model's vocabulary ceiling -> the tokenizer --------------------------------------------
     Coupling(
-        src="TOK.vmax",
-        dst="LM.d_softmax_width",
-        compute=lambda r: int(r["TOK"].vmax),
+        src="LM.vocab_slots",
+        dst="TOK.d_vocab_ceiling",
+        compute=lambda r: int(r["LM"].vocab_slots),
         unit=U.ENTRIES,
         irreducible=True,
-        why="emb.weight and head.weight have exactly this many rows. A distribution over V symbols has V "
-            "logits: this is one number named twice, not two numbers that happen to agree, and no "
-            "interface makes them independent. Getting it wrong is not a soft failure -- the resume "
-            "geometry gate at self_organize.py:4442-4468 exists because a checkpoint built at one width "
-            "cannot load into a model built at another, and the softer form (rows minted by the tokenizer "
-            "but never present in the head) is the LOSS_MASK_DEAD family, where dead rows scale with "
-            "VMAX and quietly take probability mass."),
+        why="emb.weight and head.weight have exactly this many rows, so the vocabulary the tokenizer is "
+            "allowed to mint into is the model's row count: one number named twice, not two numbers that "
+            "happen to agree, and no interface makes them independent. Getting it wrong is not a soft "
+            "failure -- the resume geometry gate at self_organize.py:4442-4468 exists because a "
+            "checkpoint built at one width cannot load into a model built at another, and the softer form "
+            "(rows minted by the tokenizer but never present in the head) is the LOSS_MASK_DEAD family, "
+            "where dead rows scale with VMAX and quietly take probability mass. DIRECTION CORRECTED HERE: "
+            "this row read `src='TOK.vmax', dst='LM.d_softmax_width'`, and TOK has no lever called vmax "
+            "-- the census gives VMAX to LM as LM_VOCAB_SLOTS and says in as many words that 'TOK "
+            "receives it as the wire d_vocab_ceiling' (CENSUS.md:323), which is what lm/levers.py:127-141 "
+            "and tok/levers.py:87 both record as the outstanding repair. Left as it was, importing the "
+            "real packages made build() raise 'TOKLevers has no lever vmax' -- the mechanism working, on "
+            "a row that named an owner nobody had."),
+
+    # --- the checkpoint's artifact root -> the tokenizer's vocabulary file --------------------------
+    Coupling(
+        src="CKPT.dir",
+        dst="TOK.d_vocab_save_path",
+        compute=lambda r: (r["CKPT"].dir + ".dyntok.json") if r["CKPT"].dir else "",
+        unit=U.PATH,
+        irreducible=False,
+        why="Where this run SAVES its own vocabulary is a property of its checkpoint, not a knob. The "
+            "census's TOKENIZER_PATH promote-to-wire (CENSUS.md:306) is exactly this: one declared knob "
+            "with a shared default of data/dyntok.json 'which belongs to whichever run wrote it last', "
+            "so concurrent arms overwrote each other (ISSUES.md:1501, :285, :768). The old tree had "
+            "already split the write side out by hand as `_TOK_SAVE = SAVE_CKPT + '.dyntok.json'` "
+            "(self_organize.py:1010-1012), and that rule is the compute here, so a run's vocabulary lands "
+            "beside its own checkpoint. Empty in, empty out: CKPT_DIR='' means saving is off entirely "
+            "(ckpt/levers.py:143), and a save target computed from it would otherwise be the file "
+            "'.dyntok.json' in whatever directory the run happened to start in. Reducible: a checkpoint "
+            "format that carried the vocabulary inside itself would need no path at all."),
+    Coupling(
+        src="CKPT.resume",
+        dst="TOK.d_vocab_read_path",
+        compute=lambda r: (r["CKPT"].resume + ".dyntok.json") if r["CKPT"].resume else "",
+        unit=U.PATH,
+        irreducible=False,
+        why="TWO FIELDS, NOT ONE, AND THE SPLIT IS THE POINT OF THE PROMOTE. TOKENIZER_PATH had two jobs "
+            "-- 'the file a resume READS its parent's vocabulary from, and the file the run SAVES its own "
+            "to' -- and conflating them made a run overwrite its parent's vocabulary; ckpt/levers.py:84-97 "
+            "says plainly that a single d_vocab_path would re-conflate what the promote exists to "
+            "separate. The read path is the parent's SAVE target under the same rule, which is the repair "
+            "the sibling-guess heuristic at self_organize.py:1215-1222 never made: on the supported "
+            "RESUME=runs/x/ckpt.pt form it guessed runs/x/ckpt.dyntok.json, that file did not exist, and "
+            "it fell through to the shared data/dyntok.json (ISSUES.md M19). A resume must reuse the "
+            "saved vocabulary or 'the restored embedding table would be indexed by a DIFFERENT "
+            "vocabulary' (:1226-1227). Empty resume, empty path: there is no parent to read."),
 
     # --- LOCAL: more than one lever, one owner. No edge, no budget, still d_-prefixed. ---------------
     Coupling(
@@ -749,9 +886,9 @@ COUPLINGS = [
             "cull, the utilization spare and FAB_RESCUE all read ARMED AND INERT for an entire "
             "investigation while the report showed them switched on."),
     Coupling(
-        src=("TRAIN.batch_w", "TRAIN.accum"),
-        dst="TRAIN.d_effective_batch_windows",
-        compute=lambda r: max(1, int(r["TRAIN"].batch_w)) * max(1, int(r["TRAIN"].accum)),
+        src=("OPT.batch_windows", "OPT.accum"),
+        dst="OPT.d_effective_batch_windows",
+        compute=lambda r: max(1, int(r["OPT"].batch_windows)) * max(1, int(r["OPT"].accum)),
         unit=U.COUNT,
         irreducible=True,
         why="The batch size a run actually trains at is windows per flush times flushes per optimizer "
@@ -759,7 +896,31 @@ COUPLINGS = [
             "CONFIGURED one: accumulation was gated on a window counter instead of on backward passes, "
             "which measured 55 optimizer steps where 13 were due, so at ACCUM=4 the effective batch was a "
             "quarter of its label and every learning-rate result taken against that configuration was "
-            "taken at a batch size other than the one it is filed under."),
+            "taken at a batch size other than the one it is filed under. OWNER CORRECTED HERE: it was "
+            "declared as TRAIN.d_effective_batch_windows reading TRAIN.batch_w and TRAIN.accum, and there "
+            "is no TRAIN package -- the loop is RUN and both levers are OPT's (BATCH_W -> "
+            "OPT_BATCH_WINDOWS, ACCUM -> OPT_ACCUM), which opt/levers.py:133-147 states as the repair. It "
+            "is still LOCAL: one owner, no edge, no budget."),
+    Coupling(
+        src="LM.ctx",
+        dst="LM.d_pos_max",
+        compute=lambda r: int(r["LM"].ctx),
+        unit=U.TOKENS,
+        irreducible=True,
+        why="The positional table has one row per position a window can hold, so its height IS the "
+            "context width -- a WIN-byte window tokenizes to at most WIN tokens. The census's MAXLEN "
+            "promote-to-wire (CENSUS.md:415) records why it may not be a free literal: at "
+            "self_organize.py:1586 the transformer arm does `p = torch.arange(L).clamp(max=s.maxlen - 1)`, "
+            "so a context wider than a hardcoded 512 silently gives every position past 511 ONE shared "
+            "embedding -- no error, no report line, a model that cannot tell those positions apart. The "
+            "same file already derived the signature encoder's table from the window ('ENC_POS_MAX': "
+            "('WIN',), :87) while leaving the LM's a literal: one fact declared two ways in one file. "
+            "LOCAL AND SINGLE-SOURCE, which is unusual and deliberate: the census's reason says the value "
+            "'arrives d_-prefixed from DATA's window lever', but no row in the census gives DATA a width "
+            "-- WIN became LM_CTX (CENSUS.md:344) -- so both ends are LM's and there is no edge to book "
+            "(lm/levers.py:143-152 reaches the same conclusion). What the row buys is not arithmetic but "
+            "the refusal of a second literal: `grep -rn d_ src/` finds the height, and lever.py will not "
+            "let anyone declare a lever that shadows it."),
 ]
 
 
@@ -772,7 +933,7 @@ COUPLINGS = [
 # ==================================================================================================
 
 NOT_WIRES = (
-    ("TRAIN.seed -> every package's d_seed",
+    ("RUN.seed -> every package's d_seed",
      "The run seed does reach every package, but what a package needs is rng.derive_seed(name, seed), "
      "which is per-subsystem and keyed by the package's own name. Wiring it would put one near-identical "
      "edge per package into the graph and still not stop a package from deriving under the wrong name. "
@@ -780,13 +941,13 @@ NOT_WIRES = (
      "with zero draws reads armed-but-inert and a subsystem that never asked does not appear at all -- "
      "two different statements the report must be able to make (G4)."),
 
-    ("TRAIN.epochs -> OPT.d_lr_horizon",
+    ("RUN.epochs -> OPT.d_lr_horizon",
      "Rejected because it IS the defect. EPOCHS setting both the run length and the cosine horizon means "
      "two runs differing only in EPOCHS are two different learning-rate experiments, which is why "
      "units.Epochs says in as many words that it is never a schedule horizon. OPT owns its horizon as a "
      "declared lever; a run that wants them to agree sets both, and the report can then say so."),
 
-    ("SIG.d_signature_width_bytes from DATA.win x the measured bytes/token",
+    ("SIG.d_signature_width_bytes from LM.ctx x the measured bytes/token",
      "Not resolvable at assemble: bytes_per_token is MEASURED on the corpus the tokenizer has not seen "
      "yet, and Config freezes when build() returns, so there is no late wire and there must not be one -- "
      "a Config that can still be written after startup is a Config the report cannot claim the run used. "
@@ -795,6 +956,19 @@ NOT_WIRES = (
      "preference: the old tree resolved the width in two places from one knob whose zero meant "
      "max(WIN, int(WIN*bpt)) = 614 bytes at self_organize.py:5675 and max(1, SIG_WIN) = 1 byte at :3919, "
      "so every eval-path routing decision in every report was made on a one-byte signature."),
+
+    ("EVAL.gist -> the eval-path signature width",
+     "The census's sixth promote-to-wire (EVAL_GIST, CENSUS.md:66) and the ONE that cannot become a "
+     "Coupling, for exactly the reason the row above gives. EVAL_GIST was never a lever: it selected "
+     "between two constructions of a value SIG owns, and both branches were wrong -- at the shipped "
+     "default `_eval_sig` (:3907-3927) built the eval signature from `[-max(1, SIG_WIN):]` with "
+     "SIG_WIN=0, i.e. ONE BYTE, while training encoded >= 256; set to 0 it returned an all-zero gist "
+     "that ranks the population identically for every window. The census's replacement is 'one "
+     "signature, its width resolved once, and eval receives it as a d_-prefixed wire' -- and that width "
+     "is derive.signature_width_bytes(win_tokens, bytes_per_token), whose second argument is MEASURED on "
+     "a corpus the tokenizer has not seen when build() freezes. So the promote is honoured by the "
+     "derive-and-keep discipline, not by a row in this table, and saying so here is the point: a "
+     "promote-to-wire that quietly became nothing is indistinguishable from one nobody noticed."),
 
     ("MEM.cap as its own lever",
      "The most tempting one, and the reason MEM.d_capacity exists. A declared capacity next to a declared "
@@ -824,7 +998,54 @@ def _check_table(couplings):
     return couplings
 
 
+def _check_endpoints(couplings, packages):
+    """Refuse a coupling naming a field or a package no declaration owns. At IMPORT, not at build().
+
+    THE FAILURE THIS REPLACES IS THE ONE THIS FILE WAS IN. Until the block at the top of this module
+    imported the real packages, every endpoint here was a string nothing could contradict: the table
+    named a package `TRAIN` that no census row owns, a lever `TRAIN.batch_w` that is OPT's
+    `batch_windows`, a lever `TRAIN.grow_cap_every` that is CAP's `pin_windows`, and `TOK.vmax` for a
+    field the census gives to LM. build() answered every one of them with a DEFERRED warning, because
+    the packages were absent -- so four wrong names and thirteen right ones produced the same output,
+    and the printed graph showed edges that could not be made. That is the untrippable-guard shape (60
+    of the survey's 475 records) with the guard pointing at itself.
+
+    WHY IMPORT TIME AND NOT build(). Two reasons, and the second is the one that matters. A malformed
+    endpoint is a DECLARATION fault, and this module already fails declaration faults at import --
+    _check_table, Coupling.__init__, _check_compute -- on a machine with no environment set, no packages
+    resolved and no GPU. And build() legitimately runs against a SUBSET: `sets=` exists so a test or the
+    isolation sweep can assemble three packages, and there a missing package is a deferral rather than a
+    fault. Putting this check inside build() would either fire on every legitimate partial build or have
+    to learn to tell the two apart, and a check with a subtlety is a check that gets relaxed.
+
+    WHAT IT CANNOT SEE: whether the field means what the row thinks it means. `CAP.pin_windows` resolves
+    and `CAP.lift` resolves, and swapping them would pass here. The unit column, the reason column and
+    tests/test_couplings.py's known-answer table are what stand behind that; this is a name check.
+    """
+    findings = []
+    for c in couplings:
+        for endpoint, (p, f) in zip(c.reads, [_split(e, "src") for e in c.reads]):
+            owner = packages.get(p)
+            if owner is None:
+                findings.append(f"{c.dst}: src={endpoint!r} names package {p!r}, which no LeverSet in "
+                                f"this file declares. Registered here: {sorted(packages)}.")
+            elif f not in owner._levers:
+                near = sorted(owner._levers, key=lambda n: (abs(len(n) - len(f)), n))[:4]
+                findings.append(f"{c.dst}: src={endpoint!r} names a field {p} does not declare. "
+                                f"{owner.__name__} declares {len(owner._levers)} lever(s); closest by "
+                                f"shape: {near}. A coupling reading a lever nobody owns is a row that "
+                                f"can only ever DEFER, and a deferred row prints as a declared edge.")
+        if c.dst_prefix not in packages:
+            findings.append(f"{c.dst}: dst names package {c.dst_prefix!r}, which no LeverSet in this "
+                            f"file declares. Registered here: {sorted(packages)}.")
+    if findings:
+        raise WireError("the coupling table names declarations that do not exist:\n  "
+                        + "\n  ".join(findings))
+    return couplings
+
+
 _check_table(COUPLINGS)
+_check_endpoints(COUPLINGS, PACKAGES)
 
 
 # ---- build ---------------------------------------------------------------------------------------
@@ -935,9 +1156,11 @@ def render(configs, wires, couplings=None):
 
     IRREDUCIBILITY IS THE OUTER AXIS AND RESOLVED/DEFERRED IS A PER-ROW STATUS, not the other way round.
     The first draft split resolved from deferred at the top level, and on today's tree -- where no package
-    is registered and all ten rows defer -- that produced a docs/03_WIRING.md with an empty IRREDUCIBLE
+    is registered and all ten rows deferred -- that produced a docs/03_WIRING.md with an empty IRREDUCIBLE
     section and every coupling filed under DEFERRED. The document's whole job is to show which couplings
-    are physics and which are choices, and it lost exactly that on the only build that currently runs.
+    are physics and which are choices, and it lost exactly that on the only build that then ran. That
+    tree is gone -- all thirteen packages are imported and no row defers -- but the ordering stays,
+    because `build(sets=...)` still assembles subsets and the isolation sweep is the caller that does.
 
     The reason column is never truncated, for the same reason wire.render does not truncate it: a
     justification cut off at the column edge reads as justified.
