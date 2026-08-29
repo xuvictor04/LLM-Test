@@ -1,0 +1,41 @@
+# Agent transcripts — the raw record behind every multi-agent phase
+
+Committed for records. These are PROCESS, not product: the conclusions they produced live in
+`.rework/` (survey, census, issues, decisions) and in `src/`, `tests/` and `docs/`. Nothing here is
+documentation and nothing here has been verified — an agent transcript is one model's working, and
+this project's standing rule is that agent output is a lead until checked against the source.
+
+Kept because it is otherwise unrecoverable: the container is ephemeral and re-provisioned, and these
+files exist nowhere else.
+
+Each `wf_*.tar.gz` holds one workflow run: a `journal.jsonl` (one line per completed agent, with its
+full structured return value) plus one `agent-*.jsonl` per subagent (its complete reasoning and tool
+use). `loose-agents.tar.gz` holds the non-workflow subagents from earlier in the session.
+
+Extract with: `tar xzf archive/agent-transcripts/<name>.tar.gz`
+
+## Runs
+
+| archive | run | agents | what it produced |
+|---|---|---:|---|
+| `wf_9efbeae8-0fa.tar.gz` | — | 70 | **the survey** — 16 readers over the whole repo, docs, archive and both spans of chat history, then 4 architectures, 3 judges and a completeness critic. Produced `.rework/survey/`, and the design that became `.rework/PLAN.md`. |
+| `wf_3ae4e940-e74.tar.gz` | — | 42 | **P1 spine + P2 census** — derive/wire/rng/assemble, the ownership and determinism tests, the 328-knob census across 12 families, and 3 adversarial reviews that found 5 critical defects in the spine. |
+| `wf_96172f4a-bf8.tar.gz` | — | 70 | earlier session work |
+| `wf_2f07991a-311.tar.gz` | — | 36 | earlier session work |
+| `wf_cf66ea09-ce5.tar.gz` | — | 24 | earlier session work |
+| `wf_b0cb9ed3-6eb.tar.gz` | — | 20 | earlier session work |
+| `wf_3b649965-67f.tar.gz` | — | 18 | earlier session work |
+| `wf_6770daeb-fb6.tar.gz` | — | 34 | earlier session work |
+| `wf_8f1688ac-4f4.tar.gz` | — | 20 | earlier session work |
+| `wf_7a73aa38-e44.tar.gz` | — | 12 | earlier session work |
+| `wf_2d772b2a-99f.tar.gz` | — | 4 | earlier session work |
+| `loose-agents.tar.gz` | (non-workflow subagents) | — | Agent-tool subagents spawned outside a workflow, earlier in the session. |
+
+**12 archives, 62 MB compressed, from 170 MB / 562 files uncompressed.**
+
+## What is NOT here
+
+- The main session transcript. It lives outside the repo and its only durable trace is the four
+  compaction summaries preserved verbatim in `.rework/COMPACTION_SUMMARIES.md`.
+- Tool results (`tool-results/`, 3.8 MB) — these are inputs the agents read, not their reasoning,
+  and every one is reproducible from the repository itself.
