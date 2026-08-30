@@ -1,0 +1,857 @@
+"""The CONTRACT: docs/04_CONTRACT.md, the frozen stubs and the composition root describe one system.
+
+    python3 tests/test_contract.py      # PASS/FAIL per check with counts; non-zero exit on any FAIL
+
+WHAT THIS FILE PROVES. Ten implementation agents will fill in ninety-odd bodies independently, and
+the ONLY thing keeping their work compatible is that the signatures do not move. This file is the
+thing that notices when one does. It also notices the two failures that the survey says are the most
+expensive in this repository: a declared knob with no reader (57 armed-but-inert records) and a
+declared wire that arrives nowhere (the mirror of the 60 untrippable guards).
+
+    K1  every name docs/04_CONTRACT.md declares exists in the tree WITH THE SIGNATURE IT CLAIMS, and
+        every public entry point in the tree is in the document. Both directions, because a document
+        that is a subset of the tree is a document that stops mentioning things.
+    K2  spine.compose imports and builds against the stubs, raising NOTHING BUT NotImplementedError,
+        and the NotImplementedError comes FROM A STUB and not from a typo in the root. Run in a
+        subprocess so an import that half-succeeds cannot poison this process.
+    K3  no package imports another. This is tests/test_ownership.py's O10 and it already passes;
+        it is restated here because the contract is the moment cross-package values become real, and
+        a check that lives only in another file is a check this file's author is trusting.
+    K4  every one of the declared levers is named `LEVERS READ:` by at least one stub, or appears in
+        the document's UNCONSUMED table WITH A REASON. Nothing may be silently dropped.
+    K5  every d_ field the coupling ledger declares is read by a stub IN ITS OWN PACKAGE, and no
+        stub reads a d_ field no coupling declares.
+
+WHAT IT DOES NOT PROVE, and the list matters more than the checks. It says nothing about whether a
+body, once written, does what its docstring says; nothing about whether the DID IT FIRE counter a
+docstring names is ever incremented; and nothing about whether the levers a stub CLAIMS to read are
+the ones it will read. `LEVERS READ:` is prose that passes a parser -- exactly the standing
+objection to `why=` in spine/wire.py, and the same answer applies: it is checked for PRESENCE and
+completeness here, and its truth is L2's single-reader sweep and L3's isolation sweep, neither of
+which exists yet. A lever named in a docstring and never read by the body is invisible to this file.
+
+THE SEAM. Two checks import from src/: K4 cross-checks its AST reading of the lever declarations
+against spine.assemble.PACKAGES, and K5 cross-checks its AST reading of the coupling table against
+spine.assemble.COUPLINGS. Re-typing either here would be a second validator with its own idea of the
+rule -- which is how the old tree ended up with a report path and an audit path printing different
+numbers for one quantity. On a SYNTHETIC tree (the self-test) the cross-check is skipped and said to
+be skipped, because importing a temp directory's spine is not what is under test there.
+
+VACUITY IS PRINTED. Every check reports the size of the population it examined, and selftest() trips
+all five against synthetic trees in a temp directory. This repository has SIXTY untrippable guards on
+record and one of them was written into tests/test_ownership.py by the patch that was fixing
+tests/test_ownership.py. A check nobody has watched fail is indistinguishable from a check that
+cannot fail.
+"""
+import ast
+import contextlib
+import io
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(ROOT, "src")
+DOC = os.path.join(ROOT, "docs", "04_CONTRACT.md")
+
+MAX_SHOWN = 25
+
+# PREFIX -> package directory. Written out rather than discovered, for the same reason
+# spine.compose.APIS is: a discovered map silently shrinks when a directory is renamed, and this
+# table is half of what K1 compares. spine/compose.py holds the same map and K1 checks they agree.
+PKG_DIR = {
+    "CAP": "capacity", "CKPT": "ckpt", "DATA": "data", "DOM": "domains", "EVAL": "eval",
+    "FAB": "fabric", "LM": "lm", "MEM": "memory", "OPT": "opt", "RUN": "train",
+    "SIG": "sig", "TOK": "tok", "WORLD": "world",
+}
+
+COMPOSE_REL = os.path.join("spine", "compose.py")
+
+
+def _report(tag, title, ok, detail, findings, vacuous=False):
+    """One check's line, plus its findings. The population size is ALWAYS printed."""
+    mark = "PASS" if ok else "FAIL"
+    tail = "   (VACUOUS: nothing to examine)" if (ok and vacuous) else ""
+    print(f"{mark}  {tag}  {title}")
+    print(f"          {detail}{tail}")
+    for f in findings[:MAX_SHOWN]:
+        print(f"          - {f}")
+    if len(findings) > MAX_SHOWN:
+        print(f"          ... and {len(findings) - MAX_SHOWN} more")
+    return 0 if ok else 1
+
+
+# ==================================================================================================
+# Reading the tree and the document
+# ==================================================================================================
+
+def api_signatures(src_dir):
+    """{"PFX: name(args)"} for every public entry point in every <pkg>/api.py, plus the findings.
+
+    Methods on a public class are included as "PFX: Class.method(args)": RunClock.advance and
+    Retention.consider are entry points the loop calls, and a contract that named only module-level
+    functions would leave the one site in the tree that increments a counter undeclared.
+
+    A package DIRECTORY that exists with no api.py is a finding, not a skip: that is exactly the
+    state "this package's contract was never written", and skipping it would make this whole check
+    weaker the more of the contract is absent -- which is backwards. A package directory that does
+    not exist at all is not this check's business, so that a partial tree (the self-test's, and any
+    future tree assembled from a subset) is judged on what it contains rather than on what a
+    hard-coded map says it ought to.
+    """
+    sigs, findings = {}, []
+    for pfx, d in sorted(PKG_DIR.items()):
+        pkg_root = os.path.join(src_dir, d)
+        if not os.path.isdir(pkg_root):
+            continue
+        path = os.path.join(pkg_root, "api.py")
+        if not os.path.isfile(path):
+            findings.append(f"src/{d}/ exists and has no api.py, so {pfx} declares no public "
+                            f"surface. A package with levers and no contract is a package ten "
+                            f"agents cannot implement compatibly.")
+            continue
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        try:
+            tree = ast.parse(text, filename=f"src/{d}/api.py")
+        except SyntaxError as e:
+            findings.append(f"src/{d}/api.py:{e.lineno} does not parse: {e.msg}")
+            continue
+        for n in tree.body:
+            if isinstance(n, ast.FunctionDef) and not n.name.startswith("_"):
+                sigs[f"{pfx}: {n.name}({ast.unparse(n.args)})"] = (pfx, n.name, f"src/{d}/api.py")
+            elif isinstance(n, ast.ClassDef) and not n.name.startswith("_"):
+                for m in n.body:
+                    if isinstance(m, ast.FunctionDef) and not m.name.startswith("_"):
+                        key = f"{pfx}: {n.name}.{m.name}({ast.unparse(m.args)})"
+                        sigs[key] = (pfx, f"{n.name}.{m.name}", f"src/{d}/api.py")
+    return sigs, findings
+
+
+def doc_text(doc_path):
+    if not os.path.isfile(doc_path):
+        return None
+    with open(doc_path, "r", encoding="utf-8") as fh:
+        return fh.read()
+
+
+def doc_signatures(text):
+    """The lines of the ```contract fenced block: the document's normative signature list."""
+    m = re.search(r"^```contract\s*$(.*?)^```\s*$", text or "", re.M | re.S)
+    if not m:
+        return None
+    return [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
+
+
+_UNCONSUMED_SECTION = re.compile(r"^#+\s*[^\n]*UNCONSUMED LEVERS[^\n]*$(.*?)(?=^#+\s|\Z)",
+                                 re.M | re.S | re.I)
+
+
+def doc_unconsumed(text):
+    """{"PFX.field": reason} from the rows of the UNCONSUMED LEVERS SECTION only.
+
+    SCOPED TO THE SECTION, not to every table in the document, and that is not tidiness. This
+    document also carries a table of the nine wires the contract phase ADDED and a table of the
+    candidates it REFUSED, and both have `PFX.d_field` in their first cell with a long reason beside
+    it. A parser that read every table would let a wire's reason silently satisfy a LEVER's
+    disposition -- a check passing because it found the wrong row.
+
+    A row counts only when its FIRST cell is a backticked PFX.field AND the row carries prose past
+    the name. A bare name with an empty reason is the placeholder this project's `why=` check exists
+    to refuse, and it must not be able to satisfy K4 -- otherwise "drop a lever quietly" becomes
+    "add its name to a table", which is the same silence with a heading over it.
+    """
+    m = _UNCONSUMED_SECTION.search(text or "")
+    body = m.group(1) if m else ""
+    out = {}
+    for line in body.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        m = re.fullmatch(r"`([A-Z][A-Z0-9_]*)\.([a-z_][a-z0-9_]*)`", cells[0])
+        if not m or m.group(2).startswith("d_"):
+            continue                       # a d_ field is a WIRE; this table is about LEVERS
+        reason = " ".join(cells[1:]).strip()
+        if len(reason) < 40 or " " not in reason:
+            continue
+        out[f"{m.group(1)}.{m.group(2)}"] = reason
+    return out
+
+
+def declared_levers(src_dir):
+    """{"PFX": {field, ...}} read out of <pkg>/levers.py by AST, plus findings.
+
+    By AST rather than by import so this runs against a synthetic tree. The real tree is
+    cross-checked against spine.assemble.PACKAGES by the caller.
+    """
+    out, findings = {}, []
+    for pfx, d in sorted(PKG_DIR.items()):
+        path = os.path.join(src_dir, d, "levers.py")
+        if not os.path.isfile(path):
+            continue
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        try:
+            tree = ast.parse(text, filename=f"src/{d}/levers.py")
+        except SyntaxError as e:
+            findings.append(f"src/{d}/levers.py:{e.lineno} does not parse: {e.msg}")
+            continue
+        for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+            prefix = None
+            for stmt in cls.body:
+                if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                        and isinstance(stmt.targets[0], ast.Name)
+                        and stmt.targets[0].id == "PREFIX"
+                        and isinstance(stmt.value, ast.Constant)):
+                    prefix = stmt.value.value
+            if not isinstance(prefix, str):
+                continue
+            fields = set()
+            for stmt in cls.body:
+                if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                        and isinstance(stmt.targets[0], ast.Name)
+                        and isinstance(stmt.value, ast.Call)
+                        and getattr(stmt.value.func, "id", None) == "Lever"):
+                    fields.add(stmt.targets[0].id)
+            out.setdefault(prefix, set()).update(fields)
+    return out, findings
+
+
+_BLOCK = re.compile(r"^\s*(LEVERS READ|WIRES READ):\s*(.+?)"
+                    r"(?=^\s*(?:LEVERS READ|WIRES READ|DID IT FIRE):)", re.M | re.S)
+
+
+def stub_reads(src_dir):
+    """{"PFX": ({levers named}, {wires named})} from the machine-readable docstring blocks.
+
+    The blocks are terminated by the NEXT block header rather than by a blank line, so a lever list
+    that wraps over several lines is read whole. A `LEVERS READ:` with no following `WIRES READ:` or
+    `DID IT FIRE:` is invisible to this parser and therefore does not count -- which is deliberate:
+    the three-line block is the declared form, and a partial one must not half-satisfy K4.
+    """
+    out = {}
+    for pfx, d in sorted(PKG_DIR.items()):
+        path = os.path.join(src_dir, d, "api.py")
+        levers, wires = set(), set()
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                text = fh.read()
+            try:
+                tree = ast.parse(text)
+            except SyntaxError:
+                out[pfx] = (levers, wires)
+                continue
+            for n in ast.walk(tree):
+                if not isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                                      ast.ClassDef)):
+                    continue
+                doc = ast.get_docstring(n) or ""
+                for kind, body in _BLOCK.findall(doc):
+                    names = {t.strip().strip("(),.") for t in re.split(r"[,\s]+", body)}
+                    names = {t for t in names if re.fullmatch(r"[a-z_][a-z0-9_]*", t or "")}
+                    (levers if kind == "LEVERS READ" else wires).update(names)
+        out[pfx] = (levers, wires)
+    return out
+
+
+def coupling_dsts(src_dir):
+    """Every Coupling(dst="PFX.d_field") in <src>/spine/assemble.py, by AST."""
+    path = os.path.join(src_dir, "spine", "assemble.py")
+    dsts = []
+    if not os.path.isfile(path):
+        return dsts
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return dsts
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "Coupling":
+            kw = {k.arg: k.value for k in node.keywords if k.arg}
+            v = kw.get("dst")
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                dsts.append(v.value)
+    return dsts
+
+
+# ==================================================================================================
+# K1 -- the document and the tree declare the same surface, in both directions
+# ==================================================================================================
+#
+# CANNOT CATCH: whether a signature is the RIGHT one. Nothing here knows that `hold_out` belongs on
+# forward() rather than on manage(); the reason columns and the five source specs are what stand
+# behind that. This is a drift check, and its whole value is that it fails on the SECOND edit -- the
+# one where somebody changes a parameter and does not open the document.
+
+def check_k1_signatures(src_dir=SRC, doc_path=DOC):
+    text = doc_text(doc_path)
+    if text is None:
+        return _report("K1", "the document and the tree declare the same public surface", False,
+                       f"{os.path.relpath(doc_path, ROOT)} does not exist", [])
+    tree_sigs, findings = api_signatures(src_dir)
+    declared = doc_signatures(text)
+    if declared is None:
+        findings.append("the document has no ```contract fenced block, so it declares no signature "
+                        "set at all. A contract phase whose contract is prose is a contract ten "
+                        "agents will each read differently.")
+        return _report("K1", "the document and the tree declare the same public surface", False,
+                       f"{len(tree_sigs)} entry point(s) in the tree, 0 declared", findings)
+    doc_set, tree_set = set(declared), set(tree_sigs)
+    for missing in sorted(doc_set - tree_set):
+        pfx = missing.split(":", 1)[0]
+        near = sorted(s for s in tree_set if s.startswith(pfx + ":")
+                      and s.split("(")[0] == missing.split("(")[0])
+        findings.append(f"the document declares {missing!r} and the tree does not have it"
+                        + (f" -- the tree has {near[0]!r}" if near else "")
+                        + ". A signature that moved without the document moving is exactly what "
+                          "makes two implementation agents incompatible.")
+    for extra in sorted(tree_set - doc_set):
+        findings.append(f"{tree_sigs[extra][2]} defines {extra!r}, which the document does not "
+                        f"declare. A public entry point outside the contract is one nobody has "
+                        f"agreed to keep.")
+    if len(declared) != len(doc_set):
+        findings.append(f"the ```contract block has {len(declared)} line(s) and "
+                        f"{len(doc_set)} distinct one(s): a duplicate declaration means one of them "
+                        f"is unreviewed.")
+    detail = (f"{len(tree_set)} entry point(s) across {len(PKG_DIR)} package(s) compared against "
+              f"{len(doc_set)} declared in {os.path.relpath(doc_path, ROOT)}")
+    return _report("K1", "the document and the tree declare the same public surface",
+                   not findings, detail, findings, vacuous=not tree_set and not doc_set)
+
+
+# ==================================================================================================
+# K2 -- the composition root runs, and fails only in the one legal way
+# ==================================================================================================
+#
+# CANNOT CATCH: whether the root passes the RIGHT arguments. `compose()` stops at the first stub, so
+# everything after RUN.process_setup is unexercised by this check today and becomes exercised one
+# stub at a time as P4 lands. That is the honest reading and it is why ASSEMBLY_ORDER is data: the
+# order can be reviewed without being run.
+#
+# RUN IN A SUBPROCESS on purpose. Importing thirteen packages and a namespace-package spine into the
+# test process would make a later check's `import spine.assemble` depend on what this one imported
+# first -- and a check that passes or fails depending on import order is the shape this project has
+# lost a whole investigation to.
+
+_K2_PROBE = r"""
+import sys, traceback
+sys.path.insert(0, %r)
+try:
+    from spine.compose import compose, plan
+except Exception as e:
+    print("IMPORT_FAILED", type(e).__name__, e); raise SystemExit(0)
+a, l = plan()
+if not a or not l:
+    print("EMPTY_PLAN", len(a), len(l)); raise SystemExit(0)
+try:
+    compose(environ={})
+except NotImplementedError as e:
+    print("NOTIMPLEMENTED", str(e).split(":")[0]); raise SystemExit(0)
+except Exception as e:
+    print("WRONG_ERROR", type(e).__name__, str(e).replace("\n", " ")[:200])
+    raise SystemExit(0)
+print("NO_ERROR")
+"""
+
+
+def check_k2_compose(src_dir=SRC):
+    findings = []
+    proc = subprocess.run([sys.executable, "-c", _K2_PROBE % src_dir],
+                          capture_output=True, text=True, timeout=180)
+    out = (proc.stdout or "").strip().splitlines()
+    line = out[-1] if out else ""
+    verdict = line.split(" ", 1)[0] if line else "NO_OUTPUT"
+    if verdict == "IMPORT_FAILED":
+        findings.append(f"spine.compose does not import: {line}. A composition root that cannot be "
+                        f"imported is a design document pretending to be code.")
+    elif verdict == "EMPTY_PLAN":
+        findings.append(f"plan() returned an empty order: {line}. The assembly order is the data "
+                        f"docs/04_CONTRACT.md and the loop are both read against.")
+    elif verdict == "WRONG_ERROR":
+        findings.append(f"compose() raised something other than NotImplementedError: {line}. That is "
+                        f"a fault in the ROOT -- a typo, a wrong argument name, a missing attribute "
+                        f"-- not a missing body, and it would be indistinguishable from 'P4 has not "
+                        f"landed yet' if this check did not separate them.")
+    elif verdict == "NO_ERROR":
+        findings.append("compose() completed without raising. Every mechanism is a stub, so it "
+                        "cannot have: something is swallowing the NotImplementedError, and a "
+                        "swallowed failure is the one shape this repository cannot afford.")
+    elif verdict != "NOTIMPLEMENTED":
+        findings.append(f"the probe produced no verdict (stdout={proc.stdout!r}, "
+                        f"stderr={(proc.stderr or '')[-300:]!r})")
+    got = line.split(" ", 1)[1] if verdict == "NOTIMPLEMENTED" and " " in line else "-"
+    detail = (f"compose(environ={{}}) run in a subprocess; verdict {verdict}, "
+              f"first unimplemented stub: {got}")
+    return _report("K2", "the composition root imports and fails only at a stub",
+                   not findings, detail, findings)
+
+
+# ==================================================================================================
+# K3 -- no package imports another (O10, restated at the contract boundary)
+# ==================================================================================================
+#
+# CANNOT CATCH: everything O10 cannot -- a value handed over as an ordinary argument (which is the
+# whole design), a dynamic import spelled without an import statement, or a coupling through shared
+# mutable state, RNG draw order or the data. This is the cheap structural half; L3 is the rest.
+
+def check_k3_no_cross_package_imports(src_dir=SRC):
+    findings, scanned = [], 0
+    pkg_dirs = set(PKG_DIR.values())
+    for pfx, d in sorted(PKG_DIR.items()):
+        pkg_root = os.path.join(src_dir, d)
+        if not os.path.isdir(pkg_root):
+            continue
+        for dirpath, dirnames, filenames in os.walk(pkg_root):
+            dirnames[:] = [x for x in dirnames if x != "__pycache__"]
+            for fn in sorted(filenames):
+                if not fn.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, fn)
+                rel = os.path.relpath(path, src_dir)
+                scanned += 1
+                with open(path, "r", encoding="utf-8") as fh:
+                    src = fh.read()
+                try:
+                    tree = ast.parse(src, filename=rel)
+                except SyntaxError as e:
+                    findings.append(f"{rel}:{e.lineno} does not parse: {e.msg}")
+                    continue
+                for node in ast.walk(tree):
+                    names = []
+                    if isinstance(node, ast.Import):
+                        names = [a.name for a in node.names]
+                    elif isinstance(node, ast.ImportFrom):
+                        base = node.module or ""
+                        names = [base] + [f"{base}.{a.name}" for a in node.names]
+                    for n in names:
+                        head = n.split(".")[0]
+                        tail = n.split(".")
+                        if "assemble" in tail or "registry" in tail:
+                            findings.append(f"{rel}:{node.lineno} imports {n!r} -- the assembly and "
+                                            f"the registry hand out every package's Config.")
+                        elif head in pkg_dirs and head != d:
+                            findings.append(f"{rel}:{node.lineno} imports {n!r} -- {head!r} is "
+                                            f"another package. A cross-package value arrives as an "
+                                            f"argument the spine passed in; an import is a coupling "
+                                            f"with no wire and nothing in affects().")
+    return _report("K3", "no package imports another, the assembly or the registry",
+                   not findings, f"{scanned} file(s) across {len(PKG_DIR)} package(s) examined",
+                   findings, vacuous=not scanned)
+
+
+# ==================================================================================================
+# K4 -- every declared lever has a reader, or a written reason for having none
+# ==================================================================================================
+#
+# CANNOT CATCH: whether the reader actually reads it. `LEVERS READ:` is a claim in prose that passes
+# a parser -- the same standing objection spine/wire.py's `why=` carries, with the same answer: this
+# checks PRESENCE and COMPLETENESS, and truth is L2's single-reader sweep and L3's isolation sweep,
+# neither of which exists yet. A lever named in a docstring and never read by the body is invisible
+# here, and that gap is the reason those two sweeps are on the plan.
+
+def check_k4_levers_have_readers(src_dir=SRC, doc_path=DOC, cross_check=True):
+    text = doc_text(doc_path)
+    findings = []
+    declared, parse_findings = declared_levers(src_dir)
+    findings.extend(parse_findings)
+
+    if cross_check:
+        # THE LEVER SET THIS TEST READS MUST BE THE ONE THE RUN USES. An AST oracle that has silently
+        # gone out of step with the real declarations is a SMALLER oracle, and a smaller oracle
+        # passes by having nothing to compare -- the exact failure G1 exists to prevent.
+        try:
+            sys.path.insert(0, src_dir)
+            try:
+                from spine.assemble import PACKAGES
+                live = {p: set(cls._levers) for p, cls in PACKAGES.items()}
+            finally:
+                if sys.path and sys.path[0] == src_dir:
+                    sys.path.pop(0)
+            if live != declared:
+                only_ast = {p: sorted(declared.get(p, set()) - live.get(p, set())) for p in
+                            set(declared) | set(live)}
+                only_run = {p: sorted(live.get(p, set()) - declared.get(p, set())) for p in
+                            set(declared) | set(live)}
+                findings.append(
+                    f"the lever declarations read by AST here and the ones spine.assemble registers "
+                    f"are not the same set. Only in the source text: "
+                    f"{ {k: v for k, v in only_ast.items() if v} }; only at runtime: "
+                    f"{ {k: v for k, v in only_run.items() if v} }. Every check below was made "
+                    f"against the source text, so it was made against the wrong set.")
+        except Exception as e:                       # noqa: BLE001 -- reported, never swallowed
+            findings.append(f"could not import spine.assemble to cross-check the lever set: "
+                            f"{type(e).__name__}: {e}. The AST reading is therefore unverified.")
+
+    reads = stub_reads(src_dir)
+    unconsumed = doc_unconsumed(text)
+    total = sum(len(v) for v in declared.values())
+    covered, listed = 0, 0
+    for pfx in sorted(declared):
+        named = reads.get(pfx, (set(), set()))[0]
+        for field in sorted(declared[pfx]):
+            if field in named:
+                covered += 1
+            elif f"{pfx}.{field}" in unconsumed:
+                listed += 1
+            else:
+                findings.append(
+                    f"{pfx}_{field.upper()} is declared and no stub names it as read, and "
+                    f"docs/04_CONTRACT.md's UNCONSUMED table does not list it with a reason. An "
+                    f"operator can set it and nothing changes -- the armed-but-inert family, 57 of "
+                    f"the survey's 475 records.")
+    for name in sorted(unconsumed):
+        pfx, _, field = name.partition(".")
+        if field in reads.get(pfx, (set(), set()))[0]:
+            findings.append(f"{name} is in the UNCONSUMED table AND is named as read by a stub. One "
+                            f"of the two is stale, and a table that disagrees with the code is worse "
+                            f"than no table.")
+        elif field not in declared.get(pfx, set()):
+            findings.append(f"{name} is in the UNCONSUMED table and no package declares it. A "
+                            f"disposition for a lever that does not exist is a row nobody will ever "
+                            f"revisit.")
+    detail = (f"{total} declared lever(s) across {len(declared)} package(s): {covered} named by a "
+              f"stub, {listed} listed as unconsumed with a reason, "
+              f"{total - covered - listed} unaccounted for")
+    return _report("K4", "every declared lever has a reader or a written reason for having none",
+                   not findings, detail, findings, vacuous=not total)
+
+
+# ==================================================================================================
+# K5 -- every declared wire is read by its own package, and no stub reads an undeclared one
+# ==================================================================================================
+#
+# CANNOT CATCH: whether the value is USED once read. `_ = cfg.d_foo` satisfies both this check and
+# tests/test_ownership.py's O4, and at the stub stage that is exactly what the read is -- a declared
+# read site with the body still to come. What it does buy is that the site is in the right package
+# and is named in the docstring beside it, so P4 has one place to put the arithmetic.
+
+def check_k5_wires_are_read(src_dir=SRC, cross_check=True):
+    findings = []
+    dsts = coupling_dsts(src_dir)
+    if cross_check:
+        try:
+            sys.path.insert(0, src_dir)
+            try:
+                from spine.assemble import COUPLINGS
+                live = {c.dst for c in COUPLINGS}
+            finally:
+                if sys.path and sys.path[0] == src_dir:
+                    sys.path.pop(0)
+            if live != set(dsts):
+                findings.append(f"the coupling table read by AST here ({len(dsts)} rows) and the one "
+                                f"spine.assemble builds ({len(live)} rows) are not the same ledger. "
+                                f"Only in the source text: {sorted(set(dsts) - live)}; only at "
+                                f"runtime: {sorted(live - set(dsts))}.")
+        except Exception as e:                       # noqa: BLE001 -- reported, never swallowed
+            findings.append(f"could not import spine.assemble to cross-check the ledger: "
+                            f"{type(e).__name__}: {e}. The AST reading is therefore unverified.")
+
+    reads = stub_reads(src_dir)
+    for dst in sorted(set(dsts)):
+        pfx, _, field = dst.partition(".")
+        named = reads.get(pfx, (set(), set()))[1]
+        if field not in named:
+            findings.append(f"{dst} is declared in the coupling table and no stub in src/"
+                            f"{PKG_DIR.get(pfx, '?')}/ names it under WIRES READ. A wire nobody "
+                            f"reads spends budget, prints an edge, and delivers a value that "
+                            f"arrives nowhere.")
+    declared_fields = {d.partition('.')[2] for d in dsts}
+    for pfx, (_, wires) in sorted(reads.items()):
+        for field in sorted(wires):
+            if not field.startswith("d_"):
+                continue
+            if field not in declared_fields:
+                findings.append(f"src/{PKG_DIR.get(pfx, '?')}/api.py names {field!r} under WIRES "
+                                f"READ and no coupling declares it. An undeclared d_ field is a "
+                                f"coupling missing from affects(), and affects() is the L3 sweep's "
+                                f"only oracle.")
+    n_named = sum(len([w for w in v[1] if w.startswith('d_')]) for v in reads.values())
+    detail = (f"{len(set(dsts))} declared destination(s) checked against {n_named} d_ field(s) named "
+              f"under WIRES READ across {len(reads)} package(s)")
+    return _report("K5", "every declared wire is read by its own package, and no stub reads an "
+                         "undeclared one", not findings, detail, findings, vacuous=not dsts)
+
+
+# ==================================================================================================
+# SELF-TEST -- every check is run against a tree that CONTAINS the defect it looks for
+# ==================================================================================================
+#
+# EACH CASE ASSERTS BOTH DIRECTIONS: the broken tree must FAIL, and the control -- the same tree with
+# one file different -- must PASS. Only the failing direction is a regression test; only the passing
+# direction distinguishes a real check from one that fails on everything, and a check that fails on
+# everything gets switched off within a week.
+
+_GOOD_LEVERS = '''\
+"""A stand-in package levers module: only what the AST reader parses."""
+
+
+class Lever:
+    def __init__(self, default, help, unit=None, choices=None):
+        pass
+
+
+class LeverSet:
+    pass
+
+
+class DATALevers(LeverSet):
+    PREFIX = "DATA"
+    source = Lever("synthetic", "which corpus path", None)
+    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)
+'''
+
+_GOOD_API = '''\
+"""A stand-in package api module."""
+from spine.lever import Config
+
+
+def open_areas(dat: Config, *, seed: int):
+    """Open every area.
+
+    LEVERS READ: source, stream_bytes
+    WIRES READ: d_expert_slots
+    DID IT FIRE: data.area_open
+    """
+    dat = dat.owned_by("DATA")
+    _ = dat.d_expert_slots
+    raise NotImplementedError("DATA.open_areas: P4 fills this in.")
+'''
+
+_GOOD_ASSEMBLE = '''\
+"""A stand-in wiring file: only the Coupling calls the AST reader looks for."""
+
+
+class Coupling:
+    def __init__(self, src=None, dst=None, compute=None, why=None, unit=None, irreducible=False):
+        self.dst = dst
+
+
+COUPLINGS = [
+    Coupling(src="FAB.slots", dst="DATA.d_expert_slots", compute=lambda r: 1,
+             why="the stand-in coupling the self-test tree needs"),
+]
+'''
+
+_GOOD_COMPOSE = '''\
+"""A stand-in composition root."""
+ASSEMBLY_ORDER = (("corpus", "DATA", "open_areas", "(seed)"),)
+LOOP_ORDER = (("A", "DATA", "draw_stream", "once per epoch"),)
+
+
+def plan():
+    return ASSEMBLY_ORDER, LOOP_ORDER
+
+
+def compose(environ=None, *, restored=None):
+    raise NotImplementedError("DATA.open_areas: P4 fills this in.")
+'''
+
+_GOOD_LEVER_PY = '''\
+"""A stand-in spine/lever.py, so the stand-in api module can import Config."""
+
+
+class Config:
+    def owned_by(self, prefix):
+        return self
+'''
+
+_GOOD_DOC = """# contract
+
+## 3. UNCONSUMED LEVERS
+
+| lever | env name | why it has no reader | disposition |
+|---|---|---|---|
+
+## 6. THE FROZEN SIGNATURE SET
+
+```contract
+DATA: open_areas(dat: Config, *, seed: int)
+```
+"""
+
+_BASE_TREE = {
+    "src/spine/lever.py": _GOOD_LEVER_PY,
+    "src/spine/assemble.py": _GOOD_ASSEMBLE,
+    "src/spine/compose.py": _GOOD_COMPOSE,
+    "src/data/__init__.py": "",
+    "src/data/levers.py": _GOOD_LEVERS,
+    "src/data/api.py": _GOOD_API,
+    "docs/04_CONTRACT.md": _GOOD_DOC,
+}
+
+# Each case: (name, overlay, {tag: (must_fail, a phrase the finding must contain)}).
+_CASES = (
+    ("control -- nothing wrong with this tree", {}, {
+        "K1": (False, None), "K2": (False, None), "K3": (False, None),
+        "K4": (False, None), "K5": (False, None)}),
+
+    ("K1: a parameter was renamed in the tree and not in the document",
+     {"src/data/api.py": _GOOD_API.replace("*, seed: int", "*, run_seed: int")},
+     {"K1": (True, "run_seed")}),
+
+    ("K1: the tree grew an entry point the document does not declare",
+     {"src/data/api.py": _GOOD_API + '''
+
+def draw_stream(dat: Config, areas):
+    """LEVERS READ: stream_bytes
+    WIRES READ: none
+    DID IT FIRE: data.stream_draw
+    """
+    raise NotImplementedError("x")
+'''},
+     {"K1": (True, "draw_stream")}),
+
+    ("K1: the document has no ```contract block at all",
+     {"docs/04_CONTRACT.md": "# contract\n\nnothing normative here\n"},
+     {"K1": (True, "fenced block")}),
+
+    ("K2: the root raises something other than NotImplementedError",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace(
+         'raise NotImplementedError("DATA.open_areas: P4 fills this in.")',
+         'raise TypeError("open_areas() got an unexpected keyword argument")')},
+     {"K2": (True, "WRONG_ERROR")}),
+
+    ("K2: the root swallows the failure and returns",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace(
+         'raise NotImplementedError("DATA.open_areas: P4 fills this in.")', "return None")},
+     {"K2": (True, "without raising")}),
+
+    ("K3: a package imports another package",
+     {"src/data/api.py": "from fabric import api as fab_api\n" + _GOOD_API},
+     {"K3": (True, "another package")}),
+
+    ("K3: a package imports the assembly",
+     {"src/data/api.py": "from spine.assemble import build\n" + _GOOD_API},
+     {"K3": (True, "the registry")}),
+
+    ("K4: a declared lever that no stub names and no table lists",
+     {"src/data/levers.py": _GOOD_LEVERS.replace(
+         '    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)',
+         '    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)\n'
+         '    seg_min = Lever(700, "shortest segment", None)')},
+     {"K4": (True, "SEG_MIN")}),
+
+    ("K4: the unconsumed table names a lever a stub also reads",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace(
+         "|---|---|---|---|\n",
+         "|---|---|---|---|\n| `DATA.source` | `DATA_SOURCE` | this is a long enough reason to pass "
+         "the placeholder filter and it is still wrong | drop |\n")},
+     {"K4": (True, "stale")}),
+
+    ("K4: an unconsumed row with a placeholder instead of a reason does not count",
+     {"src/data/levers.py": _GOOD_LEVERS.replace(
+         '    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)',
+         '    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)\n'
+         '    seg_min = Lever(700, "shortest segment", None)'),
+      "docs/04_CONTRACT.md": _GOOD_DOC.replace(
+          "|---|---|---|---|\n",
+          "|---|---|---|---|\n| `DATA.seg_min` | `DATA_SEG_MIN` | TBD | later |\n")},
+     {"K4": (True, "SEG_MIN")}),
+
+    ("K5: a declared wire no stub reads",
+     {"src/data/api.py": _GOOD_API.replace("    _ = dat.d_expert_slots\n", "")
+                                  .replace("    WIRES READ: d_expert_slots\n",
+                                           "    WIRES READ: none\n")},
+     {"K5": (True, "arrives nowhere")}),
+
+    ("K5: a stub names a d_ field no coupling declares",
+     {"src/data/api.py": _GOOD_API.replace("WIRES READ: d_expert_slots",
+                                           "WIRES READ: d_expert_slots, d_window")},
+     {"K5": (True, "d_window")}),
+)
+
+_BY_TAG = {
+    "K1": lambda d: check_k1_signatures(os.path.join(d, "src"),
+                                        os.path.join(d, "docs", "04_CONTRACT.md")),
+    "K2": lambda d: check_k2_compose(os.path.join(d, "src")),
+    "K3": lambda d: check_k3_no_cross_package_imports(os.path.join(d, "src")),
+    "K4": lambda d: check_k4_levers_have_readers(os.path.join(d, "src"),
+                                                 os.path.join(d, "docs", "04_CONTRACT.md"),
+                                                 cross_check=False),
+    "K5": lambda d: check_k5_wires_are_read(os.path.join(d, "src"), cross_check=False),
+}
+
+
+def _tree(overlay):
+    files = dict(_BASE_TREE)
+    files.update(overlay)
+    d = tempfile.mkdtemp(prefix="contract_selftest_")
+    for rel, text in files.items():
+        p = os.path.join(d, *rel.split("/"))
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return d
+
+
+def _indent(text):
+    return "\n".join("              " + ln for ln in text.strip().splitlines())
+
+
+def selftest():
+    findings, ran = [], 0
+    for name, overlay, expect in _CASES:
+        d = _tree(overlay)
+        try:
+            for tag, (want_fail, must_say) in sorted(expect.items()):
+                ran += 1
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = _BY_TAG[tag](d)
+                out = buf.getvalue()
+                got_fail = bool(rc)
+                if got_fail != want_fail:
+                    verb = ("passed a tree it must fail" if want_fail
+                            else "failed a tree it must pass")
+                    findings.append(f"[{name}] {tag} {verb}:\n{_indent(out)}")
+                elif want_fail and must_say and must_say not in out:
+                    # A check that fails for the wrong reason is a green regression test over a live
+                    # hole -- the shape this repository has sixty records of.
+                    findings.append(f"[{name}] {tag} failed as required, but its finding never "
+                                    f"mentions {must_say!r}, so it may be failing for an unrelated "
+                                    f"reason:\n{_indent(out)}")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+    detail = f"{len(_CASES)} case(s), {ran} check run(s) against synthetic trees in a temp directory"
+    return _report("SELF", "the checks fail on trees that contain the defect, and pass on ones that "
+                           "do not", not findings, detail, findings)
+
+
+CHECKS = (
+    check_k1_signatures,
+    check_k2_compose,
+    check_k3_no_cross_package_imports,
+    check_k4_levers_have_readers,
+    check_k5_wires_are_read,
+)
+
+
+def main():
+    print("=== contract: the document, the stubs and the composition root are one system ===")
+    print(f"{len(PKG_DIR)} package(s); document {os.path.relpath(DOC, ROOT)}; Python "
+          f"{sys.version.split()[0]}")
+    print()
+    failed = 0
+    for check in CHECKS:
+        failed += check()
+        print()
+    # LAST, AND COUNTED. A broken check is a worse failure than anything a check reports.
+    failed += selftest()
+    print()
+    print(f"=== {len(CHECKS)} checks + {len(_CASES)} self-test cases, {failed} failing ===")
+    print("These checks prove that the document, the stubs and the composition root DECLARE the same")
+    print("system. They do not prove that a body, once written, does what its docstring says, that a")
+    print("DID IT FIRE counter is ever incremented, or that the levers a stub CLAIMS to read are the")
+    print("ones it reads -- `LEVERS READ:` is prose that passes a parser. Those are L2's single-reader")
+    print("sweep and L3's isolation sweep, and neither exists yet.")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

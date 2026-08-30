@@ -365,14 +365,15 @@ def check_c3_allowlist_is_a_declaration():
 # 4096 slots is the setpoint an occupancy of 0.50 sat below for a whole investigation.
 
 LEVERS = {
-    "FAB":   {"slots": 4096, "pressure": 0.75, "manage_every": 2000},
+    "FAB":   {"slots": 4096, "pressure": 0.75, "manage_every": 2000,
+              "comp_ema": 0.02, "comp_protect": True},
     "MEM":   {"owners": 64, "quota": 128},
-    "OPT":   {"batch_windows": 16, "accum": 4},
+    "OPT":   {"batch_windows": 16, "accum": 4, "lr": 0.002, "lr_min_frac": 0.05},
     "CAP":   {"pin_windows": 20000},
-    "LM":    {"vocab_slots": 32768, "ctx": 128},
+    "LM":    {"vocab_slots": 32768, "ctx": 128, "mask_dead_rows": True},
     "CKPT":  {"dir": "runs/a/ckpt", "resume": "runs/parent/ckpt"},
     "DOM":   {},        # declares no lever of its own; its namespace bound arrives as a wire
-    "TOK":   {},        # same: its vocabulary ceiling and both vocabulary paths arrive as wires
+    "TOK":   {"max_bytes": 24},   # sources LM.d_max_token_bytes; its own four values arrive as wires
 }
 # THE PREFIXES AND FIELD NAMES ARE THE REAL ONES; THE VALUES ARE NOT ALL THE REAL DEFAULTS, AND THAT
 # DIFFERENCE IS DELIBERATE. `OPT_BATCH_WINDOWS` really defaults to 1, and at 1 every flush_period is the
@@ -402,6 +403,21 @@ EXPECTED = {
     "FAB.d_operating_population":      3072,          # ceil(0.75 x 4096); LOCAL, no edge, no budget
     "OPT.d_effective_batch_windows":   64,            # 16 x 4; LOCAL. The batch the run actually trains at
     "LM.d_pos_max":                    128,           # LOCAL: the positional table is ctx rows tall
+    # ---- the nine rows the contract phase added; same rule, hand-computed from the shipped formulas --
+    "LM.d_max_token_bytes":            24,            # TOK.max_bytes, and DELIBERATELY not the 16 that
+                                                      # ByteComposer hardcodes at :1441 -- a fixture at 16
+                                                      # would pass whether the wire arrived or the
+                                                      # hardcode did, which is the M21 defect exactly
+    "CAP.d_expert_slots":              4096,          # the hard ceiling CAP_FAB_START=0 resolves to
+    "CAP.d_vocab_slots":               32768,         # the same sentinel on the vocabulary target
+    "CAP.d_mask_dead_rows":            True,          # LM owns the output layer; not CAP's to decide
+    "CAP.d_operating_population":      3072,          # ceil(0.75 x 4096) again -- the SAME derive call
+                                                      # as FAB's row, so the setpoint the fabric settles
+                                                      # at and the one the valve refuses against agree
+    "DOM.d_comp_ema":                  0.02,          # one smoothing rate for both populations
+    "DOM.d_comp_protect":              True,          # one brake policy for both populations
+    "FAB.d_base_lr":                   0.002,         # the PEAK, which :7252's envelope is built from
+    "FAB.d_lr_min_frac":               0.05,          # the floor, which :7251 needs in the same block
 }
 
 LOCAL_DSTS = {"FAB.d_operating_population", "OPT.d_effective_batch_windows", "LM.d_pos_max"}
@@ -474,9 +490,11 @@ def check_c4_table_resolves():
     # here with an explicit env_owner map because the stand-ins deliberately register nothing.
     owners = {f"{p}_{f.upper()}": p for p, vals in LEVERS.items() for f in vals}
     reach = {name: wires.affects(name, env_owner=owners) for name in owners}
-    if reach.get("FAB_SLOTS") != frozenset({"FAB", "DOM", "MEM"}):
+    if reach.get("FAB_SLOTS") != frozenset({"FAB", "DOM", "MEM", "CAP"}):
         findings.append(f"affects('FAB_SLOTS') = {sorted(reach.get('FAB_SLOTS', ()))}; the slot count is "
-                        f"declared to reach DOM and MEM as well as its own package.")
+                        f"declared to reach DOM, MEM and CAP as well as its own package -- CAP because "
+                        f"the capacity valve lifts a soft cap toward this hard one and refuses a start "
+                        f"above the cull's settling point.")
     if reach.get("FAB_MANAGE_EVERY") != frozenset({"FAB"}):
         findings.append(f"affects('FAB_MANAGE_EVERY') = {sorted(reach.get('FAB_MANAGE_EVERY', ()))}; it "
                         f"is read only by its own package's cadence coupling.")
