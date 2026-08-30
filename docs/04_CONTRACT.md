@@ -21,6 +21,8 @@ DID IT FIRE: <the counters that prove the mechanism executed, in G4's three stat
 
 `tests/test_contract.py` parses those blocks. 257 of the 259 declared levers are named by at least
 one stub as read by it; the two that are not are in **UNCONSUMED LEVERS** below with a disposition.
+**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 110
+of the 117 entry points are named by a row with the remaining seven declared deferred.
 
 **Executable today.** `python3 -c "import sys;sys.path.insert(0,'src');from spine.compose import
 compose; compose(environ={})"` runs the composition root against the stubs and stops at the first
@@ -220,6 +222,11 @@ offsets and sizes, `bytes_present`/`bytes_taken`, the counter vector — all che
 Five levers (`dir`, `corpus_cap`, `holdout_frac`, `val_cap`, `seg_contig`) are **arm-dead** under
 `source="synthetic"`, and `n_processes` under `source="real"`. That is a declared arm reported
 through a Gate, not an unread lever.
+**Where they are called (§3):** `draw_stream` is the first statement of stage `E` **and** an
+`ASSEMBLY_ORDER` row for epoch 0, called UNCONDITIONALLY so `dat.resample` is a state this package
+REPORTS rather than a branch the caller takes; `restore_stream_state` is a row immediately after
+`open_areas` and before `data_plan`; `stream_state` is a stage-`C` row. Before this edit nothing in
+either table drew a stream at all.
 
 ### TOK — `src/tok/api.py` (18 levers)
 
@@ -298,6 +305,10 @@ OPT, `windows_since_boundary` ← DOM, `reservoir` ← DOM.
 sidecar carrying `width_units`, `alphabet_size`, `space`, `d`, `mode` — a resume that disagrees
 about any of them fails **here**, naming the field.
 **`warm_up` returns one of three verdicts, never a binary**; `collapsing` is a run-level failure.
+**Where they are called (§3):** `warm_up` is an `ASSEMBLY_ORDER` row after both stream rows and the
+optimizer row; `cadence_due` → `train_step` are stage-`A` rows **before** `encode`; `counters` is a
+stage-`R` row and is the encoder cadence's **only** did-it-fire surface, because its two-arm gate
+cannot go through `Cadences.due`. Until those rows existed the run trained no encoder at all.
 
 ### FAB — `src/fabric/api.py` (82 levers, 80 read)
 
@@ -334,6 +345,12 @@ writes are partitioned: knowledge is owned but not walled off.
 meanings is what made "LRU" evict the domain that had *stopped being written*.
 **Checkpointed additions:** `prob`, `recon`, `nsrc_max`, `gate_theta` — four omissions that each
 disarmed a live mechanism at the run boundary.
+**Where they are called (§3):** `census` is a stage-`A` row **before** `DOM.manage`, whose
+`memory_counts` and `mem_floor_entries` had no other producer, and again at `R`; `judge` is an event
+on that same management pass (**Q-MEM-8**); `read(promote=True)` is `maintain`'s probe (**Q-MEM-9**)
+while `read(promote=False)` + `blend` are stage-`R` rows, because retrieval has never entered the
+training distribution in this project and moving it there is an unmeasured behaviour change
+(**Q-MEM-10** is the interface that path still lacks); `state_dict` is a stage-`C` row.
 
 ### DOM — `src/domains/api.py` (28 levers)
 
@@ -352,6 +369,12 @@ were read directly from inside the domain block at `:6688-6689`.
 **Checkpointed additions:** the reservoirs (the uncensored sample the measured radius needs),
 `tokc`, `comp`/`comp_glob`, the adjacent-distance history. The boundary clock **must not restart** on
 resume; `grace` **does**, and the asymmetry is deliberate.
+**Where they are called (§3):** `rekey` is a stage-`A` row on `Cadences.due('dom.rekey',
+MEM.rekey_every, clock)` **after** `observe` — without it `accept_rule="radius"` silently degenerates
+to the constant rule, because `rekey` is the only site that measures a radius; `census` is at `A`
+(its `live` list is `apply_domain_plan`'s `live_sources`) and at `R`; `on_retokenize` is delivered by
+the RetokEvent at `B`; `prior` is at `R`, which is where the old tree read it while paying for the
+histogram every window; `state_dict` is a stage-`C` row.
 
 ### RUN — `src/train/api.py` (7 levers)
 
@@ -367,6 +390,10 @@ counters}` · `new_cadences` + `Cadences.{due,ledger}` · `bench_summary` · `st
 Because it is phase-independent, a gate may be evaluated per window or per flush and mean the same
 thing — which is what lets CKPT's and MEM's Windows cadences need **no** Windows→Flushes conversion.
 **`RunClock.advance` is the one site in the tree that increments a counter.**
+**Where they are called (§3):** `begin_epoch` is an `ASSEMBLY_ORDER` row for epoch 0 and a stage-`E`
+row for every roll — it had **no caller at all** before, together with the epoch level itself;
+`RunClock.counters`, `Cadences.ledger` and `bench_summary` are stage-`R` rows, and the ledger is
+half of the NEVER-ASKED / ASKED-AND-REFUSED distinction G4 requires.
 
 ### CKPT — `src/ckpt/api.py` (5 levers)
 
@@ -382,6 +409,13 @@ manifest's key set, so `if recorded and recorded != live` is not writable here.
 **The suffix applies to the whole snapshot**, tokenizer bytes included (M46).
 **`best_state` is checkpoint state** (M45), and the blow-up alarm **moves out** to EVAL: gating an
 instrument on a checkpoint flag is what this rebuild exists to end.
+**Where they are called (§3):** `resume_source` → `load` → `check_geometry` are `ASSEMBLY_ORDER`
+rows, the gate placed as **the last row before the first allocation**; `saving_on` is a row of its
+own before `new_retention`, whose `inert_reason` needs its answer; `Retention.state` is a stage-`C`
+row and `Retention.counters` a stage-`R` one; `save` appears at `B`, `A` (through `BestAction`) and
+`R` (`reason="final"`), which is what makes three of its six `Saves` counters reachable at all.
+**The payload fan-out is twelve ROWS, not calls inside `save`** — see §3.2 for the three independent
+reasons.
 
 ### CAP — `src/capacity/api.py` (7 levers)
 
@@ -427,10 +461,170 @@ move an RNG stream) and the one-logits-path rule (`logits_fn` is passed in, neve
 `null_excess` **refuses `null_draws < 2` at construction**: at 0 it is a `ZeroDivisionError` that
 takes the rest of the report with it, and at 1 the sd is exactly 0.0 so the 2σ test becomes a rubber
 stamp.
+**Where they are called (§3):** `curve_period` and `curve_probe` have `A` rows. The other **seven**
+are the whole of `compose.DEFERRED_ENTRY_POINTS`, each with the phase and the argument that has no
+producer — not "a later phase", which by itself is no reason at all, since `curve_probe` is P5 and
+has a row.
 
 ---
 
-## 3. UNCONSUMED LEVERS
+## 3. THE ORDER TABLES — what is REACHED, and what is declared deferred
+
+`spine/compose.py` holds two tables of rows, `ASSEMBLY_ORDER` and `LOOP_ORDER`, and one dictionary,
+`DEFERRED_ENTRY_POINTS`. Together they are the normative answer to a question **K4 does not ask**:
+not *"does some stub name this lever"* but *"is the stub that names it ever CALLED"*. K6 checks it,
+and it checked it into a failure: applying the composition root's own tables as the test, **56 of
+the 117 entry points were named by no row at all** — and they were not 56 scattered omissions, they
+were **three whole missing levels and a missing resume path**.
+
+| what was missing | what it cost, from the packages' own docstrings |
+|---|---|
+| **the epoch level** | Nothing drew a stream, began an epoch, or rolled one. `DATA.draw_stream` — the function that produces the bytes — had no caller; `RUN.epochs` was inert; the LR horizon annealed over a run the loop could not reach; `RunClock.epoch` never left 0, so every save recorded epoch 0. |
+| **the checkpoint fan-out and the resume** | Every package's `state_dict`/`load_state` existed and nothing named any of them, so `CKPT.save` would have been handed an empty payload and there was **no resume path in the tables at all** — no `resume_source`, no `load`, no `check_geometry`. M45 (a resume overwrites its parent's best model), M38 (an unearned pin clock), M51/M52/M53/M66/M67 (a live mechanism disarmed at the run boundary) were each reproduced by omission. |
+| **the counter collection** | No row collected any `counters()`. For every orphan the evidence was **doubly** unreachable: the owning function was never called *and* its gate never went through `Cadences.due`, so `Cadences.ledger()` had no key for it either. NEVER ASKED and ASKED AND REFUSED became one number, which G4 forbids. |
+| **the encoder's training** | `SIG.mode` defaults to `learned`, `compose()` hands SIG's parameters to OPT as an `encoder` param group, and nothing called `SIG.train_step`, `cadence_due` or `warm_up` — so the run routed every window through a randomly initialised encoder while an AdamW stepped it on zero gradients. |
+
+### 3.1 The stages
+
+`ASSEMBLY_ORDER` gained four stage values — `resume`, `restore`, `stream`/`segment`, `persist` —
+and `LOOP_ORDER` gained three stage letters. **There is still no third table**, for two reasons and
+the second is the load-bearing one: every level below is driven by the **same** `RunClock`, and
+`tests/test_contract.py:879` reads the tables **by name** (`ASSEMBLY_ORDER`, `LOOP_ORDER`) — a third
+table would be invisible to the one check that exists because these rows were missing, and *a level
+with a table of its own that no check can see is still an orphan.*
+
+| stage | when | what is in it |
+|---|---|---|
+| `E` | before the first window of an epoch, and again whenever `RunClock.advance` returns `Tick.rolled` | `DATA.draw_stream` → `TOK.tokenize` → `RunClock.begin_epoch`. The root also stamps `clock.opt_steps` here as the `shift_at` `OPT.maybe_step` consumes — a resample is a **self-inflicted** shift, and the old tree carried that fact in a closure variable (`:6518-6521`). |
+| `A` | per WINDOW, above the accumulator | unchanged rows, plus `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.census` (after it, supplying `live_sources`), `MEM.judge`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), and `DOM.rekey` (after `observe`). |
+| `B` | per FLUSH | unchanged rows, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. |
+| `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1), `A` (a `BestAction`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. |
+| `R` | once, after `Tick.finished` | `MEM.read(promote=False)` + `MEM.blend`, `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, and the `reason="final"` save. |
+
+### 3.2 Why the checkpoint fan-out is ROWS and not calls inside `CKPT.save`
+
+Three independent reasons, any one of which is sufficient:
+
+1. **The signature.** `save(ckpt, *, payload, geometry, step, epoch, reason, suffix="")` receives
+   **no package object and no foreign Config** — no `model`, no `pop`, no `store`, no `vocab`. To
+   call `LM.state_dict(lm, model, geom)` it would need two things it is not given. The parameter is
+   literally named `payload` and typed as already-assembled.
+2. **The timing.** `load(ckpt)` runs **before** the objects it would restore into exist — the
+   geometry gate's whole purpose is to refuse before `LM.build_model`. The load fan-out is not
+   inconvenient inside CKPT, it is *temporally impossible*.
+3. **O10.** `from lm import api` inside `src/ckpt/` is a test failure. `src/spine/` is exempt;
+   `src/ckpt/` is not.
+
+### 3.3 The resume path, in order
+
+`resume_source` → `load` (both before the first refusal, because six constructors already take
+`restored=`) → `DATA.restore_stream_state` (after `open_areas`, before `data_plan`) →
+`TOK.build_vocabulary` → `TOK.restore_vocab` → **`CKPT.check_geometry`** → everything else, with
+each remaining restore immediately after its own package's constructor.
+
+**Where the gate sits is the load-bearing part.** `check_geometry` is the last row before
+`LM.build_model`, which is the **first allocation** in the whole assembly. The old gate at
+`:4413-4468` fired only after the tokenizer had resolved and the corpus had been pulled, so a
+`FAB_NMAX` change arrived as five tensor shapes naming no knob, on a warm GPU.
+
+**`WORLD.load_into` is strictly before `OPT.build`.** `WORLD.manage` mints parameters mid-run
+through `add_param_group`, so a checkpoint taken after growth has more groups than a freshly built
+optimizer; replaying the population first is what lets OPT be built with the **same** group
+structure. Placed the other way, `OPT.load_state`'s `param_group_shape` refusal (L50) fires on every
+resume of a run that ever grew — and the honest failure is only marginally better than the old
+silent one, which attached one tensor's Adam moments to another.
+
+### 3.4 Epoch 0 appears twice, on purpose
+
+`DATA.draw_stream`, `TOK.tokenize` and `RunClock.begin_epoch` are in **both** tables. Epoch 0's
+material must exist before the loop, because `OPT.build` needs `run_windows` measured from a
+segmentation that exists (`opt/api.py:78`) and `SIG.warm_up` takes the stream; every later epoch's
+is drawn at stage `E`. The old tree has the identical duplication — `:4104` and `:6513` both call
+`_resample()`.
+
+**One latent defect fell out of writing those rows.** `_run_windows()` in `compose.py` read
+`plan.run_windows`, and `run_windows` **is not a field of `Plan`** (`data/api.py:22` declares
+`Plan` as `protocol, schedule, phase_bounds, per_area_draw, exposure, gates`) — a latent `AttributeError`
+sitting under a docstring that described the correct computation and could not perform it, because
+nothing drew a stream. It now measures `len(Segmentation.ids) // LM.ctx` through the named join
+`_windows_in_epoch`, which is the same arithmetic `RunClock.begin_epoch` is handed. That the two
+then **diverge** across a minting run is Q-OPT-5.
+
+### 3.5 No cadence was invented
+
+Every periodic row names a period a package **declares**, evaluated through
+`Cadences.due(key, period, clock)`:
+
+| key | period | owner |
+|---|---|---|
+| `curve` | `EVAL.curve_period(ev)` ← `EVAL.curve_every` | EVAL |
+| `dom.manage` | `DOM.manage_every` | DOM |
+| `fab.manage` | `FAB.manage_every` | FAB |
+| `dom.rekey` | **`MEM.rekey_every`** | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
+| `ckpt` | `CKPT.save_period(ck)` ← `CKPT.every` | CKPT |
+| MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM |
+
+**One gate, one ask.** `Cadences.due` *records* the fire and returns True, so asking a second time
+under the same key **consumes** the event — that is how a shared `_due` key made minting never fire
+at all in the old tree. The management block therefore asks `dom.manage` **once** and runs four rows
+inside that one answer: `MEM.census` → `DOM.manage` → `DOM.census` → `MEM.judge`.
+
+Everything else that fires is **event-driven and says so**: `Retention.consider` (a curve value
+arrived), `MEM.judge` (the management pass), `SIG.train_step` (`cadence_due` said yes),
+`TOK.judge_probation` (`Due.probation`), `DOM.on_retokenize` (the RetokEvent), and the whole `C`
+stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go through
+`Cadences.due`** — it selects between `train_every` and `train_every_idle` on `dense_window`, and
+`due` takes one period — so it has **no ledger key**, and `SIG.counters` at stage `R` is the only
+did-it-fire surface the encoder's cadence has. That is stated in its row rather than left for a
+reader to discover from a missing ledger line.
+
+### 3.6 `DEFERRED_ENTRY_POINTS` — seven, all EVAL
+
+`{"PFX.entry": "the phase that will call it, and why it cannot be called now"}`. K6 reads it **both
+ways**: an entry no row names is accepted, and an entry a row **now** names is reported as *stale*
+and must be deleted. That is what stops it becoming the place orphans go to be forgotten.
+
+| entry | phase | why there is no row |
+|---|---|---|
+| `EVAL.holdout_probe` | P5 | Needs `units_by_domain` drawn in **byte** coordinates from `Areas.holdout` together with a `logits_fn`, and the root has no join producing that pair. A row now would name a call whose arguments nothing supplies. |
+| `EVAL.null_excess` | P5 | `real` and `permute` are produced by the verdict machinery, which is P6's. |
+| `EVAL.generate` | P6 | `prompts_by_domain` has **no producer** among the 117 entry points. |
+| `EVAL.coherence` | P6 | Runs on its own seeded `Sample`; nothing in the tree returns a `Sample`. |
+| `EVAL.verdicts` | P6 | Three of four arguments — `silhouettes`, `affiliation`, `coherence_reading` — have no producer; the fourth, `domain_sizes`, comes from `DOM.census`, which stage `R` already collects. |
+| `EVAL.wrongness_probe` | P6 | Takes a **copy** of the store so the instrument cannot edit what it measures; MEM's surface produces no copy, and adding one is a signature change. |
+| `EVAL.verification_fit` | P6 | Same missing copy; its inner loop is genuine `units.Steps` and must never be compared against `curve_every`. |
+
+**A later phase is not by itself a reason to defer** — `EVAL.curve_probe` is P5 and has an `A` row.
+Each reason above is about an **argument with no producer**, which is the only kind of reason that
+survives the backwards check.
+
+### 3.7 What could NOT be placed, and is therefore reported rather than rowed
+
+* **The self-inflicted-shift notification to the fabric.** At an epoch roll and at a retok the old
+  tree calls `fabgrow.note_shift(step)` (`:6515`, `:7787`) to open a growth blackout. **No FAB entry
+  point accepts it** — `manage`, `observe` and `grow_check` take `step_windows` and losses, not a
+  shift event. `CAP.observe` takes a `blackout` argument, so the valve half of the mechanism has a
+  route and the fabric half does not. Escalated as **Q-FAB-6**; no row was written for a call the
+  frozen surface cannot receive.
+* **A resegment for MEM at an epoch roll.** `MEM.maintain(resegment=...)` is documented for a
+  *retokenization*. An epoch redraw is a new stream, not a new segmentation, and the old tree does
+  not resegment the store there. Inventing the call would have been the easiest row in this edit and
+  the least defensible.
+* **`SIG.train_step`'s `reservoir`.** `sig/api.py:113-114` says the pairs are "drawn from ONE domain's
+  reservoir by DOM", and **no DOM entry point returns reservoir windows** — `census` returns radii,
+  counts and `comp_glob`. At `prototype_frac = 0.0` (the default) nothing is lost; above it,
+  `sig.prototype_pairs` reads 0 and the declared Gate must print *unreachable*, not *armed*. The row
+  is written with `reservoir` optional, as the signature has it, and the gap is **Q-SIG-1**.
+* **`residual_ratio` for the `embed` probation arm.** `tok/api.py:232-234` sources it from LM's
+  `MintReport`, i.e. from **mint time**, when a new token's residual is zero by construction — so
+  `keep iff earned AND residual >= probation_residual` would retire every candidate. The old tree
+  recomputes it at judgement time from live tensors (`:7601-7605`), and **no entry point among the
+  117 exposes that read**. The `B` row passes `residual_ratio` through; whether the arm is reachable
+  is **Q-TOK-11**.
+
+---
+
+## 4. UNCONSUMED LEVERS
 
 The union of the five `levers_unconsumed` lists is **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
@@ -447,7 +641,7 @@ It changes both wires and the whole partition, so it is fully consumed — throu
 
 ---
 
-## 4. FOR THE OWNER
+## 5. FOR THE OWNER
 
 Unioned from the five specs, deduplicated, with everything resolvable from the source already
 resolved above. What is left needs a ruling.
@@ -649,9 +843,172 @@ published as a claim. **Recommendation: leave it at 32**, because that is the li
 and raise it only after G2 has measured this machine's noise floor. Raising it silently would change
 what every recorded retention number means.
 
+
+### Q-CKPT-1 — the geometry manifest has one producer and eleven packages
+`CKPT.check_geometry` says the manifest is *"assembled by the composition root from each package's
+own `geometry()` call"*. `grep '^def geometry' src/*/api.py` returns **exactly one hit**,
+`world/api.py:160` — and that one needs a **built** world, which is the thing the gate exists to
+refuse before. So the gate cannot be fed the way its own docstring describes.
+`_geometry_manifest()` in `compose.py` therefore assembles the pre-allocation manifest from
+`LM.resolve`'s `LMGeometry` and the EXACT fields readable off the frozen Configs, and the **grown**
+population counts are reported UNCHECKED — which `check_geometry` already specifies as the correct
+reading for an absent field, and which is the H22 state made visible rather than hidden. They are
+then re-refused in both directions by `WORLD.load_into` (M43) and `FAB.load_state_dict` at their own
+rows. **Options:** (a) leave it as written and print the UNCHECKED set; (b) add `geometry()` to the
+eight packages that have a shape — a signature-set change, so K1 and this document move with it;
+(c) narrow the docstring to the packages that can refuse before allocation.
+**Recommendation: (a) now, (b) when the surface next opens.** Whoever writes the assembler must not
+silently pass `{}`: an empty manifest makes `check_geometry` a no-op that reports PASS, which is the
+untrippable guard the function exists to replace.
+**Second half of the same question:** `GeometryField` is a record type **P4 defines**, so the root
+cannot construct one today. `_geometry_manifest` returns the four fields as a plain tuple in the
+declared order `(value, rule, env_name, why)`. If P4 makes `GeometryField` a namedtuple this
+reconstructs; if it makes it something else, this line and that constructor must land together.
+
+### Q-OPT-4 — `OPT.build(resume=...)` and `OPT.load_state(opt, st, saved)` overlap
+`build`'s `RECEIVES:` block explains `run_windows` and **never mentions `resume`** (`opt/api.py:78-82`),
+while `load_state` is documented as the restore-or-refuse — it carries the `param_group_shape`
+refusal (L50) and the `opt.ckpt.loaded`/`refused` counters, and its refusal needs the **live** groups,
+which do not exist until `build` returns. `ASSEMBLY_ORDER` currently has **both**, in that order, and
+`compose()` passes the same blob to each. That is deliberate exposure, not a decision.
+**Options:** (a) `build(resume=)` restores the *group structure* and `load_state` attaches the moments
+and refuses — write that into `build`'s docstring and the overlap disappears; (b) `build(resume=)`
+becomes documented dead weight and the root passes `None`; (c) drop `load_state` — which loses the
+only refusal on the path. **Recommendation: (a).** It is the reading that makes both rows do work,
+and it is the one the `WORLD.load_into`-before-`OPT.build` ordering already implies.
+**The same shape, already resolved, in CAP:** `new_valve(restored=)` takes *the lifted cap* because
+`Valve.origin` must record where the STARTING cap came from, and `CAP.restore` puts back the two pin
+clocks and the high-water marks — the other half of M38. Two rows, two scopes, both stated.
+
+### Q-OPT-5 — the horizon is a projection and the epoch length is a measurement
+`OPT.build` resolves the LR horizon **once**, from `run_windows`; `RunClock.begin_epoch` re-measures
+`len(Segmentation.ids) // ctx` **every epoch**, and online minting lengthens tokens and shortens
+every later epoch. Both are `units.Windows`, so nothing raises and nothing reconciles them. The
+once-resolved horizon is deliberate — the re-projecting machinery it replaces (`_project`/`_lr_total`
+/`_proj_lr`, `:6335-6376`) produced the E8 p=0.760 under-annealing — but it is resolved from epoch 0,
+before a token has been minted. **Options:** (a) keep the fixed horizon and **print**
+`run_windows` against `sum(observed windows_in_epoch)` at the end, so the bias is measured;
+(b) let `begin_epoch` revise it, which reintroduces the machinery that already failed twice;
+(c) require `opt.lr_wavelength` to be set explicitly. **Recommendation: (a) plus the printed
+comparison**, and file the residual as a known bias with a number attached.
+
+### Q-MEM-8 — which management cadence does `MEM.judge` run on?
+`memory/api.py:253` says *"the management cadence the spine already imposes; no new lever (see FOR
+THE OWNER Q-MEM-8)"* — **and Q-MEM-8 did not exist in this document.** It does now. The spine
+imposes two: `DOM.manage_every` (100 Windows) and `FAB.manage_every` (500 Windows). `LOOP_ORDER`
+places `judge` as an **event on the `dom.manage` pass**, immediately after the plan is applied,
+because that is the moment the store's provenance has just been rewritten by folds and deletions —
+so it invents no key and reads no foreign period at the call site, the spine delivers the event.
+**Options:** (a) the `dom.manage` pass (what is written); (b) `fab.manage`, 5× cheaper; (c) a new
+`MEM.judge_every`, which the docstring explicitly forbids. **Recommendation: (a)**, with the cost
+noted: `judge` is a forward pass over checked entries and 100 Windows is the shorter of the two.
+
+### Q-MEM-9 — does `MEM.maintain`'s read probe call `MEM.read`?
+`maintain`'s job 1 is *"probe_rows real retrievals against probe_contexts"*; `read`'s own docstring
+says `promote=False` is *"the read that MUST NOT MOVE THE STORE… the report path uses it"*, which
+implies the in-loop probe is `promote=True`. The `B` row states it that way, because if the probe
+open-codes a **second** retrieval then `n_reads`, `n_promoted` and the three `wrong_*` counters
+describe one path while the store is moved by another — the C8/C9 shape one layer down.
+**Ask:** confirm in `maintain`'s docstring that the probe **is** `read(promote=True)`. K6 cannot see
+an in-package call, so prose in the row is the only place this can be written down today.
+
+### Q-MEM-10 — `MEM.blend` returns probabilities; every scoring hook takes `logits_fn`
+`blend(mem, model_probs, retrieval)` is explicit that `model_probs` are **PROBABILITIES, not
+logits**, and every EVAL entry point that scores anything takes a `logits_fn` — which
+`eval/api.py:26-29` makes a rule (*ONE LOGITS PATH… passed in, never constructed here*), and EVAL
+cannot import MEM. So the `R`-stage rows for `read(promote=False)` + `blend` have no legal route to
+the thing that scores their output. **Options:** (a) the spine's `logits_fn` closure does
+`softmax → read → blend → log`, returning pseudo-logits — cheapest, and it quietly redefines "one
+logits path"; (b) a second optional `probs_fn` hook; (c) pass `blend_fn` into the scoring entry
+points, the way `DOM.rekey` gets `encode` and `MEM.write` gets `key_fn`. **Recommendation: (c)** —
+it matches the callable-passing idiom already in the contract and keeps one logits path *and* one
+blend path — but it is a **signature change** to EVAL and is therefore the owner's, not this edit's.
+Until it is ruled on, the +0.085 b/B retrieval path has rows and no consumer.
+
+### Q-TOK-10 — `TOK.save_vocabulary` takes no suffix, so M46 is not closed
+`CKPT.save` has a `suffix` and says *"THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT"*;
+`save_vocabulary(tok, vocab)` has **no suffix parameter** and writes `d_vocab_save_path`, a string
+frozen at `build()`. So a `reason="bestN"` save writes `runs/x.best3/ckpt.pt` **and** overwrites the
+base `runs/x.dyntok.json` — which is `ck = ck + suffix` against a base tokenizer path, i.e. M46
+exactly. `ckpt/api.py:91-92` names the escape — *"the tokenizer bytes go in `payload`"* — but
+`TOK.vocab_state` says it carries *"everything a resume needs **that the merge list alone does not
+carry**"*, i.e. explicitly not the merges. **Two frozen docstrings disagree about where a snapshot's
+vocabulary lives.** **Options:** (a) merges travel in `payload["TOK"]` and `save_vocabulary` becomes
+a human-readable sidecar at the base path — no signature moves, and it is what `ckpt/api.py:91-92`
+already says; (b) add `suffix` to `save_vocabulary` — a signature change; (c) refuse `best_keep > 0`
+with `tok.mode == "online"` at startup. **Recommendation: (a)**, which needs one sentence added to
+`vocab_state`'s docstring and no signature edit. Not taken here: it is a decision, not a repair.
+
+### Q-TOK-11 — `residual_ratio` is sourced at mint time, when it is zero by construction
+`judge_probation`'s `embed` arm keeps a token iff `earned AND residual_ratio[t] >=
+probation_residual`. `tok/api.py:232-234` sources `residual_ratio` from LM's `MintReport`, produced by
+`LM.on_mint` **at the moment the row is created**, when the free residual *starts at zero* — so the
+arm would retire 100% of candidates. The old tree recomputes it at judgement time from
+`model.compose.table()` and `.delta` (`:7601-7605`), which is the right measurement: *how much this
+token had to become that its parts did not already say* is a question about training that has
+happened. **No entry point among the 117 exposes that read.** **Options:** (a) add
+`LM.residual_ratios(lm, model)`, a pure read — a signature-set change; (b) cache the last
+`MintReport` — this is the bug; (c) leave `residual_ratio=None` and let the declared Gate print
+*unreachable (no residual_ratio supplied)*. **Recommendation: (a)** when the surface opens, (c)
+until then — and (c) must be printed, because M41 is the record of what happens when the embed arm
+silently runs the `use` test while the banner says `embed`.
+
+### Q-SIG-1 — `prototype_frac` has no supplier and is therefore structurally unreachable
+`SIG.train_step`'s `reservoir` is documented as *"a list of (window, window) pairs drawn from ONE
+domain's reservoir by DOM"*, and **no DOM entry point returns reservoir windows** — `DOM.census`
+returns radii, counts, `comp_glob` and `collapsed_at`. At the default `prototype_frac = 0.0` nothing
+is lost; above it, `sig.prototype_pairs` reads 0 forever. **Options:** (a) add
+`DOM.reservoir_pairs(...)` — a signature-set change; (b) carry the reservoir on `DOM.census`, which
+runs on the 100-Windows management cadence while `train_step` runs per window, so the sample would
+be up to 100 windows stale and *"two windows the assembler already believes belong together"* would
+no longer be true; (c) declare the arm unreachable and print the reason.
+**Recommendation: (c) now, (a) when the surface opens.** Do not fake it with (b).
+
+### Q-OPT-6 — does `OPT.maybe_step` step the ENCODER optimizer?
+`maybe_step` step 5 says *"write `lr` into EVERY param group of BOTH optimizers, then step and
+zero_grad both."* **The run of record does not do that.** `self_organize.py:7153-7154` writes the
+rate into `om` *and* `oe`; `:7287` steps **`om` alone**; `grep "oe.step"` over 9,859 lines returns
+exactly one hit, `:3401`, inside `contrastive_step` — SIG's own step. Two consequences, and the
+first is live **today**: with no `SIG.train_step` row the encoder's gradients were structurally
+zero, and an AdamW step on zero gradients is not a no-op — decoupled weight decay multiplies the
+parameters by `(1 - lr·wd)` every due flush. The second arrives **with** the row now written: the
+encoder would be stepped by `train_step` on its Windows cadence **and again** by `maybe_step` on the
+flush cadence, and SIG's loss floor — which is designed to gate the STEP, not the loss — would stop
+gating anything. **Options:** (a) `maybe_step` writes `lr` to both and steps **`base` only**; SIG
+owns the encoder step; (b) `maybe_step` steps both and `SIG.train_step` only computes and backwards
+— which makes `train_every`, `train_every_idle` and `dense_window` dead levers.
+**Recommendation: (a)** — it is what was measured and it preserves three declared levers and one
+measured mechanism. It is a one-clause docstring edit to a frozen surface's **prose**, and it is not
+made here: an exception to the freeze is the orchestrator's call. Note that under (a)
+`opt.lr.writes == opt.step` must be reworded, because the encoder then gets an `lr` write and no step.
+
+### Q-OPT-7 — `OptState` declares "both AdamW instances" and names neither
+`SIG.warm_up` and `SIG.train_step` both document their `opt` parameter as **THE ENCODER OPTIMIZER,
+BUILT BY OPT AND HANDED IN** — and the hander is the composition root, which holds only the
+`OptState` that `OPT.build` returned. `opt/api.py:29-31` describes that record as *"both AdamW
+instances, n_backward, opt_step, lr_prev, restart_amp, cycle_best, cycle_index, horizon, counters"*
+and gives the two instances **no field names**, so there is no legal expression for "the encoder
+one". `compose()` therefore passes the whole `OptState`, which means SIG is currently handed an
+object through which it could step the language model. **Options:** (a) name the two fields in the
+`RECORD TYPES` block — `base` and `encoder`, matching `build`'s own `param_groups` keys — which is a
+documentation edit, not a signature change; (b) add an accessor entry point, which *is* a signature
+change; (c) leave it and accept the boundary hole. **Recommendation: (a).** It is one line and it is
+the only option that lets `sig/api.py`'s own sentence be true.
+
+### Q-FAB-6 — nothing can tell the fabric a shift was self-inflicted
+At an epoch roll and at a retok the old tree calls `fabgrow.note_shift(step)` (`:6515`, `:7787`) to
+open a growth blackout, so the loss jump *we caused* does not read as a distribution the fabric must
+grow into. `CAP.observe` takes a `blackout` argument, so the **valve** half has a route.
+**No FAB entry point accepts a shift event** — `manage`, `observe` and `grow_check` take
+`step_windows` and losses. So `LOOP_ORDER` has no row for it, and this is recorded rather than
+invented. **Options:** (a) add a `shift_at`-style keyword to `FAB.manage` — a signature change;
+(b) route it through the existing `blackout`-shaped path if `grow_check` can be given one;
+(c) accept that fabric growth treats a resample like new material. **Recommendation: (a)**, and
+until then the report must say the blackout is unreachable rather than armed.
+
 ---
 
-## 5. What `tests/test_contract.py` checks
+## 6. What `tests/test_contract.py` checks
 
 | check | what it proves | how it can fail |
 |---|---|---|
@@ -660,16 +1017,26 @@ what every recorded retention number means.
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
 | K4 | every one of the 259 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
+| K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
+
+**K6 is the check K4 is not, and the gap was 56 entry points wide.** K4 asks whether some stub's
+docstring *names* a lever; K6 asks whether that stub is ever *called*. K4 passed at 257 named / 2
+unconsumed / 0 unaccounted while nothing trained the signature encoder, nothing read memory, nothing
+called `DOM.rekey`, and nothing drew a stream. Reading them together: a lever is accounted for when
+some stub names it **and** some row reaches that stub. K6 still cannot see whether the loop, once
+written, executes a row — the tables are data and P4 writes the code — nor an entry point reached
+only from inside another body, which is why `OPT.lr_at` is credited by being **named in the prose of
+the row that calls it** (`OPT.maybe_step`, step 2) rather than given a row of its own.
 
 Each carries a `_report()` line printing **the size of the population it examined**, and
-`selftest()` trips every one of the five against a synthetic tree in a temp directory. That is not
+`selftest()` trips every one of the six against a synthetic tree in a temp directory. That is not
 ceremony: this repository has **sixty** untrippable guards on record, and one of them was written
 into `tests/test_ownership.py` *by the patch that was fixing `tests/test_ownership.py`*. A check
 nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ---
 
-## 6. THE FROZEN SIGNATURE SET
+## 7. THE FROZEN SIGNATURE SET
 
 Everything above is prose about these 117 entry points. This block is the normative list, and
 `tests/test_contract.py`'s K1 compares it against `src/<pkg>/api.py` **in both directions**: a name

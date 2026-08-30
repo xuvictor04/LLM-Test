@@ -226,6 +226,42 @@ _BLOCK = re.compile(r"^\s*(LEVERS READ|WIRES READ):\s*(.+?)"
                     r"(?=^\s*(?:LEVERS READ|WIRES READ|DID IT FIRE):)", re.M | re.S)
 
 
+def _split_items(body):
+    """A LEVERS/WIRES READ block, as the comma-separated items it is -- parentheticals kept whole.
+
+    SPLITTING ON A BARE COMMA IS WRONG AND FAILED LOUDLY. Several entries carry a note:
+
+        WIRES READ: d_manage_period (recorded on the report beside manage_every, so the WINDOW
+                    cadence and the FLUSH cadence are one line apart)
+
+    A bare split cuts inside that parenthesis, so the first item became "d_manage_period (recorded
+    on the report beside manage_every" -- not an identifier, dropped. FAB.d_manage_period and
+    FAB.d_cap_lift_period both vanished and K5 reported two wires nobody reads, on a tree where both
+    are read at a real site three lines below the docstring. The check was right to fail and the
+    oracle was wrong.
+
+    So: depth-aware. Commas inside parentheses do not separate items, and the parenthetical is then
+    stripped from the item -- including an UNCLOSED one, since the block can end mid-note.
+    """
+    items, buf, depth = [], [], 0
+    for ch in body:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if ch == "," and depth == 0:
+            items.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    items.append("".join(buf))
+    out = []
+    for it in items:
+        it = re.sub(r"\(.*", "", it, flags=re.S).strip().strip(".")
+        out.append(it)
+    return out
+
+
 def stub_reads(src_dir):
     """{"PFX": ({levers named}, {wires named})} from the machine-readable docstring blocks.
 
@@ -252,9 +288,29 @@ def stub_reads(src_dir):
                     continue
                 doc = ast.get_docstring(n) or ""
                 for kind, body in _BLOCK.findall(doc):
-                    names = {t.strip().strip("(),.") for t in re.split(r"[,\s]+", body)}
-                    names = {t for t in names if re.fullmatch(r"[a-z_][a-z0-9_]*", t or "")}
-                    (levers if kind == "LEVERS READ" else wires).update(names)
+                    # SPLIT ON COMMAS AND REQUIRE EACH ITEM TO BE A BARE IDENTIFIER, rather than
+                    # splitting on whitespace and keeping every lowercase word.
+                    #
+                    # The whitespace version harvested 368 names of which 111 were not levers at
+                    # all: "a", "is", "as", "the", "compared", "against", "arrives", "whose" --
+                    # ordinary English bleeding in from blocks that wrap into a sentence. That is
+                    # not cosmetic. K4 credits a lever when its name appears in the harvest, and
+                    # several packages declare levers whose names are ordinary words -- `state`,
+                    # `read`, `floor`, `plan`, `path`, `rate`, `only`, `entry`, `on`. Any of those
+                    # could be credited by prose in a docstring that never meant to name it, and
+                    # K4 would report a reader that does not exist.
+                    #
+                    # MEASURED BEFORE ADOPTING, because a stricter oracle that quietly drops real
+                    # credits is worse than a loose one: strict harvests 266 names with 9
+                    # undeclared, and ZERO declared levers lose their credit. So the tightening
+                    # removes 102 spurious names and changes no verdict.
+                    #
+                    # A parenthetical is stripped, not dropped -- "emb_hid (compared against the
+                    # sidecar)" is a real item with a note, and the note is the part that used to
+                    # contribute "compared" and "against" to the harvest.
+                    for item in _split_items(body):
+                        if re.fullmatch(r"[a-z_][a-z0-9_]*", item or ""):
+                            (levers if kind == "LEVERS READ" else wires).add(item)
         out[pfx] = (levers, wires)
     return out
 
@@ -636,6 +692,20 @@ COUPLINGS = [
     Coupling(src="FAB.slots", dst="DATA.d_expert_slots", compute=lambda r: 1,
              why="the stand-in coupling the self-test tree needs"),
 ]
+
+
+class _DataLevers:
+    """Enough of a LeverSet for K7, which asks the RUNNING registry what each package declares.
+
+    K7 deliberately reads the live declarations rather than an AST copy: an oracle that has drifted
+    from the real lever set is a SMALLER oracle, and a smaller oracle passes by having nothing to
+    compare. That means the self-test tree has to carry a real one, however small.
+    """
+    PREFIX = "DATA"
+    _levers = {"source": None, "stream_bytes": None, "resample": None}
+
+
+PACKAGES = {"DATA": _DataLevers}
 '''
 
 _GOOD_COMPOSE = '''\
@@ -646,6 +716,11 @@ LOOP_ORDER = (("A", "DATA", "draw_stream", "once per epoch"),)
 
 def plan():
     return ASSEMBLY_ORDER, LOOP_ORDER
+
+
+def _manifest(configs):
+    dat = configs["DATA"]
+    return {"data.stream_bytes": int(dat.stream_bytes)}
 
 
 def compose(environ=None, *, restored=None):
@@ -689,7 +764,7 @@ _BASE_TREE = {
 _CASES = (
     ("control -- nothing wrong with this tree", {}, {
         "K1": (False, None), "K2": (False, None), "K3": (False, None),
-        "K4": (False, None), "K5": (False, None)}),
+        "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None)}),
 
     ("K1: a parameter was renamed in the tree and not in the document",
      {"src/data/api.py": _GOOD_API.replace("*, seed: int", "*, run_seed: int")},
@@ -729,6 +804,98 @@ def draw_stream(dat: Config, areas):
     ("K3: a package imports the assembly",
      {"src/data/api.py": "from spine.assemble import build\n" + _GOOD_API},
      {"K3": (True, "the registry")}),
+
+    # ---- K6. The check that found 56 orphans, and then had to be strengthened twice.
+    ("K6: an entry point with no row and no deferral",
+     {"src/data/api.py": _GOOD_API + '''
+
+def judge_probation(dat: Config):
+    """LEVERS READ: resample
+    WIRES READ: none
+    DID IT FIRE: data.probation
+    """
+    raise NotImplementedError("x")
+'''},
+     {"K6": (True, "named by no row")}),
+
+    # THE ATTACK TWO REVIEWERS FOUND INDEPENDENTLY, pinned so it cannot come back. K6 credited an
+    # entry point for being MENTIONED anywhere in a row's note, so ONE row listing names it does not
+    # call turned 110 rowed / 7 deferred into 117 / 0 and K6 still passed -- the check becoming
+    # exactly the shape it exists to catch. A note credits only a written CALL now, and this case is
+    # the proof: the same orphan, mentioned by name in a row, must still be reported.
+    ("K6: a row that MENTIONS an entry point without calling it credits nothing",
+     {"src/data/api.py": _GOOD_API + '''
+
+def judge_probation(dat: Config):
+    """LEVERS READ: resample
+    WIRES READ: none
+    DID IT FIRE: data.probation
+    """
+    raise NotImplementedError("x")
+''',
+      "src/spine/compose.py": _GOOD_COMPOSE.replace(
+          'LOOP_ORDER = (("A", "DATA", "draw_stream", "once per epoch"),)',
+          'LOOP_ORDER = (("A", "DATA", "draw_stream", "once per epoch; this row calls nothing: '
+          'DATA.judge_probation"),)')},
+     {"K6": (True, "judge_probation")}),
+
+    ("K6: a note that writes the CALL does credit it",
+     {"src/data/api.py": _GOOD_API + '''
+
+def judge_probation(dat: Config):
+    """LEVERS READ: resample
+    WIRES READ: none
+    DID IT FIRE: data.probation
+    """
+    raise NotImplementedError("x")
+''',
+      "src/spine/compose.py": _GOOD_COMPOSE.replace(
+          'LOOP_ORDER = (("A", "DATA", "draw_stream", "once per epoch"),)',
+          'LOOP_ORDER = (("A", "DATA", "draw_stream", "once per epoch -> '
+          'DATA.judge_probation(window=w)"),)')},
+     {"K6": (False, None)}),
+
+    # DEFERRING open_areas, NOT draw_stream, and the difference is the point. The first version of
+    # this case deferred DATA.draw_stream -- which the stand-in api.py does not declare -- so K6
+    # first PASSED (the stale check lives inside the walk over entry points, and that walk never saw
+    # it) and then, once the backwards loop was added, FAILED for the wrong reason. The must_say
+    # guard is what reported the difference. open_areas is a real entry point AND is named by an
+    # ASSEMBLY_ORDER row, which is the actual stale shape.
+    ("K6: a deferral that a row now names is STALE and must be reported",
+     {"src/spine/compose.py": _GOOD_COMPOSE + '''
+DEFERRED_ENTRY_POINTS = {"DATA.open_areas": "P6 calls this"}
+'''},
+     {"K6": (True, "stale")}),
+
+    ("K6: a deferral naming something that is not an entry point at all",
+     {"src/spine/compose.py": _GOOD_COMPOSE + '''
+DEFERRED_ENTRY_POINTS = {"DATA.no_such_function": "P6 calls this"}
+'''},
+     {"K6": (True, "declares no such entry point")}),
+
+    ("K6: a deferral with an empty reason is an orphan with paperwork",
+     {"src/data/api.py": _GOOD_API + '''
+
+def judge_probation(dat: Config):
+    """LEVERS READ: resample
+    WIRES READ: none
+    DID IT FIRE: data.probation
+    """
+    raise NotImplementedError("x")
+''',
+      "src/spine/compose.py": _GOOD_COMPOSE + '''
+DEFERRED_ENTRY_POINTS = {"DATA.judge_probation": "   "}
+'''},
+     {"K6": (True, "empty reason")}),
+
+    # ---- K7. The defect that produced it, in the shape it actually had.
+    ("K7: the root reads a name off a Config that the package does not declare",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace("dat.stream_bytes", "dat.depth")},
+     {"K7": (True, "does not declare")}),
+
+    ("K7: the root reaches for a Config's private _owner, which walks to every package",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace("dat.stream_bytes", "dat._owner")},
+     {"K7": (True, "PRIVATE")}),
 
     ("K4: a declared lever that no stub names and no table lists",
      {"src/data/levers.py": _GOOD_LEVERS.replace(
@@ -775,6 +942,9 @@ _BY_TAG = {
                                                  os.path.join(d, "docs", "04_CONTRACT.md"),
                                                  cross_check=False),
     "K5": lambda d: check_k5_wires_are_read(os.path.join(d, "src"), cross_check=False),
+    "K6": lambda d: check_k6_readers_are_reached(os.path.join(d, "src"),
+                                                 os.path.join(d, "docs", "04_CONTRACT.md")),
+    "K7": lambda d: check_k7_root_reads_declared_names(os.path.join(d, "src")),
 }
 
 
@@ -865,15 +1035,15 @@ def _named_by_orders(src_dir=SRC):
     and a check that ignored those would report live mechanism as orphaned.
     """
     path = os.path.join(src_dir, "spine", "compose.py")
-    named = set()
+    named, column, prose_calls = set(), set(), set()
     if not os.path.isfile(path):
-        return named
+        return named, column, prose_calls
     with open(path, "r", encoding="utf-8") as fh:
         text = fh.read()
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return named
+        return named, column, prose_calls
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Assign) and any(
                 getattr(t, "id", "") in ("ASSEMBLY_ORDER", "LOOP_ORDER") for t in node.targets)):
@@ -891,21 +1061,38 @@ def _named_by_orders(src_dir=SRC):
                 if piece:
                     named.add(f"{pfx}.{piece}")
                     named.add(f"{pfx}.{piece.split('.')[-1]}")
+                    column.add(f"{pfx}.{piece}")
+                    column.add(f"{pfx}.{piece.split('.')[-1]}")
             prose = " ".join(parts[3:])
-            for a, b in re.findall(r"\b([A-Z]{2,5})\.([A-Za-z_][A-Za-z_0-9]*)", prose):
+            # A PROSE MENTION COUNTS ONLY IF IT IS WRITTEN AS A CALL -- "FAB.grow_check(soft_cap=...)"
+            # counts, "goes to MEM.apply_domain_plan" does not.
+            #
+            # Two reviewers independently found the version without the parenthesis, and their attack
+            # is the whole argument for it: a row whose NOTE merely lists entry points credits every
+            # one of them, so one row saying "this calls nothing: WORLD.state_dict, LM.counters, ..."
+            # turns 110 rowed / 7 deferred into 117 / 0 and K6 still passes. That is this check
+            # becoming exactly the shape it exists to catch.
+            # The parenthesis is not proof -- a row could write `WORLD.state_dict()` in a note and
+            # call nothing -- but the tables ARE data, and no reading of data can prove what the code
+            # P4 writes will do. What it buys is that the credit has to be a claim about a CALL, in a
+            # row, next to the arguments; and the detail line below reports prose credits separately
+            # so a number like "110 rowed" can never again hide eleven of them.
+            for a, b in re.findall(r"\b([A-Z]{2,5})\.([A-Za-z_][A-Za-z_0-9]*)\s*\(", prose):
                 named.add(f"{a}.{b}")
                 named.add(f"{a}.{b.split('.')[-1]}")
+                prose_calls.add(f"{a}.{b}")
             # CLASS-QUALIFIED NAMES TOO. An entry point may be a METHOD -- RunClock.advance,
             # Cadences.due, Retention.consider -- and the rows write it that way in both the entry
             # column and the prose. The PREFIX pattern above cannot see "Cadences.due" because
             # "Cadences" is not an all-caps package prefix, so without this the check reported
             # RUN.Cadences.due as orphaned while three separate rows call it by name. A matcher gap
             # that manufactures orphans is as bad as one that hides them: it buries the real list.
-            for cls, meth in re.findall(r"\b([A-Z][A-Za-z0-9]+)\.([a-z_][A-Za-z_0-9]*)", prose):
+            for cls, meth in re.findall(r"\b([A-Z][A-Za-z0-9]+)\.([a-z_][A-Za-z_0-9]*)\s*\(", prose):
                 named.add(f"{cls}.{meth}")
+                prose_calls.add(f"{cls}.{meth}")
                 for _p in PKG_DIR:
                     named.add(f"{_p}.{cls}.{meth}")
-    return named
+    return named, column, prose_calls
 
 
 def _deferred_entry_points(src_dir=SRC):
@@ -971,18 +1158,20 @@ def check_k6_readers_are_reached(src_dir=SRC, doc_path=DOC):
     """
     findings = []
     eps = entry_points(src_dir)
-    named = _named_by_orders(src_dir)
+    named, column, prose_calls = _named_by_orders(src_dir)
     deferred = _deferred_entry_points(src_dir)
     reads = stub_reads(src_dir)
 
     total = sum(len(v) for v in eps.values())
-    reached, listed = 0, 0
+    reached, by_prose, listed = 0, 0, 0
     for pfx, funcs in sorted(eps.items()):
         for fn, line in sorted(funcs.items()):
             key = f"{pfx}.{fn}"
             tail = f"{pfx}.{fn.split('.')[-1]}"
             if key in named or tail in named:
                 reached += 1
+                if not (key in column or tail in column):
+                    by_prose += 1
                 if key in deferred:
                     findings.append(
                         f"{key}: listed in DEFERRED_ENTRY_POINTS as {deferred[key]!r}, but a row in "
@@ -1004,11 +1193,152 @@ def check_k6_readers_are_reached(src_dir=SRC, doc_path=DOC):
                    f"called, which reads as armed-but-0 and is actually never-asked."
                    if lv else " It reads no lever, so the cost is only that the contract declares a"
                               " surface the root does not use."))
+    # THE TABLE, READ BACKWARDS -- and this loop exists because the self-test found it missing.
+    # The stale check above lives inside the walk over ENTRY POINTS, so it only ever sees a deferral
+    # whose function still exists. A deferral naming a function that was deleted, renamed, or never
+    # written is invisible to it: the case "a deferral that a row now names is STALE" PASSED on a
+    # tree where the deferred name was not an entry point at all. That is the write-only-table shape
+    # test_census.py's N3 exists to prevent, reproduced in a table written four hours later.
+    all_eps = {f"{p}.{f}" for p, fs in eps.items() for f in fs}
+    for key, why in sorted(deferred.items()):
+        if key in all_eps:
+            continue                                   # handled by the walk above, both directions
+        pfx = key.split(".")[0]
+        findings.append(
+            f"DEFERRED_ENTRY_POINTS names {key!r} ({str(why)[:60]!r}), and "
+            + (f"{PKG_DIR[pfx]}/api.py declares no such entry point."
+               if pfx in PKG_DIR else f"{pfx!r} is not a package.")
+            + " A deferral for something that does not exist is a row nobody can ever retire.")
+
     return _report("K6", "every entry point is reached by the order tables, or declared deferred",
                    not findings,
-                   f"{total} entry point(s): {reached} named by a row, {listed} declared deferred; "
-                   f"{len(deferred)} deferred entr(y/ies) re-checked against the tables",
+                   f"{total} entry point(s): {reached - by_prose} in a row's ENTRY COLUMN, "
+                   f"{by_prose} credited by a CALL WRITTEN IN A ROW'S NOTE, {listed} declared "
+                   f"deferred; {len(deferred)} deferred entr(y/ies) re-checked against the tables",
                    findings, vacuous=not total)
+
+
+
+# ==================================================================================================
+# K7 -- every Config attribute the composition root reads must be a declared lever or a declared wire
+# ==================================================================================================
+
+def check_k7_root_reads_declared_names(src_dir=SRC):
+    """K7 -- src/spine/compose.py may not read a name off a Config that no package declares.
+
+    THE DEFECT THAT PRODUCED THIS CHECK, in the code it now guards. _geometry_manifest read
+
+        "lm.depth": (int(lm.depth), "EXACT", "LM_DEPTH", "the layer stack"),
+
+    where `lm` is sysm.configs["LM"]. LM declares `layers`; there is no `depth`. Config.__getattr__
+    RAISES on an undeclared name rather than returning a default, so every compose() would have died
+    at the gate stage.
+
+    WHY NOTHING CAUGHT IT, WHICH IS THE WHOLE POINT. RUN.process_setup raises NotImplementedError
+    several rows EARLIER, so the crash was unreachable, and K2 -- "the composition root imports and
+    fails only at a stub" -- passed on a tree that could not run. K2 checks the FIRST failure and
+    stops; every line after it is untested until the stub before it is implemented, which means the
+    root's correctness arrives in the order the stubs get bodies rather than all at once. A defect
+    hidden behind an earlier stub is this project's oldest shape, and it is the reason a static check
+    is worth more here than an execution.
+
+    HOW IT DECIDES. By AST, over compose.py: find every local name bound to `configs[...]` or
+    `sysm.configs[...]` with a CONSTANT prefix string, then check every attribute read on that name
+    against the declared levers of that package plus its declared d_ wire fields. Both sides come
+    from the running registry, so an oracle that drifts from the declarations cannot make this pass
+    by having a smaller set to compare against.
+
+    WHAT IT CANNOT CATCH:
+      * a Config reached through a name this resolver cannot follow -- stored in a dict, passed to a
+        helper, or rebound. It reports the count it examined so a fall in coverage is visible rather
+        than silent, and a helper taking a Config parameter is O9's territory.
+      * a name that IS declared but wrong -- reading `lm.heads` where `lm.layers` was meant is
+        legal here and always will be. The manifest's `why` column is what stands behind that.
+      * an attribute on any object that is not a Config: the geometry record, the population, the
+        clock. Those are P4's types and do not exist yet.
+    """
+    path = os.path.join(src_dir, "spine", "compose.py")
+    if not os.path.isfile(path):
+        return _report("K7", "the root reads only declared names off a Config", False,
+                       "src/spine/compose.py is missing", [], vacuous=True)
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as e:
+        return _report("K7", "the root reads only declared names off a Config", False,
+                       f"src/spine/compose.py does not parse at line {e.lineno}", [])
+
+    # The declared surface of every package: its levers, plus the d_ fields the wire table lands.
+    declared = {}
+    try:
+        sys.path.insert(0, src_dir)
+        try:
+            from spine.assemble import PACKAGES, COUPLINGS
+            for pfx, cls in PACKAGES.items():
+                declared[pfx] = set(cls._levers)
+            for c in COUPLINGS:
+                pfx, _, field = str(c.dst).partition(".")
+                if pfx in declared:
+                    declared[pfx].add(field)
+        finally:
+            if sys.path and sys.path[0] == src_dir:
+                sys.path.pop(0)
+    except Exception as e:                               # noqa: BLE001 -- reported, never swallowed
+        return _report("K7", "the root reads only declared names off a Config", False,
+                       f"could not import spine.assemble to learn the declared names: "
+                       f"{type(e).__name__}: {e}", [])
+
+    def _prefix_of(node):
+        """`configs["LM"]` / `sysm.configs["LM"]` -> "LM"; anything else -> None."""
+        if not isinstance(node, ast.Subscript):
+            return None
+        key = node.slice
+        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+            return None
+        base = node.value
+        name = (base.attr if isinstance(base, ast.Attribute) else
+                base.id if isinstance(base, ast.Name) else "")
+        return key.value if name == "configs" else None
+
+    bound, findings = {}, []
+    for node in ast.walk(tree):
+        # x = configs["LM"]   and   a, b = configs["LM"], configs["SIG"]
+        if isinstance(node, ast.Assign):
+            tgts, vals = node.targets[0], node.value
+            pairs = (zip(tgts.elts, vals.elts)
+                     if isinstance(tgts, ast.Tuple) and isinstance(vals, ast.Tuple)
+                     else [(tgts, vals)])
+            for t, v in pairs:
+                p = _prefix_of(v)
+                if p and isinstance(t, ast.Name):
+                    bound[t.id] = p
+
+    checked = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        base = node.value
+        pfx = bound.get(base.id) if isinstance(base, ast.Name) else _prefix_of(base)
+        if not pfx or pfx not in declared:
+            continue
+        checked += 1
+        if node.attr.startswith("_"):
+            findings.append(f"src/spine/compose.py:{node.lineno}  reads the PRIVATE {pfx}.{node.attr} "
+                            f"off a Config. Config.__slots__ exposes _owner, which walks to LeverSet "
+                            f"and every other package -- the root has no need of it.")
+        elif node.attr not in declared[pfx]:
+            near = sorted(n for n in declared[pfx] if n[:3] == node.attr[:3])
+            findings.append(
+                f"src/spine/compose.py:{node.lineno}  reads {pfx}.{node.attr}, which {pfx} does not "
+                f"declare as a lever or receive as a wire. Config.__getattr__ RAISES on an undeclared "
+                f"name, so this is a crash at whatever stage reaches it -- and it stays invisible "
+                f"while an earlier stub raises first."
+                + (f" Closest declared: {', '.join(near)}." if near else ""))
+    return _report("K7", "the root reads only declared names off a Config", not findings,
+                   f"{checked} Config attribute read(s) across {len(bound)} bound name(s), against "
+                   f"{sum(len(v) for v in declared.values())} declared name(s) in "
+                   f"{len(declared)} package(s)", findings, vacuous=not checked)
 
 
 CHECKS = (
@@ -1018,6 +1348,7 @@ CHECKS = (
     check_k4_levers_have_readers,
     check_k5_wires_are_read,
     check_k6_readers_are_reached,
+    check_k7_root_reads_declared_names,
 )
 
 
