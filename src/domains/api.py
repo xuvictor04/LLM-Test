@@ -23,6 +23,7 @@ RECORD TYPES RETURNED (P4 defines them):
   Plan         folds, deletions, live, merged, culled, folded, held, spared, emptied
 """
 from spine.lever import Config
+from spine import units as U
 
 
 def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=None):
@@ -304,3 +305,32 @@ def state_dict(dom: Config, part):
     raise NotImplementedError(
         "DOM.state_dict: P4 (domains) fills this in. The contract is frozen here; see "
         "docs/04_CONTRACT.md, section DOM.")
+
+
+def manage_period(dom: Config):
+    """The domain management cadence, AS units.Windows. Handed to RUN's Cadences.due.
+
+    WHY THIS EXISTS RATHER THAN THE ROOT PASSING cfg.manage_every. Cadences.due states that its
+    period "MUST be units.Windows. An int raises; a Flushes raises." -- and Config hands back a bare
+    int for all 35 levers that declare a Clock unit (ISSUES H51), so the row that read
+    `Cadences.due('dom.manage', FAB.manage_every, clock)` was passing an int into a function whose
+    contract refuses one. EVAL and CKPT already had typed accessors (curve_period, save_period);
+    FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.
+
+    THE WRAP BELONGS HERE AND NOT AT THE CALL SITE because this is where the kind is DECLARED.
+    domains/levers.py types manage_every Windows; a root that wrote Windows(dom.manage_every)
+    would be asserting that kind from outside the package that owns it, in three places, each free
+    to be wrong on its own. One accessor per period is the same rule the wires follow.
+
+    IT IS A CONSTRUCTION, NOT A CONVERSION. Windows(int) re-attaches the declared kind; it does not
+    cross kinds. The inline arithmetic this project calls a defect is
+    `manage_every // batch_w` -- Windows to Flushes, unnamed -- which is derive.flush_period_windows
+    and is not this.
+
+    LEVERS READ: manage_every
+    WIRES READ: none
+    DID IT FIRE: no counter of its own -- Cadences.ledger()['dom.manage'] is the surface, and that
+                 is the point of routing every gate through one primitive.
+    """
+    dom = dom.owned_by("DOM")
+    return U.Windows(int(dom.manage_every))

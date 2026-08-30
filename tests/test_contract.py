@@ -710,7 +710,8 @@ PACKAGES = {"DATA": _DataLevers}
 
 _GOOD_COMPOSE = '''\
 """A stand-in composition root."""
-ASSEMBLY_ORDER = (("corpus", "DATA", "open_areas", "(seed)"),)
+ASSEMBLY_ORDER = (("corpus", "DATA", "open_areas",
+                   "(seed); Cadences.due('data.draw', DATA.draw_period(dat), clock)"),)
 LOOP_ORDER = (("A", "DATA", "draw_stream", "once per epoch"),)
 
 
@@ -718,8 +719,12 @@ def plan():
     return ASSEMBLY_ORDER, LOOP_ORDER
 
 
-def _manifest(configs):
+RNG_SUBSYSTEMS = ("data.synth",)
+
+
+def _manifest(configs, streams):
     dat = configs["DATA"]
+    _ = streams["data.synth"]
     return {"data.stream_bytes": int(dat.stream_bytes)}
 
 
@@ -764,7 +769,8 @@ _BASE_TREE = {
 _CASES = (
     ("control -- nothing wrong with this tree", {}, {
         "K1": (False, None), "K2": (False, None), "K3": (False, None),
-        "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None)}),
+        "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None),
+        "K8": (False, None), "K9": (False, None)}),
 
     ("K1: a parameter was renamed in the tree and not in the document",
      {"src/data/api.py": _GOOD_API.replace("*, seed: int", "*, run_seed: int")},
@@ -897,6 +903,22 @@ DEFERRED_ENTRY_POINTS = {"DATA.judge_probation": "   "}
      {"src/spine/compose.py": _GOOD_COMPOSE.replace("dat.stream_bytes", "dat._owner")},
      {"K7": (True, "PRIVATE")}),
 
+    # ---- K8. The defect that produced it: WORLD was handed rng=None for the life of every run.
+    ("K8: the root takes a stream RNG_SUBSYSTEMS never minted",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace('streams["data.synth"]', 'streams["world"]')},
+     {"K8": (True, "does not mint")}),
+
+    ("K8: the root uses .get(), which returns None instead of raising",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace('streams["data.synth"]',
+                                                    'streams.get("data.synth")')},
+     {"K8": (True, "returns None")}),
+
+    # ---- K9. Three of the five periodic gates in the real tree were this, and the two that were
+    # ---- right (EVAL.curve_period, CKPT.save_period) made them look like a style difference.
+    ("K9: a cadence gate handed a bare lever read, which Cadences.due refuses",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace("DATA.draw_period(dat)", "DATA.draw_every")},
+     {"K9": (True, "bare attribute read")}),
+
     ("K4: a declared lever that no stub names and no table lists",
      {"src/data/levers.py": _GOOD_LEVERS.replace(
          '    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)',
@@ -945,6 +967,8 @@ _BY_TAG = {
     "K6": lambda d: check_k6_readers_are_reached(os.path.join(d, "src"),
                                                  os.path.join(d, "docs", "04_CONTRACT.md")),
     "K7": lambda d: check_k7_root_reads_declared_names(os.path.join(d, "src")),
+    "K8": lambda d: check_k8_streams_are_declared(os.path.join(d, "src")),
+    "K9": lambda d: check_k9_cadence_periods_are_typed(os.path.join(d, "src")),
 }
 
 
@@ -1341,6 +1365,173 @@ def check_k7_root_reads_declared_names(src_dir=SRC):
                    f"{len(declared)} package(s)", findings, vacuous=not checked)
 
 
+
+# ==================================================================================================
+# K8 -- every RNG stream the root reaches for is one it minted
+# ==================================================================================================
+
+def check_k8_streams_are_declared(src_dir=SRC):
+    """K8 -- the root may only take streams named in RNG_SUBSYSTEMS, and never with .get().
+
+    THE DEFECT, WHICH WAS LIVE. RNG_SUBSYSTEMS listed nine subsystems and "world" was not among
+    them, so compose() reached for WORLD's generator as
+
+        rng=sysm.streams.get("world")
+
+    and handed WORLD None for the life of every run. The four sibling constructors all write
+    streams["name"], which RAISES on a missing key; this one line used .get() and returned None
+    instead, while world/api.py:35 takes rng as a REQUIRED keyword.
+
+    WHY THAT IS WORSE THAN AN ORDINARY BUG. compose.py's own comment above RNG_SUBSYSTEMS says
+    rng.issued() is the DID-IT-FIRE surface for the whole randomness story: "a subsystem present with
+    ZERO DRAWS is armed-but-inert, and a subsystem ABSENT never asked. Those are two different
+    statements and G4 requires the report to make both." A package that is absent from the register
+    AND was handed None is a third state G4 has no name for -- the report would say WORLD never asked
+    for randomness, on a run where WORLD asked and got nothing. The recorded-never-read family (39
+    records) meeting the armed-but-inert one (57).
+
+    TWO RULES, and the second is the one that matters. Every key must appear in RNG_SUBSYSTEMS, and
+    the lookup must SUBSCRIPT rather than .get(): a missing key has to raise at startup. .get() is
+    the silent default, and this project has lost runs to silent defaults -- MAX_DOMAINS read with
+    two different defaults 128x apart at two sites is the same shape one layer down.
+
+    WHAT IT CANNOT CATCH: a stream fetched through a name this resolver cannot follow, or a package
+    that never asks for the stream it was minted. rng.issued() is the runtime answer to the second
+    and it does not exist until the loop runs.
+    """
+    path = os.path.join(src_dir, "spine", "compose.py")
+    if not os.path.isfile(path):
+        return _report("K8", "every RNG stream the root takes is one it minted", False,
+                       "src/spine/compose.py is missing", [], vacuous=True)
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as e:
+        return _report("K8", "every RNG stream the root takes is one it minted", False,
+                       f"src/spine/compose.py does not parse at line {e.lineno}", [])
+
+    declared = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", "") == "RNG_SUBSYSTEMS" for t in node.targets):
+            for e in ast.walk(node.value):
+                if isinstance(e, ast.Constant) and isinstance(e.value, str):
+                    declared.append(e.value)
+    declared = set(declared)
+
+    def _is_streams(n):
+        return (isinstance(n, ast.Attribute) and n.attr == "streams") or \
+               (isinstance(n, ast.Name) and n.id == "streams")
+
+    findings, looked = [], 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and _is_streams(node.value):
+            looked += 1
+            k = node.slice
+            if isinstance(k, ast.Constant) and isinstance(k.value, str) and k.value not in declared:
+                findings.append(f"src/spine/compose.py:{node.lineno}  takes the stream "
+                                f"{k.value!r}, which RNG_SUBSYSTEMS does not mint. It would raise at "
+                                f"startup -- which is the right behaviour and the reason to say so "
+                                f"here instead.")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr == "get" and _is_streams(node.func.value):
+            looked += 1
+            k = node.args[0] if node.args else None
+            nm = k.value if isinstance(k, ast.Constant) else "?"
+            findings.append(
+                f"src/spine/compose.py:{node.lineno}  takes the stream {nm!r} with .get(), which "
+                f"returns None for a name RNG_SUBSYSTEMS never minted instead of raising. Every "
+                f"sibling constructor subscripts. Use streams[{nm!r}] and add {nm!r} to "
+                f"RNG_SUBSYSTEMS."
+                + ("" if nm in declared else f" ({nm!r} is not in RNG_SUBSYSTEMS today, so this is "
+                                             f"handing None to a required argument right now.)"))
+    return _report("K8", "every RNG stream the root takes is one it minted", not findings,
+                   f"{looked} stream lookup(s) against {len(declared)} minted subsystem(s)",
+                   findings, vacuous=not looked)
+
+
+
+# ==================================================================================================
+# K9 -- no cadence gate is handed a bare lever read
+# ==================================================================================================
+
+_DUE_RE = re.compile(r"Cadences\.due\(\s*'([^']+)'\s*,\s*([^,]+?)\s*,")
+
+
+def check_k9_cadence_periods_are_typed(src_dir=SRC):
+    """K9 -- every Cadences.due period in the order tables is a typed accessor, not a lever read.
+
+    THE DEFECT. RUN.Cadences.due states its own contract: "`period` MUST be units.Windows. An int
+    raises; a Flushes raises." Three rows handed it a bare lever read --
+    Cadences.due('fab.manage', FAB.manage_every, clock), and the same for DOM.manage_every and
+    MEM.rekey_every -- and Config hands back a bare int for all 35 levers that declare a Clock unit
+    (ISSUES H51). So three of the five periodic gates in the system would have raised on their first
+    evaluation, and the row said they were fine.
+
+    EVAL and CKPT already had typed accessors (curve_period, save_period) and did not raise. That is
+    the tell: the same table declared the same thing two ways, and the two that were right made the
+    three that were wrong look like a style difference.
+
+    WHAT THE RULE IS. The period must be a CALL -- PKG.something(...) -- not an attribute read. The
+    accessor lives in the package that DECLARES the kind, which is the whole argument for it over
+    wrapping at the call site: a root writing Windows(fab.manage_every) asserts FAB's kind from
+    outside FAB, in as many places as there are gates, each free to be wrong on its own. One
+    accessor per period is the rule the wires already follow.
+
+    A CONSTRUCTION IS NOT A CONVERSION, and the distinction matters because this project calls one
+    of them a defect. Windows(int) re-attaches a kind the lever already declares. The defect is
+    crossing kinds unnamed -- manage_every // batch_w, Windows to Flushes -- which is
+    derive.flush_period_windows and is not this.
+
+    WHAT IT CANNOT CATCH: an accessor that returns the wrong kind, or the right kind computed
+    wrongly. It reads the ORDER TABLES, which are data; whether P4's loop actually calls due() with
+    what the row says is L2's, and does not exist yet.
+    """
+    path = os.path.join(src_dir, "spine", "compose.py")
+    if not os.path.isfile(path):
+        return _report("K9", "no cadence gate is handed a bare lever read", False,
+                       "src/spine/compose.py is missing", [], vacuous=True)
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    # Read the joined row text, so a period split across two source lines is still seen whole.
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as e:
+        return _report("K9", "no cadence gate is handed a bare lever read", False,
+                       f"src/spine/compose.py does not parse at line {e.lineno}", [])
+    prose = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and any(
+                getattr(t, "id", "") in ("ASSEMBLY_ORDER", "LOOP_ORDER") for t in node.targets)):
+            continue
+        for row in ast.walk(node.value):
+            if isinstance(row, ast.Tuple) and len(row.elts) >= 4:
+                parts = [e.value for e in row.elts
+                         if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+                if len(parts) >= 4:
+                    prose.append((row.lineno, " ".join(parts[3:])))
+
+    findings, gates = [], 0
+    for lineno, text_row in prose:
+        for key, period in _DUE_RE.findall(text_row):
+            period = period.strip()
+            if period in ("...", "..."):
+                continue                       # an elided illustration, not a declared gate
+            gates += 1
+            if "(" in period:
+                continue                       # a call: the typed accessor
+            findings.append(
+                f"src/spine/compose.py:{lineno}  the {key!r} gate is handed {period!r}, a bare "
+                f"attribute read. Cadences.due states 'period MUST be units.Windows. An int raises', "
+                f"and a Config hands back an int for every lever that declares a Clock unit. Give "
+                f"the owning package a typed period accessor, as EVAL.curve_period and "
+                f"CKPT.save_period already are.")
+    return _report("K9", "no cadence gate is handed a bare lever read", not findings,
+                   f"{gates} Cadences.due gate(s) declared across {len(prose)} row note(s)",
+                   findings, vacuous=not gates)
+
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
@@ -1349,6 +1540,8 @@ CHECKS = (
     check_k5_wires_are_read,
     check_k6_readers_are_reached,
     check_k7_root_reads_declared_names,
+    check_k8_streams_are_declared,
+    check_k9_cadence_periods_are_typed,
 )
 
 

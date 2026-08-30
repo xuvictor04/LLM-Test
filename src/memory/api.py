@@ -19,6 +19,7 @@ RECORD TYPES RETURNED (P4 defines them):
   Retrieval      dist, conf, hits, weights, blend
 """
 from spine.lever import Config
+from spine import units as U
 
 
 def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, restored=None):
@@ -318,3 +319,24 @@ def state_dict(mem: Config, store):
     raise NotImplementedError(
         "MEM.state_dict: P4 (memory) fills this in. The contract is frozen here; see "
         "docs/04_CONTRACT.md, section MEM.")
+
+
+def rekey_period(mem: Config):
+    """The memory rekey cadence, AS units.Windows. Handed to RUN's Cadences.due under 'dom.rekey'.
+
+    Same reason as FAB.manage_period and DOM.manage_period: Cadences.due refuses a bare int, and
+    Config hands one back for every lever that declares a Clock unit (ISSUES H51). This was one of
+    the three rows that would have raised on the first evaluation.
+
+    THE KEY IS 'dom.rekey' AND THE PERIOD IS MEM'S, which looks wrong and is not: the old line made
+    TWO foreign reads in one statement (:6688-6689), and the split keeps the threshold with the
+    package that declares it while the spine delivers the event to DOM. MEM.maintain compares this
+    same lever against a Windows `now` internally; that is the second gate on one lever, and
+    docs/04_CONTRACT.md's cadence table names both so the ledger cannot describe only one of them.
+
+    LEVERS READ: rekey_every
+    WIRES READ: none
+    DID IT FIRE: no counter of its own -- Cadences.ledger()['dom.rekey'] is the surface.
+    """
+    mem = mem.owned_by("MEM")
+    return U.Windows(int(mem.rekey_every))

@@ -117,8 +117,16 @@ APIS = {
 # per-epoch stream names DATA derives itself. rng.issued() is then the DID-IT-FIRE surface for the
 # whole randomness story: a subsystem present with ZERO DRAWS is armed-but-inert, and a subsystem
 # ABSENT never asked. Those are two different statements and G4 requires the report to make both.
-RNG_SUBSYSTEMS = ("lm", "sig", "fabric", "memory", "domains", "tok.dropout",
+RNG_SUBSYSTEMS = ("lm", "sig", "fabric", "memory", "domains", "world", "tok.dropout",
                   "data.synth", "data.holdout", "eval")
+# "world" WAS MISSING AND THE ROOT REACHED FOR IT WITH .get(), so WORLD.build received rng=None for
+# the life of every run. The four sibling constructors all use streams["name"], which raises on a
+# missing key; this one line used .get() and returned None instead, and world/api.py:35 takes rng as
+# a REQUIRED keyword. It is the silent-default shape, in the file whose comment two lines above says
+# a subsystem ABSENT from rng.issued() means "never asked" -- so the report would have said WORLD
+# never asked for randomness, on a run where WORLD asked and was handed None. That is a third state
+# G4 has no name for, and it is worse than either of the two it distinguishes.
+# K8 below refuses .get() on the stream map and checks every key against this tuple.
 
 
 # ==================================================================================================
@@ -342,7 +350,7 @@ LOOP_ORDER = (
                                       "suffix -- without it Saves.best can never be non-zero and the "
                                       "only copies of the good model are never written"),
     ("A", "MEM",   "census",          "THE MANAGEMENT PASS OPENS HERE. Cadences.due('dom.manage', "
-                                      "DOM.manage_every, clock) is asked ONCE and the next three "
+                                      "DOM.manage_period(dom), clock) is asked ONCE and the next three "
                                       "rows run inside that one answer: due() RECORDS the fire and "
                                       "returns True, so asking a second time under the same key "
                                       "CONSUMES the event -- the defect that made minting never "
@@ -365,7 +373,7 @@ LOOP_ORDER = (
                                       "CADENCED rather than run once from the report over a store "
                                       "whose every write had reset selfcon to -1. Which management "
                                       "pass is the owner's call: Q-MEM-8"),
-    ("A", "FAB",   "manage",          "Cadences.due('fab.manage', FAB.manage_every, clock)"),
+    ("A", "FAB",   "manage",          "Cadences.due('fab.manage', FAB.manage_period(fab), clock)"),
     ("A", "WORLD", "manage",          "the SAME Windows cadence, NEVER FAB.d_manage_period, which "
                                       "is Flushes -- a 16x error at BATCH_W=16"),
     ("A", "SIG",   "cadence_due",     "SIG's OWN two-arm shift gate, not Cadences.due: it selects "
@@ -384,7 +392,7 @@ LOOP_ORDER = (
                                       "encoder while an AdamW steps it on zero gradients"),
     ("A", "SIG",   "encode",          "one signature per window, at st.width_units, always"),
     ("A", "DOM",   "observe",         "once per window, above the early-out: `sustain` is Windows"),
-    ("A", "DOM",   "rekey",           "Cadences.due('dom.rekey', MEM.rekey_every, clock) -- the "
+    ("A", "DOM",   "rekey",           "Cadences.due('dom.rekey', MEM.rekey_period(mem), clock) -- the "
                                       "period is MEM's and the arm test is SIG.mode == 'learned', so "
                                       "BOTH are evaluated HERE and delivered as an event; the old "
                                       "line made two foreign reads at :6688-6689. AFTER observe, so "
@@ -758,7 +766,7 @@ def compose(environ=None, *, restored=None):
     sysm.stage = "world"
     sysm.world = world_api.build(
         world, d_model=int(lm.width), device=sysm.process.device,
-        ctx_tokens=int(lm.ctx), rng=sysm.streams.get("world"))
+        ctx_tokens=int(lm.ctx), rng=sysm.streams["world"])
     if "WORLD" in saved:
         # STRICTLY BEFORE OPT.build: replaying the grown population first is what lets the
         # optimizer below be constructed with the SAME param-group structure the checkpoint has,

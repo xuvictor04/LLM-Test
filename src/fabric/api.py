@@ -28,6 +28,7 @@ RECORD TYPES RETURNED (P4 defines them):
   GrowReport     asked vs grown, per trigger; declined_cap, declined_newfrac, lineage counts
 """
 from spine.lever import Config
+from spine import units as U
 
 
 def build(fab: Config, *, d_model, signature_dim, device, generator):
@@ -397,3 +398,32 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
     raise NotImplementedError(
         "FAB.load_state_dict: P4 (fabric) fills this in. The contract is frozen here; see "
         "docs/04_CONTRACT.md, section FAB.")
+
+
+def manage_period(fab: Config):
+    """The fabric management cadence, AS units.Windows. Handed to RUN's Cadences.due.
+
+    WHY THIS EXISTS RATHER THAN THE ROOT PASSING cfg.manage_every. Cadences.due states that its
+    period "MUST be units.Windows. An int raises; a Flushes raises." -- and Config hands back a bare
+    int for all 35 levers that declare a Clock unit (ISSUES H51), so the row that read
+    `Cadences.due('fab.manage', FAB.manage_every, clock)` was passing an int into a function whose
+    contract refuses one. EVAL and CKPT already had typed accessors (curve_period, save_period);
+    FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.
+
+    THE WRAP BELONGS HERE AND NOT AT THE CALL SITE because this is where the kind is DECLARED.
+    fabric/levers.py:648 types manage_every Windows; a root that wrote Windows(fab.manage_every)
+    would be asserting that kind from outside the package that owns it, in three places, each free
+    to be wrong on its own. One accessor per period is the same rule the wires follow.
+
+    IT IS A CONSTRUCTION, NOT A CONVERSION. Windows(int) re-attaches the declared kind; it does not
+    cross kinds. The inline arithmetic this project calls a defect is
+    `manage_every // batch_w` -- Windows to Flushes, unnamed -- which is derive.flush_period_windows
+    and is not this.
+
+    LEVERS READ: manage_every
+    WIRES READ: none
+    DID IT FIRE: no counter of its own -- Cadences.ledger()['fab.manage'] is the surface, and that
+                 is the point of routing every gate through one primitive.
+    """
+    fab = fab.owned_by("FAB")
+    return U.Windows(int(fab.manage_every))

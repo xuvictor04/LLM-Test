@@ -558,9 +558,9 @@ Every periodic row names a period a package **declares**, evaluated through
 | key | period | owner |
 |---|---|---|
 | `curve` | `EVAL.curve_period(ev)` ← `EVAL.curve_every` | EVAL |
-| `dom.manage` | `DOM.manage_every` | DOM |
-| `fab.manage` | `FAB.manage_every` | FAB |
-| `dom.rekey` | **`MEM.rekey_every`** | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
+| `dom.manage` | `DOM.manage_period(dom)` ← `DOM.manage_every` | DOM |
+| `fab.manage` | `FAB.manage_period(fab)` ← `FAB.manage_every` | FAB |
+| `dom.rekey` | **`MEM.rekey_period(mem)`** ← `MEM.rekey_every` | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
 | `ckpt` | `CKPT.save_period(ck)` ← `CKPT.every` | CKPT |
 | MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM |
 
@@ -1105,6 +1105,7 @@ DOM: on_retokenize(dom: Config, part)
 DOM: prior(dom: Config, part, *, did)
 DOM: census(dom: Config, part)
 DOM: state_dict(dom: Config, part)
+DOM: manage_period(dom: Config)
 EVAL: curve_period(ev: Config)
 EVAL: curve_probe(ev: Config, *, units_by_domain, logits_fn, rng)
 EVAL: holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng)
@@ -1124,6 +1125,7 @@ FAB: own_lr_scale(fab: Config, pop, *, applied_lr)
 FAB: counters(fab: Config, pop)
 FAB: state_dict(fab: Config, pop)
 FAB: load_state_dict(fab: Config, pop, sd, *, sidecar)
+FAB: manage_period(fab: Config)
 LM: resolve(lm: Config)
 LM: build_model(lm: Config, geom, *, device, seed)
 LM: encode(lm: Config, model, x, *, n_layers=None, extra=None)
@@ -1143,6 +1145,7 @@ MEM: apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources)
 MEM: judge(mem: Config, store, *, scorer=None, reconstructor=None)
 MEM: census(mem: Config, store, *, reconcile=False)
 MEM: state_dict(mem: Config, store)
+MEM: rekey_period(mem: Config)
 OPT: build(opt: Config, *, param_groups, run_windows, resume=None)
 OPT: lr_at(opt: Config, st, opt_step)
 OPT: scaled_backward(opt: Config, st, total)
