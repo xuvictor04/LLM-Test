@@ -203,31 +203,42 @@ def smoke():
     # RAISES rather than returning False, so against an untyped pin_tick the value assertion below fails
     # as a UnitError traceback out of units.Clock._same -- a real failure, reported as a crash in the
     # wrong file. Asserting the type first makes the same regression say what it is.
-    assert type(derive.pin_tick(Steps(2650), True, Steps(16))) is Steps, "pin_tick lost its unit type"
-    assert derive.pin_tick(Steps(2650), True, Steps(16)) == Steps(2666)
-    assert type(derive.pin_tick(2650, True, 16)) is Steps          # bare ints coerce IN, Steps comes OUT
-    assert derive.pin_tick(Steps(8), False, Steps(16)) == Steps(0)  # clamped at zero, still carrying kind
-    for bad in (Flushes(2650), Windows(2650), Backwards(2650)):
+    # WINDOWS, NOT STEPS, AND THESE ASSERTIONS SAID Steps UNTIL THE CONTRADICTION WAS FOUND. Two frozen
+    # surfaces disagreed: src/capacity/api.py:16 declared "pin_tick is re-typed to accumulate
+    # units.Windows ... NO CONVERSION HAPPENS ANYWHERE" while derive.pin_tick refused a Windows, so a
+    # P4 implementer following the contract got UnitError on the first flush and the only non-raising
+    # implementation left was `int(held) >= cap.pin_windows` -- the original defect, restored at the
+    # comparison. units.py settles which side was wrong: Steps is "Optimizer steps ... AND NOTHING
+    # ELSE", Windows is "what `step` counts", and this clock accumulates deltas of `step`.
+    # The 32 oracle cases above did not move: they record raw ints in and out, so they pin the
+    # arithmetic and never saw the kind. These typed assertions are the only thing that did.
+    assert type(derive.pin_tick(Windows(2650), True, Windows(16))) is Windows, "pin_tick lost its unit"
+    assert derive.pin_tick(Windows(2650), True, Windows(16)) == Windows(2666)
+    assert type(derive.pin_tick(2650, True, 16)) is Windows        # bare ints coerce IN, Windows comes OUT
+    assert derive.pin_tick(Windows(8), False, Windows(16)) == Windows(0)   # clamped, still carrying kind
+    for bad in (Flushes(2650), Steps(2650), Backwards(2650)):
         try:
-            derive.pin_tick(bad, True, Steps(16))
+            derive.pin_tick(bad, True, Windows(16))
             raise AssertionError(f"foreign clock accepted as held: {bad!r}")
         except UnitError:
             pass
         try:
-            derive.pin_tick(Steps(2650), True, bad)
+            derive.pin_tick(Windows(2650), True, bad)
             raise AssertionError(f"foreign clock accepted as dstep: {bad!r}")
         except UnitError:
             pass
     # The kind has to survive OUT of the function, because the comparison -- not the accumulation -- is
-    # where the 16x error actually landed. A Steps answer measures against a Steps threshold and REFUSES
+    # where the 16x error actually landed. A Windows answer measures against CAP.pin_windows and REFUSES
     # the same threshold expressed in flushes, which is the failure the shipped code never got.
-    held = derive.pin_tick(Steps(43645), True, Steps(0))
-    assert held >= Steps(20000)                                   # 43,645 real steps: the lift was earned
-    try:
-        _ = held >= derive.flush_period(Steps(20000), 16)         # the same threshold, in flushes: 1250
-        raise AssertionError("a steps clock compared against a flush threshold and did not raise")
-    except UnitError:
-        pass
+    held = derive.pin_tick(Windows(43645), True, Windows(0))
+    assert held >= Windows(20000)                                 # 43,645 real ticks: the lift was earned
+    for wrong in (derive.flush_period_windows(Windows(20000), 16),  # repair (b): the same threshold,
+                  Steps(20000)):                                    # in flushes -- and the old kind
+        try:
+            _ = held >= wrong
+            raise AssertionError(f"a windows clock compared against {wrong!r} and did not raise")
+        except UnitError:
+            pass
 
     # The remaining five are covered by their tables; call each once so an import-time or signature
     # breakage cannot hide behind a table that is only read when the file is run.

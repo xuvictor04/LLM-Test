@@ -311,10 +311,39 @@ def accum_due(n_backward, accum):
 
 
 def pin_tick(held, pinned, dstep):
-    """Advance the pinned-at-the-cap clock by however many steps elapsed, not by one per call.
+    """Advance the pinned-at-the-cap clock by however many WINDOWS elapsed, not by one per call.
 
-    UNIT IN: held = Steps (the accumulated clock), pinned = on/off, dstep = Steps (the step delta).
-    UNIT OUT: Steps.
+    UNIT IN: held = Windows (the accumulated clock), pinned = on/off, dstep = Windows (the delta).
+    UNIT OUT: Windows.
+
+    WINDOWS, NOT STEPS, AND THIS FILE SAID STEPS FOR SIX COMMITS. The kind is settled by units.py's
+    own definitions, not by preference: `Steps` is "Optimizer steps. What the LR schedule's horizon
+    is denominated in, AND NOTHING ELSE"; `Windows` is "Stream windows. What `step` counts." The
+    quantity accumulated here is the delta of the loop counter `step` (`_dstep = step - _pin_prev[0]`
+    at the call site), and `step` advances once per WINDOW (`i += WIN; step += 1`,
+    self_organize.py:6796 and :7708). So the clock was carrying window deltas under the one kind name
+    units.py reserves for something else -- the original conflation, moved from the arithmetic into
+    the type that was added to prevent it.
+
+    THE CONTRADICTION THIS RESOLVES, because it was frozen on two surfaces at once.
+    src/capacity/levers.py:88-108 sets out two legal repairs and records that applying BOTH fires the
+    valve 16x too EARLY. capacity/api.py:16 then froze repair (a) as done -- "pin_tick is re-typed to
+    accumulate units.Windows ... NO CONVERSION HAPPENS ANYWHERE" -- while this function still refused
+    a Windows, and docs/04_CONTRACT.md stated the same repair as done in one section and proposed in
+    another. A P4 implementer following the CAP contract would have written
+    pin_tick(held_windows, pinned, elapsed_windows) and got UnitError on the first flush; the only
+    non-raising implementation left was `int(held) >= cap.pin_windows`, which capacity/levers.py:107
+    names as "the original defect again". This is repair (a), applied here, once.
+
+    Repair (b) -- converting the THRESHOLD to Flushes -- stays only in FAB.d_cap_lift_period and
+    TOK.d_cap_lift_period, which fabric/api.py:305 and tok/api.py:313 read for REPORTING beside the
+    lift counters, because "0 lifts" cannot otherwise distinguish "never full" from "never
+    plateaued". Nothing compares them against this clock, and Windows >= Flushes raises, so both
+    repairs cannot be live in the valve at once by construction rather than by discipline.
+
+    THE 32 ORACLE CASES ARE UNAFFECTED. They record raw ints in and raw ints out -- the shipped
+    function had no types to capture -- so the arithmetic they pin is identical and only the wrapper
+    kind changed. That is also the limit of what they prove, and it is stated below.
 
     IT MUST BE A STEP DELTA AND IT WAS A BARE +1/-1. See flush_period above for the measurement: at
     BATCH_W=16 this ran once per flush while the threshold it feeds is written in steps, so 43,645 real
@@ -324,19 +353,19 @@ def pin_tick(held, pinned, dstep):
     NO UNIT TYPE AT ALL. flush_period refuses a Flushes and accum_due refuses anything but a Backwards;
     pin_tick accepted whatever it was handed and returned a bare int:
 
-        pin_tick(Flushes(2650), True, Flushes(16))  ->  2666   -- a FLUSH count, labelled steps
+        pin_tick(Flushes(2650), True, Flushes(16))  ->  2666   -- a FLUSH count, labelled windows
         pin_tick(True, 400, 16)                     ->    17   -- the bool/int swap, below
 
     The first line is the shipped defect reconstructed exactly, inside the function whose own docstring
     describes it: flushes accumulate, the answer comes out kindless, and the threshold comparison that
-    was the actual failure site -- `held >= GROW_CAP_EVERY`, 20,000 STEPS -- passes on a clock running at
-    1/BATCH_W. Now `held` and `dstep` are Steps and so is the answer, so that comparison raises UnitError
-    against a Flushes threshold instead of quietly being 16x slow.
+    was the actual failure site -- `held >= GROW_CAP_EVERY`, 20,000 -- passes on a clock running at
+    1/BATCH_W. Now `held` and `dstep` are Windows and so is the answer, so that comparison raises
+    UnitError against a Flushes threshold instead of quietly being 16x slow.
 
     BARE INTS ARE COERCED; FOREIGN CLOCKS RAISE. The 32 captured oracle cases pass plain ints, because the
     shipped function had no types to capture, and refusing them would throw away the only evidence of what
     the old code did. So an int (a bool included -- the capture grid passes True as `held`) is read as
-    Steps below, reproducing the shipped `int(...)` truncation, while a Flushes raises. THE TABLE CANNOT
+    Windows below, reproducing the shipped `int(...)` truncation, while a Flushes raises. THE TABLE CANNOT
     SEE THIS DISTINCTION: a typed implementation and an untyped one replay all 32 cases identically, so
     the typed smoke assertions in tests/test_derive.py are the only thing covering it. That blind spot is
     named there too.
@@ -345,7 +374,7 @@ def pin_tick(held, pinned, dstep):
     grid did with it: it passed the BOOLEAN as `held` and the COUNT as `pinned`, and the function
     accepted that silently and produced a full table of confident answers, because a bool and an int are
     positionally interchangeable here. Typing the clocks does NOT close that one -- `bool` IS an `int`,
-    so `pin_tick(True, 400, 16)` still coerces to Steps(1) and still answers 17. It is a live hazard in
+    so `pin_tick(True, 400, 16)` still coerces to Windows(1) and still answers 17. It is a live hazard in
     this signature, not a historical one -- call it with keywords.
 
     Clamped at zero on the way down: an unpinned population that has been unpinned longer than it was
@@ -356,22 +385,26 @@ def pin_tick(held, pinned, dstep):
     # names neither the argument nor the defect. Written out once per clock argument rather than folded
     # into a helper, because flush_period and accum_due each state their type test inline and a reader
     # comparing the three unit-typed functions should meet the same shape three times.
-    if isinstance(held, Clock) and type(held) is not Steps:
-        raise UnitError(f"pin_tick: held must be Steps, got {type(held).__name__}. This clock accumulates "
-                        f"REAL STEPS against a threshold written in steps (GROW_CAP_EVERY=20000); a flush "
-                        f"count here is the defect that read 43,645 steps as 2,650 at BATCH_W=16. If the "
-                        f"caller counts flushes, convert the THRESHOLD with flush_period, not this.")
-    if isinstance(dstep, Clock) and type(dstep) is not Steps:
-        raise UnitError(f"pin_tick: dstep must be Steps, got {type(dstep).__name__}. The delta is how many "
-                        f"steps elapsed since the last call, not how many times the loop body ran -- "
-                        f"ticking once per flush is precisely how the clock came out 16x slow.")
-    # BARE INT -> Steps AT THE BOUNDARY. `Steps(v)` is `int(v)` for anything that is not already a clock,
+    if isinstance(held, Clock) and type(held) is not Windows:
+        raise UnitError(f"pin_tick: held must be Windows, got {type(held).__name__}. This clock "
+                        f"accumulates deltas of the loop counter `step`, which advances once per WINDOW, "
+                        f"against CAP.pin_windows -- a threshold declared in Windows. A Flushes here is "
+                        f"the defect that read 43,645 real ticks as 2,650 at BATCH_W=16. A Steps here is "
+                        f"the same defect wearing the kind units.py reserves for the LR horizon and "
+                        f"nothing else. Do not convert the threshold either: FAB.d_cap_lift_period and "
+                        f"TOK.d_cap_lift_period exist for the REPORT, and applying both repairs at once "
+                        f"fires the valve 16x too EARLY (capacity/levers.py:88-108).")
+    if isinstance(dstep, Clock) and type(dstep) is not Windows:
+        raise UnitError(f"pin_tick: dstep must be Windows, got {type(dstep).__name__}. The delta is how "
+                        f"many windows elapsed since the last call, not how many times the loop body ran "
+                        f"-- ticking once per flush is precisely how the clock came out 16x slow.")
+    # BARE INT -> Windows AT THE BOUNDARY. `Windows(v)` is `int(v)` for anything not already a clock,
     # so this is the shipped `int(held)` / `int(dstep)` truncation unchanged and the 32 oracle cases still
     # replay through it. It is a concession to the captured table, not a general invitation: an int gets
     # in because the oracle predates units, a Flushes does not because it is the bug.
-    held = Steps(held)
-    dstep = max(Steps(0), Steps(dstep))
-    return (held + dstep) if pinned else max(Steps(0), held - dstep)
+    held = Windows(held)
+    dstep = max(Windows(0), Windows(dstep))
+    return (held + dstep) if pinned else max(Windows(0), held - dstep)
 
 
 # === continual learning: the sign the whole claim rests on =======================================

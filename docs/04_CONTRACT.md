@@ -655,16 +655,40 @@ is the 16×-early fault. **Recommendation: (b) once the owner confirms the valve
 because a row nothing but the report reads is a row a future author will "fix" by connecting it.
 Changing a declared ledger row is the owner's call.
 
-### Q-DERIVE-1 — re-type `derive.pin_tick` from `Steps` to `Windows`?
-`derive.py:313-375` types `held` and `dstep` as `Steps` and raises on any other kind, while
-`CAP.pin_windows` is `Windows`. **As the tree stands the two cannot meet** — and that refusal is the
-mechanism working. The delta the clock accumulates is `step - _pin_prev`, a **window** delta. The 32
-captured oracle cases pass plain ints and replay unchanged either way; only the typed smoke
-assertions in `tests/test_derive.py` move. **Recommendation: re-type it, and correct the docstring's
-"REAL STEPS" to "real windows" in the same edit.** There is no second caller. This is a
-`spine/derive.py` edit; the contract phase did not make it because nothing in the stubs can call it
-yet, and a `Steps` form nobody can legally call reads as a claim that the steps form is right rather
-than unused.
+### Q-DERIVE-1 — re-type `derive.pin_tick` from `Steps` to `Windows`? — **RESOLVED 2026-08-30, repair (a) adopted**
+
+It was re-typed. `derive.pin_tick` now accumulates `Windows` and raises on `Steps`, `Flushes` or
+`Backwards`.
+
+**Why this could not stay open.** It was not a question in one place and an answer in another by
+accident — it was the *same* claim, frozen twice with opposite content. `src/capacity/api.py:16` said
+"derive.pin_tick **is** re-typed to accumulate units.Windows … NO CONVERSION HAPPENS ANYWHERE" while
+`derive.pin_tick` refused a `Windows`, and this document said the repair was done in §CAP and
+proposed here. A P4 implementer following the CAP contract writes
+`pin_tick(held_windows, pinned, elapsed_windows)`, gets `UnitError` on the first flush, and is left
+with `int(held) >= cap.pin_windows` as the only form that runs — which `capacity/levers.py:107` names
+as *"the original defect again"*. A reviewer found it by reading both surfaces; nothing executed,
+because `compose()` stops at `RUN.process_setup` long before the valve.
+
+**Which side was wrong is not a preference.** `spine/units.py` defines `Steps` as *"Optimizer steps.
+What the LR schedule's horizon is denominated in, **and nothing else**"* and `Windows` as *"Stream
+windows. What `step` counts."* The clock accumulates `step - _pin_prev`, a window delta. The `Steps`
+typing was the original conflation moved out of the arithmetic and into the type added to prevent it
+— and `pin_tick`'s docstring called the 43,645 *"REAL STEPS"*, using "steps" for the loop counter one
+level below the defect it repaired.
+
+**What moved.** `spine/derive.py` (the kind, the two refusal messages, the docstring),
+`tests/test_derive.py` (the typed smoke assertions — the 32 oracle cases record raw ints in and out,
+so they pin the arithmetic and never saw the kind), `src/capacity/levers.py:88-108` (from "stated and
+not resolved" to settled), and the two `d_cap_lift_period` reason columns in `spine/assemble.py`.
+
+**Repair (b) survives as reporting only.** `FAB.d_cap_lift_period` and `TOK.d_cap_lift_period` are
+still wired as a `Flushes` period, read by `fabric/api.py` and `tok/api.py` beside the lift counters,
+because *"0 lifts"* cannot otherwise distinguish "never full" from "never plateaued". Nothing compares
+them against the clock. Both repairs can no longer be live in the valve at once **by construction**:
+`Windows >= Flushes` raises. Applying both would turn 20,000 into 1,250 at `BATCH_W=16` and fire the
+valve sixteen times too *early* — harder to see than the original, because a valve that fires looks
+like a valve that works.
 
 ### Q-DATA-4 — `data/continual/` and `data/ood/` are unreachable from any DATA lever
 `datastream.py:72` hardcodes `{data_dir}/train/{d}/*`. The repository ships

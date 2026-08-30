@@ -797,11 +797,16 @@ COUPLINGS = [
             "fabgrow.n (calls) to the same threshold and lifted nothing for a further whole round, the "
             "first fault masking the second. The knob is now CAP.pin_windows (census GROW_CAP_EVERY -> "
             "CAP_PIN_STEPS, re-typed and re-named to CAP_PIN_WINDOWS at capacity/levers.py:305 because "
-            "the counter it is compared against is `step`). CAVEAT THE VALVE PORT MUST SETTLE, recorded "
-            "rather than papered over: derive.pin_tick still types its accumulated clock as Steps, so a "
-            "Windows threshold and a Steps clock cannot meet -- capacity/levers.py:88-108 sets out the "
-            "two legal repairs, and applying both at once fires the valve 16x too EARLY. This row "
-            "converts the threshold and nothing else."),
+            "the counter it is compared against is `step`). THE VALVE PORT IS NOW SETTLED, and this row is "
+            "no longer the valve's comparison. derive.pin_tick accumulates WINDOWS as of 2026-08-30 -- "
+            "repair (a), because units.py reserves Steps for the LR horizon and nothing else while the "
+            "clock accumulates deltas of `step`, which counts windows. So the valve compares a Windows "
+            "clock against CAP.pin_windows directly, with NO conversion. This row is REPORTING: "
+            "fabric/api.py reads d_cap_lift_period beside the lift counters, because '0 lifts' cannot "
+            "otherwise distinguish 'never full' from 'never plateaued'. Both repairs can no longer be "
+            "live in the valve at once, and not by discipline -- Windows >= Flushes raises. Applying "
+            "both would make 20,000 into 1,250 at BATCH_W=16 and fire the valve 16x too EARLY, which is "
+            "harder to see than the original because a valve that fires looks like a valve that works."),
     Coupling(
         src=("OPT.batch_windows", "CAP.pin_windows"),
         dst="TOK.d_cap_lift_period",

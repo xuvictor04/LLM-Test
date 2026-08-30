@@ -23,6 +23,17 @@ survive in this contract as REPORTING wires only (see FOR THE OWNER Q-CLOCK-1); 
 read either of them, and Windows(...) >= Flushes(...) raises, so applying both repairs at once is
 refused by the type system rather than by discipline.
 
+    TRUE IN THE CODE AS OF 2026-08-30, and it was not when this paragraph was written. For six
+    commits this file asserted the repair as done while spine/derive.py still refused a Windows,
+    and docs/04_CONTRACT.md stated it done in one section and proposed in another (Q-DERIVE-1). An
+    implementer following this contract would have written pin_tick(held_windows, pinned,
+    elapsed_windows) and got UnitError on the first flush -- with `int(held) >= cap.pin_windows`,
+    the original defect restored at the comparison, as the only form that ran. Nothing executed to
+    reveal it, because compose() stops at RUN.process_setup long before the valve; a reviewer found
+    it by reading the two surfaces against each other. The repair is applied now: derive.pin_tick
+    accumulates Windows and raises on Steps, Flushes and Backwards, and the 32 captured oracle cases
+    replay unchanged because they record raw ints and never saw the kind.
+
 RECORD TYPES RETURNED (P4 defines them):
   Valve     cap_experts, cap_vocab, the two accumulated pin clocks (Windows), four high-water
             marks, best improving seen, stall-test count, last-called window index, origin

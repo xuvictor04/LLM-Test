@@ -86,7 +86,7 @@ This matters most because of what it would certify: PLAN's P3 exit criterion is 
 
 **Not fixed by editing the numbers**, which would only move the inconsistency. The repair is to make it *loud*: `RUN.startup_refusals` already exists as an entry point, and the resolved run length is known at build time from `stream_bytes`, `ctx`, `epochs` and the measured bytes/token — so a run can say at startup which cadences cannot fire before it spends a single step. Whether the defaults themselves should change is the owner's call (§ *for the owner*, `docs/04_CONTRACT.md`).
 
-### HIGH (50)
+### HIGH (51)
 
 **H1. Three arms in the DEFAULT grid list are the same run, and three more are a second identical triple** *(unverified)*  
 `wrong-measurement` · harness · longrun.sh:1116-1117 (GRID_ARMS_DEFAULT), resolved at :164 base, :173 vote, :174 socloop, :175 socloop_w, :176 vote_w, :292 weights  
@@ -288,6 +288,22 @@ self_organize.py drops corpora under 5000 bytes and explicitly realigns DN so 't
 `coupling` · tools · fetch_big.py:212 vs fetch_big.py:112-114  
 Lines 105-114 were explicitly rewritten so a preset is found by short key OR by full id. Line 212 was not: `is_dialogue = a.dataset == "oasst1"`. So `--dataset OpenAssistant/oasst1` — the id printed on the dataset page — resolves field='text' from the preset and then writes plain text with no `<|user|>` / `<|assistant|>` markers. The preset's entire stated purpose ('DIALOGUE. Formats as turn-marked conversations', 'teaches TURN-TAKING') is silently discarded, and nothing downstream can detect it. Same bug class, one line below the fix.
 
+
+**H51. All 35 levers that declare a Clock unit resolve to a bare int, so the unit is metadata at every read site** **[CONFIRMED]**  
+`unit-mismatch` · rework · measured from `build(environ={})` on 2026-08-30  
+`spine/units.py` exists because one number compared against two clock kinds is this project's most repeated defect. 35 levers declare a Clock unit — `CAP.pin_windows` (Windows), `DOM.manage_every` (Windows), `EVAL.curve_every` (Windows), `OPT.lr_warmup`, `FAB.bal_warm`, `TOK.retok_every` and 29 others — and `Config` hands back **`int` for 34 of them and `float` for one**. So the kind is a comment unless the reader wraps it:
+
+```
+held >= cfg.pin_windows              -> UnitError   (the mechanism working)
+int(held) >= cfg.pin_windows         -> silence     (the original defect)
+Windows(held) >= Windows(cfg.pin_windows)  -> correct, and nothing requires it
+```
+
+**Where the protection IS real**, so this is not "the units do nothing": `spine/derive.py`'s functions type-check their arguments and refuse a foreign kind, and `spine/assemble.py` wraps explicitly at every coupling (`derive.flush_period_windows(Windows(r["CAP"].pin_windows), ...)`). Any value travelling through a derive function or a wire is checked. The gap is a **package body reading its own lever** and comparing it to anything — the one place the spine cannot see, and the place all six historical instances of this defect lived.
+
+**Not fixable by making `Config` return `unit(value)`**, which was the obvious patch and was measured before being rejected: a `Clock` refuses `*`, `//`, `%` and comparison against a bare int, and several of these levers are used arithmetically (`max(1, manage_every // batch_w)` is the shipped shape). Auto-wrapping would turn every such site into a `TypeError` at once. Doing it properly means routing each arithmetic site through a **named** conversion in `spine.derive` — which is the design's own rule and is exactly what `flush_period_windows` was added for — and that is P4 work, package by package, not a patch to `lever.py`.
+
+Until then the honest statement is the one to put in the report: the clock kinds are enforced **between** packages and advisory **within** one.
 
 ### MEDIUM (118)
 

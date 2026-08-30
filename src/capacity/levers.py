@@ -86,25 +86,40 @@ anything if a later reader can see that it was looked for.
     name: the census's intended spelling is CAP_PIN_STEPS, the declared environment name is
     CAP_PIN_WINDOWS, and if the tree later settles the kind the other way the NAME must go back with it.
 
-    THE CONFLICT WITH THE SPINE, STATED AND NOT RESOLVED, because picking a side inside a declaration
-    file is how one knob acquires two meanings. Three files already disagree about this single number:
-      * spine/derive.py:265-320 `pin_tick` types `held` and `dstep` as Steps and RAISES UnitError on any
-        other Clock -- with a message that names GROW_CAP_EVERY=20000 explicitly as "a threshold written
-        in steps". Its own docstring calls the 43,645 "REAL STEPS", i.e. it uses "steps" for the loop
-        counter, which is the conflation one level down from the one it repaired.
-      * spine/assemble.py:697-719 wraps the same knob as `derive.flush_period(Steps(r["TRAIN"]
-        .grow_cap_every), r["TRAIN"].batch_w)` and hands the result to FAB.d_cap_lift_period and
-        TOK.d_cap_lift_period as a FLUSHES period.
-      * this file declares it Windows.
-    The practical consequence of the split is not academic in either direction. Comparing a Windows-typed
-    threshold against the Steps clock pin_tick returns raises UnitError at the comparison -- that refusal
-    is the mechanism working, not a bug in this file. And applying BOTH repairs at once overshoots the
-    other way: if the pin clock accumulates window deltas (the shipped fix) AND the threshold is also
-    divided by batch_w by flush_period (the wire), then 20,000 becomes 1,250 at BATCH_W=16 and the valve
-    fires sixteen times too EARLY -- the same defect reflected, and harder to see, because a valve that
-    fires looks like a valve that works. Whoever ports the valve must settle it in ONE place: either
-    re-type pin_tick's clock as Windows, or add a named Windows->Flushes conversion to spine.derive and
-    let the wire keep its period. Doing it inline at the comparison is the original defect again.
+    THE CONFLICT WITH THE SPINE: SETTLED, 2026-08-30, BY ADOPTING REPAIR (a). This note said "stated
+    and not resolved" for six commits, and the cost of leaving it open was measured. src/capacity/api.py
+    froze repair (a) as DONE -- "derive.pin_tick is re-typed to accumulate units.Windows ... NO
+    CONVERSION HAPPENS ANYWHERE" -- while derive.pin_tick still refused a Windows, and
+    docs/04_CONTRACT.md stated the same repair as done in one section and proposed in another. A P4
+    implementer following the CAP contract would have written pin_tick(held_windows, pinned,
+    elapsed_windows), got UnitError on the first flush, and been left with `int(held) >=
+    cap.pin_windows` as the only non-raising form -- which is the original defect, restored at the
+    comparison, by someone following the contract correctly.
+
+    WHICH SIDE WAS WRONG IS NOT A PREFERENCE. spine/units.py defines Steps as "Optimizer steps. What
+    the LR schedule's horizon is denominated in, AND NOTHING ELSE" and Windows as "Stream windows. What
+    `step` counts." The quantity this clock accumulates is the delta of `step` (`_dstep = step -
+    _pin_prev[0]`), and `step` advances once per window. So the Steps typing was the original
+    conflation moved out of the arithmetic and into the type that had been added to prevent it -- and
+    pin_tick's own docstring called the 43,645 "REAL STEPS", using "steps" for the loop counter one
+    level below the defect it repaired.
+
+    WHAT IS NOW TRUE, in three files:
+      * spine/derive.py `pin_tick` accumulates Windows and RAISES on Steps, Flushes or Backwards. The
+        32 captured oracle cases did not move: they record raw ints in and out, so they pin the
+        arithmetic and never saw the kind. tests/test_derive.py's typed smoke assertions are what
+        changed, and they are the only thing that ever covered it.
+      * spine/assemble.py still wires FAB.d_cap_lift_period and TOK.d_cap_lift_period as a FLUSHES
+        period -- repair (b) -- but they are read by fabric/api.py and tok/api.py for the REPORT only,
+        beside the lift counters, because "0 lifts" cannot otherwise distinguish "never full" from
+        "never plateaued". NOTHING COMPARES THEM AGAINST THIS CLOCK.
+      * this file declares the threshold Windows, unchanged.
+    BOTH REPAIRS CANNOT NOW BE LIVE IN THE VALVE AT ONCE, and not by discipline: Windows >= Flushes
+    raises. That matters because applying both overshoots the other way -- pin clock in window deltas
+    AND a threshold divided by batch_w makes 20,000 into 1,250 at BATCH_W=16 and the valve fires
+    sixteen times too EARLY. Harder to see than the original, because a valve that fires looks like a
+    valve that works.
+    Doing the conversion inline at the comparison is still the original defect and is still refused.
 
   DEFECT 3 -- NO UNRESOLVED MERGE HERE, AND IT WAS CHECKED. Both merges name `CAP_TARGETS` as the
   survivor, and CAP_TARGETS has a row of its own in the same family: GROW_CAP, verdict rename. Nothing
