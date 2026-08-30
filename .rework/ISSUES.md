@@ -20,7 +20,7 @@ Counts: critical 58, high 122, medium 181, low 114 — 475 records total.
 These came from reading the source. They are the work list for the rebuild.
 
 
-### CRITICAL (10)
+### CRITICAL (11)
 
 **C1. Six arm names resolve to a flag set identical to the shipped defaults — they are `base` under another name** *(unverified)*  
 `armed-but-inert` · harness · longrun.sh:173 (vote), :174 (socloop), :269 (nogate), :278 (nocompose), :304 (nomem), :378 (gate_press)  
@@ -62,6 +62,29 @@ Every 'weights + memory' number this testbed produces — the whole editable-mem
 **C10. `import memory` from the repository root returns the OLD system's 654-line module, not `src/memory/`** **[CONFIRMED]**  
 `silent-overwrite` · rework · ./memory.py vs src/memory/ ; measured 2026-08-29  
 `PYTHONPATH=src python3 ...` from the repository root — the natural invocation, and the first one tried — puts the ROOT ahead of `src` on `sys.path`, because PYTHONPATH lands after the script's own directory. `import memory` therefore resolves to the legacy `./memory.py` and not to `src/memory/`, silently, with no error and the wrong module's globals. It surfaced only by luck: the old file has no `levers` attribute, so `import memory.levers` raised `'memory' is not a package`; a plain `import memory`, or an old file that happened to carry the attribute, succeeds and returns the wrong system. None of the ownership checks can see this — O1 through O10 parse `src/` with `ast` and never ask which file a name resolves to. `src/data/` survives the same collision with the tracked `./data/` only because it has an `__init__.py` and a regular package outranks a namespace package found earlier; measured both ways, and removing that one file reverses it. NOT FIXED BY DELETION, because `self_organize.py` imports `memory` by that name and the old tree is the only thing that has ever produced a result. Mitigated by ordering — every entry point does `sys.path.insert(0, <root>/src)` — and tests/test_census.py's N5 re-measures the mitigation in a subprocess rather than asserting the collision is absent.
+
+**C11. The default configuration cannot exercise itself: ten cadence defaults are longer than a default run** **[CONFIRMED]**  
+`armed-but-inert` · rework · resolved from `build(environ={})` on 2026-08-30  
+`DATA.stream_bytes=120000`, `LM.ctx=128`, `RUN.epochs=1`, so a default run is **at most 937 windows** and about **506** at the project's own measured 1.85 bytes/token (`spine/derive.py:139`). Ten cadence-shaped defaults exceed that:
+
+| lever | default | what never happens on a default run |
+|---|---:|---|
+| `CAP.pin_windows` | 20000 | the capacity valve never lifts either cap |
+| `MEM.use_decay_every` | 20000 | usage decay never runs |
+| `FAB.ponder_warm` | 8000 | ponder never arms |
+| `FAB.bal_warm` | 4000 | the load-balance term never arms |
+| `EVAL.verify_fit_steps` | 3000 | the verification fit never runs |
+| `TOK.retok_every` | 3000 | the vocabulary is never re-segmented |
+| `EVAL.curve_every` | 2000 | **the learning curve is never probed — the one number P3 exists to produce** |
+| `TOK.cand_window` | 1024 | the candidate window never fills |
+| `OPT.lr_warmup` | 1000 | the run ends *inside* LR warm-up; the schedule's body never runs |
+| `SIG.warmup` | 800 | the encoder warm-up never completes at measured b/token |
+
+Two defaults from two different worlds met in one config: every cadence carries the OLD system's value, tuned against `STREAM_LEN=94000000` and 60k-step runs, while `stream_bytes` carries a smoke-test value. Neither is wrong on its own and together they describe a run in which almost nothing fires. `CAP.pin_windows=20000` is the same number, against a short run, that produced the historical defect where the report said the population "reached the cap but never held it long enough" — a true sentence about a false clock.
+
+This matters most because of what it would certify: PLAN's P3 exit criterion is *empty environment, 200 steps, reaches the end*. A green P3 under these defaults means a system where every cadenced mechanism fired zero times, reported as working. That is the armed-but-inert family (57 records) arriving through the DEFAULTS rather than through a guard.
+
+**Not fixed by editing the numbers**, which would only move the inconsistency. The repair is to make it *loud*: `RUN.startup_refusals` already exists as an entry point, and the resolved run length is known at build time from `stream_bytes`, `ctx`, `epochs` and the measured bytes/token — so a run can say at startup which cadences cannot fire before it spends a single step. Whether the defaults themselves should change is the owner's call (§ *for the owner*, `docs/04_CONTRACT.md`).
 
 ### HIGH (50)
 
