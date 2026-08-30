@@ -342,7 +342,21 @@ ASSEMBLY_ORDER = (
                                               "GATE TO COMPARE ANYTHING is the C-stage question: "
                                               "the manifest has 15 fields spanning LM, SIG, FAB and "
                                               "WORLD, and the save side writes WORLD.geometry ALONE "
-                                              "-- so eleven packages' fields are reported UNCHECKED "
+                                              "-- so ten of the manifest's fifteen fields are in "
+                                              "the LIVE manifest and absent from the recording, "
+                                              "which ckpt/api.py:174-179 specifies as a REFUSAL and "
+                                              "NOT as UNCHECKED: 'A MISSING FIELD IS A REFUSAL, NOT "
+                                              "A SKIP ... the comparison is driven off the "
+                                              "manifest's KEY SET rather than off truthiness.' "
+                                              "UNCHECKED is the OTHER direction -- recorded and "
+                                              "absent from the manifest, which is where WORLD's "
+                                              "grown counts sit. Three statements here called this "
+                                              "one UNCHECKED, and the difference is not wording: it "
+                                              "is 'the gate checks a sixth of what it names' versus "
+                                              "EVERY RESUME RAISES GeometryRefusal THE DAY P4 LANDS "
+                                              "-- and a resume is what ckpt/api.py:3-6 calls the "
+                                              "experiment for goal B. Q-CKPT-2 is therefore "
+                                              "BLOCKING, not cosmetic "
                                               "on every resume, and the two SIDECAR refusals below "
                                               "read a key nothing writes. The C rows now say what "
                                               "the save side owes; Q-CKPT-2 asks the owner to land "
@@ -958,7 +972,8 @@ LOOP_ORDER = (
     # layers, heads, ctx, pos_max, vocab_slots; sig.d, space; fab.slots, rank, dk; world.lat, hid,
     # route_d, nmax, feedback. The only geometry() in the tree is WORLD's, so the recorded side
     # today carries its five fields and nothing else, and the gate reports the other ten
-    # UNCHECKED -- while the two `sidecar` refusals read a per-prefix key
+    # a REFUSAL (ckpt/api.py:174: a field in the manifest and absent from the recording is not a
+    # skip) -- while the two `sidecar` refusals read a per-prefix key
     # that no row writes. FOR THE GATE TO HAVE ANYTHING TO COMPARE, the C block must record the SAME
     # manifest shape the live side builds, keyed by prefix: 'WORLD' from WORLD.geometry, 'SIG' from
     # the sidecar SIG.state_dict already says it emits, 'FAB' from a sidecar FAB.state_dict does not
@@ -1933,7 +1948,9 @@ def _sidecar(sysm, restored, prefix):
 
     They take theirs as a `sidecar` argument rather than through the manifest above because their
     refusals run AFTER their build -- which is exactly why the manifest reports the grown counts as
-    UNCHECKED rather than pretending to have checked them.
+    UNCHECKED rather than pretending to have checked them. THAT WORD IS FOR THIS DIRECTION ONLY --
+    recorded, and absent from the manifest. The reverse (in the manifest, absent from the recording)
+    is ckpt/api.py:174's REFUSAL, and three statements in this file borrowed the word for it.
 
     IT RETURNS None ON EVERY REAL RESUME AND BOTH REFUSALS ARE THEREFORE DISARMED. The snapshot's
     recorded manifest is written by the C block, and the only geometry() in the tree is WORLD's --

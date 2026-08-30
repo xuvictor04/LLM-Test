@@ -825,7 +825,13 @@ this project's oldest"*.
 the snapshot recorded. The live side has **15 fields** (16 with `pos_max`): `lm.width, layers, heads,
 ctx, pos_max, vocab_slots`; `sig.d, space`; `fab.slots, rank, dk`; `world.lat, hid, route_d, nmax,
 feedback`. The recorded side is written at stage `C`, and **the only `geometry()` in the tree is
-WORLD's** (Q-CKPT-1) — five fields. So ten fields are reported UNCHECKED on every resume, and the
+WORLD's** (Q-CKPT-1) — five fields. So ten fields are in the LIVE manifest and absent from the
+recording, which `ckpt/api.py:174-179` specifies as a **REFUSAL, not UNCHECKED** — *"A MISSING FIELD
+IS A REFUSAL, NOT A SKIP … the comparison is driven off the manifest's KEY SET rather than off
+truthiness."* UNCHECKED is the other direction: recorded and absent from the manifest, where WORLD's
+grown counts sit. **This makes Q-CKPT-2 blocking rather than cosmetic: as written, every resume
+raises `GeometryRefusal` the day P4 lands** — and a resume is what `ckpt/api.py:3-6` calls *the
+experiment* for goal B. The
 gate that exists because *a checkpoint built at one width cannot load into a model built at another*
 (`self_organize.py:4442-4468`) compares a sixth of what it names.
 
@@ -1277,9 +1283,11 @@ until then the report must say the blackout is unreachable rather than armed.
 
 ### Q-CKPT-2 — what does the SAVE side write for the geometry gate, and who emits FAB's sidecar?
 `_geometry_manifest` builds 15 live fields across LM, SIG, FAB and WORLD; the recorded side is
-`WORLD.geometry` alone, five fields, so ten are UNCHECKED on every resume — and `_sidecar` finds no
+`WORLD.geometry` alone, five fields, so ten are REFUSED on every resume (`ckpt/api.py:174`; they are
+in the manifest and absent from the recording, which is not the UNCHECKED direction) — and `_sidecar`
+finds no
 `'SIG'` or `'FAB'` key, so **both width refusals are disarmed on every real resume** (§3.9). Nothing
-about that is visible today: `check_geometry` reports UNCHECKED, the two restores take `None`, and no
+about that is visible today: `check_geometry` would refuse, the two restores take `None`, and no
 counter says the guard did not run. **Options:** (a) the `C` block records `_geometry_manifest`'s
 output keyed by prefix, plus `'WORLD'` from `WORLD.geometry` and `'SIG'`/`'FAB'` sidecars —
 `FAB.state_dict` then has to declare the sidecar it currently does not mention, which is a docstring

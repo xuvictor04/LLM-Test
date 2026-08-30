@@ -19,8 +19,7 @@ Counts: critical 58, high 122, medium 181, low 114 — 475 records total.
 
 These came from reading the source. They are the work list for the rebuild.
 
-
-### CRITICAL (11)
+### CRITICAL (12)
 
 **C1. Six arm names resolve to a flag set identical to the shipped defaults — they are `base` under another name** *(unverified)*  
 `armed-but-inert` · harness · longrun.sh:173 (vote), :174 (socloop), :269 (nogate), :278 (nocompose), :304 (nomem), :378 (gate_press)  
@@ -85,6 +84,16 @@ Two defaults from two different worlds met in one config: every cadence carries 
 This matters most because of what it would certify: PLAN's P3 exit criterion is *empty environment, 200 steps, reaches the end*. A green P3 under these defaults means a system where every cadenced mechanism fired zero times, reported as working. That is the armed-but-inert family (57 records) arriving through the DEFAULTS rather than through a guard.
 
 **Not fixed by editing the numbers**, which would only move the inconsistency. The repair is to make it *loud*: `RUN.startup_refusals` already exists as an entry point, and the resolved run length is known at build time from `stream_bytes`, `ctx`, `epochs` and the measured bytes/token — so a run can say at startup which cadences cannot fire before it spends a single step. Whether the defaults themselves should change is the owner's call (§ *for the owner*, `docs/04_CONTRACT.md`).
+
+**C12. The resume geometry gate would REFUSE every resume, and three statements call it UNCHECKED** **[CONFIRMED]**  
+`wrong-measurement` · rework · `src/spine/compose.py`, `docs/04_CONTRACT.md`; found 2026-08-30  
+`compose._geometry_manifest` builds **15 fields** across LM, SIG, FAB and WORLD. The save side records **`WORLD.geometry` alone — five fields**, because `WORLD.geometry` is the only `geometry()` entry point in the tree. So ten fields are **in the live manifest and absent from the recording**.
+
+`ckpt/api.py:174-179` specifies that case unambiguously: *"**A MISSING FIELD IS A REFUSAL, NOT A SKIP.** … The comparison is driven off the manifest's KEY SET rather than off truthiness, so `if recorded and recorded != live` — the untrippable-guard shape — is not writable here."* UNCHECKED is the **other** direction — recorded and absent from the manifest — which is where WORLD's grown population counts sit, and which `_geometry_manifest`'s own docstring uses the word for correctly.
+
+Three statements in `compose.py` and three in `docs/04_CONTRACT.md` borrowed the word for the direction it does not cover. That is not a wording quibble. It is the difference between *"the gate checks a sixth of what it names"* and **every resume raising `GeometryRefusal` the day P4 lands** — and a resume is what `ckpt/api.py:3-6` calls *the experiment* for goal B, the definitive goal this whole rework exists for.
+
+Corrected in all six places. **Q-CKPT-2 is therefore BLOCKING, not cosmetic**: either the save side records the same manifest shape keyed by prefix (which needs FAB to declare a sidecar it does not currently claim to emit), or the gate's key set narrows to what is actually recorded — and the second is the one that quietly checks nothing.
 
 ### HIGH (53)
 
