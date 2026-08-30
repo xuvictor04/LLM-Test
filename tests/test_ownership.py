@@ -75,6 +75,7 @@ import ast
 import contextlib
 import io
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -1563,6 +1564,187 @@ def check_o10_no_backdoor_imports(mods):
                    f"{n_out} module(s) outside src/spine/ examined", findings, vacuous=not n_out)
 
 
+# =====================================================================================================
+def check_o11_no_unnamed_clock_arithmetic(mods):
+    """O11 -- a package body may not do arithmetic on a lever that declares a Clock unit.
+
+    THE DEFECT THAT PRODUCED IT, and the paragraph it was written under. src/opt/api.py said
+
+        units.Steps becomes literally true and no conversion function is needed -- which matters,
+        because spine/derive.py has no Windows->Steps function today (verified).
+
+    and four lines below resolved the LR horizon as
+
+        run_steps = max(1, run_windows // d_effective_batch_windows)
+
+    which IS a Windows->Steps conversion, inline, on bare ints, unguarded. The parenthetical was even
+    true -- derive had no such function, which is exactly why the division had to be hand-written.
+    A reviewer found the assertion and the line together.
+
+    Nothing was numerically wrong at the shipped batch_windows=1, accum=1, where the two counters
+    coincide. That is what made it survive. At fetch_big.py's own recommended heavy-run command
+    (WIN=256 BATCH_W=16 ACCUM=4) the divisor is 64, and a horizon in the wrong kind puts every
+    learning-rate result under a schedule 64 times longer than its label.
+
+    THE RULE IS units.py:86's, APPLIED: "There is no implicit path between kinds ... call the named
+    function in spine.derive that already knows the rate, so the conversion exists in one place with
+    a name." A division written at its call site is a conversion nobody can audit, and every
+    historical instance of this project's most repeated defect is one of those.
+
+    MEASURED BEFORE ADOPTING, as O10 was: after the opt repair there are ZERO such sites across all
+    thirteen packages, so the strongest form of the rule costs nothing today. It is added while it is
+    green precisely because it cannot then go red silently -- and P4, which writes the bodies, is
+    where every one of these would otherwise appear.
+
+    WHAT IT CANNOT CATCH, and the second one is why H51 is still open:
+      * arithmetic on a Clock-unit value that arrives as a plain ARGUMENT rather than as a lever
+        read. `run_windows // n` inside a function whose parameter is named run_windows is invisible
+        here -- which is what the opt defect actually looked like, so this check would have caught it
+        only through the `d_effective_batch_windows` operand. Both operands are examined for that
+        reason.
+      * the reason the whole class is possible: Config hands back a bare int for all 35 levers that
+        declare a Clock unit (ISSUES H51), so the kind is metadata at the read site. Enforced between
+        packages, advisory within one. This check is the within-one half, done by AST because the
+        type system cannot do it.
+    """
+    _PKG_DIRS = {m.rel.split("/")[1] for m in mods
+                 if m.rel.startswith("src/") and m.rel.count("/") >= 2} - {"spine"}
+    # The clock-unit levers of each package, from the DECLARATIONS in that package's levers.py --
+    # read here rather than imported, so this pass stays "parse, never execute" like the rest.
+    clocks, findings = {}, []
+    _KINDS = ("Steps", "Flushes", "Windows", "Backwards", "Epochs", "Selections")
+    for m in mods:
+        if not m.rel.endswith("levers.py"):
+            continue
+        pkg = m.rel.split("/")[1] if m.rel.startswith("src/") else ""
+        for node in ast.walk(m.tree):
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and isinstance(node.value, ast.Call)
+                    and getattr(node.value.func, "id", "") == "Lever"):
+                continue
+            for a in node.value.args + [k.value for k in node.value.keywords]:
+                nm = (a.attr if isinstance(a, ast.Attribute) else
+                      a.id if isinstance(a, ast.Name) else "")
+                if nm in _KINDS:
+                    clocks.setdefault(pkg, set()).add(node.targets[0].id)
+    n_clocks = sum(len(v) for v in clocks.values())
+
+    _OPS = (ast.FloorDiv, ast.Mult, ast.Mod, ast.Div, ast.Pow)
+    _TXT = re.compile(r"\b([a-z_][a-z_0-9]*)\s*(//|%|\*(?!\*))\s*")
+    examined = 0
+    for m in mods:
+        if m.rel.startswith("src/spine/"):
+            continue                      # derive IS the named conversion; it must do the arithmetic
+        pkg = m.rel.split("/")[1] if m.rel.startswith("src/") else ""
+        mine = clocks.get(pkg, set())
+        if not mine:
+            continue
+
+        # (a) REAL CODE. This is the half that matters once P4 writes bodies.
+        for node in ast.walk(m.tree):
+            if not (isinstance(node, ast.BinOp) and isinstance(node.op, _OPS)):
+                continue
+            examined += 1
+            for side in (node.left, node.right):
+                nm = side.attr if isinstance(side, ast.Attribute) else ""
+                if nm in mine:
+                    findings.append(
+                        f"{m.rel}:{node.lineno}  {pkg}.{nm} declares a Clock unit and is an operand "
+                        f"of {type(node.op).__name__} in CODE. A cross-kind conversion written at "
+                        f"its call site is one nobody can audit -- units.py:86 requires it to be a "
+                        f"named function in spine.derive.  {m.line(node.lineno)}")
+
+        # (b) THE DOCSTRING SPECIFICATIONS, WHICH AT THIS PHASE ARE THE CODE. Every entry point is a
+        # stub that raises NotImplementedError, so the (a) half above examines ZERO expressions and
+        # cannot fail -- which is how the first version of this check shipped untrippable. It was
+        # caught by putting the original defect back and watching O11 stay green.
+        #
+        # That matters more than it sounds. The defect this check exists for lived in exactly this
+        # place: src/opt/api.py's build() docstring specified the horizon as
+        #     run_steps = max(1, run_windows // d_effective_batch_windows)
+        # and the repair for it edited that DOCSTRING, because there is no body yet. A rule that
+        # only reads bodies would have declared the tree clean while the specification P4 is going
+        # to implement still said "divide it inline".
+        #
+        # Textual, and deliberately narrow: `name // ...`, `name % ...`, `name * ...` where the name
+        # is one of THIS package's clock levers. It cannot parse prose and does not try; a formula
+        # written some other way slips past. What it buys is that the spec and the code are held to
+        # one rule, at the phase where the spec is all there is.
+        for i, line in enumerate(m.lines, 1):
+            # A FORMULA IN BACKTICKS IS A QUOTATION, NOT A SPECIFICATION, and the distinction had to
+            # be drawn because the first live version of this check flagged its own explanation.
+            # fabric/api.py and domains/api.py both carry the sentence
+            #     `manage_every // batch_w` -- Windows to Flushes, unnamed -- which is
+            #     derive.flush_period_windows and is not this.
+            # written to explain what the rule forbids. Two of the check's three findings were that
+            # prose. A check that reports the documentation of its own rule as a violation of it is
+            # noise, and noise is how the real third finding gets skipped.
+            # THE HOLE THIS LEAVES, stated rather than discovered later: a genuine specification
+            # written inside backticks is skipped. That is a convention this tree already follows --
+            # specifications are written as bare indented code under a heading, quotations are
+            # inline and quoted -- but it is a convention, not a guarantee.
+            bare = re.sub(r"`[^`]*`", "", line)
+            for nm, op in _TXT.findall(bare):
+                if nm in mine:
+                    examined += 1
+                    findings.append(
+                        f"{m.rel}:{i}  {pkg}.{nm} declares a Clock unit and is divided or scaled by "
+                        f"'{op}' in a SPECIFICATION. Every body here is still a stub, so this "
+                        f"docstring is what P4 will implement -- name the conversion in "
+                        f"spine.derive and write that call instead.  {line.strip()[:70]}")
+    return _report("O11", "no package body does arithmetic on a lever that declares a Clock unit",
+                   not findings,
+                   f"{examined} arithmetic site(s) examined in package code AND in the docstring "
+                   f"specifications P4 implements, against {n_clocks} clock-unit lever(s) declared "
+                   f"across {len(clocks)} package(s)",
+                   findings, vacuous=not n_clocks)
+
+
+
+_CLOCK_ARITH_CODE = """\
+from spine.lever import Config
+
+
+def flush_gate(fab: Config, batch_w):
+    \"\"\"the shape units.py forbids: a cross-kind conversion at its call site\"\"\"
+    return fab.manage_every // max(1, batch_w)
+"""
+
+_CLOCK_ARITH_SPEC = """\
+from spine.lever import Config
+
+
+def flush_gate(fab: Config, batch_w):
+    \"\"\"P4 fills this in. The gate is
+        period = manage_every // batch_w
+    which is what the loop compared against _nbwd.
+    \"\"\"
+    raise NotImplementedError("x")
+"""
+
+_CLOCK_ARITH_QUOTED = """\
+from spine.lever import Config
+
+
+def flush_gate(fab: Config, batch_w):
+    \"\"\"P4 fills this in. It must NOT write `manage_every // batch_w` inline -- that is the
+    conversion derive.flush_period_windows exists to name.
+    \"\"\"
+    raise NotImplementedError("x")
+"""
+
+_CLOCK_LEVERS = """\
+from spine.lever import Lever, LeverSet
+from spine import units as U
+
+
+class FabricLevers(LeverSet):
+    PREFIX = "FAB"
+    manage_every = Lever(500, "the management cadence", U.Windows)
+    alpha = Lever(0.5, "not a clock", U.FLAG)
+"""
+
 # --- O10 fixtures. The check had no self-test cases until the route it was written to close was
 # --- reopened by src/spine/compose.py and a reviewer walked through it with every check green.
 
@@ -1652,6 +1834,26 @@ _CASES = (
      {"src/memory/store.py": _WRONG_PREFIX},
      {"O9": (1, "names no declared PREFIX")}),
 
+    # ---- O11. The first version scanned CODE only, and every body in this tree is a stub, so it
+    # ---- examined zero expressions and was untrippable -- caught by putting the original defect
+    # ---- back and watching it stay green. It reads the docstring SPECIFICATIONS too, because at
+    # ---- this phase those are what P4 implements.
+    ("O11: a cross-kind conversion in real code",
+     {"src/fabric/levers.py": _CLOCK_LEVERS, "src/fabric/gate.py": _CLOCK_ARITH_CODE},
+     {"O11": (1, "in CODE")}),
+
+    ("O11: the same conversion in the docstring P4 will implement",
+     {"src/fabric/levers.py": _CLOCK_LEVERS, "src/fabric/gate.py": _CLOCK_ARITH_SPEC},
+     {"O11": (1, "in a SPECIFICATION")}),
+
+    # THE ADMIT SIDE, without which the two above prove only that O11 can say FAIL. Prose QUOTING the
+    # forbidden formula to explain the rule is not a violation of it -- and the first live version
+    # reported exactly that, flagging two of its own explanatory sentences and burying the one real
+    # finding underneath them.
+    ("O11: prose quoting the forbidden formula in backticks is ADMITTED",
+     {"src/fabric/levers.py": _CLOCK_LEVERS, "src/fabric/gate.py": _CLOCK_ARITH_QUOTED},
+     {"O11": (0, None)}),
+
     # ---- O10. THE FIRST OF THESE IS A REGRESSION TEST FOR A LIVE DEFEAT, not a hypothetical. O10
     # ---- shipped asking `if "assemble" in tail or "registry" in tail`; P3 wrote src/spine/compose.py
     # ---- with `from spine.assemble import build, render  # noqa: F401 -- render is re-exported`, and
@@ -1688,6 +1890,7 @@ _BY_TAG = {
     "O8": check_o8_from_env_only_in_wiring_file,
     "O9": check_o9_one_config_per_signature,
     "O10": check_o10_no_backdoor_imports,
+    "O11": check_o11_no_unnamed_clock_arithmetic,
 }
 
 
@@ -1760,6 +1963,7 @@ CHECKS = (
     check_o8_from_env_only_in_wiring_file,
     check_o9_one_config_per_signature,
     check_o10_no_backdoor_imports,
+    check_o11_no_unnamed_clock_arithmetic,
 )
 
 

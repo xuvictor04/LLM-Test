@@ -86,7 +86,7 @@ This matters most because of what it would certify: PLAN's P3 exit criterion is 
 
 **Not fixed by editing the numbers**, which would only move the inconsistency. The repair is to make it *loud*: `RUN.startup_refusals` already exists as an entry point, and the resolved run length is known at build time from `stream_bytes`, `ctx`, `epochs` and the measured bytes/token — so a run can say at startup which cadences cannot fire before it spends a single step. Whether the defaults themselves should change is the owner's call (§ *for the owner*, `docs/04_CONTRACT.md`).
 
-### HIGH (52)
+### HIGH (53)
 
 **H1. Three arms in the DEFAULT grid list are the same run, and three more are a second identical triple** *(unverified)*  
 `wrong-measurement` · harness · longrun.sh:1116-1117 (GRID_ARMS_DEFAULT), resolved at :164 base, :173 vote, :174 socloop, :175 socloop_w, :176 vote_w, :292 weights  
@@ -312,6 +312,16 @@ Until then the honest statement is the one to put in the report: the clock kinds
 PLAN's P3 exit criterion was `empty environment, 200 steps, reaches the end; both data paths`. Under it, a run that reaches the end is evidence the code executes and **no evidence whatever about units**. Every historical instance of the defect needed `BATCH_W > 1` to appear: the pin clock reading 43,645 real ticks as 2,650 (÷16), `MANAGE_EVERY` compared against a window counter above the early-out and a flush counter below it, accumulation gated on windows so 55 optimizer steps were measured where 13 were due.
 
 This is not an argument for changing the defaults — `batch_windows=1` is a reasonable smoke-test value. It is an argument that **the test must not be run only there**. P3's criterion is amended to require a second arm at `OPT_BATCH_WINDOWS=16`, and the two arms must differ only where the units say they should. Recorded rather than silently added to the test, because the criterion is PLAN's and this is a change to it.
+
+**H53. `SIG.d_idle_cadence` was relocated from a computed default into a coupling that was never declared, so the relation is simply gone** **[CONFIRMED]**  
+`recorded-never-read` · rework · `src/sig/levers.py:402-410`, found by `tests/test_ownership.py` O11 on 2026-08-30  
+The old declaration was `_i("ENC_EVERY_IDLE", max(ENC_EVERY * 6, 12))` — a default read from another lever, which `spine/lever.py` refuses by construction. The census's repair was not to delete the relation but to **move** it: the comment says the intent "is not lost, it is relocated: the census proposes `SIG.d_idle_cadence = max(train_every*6, train_every_idle)` declared in `spine/assemble.py`, so the relation prints in the coupling graph instead of hiding inside a default" — and then, in its own words, "it is simply not declared yet."
+
+It still is not. So `train_every_idle` sits at a literal 12 with **no connection to `train_every` at all**: change the dense cadence and the idle cadence does not follow, silently. The literal is defensible on its own — at the shipped `ENC_EVERY=1`, `max(1*6, 12) = 12`, so the run of record is unchanged — which is exactly what let it survive. What is lost is the *rule*, and the coupling graph is the one place this architecture puts rules so they can be read.
+
+The comment is right that `assemble.py` already supports the shape: `FAB.d_operating_population` is a same-package coupling computed from FAB's own levers. This is one row.
+
+**How it was found is the part worth keeping.** No check looked for it. O11 was written to catch unnamed cross-kind arithmetic in *code*, found nothing because every body is a stub, and was then widened to read the docstring specifications P4 will implement — at which point it reported this. A defect recorded as "relocated" to somewhere it never landed is invisible to every check that reads declarations, because the declaration it was relocated *to* does not exist.
 
 ### MEDIUM (118)
 
