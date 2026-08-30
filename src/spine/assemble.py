@@ -119,6 +119,7 @@ import io
 import types
 
 from . import derive
+from . import lever
 from . import registry
 from . import units as U
 from .lever import LeverError
@@ -870,6 +871,157 @@ COUPLINGS = [
             "saved vocabulary or 'the restored embedding table would be indexed by a DIFFERENT "
             "vocabulary' (:1226-1227). Empty resume, empty path: there is no parent to read."),
 
+    # --- the tokenizer's longest token -> the composer's byte tables --------------------------------
+    Coupling(
+        src="TOK.max_bytes",
+        dst="LM.d_max_token_bytes",
+        compute=lambda r: int(r["TOK"].max_bytes),
+        unit=U.BYTES,
+        irreducible=True,
+        why="ByteComposer sizes its byte-index and position tables from the longest token that can "
+            "exist, and that length is TOK's max_bytes -- one quantity, two packages, and no interface "
+            "makes them independent. self_organize.py:1441 declares `def __init__(s, d, maxb=16)`, :1549 "
+            "constructs it as `ByteComposer(d)` so the default always wins, and :1487 truncates with "
+            "`b = bs[:s.maxb]`. With MAX_TOK above 16 two distinct long tokens sharing their first 16 "
+            "bytes get IDENTICAL composites and identical starting vectors, silently -- the property the "
+            "composer exists to provide, inverted, with no error (ISSUES M21). The defaults agreeing "
+            "today is luck, not design, and luck is what a wire replaces: lm/levers.py:165 already names "
+            "d_max_token_bytes as the incoming value it expects and tok/levers.py:337 records the same "
+            "coupling as missing from this table. Wired rather than passed as an argument because the "
+            "composition root would otherwise be free to hand LM a different number than the tokenizer "
+            "mints against, and affects() would not see it."),
+
+    # --- the two hard ceilings the capacity valve lifts toward --------------------------------------
+    Coupling(
+        src="FAB.slots",
+        dst="CAP.d_expert_slots",
+        compute=lambda r: int(r["FAB"].slots),
+        unit=U.SLOTS,
+        irreducible=True,
+        why="The valve lifts a SOFT cap toward a HARD one, and the hard one is the preallocated expert "
+            "slot pool: A, B and cent are allocated to FAB.slots rows and growth only advances n_live, "
+            "so a soft cap above the pool is a cap that can never be reached and a lift past it is "
+            "arithmetic on capacity that does not exist. capacity/levers.py:119 names this exact field "
+            "as what CAP_FAB_START's 0 sentinel resolves to and :123 records that it is absent from this "
+            "table. The sentinel is why it must be a wire and not a literal: `fab_start = 0` means START "
+            "AT THE HARD CEILING, and lever.py refuses a default computed from another lever, so 0 has "
+            "no meaning until this row supplies the number it stands for.",),
+    Coupling(
+        src="LM.vocab_slots",
+        dst="CAP.d_vocab_slots",
+        compute=lambda r: int(r["LM"].vocab_slots),
+        unit=U.SLOTS,
+        irreducible=True,
+        why="The same sentinel on the other target: CAP_VOCAB_START=0 means start at the vocabulary's "
+            "hard ceiling, which is the model's softmax row count and nothing else (the same number "
+            "TOK.d_vocab_ceiling carries, from the same owner, for the minting side). Lifting a soft "
+            "vocabulary cap above emb.weight's row count reserves ids the model has no row for, which is "
+            "the failure C31 records from the other end -- `grew 2048 -> 2048 (+0)` on the first "
+            "continual-learning run, a second language spelled entirely with the first one's merges. "
+            "capacity/levers.py:120 and :244 both name d_vocab_slots as the wire this package expects "
+            "and state that TOK holds no ceiling of its own to give.",),
+    Coupling(
+        src="LM.mask_dead_rows",
+        dst="CAP.d_mask_dead_rows",
+        compute=lambda r: r["LM"].mask_dead_rows,
+        unit=U.FLAG,
+        irreducible=False,
+        why="The honesty precondition on the vocabulary arm of the valve, and it belongs to LM. Lifting "
+            "the vocabulary cap reserves rows; a reserved row nobody has minted sits in the softmax "
+            "denominator at its initialisation for the whole run unless the dead-row mask is on, so at "
+            "8192 reserved against 2048 minted the run measures 6144 dead rows rather than the mechanism "
+            "(capacity/levers.py:262, and the measurement at self_organize.py:3971-3979: 86.7% dead "
+            "width scored 4.746 unmasked against 6.100 masked at the loss only). CAP does not get to "
+            "decide this -- it is the model's output layer -- so it arrives as a wire and the valve "
+            "reports the vocabulary arm as dishonest rather than silently lifting into unmasked rows. "
+            "Reducible: a valve that refused to lift the vocabulary at all while the mask is off would "
+            "need no flag, and that is the stricter repair if the owner wants it.",),
+    Coupling(
+        src=("FAB.pressure", "FAB.slots"),
+        dst="CAP.d_operating_population",
+        compute=lambda r: derive.operating_population(r["FAB"].pressure, r["FAB"].slots),
+        unit=U.EXPERTS,
+        irreducible=True,
+        why="THE IRREDUCIBLE COUPLING THE VALVE PORT MUST DECLARE RATHER THAN REMOVE. The soft expert "
+            "cap has to sit at or below the cull's settling point, FAB.pressure x FAB.slots: below "
+            "pressure x slots the cull gate is shut and the population grows, at or above it the cull "
+            "runs, so a soft cap ABOVE that number is a cap the population never reaches -- it never "
+            "pins, the pin clock never accumulates, and the valve is dead while every report line says "
+            "it is armed. The second landing of FAB.d_operating_population, computed by the same "
+            "derive.operating_population call rather than restated, so the setpoint the fabric "
+            "equilibrates at and the setpoint the valve refuses against cannot disagree. It is what "
+            "capacity's startup refusal compares CAP_FAB_START against, and the failure it answers is "
+            "C30: a soft cap below the population makes `min(_nb, _cap_fab[0] - fab.n())` negative at "
+            "self_organize.py:7446 and freezes growth for the whole run with nothing in the log.",),
+
+    # --- the fabric's competence numbers -> the domain manager's spare rule -------------------------
+    Coupling(
+        src="FAB.comp_ema",
+        dst="DOM.d_comp_ema",
+        compute=lambda r: r["FAB"].comp_ema,
+        unit=U.FRACTION,
+        irreducible=False,
+        why="Competence is one EMA rate for the whole system: the fabric smooths per-expert competence "
+            "at it and the domain manager smooths per-domain competence at it, and two rates would make "
+            "'this domain is better than the population' a comparison between two differently smoothed "
+            "series. FAB owns the number because the fabric's cull and spare rules are where it was "
+            "first needed (fabric/levers.py:693 says so and names both this field and d_comp_protect as "
+            "what DOM receives). The old tree had DOM reach for FAB's value directly -- "
+            "self_organize.py:6720 reads the population baseline off the fabric object -- which is a "
+            "coupling with no wire and nothing in affects(). Reducible: domains could legitimately "
+            "smooth on their own clock; what they may not do is smooth on a DIFFERENT one silently while "
+            "the report compares the two.",),
+    Coupling(
+        src="FAB.comp_protect",
+        dst="DOM.d_comp_protect",
+        compute=lambda r: r["FAB"].comp_protect,
+        unit=U.FLAG,
+        irreducible=False,
+        why="The competence brake is one policy applied to two populations. FAB_COMP_PROTECT spares an "
+            "expert whose competence beats the population baseline; the domain cull needs the same "
+            "brake, because a rarely-fed domain that is GOOD at what it does get looks identical to a "
+            "dead one from a utilization-only vantage point -- and the domain cull is the mechanism that "
+            "deleted 200,000 memory entries under a phased schedule, which is catastrophic forgetting "
+            "performed by the manager rather than suffered by the model. Wired rather than passed so "
+            "that a run cannot have the brake on for experts and off for domains without anybody saying "
+            "so; fabric/levers.py:693 names this field as the receiving spelling.",),
+
+    # --- the optimizer's two rate endpoints -> the fabric's per-expert envelope ---------------------
+    Coupling(
+        src="OPT.lr",
+        dst="FAB.d_base_lr",
+        compute=lambda r: r["OPT"].lr,
+        unit=U.FRACTION,
+        irreducible=False,
+        why="The per-expert triangular2 envelope is built from the PEAK rate: self_organize.py:7252 is "
+            "`_oa = _lo + (LR - _lo) * (1.0 - _x).clamp_min(0.0) * _amp`, where LR is the optimizer's "
+            "peak. FAB may not read OPT's lever and must not carry a second one, and until some name "
+            "lands FAB_LR_OWN=1 has no legal way to learn the number -- which is what makes ISSUES H15 "
+            "spellable at all: `_lrv` is assigned only inside `if LR_SCHED != \'none\'` at :7093-7094 and "
+            "read unconditionally by the per-expert block at :7195, so LR_SCHED=none with FAB_LR_OWN=1 "
+            "dies with a NameError on the first flush. THE NAME IS d_base_lr AND NOT d_lr_peak because "
+            "the RECEIVING package already declares that spelling (fabric/levers.py:756) and the "
+            "receiver's `grep d_` is the one that has to find the field; opt/levers.py:186 records both "
+            "spellings as an open choice, and this row settles it. The PEAK is a frozen lever and "
+            "belongs here; the LIVE rate the ratio clamp compares against is a different number and "
+            "stays a call argument, which is the distinction the two independent specs of this mechanism "
+            "disagreed about.",),
+    Coupling(
+        src="OPT.lr_min_frac",
+        dst="FAB.d_lr_min_frac",
+        compute=lambda r: r["OPT"].lr_min_frac,
+        unit=U.FRACTION,
+        irreducible=False,
+        why="The other endpoint of the same envelope, needed in the same block: :7251 is "
+            "`_lo = LR * LR_MIN_FRAC`, so the floor the per-expert rate anneals toward is the "
+            "optimizer's floor fraction and shipping one endpoint without the other leaves the fabric "
+            "with half a rate. It is the schedule's floor and OPT owns it -- opt/levers.py:187 names "
+            "d_lr_min_frac as the outgoing half -- and the floor exists for a goal-B reason that makes a "
+            "second copy actively harmful: a schedule that anneals to nothing cannot learn anything that "
+            "ARRIVES LATE, and the add-an-area entry point is the late-arrival case. Two packages "
+            "annealing to two different floors would be two different continual-learning experiments "
+            "reported as one.",),
+
     # --- LOCAL: more than one lever, one owner. No edge, no budget, still d_-prefixed. ---------------
     Coupling(
         src=("FAB.pressure", "FAB.slots"),
@@ -1140,6 +1292,22 @@ def build(environ=None, sets=None, couplings=None, budget=None):
         for name, near in registry.unread_env(environ):
             warnings.append(f"UNREAD {name}: matches no declared lever. Closest: {near}. "
                             f"A mis-typed knob is silently the default.")
+
+    # CLOSE THE ASSEMBLY. Last act, after every Config is resolved, wired and frozen, so nothing this
+    # function legitimately does is refused. From here on lever.LeverSet.from_env raises.
+    #
+    # WHY IT IS HERE AND NOT LEFT TO THE AST CHECKS. A reviewer demonstrated the walk that needs no
+    # import and no forbidden spelling: `LeverSet.__subclasses__()` from spine.lever -- the one module
+    # every package MUST import -- returns all thirteen lever sets, and `getattr(sib, "from_" + "env")()`
+    # then mints each one from the live environment. All ten ownership checks stayed green while a memory
+    # module returned FAB and LM's env-overridden values. A package's OWN Config reaches the same class
+    # through `cfg._owner.__mro__` with nothing imported at all.
+    # Every static defence in this tree matches a name; this one matches a MOMENT, which is the only
+    # thing a spelling cannot walk past.
+    #
+    # IT DOES NOT CLOSE THE DECLARATION HALF -- `sib._levers["alpha"].default` needs no from_env -- and
+    # spine/lever.py says so at the latch rather than leaving it implied.
+    lever._close_assembly()
     return configs, wires, warnings
 
 

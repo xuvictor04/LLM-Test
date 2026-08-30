@@ -3,7 +3,7 @@
     python3 tests/test_assemble.py           # PASS/FAIL per check with counts; non-zero exit on any FAIL
 
 WHY THIS FILE EXISTS. Everything in src/spine that RESOLVES something was armed and unreached. Nothing
-in tests/ called assemble.build(), assemble.render(), Wires.affects(), Wires.render(),
+in tests/ called _build(), assemble.render(), Wires.affects(), Wires.render(),
 registry.unread_env() or rng.issued(): tests/test_ownership.py imports spine.assemble only to read its
 COUPLINGS table for an AST cross-check, and tests/test_determinism.py names build() inside a comment
 marking the P3 plug point. That is this project's ARMED-BUT-INERT class -- 57 of the survey's 475 records
@@ -74,6 +74,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
 from spine import assemble                                             # noqa: E402
+from spine import lever                                                # noqa: E402
 from spine import registry                                             # noqa: E402
 from spine import rng                                                  # noqa: E402
 from spine import units as U                                           # noqa: E402
@@ -82,6 +83,30 @@ from spine.units import Flushes                                        # noqa: E
 from spine.wire import WIRE_BUDGET, WireError                          # noqa: E402
 
 MAX_SHOWN = 12
+
+
+def _build(*a, **kw):
+    """_build(), with the assembly latch released first, and this is the ONLY file that may.
+
+    spine/lever.py latches after build() returns and from_env raises from then on. That exists because a
+    reviewer walked past every AST check with `LeverSet.__subclasses__()` plus `getattr(sib, "from_" +
+    "env")()` -- thirteen packages, every env-overridden value, ten checks green -- and a latch matches a
+    MOMENT, which is the one thing a spelling cannot get round.
+
+    This file builds seven times in one process ON PURPOSE: A1 needs a default build AND an
+    environment-overridden one to show a knob reaching another package, A2 needs a garbage environment,
+    A5 needs a SECOND build to prove a frozen Config refuses it, A6 needs a build with packages missing.
+    Those are seven separate startups being simulated, not one startup resolving twice, so releasing the
+    latch is honest here and is what the LeverError message tells the reader to do.
+
+    It is a named wrapper rather than a call to lever._reopen_assembly() at seven sites because seven
+    scattered releases is how a latch quietly stops being one: the eighth caller copies the line without
+    the reason. Nothing in src/ may do this -- O10 refuses the import of spine.lever from a package for
+    the purpose of the from_env it exposes, and the latch is what refuses it if the import ever lands.
+    """
+    lever._reopen_assembly()
+    return assemble.build(*a, **kw)
+
 
 # The registry as this file found it: thirteen real packages, because importing spine.assemble imports
 # every levers.py. Snapshotted at module level so the runner can tell "the sandbox restored what was
@@ -163,6 +188,8 @@ def packages():
             slots = Lever(4096, "hard ceiling on the expert slot pool", U.SLOTS)
             manage_every = Lever(2000, "management cadence, written in WINDOWS", U.Windows)
             pressure = Lever(0.75, "occupancy setpoint the cull equilibrates at", U.FRACTION)
+            comp_ema = Lever(0.02, "rate competence is smoothed at, for BOTH populations", U.FRACTION)
+            comp_protect = Lever(True, "spare a member whose competence beats the baseline", U.FLAG)
 
         class Memory(LeverSet):
             PREFIX = "MEM"
@@ -182,13 +209,18 @@ def packages():
             # A PURE SINK WITH NO LEVER OF ITS OWN in this fixture: TOK receives four wires (the
             # vocabulary ceiling, the cap-lift cadence and the two vocabulary paths) and sources none.
             # The real TOKLevers declares 18; none of them appears in any coupling, so declaring one
-            # here would only add a lever A3 has to write an expectation for.
-            pass
+            # here would only add a lever A3 has to write an expectation for. It gained exactly ONE
+            # when LM.d_max_token_bytes landed: TOK is a source for that row and the fixture cannot
+            # resolve it otherwise.
+            max_bytes = Lever(24, "longest token that may be minted, in bytes", U.BYTES)
 
         class Optimizer(LeverSet):
             PREFIX = "OPT"
             batch_windows = Lever(16, "windows accumulated into one flush", U.Windows)
             accum = Lever(4, "backward passes per optimizer step", U.Backwards)
+            lr = Lever(0.002, "the PEAK rate the schedule warms up to", U.FRACTION)
+            lr_min_frac = Lever(0.05, "the floor the cosine anneals toward, as a fraction of peak",
+                                U.FRACTION)
 
         class Capacity(LeverSet):
             PREFIX = "CAP"
@@ -204,6 +236,7 @@ def packages():
             PREFIX = "LM"
             vocab_slots = Lever(32768, "rows in emb.weight and head.weight", U.SLOTS)
             ctx = Lever(128, "tokens in one window, and the height of the positional table", U.TOKENS)
+            mask_dead_rows = Lever(True, "keep never-minted rows out of the softmax denominator", U.FLAG)
 
         class Run(LeverSet):
             PREFIX = "RUN"
@@ -238,6 +271,19 @@ EXPECTED_DEFAULT = {
     "FAB.d_operating_population":      3072,           # ceil(0.75 x 4096); LOCAL, no edge, no budget
     "OPT.d_effective_batch_windows":   64,             # 16 x 4; LOCAL. The batch the run actually trains at
     "LM.d_pos_max":                    128,            # LOCAL: the positional table is ctx rows tall
+    # ---- the nine rows the contract phase added ---------------------------------------------------
+    "LM.d_max_token_bytes":            24,             # TOK.max_bytes, deliberately NOT ByteComposer's
+                                                       # hardcoded 16: a fixture at 16 would pass whether
+                                                       # the wire arrived or the hardcode did (M21)
+    "CAP.d_expert_slots":              4096,           # the hard ceiling CAP_FAB_START=0 stands for
+    "CAP.d_vocab_slots":               32768,          # the same sentinel, vocabulary target
+    "CAP.d_mask_dead_rows":            True,           # LM owns the output layer, not the valve
+    "CAP.d_operating_population":      3072,           # ceil(0.75 x 4096) -- the SAME derive call as
+                                                       # FAB's row, so the two setpoints cannot disagree
+    "DOM.d_comp_ema":                  0.02,           # one smoothing rate across both populations
+    "DOM.d_comp_protect":              True,           # one brake policy across both populations
+    "FAB.d_base_lr":                   0.002,          # the PEAK, which :7252's envelope is built from
+    "FAB.d_lr_min_frac":               0.05,           # the floor, which :7251 needs in the same block
 }
 
 # What it computes with FAB_SLOTS=1024 in the environment and nothing else set. This is the whole point
@@ -246,6 +292,8 @@ EXPECTED_ENV = dict(EXPECTED_DEFAULT, **{
     "DOM.d_expert_slots":         1024,                # straight through
     "MEM.d_source_slots":         2048,                # max(64, 2 x 1024)
     "FAB.d_operating_population": 768,                 # ceil(0.75 x 1024)
+    "CAP.d_expert_slots":         1024,                # straight through, to the valve's hard ceiling
+    "CAP.d_operating_population": 768,                 # the second landing of the same derive call
 })
 
 # THE FIELDS THAT MOVE, WRITTEN DOWN RATHER THAN DERIVED WITH A RULE. The tempting rule -- "every d_
@@ -257,7 +305,8 @@ EXPECTED_ENV = dict(EXPECTED_DEFAULT, **{
 # while the store has 64 partitions, so 32 experts shared each partition and "per-expert memory" was
 # per-64-buckets memory. The set below is the honest answer and the two saturated fields are the
 # evidence for the reason column.
-MOVED_BY_SLOTS = {"DOM.d_expert_slots", "MEM.d_source_slots", "FAB.d_operating_population"}
+MOVED_BY_SLOTS = {"DOM.d_expert_slots", "MEM.d_source_slots", "FAB.d_operating_population",
+                  "CAP.d_expert_slots", "CAP.d_operating_population"}
 
 # The environment A1 and A2 are run against: one correctly spelled knob, one near miss of a real name,
 # one name that is not ours at all.
@@ -324,8 +373,8 @@ def check_a1_build_resolves():
         # NO sets=, NO couplings=. This is the production call: registry.all_sets() and the real
         # COUPLINGS table. Every other exercise of build() in this tree hands in its own, so the two
         # `if x is None` branches at the top of build() had never run.
-        cfg_default, wires_default, warn_default = assemble.build(environ={})
-        configs, wires, warnings = assemble.build(environ=ENV)
+        cfg_default, wires_default, warn_default = _build(environ={})
+        configs, wires, warnings = _build(environ=ENV)
 
         landed_default = _landed(cfg_default)
         landed = _landed(configs)
@@ -433,7 +482,7 @@ def check_a2_typo_net():
     """
     findings = []
     with packages():
-        configs, wires, warnings = assemble.build(environ=ENV)
+        configs, wires, warnings = _build(environ=ENV)
         unread = [w for w in warnings if w.startswith("UNREAD ")]
         others = [w for w in warnings if not w.startswith("UNREAD ")]
 
@@ -501,7 +550,7 @@ def check_a2_typo_net():
         # rather than a clean build, because a clean build with the net off is indistinguishable from
         # a clean build with the net on.
         try:
-            _, _, warn_none = assemble.build(environ=None)
+            _, _, warn_none = _build(environ=None)
             if not any("TYPO NET SKIPPED" in w for w in warn_none):
                 findings.append("build(environ=None) did not warn that the typo net was skipped. An "
                                 "unrun check that reports nothing is an unrun check that reads as a "
@@ -542,10 +591,18 @@ def check_a3_affects():
     # Written out rather than derived from COUPLINGS: deriving the expectation from the same table
     # affects() reads would assert only that two loops agree. These are read off the reason column.
     EXPECT = {
-        "FAB_SLOTS":           {"FAB", "DOM", "MEM"},  # bounds the domain namespace and sizes the store
+        "FAB_SLOTS":           {"FAB", "DOM", "MEM", "CAP"},  # domain namespace, store size, and the
+                                                             # hard ceiling the valve lifts toward
         "OPT_BATCH_WINDOWS":   {"OPT", "FAB", "TOK"},  # both cap-lift cadences and the manage cadence
         "CAP_PIN_WINDOWS":     {"CAP", "FAB", "TOK"},  # the valve's threshold, converted for both caps
-        "LM_VOCAB_SLOTS":      {"LM", "TOK"},          # emb.weight and head.weight have exactly V rows
+        "LM_VOCAB_SLOTS":      {"LM", "TOK", "CAP"},   # emb.weight and head.weight have exactly V rows,
+                                                       # and that is what the vocabulary cap lifts toward
+        "LM_MASK_DEAD_ROWS":   {"LM", "CAP"},          # the honesty precondition on the vocabulary arm
+        "TOK_MAX_BYTES":       {"TOK", "LM"},          # ByteComposer's byte tables are this tall
+        "FAB_COMP_EMA":        {"FAB", "DOM"},         # one smoothing rate for two populations
+        "FAB_COMP_PROTECT":    {"FAB", "DOM"},         # one brake policy for two populations
+        "OPT_LR":              {"OPT", "FAB"},         # the peak the per-expert envelope is built from
+        "OPT_LR_MIN_FRAC":     {"OPT", "FAB"},         # the floor that envelope anneals toward
         "CKPT_DIR":            {"CKPT", "TOK"},        # the run's own vocabulary lands beside its ckpt
         "CKPT_RESUME":         {"CKPT", "TOK"},        # the parent's vocabulary is read by the same rule
         # ---- levers that feed no WIRE. Four different shapes, all of which must read {owner}: ----
@@ -553,13 +610,16 @@ def check_a3_affects():
         "MEM_QUOTA":           {"MEM"},   # same shape, on the receiving side of a cross wire
         "MEM_OWNERS":          {"MEM"},   # folded with FAB.slots by two wires, and read as MEM's own
         "OPT_ACCUM":           {"OPT"},   # feeds a LOCAL coupling: a d_ field, and still no edge
-        "FAB_PRESSURE":        {"FAB"},   # the other half of the fabric's local coupling
+        "FAB_PRESSURE":        {"FAB", "CAP"},  # WAS {"FAB"}: it fed only the fabric's LOCAL coupling,
+                                          # which books no edge. The valve's startup refusal needs the
+                                          # SAME settling point, so the identical derive call lands a
+                                          # second time on CAP -- and that landing is a real edge.
         "LM_CTX":              {"LM"},    # a single-source LOCAL coupling: still a d_ field, still no edge
         "DOM_MIN_SUPPORT":     {"DOM"},   # feeds nothing at all
         "RUN_SEED":            {"RUN"},   # deliberately NOT wired -- see NOT_WIRES, and A7
     }
     with packages():
-        configs, wires, warnings = assemble.build(environ=ENV)
+        configs, wires, warnings = _build(environ=ENV)
 
         # No env_owner override: this resolves through registry.all_env_names(), which is the production
         # path and the branch tests/test_couplings.py cannot reach with unregistered doubles.
@@ -596,8 +656,12 @@ def check_a3_affects():
                             f"a smaller oracle makes the sweep pass by having nothing to compare.")
 
         # The package graph is the same claim at package granularity, which is where the sweep measures.
-        want_graph = {"CAP": ("FAB", "TOK"), "CKPT": ("TOK",), "FAB": ("DOM", "MEM"),
-                      "LM": ("TOK",), "OPT": ("FAB", "TOK")}
+        # TOK IS NO LONGER A PURE SINK, and that is the one structural change in this graph. It
+        # sources LM.d_max_token_bytes (ByteComposer's byte tables are max_bytes rows tall), so it
+        # appears as a key AND as a target. That is legal and it is not chaining: no coupling reads a
+        # d_ field, so LM's incoming value is TOK's own lever and affects() stays one hop.
+        want_graph = {"CAP": ("FAB", "TOK"), "CKPT": ("TOK",), "FAB": ("CAP", "DOM", "MEM"),
+                      "LM": ("CAP", "TOK"), "OPT": ("FAB", "TOK"), "TOK": ("LM",)}
         if wires.graph() != want_graph:
             findings.append(f"wires.graph() = {wires.graph()}, expected {want_graph}. Packages that only "
                             f"receive must appear as targets and never as keys -- a sink cannot leak "
@@ -649,7 +713,7 @@ def check_a4_render():
     """
     findings = []
     with packages():
-        configs, wires, warnings = assemble.build(environ=ENV)
+        configs, wires, warnings = _build(environ=ENV)
 
         # render() RETURNS text and PRINTS NOTHING -- a documented promise, and one worth checking: a
         # doc generator that also writes to stdout corrupts whatever else is being printed, and this
@@ -743,7 +807,7 @@ def check_a5_build_runs_once():
     """
     findings = []
     with packages():
-        configs, wires, warnings = assemble.build(environ=ENV)
+        configs, wires, warnings = _build(environ=ENV)
         before = _landed(configs)
 
         def replay(cfg):
@@ -753,7 +817,7 @@ def check_a5_build_runs_once():
             return owner
 
         try:
-            assemble.build(environ=ENV, sets={p: replay(c) for p, c in configs.items()})
+            _build(environ=ENV, sets={p: replay(c) for p, c in configs.items()})
             findings.append("a second build() over already-frozen Configs succeeded. A Config that can "
                             "still be written after startup is a Config the report cannot claim the run "
                             "used, and a value written twice is the silent-overwrite class -- 29 of the "
@@ -788,7 +852,7 @@ def check_a5_build_runs_once():
         # until this line, nothing did. A budget that has never been observed to refuse anything is
         # indistinguishable from a budget that is never consulted.
         try:
-            assemble.build(environ=ENV, budget=len(wires) - 1)
+            _build(environ=ENV, budget=len(wires) - 1)
             findings.append(f"build() accepted {len(wires)} wires against a budget of {len(wires) - 1}.")
         except WireError as e:
             if "WIRE_BUDGET" not in str(e):
@@ -825,7 +889,7 @@ def check_a6_deferred_is_visible():
     present = ("FAB", "MEM", "OPT")
     with packages() as P:
         part = {p: P[p] for p in present}
-        configs, wires, warnings = assemble.build(environ=ENV, sets=part)
+        configs, wires, warnings = _build(environ=ENV, sets=part)
         landed = _landed(configs)
 
         absent = [c for c in assemble.COUPLINGS if set(c.prefixes) - set(present)]
@@ -912,7 +976,7 @@ def check_a7_rng_accounting():
     """
     findings = []
     with packages(), _issued_sandbox():
-        configs, _wires, _warnings = assemble.build(environ=ENV)
+        configs, _wires, _warnings = _build(environ=ENV)
         seed = configs["RUN"].seed
 
         if rng.issued():

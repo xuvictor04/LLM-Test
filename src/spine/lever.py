@@ -130,6 +130,37 @@ class Lever:
         return v
 
 
+# --------------------------------------------------------------------------------------------------
+# The assembly latch
+# --------------------------------------------------------------------------------------------------
+# One process-wide flag. It is module state rather than a parameter because the thing it must survive is
+# an ARBITRARY call path: the point is to refuse a from_env that arrives through a walk nobody wrote
+# down, and a parameter only constrains callers who agree to pass it.
+#
+# Not a security boundary and not described as one. A module that can reach LeverSet can reach
+# _reopen_assembly() too. What it buys is that the ACCIDENTAL and the CASUAL forms -- an implementation
+# agent who needs a number and finds from_env, a helper that re-resolves "just to be safe" -- become a
+# raise at the call site instead of a second answer that agrees with the first until the day it does not.
+
+_ASSEMBLY_CLOSED = False
+
+
+def _close_assembly():
+    """Called by spine.assemble.build() as its last act. Idempotent."""
+    global _ASSEMBLY_CLOSED
+    _ASSEMBLY_CLOSED = True
+
+
+def _reopen_assembly():
+    """For tests that build more than once in a process. Name it in the test, and say why."""
+    global _ASSEMBLY_CLOSED
+    _ASSEMBLY_CLOSED = False
+
+
+def assembly_closed():
+    return _ASSEMBLY_CLOSED
+
+
 class LeverSet:
     """One package's levers. Subclass, set PREFIX, declare Levers as class attributes."""
 
@@ -151,7 +182,41 @@ class LeverSet:
     # -- resolution ------------------------------------------------------------------------------
     @classmethod
     def from_env(cls, environ=None):
-        """THE ONLY PLACE IN THE TREE THAT MAY NAME os.environ. Enforced by tests/test_ownership.py."""
+        """THE ONLY PLACE IN THE TREE THAT MAY NAME os.environ. Enforced by tests/test_ownership.py.
+
+        AND IT REFUSES TO RUN ONCE THE ASSEMBLY IS CLOSED, which is the only part of this that a
+        spelling cannot walk past. Every static defence against a package minting a foreign Config
+        matches a NAME -- O8 matched `from_env`, O10 matches an import -- and a reviewer demonstrated
+        the walk that needs neither:
+
+            from spine.lever import Config, LeverSet     # the one import PLAN mandates for every package
+            for sib in LeverSet.__subclasses__():        # Python keeps this list; no registry needed
+                out[sib.PREFIX] = getattr(sib, "from_" + "env")()
+
+        Thirteen packages, every env-overridden value, all ten ownership checks green. It is worse than
+        that: `Config.__slots__` exposes `_owner`, so a package's OWN Config -- the one the composition
+        root is obliged to hand it -- walks `cfg._owner.__mro__` to this class with no import at all.
+
+        The latch closes the RESOLUTION half of that at runtime, whatever spelling reached it.
+        `spine.assemble.build()` calls this thirteen times and then sets the latch as its last act, so
+        nothing legal breaks and every mint after startup is a loud failure at the moment it happens
+        rather than a plausible number in a report.
+
+        WHAT IT DOES NOT CLOSE, said here rather than left for the next reviewer to find: the
+        DECLARATION half. `sib._levers["alpha"].default` reads a foreign lever with no from_env call and
+        no Config at all, so editing FAB's literal changes MEM's behaviour and affects() cannot see it.
+        Nothing static or runtime in this file reaches that -- only L3, the behavioural isolation sweep
+        in tests/test_lever_isolation.py against the tests/test_determinism.py noise floor, and it does
+        not exist yet. Do not read this latch as "there is no other route"; that sentence is the reason
+        a reviewer stops looking, and this module has already had to be corrected for writing it once.
+        """
+        if _ASSEMBLY_CLOSED:
+            raise LeverError(
+                f"{cls.__name__}.from_env() after the assembly closed. build() resolves every package "
+                f"exactly once and then latches this; a mint at this point is a SECOND source for a "
+                f"value the frozen Config already holds, and whichever of the two the report quotes is "
+                f"a coin flip. If this is legitimate startup work, do it before build() returns. If it "
+                f"is a test, call spine.lever._reopen_assembly() and say in the test why.")
         env = os.environ if environ is None else environ
         vals, given = {}, {}
         for k, lv in cls._levers.items():
