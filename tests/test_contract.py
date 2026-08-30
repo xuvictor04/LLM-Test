@@ -823,12 +823,201 @@ def selftest():
                            "do not", not findings, detail, findings)
 
 
+
+# ==================================================================================================
+# K6 -- a stub that names a lever must be REACHED by the order tables
+# ==================================================================================================
+
+def entry_points(src_dir=SRC):
+    """{"PFX": {name: lineno}} -- every public function and public method in each <pkg>/api.py."""
+    out = {}
+    for pfx, d in sorted(PKG_DIR.items()):
+        path = os.path.join(src_dir, d, "api.py")
+        found = {}
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                text = fh.read()
+            try:
+                tree = ast.parse(text)
+            except SyntaxError:
+                out[pfx] = found
+                continue
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                        and not node.name.startswith("_"):
+                    found[node.name] = node.lineno
+                elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+                    for sub in node.body:
+                        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                                and not sub.name.startswith("_"):
+                            found[f"{node.name}.{sub.name}"] = sub.lineno
+        out[pfx] = found
+    return out
+
+
+def _named_by_orders(src_dir=SRC):
+    """Every "PFX.entry" the two order tables name, from compose.py BY AST -- not by import.
+
+    By AST because this check has to run against a synthetic tree in the self-test, where importing
+    spine.compose would drag in thirteen real packages. It reads the tables as literals and takes
+    BOTH the entry-point column and the prose column: several rows legitimately name a second entry
+    point in their note ("-> FAB.grow_check(...)", "the Plan it returns goes to MEM.apply_domain_plan"),
+    and a check that ignored those would report live mechanism as orphaned.
+    """
+    path = os.path.join(src_dir, "spine", "compose.py")
+    named = set()
+    if not os.path.isfile(path):
+        return named
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return named
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and any(
+                getattr(t, "id", "") in ("ASSEMBLY_ORDER", "LOOP_ORDER") for t in node.targets)):
+            continue
+        for row in ast.walk(node.value):
+            if not isinstance(row, ast.Tuple) or len(row.elts) < 3:
+                continue
+            parts = [e.value for e in row.elts if isinstance(e, ast.Constant)
+                     and isinstance(e.value, str)]
+            if len(parts) < 3:
+                continue
+            pfx = parts[1]
+            for piece in re.split(r"[/\s]+", parts[2]):
+                piece = piece.strip("(),.")
+                if piece:
+                    named.add(f"{pfx}.{piece}")
+                    named.add(f"{pfx}.{piece.split('.')[-1]}")
+            prose = " ".join(parts[3:])
+            for a, b in re.findall(r"\b([A-Z]{2,5})\.([A-Za-z_][A-Za-z_0-9]*)", prose):
+                named.add(f"{a}.{b}")
+                named.add(f"{a}.{b.split('.')[-1]}")
+            # CLASS-QUALIFIED NAMES TOO. An entry point may be a METHOD -- RunClock.advance,
+            # Cadences.due, Retention.consider -- and the rows write it that way in both the entry
+            # column and the prose. The PREFIX pattern above cannot see "Cadences.due" because
+            # "Cadences" is not an all-caps package prefix, so without this the check reported
+            # RUN.Cadences.due as orphaned while three separate rows call it by name. A matcher gap
+            # that manufactures orphans is as bad as one that hides them: it buries the real list.
+            for cls, meth in re.findall(r"\b([A-Z][A-Za-z0-9]+)\.([a-z_][A-Za-z_0-9]*)", prose):
+                named.add(f"{cls}.{meth}")
+                for _p in PKG_DIR:
+                    named.add(f"{_p}.{cls}.{meth}")
+    return named
+
+
+def _deferred_entry_points(src_dir=SRC):
+    """The DEFERRED_ENTRY_POINTS declaration in compose.py, read by AST as {"PFX.entry": reason}."""
+    path = os.path.join(src_dir, "spine", "compose.py")
+    out = {}
+    if not os.path.isfile(path):
+        return out
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", "") == "DEFERRED_ENTRY_POINTS" for t in node.targets):
+            v = node.value
+            if isinstance(v, ast.Call):                      # types.MappingProxyType({...})
+                v = v.args[0] if v.args else None
+            if isinstance(v, ast.Dict):
+                for k, val in zip(v.keys, v.values):
+                    if isinstance(k, ast.Constant) and isinstance(val, ast.Constant):
+                        out[k.value] = val.value
+    return out
+
+
+def check_k6_readers_are_reached(src_dir=SRC, doc_path=DOC):
+    """K6 -- an entry point that names levers must be REACHED by ASSEMBLY_ORDER or LOOP_ORDER.
+
+    WHY K4 IS NOT THIS CHECK, and why the gap mattered. K4 asks whether some stub's docstring NAMES
+    each declared lever. It passed at 257 named / 2 listed / 0 unaccounted, and docs/04_CONTRACT.md
+    reported the unconsumed set as two levers, both FAB's. A reviewer then applied the composition
+    root's OWN order tables as the test and found that the naming stub is frequently never called:
+
+      * nothing calls SIG.train_step, SIG.cadence_due or SIG.warm_up, while SIG.mode defaults to
+        'learned' and compose() hands SIG's parameters to OPT as a second param group. The run
+        therefore allocates an AdamW over the encoder, steps it every flush on zero gradients, and
+        routes every window through a RANDOMLY INITIALISED encoder for the whole run -- with
+        sig/api.py:8 stating the stakes itself: "the signature is the router's only input, so a
+        collapsed encoder routes every window to the same experts".
+      * nothing calls MEM.read or MEM.blend. The store is written and maintained and never read, so
+        nothing retrieval-side reaches the model's distribution -- and memory/api.py:8 prices that
+        path at the difference between -0.097 and +0.085 b/B.
+      * nothing calls DOM.rekey, which domains/api.py:116 calls "AN EVENT THE SPINE DELIVERS" and
+        which is the only place a radius is measured, while DOM.accept_rule defaults to 'radius'.
+      * nothing calls DATA.draw_stream. The stream is never drawn.
+
+    That is armed-but-inert -- 57 records, the second-largest family in the survey -- reproduced in
+    the new architecture at DESIGN time, where it costs one table edit instead of ten implemented
+    bodies for functions nobody calls. K4 could not see it because "reads a lever" and "is reached"
+    are different questions and it only ever asked the first.
+
+    THE DEFERRED TABLE IS A DECLARATION, NOT AN ESCAPE. An entry point with no row must appear in
+    compose.DEFERRED_ENTRY_POINTS with the phase that will call it and why. It is checked BACKWARDS
+    too: an entry that is now named by a row is stale and must be deleted, so the table cannot
+    become the place orphans go to be forgotten.
+
+    WHAT IT CANNOT CATCH. That a row exists does not mean the loop, once written, executes it -- the
+    tables are data and P4 writes the code. It also cannot see an entry point reached only from
+    inside another package's body (LM.load_state through CKPT.load, say); that is why those appear
+    in the deferred table with the caller named rather than being silently allowed.
+    """
+    findings = []
+    eps = entry_points(src_dir)
+    named = _named_by_orders(src_dir)
+    deferred = _deferred_entry_points(src_dir)
+    reads = stub_reads(src_dir)
+
+    total = sum(len(v) for v in eps.values())
+    reached, listed = 0, 0
+    for pfx, funcs in sorted(eps.items()):
+        for fn, line in sorted(funcs.items()):
+            key = f"{pfx}.{fn}"
+            tail = f"{pfx}.{fn.split('.')[-1]}"
+            if key in named or tail in named:
+                reached += 1
+                if key in deferred:
+                    findings.append(
+                        f"{key}: listed in DEFERRED_ENTRY_POINTS as {deferred[key]!r}, but a row in "
+                        f"ASSEMBLY_ORDER or LOOP_ORDER now names it. The entry is stale -- delete it, "
+                        f"or the table becomes the place orphans go to be forgotten.")
+                continue
+            if key in deferred:
+                listed += 1
+                if not str(deferred[key]).strip():
+                    findings.append(f"{key}: deferred with an empty reason, which is an orphan with "
+                                    f"paperwork.")
+                continue
+            lv = sorted(reads.get(pfx, (set(), set()))[0])
+            findings.append(
+                f"{PKG_DIR[pfx]}/api.py:{line}  {key} is named by no row in ASSEMBLY_ORDER or "
+                f"LOOP_ORDER and is not in DEFERRED_ENTRY_POINTS."
+                + (f" It claims to read {len(lv)} lever(s) -- {', '.join(lv[:6])}"
+                   f"{' ...' if len(lv) > 6 else ''} -- so those levers have a reader that is never "
+                   f"called, which reads as armed-but-0 and is actually never-asked."
+                   if lv else " It reads no lever, so the cost is only that the contract declares a"
+                              " surface the root does not use."))
+    return _report("K6", "every entry point is reached by the order tables, or declared deferred",
+                   not findings,
+                   f"{total} entry point(s): {reached} named by a row, {listed} declared deferred; "
+                   f"{len(deferred)} deferred entr(y/ies) re-checked against the tables",
+                   findings, vacuous=not total)
+
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
     check_k3_no_cross_package_imports,
     check_k4_levers_have_readers,
     check_k5_wires_are_read,
+    check_k6_readers_are_reached,
 )
 
 
