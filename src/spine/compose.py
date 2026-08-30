@@ -248,15 +248,26 @@ ASSEMBLY_ORDER = (
                                               "CKPT.save takes `payload` as an ARGUMENT and load "
                                               "runs before the objects exist, so the fan-out cannot "
                                               "live inside this package even if O10 allowed it",
-                                              "ONE FIELD, Snapshot.payload, UNDER SIX SPELLINGS -- "
-                                              "state (DATA.restore_stream_state, TOK.restore_vocab, "
-                                              "CAP.restore), saved (LM.load_state, OPT.load_state), "
-                                              "sd (SIG.load_state_dict, FAB.load_state_dict, "
-                                              "WORLD.load_into), restored (MEM.open_store, "
-                                              "DOM.open_partition, CAP.new_valve, "
-                                              "CKPT.new_retention), resume (OPT.build) and snapshot "
-                                              "(CKPT.check_geometry's first positional) -- plus "
-                                              "best_state, resume_step and resume_epoch. THE TOKEN "
+                                              "state -- Snapshot.payload, under the spelling "
+                                              "DATA.restore_stream_state, TOK.restore_vocab and "
+                                              "CAP.restore use; "
+                                              "saved -- Snapshot.payload again, LM.load_state's and "
+                                              "OPT.load_state's spelling; "
+                                              "sd -- Snapshot.payload again, for SIG.load_state_dict, "
+                                              "FAB.load_state_dict and WORLD.load_into; "
+                                              "restored -- Snapshot.payload again, for MEM.open_store, "
+                                              "DOM.open_partition, CAP.new_valve and "
+                                              "CKPT.new_retention; "
+                                              "resume -- Snapshot.payload again, OPT.build's spelling; "
+                                              "snapshot -- the Snapshot itself, CKPT.check_geometry's "
+                                              "first positional; "
+                                              "best_state -- CKPT.new_retention's restored argument; "
+                                              "resume_step -- Snapshot.step, RunClock's seed; "
+                                              "resume_epoch -- Snapshot.epoch, the same. "
+                                              "ONE FIELD UNDER SIX SPELLINGS, and each is written as "
+                                              "its own entry because a column read as prose gave the "
+                                              "PRODUCER side the same hole the consumer side had. "
+                                              "THE TOKEN "
                                               "NAMES THE PARENT'S BLOB: what CKPT.save takes at C "
                                               "is the map the C rows assemble, and the two are the "
                                               "same word for a load and a save. It does "
@@ -301,7 +312,7 @@ ASSEMBLY_ORDER = (
                                               "restored ceiling, which is thirty rows away and is "
                                               "the whole of M38; the body passes None today) -- "
                                               "MEASURES bytes/token, which three later rows need",
-                                              "vocab -- the Vocabulary itself, which TOK.restore_vocab "
+                                              "vocab = Vocabulary -- the record itself, which TOK.restore_vocab "
                                               "and TOK.save_vocabulary both take and which nothing "
                                               "else in the tree mints; bytes_per_token -- "
                                               "DATA.data_plan's argument and _signature_width's "
@@ -383,7 +394,7 @@ ASSEMBLY_ORDER = (
                                               "spelling; stream -- Segmentation.ids under SIG's "
                                               "spelling on the token arm of _signature_stream"),
     ("model",     "LM",    "build_model",     "(geom, device=RUN.device, seed=RUN.seed)",
-                                              "key_fn -- LM's encoder bound to (lm, model) by "
+                                              "NOT key_fn, which is _key_fn's partial application and is named on MEM.write's exemption; the old claim read: LM's encoder bound to (lm, model) by "
                                               "_key_fn, which is MEM.write's and MEM.maintain's "
                                               "spelling; head -- LM's decoder bound by _head, "
                                               "which is FAB.forward's. Both are ENTRY POINTS "
@@ -482,9 +493,9 @@ ASSEMBLY_ORDER = (
                                               "handed; step -- RunClock.step (units.Windows) under "
                                               "the spelling TOK.on_window, TOK.mint_burst, "
                                               "TOK.judge_probation, CKPT.Retention.consider and "
-                                              "CKPT.save use; step_windows -- the SAME counter "
+                                              "CKPT.save use; step_windows = step -- the SAME counter "
                                               "under SIG.cadence_due's, FAB.manage's, "
-                                              "FAB.forward's and FAB.grow_check's; now -- the same "
+                                              "FAB.forward's and FAB.grow_check's; now = step -- the same "
                                               "again under MEM.write's, MEM.maintain's, "
                                               "DOM.observe's and DOM.manage's; epoch -- "
                                               "RunClock.epoch, taken by DATA.draw_stream at E and "
@@ -605,7 +616,7 @@ LOOP_ORDER = (
                                       "old tree carried that fact in a closure variable (:6518-6521)",
                                       "data -- Stream.bytes under TOK.tokenize's spelling; labels; "
                                       "stream -- the same bytes under SIG's spelling at "
-                                      "space='bytes'; shift_at -- clock.opt_steps, stamped by the "
+                                      "space='bytes'; NOT shift_at, which comes off the CLOCK and not off this row -- RUN.new_clock produces it and OPT.maybe_step takes it. The old claim read: clock.opt_steps, stamped by the "
                                       "root at this row and consumed by OPT.maybe_step at B"),
     ("E", "TOK",   "tokenize",        "(vocab, data=Stream.bytes, labels=Stream.labels, "
                                       "regularize=True) -- between the draw and begin_epoch, because "
@@ -648,9 +659,14 @@ LOOP_ORDER = (
                                       "is before DOM.manage because manage's memory_counts and "
                                       "mem_floor_entries are REQUIRED arguments with no other "
                                       "producer -- a hole in a row that already existed",
-                                      "memory_counts and mem_floor_entries -- DOM.manage's "
-                                      "spellings for the per-source counts and floor_entries; "
-                                      "memory_pressure -- FAB.grow_check's spelling for "
+                                      "memory_counts = counts -- DOM.manage's spelling for the "
+                                      "per-source counts; "
+                                      "mem_floor_entries = floor_entries -- DOM.manage's spelling "
+                                      "for the floor it may not cull below. ONE NAME PER ENTRY, because a column "
+                                      "reading 'memory_counts and mem_floor_entries -- ...' declares "
+                                      "neither: the parser takes the token before `--`, and 'and' is "
+                                      "not a name; "
+                                      "memory_pressure = pressure -- FAB.grow_check's spelling for "
                                       "main/(main+prob). MEM.census DECLARES NO RECORD TYPE "
                                       "(memory/api.py:14-19 lists Store, WriteReceipt and Retrieval "
                                       "only; :269-278 names these three in prose), so these are the "
@@ -671,7 +687,7 @@ LOOP_ORDER = (
                                       "`live` list is what MEM.apply_domain_plan takes as "
                                       "live_sources, which replaces the attribute reach at :6699",
                                       "live_sources -- the `live` list under "
-                                      "MEM.apply_domain_plan's spelling; live_domains -- `n_live` "
+                                      "MEM.apply_domain_plan's spelling; live_domains = n_live -- "
                                       "under FAB.forward's, which fabric/api.py:78 is explicit is "
                                       "RUNTIME STATE and an argument rather than the "
                                       "d_live_domains wire. Same staleness as the row above: a B "
@@ -717,7 +733,7 @@ LOOP_ORDER = (
                                       "that call site is a defect by construction",
                                       "signature -- the (N, sig.d) unit vectors DOM.observe, "
                                       "FAB.forward and FAB.grow_check all take under that exact "
-                                      "name; sample_window -- the same slice DOM.observe takes, "
+                                      "name; NOT sample_window, which is this row's ARGUMENT and not its return -- DOM.observe takes the same slice and gets it from ROW_ARGUMENTS_ELSEWHERE. It is "
                                       "which is this row's ARGUMENT rather than its return and is "
                                       "why the join has a name"),
     ("A", "DOM",   "observe",         "once per window, above the early-out: `sustain` is Windows. "
@@ -725,8 +741,8 @@ LOOP_ORDER = (
                                       "tokens=this window's slice of Segmentation.ids "
                                       "(_window_bounds); now=clock.step",
                                       "did -- Assignment.did, DOM.note_competence's and DOM.prior's "
-                                      "spelling; domain_id -- the same id under FAB.forward's and "
-                                      "FAB.observe's; sources -- the same id under MEM.write's, "
+                                      "spelling; domain_id = did -- the same id under FAB.forward's and "
+                                      "FAB.observe's; sources = did -- the same id under MEM.write's, "
                                       "where memory/api.py:95's src<0 and -2 conventions are MEM's "
                                       "own and nothing here implements them; boundary -- the window "
                                       "SIG.cadence_due's windows_since_boundary is measured from ON "
@@ -781,10 +797,15 @@ LOOP_ORDER = (
                                       "h -- LM.encode's (B, L, width) hidden, which is FAB.forward's "
                                       "spelling; logits -- LM.decode's return, THE ONLY PLACE "
                                       "LOGITS ARE PRODUCED, and one of the two inputs this file "
-                                      "forms MEM's write gate from (:7497-7498); per_window_loss "
-                                      "(FAB.observe), flush_loss (FAB.manage, FAB.grow_check), "
-                                      "baseline_loss (FAB.contribution) and bits "
-                                      "(DOM.note_competence) -- FOUR SPELLINGS OF LM.lm_loss'S TWO "
+                                      "forms MEM's write gate from (:7497-7498); "
+                                      "per_window_loss = per_window -- lm_loss's first return, "
+                                      "FAB.observe's spelling; "
+                                      "flush_loss = per_window -- the same return pooled over the "
+                                      "flush, which FAB.manage and FAB.grow_check take; "
+                                      "baseline_loss = per_window -- the same return again, "
+                                      "FAB.contribution's spelling; "
+                                      "bits = per_window -- the same return in bits per byte, "
+                                      "DOM.note_competence's spelling. FOUR SPELLINGS OF LM.lm_loss'S TWO "
                                       "RETURNS, which are a bare tuple with no record type to "
                                       "anchor them (lm/api.py:181); mean, the other one, is "
                                       "the first summand of the composed objective "
@@ -800,7 +821,7 @@ LOOP_ORDER = (
                                       "fab.halt_mass_train is a TRAINING-ONLY EMA that the old tree "
                                       "moved by averaging eval passes in",
                                       "out -- the FabricOut FAB.observe takes as its second "
-                                      "positional; owners -- MEM.write's spelling for the top "
+                                      "positional; NOT owners, which MEM.write takes and this row does not return: it is an argmax-of-weights join, named in ROW_ARGUMENTS_ELSEWHERE on the consuming row. The old claim here was the top "
                                       "expert of each window, which the old tree formed at :7523 as "
                                       "the argmax of the routing weights folded modulo the owner "
                                       "count, and THE FOLD IS A RECORDED DEFECT (:7524-7527: expert "
@@ -906,7 +927,7 @@ LOOP_ORDER = (
                                       "entry point in their frozen surfaces. The event itself is a "
                                       "record type tok/api.py:35 declares and no entry point's "
                                       "docstring returns",
-                                      "mints -- the list LM.on_mint takes; resegment -- the "
+                                      "mints = Mint -- the list LM.on_mint takes; NOT resegment: the RetokEvent is declared by no entry point's docstring, which this table says four rows above, so claiming it here would be K11's exact defect. It is named on the consuming rows' exemptions. The old claim read: the "
                                       "RetokEvent under MEM.maintain's spelling, when one is "
                                       "produced at all"),
     ("B", "TOK",   "judge_probation", "step=clock.step; appearances is System.token_seen, the same "
@@ -984,7 +1005,7 @@ LOOP_ORDER = (
                                       "built. It is the only geometry() in the tree -- see Q-CKPT-1 "
                                       "and the block above: five fields recorded against fifteen "
                                       "compared",
-                                      "geometry -- CKPT.save's argument, the RECORDED side of the "
+                                      "NOT geometry: WORLD.geometry returns WORLD's own six fields, not the fifteen-field manifest CKPT.save takes, and claiming the bare token here made K10 certify a five-field record as the whole comparison. CKPT.save gets its manifest from _geometry_manifest via ROW_ARGUMENTS_ELSEWHERE. What this row does supply is the RECORDED side of the "
                                       "gate's comparison. It is NOT what check_geometry takes as "
                                       "its own live manifest"),
     ("C", "MEM",   "state_dict",      "(store) -- including prob, recon, nsrc_max "
@@ -1323,6 +1344,10 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "(DOM.observe's `boundary`), reset there and incremented per window. It is a running counter "
         "between two calls, not a return value.",
     "DOM.observe":
+        "sample_window is _sample_window(sysm, sig, at_window) -- the same object SIG.encode is "
+        "GIVEN, not one it returns. The SIG.encode row claimed to produce it while its own prose "
+        "conceded it was 'this row's ARGUMENT rather than its return', which is honest writing that "
+        "K10 could not read. "
         "tokens is the window's token ids -- Segmentation.ids sliced at _window_bounds. The slice is "
         "the loop's; the bounds are named here.",
     "FAB.forward":
@@ -1343,7 +1368,19 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "total is the summed loss the loop assembles: LM.lm_loss plus FAB's aux_loss plus WORLD's "
         "terms plus LM.anchor_term. The sum is the loop's because the terms come from four packages "
         "and no package may see another's.",
+    "MEM.maintain":
+        "key_fn is _key_fn(sysm) -- LM.encode bound to (lm, model), the same callable MEM.write "
+        "takes. LM.build_model returns a MODEL, not a key_fn, and the row claimed otherwise until "
+        "K11 refused it: a bound method is the composition root's construction, which is what this "
+        "table is for.",
     "MEM.write":
+        "owners is the per-entry owner block: argmax over FabricOut.weights, modulo "
+        "MEM.d_owner_blocks. FAB.forward does NOT return it -- FabricOut carries logits, "
+        "expert_ids, weights, per_expert_logits, aux_loss and gates -- and the row claimed it did "
+        "until K11 refused the claim. It is the one join in this file with no named helper, because "
+        "it needs a tensor operation and nothing in src/ imports torch; P4 writes it in the loop and "
+        "this entry is what says so. "
+        "key_fn is _key_fn(sysm), the same bound callable MEM.maintain takes -- see above. "
         "contexts is LM.encode's `h` for the flush, tokens is the same cut's ids, surprise is the "
         "per-window loss LM.lm_loss returned. All three are the flush's own tensors, sliced by the "
         "loop from values earlier rows DO produce -- the slicing is what has no row.",

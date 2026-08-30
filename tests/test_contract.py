@@ -668,7 +668,7 @@ from spine.lever import Config
 
 
 def open_areas(dat: Config, *, seed: int):
-    """Open every area.
+    """Open every area. Returns Areas(areas, bodies).
 
     LEVERS READ: source, stream_bytes
     WIRES READ: d_expert_slots
@@ -784,7 +784,7 @@ _CASES = (
     ("control -- nothing wrong with this tree", {}, {
         "K1": (False, None), "K2": (False, None), "K3": (False, None),
         "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None),
-        "K8": (False, None), "K9": (False, None), "K10": (False, None)}),
+        "K8": (False, None), "K9": (False, None), "K10": (False, None), "K11": (False, None)}),
 
     ("K1: a parameter was renamed in the tree and not in the document",
      {"src/data/api.py": _GOOD_API.replace("*, seed: int", "*, run_seed: int")},
@@ -969,6 +969,24 @@ ROW_ARGUMENTS_ELSEWHERE = {"DATA.no_such_entry": "produced by _nothing"}
 '''},
      {"K10": (True, "stale exemption")}),
 
+    # ---- K11. K10 makes provenance decidable by TRUSTING the produces column, so a column entry
+    # ---- naming a value its entry point does not return is a fabrication K10 then certifies. A
+    # ---- reviewer found nine, covering fourteen tokens.
+    ("K11: a produces entry naming a value the entry point does not return",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace('"areas -- the corpus handles"',
+                                                    '"key_fn -- a bound callable"')},
+     {"K11": (True, "does not return")}),
+
+    ("K11: a DECLARED RENAME is admitted -- `alias = real` where real is in the docstring",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace('"areas -- the corpus handles"',
+                                                    '"handles = areas -- renamed for the consumer"')},
+     {"K11": (False, None)}),
+
+    ("K11: a rename that names nothing real is still refused",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace('"areas -- the corpus handles"',
+                                                    '"handles = nowhere -- renamed from nothing"')},
+     {"K11": (True, "does not return")}),
+
     ("K4: a declared lever that no stub names and no table lists",
      {"src/data/levers.py": _GOOD_LEVERS.replace(
          '    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)',
@@ -1020,6 +1038,7 @@ _BY_TAG = {
     "K8": lambda d: check_k8_streams_are_declared(os.path.join(d, "src")),
     "K9": lambda d: check_k9_cadence_periods_are_typed(os.path.join(d, "src")),
     "K10": lambda d: check_k10_rows_name_their_arguments(os.path.join(d, "src")),
+    "K11": lambda d: check_k11_produces_is_not_fabricated(os.path.join(d, "src")),
 }
 
 
@@ -1686,9 +1705,27 @@ def _rows_with_prose(src_dir=SRC):
             # default: a row that yields a value later rows need has to say so, and the ones that
             # yield nothing (a refusal, a save, a counter read) legitimately have none.
             recv = parts[3] if len(parts) > 3 else ""
-            prod = set()
-            for name in re.findall(r"[A-Za-z_][A-Za-z_0-9]*", " ".join(parts[4:])):
-                prod.add(name)
+            # THE PRODUCES COLUMN IS A LIST OF NAMES, EACH WITH AN EXPLANATION AFTER `--`, THE
+            # ENTRIES SEPARATED BY `;`. Harvesting every identifier from it instead gave the
+            # producer side the SAME hole the consumer side had: a column reading
+            #     "geometry -- CKPT.save's argument, the RECORDED side of the comparison"
+            # produced the tokens `geometry`, `CKPT`, `save`, `argument`, `side`, `comparison` and
+            # `RECORDED`, so any later row wanting an argument called `side` or `comparison` was
+            # satisfied by prose about something else entirely. Measured: 24 tokens harvested this
+            # way across nine rows were ordinary English, including `THE`, `WHICH` and `WRITES`.
+            # Parsing the declared form means a produced name has to be WRITTEN as one.
+            prod = {}
+            for entry in " ".join(parts[4:]).split(";"):
+                head, _, why = entry.partition("--")
+                head = head.strip().strip(",.")
+                # `alias = real` -- the head carries the rename, so split it off and keep it where
+                # K11 can read it. K10 only ever wants the alias: that is the name the CONSUMING
+                # signature uses, and matching consumers to producers is its whole job.
+                alias, eq, real = head.partition("=")
+                if eq:
+                    head, why = alias.strip(), "= " + real.strip() + " -- " + why.strip()
+                if re.fullmatch(r"[a-z_][A-Za-z_0-9]*", head or ""):
+                    prod[head] = why.strip()
             for piece in re.split(r"[/\s]+", parts[2]):
                 piece = piece.strip("(),.")
                 if piece:
@@ -1813,7 +1850,7 @@ def check_k10_rows_name_their_arguments(src_dir=SRC):
         # judgement call.
         earlier = set()
         for _ln, _k, _pr, _pd in produced_before.get((lineno, key), []):
-            earlier |= _pd
+            earlier |= set(_pd)
         # NO PROSE ESCAPE. The first version read
         #     if a not in earlier and not re.search(r"\b" + a + r"\b", prose)
         # -- an argument counted as produced when the CONSUMING ROW'S OWN NOTE contained the word.
@@ -1876,6 +1913,117 @@ def check_k10_rows_name_their_arguments(src_dir=SRC):
                    vacuous=not checked)
 
 
+
+# ==================================================================================================
+# K11 -- a produces entry must name something its entry point actually returns
+# ==================================================================================================
+
+def check_k11_produces_is_not_fabricated(src_dir=SRC):
+    """K11 -- every name in a row's `produces` column appears in that entry point's own docstring.
+
+    THE DEFECT, AND IT IS THE ONE K10 CREATED. K10 makes provenance decidable by trusting the
+    `produces` column -- so a column entry naming a value its entry point does not return is a
+    fabricated provenance that K10 then CERTIFIES. A reviewer found nine, covering fourteen tokens:
+    LM.build_model producing `key_fn` and `head` (it returns a model; both are compose's partial
+    applications), SIG.build producing `encode` (it returns SigState), TOK.tokenize producing
+    `windows_in_epoch`, `run_windows` and `bytes_per_window` (it returns a Segmentation; all three
+    are compose helpers), CKPT.Retention.consider producing `reason` and `suffix` (it returns a
+    BestAction), FAB.forward producing `owners` (a join with no named helper), TOK.mint_burst
+    producing a RetokEvent the same table says is "DECLARED BY NO ENTRY POINT'S DOCSTRING".
+
+    Five of the nine SAY SO in their own prose, which is honest writing and does not help: K10 reads
+    the token, not the sentence. compose.py's own header already names the legal move for a
+    helper-supplied argument -- ROW_ARGUMENTS_ELSEWHERE with the helper named -- and a `produces`
+    entry on another package's row is not it.
+
+    HOW IT DECIDES, and this is a weak test on purpose. The name must appear somewhere in the entry
+    point's docstring or its module's -- which is where every package declares its RECORD TYPES
+    RETURNED. It cannot tell a returned field from a mention, and it does not try: what it makes
+    impossible is inventing a name out of nothing, which is what all nine were.
+
+    WHAT IT CANNOT CATCH: a docstring that names a field the code will not return (nothing here
+    executes), and a return whose fields the docstring does not enumerate -- which is itself worth
+    reporting, so the count of entry points with no discoverable return text is printed.
+    """
+    rows = _rows_with_prose(src_dir)
+    docs, undocumented = {}, []
+    for pfx, d in sorted(PKG_DIR.items()):
+        path = os.path.join(src_dir, d, "api.py")
+        if not os.path.isfile(path):
+            continue
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        mod_doc = ast.get_docstring(tree) or ""
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and not node.name.startswith("_"):
+                docs[f"{pfx}.{node.name}"] = (ast.get_docstring(node) or "") + "\n" + mod_doc
+            elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+                for sub in node.body:
+                    if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                            and not sub.name.startswith("_"):
+                        docs[f"{pfx}.{node.name}.{sub.name}"] = \
+                            (ast.get_docstring(sub) or "") + "\n" + mod_doc
+
+    findings, checked, seen = [], 0, set()
+    for lineno, key, _prose, prod in rows:
+        if (lineno, key) in seen:
+            continue
+        seen.add((lineno, key))
+        # A COMBINED ROW'S produces COLUMN IS THE UNION OF ITS CALLS. One row reads
+        #     ("B", "LM", "encode/decode/lm_loss", ...)
+        # and _rows_with_prose splits it into three keys, each handed the whole column -- so
+        # per_window_loss, which lm_loss returns, was reported as fabricated on encode and on decode.
+        # The row names three calls on one line; its column describes what the three produce
+        # between them, and attributing each token to one of them is a precision this table does not
+        # have. Any entry point the row names may account for a token.
+        siblings = [k for _l, k, _p, _d in rows if _l == lineno]
+        doc = "\n".join(docs.get(k, "") for k in siblings)
+        if not doc.strip():
+            continue
+        for tok in sorted(prod):
+            checked += 1
+            # A DECLARED RENAME IS HONEST. The root's job includes handing one returned value to
+            # several packages under the names their signatures use: CKPT.load returns a Snapshot and
+            # the same Snapshot.payload reaches five packages as `state`, `saved`, `sd`, `restored`
+            # and `resume`. The column writes those as "state -- Snapshot.payload, under the spelling
+            # DATA.restore_stream_state uses", so the EXPLANATION names the real field even though
+            # the token does not. Refusing that would push the root toward one spelling and thirteen
+            # signatures changed to match, which is the opposite of the frozen contract.
+            # So: the token, OR a `Something.field` in its explanation whose field the docstring
+            # names. A rename must SAY what it renames.
+            # TWO DECLARED FORMS FOR A RENAME, and both must NAME the real thing:
+            #   `alias -- Type.field ...`     the returned record's field, spelled out
+            #   `alias = real -- ...`         for a return with no record type to qualify against,
+            #                                 which lm_loss has: it returns a bare
+            #                                 "(per_window: (B,), mean: scalar)" and four rows take
+            #                                 per_window under four names.
+            # Prose alone is not a rename. "saved -- the same field" named nothing and passed
+            # nothing; "saved -- Snapshot.payload again" names the field and is checkable.
+            renamed = any(re.search(r"\b" + re.escape(f) + r"\b", doc)
+                          for _t, f in re.findall(r"\b([A-Z][A-Za-z0-9]*)\.([a-z_][a-z_0-9]*)",
+                                                  prod[tok]))
+            alias = re.match(r"\s*=\s*([A-Za-z_][A-Za-z_0-9]*)", prod[tok])
+            if alias and re.search(r"\b" + re.escape(alias.group(1)) + r"\b", doc):
+                renamed = True
+            if not re.search(r"\b" + re.escape(tok) + r"\b", doc) and not renamed:
+                findings.append(
+                    f"src/spine/compose.py:{lineno}  the {key} row claims to produce {tok!r}, and "
+                    f"nothing in that entry point's docstring or its module's RECORD TYPES RETURNED "
+                    f"block mentions it. K10 reads this column as provenance, so a name invented "
+                    f"here is a fabricated producer that K10 then certifies. If a helper in "
+                    f"compose.py supplies it, that is ROW_ARGUMENTS_ELSEWHERE on the CONSUMING row, "
+                    f"with the helper named.")
+    return _report("K11", "no produces entry names a value its entry point does not return",
+                   not findings,
+                   f"{checked} produces entr(y/ies) across {len(seen)} row(s), against "
+                   f"{len(docs)} documented entry point(s)", findings, vacuous=not checked)
+
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
@@ -1887,6 +2035,7 @@ CHECKS = (
     check_k8_streams_are_declared,
     check_k9_cadence_periods_are_typed,
     check_k10_rows_name_their_arguments,
+    check_k11_produces_is_not_fabricated,
 )
 
 
