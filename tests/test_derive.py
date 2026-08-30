@@ -240,6 +240,36 @@ def smoke():
         except UnitError:
             pass
 
+    # --- cadences_that_cannot_fire: C11's measurement, pinned as a test rather than left in a doc.
+    # NO ORACLE TABLE, and the reason is worth stating: this function has no old-tree equivalent to
+    # capture -- the old system had no such audit, which is exactly why the ten defaults could sit
+    # longer than the run for the whole project's life without anyone reading a line about it. So the
+    # known-answer table is written here by hand from the SHIPPED defaults, and it fails the day
+    # either the defaults or the run-length arithmetic moves.
+    _per = {"curve": Windows(2000), "ckpt": Windows(1000), "fab.manage": Windows(500),
+            "dom.manage": Windows(100), "dom.rekey": Windows(200)}
+    # 506 windows = 120000 bytes / 1.85 bytes-per-token / 128 tokens, the project's own measured
+    # compression against the shipped DATA.stream_bytes and LM.ctx.
+    assert derive.cadences_that_cannot_fire(Windows(506), _per) == [("curve", 2000, 506),
+                                                                    ("ckpt", 1000, 506)]
+    # 937 = the same at the 1.0 bytes/token CEILING, which no real corpus reaches. Still two gates.
+    assert derive.cadences_that_cannot_fire(Windows(937), _per) == [("curve", 2000, 937),
+                                                                    ("ckpt", 1000, 937)]
+    # At P3's own exit criterion -- 200 steps -- FOUR of the five gates cannot fire, and the fifth
+    # (dom.manage at 100) fires twice. That is the sentence the audit exists to put in the report.
+    assert len(derive.cadences_that_cannot_fire(Windows(200), _per)) == 4
+    assert derive.cadences_that_cannot_fire(Windows(60000), _per) == []      # a real run: all reachable
+    # STRICT AT THE BOUNDARY: a period equal to the run length is reported, because a gate fires on
+    # elapsed-since-last-fire and one exactly-equal period has a single chance, at the final window.
+    assert derive.cadences_that_cannot_fire(Windows(500), {"x": Windows(500)}) == [("x", 500, 500)]
+    assert derive.cadences_that_cannot_fire(Windows(501), {"x": Windows(500)}) == []
+    for bad_run, bad_per in ((Flushes(506), _per), (Windows(506), {"x": Steps(10)})):
+        try:
+            derive.cadences_that_cannot_fire(bad_run, bad_per)
+            raise AssertionError("a foreign clock kind was accepted by cadences_that_cannot_fire")
+        except UnitError:
+            pass
+
     # The remaining five are covered by their tables; call each once so an import-time or signature
     # breakage cannot hide behind a table that is only read when the file is run.
     assert derive.cull_gate_open(2090, 4096, 0.45) is True

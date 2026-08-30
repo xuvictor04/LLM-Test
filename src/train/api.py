@@ -186,18 +186,37 @@ class RunClock:
         raise NotImplementedError("RUN.RunClock.counters: P4 (train) fills this in.")
 
 
-def new_cadences(run: Config):
+def new_cadences(run: Config, *, periods):
     """The gate ledger. ONE object; every periodic gate in the run goes through it.
 
-    Reads NONE of RUN's levers. EVERY PERIOD IS AN ARGUMENT -- a units.Windows supplied by the
-    package that owns the threshold (CKPT.every, EVAL.curve_every, FAB.manage_every,
-    TOK.retok_every, DOM.manage_every, MEM.probe_every). RUN evaluates; RUN does not own a single
+    Reads NONE of RUN's levers. EVERY PERIOD IS AN ARGUMENT -- `periods` is {key: units.Windows},
+    each supplied by the package that OWNS the threshold. RUN evaluates; RUN does not own a single
     threshold.
+
+    THE SIGNATURE SAID Config AND NOTHING ELSE UNTIL 2026-08-30, while this docstring said every
+    period is an argument. There was no parameter to pass one through, so the sentence describing
+    the package's whole design was unimplementable -- and a reviewer found it by reading the two
+    against each other. It is now a real parameter.
+
+    THE SIX PERIODS THIS DOCSTRING USED TO NAME WERE THREE WRONG. It listed CKPT.every,
+    EVAL.curve_every, FAB.manage_every, TOK.retok_every, DOM.manage_every and MEM.probe_every. The
+    gates that actually exist in the order tables are five -- 'curve', 'dom.manage', 'fab.manage',
+    'dom.rekey' and 'ckpt' -- so TOK.retok_every and MEM.probe_every were named here while being
+    evaluated INSIDE their own packages (TOK.on_window's four cadences, MEM.maintain's internal
+    comparison against a Windows `now`), and MEM.rekey_every, which drives the 'dom.rekey' gate, was
+    not named at all. A ledger that lists gates it does not evaluate and omits one it does is worse
+    than no ledger: Cadences.ledger() is the DID IT FIRE surface, and every key missing from it is a
+    mechanism whose "0 fires" nobody can read.
+
+    THE KEYS ARE THE ROOT'S, NOT THIS FUNCTION'S. compose.py's cadence table is the authority on
+    which key maps to which owner's period, and docs/04_CONTRACT.md prints it. This function
+    accepts the mapping and records against it.
 
     LEVERS READ: none
     WIRES READ: none
     DID IT FIRE: Cadences.ledger() -> {key: (checks, fires, last_fired_step, period)}. A key with
-                 checks > 0 and fires == 0 is armed-but-inert with its own arithmetic attached.
+                 checks > 0 and fires == 0 is armed-but-inert with its own arithmetic attached; a
+                 key ABSENT was never wired, which is a different statement and G4 needs both.
     """
     run = run.owned_by("RUN")
     raise NotImplementedError(
@@ -275,4 +294,55 @@ def startup_refusals(run: Config, *, disk_stream):
     run = run.owned_by("RUN")
     raise NotImplementedError(
         "RUN.startup_refusals: P4 (train) fills this in. The contract is frozen here; see "
+        "docs/04_CONTRACT.md, section RUN.")
+
+
+def cadence_audit(run: Config, *, run_windows, periods):
+    """Which gates cannot fire, given how long this run actually is. Returns a list of strings.
+
+    STATED AT STARTUP, NOT RAISED, and the distinction is the whole design. A short run is a
+    legitimate thing to ask for -- a smoke test is supposed to be short. What is not legitimate is a
+    report that cannot separate "the mechanism ran and did nothing" from "the mechanism was never
+    reached". So this returns the sentences and the caller prints them before the first window.
+
+    THE MEASUREMENT THAT MADE IT NECESSARY (ISSUES C11, confirmed 2026-08-30). At the shipped
+    defaults DATA.stream_bytes=120000, LM.ctx=128 and RUN.epochs=1 give AT MOST 937 windows, about
+    506 at the project's own measured 1.85 bytes/token -- and TEN cadence-shaped defaults are longer
+    than that:
+
+        CAP.pin_windows       20000   the capacity valve never lifts either cap
+        MEM.use_decay_every   20000   usage decay never runs
+        FAB.ponder_warm        8000   ponder never arms
+        FAB.bal_warm           4000   the load-balance term never arms
+        EVAL.verify_fit_steps  3000   the verification fit never runs
+        TOK.retok_every        3000   the vocabulary is never re-segmented
+        EVAL.curve_every       2000   THE LEARNING CURVE IS NEVER PROBED
+        TOK.cand_window        1024   the candidate window never fills
+        OPT.lr_warmup          1000   the run ends INSIDE warm-up
+        SIG.warmup              800   the encoder warm-up never completes
+
+    Every cadence carries the OLD system's value, tuned against STREAM_LEN=94000000 and 60k-step
+    runs; stream_bytes carries a smoke-test value. Neither is wrong alone; together they describe a
+    run in which almost nothing happens. PLAN's P3 exit criterion is "empty environment, 200 steps,
+    reaches the end" -- so without this, a green P3 certifies a system in which every cadenced
+    mechanism fired zero times.
+
+    WHY IT COULD NOT BE A LEVER REFUSAL OR A BUILD-TIME WIRE. `run_windows` is not knowable when
+    build() freezes: it needs bytes_per_token, MEASURED on a corpus the tokenizer has not seen. That
+    is the same reason SIG's signature width is derive-and-keep rather than a coupling, and it is why
+    this is an entry point placed after DATA.data_plan rather than a startup_refusal.
+
+    `run_windows` is units.Windows and every period is units.Windows; derive.cadences_that_cannot_fire
+    refuses any other kind at both ends.
+
+    LEVERS READ: none
+    WIRES READ: none
+    DID IT FIRE: the returned list is the record. An EMPTY list is a real result and must be printed
+                 as one -- "every declared gate can fire at this run length" -- because silence here
+                 is indistinguishable from the audit not having run.
+    """
+    run = run.owned_by("RUN")
+    raise NotImplementedError(
+        "RUN.cadence_audit: P4 (train) fills this in -- it is one call to "
+        "derive.cadences_that_cannot_fire plus the sentences. The contract is frozen here; see "
         "docs/04_CONTRACT.md, section RUN.")

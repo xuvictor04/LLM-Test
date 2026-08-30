@@ -86,7 +86,7 @@ This matters most because of what it would certify: PLAN's P3 exit criterion is 
 
 **Not fixed by editing the numbers**, which would only move the inconsistency. The repair is to make it *loud*: `RUN.startup_refusals` already exists as an entry point, and the resolved run length is known at build time from `stream_bytes`, `ctx`, `epochs` and the measured bytes/token — so a run can say at startup which cadences cannot fire before it spends a single step. Whether the defaults themselves should change is the owner's call (§ *for the owner*, `docs/04_CONTRACT.md`).
 
-### HIGH (51)
+### HIGH (52)
 
 **H1. Three arms in the DEFAULT grid list are the same run, and three more are a second identical triple** *(unverified)*  
 `wrong-measurement` · harness · longrun.sh:1116-1117 (GRID_ARMS_DEFAULT), resolved at :164 base, :173 vote, :174 socloop, :175 socloop_w, :176 vote_w, :292 weights  
@@ -304,6 +304,14 @@ Windows(held) >= Windows(cfg.pin_windows)  -> correct, and nothing requires it
 **Not fixable by making `Config` return `unit(value)`**, which was the obvious patch and was measured before being rejected: a `Clock` refuses `*`, `//`, `%` and comparison against a bare int, and several of these levers are used arithmetically (`max(1, manage_every // batch_w)` is the shipped shape). Auto-wrapping would turn every such site into a `TypeError` at once. Doing it properly means routing each arithmetic site through a **named** conversion in `spine.derive` — which is the design's own rule and is exactly what `flush_period_windows` was added for — and that is P4 work, package by package, not a patch to `lever.py`.
 
 Until then the honest statement is the one to put in the report: the clock kinds are enforced **between** packages and advisory **within** one.
+
+**H52. At the shipped defaults every clock kind is numerically identical, so P3's exit criterion cannot detect a units defect** **[CONFIRMED]**  
+`wrong-measurement` · rework · resolved from `build(environ={})` on 2026-08-30  
+`OPT.batch_windows=1` and `OPT.accum=1`, so **one window is one flush is one backward pass is one optimizer step**. Every conversion in `spine/derive.py` is the identity at those numbers, and a Windows/Flushes confusion — the single most repeated defect in the survey, and the entire reason `spine/units.py` exists — produces *identical output* to correct code.
+
+PLAN's P3 exit criterion was `empty environment, 200 steps, reaches the end; both data paths`. Under it, a run that reaches the end is evidence the code executes and **no evidence whatever about units**. Every historical instance of the defect needed `BATCH_W > 1` to appear: the pin clock reading 43,645 real ticks as 2,650 (÷16), `MANAGE_EVERY` compared against a window counter above the early-out and a flush counter below it, accumulation gated on windows so 55 optimizer steps were measured where 13 were due.
+
+This is not an argument for changing the defaults — `batch_windows=1` is a reasonable smoke-test value. It is an argument that **the test must not be run only there**. P3's criterion is amended to require a second arm at `OPT_BATCH_WINDOWS=16`, and the two arms must differ only where the units say they should. Recorded rather than silently added to the test, because the criterion is PLAN's and this is a change to it.
 
 ### MEDIUM (118)
 

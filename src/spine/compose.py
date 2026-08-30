@@ -295,7 +295,26 @@ ASSEMBLY_ORDER = (
                                               "FAILURE, not a warning. OptState is declared as "
                                               "'both AdamW instances' and NAMES NEITHER, so what is "
                                               "handed over today is the OptState -- Q-OPT-7"),
-    ("cadence",   "RUN",   "new_cadences",    "() -- every period below is an argument"),
+    ("cadence",   "RUN",   "new_cadences",    "(periods={'curve': EVAL.curve_period(ev), "
+                                              "'dom.manage': DOM.manage_period(dom), 'fab.manage': "
+                                              "FAB.manage_period(fab), 'dom.rekey': "
+                                              "MEM.rekey_period(mem), 'ckpt': CKPT.save_period(ck)}) "
+                                              "-- the five gates the loop evaluates, each period "
+                                              "supplied by the package that DECLARES its kind. "
+                                              "new_cadences took no periods at all until 2026-08-30 "
+                                              "while its docstring said every period is an argument"),
+    ("audit",     "RUN",   "cadence_audit",   "(run_windows=Plan's measured length, periods=the "
+                                              "SAME mapping) -- states which of those five cannot "
+                                              "fire at this run's length BEFORE the first window. At "
+                                              "the shipped defaults a run is at most 937 windows and "
+                                              "ten cadence defaults are longer (ISSUES C11), so "
+                                              "without this a green P3 certifies a system in which "
+                                              "every cadenced mechanism fired zero times. It states, "
+                                              "it does not raise: a short run is legitimate, a report "
+                                              "that cannot tell 'ran and did nothing' from 'never "
+                                              "reached' is not. AFTER new_cadences because it takes "
+                                              "the same mapping, and after DATA.data_plan because "
+                                              "run_windows needs the MEASURED bytes/token"),
     ("persist",   "CKPT",  "saving_on",       "() -- recorded ONCE on the System and consulted by "
                                               "every save site; it must precede new_retention, whose "
                                               "inert_reason is populated when best_keep > 0 AND "

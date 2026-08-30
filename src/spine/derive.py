@@ -282,6 +282,56 @@ def flush_period_windows(period_windows, batch_windows):
     return Flushes(1) if period.n < 1 else period
 
 
+
+def cadences_that_cannot_fire(run_windows, periods):
+    """Which periodic gates are longer than the run, so they can never fire once.
+
+    UNIT IN: run_windows = Windows (the resolved length of the run), periods = {key: Windows}.
+    UNIT OUT: [(key, period_n, run_n)], sorted longest period first. Empty means every gate can fire.
+
+    WHY THIS IS A FUNCTION AND NOT A COMMENT. Measured on the shipped defaults, 2026-08-30:
+    DATA.stream_bytes=120000, LM.ctx=128, RUN.epochs=1 give AT MOST 937 windows and about 506 at the
+    project's own measured 1.85 bytes/token -- and TEN cadence-shaped defaults are longer than that,
+    including EVAL.curve_every=2000, so the learning curve is never probed, and OPT.lr_warmup=1000,
+    so the run ends INSIDE warm-up. Every cadence carries the old system's value, tuned against
+    STREAM_LEN=94000000 and 60k-step runs; stream_bytes carries a smoke-test value. Neither is wrong
+    alone. Together they describe a run in which almost nothing happens (ISSUES C11).
+
+    WHAT IT IS FOR IS THE REPORT, NOT THE ARITHMETIC. The check is one comparison; the reason it
+    exists is that PLAN's P3 exit criterion is "empty environment, 200 steps, reaches the end", and
+    under these defaults a green P3 certifies a system in which every cadenced mechanism fired zero
+    times. That is the armed-but-inert family (57 records) arriving through the DEFAULTS rather than
+    through a guard -- the one place none of O1-O10, K1-K9 or the census checks looks, because all of
+    them read declarations and this is a property of the declared VALUES against a measured length.
+
+    NOT A REFUSAL, AND THAT IS DELIBERATE. A short run is a legitimate thing to ask for; a smoke test
+    is supposed to be short. What is not legitimate is a report that cannot tell "the mechanism ran
+    and did nothing" from "the mechanism was never reached". So this returns the list and the caller
+    states it; it does not raise. The owner decides whether to change the numbers.
+
+    STRICT: a period EQUAL to the run length is reported. A gate fires when `period` windows have
+    ELAPSED since it last fired, and `_fired[key]` seeds at the resumed step -- so a period exactly
+    equal to the run has one chance, at the final window, and only if nothing rounds against it.
+    Reporting it is the honest side of a boundary nobody should have to reason about twice.
+    """
+    if type(run_windows) is not Windows:
+        raise UnitError(f"cadences_that_cannot_fire: run_windows must be Windows, got "
+                        f"{type(run_windows).__name__}. The run's length is counted in the same clock "
+                        f"the gates are compared against -- `step`, which advances once per window. A "
+                        f"Flushes here divides the answer by the batch width and reports gates as "
+                        f"reachable that are not.")
+    out = []
+    for key, period in periods.items():
+        if type(period) is not Windows:
+            raise UnitError(f"cadences_that_cannot_fire: the period for {key!r} must be Windows, got "
+                            f"{type(period).__name__}. Cadences.due refuses the same thing; a gate "
+                            f"whose period reaches this function in another kind was never going to "
+                            f"be evaluable against the clock either.")
+        if period.n >= run_windows.n:
+            out.append((key, period.n, run_windows.n))
+    return sorted(out, key=lambda r: (-r[1], r[0]))
+
+
 def accum_due(n_backward, accum):
     """Is an optimizer step due, given how many BACKWARD PASSES have accumulated?
 
