@@ -332,6 +332,56 @@ def cadences_that_cannot_fire(run_windows, periods):
     return sorted(out, key=lambda r: (-r[1], r[0]))
 
 
+
+def opt_steps_from_windows(run_windows, effective_batch_windows):
+    """A run's length in WINDOWS, expressed in the OPTIMIZER STEPS the LR schedule is denominated in.
+
+    UNIT IN: run_windows = Windows, effective_batch_windows = windows per optimizer step (count).
+    UNIT OUT: Steps.
+
+    THE ONE CROSS-KIND CONVERSION IN THE TREE THAT HAD NO NAME. units.py:86 states the rule -- "There
+    is no implicit path between kinds ... call the named function in spine.derive that already knows
+    the rate, so the conversion exists in one place with a name" -- and opt/api.py said in as many
+    words that "no conversion function is needed -- which matters, because spine/derive.py has no
+    Windows->Steps function today (verified)". It then wrote one, inline, on bare ints:
+
+        run_steps = max(1, run_windows // d_effective_batch_windows)
+
+    which is a window count divided by windows-per-optimizer-step, unguarded, in a package body. A
+    reviewer found the assertion and the line four lines apart. Nothing was numerically wrong -- at
+    the shipped batch_windows=1, accum=1 the two counters coincide -- but the whole argument for
+    units.py is that a conversion written at its call site is one nobody can audit, and this was the
+    only one left.
+
+    WHY IT IS Windows -> Steps AND NOT Windows -> Flushes. `effective_batch_windows` is
+    batch_windows x accum: windows per FLUSH times flushes per optimizer STEP. So the divisor spans
+    both boundaries at once and the answer is in optimizer steps, which is what the LR horizon needs
+    and the only kind units.py permits it -- "Optimizer steps. What the LR schedule's horizon is
+    denominated in, and nothing else." Dividing by batch_windows alone would give Flushes and is the
+    conflation this module exists against; that path is flush_period_windows and is a different
+    function on purpose.
+
+    THE SCALE IS NOT ACADEMIC. At fetch_big.py's own recommended heavy-run command
+    (WIN=256 BATCH_W=16 ACCUM=4) the two counters differ by 64x, so a horizon taken in the wrong kind
+    puts every learning-rate result under a schedule 64 times longer or shorter than its label. That
+    is the family this project has the most records of.
+
+    TRUNCATES and floors at one, for flush_period's reasons: a horizon that rounds up ends the
+    schedule after the run, and a horizon of zero is a division by zero in n_cycles.
+    """
+    if type(run_windows) is not Windows:
+        raise UnitError(f"opt_steps_from_windows: run_windows must be Windows, got "
+                        f"{type(run_windows).__name__}. The run's length is counted in the clock "
+                        f"`step` advances, and a Steps value here has already been converted once.")
+    w = int(effective_batch_windows)
+    if w < 1:
+        raise UnitError(f"opt_steps_from_windows: effective_batch_windows={effective_batch_windows!r} "
+                        f"-- an optimizer step covers at least one window. It is batch_windows x "
+                        f"accum, and both are floored at 1 by their own declarations.")
+    n = run_windows.n // w
+    return Steps(1) if n < 1 else Steps(n)
+
+
 def accum_due(n_backward, accum):
     """Is an optimizer step due, given how many BACKWARD PASSES have accumulated?
 

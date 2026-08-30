@@ -240,6 +240,38 @@ def smoke():
         except UnitError:
             pass
 
+    # --- opt_steps_from_windows: the last unnamed cross-kind conversion in the tree, now named.
+    # NO ORACLE ROW, and for the same reason as cadences_that_cannot_fire: the old tree resolved the
+    # horizon by reading ANOTHER KNOB (`if LR_STEPS: return LR_STEPS`, else project through
+    # LR_EPOCHS), so there is no captured table for this shape -- what was captured is the defect.
+    # The rule is written here instead, and the numbers are the ones that matter.
+    assert derive.opt_steps_from_windows(Windows(1024), 1) == Steps(1024)     # defaults: they coincide
+    assert type(derive.opt_steps_from_windows(Windows(1024), 1)) is Steps
+    # 64x is not academic: it is fetch_big.py's OWN recommended heavy-run command,
+    # WIN=256 BATCH_W=16 ACCUM=4, so effective_batch_windows = 16 x 4. A horizon taken in the wrong
+    # kind there puts every learning-rate result under a schedule 64 times longer than its label.
+    assert derive.opt_steps_from_windows(Windows(1024), 64) == Steps(16)
+    assert derive.opt_steps_from_windows(Windows(10), 64) == Steps(1)        # floored, never zero
+    for bad in (Steps(1024), Flushes(1024), Backwards(1024), 1024):
+        try:
+            derive.opt_steps_from_windows(bad, 4)
+            raise AssertionError(f"opt_steps_from_windows accepted {bad!r} as a window count")
+        except UnitError:
+            pass
+    try:
+        derive.opt_steps_from_windows(Windows(1024), 0)
+        raise AssertionError("a zero divisor was accepted; n_cycles would divide by zero")
+    except UnitError:
+        pass
+    # The answer is STEPS, so it refuses the two kinds it would otherwise be confused with -- which
+    # is the entire reason the function exists rather than the division that was there before.
+    for wrong in (Windows(16), Flushes(16)):
+        try:
+            _ = derive.opt_steps_from_windows(Windows(1024), 64) >= wrong
+            raise AssertionError(f"a Steps horizon compared against {wrong!r} and did not raise")
+        except UnitError:
+            pass
+
     # --- cadences_that_cannot_fire: C11's measurement, pinned as a test rather than left in a doc.
     # NO ORACLE TABLE, and the reason is worth stating: this function has no old-tree equivalent to
     # capture -- the old system had no such audit, which is exactly why the ten defaults could sit

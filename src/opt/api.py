@@ -20,11 +20,30 @@ is applied every step to every parameter regardless of gradient, so a dormant ex
 its magnitude over a 62.5k-step run.
 
 THE COUNTER IS OPTIMIZER STEPS AND THAT IS THE UNIT REPAIR. OPT maintains its OWN counter of
-optimizer steps, advanced only inside maybe_step, and hands THAT to lr_at. units.Steps becomes
-literally true and no conversion function is needed -- which matters, because spine/derive.py has
-no Windows->Steps function today (verified). At the shipped defaults batch_windows=1, accum=1 the
-two counters coincide, so no recorded result moves; at fetch_big.py's own recommended heavy-run
-command (WIN=256 BATCH_W=16 ACCUM=4) they differ by 64x.
+optimizer steps, advanced only inside maybe_step, and hands THAT to lr_at, so units.Steps becomes
+literally true for the counter. At the shipped defaults batch_windows=1, accum=1 the two counters
+coincide, so no recorded result moves; at fetch_big.py's own recommended heavy-run command
+(WIN=256 BATCH_W=16 ACCUM=4) they differ by 64x.
+
+AND THE HORIZON STILL NEEDED A CONVERSION, WHICH THIS PARAGRAPH USED TO DENY. It said "no
+conversion function is needed -- which matters, because spine/derive.py has no Windows->Steps
+function today (verified)", and then the horizon four lines below did
+
+    run_steps = max(1, run_windows // d_effective_batch_windows)
+
+which IS a Windows->Steps conversion: a window count divided by windows-per-optimizer-step, inline,
+on bare ints, in a package body. A reviewer found the assertion and the line together. Nothing was
+numerically wrong at the defaults -- that is what made it survive -- but units.py:86 is explicit
+that the point is naming: "There is no implicit path between kinds ... call the named function in
+spine.derive that already knows the rate, so the conversion exists in one place with a name." It
+was the only unnamed cross-kind conversion left in the tree.
+
+It is now derive.opt_steps_from_windows(Windows(run_windows), effective_batch_windows) -> Steps,
+which refuses a non-Windows at one end and a divisor below 1 at the other. The divisor spans BOTH
+boundaries at once -- batch_windows is windows per flush, accum is flushes per optimizer step -- so
+the answer is in optimizer steps, which is the only kind units.py allows an LR horizon. Dividing by
+batch_windows alone would give Flushes and is a different function, flush_period_windows, on
+purpose.
 
 RECORD TYPES RETURNED (P4 defines them):
   OptState     both AdamW instances, n_backward (Backwards), opt_step (Steps), lr_prev,
@@ -34,6 +53,7 @@ RECORD TYPES RETURNED (P4 defines them):
   LoadReport   restored, refused, reason
 """
 from spine.lever import Config
+from spine import derive
 
 
 def build(opt: Config, *, param_groups, run_windows, resume=None):
@@ -48,7 +68,7 @@ def build(opt: Config, *, param_groups, run_windows, resume=None):
     no home here because the env name is generated from the field.
 
     THE HORIZON IS RESOLVED ONCE, HERE, IN OPTIMIZER STEPS, AND PRINTED:
-        run_steps  = max(1, run_windows // d_effective_batch_windows)
+        run_steps  = derive.opt_steps_from_windows(run_windows, d_effective_batch_windows)
         wavelength = opt.lr_wavelength or run_steps          # the 0 sentinel, in ONE visible place
         warmup     = min(opt.lr_warmup, max(1, run_steps // 10))
         n_cycles   = max(1, round((run_steps - warmup) / max(1, wavelength - warmup)))
