@@ -1671,6 +1671,7 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
         # is one of THIS package's clock levers. It cannot parse prose and does not try; a formula
         # written some other way slips past. What it buys is that the spec and the code are held to
         # one rule, at the phase where the spec is all there is.
+        in_quote = False
         for i, line in enumerate(m.lines, 1):
             # A FORMULA IN BACKTICKS IS A QUOTATION, NOT A SPECIFICATION, and the distinction had to
             # be drawn because the first live version of this check flagged its own explanation.
@@ -1684,7 +1685,25 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
             # written inside backticks is skipped. That is a convention this tree already follows --
             # specifications are written as bare indented code under a heading, quotations are
             # inline and quoted -- but it is a convention, not a guarantee.
-            bare = re.sub(r"`[^`]*`", "", line)
+            # BACKTICK PARITY IS TRACKED ACROSS LINES, because a quoted formula wraps. The
+            # line-by-line version stripped only quotes that opened and closed on one line, so
+            #     d_idle_cadence is `max(train_every*6,
+            #     train_every_idle)`, declared in spine/assemble.py
+            # was reported as a specification -- the check flagging a reference to a coupling that
+            # is declared, correctly, in the one file O11 exempts. Reflowing the sentence would have
+            # made it green and left the rule wrong; the rule says "a formula in backticks is a
+            # quotation" and that has to be true of a formula that wraps.
+            if in_quote:
+                head, sep, rest = line.partition("`")
+                if not sep:
+                    continue                                  # wholly inside a quotation
+                line, in_quote = rest, False
+            bare, ticks = [], line.split("`")
+            for j, part in enumerate(ticks):
+                if j % 2 == 0:
+                    bare.append(part)
+            in_quote = (len(ticks) % 2 == 0)                   # an unclosed quote runs on
+            bare = " ".join(bare)
             for nm, op in _TXT.findall(bare):
                 if nm in mine:
                     examined += 1

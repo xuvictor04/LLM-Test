@@ -242,8 +242,20 @@ def packages():
             PREFIX = "RUN"
             seed = Lever(1234, "the run seed every subsystem stream is derived from", U.COUNT)
 
+        class Signature(LeverSet):
+            # ADDED WITH SIG.d_idle_cadence, which is the coupling ISSUES H53 records as declared in
+            # a comment for six commits and nowhere else. Its two ends are both SIG's, so without a
+            # SIG stand-in the row deferred on every build here and three checks reported the
+            # deferral as a defect -- correctly. The stand-ins are the reason A1/A2/A4 can assert
+            # "no warnings with every package registered" at all; a prefix missing from this map is
+            # a package this file cannot say anything about.
+            PREFIX = "SIG"
+            train_every = Lever(1, "dense contrastive cadence, in windows", U.Windows)
+            train_every_idle = Lever(12, "throttled cadence once the stream is stable", U.Windows)
+
         yield {"FAB": Fabric, "MEM": Memory, "DOM": Domains, "TOK": Tokenizer,
-               "OPT": Optimizer, "CAP": Capacity, "CKPT": Checkpoint, "LM": Model, "RUN": Run}
+               "OPT": Optimizer, "CAP": Capacity, "CKPT": Checkpoint, "LM": Model, "RUN": Run,
+               "SIG": Signature}
     finally:
         registry._SETS.clear()
         registry._SETS.update(sets_before)
@@ -268,6 +280,9 @@ EXPECTED_DEFAULT = {
     "TOK.d_vocab_ceiling":             32768,          # one number named twice, from LM's row count
     "TOK.d_vocab_save_path":           "runs/a/ckpt.dyntok.json",       # _TOK_SAVE's shipped rule
     "TOK.d_vocab_read_path":           "runs/parent/ckpt.dyntok.json",  # the parent's, by the same rule
+    "SIG.d_idle_cadence":              12,             # max(1 x 6, 12); LOCAL, both ends SIG's --
+                                                      # the relation ISSUES H53 records as declared
+                                                      # in a comment and nowhere else for six commits
     "FAB.d_operating_population":      3072,           # ceil(0.75 x 4096); LOCAL, no edge, no budget
     "OPT.d_effective_batch_windows":   64,             # 16 x 4; LOCAL. The batch the run actually trains at
     "LM.d_pos_max":                    128,            # LOCAL: the positional table is ctx rows tall
@@ -316,7 +331,8 @@ TYPO_MEANT = "FAB_SLOTS"
 FOREIGN_KNOB = "CUDA_VISIBLE_DEVICES"
 ENV = {GOOD_KNOB: GOOD_VALUE, TYPO_KNOB: TYPO_VALUE, FOREIGN_KNOB: "0"}
 
-LOCAL_DSTS = {"FAB.d_operating_population", "OPT.d_effective_batch_windows", "LM.d_pos_max"}
+LOCAL_DSTS = {"FAB.d_operating_population", "OPT.d_effective_batch_windows", "LM.d_pos_max",
+              "SIG.d_idle_cadence"}
 
 
 def _landed(configs):
@@ -616,6 +632,13 @@ def check_a3_affects():
                                           # second time on CAP -- and that landing is a real edge.
         "LM_CTX":              {"LM"},    # a single-source LOCAL coupling: still a d_ field, still no edge
         "DOM_MIN_SUPPORT":     {"DOM"},   # feeds nothing at all
+        "SIG_TRAIN_EVERY":     {"SIG"},   # feeds SIG.d_idle_cadence, whose OTHER end is also SIG's:
+                                          # a LOCAL coupling books no edge, so the reach stays {SIG}
+                                          # even though the value genuinely moves. That is the same
+                                          # shape LM_CTX and OPT_ACCUM have above, and it is why
+                                          # ISSUES H53 -- the relation declared in a comment and
+                                          # nowhere else -- was invisible to affects() as well.
+        "SIG_TRAIN_EVERY_IDLE": {"SIG"},  # the other end of that coupling
         "RUN_SEED":            {"RUN"},   # deliberately NOT wired -- see NOT_WIRES, and A7
     }
     with packages():
@@ -736,10 +759,19 @@ def check_a4_render():
 
         for c in assemble.COUPLINGS:
             mine, theirs = (irr_block, red_block) if c.irreducible else (red_block, irr_block)
-            if c.dst not in mine:
+            # MATCH THE RENDERED ROW, NOT THE NAME ANYWHERE IN THE BLOCK. A bare substring test put
+            # FAB.d_operating_population in "the wrong block" the moment another coupling's REASON
+            # column mentioned it by name -- which reason columns are supposed to do, since they
+            # exist to explain a row by pointing at its siblings. The anchor is render()'s own row
+            # header, "-> DST = ", so prose about a coupling is no longer indistinguishable from the
+            # coupling. Strictly narrower than the substring test, not looser: a dst rendered under
+            # the wrong heading still fails.
+            anchor = f"-> {c.dst} = "
+            mine, theirs = (anchor in mine), (anchor in theirs)
+            if not mine:
                 findings.append(f"{c.dst} is {'irreducible' if c.irreducible else 'reducible'} and is "
-                                f"not in that block of the rendered graph.")
-            if c.dst in theirs:
+                                f"not rendered in that block of the graph.")
+            if theirs:
                 findings.append(f"{c.dst} appears in the wrong block: an irreducible coupling is a "
                                 f"statement about arithmetic and a reducible one is a decision.")
             if c.why not in text:

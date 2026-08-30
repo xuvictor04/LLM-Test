@@ -374,6 +374,13 @@ LEVERS = {
     "CKPT":  {"dir": "runs/a/ckpt", "resume": "runs/parent/ckpt"},
     "DOM":   {},        # declares no lever of its own; its namespace bound arrives as a wire
     "TOK":   {"max_bytes": 24},   # sources LM.d_max_token_bytes; its own four values arrive as wires
+    # SIG joined this map with SIG.d_idle_cadence, the coupling ISSUES H53 records as declared in a
+    # comment for six commits and nowhere else. Both its ends are SIG's, so without a SIG stand-in
+    # the row deferred on every build here and C4 reported the deferral -- correctly, since a
+    # deferred row on a build where every package is present is the shape that hid thirteen rows
+    # before P3. train_every=3 rather than the shipped 1 for the reason the note below gives: at 1,
+    # max(1*6, 12) and max(12, 12) are the same number and the formula could be anything.
+    "SIG":   {"train_every": 3, "train_every_idle": 12},
 }
 # THE PREFIXES AND FIELD NAMES ARE THE REAL ONES; THE VALUES ARE NOT ALL THE REAL DEFAULTS, AND THAT
 # DIFFERENCE IS DELIBERATE. `OPT_BATCH_WINDOWS` really defaults to 1, and at 1 every flush_period is the
@@ -400,6 +407,12 @@ EXPECTED = {
     "TOK.d_vocab_ceiling":             32768,         # one number named twice, from LM's row count
     "TOK.d_vocab_save_path":           "runs/a/ckpt.dyntok.json",       # _TOK_SAVE's shipped rule
     "TOK.d_vocab_read_path":           "runs/parent/ckpt.dyntok.json",  # the parent's, by the same rule
+    # max(3 x 6, 12) = 18, NOT 12. The stand-in sets train_every=3 rather than the shipped 1 exactly
+    # so this number discriminates: at train_every=1 the formula gives max(6, 12) = 12, which is also
+    # what train_every_idle alone gives, so a compute that ignored train_every entirely would pass.
+    # That is the shape a known-answer table exists to refuse, and it is the shape this coupling was
+    # in for six commits -- a literal 12 with no connection to train_every at all (ISSUES H53).
+    "SIG.d_idle_cadence":              18,
     "FAB.d_operating_population":      3072,          # ceil(0.75 x 4096); LOCAL, no edge, no budget
     "OPT.d_effective_batch_windows":   64,            # 16 x 4; LOCAL. The batch the run actually trains at
     "LM.d_pos_max":                    128,           # LOCAL: the positional table is ctx rows tall
@@ -420,7 +433,10 @@ EXPECTED = {
     "FAB.d_lr_min_frac":               0.05,          # the floor, which :7251 needs in the same block
 }
 
-LOCAL_DSTS = {"FAB.d_operating_population", "OPT.d_effective_batch_windows", "LM.d_pos_max"}
+LOCAL_DSTS = {"FAB.d_operating_population", "OPT.d_effective_batch_windows", "LM.d_pos_max",
+              # SIG.d_idle_cadence: both ends are SIG's, so it books no edge and spends no
+              # budget -- the fourth of this shape, added with ISSUES H53.
+              "SIG.d_idle_cadence"}
 
 
 def _package(prefix, values):

@@ -23,6 +23,7 @@ RECORD TYPES RETURNED (P4 defines them):
   Retention        the best-model policy object; BestAction(save_best, rotate_slot)
 """
 from spine.lever import Config
+from spine import units as U
 
 
 def saving_on(ckpt: Config):
@@ -70,9 +71,13 @@ def save_period(ckpt: Config):
                  its own condition rather than as a warning string
     """
     ckpt = ckpt.owned_by("CKPT")
-    raise NotImplementedError(
-        "CKPT.save_period: P4 (ckpt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CKPT.")
+    # NOT A STUB, AND THE THREE SIBLINGS ARE NOT EITHER. A period accessor is one
+    # construction over one declared lever, and its whole job is that Cadences.due REFUSES a
+    # bare int while Config hands one back for all 35 levers that declare a Clock unit
+    # (ISSUES H51). Leaving it a stub kept spine.compose._periods -- and therefore
+    # RUN.cadence_audit, the one statement that makes ISSUES C11 visible -- unreachable
+    # until P4, for no reason but symmetry with entry points that have real work to do.
+    return U.Windows(int(ckpt.every))
 
 
 def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):

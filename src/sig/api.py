@@ -91,14 +91,24 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
     disagreement with L2: the value still arrives from outside and the reader still never names the
     foreign lever.
 
+    THE IDLE CADENCE IS THE WIRE, NOT THE LEVER. d_idle_cadence is `max(train_every*6,
+    train_every_idle)`, declared in spine/assemble.py, and the throttled arm reads THAT. The relation
+    was recorded as "relocated" out of the old computed default
+    `_i("ENC_EVERY_IDLE", max(ENC_EVERY * 6, 12))` and into a coupling -- and the coupling was never
+    declared, so for six commits train_every_idle sat at a literal 12 with no connection to
+    train_every at all (ISSUES H53). At the shipped train_every=1 the two agree exactly, which is
+    what let it survive. Reading the wire is what makes "the idle cadence follows the dense one"
+    true rather than a sentence in a comment.
+
     LEVERS READ: mode, train_every, train_every_idle, dense_window
-    WIRES READ: none
+    WIRES READ: d_idle_cadence
     DID IT FIRE: sig.cadence_dense, sig.cadence_idle, sig.cadence_checks. sig.cadence_idle == 0 for
                  a whole run means the gate never left the dense arm; sig.cadence_dense == 0 after
                  step dense_window means no boundary was ever detected and the gate is stuck open
                  on idle -- two different findings the report must be able to separate.
     """
     sig = sig.owned_by("SIG")
+    _ = sig.d_idle_cadence           # WIRE READ HERE -- the throttled arm's threshold
     raise NotImplementedError(
         "SIG.cadence_due: P4 (sig) fills this in. The contract is frozen here; see "
         "docs/04_CONTRACT.md, section SIG.")

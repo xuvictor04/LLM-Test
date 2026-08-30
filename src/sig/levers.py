@@ -404,11 +404,19 @@ class SIGLevers(LeverSet):
     # THE DEFAULT WAS A WIRE. The old declaration was `_i("ENC_EVERY_IDLE", max(ENC_EVERY * 6, 12))`
     # -- a default read from another lever, which spine/lever.py refuses in as many words. THE
     # LITERAL 12 IS WHAT THE RUN OF RECORD USED: at the shipped ENC_EVERY=1, max(1*6, 12) = 12. The
-    # "idle follows the dense cadence" intent is not lost, it is relocated: the census proposes
-    # SIG.d_idle_cadence = max(train_every*6, train_every_idle) declared in spine/assemble.py, so
-    # the relation prints in the coupling graph instead of hiding inside a default. Same-package
-    # couplings are already the practice there (FAB.d_operating_population is computed from FAB's
-    # own levers), so this is a shape assemble.py already supports; it is simply not declared yet.
+    # "idle follows the dense cadence" intent is not lost, it is relocated: SIG.d_idle_cadence =
+    # `max(train_every*6, train_every_idle)` IS DECLARED in spine/assemble.py as of 2026-08-30, and
+    # sig/api.py's cadence_due reads it. Same-package couplings were already the practice there
+    # (FAB.d_operating_population is computed from FAB's own levers).
+    #
+    # IT SAID "it is simply not declared yet" FOR SIX COMMITS, and that sentence is why this note is
+    # longer than the fix. A relation recorded as relocated to somewhere it never landed is INVISIBLE
+    # to every check that reads declarations, because the declaration it was relocated TO does not
+    # exist: train_every_idle sat at a literal 12 with no connection to train_every, so changing the
+    # dense cadence left the idle one where it was, silently. At the shipped train_every=1,
+    # max(1*6, 12) = 12 and no recorded result moves -- which is exactly what let it survive. It was
+    # found by tests/test_ownership.py's O11, which reads the docstring SPECIFICATIONS precisely
+    # because every body here is still a stub (ISSUES H53).
     # THIS LEVER ABSORBS THE ONE MERGE ROW IN THE SIG CENSUS, and the merge is RESOLVED -- the target
     # is this row, which exists, so nothing had to be invented (census defect 3). SIG_LOOK capped how
     # many upcoming windows the signature lookahead could pre-compute:

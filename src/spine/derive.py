@@ -327,7 +327,18 @@ def cadences_that_cannot_fire(run_windows, periods):
                             f"{type(period).__name__}. Cadences.due refuses the same thing; a gate "
                             f"whose period reaches this function in another kind was never going to "
                             f"be evaluable against the clock either.")
-        if period.n >= run_windows.n:
+        # A PERIOD OF ZERO OR LESS IS A SENTINEL, AND IT MUST BE REPORTED, NOT SKIPPED. The first
+        # version tested only `period >= run`, so a period of 0 fell through and the gate vanished
+        # from the audit entirely -- which was found by running the audit against the real resolved
+        # defaults and noticing that CKPT.every is 0, so the 'ckpt' gate was silently absent from a
+        # list whose entire purpose is naming gates that cannot fire.
+        # It is reported with run_windows as 0 to say "this is not a length comparison". ckpt/api.py
+        # states what the sentinel means there -- "every == 0 means the only save is the final one
+        # plus SIGUSR1" -- which is a legitimate configuration and exactly the kind of thing the
+        # report must SAY rather than leave the reader to infer from a missing line.
+        if period.n <= 0:
+            out.append((key, period.n, 0))
+        elif period.n >= run_windows.n:
             out.append((key, period.n, run_windows.n))
     return sorted(out, key=lambda r: (-r[1], r[0]))
 

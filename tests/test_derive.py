@@ -291,6 +291,14 @@ def smoke():
     # (dom.manage at 100) fires twice. That is the sentence the audit exists to put in the report.
     assert len(derive.cadences_that_cannot_fire(Windows(200), _per)) == 4
     assert derive.cadences_that_cannot_fire(Windows(60000), _per) == []      # a real run: all reachable
+    # A ZERO PERIOD IS A SENTINEL AND IS REPORTED, not skipped. CKPT.every defaults to 0, and
+    # ckpt/api.py says what that means there -- "the only save is the final one plus SIGUSR1" -- a
+    # legitimate configuration that the audit must SAY rather than leave to be inferred from a
+    # missing line. The first version tested only `period >= run`, so the ckpt gate vanished from a
+    # list whose whole purpose is naming gates that cannot fire; found by running the audit against
+    # the real resolved defaults.
+    assert derive.cadences_that_cannot_fire(Windows(60000), {"ckpt": Windows(0)}) == [("ckpt", 0, 0)]
+    assert derive.cadences_that_cannot_fire(Windows(10), {"ckpt": Windows(0)}) == [("ckpt", 0, 0)]
     # STRICT AT THE BOUNDARY: a period equal to the run length is reported, because a gate fires on
     # elapsed-since-last-fire and one exactly-equal period has a single chance, at the final window.
     assert derive.cadences_that_cannot_fire(Windows(500), {"x": Windows(500)}) == [("x", 500, 500)]

@@ -36,6 +36,7 @@ RECORD TYPES RETURNED (P4/P5 define them):
   Sample         the measured population, its SIZE, and the rule that drew it
 """
 from spine.lever import Config
+from spine import units as U
 
 
 def curve_period(ev: Config):
@@ -58,9 +59,13 @@ def curve_period(ev: Config):
     DID IT FIRE: Cadences.ledger()["curve"]
     """
     ev = ev.owned_by("EVAL")
-    raise NotImplementedError(
-        "EVAL.curve_period: P4 (eval) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section EVAL.")
+    # NOT A STUB, AND THE THREE SIBLINGS ARE NOT EITHER. A period accessor is one
+    # construction over one declared lever, and its whole job is that Cadences.due REFUSES a
+    # bare int while Config hands one back for all 35 levers that declare a Clock unit
+    # (ISSUES H51). Leaving it a stub kept spine.compose._periods -- and therefore
+    # RUN.cadence_audit, the one statement that makes ISSUES C11 visible -- unreachable
+    # until P4, for no reason but symmetry with entry points that have real work to do.
+    return U.Windows(int(ev.curve_every))
 
 
 def curve_probe(ev: Config, *, units_by_domain, logits_fn, rng):

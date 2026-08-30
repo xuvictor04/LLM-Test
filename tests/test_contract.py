@@ -677,6 +677,17 @@ def open_areas(dat: Config, *, seed: int):
     dat = dat.owned_by("DATA")
     _ = dat.d_expert_slots
     raise NotImplementedError("DATA.open_areas: P4 fills this in.")
+
+
+def data_plan(dat: Config, *, areas):
+    """The exposure gates.
+
+    LEVERS READ: source
+    WIRES READ: none
+    DID IT FIRE: data.plan
+    """
+    dat = dat.owned_by("DATA")
+    raise NotImplementedError("DATA.data_plan: P4 fills this in.")
 '''
 
 _GOOD_ASSEMBLE = '''\
@@ -711,7 +722,9 @@ PACKAGES = {"DATA": _DataLevers}
 _GOOD_COMPOSE = '''\
 """A stand-in composition root."""
 ASSEMBLY_ORDER = (("corpus", "DATA", "open_areas",
-                   "(seed); Cadences.due('data.draw', DATA.draw_period(dat), clock)"),)
+                   "(seed=1234); Cadences.due('data.draw', DATA.draw_period(dat), clock)",
+                   "areas -- the corpus handles"),
+                  ("plan", "DATA", "data_plan", "(areas)", ""),)
 LOOP_ORDER = (("A", "DATA", "draw_stream", "once per epoch"),)
 
 
@@ -752,6 +765,7 @@ _GOOD_DOC = """# contract
 
 ```contract
 DATA: open_areas(dat: Config, *, seed: int)
+DATA: data_plan(dat: Config, *, areas)
 ```
 """
 
@@ -770,7 +784,7 @@ _CASES = (
     ("control -- nothing wrong with this tree", {}, {
         "K1": (False, None), "K2": (False, None), "K3": (False, None),
         "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None),
-        "K8": (False, None), "K9": (False, None)}),
+        "K8": (False, None), "K9": (False, None), "K10": (False, None)}),
 
     ("K1: a parameter was renamed in the tree and not in the document",
      {"src/data/api.py": _GOOD_API.replace("*, seed: int", "*, run_seed: int")},
@@ -919,6 +933,42 @@ DEFERRED_ENTRY_POINTS = {"DATA.judge_probation": "   "}
      {"src/spine/compose.py": _GOOD_COMPOSE.replace("DATA.draw_period(dat)", "DATA.draw_every")},
      {"K9": (True, "bare attribute read")}),
 
+    # ---- K10. The reviewer's demonstrated defeat, pinned. K10's first version let an argument
+    # ---- count as produced when the CONSUMING row's own note contained the word, which made the
+    # ---- whole produces column optional -- a four-element row reading "(units_by_domain, logits_fn,
+    # ---- rng)" passed with no producer anywhere in the tree. The column is the only thing that
+    # ---- counts now, plus an explicit binding and the declared helper table.
+    ("K10: an argument no earlier row produces",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace('"areas -- the corpus handles"', '""')},
+     {"K10": (True, "no earlier row")}),
+
+    ("K10: naming the argument in the CONSUMING row's own note credits nothing",
+     {"src/spine/compose.py": _GOOD_COMPOSE
+        .replace('"areas -- the corpus handles"', '""')
+        .replace('("plan", "DATA", "data_plan", "(areas)", "")',
+                 '("plan", "DATA", "data_plan", "areas arrives from the row above", "")')},
+     {"K10": (True, "no earlier row")}),
+
+    ("K10: a producer on a LATER row does not count",
+     {"src/spine/compose.py": _GOOD_COMPOSE
+        .replace('"areas -- the corpus handles"', '""')
+        .replace('("plan", "DATA", "data_plan", "(areas)", "")',
+                 '("plan", "DATA", "data_plan", "(areas)", "areas -- produced too late")')},
+     {"K10": (True, "no earlier row")}),
+
+    ("K10: an explicit lever binding IS a producer",
+     {"src/spine/compose.py": _GOOD_COMPOSE
+        .replace('"areas -- the corpus handles"', '""')
+        .replace('("plan", "DATA", "data_plan", "(areas)", "")',
+                 '("plan", "DATA", "data_plan", "(areas=DATA.source)", "")')},
+     {"K10": (False, None)}),
+
+    ("K10: a stale ROW_ARGUMENTS_ELSEWHERE entry is reported",
+     {"src/spine/compose.py": _GOOD_COMPOSE + '''
+ROW_ARGUMENTS_ELSEWHERE = {"DATA.no_such_entry": "produced by _nothing"}
+'''},
+     {"K10": (True, "stale exemption")}),
+
     ("K4: a declared lever that no stub names and no table lists",
      {"src/data/levers.py": _GOOD_LEVERS.replace(
          '    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)',
@@ -969,6 +1019,7 @@ _BY_TAG = {
     "K7": lambda d: check_k7_root_reads_declared_names(os.path.join(d, "src")),
     "K8": lambda d: check_k8_streams_are_declared(os.path.join(d, "src")),
     "K9": lambda d: check_k9_cadence_periods_are_typed(os.path.join(d, "src")),
+    "K10": lambda d: check_k10_rows_name_their_arguments(os.path.join(d, "src")),
 }
 
 
@@ -1715,6 +1766,26 @@ def check_k10_rows_name_their_arguments(src_dir=SRC):
         produced_before[(lineno, key)] = list(running)
         running.append((lineno, key, prose, prod))
 
+    # The declared surface of every package -- levers plus the d_ fields the wire table lands. From
+    # the RUNNING registry, for the reason K4 gives: an oracle that has drifted from the real
+    # declarations is a SMALLER oracle, and a smaller oracle passes by having nothing to compare.
+    declared = {}
+    try:
+        sys.path.insert(0, src_dir)
+        try:
+            from spine.assemble import PACKAGES as _PKGS, COUPLINGS as _CPL
+            for _p, _cls in _PKGS.items():
+                declared[_p] = set(_cls._levers)
+            for _c in _CPL:
+                _p, _, _f = str(_c.dst).partition(".")
+                if _p in declared:
+                    declared[_p].add(_f)
+        finally:
+            if sys.path and sys.path[0] == src_dir:
+                sys.path.pop(0)
+    except Exception:                                # noqa: BLE001 -- a synthetic tree may have none
+        declared = {}
+
     findings, checked, seen = [], 0, set()
     for lineno, key, prose, prod in rows:
         want = req.get(key)
@@ -1743,15 +1814,52 @@ def check_k10_rows_name_their_arguments(src_dir=SRC):
         earlier = set()
         for _ln, _k, _pr, _pd in produced_before.get((lineno, key), []):
             earlier |= _pd
-        unproduced = [a for a in want
-                      if a not in earlier
-                      and not re.search(r"\b" + re.escape(a) + r"\b", prose)]
+        # NO PROSE ESCAPE. The first version read
+        #     if a not in earlier and not re.search(r"\b" + a + r"\b", prose)
+        # -- an argument counted as produced when the CONSUMING ROW'S OWN NOTE contained the word.
+        # That made the entire `produces` column optional, and a reviewer demonstrated it end to end:
+        # deleting EVAL.curve_probe from DEFERRED_ENTRY_POINTS and adding a four-element row reading
+        #     ("R", "EVAL", "curve_probe", "(units_by_domain, logits_fn, rng)")
+        # -- no produces column at all, no producer anywhere in the tree -- passed K6 and K10 with
+        # the suite green. Spelling the two words was the entire fix K10 demanded. Of 137 checked
+        # pairs, the column was the sole justification for 8; the other 129 rode the note.
+        # It also reopened the ordering the column exists to close: with a producer token moved to a
+        # row AFTER its consumer, K10 correctly failed -- and one sentence of prose in the consuming
+        # row's note made it pass again.
+        # This is the same hole K6 had, in the check written to close K6's class, four hours later.
+        # An argument is produced by an EARLIER row's column, or by a declared helper in
+        # ROW_ARGUMENTS_ELSEWHERE, or it is not produced.
+        # A LEVER BINDING IS A PRODUCER; A BARE MENTION IS NOT. The distinction is the whole point.
+        # Removing the prose escape left 30 rows failing, and most were arguments the root reads off
+        # a Config -- DATA.data_plan's `epochs=RUN.epochs`, FAB.build's `d_model=LM.width`,
+        # RUN.new_clock's `batch_windows=OPT.batch_windows`. Those ARE produced: by the assembly,
+        # which is the thing this whole spine exists to do, and K7 already checks that every such
+        # read names a declared lever or wire. Refusing them would push the root toward writing rows
+        # for values that have no row to come from.
+        # But the binding must be WRITTEN AS ONE -- `arg=PKG.field` -- not merely mentioned. That is
+        # what separates it from the escape a reviewer defeated: "(units_by_domain, logits_fn, rng)"
+        # names three words and no origin; "epochs=RUN.epochs" names an owner and a field, and is
+        # wrong in a way a reader can see.
+        bound = set()
+        for arg, pfx, field in re.findall(
+                r"\b([a-z_][a-z_0-9]*)\s*=\s*([A-Z]{2,5})\.([a-z_][a-z_0-9]*)", prose):
+            if field in declared.get(pfx, set()):
+                bound.add(arg)
+        # A LITERAL IS A PRODUCER TOO. `epoch=0` on the epoch-0 draw is the root supplying a constant,
+        # which is as complete an answer to "where does this come from" as a lever read is -- and
+        # more auditable than either, since the value is on the page. Numbers, quoted strings and the
+        # three singletons only; a bare name is NOT a literal and stays unproduced.
+        for arg in re.findall(
+                r"\b([a-z_][a-z_0-9]*)\s*=\s*(?:-?\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\"|True|False|None)\b",
+                prose):
+            bound.add(arg)
+        unproduced = [a for a in want if a not in earlier and a not in bound]
         if unproduced:
             findings.append(
                 f"src/spine/compose.py:{lineno}  the {key} row calls for "
                 f"{', '.join(repr(m) for m in unproduced)}, and no earlier row's `produces` column "
-                f"yields {'them' if len(unproduced) > 1 else 'it'}, nor does this row's own note name "
-                f"a producer. Either add the value to the producing row's `produces`, name the "
+                f"yields {'them' if len(unproduced) > 1 else 'it'}. Either add the value to the "
+                f"producing row's `produces` column, name the "
                 f"producer in this row's note, or move the entry point to DEFERRED_ENTRY_POINTS with "
                 f"that gap as the reason -- which is what the identical gap earned "
                 f"EVAL.holdout_probe.")
@@ -1763,8 +1871,8 @@ def check_k10_rows_name_their_arguments(src_dir=SRC):
                    f"{checked} row(s) whose entry point takes required arguments, against "
                    f"{sum(len(v) for v in req.values())} required parameter(s) across "
                    f"{len(req)} signature(s); {len(exempt)} exemption(s). An argument is produced "
-                   f"when an EARLIER row's `produces` column yields it, or this row's own note names "
-                   f"its producer", findings,
+                   f"ONLY by an EARLIER row's `produces` column or a declared helper -- a mention in "
+                   f"the consuming row's own note counts for nothing", findings,
                    vacuous=not checked)
 
 

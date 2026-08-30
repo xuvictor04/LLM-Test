@@ -21,8 +21,11 @@ DID IT FIRE: <the counters that prove the mechanism executed, in G4's three stat
 
 `tests/test_contract.py` parses those blocks. 257 of the 259 declared levers are named by at least
 one stub as read by it; the two that are not are in **UNCONSUMED LEVERS** below with a disposition.
-**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 110
-of the 117 entry points are named by a row with the remaining seven declared deferred.
+**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 107
+of the 121 entry points are named by a row — 93 in a row's entry column and 14 by a call written
+into a row's note — with the remaining **14 declared deferred**, each with the argument that has no
+producer as the reason. That number was seven until the order tables grew a `produces` column and
+the same standard was applied to every row rather than to EVAL alone (§3.6).
 
 **Executable today.** `python3 -c "import sys;sys.path.insert(0,'src');from spine.compose import
 compose; compose(environ={})"` runs the composition root against the stubs and stops at the first
@@ -470,8 +473,8 @@ has a row.
 
 ## 3. THE ORDER TABLES — what is REACHED, and what is declared deferred
 
-`spine/compose.py` holds two tables of rows, `ASSEMBLY_ORDER` and `LOOP_ORDER`, and one dictionary,
-`DEFERRED_ENTRY_POINTS`. Together they are the normative answer to a question **K4 does not ask**:
+`spine/compose.py` holds two tables of rows, `ASSEMBLY_ORDER` and `LOOP_ORDER`, and three
+dictionaries, `DEFERRED_ENTRY_POINTS`, `ROW_ARGUMENTS_ELSEWHERE` and the package map. Together they are the normative answer to a question **K4 does not ask**:
 not *"does some stub name this lever"* but *"is the stub that names it ever CALLED"*. K6 checks it,
 and it checked it into a failure: applying the composition root's own tables as the test, **56 of
 the 117 entry points were named by no row at all** — and they were not 56 scattered omissions, they
@@ -484,22 +487,121 @@ were **three whole missing levels and a missing resume path**.
 | **the counter collection** | No row collected any `counters()`. For every orphan the evidence was **doubly** unreachable: the owning function was never called *and* its gate never went through `Cadences.due`, so `Cadences.ledger()` had no key for it either. NEVER ASKED and ASKED AND REFUSED became one number, which G4 forbids. |
 | **the encoder's training** | `SIG.mode` defaults to `learned`, `compose()` hands SIG's parameters to OPT as an `encoder` param group, and nothing called `SIG.train_step`, `cadence_due` or `warm_up` — so the run routed every window through a randomly initialised encoder while an AdamW stepped it on zero gradients. |
 
+### 3.0 Every row says what it PRODUCES, and K10 reads the column
+
+A row is now **`(stage, PREFIX, entry point, what it receives, what it produces)`**. A row that
+yields nothing a later row consumes — a refusal, a save, a counter read — keeps **four** elements,
+and that is a statement rather than a default.
+
+**Why the column exists.** The four-column shape claimed a standard it could not check. The header
+said a row is *"what it receives"*, and the deferral written for `EVAL.holdout_probe` stated the
+rule outright — *"the root has no join that produces that pair; writing a row now would name a call
+whose arguments nothing supplies"* — and then `EVAL.curve_probe`, whose signature is
+**byte-identical** to `holdout_probe`'s (`ev: Config, *, units_by_domain, logits_fn, rng`), carried
+a row whose entire prose was `Cadences.due('curve', EVAL.curve_period(ev), clock)`: neither argument
+named, no producer anywhere. The same gap earned a deferral in one place and a row in the other, and
+the header cited the rowed one as proof the standard was about arguments rather than phase.
+
+Two mechanical heuristics were tried against it and both failed. *"The row must restate every
+required argument"* gave **30** findings, almost all of them rows declining to repeat `h`, `step`,
+`now`, `x` — which turns the tables into a second copy of the signatures, the one thing this design
+exists to prevent. *"The name must appear somewhere else in compose.py"* gave **25**, flagging
+`LM.lm_loss`'s `y` and `FAB.forward`'s `h`, both produced by the row immediately above. Neither can
+separate PRODUCED BY AN EARLIER ROW from MENTIONED IN PASSING, because the tables did not record
+what a row produces.
+
+**The column spells the CONSUMER's name.** `DATA.open_areas` yields `Areas.bodies` and
+`TOK.build_vocabulary` takes it as `area_heads`, so the column says `area_heads` and names the field
+beside it — the rename is the root's, which is the root's whole job. Where one value crosses under
+several spellings the column lists every one, because a check matching on the producer's field would
+report live joins as missing:
+
+| one value | the spellings it is consumed under |
+|---|---|
+| `RunClock.step` | `step` (TOK ×3, `Retention.consider`, `CKPT.save`), `step_windows` (SIG, FAB ×3), `now` (MEM ×2, DOM ×2) |
+| `Snapshot.payload` | `state` (DATA, TOK, CAP), `saved` (LM, OPT), `sd` (SIG, FAB, WORLD), `restored` (MEM, DOM, CAP, CKPT), `resume` (OPT), `snapshot` (CKPT) |
+| `LM.lm_loss`'s two returns | `per_window_loss` (FAB.observe), `flush_loss` (FAB.manage/grow_check), `baseline_loss` (FAB.contribution), `bits` (DOM.note_competence), and one summand of the objective |
+| `Assignment.did` | `did` (DOM ×2), `domain_id` (FAB ×3), `sources` (MEM.write) |
+| `Process.device` | `device`, at six constructors |
+| `streams[...]` | `rng` (MEM, DOM, WORLD, EVAL), `generator` (SIG, FAB) |
+
+**What the column may not do** is name a value nothing produces in order to make a row pass. Where an
+argument has no producer there are three legal moves: put it in the producing row's column; produce
+it with a **named join** in `compose.py` and say so (or list the row in `ROW_ARGUMENTS_ELSEWHERE`);
+or move the entry point to `DEFERRED_ENTRY_POINTS` with the missing producer as the reason. Seven
+entry points took the third route (§3.6) and each names what would close it.
+
+**The column reads FORWARDS only.** K10 folds `ASSEMBLY_ORDER` then `LOOP_ORDER` in source order and
+asks whether an *earlier* row produced each argument, so a value crossing **backwards** cannot live
+in it at all. The loop has three such edges and each is written into the consuming row as a
+previous-iteration value, with a carrier named on `System`: `novelty` (the previous flush's mean
+surprise, `:7499`), `windows_since_boundary` (the boundary `DOM.observe` reported on an earlier
+window), and `Due` (asked per window at `A`, acted on per flush at `B`). A fourth, `best_bpb`, has no
+producer at all now that the curve probe is deferred.
+
+### 3.0.1 `ROW_ARGUMENTS_ELSEWHERE` — two entries, and why only two
+
+`{"PFX.entry": "which join in compose.py produces this row's arguments"}`. K10 reads it and skips
+those rows; it also reads it **backwards**, so an entry whose row requires nothing is reported stale.
+Every *other* helper-supplied argument is named in the consuming row's own note, where a reader meets
+it — an exemption table is a place a row stops being read. The two exceptions:
+
+| entry | why the note would be worse |
+|---|---|
+| `CKPT.check_geometry` | its argument is spelled with the same word as the **other side** of the comparison (`Snapshot.geometry`, the RECORDED manifest). A row or a column carrying the bare token would satisfy the check against the wrong object. The producer is `_geometry_manifest(sysm)`, the LIVE manifest. |
+| `LM.encode` | `x` is the flush batch and **no entry point returns one** — `RunClock.advance` appends to the accumulator and hands back a `Tick`. The producer is this file's own cut, `_flush_bounds`, and stating it once is better than a row that reads as if a package supplied it. |
+
+### 3.0.2 The loop-side joins in `compose.py`
+
+`compose()` does not call these; the loop does. They are in the root for the reason everything else
+there is: each spans two packages, O10 forbids a package owning it, and the alternative is the same
+arithmetic written inline at a call site — which is how the signature width came out 614 bytes on the
+training path and 1 byte on the eval path with every check green.
+
+| join | what it produces, under the consumer's spelling |
+|---|---|
+| `_window_bounds` / `_flush_bounds` | the cut of `Segmentation.ids` behind `x`, `y`, `contexts`, `tokens`, `targets`, `positions` — contiguous, non-overlapping, `LM.ctx` wide, `OPT.batch_windows` per flush. Returns **bounds, not tensors**: no file in `src/` imports torch at P3 and this file runs no loop. |
+| `_signature_cursor` | `seen_units` in the loop — the CURSOR, where `_signature_units` is the whole epoch-0 stream and is `warm_up`'s alone. A unit crossing (Windows → tokens or **true bytes** off `byte_pos`), which is why it has a name. |
+| `_sample_window` | `windows` for `SIG.encode` and **the same object** as `sample_window` for `DOM.observe`, which `domains/api.py:96` requires. |
+| `_key_fn` / `_head` / `_sig_encode_fn` | `key_fn` (MEM ×2), `head` (FAB), `encode` (DOM.rekey) — entry points partially applied. The callable class of argument has no other producer. |
+| `_n_params` / `_bytes_per_window` | `RUN.bench_summary`'s two measured arguments. `_n_params` sums **both** param groups; summing only the base list undercounts by the whole encoder. |
+| `_geometry_manifest` / `_run_windows` / `_windows_in_epoch` / `_signature_width` / `_alphabet_size` / `_base_parameters` / `_sidecar` / `_signature_stream` / `_signature_units` | the assembly-side joins, unchanged except where §3.8 records a repair. |
+
+What is deliberately **not** there, because writing it would be inventing a producer rather than
+naming one: a `logits_fn` (it must be *the path the run trained*, `eval/api.py:27-30`, which runs
+through `FAB.forward` and so needs the flush's own `novelty`, `live_domains` and `training`); an
+`improving` EMA pair (FAB already keeps one, and a second would be two mechanisms deciding the same
+question); an `owners` rule beyond the old tree's; a `plateau` boolean (WORLD holds that state).
+
 ### 3.1 The stages
 
 `ASSEMBLY_ORDER` gained four stage values — `resume`, `restore`, `stream`/`segment`, `persist` —
 and `LOOP_ORDER` gained three stage letters. **There is still no third table**, for two reasons and
 the second is the load-bearing one: every level below is driven by the **same** `RunClock`, and
-`tests/test_contract.py:879` reads the tables **by name** (`ASSEMBLY_ORDER`, `LOOP_ORDER`) — a third
+`tests/test_contract.py` reads the tables **by name** in `_named_by_orders` and `_rows_with_prose`
+(`ASSEMBLY_ORDER`, `LOOP_ORDER`) — a third
 table would be invisible to the one check that exists because these rows were missing, and *a level
 with a table of its own that no check can see is still an orphan.*
 
 | stage | when | what is in it |
 |---|---|---|
-| `E` | before the first window of an epoch, and again whenever `RunClock.advance` returns `Tick.rolled` | `DATA.draw_stream` → `TOK.tokenize` → `RunClock.begin_epoch`. The root also stamps `clock.opt_steps` here as the `shift_at` `OPT.maybe_step` consumes — a resample is a **self-inflicted** shift, and the old tree carried that fact in a closure variable (`:6518-6521`). |
-| `A` | per WINDOW, above the accumulator | unchanged rows, plus `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.census` (after it, supplying `live_sources`), `MEM.judge`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), and `DOM.rekey` (after `observe`). |
-| `B` | per FLUSH | unchanged rows, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. |
+| `E` | before the first window of an epoch, and again whenever `RunClock.advance` returns `Tick.rolled` | `DATA.draw_stream` → `TOK.tokenize` → `RunClock.begin_epoch`. The root also stamps `clock.opt_steps` here as the `shift_at` `OPT.maybe_step` consumes — a resample is a **self-inflicted** shift, and the old tree carried that fact in a closure variable (`:6518-6521`). **At the shipped default these rows never run — see below.** |
+| `A` | per WINDOW, above the accumulator | `Retention.consider`, `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
+| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` and `FAB.contribution` **were here and are now deferred**. |
 | `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1), `A` (a `BestAction`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. |
-| `R` | once, after `Tick.finished` | `MEM.read(promote=False)` + `MEM.blend`, `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, and the `reason="final"` save. |
+| `R` | once, after `Tick.finished` | `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, and the `reason="final"` save. `MEM.read` and `MEM.blend` **were here and are now deferred**. |
+
+**`Tick.rolled` and `Tick.finished`: the precedence, and the E stage on a one-epoch run.**
+`advance()` sets `rolled` when the stream is exhausted and the epoch increments, and `finished` when
+`epoch >= run.epochs` — so both are True on the same advance whenever the last epoch ends, and
+**`finished` wins**: the loop leaves for `R` and does not re-enter `E`. `RUN.epochs` **defaults to 1**
+(`train/levers.py:238`), so at the shipped default the only roll a run ever takes is that one, and
+**the `E` rows in `LOOP_ORDER` never execute**. Epoch 0's draw, segmentation and `begin_epoch` come
+from `ASSEMBLY_ORDER` instead (§3.4). *"Entered once before the first window"* and *"entered on
+`Tick.rolled`"* are two different claims and the tables must not blur them: at `epochs=1` the first
+is true and the second never happens, so `DATA.resample`, the epoch-roll resegmentation and every
+E-stage counter must read **never reached** rather than **ran and did nothing** — the distinction
+G4 exists for, arriving through a default rather than through a guard.
 
 ### 3.2 Why the checkpoint fan-out is ROWS and not calls inside `CKPT.save`
 
@@ -557,20 +659,40 @@ Every periodic row names a period a package **declares**, evaluated through
 
 | key | period | owner |
 |---|---|---|
-| `curve` | `EVAL.curve_period(ev)` ← `EVAL.curve_every` | EVAL |
+| `curve` | `EVAL.curve_period(ev)` ← `EVAL.curve_every` | EVAL — **declared and never asked** while `EVAL.curve_probe` is deferred (§3.6). The period stays in the mapping on purpose: the ledger then carries a key with `checks == 0`, which says DECLARED AND NEVER ASKED, a different statement from armed-and-inert, and G4 needs both. |
 | `dom.manage` | `DOM.manage_period(dom)` ← `DOM.manage_every` | DOM |
 | `fab.manage` | `FAB.manage_period(fab)` ← `FAB.manage_every` | FAB |
 | `dom.rekey` | **`MEM.rekey_period(mem)`** ← `MEM.rekey_every` | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
 | `ckpt` | `CKPT.save_period(ck)` ← `CKPT.every` | CKPT |
-| MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM |
+| MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM — **NOT ledger gates**, see below |
+
+**Five keys go through the ledger; three comparisons do not, and the document and the code must
+agree on the count.** The table above has six rows and `Cadences.ledger()` has five keys, because the
+last row is **two comparisons inside `MEM.maintain`** and a third, `SIG.cadence_due`, is a row of its
+own. None of the three is a ledger gate, and a gate that is not in the ledger has a **"0 fires"
+nobody can read** — so each names its own surface instead:
+
+| comparison | why it cannot go through `Cadences.due` | the did-it-fire surface it uses instead |
+|---|---|---|
+| `SIG.cadence_due` | it selects between `train_every` and `train_every_idle` on `dense_window`, and `due` takes **one** period | `SIG.counters()` at stage `R` |
+| `MEM.maintain`'s probe | `probe_every` is compared against the Windows `now` **inside** the call, and `maintain` takes no `due` flag — giving it one is a signature change | `store.n_probe_fired` / `n_probe_rows` / `n_probe_hits`, read by `MEM.census` at `R` |
+| `MEM.maintain`'s rekey | same, and `mem.rekey_every` drives **two different mechanisms**: this internal amortized re-encode AND the spine's `dom.rekey` gate, which delivers an event to `DOM.rekey`. **One lever, two mechanisms, two gates, one ledger key** — and the key belongs to DOM's event, not to this one | `store.n_rekey_slices` / `n_rekey_passes` / `n_rekey_entries` |
+
+`MEM.rekey_period`'s own docstring says this in as many words ("MEM.maintain compares this same lever
+against a Windows `now` internally; that is the second gate on one lever"). The rows now say it too,
+so a reader counting gates from the code and a reader counting them from this table get the same
+answer: **five ledger keys, three unledgered comparisons, each with a named counter.**
 
 **One gate, one ask.** `Cadences.due` *records* the fire and returns True, so asking a second time
 under the same key **consumes** the event — that is how a shared `_due` key made minting never fire
-at all in the old tree. The management block therefore asks `dom.manage` **once** and runs four rows
-inside that one answer: `MEM.census` → `DOM.manage` → `DOM.census` → `MEM.judge`.
+at all in the old tree. The management block therefore asks `dom.manage` **once** and runs three rows
+inside that one answer: `MEM.census` → `DOM.manage` → `DOM.census`. (`MEM.judge` was the fourth and
+is deferred; `WORLD.manage` rode `fab.manage`'s single answer **without its row saying so**, and its
+deferral records that when it returns it must either be written inside that answer, in the shape this
+block uses, or take a key of its own.)
 
 Everything else that fires is **event-driven and says so**: `Retention.consider` (a curve value
-arrived), `MEM.judge` (the management pass), `SIG.train_step` (`cadence_due` said yes),
+arrived — which today it never can), `SIG.train_step` (`cadence_due` said yes),
 `TOK.judge_probation` (`Due.probation`), `DOM.on_retokenize` (the RetokEvent), and the whole `C`
 stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go through
 `Cadences.due`** — it selects between `train_every` and `train_every_idle` on `dense_window`, and
@@ -578,25 +700,49 @@ stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go
 did-it-fire surface the encoder's cadence has. That is stated in its row rather than left for a
 reader to discover from a missing ledger line.
 
-### 3.6 `DEFERRED_ENTRY_POINTS` — seven, all EVAL
+### 3.6 `DEFERRED_ENTRY_POINTS` — fourteen, and no longer only EVAL
 
 `{"PFX.entry": "the phase that will call it, and why it cannot be called now"}`. K6 reads it **both
 ways**: an entry no row names is accepted, and an entry a row **now** names is reported as *stale*
 and must be deleted. That is what stops it becoming the place orphans go to be forgotten.
 
+**It was seven, all EVAL, and that was the finding.** The seven were deferred for a stated reason —
+an argument with no producer — while seven rows elsewhere in the tables named calls with exactly the
+same gap. The `produces` column made every one of them decidable, and the seven added below are the
+rows where nothing among the 121 entry points supplies a required argument and no join in
+`compose.py` honestly can. **None is deferred for being late**, and none because a body is missing:
+the whole tree is stubs.
+
 | entry | phase | why there is no row |
 |---|---|---|
-| `EVAL.holdout_probe` | P5 | Needs `units_by_domain` drawn in **byte** coordinates from `Areas.holdout` together with a `logits_fn`, and the root has no join producing that pair. A row now would name a call whose arguments nothing supplies. |
-| `EVAL.null_excess` | P5 | `real` and `permute` are produced by the verdict machinery, which is P6's. |
-| `EVAL.generate` | P6 | `prompts_by_domain` has **no producer** among the 117 entry points. |
-| `EVAL.coherence` | P6 | Runs on its own seeded `Sample`; nothing in the tree returns a `Sample`. |
+| `EVAL.curve_probe` | P5 | **New.** Byte-identical signature to `holdout_probe`, same gap, and now the same verdict. Nothing produces `units_by_domain` (Areas carries names/bodies/holdout/holdout_bytes/cursors, `DOM.census` returns sizes and radii, `Segmentation` carries ids/byte_pos/labels/bytes_per_token — there is no per-domain window supplier), and nothing produces `logits_fn`. |
+| `EVAL.holdout_probe` | P5 | Needs `units_by_domain` drawn in **byte** coordinates from `Areas.holdout` together with a `logits_fn`, and the root has no join producing that pair. |
+| `EVAL.null_excess` | P5 | **Reason corrected.** It said `real` and `permute` come from "the verdict machinery, which is P6's" — but `EVAL.verdicts` takes `domain_sizes`, `silhouettes`, `affiliation`, `coherence_reading` and is this function's **consumer**, not its producer. `real` is the measured statistic under test and `permute` the label-permuting redraw of it, so the candidates are the silhouette and affiliation statistics — which have **no producer in the tree**, the very gap `verdicts` is deferred for — and nothing returns a permutation callable. **Neither exists.** |
+| `EVAL.generate` | P6 | `prompts_by_domain` has **no producer** among the 121 entry points; `logits_fn` is the same missing join. |
+| `EVAL.coherence` | P6 | **Reason corrected.** It said "nothing in the tree returns a `Sample`" — `EVAL.generate` does (`eval/api.py:142-143`). The true reason is `logits_fn`. The `sample` **parameter** is a separate, unresolved contradiction with this function's own docstring ("its OWN seeded sample… `coh_seeds` and `coh_len` size a sample it draws for itself"): **Q-EVAL-10**. |
 | `EVAL.verdicts` | P6 | Three of four arguments — `silhouettes`, `affiliation`, `coherence_reading` — have no producer; the fourth, `domain_sizes`, comes from `DOM.census`, which stage `R` already collects. |
-| `EVAL.wrongness_probe` | P6 | Takes a **copy** of the store so the instrument cannot edit what it measures; MEM's surface produces no copy, and adding one is a signature change. |
+| `EVAL.wrongness_probe` | P6 | Takes a **copy** of the store so the instrument cannot edit what it measures; MEM's surface produces no copy, and adding one is a signature change. Its `scorer` is the same missing logits callable as `MEM.judge`'s. |
 | `EVAL.verification_fit` | P6 | Same missing copy; its inner loop is genuine `units.Steps` and must never be compared against `curve_every`. |
+| `MEM.read` | P5 | **New.** Nothing produces `queries`. The deleted `R` row named none of them, and the probe contexts it would key on are the same held-out material `holdout_probe`'s `units_by_domain` needs — one missing join, and deferring only one of the two was the inconsistency. |
+| `MEM.blend` | P5 | **New.** `retrieval` comes from `MEM.read`; `model_probs` are **probabilities** while every scoring hook takes a `logits_fn` (Q-MEM-10) — which the deleted row's own prose conceded while being written anyway. `model_probs` is also the first positional after the Config, which K10 drops as "the package's own live object" — it is not (MEM's is `store`), so the check is structurally blind here and the deferral is the only record. |
+| `MEM.judge` | P4/P5 | **New.** `scorer(ctx) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). That callable does not exist, and scoring a **stored** ctx needs a signature and a domain id per entry, which nothing produces either. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:259-261` itself names as the inert state. |
+| `FAB.contribution` | P4 | **New.** `candidates` is the eligible past-grace set, which lives in `Population`'s books — no entry point exports it and O10 forbids the root reaching into `pop`. `baseline_logits_fn` is the same missing callable as EVAL's, and it is load-bearing rather than convenient: the whole C3/H11 repair is that the baseline must come from **the same callable** that produced `baseline_loss`. |
+| `CAP.observe` | P4 | **New.** `improving` = `(slow - fast)/|slow|` off the growth controller's EMAs, which live **inside FAB** and are on no returned record; `observations` is the valve-evaluation count tied to a hardcoded 0.998 EMA rate the caller cannot see. The root must **not** maintain a second EMA pair over the same loss to manufacture them — two mechanisms deciding independently whether the run has stalled is the recorded defect where the valve fired hardest exactly when the run was degrading worst. `blackout` **would** have a home (retok, epoch resample and LR restart all have rows). |
+| `WORLD.manage` | P4 | **New.** `plateau` contradicts the package's own `state_dict`, which says the plateau state `(_wl_ema, _wl_lastgrow)` **moves inside this package** and travels in the checkpoint — if the state is inside, the boolean is computed inside, and both sentences cannot hold. `add_param_group` needs OPT to name one of its two AdamW instances (**Q-OPT-7**). `latent` is real but arrives **backwards** (`loss_terms` is a `B` row, this pass was `A`). |
 
-**A later phase is not by itself a reason to defer** — `EVAL.curve_probe` is P5 and has an `A` row.
-Each reason above is about an **argument with no producer**, which is the only kind of reason that
-survives the backwards check.
+**A later phase is not by itself a reason to defer.** Each reason above is about an **argument with
+no producer**, which is the only kind that survives the backwards check.
+
+**What the seven new deferrals cost, said plainly**, because a deferral that hides its cost is the
+shape it replaces: the run has no capacity valve (nothing lifts a cap, so `CAP.caps` returns the
+starting ceilings and every block reason reads *unreachable*), no WORLD growth, no learning-curve
+probe — and therefore **no best-model save** (`Retention.counters().inert_reason` must report "no
+curve value has ever arrived") and **no restart damping** (`OPT.maybe_step`'s `best_bpb` has no
+producer, so `opt.restart.damped` is unreachable, not zero) — no per-expert contribution and so no
+informed spare rule, and no memory retrieval or wrongness sweep (so `evict="lru"` and `evict="usage"`
+stay write-order FIFO and probation can never promote). **All of that was already inert**: the rows
+named calls whose arguments nothing supplies. The deferral does not remove a mechanism, it stops the
+tables claiming one, and it names the producer each is waiting on.
 
 ### 3.7 What could NOT be placed, and is therefore reported rather than rowed
 
@@ -619,8 +765,107 @@ survives the backwards check.
   `MintReport`, i.e. from **mint time**, when a new token's residual is zero by construction — so
   `keep iff earned AND residual >= probation_residual` would retire every candidate. The old tree
   recomputes it at judgement time from live tensors (`:7601-7605`), and **no entry point among the
-  117 exposes that read**. The `B` row passes `residual_ratio` through; whether the arm is reachable
+  121 exposes that read**. The `B` row passes `residual_ratio` through; whether the arm is reachable
   is **Q-TOK-11**.
+* **`FAB.own_lr_scale`'s return.** It yields per-expert learning-rate multipliers "or None when
+  off", and `OPT.maybe_step(opt, st, *, best_bpb=None, shift_at=None)` **has no parameter for them**
+  — no signature in the tree does. Its row therefore produces nothing, which is a legal four-element
+  row, but it means `fab.lr_scaled_experts` counts an effect this contract never applies: the mirror
+  image of an argument with no producer, and the row says so rather than leaving the reader to
+  discover it from an unread return.
+* **`Stream.splice_starts` and `Stream.area_changes`.** `data/api.py:153-156` argues hard that BOTH
+  must leave the package "so no consumer has to guess which one it wanted" — against ISSUES H10,
+  where boundary precision/recall was scored on every splice start and on a one-area run all ~96
+  "true switches" were artefacts. **No signature in the tree names either.** `DOM.observe` *produces*
+  boundaries rather than consuming ground truth, and every boundary-scoring instrument is deferred.
+  Not a K10 finding — nothing requires them — but the mirror of one, and the `E`/`stream` rows record
+  that they are inert until P5/P6 rather than leaving the fields silent.
+* **`RetokEvent`.** `tok/api.py:35` declares it in RECORD TYPES as "the signal the composition root
+  hands to SIG, MEM, DOM and FAB", and **no entry point's docstring says it returns one** —
+  `TOK.tokenize`'s says `Segmentation`. Of the four named destinations only one exists:
+  `MEM.maintain(resegment=...)`. `DOM.on_retokenize(dom, part)` takes **no event parameter at all**
+  (`domains/api.py:230`) — the `B` row wrote the call as `on_retokenize(event=RetokEvent)`, an
+  argument the signature does not have, and no check saw it because the entry point has no required
+  arguments; the row is corrected. SIG and FAB have **no retokenize entry point** in their frozen
+  surfaces. A declared record with no declared producer and two destinations that do not exist.
+
+### 3.8 What writing the column found in the root itself
+
+Six defects in `spine/compose.py` that the column exposed and that are repaired here. None of them
+is a signature change; all are unreachable today because `RUN.process_setup` raises several rows
+earlier, which is the shape this file's own header calls *"a defect hidden behind an earlier stub,
+this project's oldest"*.
+
+1. **`new_cadences` was called with no `periods`.** `new_cadences(run: Config, *, periods)` is
+   keyword-only with no default, the ASSEMBLY row describes the five-key mapping in detail, and the
+   call site passed `run` alone — a `TypeError` on every `compose()` the moment the first stub gets
+   a body. The signature was fixed on 2026-08-30 and the call site was not. Now built and passed.
+2. **`cadence_audit` was a row nobody called.** `grep` found it only inside its own row prose: the
+   one statement that makes ISSUES C11 visible — ten cadence defaults longer than a 937-window run
+   — never ran, while K6 credited the row and passed. It now runs, and its lines join
+   `System.warnings`; an **empty** list is a real result and must be printed as one.
+3. **`_run_windows` returned a bare `int`** into two functions that refuse one:
+   `derive.cadences_that_cannot_fire` and `derive.opt_steps_from_windows` both raise `UnitError` on
+   a non-`Windows` (ISSUES H51: all 35 Clock-unit levers resolve to bare ints and the typing is real
+   only where `derive` puts it back). It now returns `units.Windows`.
+4. **`_run_windows`' row said `run_windows=Plan's measured length`.** `Plan` has no such field
+   (`data/api.py:22`) — the same wrong fact the helper's own docstring had already caught once, in
+   the body, without the fix reaching the row. The row now names the measurement.
+5. **`_base_parameters` skipped a missing `parameters()` in silence.** `Population` declares none,
+   so if P4 does not add one the fabric contributes **zero** parameters to the optimizer with every
+   check green. The absence is now recorded on `System.warnings`. The `OPT.build` row also said
+   `'base': LM+FAB+WORLD+MEM params` while the body walks three objects — **MEM has no module and no
+   parameters at all** — so the row now matches the body.
+6. **`_sidecar` returned `None` on every real resume and said nothing.** See §3.9.
+
+### 3.9 The geometry gate: what the SAVE side must write
+
+`CKPT.check_geometry(ckpt, snapshot, geometry)` compares a **live** manifest, built by
+`_geometry_manifest(sysm)` from `LM.resolve`'s `LMGeometry` and the frozen Configs, against whatever
+the snapshot recorded. The live side has **15 fields** (16 with `pos_max`): `lm.width, layers, heads,
+ctx, pos_max, vocab_slots`; `sig.d, space`; `fab.slots, rank, dk`; `world.lat, hid, route_d, nmax,
+feedback`. The recorded side is written at stage `C`, and **the only `geometry()` in the tree is
+WORLD's** (Q-CKPT-1) — five fields. So ten fields are reported UNCHECKED on every resume, and the
+gate that exists because *a checkpoint built at one width cannot load into a model built at another*
+(`self_organize.py:4442-4468`) compares a sixth of what it names.
+
+**Two `sidecar` refusals are disarmed by the same hole.** `SIG.load_state_dict` and
+`FAB.load_state_dict` take a `sidecar` that `_sidecar(restored, PFX)` reads as
+`Snapshot.geometry[PFX]`. Nothing writes a per-prefix key, so both receive `None` **on every real
+resume** and neither refusal runs — `SIG`'s on `width_units/alphabet_size/space/d/mode`, `FAB`'s on
+`slots/rank/dk`. `sig/api.py:201-205` at least *says* `SIG.state_dict` emits its sidecar;
+`FAB.state_dict` does not claim to emit one at all, so FAB's refusal reads a value with no declared
+origin at either end. A guard that cannot fire is a defect even where the code around it is correct,
+so `_sidecar` now records the disarmed state on `System.warnings` rather than returning `None` in
+silence, and both restore rows say the refusal is disarmed until P4.
+
+**For the gate to have anything to compare**, the `C` block must record the SAME manifest shape the
+live side builds, **keyed by prefix**: `'WORLD'` from `WORLD.geometry`, `'SIG'` from the sidecar
+`SIG.state_dict` already says it emits, `'FAB'` from a sidecar `FAB.state_dict` does not yet claim to
+emit, and the LM/SIG/FAB lever fields from `_geometry_manifest`, which is a pure function of the
+frozen Configs and is therefore computable on the save side too. The C rows now say this. It is not a
+row the root can write alone — FAB must declare its sidecar — so it is **Q-CKPT-2**.
+
+### 3.10 Three TOK events are produced at `A` and consumed at `B`
+
+`TOK.on_window` is the ONE place TOK's four cadences are asked, once per **window**, and it returns
+`Due(mint, retok, probation, frozen)`. `TOK.mint_burst`, the retok and `TOK.judge_probation` act on
+that Due at `B`, once per **flush**. Between them sits the batch accumulator, and **nothing in the
+frozen surfaces carries an event across it**: `RunClock.advance` appends to the accumulator and
+returns a `Tick`.
+
+So the carrier is named: `System.due`. What crosses is `batch_windows` Dues reaching one flush, and
+the choice of what the flush acts on is a real decision with a measured failure behind it — taking
+the **last** silently drops up to `batch_windows - 1` fires; **OR**-ing them makes one flush act on a
+cadence that fired mid-batch. Both are the class of loss that made minting fire 999 times at
+`batch_w=1` and **zero** times at every `batch_w` in {2, 8, 15, 16, 32}. The rows state the carrier so
+the choice cannot be made by accident at a call site; **Q-TOK-12** asks the owner which.
+
+Two more values cross a boundary the column cannot express, and both are on `System` for the same
+reason: `novelty` (the previous flush's mean surprise, `:7499` — `FAB.forward`'s `novelty` and the
+input to `MEM.write`'s `surprise`) and `token_seen` (the per-token appearance counter, which is
+`LM.anchor_term`'s `token_seen` and `TOK.judge_probation`'s `appearances` — **one tensor, two
+spellings**, owned by the loop and returned by no entry point; C5).
 
 ---
 
@@ -970,7 +1215,7 @@ probation_residual`. `tok/api.py:232-234` sources `residual_ratio` from LM's `Mi
 arm would retire 100% of candidates. The old tree recomputes it at judgement time from
 `model.compose.table()` and `.delta` (`:7601-7605`), which is the right measurement: *how much this
 token had to become that its parts did not already say* is a question about training that has
-happened. **No entry point among the 117 exposes that read.** **Options:** (a) add
+happened. **No entry point among the 121 exposes that read.** **Options:** (a) add
 `LM.residual_ratios(lm, model)`, a pure read — a signature-set change; (b) cache the last
 `MintReport` — this is the bug; (c) leave `residual_ratio=None` and let the declared Gate print
 *unreachable (no residual_ratio supplied)*. **Recommendation: (a)** when the surface opens, (c)
@@ -1030,6 +1275,69 @@ invented. **Options:** (a) add a `shift_at`-style keyword to `FAB.manage` — a 
 (c) accept that fabric growth treats a resample like new material. **Recommendation: (a)**, and
 until then the report must say the blackout is unreachable rather than armed.
 
+### Q-CKPT-2 — what does the SAVE side write for the geometry gate, and who emits FAB's sidecar?
+`_geometry_manifest` builds 15 live fields across LM, SIG, FAB and WORLD; the recorded side is
+`WORLD.geometry` alone, five fields, so ten are UNCHECKED on every resume — and `_sidecar` finds no
+`'SIG'` or `'FAB'` key, so **both width refusals are disarmed on every real resume** (§3.9). Nothing
+about that is visible today: `check_geometry` reports UNCHECKED, the two restores take `None`, and no
+counter says the guard did not run. **Options:** (a) the `C` block records `_geometry_manifest`'s
+output keyed by prefix, plus `'WORLD'` from `WORLD.geometry` and `'SIG'`/`'FAB'` sidecars —
+`FAB.state_dict` then has to declare the sidecar it currently does not mention, which is a docstring
+change inside a frozen signature; (b) give the other packages a `geometry()` each, which is eleven
+new entry points; (c) accept a five-field gate and delete the `sidecar` parameters, which throws away
+the H24/H31-class refusals. **Recommendation: (a)** — the manifest is already a pure function of the
+frozen Configs, so the save side can compute the same thing the load side does, and only FAB's
+sidecar needs an owner's word. Until then the root records the disarmed state on `System.warnings`.
+
+### Q-EVAL-10 — `EVAL.coherence` takes a `sample` and its docstring says it draws its own
+`coherence(ev, *, logits_fn, sample, rng)`, while `eval/api.py:162-168` says it runs "over its OWN
+seeded sample, not over the printed generations" and that `coh_seeds` and `coh_len` size a sample
+**it draws for itself**. Both cannot be true. This matters beyond tidiness: the recorded failure is
+that coherence was scored on the four printed generation samples, ~2 windows each, so every number
+landed on 0.25/0.50/0.75/1.00 and "memory HELPS (0.50 → 0.75)" was **one sample flipping**, reported
+as a finding twice in opposite directions. **Options:** (a) drop the parameter — the instrument owns
+its draw, which is what the docstring argues for; (b) keep it and delete the sentence, making the
+caller responsible for a seeded draw of `coh_seeds` × `coh_len`; (c) keep both with the parameter
+documented as an override for A/B work. **Recommendation: (a)**, because the parameter is what
+allowed the old code to hand it the generation samples in the first place. Note the deferral reason
+written here until 2026-08-30 — "no entry point in the tree returns a Sample today" — was simply
+**false**: `EVAL.generate` returns one. The real blocker is `logits_fn`.
+
+### Q-MEM-11 — `MEM.census` and `DOM.census` return record types neither file declares
+`memory/api.py:14-19` declares `Store`, `WriteReceipt`, `Retrieval` and nothing for `census`, whose
+docstring names `floor_entries`, a `quota_arm`, `pressure` and the per-source counts **in prose**.
+`domains/api.py:18-23` declares `Partition`, `Assignment`, `Plan` and nothing for `census`, whose
+prose names `live`, `n_live`, `comp_glob`, radii and more. Four required arguments cross those two
+boundaries — `DOM.manage`'s `memory_counts` and `mem_floor_entries`, `FAB.grow_check`'s
+`memory_pressure`, `FAB.forward`'s `live_domains` — so the `produces` columns spell the **consuming**
+names against a record whose fields are not declared anywhere. **Options:** (a) add both returns to
+the RECORD TYPES blocks and spell the fields, ideally as the consuming names so the rename disappears;
+(b) leave the prose and accept that the round trip is unverifiable by inspection.
+**Recommendation: (a)** — it is a docstring change inside a frozen signature, and `TOK.vocab_state`'s
+D-T3 is a live defect *caused* by an undeclared key.
+
+### Q-TOK-12 — which window's `Due` does the flush act on?
+`TOK.on_window` is asked per WINDOW; `mint_burst`, the retok and `judge_probation` act per FLUSH
+(§3.10). `batch_windows` Dues therefore reach one flush and nothing in the frozen surfaces says which
+one wins. **Options:** (a) the LAST window's — simple, and silently drops up to `batch_windows - 1`
+fires; (b) the OR over the batch — no fire is lost, but a flush then acts on a cadence that fired
+mid-batch, and `judge_probation`'s `appearances` is the counter the *whole* batch updated; (c) hoist
+the three B-stage acts to A, which puts a mint inside the accumulator and invalidates the batch the
+model is mid-flush on. **Recommendation: (b)**, with the count of dropped-or-merged fires as a
+counter, because the failure this whole cadence design exists to prevent is a fire that silently does
+not happen. The root carries the events on `System.due` either way.
+
+### Q-LM-12 — what call produces `WORLD.loss_terms`' `obs_emb`?
+`world/api.py:58-63` wants "LM's EMBEDDING of the batch, (B, W, d_model) — the lowest layer, the
+point where a new sense plugs in". **LM exposes no embedding entry point**: `LM.encode` returns the
+`(B, L, width)` HIDDEN, and its `n_layers` argument "runs only the first n blocks", so `n_layers=0`
+is a plausible reading and nowhere a stated one. This is load-bearing for goal A's *room for more
+modalities*: if `obs_emb` is silently the GRU/transformer state, then the claim that a second sense
+needs only new embedding rows is false and nothing says so. **Options:** (a) state that
+`LM.encode(..., n_layers=0)` is the embedding; (b) add an `LM.embed` entry point — a signature
+change; (c) let WORLD take the hidden and correct the module docstring's modality claim.
+**Recommendation: (a)** if the arm really returns the embedding table's output, otherwise (b).
+
 ---
 
 ## 6. What `tests/test_contract.py` checks
@@ -1042,6 +1350,10 @@ until then the report must say the blackout is unreachable rather than armed.
 | K4 | every one of the 259 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
+| K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
+| K8 | every RNG stream the root takes is one `RNG_SUBSYSTEMS` minted, and none is reached with `.get()` | `streams.get("world")` returning `None` into a required `rng=` |
+| K9 | every `Cadences.due` period in the tables is a **typed accessor**, not a bare lever read | `Cadences.due('fab.manage', FAB.manage_every, clock)` — an int where `due` requires `units.Windows` |
+| K10 | every **required** argument of a rowed entry point is produced by an EARLIER row's `produces` column, named in that row's own note, listed in `ROW_ARGUMENTS_ELSEWHERE`, or the entry point is deferred | write a row for a call whose arguments nothing supplies — which is what `EVAL.curve_probe` was, against a deferral for the byte-identical `EVAL.holdout_probe` |
 
 **K6 is the check K4 is not, and the gap was 56 entry points wide.** K4 asks whether some stub's
 docstring *names* a lever; K6 asks whether that stub is ever *called*. K4 passed at 257 named / 2
@@ -1052,8 +1364,15 @@ written, executes a row — the tables are data and P4 writes the code — nor a
 only from inside another body, which is why `OPT.lr_at` is credited by being **named in the prose of
 the row that calls it** (`OPT.maybe_step`, step 2) rather than given a row of its own.
 
+**K10 asks about REQUIRED arguments only**, and that is a real limit with a name: a parameter
+carrying a default is the author saying the call works without it, so the check cannot see
+`MEM.judge(mem, store, *, scorer=None)` yielding `n_checked = 0` forever under a `verify` that
+defaults to `selfcon`. Only reading the docstring can, which is why that one is a deferral written by
+hand. It is also blind to `MEM.blend`'s `model_probs`, which it drops as "the package's own live
+object" — MEM's live object is `store`, and `blend` is the one entry point that does not take it.
+
 Each carries a `_report()` line printing **the size of the population it examined**, and
-`selftest()` trips every one of the six against a synthetic tree in a temp directory. That is not
+`selftest()` trips every one of the ten against a synthetic tree in a temp directory. That is not
 ceremony: this repository has **sixty** untrippable guards on record, and one of them was written
 into `tests/test_ownership.py` *by the patch that was fixing `tests/test_ownership.py`*. A check
 nobody has watched fail is indistinguishable from a check that cannot fail.
@@ -1062,7 +1381,7 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 117 entry points. This block is the normative list, and
+Everything above is prose about these 121 entry points. This block is the normative list, and
 `tests/test_contract.py`'s K1 compares it against `src/<pkg>/api.py` **in both directions**: a name
 here that the tree does not have is a failure, and a public entry point in the tree that is not here
 is also a failure. The signature text is `ast.unparse` of the argument list, so a renamed parameter,

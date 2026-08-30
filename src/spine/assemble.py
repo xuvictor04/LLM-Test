@@ -942,6 +942,31 @@ COUPLINGS = [
             "Reducible: a valve that refused to lift the vocabulary at all while the mask is off would "
             "need no flag, and that is the stricter repair if the owner wants it.",),
     Coupling(
+        src=("SIG.train_every", "SIG.train_every_idle"),
+        dst="SIG.d_idle_cadence",
+        compute=lambda r: max(int(r["SIG"].train_every) * 6, int(r["SIG"].train_every_idle)),
+        unit=U.Windows,
+        irreducible=False,
+        why="THE RELATION THAT WAS RECORDED AS RELOCATED AND NEVER LANDED (ISSUES H53). The old "
+            "declaration was `_i(\"ENC_EVERY_IDLE\", max(ENC_EVERY * 6, 12))` -- a default read from "
+            "another lever, which spine/lever.py refuses by construction. The census's repair was not "
+            "to delete the relation but to MOVE it, and sig/levers.py:402-410 says so in as many "
+            "words: 'the census proposes SIG.d_idle_cadence = max(train_every*6, train_every_idle) "
+            "declared in spine/assemble.py, so the relation prints in the coupling graph instead of "
+            "hiding inside a default' -- and then, in its own words, 'it is simply not declared "
+            "yet.' It was not, for six commits. So train_every_idle sat at a literal 12 with NO "
+            "connection to train_every: change the dense cadence and the idle cadence did not "
+            "follow, silently. The literal is defensible alone -- at the shipped train_every=1, "
+            "max(1*6, 12) = 12, so no recorded result moves -- which is exactly what let it survive. "
+            "What was lost is the RULE, and this graph is the one place this architecture puts rules "
+            "so a reader can find them. LOCAL: both ends are SIG's, so it books no edge and spends "
+            "no budget, the same shape as FAB.d_operating_population above. REDUCIBLE, unlike that "
+            "one: a design could legitimately let the idle cadence float free of the dense one. What "
+            "it may not do is claim they are related and then not relate them. Found by "
+            "tests/test_ownership.py's O11, which reads the docstring SPECIFICATIONS because every "
+            "body is still a stub -- no check that reads declarations could see it, since the "
+            "declaration it was relocated TO did not exist."),
+    Coupling(
         src=("FAB.pressure", "FAB.slots"),
         dst="CAP.d_operating_population",
         compute=lambda r: derive.operating_population(r["FAB"].pressure, r["FAB"].slots),
