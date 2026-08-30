@@ -409,8 +409,9 @@ ASSEMBLY_ORDER = (
                                               "encode -- SIG.encode bound to the SigState by "
                                               "_sig_encode_fn, which is DOM.rekey's spelling for "
                                               "the same callable"),
-    ("restore",   "SIG",   "load_state_dict", "(st, sd=Snapshot.payload['SIG'], sidecar=_sidecar("
-                                              "Snapshot, 'SIG'), which reads the snapshot's "
+    ("restore",   "SIG",   "load_state_dict", "(st, sd=Snapshot.payload['SIG'], "
+                                              "sidecar=_sidecar(sysm, restored, 'SIG'), which reads "
+                                              "the snapshot's "
                                               "recorded manifest under the key 'SIG'. NOTHING "
                                               "WRITES THAT KEY: the C rows record WORLD.geometry "
                                               "alone, so the sidecar is None on every real resume "
@@ -430,8 +431,9 @@ ASSEMBLY_ORDER = (
                                               "contributes ZERO parameters to the optimizer, so "
                                               "that helper records the absence instead of "
                                               "skipping in silence"),
-    ("restore",   "FAB",   "load_state_dict", "(pop, sd=Snapshot.payload['FAB'], sidecar=_sidecar("
-                                              "Snapshot, 'FAB') -- slots MAY_WIDEN, rank and dk "
+    ("restore",   "FAB",   "load_state_dict", "(pop, sd=Snapshot.payload['FAB'], "
+                                              "sidecar=_sidecar(sysm, restored, 'FAB') -- slots "
+                                              "MAY_WIDEN, rank and dk "
                                               "EXACT. SAME DISARMED REFUSAL AS SIG'S, and worse by "
                                               "one step: FAB.state_dict does not even CLAIM to emit "
                                               "a sidecar the way sig/api.py:201-205 does, so this "
@@ -1174,12 +1176,15 @@ DEFERRED_ENTRY_POINTS = {
         "have no producer in the tree; the fourth, domain_sizes, comes from DOM.census, which the "
         "R stage above already collects.",
     "EVAL.wrongness_probe":
-        "P6 (eval). Takes a COPY of the store so the instrument cannot edit what it measures; "
-        "nothing in MEM's surface produces a copy, and inventing one is a signature change. Its "
+        "P6 (eval). Takes a `store_copy` so the instrument cannot edit what it measures; nothing in "
+        "MEM's surface produces one -- the ten entry points are open_store, write, read, blend, "
+        "maintain, apply_domain_plan, judge, census, state_dict and rekey_period, and no copy -- "
+        "and inventing it is a signature change. Its "
         "`scorer` is the same missing logits callable as MEM.judge's.",
     "EVAL.verification_fit":
-        "P6 (eval). Post hoc, on a store copy, with an inner loop in genuine units.Steps that must "
-        "never be compared against curve_every -- same missing copy, same phase.",
+        "P6 (eval). Post hoc, on a `store_copy` MEM's surface does not produce -- see wrongness_probe "
+        "above -- with an inner loop in genuine units.Steps that must never be compared against "
+        "curve_every. Same missing copy, same phase.",
     "MEM.read":
         "P5 (eval/report). Nothing produces `queries`. The R row that called it named none of "
         "them, and the probe contexts it would key on are the same held-out material "
@@ -1207,7 +1212,7 @@ DEFERRED_ENTRY_POINTS = {
         "inert state. That is precisely why this is a deferral and not a row with a note. Q-MEM-8 "
         "still owns WHICH management pass it rides when it returns.",
     "FAB.contribution":
-        "P4 (fabric). Two arguments have no producer. `candidates` is the eligible past-grace set, "
+        "P4 (fabric). THREE arguments have no producer, not two: the reason said two until K12 counted them. `targets` is the flush's shifted token cut -- the same `y` LM.lm_loss takes, which is the loop's own slice and has no row -- so it is a gap of a different KIND from the other two and that difference is why it was missed. `candidates` is the eligible past-grace set, "
         "which lives in Population's use/uage books; no entry point exports it and O10 forbids the "
         "root reaching into `pop`, so either FAB adds an accessor or `candidates` gains a "
         "documented default of 'all past-grace'. `baseline_logits_fn` is the same missing callable "
@@ -1217,7 +1222,12 @@ DEFERRED_ENTRY_POINTS = {
         "rebuild the offset that set contrib's SIGN. Until then fab.contrib_measured reads "
         "unreachable, and the two spare rules and the replication parent choice have no signal.",
     "CAP.observe":
-        "P4 (fabric + capacity). `improving` and `observations` have no producer. improving is "
+        "P4 (fabric + capacity). THREE arguments have no producer, not two: `elapsed_windows` was "
+        "omitted from this reason until K12 counted them. It is the valve's PIN DELTA -- how many "
+        "windows since the last call -- and RunClock counts windows without naming that difference, "
+        "which is the whole of the pin-clock story: the delta is what derive.pin_tick accumulates, "
+        "and typing it was the repair settled on 2026-08-30. "
+        "`improving` and `observations` have no producer either. improving is "
         "(slow - fast)/|slow| off the growth controller's two EMAs, which live INSIDE FAB "
         "(fabric/api.py:262-264 runs the same two-sided test) and are on no returned record: "
         "GrowReport carries asks, deliveries and decline reasons, not the reading. observations is "
@@ -1414,7 +1424,7 @@ class System:
                  # epoch 0's material, which OPT.build and SIG.warm_up both need before the loop --
                  # and which nothing held before, so MEM's byte offsets indexed a stream no
                  # attribute on this record named.
-                 "resume_src", "manifest", "saving", "stream", "segmentation",
+                 "resume_src", "manifest", "saving", "stream", "segmentation", "base_params",
                  # THE THREE VALUES THAT CROSS A BOUNDARY THE ORDER TABLES CANNOT EXPRESS, each
                  # named by the row that consumes it. `produces` reads FORWARDS -- an argument is
                  # supplied by an EARLIER row -- so a value produced at A and consumed at B, or
@@ -1631,9 +1641,14 @@ def compose(environ=None, *, restored=None):
     # that has parameters hands over a plain list and the root concatenates them, so a package
     # cannot be silently left out of the optimizer by an ablation flag about something else.
     sysm.stage = "optimizer"
+    # BUILT ONCE AND HELD. _n_params needs the same list for RUN.bench_summary, and calling
+    # _base_parameters a second time appends its no-parameters() warning a second time -- turning
+    # the one did-it-fire signal for "a package contributed nothing to training" into a count
+    # nobody can read.
+    sysm.base_params = _base_parameters(sysm)
     sysm.optimizer = opt_api.build(
         opt,
-        param_groups={"base": _base_parameters(sysm),
+        param_groups={"base": sysm.base_params,
                       "encoder": list(sig_api.encoder_parameters(sig, sysm.sig))},
         run_windows=_run_windows(sysm),
         resume=saved.get("OPT"))
@@ -2123,7 +2138,13 @@ def _n_params(sysm):
     """
     sig = sysm.configs["SIG"]
     total = 0
-    for p in list(_base_parameters(sysm)) + list(sig_api.encoder_parameters(sig, sysm.sig)):
+    # sysm.base_params, NOT a second _base_parameters(sysm) call. Re-invoking it walks the same
+    # objects again and APPENDS THE SAME WARNING A SECOND TIME -- and that warning is the only
+    # did-it-fire surface for "a package declared no parameters() and contributed nothing to
+    # training", so double-counting it turns the one signal into a number nobody can read. The list
+    # is built once at the optimizer row and held.
+    base = sysm.base_params if sysm.base_params is not None else _base_parameters(sysm)
+    for p in list(base) + list(sig_api.encoder_parameters(sig, sysm.sig)):
         numel = getattr(p, "numel", None)
         total += int(numel()) if callable(numel) else 0
     return total

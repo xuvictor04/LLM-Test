@@ -784,7 +784,7 @@ _CASES = (
     ("control -- nothing wrong with this tree", {}, {
         "K1": (False, None), "K2": (False, None), "K3": (False, None),
         "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None),
-        "K8": (False, None), "K9": (False, None), "K10": (False, None), "K11": (False, None)}),
+        "K8": (False, None), "K9": (False, None), "K10": (False, None), "K11": (False, None), "K12": (False, None)}),
 
     ("K1: a parameter was renamed in the tree and not in the document",
      {"src/data/api.py": _GOOD_API.replace("*, seed: int", "*, run_seed: int")},
@@ -987,6 +987,19 @@ ROW_ARGUMENTS_ELSEWHERE = {"DATA.no_such_entry": "produced by _nothing"}
                                                     '"handles = nowhere -- renamed from nothing"')},
      {"K11": (True, "does not return")}),
 
+    # ---- K12. "Two arguments have no producer." Four did.
+    ("K12: a deferral reason that omits an argument with no producer",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace('"areas -- the corpus handles"', '""') + '''
+DEFERRED_ENTRY_POINTS = {"DATA.data_plan": "P6 fills this in, for unrelated reasons"}
+'''},
+     {"K12": (True, "does not name")}),
+
+    ("K12: a reason that names the gap is admitted",
+     {"src/spine/compose.py": _GOOD_COMPOSE.replace('"areas -- the corpus handles"', '""') + '''
+DEFERRED_ENTRY_POINTS = {"DATA.data_plan": "P6. Nothing produces areas."}
+'''},
+     {"K12": (False, None)}),
+
     ("K4: a declared lever that no stub names and no table lists",
      {"src/data/levers.py": _GOOD_LEVERS.replace(
          '    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)',
@@ -1039,6 +1052,7 @@ _BY_TAG = {
     "K9": lambda d: check_k9_cadence_periods_are_typed(os.path.join(d, "src")),
     "K10": lambda d: check_k10_rows_name_their_arguments(os.path.join(d, "src")),
     "K11": lambda d: check_k11_produces_is_not_fabricated(os.path.join(d, "src")),
+    "K12": lambda d: check_k12_deferral_reasons_are_complete(os.path.join(d, "src")),
 }
 
 
@@ -2024,6 +2038,92 @@ def check_k11_produces_is_not_fabricated(src_dir=SRC):
                    f"{len(docs)} documented entry point(s)", findings, vacuous=not checked)
 
 
+
+# ==================================================================================================
+# K12 -- a deferral reason must name every argument that has no producer
+# ==================================================================================================
+
+def check_k12_deferral_reasons_are_complete(src_dir=SRC):
+    """K12 -- a deferred entry point's reason names every required argument nothing produces.
+
+    A DEFERRAL REASON IS AN ARGUMENT, and an argument that is wrong is worse than none: it is the
+    thing the next reader trusts instead of checking. A reviewer found two false ones and one
+    incomplete, and the incomplete one is the shape this check generalises --
+
+        FAB.contribution: "Two arguments have no producer."  Four do.
+        CAP.observe:      the reason omits a sixth required argument entirely.
+
+    WHICH OMISSIONS COUNT, because most do not. A deferred entry point typically requires arguments
+    that ARE produced -- FAB.contribution's h, signature, head and targets all come off earlier
+    rows, and `rng` comes off RUN.streams. Those are not why it is deferred and a reason listing
+    them would be noise. What the reason must account for is exactly the arguments with NO producer:
+    those are the deferral, and a reason that names two of four is a claim the reader will act on.
+
+    HOW `produced` IS COMPUTED HERE: the union of every row's `produces` column, plus the declared
+    helper exemptions, plus explicit bindings in any row's note. Not "earlier rows" -- a deferred
+    entry point has no row, so it has no position, and the honest question is whether the value
+    exists anywhere in the assembly at all.
+
+    WHAT IT CANNOT CATCH: a reason that names the right arguments and says something false ABOUT
+    them. EVAL.null_excess's reason claimed real/permute "are produced by the verdict machinery,
+    which is P6's" -- and the dependency runs the other way, since EVAL.verdicts takes neither and
+    null_excess's own docstring calls itself "the permutation null every 2-sigma verdict is judged
+    against". Naming the consumer as the producer passes this check. Only reading does.
+    """
+    rows = _rows_with_prose(src_dir)
+    req = _required_params(src_dir)
+    deferred = _deferred_entry_points(src_dir)
+    exempt = {}
+    path = os.path.join(src_dir, "spine", "compose.py")
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            try:
+                tree = ast.parse(fh.read())
+            except SyntaxError:
+                tree = None
+        if tree is not None:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign) and any(
+                        getattr(t, "id", "") == "ROW_ARGUMENTS_ELSEWHERE" for t in node.targets):
+                    v = node.value
+                    if isinstance(v, ast.Call):
+                        v = v.args[0] if v.args else None
+                    if isinstance(v, ast.Dict):
+                        for k, val in zip(v.keys, v.values):
+                            if isinstance(k, ast.Constant) and isinstance(val, ast.Constant):
+                                exempt[k.value] = val.value
+
+    produced = set()
+    for _ln, _k, prose, prod in rows:
+        produced |= set(prod)
+        for arg, _p, _f in re.findall(
+                r"\b([a-z_][a-z_0-9]*)\s*=\s*([A-Z]{2,5})\.([a-z_][a-z_0-9]*)", prose):
+            produced.add(arg)
+    for why in exempt.values():
+        for arg in re.findall(r"\b([a-z_][a-z_0-9]*) is ", str(why)):
+            produced.add(arg)
+
+    findings, checked = [], 0
+    for key, why in sorted(deferred.items()):
+        want = req.get(key)
+        if not want:
+            continue
+        checked += 1
+        gaps = [a for a in want if a not in produced]
+        unnamed = [a for a in gaps if not re.search(r"\b" + re.escape(a) + r"\b", str(why))]
+        if unnamed:
+            findings.append(
+                f"{key} is deferred, and {len(gaps)} of its {len(want)} required argument(s) have "
+                f"no producer -- but the reason does not name "
+                f"{', '.join(repr(u) for u in unnamed)}. A reason that accounts for some of the gap "
+                f"is what the next reader acts on instead of checking, and a reason listing two of "
+                f"four is how FAB.contribution's already read.")
+    return _report("K12", "every deferral reason names the arguments that have no producer",
+                   not findings,
+                   f"{checked} deferred entr(y/ies) with required arguments, against "
+                   f"{len(produced)} value(s) the assembly produces", findings, vacuous=not checked)
+
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
@@ -2036,6 +2136,7 @@ CHECKS = (
     check_k9_cadence_periods_are_typed,
     check_k10_rows_name_their_arguments,
     check_k11_produces_is_not_fabricated,
+    check_k12_deferral_reasons_are_complete,
 )
 
 
