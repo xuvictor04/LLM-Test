@@ -1532,6 +1532,242 @@ def check_k9_cadence_periods_are_typed(src_dir=SRC):
                    findings, vacuous=not gates)
 
 
+
+# ==================================================================================================
+# K10 -- a row must name every argument its entry point requires
+# ==================================================================================================
+
+def _required_params(src_dir=SRC):
+    """{"PFX.entry": [required parameter names]} -- from the frozen signatures, by AST.
+
+    REQUIRED means: keyword-only without a default, plus any positional-or-keyword without a default
+    BEYOND THE FIRST. Excluding: the leading Config, `self`, and the FIRST positional after the
+    Config.
+
+    THAT FIRST POSITIONAL IS THE PACKAGE'S OWN LIVE OBJECT -- store, pop, part, valve, model,
+    snapshot -- produced by the package's own constructor row, which ASSEMBLY_ORDER always contains
+    and K6 already guarantees is reached. Demanding every row restate it produced 25 findings of
+    which the majority were that noise: "the MEM.census row does not name 'store'", on a row whose
+    package built the store nine rows earlier. A check that reports mostly noise is a check nobody
+    reads, and the real findings drown -- the same argument that narrowed K4's oracle and N4's
+    matching.
+
+    What survives the narrowing is exactly what the reviewers found by hand: EVAL.curve_probe naming
+    none of units_by_domain / logits_fn / rng, MEM.read naming no queries, DOM.manage naming none of
+    now / memory_counts / mem_floor_entries, CKPT.check_geometry naming no geometry.
+
+    A parameter WITH a default is the author saying the call works without it, so this check does not
+    ask about it. That is a real limit and it is where MEM.judge sat:
+    judge(mem, store, *, scorer=None, reconstructor=None) with MEM.verify defaulting to "selfcon",
+    which needs a scorer -- so a row calling judge(mem, store) yields n_checked=0 forever, which
+    memory/api.py:265 itself names as the inert state. K10 cannot see that; only reading the
+    docstring can, and that is why the row was fixed by hand and this docstring says so.
+    """
+    out = {}
+    for pfx, d in sorted(PKG_DIR.items()):
+        path = os.path.join(src_dir, d, "api.py")
+        if not os.path.isfile(path):
+            continue
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+
+        def _collect(node, name):
+            a = node.args
+            req = []
+            allargs = a.posonlyargs + a.args
+            n_def = len(a.defaults)
+            pos_req = allargs[:len(allargs) - n_def] if n_def else allargs
+            after_config = []
+            for arg in pos_req:
+                if arg.arg == "self":
+                    continue
+                if getattr(arg.annotation, "id", None) == "Config":
+                    continue                      # the package's own Config, never named in a row
+                after_config.append(arg.arg)
+            # DROP THE FIRST: it is the package's own live object, built by its own constructor row.
+            req.extend(after_config[1:])
+            for kw, dflt in zip(a.kwonlyargs, a.kw_defaults):
+                if dflt is None:
+                    req.append(kw.arg)
+            out[name] = req
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and not node.name.startswith("_"):
+                _collect(node, f"{pfx}.{node.name}")
+            elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+                for sub in node.body:
+                    if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                            and not sub.name.startswith("_"):
+                        _collect(sub, f"{pfx}.{node.name}.{sub.name}")
+    return out
+
+
+def _rows_with_prose(src_dir=SRC):
+    """[(lineno, "PFX.entry", "the whole receives column")] for every row in either order table."""
+    path = os.path.join(src_dir, "spine", "compose.py")
+    rows = []
+    if not os.path.isfile(path):
+        return rows
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return rows
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and any(
+                getattr(t, "id", "") in ("ASSEMBLY_ORDER", "LOOP_ORDER") for t in node.targets)):
+            continue
+        for row in ast.walk(node.value):
+            if not isinstance(row, ast.Tuple) or len(row.elts) < 3:
+                continue
+            parts = [e.value for e in row.elts
+                     if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if len(parts) < 3:
+                continue
+            # parts[3] is `receives`; parts[4:] is `produces`, when the row carries one. A row with
+            # only four elements produces nothing FOR THIS CHECK -- which is a real statement, not a
+            # default: a row that yields a value later rows need has to say so, and the ones that
+            # yield nothing (a refusal, a save, a counter read) legitimately have none.
+            recv = parts[3] if len(parts) > 3 else ""
+            prod = set()
+            for name in re.findall(r"[A-Za-z_][A-Za-z_0-9]*", " ".join(parts[4:])):
+                prod.add(name)
+            for piece in re.split(r"[/\s]+", parts[2]):
+                piece = piece.strip("(),.")
+                if piece:
+                    rows.append((row.lineno, f"{parts[1]}.{piece}", recv, prod))
+    return rows
+
+
+def check_k10_rows_name_their_arguments(src_dir=SRC):
+    """K10 -- every required argument of a rowed entry point is produced by an earlier row.
+
+    THE STANDARD THE ORDER TABLES ALREADY CLAIM, applied. compose.py's own header says a row is
+    "(stage, PREFIX, entry point, what it receives that is not its own Config)", and the deferral
+    reason written for EVAL.holdout_probe states the rule outright: "the root has no join that
+    produces that pair; writing a row now would name a call whose arguments nothing supplies."
+
+    A reviewer then found the standard broken by the row the standard's own argument rests on.
+    EVAL.curve_probe and EVAL.holdout_probe have BYTE-IDENTICAL signatures --
+    (ev: Config, *, units_by_domain, logits_fn, rng) -- and curve_probe's entire row prose is
+    "Cadences.due('curve', EVAL.curve_period(ev), clock)", which names neither argument and no row or
+    helper produces either. So the same gap was grounds for deferral in one case and a row in the
+    other, and the compose header cited the rowed one as PROOF that the standard is about arguments
+    rather than phase. Two more of the repair's own rows had the shape: R MEM.read (nothing produces
+    `queries`) and R MEM.blend (whose prose CONCEDES the join is missing and writes the row anyway).
+
+    A standard stated in a header and broken by the first row under it is worse than no standard --
+    it reads as an argument that the gap is acceptable.
+
+    REQUIRED, NOT ALL. A parameter with a default is the author saying the call works without it, so
+    this check does not ask about it. That is a real limit and it is where MEM.judge sat:
+    judge(mem, store, *, scorer=None, reconstructor=None) with MEM.verify defaulting to "selfcon",
+    which needs a scorer -- so a row calling judge(mem, store) yields n_checked=0 forever, which
+    memory/api.py:265 itself names as the inert state. K10 cannot see that; only reading the
+    docstring can, and that is why the row was fixed by hand and this docstring says so.
+
+    THE EXEMPTION TABLE IS A DECLARATION. compose.ROW_ARGUMENTS_ELSEWHERE names rows whose arguments
+    are supplied by a helper in compose.py rather than written into the note, with the helper named.
+    It is checked backwards: an entry whose row now names its arguments is stale.
+
+    WHAT IT CANNOT CATCH: whether the named producer actually produces it, whether it produces the
+    right thing, or whether an argument named in a note is passed at the call P4 writes. The tables
+    are data.
+    """
+    req = _required_params(src_dir)
+    rows = _rows_with_prose(src_dir)
+    exempt = {}
+    path = os.path.join(src_dir, "spine", "compose.py")
+    whole = ""
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            whole = fh.read()
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            try:
+                tree = ast.parse(fh.read())
+            except SyntaxError:
+                tree = None
+        if tree is not None:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign) and any(
+                        getattr(t, "id", "") == "ROW_ARGUMENTS_ELSEWHERE" for t in node.targets):
+                    v = node.value
+                    if isinstance(v, ast.Call):
+                        v = v.args[0] if v.args else None
+                    if isinstance(v, ast.Dict):
+                        for k, val in zip(v.keys, v.values):
+                            if isinstance(k, ast.Constant) and isinstance(val, ast.Constant):
+                                exempt[k.value] = val.value
+
+    # Rows are in source order, so "earlier" is every row before this one in the same table. The
+    # ASSEMBLY table runs once before the loop and the LOOP table runs many times, so a LOOP row may
+    # also consume anything the ASSEMBLY table produced -- both are folded in, in order.
+    produced_before = {}
+    running = []
+    for lineno, key, prose, prod in rows:
+        produced_before[(lineno, key)] = list(running)
+        running.append((lineno, key, prose, prod))
+
+    findings, checked, seen = [], 0, set()
+    for lineno, key, prose, prod in rows:
+        want = req.get(key)
+        if not want:
+            continue
+        checked += 1
+        seen.add(key)
+        if key in exempt:
+            continue
+        # PROVENANCE, AGAINST THE `produces` COLUMN -- not against whether the row restates the name.
+        #
+        # TWO HEURISTICS WERE TRIED AND BOTH FAILED, and the failures are why this column exists.
+        # "The row must restate every required argument" gave 30 findings, mostly rows declining to
+        # repeat `h`, `step`, `now` or `x`; restating every argument in every note turns the tables
+        # into a second copy of the signatures, and a second copy is what this whole design exists to
+        # prevent. "The name must appear somewhere else in compose.py" gave 25, and flagged
+        # LM.lm_loss's `y` and FAB.forward's `h` -- produced by the row immediately above -- while
+        # still catching the real four. Neither heuristic can separate "produced by an earlier row"
+        # from "mentioned in passing", because THE TABLES DID NOT RECORD WHAT A ROW PRODUCES.
+        #
+        # So they do now: a row is (stage, PREFIX, entry, receives, produces), and `produces` names
+        # the values that row yields for later rows to consume. That is the same discipline the wire
+        # ledger already follows one level down -- src and dst, both named -- and it is the only
+        # thing that makes "nothing supplies this argument" a decidable question rather than a
+        # judgement call.
+        earlier = set()
+        for _ln, _k, _pr, _pd in produced_before.get((lineno, key), []):
+            earlier |= _pd
+        unproduced = [a for a in want
+                      if a not in earlier
+                      and not re.search(r"\b" + re.escape(a) + r"\b", prose)]
+        if unproduced:
+            findings.append(
+                f"src/spine/compose.py:{lineno}  the {key} row calls for "
+                f"{', '.join(repr(m) for m in unproduced)}, and no earlier row's `produces` column "
+                f"yields {'them' if len(unproduced) > 1 else 'it'}, nor does this row's own note name "
+                f"a producer. Either add the value to the producing row's `produces`, name the "
+                f"producer in this row's note, or move the entry point to DEFERRED_ENTRY_POINTS with "
+                f"that gap as the reason -- which is what the identical gap earned "
+                f"EVAL.holdout_probe.")
+    for key, why in sorted(exempt.items()):
+        if key not in seen:
+            findings.append(f"ROW_ARGUMENTS_ELSEWHERE names {key!r} ({str(why)[:50]!r}) and no row "
+                            f"requires arguments for it. A stale exemption is a row nobody can retire.")
+    return _report("K10", "every required argument is produced by an earlier row", not findings,
+                   f"{checked} row(s) whose entry point takes required arguments, against "
+                   f"{sum(len(v) for v in req.values())} required parameter(s) across "
+                   f"{len(req)} signature(s); {len(exempt)} exemption(s). An argument is produced "
+                   f"when an EARLIER row's `produces` column yields it, or this row's own note names "
+                   f"its producer", findings,
+                   vacuous=not checked)
+
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
@@ -1542,6 +1778,7 @@ CHECKS = (
     check_k7_root_reads_declared_names,
     check_k8_streams_are_declared,
     check_k9_cadence_periods_are_typed,
+    check_k10_rows_name_their_arguments,
 )
 
 
