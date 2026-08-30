@@ -229,7 +229,7 @@ ASSEMBLY_ORDER = (
                                               "timing -- RunMode.timing, which only RUN's own "
                                               "bench_summary takes; `bench` and `profile` are "
                                               "branch conditions the root reads, not arguments"),
-    ("process",   "RUN",   "streams",         "(RNG_SUBSYSTEMS) -- every package's stream is minted "
+    ("process",   "RUN",   "streams",         "(subsystems=RNG_SUBSYSTEMS) -- every package's stream is minted "
                                               "here so rng.issued() has one register",
                                               "rng -- the per-subsystem generator MEM.open_store, "
                                               "DOM.open_partition and WORLD.build take under that "
@@ -457,7 +457,13 @@ ASSEMBLY_ORDER = (
                                               "device, rng, lm_kind=LM.arch, restored)"),
     ("partition", "DOM",   "open_partition",  "(sig_dim=SIG.d, vocab_slots=LM.vocab_slots, device, "
                                               "rng, restored)"),
-    ("valve",     "CAP",   "new_valve",       "(restored) -- both hard ceilings arrive as wires"),
+    ("valve",     "CAP",   "new_valve",       "(restored=Snapshot.payload['CAP']) -- both hard "
+                                              "ceilings arrive as wires",
+                                              "valve -- the Valve every later CAP row takes. "
+                                              "CAP.state(valve) declares no Config at all, so it "
+                                              "is the one entry point whose live object cannot be "
+                                              "recognised by position and has to be produced here "
+                                              "like any other value"),
     ("restore",   "CAP",   "restore",         "(valve, state=Snapshot.payload['CAP']) -- "
                                               "new_valve's `restored` is the LIFTED CAP ALONE, "
                                               "because Valve.origin has to record where the "
@@ -637,21 +643,6 @@ LOOP_ORDER = (
                                       "is a different length each time and minting shortens every "
                                       "later one. THE LENGTH ARRIVES AS A COUNT OF WINDOWS. The "
                                       "partial batch was already dropped by the advance that rolled"),
-    ("A", "CKPT",  "Retention.consider", "(curve_bpb, step=clock.step) -- EVENT-DRIVEN: only when a "
-                                      "curve probe returned a value. Its BestAction(save_best, "
-                                      "rotate_slot) is the A-level route into the C block, with "
-                                      "reason='best'/'bestN' and the matching suffix -- without it "
-                                      "Saves.best can never be non-zero and the only copies of the "
-                                      "good model are never written. THE EVENT CANNOT ARRIVE TODAY: "
-                                      "EVAL.curve_probe is deferred below for want of a "
-                                      "units_by_domain and a logits_fn, and curve_bpb has no other "
-                                      "producer in the tree. This row stays because the mechanism "
-                                      "is CKPT's and lands the moment the probe does, and because "
-                                      "Retention.counters().inert_reason is the one surface that "
-                                      "can say 'no curve value has ever arrived' instead of 'zero "
-                                      "local lows' -- at P3 that is what it must say",
-                                      "reason and suffix -- BestAction selects 'best' or 'bestN' "
-                                      "and the matching suffix for the C block's CKPT.save"),
     ("A", "MEM",   "census",          "THE MANAGEMENT PASS OPENS HERE. Cadences.due('dom.manage', "
                                       "DOM.manage_period(dom), clock) is asked ONCE and the next two "
                                       "rows run inside that one answer: due() RECORDS the fire and "
@@ -1126,6 +1117,19 @@ LOOP_ORDER = (
 # arguments nothing supplies. The deferral does not remove a mechanism, it stops the tables claiming
 # one, and it names the producer each mechanism is waiting on.
 DEFERRED_ENTRY_POINTS = {
+    "CKPT.Retention.consider":
+        "P5, WITH EVAL.curve_probe, AND THIS IS THE SAME DOUBLE STANDARD ONE ROW DOWNSTREAM. It had "
+        "an A row until 2026-08-30 while its only input's producer sat in this table: `curve_bpb` is "
+        "the held-out value EVAL.curve_probe returns, curve_probe is deferred because nothing "
+        "produces units_by_domain or logits_fn, and a row consuming the output of a deferred entry "
+        "point is a call whose argument cannot arrive -- the exact thing this table's standard "
+        "forbids. K10 could not see it because the check dropped the FIRST POSITIONAL as 'the "
+        "package's own live object', and Retention.consider is a METHOD: self was already skipped, "
+        "so the rule discarded curve_bpb and asked only about `step`. "
+        "THE COST IS STATED RATHER THAN HIDDEN: Saves.best can never be non-zero, so the only "
+        "copies of the model are the periodic ones and the final one, and Retention.counters() must "
+        "report inert_reason='no curve value has ever arrived' rather than a bare zero. It returns "
+        "with curve_probe.",
     "EVAL.curve_probe":
         "P5 (eval). SAME SIGNATURE, SAME GAP, SAME VERDICT AS holdout_probe below -- which is the "
         "whole reason this table was re-read. Nothing produces `units_by_domain`: Areas carries "
@@ -1378,6 +1382,13 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "total is the summed loss the loop assembles: LM.lm_loss plus FAB's aux_loss plus WORLD's "
         "terms plus LM.anchor_term. The sum is the loop's because the terms come from four packages "
         "and no package may see another's.",
+    "RUN.RunClock.begin_epoch":
+        "windows_in_epoch is _windows_in_epoch(sysm) -- len(Segmentation.ids) // LM.ctx, this file's "
+        "arithmetic over TOK.tokenize's return and LM's frozen Config. TOK.tokenize does NOT return "
+        "it: tok/api.py:33 declares Segmentation as ids, byte_pos, labels and bytes_per_token, and "
+        "the row claimed the count until K11 refused the claim. begin_epoch's own docstring is why "
+        "it matters -- 'THE LENGTH ARRIVES AS A COUNT OF WINDOWS, never as a byte budget divided by "
+        "a token window' -- so the division has to happen once, here, and be named.",
     "MEM.maintain":
         "key_fn is _key_fn(sysm) -- LM.encode bound to (lm, model), the same callable MEM.write "
         "takes. LM.build_model returns a MODEL, not a key_fn, and the row claimed otherwise until "

@@ -1666,14 +1666,31 @@ def _required_params(src_dir=SRC):
             n_def = len(a.defaults)
             pos_req = allargs[:len(allargs) - n_def] if n_def else allargs
             after_config = []
+            took_config = False
             for arg in pos_req:
                 if arg.arg == "self":
                     continue
                 if getattr(arg.annotation, "id", None) == "Config":
+                    took_config = True
                     continue                      # the package's own Config, never named in a row
                 after_config.append(arg.arg)
-            # DROP THE FIRST: it is the package's own live object, built by its own constructor row.
-            req.extend(after_config[1:])
+            # DROP THE LIVE OBJECT BY NAME, NOT BY POSITION. The first version dropped "the first
+            # positional after the Config", and a reviewer showed it drops the wrong argument twice:
+            #   Retention.consider(self, curve_bpb, step) is a METHOD -- no Config, `self` already
+            #     skipped -- so the rule discarded `curve_bpb`, which is the held-out curve value
+            #     the EVAL.curve_probe deferral says "can never arrive". K10 certified that row
+            #     while asking only about `step`.
+            #   TOK.restore_vocab(tok, state, vocab) puts the snapshot blob FIRST and the live
+            #     object second, so the rule dropped `state` and demanded `vocab` -- backwards.
+            # A method's live object is `self` and is already gone; only a module-level function
+            # carries one as a parameter, and it is identifiable by NAME. The set is small, closed
+            # and written down rather than inferred from position, because position was the
+            # assumption that failed.
+            LIVE = {"store", "pop", "part", "valve", "model", "vocab", "areas", "st", "w",
+                    "plan", "clock", "cadences", "sysm", "system"}
+            if took_config and after_config and after_config[0] in LIVE:
+                after_config = after_config[1:]
+            req.extend(after_config)
             for kw, dflt in zip(a.kwonlyargs, a.kw_defaults):
                 if dflt is None:
                     req.append(kw.arg)
@@ -1904,6 +1921,11 @@ def check_k10_rows_name_their_arguments(src_dir=SRC):
                 r"\b([a-z_][a-z_0-9]*)\s*=\s*(?:-?\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\"|True|False|None)\b",
                 prose):
             bound.add(arg)
+        # A MODULE CONSTANT IS A PRODUCER. `subsystems=RNG_SUBSYSTEMS` names a declaration at the
+        # top of compose.py -- as complete an answer as a lever read, and one K8 separately checks
+        # every member of. ALL-CAPS only, so a bare name still counts for nothing.
+        for arg in re.findall(r"\b([a-z_][a-z_0-9]*)\s*=\s*([A-Z][A-Z_0-9]{2,})\b", prose):
+            bound.add(arg[0])
         unproduced = [a for a in want if a not in earlier and a not in bound]
         if unproduced:
             findings.append(
