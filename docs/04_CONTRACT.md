@@ -1281,21 +1281,51 @@ invented. **Options:** (a) add a `shift_at`-style keyword to `FAB.manage` — a 
 (c) accept that fabric growth treats a resample like new material. **Recommendation: (a)**, and
 until then the report must say the blackout is unreachable rather than armed.
 
-### Q-CKPT-2 — what does the SAVE side write for the geometry gate, and who emits FAB's sidecar?
-`_geometry_manifest` builds 15 live fields across LM, SIG, FAB and WORLD; the recorded side is
-`WORLD.geometry` alone, five fields, so ten are REFUSED on every resume (`ckpt/api.py:174`; they are
-in the manifest and absent from the recording, which is not the UNCHECKED direction) — and `_sidecar`
-finds no
-`'SIG'` or `'FAB'` key, so **both width refusals are disarmed on every real resume** (§3.9). Nothing
-about that is visible today: `check_geometry` would refuse, the two restores take `None`, and no
-counter says the guard did not run. **Options:** (a) the `C` block records `_geometry_manifest`'s
-output keyed by prefix, plus `'WORLD'` from `WORLD.geometry` and `'SIG'`/`'FAB'` sidecars —
-`FAB.state_dict` then has to declare the sidecar it currently does not mention, which is a docstring
-change inside a frozen signature; (b) give the other packages a `geometry()` each, which is eleven
-new entry points; (c) accept a five-field gate and delete the `sidecar` parameters, which throws away
-the H24/H31-class refusals. **Recommendation: (a)** — the manifest is already a pure function of the
-frozen Configs, so the save side can compute the same thing the load side does, and only FAB's
-sidecar needs an owner's word. Until then the root records the disarmed state on `System.warnings`.
+### Q-CKPT-2 — what does the SAVE side write for the geometry gate, and who emits FAB's sidecar? — **FIRST HALF RESOLVED 2026-08-30; the residue is narrower and is HIGH, not blocking**
+
+**The first half was already answered in the tree, by the declaration a check reads.**
+`ROW_ARGUMENTS_ELSEWHERE["CKPT.save"]` says `geometry` **is** `_geometry_manifest(sysm)` — the same
+function the child calls on the way back in — so the recorded key set is byte-identical to the live
+one and `check_geometry`'s missing-field set is empty by construction. K10 reads that table in both
+directions, so the entry is live and normative.
+
+Six other statements in `compose.py` and this document said the save side records `WORLD.geometry`
+alone, and **ISSUES C12 was filed against those** — a critical defect asserted against a claim the
+same file had already refuted. C12 is withdrawn as filed and the record is kept there. *Where a
+declaration and a comment disagree, the declaration is what runs.*
+
+**Every one of the manifest's fields is a pure function of the frozen Configs** — enumerated, all of
+them, with no exception. So there is no collection problem: nothing has to be gathered from packages
+on the save side, because the save side can compute the same manifest the child will. That is the
+option the question's own framing missed by asking *"what does the save side write"* rather than
+*"does the save side need to write anything the child cannot recompute"*.
+
+**What the question actually surfaced, and it is worth more than the original.** The gate compared
+twelve dimensions and **not one field that decides which tensors exist**: `lm.arch` (gru against
+transformer — two different modules producing an identical manifest at the same numbers),
+`lm.compose` (when True, `emb` and `head` are **not constructed at all**, so the parameter *set*
+changes and no shape comparison can see it), `sig.mode` (a trained encoder against a frozen
+hashed-bigram modulus), and `fab.emb_hid` (a real tensor dimension compared *only* against the
+sidecar, which is `None` on every resume). All four are frozen-Config reads and cost nothing. Added;
+the manifest is 20 fields.
+
+**The residue, still open, HIGH rather than critical:**
+
+1. **The two sidecars have no producer.** `_sidecar` reads `Snapshot.geometry[PREFIX]` and nothing
+   writes a per-prefix key, so SIG's refusal (on `width_units`, `alphabet_size`, `space`, `d`,
+   `mode`) and FAB's (on `slots`, `rank`, `dk`) are **disarmed on every resume** — and
+   `FAB.state_dict` does not even claim to emit a sidecar, so that one reads a value with no declared
+   origin at either end. Now that four of those fields are in the manifest itself, **the question is
+   whether the sidecars are still needed at all**, or whether the manifest subsumes them and the two
+   `sidecar` parameters should go. That is a frozen-signature decision and is cheap now.
+2. **WORLD's grown population count is the one quantity that genuinely needs a live object**, so it
+   cannot join the manifest — `_geometry_manifest` is computed before any package is built, which is
+   the point of it. It is re-refused by `WORLD.load_into` (M43) at its own row, and whether that is
+   sufficient is the remaining question.
+
+**For the owner:** (1) is a straight yes/no on whether the sidecars survive, and the answer changes
+two frozen signatures. (2) needs no decision unless you want the grown counts checked at the gate
+rather than at the row.
 
 ### Q-EVAL-10 — `EVAL.coherence` takes a `sample` and its docstring says it draws its own
 `coherence(ev, *, logits_fn, sample, rng)`, while `eval/api.py:162-168` says it runs "over its OWN

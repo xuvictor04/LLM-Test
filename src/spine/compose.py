@@ -1346,8 +1346,13 @@ ROW_ARGUMENTS_ELSEWHERE = {
     "CKPT.save":
         "geometry is _geometry_manifest(sysm), the LIVE manifest -- the same object CKPT.check_geometry "
         "compares a restored Snapshot against, written here so the two sides of that comparison are "
-        "one function's output rather than two. Ten of its fields have no writer on the save side "
-        "today (Q-CKPT-2), which the C-block prose states.",
+        "one function's output rather than two -- so the recorded key set is BYTE-IDENTICAL to the "
+        "live one and check_geometry's missing-field set is empty by construction. "
+        "THE SENTENCE THAT USED TO FOLLOW HERE SAID 'Ten of its fields have no writer on the save "
+        "side today', WHICH CONTRADICTED THE ONE BEFORE IT: if geometry IS _geometry_manifest(sysm), "
+        "that one call is the writer of all sixteen. It was the C-block's claim leaking into the "
+        "entry that refutes it, and ISSUES C12 was then filed against a claim this declaration had "
+        "already answered -- see C12, corrected 2026-08-30.",
     "RUN.bench_summary":
         "n_params is _n_params(sysm) -- BOTH param groups, never just the base list, because a report "
         "that counts the model and omits the encoder is the wrong-measurement family. elapsed_s is "
@@ -1917,6 +1922,29 @@ def _geometry_manifest(sysm):
         "sig.d":        (int(sig.d), "EXACT", "SIG_D", "the signature space the router keys on"),
         "sig.space":    (str(sig.space), "EXACT", "SIG_SPACE",
                          "bytes vs tokens changes the encoder's alphabet"),
+        # ---- THE FOUR FIELDS THAT DECIDE WHICH TENSORS EXIST, not how big they are. The gate had
+        # ---- twelve dimensions and none of these, so two checkpoints with identical numbers and
+        # ---- incompatible parameter SETS compared equal. All four are pure frozen-Config reads, so
+        # ---- they cost nothing: the manifest was already computable before a single tensor existed
+        # ---- and still is.
+        "lm.arch":      (str(lm.arch), "EXACT", "LM_ARCH",
+                         "gru and transformer are different modules. LM_ARCH=gru LM_LAYERS=1 and a "
+                         "transformer at the same numbers produced an IDENTICAL manifest, and the "
+                         "gate exists because a checkpoint built one way cannot load into the "
+                         "other"),
+        "lm.compose":   (bool(lm.compose), "EXACT", "LM_COMPOSE",
+                         "lm/api.py:76-79: when compose is FALSE emb and head are constructed, when "
+                         "TRUE they are NOT CONSTRUCTED AT ALL. Flipping it across a resume changes "
+                         "the parameter SET rather than a dimension, which is the one thing a "
+                         "shape comparison cannot notice"),
+        "sig.mode":     (str(sig.mode), "EXACT", "SIG_MODE",
+                         "a trained encoder against a frozen hashed-bigram modulus. Same d, "
+                         "different object, and the signature is the router's only input"),
+        "fab.emb_hid":  (int(fab.emb_hid), "EXACT", "FAB_EMB_HID",
+                         "the shared identity embedder's hidden width -- a real tensor dimension "
+                         "that FAB.load_state_dict names in its LEVERS READ and compares ONLY "
+                         "against the sidecar, which is None on every resume, so nothing checked it "
+                         "at either end"),
         "fab.slots":    (int(fab.slots), "MAY_WIDEN", "FAB_SLOTS",
                          "preallocated; growth only advances n_live, so a smaller cap IS a prefix"),
         "fab.rank":     (int(fab.rank), "EXACT", "FAB_RANK", "an inner dimension; no prefix valid"),

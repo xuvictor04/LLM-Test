@@ -19,7 +19,7 @@ Counts: critical 58, high 122, medium 181, low 114 — 475 records total.
 
 These came from reading the source. They are the work list for the rebuild.
 
-### CRITICAL (12)
+### CRITICAL (11, and C12 withdrawn)
 
 **C1. Six arm names resolve to a flag set identical to the shipped defaults — they are `base` under another name** *(unverified)*  
 `armed-but-inert` · harness · longrun.sh:173 (vote), :174 (socloop), :269 (nogate), :278 (nocompose), :304 (nomem), :378 (gate_press)  
@@ -85,15 +85,31 @@ This matters most because of what it would certify: PLAN's P3 exit criterion is 
 
 **Not fixed by editing the numbers**, which would only move the inconsistency. The repair is to make it *loud*: `RUN.startup_refusals` already exists as an entry point, and the resolved run length is known at build time from `stream_bytes`, `ctx`, `epochs` and the measured bytes/token — so a run can say at startup which cadences cannot fire before it spends a single step. Whether the defaults themselves should change is the owner's call (§ *for the owner*, `docs/04_CONTRACT.md`).
 
-**C12. The resume geometry gate would REFUSE every resume, and three statements call it UNCHECKED** **[CONFIRMED]**  
-`wrong-measurement` · rework · `src/spine/compose.py`, `docs/04_CONTRACT.md`; found 2026-08-30  
-`compose._geometry_manifest` builds **15 fields** across LM, SIG, FAB and WORLD. The save side records **`WORLD.geometry` alone — five fields**, because `WORLD.geometry` is the only `geometry()` entry point in the tree. So ten fields are **in the live manifest and absent from the recording**.
+**C12. ~~The resume geometry gate would REFUSE every resume~~ — WITHDRAWN AS FILED. The real defect is the four fields the gate never had** **[CORRECTED 2026-08-30]**  
+`wrong-measurement` · rework · `src/spine/compose.py`
 
-`ckpt/api.py:174-179` specifies that case unambiguously: *"**A MISSING FIELD IS A REFUSAL, NOT A SKIP.** … The comparison is driven off the manifest's KEY SET rather than off truthiness, so `if recorded and recorded != live` — the untrippable-guard shape — is not writable here."* UNCHECKED is the **other** direction — recorded and absent from the manifest — which is where WORLD's grown population counts sit, and which `_geometry_manifest`'s own docstring uses the word for correctly.
+**What I filed, and why it was wrong.** I recorded that `_geometry_manifest` builds 15 fields while the save side records `WORLD.geometry` alone — five — so ten are in the manifest and absent from the recording, which `ckpt/api.py:174-179` makes a **refusal**, and therefore *every resume raises the day P4 lands*.
 
-Three statements in `compose.py` and three in `docs/04_CONTRACT.md` borrowed the word for the direction it does not cover. That is not a wording quibble. It is the difference between *"the gate checks a sixth of what it names"* and **every resume raising `GeometryRefusal` the day P4 lands** — and a resume is what `ckpt/api.py:3-6` calls *the experiment* for goal B, the definitive goal this whole rework exists for.
+The tree already contained the answer, in the one declaration a machine check reads. `ROW_ARGUMENTS_ELSEWHERE["CKPT.save"]` says `geometry` **is** `_geometry_manifest(sysm)` — the same function the child calls — so the recorded key set is byte-identical to the live one and the missing-field set is empty by construction. `tests/test_contract.py` K10 reads that table in both directions, so the entry is live and normative. It was added in `04e67bf`; I filed C12 in `35b02ee` and **the diff never touched it**. I asserted a critical defect against a claim the same file had already refuted, and the check that reads that claim was passing the whole time.
 
-Corrected in all six places. **Q-CKPT-2 is therefore BLOCKING, not cosmetic**: either the save side records the same manifest shape keyed by prefix (which needs FAB to declare a sidecar it does not currently claim to emit), or the gate's key set narrows to what is actually recorded — and the second is the one that quietly checks nothing.
+Three counts were also wrong: the manifest is **16** fields, not 15 (`pos_max` arrives through the `LMGeometry` override loop, not the dict literal); `WORLD.geometry` returns **six**, not five; and the "ten" was arithmetic over both errors.
+
+**What was actually true.** The entry itself carried both answers — *"geometry is `_geometry_manifest(sysm)` … one function's output rather than two"* followed immediately by *"Ten of its fields have no writer on the save side today"*. If `geometry` **is** the manifest, that one call is the writer of all sixteen. The second sentence was the C-block's claim leaking into the entry that refutes it. Deleted, with the record kept in place of it.
+
+**The finding that survives, and it is the one worth having.** The gate compared twelve dimensions and **not one field that decides which tensors exist**:
+
+| field | why the gate needed it |
+|---|---|
+| `lm.arch` | gru and transformer are different modules. `LM_ARCH=gru LM_LAYERS=1` and a transformer at the same numbers produced an **identical manifest** — and the gate exists because a checkpoint built one way cannot load into the other |
+| `lm.compose` | `lm/api.py:76-79`: when False `emb` and `head` are constructed; when True they are **not constructed at all**. Flipping it changes the parameter **set**, which is the one thing a shape comparison cannot notice |
+| `sig.mode` | a trained encoder against a frozen hashed-bigram modulus — same `d`, different object, and the signature is the router's only input |
+| `fab.emb_hid` | a real tensor dimension `FAB.load_state_dict` names in its `LEVERS READ` and compares **only** against the sidecar, which is `None` on every resume — so nothing checked it at either end |
+
+All four are pure frozen-Config reads, so they cost nothing: the manifest was already computable before a single tensor existed and still is. Added; the manifest is 20 fields.
+
+**What remains open** is narrower than C12 claimed and is **HIGH, not critical**: the SIG and FAB sidecars have no producer (`_sidecar` returns `None`, both refusals disarmed, and `FAB.state_dict` does not even claim to emit one), and WORLD's **grown** population count is the one quantity that genuinely needs a live object. That is Q-CKPT-2's residue.
+
+**The lesson, which is the reusable part.** The tree held two mutually exclusive answers in one file, and I read the prose and not the declaration. `ROW_ARGUMENTS_ELSEWHERE` is checked by K10; the C-block comment is checked by nothing. **Where a declaration and a comment disagree, the declaration is what runs** — and a defect filed against a comment is a defect filed against nothing.
 
 ### HIGH (53)
 
