@@ -28,6 +28,60 @@ RECORD TYPES RETURNED (P4 defines them):
   Timing    span(name) -> a context manager; spans() -> {name: seconds}
 """
 from spine.lever import Config
+from spine import units as U
+
+
+# ==================================================================================================
+# THE ONE FIXED CADENCE IN THIS PACKAGE, AND WHY IT IS NOT A LEVER
+# ==================================================================================================
+
+PROGRESS_WINDOWS = U.Windows(100)
+"""How often the progress/ETA line and the profiler dump are emitted. NOT A KNOB (Q-RUN-1, RESOLVED
+2026-09-02: option (b)). A DEFAULT WITH NO ENVIRONMENT NAME -- there is nothing to turn off.
+
+WHY IT EXISTS AT ALL. Three statements in the tree disagreed about who owns this cadence:
+eval/levers.py and .rework/CENSUS.md both said "a separate RUN-owned log CADENCE", eval/api.py said
+"RUN's own fixed CONSTANT", and `grep -i progress` over src/ returned nothing -- neither a lever nor
+a constant existed. A cadence and a constant are different objects with different obligations (a
+census row, an environment name, a Cadences.ledger key, cadence_audit coverage), so it was a live
+fork and not a wording difference. This is the constant, and the other two statements now name it.
+
+WHY IT IS NOT A LEVER, WHICH IS THIS PACKAGE'S OWN RULE. levers.py opens with "nothing here is a
+cadence, a threshold or a weight" and lists the seven numbers RUN owns; a module constant is not a
+lever and does not break that sentence, while an eighth `RUN_PROGRESS_EVERY` would. It also needs no
+census row: the ancestor is RATE_EVERY, whose census verdict is `rename` to EVAL_CURVE_EVERY, and
+the SPLIT this constant implements is written into that row already. And the split's whole purpose
+argues against a knob: RATE_EVERY drove five things at once, so setting RATE_EVERY=100000 to quieten
+a smoke run SUPPRESSED THE CURVE TABLE ENTIRELY and the curve fix went unverified for a round. A log
+cadence that can be turned up is a log cadence that silently disables things. If it ever must be
+tunable, that is one census row and one lever, added deliberately.
+
+WHY 100 WINDOWS, STATED BECAUSE IT IS A DEFAULT AND DEFAULTS ARE THE OWNER'S. It has to be sane at
+BOTH ends of the range because nothing can move it. At the shipped defaults a run is at most 937
+windows and about 506 at the project's measured 1.85 bytes/token, so 100 fires ~5 times: the old
+default of 2000 would fire ZERO times and put this line straight onto the ISSUES C11 list, which is
+the one cadence where being unreachable is a pure loss -- no measurement is confounded by a progress
+line, and a meter that never prints is not a meter. It is also the shortest cadence already declared
+in the tree (DOM.manage_every = 100), so it can never be the reason a report has nothing in it. On a
+long run (94 MB, ~400k windows) it is ~4000 lines over hours, which is what an ETA meter is for.
+
+WHY units.Windows AND NOT A BARE int. Cadences.due states "period MUST be units.Windows. An int
+raises", and Config hands back a bare int for all 35 levers that declare a Clock unit -- ISSUES H51,
+three of five gates were handed bare ints until 2026-08-30. The accessors (EVAL.curve_period and its
+three siblings) exist to re-attach the kind a lever declares and drops. A module constant has no
+Config to drop it, so it is written typed at its definition and needs no accessor and no new entry
+point. THIS IS A CONSTRUCTION, NOT A CONVERSION: it re-attaches a kind, it does not cross one.
+
+IT GOES THROUGH _periods AND THEREFORE THROUGH Cadences. compose.py states the rule -- "Every
+PERIODIC gate goes through Cadences.due(key, period, clock) with a period its OWNING package
+supplied, so the modulo form that fired zero times at every BATCH_W > 1 is not writable at a call
+site" -- and a progress line evaluated as `step % PROGRESS_WINDOWS == 0` below the batch early-out
+is that defect exactly. new_cadences adds the other half: "THE KEYS ARE THE ROOT'S", so the key must
+come from the root's mapping rather than be invented at the call site. Hence `_periods`' sixth key,
+'progress'. IT HAS NO LOOP_ORDER ROW and cannot have one: rows are entry-point calls and no entry
+point prints this line -- the loop driver does. Its DID IT FIRE is Cadences.ledger()['progress'],
+and cadence_audit covers it like the other five.
+"""
 
 
 def process_setup(run: Config):
@@ -151,9 +205,15 @@ class RunClock:
         Called once at start and again after every roll, because a resampling stream is a
         different length each epoch. THE LENGTH ARRIVES AS A COUNT OF WINDOWS -- never as a byte
         budget divided by a token window, which is the live byte/token confusion behind
-        `steps = STREAM_LEN // WIN` at :4317 and :4719: `stream_bytes // ctx` overstates the step
-        count by the compression ratio (~2.5x at a grown vocabulary), and the LR horizon and every
-        ETA were computed from it. See FOR THE OWNER Q-DATA-8.
+        `steps = STREAM_LEN // WIN` at :4317: `stream_bytes // ctx` overstates the step count by
+        the compression ratio (~2.5x at a grown vocabulary).
+
+        THE OLD CLAIM ATTACHED TO THIS SENTENCE WAS WRONG AND IS CORRECTED (Q-DATA-8, 2026-09-02).
+        The LR horizon and the runtime ETA were NOT computed from the byte form: `_project` uses
+        `len(stream) // WIN` over the TOKEN stream (:6236, :6339). The byte form survives in the
+        pre-run [probe] banner (:4317) and in one cadence period (:7319). The horizon's real defect
+        is the shrinkage projection at :6338-6362 -- Q-OPT-5, and OPT's -- and sending an
+        implementer here to look for it is how one bug gets fixed twice, differently.
         """
         raise NotImplementedError("RUN.RunClock.begin_epoch: P4 (train) fills this in.")
 
@@ -182,7 +242,18 @@ class RunClock:
         raise NotImplementedError("RUN.RunClock.note_backward: P4 (train) fills this in.")
 
     def counters(self):
-        """The five typed counters plus the batch flush count, as the DID IT FIRE surface."""
+        """The five typed counters plus the batch flush count, as the DID IT FIRE surface.
+
+        `step` -- the WINDOW total -- IS THE OBSERVED SIDE OF THE HORIZON COMPARISON (Q-OPT-5).
+        OPT's schedule horizon is resolved ONCE at build() from epoch 0's length times RUN.epochs,
+        while this clock re-measures every epoch through begin_epoch(); minting merges bytes into
+        tokens, so every later epoch is SHORTER and the run ends BELOW the projection with the
+        cosine incomplete -- an under-anneal of unmeasured size. Both quantities are declared
+        surfaces on two packages that may not read each other, so the COMPOSITION ROOT joins them
+        in the report: derive.opt_steps_from_windows(Windows(step), d_effective_batch_windows)
+        against st.horizon.run_steps, two units.Steps, so the residual is a subtraction. RUN does
+        not compute the comparison and does not name OPT's horizon; it publishes the observed side.
+        """
         raise NotImplementedError("RUN.RunClock.counters: P4 (train) fills this in.")
 
 
@@ -191,7 +262,11 @@ def new_cadences(run: Config, *, periods):
 
     Reads NONE of RUN's levers. EVERY PERIOD IS AN ARGUMENT -- `periods` is {key: units.Windows},
     each supplied by the package that OWNS the threshold. RUN evaluates; RUN does not own a single
-    threshold.
+    threshold THAT DECIDES ANYTHING THE MODEL COMPUTES. The narrowing is 2026-09-02's and is exact:
+    one of the six periods, 'progress', is RUN's own PROGRESS_WINDOWS -- a log cadence, a module
+    constant, NOT a lever, and the exception is stated here rather than smuggled past a sentence
+    that would otherwise be false (Q-RUN-1). `Reads NONE of RUN's levers` is unaffected: a module
+    constant is not a lever and this function still reads no Config.
 
     THE SIGNATURE SAID Config AND NOTHING ELSE UNTIL 2026-08-30, while this docstring said every
     period is an argument. There was no parameter to pass one through, so the sentence describing
@@ -199,14 +274,24 @@ def new_cadences(run: Config, *, periods):
     against each other. It is now a real parameter.
 
     THE SIX PERIODS THIS DOCSTRING USED TO NAME WERE THREE WRONG. It listed CKPT.every,
-    EVAL.curve_every, FAB.manage_every, TOK.retok_every, DOM.manage_every and MEM.probe_every. The
-    gates that actually exist in the order tables are five -- 'curve', 'dom.manage', 'fab.manage',
-    'dom.rekey' and 'ckpt' -- so TOK.retok_every and MEM.probe_every were named here while being
-    evaluated INSIDE their own packages (TOK.on_window's four cadences, MEM.maintain's internal
-    comparison against a Windows `now`), and MEM.rekey_every, which drives the 'dom.rekey' gate, was
-    not named at all. A ledger that lists gates it does not evaluate and omits one it does is worse
-    than no ledger: Cadences.ledger() is the DID IT FIRE surface, and every key missing from it is a
-    mechanism whose "0 fires" nobody can read.
+    EVAL.curve_every, FAB.manage_every, TOK.retok_every, DOM.manage_every and MEM.probe_every. Five
+    gates exist in the order tables -- 'curve', 'dom.manage', 'fab.manage', 'dom.rekey' and 'ckpt'
+    -- so TOK.retok_every and MEM.probe_every were named here while being evaluated INSIDE their own
+    packages (TOK.on_window's four cadences, MEM.maintain's internal comparison against a Windows
+    `now`), and MEM.rekey_every, which drives the 'dom.rekey' gate, was not named at all. A ledger
+    that lists gates it does not evaluate and omits one it does is worse than no ledger:
+    Cadences.ledger() is the DID IT FIRE surface, and every key missing from it is a mechanism whose
+    "0 fires" nobody can read.
+
+    A SIXTH KEY, 'progress', ARRIVES WITH NO ROW, AND THAT IS CORRECT RATHER THAN AN OMISSION
+    (Q-RUN-1, RESOLVED 2026-09-02). Its period is PROGRESS_WINDOWS at the top of this file -- this
+    package's ONE fixed cadence, a module constant and not a lever. It has no LOOP_ORDER row because
+    rows are entry-point calls and NO ENTRY POINT PRINTS THE PROGRESS LINE: the loop driver does,
+    the way it owns the window cut compose.py names _window_bounds. It is in the mapping anyway,
+    because the alternative is `step % PROGRESS_WINDOWS == 0` at a call site -- the modulo form that
+    fired 999 times at BATCH_W=1 and ZERO times at every BATCH_W in {2, 8, 15, 16, 32} -- and
+    because a gate outside the ledger has no readable "0 fires" and no cadence_audit coverage. So
+    six keys, five of them rowed.
 
     THE KEYS ARE THE ROOT'S, NOT THIS FUNCTION'S. compose.py's cadence table is the authority on
     which key maps to which owner's period, and docs/04_CONTRACT.md prints it. This function
@@ -334,6 +419,13 @@ def cadence_audit(run: Config, *, run_windows, periods):
 
     `run_windows` is units.Windows and every period is units.Windows; derive.cadences_that_cannot_fire
     refuses any other kind at both ends.
+
+    IT COVERS SIX GATES, NOT FIVE, SINCE 2026-09-02. The sixth is 'progress', whose period is this
+    module's PROGRESS_WINDOWS constant (Q-RUN-1). It is deliberately 100 Windows so that it FIRES at
+    the shipped defaults and never joins the list above: a progress/ETA meter that prints zero times
+    is a pure loss -- no measurement is confounded by it -- and the old RATE_EVERY default of 2000
+    would have made this the eleventh entry. That is a choice this audit can now check rather than a
+    claim, which is the whole reason the constant is in the mapping.
 
     LEVERS READ: none
     WIRES READ: none

@@ -301,8 +301,8 @@ class WORLDLevers(LeverSet):
     # run's n0 builds falls straight through to load_state_dict and raises "Missing key(s) preds.N.*" --
     # a shape dump naming no knob (M43). The new gate must refuse in both directions and name n0.
 
-    nmax = Lever(6, "Hard cap on the dynamics population; also sizes the per-predictor fitness, "
-                    "routing-mass and alive buffers.", U.COUNT)
+    nmax = Lever(6, "Hard cap on the number of LIVE dynamics predictors; also sizes the "
+                    "per-predictor fitness, routing-mass and alive buffers.", U.COUNT)
     # Census: WORLD_NMAX, verdict keep; doubled name corrected to `nmax`. Old default `_i("WORLD_NMAX",
     # 6)` at :4156 (not the signature's 8).
     # KEEPING IT IS NOT OPTIONAL: it is the value the resume gate has to be able to NAME. A checkpoint
@@ -321,6 +321,17 @@ class WORLDLevers(LeverSet):
     #        :127 and nothing anywhere restores it to 1.0, so capacity is permanently lost to a
     #        predictor that still costs forward compute and gradient while contributing about 1e-6 of
     #        the blend.
+    # HELP-STRING MEANING CHANGED 2026-09-02, DEFAULT UNCHANGED AT 6 (Q-WORLD-8, RESOLVED (b)): this
+    # caps LIVE predictors, not allocated ones, and a mint at the cap takes the lowest DEAD SLOT
+    # rather than appending. THE BUFFER WIDTH IS WHY, and it is not a preference: fit, mass and alive
+    # are all width nmax (world_model.py:81-83) while grow() appends to a ModuleList, so "count live
+    # and append" -- the literal reading of the contract's own recommendation -- drives n() past nmax
+    # and update_fitness's `for i in range(s.n())` walks off the end of three buffers. The frozen
+    # `blocked_reason` set says the same thing from the other side: it contains at_live_cap and no
+    # at_total_cap, so refusing at n() == nmax with live < nmax has no reason it is allowed to
+    # report. Under (b) n() (allocated) is monotone up to nmax and `live` is the number that moves;
+    # world/api.py's geometry records the ALLOCATED count, because that is what decides which tensors
+    # exist.
     # Because it sizes fit/mass/alive (world_model.py:81-83), changing it across a resume breaks buffer
     # shapes inside torch with no knob named (H22).
 

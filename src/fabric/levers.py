@@ -173,6 +173,28 @@ class FABLevers(LeverSet):
     # walk, a different forward pass with different losses. (The census reason says the fallthrough
     # is to soc; the source says the opposite, and the source is quoted here.) With choices= the same
     # typo is a startup LeverError naming both legal values.
+    # Q-FAB-1, RESOLVED 2026-09-02: THE LEVER STAYS AND ONE ARM IS PORTED. `soc` is built; the
+    # transition walk (SRC_p as a live parameter, the R softmax and its top-k source trick -- the
+    # full transition is 1.07 GB at N=4096, :2828-2830 -- `ctrl`, the per-hop query book `_hopq`,
+    # and a second set of loss terms) is NOT. It was recommended for a drop and the drop was NOT
+    # taken: the owner's standing rule is that a mechanism kept for future use is kept WITH A
+    # SWITCH rather than deleted, and dropping this would retire census row CHAIN_ROUTE, making the
+    # eventual port a census amendment instead of a body. What the drop was RIGHT about is that an
+    # unread choice is intolerable, so FAB.build now READS this lever and REFUSES "transition" at
+    # startup, naming the arm and the question. Declared-and-refused is loud; declared-and-ignored
+    # is the M24 defect wearing the repair's own clothes.
+    # WHAT WOULD RETIRE THE REFUSAL, so this is a measurement and not a verdict: port the arm and
+    # compare it against soc on THIS tree's instruments -- H(hop1|hop0) over the hop choices (the
+    # old tree read 0.533 bits on soc against 0.005-0.058 on every transition arm, over 202k
+    # transitions, and that reading did NOT pass through the C3-voided leave-one-out counterfactual)
+    # and expert coverage of the compute path (:2731-2734 records 25% under society against 8%
+    # under chaining, "because mass CONCENTRATES as it flows"). Both are D1-suspect old-run numbers
+    # and both point the same way, which is why the arm is deferred rather than built now -- not
+    # why it is deleted. The cost of building it is the thing to weigh: TWO FORWARD PATHS INSIDE
+    # ONE FUNCTION, which fabric/api.py's header exists to forbid ("the old tree had two, and
+    # SUFFICIENCY called fab.society() unconditionally while the shipped default was the looped
+    # path, which is how '479 experts buy -0.002 b/B' came to be a measurement of a forward path
+    # the run never trained"), plus ~20 DID-IT-FIRE counters becoming arm-conditional.
 
     hop_vote = Lever(True, "Each hop's experts vote on the OUTPUT and the halting hop picks the "
                            "answer, instead of blending hidden states.", U.FLAG)
@@ -184,10 +206,15 @@ class FABLevers(LeverSet):
     hop_sup = Lever(0.0, "Weight on per-hop deep supervision: a cross-entropy at every hop, not only "
                          "at the end of the walk.", U.FRACTION)
     # ARMED AND INERT, by wiring rather than by design (ISSUES M27): it reads fab._hops, which only
-    # the transition branch fills, so under the shipped hop_mode="soc" any value above zero adds
+    # the transition branch fills -- `s._hops.append` occurs at EXACTLY ONE site over 9,859 lines,
+    # :2819, inside that branch -- so under the shipped hop_mode="soc" any value above zero adds
     # exactly nothing to the loss and nothing at the config layer says so. Kept because the
     # structural argument stands on its own (:2521-2524): one loss at the end of a depth-D walk,
     # diluted through every later LayerNorm, is the whole reason hop order is hard to learn.
+    # AND IT IS NOT INERT IN THE REBUILD: FAB.forward now states that per-hop states are collected
+    # ON THE SOC LOOP, which is where the M27 inertness actually came from. At hop_vote=True the
+    # per-hop logits already exist for the vote (:2675-2680), so this costs nothing there.
+    # fab.hopsup_applied reading 0 with hop_sup > 0 means that collection was not written.
 
     hops = Lever(4, "Maximum hop budget for one routed forward pass; effective depth is "
                     "min(depth0-stage, hops, 2 + n_live//2).", U.COUNT)
@@ -626,12 +653,27 @@ class FABLevers(LeverSet):
     # WRONG OWNER IN THE OLD TREE, NOT A WRONG KNOB. It was tagged into the memory block, but its
     # entire effect is a call INTO the fabric -- fabgrow.note_shift(step) at :6569-6571 -- and under
     # L2 the memory package may neither read it nor make that call: memory publishes a pressure
-    # Reading, the fabric decides what to do with it, and the reading arrives here as a wire. Kept
+    # Reading, the fabric decides what to do with it, and THE READING ARRIVES AS AN ARGUMENT, NOT AS
+    # A WIRE. (Corrected 2026-09-02. This comment said "as a wire"; it is FAB.grow_check's
+    # `memory_pressure`, supplied per flush from MEM.census, and a store occupancy measured at
+    # runtime can never be a wire because a Coupling.compute sees only frozen Configs. The wrong word
+    # matters here: `grep -rn d_ src/` is meant to be a complete coupling index and a comment
+    # promising a coupling that must never exist is a trap for whoever tries to declare it.) Kept
     # rather than dropped because D3 explicitly retains pressure-drives-growth as a selectable arm,
     # and because it has never fired only because its input signal is pinned near zero -- the
     # broken-instrument case, which does not convict a mechanism. Its own comment gives the honest
     # reason it ships off: "wiring this to growth is a behaviour change nobody has measured, and the
     # last unmeasured default in this file cost a run."
+    # AND DO NOT PORT THE OLD CALL, WHICH IS INVERTED -- found while ruling Q-FAB-6, 2026-09-02, and
+    # recorded here because this lever's own citation is the thing that would invite it back.
+    # :6570 is `fabgrow.note_shift(step)` under the comment "same entry point a regression uses:
+    # makes growth eligible now", and it does the OPPOSITE. note_shift sets `blackout = t` (:2948),
+    # and blackout's only two readers are :3004 (`if unexpected and t - s.blackout >= s.cool`) and
+    # :3012 (`if t - s.last < s.cool or t - s.blackout < s.cool: return 0`), both of which SUPPRESS
+    # growth for `cooldown` windows. So MEM_PRESSURE_ACT=1 printed "growth made eligible at step N"
+    # while BLOCKING growth for the next 400 windows. In the rebuild the signal arrives as
+    # grow_check's own `memory_pressure` argument and this lever gates on it there, which is why the
+    # defect does not carry -- but a P4 author following the :6569-6571 citation would rebuild it.
 
     # ==============================================================================================
     # 6. SELECTION: WHO IS REMOVED, AND WHO IS SPARED
@@ -683,6 +725,26 @@ class FABLevers(LeverSet):
     # A wall-clock grace punishes late births and protects idle founders; a use-clock grace makes
     # "has had its chances" mean one thing in both the cull and lr_boost. Cross-kind comparison is
     # now a UnitError instead of a silent immunity.
+    # THE LEVEL IS WRONG AT THE SHIPPED RUN LENGTH AND IS DELIBERATELY NOT GUESSED (Q-FAB-5,
+    # RESOLVED 2026-09-02). FAB.observe credits uage by SELECTION over the computed experts, so at
+    # n0=2048 with chain_k=8 credits per window at depth0=1, mean uage after a full default run is
+    # 506*8/2048 = 1.98. Reaching 48 needs 12,288 windows at depth 1, or 3,072 at full depth 4,
+    # against a default run of 506-937 windows. THE PAST-GRACE SET IS THEREFORE PROVABLY EMPTY AT
+    # THE SHIPPED DEFAULTS, which makes the utilization cull, `rescue` (which lives inside it),
+    # lr_boost's budget (sized on the eligible count) and the new merge all UNREACHABLE -- even
+    # though derive.cull_gate_open(2048, 4096, 0.45) returns True. The gate is open onto an empty
+    # set, and that is a different report line from "the gate never opened".
+    # THIS FAMILY IS OUTSIDE THE C11 AUDIT'S REACH BY TYPE. derive.cadences_that_cannot_fire
+    # refuses anything that is not units.Windows and this is units.Selections, so a Selections
+    # threshold that cannot be crossed in a run's length can never appear in that audit. Whoever
+    # answers C11 must be told there is a SECOND unreachable-threshold family here.
+    # THE RETUNE IS A P9 MEASUREMENT AND ITS INPUT IS NAMED: fab.mass_per_selection
+    # (sum(use)/sum(uage)) is the evidential dilution factor -- how many argmax-equivalents one
+    # post-split uage tick is worth -- and it is the only defensible basis for re-scaling 48. It
+    # depends on the router, so it cannot be computed at build time, which is exactly why this
+    # stays a literal. Changing an instrument's DEFINITION (the use/uage split) and its
+    # CONFIGURATION (this level) in one step is how this project produced numbers nobody could
+    # attribute; the split is the definition change, so the level does not move in the same commit.
 
     comp_ema = Lever(0.02, "EMA rate for the per-node competence and marginal-contribution signals "
                            "that gate cull-sparing.", U.FRACTION)
@@ -725,15 +787,45 @@ class FABLevers(LeverSet):
 
     merge_dist = Lever(0.10, "Cosine distance under which two redundant experts are MERGED by "
                              "averaging their adapters, instead of one being culled.", U.FRACTION)
-    # CARRIED OVER ON A CONDITION, AND THE CONDITION IS THE COMMENT. This is the only merge-rather-
-    # than-kill mechanism in either expert population -- the legacy router averaged the two adapters
-    # and summed their use, so "both experts' learning survives" where culling destroys it
-    # (:3063-3085) -- which is why goal B keeps it even though its old home is dropped. The fabric
-    # has no merge today: Fabric.manage does cull and spare only, and xover is birth-from-parents,
-    # not consolidation of two live nodes. IF THE FABRIC DOES NOT GAIN THE MERGE AT PORT, this must
-    # return to the census as a drop rather than ship as an inert default, because a lever that
-    # nothing reads is the recorded-never-read class (39 records) and it reads as a live capability
-    # in the banner.
+    # CARRIED OVER ON A CONDITION, AND THE CONDITION IS NOW MET (Q-FAB-2, RESOLVED 2026-09-02).
+    # This is the only merge-rather-than-kill mechanism in either expert population -- the legacy
+    # router averaged the two adapters and summed their use, so "both experts' learning survives"
+    # where culling destroys it (:3063-3085) -- which is why goal B keeps it even though its old
+    # home is dropped. The condition the old comment set ("IF THE FABRIC DOES NOT GAIN THE MERGE AT
+    # PORT, this must return to the census as a drop") is discharged: FAB.manage gains a step 0.
+    #
+    # ==> DEFAULT NOTICE, BECAUSE THE OWNER ASKED TO BE TOLD WHAT IS ON AND OFF <==
+    # THIS DEFAULT IS 0.10 AND IT IS NOT ZERO. Until 2026-09-02 the mechanism did not exist, so the
+    # value was inert; implementing the merge turns it ON for every default run. The default is NOT
+    # moved to 0 here -- that would be deciding by argument a question the census already answered,
+    # and it would leave goal B without its only consolidation path -- but the state change is
+    # loud, in the commit, in docs/04_CONTRACT.md section 4, and here.
+    # WHAT IS ACTUALLY REACHABLE AT THE SHIPPED DEFAULTS IS ANOTHER MATTER AND IS NOT THE SAME
+    # STATEMENT: the absorbed expert must be past `grace`, and by Q-FAB-5's arithmetic the
+    # past-grace set is provably empty at 506-937 windows (mean uage 1.98 against grace=48). So a
+    # default run reports fab.merged as `unreachable` WITH THAT ARITHMETIC, not "armed but 0" and
+    # not "fired". Three states, and the ledger must be able to say which.
+    #
+    # THE ARITHMETIC IS CORRECTED AND THE CORRECTION IS THE RULING. The legacy line averages the
+    # FACTORS, and dW = A@B is bilinear: 0.5*(A1+A2) @ 0.5*(B1+B2) = 0.25*(A1B1+A1B2+A2B1+A2B2),
+    # which HALVES the intended contribution and injects two cross terms nobody trained. A and B
+    # are zero-init at birth with no shared basis, so the factors are not aligned by construction
+    # either. FAB.manage's step 0 merges in dW space at fixed rank instead and reports the
+    # truncation residual, which is what makes the census's claim falsifiable in-run for the first
+    # time. The merging literature says the same thing from the other end: MC-SMoE aligns expert
+    # weights by permutation BEFORE averaging, precisely because unaligned factor averaging
+    # destroys both experts, and the exact-mean LoRA construction needs concatenation at rank 2r,
+    # which a preallocated fixed rank refuses.
+    # NOTHING IN MEM MOVES. The escalation asked for a MEM entry point "reassign the entries owned
+    # by expert i to expert j"; it is refused on three reads -- MEM.read is global across owner
+    # blocks, an entry's owner is its row index and 64 experts share every block at the shipped
+    # defaults so that set is not nameable, and a cull already has the identical (larger) MEM
+    # consequence and ships.
+    # ONE INTERNAL TENSION WORTH THE OPERATOR'S ATTENTION: this gate is cosine distance in IDENTITY
+    # space, while div_w (above) PAYS two co-routed experts for producing different outputs. div_w
+    # manufactures exactly the pairs merge_dist would consume. The residual is the reading that
+    # says which of the two is winning, and lowering merge_dist is the operator's answer if it is
+    # this one.
 
     # ==============================================================================================
     # 7. PER-EXPERT LEARNING RATE

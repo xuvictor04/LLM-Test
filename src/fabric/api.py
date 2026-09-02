@@ -53,11 +53,24 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     builder reads next, so two runs differing only in how much they MEASURED trained on different
     text.
 
-    LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt
+    THE HOP ARM IS DECLARED HERE AND ONLY ONE OF ITS TWO VALUES IS PORTED (Q-FAB-1, RESOLVED
+    2026-09-02: the lever STAYS). `hop_mode="soc"` is the walk this contract ports -- re-route from
+    scratch each hop with the current state in the query. `hop_mode="transition"` is the learned
+    successor walk (the R matrix, per-expert SRC marks, the `ctrl` summary) and NO BODY FOR IT
+    EXISTS IN THIS TREE. So this function REFUSES `transition` at startup, naming the arm, naming
+    Q-FAB-1 and naming what porting it would cost -- rather than accepting the value and running
+    soc, which is the M24 shape the `choices=` repair exists to end (`s.loop_soc = (_env(
+    "CHAIN_ROUTE","soc") == "soc")` at :1843 made every typo the OTHER walk, silently). The lever is
+    NOT dropped and its census row is NOT retired: the owner's standing rule is that a mechanism
+    kept for future use is kept with a switch, and a drop here would make the port a census
+    amendment later. The refusal is what makes "declared but not built" loud instead of silent.
+
+    LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode
     WIRES READ: d_operating_population
     DID IT FIRE: fab.built, fab.n0, fab.cap, fab.operating_population (from
                  derive.operating_population, printed BESIDE the cull gate so the setpoint and the
-                 gate are one statement), fab.off
+                 gate are one statement), fab.off, fab.hop_arm (the ported walk, by name -- "soc";
+                 the transition arm never reaches a counter because the refusal is at startup)
     """
     fab = fab.owned_by("FAB")
     _ = fab.d_operating_population       # WIRE READ HERE -- the setpoint, printed with the gate
@@ -85,6 +98,15 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     HOLD_OUT IS APPLIED INSIDE THE HOP LOOP. The old soc branch computed a banned entry
     distribution and then re-routed from scratch every hop WITHOUT it (:2618-2694), so the
     counterfactual walk was bit-identical for every candidate (C3).
+
+    PER-HOP STATES ARE COLLECTED ON THE SOC LOOP, which is what makes hop_sup reachable on the path
+    that actually runs. In the old tree `s._hops.append` occurs at EXACTLY ONE site, :2819, inside
+    the transition branch -- so under the shipped hop_mode="soc" any hop_sup above zero added
+    exactly nothing to the loss and nothing at the config layer said so (M27). It is a one-line
+    repair and it is owed HERE, not to the unported arm: at the shipped hop_vote=True the loop
+    already forms head(norm(state)) per hop for the vote (:2675-2680), so the per-hop logits deep
+    supervision needs are tensors already in hand; at hop_vote=False it costs one `head` call per
+    hop. fab.hopsup_applied reads 0 with hop_sup > 0 ONLY if this collection was not written.
 
     THE LOAD-BALANCE TERM HAS A GRAPH. The soc loop's return was
     `return h, _dep2/steps, _mass2/steps, h.new_zeros(())` (:2694) -- the fourth element is `bal`,
@@ -150,14 +172,39 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
 
     THE SPLIT IS A BEHAVIOUR CHANGE WITH NO MEASUREMENT BEHIND IT: grace=48 was set against a clock
     that ticked once per window, and crediting chain_k experts per hop over `hops` hops makes it
-    tick up to 32x faster. It belongs on P9's list -- see FOR THE OWNER Q-FAB-5.
+    tick faster. It belongs on P9's list -- see FOR THE OWNER Q-FAB-5, RESOLVED 2026-09-02: the
+    split stands as specified, `grace` stays a Selections lever at its literal 48, and THE LEVEL IS
+    NOT GUESSED HERE. Two corrections to the "32x", because they are different quantities and they
+    imply different retunes:
+      PER EXPERT the ceiling is `hops`, not chain_k * hops -- one expert can be selected at most
+      once per hop -- so its OWN clock ticks at most 4x faster at hops=4.
+      POPULATION-WIDE the credit issued per window goes from 1 to chain_k * hops, up to 32x.
+      AT THE SHIPPED DEFAULTS the multiplier is 8x, not 32x: depth0=1 starts the chain at one hop
+      and maybe_deepen sits on the manage_every=500 cadence, which fires at most once in a default
+      run of 506-937 windows.
+    AND THE NUMBER THAT DECIDES THE RETUNE IS NOT A LEVER, IT IS A READING: at n0=2048 with 8
+    credits per window, mean uage per expert after a full default run is 506*8/2048 = 1.98 against
+    grace=48. Reaching 48 needs 12,288 windows at depth 1 (3,072 at full depth 4). Under the OLD
+    argmax-only clock the same threshold needed 98,304 windows, so the split improves reachability
+    by 8-32x and STILL leaves grace short by 6-24x at the shipped run length. Re-expressing grace as
+    k * chain_k * hops is refused: a lever computed from two other levers is the L1 defect, and it
+    would make one operator edit to chain_k silently move the cull's eligibility threshold through a
+    default, where `grep -rn d_` cannot see it.
 
     LEVERS READ: comp_ema, err_fast, err_slow
     WIRES READ: none
     DID IT FIRE: fab.observed_windows, fab.experts_with_use (DISTINCT experts ever credited -- the
                  number that reads 43 of 4096 when attribution samples one row in sixteen),
                  fab.experts_past_grace_ever (CUMULATIVE, not the snapshot that made
-                 fabric.cull_eligible read ARMED AND INERT, ISSUES M58)
+                 fabric.cull_eligible read ARMED AND INERT, ISSUES M58),
+                 fab.uage_per_expert_per_pass BESIDE it, because a cumulative zero does not say
+                 WHY: "0 experts past grace=48; mean uage 2.0 over 506 windows at n_live=2048" is
+                 an unreachable line carrying its own arithmetic, which is what G4 asks for,
+                 fab.mass_per_selection (sum(use)/sum(uage) -- the mean routing mass an expert
+                 receives per selection, i.e. how many argmax-equivalents one post-split uage tick
+                 is worth. THIS IS THE NUMBER THE P9 RETUNE OF `grace` MUST BE SET FROM. It depends
+                 on the router and so cannot be computed at build time, which is exactly why grace
+                 stays a literal and the retune is a measurement rather than an argument)
     """
     fab = fab.owned_by("FAB")
     raise NotImplementedError(
@@ -204,6 +251,58 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     """The selection pass: failure cull, utilization cull, three spares, rescue, staged depth.
 
     ORDER AND GATING, each with its own reason:
+      0. MERGE, BEFORE EITHER CULL (Q-FAB-2, RESOLVED 2026-09-02 -- and READ THE DEFAULT NOTE IN
+         fabric/levers.py's merge_dist comment: implementing this turns a mechanism ON at the
+         shipped default for the first time, because merge_dist resolves to 0.10 and not to 0).
+         Two experts whose centroids are within merge_dist cosine distance in IDENTITY space are
+         consolidated instead of one being deleted -- the only merge-rather-than-kill path in
+         either population, which is why goal B keeps it.
+         THE ARITHMETIC IS IN DELTA-W SPACE AND NOT IN THE FACTORS, and that correction is the
+         whole of this ruling. The legacy merge is :3083, `A[a] = 0.5*(A[a]+A[b]);
+         B[a] = 0.5*(B[a]+B[b])`. An expert's function is dW = A@B, so averaging the FACTORS gives
+         0.25*(A1B1 + A1B2 + A2B1 + A2B2): the intended contribution is HALVED and two cross terms
+         corresponding to no learning either expert did are injected. A and B are ZERO-INIT at
+         birth with no shared basis (`build` above), so nothing aligns expert a's rank slot 3 with
+         expert b's. The census's headline claim -- "both experts' learning survives where culling
+         destroys it" -- is not supported by its own arithmetic, and this is the version that
+         makes the claim testable: form the best rank-`rank` approximation of dW_a + dW_b by thin
+         QR of [A_a | A_b] (d x 2r) and of [B_a | B_b]^T, then an SVD of the 2r x 2r core --
+         O(d*r^2), a few thousand flops at d=128, r=8 -- and write it into A[a], B[a]. Rank cannot
+         be widened to hold the exact sum (`load_state_dict` below: rank is an INNER dimension),
+         so the truncation is forced and the RESIDUAL is the honest report of what it cost.
+         WHAT MERGES: use[a] += use[b]; uage[a] += uage[b]; dom_of[a] |= dom_of[b];
+         cent[a] = normalize(cent_a + cent_b); then remove(b) through the ONE declared renumbering
+         list. NOTHING IN MEM MOVES AND NO MEM ENTRY POINT IS MINTED -- the escalation's premise
+         that "memory ownership is expert_id % n_own, so merging changes which owner block holds
+         whose entries" does not survive three reads: MEM.read is GLOBAL across owner blocks
+         (memory/api.py, read's second paragraph), an entry's owner is its ROW INDEX and at
+         d_owner_blocks=64 against slots=4096 sixty-four experts share every block so "the entries
+         owned by expert i" is not a set MEM can name (spine/assemble.py's _owner_blocks note), and
+         a CULL already does everything a merge would do to MEM and ships -- remove()'s
+         swap-with-last renumbers the survivor above the hole, which moves ITS expert_id % 64 too.
+         The merge's MEM blast radius is strictly SMALLER than the cull's.
+         ELIGIBILITY, AND THE REACHABILITY IT INHERITS. The absorbed expert `b` must be past grace;
+         the absorbing expert `a` need not be. Requiring both would mean merging inside the
+         eligible set, which sizes nothing differently -- ELIGIBLE IS PAST-GRACE, rule 3 below --
+         while merging over the whole live set re-absorbs every replicate/xover birth, which are
+         near-duplicates BY CONSTRUCTION (grow_check below), making `replicate` inert. So one
+         grace test, on the expert that disappears. THE CONSEQUENCE MUST BE REPORTED AND NOT
+         DISCOVERED: at the shipped defaults the past-grace set is provably EMPTY (Q-FAB-5's
+         arithmetic -- mean uage 506*8/2048 = 1.98 against grace=48), so `fab.merged` is
+         `unreachable` WITH THAT ARITHMETIC, exactly as fabric.cull_eligible is, and NOT
+         "armed but 0". A mechanism that is on and cannot fire must say both things.
+         THE SECOND GATE COSTS NO LEVER. If dW_a and dW_b are near-parallel the truncation loses
+         almost nothing and the merge is honest; if they are not, the residual is large. Report
+         fab.merge_residual_p50/p99 rather than minting a threshold -- a second lever would need a
+         census row, and Q-MEM-4's discipline (MEASURE BEFORE RETUNING) applies. If the residual
+         reads high the operator lowers merge_dist, which is what that lever is for.
+         ONE THING INHERITED AND STATED RATHER THAN HIDDEN: the Adam moments on A[a], B[a] are
+         stale after an in-place write. `rescue` at 5 below already does this; the merge does not
+         make it worse and does not fix it, and P4 must not pretend either.
+         WHY THE MERGE IS NOT GATED ON `contribution`, which would be the better signal: FAB.contribution
+         is DEFERRED (spine/compose.py) for want of `candidates` and `baseline_logits_fn`, so the
+         output-space redundancy reading does not exist at P4. The weight-space residual is the
+         available second gate, and this note is where the revisit is recorded.
       1. FAILURE CULL, AT ANY OCCUPANCY. An expert is failing when BOTH error EMAs sit above the
          population by fail_tol AND the fast one is not above the slow one by shift_tol -- because
          fast >> slow is a SHIFT IN PROGRESS and that expert is adapting. This is the goal-B
@@ -232,9 +331,18 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          per-flush cross-entropy in NATS PER TOKEN (:2529 against :7317). The repair is owed at the
          COMPARISON, not at the declaration, and the report prints the unit it was compared in.
 
+    THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5, RESOLVED 2026-09-02).
+    `fabric.cull_eligible` reports `unreachable` -- never "armed but 0" -- when the eligible set is
+    empty, and it prints its OWN arithmetic to say so: mean uage, grace, n_live and the window
+    count, in the form "unreachable (mean uage 2.0 over 506 windows at n_live=2048; grace=48 needs
+    12,288)". This CANNOT ride derive.cadences_that_cannot_fire: that audit refuses anything that
+    is not units.Windows and `grace` is units.Selections, so the reachability statement is
+    FAB-owned by construction. C11 cannot see this family and whoever answers C11 must be told.
+    `fab.merged` takes the identical treatment for the identical reason (step 0).
+
     LEVERS READ: grace, cull_frac, pressure, slots, comp_protect, comp_ema, err_fast, err_slow,
                  shift_tol, fail_tol, rescue, mut_big, manage_every, depth0, depth_eps,
-                 depth_patience, depth_stage_max, hops
+                 depth_patience, depth_stage_max, hops, merge_dist
     WIRES READ: d_manage_period (recorded on the report beside manage_every, so the WINDOW cadence
                 this function is called on and the FLUSH cadence `contribution` is called on are
                 visible side by side and a cadence that never coincides reads as a zero rather than
@@ -242,7 +350,16 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     DID IT FIRE: fab.cull_fail, fab.cull_util, fab.spared_contrib, fab.spared_comp,
                  fab.spared_shift, fab.rescued (CUMULATIVE, and its gate arms on `rescue > 0 OR the
                  count is nonzero` -- the old row armed on cull_ran, a snapshot reassigned every
-                 pass, and discarded a nonzero count, ISSUES M57), fab.deepened, fab.cull_gate
+                 pass, and discarded a nonzero count, ISSUES M57), fab.deepened, fab.cull_gate,
+                 fab.cull_rank_spread (max/min `use` INSIDE the eligible set: at ~1 the ranking
+                 carries no information and H12 survived the use/uage split in a new dress, because
+                 routing concentrates -- the pilot's top expert took 79.5% of traffic -- so the
+                 experts that cross grace first are the most-used ones while the cull then ranks
+                 that set by `use` ASCENDING. This counter is the falsifier for the repair itself),
+                 fab.merged / fab.merge_residual_p50 / fab.merge_residual_p99 /
+                 fab.merge_declined_grace / fab.merge_declined_residual (step 0: "no pair was close
+                 enough", "no expert was past grace" and "the residual refused every pair" are
+                 THREE different outcomes and one number cannot carry them)
     """
     fab = fab.owned_by("FAB")
     _ = fab.d_manage_period          # WIRE READ HERE -- both cadences reported side by side
@@ -251,7 +368,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         "docs/04_CONTRACT.md, section FAB.")
 
 
-def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_pressure, signature):
+def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_pressure,
+               signature, shift_at=None):
     """The growth trigger and, if it fires, the births. Returns WHAT WAS ACTUALLY CREATED.
 
     WATCH -> BURST -> RECOVER on a running MAD: a loss `z` robust deviations above the slow EMA is
@@ -266,6 +384,17 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
 
     memory_pressure, when supplied and grow_on_mem_pressure is set, makes growth eligible; when it
     is None that lever is UNREACHABLE and says so.
+    IT ARRIVES AS MEM'S VERDICT, NOT AS MEM'S READING (Q-MEM-4, 2026-09-02). This function reads NO
+    threshold and must not: pressure_thresh is MEM's and its only reader is MEM.census, so the
+    comparison against 0.80 happens inside MEM and what the composition root passes here is already
+    the boolean-equivalent answer. Handing over the raw share instead would make fab.grow_mem_eligible
+    fire on every flush, which is the same shape as a gate evaluated at a consumer site. It is an
+    ARGUMENT and can never be a wire: a store occupancy measured at runtime is not visible to a
+    Coupling.compute, which sees only frozen Configs.
+    ITS PRESENT STATE IS unreachable AND THE ARITHMETIC IS MEM'S: MEM.read is deferred and
+    MEM.maintain's probe has no contexts, so nothing promotes out of probation, no eviction destroys
+    a promoted entry, and MEM's pressure is exactly 0.0 for every configuration -- which is why
+    grow_on_mem_pressure also ships False. Two named causes, not one.
 
     THE CLAMPS RUN INSIDE, BEFORE THE COUNTER. soft_cap (CAP's operating ceiling) and the new_frac
     newborn budget were applied at the CALL SITE after n_regr had been incremented (:7444-7470), so
@@ -285,22 +414,79 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
     expert's error history and could be culled by the failure route for something it never did
     (L30).
 
+    THE BLACKOUT: A SHIFT WE CAUSED IS NOT NEW MATERIAL (Q-FAB-6, RESOLVED 2026-09-02 --
+    SIGNATURE CHANGE, `shift_at=None` added to this entry point and NOT to `manage`). `shift_at` is
+    the step of the last SELF-INFLICTED distribution shift -- an epoch resample, a retok, an LR
+    restart -- as units.Windows. This function applies its OWN `cooldown` to
+    `step_windows - shift_at` and suppresses BOTH growth legs while it is open, which is precisely
+    what the old tree did: note_shift(t) sets `blackout` (:2948) and its ONLY two consumers are
+    :3004 (`if unexpected and t - s.blackout >= s.cool`) and :3012 (`if t - s.last < s.cool or
+    t - s.blackout < s.cool: return 0`), BOTH inside PlateauGrowth.step -- which in this rebuild is
+    this function. The contract question proposed the keyword on FAB.manage; manage is
+    cull-and-spare and has no cooldown to suppress, so the keyword would have been unreachable
+    there. Deciding the wrong entry point costs as much as not deciding.
+    THE THRESHOLD STAYS IN THE PACKAGE THAT DECLARES IT. The root supplies only the STAMP; FAB
+    applies `cooldown`. That is the same rule manage_period below exists to enforce -- "the wrap
+    belongs here and not at the call site because this is where the kind is DECLARED" -- and it is
+    why this is not a boolean: a boolean would force the caller to apply FAB's cooldown, a foreign
+    lever read at the call site that `grep -rn d_` could never index.
+    IT IS AN ARGUMENT AND CAN NEVER BE A WIRE. The shift step is MEASURED at runtime and a
+    Coupling.compute sees only frozen Configs; docs/04_CONTRACT.md's refused-wires table already
+    says so for OPT's `d_shift_at` and the identical reasoning lands here.
+    TWO CLOCKS FOR ONE EVENT, ON PURPOSE. OPT.maybe_step's `shift_at` is units.Steps
+    (clock.opt_steps, stamped at the E draw row); FAB's cooldown, warmup and recover_min/max are
+    all units.Windows and this function takes step_windows. So the root stamps the SAME event into
+    TWO typed clocks and passing OPT's to FAB raises UnitError instead of being 16x wrong at
+    batch_windows=16. That is the type system doing its job, not a duplication.
+    A DEFAULTED ARGUMENT IS INVISIBLE TO K10, so it gets the counter OPT already carries for the
+    same hazard (`opt.shift.notifications`, 0 means nobody is supplying shift_at):
+    fab.shift_notifications distinguishes "nobody wired it" from "it was wired and never fired",
+    and until it is nonzero the blackout is UNREACHABLE rather than armed.
+    CAP'S HALF OF THE SAME EVENT IS ANSWERED FROM HERE AND NOT BY A NEW CAP LEVER. CAP.observe
+    takes a `blackout` BOOLEAN and CAP declares no blackout-window lever of its own (its seven are
+    targets, fab_start, vocab_start, lift, lift_min, pin_windows, stall_band); in the old tree the
+    boolean was `(step - fabgrow.blackout) < fabgrow.cool` (:7397), i.e. computed from FAB's
+    `cooldown`. GrowReport therefore carries the blackout state -- open/closed and the windows
+    remaining -- so the root joins a value FAB computed with FAB's own lever instead of reading a
+    foreign lever at the call site or minting a CAP lever that has no census row. That is exactly
+    the route ROW_ARGUMENTS_ELSEWHERE["CAP.observe"] already names ("one field on GrowReport and
+    one root join"), and naming it here is what stops it being chosen twice, differently.
+
     RECEIVES: soft_cap <- CAP.caps().experts, as an argument -- CAP owns the valve, ticks its own
     pin clock and hands FAB a single integer ceiling per flush. memory_pressure <- MEM.census().
+    shift_at <- the root, stamped at the E draw row (epoch resample), at TOK.mint_burst's retok and
+    at OPT's LR restart -- the three sites the old tree called note_shift from (:6515, :7787,
+    :7120) -- as units.Windows off clock.step.
 
     LEVERS READ: grow, burst, z, plateau, warmup, cooldown, recover_min, recover_max, new_frac,
                  replicate, parent_k, parent_max, birth_win, mut, mut_big, mut_big_p, xover,
                  birth_jitter, grow_on_mem_pressure, spawn, slots, n0
     WIRES READ: d_cap_lift_period (reported beside the decline counters, so "0 lifts" is
                 distinguishable from "the valve's period is longer than the run" -- round6 measured
-                0 vocabulary lifts and it was a clock-unit fault, not the plateau condition; see
-                FOR THE OWNER Q-CLOCK-1)
+                0 vocabulary lifts and it was a clock-unit fault, not the plateau condition.
+                IT IS A SECOND VIEW OF A QUESTION CAP OWNS, AND CAP'S IS THE AUTHORITY: the
+                normative answer to "0 lifts -- never full, or never plateaued?" is
+                CAP.counters' BLOCK-REASON HISTOGRAM, in the package that owns the valve, in the
+                unit the valve compares (pin_windows, Windows), beside the pinned high-water mark,
+                and it answers by NAMING the refusing condition rather than leaving it to be
+                inferred from a cadence. This line prints the period and points at that histogram;
+                it must never grow its own verdict about which condition blocked, because a report
+                path and an audit path formatting one quantity two ways is what
+                spine/wire.py exists to stop. See FOR THE OWNER Q-CLOCK-1, which is MEASURABLE and
+                not resolved: this row retires when CAP.counters has a BODY that renders the
+                histogram, and not before)
     DID IT FIRE: fab.grow_asked_regression / fab.grow_asked_stall vs fab.grown_regression /
                  fab.grown_stall (ASK and DELIVERY, separately), fab.declined_cap,
                  fab.declined_newfrac, fab.replicated, fab.crossed, fab.random_born,
                  fab.parent_quota_refusals, fab.distinct_parents (1 means the population is one
                  lineage wearing n hats -- which is a DIFFERENT finding from "the experts are
-                 interchangeable", and D7 needs the two separated), fab.grow_mem_eligible
+                 interchangeable", and D7 needs the two separated), fab.grow_mem_eligible,
+                 fab.shift_notifications (0 means NOBODY IS SUPPLYING shift_at and the blackout is
+                 unreachable, not armed -- copied verbatim from opt.shift.notifications because a
+                 defaulted keyword is invisible to K10), fab.growth_blackout_suppressed (asks the
+                 blackout actually refused, split by leg so a suppressed REGRESSION is not filed
+                 under a suppressed stall -- the two keep separate cooldown clocks above for the
+                 same reason)
     """
     fab = fab.owned_by("FAB")
     _ = fab.d_cap_lift_period        # WIRE READ HERE -- reported beside the decline counters
@@ -350,7 +536,8 @@ def counters(fab: Config, pop):
 
     LEVERS READ: on, norm_only, society, grow, balance, rescue, comp_protect, explore, discover,
                  spawn, dom_frac, ec_w, div_w, ind_w, hop_sup, hop_vote, depth0, hops, emb_every,
-                 lr_own, replicate, xover, halt, cull_frac, pressure, slots, grace, manage_every
+                 lr_own, replicate, xover, halt, cull_frac, pressure, slots, grace, manage_every,
+                 merge_dist, hop_mode
     WIRES READ: none
     DID IT FIRE: this call IS the DID IT FIRE surface for the package
     """
@@ -361,8 +548,16 @@ def counters(fab: Config, pop):
 
 
 def state_dict(fab: Config, pop):
-    """Parameters (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, q_entry, nov_proj,
-    ctrl), the `cent` BUFFER, every book, the cumulative counter ledger, and the package RNG stream.
+    """Parameters (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, q_entry, nov_proj),
+    the `cent` BUFFER, every book, the cumulative counter ledger, and the package RNG stream.
+
+    `ctrl` IS NOT IN THAT LIST AND THE ABSENCE IS THE STATEMENT. It was, until 2026-09-02, and
+    nothing built it: `ctrl` exists only on the transition hop arm (:1907 mints it, :2827 is its
+    only read, both inside the transition branch), `build`'s allocation list creates no such
+    module, and Q-FAB-1 rules that the arm stays DECLARED and UNPORTED. So the contract promised to
+    checkpoint a parameter nothing allocates -- a save-side claim that could only ever be tested by
+    a resume. It returns to this list in the same commit that ports the arm, and not before;
+    `q_entry` (:2557, :2564) and `nov_proj` (:2554) stay, because both walks use them.
 
     `cent` is a BUFFER and not a plain attribute: as an attribute it was absent from state_dict(),
     so the centroids that ARE the routing function were never saved and generation routed on

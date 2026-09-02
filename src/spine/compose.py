@@ -123,6 +123,22 @@ APIS = {
 # ABSENT never asked. Those are two different statements and G4 requires the report to make both.
 RNG_SUBSYSTEMS = ("lm", "sig", "fabric", "memory", "domains", "world", "tok.dropout",
                   "data.synth", "data.holdout", "eval")
+# "data.holdout" IS A PARENT, NOT A STREAM ANYTHING DRAWS FROM (Q-DATA-6, 2026-09-02). DATA opens one
+# CHILD per area -- rng_for("data.holdout." + key, seed), the key being the area label normalised to
+# rng.py's charset -- because a single stream draws the areas in list order, which makes every area's
+# held-out block position a function of how many areas were drawn before it. EVAL's held-out window
+# already declares the opposite property ("KEYED BY DOMAIN NAME, not by index, so adding a domain does
+# not shift the comparison"), and the add-an-area resume is the run both halves exist for. This is the
+# same shape as the per-epoch "data.stream.e<n>" names above: DATA derives the child, the parent is
+# what is declared here, and rng.py:107-109 makes the dot the supported separator.
+# "eval" IS A DRAWN PARENT WITH DERIVED CHILDREN OF ITS OWN (Q-EVAL-9, 2026-09-02), and it is NOT
+# re-declared per child for the same reason "data.stream.e<n>" is not: the child is derived by the
+# package from a name this tuple already carries. EVAL.holdout_probe draws each domain's held-out
+# window starts ONCE from rng_for("eval.holdout." + domain_name, seed) so that every probe in a run
+# and across a resume scores the IDENTICAL byte windows and the 2-sigma verdict is computed on
+# PAIRED differences. If that stream advanced between probes the pairing would be lost silently and
+# no check in this tree would see it -- rng.issued() is the only surface that can say a domain's
+# holdout stream was never drawn, which is why the draw is named rather than left to P5.
 # "world" WAS MISSING AND THE ROOT REACHED FOR IT WITH .get(), so WORLD.build received rng=None for
 # the life of every run. The four sibling constructors all use streams["name"], which raises on a
 # missing key; this one line used .get() and returned None instead, and world/api.py:35 takes rng as
@@ -258,13 +274,16 @@ ASSEMBLY_ORDER = (
                                               "restored -- Snapshot.payload again, for MEM.open_store, "
                                               "DOM.open_partition, CAP.new_valve and "
                                               "CKPT.new_retention; "
-                                              "resume -- Snapshot.payload again, OPT.build's spelling; "
                                               "snapshot -- the Snapshot itself, CKPT.check_geometry's "
                                               "first positional; "
                                               "best_state -- CKPT.new_retention's restored argument; "
                                               "resume_step -- Snapshot.step, RunClock's seed; "
                                               "resume_epoch -- Snapshot.epoch, the same. "
-                                              "ONE FIELD UNDER SIX SPELLINGS, and each is written as "
+                                              "ONE FIELD UNDER FOUR SPELLINGS -- state, saved, sd, "
+                                              "restored -- plus the name `payload` itself, which is "
+                                              "five; it was six until 2026-09-02, when OPT.build's "
+                                              "`resume` spelling was removed with the parameter "
+                                              "(Q-OPT-4 (d)). Each is written as "
                                               "its own entry because a column read as prose gave the "
                                               "PRODUCER side the same hole the consumer side had. "
                                               "THE TOKEN "
@@ -339,30 +358,34 @@ ASSEMBLY_ORDER = (
                                               "_geometry_manifest() from LM.resolve's LMGeometry "
                                               "and the EXACT fields readable off the frozen "
                                               "Configs. WHAT THE SNAPSHOT SIDE MUST CARRY FOR THIS "
-                                              "GATE TO COMPARE ANYTHING is the C-stage question: "
-                                              "the manifest has 15 fields spanning LM, SIG, FAB and "
-                                              "WORLD, and the save side writes WORLD.geometry ALONE "
-                                              "-- so ten of the manifest's fifteen fields are in "
-                                              "the LIVE manifest and absent from the recording, "
-                                              "which ckpt/api.py:174-179 specifies as a REFUSAL and "
-                                              "NOT as UNCHECKED: 'A MISSING FIELD IS A REFUSAL, NOT "
-                                              "A SKIP ... the comparison is driven off the "
-                                              "manifest's KEY SET rather than off truthiness.' "
-                                              "UNCHECKED is the OTHER direction -- recorded and "
-                                              "absent from the manifest, which is where WORLD's "
-                                              "grown counts sit. Three statements here called this "
-                                              "one UNCHECKED, and the difference is not wording: it "
-                                              "is 'the gate checks a sixth of what it names' versus "
-                                              "EVERY RESUME RAISES GeometryRefusal THE DAY P4 LANDS "
-                                              "-- and a resume is what ckpt/api.py:3-6 calls the "
-                                              "experiment for goal B. Q-CKPT-2 is therefore "
-                                              "BLOCKING, not cosmetic "
-                                              "on every resume, and the two SIDECAR refusals below "
-                                              "read a key nothing writes. The C rows now say what "
-                                              "the save side owes; Q-CKPT-2 asks the owner to land "
-                                              "it. The GROWN population counts genuinely cannot be "
-                                              "here (they need a built object) and are re-refused "
-                                              "by WORLD.load_into and FAB.load_state_dict"),
+                                              "GATE TO COMPARE ANYTHING was the C-stage question, "
+                                              "and it is ANSWERED: ROW_ARGUMENTS_ELSEWHERE says "
+                                              "CKPT.save's geometry IS _geometry_manifest(sysm), "
+                                              "the same function the child calls on the way back "
+                                              "in, so the recorded key set is byte-identical to the "
+                                              "live one and the missing-field set is EMPTY by "
+                                              "construction (Q-CKPT-2, first half resolved "
+                                              "2026-08-30; ISSUES C12 withdrawn as filed). THE "
+                                              "FIELD COUNT IS NOT WRITTEN HERE, DELIBERATELY. It "
+                                              "was written in four places and three of them went "
+                                              "stale inside one week -- 15, 16, 20 -- so the count "
+                                              "lives at _geometry_manifest and nowhere else, and a "
+                                              "reader who needs it runs the function. What this row "
+                                              "still owes the reader is the DIRECTION rule, because "
+                                              "it is the thing that keeps being confused: "
+                                              "ckpt/api.py specifies that a field in the LIVE "
+                                              "manifest and absent from the RECORDING is a REFUSAL "
+                                              "-- 'A MISSING FIELD IS A REFUSAL, NOT A SKIP ... the "
+                                              "comparison is driven off the manifest's KEY SET "
+                                              "rather than off truthiness' -- while UNCHECKED is "
+                                              "the OTHER direction, recorded and absent from the "
+                                              "manifest, which is where WORLD's grown counts sit. "
+                                              "Three statements here had them the wrong way round. "
+                                              "The two SIDECAR refusals below remain disarmed and "
+                                              "are the RESIDUE of Q-CKPT-2, which is HIGH and not "
+                                              "blocking. The GROWN population counts genuinely "
+                                              "cannot be here (they need a built object) and are "
+                                              "re-refused by WORLD.load_into and FAB.load_state_dict"),
     ("plan",      "DATA",  "data_plan",       "(epochs=RUN.epochs, win_tokens=LM.ctx, "
                                               "bytes_per_token=Vocabulary.bytes_per_token) -- the "
                                               "exposure gates, before a single step runs",
@@ -393,7 +416,13 @@ ASSEMBLY_ORDER = (
                                               "len(Segmentation.ids) // LM.ctx, never "
                                               "stream_bytes // ctx, which divides a BYTE budget by a "
                                               "TOKEN window and overstates it by the compression "
-                                              "ratio",
+                                              "ratio. THE ROOT PRINTS ONE LINE AFTER THIS ROW, ON "
+                                              "EVERY RUN: stream_bytes, len(Segmentation.ids), the "
+                                              "measured bytes_per_token, windows_in_epoch and "
+                                              "run_windows TOGETHER, so the ratio is checkable by "
+                                              "eye. It is here and not in RUN.bench_summary, which "
+                                              "can reach none of the five and returns None when "
+                                              "bench is off (Q-DATA-8)",
                                               "ids -- Segmentation.ids, which TOK.on_window takes "
                                               "one window of; positions -- Segmentation.byte_pos "
                                               "under MEM.write's spelling, TRUE BYTE OFFSETS and "
@@ -493,22 +522,37 @@ ASSEMBLY_ORDER = (
                                               "WORLD+MEM until 2026-08-30 and MEM has no module and "
                                               "no parameters at all; 'encoder': "
                                               "SIG.encoder_parameters()}, "
-                                              "run_windows=_run_windows(sysm) in units.Windows, "
-                                              "resume) -- OPT never walks a module tree",
-                                              "opt -- the OptState SIG.warm_up and SIG.train_step "
-                                              "take under that spelling. It is declared as 'both "
-                                              "AdamW instances' and NAMES NEITHER, so what crosses "
-                                              "is the whole state and SIG is left to guess which "
-                                              "optimizer it may drive -- Q-OPT-7, and the same "
-                                              "missing field is why WORLD.manage's add_param_group "
-                                              "has no producer and that row is deferred below"),
+                                              "run_windows=_run_windows(sysm) in units.Windows) -- "
+                                              "OPT never walks a module tree. THE `resume` "
+                                              "PARAMETER IS GONE as of 2026-09-02 (Q-OPT-4 (d), a "
+                                              "frozen signature moved): the module restores run "
+                                              "STRICTLY BEFORE this row so the groups already carry "
+                                              "the checkpoint's structure, leaving build no "
+                                              "structural work and no counters for a second restore "
+                                              "path",
+                                              "opt.base -- the AdamW over param_groups['base'], "
+                                              "which maybe_step steps; opt.encoder -- the AdamW "
+                                              "over param_groups['encoder'], which is what "
+                                              "SIG.warm_up and SIG.train_step take under the "
+                                              "spelling `opt`. THE TWO FIELDS ARE NAMED as of "
+                                              "2026-09-02 (Q-OPT-7 RESOLVED (a)): OptState said "
+                                              "'both AdamW instances' and named neither, so the "
+                                              "root could not address one, SIG was handed the whole "
+                                              "state and could have stepped the language model, and "
+                                              "WORLD.manage's add_param_group deferral cited the "
+                                              "identical hole. K11 resolves a produces token against "
+                                              "the module's RECORD TYPES block, so `encoder` is now "
+                                              "checkable provenance"),
     ("restore",   "OPT",   "load_state",      "(st, saved=Snapshot.payload['OPT']) -- AFTER build "
                                               "because the param_group_shape refusal (ISSUES L50) "
                                               "compares the saved shape against the LIVE groups, "
                                               "which do not exist until build returns. It is the "
-                                              "entry point that carries opt.ckpt.loaded/refused; "
-                                              "build's undocumented `resume` parameter overlaps it "
-                                              "-- see Q-OPT-4"),
+                                              "entry point that carries opt.ckpt.loaded/refused, "
+                                              "and as of 2026-09-02 it is the ONLY OPT restore path "
+                                              "(Q-OPT-4). OPT.state_dict now declares it writes "
+                                              "param_group_shape, which it did not, so the refusal "
+                                              "compares against a value something produces instead "
+                                              "of being untrippable"),
     ("clock",     "RUN",   "new_clock",       "(batch_windows=OPT.batch_windows, accum=OPT.accum, "
                                               "resume_step, resume_epoch)",
                                               "clock -- the RunClock every Cadences.due gate is "
@@ -539,15 +583,27 @@ ASSEMBLY_ORDER = (
                                               "cadence. Its verdict 'collapsing' is a RUN-LEVEL "
                                               "FAILURE, not a warning, and NO signature in the tree "
                                               "takes that verdict -- it is a WarmupReport the root "
-                                              "must act on itself. OptState is declared as 'both "
-                                              "AdamW instances' and NAMES NEITHER, so what is "
-                                              "handed over today is the OptState -- Q-OPT-7"),
+                                              "must act on itself. opt is "
+                                              "sysm.optimizer.encoder -- the AdamW over "
+                                              "param_groups['encoder'], NOT the whole OptState, "
+                                              "which is what crossed until 2026-09-02 because "
+                                              "OptState was declared as 'both AdamW instances' and "
+                                              "named neither (Q-OPT-7 RESOLVED (a))"),
     ("cadence",   "RUN",   "new_cadences",    "(periods={'curve': EVAL.curve_period(ev), "
                                               "'dom.manage': DOM.manage_period(dom), 'fab.manage': "
                                               "FAB.manage_period(fab), 'dom.rekey': "
-                                              "MEM.rekey_period(mem), 'ckpt': CKPT.save_period(ck)}) "
-                                              "-- the five gates the loop evaluates, each period "
-                                              "supplied by the package that DECLARES its kind. "
+                                              "MEM.rekey_period(mem), 'ckpt': CKPT.save_period(ck), "
+                                              "'progress': RUN.PROGRESS_WINDOWS}) "
+                                              "-- the SIX gates the loop evaluates, each period "
+                                              "supplied by the package that DECLARES its kind. Five "
+                                              "arrive through a typed accessor because a Config "
+                                              "hands back a bare int for a Clock-unit LEVER; the "
+                                              "sixth is RUN's own module CONSTANT, written "
+                                              "units.Windows at its definition, so it needs no "
+                                              "accessor and mints no entry point -- Q-RUN-1, "
+                                              "RESOLVED 2026-09-02. 'progress' is the ONLY key here "
+                                              "with no row of its own: no entry point prints the "
+                                              "progress/ETA line, the loop driver does. "
                                               "new_cadences took no periods at all until 2026-08-30 "
                                               "while its docstring said every period is an "
                                               "argument; the CALL SITE was still passing none until "
@@ -635,7 +691,12 @@ LOOP_ORDER = (
                                       "than a branch the caller takes. The root also stamps "
                                       "clock.opt_steps here as the shift_at that OPT.maybe_step's B "
                                       "row consumes -- a resample is a SELF-INFLICTED shift and the "
-                                      "old tree carried that fact in a closure variable (:6518-6521)",
+                                      "old tree carried that fact in a closure variable (:6518-6521) "
+                                      "-- AND, since Q-FAB-6 (2026-09-02), units.Windows(clock.step) "
+                                      "on System.shift_at_windows for FAB.grow_check's own shift_at. "
+                                      "ONE EVENT, TWO TYPED STAMPS, because the two consumers "
+                                      "measure their cooldowns in different clock kinds; the old "
+                                      "tree told only the optimizer here and told growth at :6515",
                                       "data -- Stream.bytes under TOK.tokenize's spelling; labels; "
                                       "stream -- the same bytes under SIG's spelling at "
                                       "space='bytes'; NOT shift_at, which comes off the CLOCK and not off this row -- RUN.new_clock produces it and OPT.maybe_step takes it. The old claim read: clock.opt_steps, stamped by the "
@@ -674,11 +735,15 @@ LOOP_ORDER = (
                                       "neither: the parser takes the token before `--`, and 'and' is "
                                       "not a name; "
                                       "memory_pressure = pressure -- FAB.grow_check's spelling for "
-                                      "main/(main+prob). MEM.census DECLARES NO RECORD TYPE "
-                                      "(memory/api.py:14-19 lists Store, WriteReceipt and Retrieval "
-                                      "only; :269-278 names these three in prose), so these are the "
-                                      "CONSUMING spellings and Q-MEM-11 asks the owner to declare "
-                                      "them. THEY ARE THIS PASS'S NUMBERS AND NOTHING REFRESHES "
+                                      "main/(main+prob). MEM.census RETURNS StoreCensus, DECLARED "
+                                      "in memory/api.py's RECORD TYPES block since 2026-09-02 "
+                                      "(Q-MEM-11, RESOLVED (a)); until then the fields were prose "
+                                      "and these three `produces` entries passed K11 by "
+                                      "word-appearance. The record carries MEM'S OWN spellings "
+                                      "(counts, floor_entries, pressure) and THESE ARE THE CONSUMING "
+                                      "ones -- the rename lives HERE, in this column, which is the "
+                                      "declared home K10 and K11 read. "
+                                      "THEY ARE THIS PASS'S NUMBERS AND NOTHING REFRESHES "
                                       "THEM BETWEEN PASSES: FAB.grow_check is a B row and takes "
                                       "memory_pressure every flush, so before the first fire there "
                                       "is no value at all, and at the shipped defaults dom.manage "
@@ -699,8 +764,11 @@ LOOP_ORDER = (
                                       "RUNTIME STATE and an argument rather than the "
                                       "d_live_domains wire. Same staleness as the row above: a B "
                                       "row takes live_domains every flush and this one runs on a "
-                                      "cadence that may never fire. DOM.census declares no record "
-                                      "type either (domains/api.py:18-23) -- Q-MEM-11 covers both"),
+                                      "cadence that may never fire. DOM.census returns "
+                                      "PartitionCensus, declared in domains/api.py's RECORD TYPES "
+                                      "block since 2026-09-02 under DOM's own spellings -- "
+                                      "Q-MEM-11 RESOLVED (a), and this row is where its two renames "
+                                      "are recorded"),
     ("A", "FAB",   "manage",          "Cadences.due('fab.manage', FAB.manage_period(fab), clock) -- "
                                       "step_windows=clock.step. WORLD's growth pass used to ride "
                                       "this same one answer without saying so; that row is now "
@@ -727,9 +795,19 @@ LOOP_ORDER = (
                                       "THE CURSOR AND NOT THE LENGTH -- _signature_units is the "
                                       "whole epoch-0 stream and is warm_up's alone, and deriving "
                                       "the cursor inline at a call site would be a Windows->bytes "
-                                      "conversion written where nobody can audit it. opt is OPT's "
-                                      "ENCODER optimizer, handed in as the whole OptState "
-                                      "(Q-OPT-7); SIG never names a learning rate. WITHOUT THIS ROW "
+                                      "conversion written where nobody can audit it. opt is "
+                                      "sysm.optimizer.encoder, the AdamW over "
+                                      "param_groups['encoder'] -- NOT the whole OptState, which is "
+                                      "what crossed until 2026-09-02 for want of a field name "
+                                      "(Q-OPT-7 RESOLVED (a)); SIG never names a learning rate. "
+                                      "THIS ROW IS THE ONLY PLACE THE ENCODER IS STEPPED IN THE "
+                                      "LOOP (Q-OPT-6 RESOLVED (a)): OPT.maybe_step writes the rate "
+                                      "into both optimizers and steps the BASE one, because the "
+                                      "encoder's step is gated by SIG's InfoNCE floor and paced by "
+                                      "SIG's own cadence levers, and a second step from the flush "
+                                      "gate would make that floor and those three levers inert by "
+                                      "construction. opt.encoder_steps_here is the counter that "
+                                      "says the double step has not come back. WITHOUT THIS ROW "
                                       "the run routes every window through a randomly initialised "
                                       "encoder while an AdamW steps it on zero gradients"),
     ("A", "SIG",   "encode",          "one signature per window, at st.width_units, always: "
@@ -777,13 +855,20 @@ LOOP_ORDER = (
                                       "and not an argument: three B rows act on it. IT IS ASKED PER "
                                       "WINDOW AND ACTED ON PER FLUSH, so what crosses the "
                                       "accumulator is batch_windows Dues and one flush. The root "
-                                      "carries them on System.due; TAKING THE LAST SILENTLY DROPS "
-                                      "UP TO batch_windows-1 FIRES and OR-ing them makes one flush "
-                                      "act on a cadence that fired mid-batch, which is the same "
-                                      "class of loss as the shared key that made minting never fire "
-                                      "-- Q-TOK-12 asks the owner which, and the row states the "
-                                      "carrier so it cannot be decided by accident at the call "
-                                      "site"),
+                                      "carries them on System.due and OR-s THEM, PER CADENCE KEY "
+                                      "(Q-TOK-12, ruled 2026-09-02): mint, retok and probation each "
+                                      "separately, with `frozen` taken from the last window, which "
+                                      "is the same value because frozen is a monotone STATE. Taking "
+                                      "the last window's Due was refused because it silently drops "
+                                      "gcd(period, batch_windows)/batch_windows of every cadence -- "
+                                      "HALF of all mints and retoks at grow_every=200 with "
+                                      "batch_windows=16, 15 of 16 at a coprime period -- which is "
+                                      "the same silent non-fire as the shared key that made minting "
+                                      "never fire. The OR's cost is bounded latency, under 8% of one "
+                                      "period. Two counters, and one must read zero: tok.due_merged "
+                                      "and tok.due_dropped (0 by construction here, which is how a "
+                                      "later reader can tell which reading was implemented). At the "
+                                      "shipped batch_windows=1 the two are identical"),
     ("A", "RUN",   "RunClock.advance","appends to the accumulator; if not full, continue. THE "
                                       "ACCUMULATOR IS WHERE THE FLUSH BATCH COMES FROM and Tick "
                                       "does not carry it -- the cut is named once, at _flush_bounds. "
@@ -795,6 +880,27 @@ LOOP_ORDER = (
                                       "flush_due, rolled, finished -- Tick's three branch "
                                       "conditions, which are read by the loop and taken by no "
                                       "parameter"),
+    ("B", "LM",    "embed",           "x is the flush's batch, the same cut encode takes -- see "
+                                      "ROW_ARGUMENTS_ELSEWHERE on the row below, because no entry "
+                                      "point returns a batch. FIRST OF THE B ROWS, before "
+                                      "encode/decode, because WORLD.forecast supplies that row's "
+                                      "`extra` and forecast takes obs_emb too. ADDED 2026-09-02 "
+                                      "(Q-LM-12 RESOLVED (b)): obs_emb had NO PRODUCER and this "
+                                      "file gave two incompatible accounts of it -- the "
+                                      "WORLD.loss_terms row said LM exposes no embedding entry "
+                                      "point and called it open, while ROW_ARGUMENTS_ELSEWHERE said "
+                                      "it was 'the model's embedding table applied to the same cut', "
+                                      "i.e. a root-side model.emb(x), which is an AttributeError on "
+                                      "every run at lm.compose=1 because build_model does not "
+                                      "construct emb under compose. LM.encode(n_layers=0) was "
+                                      "refused on both arms: the gru arm ignores n_layers by "
+                                      "declared gate, and on the transformer arm zero blocks is "
+                                      "embedding PLUS positional",
+                                      "obs_emb -- the (B, L, width) token vectors WORLD.loss_terms "
+                                      "and WORLD.forecast both take under that name. It is the "
+                                      "LOWEST LAYER and the point where a second modality plugs in, "
+                                      "which is the claim world/api.py makes and this row is what "
+                                      "makes it true rather than asserted"),
     ("B", "LM",    "encode/decode/lm_loss", "x and y are the flush's batch and its next-token "
                                       "targets, cut from Segmentation.ids at _flush_bounds -- see "
                                       "ROW_ARGUMENTS_ELSEWHERE, because no entry point returns a "
@@ -835,13 +941,18 @@ LOOP_ORDER = (
                                       "ids run to FAB_NMAX while the store has MEM_OWNERS "
                                       "partitions); aux_loss -- one summand of the objective "
                                       "OPT.scaled_backward takes"),
-    ("B", "WORLD", "loss_terms",      "obs_emb = LM's EMBEDDING of the batch. LM EXPOSES NO "
-                                      "EMBEDDING ENTRY POINT: LM.encode returns the (B, L, width) "
-                                      "HIDDEN, and whether encode with n_layers=0 is the embedding "
-                                      "is nowhere stated -- Q-LM-12. Passing the hidden silently "
-                                      "would falsify world/api.py:6-7's claim that a second "
-                                      "modality needs only new embedding rows, which is goal A's "
-                                      "'room for more modalities'",
+    ("B", "WORLD", "loss_terms",      "obs_emb = LM.embed's return from the row above, the (B, L, "
+                                      "width) token vectors. IT HAS A REAL PRODUCER as of "
+                                      "2026-09-02 (Q-LM-12 RESOLVED (b)) and this row no longer "
+                                      "appears in ROW_ARGUMENTS_ELSEWHERE: it used to say LM "
+                                      "exposed no embedding entry point while that table said the "
+                                      "loop applied model.emb between two calls, which are two "
+                                      "different answers to one question in one file, and the "
+                                      "second crashes under lm.compose=1. Passing the HIDDEN "
+                                      "instead was the other refused option: it would falsify "
+                                      "world/api.py:6-7's claim that a second modality needs only "
+                                      "new embedding rows, which is goal A's 'room for more "
+                                      "modalities'",
                                       "latent -- WorldStep.latent, whose only consumer, "
                                       "WORLD.manage, is deferred below; loss -- one summand of "
                                       "the objective OPT.scaled_backward takes. WorldStep.inv, which the "
@@ -899,7 +1010,23 @@ LOOP_ORDER = (
                                       "step_windows=clock.step; soft_cap from CAP.caps; "
                                       "memory_pressure from MEM.census, which is a CADENCED "
                                       "producer feeding a per-flush required argument; signature "
-                                      "from SIG.encode. FAB.contribution was the third entry on "
+                                      "from SIG.encode. shift_at=THE SAME EVENT OPT.maybe_step "
+                                      "TAKES BELOW, STAMPED INTO THE OTHER CLOCK KIND: OPT's is "
+                                      "units.Steps off clock.opt_steps, FAB's cooldown/warmup/ "
+                                      "recover_* are units.Windows and grow_check takes "
+                                      "step_windows, so the root stamps units.Windows(clock.step) "
+                                      "here and handing OPT's object to FAB raises UnitError "
+                                      "instead of being batch_windows-fold wrong. Three sites "
+                                      "stamp it -- the E draw row's resample, the TOK.mint_burst "
+                                      "retok two rows up, and OPT's LR restart -- which are the "
+                                      "three the old tree called note_shift from (:6515, :7787, "
+                                      ":7120). It carries backwards like System.novelty, so it "
+                                      "rides System rather than a produces column, and because a "
+                                      "DEFAULTED argument is invisible to K10 the counter "
+                                      "fab.shift_notifications is what says whether anyone "
+                                      "supplied it (Q-FAB-6, ruled 2026-09-02: A FROZEN SIGNATURE "
+                                      "MOVED, grow_check gained shift_at=None). FAB.contribution "
+                                      "was the third entry on "
                                       "this row and is now deferred -- its `candidates` and "
                                       "`baseline_logits_fn` have no producer, and the second is the "
                                       "same missing join that deferred EVAL.holdout_probe"),
@@ -933,10 +1060,28 @@ LOOP_ORDER = (
                                       "(domains/api.py:230), while SIG and FAB have no retokenize "
                                       "entry point in their frozen surfaces. The event itself is a "
                                       "record type tok/api.py:35 declares and no entry point's "
-                                      "docstring returns",
+                                      "docstring returns. THE ROOT ALSO STAMPS "
+                                      "System.shift_at_windows HERE when Due.retok fires: the loss "
+                                      "jump after a retok is OURS, which is what note_shift(:7787) "
+                                      "said, and FAB.grow_check reads it on the NEXT flush -- this "
+                                      "row is two rows BELOW FAB's, so the ordering is right by "
+                                      "construction and the jump cannot grow an expert (Q-FAB-6)",
                                       "mints = Mint -- the list LM.on_mint takes; NOT resegment: the RetokEvent is declared by no entry point's docstring, which this table says four rows above, so claiming it here would be K11's exact defect. It is named on the consuming rows' exemptions. The old claim read: the "
                                       "RetokEvent under MEM.maintain's spelling, when one is "
                                       "produced at all"),
+    ("B", "LM",    "residual_ratios", "(model) -- LM's JUDGEMENT-TIME read of "
+                                      "||delta||/||composite|| per live slot, the input the row "
+                                      "below has been defaulting to None. SAME GATE AS ITS "
+                                      "CONSUMER: EVENT-DRIVEN on the Due.probation this flush "
+                                      "OR-ed at A, never per flush -- a per-token norm over the "
+                                      "whole vocabulary computed every flush and discarded by a "
+                                      "5000-window consumer is an instrument nobody asked for. It "
+                                      "returns None at lm.compose=False and TOK's Gate then prints "
+                                      "unreachable, which is M41's repair and not an alternative "
+                                      "to this row (Q-TOK-11, ruled 2026-09-02: THE FROZEN SET "
+                                      "GREW 121 -> 122 HERE)",
+                                      "residual_ratio -- TOK.judge_probation's exact spelling; the "
+                                      "vector is indexed as `appearances` is"),
     ("B", "TOK",   "judge_probation", "step=clock.step; appearances is System.token_seen, the same "
                                       "per-token counter LM.anchor_term takes as `token_seen`. "
                                       "EVENT-DRIVEN on Due.probation, which TOK.on_window already "
@@ -944,8 +1089,10 @@ LOOP_ORDER = (
                                       "would CONSUME the event, which is how a shared key made "
                                       "minting never fire. It is at B and not A because two of its "
                                       "three inputs are flush-side: the counter this flush's batch "
-                                      "just updated, and residual_ratio, read off live model "
-                                      "tensors and defaulted, so no check asks about it",
+                                      "just updated, and residual_ratio, which the row above now "
+                                      "PRODUCES under the same Due.probation gate -- it used to be "
+                                      "read off live model tensors by nothing and defaulted, so no "
+                                      "check asked about it",
                                       "retired_ids -- Judgement.retired_ids, LM.decode's exact "
                                       "spelling and the REFRESH of what the vocabulary produced at "
                                       "assembly; live_vocab -- Judgement.live_size under the same "
@@ -1011,10 +1158,15 @@ LOOP_ORDER = (
                                       "SAVE side and not beside that gate because it needs the "
                                       "GROWN population, and the gate must fire before anything is "
                                       "built. It is the only geometry() in the tree -- see Q-CKPT-1 "
-                                      "and the block above: five fields recorded against fifteen "
-                                      "compared",
-                                      "NOT geometry: WORLD.geometry returns WORLD's own six fields, not the fifteen-field manifest CKPT.save takes, and claiming the bare token here made K10 certify a five-field record as the whole comparison. CKPT.save gets its manifest from _geometry_manifest via ROW_ARGUMENTS_ELSEWHERE. What this row does supply is the RECORDED side of the "
-                                      "gate's comparison. It is NOT what check_geometry takes as "
+                                      "and the block above. IT IS THE OVERLAY, NOT THE RECORD: it "
+                                      "returns SIX fields, five of which (lat, hid, route_d, nmax, "
+                                      "feedback) the live manifest already carries as world.*, so "
+                                      "the one thing it genuinely adds is `n`, THE GROWN "
+                                      "POPULATION -- the only quantity in this whole gate that "
+                                      "cannot be computed from frozen Configs. n is the ALLOCATED "
+                                      "predictor count and never the live count (world/api.py, "
+                                      "Q-WORLD-8), so it is a shape",
+                                      "NOT geometry: WORLD.geometry returns WORLD's own six fields, not the whole manifest CKPT.save takes, and claiming the bare token here made K10 certify a six-field record as the whole comparison. CKPT.save gets its manifest from _geometry_manifest via ROW_ARGUMENTS_ELSEWHERE; this row supplies world.n on TOP of it, recorded-only, reported UNCHECKED by the child's gate and re-refused in both directions by WORLD.load_into (M43). Three statements called this return five fields and it is six -- corrected 2026-09-02 with Q-CKPT-1. It is NOT what check_geometry takes as "
                                       "its own live manifest"),
     ("C", "MEM",   "state_dict",      "(store) -- including prob, recon, nsrc_max "
                                       "and gate_theta, four omissions that each disarmed a live "
@@ -1036,11 +1188,18 @@ LOOP_ORDER = (
                                       "not part of payload: new_retention(restored=) takes it back. "
                                       "Without it the first post-resume probe satisfies 'no best "
                                       "yet' and overwrites the parent's best model (M45)"),
-    ("C", "TOK",   "save_vocabulary", "(vocab) -> the run's own d_vocab_save_path. BESIDE the save "
-                                      "and never at the read path, which is the parent's. It takes "
-                                      "no suffix, so a .bestN snapshot still overwrites the base "
-                                      "vocabulary file -- M46 is NOT closed by this row and Q-TOK-10 "
-                                      "records what would close it"),
+    ("C", "TOK",   "save_vocabulary", "(vocab, suffix) -> the run's own d_vocab_save_path with the "
+                                      "suffix spliced before the .dyntok.json tail. BESIDE the save "
+                                      "and never at the read path, which is the parent's. THE "
+                                      "SUFFIX IS THE SAME VALUE THIS BLOCK HANDS CKPT.save two rows "
+                                      "below -- CKPT.Retention.consider's BestAction chooses it at "
+                                      "RUNTIME, which is why it is an argument and not part of the "
+                                      "d_vocab_save_path coupling (a compute sees only frozen "
+                                      "Configs). M46 IS CLOSED BY THIS ROW (Q-TOK-10, 2026-09-02): "
+                                      "a .bestN snapshot no longer overwrites the base vocabulary "
+                                      "file, and <base>.bestN.dyntok.json now exists, so resuming "
+                                      "from a best snapshot -- which could not work at all -- reads "
+                                      "the vocabulary that snapshot was written with"),
     ("C", "CKPT",  "save",            "(payload, geometry, step=clock.step, epoch=clock.epoch, "
                                       "reason, suffix) -- LAST, because it is handed the finished "
                                       "product. reason is one of the five declared routes and is "
@@ -1120,7 +1279,7 @@ LOOP_ORDER = (
 # were deferred for a stated reason -- an argument with no producer -- while seven rows elsewhere in
 # the tables named calls with exactly the same gap. EVAL.curve_probe and EVAL.holdout_probe have
 # BYTE-IDENTICAL signatures and got opposite verdicts. The column made every one of them decidable,
-# and the seven below are the ones where nothing in the 121 entry points supplies a required
+# and the seven below are the ones where nothing in the frozen entry-point set supplies a required
 # argument and no join in this file honestly can. Each names what would close it. NONE of them is
 # deferred for being late, and none is deferred because a body is missing: the whole tree is stubs.
 #
@@ -1178,18 +1337,20 @@ DEFERRED_ENTRY_POINTS = {
         "permutation callable. Neither exists. A deferral reason that names the wrong producer is "
         "worse than none: it reads as a dependency somebody has already placed.",
     "EVAL.generate":
-        "P6 (eval). The generation battery. `prompts_by_domain` has no producer among the 121 "
+        "P6 (eval). The generation battery. `prompts_by_domain` has no producer among the frozen "
         "entry points: DOM.census returns domain sizes and radii, not prompts. `logits_fn` is the "
         "same missing join as curve_probe's.",
     "EVAL.coherence":
-        "P6 (eval). THE REASON WRITTEN HERE UNTIL 2026-08-30 WAS FALSE: it said 'no entry point in "
-        "the tree returns a Sample today', and EVAL.generate returns one (eval/api.py:142-143). The "
-        "true reason is `logits_fn`, the same join curve_probe and holdout_probe wait on. The "
-        "`sample` parameter is a separate and unresolved contradiction, not a reason: this "
-        "function's own docstring says it runs 'over its OWN seeded sample, not over the printed "
-        "generations' and that coh_seeds and coh_len size a sample IT DRAWS FOR ITSELF, while the "
-        "signature requires one to be handed in -- so either the parameter or the sentence is "
-        "wrong. Q-EVAL-10 asks the owner, against eval/api.py:162.",
+        "P6 (eval). TWO arguments have no producer and BOTH are named: `logits_fn`, the same join "
+        "curve_probe and holdout_probe wait on, and `units_by_domain`, the same per-domain unit "
+        "supplier those two wait on -- one missing join, three deferrals, and the same sentence. "
+        "The third callable, `encode`, is NOT a gap: _sig_encode_fn already forms it for DOM.rekey "
+        "and this function takes the same one. THE REASON WRITTEN HERE UNTIL 2026-08-30 WAS FALSE: "
+        "it said 'no entry point in the tree returns a Sample today', and EVAL.generate returns one "
+        "(eval/api.py). THE `sample` PARAMETER IS GONE, 2026-09-02, Q-EVAL-10 RESOLVED: a Sample is "
+        "the printed generations, so the signature invited the one argument the docstring forbids "
+        "and the old code passed it. It is now `units_by_domain` plus `encode` -- material and an "
+        "encoder, not a measurement -- and the docstring's sentence is true.",
     "EVAL.verdicts":
         "P6 (eval). Three of its four arguments -- silhouettes, affiliation, coherence_reading -- "
         "have no producer in the tree; the fourth, domain_sizes, comes from DOM.census, which the "
@@ -1199,7 +1360,10 @@ DEFERRED_ENTRY_POINTS = {
         "MEM's surface produces one -- the ten entry points are open_store, write, read, blend, "
         "maintain, apply_domain_plan, judge, census, state_dict and rekey_period, and no copy -- "
         "and inventing it is a signature change. Its "
-        "`scorer` is the same missing logits callable as MEM.judge's.",
+        "`scorer` is the same missing logits callable as MEM.judge's, AND IT TAKES THE SAME ARITY: "
+        "`scorer(ctx, src) -> logits`, ruled under Q-MEM-8/Q-MEM-10 on 2026-09-02. One callable "
+        "declared twice with two shapes is how this tree got a width of 614 on one path and 1 on "
+        "the other.",
     "EVAL.verification_fit":
         "P6 (eval). Post hoc, on a `store_copy` MEM's surface does not produce -- see wrongness_probe "
         "above -- with an inner loop in genuine units.Steps that must never be compared against "
@@ -1211,7 +1375,11 @@ DEFERRED_ENTRY_POINTS = {
         "deferring only one of them was the inconsistency this edit exists to end. The cost is "
         "recorded where it bites: MEM.maintain's job 1 is this package's own retrieval and its "
         "`probe_contexts` has no producer either, so evict='lru' and evict='usage' stay write-order "
-        "FIFO and probation can never promote until P5 lands the contexts.",
+        "FIFO and probation can never promote until P5 lands the contexts. "
+        "DEFERRED AS A ROW, REACHED IN-PACKAGE: Q-MEM-9 is RESOLVED (a) as of 2026-09-02 and "
+        "MEM.maintain's job 1 IS this call, with `queries` maintain encoded itself. K6 is satisfied "
+        "by the absence of a ROW, not by the absence of a call, and an in-package call is not a "
+        "cross-package import (O10/K3 untouched), so this deferral stays valid and is not stale.",
     "MEM.blend":
         "P5 (eval/report). Its `retrieval` comes from MEM.read, deferred above, and its "
         "`model_probs` are PROBABILITIES while every scoring hook in the tree takes a logits_fn -- "
@@ -1219,17 +1387,40 @@ DEFERRED_ENTRY_POINTS = {
         "written anyway. `model_probs` is also the first positional after the Config, which K10 "
         "drops as 'the package's own live object' -- it is not; MEM's live object is `store`, and "
         "blend is the one entry point in the package that does not take it. So the check is "
-        "structurally blind here and the deferral is the only thing that records the gap.",
+        "structurally blind here and the deferral is the only thing that records the gap. "
+        "Q-MEM-10 IS RESOLVED (a) as of 2026-09-02 and it does NOT close this deferral: it rules "
+        "that the join is spine work, written once as _logits_fn(sysm, *, use_memory), that NEITHER "
+        "MEM.blend NOR ANY EVAL SIGNATURE MOVES, and that the scoring caller takes log() of the "
+        "mixture -- which is exact, not a pseudo-logit. What still has no producer is the "
+        "logits_fn itself. When it lands, blend is called from that spine helper and never from a "
+        "row, so K10's blind spot here is retired rather than papered over.",
     "MEM.judge":
         "P4/P5 (memory + eval). `scorer(ctx) -> logits` is required by the DEFAULT arm: MEM.verify "
         "defaults to 'selfcon' and memory/api.py:238-240 says the scorer must be THE SAME FORWARD "
         "PATH TRAINING USED, passed in and never constructed there (M47). That callable does not "
         "exist -- see EVAL.curve_probe -- and scoring a STORED ctx through it needs a signature and "
-        "a domain id per stored entry, which nothing produces either. Because `scorer` carries a "
+        "a domain id per stored entry -- WHICH THE STORE ITSELF CARRIES as Store.src, so the datum "
+        "exists and what cannot carry it is the DECLARED CALLABLE SHAPE: it is `scorer(ctx, src) -> "
+        "logits`, ruled once here and in memory/api.py, and EVAL.wrongness_probe's `scorer` takes "
+        "the same two arguments (Q-MEM-8/Q-MEM-10, 2026-09-02). Because `scorer` carries a "
         "default, no check asks about it: a row calling judge(mem, store) passes every check in the "
         "tree and yields n_checked = 0 forever, which memory/api.py:259-261 itself names as the "
-        "inert state. That is precisely why this is a deferral and not a row with a note. Q-MEM-8 "
-        "still owns WHICH management pass it rides when it returns.",
+        "inert state. That is precisely why this is a deferral and not a row with a note. "
+        "Q-MEM-8 IS RESOLVED 2026-09-02 AND THIS IS THE ROW TO WRITE WHEN THE SCORER EXISTS: an "
+        "('A', 'MEM', 'judge', ...) row at the END of the dom.manage block, after the DOM.census "
+        "row, INSIDE the one Cadences.due('dom.manage', ...) answer that block already asks and "
+        "NEVER a second due() under that key -- and this entry is deleted in the same edit, because "
+        "K6 reads this table backwards and would otherwise report it stale. No key is added to "
+        "_periods and no lever is minted for the cadence. The contract's claim that LOOP_ORDER "
+        "ALREADY places judge on that pass was false and is corrected there; the reason it gave -- "
+        "'the provenance has just been rewritten by folds' -- is also wrong, since nothing judge "
+        "reads is provenance. The reason that survives is census(reconcile=True) opening the SAME "
+        "pass, which bounds a wrong_sweep deletion's count drift to one cadence interval; 100 "
+        "Windows bounds it five times tighter than fab.manage's 500, and a MEM row on a FAB-keyed "
+        "answer is the untracked ride the fab.manage row above records for WORLD. WHAT IS *NOT* "
+        "SETTLED BY ARGUMENT IS THE SCOPE, and it is a declared lever instead: MEM.judge_frac, a "
+        "CENSUS AMENDMENT shipped at 0.0 (the re-score is off), with the full-store arm at 1.0 "
+        "costing about 1.7x the interval's whole training compute.",
     "FAB.contribution":
         "P4 (fabric). THREE arguments have no producer, not two: the reason said two until K12 counted them. `targets` is the flush's shifted token cut -- the same `y` LM.lm_loss takes, which is the loop's own slice and has no row -- so it is a gap of a different KIND from the other two and that difference is why it was missed. `candidates` is the eligible past-grace set, "
         "which lives in Population's use/uage books; no entry point exports it and O10 forbids the "
@@ -1238,7 +1429,9 @@ DEFERRED_ENTRY_POINTS = {
         "as EVAL's, and fabric/api.py:184-188 makes it load-bearing rather than convenient: the "
         "whole C3/H11 repair is that the baseline must come from THE SAME CALLABLE that produced "
         "`baseline_loss`, and a row that named a call whose baseline came from somewhere else would "
-        "rebuild the offset that set contrib's SIGN. Until then fab.contrib_measured reads "
+        "rebuild the offset that set contrib's SIGN. Under Q-MEM-10 (a) there will be TWO closures, "
+        "memory-off and memory-on, and THIS ONE IS ALWAYS THE MEMORY-OFF CLOSURE -- handing it the "
+        "memory-on one would put retrieval in the baseline and undo that repair from the other side. Until then fab.contrib_measured reads "
         "unreachable, and the two spare rules and the replication parent choice have no signal.",
     "CAP.observe":
         "P4 (fabric + capacity). THREE arguments have no producer, not two: `elapsed_windows` was "
@@ -1257,17 +1450,32 @@ DEFERRED_ENTRY_POINTS = {
         "where the valve fired hardest exactly when the run was degrading worst. `blackout` is the "
         "one argument that WOULD have a home: retok, epoch resample and LR restart all have rows, "
         "and the root already stamps the same events as OPT.maybe_step's shift_at. So the fix is "
-        "one field on GrowReport and one root join, and until then CAP.caps returns the STARTING "
-        "ceilings and every block reason in the histogram reads unreachable.",
+        "one field on GrowReport and one root join, and HALF OF IT LANDED 2026-09-02 with Q-FAB-6: "
+        "FAB.grow_check now takes the units.Windows stamp, applies FAB'S OWN cooldown to it, and "
+        "declares the resulting blackout state on GrowReport -- which is what stops CAP either "
+        "reading a foreign lever at the call site or minting a blackout-window lever it has no "
+        "census row for (CAP's seven are targets, fab_start, vocab_start, lift, lift_min, "
+        "pin_windows, stall_band; in the old tree the boolean was `(step - fabgrow.blackout) < "
+        "fabgrow.cool` at :7397, i.e. FAB's cooldown). WHAT IS STILL MISSING IS THE ROOT JOIN AND "
+        "THE TWO EMAs, so this entry point stays deferred; until then CAP.caps returns the "
+        "STARTING ceilings and every block reason in the histogram reads unreachable.",
     "WORLD.manage":
         "P4 (world + opt). `plateau` contradicts the package's own state_dict: world/api.py:183-185 "
         "says the loop-side plateau state (_wl_ema, _wl_lastgrow) MOVES INSIDE THIS PACKAGE and "
         "travels in the checkpoint, while manage takes the boolean as a required argument -- if the "
         "state is inside, the boolean is computed inside, and both sentences cannot hold. Nothing "
-        "returns it. `add_param_group` is OPT's optimizer.add_param_group as a callable, and "
-        "OptState is declared as 'both AdamW instances' and NAMES NEITHER, so the root cannot "
-        "address one without guessing a field -- the identical hole recorded for SIG.warm_up as "
-        "Q-OPT-7, and one field on OptState closes both. `latent` is real but arrives BACKWARDS: "
+        "returns it. `add_param_group` is OPT's optimizer.add_param_group as a callable, and HALF "
+        "of why it had no producer is closed as of 2026-09-02: OptState was declared as 'both AdamW "
+        "instances' and NAMED NEITHER, so the root could not address one without guessing a field -- "
+        "the identical hole recorded for SIG.warm_up as Q-OPT-7. The fields are now `base` and "
+        "`encoder` (opt/api.py, RECORD TYPES), so the expression the root would write is "
+        "`sysm.optimizer.base.add_param_group` and the guess is gone. WHAT IS STILL MISSING IS THE "
+        "ROW: this entry point has no ASSEMBLY_ORDER or LOOP_ORDER position, so nothing in the "
+        "assembly hands the callable to WORLD, and the argument therefore still has no producer. "
+        "Which of the two optimizers a mid-run world parameter joins is also OPT's ruling and not "
+        "this table's: the dynamics population's parameters are base-group parameters, and putting "
+        "them in the encoder group would put them under SIG's cadence. `latent` is real but "
+        "arrives BACKWARDS: "
         "WORLD.loss_terms is a B row and this pass ran at A, so what was in hand was the PREVIOUS "
         "flush's. WHEN IT RETURNS IT MUST SAY WHICH ANSWER IT RIDES: it ran on the fab.manage key "
         "without the row saying so, and Cadences.due RECORDS the fire, so asking twice under one "
@@ -1282,16 +1490,21 @@ DEFERRED_ENTRY_POINTS = {
 # {"PFX.entry": "which join produces the row's arguments, and what it does"}. K10 reads it and skips
 # those rows; it also reads it BACKWARDS, so an entry whose row requires nothing is reported stale.
 #
-# IT IS DELIBERATELY TWO ENTRIES LONG. Every other helper-supplied argument in the tables is named
-# in the consuming row's own note, where a reader meets it -- an exemption table is a place a row
-# stops being read, so it is for the two cases where writing the name INTO the row would be worse
-# than not writing it:
+# IT SAID "DELIBERATELY TWO ENTRIES LONG" AND HELD 24. Corrected 2026-09-02 while adding LM.embed:
+# a table whose own header misdescribes its size by an order of magnitude is a table a reader stops
+# checking, and this one carries the normative answer to arguments K10 would otherwise refuse. The
+# rule the sentence was reaching for is still the right rule and it stands: every helper-supplied
+# argument is named in the CONSUMING ROW'S OWN NOTE wherever a reader would meet it there, and an
+# entry is written here only when putting the name into the row would be WORSE than not. The two
+# ORIGINAL cases are still the clearest statements of when that is true:
 #   * check_geometry, because the word its argument is spelled with also names the OTHER side of
 #     the comparison one row up (Snapshot.geometry, the RECORDED manifest), and a row or a column
 #     carrying the bare token would satisfy the check against the wrong object;
 #   * LM.encode, because `x` is the flush batch and NO ENTRY POINT RETURNS ONE -- RunClock.advance
 #     appends to the accumulator and hands back a Tick -- so the honest producer is this file's own
 #     cut, and stating it once here is better than a row that reads as if a package supplied it.
+# Everything else here is one of those two shapes: a value the ROOT computes from two packages'
+# frozen Configs, or a tensor the LOOP slices and no entry point returns.
 ROW_ARGUMENTS_ELSEWHERE = {
     "CKPT.check_geometry":
         "geometry is the LIVE manifest, produced by _geometry_manifest(sysm), which assembles the "
@@ -1350,7 +1563,7 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "live one and check_geometry's missing-field set is empty by construction. "
         "THE SENTENCE THAT USED TO FOLLOW HERE SAID 'Ten of its fields have no writer on the save "
         "side today', WHICH CONTRADICTED THE ONE BEFORE IT: if geometry IS _geometry_manifest(sysm), "
-        "that one call is the writer of all sixteen. It was the C-block's claim leaking into the "
+        "that one call is the writer of EVERY field in it -- a count is deliberately not written here, because it stood at 15, 16 and 20 in three live statements at once and the sentence added to un-stale it was stale by four when it landed. It was the C-block's claim leaking into the "
         "entry that refutes it, and ISSUES C12 was then filed against a claim this declaration had "
         "already answered -- see C12, corrected 2026-08-30.",
     "RUN.bench_summary":
@@ -1363,13 +1576,18 @@ ROW_ARGUMENTS_ELSEWHERE = {
     # calls -- a tensor slice, a running counter, a boolean, a sum. The order tables model CALLS, so
     # a value that lives between two of them has no row to come from, and pretending otherwise by
     # inventing one would be the fabricated provenance this column exists to make impossible.
-    # Each says what computes it and why no row can. Three of them are on System.__slots__ because
-    # they cross a boundary the tables read forwards cannot express.
+    # Each says what computes it and why no row can. Four of them are on System.__slots__ because
+    # they cross a boundary the tables read forwards cannot express (the fourth is
+    # shift_at_windows, added 2026-09-02 with Q-FAB-6).
     "RUN.new_cadences":
-        "periods is _periods(sysm) -- the five gates' thresholds, each through its OWNING package's "
-        "typed accessor (EVAL.curve_period, DOM.manage_period, FAB.manage_period, MEM.rekey_period, "
-        "CKPT.save_period). A mapping spanning five packages is precisely the object O10 forbids any "
-        "one of them to build, so the root builds it; RUN evaluates gates and owns no threshold.",
+        "periods is _periods(sysm) -- the SIX gates' thresholds. Five arrive through their OWNING "
+        "package's typed accessor (EVAL.curve_period, DOM.manage_period, FAB.manage_period, "
+        "MEM.rekey_period, CKPT.save_period); the sixth is RUN.PROGRESS_WINDOWS, a module constant "
+        "and not a lever, for the progress/ETA line and the profiler dump (Q-RUN-1, RESOLVED "
+        "2026-09-02). A mapping spanning six packages is precisely the object O10 forbids any one "
+        "of them to build, so the root builds it. RUN evaluates gates and owns no threshold that "
+        "decides anything the model computes; a log cadence is the stated exception, and it is "
+        "stated rather than smuggled.",
     "RUN.cadence_audit":
         "periods is the SAME _periods(sysm) mapping new_cadences receives -- the same object, not a "
         "second construction, or the audit would describe gates other than the ones evaluated.",
@@ -1388,9 +1606,6 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "novelty is the PREVIOUS flush's mean surprise (self_organize.py:7499), carried on "
         "System.novelty because it crosses backwards and `produces` reads forwards only. training "
         "is the loop's own train/eval flag, which no package owns and none should.",
-    "WORLD.loss_terms":
-        "obs_emb is LM's embedding of the batch -- the model's embedding table applied to the same "
-        "cut LM.encode took, which is a tensor operation the loop does between two calls.",
     "LM.anchor_term":
         "token_seen is the per-token appearance counter, carried on System.token_seen because it is "
         "written every window and read at the flush. It is the SAME object TOK.judge_probation "
@@ -1425,6 +1640,13 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "contexts is LM.encode's `h` for the flush, tokens is the same cut's ids, surprise is the "
         "per-window loss LM.lm_loss returned. All three are the flush's own tensors, sliced by the "
         "loop from values earlier rows DO produce -- the slicing is what has no row.",
+    "LM.embed":
+        "x is THE SAME CUT LM.encode takes, one row below -- see that entry, which defines it. It "
+        "is named here rather than in the row because the cut has ONE definition in this file and "
+        "a second statement of it is a second declaration that can disagree; what this entry adds "
+        "is only that the embed row and the encode row take the identical tensor, which is what "
+        "makes obs_emb the embedding OF THE BATCH THE LM IS TRAINED ON rather than of a "
+        "differently-sliced one.",
     "LM.encode":
         "x is the flush's (B, L) window batch, cut from Segmentation.ids at the bounds "
         "_flush_bounds(sysm, at_window) names -- contiguous, non-overlapping, LM.ctx wide, "
@@ -1456,20 +1678,35 @@ class System:
                  # and which nothing held before, so MEM's byte offsets indexed a stream no
                  # attribute on this record named.
                  "resume_src", "manifest", "saving", "stream", "segmentation", "base_params",
-                 # THE THREE VALUES THAT CROSS A BOUNDARY THE ORDER TABLES CANNOT EXPRESS, each
+                 # THE FOUR VALUES THAT CROSS A BOUNDARY THE ORDER TABLES CANNOT EXPRESS, each
                  # named by the row that consumes it. `produces` reads FORWARDS -- an argument is
                  # supplied by an EARLIER row -- so a value produced at A and consumed at B, or
                  # produced by one flush and consumed by the next, has nowhere to live but here:
                  #   due        TOK.on_window's Due, asked PER WINDOW and acted on PER FLUSH by
                  #              mint_burst / judge_probation / the retok. batch_windows of them
-                 #              reach one flush; which one wins is Q-TOK-12 and must not be
-                 #              decided by accident at a call site.
+                 #              reach one flush, and the root OR-s them PER CADENCE KEY (mint,
+                 #              retok, probation; `frozen` from the last window, which is the same
+                 #              value because it is monotone) -- Q-TOK-12, ruled 2026-09-02. The
+                 #              OR is here and not at a call site because the root is the only
+                 #              thing that can see a batch. tok.due_dropped must read 0.
                  #   novelty    the PREVIOUS flush's mean surprise, which is what FAB.forward's
                  #              `novelty` and MEM.write's `surprise` are (:7499). A backwards edge.
                  #   token_seen the per-token appearance counter LM.anchor_term takes under that
                  #              name and TOK.judge_probation takes as `appearances` -- ONE tensor,
                  #              owned by the loop, returned by no entry point (C5).
-                 "due", "novelty", "token_seen")
+                 #   shift_at_windows
+                 #              THE STEP OF THE LAST SELF-INFLICTED SHIFT, as units.Windows, added
+                 #              2026-09-02 with Q-FAB-6. It is stamped at THREE sites in three
+                 #              different stages -- the E draw row's resample, the B TOK.mint_burst
+                 #              retok, and OPT's LR restart -- and consumed by FAB.grow_check's
+                 #              `shift_at` on a LATER flush, which is both a backwards edge and a
+                 #              cross-stage one, so no `produces` column can reach it. It is a
+                 #              SECOND OBJECT for the same event: OPT.maybe_step's `shift_at` is
+                 #              units.Steps off clock.opt_steps and this one is units.Windows off
+                 #              clock.step, because FAB's cooldown is Windows and mixing them
+                 #              raises UnitError rather than being batch_windows-fold wrong. Two
+                 #              typed stamps of one event is the point, not a duplication.
+                 "due", "novelty", "token_seen", "shift_at_windows")
 
     def __init__(self, configs, wires, warnings):
         for name in self.__slots__:
@@ -1681,13 +1918,18 @@ def compose(environ=None, *, restored=None):
         opt,
         param_groups={"base": sysm.base_params,
                       "encoder": list(sig_api.encoder_parameters(sig, sysm.sig))},
-        run_windows=_run_windows(sysm),
-        resume=saved.get("OPT"))
+        run_windows=_run_windows(sysm))
     if "OPT" in saved:
+        # THE ONLY OPT RESTORE PATH, as of 2026-09-02 (Q-OPT-4 RESOLVED (d)). build() used to take
+        # `resume=saved.get("OPT")` as well -- one Snapshot.payload into two entry points in
+        # adjacent rows -- and the parameter is gone, because the work it would do does not exist:
+        # the module restores above run STRICTLY BEFORE this point precisely so the param groups
+        # assembled at :1726-1729 already have the checkpoint's structure. A second restore path
+        # would also carry state past opt.ckpt.loaded / opt.ckpt.refused, which live here.
         # The param_group_shape refusal (ISSUES L50) compares the saved shape against the LIVE
-        # groups, which do not exist until build returns, and this is the call that carries
-        # opt.ckpt.loaded / opt.ckpt.refused. build()'s `resume` parameter overlaps it and is
-        # undocumented at opt/api.py:39-84 -- see Q-OPT-4; the overlap is recorded, not resolved.
+        # groups, which do not exist until build returns; OPT.state_dict now DECLARES it writes
+        # that shape, which it did not until the same edit, so the refusal has something to
+        # compare against instead of being armed against nothing.
         sysm.stage = "restore.opt"
         opt_api.load_state(opt, sysm.optimizer, saved["OPT"])
 
@@ -1706,15 +1948,18 @@ def compose(environ=None, *, restored=None):
     # The encoder is trained BEFORE the loop, which is why this needs the stream and the optimizer
     # to be in place already. Without it every window of the run is routed through a randomly
     # initialised encoder while the AdamW built above steps it on zero gradients.
-    # `opt` is documented as THE ENCODER OPTIMIZER and this hands over the OptState that holds
-    # both, because opt/api.py:29-31 declares OptState as "both AdamW instances" and names neither,
-    # so the root has no way to address one of them. Recorded as Q-OPT-7 rather than closed by
-    # guessing a field name: guessing produces an AttributeError months from now in a file nobody
-    # is looking at, and handing SIG the whole state is a boundary hole worth one line in a table.
+    # `opt` is documented as THE ENCODER OPTIMIZER and this now hands over exactly that --
+    # sysm.optimizer.encoder, the AdamW over param_groups["encoder"] (Q-OPT-7 RESOLVED (a),
+    # 2026-09-02). Until then OptState was declared as "both AdamW instances" and named neither, so
+    # the root had no expression for one of them and handed SIG the whole state: an object through
+    # which SIG could have stepped the language model. It was recorded rather than closed by
+    # guessing a field name, and naming the two fields in opt/api.py's RECORD TYPES block is what
+    # closed it -- K11 resolves a `produces` token against that block, so `encoder` is checkable
+    # provenance rather than a comment.
     sysm.stage = "warmup"
     sig_api.warm_up(sig, sysm.sig, stream=_signature_stream(sysm, sig),
                     seen_units=_signature_units(sysm, sig),
-                    opt=sysm.optimizer)
+                    opt=sysm.optimizer.encoder)
 
     # THE PERIODS ARE ARGUMENTS AND THE CALL WAS NOT PASSING ANY. new_cadences(run: Config, *,
     # periods) is keyword-only with no default (train/api.py:189), so this line was a TypeError on
@@ -1794,8 +2039,12 @@ def _base_parameters(sysm):
     Collected from the objects the packages returned, never by walking a module tree from inside
     OPT. The fabric's population is preallocated, so growth never adds a parameter here; WORLD's
     dynamics population DOES mint parameters mid-run and OPT's add_param_group is handed to
-    WORLD.manage as a callable for exactly that reason -- a row that is now deferred, because
-    OptState names neither of its two AdamW instances and the root cannot address one (Q-OPT-7).
+    WORLD.manage as a callable for exactly that reason -- a row that is still deferred, though no
+    longer for the reason written here until 2026-09-02. OptState named neither of its two AdamW
+    instances, so the root could not address one; the fields are `base` and `encoder` as of Q-OPT-7,
+    and a mid-run world parameter joins the BASE group, because the encoder group is under SIG's
+    cadence. What the row still lacks is a position: WORLD.manage has no ASSEMBLY_ORDER or
+    LOOP_ORDER row, so nothing hands the callable over.
 
     THREE OBJECTS, NOT FOUR. The ASSEMBLY_ORDER row said "LM+FAB+WORLD+MEM params" until
     2026-08-30 and this body has always walked three: MEM has no module and no parameters at all,
@@ -1871,8 +2120,33 @@ def _windows_in_epoch(sysm):
     The ONE arithmetic that turns a token stream into a window count, named so both readers -- the
     LR horizon above and RunClock.begin_epoch -- take it from the same place. `stream_bytes // ctx`
     is the form this replaces: it divides a BYTE budget by a TOKEN window and overstates the count
-    by the compression ratio, and the old tree computed the LR horizon and every ETA from it
-    (:4317, :4719; FOR THE OWNER Q-DATA-8).
+    by the compression ratio (~2.5x at a grown vocabulary).
+
+    WHERE THE BYTE FORM ACTUALLY LIVED IN THE OLD TREE, CORRECTED (Q-DATA-8, ruled 2026-09-02).
+    This docstring, docs/04_CONTRACT.md and train/api.py all used to say the LR horizon and every
+    ETA were computed from `STREAM_LEN // WIN`. THEY WERE NOT, and the claim would send an
+    implementer to the wrong function. Of the 28 STREAM_LEN sites, `STREAM_LEN // WIN` appears in
+    exactly two live places: the pre-run [probe] ETA banner (:4317) and one cadence period,
+    `_due("lmcurve", max(1, (STREAM_LEN // WIN) // 8))` (:7319). :4719 is a prose comment. The
+    runtime LR horizon and the ETA both went through `_project`, whose `_total_steps = EPOCHS *
+    (len(stream) // WIN)` (:6236) and `_per = max(1, len(stream) // WIN)` (:6339) measure the TOKEN
+    stream -- `byte_stream` is the separate byte one, and :5656 divides the two to get the measured
+    bytes/token. So the horizon was ALREADY token-measured, and its real defect is the shrinkage
+    projection at :6338-6362, which is Q-OPT-5 and belongs to OPT. What this repair kills is the
+    ~2.5x overstatement in the banner an operator sizes a multi-day run from.
+
+    THE FIVE NUMBERS PRINT TOGETHER, AT STARTUP, FROM HERE -- not from RUN.bench_summary. A step
+    count 2.5x the truth is invisible unless `stream_bytes`, len(Segmentation.ids), the measured
+    bytes_per_token, _windows_in_epoch(sysm) and _run_windows(sysm) appear on ONE line where the
+    ratio is checkable by eye. bench_summary cannot carry it and it was a mistake to propose that
+    it should: its frozen signature (run, clock, *, elapsed_s, bytes_per_window, n_params, timing)
+    reaches NONE of the five -- bytes_per_window is the PRODUCT ctx x bytes_per_token and RUN may
+    not read LM.ctx to divide it back out, and RunClock carries step/flushes/backwards/opt_steps/
+    epoch/batch_len and nothing else -- and it returns None when `bench` is off, i.e. it would be
+    invisible on every ordinary run, which is the armed-but-inert shape this project exists to end.
+    The composition root is the only place that holds all five at once and is exempt from the
+    ownership rule that stops RUN from assembling them. P4 prints it once, after the `segment`
+    stage, on EVERY run.
     """
     return max(1, len(sysm.segmentation.ids) // int(sysm.configs["LM"].ctx))
 
@@ -1894,14 +2168,36 @@ def _geometry_manifest(sysm):
     UNCHECKED, not skipped -- and the population counts are then re-refused, in both directions, by
     WORLD.load_into (M43) and FAB.load_state_dict at their own rows.
 
-    TWO THINGS HERE ARE THE OWNER'S, NOT MINE, and Q-CKPT-1 asks them: WORLD.geometry is the only
-    geometry() entry point in the tree, so eleven packages have no producer of their own; and
+    ONE THING HERE IS THE OWNER'S, NOT TWO. Q-CKPT-1 asked whether the eleven packages without a
+    geometry() of their own should get one; RESOLVED 2026-09-02, they should NOT, and the framing
+    is retired rather than managed. A package geometry() can only be called after that package has
+    built something, and this manifest's defining property is that it exists BEFORE the first
+    allocation -- so the eight or eleven functions would either take a Config and no object, at
+    which point they are a lever read the root already does, or they could not be called at the
+    gate at all. Worse, the EXACT/MAY_WIDEN RULE would move into the package, and ckpt/api.py says
+    in as many words that the rules are the owner's: a package grading the refusal that protects it
+    is the shape aff_min and genuine_min live in EVAL to avoid. What remains the owner's is that
     GeometryField is a record type P4 defines, so this returns the four fields as a plain tuple in
     the declared order rather than constructing a type that does not exist yet.
+
+    IT MUST BE BUILT WITH sysm.geometry PRESENT, AND THAT IS A REFUSAL BELOW RATHER THAN A COMMENT.
+    LM declares layers=0 as a SENTINEL and LM.resolve replaces it with the real depth; the override
+    loop at the bottom skips a field LMGeometry does not carry, so a manifest built before resolve()
+    records lm.layers = 0 -- the sentinel, not the depth. A run at LM_LAYERS=0 and a run at
+    LM_LAYERS=4 are then the SAME model recording two different values, an EXACT mismatch and a
+    spurious refusal on a resume that is actually compatible. That is a wrong measurement inside the
+    instrument that decides whether a resume happens, and it was reachable by writing the two calls
+    in the wrong order.
     """
     lm, sig = sysm.configs["LM"], sysm.configs["SIG"]
     fab, world = sysm.configs["FAB"], sysm.configs["WORLD"]
     geom = sysm.geometry
+    if geom is None:
+        raise RuntimeError(
+            "_geometry_manifest was called before LM.resolve: sysm.geometry is None, so lm.layers "
+            "would record LM's SENTINEL 0 instead of the resolved depth and a compatible resume "
+            "would be refused on an EXACT mismatch that describes nothing. Build the manifest "
+            "after sysm.geometry is set (compose(): resolve, then vocabulary, then this).")
     man = {
         "lm.width":     (int(lm.width), "EXACT", "LM_WIDTH", "every tensor in the model"),
         # `layers`, NOT `depth`, and the environment name is LM_LAYERS. LM declares
@@ -1949,6 +2245,18 @@ def _geometry_manifest(sysm):
                          "preallocated; growth only advances n_live, so a smaller cap IS a prefix"),
         "fab.rank":     (int(fab.rank), "EXACT", "FAB_RANK", "an inner dimension; no prefix valid"),
         "fab.dk":       (int(fab.dk), "EXACT", "FAB_DK", "an inner dimension; no prefix valid"),
+        # THE TENSOR EXTENT IS NOT `slots`, AND fab.slots ALONE LET A NARROWED ONE THROUGH.
+        # fabric/levers.py and fabric/api.py both say it in one expression -- cap = max(n0, slots),
+        # and A is allocated (cap, d_model, rank) -- so at FAB_N0 > FAB_SLOTS the population's
+        # rows are sized by n0 and a resume that lowers n0 narrows every fabric tensor while
+        # fab.slots compares equal. n0 is the fifth name in FAB.load_state_dict's LEVERS READ and
+        # was the only one of the five with nothing to compare against at either end; it arrives
+        # here FOLDED INTO THE EXTENT rather than as its own field, because n0 changing under a
+        # fixed cap moves n_live -- a state_dict buffer -- and not a shape, so recording it raw
+        # would refuse resumes that change no tensor. Q-CKPT-1.
+        "fab.cap":      (max(int(fab.n0), int(fab.slots)), "MAY_WIDEN", "FAB_N0 or FAB_SLOTS",
+                         "max(n0, slots) is what FAB.build allocates A and B at; a smaller-cap "
+                         "checkpoint IS a prefix, so this widens like slots and never narrows"),
         "world.lat":    (int(world.lat), "EXACT", "WORLD_LAT", "H22: recorded and never read"),
         "world.hid":    (int(world.hid), "EXACT", "WORLD_HID", "H22"),
         "world.route_d": (int(world.route_d), "EXACT", "WORLD_ROUTE_D", "H22"),
@@ -1980,12 +2288,26 @@ def _sidecar(sysm, restored, prefix):
     recorded, and absent from the manifest. The reverse (in the manifest, absent from the recording)
     is ckpt/api.py:174's REFUSAL, and three statements in this file borrowed the word for it.
 
-    IT RETURNS None ON EVERY REAL RESUME AND BOTH REFUSALS ARE THEREFORE DISARMED. The snapshot's
-    recorded manifest is written by the C block, and the only geometry() in the tree is WORLD's --
-    so the recorded map carries WORLD's fields and has no 'SIG' or 'FAB' key for this function to
-    find. sig/api.py:201-205 says SIG.state_dict emits its sidecar; nothing carries it into the
-    snapshot. FAB.state_dict does not even claim to emit one, so FAB.load_state_dict refuses on
-    slots/rank/dk read from a value with no declared origin at either end.
+    IT RETURNS None ON EVERY REAL RESUME AND BOTH REFUSALS ARE THEREFORE DISARMED -- STILL TRUE,
+    FOR A DIFFERENT REASON THAN THE ONE WRITTEN HERE UNTIL 2026-09-02. That reason was "the save
+    side records WORLD.geometry alone", which is the withdrawn C12 claim and is false: the recorded
+    map is CKPT.save's `geometry`, and ROW_ARGUMENTS_ELSEWHERE declares that to be
+    _geometry_manifest(sysm) -- a FLAT map with PREFIXED keys, 'sig.d' and 'fab.rank'. The live
+    reason it returns None is therefore a SHAPE MISMATCH IN THIS FUNCTION: it indexes the recorded
+    map by a bare package prefix, recorded.get('SIG'), and a flat prefixed map has no such key at
+    any point in its life. Q-CKPT-2's first half is resolved; this is its residue, and it is HIGH.
+
+    WHAT IS AND IS NOT STILL OWED, since four of the fields moved. lm.arch, lm.compose, sig.mode
+    and fab.emb_hid joined the manifest on 2026-08-30, and fab.cap on 2026-09-02 -- so FAB's whole
+    declared comparison set (slots, n0-via-cap, rank, dk, emb_hid) is now in the manifest and
+    FAB.state_dict does NOT have to emit a sidecar it never claimed to emit. SIG's `width_units` is
+    the one field that cannot be there: derive.signature_width_bytes reads Vocabulary.bytes_per_token,
+    which is MEASURED over the build sample, so it fails the wire predicate the same way the
+    couplings do -- it travels in SIG's own state blob, which SIG reads back from `sd`.
+    THE OPEN QUESTION IS THEREFORE WHETHER THIS FUNCTION AND THE TWO `sidecar` PARAMETERS SURVIVE
+    AT ALL, or whether a prefix SLICE of the recorded flat manifest replaces them. That is a frozen
+    signature decision on sig/api.py and fabric/api.py, it is cheap while both are stubs, and it is
+    the owner's: it is not reopened here.
 
     A GUARD THAT CANNOT FIRE IS A DEFECT EVEN WHERE THE CODE AROUND IT IS CORRECT, so the state is
     recorded instead of returned in silence: with a snapshot in hand and a payload for this package
@@ -1999,8 +2321,9 @@ def _sidecar(sysm, restored, prefix):
     if side is None and sysm is not None and sysm.warnings is not None:
         sysm.warnings.append(
             f"{prefix}.load_state_dict: no '{prefix}' slice in the snapshot's recorded geometry, so "
-            f"sidecar=None and its width/shape refusal DID NOT RUN. The save side records "
-            f"WORLD.geometry alone; see Q-CKPT-2.")
+            f"sidecar=None and its width/shape refusal DID NOT RUN. The recorded geometry is the "
+            f"FLAT prefixed manifest (CKPT.save's geometry is _geometry_manifest); this lookup "
+            f"wants a nested '{prefix}' key that nothing writes. Q-CKPT-2's residue.")
     return side
 
 
@@ -2047,6 +2370,30 @@ def _signature_units(sysm, sig):
 # pair (FAB already keeps one and a second would be two mechanisms deciding the same question); an
 # `owners` rule beyond the one the old tree used; a `plateau` boolean (WORLD holds that state).
 # Those are the seven deferrals, and each is filed with what would close it.
+#
+# THE logits_fn IS STILL NOT FORMABLE, BUT ITS SHAPE AND ITS OWNER ARE NOW RULED (Q-MEM-10, RESOLVED
+# 2026-09-02 (a)). When the missing data exist it is written HERE, once, as
+# `_logits_fn(sysm, *, use_memory)`, beside _key_fn / _head / _sig_encode_fn, and it is the ONLY
+# place softmax -> MEM.read(promote=False) -> MEM.blend -> log is written anywhere in the tree.
+# NEITHER SIDE'S FROZEN SIGNATURE MOVES: MEM.blend keeps `model_probs` as probabilities and EVAL
+# keeps `logits_fn`. The document's own recommendation was (c), passing `blend_fn` into the four
+# scoring entry points, and it is NOT TAKEN: it moves four frozen EVAL `def`s and then makes each of
+# the four bodies write the mix for itself, which is the ungated recomputed blend of C8 (prompt.py)
+# and C9 (cl_bench.py) rebuilt inside the instrument line -- the exact thing memory/api.py's blend
+# exists to prevent ("THE ARITHMETIC LIVES IN THIS PACKAGE so the mixing weight never travels").
+# TWO CLOSURES, TWO SYSTEMS, AND THE READING NAMES WHICH. use_memory=False is the trained path;
+# use_memory=True is the trained path plus retrieval, which has never entered training. FAB's
+# `baseline_logits_fn` MUST ALWAYS BE THE MEMORY-OFF ONE, because fabric/api.py makes it
+# load-bearing that the baseline comes from the same callable that produced `baseline_loss`, and a
+# memory-on baseline there would silently undo the C3/H11 repair.
+# WHAT IS STILL MISSING, so this stays a deferral and not a helper: FAB.forward needs `signature`,
+# `domain_id`, `novelty` and `live_domains` per row. For a HELD-OUT window the closure can encode
+# the signature itself with _sig_encode_fn and pass training=False and DOM's live count -- `novelty`
+# is the one datum with no honest source off the training path, and it is named here rather than
+# defaulted to zero in silence. For a STORED entry the domain id is Store.src, which is why the
+# declared callable is `scorer(ctx, src) -> logits` and not `scorer(ctx)`; see MEM.judge below.
+# ONE ARITY, WRITTEN ONCE: EVAL.wrongness_probe's `scorer` is the same callable and takes the same
+# two arguments.
 # ==================================================================================================
 
 def _window_bounds(sysm, at_window):
@@ -2152,19 +2499,46 @@ def _sig_encode_fn(sysm):
     domains/api.py:120 says in as many words that `encode` is SIG.encode passed in. The rekey MUST
     use the same callable the live path used or the partition drifts into two signature spaces that
     do not compare.
+
+    IT HAS A SECOND CONSUMER SINCE 2026-09-02: EVAL.coherence's `encode` (Q-EVAL-10). Coherence
+    measures "which centroid is this window of the CONTINUATION nearest", so it encodes at report
+    time, and EVAL may not import SIG. It takes THIS callable under THE SAME NAME rather than a
+    second one under a second name, for the reason above: two encoders would be two signature
+    spaces, and the whole point of coherence is comparing a generated window against centroids
+    built from real material in the same space.
     """
     sig = sysm.configs["SIG"]
     return lambda windows: sig_api.encode(sig, sysm.sig, windows)
 
 
 def _periods(sysm):
-    """{gate key: units.Windows} -- the five periods RUN.new_cadences and RUN.cadence_audit take.
+    """{gate key: units.Windows} -- the periods RUN.new_cadences and RUN.cadence_audit take.
 
     ASSEMBLED HERE BECAUSE NO PACKAGE CAN. Each period belongs to the package that DECLARES its kind
     and arrives through that package's typed accessor -- EVAL.curve_period, DOM.manage_period,
-    FAB.manage_period, MEM.rekey_period, CKPT.save_period -- and a mapping spanning five packages is
-    exactly the object O10 forbids any one of them to build. RUN evaluates gates; RUN owns no
-    threshold, which is what new_cadences' own docstring says.
+    FAB.manage_period, MEM.rekey_period, CKPT.save_period -- and a mapping spanning six packages is
+    exactly the object O10 forbids any one of them to build. RUN evaluates gates, and RUN owns no
+    threshold THAT DECIDES ANYTHING THE MODEL COMPUTES -- which is the sentence new_cadences means,
+    and the one sixth entry is the exception that has to be stated rather than smuggled.
+
+    'progress' IS RUN'S OWN AND IT IS NOT A LEVER (Q-RUN-1, RESOLVED 2026-09-02: option (b)). It is
+    RUN.PROGRESS_WINDOWS (run_api.PROGRESS_WINDOWS here), a module constant in train/api.py written units.Windows at its definition,
+    driving the progress/ETA line and the profiler dump. It is HERE rather than wrapped at a call
+    site for two reasons this file already states about the other five. First, its own rule sixty
+    lines above LOOP_ORDER: "Every PERIODIC gate goes through Cadences.due(key, period, clock) with
+    a period its OWNING package supplied, so the modulo form that fired zero times at every
+    BATCH_W > 1 is not writable at a call site" -- and `step % PROGRESS_WINDOWS == 0` below the
+    batch early-out is that defect, on a line whose absence a reader would blame on the run being
+    quiet. Second, new_cadences' "THE KEYS ARE THE ROOT'S, NOT THIS FUNCTION'S": a gate whose key is
+    not in this mapping is a key invented at a call site, and Cadences.ledger() is the DID IT FIRE
+    surface, so a key missing from it is a mechanism whose "0 fires" nobody can read.
+
+    IT IS THE ONE PERIOD HERE WITH NO LOOP_ORDER ROW, and it cannot have one: rows are entry-point
+    calls and NO ENTRY POINT PRINTS THIS LINE -- the loop driver does, the way it owns the window
+    cut that _window_bounds names. K9 reads the order tables, so it never sees this period; the
+    typing is guaranteed at the constant's definition instead, which is why no RUN.progress_period()
+    accessor was minted. The accessors exist because Config hands back a bare int for a Clock-unit
+    LEVER; a module constant has no Config to drop its kind.
 
     THE ACCESSORS EXIST BECAUSE Cadences.due REFUSES A BARE INT. Three of the five gates were handed
     cfg.manage_every directly until 2026-08-30, and Config hands back a bare int for all 35 levers
@@ -2182,6 +2556,7 @@ def _periods(sysm):
         "fab.manage": fab_api.manage_period(r["FAB"]),
         "dom.rekey": mem_api.rekey_period(r["MEM"]),
         "ckpt": ckpt_api.save_period(r["CKPT"]),
+        "progress": run_api.PROGRESS_WINDOWS,
     }
 
 

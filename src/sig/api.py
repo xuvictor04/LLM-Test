@@ -120,8 +120,29 @@ def train_step(sig: Config, st, *, stream, seen_units, opt, reservoir=None):
     `stream` is the unit stream this package's alphabet is over (bytes under space="bytes", token
     ids under space="tokens") as a device tensor; `seen_units` bounds the anchor draw to material
     the loop has actually reached. `opt` is the ENCODER OPTIMIZER, BUILT BY OPT AND HANDED IN --
-    SIG never names a learning rate. `reservoir`, when given, is a list of (window, window) pairs
-    drawn from ONE domain's reservoir by DOM.
+    `OptState.encoder`, the AdamW over param_groups["encoder"], which is a nameable value as of
+    2026-09-02 (Q-OPT-7); until then the root had no expression for one of the two and handed over
+    the whole OptState, an object through which this package could have stepped the language model.
+    SIG never names a learning rate: OPT.maybe_step writes `lr` into this optimizer's param groups
+    on every optimizer step and does NOT step it (Q-OPT-6 (a)) -- THIS FUNCTION IS THE ONLY PLACE
+    THE ENCODER IS STEPPED IN THE LOOP, which is what makes the floor gate below and this package's
+    three cadence levers load-bearing rather than inert. `reservoir`, when given, is a list of
+    (window, window) pairs drawn from ONE domain's reservoir by DOM.
+
+    NOTHING GIVES IT, AND THAT IS THE ANSWER RATHER THAN AN OVERSIGHT (Q-SIG-1, RESOLVED
+    2026-09-02, option (c) -- which is what this signature already specified). No DOM entry point
+    returns reservoir windows and the LOOP_ORDER row for this call supplies stream, seen_units and
+    opt only, so `reservoir` is None on every call the root makes and the prototype arm cannot run.
+    WITH prototype_frac > 0 AND reservoir None, sig.prototype_pairs MUST REPORT
+    `unreachable (no DOM supplier)` AND NEVER "armed but 0" -- the two are different states and this
+    is the purest armed-but-inert shape in the tree, because prototype_frac appears in this
+    function's own LEVERS READ list and therefore passes K4 as consumed while being structurally
+    unreachable (tests/test_contract.py says it outright: "LEVERS READ: is prose that passes a
+    parser"). The lever is NOT dropped: sig/levers.py's group header diagnoses that the positive
+    radius is shorter than a splice segment, so the encoder is explicitly taught that two distant
+    windows of the same corpus differ and more encoder training makes domain identity WORSE, and
+    prototype_frac is the only declared remedy for it. `reservoir=None` being a defaulted keyword is
+    what lets a supplier land later with no change to this signature at all.
 
     ANCHORS AND POSITIVES ARE DRAWN AT st.width_units, NOT AT THE LOOP WINDOW. The old tree drew
     them at WIN (:3323, :3326 -- `torch.arange(WIN)`) while applying the encoder to `_sigw` bytes
@@ -175,6 +196,11 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     every default run while telling the run that paid the full budget it had converged.
 
     The probe draws from this package's own RNG stream, never the global one.
+
+    `opt` is OptState.encoder, the AdamW over param_groups["encoder"] -- a nameable value as of
+    2026-09-02 (Q-OPT-7). The composition root passes `sysm.optimizer.encoder`; until that field had
+    a name it passed the whole OptState, so this pre-loop routine was handed an object through which
+    it could have stepped the language model.
 
     LEVERS READ: mode, warmup, warmup_min_frac, warmup_plateau_eps, warmup_probe_every,
                  contrastive_batch, d

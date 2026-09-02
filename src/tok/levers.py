@@ -284,9 +284,21 @@ class TOKLevers(LeverSet):
     # THE DEFAULT IS 2 BECAUSE 2 IS WHAT THE DEFAULT CONFIGURATION RAN. GROW_PASSES=8 was the offline
     # build's literal and it is NOT lost information: the offline build genuinely wants more passes,
     # since it is the only chance it gets. But a per-arm default cannot be expressed on a Lever -- the
-    # default must be one literal -- so 8 carries over as the "fixed" arm's declared target inside this
-    # package's build code, next to the seed_vocab-as-ceiling derivation above. It must NOT come back as
-    # a second lever: that is the state the merge removed.
+    # default must be one literal.
+    # RULED 2026-09-02 (Q-TOK-9): THERE IS ONE LITERAL, 2, AND IT IS READ ON ALL THREE ARMS. This
+    # comment used to say the 8 "carries over as the fixed arm's declared target inside this package's
+    # build code", which put a second number where the generated lever reference cannot reach it:
+    # docs/04_LEVERS.md is generated from these declarations (fabric/levers.py:104, domains/levers.py:166,
+    # opt/levers.py:499 -- "reads the default off the registry instead of retyping it"), so an 8 in
+    # build code prints as 2 for the arm where it is wrong. That is L1's failure with a second literal
+    # instead of a second environment name, and src/tok/api.py:57 and :75 already told P4 the opposite
+    # of this comment -- two frozen surfaces, opposite instructions, different tok.v0 on the arm that
+    # carries the project's largest recorded effect (4.364 vs 2.175 b/B).
+    # THE 8 SURVIVES AS A DECLARED GATE, NOT AS A NUMBER: build_vocabulary's tok.build_passes_advice
+    # prints the recommendation with its predicate on mode="fixed" and prints "unreachable" otherwise.
+    # It must NOT come back as a second lever: that is the state the merge removed, and N1 has one row
+    # (SEED_PASSES -> TOK_BUILD_PASSES absorbing GROW_PASSES), so a second lever needs a second row.
+    # A mode="fixed" run at 2 passes is not the offline build of record -- P9's moved-numbers list.
 
     build_bytes = Lever(1000000, "How many bytes are taken from the head of each corpus for the "
                                  "pre-training vocabulary build.", U.BYTES)

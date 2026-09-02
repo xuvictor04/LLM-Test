@@ -25,6 +25,11 @@ CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "MEM"): 36 rows
                                       MEM_PER_EXPERT into `owners`); 1 is unresolved, see DEFECT 3
      1 promote-to-wire             -> MEM_CAP is `d_capacity`, computed in spine.assemble, NOT declared here
    25 levers in total: the 24 above plus `wrong_sweep`, which DEFECT 3 leaves standing on its own.
+   26 DECLARED HERE, because one is a CENSUS AMENDMENT and not an old-tree knob: `judge_frac`, minted
+      2026-09-02 under FOR THE OWNER Q-MEM-8 and recorded in .rework/census.json's `amendments` group
+      and .rework/CENSUS.md. It has no ancestor, so N2 could not be satisfied by a DEPARTURES entry;
+      see its own comment in the WRONGNESS group. The 36-row census total above is unchanged, and so is
+      the census's 328 -- that figure counts the old _SPEC's knobs and this was never one.
 
 THREE CENSUS DEFECTS REPAIRED WHILE READING IT. All three were real and all three are recorded here rather
 than fixed in silence, because a correction nobody can find is indistinguishable from a transcription
@@ -242,7 +247,16 @@ class MEMLevers(LeverSet):
     # THE INSTRUMENT IS BROKEN, NOT THE MECHANISM, which is why it is kept rather than dropped: at the
     # measured write:read ratio (11.7M writes into 200k slots against 1469 read probes) probation is 82%
     # of the store and permanently over budget, so the probation branch is the RULE rather than the
-    # exception (H33, ISSUES.md:1890-1891). Two further port requirements: probation state is not in the
+    # exception (H33, ISSUES.md:1890-1891). ON THIS TREE THE REASON IS STRONGER AND EXACT, not a ratio:
+    # MEM.read is deferred and maintain's `probe_contexts` has no producer, so NOTHING PROMOTES AT ALL,
+    # probation is 100% of the store and the probation branch is taken every time -- for every
+    # configuration (Q-MEM-4, RESOLVED 2026-09-02 (a): keep the definition, declare the Gate, measure
+    # before retuning).
+    # IT IS A PER-BLOCK SHARE, NOT A STORE-WIDE ONE. memory/api.py's write says the owner narrows the
+    # candidate slot set to its block and "probation narrowing ... run INSIDE that set", so at the
+    # shipped d_owner_blocks=64 and quota=128 this 0.10 is 12.8 entries per block and not 819 across the
+    # store -- a factor of 64, and the two readings are different code in write's eviction path. The
+    # store-wide `probation_share` census reports is an AGGREGATE and is not this predicate. Two further port requirements: probation state is not in the
     # checkpoint, so every restored entry comes back prob=False and the region is off exactly when a new
     # area arrives (M66, ISSUES.md:473); and delete() does not clear the flag, so deactivated slots keep
     # inflating the census (L61).
@@ -260,6 +274,17 @@ class MEMLevers(LeverSet):
     # whatever the store is suffering (H33). A signal that cannot reach its own threshold reads exactly
     # like a healthy one, so under G4 this becomes a declared Gate that prints its own arithmetic instead
     # of printing nothing and passing for calm.
+    # THE LEVEL DOES NOT MOVE IN THIS COMMIT AND THE REASON IS NOT CAUTION (Q-MEM-4, RESOLVED (a)): on
+    # THIS tree pressure is not ~0, it is EXACTLY 0 for every setting, because MEM.read is deferred and
+    # maintain's probe has no contexts, so n_promoted is identically 0 and there is no promoted entry an
+    # eviction could destroy. Retuning a threshold against a structural constant is unfalsifiable, and
+    # changing an instrument's definition and its setting in one step is how this project produced
+    # numbers nobody could attribute. Expect the eventual retune to raise this number rather than lower
+    # it: at probe_rows/probe_every = 64/25 and topk=8 the probe touches ~20 entries per window against
+    # ~1 gated write, so once contexts exist probation can fall under budget and pressure can pin at 1.0.
+    # THE COMPARISON AGAINST THIS NUMBER HAPPENS INSIDE MEM. Its only reader is MEM.census;
+    # FAB.grow_check takes a `memory_pressure` ARGUMENT and reads no threshold, so what the root hands
+    # the fabric must already be MEM's verdict or fab.grow_mem_eligible fires on every flush.
 
     # ==============================================================================================
     # KEYS -- what the store is indexed by, and how it tracks a model that moves
@@ -422,6 +447,49 @@ class MEMLevers(LeverSet):
     # THE COMMENT THE OLD FLAG'S REASSURANCE HID, which is the reason wrong_read exists beside it: 0 does
     # NOT make the flag inert, because read() filters on the same predicate. Sweep off still left 63,146
     # entries -- a third of the store -- unreadable. Separating the two is what makes this flag honest.
+
+    judge_frac = Lever(
+        0.0, "Share of the ALREADY-CHECKED store that judge() re-scores on each pass, on top of the "
+             "entries written since the last one. 0.0 re-scores nothing.", U.FRACTION)
+    # ⚠ CENSUS AMENDMENT, 2026-09-02, ruled under FOR THE OWNER Q-MEM-8. THIS LEVER HAS NO OLD-TREE
+    # ANCESTOR: the old selfcheck (self_organize.py:4048-4060) is "single pass, every entry judged",
+    # called ONCE from the report, with no scope knob and no cadence knob anywhere -- so there is no
+    # (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied
+    # by amending the census. It is amended, in .rework/census.json and .rework/CENSUS.md, and said
+    # loudly here. The 328 is unchanged; it counts the old _SPEC's knobs and this was never one.
+    # DEFAULT 0.0 = THE RE-SCORE IS OFF, and both arms are reachable from the environment.
+    # WHY IT IS MINTED RATHER THAN DECIDED. judge() is cadenced now, not end-of-run, and `selfcon` is
+    # a persistent per-entry field where -1 means unchecked (memory.py:79, :492) while the flag rule
+    # reads every entry with selfcon >= 0 (:585-591). So there are two legitimate checked sets and
+    # they are 20x apart in cost and different in meaning, and NOTHING IN THE FROZEN SURFACES PICKS
+    # ONE:
+    #   0.0  -- stale-selfcon only: score the ~1 gated write per window accumulated since the last
+    #           pass. At dom.manage (100 Windows) that is ~100 entries x key_win 8 = ~800 forward
+    #           tokens against 100 x LM.ctx 128 = 12,800 training tokens, about 6% of the interval.
+    #           THE COST OF THIS ARM IS NOT ZERO AND IT IS NOT COMPUTE: an entry keeps forever the
+    #           score it got under the model that existed when it was written, and the adaptive
+    #           median + k*MAD rule then computes a median over scores taken across the WHOLE run's
+    #           model trajectory. That is a population mixing model epochs, and it is the argument
+    #           for raising this number.
+    #   1.0  -- full re-score every pass: 8192 entries x key_win 8 = 65,536 forward tokens, roughly
+    #           1.7x the ENTIRE training compute of a 100-Window interval (0.34x on the 500-Window
+    #           fab.manage cadence). Every score then comes from one model snapshot and the median is
+    #           meaningful. This is the old tree's semantics applied on a cadence.
+    # Anything between is an amortized sweep: the whole checked population is covered once per
+    # ceil(1/judge_frac) passes, taken by DETERMINISTIC STRIDE from a rotating cursor -- never a
+    # random draw, the same rule probe_rows carries and for the same reason (a diagnostic that
+    # consumes RNG draws changes the training trajectory; frozen_rng exists for that class).
+    # WHY NOT REUSE rekey_every FOR THE AMORTIZATION: compose.py already flags rekey_every as ONE
+    # LEVER, TWO MECHANISMS, and hanging a third on it would make re-timing the rekey silently
+    # re-time judging. A separate knob is the honest shape.
+    # WHY 0.0 IS THE DEFAULT: there is no recorded number under either arm -- in the old tree every
+    # write reset selfcon to -1 and the detector was structurally inert for the whole run -- so
+    # "preserve the configuration the numbers were taken under" does not select an arm. What decides
+    # it is that 1.0 would MORE THAN DOUBLE the cost of every run by default, which is itself a
+    # confound and a capability cost, while 0.0 costs nothing and still checks strictly more than the
+    # old tree ever did in-loop. THE MEASUREMENT THAT RETIRES THIS LEVER IS WRITTEN AT Q-MEM-8.
+    # DID IT FIRE: store.n_rescored beside n_checked, and n_judge_cursor_wraps -- so "the sweep never
+    # came round" is a different report line from "the sweep found nothing".
 
     recon_hid = Lever(
         64, "Hidden width of the reconstructor that maps a stored key to its expected token code.",

@@ -54,6 +54,19 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     line and counted (ISSUES M80, L20 -- a resume setting MIN_PAIR=200 ran with the parent's value
     and the audit then printed "NOTHING READ THESE" naming a knob that was set and ignored).
 
+    ONE LITERAL FOR THE PASS COUNT (Q-TOK-9, ruled 2026-09-02). It is tok.build_passes on ALL
+    THREE ARMS. tok/levers.py used to say the offline build's 8 "carries over as the fixed arm's
+    declared target inside this package's build code"; that is a second literal in a second place,
+    and the Lever carries exactly one default, so an 8 living in build code prints as 2 in the
+    generated lever reference -- the L1 failure the SEED_PASSES/GROW_PASSES merge exists to end,
+    moved from a second environment name into a second number. The 8 is not lost: it is a DECLARED
+    GATE with its predicate, tok.build_passes_advice, which on mode="fixed" prints
+    `build_passes=2; the offline build historically used 8 -- set TOK_BUILD_PASSES=8 to reproduce
+    it` and on the other two arms prints `unreachable (mode != fixed)`. Advice that appears
+    sometimes and says nothing when it does not is armed-but-inert applied to prose.
+    A mode="fixed" run at 2 passes is NOT the offline build of record, and that belongs on P9's
+    list of numbers that moved.
+
     Otherwise: tok.build_passes tally-and-mint passes over
     b"".join(h[:tok.build_bytes] for h in area_heads), breaking early when a pass mints nothing.
     The counting segmentation applies tok.dropout, drawing from rng_for("tok.dropout", seed) --
@@ -76,6 +89,8 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
                  mint_pmin, mint_novel, dropout
     WIRES READ: d_vocab_ceiling, d_vocab_read_path
     DID IT FIRE: tok.build_pass, tok.build_mint, tok.build_converged, tok.load_reconciled,
+                 Gate tok.build_passes_advice (fires on mode="fixed" with the two numbers;
+                 "unreachable (mode != fixed)" otherwise -- never silence),
                  tok.v0 -- the ACHIEVED size at the start of training, recorded once and NEVER
                  computed by subtracting seed_vocab, which is what the old DID IT FIRE row did and
                  why it over-reported mints on any corpus that converged below target
@@ -109,7 +124,28 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     back toward the raw byte, which is always in the vocabulary); it is used for the TRAINING
     stream and never for held-out text, generation, or the final segmentation, which must be
     deterministic. THE SKIP TEST ABOVE IS DISABLED WHENEVER dropout > 0, because the emitted stream
-    is then no longer a deterministic function of the vocabulary -- see FOR THE OWNER Q-TOK-3.
+    is then no longer a deterministic function of the vocabulary.
+
+    Q-TOK-3 IS CONFIRMED (2026-09-02): the regularizer reaches the TRAINING stream, which is what
+    BPE-dropout is (Provilkov et al., ACL 2020 -- dropout during training, deterministic BPE at
+    inference, the protocol this paragraph already states). The old tree applied it only to
+    count=True segmentations and the only count=True call was the build pass
+    (self_organize.py:1264), so at mode="online" it ran during the seed build and never again. Two
+    consequences follow and neither is written anywhere else:
+
+      1. THE RUN LENGTH BECOMES A DRAW. With regularize=True on the epoch-0 and every-epoch
+         segmentation, len(Segmentation.ids) -- hence _windows_in_epoch, _run_windows and the LR
+         horizon -- are stochastic in the "tok.dropout" stream whenever dropout > 0. That is
+         acceptable because the count is MEASURED rather than estimated (Q-DATA-8), but
+         DATA.draw_stream's invariant "two arms differing in one unrelated knob still read the same
+         text at epoch 2" is a statement about BYTES and does not extend to tokens. Two dropout>0
+         arms will differ in window count; that is the regularizer, not a bug.
+      2. bytes_per_token IS MEASURED WITH DROPOUT APPLIED. build_vocabulary measures it over the
+         COUNTING segmentation, which applies tok.dropout, so more and shorter tokens lower it --
+         and derive.signature_width_bytes(LM.ctx, bytes_per_token) (SIG's one width) and
+         data_plan's splice_window threshold both move with a TOK regularizer. Both take the
+         measured value and so follow correctly; whoever reads a width that changed with no SIG
+         lever set should look here first.
 
     LEVERS READ: mode, dropout
     WIRES READ: none
@@ -144,13 +180,44 @@ def on_window(tok: Config, vocab, ids, *, step):
     freeze_at: at step >= tok.freeze_at (and freeze_at != 0) minting stops permanently and
     Due.frozen is True from then on. Retok is still asked for on its own cadence.
 
+    WHAT THE ROOT DOES WITH batch_windows OF THESE (Q-TOK-12, ruled 2026-09-02: THE OR, option
+    (b)). This is asked PER WINDOW; mint_burst, the retok and judge_probation act PER FLUSH, so
+    batch_windows Dues reach one flush. The root ORs them, PER CADENCE KEY -- mint, retok and
+    probation each separately -- and takes `frozen` from the LAST window of the batch, which is the
+    same thing as the OR because frozen is a STATE and monotone (at step >= freeze_at it is True
+    from then on), said here so no reader has to notice that for themselves.
+    TAKING THE LAST WINDOW'S DUE WAS REFUSED, and the arithmetic is why. Every cadence here is
+    elapsed-since-last-fire and _due RECORDS the step, so a Due a flush discards is a fire that is
+    silently GONE. A Due survives under "last" only when the window that raised it is the last of
+    its batch, i.e. at a rate of gcd(period, batch_windows) / batch_windows: at grow_every=200 with
+    batch_windows=16 that is HALF of all mints and half of all retoks dropped, and at any period
+    coprime with the batch it is 15 of every 16. That is the same silent non-fire this whole cadence
+    design exists to prevent -- minting fired 999 times at batch_w=1 and ZERO at batch_w in
+    {2,8,15,16,32} under the modulo form -- reintroduced by a different route and at a computable
+    rate. The OR's cost is bounded latency instead: a flush acts on a cadence raised up to
+    batch_windows-1 windows earlier, under 8% of one grow_every period at batch_w=16. It is also
+    consistent with judge_probation's other input, which is the counter THIS FLUSH'S WHOLE BATCH
+    updated, so the act and the counter cover the same windows.
+    AT THE SHIPPED batch_windows=1 THE TWO READINGS ARE IDENTICAL and no recorded result moves; the
+    divergence appears at BATCH_W=16, which is what the heavy-run command uses.
+    BIRTH STEPS ARE FLUSH-ALIGNED, and that is the one thing to write down rather than rediscover:
+    `step` handed to mint_burst and judge_probation is clock.step AT THE FLUSH, so a token minted on
+    an OR-ed Due is born up to batch_windows-1 windows after the window that raised it.
+    probation_deadline compares step - birth and both are Windows, so nothing raises.
+
     RECEIVES: step <- RUN's RunClock, as units.Windows.
     RETURNS: Due.
 
     LEVERS READ: mode, grow_every, retok_every, freeze_at, probation_deadline, probation_uses
     WIRES READ: none
     DID IT FIRE: tok.tally, tok.due_mint, tok.due_retok, tok.due_probation, tok.mint_frozen_at
-                 (the step, or unreachable when freeze_at = 0)
+                 (the step, or unreachable when freeze_at = 0),
+                 tok.due_merged (flushes where MORE THAN ONE window of the batch raised the same
+                 key -- unreachable at batch_windows=1, which is the shipped default),
+                 tok.due_dropped (Dues discarded by the flush: 0 BY CONSTRUCTION under the OR, and
+                 declared precisely because a counter that must read zero is the only way a later
+                 reader can tell which reading was actually implemented. Under the refused "last"
+                 reading this is the number that says what it cost)
     """
     tok = tok.owned_by("TOK")
     raise NotImplementedError(
@@ -229,9 +296,13 @@ def judge_probation(tok: Config, vocab, *, step, appearances, residual_ratio=Non
     probation arms 217 and 224 of 256 minted tokens were retired that way).
 
     RECEIVES: appearances <- the training loop's per-token appearance counter (the old _tok_seen,
-    self_organize.py:6804), the ONE shared mutable tensor in this contract; residual_ratio <- LM's
-    MintReport (||delta[nid]|| / ||composite[nid]||), which cannot be a build-time wire because it
-    is read off a live tensor.
+    self_organize.py:6804), the ONE shared mutable tensor in this contract; residual_ratio <-
+    LM.residual_ratios(lm, model), LM's JUDGEMENT-TIME read of ||delta[t]|| / ||composite[t]||,
+    which cannot be a build-time wire because it is read off a live tensor. IT IS NOT THE
+    MintReport'S residual_ratio AND THIS CLAUSE USED TO SAY IT WAS (corrected 2026-09-02,
+    Q-TOK-11): the MintReport is produced at the mint, when the free residual is zero by
+    construction under every new_row_init arm, so the embed arm would have retired 100% of
+    candidates. None arrives at lm.compose=False and the Gate below prints unreachable.
     RETURNS: Judgement.
 
     LEVERS READ: probation_uses, probation_deadline, probation_by, probation_residual
@@ -272,16 +343,61 @@ def lift_vocab_cap(tok: Config, vocab, *, to: int):
         "docs/04_CONTRACT.md, section TOK.")
 
 
-def save_vocabulary(tok: Config, vocab):
-    """Write merges plus the settings this run actually used to d_vocab_save_path, or return None
-    when that wire is empty (saving is off). NEVER writes to d_vocab_read_path: that file is the
-    parent's.
+def save_vocabulary(tok: Config, vocab, *, suffix=""):
+    """Write merges plus the settings this run actually used BESIDE THE SNAPSHOT THAT NAMES THEM,
+    or return None when d_vocab_save_path is empty (saving is off). NEVER writes to
+    d_vocab_read_path: that file is the parent's.
 
+    THE SUFFIX, AND WHY IT IS AN ARGUMENT AND NOT PART OF THE WIRE (Q-TOK-10, ruled 2026-09-02 --
+    A FROZEN SIGNATURE MOVED HERE). CKPT.save takes `suffix` and says "THE SUFFIX APPLIES TO THE
+    WHOLE SNAPSHOT, NOT ONLY TO ckpt.pt", and A SNAPSHOT'S VOCABULARY IS PART OF THE SNAPSHOT.
+    Without it this call always wrote the base file, so a reason="bestN" save wrote
+    runs/x.best3/ckpt.pt and OVERWROTE runs/x.dyntok.json -- ISSUES M46 exactly, multiplied n times
+    over by best_keep. It is worse in this tree than an overwrite: resuming from a best snapshot
+    sets CKPT.resume to that snapshot's base, so d_vocab_read_path resolves to
+    <base>.best3.dyntok.json, A FILE NOTHING EVER WROTE; build_vocabulary falls through to "build",
+    and the restored embedding table is indexed by a freshly minted, different vocabulary. The
+    best-snapshot resume path could not work at all.
+
+    IT CANNOT BE A WIRE, and that is the framework rule rather than a preference: the suffix is
+    chosen AT RUNTIME by the retention policy (CKPT.BestAction, ckpt/api.py:23) and a coupling's
+    compute sees only frozen Configs. A runtime value reaches a package as an ARGUMENT -- the same
+    rule that made bytes_per_token an argument to DATA.data_plan and curve_bpb an argument to
+    CKPT.Retention.consider.
+
+    WHAT IS WRITTEN: d_vocab_save_path with `suffix` spliced in immediately BEFORE the
+    ".dyntok.json" tail, so a snapshot at <base><suffix> is accompanied by
+    <base><suffix>.dyntok.json. suffix="" is the ordinary periodic/final save and writes the wire's
+    own value unchanged. THE READ SIDE THEN NEEDS NO EDIT AT ALL: d_vocab_read_path is
+    CKPT.resume + ".dyntok.json" and CKPT.resume names the snapshot the operator is resuming FROM,
+    suffix included -- so the two sides meet exactly.
+    THE ".dyntok.json" TAIL IS NOW NAMED IN THREE PLACES AND THEY MOVE TOGETHER: the two couplings
+    in spine/assemble.py (which already state it twice, once per direction) and this splice. The
+    considered alternative -- have the couplings carry CKPT.dir/CKPT.resume as bare bases and let
+    TOK own the extension -- puts the rule in one home but leaves two wires named `..._path`
+    carrying something that is not a path, changes both wires' resolved values (and the hand-computed
+    fixtures in tests/test_assemble.py and tests/test_couplings.py that pin them), and buys nothing
+    the splice does not. Splicing generically (before the LAST dot, or via splitext) is NOT
+    equivalent and must not be written: the tail has two dots, so splitext yields
+    <base>.dyntok.best3.json while the read side looks for <base>.best3.dyntok.json.
+    THE OTHER OPTION IS NOT TAKEN AND THE REASON IS RECORDED: moving the merges into payload["TOK"]
+    would make the snapshot self-contained (which ckpt/api.py:96-99 already claims), but
+    build_vocabulary's merge source is the FILE (tok/api.py:50-56) and the payload is not one of
+    its arguments, so it costs either a second signature change (build_vocabulary gains `saved=`)
+    or re-chartering restore_vocab from "refuse on mismatch" to "install the match table" -- which
+    throws away a full corpus build and leaves bytes_per_token measured on a vocabulary that was
+    then replaced -- and it strands d_vocab_read_path, half of a promote the census made on
+    purpose. If the owner rules that a checkpoint plus a sidecar is one artifact too many, that
+    ruling overrides this one and the full cost above is what it costs.
+
+    RECEIVES: suffix <- the same value the root hands CKPT.save on this save, on the C rows.
     RETURNS: str path, or None.
 
     LEVERS READ: none
     WIRES READ: d_vocab_save_path
-    DID IT FIRE: tok.vocab_saved
+    DID IT FIRE: tok.vocab_saved, tok.vocab_saved_suffixed (a snapshot-suffixed write; 0 means no
+                 bestN save has happened, which at CKPT.best_keep=0 is "unreachable" and must say
+                 so rather than read 0)
     """
     tok = tok.owned_by("TOK")
     _ = tok.d_vocab_save_path                            # WIRE READ HERE -- this run's own file
@@ -306,7 +422,12 @@ def vocab_state(tok: Config, vocab):
     RETURNS: dict, handed to CKPT.save as part of the opaque payload.
 
     LEVERS READ: none
-    WIRES READ: d_cap_lift_period (reported beside tok.cap_lift; see FOR THE OWNER Q-CLOCK-1)
+    WIRES READ: d_cap_lift_period (reported beside tok.cap_lift. THE AUTHORITY ON "0 lifts --
+                never full, or never plateaued?" IS CAP.counters' block-reason histogram, in the
+                package that owns the valve and in the unit the valve compares; this line prints
+                the period and points there, and must not grow a second verdict of its own. See
+                FOR THE OWNER Q-CLOCK-1, MEASURABLE: this row retires when CAP.counters has a body
+                that renders that histogram, and not before)
     DID IT FIRE: tok.state_written
     """
     tok = tok.owned_by("TOK")

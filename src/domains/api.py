@@ -21,6 +21,16 @@ RECORD TYPES RETURNED (P4 defines them):
                the counters and the package RNG stream
   Assignment   did, boundary, spawned, reentered
   Plan         folds, deletions, live, merged, culled, folded, held, spared, emptied
+  PartitionCensus  what DOM.census returns, DECLARED HERE rather than left in that docstring's prose
+               (Q-MEM-11, RESOLVED 2026-09-02): live, n_live, created, capped, merged, culled,
+               folded, held, spared, emptied, boundaries, windows, per-domain visits/born/last/
+               radius, pooled_radius, comp_glob, collapsed_at, partition_off, and every part.n_*
+               counter. NAMED PartitionCensus AND NOT `Census` so a grep across packages stays
+               unambiguous against MEM's StoreCensus. THE FIELDS CARRY DOM'S OWN SPELLINGS: `live`
+               reaches MEM as `live_sources` and `n_live` reaches FAB as `live_domains`, and both
+               renames stay in spine/compose.py's `produces` column -- the same record feeding two
+               packages under two vocabularies is why "spell it as the consumer does" is not a
+               function and cannot be a rule.
 """
 from spine.lever import Config
 from spine import units as U
@@ -272,6 +282,8 @@ def prior(dom: Config, part, *, did):
 
 def census(dom: Config, part):
     """Everything the report, FAB and the spine need to know about the partition, in one call.
+
+    RETURNS PartitionCensus, declared in this module's RECORD TYPES RETURNED block (Q-MEM-11).
 
     Returns live (the list the spine passes to MEM as live_sources), n_live, created, capped,
     merged, culled, folded, held, spared, emptied, boundaries, windows, visits/born/last/radius per

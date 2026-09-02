@@ -35,15 +35,32 @@ WHY THESE ARE THE LEVERS, against the two goals and nothing else.
       nothing is training is nevertheless being erased. It is off by default and it is a lever precisely
       so that the erasure is a decision somebody made rather than AdamW's implicit 0.01.
 
-CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "OPT"): 14 rows.
+CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "OPT"): 14 rows + 1 AMENDMENT.
     10 keep + 2 rename             -> 12 levers declared below
      1 merge                       -> LR_EPOCHS folds into `lr_wavelength`, which is LR_STEPS's own row
      1 drop                        -> RECON_W, not declared (CENSUS.md:241)
      0 promote-to-wire
-   12 levers in total, from 14 rows. CENSUS.md:38 says "OPT 14" because it counts ROWS assigned to this
-   package, not declarations that survive them. The two that do not become declarations are named above
-   rather than subtracted silently, so a reader who counts twelve against a table that says fourteen
-   does not have to re-derive which two went where.
+     1 amend                       -> OPT_GRAD_CLIP, minted 2026-09-02, NO ANCESTOR KNOB
+   13 levers in total, from 14 old-tree rows plus one amendment. CENSUS.md:38 says "OPT 14" because it
+   counts ROWS assigned to this package, not declarations that survive them, and the amendment does NOT
+   move that figure -- the 328 and every per-package total in CENSUS.md count knobs the old system had,
+   and this is not one. The two rows that do not become declarations are named above rather than
+   subtracted silently, so a reader who counts thirteen against a table that says fourteen does not have
+   to re-derive which two went where and where the thirteenth came from.
+
+⚠ THIS PACKAGE HOLDS ONE OF THE TREE'S TWO CENSUS AMENDMENTS. `grad_clip` is declared in section 1
+below with its full reason; `.rework/CENSUS.md` gained an `amendments` section and
+`.rework/census.json` an `amendments` group in the same edit, and `tests/test_census.py` N1 was widened
+to check `amend` rows so that deleting the lever fails a check instead of leaving an orphan row.
+
+THE OTHER IS `MEM_JUDGE_FRAC`, and this paragraph said "the tree's ONLY census amendment" while it
+existed -- both were minted on 2026-09-02, by different slices of the same run, neither knowing about
+the other. Worse than the wrong word: both were written with `old_name` = "(none -- amendment, not an
+old-tree knob)", which is a true sentence and a DUPLICATE KEY. `DEPARTURES` is keyed by
+(family, old_name) and N3 builds a dict from it, so N3's lookup kept MEM_JUDGE_FRAC and dropped this
+one entirely -- a departure declared against OPT_GRAD_CLIP would have read "no census row with this
+identity" while the row sat in census.json. Each amendment now carries "(amendment: <NAME>)", and
+tests/test_census.py N6 refuses a duplicate identity outright.
 
 ONE ROW THAT LOOKS LIKE ANOTHER PACKAGE'S AND IS FILED HERE. RECON_W arrives from the `memory` family
 (CENSUS.md:241) and is DROPPED, so it declares nothing -- but the reason it was filed to OPT at all is
@@ -297,6 +314,49 @@ class OPTLevers(LeverSet):
     # either file alone.
     # READ AT :1420, ALIASED TO `WD` AT :4329 and passed to both AdamW instances. The alias is exactly
     # the shape L1 removes: one number, two names, and the audit could see only the first.
+
+    grad_clip = Lever(0.0, "Global gradient-norm clip applied to the BASE parameter group before "
+                           "each optimizer step. 0.0 is OFF, which is what every recorded number "
+                           "in this project was measured under.", U.FRACTION)
+    # CENSUS AMENDMENT, 2026-09-02, AND IT IS THE ONLY ONE IN THIS FILE. There is no old-tree knob
+    # behind this lever: `grep -c clip self_organize.py` returns 2 and both are prose about the
+    # forgetting measure F (:920, :5203). Across self_organize.py, memory.py, tokenizer.py,
+    # vocab.py, datastream.py and world_model.py there is no clip_grad_norm_, no clip_grad_value_
+    # and no manual norm clamp. So this knob has NO CENSUS ANCESTOR, there is no (family, old_name)
+    # key a DEPARTURES entry could be written under, and N2 would report it as a lever whose reason
+    # for existing is written nowhere. It is accounted for by an AMENDMENTS group in
+    # .rework/census.json and a matching section in .rework/CENSUS.md -- which is the ONLY legal way
+    # to add a genuinely new lever here, and it is an owner-visible act, not a package edit. The 328
+    # figure the census claims is UNCHANGED: an amendment is not a knob the old tree had.
+    # WHY IT EXISTS AT ALL, stated as the question it keeps open rather than as a preference. OPT is
+    # the leading standing hypothesis for GOAL A: all 17 pilots bottom at ~2.4 bits/byte around step
+    # 6000 and rise to 3.8-4.1 by 48,000, across every arm, so the cause is common to all of them.
+    # The header names TWO unmeasured explanations for that shape -- a constant 2e-3 on AdamW for
+    # 48k steps, which lr_sched="none" ablates in one flag, and gradients large enough that the
+    # steps overshoot, which NOTHING in this tree could ablate because there was no clip anywhere.
+    # One hypothesis had a switch and the other did not, which is not a fair comparison; this is the
+    # second switch. The literature is unambiguous that global-norm clipping at max_norm=1.0 is the
+    # near-universal default in transformer/LM recipes (HuggingFace Transformers, PyTorch Lightning,
+    # DeepSpeed all default to it; clip-by-norm is preferred over clip-by-value because it preserves
+    # direction and rescales magnitude only).
+    # THE DEFAULT IS 0.0 = OFF AND THAT IS DELIBERATE, NOT TIMID. Turning the standard remedy on by
+    # default would take every future number under a different confound and would replace, rather
+    # than remove, the confound this question exists to disentangle -- and it would silently move
+    # every recorded result off its measured configuration. Off costs nothing and keeps both arms
+    # reachable from the environment, which is what makes this a MEASURABLE question rather than a
+    # decided one. docs/04_CONTRACT.md, Q-OPT-3, states the run that retires it.
+    # IT IS NOT ARMED-BUT-INERT PADDING, and the difference is checkable. It has a reader
+    # (OPT.maybe_step, step 5, between the gradient's last use and the zero_grad), a stated default,
+    # its own DID IT FIRE counters (opt.clip.applied against opt.clip.armed_no_clip -- clipping on
+    # and NOTHING exceeded the norm is a different statement from clipping off, and the report must
+    # make both), a startup refusal on a negative max-norm, and a Gate on OPT.build that prints
+    # "off (0.0)" rather than omitting the line.
+    # SCOPE IS THE BASE GROUP, FOR THE SAME REASON THE NORM MEASUREMENT IS. The encoder's gradients
+    # at flush time are SIG's, produced on SIG's cadence and stepped by SIG (Q-OPT-6), so folding
+    # them into one clipped norm would silently couple two schedules.
+    # UNIT IS THE SAME KNOWN MISLABEL AS `lr`, and for the same reason: units.py has no RATE or
+    # MAGNITUDE constant, a max-norm is not a fraction OF anything, and adding one is a SPINE edit
+    # this file has no standing to make. Recorded here so the word is not read as a claim.
 
     # ==============================================================================================
     # 2. THE SHAPE OF THE RATE OVER TIME

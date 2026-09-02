@@ -82,13 +82,28 @@ def build_model(lm: Config, geom, *, device, seed):
     `p = torch.arange(L).clamp(max=s.maxlen - 1)` against a hardcoded MAXLEN=512, so every position
     past 511 shared ONE embedding with no error and no report line. encode() raises instead.
 
-    DROPOUT REACHES BOTH ARMS. On the gru arm it is the embedding dropout, the inter-layer dropout
-    at depth > 1, AND the dropout on the returned hidden state (:1556-1558 -- three sites, of which
-    the lever's help text names two, and the third is the memory-key source). On the transformer
-    arm it is passed to nn.TransformerEncoderLayer(dropout=...), which the old tree HARDCODED to
-    0.0 at :1567, so LM_DROPOUT was 100% inert on MODEL=transformer while the report at :7990 told
-    the operator to raise it. This CHANGES numbers on the transformer arm the instant anyone sets
-    dropout > 0; at the 0.0 default nothing moves, and it belongs on P9's list.
+    DROPOUT REACHES BOTH ARMS, AND THE READOUT SITE IS IN decode(), NOT ON encode()'S RETURN.
+    Q-LM-9 RESOLVED (b), 2026-09-02. The old gru arm had THREE dropout sites in two lines --
+    `s.drop = nn.Dropout(DROPOUT)`; `h, _ = s.gru(s.drop(_e))`; `return s.drop(h)` (:1556-1558) --
+    and the source's own comment on the third is `(B,L,D) hidden -- also the memory-key source`. It
+    is: compose.py binds key_fn to LM.encode, so at dropout > 0 with the module in train mode EVERY
+    memory key written during the loop is computed through a dropped-out hidden, while at eval the
+    same function returns the undropped one. The store goal B is measured on would then be queried
+    with keys drawn from a different distribution than the ones it holds, and FAB's router would see
+    a different input in train and eval. The three sites this arm now has are: the embedding
+    dropout, the inter-layer dropout at depth > 1, and the READOUT dropout, applied inside decode()
+    before the head. Arithmetically that is the old `head(drop(h))` exactly -- nothing about the
+    LM's own regularisation changes -- and it makes the key path train/eval consistent
+    STRUCTURALLY rather than by convention, so ISSUES.md:441 (holdout_bpb's finally block returning
+    the model to TRAIN unconditionally) can no longer corrupt the store: the key path has no
+    dropout left to leave switched on. On the transformer arm dropout is passed to
+    nn.TransformerEncoderLayer(dropout=...), which the old tree HARDCODED to 0.0 at :1567, so
+    LM_DROPOUT was 100% inert on MODEL=transformer while the report at :7990 told the operator to
+    raise it -- and the readout site in decode() now reaches that arm too, which the old
+    TinyTransformer (`forward`: `head(s.encode(x))`, no drop) did not have. Both are the same
+    decision and the same P9 entry: this CHANGES numbers on the transformer arm the instant anyone
+    sets dropout > 0, and at dropout > 0 on either arm FAB's routing input and MEM's keys change.
+    AT THE 0.0 DEFAULT NOTHING MOVES AT ALL, on either arm.
 
     Seeding: calls spine.rng.rng_for("lm", seed) and initialises every tensor from that one stream,
     so LM's initialisation cannot be reordered by another package's draws.
@@ -111,8 +126,71 @@ def build_model(lm: Config, geom, *, device, seed):
         "docs/04_CONTRACT.md, section LM.")
 
 
+def embed(lm: Config, model, x):
+    """(B, L) token ids -> (B, L, width) TOKEN VECTORS. The lowest layer, and nothing else.
+
+    ADDED 2026-09-02 (Q-LM-12 RESOLVED (b)). LOUD: THIS IS AN ADDITION TO THE FROZEN SIGNATURE SET,
+    122 -> 123. The count lives in docs/04_CONTRACT.md section 7's header; the second addition this
+    week, after LM.residual_ratios took it 121 -> 122 (Q-TOK-11).
+
+    It is the token vector table applied to the ids: the ByteComposer's composed table under
+    `lm.compose`, and `emb.weight` otherwise. It is NOT encode(): no GRU, no attention block, and --
+    on the transformer arm -- NO POSITIONAL TERM. It carries no dropout.
+
+    WHY IT HAD TO BE AN ENTRY POINT RATHER THAN AN ARGUMENT VALUE OR A ROOT-SIDE EXPRESSION.
+    WORLD.loss_terms and WORLD.forecast both take `obs_emb`, documented as "LM's EMBEDDING of the
+    batch ... the lowest layer, the point where a new sense plugs in", and nothing produced it.
+    Three candidate producers were refused, each on evidence:
+      * `encode(..., n_layers=0)`. Refused on BOTH arms. encode's own docstring says n_layers "runs
+        only the first n blocks ON THE TRANSFORMER ARM ... on the gru arm it is accepted and
+        ignored, and that is a DECLARED GATE" -- so on the shipped gru arm n_layers=0 returns the
+        full GRU hidden, which is exactly what obs_emb must not be. And on the transformer arm zero
+        blocks is `s.emb(x) + s.pos(p)` (:1587), embedding PLUS positional, which is not what the
+        old world encoder received either: :6813 passes `model.emb(x)` alone.
+      * The root reaching for `model.emb`. This is what ROW_ARGUMENTS_ELSEWHERE said until this
+        edit, and it is an AttributeError on every run with `lm.compose = 1`: build_model above
+        states that under compose `emb` and `head` "are NOT constructed at all". The old tree hid
+        that -- MiniLM always built `s.emb` and merely used the composed table instead (:1549-1558)
+        -- so `world_enc(model.emb(x))` did not crash at TOK_COMPOSE=1; it fed the world model an
+        embedding table the LM was not training. TOK_COMPOSE defaulted to 0, so no recorded run hit
+        it. It also puts an LM-internal attribute name in the composition root, which K7 cannot see
+        because it checks Config reads and `model` is not a Config.
+      * WORLD taking the hidden instead. That would falsify world/api.py's structural claim that
+        "a second sense needs new rows in LM's embedding and nothing new here" -- goal A's room for
+        more modalities -- and would make the world model predict the dynamics of a GRU state under
+        the name of observations.
+    Only LM knows which of the two tables is live, which is why this is LM's entry point and not an
+    expression anywhere else.
+
+    RECEIVES: x <- the flush's batch, cut from Segmentation.ids at _flush_bounds by the loop.
+    RETURNS: (B, L, width) float tensor.
+
+    LEVERS READ: compose (which table), width (the returned last dimension)
+    WIRES READ: none
+    DID IT FIRE: lm.embed.calls, lm.embed.from_composed_table (vs lm.embed.from_emb_weight --
+                 exactly one is nonzero on a run, and which one is a fact the report must state
+                 because it is the difference between the world model observing the table the LM
+                 trains and observing one it does not)
+    """
+    lm = lm.owned_by("LM")
+    raise NotImplementedError(
+        "LM.embed: P4 (lm) fills this in. The contract is frozen here; see "
+        "docs/04_CONTRACT.md, section LM.")
+
+
 def encode(lm: Config, model, x, *, n_layers=None, extra=None):
-    """(B, L) token ids -> (B, L, width) hidden. The memory-key source and the fabric's input.
+    """(B, L) token ids -> (B, L, width) hidden, UNDROPPED. The memory-key source and the fabric's
+    input.
+
+    THE RETURN CARRIES NO DROPOUT, and that is the whole of Q-LM-9 (RESOLVED (b), 2026-09-02).
+    `encode` returns the REPRESENTATION; `decode` performs the REGULARISED READOUT. Three packages
+    consume this value -- MEM stores it as keys through key_fn, FAB routes on it, LM decodes it --
+    and a value three packages consume must not carry one consumer's regulariser. The property that
+    buys is that the memory keys are train/eval consistent by construction rather than by whoever
+    last set the module's mode: `nn.Dropout` is identity in eval, so under the old shape the store
+    held dropped-out keys and was queried with undropped ones at dropout > 0. There is no
+    `for_key=` keyword and there must not be one -- a second path flag beside `n_layers`, which one
+    arm already ignores, is how KEY_LAYERS became "silently inert twice over" (CENSUS.md:250).
 
     RAISES, DOES NOT CLAMP, when L > d_pos_max, naming LM_CTX and the actual L. That refusal is the
     whole point of the d_pos_max wire: `grep -rn d_ src/` finds the height and lever.py will not
@@ -146,7 +224,17 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
 
 
 def decode(lm: Config, model, h, *, live_vocab, retired_ids):
-    """(B, L, width) hidden -> (B, L, vocab_slots) logits. THE ONLY PLACE LOGITS ARE PRODUCED.
+    """(B, L, width) hidden -> (B, L, vocab_slots) logits. THE ONLY PLACE LOGITS ARE PRODUCED,
+    AND THE ONLY PLACE THE READOUT DROPOUT IS APPLIED.
+
+    THE READOUT DROPOUT LIVES HERE (Q-LM-9, 2026-09-02): `head(drop(h))`, which is arithmetically
+    the old gru arm's `forward` (:1559-1561, where `encode` had already applied `s.drop` to its
+    return and `forward` fed that to the head). It moved out of encode()'s return because that
+    return is also the memory-key source and the fabric's input, and this function is already
+    declared THE readout. On the transformer arm this site is new -- the old TinyTransformer's
+    forward was `head(s.encode(x))` with no readout dropout at all -- which is the same P9 entry as
+    the arm's other dropout sites: inert at the 0.0 default, a changed number the instant anyone
+    raises it, and stated rather than discovered.
 
     Under compose it is `h @ table.t() + bias` from the tied composed table; otherwise the head
     Linear. Then mask_dead_rows is applied HERE, once, so training and every eval path share one
@@ -165,7 +253,10 @@ def decode(lm: Config, model, h, *, live_vocab, retired_ids):
     retired and sailed straight through a suffix-only mask, :3982-3987). The mask is cached on
     (live_vocab, len(retired_ids)); both only ever grow.
 
-    LEVERS READ: mask_dead_rows, vocab_slots, compose
+    LEVERS READ: mask_dead_rows, vocab_slots, compose -- NOT `dropout`. The readout dropout is the
+                 nn.Dropout MODULE build_model constructed from geom; this function applies it, it
+                 does not re-read the probability. A second read here would be a second declaration
+                 of one number, which is what L1 exists to stop.
     WIRES READ: none
     DID IT FIRE: lm.decode.calls, lm.mask.applied, lm.mask.rows_masked (the count, so the dead
                  fraction is a number the report prints rather than infers), lm.mask.armed_no_rows
@@ -271,6 +362,52 @@ def on_mint(lm: Config, model, mints, id2bytes, *, at_window, sig_emb=None):
     lm = lm.owned_by("LM")
     raise NotImplementedError(
         "LM.on_mint: P4 (lm) fills this in. The contract is frozen here; see "
+        "docs/04_CONTRACT.md, section LM.")
+
+
+def residual_ratios(lm: Config, model):
+    """LM's JUDGEMENT-TIME read of how far each composed row has moved from its byte composite:
+    ||delta[t]|| / ||composite[t]||, per live vocabulary slot. A PURE READ -- no grad, no side
+    effect, no mutation of the composer -- returned as a (vocab_slots,) float vector, or None when
+    lm.compose is False.
+
+    WHY THIS ENTRY POINT EXISTS, AND IT IS A LOUD ONE: THE FROZEN SET GREW BY ONE HERE (121 -> 122,
+    Q-TOK-11, ruled 2026-09-02). TOK.judge_probation's "embed" arm keeps a token iff `earned AND
+    residual_ratio[t] >= tok.probation_residual`, and it used to source that vector from
+    MintReport.residual_ratio -- produced by LM.on_mint AT THE MOMENT THE ROW IS CREATED, when the
+    free residual starts at zero under every new_row_init arm. The comparison therefore fails for
+    every candidate and the arm retires 100% of them: an arm that is wrong BY CONSTRUCTION rather
+    than by tuning. The old tree gets this right and says why (self_organize.py:7600-7605): it
+    recomputes from model.compose.table() and .delta at judgement time, because "the embedding test
+    still requires the token to have been TRAINED -- a residual that is near zero because the token
+    was never seen says nothing about the merge".
+
+    IT IS NOT NEW MACHINERY, WHICH IS WHY IT IS CHEAP: LM.anchor_term already computes this exact
+    quantity every flush ("holds a newly minted token's residual near its byte composite"). What was
+    missing was an entry point that RETURNS the read. None of the other ten does -- counters()
+    returns {name: int}, not a per-token float vector -- so the value had no producer at all.
+    A wire is structurally impossible: it is read off a live tensor after build() freezes, which is
+    the same ground that refuses EVAL.d_holdout_bytes and the SIG width. It reaches TOK as an
+    ARGUMENT the composition root assembles, crossing no import -- the idiom MEM.write(key_fn=...)
+    and DOM.rekey(encode=...) already use.
+
+    THE GATE STAYS, ALONGSIDE, AND IS NOT AN ALTERNATIVE TO THIS CALL. At lm.compose = False there
+    is no composer and no residual to read, so this returns None and TOK's Gate must print
+    "unreachable (no residual_ratio supplied)" rather than silently running the "use" test -- which
+    is ISSUES M41, the record of the embed arm running the use test while the banner said embed.
+
+    RETURNS: a (vocab_slots,) float vector indexed exactly as TOK's `appearances` is, or None.
+
+    LEVERS READ: compose, vocab_slots
+    WIRES READ: none
+    DID IT FIRE: lm.residual_read (calls that returned a vector), lm.residual_rows (live slots read
+                 -- 0 with a non-None return means the vocabulary has no composed rows yet, which is
+                 a different statement from "compose is off"), Gate lm.residual_unreachable
+                 (compose off -- printed with its predicate, never as silence)
+    """
+    lm = lm.owned_by("LM")
+    raise NotImplementedError(
+        "LM.residual_ratios: P4 (lm) fills this in. The contract is frozen here; see "
         "docs/04_CONTRACT.md, section LM.")
 
 

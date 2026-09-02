@@ -62,9 +62,18 @@ NEITHER WIRE EXISTS YET, AND SAYING SO IS PART OF THE HAND-OFF. spine/assemble.p
 couplings and not one of them has a SIG destination (grep `dst=`), so a SIG Config built today has
 18 levers and zero wired fields. Reading `cfg.d_signature_width_bytes` raises. The width is listed in
 assemble.py's NOT_WIRES on purpose -- bytes_per_token is MEASURED after Config freezes, so it is a
-derive-and-keep rather than a build-time wire -- but the four fields this file's comments name
-(`d_signature_width_bytes`, `d_positive_radius_bytes`, `d_last_boundary`, `d_prototype_reservoir`)
-are the port's remaining work, and they are named at the declarations that need them.
+derive-and-keep rather than a build-time wire -- but the three fields this file's comments name
+(`d_signature_width_bytes`, `d_positive_radius_bytes`, `d_last_boundary`) are the port's remaining
+work, and they are named at the declarations that need them.
+THERE WAS A FOURTH IN THIS LIST AND IT WAS ILLEGAL (Q-SIG-1, corrected 2026-09-02).
+`d_prototype_reservoir` CANNOT EXIST IN ANY FORM: a Coupling.compute sees only frozen Configs, and a
+reservoir is a list of stream windows the loop assigned at RUNTIME -- the same class the
+`("encoder","SIG_WIN")` departure refuses `d_signature_width_bytes` for, one step further out.
+docs/04_CONTRACT.md's refused-wires table has said so; this file went on naming it as owed work, and
+the contract calls `grep -rn d_ src/` a complete coupling index, so two comments were putting a
+non-coupling into it. They survived because O4 and K5 are AST checks over code and a `d_` name in a
+comment is invisible to both. The reservoir's supplier, if one ever lands, is a DOM ENTRY POINT
+returning pairs on the per-window call path -- an argument, not a wire.
 
 -------------------------------------------------------------------------------------------------
 THE THREE CENSUS DEFECTS REPAIRED HERE
@@ -311,9 +320,26 @@ class SIGLevers(LeverSet):
     # OFF BY DEFAULT FOR A STATED HAZARD, NOT BY NEGLECT, and the distinction decides whether it is
     # allowed to survive: the assembler's partition would be training the encoder that produces the
     # partition, which is a feedback loop, bounded here by only using a fraction of the batch. This
-    # is the ONE encoder lever that reads DOM state (asm.cent / asm.wins), so under L2 the reservoir
-    # arrives as `d_prototype_reservoir` and the SIG -> DOM -> SIG loop appears in the printed
-    # coupling graph instead of hiding in a function argument.
+    # is the ONE encoder lever that reads DOM state (asm.cent / asm.wins).
+    # HOW THAT STATE ARRIVES IS SETTLED AND IT IS NOT A WIRE (Q-SIG-1, RESOLVED 2026-09-02). This
+    # comment used to say "under L2 the reservoir arrives as `d_prototype_reservoir`". It cannot: a
+    # reservoir is runtime state and a coupling's compute sees only frozen Configs. It arrives as
+    # SIG.train_step's `reservoir` ARGUMENT, whose default is None -- which is why the frozen
+    # signature already permits a supplier to land later at zero cost to SIG.
+    # AND THERE IS NO SUPPLIER TODAY, SO THE ARM IS UNREACHABLE AND SAYS SO. DOM has ten entry
+    # points and not one returns reservoir windows (DOM.census returns radii, counts, comp_glob,
+    # collapsed_at and the rest); the LOOP_ORDER row for train_step supplies stream, seen_units and
+    # opt and nothing else, so `reservoir` is None on every call the root makes. sig.prototype_pairs
+    # therefore reads `unreachable (no DOM supplier)` with prototype_frac > 0, NEVER "armed but 0".
+    # The two routes that were refused, and why, so neither is re-proposed: carrying the reservoir
+    # on DOM.census puts a PER-WINDOW training input on the 100-Windows management cadence, where
+    # pairs up to 100 windows stale still look like pairs and the arm would report as FIRING while
+    # training the encoder on a partition that has since moved; and the root slicing `part.reservoir`
+    # itself is refused by O10, with the precedent written one question over for FAB.contribution's
+    # `candidates` ("no entry point exports it and O10 forbids the root reaching into pop").
+    # WHAT WOULD SUPPLY IT: DOM.reservoir_pairs(dom, part, *, did, n, rng), a new frozen entry point
+    # drawing from DOM'S OWN named stream -- domains/api.py records that two draws in that package
+    # leaked to the global `random`, which makes draw order a coupling channel no wire declares.
     # DO NOT DROP IT AS INERT. It is the only declared answer to the defect the group header
     # describes -- locality invariance where the assembler is asking a kind question -- so dropping
     # it would leave the file's own diagnosis with no remedy attached.

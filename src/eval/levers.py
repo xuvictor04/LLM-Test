@@ -190,16 +190,41 @@ class EVALLevers(LeverSet):
     # adding an area damage what was already known".
     # THE DEFAULT IS A CANDIDATE TO RAISE AND THE RECORD SAYS SO: research_continual_memory.md:743-745
     # warns that the 2-sigma rule at n=32 will report "HELD (inside the noise)" for real effects of
-    # moderate size, and recommends 128-256 if a null result is going to be published as a claim. It is
-    # left at 32 because that is the literal the runs used; raising it is a decision for after G2 has
-    # measured this machine's noise floor, not a silent edit here.
+    # moderate size, and recommends 128-256 if a null result is going to be published as a claim.
+    # 32 STAYS (Q-EVAL-9, RESOLVED 2026-09-02) AND THE OLD REASON FOR IT IS WITHDRAWN. "It is left at
+    # 32 because that is the literal the runs used" is not a reason this project may give: PLAN's
+    # explicit non-goal is that the new tree will not reproduce rm-predict's numbers and must not be
+    # judged on it -- "agreement with them would be evidence of a bug faithfully carried forward".
+    # THE THREE REASONS THAT SURVIVE, in order of weight:
+    #  1. THE COMPARISON IS PAIRED, and EVAL.holdout_probe now pins it: each domain's window starts
+    #     are drawn ONCE from rng_for("eval.holdout." + domain_name, seed) and are identical at every
+    #     probe and across a resume, so the 2-sigma test runs on PAIRED per-window differences. On
+    #     the same windows the per-window difficulty term CANCELS. Window-to-window bpb spread in
+    #     text is order 0.3-0.5 b/B; the paired-difference spread is far smaller. n=32 PAIRED is a
+    #     materially stronger instrument than n=32 unpaired, and the research doc's warning is
+    #     calibrated for the unpaired case. Pin the pairing FIRST -- it is free -- then raise n.
+    #  2. G2 (tests/test_determinism.py) has not run against a trained system, so this machine's
+    #     noise floor is unmeasured and any new n would be as arbitrary as the old one.
+    #  3. THE DOMINANT ERROR BAR IS NOT THIS ONE. PLAN 3.8 records a between-seed spread of
+    #     0.066-0.131 b/B, which exceeds every architectural difference this project has ever
+    #     claimed, and no comparison may be reported from fewer than two seeds. Raising this lever
+    #     tightens the within-run term 8x more expensively while leaving the larger term untouched.
+    # SIZE, STATED SO IT IS VISIBLE: 32 windows x LM.ctx=128 is about 7.6 kB of text per domain --
+    # smaller than one splice segment -- against a default run of 506-937 windows (ISSUES C11). If
+    # the owner raises DATA.stream_bytes, re-ask this question with the noise floor in hand.
+    # NOTHING MOVES ON P9: this number does not change.
     # TWO COUPLINGS THAT MUST NOT COME BACK. Before c76dc74, changing this 4 -> 16 moved 48 report lines
     # including a verdict SIGN FLIP, because build_stream() drew segment lengths from the same global RNG
     # the diagnostics drew from -- how much you measured decided what you trained on. And SAVE_CKPT gates
     # extra holdout_bpb passes, which once moved a same-seed result by 1.594 b/B. The first is fixed by a
     # separately named eval RNG stream; the second must be declared as a wire or removed.
     # KEYED BY DOMAIN NAME, not by index, so adding a domain does not shift the comparison. That property
-    # is part of the lever's meaning and has to survive the port.
+    # is part of the lever's meaning and has to survive the port. AS OF 2026-09-02 IT IS KEYED BY NAME
+    # AT THE DRAW AND NOT ONLY AT THE REPORT (Q-EVAL-9), and the other half of the same property now
+    # holds upstream too: DATA draws each area's held-out block from its own "data.holdout.<area>"
+    # child rather than from one order-consumed stream (Q-DATA-6), so adding an area moves neither
+    # the held-out TEXT nor the windows drawn over it. Both halves are needed; either alone leaves
+    # the add-an-area comparison broken, which is the one run goal B rests on.
 
     null_draws = Lever(
         5, "Permutation draws used to build the null distribution every 2-sigma verdict is judged against.",
@@ -327,8 +352,13 @@ class EVALLevers(LeverSet):
     # no-eligible-expert line. The cost of that is on the record: setting RATE_EVERY=100000 to quieten
     # smoke runs SUPPRESSED THE CURVE TABLE ENTIRELY, so the curve fix went unverified on a live table for
     # a whole round -- every smoke run silently removed the table it existed to check. Here the
-    # MEASUREMENT cadence is this lever and the progress/ETA line and profiler dump take a separate
-    # RUN-owned log cadence, so quietening a log can no longer disable a measurement.
+    # MEASUREMENT cadence is this lever and the progress/ETA line and profiler dump take RUN's own
+    # FIXED CONSTANT -- train/api.py's PROGRESS_WINDOWS, 100 Windows, not a lever and with no
+    # environment name (Q-RUN-1, RESOLVED 2026-09-02) -- so quietening a log can no longer disable a
+    # measurement, and there is no log knob left to turn up. This comment said "a separate RUN-owned
+    # log CADENCE" while eval/api.py said "RUN's own fixed CONSTANT" and neither object existed; a
+    # cadence and a constant carry different obligations (a census row, an environment name, a
+    # ledger key), so it was a live fork and not a wording difference.
     # UNIT: Windows. The guard is `step % RATE_EVERY == 0` and `step` advances per WINDOW, not per
     # optimizer step, so this knob has always been denominated in Windows while its name and every
     # discussion of it said steps -- at BATCH_W > 1 the cadence a reader sets is not the cadence they get.

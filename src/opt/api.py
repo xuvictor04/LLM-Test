@@ -46,22 +46,51 @@ batch_windows alone would give Flushes and is a different function, flush_period
 purpose.
 
 RECORD TYPES RETURNED (P4 defines them):
-  OptState     both AdamW instances, n_backward (Backwards), opt_step (Steps), lr_prev,
-               restart_amp, cycle_best, cycle_index, horizon, counters
+  OptState     base (the AdamW over param_groups["base"]), encoder (the AdamW over
+               param_groups["encoder"]) -- THE TWO FIELDS ARE NAMED, AS OF 2026-09-02, Q-OPT-7:
+               this line said "both AdamW instances" and named neither, so SIG.warm_up and
+               SIG.train_step were handed the whole state with no expression for "the encoder one",
+               and WORLD.manage's `add_param_group` deferral cited the identical hole. One
+               vocabulary, and the words are build()'s own param_groups keys. K11 resolves a
+               `produces` token against this block, so `encoder` is now a CHECKABLE provenance
+               token rather than a comment;
+               n_backward (Backwards), opt_step (Steps), lr_prev, restart_amp, cycle_best,
+               cycle_index, horizon, param_group_shape, counters
   Horizon      run_steps, warmup, wavelength, n_cycles
   StepOutcome  stepped, lr, restart, damped
   LoadReport   restored, refused, reason
+
+`param_group_shape` IS IN THAT LIST BECAUSE load_state REFUSES ON IT (Q-OPT-4). state_dict wrote
+every other field and not that one, so ISSUES L50's refusal -- the one thing standing between a
+resume and AdamW moments attached positionally to the wrong tensors -- compared against a value
+nothing produced. An untrippable guard reads exactly like a guard that never had to fire.
 """
 from spine.lever import Config
 from spine import derive
 
 
-def build(opt: Config, *, param_groups, run_windows, resume=None):
+def build(opt: Config, *, param_groups, run_windows):
     """Construct both optimizers, resolve the schedule horizon, and refuse the illegal settings.
     Returns an OptState.
 
+    THERE IS NO `resume` PARAMETER, AS OF 2026-09-02 (Q-OPT-4, and A FROZEN SIGNATURE MOVED). It
+    used to take `resume=None` and the root passed Snapshot.payload into it AND into load_state --
+    one object, two entry points, adjacent rows. The overlap could not be resolved by documenting
+    it, because the work the parameter would do does not exist: the live param-group structure is
+    fully determined BEFORE this call (spine/compose.py restores LM, FAB and WORLD "STRICTLY BEFORE
+    OPT.build", and the root assembles param_groups from those already-restored objects), so the
+    checkpoint's influence on group shape arrives through the module restores, not through OPT.
+    A second restore path would also move optimizer state past opt.ckpt.loaded / opt.ckpt.refused,
+    which live on load_state -- counters describing one path while the state travels another.
+    OPT.load_state IS THE WHOLE RESTORE PATH. The CAP analogue argues the same way and not the
+    other: new_valve(restored=) takes the LIFTED CAP ALONE because Valve.origin must record where
+    the starting cap came from, a fact the constructor cannot get any other way. build() has no
+    equivalent fact.
+
     param_groups is {"base": [...Parameter], "encoder": [...Parameter]} -- plain lists another
-    package's constructor returned. OPT DOES NOT WALK ANYBODY'S MODULE TREE and does not know what
+    package's constructor returned. THOSE TWO KEYS ARE THE OptState FIELD NAMES (Q-OPT-7): the
+    optimizer built over param_groups["encoder"] is st.encoder, which is what the root hands
+    SIG.warm_up and SIG.train_step, and what WORLD.manage's add_param_group addresses. OPT DOES NOT WALK ANYBODY'S MODULE TREE and does not know what
     an encoder is; it knows that both get lr=opt.lr, weight_decay=opt.weight_decay (:4748/:4750)
     and that both get their param_groups' lr rewritten on every step. The old alias
     `WD = WEIGHT_DECAY` at :4329 -- one number, two names, the audit seeing only the first -- has
@@ -94,19 +123,29 @@ def build(opt: Config, *, param_groups, run_windows, resume=None):
         which is where a typo hides; batch_windows < 1 already raises UnitError in
         derive.flush_period_windows, and this one must not be quieter than that one.
       * batch_windows < 1, for the same reason and because build() divides by it.
+      * grad_clip < 0.0. Zero is OFF and is the shipped default; a negative max-norm is a typo that
+        would clip every step to nothing.
+
+    IT ALSO RECORDS param_group_shape ON THE OptState, because load_state refuses against it and
+    state_dict has to be able to write it. The shape is whatever P4 makes it -- the group order and
+    each group's tensor count and shapes -- but it must be computed HERE, from the live groups,
+    since that is the only moment the "live" side of load_state's comparison exists.
 
     RECEIVES: run_windows <- RUN/DATA, resolved once after the stream and the tokenizer exist. It
     CANNOT be a build-time Coupling: the stream length in windows depends on the tokenization,
     which has not happened when build() freezes -- the same rejection assemble.NOT_WIRES gives the
-    SIG width, and a DIFFERENT one from the RUN.epochs -> d_lr_horizon rejection. See FOR THE OWNER
-    Q-OPT-1.
+    SIG width, and a DIFFERENT one from the RUN.epochs -> d_lr_horizon rejection. Both grounds are
+    now rows in that table rather than prose here and in the contract (Q-OPT-1, RESOLVED).
 
     LEVERS READ: lr, weight_decay, lr_warmup, lr_wavelength, lr_restarts, lr_restart_damp,
-                 lr_decay, lr_min_frac, lr_sched, accum, batch_windows
+                 lr_decay, lr_min_frac, lr_sched, accum, batch_windows, grad_clip
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: opt.build.calls (exactly 1), opt.build.wavelength_from_sentinel,
                  opt.build.warmup_clamped (with both numbers), opt.build.cycles_fitted (n_cycles --
-                 "armed" for a restart means > 1, NOT lr_restarts == 1)
+                 "armed" for a restart means > 1, NOT lr_restarts == 1),
+                 Gate opt.build.grad_clip -- "off (0.0)" or the resolved max-norm, printed either
+                 way, because "no clipping" is a run-level fact the report must state rather than
+                 leave to be inferred from a missing line
     """
     opt = opt.owned_by("OPT")
     _ = opt.d_effective_batch_windows            # WIRE READ HERE -- the horizon's divisor
@@ -209,12 +248,47 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
          is measured: best 2.030 @ 252,000, restarts at 263,965 / 504,894 / 756,851, final 2.848 --
          81% of the run spent getting worse, the same losing bet re-taken three times at full
          amplitude;
-      5. write `lr` into EVERY param group of BOTH optimizers, then step and zero_grad both.
-         Writing it UNCONDITIONALLY is what kills ISSUES H15: `_lrv` is assigned only inside
+      5. write `lr` into EVERY param group of BOTH optimizers -- st.base and st.encoder -- then
+         READ THE GRADIENT NORM, CLIP IF ASKED, and step and zero_grad THE BASE OPTIMIZER ONLY.
+         Writing the rate UNCONDITIONALLY is what kills ISSUES H15: `_lrv` is assigned only inside
          `if LR_SCHED != "none"` (:7094) and read unconditionally by the per-expert path (:7195),
          so LR_SCHED="none" with FAB_LR_OWN=1 dies with a NameError on the FIRST flush. Here the
          rate always exists and always leaves this package AS A RETURN VALUE, never as a local
          another package reads.
+
+         THE ENCODER IS NOT STEPPED HERE, AND THAT IS Q-OPT-6 RESOLVED (a), 2026-09-02. This clause
+         said "step and zero_grad both" and it described something that never happened: in 9,859
+         lines of self_organize.py the encoder optimizer `oe` appears exactly twice -- :5372
+         (state_dict into the checkpoint) and :7154 (`for _g in oe.param_groups: _g["lr"] = _lrv`).
+         There is no oe.step() and no oe.zero_grad() anywhere; :7287 is `om.step(); om.zero_grad()`,
+         the base optimizer alone. The encoder was stepped only inside contrastive_step (:3401),
+         which is SIG's mechanism on SIG's cadence. Stepping it from here as well would step it
+         twice -- once by SIG.train_step on its Windows cadence and again by this flush gate -- and
+         would destroy three declared mechanisms: SIG's floor gate returns BEFORE touching the
+         optimizer when the InfoNCE loss is at the floor (:3399-3401; sig/api.py restates it as
+         "the step is SKIPPED, opt untouched"), so a step taken here gates nothing; and
+         sig.train_every, sig.train_every_idle and sig.dense_window -- plus the SIG.d_idle_cadence
+         wire computed from two of them -- would become armed-but-inert BY CONSTRUCTION, because a
+         package's cadence lever is only meaningful if that package's mechanism fires on it.
+         The lr WRITE still reaches both, so the encoder runs at the schedule's rate; only the
+         step and the zero_grad are the base optimizer's.
+
+         THE GRADIENT NORM IS TAKEN HERE BECAUSE IT CANNOT BE TAKEN ANYWHERE ELSE (Q-OPT-3). A
+         global grad norm can only be read while gradients EXIST -- after backward, before the
+         zero_grad on this line. OPT.counters used to claim it computed the norm; by the time
+         counters runs the grads are zero, so a P4 author following that docstring would have
+         reported 0.0 for the whole run with every check green. counters RENDERS the accumulated
+         quantiles; this is where they are read. SCOPE: THE BASE GROUP ONLY. The encoder's grads at
+         flush time belong to SIG's cadence and folding them into one number makes it
+         uninterpretable.
+
+         CLIPPING, WHEN opt.grad_clip > 0, HAPPENS ON THE SAME LINE AND IN THE SAME SCOPE: a global
+         max-norm over the base group's parameters, applied AFTER the norm is recorded and BEFORE
+         the step, so the reported p50/p99 are the norms the run actually produced rather than the
+         clipped ones -- an instrument that measures its own remedy answers nothing. Clip-by-norm,
+         never clip-by-value: it preserves gradient direction and rescales magnitude only.
+         opt.grad_clip DEFAULTS TO 0.0 = OFF, so nothing in any recorded result moves; see Q-OPT-3
+         in docs/04_CONTRACT.md for what measurement settles the default.
 
     RECEIVES: best_bpb <- EVAL, a Reading carrying (value, seed_count) or None; shift_at <- the
     composition root, the optimizer step of the last self-inflicted shift (epoch resample, retok,
@@ -223,11 +297,24 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     shift_at is supplied, lr_shift_warm has nothing to fire on and its counter reads "armed but 0"
     -- which is a DIFFERENT statement from lr_shift_warm == 0, and the report must make both.
 
-    LEVERS READ: accum, lr, lr_restart_damp, lr_sched (through lr_at), plus everything lr_at reads
+    LEVERS READ: accum, lr, lr_restart_damp, lr_sched (through lr_at), grad_clip, plus everything
+                 lr_at reads
     WIRES READ: none
-    DID IT FIRE: opt.step, opt.step.not_due, opt.restart.detected, opt.restart.damped,
-                 opt.restart.damp_refused_n1, opt.lr.writes (must equal opt.step, on BOTH
-                 optimizers), opt.shift.notifications (0 means nobody is supplying shift_at)
+    DID IT FIRE: opt.step (BASE optimizer steps -- the encoder's are sig.train_stepped and live in
+                 SIG), opt.step.not_due, opt.restart.detected, opt.restart.damped,
+                 opt.restart.damp_refused_n1,
+                 opt.lr.writes.base and opt.lr.writes.encoder (each must equal opt.step -- the
+                 rate is written to both optimizers on every step; the old single counter said
+                 "must equal opt.step, on BOTH optimizers" and could not distinguish a missing
+                 encoder write from a missing step),
+                 opt.encoder_steps_here (MUST BE 0 -- the regression counter for Q-OPT-6. A
+                 nonzero value is the double-step returning, and without a counter it returns
+                 silently because both call sites look correct in isolation),
+                 opt.grad_norm.p50 / opt.grad_norm.p99 (base group, read before zero_grad;
+                 rendered by counters),
+                 opt.clip.applied / opt.clip.armed_no_clip (grad_clip > 0 and no step exceeded it
+                 -- a DIFFERENT statement from grad_clip == 0, and the report must make both),
+                 opt.shift.notifications (0 means nobody is supplying shift_at)
     """
     opt = opt.owned_by("OPT")
     raise NotImplementedError(
@@ -252,14 +339,38 @@ def counters(opt: Config, st):
     fired in anger -- ISSUES.md:2029 files exactly this pair as the canonical "off by arithmetic,
     not armed and inert" case.
 
-    ALSO REPORTS the observed global gradient norm per optimizer step (opt.grad_norm.p50/p99). It
-    costs one torch.norm per step, needs no lever, and answers whether gradients were ever large
-    enough to matter -- the second, independent, unmeasured explanation for the same curve shape
-    that lr_sched exists to ablate. See FOR THE OWNER Q-OPT-3: there is NO gradient clipping
-    anywhere in self_organize.py (verified by exhaustive grep) and no census row for one.
+    RENDERS -- DOES NOT COMPUTE -- the observed global gradient norm (opt.grad_norm.p50/p99, base
+    group). THE DISTINCTION IS THE WHOLE OF Q-OPT-3'S FIRST HALF: this paragraph used to say it
+    reported the norm "per optimizer step", but maybe_step step 5 does the zero_grad, so a norm
+    read from here is a norm over freshly zeroed gradients -- 0.0 for the entire run, with every
+    check in this repository green. The quantiles are accumulated in maybe_step, between the
+    gradient's last use and the zero_grad, and this call prints them. A counter that answers "0"
+    while meaning "unreachable" is the exact distinction DID IT FIRE exists to preserve.
+
+    Beside them it prints the CLIP gate: opt.grad_clip, and opt.clip.applied against
+    opt.clip.armed_no_clip. There is NO gradient clipping anywhere in self_organize.py (verified by
+    exhaustive grep: two matches, both prose about the forgetting measure F), so 0.0 is the setting
+    every recorded number was taken under; see FOR THE OWNER Q-OPT-3 for the measurement that
+    settles whether it should stay there.
+
+    AND IT PRINTS THE HORIZON AGAINST THE RUN THAT ACTUALLY HAPPENED (Q-OPT-5). st.horizon.run_steps
+    was resolved ONCE at build() from epoch 0's measured length times RUN.epochs; minting merges
+    bytes into tokens, so len(Segmentation.ids) FALLS and every later epoch is SHORTER, which means
+    the observed total comes in BELOW the projection and the cosine does not complete -- the run
+    ends at a rate above lr x lr_min_frac. That is the same direction as the E8 p=0.760
+    under-annealing the once-resolved horizon was introduced to kill: the machinery changed and the
+    sign of the residual did not. THE MAGNITUDE IS UNMEASURED and this line is what measures it.
+    The comparison is between two units.Steps values and is therefore a subtraction, not a
+    UnitError: derive.opt_steps_from_windows(Windows(observed_windows), d_effective_batch_windows)
+    against st.horizon.run_steps, where the observed side is RunClock.counters()'s window total,
+    joined here by the composition root because neither package may read the other. The residual is
+    filed with its sign NAMED (under-anneal), not left as two numbers in two report sections.
+    Re-projecting the horizon mid-run is NOT the repair and is refused: it is `_project`/`_lr_total`
+    /`_proj_lr` (:6335-6376), which produced E8 p=0.760 and E18 p=0.730 and the H17 resume defect,
+    and it would require writing into a horizon resolved from a frozen Config.
 
     LEVERS READ: accum, batch_windows, lr_sched, lr_restarts, lr_decay, lr_shift_warm,
-                 weight_decay, lr_restart_damp
+                 weight_decay, lr_restart_damp, grad_clip
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: this call IS the DID IT FIRE surface for the package
     """
@@ -272,8 +383,14 @@ def counters(opt: Config, st):
 
 def state_dict(opt: Config, st):
     """Both optimizers' state, plus everything the closed loop needs to survive a run boundary:
-    opt_step, n_backward, lr_prev, restart_amp, cycle_best, cycle_index, the resolved horizon, and
-    the counters.
+    opt_step, n_backward, lr_prev, restart_amp, cycle_best, cycle_index, the resolved horizon,
+    param_group_shape, and the counters.
+
+    param_group_shape WAS MISSING FROM THIS ENUMERATION UNTIL 2026-09-02 (Q-OPT-4) AND load_state
+    REFUSES ON IT. A refusal armed against a value nothing writes is untrippable: the L50 guard --
+    the one thing that stops AdamW moments being reattached positionally to different tensors after
+    the population grew -- would have passed every resume by finding no shape to disagree with.
+    It is written here and computed in build(), from the live groups.
 
     The old checkpoint saved opt_m and opt_e (:5372) and NOTHING ELSE from this package, so
     _rst_amp, _cyc_best, _nrst, _ndamp, _ncyc and _lr_prev all reset on every resume: a schedule

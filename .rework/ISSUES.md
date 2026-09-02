@@ -105,7 +105,11 @@ Three counts were also wrong: the manifest is **16** fields, not 15 (`pos_max` a
 | `sig.mode` | a trained encoder against a frozen hashed-bigram modulus — same `d`, different object, and the signature is the router's only input |
 | `fab.emb_hid` | a real tensor dimension `FAB.load_state_dict` names in its `LEVERS READ` and compares **only** against the sidecar, which is `None` on every resume — so nothing checked it at either end |
 
-All four are pure frozen-Config reads, so they cost nothing: the manifest was already computable before a single tensor existed and still is. Added; the manifest is 20 fields.
+All four are pure frozen-Config reads, so they cost nothing: the manifest was already computable before a single tensor existed and still is. Added.
+
+**A fifth followed on 2026-09-02 under Q-CKPT-1: `fab.cap`.** `fabric/levers.py` and `fabric/api.py` both say `cap = max(n0, slots)` and `A` is allocated `(cap, d_model, rank)`, so `fab.slots` alone is **not** the tensor extent: at `FAB_N0 > FAB_SLOTS` a resume that lowers `n0` narrows every fabric tensor while `fab.slots` compares equal. That is the `fix_resume` failure below in this file — trained at `FAB_N0=256 FAB_NMAX=1024`, resumed at 2048/4096, died inside torch with five tensor shapes and no knob name. `n0` is folded into the extent rather than recorded raw, because `n0` under a fixed `cap` moves `n_live` (a `state_dict` buffer) and not a shape.
+
+**The field count is no longer written anywhere, and that is the ruling.** It stood at 15, 16 and 20 in three live statements at once — including a sentence written to un-stale the count that was already stale by four when it landed. The manifest is data; run `_geometry_manifest`. Prose states the shape (one flat, prefixed map) and the rules.
 
 **What remains open** is narrower than C12 claimed and is **HIGH, not critical**: the SIG and FAB sidecars have no producer (`_sidecar` returns `None`, both refusals disarmed, and `FAB.state_dict` does not even claim to emit one), and WORLD's **grown** population count is the one quantity that genuinely needs a live object. That is Q-CKPT-2's residue.
 

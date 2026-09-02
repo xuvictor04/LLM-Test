@@ -125,10 +125,16 @@ NO WIRES ARRIVE HERE TODAY. spine/assemble.py declares no d_ field on DATA (the 
 the string DATA in that file are prose). If one is added later it must NOT be declared in this class --
 lever.py refuses a d_-named lever precisely so a declaration cannot shadow the wire that writes it.
 
-ONE VALUE LEAVES, AND IT IS NOT DECLARED HERE EITHER. The census's val_cap row requires the RESOLVED
-held-out size to reach EVAL "as a wire so the Sample can state how many bytes it actually covered".
-That is a wire on the receiving package (EVAL.d_holdout_bytes) declared in spine.assemble, not a lever
-here, and it is a resolved SIZE rather than the cap -- see `val_cap`.
+ONE VALUE LEAVES, AND IT IS NOT DECLARED HERE EITHER -- NOR IS IT A WIRE. The census's val_cap row asks
+for the RESOLVED held-out size to reach EVAL "as a wire so the Sample can state how many bytes it
+actually covered". THAT WIRE DOES NOT EXIST AND MUST NOT: docs/04_CONTRACT.md:74 lists
+EVAL.d_holdout_bytes among the REFUSED wires, because the size depends on how many bytes are on disk,
+so build() would have to stat the corpus -- IO inside the ownership spine and a non-reproducible
+startup -- and wiring val_cap instead would print the CEILING as the size. It is the same refusal that
+holds for bytes_per_token and the SIG width. The resolved size travels as an ARGUMENT and is recorded
+as a Sample field -- see `val_cap`. This sentence used to say the wire was declared in spine.assemble;
+it never was, and a P4 author following it would try to declare a coupling A1/K5 then bounces with a
+message that does not explain why.
 
 FOUR FOREIGN VALUES THIS PACKAGE READS TODAY AND MAY NOT. None is declared here; a value another package
 owns arrives as a wire or it does not arrive:
@@ -213,7 +219,9 @@ class DATALevers(LeverSet):
     # and removes the constraint) and because a default changed in two packages at once is a default
     # nobody decided. P3's empty-environment test on both paths is what proves it.
 
-    dir = Lever("data", "Root of the corpus tree; areas are read from DATA_DIR/train/<area>/part*.txt.",
+    dir = Lever("data", "Root of the corpus tree; an area with no '/' is read from "
+                        "DATA_DIR/train/<area>/*, and an area containing '/' is joined under "
+                        "DATA_DIR verbatim (DATA_AREAS=\"eng,continual/01_rust\").",
                 U.PATH)
     # Census: DATA_DIR -> DATA_DIR, one of the few knobs whose shipped name is ALREADY exactly
     # PREFIX + FIELD, so the field has to be the bare word `dir` for the generated name to come out
@@ -226,7 +234,19 @@ class DATALevers(LeverSet):
     # declaring what it means when unset.
 
     areas = Lever("eng,py,num,c", "The corpora to stream, in order; their names label every per-area "
-                                  "score in the report and across the run boundary.", U.NAME)
+                                  "score in the report and across the run boundary. An entry may "
+                                  "contain '/' to reach a tree beside train/ (continual/01_rust); "
+                                  "the label is then the basename.", U.NAME)
+    # THE SLASH RULE, RULED 2026-09-02 (Q-DATA-4), AND IT IS A CHANGE TO WHAT THIS STRING MAY SAY --
+    # not to its default, which is untouched. datastream.py:72 hardcoded {data_dir}/train/{d}/*, so
+    # data/continual/ (1.5 MB, four arriving areas) and data/ood/ (764 KB) -- the material the
+    # add-an-area benchmark exists for -- were reachable only by moving files, i.e. by a configuration
+    # no Sample can record. An entry with no "/" keeps train/ as the implicit prefix, so every shipped
+    # spelling means exactly what it meant. Two startup refusals come with it and DATA.open_areas owns
+    # both: an absolute entry or one containing ".." is refused (otherwise this is an arbitrary-path
+    # read), and two entries whose BASENAMES collide are refused with both source paths printed --
+    # because the label is what per-area scores, the holdout rng key and ACROSS THE RUN BOUNDARY look
+    # up by name, and one label over two corpora is ISSUES:1421 from the other side.
     # Census: DOMAINS -> DATA_AREAS. RENAMED FOR A GLOSSARY COLLISION THAT IS ALREADY PRODUCING WRONG
     # NUMBERS (G12). "Domain" in the DOM package is a self-assembled partition cell; this knob is a list
     # of corpus DIRECTORIES. Two meanings, one word, and the old _DERIVED table even wired SEG_CONTIG's
@@ -330,12 +350,31 @@ class DATALevers(LeverSet):
     # ==============================================================================================
 
     phase_sched = Lever("", "Explicit phase schedule, pipe-separated phases of comma-separated area "
-                            "indices (\"0|0,1|0,1|1\"); empty generates a sliding window from `phases` "
-                            "and `phase_live`.", U.NAME)
+                            "indices OR area names (\"0|0,1|0,1|1\", \"eng|eng|rust|rust\"); empty "
+                            "generates a rehearsed sliding window from `phases` and `phase_live`.",
+                        U.NAME)
     # Census: PHASE_SCHED, verdict keep, and it ABSORBS PHASED (the merge above). The parse-at-startup
     # shape is already right and is the model for the port: :1355-1366 refuses an empty phase or an
     # out-of-range area id loudly, at startup, rather than producing a silently different experiment.
-    # D2 IS A RULING THIS LEVER CANNOT CARRY AS A LITERAL, AND SAYING SO IS THE POINT. D2 (2026-08-28)
+    # D2 IS RULED (Q-DATA-7, 2026-09-02) AND THE DEFAULT BELOW DID NOT MOVE. Two things landed. First,
+    # AN ENTRY MAY BE AN AREA NAME as well as an index, resolved against Areas.names at the parse site
+    # and refused loudly on a name no area carries. That is what makes "the added area alone" WRITABLE
+    # at any area count -- "rust|rust|rust|rust" -- which the paragraph below says no literal string
+    # could express, and it removes the order-fragility longrun.sh:930-932 is living with (it hand-types
+    # _AI=1 under a comment claiming the index is computed from DOMAINS, and nothing reads DOMAINS,
+    # ISSUES L2). Second, DATA.data_plan RECOGNISES the protocol from the resolved schedule -- four
+    # written predicates, no generator, no new lever -- so Plan.protocol names explicit / generated /
+    # stationary / pure_add on every run.
+    # WHAT IS DELIBERATELY NOT DONE, AND THE OWNER IS OWED THE SENTENCE: empty still generates the
+    # REHEARSED sliding window. The owner's ruling keeps pure-add as the protocol of the add-an-area
+    # experiment, and it is kept -- as a schedule the launcher writes and the resolver NAMES. Flipping
+    # this default to generate pure-add would stream ONE area at the shipped DATA_AREAS="eng,py,num,c"
+    # and leave three declared corpora untrained without saying so, and a default whose shape changes
+    # between n=2 and n=4 is M18 (a declared parent that is not the actual one) reproduced on the
+    # protocol. The comparison arm is measurable either way and DATA.data_plan states the run that
+    # settles it.
+    # THE PARAGRAPH BELOW IS THE PRE-RULING RECORD AND IS KEPT BECAUSE ITS ARGUMENT IS WHY THE DEFAULT
+    # STANDS. D2 (2026-08-28)
     # makes PURE_ADD the default protocol -- the added area streams alone. PURE_ADD is not and never was
     # a knob in self_organize.py (0 occurrences); it is longrun.sh shorthand that EXPANDS to
     # PHASE_SCHED="1|1|1|1", and it expands to that string only because that harness runs exactly two
@@ -436,10 +475,13 @@ class DATALevers(LeverSet):
     # about where bytes live" (M81 and M83 are the same root, ISSUES:593). The memorization check, the
     # anchors and ACROSS THE RUN BOUNDARY were therefore computed over different amounts of text in two
     # configurations that differ in paging, and nothing in either report said which.
-    # WHAT LEAVES THIS PACKAGE IS THE RESOLVED SIZE, NOT THE CAP. The census requires the held-out byte
-    # count to reach EVAL as a wire so the Sample can state how many bytes it actually covered. That wire
-    # is declared in spine.assemble on the RECEIVER (EVAL.d_holdout_bytes) and must not be declared here;
-    # this lever is only the ceiling.
+    # WHAT LEAVES THIS PACKAGE IS THE RESOLVED SIZE, NOT THE CAP -- AND NOT AS A WIRE. The census asks for
+    # the held-out byte count to reach EVAL as a wire so the Sample can state how many bytes it actually
+    # covered. docs/04_CONTRACT.md:74 REFUSES that wire (EVAL.d_holdout_bytes) and gives the reason: the
+    # size depends on bytes on disk, so build() would have to stat the corpus, and wiring this ceiling
+    # instead would print the cap as the size. It travels as an argument and is recorded on the Sample.
+    # This comment claimed the wire was declared in spine.assemble; grep finds no such coupling, and the
+    # refusal is structural rather than an omission (Q-DATA-6, 2026-09-02).
 
     exposure_max = Lever(2.0, "Whole-run repetition multiple (bytes drawn x epochs / bytes on disk) "
                               "above which the data plan is flagged before training starts.", U.COUNT)

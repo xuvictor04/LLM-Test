@@ -24,12 +24,23 @@ TWO RULES EVERY FUNCTION BELOW OBEYS, both from the survey:
       stream. Before c76dc74, changing the holdout n from 4 to 16 moved 48 report lines INCLUDING A
       VERDICT SIGN FLIP, because build_stream drew segment lengths from the same global RNG the
       diagnostics drew from -- how much you MEASURED decided what you TRAINED on.
-  ONE LOGITS PATH. `logits_fn` is passed in, never constructed here. compose_test built `pm` from
-      `model(X)[0]`, the plain LM head, while the held-out path used _eval_logits, so with
-      FABRIC=1 three report sections scored a system the run never trained.
+  ONE LOGITS PATH, RESTATED 2026-09-02 UNDER Q-MEM-10 AND STILL ONE PATH PER SYSTEM. `logits_fn`
+      is passed in, never constructed here. compose_test built `pm` from `model(X)[0]`, the plain LM
+      head, while the held-out path used _eval_logits, so with FABRIC=1 three report sections scored
+      a system the run never trained. The rule is therefore: ONE CLOSURE PER SCORED SYSTEM, formed
+      in the composition root, passed in, never constructed here -- AND EVERY READING NAMES WHICH
+      CLOSURE PRODUCED IT. There are two systems and not one: the trained path (memory off) and the
+      trained path plus retrieval (memory on), which has never entered training. The -0.097 -> +0.085
+      b/B price of retrieval IS the difference between them, so the PAIR is the deliverable and a
+      single unnamed number is the defect. NO SIGNATURE HERE MOVES FOR THIS: `blend_fn` is NOT added
+      to curve_probe, holdout_probe, generate or coherence -- see Q-MEM-10 in docs/04_CONTRACT.md,
+      which recommended exactly that and was overruled, because four bodies each doing
+      softmax -> blend -> log is the ungated mix recomputed at a consumer site, i.e. C8 (prompt.py)
+      and C9 (cl_bench.py) rebuilt inside the instrument line.
 
 RECORD TYPES RETURNED (P4/P5 define them):
-  CurveReading   per_domain_bpb, mean_bpb, windows_drawn, step
+  CurveReading   per_domain_bpb, mean_bpb, windows_drawn, units_drawn (the total this probe spent:
+                 windows_drawn summed across domains x LM.ctx -- Q-EVAL-5), step
   Reading        value, seed_count -- PLAN 3.8 forbids a verdict on n=1, and OPT refuses to damp a
                  restart on a Reading whose seed count is 1
   NullReading    real, null_mean, null_sd, draws, verdict_allowed
@@ -51,8 +62,10 @@ def curve_period(ev: Config):
     rate/ETA meter (:6489), the profiler dump, the per-expert LR line (:7297) and the
     no-eligible-expert line. Setting RATE_EVERY=100000 to quieten smoke runs SUPPRESSED THE CURVE
     TABLE ENTIRELY, so the curve fix went unverified on a live table for a whole round. Here the
-    MEASUREMENT cadence is this lever and the progress line takes RUN's own fixed constant, so
-    quietening a log can no longer disable a measurement (FOR THE OWNER Q-RUN-1).
+    MEASUREMENT cadence is this lever and the progress line takes RUN's own fixed constant --
+    RUN.PROGRESS_WINDOWS, 100 Windows, a module constant with no environment name (Q-RUN-1, RESOLVED
+    2026-09-02, and this file's wording was the one of the three that was already right) -- so
+    quietening a log can no longer disable a measurement, and there is no log knob left to turn up.
 
     LEVERS READ: curve_every
     WIRES READ: none
@@ -71,20 +84,33 @@ def curve_period(ev: Config):
 def curve_probe(ev: Config, *, units_by_domain, logits_fn, rng):
     """One learning-curve probe. Returns CurveReading.
 
-    THE SAMPLE SIZE IS ev.windows AND NOT A HARDCODED 16. The old probe drew `range(16)` at :6396
-    while the lever's own help text quotes that 16 as if it were declared -- an undeclared second
-    default INSIDE THE SENTENCE DESCRIBING THE LEVER, which is the L1 shape arriving through the
-    document written to end it. Reading ev.windows here raises the default probe cost 4x, and that
-    belongs on P9's list of numbers expected to move (FOR THE OWNER Q-EVAL-5). The old EVAL_N was
+    THE SAMPLE SIZE IS ev.windows AND NOT A HARDCODED 16 (Q-EVAL-5, RESOLVED 2026-09-02 -- read the
+    lever). The old probe drew `range(16)` at :6396 while the lever's own help text quotes that 16
+    as if it were declared -- an undeclared second default INSIDE THE SENTENCE DESCRIBING THE LEVER,
+    which is the L1 shape arriving through the document written to end it. The old EVAL_N was
     UNRAISABLE -- five of its six readers wrapped it as min(24, EVAL_N) or min(48, EVAL_N), so
-    EVAL_N=256 drew 24, the untrippable-guard shape -- and hardcoding 16 here would rebuild it.
+    EVAL_N=256 drew 24, the untrippable-guard shape -- and hardcoding 16 here would rebuild it. An
+    operator who wants the old cost sets EVAL_WINDOWS=16 and gets exactly it, which is what makes
+    reading the lever strictly better than the literal rather than merely tidier.
+
+    THE COST, WITH THE NUMBER AND THE CONDITION ON IT. `ev.windows` resolves to 64, so the multiplier
+    is 64/16 = 4x, and it belongs on P9's list of numbers expected to move. BUT IT IS 4x OF ZERO AT
+    THE SHIPPED DEFAULTS AND THE P9 ENTRY MUST SAY SO: curve_every=2000 against a default run of
+    506-937 windows (DATA.stream_bytes=120000, LM.ctx=128, RUN.epochs=1) means this probe NEVER
+    FIRES, which is ISSUES C11. An unconditional "the default probe cost rose 4x" is a number nobody
+    can reproduce -- the failure P9 exists to prevent -- so the entry reads "4x on runs long enough
+    to probe; does not exist at the shipped defaults". If the C11 run-length ruling raises
+    stream_bytes or epochs, this question should be re-read, not carried.
 
     LEVERS READ: windows
     WIRES READ: none
     DID IT FIRE: CurveReading.windows_drawn PER DOMAIN -- a domain that yielded zero windows is
                  REPORTED, not skipped (the recorded case: CAN A DOMAIN PREDICT needed 16 and drew
                  min(48, EVAL_N), so at EVAL_N=4 it collected 4, produced nothing, and DOM_PRIOR
-                 was accumulated and never read)
+                 was accumulated and never read) -- AND THE TOTAL THIS PROBE SPENT, windows_drawn
+                 summed across domains times LM.ctx, so the sample size is a knob whose cost is
+                 VISIBLE as well as raisable and lowerable. That asymmetry is what EVAL_N failed:
+                 it could only ever be lowered, and nothing printed what it bought.
     """
     ev = ev.owned_by("EVAL")
     raise NotImplementedError(
@@ -109,9 +135,42 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng):
     Sample: ISSUES M82 is precisely the case where two configurations covered different amounts of
     text and neither report said so.
 
+    THE COMPARISON IS PAIRED, AND THE PAIRING IS PINNED HERE RATHER THAN LEFT TO P5 (Q-EVAL-9,
+    RESOLVED 2026-09-02: holdout_windows STAYS AT 32, and this clause is what earns that).
+    Each domain's window starts are drawn ONCE, from rng_for("eval.holdout." + domain_name, seed) --
+    the domain's stable NAME normalised to spine/rng.py's charset, exactly as DATA derives one
+    "data.holdout.<area>" child per area for the same reason -- and are IDENTICAL at every probe of
+    the run and across a resume. The 2-sigma verdict is then computed on the PAIRED per-window
+    differences and the Reading carries the paired SD.
+    WHY THAT IS THE WHOLE ARGUMENT FOR n=32. H20's repair above fixes WHICH windows are scored (byte
+    coordinates, so a re-segmentation cannot move them); pinning the DRAW fixes that `prev` and `now`
+    are the SAME windows, and on the same windows the per-window difficulty term CANCELS in the
+    difference. Window-to-window bpb spread in text is large (order 0.3-0.5 b/B); the spread of a
+    paired difference on fixed windows is far smaller. So n=32 PAIRED is a materially stronger
+    instrument than n=32 unpaired, and research_continual_memory.md:743-745's warning that the
+    2-sigma rule at n=32 reports "HELD (inside the noise)" for real effects -- and its 128-256
+    recommendation -- is calibrated for the UNPAIRED case.
+    NOTHING IN THE TREE PINS IT TODAY, WHICH IS WHY IT IS WRITTEN HERE: this function takes an `rng`,
+    and spine/rng.py's frozen_rng protects the GLOBAL streams and explicitly does not cover streams
+    handed out by rng_for(). If P5 lets that stream advance between probes the pairing is lost
+    SILENTLY, no check in the tree sees it, and the number reverts to the unpaired power the research
+    doc warns about.
+    THE ORDER OF OPERATIONS, so it cannot be got wrong: PIN THE PAIRING, then let G2 measure this
+    machine's noise floor, then decide n. Raising n before pairing buys the smaller of the two
+    available variance reductions at 8x the cost. And the DOMINANT error bar is neither: PLAN 3.8
+    records a between-seed spread of 0.066-0.131 b/B, which exceeds every architectural difference
+    this project has ever claimed, and the renderer already refuses a verdict on n=1.
+    THE HONEST CAVEAT, per C11: at the shipped defaults 32 windows x LM.ctx=128 is about 7.6 kB of
+    text per domain, a sample smaller than one splice segment, against a run of 506-937 windows. If
+    the owner raises DATA.stream_bytes, re-ask this question with the noise floor in hand.
+
     LEVERS READ: holdout_windows
     WIRES READ: none
-    DID IT FIRE: windows drawn per domain, and the SEED COUNT carried on the Reading
+    DID IT FIRE: windows drawn per domain, and the SEED COUNT carried on the Reading; plus the
+                 PAIRED SD and, per domain, whether its "eval.holdout.<name>" stream had already
+                 been drawn (rng.issued() makes "this domain's holdout stream was never drawn" a
+                 reportable state rather than a silence, and a probe whose starts moved between two
+                 calls is the one failure this whole clause exists to make visible)
     """
     ev = ev.owned_by("EVAL")
     raise NotImplementedError(
@@ -164,7 +223,7 @@ def generate(ev: Config, *, logits_fn, prompts_by_domain, rng):
         "docs/04_CONTRACT.md, section EVAL.")
 
 
-def coherence(ev: Config, *, logits_fn, sample, rng):
+def coherence(ev: Config, *, logits_fn, units_by_domain, encode, rng):
     """The coherence Reading over its OWN seeded sample, not over the printed generations.
 
     It was scored on the four printed GENERATION samples, ~2 windows each, so every coherence
@@ -173,9 +232,41 @@ def coherence(ev: Config, *, logits_fn, sample, rng):
     directions on consecutive runs. coh_seeds and coh_len size a sample this instrument draws for
     itself.
 
+    THE PARAMETER WAS `sample` UNTIL 2026-09-02 AND THAT IS WHAT LET THE DEFECT HAPPEN
+    (Q-EVAL-10, RESOLVED). A `Sample` is the object EVAL.generate returns -- the printed
+    generations -- so the signature invited exactly the argument the sentence above forbids, and
+    the old code passed it. What this instrument needs is MATERIAL, not a measurement:
+
+      units_by_domain  the same per-domain unit stream curve_probe and holdout_probe take, in the
+                       same shape and under the same name, because ONE CALLABLE OR ONE RECORD
+                       DECLARED TWICE WITH TWO SHAPES is how a signature width came out 614 on one
+                       path and 1 on the other. coh_seeds seeds are drawn FROM it, one per domain
+                       in rotation, and the CEILING -- real text of the same length scored the same
+                       way -- is cut from it too. The per-domain keys are load-bearing: HOME is the
+                       key of the bucket a seed came from, so the strict arm needs no lookup.
+      encode           SIG.encode bound to the SigState -- the SAME callable DOM.rekey takes, and
+                       the composition root already forms it (_sig_encode_fn). It is here because
+                       the measurement IS an encoding: "which centroid is this window of the
+                       CONTINUATION nearest" is evaluated per generated window on BOTH arms, and
+                       EVAL may not import SIG. Without it this function cannot be written at all.
+                       It also builds the TRUE-CORPUS centroids from units_by_domain, which is the
+                       stricter reference: scoring against DOM's assembled partition instead would
+                       be the self-referential arm, and shipping only that arm would silently
+                       downgrade the metric to "the encoder is self-consistent".
+
+    `rng` was always the tell that this instrument draws: a function that only SCORES a handed-in
+    sample has no draw to seed, and G7 says every probe draws from its own named stream.
+
+    THE SELF-REFERENTIAL ARM IS STILL P6'S, AND IT NEEDS NOTHING FURTHER FROM THIS SIGNATURE. On a
+    run with fewer than two labelled buckets there are no true-corpus centroids; the fallback is
+    the partition the system assembled, and HOME is then MEASURED per seed by encoding it and
+    taking the nearest centroid (eval/levers.py, coh_seeds) -- with `encode` in hand that is this
+    function's own arithmetic. It must be LABELLED as the weaker claim wherever it is printed.
+
     LEVERS READ: coh_seeds, coh_len, gen_temp
     WIRES READ: none
-    DID IT FIRE: Sample.size, and the Reading's seed count
+    DID IT FIRE: Sample.size, and the Reading's seed count. The arm is part of the record: strict
+                 (true-corpus centroids) or self-referential, never silently one of the two.
     """
     ev = ev.owned_by("EVAL")
     raise NotImplementedError(

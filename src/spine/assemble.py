@@ -1152,10 +1152,47 @@ NOT_WIRES = (
      "derive-and-keep discipline, not by a row in this table, and saying so here is the point: a "
      "promote-to-wire that quietly became nothing is indistinguishable from one nobody noticed."),
 
+    ("the run length in windows -> OPT.d_run_steps / OPT.d_total_steps",
+     "The most-proposed rejected candidate in this tree, and it is rejected on the SECOND ground, not "
+     "the first. `RUN.epochs -> OPT.d_lr_horizon` above is refused because it IS the defect; this one is "
+     "refused because the value does not EXIST yet: the run length in windows is "
+     "len(Segmentation.ids) // LM.ctx times RUN.epochs, and Segmentation does not exist until "
+     "TOK.tokenize has run, which is many assembly rows after every build() has frozen. A Config that "
+     "can still be written after startup is a Config the report cannot claim the run used, so there is "
+     "no late wire and there must not be one. The named computation is spine/compose.py's _run_windows, "
+     "and the value reaches OPT as the `run_windows` ARGUMENT to OPT.build -- the same shape, and the "
+     "same reason, as the SIG width row above. Both rejections are real and they are different, which "
+     "is why this row is separate from the RUN.epochs one rather than folded into it: folded, a reader "
+     "who fixes the EPOCHS conflation would believe the tokenization objection went with it. "
+     "RESOLVED 2026-09-02, Q-OPT-1 -- the ground was written down in docs/04_CONTRACT.md and in "
+     "compose.py and in no row of this table, so the printed graph asserted a completeness it did not "
+     "have."),
+
     ("MEM.cap as its own lever",
      "The most tempting one, and the reason MEM.d_capacity exists. A declared capacity next to a declared "
      "quota and a declared owner count is three numbers for two degrees of freedom; the third is "
      "discarded at runtime by whichever line runs last, and in the old tree that line was memory.py:36."),
+
+    ("FAB.manage_every -> WORLD.d_manage_period_windows",
+     "Q-WORLD-6, RESOLVED 2026-09-02: the reach is REAL and the composition root makes it, and it is "
+     "still not a wire. C3 is a frozen decision and it says so in these words -- WORLD.manage is called "
+     "from the composition root through RUN's Windows-typed Cadences.due with FAB.manage_every, and NO "
+     "PERIOD ENTERS WORLD'S CONFIG, which is the sentence that keeps the Flushes wire out; a Windows wire "
+     "into the same field re-opens the door it closed. WORLD has no d_ field at all, and it would have no "
+     "arithmetic to do with one: the root evaluates the gate and calls manage only when it fires, while "
+     "FAB.manage_period(fab) already returns typed Windows and Cadences.due refuses anything else -- so "
+     "the WIRES READ: line K5 requires would be a decorative `_ = world.d_manage_period_windows` forever, "
+     "which is the untrippable-guard shape this file names two paragraphs above. It would also spend one "
+     "of the last coupling lines on a WORLD.manage that is itself deferred today for three unrelated "
+     "reasons, printing an edge the run does not make. "
+     "WHAT THIS ENTRY BUYS IS THE HONEST STATEMENT OF THE GAP, which is bigger than WORLD: affects() DOES "
+     "NOT SEE CADENCE REACH FOR ANY GATE. DOM.manage_every already gates MEM.census, DOM.manage, "
+     "DOM.census and MEM.apply_domain_plan with no DOM->MEM wire anywhere, so a single WORLD row would be "
+     "a spot repair that makes the graph look MORE complete than it is. The did-it-fire surface for every "
+     "periodic gate is Cadences.ledger(), whoever owns the threshold, and the L3 isolation sweep must "
+     "take cadence reach from Cadences.ledger() and LOOP_ORDER -- both of which the root already holds as "
+     "data -- and not from the wire ledger. Teaching the L3 oracle that union is the real repair and it "
+     "is filed here so it is not lost."),
 )
 
 

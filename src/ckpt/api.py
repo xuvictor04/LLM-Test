@@ -93,8 +93,14 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
     BASE vocabulary path, so every later save overwrote the file a .bestN snapshot records as its
     own; by the end of a run a .best checkpoint's recorded merge count no longer matches the file
     it names and resuming from it trips the VOCABULARY MISMATCH refusal at :4380-4408. best_keep
-    multiplies that defect n times over. A SNAPSHOT'S VOCABULARY IS PART OF THE SNAPSHOT: the
-    tokenizer bytes go in `payload`, and the d_vocab_save_path wire names the run's own directory.
+    multiplies that defect n times over. A SNAPSHOT'S VOCABULARY IS PART OF THE SNAPSHOT -- BUT NOT
+    IN `payload`, AND THIS SENTENCE USED TO SAY OTHERWISE (corrected 2026-09-02, Q-TOK-10). The
+    merges live in the FILE at d_vocab_save_path: build_vocabulary REPLAYS them from
+    d_vocab_read_path on a resume (tok/api.py:50-56), and TOK.vocab_state carries "everything a
+    resume needs THAT THE MERGE LIST ALONE DOES NOT CARRY", i.e. explicitly not the merges. Two
+    frozen docstrings disagreed about where a snapshot's vocabulary lives; the repair is that
+    TOK.save_vocabulary now takes the SAME `suffix` this call takes, so the tokenizer file travels
+    under the snapshot's suffix instead of being overwritten by the next base save.
 
     LEVERS READ: dir (through saving_on and the artifact path set)
     WIRES READ: none
@@ -163,7 +169,15 @@ def check_geometry(ckpt: Config, snapshot, geometry):
     GeometryRefusal; returns a GeometryReport when it passes.
 
     `geometry` is {field: GeometryField(value, rule, env_name, why)} assembled by the composition
-    root from each package's own geometry() call. RULES ARE THE OWNER'S, because the direction
+    root -- BY IT AND NOT BY A FAN-IN OF PACKAGE CALLS, and this sentence said the opposite until
+    2026-09-02 (Q-CKPT-1, RESOLVED). It is built from the frozen Configs and LM.resolve's
+    LMGeometry, in _geometry_manifest, BEFORE THE FIRST ALLOCATION -- which is the whole point of
+    the gate, and is also why it cannot be assembled the way this line used to describe: a
+    package's geometry() needs a built object, and the build is the thing this refusal exists to
+    happen before. There is exactly one geometry() in the tree, WORLD's, and it is correctly
+    placed on the SAVE side, where the object exists; what it contributes is the GROWN population
+    count, which is recorded and reported UNCHECKED here rather than compared. RULES ARE THE
+    OWNER'S, because the direction
     differs per field: FAB's slots is MAY_WIDEN (the tensors are preallocated and growth only
     advances n_live, so a smaller-cap checkpoint IS a prefix -- and refusing to widen would mean a
     resume can never add capacity for the area it is adding, which is the whole exercise); FAB's

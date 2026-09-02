@@ -58,9 +58,15 @@ def build(world: Config, *, d_model, device, ctx_tokens, rng):
 def loss_terms(world: Config, w, obs_emb):
     """The two terms this subsystem adds to the training loss. Called once per FLUSH.
 
-    obs_emb is LM's EMBEDDING of the batch, (B, W, d_model) -- an ARGUMENT, because the encoder
-    reads OBSERVATION embeddings (the lowest layer, the point where a new sense plugs in) and not
-    the GRU state. Returns WorldStep(loss, latent, inv, latent_std).
+    obs_emb is LM.embed(lm, model, x), (B, W, d_model) -- an ARGUMENT, because the encoder reads
+    OBSERVATION embeddings (the lowest layer, the point where a new sense plugs in) and not the GRU
+    state. IT HAS A PRODUCER as of 2026-09-02 (Q-LM-12 RESOLVED (b)): LM exposed no embedding entry
+    point, the composition root's own table said the loop applied `model.emb(x)` between two calls,
+    and that expression is an AttributeError at lm.compose=1 because LM does not construct `emb`
+    under compose. `LM.encode(..., n_layers=0)` was refused as the producer on BOTH arms -- the gru
+    arm ignores n_layers by declared gate and would return the full hidden, and the transformer arm
+    at zero blocks returns embedding PLUS positional. Returns WorldStep(loss, latent, inv,
+    latent_std).
 
     tot += predict_w * pop_loss(...) + collapse_w * (var + 0.04 * cov). THE TWO WEIGHTS MUST NOT BE
     FOLDED BACK INTO ONE and the names now make folding require deliberately writing the wrong
@@ -86,6 +92,10 @@ def loss_terms(world: Config, w, obs_emb):
 def forecast(world: Config, w, obs_emb):
     """The forecast the LM's hidden state is conditioned on: world_proj(pop(z)). None when
     `feedback` is off, and None on the null world.
+
+    obs_emb is LM.embed's return, the same object loss_terms takes and the same the B row above
+    produces -- which is why that row is the FIRST of the B rows: this call supplies LM.encode's
+    `extra` on the row below it.
 
     THIS IS A RUNTIME ARGUMENT, NOT A WIRE, and the levers file's phrase "becomes a declared d_ wire
     into LM" cannot be honoured literally: a Coupling value is resolved once and frozen when
@@ -127,7 +137,23 @@ def manage(world: Config, w, *, latent, plateau, add_param_group):
              is minted, and the DID IT FIRE row counts the mint.
       M70 -- `if s.n() >= s.nmax` counts TOTAL predictors, not LIVE ones, so once soft_cull has
              deactivated k the population stalls at nmax with nmax-k working and the plateau
-             trigger silently stops firing. Count LIVE.
+             trigger silently stops firing. THE CAP IS ON LIVE PREDICTORS, AND THE MINT CLAIMS A
+             DEAD SLOT -- Q-WORLD-8, RESOLVED 2026-09-02 (b). "Count live and append" is NOT
+             implementable and that is why the literal reading of the recommendation had to be
+             refused: fit, mass and alive are buffers of width nmax (world_model.py:81-83) and
+             grow() does `s.preds.append(...)`, so appending while comparing LIVE against nmax
+             drives n() past nmax and update_fitness's `for i in range(s.n())` indexes past the end
+             of every one of them -- besides unbounded forward compute and a checkpoint whose n
+             exceeds its own nmax, which geometry and load_into exist to refuse. Slot reuse is the
+             only implementation the fixed-width buffers admit, AND THE FROZEN DID IT FIRE ROW
+             ALREADY DEMANDS IT: `blocked_reason` is one of {grow_off, at_live_cap, no_plateau,
+             cooldown, null_world} -- `at_live_cap` and no `at_total_cap`, so a grow() that refuses
+             because n() == nmax while live < nmax has NO LEGAL REASON TO REPORT. A mint therefore
+             takes the LOWEST DEAD SLOT: clone the fittest into it, reset that slot's fit and mass,
+             set alive = 1. n() never exceeds nmax and never narrows; `live` is the number that
+             varies. Count reused-slot mints SEPARATELY from fresh ones (n_slots_reused beside
+             `grown`), because "minting and culling at the cap indefinitely" is then a number the
+             report states rather than a hypothesis the design has to pre-empt.
       M71 -- `grown` is a plain int (world_model.py:75), absent from state_dict, restarting at 0 on
              every resume WHILE the resume's grow-replay loop increments it, so the DID IT FIRE row
              reports THE CHECKPOINT'S POPULATION SIZE as this run's growth events. It becomes a
@@ -139,6 +165,25 @@ def manage(world: Config, w, *, latent, plateau, add_param_group):
              only ever written to 0.0 (:127) and nothing restores it. THIS CONTRACT FIXES M70 ONLY
              and removes the reversibility claim from the docstrings -- fixing both would let the
              population oscillate at the cap indefinitely, minting and culling (Q-WORLD-8).
+             STILL ONE-WAY IN THE SENSE THAT MATTERS, and the "reversible: params kept" claim is
+             DELETED from world_model.py:83 and :121 in the port: a culled predictor's LEARNING is
+             never restored. Resurrection (alive back to 1.0) is refused for a stronger reason than
+             oscillation -- a resurrected predictor's `mass` is BY DEFINITION below min_mass, so it
+             is culled again on the next pass unless something else changed, which is a mechanism
+             that cannot work rather than one that works badly. Slot reuse overwrites the slot, and
+             that is also what the plasticity literature does (ReDo reinitialises dormant units;
+             continual backprop reinitialises the least-used ones) -- nothing there restores a dead
+             unit.
+             AND THE COMPUTE COST ACTUALLY STOPS BEING PAID. A DEAD PREDICTOR IS SKIPPED IN THE
+             FORWARD, not merely down-weighted: world_model.py:92-94 stacks EVERY predictor's output
+             and :88 holds the dead ones down with log(alive.clamp_min(1e-6)), so a culled predictor
+             ran and took gradient every step for about 1e-6 of the routing mass. A hard penalty is
+             a skip, and this is the half of "the honest repair is a hard routing penalty, not
+             resurrection" that a docstring change alone does not deliver.
+             C6 RIDES WITH IT AND MUST: mass initialised on birth, or a newborn -- fresh or reused --
+             is culled by the soft_cull in the same block microseconds later, which turns slot reuse
+             into pure churn. The plateau predicate and the 4 x MANAGE_EVERY cooldown bound the mint
+             rate and both become Gates printing their own arithmetic.
 
     add_param_group is OPT's optimizer.add_param_group, passed as a callable, because growth mints
     parameters mid-run and the optimizer must learn about them (:6771).
@@ -161,6 +206,15 @@ def geometry(world: Config, w):
     """Every field a resume must match, with its rule: lat/hid/route_d EXACT, nmax MAY_WIDEN, n
     (the grown population) MAY_WIDEN AND MAY_NARROW, feedback EXACT.
 
+    `n` IS THE ALLOCATED PREDICTOR COUNT -- len(preds), the number of ForwardModels that EXIST -- AND
+    NEVER THE LIVE COUNT. Stated because Q-WORLD-8 (b) makes the two diverge and M70 is the record of
+    them being confused: under slot reuse n() rises to nmax and then stops, while `live` (the alive
+    mask's sum) moves in both directions as culls and reused-slot mints happen. n is what decides
+    WHICH TENSORS EXIST in the checkpoint, so n is the geometry field and it keeps its MAY_WIDEN AND
+    MAY_NARROW rule -- the live count is a ManageResult reading and a state_dict buffer, not a shape,
+    and putting it here would make a resume refuse on a number that says nothing about tensor extent.
+    n <= nmax is an INVARIANT under (b) and load_into may assert it; before (b) it was not one.
+
     H22: lat, hid, n, nmax, route and feedback are all recorded into world_cfg at :5365-5366 and
     the resume reads ONLY world_cfg["n"] (:4590), so changing any other across a resume dies inside
     torch on a shape mismatch naming no knob -- the exact failure the fabric's refusal at
@@ -170,8 +224,15 @@ def geometry(world: Config, w):
 
     LEVERS READ: lat, hid, route_d, nmax, n0, feedback
     WIRES READ: none
-    DID IT FIRE: the manifest CKPT.check_geometry consumes; a field present in the checkpoint and
-                 absent here is reported as UNCHECKED
+    DID IT FIRE: the RECORDED side of the resume gate's comparison -- NOT the live manifest
+                 check_geometry consumes, which is spine/compose.py's _geometry_manifest and which
+                 deliberately holds NO population count at all, because it must run before anything
+                 is built and n needs a built world. Corrected 2026-09-02 with Q-WORLD-8: the old
+                 wording here said "the manifest CKPT.check_geometry consumes" and that is the same
+                 conflation compose.py's own row note had to be corrected for. What this returns is
+                 the overlay that supplies `world.n`; a field present in the checkpoint and absent
+                 from the live manifest is reported UNCHECKED and is then re-refused, in both
+                 directions, by WORLD.load_into (M43)
     """
     world = world.owned_by("WORLD")
     raise NotImplementedError(
@@ -203,6 +264,14 @@ def load_into(world: Config, w, sd):
     `while world_fwd.n() < _want2` (:4591) handles only growth, so a checkpoint with FEWER
     predictors than this run builds falls through to load_state_dict as "Missing key(s)
     preds.N.*".
+
+    THE SIZE IT COMPARES IS THE ALLOCATED COUNT, len(preds), and under Q-WORLD-8 (b) `n <= nmax` is
+    an invariant it may assert rather than a hope: a checkpoint whose n exceeds this run's nmax is
+    refused NAMING WORLD_NMAX (the old tree spun the replay loop forever there, because grow()
+    returns None without appending at capacity). The `alive` mask travels in state_dict, so which
+    slots are dead is restored with the parameters and is NOT re-derived here -- a resume that
+    rebuilt `alive` from anything else would silently resurrect culled predictors, which is exactly
+    what (b) refuses to do on purpose.
 
     LEVERS READ: n0, nmax
     WIRES READ: none

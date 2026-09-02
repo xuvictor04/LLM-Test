@@ -92,9 +92,17 @@ DEPARTURES = {
         why="A UNIT correction, not a rename. The threshold is compared against `step`, and the loop "
             "advances `step` once per WINDOW (`i += WIN; step += 1`, self_organize.py:6796 and :7708). "
             "Calling it _STEPS is the conflation that pinned the population for 43,645 real ticks while "
-            "the clock read 2,650. The capacity/levers.py note records the outstanding half: "
-            "derive.pin_tick still accumulates a Steps clock, so the port is not finished and applying "
-            "both legal repairs at once fires the valve 16x too EARLY."),
+            "the clock read 2,650. THE SECOND HALF OF THAT NOTE IS NOW DONE AND THIS TEXT SAID "
+            "OTHERWISE UNTIL 2026-09-02: it read 'derive.pin_tick still accumulates a Steps clock, so "
+            "the port is not finished', which has been false since the 2026-08-30 repair (Q-DERIVE-1) "
+            "-- pin_tick accumulates Windows and raises UnitError on a Steps or a Flushes at both "
+            "arguments, verified by calling it. N3 checks that a departure still LANDS, not that its "
+            "prose is current, so this file was green while asserting an unfinished port, which is the "
+            "prose-that-lies-under-a-green-check shape this repository has 60 records of. WHAT REMAINS "
+            "TRUE, and is why the departure itself stands: the tree lands CAP_PIN_WINDOWS where the "
+            "census says CAP_PIN_STEPS, and applying BOTH legal repairs at once -- re-typing the clock "
+            "AND converting the threshold -- would fire the valve 16x too EARLY. That can no longer "
+            "happen silently, because Windows >= Flushes raises."),
     ("fabric", "FAB_NORM_ONLY"): dict(
         census="FAB_MODE", lands="FAB_NORM_ONLY", where="src/fabric/levers.py:68-74, :155-163",
         why="The census merges this into a three-valued FAB_MODE, and no row in the census creates the "
@@ -221,10 +229,21 @@ def _rows():
 # ==================================================================================================
 
 def check_n1_every_kept_knob_landed(rows, env_names, wire_dsts):
-    """N1 -- a census row that says keep, rename or merge has a lever, or a declared departure."""
+    """N1 -- a census row that says keep, rename, merge or AMEND has a lever, or a declared departure.
+
+    `amend` is not one of the census's five original verdicts. It marks a lever minted AFTER the census
+    was written, under a FOR THE OWNER ruling, which has no old-tree ancestor and therefore no
+    (family, old_name) key a DEPARTURES entry could be written under -- the amendments group in
+    census.json exists so N2 can account for such a lever at all. It is checked HERE rather than left to
+    N2 alone because N2 only runs one direction: it asks whether every declared lever has a reason
+    written down, and an amendment row whose lever was later deleted would sit in the census asserting
+    a knob that no longer exists, which is the "knob that vanished" defect this file's docstring opens
+    with, arriving through the one door that was not watched. Including `amend` makes the amendment
+    load-bearing in both directions; it widens what N1 examines and narrows nothing.
+    """
     findings, n = [], 0
     for fam, old, verdict, e in rows:
-        if verdict not in ("keep", "rename", "merge"):
+        if verdict not in ("keep", "rename", "merge", "amend"):
             continue
         n += 1
         dep = DEPARTURES.get((fam, old))
@@ -238,8 +257,9 @@ def check_n1_every_kept_knob_landed(rows, env_names, wire_dsts):
             findings.append(f"{fam}/{old}: census says {verdict} as {want}, and no package declares it. "
                             f"Either the mechanism is gone, or it is hardcoded, or the lever was named "
                             f"something else and the rename is undeclared.")
-    return _report("N1", "every kept, renamed or merged knob has a lever or a declared departure",
-                   not findings, f"{n} kept/renamed/merged row(s) of {len(rows)}; "
+    return _report("N1", "every kept, renamed, merged or amended knob has a lever or a declared "
+                         "departure",
+                   not findings, f"{n} kept/renamed/merged/amended row(s) of {len(rows)}; "
                                  f"{len(DEPARTURES)} declared departure(s)", findings, vacuous=not n)
 
 
@@ -497,6 +517,14 @@ def selftest():
     case("N4 does not fire on a lever that merely ends like a dropped one", False,
          check_n4_drops_actually_dropped, rows, env, dsts)
 
+    # --- N6: two rows under one identity. It happened with the two census amendments, and N3's
+    # --- lookup silently kept the last, so this case is a regression test for a live defect.
+    _dup = rows + [("amendments", "(amendment: OPT_GRAD_CLIP)", "amend",
+                    {"new_name": "OPT_SOMETHING_ELSE", "new_owner": "OPT"})]
+    case("N6 catches two rows sharing one identity", True,
+         check_n6_row_identity_is_unique, _dup, env, dsts)
+    case("N6 passes on the real census", False, check_n6_row_identity_is_unique, rows, env, dsts)
+
     # --- N5: the mitigation actually failing, in a temp tree, in both of its two forms. ---
     tmp = tempfile.mkdtemp(prefix="n5probe-")
     try:
@@ -549,12 +577,52 @@ def selftest():
                    bad, vacuous=not cases)
 
 
+
+def check_n6_row_identity_is_unique(rows, env_names, wire_dsts):
+    """N6 -- (family, old_name) identifies exactly one census row.
+
+    THE WHOLE FILE KEYS ON THIS PAIR AND NOTHING CHECKED IT. `DEPARTURES` is keyed by it, N3 builds
+    `by_key = {(f, o): (v, e) for ...}` from it, and a dict silently keeps the last write. So two rows
+    sharing an identity means one of them is invisible to N3 -- not reported, not skipped, GONE.
+
+    IT HAPPENED. The two census amendments (OPT_GRAD_CLIP, minted 2026-09-02, and MEM_JUDGE_FRAC) were
+    both written with `old_name` = "(none -- amendment, not an old-tree knob)", which is a true
+    sentence and a duplicate key. N3's lookup kept MEM_JUDGE_FRAC and dropped OPT_GRAD_CLIP entirely:
+    a departure declared against OPT_GRAD_CLIP would have been reported as "no census row with this
+    identity" while the row sat in census.json, and a stale one would never have been reported at all.
+    Each amendment now carries "(amendment: <NAME>)".
+
+    That is the shape this file's own N3 exists to prevent one level up -- a table that silently stops
+    describing what it indexes -- reproduced in the index itself. An amendment has no ancestor knob, so
+    the honest `old_name` is a sentence rather than a name, and the moment there were two of them the
+    sentence stopped being an identity. The general rule is the check: whatever an amendment's
+    old_name says, it has to be UNIQUE, because the rest of the file treats it as a key.
+
+    WHAT IT CANNOT CATCH: two rows that are genuinely the same knob written twice under different
+    names. This asks whether the index is injective, not whether the census is right.
+    """
+    import collections as _c
+    seen = _c.Counter((f, o) for f, o, _v, _e in rows)
+    findings = []
+    for (fam, old), n in sorted(seen.items()):
+        if n > 1:
+            names = [e.get("new_name") for f, o, _v, e in rows if (f, o) == (fam, old)]
+            findings.append(
+                f"{fam}/{old!r} identifies {n} rows ({', '.join(repr(x) for x in names)}). DEPARTURES "
+                f"is keyed by this pair and N3 builds a dict from it, so a dict keeps the last and the "
+                f"rest are invisible -- not reported, GONE. Give each row its own old_name.")
+    return _report("N6", "(family, old_name) identifies exactly one census row", not findings,
+                   f"{len(rows)} row(s) against {len(seen)} distinct identit(y/ies)", findings,
+                   vacuous=not rows)
+
+
 CHECKS = (
     check_n1_every_kept_knob_landed,
     check_n2_every_lever_traces_back,
     check_n3_departures_are_live,
     check_n4_drops_actually_dropped,
     check_n5_the_shadowed_names_still_resolve_to_src,
+    check_n6_row_identity_is_unique,
 )
 
 

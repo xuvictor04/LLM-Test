@@ -334,8 +334,10 @@ class LMLevers(LeverSet):
     # header: raising this past the positional table's height silently collapses every position beyond it
     # onto one shared embedding at :1586.
 
-    dropout = Lever(0.0, "Dropout probability on the token embedding, and between GRU layers when depth "
-                         "is greater than one.", U.PROBABILITY)
+    dropout = Lever(0.0, "Dropout probability, at three sites: the token embedding, between GRU layers "
+                         "when depth is greater than one, and the READOUT in LM.decode before the head. "
+                         "It does NOT reach LM.encode's return, which is the memory-key source and the "
+                         "fabric's input.", U.PROBABILITY)
     # Census: DROPOUT -> LM_DROPOUT, verdict rename, default 0.0. Field corrected from `LM_DROPOUT` to
     # `dropout` (DEFECT 1).
     # MISFILED UNDER optim, AND UNDER L2 THAT WOULD HAVE BEEN A FOREIGN READ. It is not an optimizer
@@ -354,8 +356,20 @@ class LMLevers(LeverSet):
     # model in a different mode than it found it (G7).
     # SECOND SILENT ZERO, WORTH KNOWING BEFORE SETTING IT: the GRU's inter-layer dropout applies only when
     # depth > 1 (`dropout=(DROPOUT if layers > 1 else 0.0)`, :1550), so on the shipped gru arm at depth 1
-    # this knob reaches exactly one place -- the embedding -- and half of what its name suggests is
-    # unreachable.
+    # that ONE site is unreachable. THIS COMMENT USED TO SAY THE KNOB THEREFORE REACHED "exactly one
+    # place -- the embedding", AND THAT WAS WRONG BY ONE, in the direction that mattered: the old arm
+    # applied `s.drop` TWICE in two lines -- `s.gru(s.drop(_e))` and `return s.drop(h)` (:1557-1558) --
+    # so at depth 1 it reached the embedding AND the returned hidden, and the second of those is the
+    # memory-key source. Corrected 2026-09-02 with Q-LM-9.
+    # WHERE THE THIRD SITE IS NOW, AND WHY IT MOVED (Q-LM-9 RESOLVED (b)). The readout dropout is applied
+    # inside LM.decode, before the head, instead of on LM.encode's return. Arithmetically identical on
+    # the gru arm -- the old forward was `head(drop(h))` either way -- but it takes this lever's blast
+    # radius OUT of two foreign packages: at dropout > 0 the old shape wrote dropped-out keys into MEM
+    # while querying with undropped ones at eval, and handed FAB's router a different input in train than
+    # in eval. NO WIRE COULD HAVE RECORDED THAT, because it is not a value crossing a boundary, it is a
+    # code path -- which is exactly why the fix has to be structural. On the TRANSFORMER arm the readout
+    # site is NEW (TinyTransformer's forward was `head(s.encode(x))`, no drop): inert at 0.0, a changed
+    # number above it, and on P9's list beside this arm's other dropout correction.
 
     # ==============================================================================================
     # 2. THE SOFTMAX, AND THE ROWS NOBODY HAS MINTED YET

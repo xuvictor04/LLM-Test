@@ -17,6 +17,19 @@ RECORD TYPES RETURNED (P4 defines them):
                  cursor), nsrc/nsrc_max, live_src, and every n_* counter
   WriteReceipt   offered, kept, committed, evicted_free/probation/main, floor_blocked, gate_theta
   Retrieval      dist, conf, hits, weights, blend
+  StoreCensus    what MEM.census returns, DECLARED HERE rather than left in that docstring's prose
+                 (Q-MEM-11, RESOLVED 2026-09-02): counts (the per-source table), floor_entries,
+                 quota_arm, pressure, probation_share, live_src, nsrc, nsrc_max, census_drift,
+                 n_census_reconciles, and every store.n_* counter passed through.
+                 THE FIELDS CARRY MEM'S OWN SPELLINGS AND NOT ITS CONSUMERS'. DOM.manage reads two
+                 of them as `memory_counts` and `mem_floor_entries` and FAB.grow_check reads a
+                 third as `memory_pressure`; those renames stay in spine/compose.py's `produces`
+                 column, which is the declared and machine-read home for a rename (K10/K11). Putting
+                 the consuming names on this record would prefix MEM's own fields with MEM's own
+                 name -- the doubled-name defect the census already corrected once -- and would
+                 invert spine/assemble.py's rule that a wire NAMES THE FIELD, NOT THE RECEIVER. It
+                 is not even a function: DOM.census's `live` reaches MEM as `live_sources` while its
+                 `n_live` reaches FAB as `live_domains`, so one record feeds two vocabularies.
 """
 from spine.lever import Config
 from spine import units as U
@@ -74,7 +87,14 @@ def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, po
 
     ONE WRITE PATH. There is no `if blocks > 1:` branch. The owner NARROWS the candidate SLOT SET
     to its block; probation narrowing and per-source floor protection then run INSIDE that set.
-    With blocks == 1 the block is the store. This is the repair for H31, where the per-owner path
+    With blocks == 1 the block is the store.
+    SO probation_frac IS A PER-BLOCK PREDICATE, and that sentence is the declaration -- said again
+    here because the two readings are different code and differ by the block count (Q-MEM-4, settled
+    2026-09-02). At the shipped d_capacity=8192, d_owner_blocks=64, quota=128 a 0.10 share is 12.8
+    entries INSIDE A BLOCK, not 819 across the store: a 64x difference in when eviction narrows.
+    census's `probation_share` is a STORE-WIDE REPORT AGGREGATE over the same flag and is NOT this
+    predicate; a Gate that prints the aggregate beside probation_frac is comparing two different
+    denominators, which is why census's own Gate must print the per-block distribution. This is the repair for H31, where the per-owner path
     returned before probation, the floor and the pressure counters while the report printed all
     three. `write_target` is a setpoint on the KEPT FRACTION, and survivors in excess of the
     block's quota are truncated BY SURPRISE RANK and counted -- the old path kept the FIRST quota
@@ -118,6 +138,12 @@ def read(mem: Config, store, *, queries, promote=True):
     is set, AND NOTHING ELSE -- reads stay GLOBAL across owner blocks even when writes are
     partitioned. That asymmetry is the design: knowledge is owned but not walled off.
 
+    `queries` ARE KEYS IN THE STORE'S OWN KEY SPACE, NOT CONTEXTS. This function declares no key
+    lever and takes no key_fn, so it cannot encode: whoever calls it narrows to key_win and encodes
+    with the same key_fn at the same key_depth the write path used. In-package that caller is
+    maintain (Q-MEM-9); the report-path caller is the composition root, and the two must agree or
+    the store is queried in one key space and written in another.
+
     `conf` is the top cosine similarity and `blend` is computed HERE from conf, match_floor and
     blend_max -- THE CALLER NEVER RECOMPUTES EITHER. Recomputing conf at the blend site is what
     reproduced the ungated 50/50 mix one layer up in prompt.py (ISSUES C8) and cl_bench.py (C9).
@@ -150,6 +176,17 @@ def blend(mem: Config, model_probs, retrieval):
     model_probs untouched. Both blend_max and match_floor are re-asserted here, so a Retrieval
     built by anything else fails loudly rather than mixing at an unknown weight.
 
+    THE SCORING CALLER TAKES log() OF WHAT THIS RETURNS, AND THAT IS EXACT, NOT A PSEUDO-LOGIT
+    (Q-MEM-10, RESOLVED 2026-09-02 (a)). softmax(log p) == p identically, so temperature, top-k,
+    nucleus sampling and cross-entropy over log(mixture) are all the true bits/byte of the blended
+    distribution. THIS SIGNATURE DOES NOT MOVE and no EVAL signature moves either: the composition
+    root forms softmax -> read(promote=False) -> blend -> log ONCE, as the named closure
+    _logits_fn(sysm, *, use_memory), and the mixing weight still never travels. log(0) cannot arise
+    while blend_max < 1: the result is >= (1-blend_max)*p_model and p_model from a softmax is
+    strictly positive. THE ONE CASE THAT MUST BE CLAMPED is blend_max == 1.0 with conf == 1.0, where
+    the model's mass can vanish entirely; that clamp belongs here, with the arithmetic, not at the
+    log site.
+
     LEVERS READ: blend_max, match_floor
     WIRES READ: none
     DID IT FIRE: store.n_blends, store.blend_weight_sum (the MEAN APPLIED WEIGHT is the honest
@@ -180,6 +217,19 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
        WHATEVER THEY SAY, and probation can never promote -- four archive files recorded
        EVICT=usage "does not protect faded knowledge by construction" as measured fact, and it was
        measured through a constant.
+       THE PROBE *IS* read(), NOT A SECOND RETRIEVAL (Q-MEM-9, RESOLVED 2026-09-02 (a)). It is
+       read(mem, store, queries=key_fn(stride(probe_contexts)[:, -key_win:], depth=key_depth),
+       promote=True), and THERE IS NO SECOND RETRIEVAL IMPLEMENTATION IN THIS PACKAGE. The
+       parameter lists force it rather than merely suggesting it: read declares no key lever and
+       takes no key_fn, so it cannot encode anything and its `queries` must already be key-space
+       vectors -- while THIS function holds key_fn and all three key levers. Open-coding a second
+       kNN here would put n_reads/n_promoted/n_wrong_* on one path while the store is moved by
+       another, which is C8/C9 one layer down, and would give wrong_read and match_floor a second
+       implementation free to drift. The narrowing to key_win and the encode at key_depth happen
+       HERE, once; any other site that forms `queries` must use the same two levers or the store is
+       queried in one key space and written in another -- the drift rekey_every exists to prevent.
+       WITH probe_contexts None OR EMPTY the honest DID IT FIRE reading is n_probe_fired counting
+       the CADENCE and n_probe_rows == 0: armed-but-0, not unreachable and not silence.
     2. AMORTIZED REKEY. If key_src == "model" and rekey_every > 0, re-encode one slice of a
        SNAPSHOT of the readable entries, sized so the whole snapshot is covered once per
        rekey_every windows. rekey_every == 0 DISARMS, behind a guard: the old tree documented 0 as
@@ -236,9 +286,18 @@ def apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources):
 def judge(mem: Config, store, *, scorer=None, reconstructor=None):
     """Run the selected wrongness detector over the store, and act on it or not.
 
-    verify == "selfcon": scorer(ctx) -> logits, THE SAME FORWARD PATH TRAINING USED -- passed in,
-    never constructed here, so the detector cannot score entries through a path the run never
+    verify == "selfcon": scorer(ctx, src) -> logits, THE SAME FORWARD PATH TRAINING USED -- passed
+    in, never constructed here, so the detector cannot score entries through a path the run never
     trained (M47). Per entry, the fraction of the vocabulary ranked above the stored token.
+    THE ARITY IS TWO AND IT IS DECLARED HERE, ONCE (Q-MEM-8/Q-MEM-10, 2026-09-02). It was
+    `scorer(ctx) -> logits`, and that shape cannot deliver what it promises: the path training used
+    runs through FAB.forward, which routes per row on a `domain_id`, so a one-argument scorer either
+    routes every stored entry as if it belonged to one domain or is not the trained path at all.
+    The datum exists -- Store carries `src` per entry -- so only the declared shape was missing. It
+    is prose and not a `def`, which is why it is free to change now and expensive after P4 writes
+    against it. EVAL.wrongness_probe's `scorer` is THE SAME CALLABLE and takes the same two
+    arguments; one callable declared twice with two shapes is how the signature width came out 614
+    on one path and 1 on the other.
     verify == "recon": fit a Reconstructor(key_dim, vocab_slots, recon_tok, recon_hid) on the
     SETTLED store and record per-entry reconstruction error. verify == "off": a no-op, and "off" is
     a first-class configuration rather than a code path that rots (D4).
@@ -251,14 +310,50 @@ def judge(mem: Config, store, *, scorer=None, reconstructor=None):
 
     THIS IS CADENCED, NOT END-OF-RUN. Called once from the report on a store where every write had
     reset selfcon to -1, the detector was structurally inert for the whole run and its report line
-    described a pass the report had just performed. It runs on the management cadence the spine
-    already imposes; no new lever (see FOR THE OWNER Q-MEM-8).
+    described a pass the report had just performed.
 
-    LEVERS READ: verify, wrong_read, wrong_sweep, recon_hid, recon_tok
+    WHICH PASS: THE dom.manage PASS, AT ITS END -- after MEM.apply_domain_plan and DOM.census, and
+    INSIDE the one Cadences.due('dom.manage', ...) answer that block already asks, never a second
+    due() under the same key (asking twice CONSUMES the fire, which is the defect that made minting
+    never fire). Q-MEM-8, RESOLVED 2026-09-02 (a). No new key, no new period, and no key is added to
+    spine/compose.py's _periods.
+    THE REASON IS NOT THE ONE THE QUESTION GAVE. docs/04_CONTRACT.md justified this pass as "the
+    moment the store's provenance has just been rewritten by folds and deletions"; that is not an
+    input to anything here -- this function reads verify, wrong_read, wrong_sweep, recon_hid and
+    recon_tok and scores (ctx, tok) per entry, and a fold relabels `src` without changing what the
+    model thinks of a stored token. The operative reason is census's own contract: a wrong_sweep
+    deletion makes the per-source counts stale, census(reconcile=True) is the FIRST row of this same
+    pass, and running judge at the END bounds that staleness to ONE cadence interval. 100 Windows
+    bounds it five times tighter than 500 -- that is the argument for dom.manage over fab.manage,
+    and it is the only one that survives inspection. At the shipped wrong_sweep=False nothing is
+    deleted at all, so the ordering costs nothing today. The alternative also has a cost of its own:
+    on fab.manage this would be the only MEM row riding a FAB-keyed answer with no MEM period in
+    sight, which is exactly the untracked ride compose.py's fab.manage row records for WORLD.
+    ALSO STALE, AND CORRECTED HERE: this docstring said "no new lever", and the CONTRACT said
+    LOOP_ORDER already places judge on the dom.manage pass. It does not -- MEM.judge has NO
+    LOOP_ORDER ROW; it is in DEFERRED_ENTRY_POINTS for want of the scorer, and the row above is what
+    to write when it returns.
+
+    WHAT IS CHECKED IS A LEVER, AND IT IS THE ONE GENUINELY OPEN HALF OF Q-MEM-8 (see judge_frac,
+    a CENSUS AMENDMENT). The checked set per pass is (every entry whose selfcon is -1, i.e. written
+    since the last pass) plus (a judge_frac slice of the already-checked population, taken by
+    DETERMINISTIC STRIDE from a rotating cursor, never a random draw). judge_frac = 0.0 is the
+    shipped default and re-scores nothing; 1.0 is a full re-score every pass and costs about 1.7x
+    the whole training compute of a 100-Window interval at the shipped d_capacity and key_win.
+    Neither is forced, they differ by ~20x in cost and they differ in MEANING -- at 0.0 the median +
+    k*MAD population mixes scores taken under models thousands of windows apart -- so the tree
+    leaves both reachable and states the measurement instead of arguing. FLAGGING STILL RUNS OVER
+    THE WHOLE CHECKED POPULATION whatever judge_frac is; the lever sizes the re-score, not the flag.
+
+    LEVERS READ: verify, wrong_read, wrong_sweep, recon_hid, recon_tok, judge_frac
     WIRES READ: none
-    DID IT FIRE: store.n_judge_runs, n_checked, n_flagged, n_swept. n_checked <= 10 is the state in
-                 which the flag rule returns all-False and the whole filter is inert; the Gate
-                 prints THAT ARITHMETIC rather than printing nothing.
+    DID IT FIRE: store.n_judge_runs, n_checked, n_rescored, n_judge_cursor_wraps, n_flagged,
+                 n_swept. n_checked <= 10 is the state in which the flag rule returns all-False and
+                 the whole filter is inert; the Gate prints THAT ARITHMETIC rather than printing
+                 nothing. n_rescored == 0 with judge_frac == 0.0 is `armed but 0 (judge_frac=0.0,
+                 the re-score is off)` and NOT unreachable; n_judge_cursor_wraps == 0 with
+                 judge_frac > 0 says the sweep never came round, which is a different finding from
+                 a sweep that found nothing.
     """
     mem = mem.owned_by("MEM")
     raise NotImplementedError(
@@ -268,6 +363,12 @@ def judge(mem: Config, store, *, scorer=None, reconstructor=None):
 
 def census(mem: Config, store, *, reconcile=False):
     """Everything the report and the domain manager need to know about the store, in one call.
+
+    RETURNS StoreCensus, declared in this module's RECORD TYPES RETURNED block. Until 2026-09-02 the
+    fields lived only in the prose below, so the four `produces` entries that cross into DOM and FAB
+    passed K11 by word-appearance rather than by declaration -- K11 says so itself: it "cannot tell
+    a returned field from a mention, and it does not try". TOK.vocab_state's D-T3 is the live defect
+    an undeclared key produced, and this is the same shape (Q-MEM-11).
 
     reconcile=True recomputes the per-source counts EXACTLY from (src & active) and reports the
     drift against the incrementally-maintained table. The incremental table is the floor's only
@@ -280,17 +381,46 @@ def census(mem: Config, store, *, reconcile=False):
     src_share > 0, "pressure_signal" at src_share == 0 -- whose other half is FAB's
     grow_on_mem_pressure, so the report must join two packages to name the arm.
 
-    `pressure` is main/(main+prob) and its Gate prints probation_share/probation_frac BESIDE
-    pressure/pressure_thresh, because H33 is that every write lands on probation, only retrieval
-    promotes, probation is over budget (measured 82% of the store), eviction takes the probation
-    branch almost always, and pressure reads ~0 whatever the store is suffering -- an unreachability
-    that must show its own arithmetic instead of reading as calm.
+    `pressure` is main/(main+prob) over eviction BRANCHES, and Q-MEM-4 is RESOLVED 2026-09-02 (a):
+    KEEP THE DEFINITION, KEEP pressure_thresh AT 0.80, DECLARE THE GATE, AND MEASURE BEFORE
+    RETUNING. What changed is the REASON, and the corrected reason is stronger than H33's. H33 says
+    probation is over budget at the measured write:read ratio (82% of the store) so pressure reads
+    ~0. The operative chain today is shorter and it is exact, not approximate: only a retrieval
+    promotes out of probation (levers.py, probation_frac); the only in-loop retrieval is
+    MEM.maintain's job 1, whose `probe_contexts` HAS NO PRODUCER, and MEM.read is a DEFERRED entry
+    point for want of `queries`. So n_promoted is IDENTICALLY 0, probation is 100% of the store,
+    every eviction takes the probation branch, n_evict_main is identically 0 and pressure is exactly
+    0.0 -- for EVERY configuration, not "~0 at the measured ratio". The number is not mis-tuned; it
+    is structurally constant until P5 lands the contexts, and retuning either lever against a
+    constant is unfalsifiable.
+    THE GATE THEREFORE REPORTS A STATE, NOT A NUMBER. Whenever n_promoted == 0 over the interval it
+    prints `unreachable (no promotion path: probe_contexts has no producer, n_promoted=0)` with that
+    arithmetic, never `0.000` -- which is H33's own point read one level up, that a signal which
+    cannot reach its threshold is indistinguishable from a healthy one. It prints
+    probation_share/probation_frac and n_probe_fired/n_promoted beside pressure/pressure_thresh,
+    AND it names BOTH causes of a silent zero, because there are two: no promotion path, and the arm
+    is not selected (src_share=0.5 > 0 makes quota_arm "reservoir", and FAB.grow_on_mem_pressure
+    ships False, so the pressure_signal arm is off at both ends).
+    probation_frac IS A PER-BLOCK PREDICATE (write's own "INSIDE that set"); `probation_share`
+    reported here is a store-wide aggregate and is not the thing the eviction branch tests. At the
+    shipped defaults those differ by the 64 blocks.
+    EXPECT THE RETUNE TO GO UP, NOT DOWN. Once the probe has material the rates invert: ~probe_rows/
+    probe_every = 64/25 = 2.56 query rows per window at topk=8 is up to ~20 entry-touches per
+    window against ~1 gated write per window, so probation can fall UNDER its budget and pressure
+    can pin at 1.0 above 0.80 permanently. Both pinned-at-0 and pinned-at-1 are live outcomes and
+    only a run with the probe fed can say which.
+    THE READING IS NOT A WIRE AND MUST NOT BECOME ONE. pressure_thresh's only reader is this
+    function; FAB.grow_check takes `memory_pressure` and reads no threshold, so the comparison
+    against 0.80 happens HERE and what the root passes to FAB must already be MEM's VERDICT. A store
+    occupancy measured at runtime can never be a wire -- a Coupling.compute sees only frozen Configs.
 
     LEVERS READ: src_share, probation_frac, pressure_thresh, quota, evict
     WIRES READ: none
     DID IT FIRE: this call IS the DID IT FIRE surface for the package; it also maintains
                  n_census_reconciles and census_drift, and a nonzero census_drift is itself a
-                 defect signal rather than a repair
+                 defect signal rather than a repair. The `mem.pressure` Gate reads
+                 store.n_promoted, n_probe_fired, n_evict_main and n_evict_probation, and covers
+                 BOTH unreachability causes named above
     """
     mem = mem.owned_by("MEM")
     raise NotImplementedError(
