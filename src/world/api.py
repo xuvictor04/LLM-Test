@@ -298,6 +298,19 @@ def startup_refusals(world: Config, *, ctx_tokens):
     DID IT FIRE: the returned list; an empty list is a positive result and is printed as one
     """
     world = world.owned_by("WORLD")
-    raise NotImplementedError(
-        "WORLD.startup_refusals: P4 (world) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section WORLD.")
+    out = []
+    horizon = int(world.horizon)
+    if horizon == 0:
+        # Same shape as RUN_EPOCHS=0: `max(1, _i("WORLD_K", 1))` rewrote it to 1 and the banner
+        # printed the value the operator typed, not the one the run used.
+        out.append("WORLD_HORIZON=0: refused rather than silently rewritten to 1, which is what the "
+                   "old `max(1, ...)` did while the banner kept printing 0.")
+    elif horizon >= int(ctx_tokens):
+        # BOTH SLICES EMPTY. The prediction target is the window shifted by the horizon, so a
+        # horizon at or past the context length leaves nothing on either side and the loss comes
+        # out nan -- a number, not an error, which is the failure mode this refusal exists for.
+        out.append(f"WORLD_HORIZON={horizon} is not below LM_CTX={int(ctx_tokens)}: the input and "
+                   f"target slices are both empty and the world loss is nan rather than an error. "
+                   f"The bound is LM's context length and arrives here as an argument, because a "
+                   f"choices= list cannot name another package's lever.")
+    return out

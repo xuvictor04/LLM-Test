@@ -22,8 +22,56 @@ RECORD TYPES RETURNED (P4 defines them):
   Resume           attempted, loaded, step_restored, epoch_restored, best_restored
   Retention        the best-model policy object; BestAction(save_best, rotate_slot)
 """
+import dataclasses
+import os
+
+import torch
+
 from spine.lever import Config
 from spine import units as U
+
+
+# ==================================================================================================
+# THE RECORDS THIS PACKAGE RETURNS
+# ==================================================================================================
+
+# THE SIX SPELLINGS OF OFF, IN ONE PLACE. The old tree normalised these at :5329, hundreds of lines
+# BELOW the first consumer at :1010, so the tokenizer save path was computed from the raw string and
+# would have named a file "0.dyntok.json"; a second copy of the same test at :1010 existed to work
+# around that. Before the normalisation existed at all, `if not ck: return` never fired for "0",
+# os.makedirs("0") ran, and the run wrote its checkpoint into a directory literally named `0` in the
+# repository root. One tuple, one predicate, one call site per question.
+_OFF = ("0", "", "off", "no", "none", "false")
+
+
+@dataclasses.dataclass(frozen=True)
+class Snapshot:
+    """One checkpoint as read from disk. `payload` is OPAQUE to this package.
+
+    CKPT never learns what a "rank" is: payload is a mapping the composition root assembles from
+    every package's own state_dict and hands back whole, and geometry is a manifest of records each
+    package produced. This package compares recorded against live and prints the arithmetic.
+    """
+    payload: dict
+    geometry: dict
+    step: int
+    epoch: int
+    best_state: object
+
+
+@dataclasses.dataclass(frozen=True)
+class Resume:
+    """The three-state DID IT FIRE for the resume path.
+
+    `attempted` without `loaded` is the state the old tree could not report: a RESUME that named a
+    path nothing could be read from fell through to a cold start with nothing in the log saying the
+    continual-learning boundary the run was launched to measure had not happened.
+    """
+    attempted: bool
+    loaded: bool
+    step_restored: int
+    epoch_restored: int
+    best_restored: bool
 
 
 def saving_on(ckpt: Config):
@@ -46,9 +94,7 @@ def saving_on(ckpt: Config):
     DID IT FIRE: the returned bool is recorded once; every save records refused_off when it is False
     """
     ckpt = ckpt.owned_by("CKPT")
-    raise NotImplementedError(
-        "CKPT.saving_on: P4 (ckpt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CKPT.")
+    return str(ckpt.dir).strip().lower() not in _OFF
 
 
 def save_period(ckpt: Config):
@@ -141,9 +187,14 @@ def resume_source(ckpt: Config):
     DID IT FIRE: Resume.attempted
     """
     ckpt = ckpt.owned_by("CKPT")
-    raise NotImplementedError(
-        "CKPT.resume_source: P4 (ckpt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CKPT.")
+    raw = str(ckpt.resume).strip()
+    if raw.lower() in _OFF:
+        return None
+    # BOTH SUPPORTED FORMS NORMALISE TO THE FILE. `RESUME=runs/x/` and `RESUME=runs/x/ckpt.pt` are
+    # both documented, and the sibling-vocabulary guess broke on the second because it appended
+    # `.dyntok.json` to a path that already ended in `.pt` (ISSUES P1-M19). Normalising here means
+    # every later consumer -- the vocabulary read path among them -- sees one shape.
+    return os.path.join(raw, "ckpt.pt") if raw.endswith(("/", os.sep)) or os.path.isdir(raw) else raw
 
 
 def load(ckpt: Config):
@@ -159,9 +210,30 @@ def load(ckpt: Config):
     DID IT FIRE: Resume(attempted, loaded, step_restored, epoch_restored, best_restored)
     """
     ckpt = ckpt.owned_by("CKPT")
-    raise NotImplementedError(
-        "CKPT.load: P4 (ckpt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CKPT.")
+    src = resume_source(ckpt)
+    if src is None:
+        return None
+    if not os.path.isfile(src):
+        # NAMED, NOT SILENT. A RESUME pointing at nothing used to fall through to a cold start, and
+        # in this system a cold start where a resume was asked for is not a slower run -- it is a
+        # different experiment, because every forgetting number is a measurement ACROSS the
+        # boundary this path creates.
+        raise FileNotFoundError(
+            f"CKPT_RESUME={str(ckpt.resume)!r} resolves to {src!r}, which does not exist. A resume "
+            f"is the experiment here, not a convenience: continuing without one silently would "
+            f"report a cold run as a continual-learning run.")
+    # weights_only=False: the payload carries this project's own record objects, not just tensors,
+    # and the file is one this run's own operator named.
+    blob = torch.load(src, map_location="cpu", weights_only=False)
+
+    # `best_state` IS IN THE CHECKPOINT (ISSUES P1-M45). `_best_bpb` started cold on every process,
+    # so the first post-resume probe satisfied "no best yet" and overwrote the PARENT's
+    # best-by-held-out snapshot with the Adam re-warm bump. Reading it back is the whole repair.
+    return Snapshot(payload=blob.get("payload") or {},
+                    geometry=blob.get("geometry") or {},
+                    step=int(blob.get("step", 0)),
+                    epoch=int(blob.get("epoch", 0)),
+                    best_state=blob.get("best_state"))
 
 
 def check_geometry(ckpt: Config, snapshot, geometry):

@@ -27,7 +27,14 @@ RECORD TYPES RETURNED (P4 defines them):
   Tick      step, epoch, flush_due, rolled, finished
   Timing    span(name) -> a context manager; spans() -> {name: seconds}
 """
+import contextlib
+import dataclasses
+import time
+
+import torch
+
 from spine.lever import Config
+from spine import rng as _rng
 from spine import units as U
 
 
@@ -84,6 +91,72 @@ and cadence_audit covers it like the other five.
 """
 
 
+# ==================================================================================================
+# THE RECORDS THIS PACKAGE RETURNS
+# ==================================================================================================
+#
+# FROZEN, because a caller that can write to one of these can move a counter. RUN's whole mechanical
+# contribution is "exactly one place in the tree where a counter advances", and a mutable Tick handed
+# to thirteen packages is thirteen places again. `frozen=True` is the cheapest form of that promise
+# and it is checked by the language rather than by a comment.
+
+
+@dataclasses.dataclass(frozen=True)
+class Process:
+    """What the process-wide settings RESOLVED to, not what was asked for.
+
+    `tf32_applied` is the PAIR actually written to torch -- (matmul, cudnn) -- and not the requested
+    flag, because the defect this record answers is a knob that reported itself off while cuDNN ran
+    TF32 anyway from its own default. `amp_state` carries the third state: "declined" is bf16 asked
+    for on a device that has no autocast for it, which is legal, inert, and must be readable.
+    """
+    device: str
+    autocast: object
+    tf32_applied: tuple
+    amp_state: str
+    amp_reason: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RunMode:
+    bench: bool
+    profile: bool
+    timing: object
+
+
+class Timing:
+    """Wall-clock attribution for the training step, and a single shared no-op when it is off.
+
+    ONE CODE PATH, WHICH IS THE POINT. `span()` returns a context manager either way, so the
+    instrumentation sits in the hot path unconditionally and there is no second, uninstrumented
+    branch to rot. The old tree had the branch and it drifted.
+
+    `spans()` returns {} when profiling is off. An EMPTY dict and an ABSENT one are different
+    statements -- "measured nothing" versus "did not measure" -- and RunMode always carries a
+    Timing so the caller can tell them apart.
+    """
+
+    __slots__ = ("_on", "_spans")
+
+    def __init__(self, on):
+        self._on = bool(on)
+        self._spans = {}
+
+    @contextlib.contextmanager
+    def _timed(self, name):
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            self._spans[name] = self._spans.get(name, 0.0) + (time.perf_counter() - t0)
+
+    def span(self, name):
+        return self._timed(name) if self._on else contextlib.nullcontext()
+
+    def spans(self):
+        return dict(self._spans)
+
+
 def process_setup(run: Config):
     """Apply the process-wide arithmetic settings ONCE, before any package is built.
 
@@ -115,9 +188,38 @@ def process_setup(run: Config):
     DID IT FIRE: Process.tf32_applied, Process.amp_state
     """
     run = run.owned_by("RUN")
-    raise NotImplementedError(
-        "RUN.process_setup: P4 (train) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section RUN.")
+    device = str(run.device)
+    tf32 = bool(run.tf32)
+
+    # ASSIGNED, NOT GUARDED, on BOTH attributes -- the docstring above says why. `if tf32:` would
+    # leave cudnn.allow_tf32 at its own default of True on a run launched with RUN_TF32=0 to rule
+    # matmul precision out of a determinism question.
+    torch.backends.cuda.matmul.allow_tf32 = tf32
+    torch.backends.cudnn.allow_tf32 = tf32
+    applied = (bool(torch.backends.cuda.matmul.allow_tf32),
+               bool(torch.backends.cudnn.allow_tf32))
+
+    # THE THREE STATES, AND "declined" IS THE ONE THAT MATTERS. `choices=` already refused every
+    # spelling but "off"/"bf16", so what is left is the case the old tree lost silently: bf16 asked
+    # for on a device with no autocast for it. It is not an error and it is not "active".
+    amp = str(run.amp)
+    if amp == "off":
+        state, reason = "off", "RUN_AMP=off: the step runs in fp32."
+        cast = contextlib.nullcontext
+    elif device.startswith("cuda"):
+        state = "active"
+        reason = f"RUN_AMP={amp} on {device}: the LM step runs under torch.autocast."
+        cast = lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    else:
+        state = "declined"
+        reason = (f"RUN_AMP={amp} was requested and DECLINED: device is {device!r}, which has no "
+                  f"bf16 autocast here, so the step runs in fp32. This is the armed-but-inert "
+                  f"state, reported rather than silent -- the old tree ran fp32 having been asked "
+                  f"for bf16 and said so once, at step 0, in a line no grid read.")
+        cast = contextlib.nullcontext
+
+    return Process(device=device, autocast=cast, tf32_applied=applied,
+                   amp_state=state, amp_reason=reason)
 
 
 def mode(run: Config):
@@ -139,9 +241,8 @@ def mode(run: Config):
                  off, and an empty dict and an absent one are different statements
     """
     run = run.owned_by("RUN")
-    raise NotImplementedError(
-        "RUN.mode: P4 (train) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section RUN.")
+    return RunMode(bench=bool(run.bench), profile=bool(run.profile),
+                   timing=Timing(bool(run.profile)))
 
 
 def streams(run: Config, subsystems):
@@ -160,9 +261,12 @@ def streams(run: Config, subsystems):
                  subsystem ABSENT never asked. Both statements must be printable (G4).
     """
     run = run.owned_by("RUN")
-    raise NotImplementedError(
-        "RUN.streams: P4 (train) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section RUN.")
+    seed = int(run.seed)
+    # MINTED HERE, ALL OF THEM, AND THAT IS WHY rng.issued() IS A REGISTER RATHER THAN A SAMPLE. A
+    # subsystem that mints its own stream later is absent from issued() until it does, so "never
+    # asked" and "not built yet" would be the same reading. Minting every declared name up front
+    # makes the ledger complete at step 0 and leaves `.draws == 0` to carry armed-but-inert.
+    return {name: _rng.rng_for(name, seed) for name in subsystems}
 
 
 def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0):
@@ -377,9 +481,27 @@ def startup_refusals(run: Config, *, disk_stream):
     DID IT FIRE: the returned list; an empty list is a positive result and is printed as one
     """
     run = run.owned_by("RUN")
-    raise NotImplementedError(
-        "RUN.startup_refusals: P4 (train) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section RUN.")
+    out = []
+    epochs = int(run.epochs)
+    if epochs < 1:
+        # REFUSED, NOT REPAIRED. `EPOCHS = max(1, _i(...))` rewrote a 0 to a 1 and then printed 1 in
+        # the banner, so an operator who asked for zero passes got one and the log agreed with the
+        # operator rather than with the run. A coercion at read time that makes a printed number a
+        # lie is the FAB_MIN_STEPS shape and this package refuses it by name.
+        out.append(f"RUN_EPOCHS={epochs}: the loop would make no passes. Set it to 1 or more. This "
+                   f"is refused rather than clamped to 1, because a clamp makes the banner print a "
+                   f"number the run did not use.")
+    if epochs > 1 and not disk_stream:
+        # THE TWO-PACKAGE GUARD, and the reason this function takes an argument at all. It cannot
+        # live in either levers.py: RUN owns the length, DATA owns the resample flag, and neither
+        # may read the other's lever.
+        out.append(f"RUN_EPOCHS={epochs} with resampling off replays byte-identical text every "
+                   f"epoch, so a continual-learning result taken this way is a MEMORISATION "
+                   f"result. Turn DATA resampling on, or run one epoch.")
+    # amp on a device with no autocast for it is NOT refused. It is legal and inert, and
+    # Process.amp_state says "declined" with the sentence -- that is the reportable third state,
+    # and refusing it here would make a legal configuration unrunnable.
+    return out
 
 
 def cadence_audit(run: Config, *, run_windows, periods):

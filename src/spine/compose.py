@@ -1299,6 +1299,25 @@ LOOP_ORDER = (
 # arguments nothing supplies. The deferral does not remove a mechanism, it stops the tables claiming
 # one, and it names the producer each mechanism is waiting on.
 DEFERRED_ENTRY_POINTS = {
+    "RUN.Timing.span":
+        "P4, WITH THE FLUSH BODY, AND IT ARRIVED BEFORE ITS CALLER ON PURPOSE. RUN.mode has to "
+        "return a RunMode, RunMode carries a `timing`, and the contract's RECORD TYPES block names "
+        "span() and spans() as that object's surface -- so writing `mode` writes these two, one "
+        "increment before the rows that call them. THE ALTERNATIVE WAS WORSE: a RunMode carrying "
+        "None until the loop lands would make every future call site test for it, which is the "
+        "second-code-path this record exists to remove (span() returns a context manager whether "
+        "profiling is on or off precisely so the hot path has no branch). ITS ONE ARGUMENT, `name`, "
+        "HAS NO PRODUCER AND WILL NOT HAVE ONE: it is a literal written at the call site -- the "
+        "label of the component being timed ('encode', 'route', 'backward') -- so it is not a value "
+        "any entry point returns and no row can name a producer for it. What is missing is the "
+        "CALLER, not the argument: the flush body's per-component spans. `spans()` is read by "
+        "RUN.bench_summary, which takes `timing` and is itself a stage-R row. Both leave this table "
+        "when the loop body lands.",
+    "RUN.Timing.spans":
+        "P4, with RUN.Timing.span above -- same increment, same caller. Read by RUN.bench_summary "
+        "(`timing=None` in its signature is the not-profiled case), and an EMPTY dict from it is a "
+        "different statement from an absent one: 'measured nothing' versus 'did not measure'. That "
+        "distinction is why RunMode always carries a Timing rather than sometimes carrying None.",
     "CKPT.Retention.consider":
         "P5, WITH EVAL.curve_probe, AND THIS IS THE SAME DOUBLE STANDARD ONE ROW DOWNSTREAM. It had "
         "an A row until 2026-08-30 while its only input's producer sat in this table: `curve_bpb` is "
