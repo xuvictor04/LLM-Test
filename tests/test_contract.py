@@ -810,6 +810,9 @@ _CASES = (
         "K8": (False, None), "K9": (False, None), "K10": (False, None), "K11": (False, None),
         "K12": (False, None), "K13": (False, None)}),
 
+    ("K13: the population collapsed below the declared floor",
+     {}, {"K13floor": (True, "POPULATION COLLAPSED")}),
+
     ("K1: a parameter was renamed in the tree and not in the document",
      {"src/data/api.py": _GOOD_API.replace("*, seed: int", "*, run_seed: int")},
      {"K1": (True, "run_seed")}),
@@ -1158,7 +1161,9 @@ _BY_TAG = {
     "K11": lambda d: check_k11_produces_is_not_fabricated(os.path.join(d, "src")),
     "K12": lambda d: check_k12_deferral_reasons_are_complete(os.path.join(d, "src")),
     "K13": lambda d: check_k13_counts_and_absence_claims(
-        os.path.join(d, "src"), os.path.join(d, "docs", "04_CONTRACT.md")),
+        os.path.join(d, "src"), os.path.join(d, "docs", "04_CONTRACT.md"), floor=1),
+    "K13floor": lambda d: check_k13_counts_and_absence_claims(
+        os.path.join(d, "src"), os.path.join(d, "docs", "04_CONTRACT.md"), floor=999),
 }
 
 
@@ -1784,12 +1789,22 @@ def check_k9_cadence_periods_are_typed(src_dir=SRC):
             f"raises on a bare int, and a Config returns a bare int for every Clock-unit lever "
             f"(ISSUES P1-H51).")
 
+    # TWO ARMS, AND `or` MEANT NEITHER OF THEM HAD TO HAVE ANYTHING IN IT. K9 reads the order tables
+    # for Cadences.due gates AND compose.py's _periods mapping, and it marked itself VACUOUS only when
+    # BOTH were empty. So the arm this check was written for -- the gates, the three rows that handed
+    # Cadences.due a bare lever read -- could go to zero and K9 would still print a plain PASS on the
+    # strength of the other arm's population. That is a green tick over an empty set wearing a second
+    # set's count, which is the same defect the marker exists to refuse. Either arm empty is vacuous,
+    # and the detail line says which.
+    empty = [n for n, c in (("Cadences.due gates", gates), ("_periods entries", len(periods))) if not c]
+    detail = (f"{gates} Cadences.due gate(s) declared across {len(prose)} row note(s); "
+              f"{len(periods)} period(s) in _periods, "
+              f"{sum(1 for v in periods.values() if not isinstance(v, ast.Call))} of them a "
+              f"module constant with no order-table row")
+    if empty:
+        detail += f" -- EMPTY ARM(S): {', '.join(empty)}"
     return _report("K9", "no cadence gate is handed a bare lever read", not findings,
-                   f"{gates} Cadences.due gate(s) declared across {len(prose)} row note(s); "
-                   f"{len(periods)} period(s) in _periods, "
-                   f"{sum(1 for v in periods.values() if not isinstance(v, ast.Call))} of them a "
-                   f"module constant with no order-table row",
-                   findings, vacuous=not (gates or periods))
+                   detail, findings, vacuous=bool(empty))
 
 
 
@@ -2342,6 +2357,38 @@ _K13_PAST = re.compile(r"\b(?:was|were|had|used\s+to|stood\s+at|historically|no\
                        r"|\buntil\s+20\d\d", re.I)
 _K13_TRANSITION = re.compile(r"(?:→|->)\s*\**\d*\s*$")
 
+# WHERE A SENTENCE STOPS BEING ONE CLAIM. The tense skip used to switch off for a WHOLE SENTENCE, so
+# one "was" anywhere in it silenced every number in it: "Everything above is prose about these 123
+# entry points" sat inside a sentence that also recounted what the count HAD been, and went unchecked.
+# Measured: seven live claims were switched off that way, six of which the tree could confirm on the
+# spot. The window is now the clause holding the number, and a clause that is itself historical is
+# still skipped -- so a history keeps its numbers and a live claim beside one stops hiding behind it.
+_K13_CLAUSE = re.compile(r"(?:[;:|]|\s—\s|\s--\s|,\s+(?:and|but|while|which|so|because|until)\s+)")
+
+# THE FLOOR IS THE ONLY THING THAT MAKES A REWORD LOUD. K13's patterns are literal English shapes, so
+# rewording a claim out of a shape removes it from the population and nothing says so: the checked
+# count drops and the check still prints PASS. That is the same green-tick-over-a-shrinking-set the
+# VACUOUS marker exists to refuse, one step short of empty -- and 60 of the survey's 475 records are
+# guards whose condition cannot be satisfied. Zero is not the only dishonest population.
+#
+# So the size is DECLARED here and compared. Deleting prose legitimately lowers it; lowering this
+# number is then a deliberate line in a diff with a reason beside it, which is the whole difference
+# between a population that shrank and a population that was allowed to shrink.
+_K13_FLOOR = 50
+
+
+def _k13_clause(sentence, offset):
+    """The clause of `sentence` containing the character at `offset`, for the tense test."""
+    parts, last = [], 0
+    for c in _K13_CLAUSE.finditer(sentence):
+        parts.append((last, c.start()))
+        last = c.end()
+    parts.append((last, len(sentence)))
+    for a, b in parts:
+        if a <= offset < b:
+            return sentence[a:b]
+    return sentence
+
 # (label printed in the detail line, regex, quantity per capture group, words the sentence must
 # contain for the match to count). The labels ARE the report: a reader has to be able to see the
 # shape of what was searched for, and therefore the shape of what was not.
@@ -2587,8 +2634,13 @@ def _k13_scan(paths, counts, root):
             for m in re.finditer(rx, text, re.I | re.M):
                 if any(a <= m.start() and m.end() <= b for a, b in taken):
                     continue          # already claimed by a more specific pattern
-                sentence = next((text[a:b] for a, b in spans if a <= m.start() < b),
-                                text[max(0, m.start() - 200):m.end() + 200])
+                span = next(((a, b) for a, b in spans if a <= m.start() < b), None)
+                if span is None:
+                    s_start = max(0, m.start() - 200)
+                    sentence = text[s_start:m.end() + 200]
+                else:
+                    s_start, _s_end = span
+                    sentence = text[s_start:_s_end]
                 if ctx and not any(c in sentence.lower() for c in ctx):
                     continue
                 taken.append((m.start(), m.end()))
@@ -2598,8 +2650,12 @@ def _k13_scan(paths, counts, root):
                 if _K13_TRANSITION.search(text[max(0, m.start() - 40):m.start()]):
                     skipped.append(f"{where} {m.group(0)!r} -- reads as a transition (N -> M)")
                     continue
-                if _K13_PAST.search(sentence):
-                    skipped.append(f"{where} {m.group(0)!r} -- sentence is past-tense")
+                # THE CLAUSE, NOT THE SENTENCE. See _K13_CLAUSE above: the sentence-wide test
+                # switched off seven live claims because something else in the same sentence was
+                # written in the past. A clause that is itself historical is still skipped.
+                clause = _k13_clause(sentence, m.start() - s_start)
+                if _K13_PAST.search(clause):
+                    skipped.append(f"{where} {m.group(0)!r} -- clause is past-tense")
                     continue
                 if keys[0] == "PFX":
                     pairs = [("levers:" + m.group(1).upper(), m.group(2))]
@@ -2672,7 +2728,7 @@ def _k13_absence_claims(doc_text, src_dir, root_rel):
     return findings, headings, negatives
 
 
-def check_k13_counts_and_absence_claims(src_dir=SRC, doc_path=DOC):
+def check_k13_counts_and_absence_claims(src_dir=SRC, doc_path=DOC, floor=None):
     """K13 -- every number the prose writes about a countable thing equals the tree's number, and
     no question heading says a thing is absent that the tree declares.
 
@@ -2693,15 +2749,20 @@ def check_k13_counts_and_absence_claims(src_dir=SRC, doc_path=DOC):
       * A NUMBER WRITTEN IN WORDS. "The four accessors exist" against five, and "DEFERRED_ENTRY_
         POINTS -- fourteen" against fifteen, were both live in this document while this check was
         being written, and it saw neither. Both were found by reading.
-      * TENSE. A stale count survives by sitting in a sentence containing "was", "were", "had",
-        "used to", "stood at", "historically", "no longer" or "until <year>" -- those sentences are
-        SKIPPED, and the skipped list is printed with its size, because a history is allowed to
-        record the number it recorded. A live claim in such a sentence is equally invisible. The
+      * TENSE. A stale count survives by sitting in a CLAUSE containing "was", "were", "had",
+        "used to", "stood at", "historically", "no longer" or "until <year>" -- those are SKIPPED,
+        and the skipped list is printed with its size, because a history is allowed to record the
+        number it recorded. The window was the whole SENTENCE until 2026-09-02, which silenced
+        seven live claims sitting beside a historical one -- six of which the tree confirmed on the
+        spot once the window narrowed, and the population went 44 to 50. A live claim in a clause
+        that is itself past-tense is still invisible. The
         same applies to a number written as the target of an arrow (`19 -> 17 of 25`), which is a
         transition and not a claim about today.
-      * A CLAIM PHRASED DIFFERENTLY. The patterns are literal English shapes. "the manifest holds a
-        score of fields" is a claim; nothing here sees it. The remedy when a count goes stale in a
-        shape this check cannot see is to add the shape, not to argue the check is complete.
+      * A CLAIM PHRASED DIFFERENTLY. The patterns are literal English shapes, so a claim written
+        outside them -- "the manifest holds a score of fields" -- is not read. What IS now caught is
+        the reword: taking an existing claim out of a matched shape drops the population, and
+        `_K13_FLOOR` fails on that rather than printing a green tick over a smaller set. The floor
+        does not say WHICH claim left, only that one did; the remedy is still to add the shape.
       * WHETHER THE NUMBER IS WORTH WRITING. `ROW_ARGUMENTS_ELSEWHERE["CKPT.save"]` says the count
         is deliberately absent because it "stood at 15, 16 and 20 in three live statements at
         once". This check makes a copy cheap to verify; it does not make a copy a good idea.
@@ -2737,6 +2798,15 @@ def check_k13_counts_and_absence_claims(src_dir=SRC, doc_path=DOC):
         findings.append(
             f"NO `### Q-` HEADING was found in {os.path.relpath(doc_path, root)}, so arm (b) "
             "examined nothing. A check with an empty population is a check that cannot fail.")
+    want_floor = _K13_FLOOR if floor is None else floor
+    if len(examined) < want_floor:
+        findings.append(
+            f"POPULATION COLLAPSED: {len(examined)} numeric claim(s) matched, against a declared "
+            f"floor of {want_floor}. The patterns are literal English shapes, so rewording a claim "
+            f"out of a shape removes it from this check silently and leaves a green tick over a "
+            f"smaller set. If prose was legitimately deleted, lower _K13_FLOOR in this file and say "
+            f"why in the commit; if a claim was reworded, either restore the shape or add the new "
+            f"one to _K13_PATTERNS. Do not leave the floor above what the tree can meet.")
 
     quantities = ", ".join(f"{k}={v[0]}" for k, v in sorted(counts.items()))
     shapes = "; ".join(label for label, _, _, _ in _K13_PATTERNS)
@@ -2747,7 +2817,7 @@ def check_k13_counts_and_absence_claims(src_dir=SRC, doc_path=DOC):
               f"\n          LIVE COUNTS: {quantities}"
               f"\n          PATTERNS SEARCHED FOR: {shapes}"
               f"\n          NOT SEARCHED FOR: a number written in words; a claim in a past-tense "
-              f"sentence; any shape not listed above")
+              f"clause; any shape not listed above")
     if skipped:
         detail += "\n          SKIPPED: " + "; ".join(skipped[:8])
         if len(skipped) > 8:

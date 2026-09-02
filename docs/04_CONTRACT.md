@@ -3294,7 +3294,7 @@ and the tree agrees with it in both directions.
 | K10 | every **required** argument of a rowed entry point is produced by an EARLIER row's `produces` column, named in that row's own note, listed in `ROW_ARGUMENTS_ELSEWHERE`, or the entry point is deferred | write a row for a call whose arguments nothing supplies — which is what `EVAL.curve_probe` was, against a deferral for the byte-identical `EVAL.holdout_probe` |
 | K11 | no `produces` entry names a value its entry point does not return | certify a six-field record as the whole geometry comparison by writing the bare token `geometry` in a column |
 | K12 | every deferral reason names **every** required argument that has no producer | defer `FAB.contribution` with a reason listing two of the four arguments nothing supplies |
-| K13 | every **number the prose writes about a countable thing** equals the tree's number, and no `### Q-` heading says a thing is **absent** that the tree declares | write "a manifest of 15 fields" against twenty, or head a question *"nothing in this system clips gradients"* while `OPT.grad_clip` is declared |
+| K13 | every **number the prose writes about a countable thing** equals the tree's number, and no `### Q-` heading says a thing is **absent** that the tree declares | write a field count for the manifest that is one short of the live one, or head a question *"nothing in this system clips gradients"* while `OPT.grad_clip` is declared |
 
 **K6 is the check K4 is not, and the gap was 56 entry points wide.** K4 asks whether some stub's
 docstring *names* a lever; K6 asks whether that stub is ever *called*. K4 passed at 257 named / 2
