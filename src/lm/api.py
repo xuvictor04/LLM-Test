@@ -24,8 +24,13 @@ RECORD TYPES RETURNED (P4 defines them):
   LoadReport   widened, refused, reason
 """
 import dataclasses
+import math
+
+import torch
+from torch import nn
 
 from spine.lever import Config
+from spine import rng as _rng
 
 
 class GeometryError(ValueError):
@@ -68,6 +73,61 @@ class LMGeometry:
 # about THIS package's constructor in the shared arithmetic module. 0 layers is not a small model,
 # it is a broken constructor, so the sentinel has to resolve to something and the arm is what knows.
 _SENTINEL_DEPTH = {"gru": 1, "transformer": 4}
+
+
+class _LM(nn.Module):
+    """The network `geom` describes. ONE TOKEN TABLE, BOTH ARMS, and it is TIED under compose.
+
+    UNDER compose THE emb AND head LINEARS ARE NOT CONSTRUCTED AT ALL -- not built and unused, not
+    built and zeroed: absent. The old TinyTransformer had no `compose` attribute, so LM_COMPOSE=1
+    with LM_ARCH=transformer was a silent no-op while the banner printed a coupling sentence about
+    a mechanism that model did not have (ISSUES P1-M22), and the ~6.3M dead parameters ISSUES P1-L13
+    counts into every reported size and every checkpoint were real on the other arm. Here they do
+    not exist, so `n_params` and the checkpoint both shrink and neither has to explain why.
+
+    THE POSITIONAL TABLE IS pos_max ROWS TALL AND THERE IS NO CLAMP anywhere in this class. The old
+    `p = torch.arange(L).clamp(max=s.maxlen - 1)` against a hardcoded 512 gave every position past
+    511 ONE shared embedding, with no error and no report line. encode() raises instead.
+
+    THREE DROPOUT SITES ON THE GRU ARM AND THE READOUT IS NOT ONE OF encode()'s (Q-LM-9 (b)). The
+    embedding dropout and the inter-layer dropout live here; the readout dropout is applied in
+    decode(), before the head. Arithmetically that is the old `head(drop(h))` exactly. What it buys
+    is that encode()'s return -- which MEM stores as keys and FAB routes on -- carries no
+    regulariser, so the store is not written with dropped-out keys and queried with undropped ones.
+    """
+
+    def __init__(self, geom):
+        super().__init__()
+        self.geom = geom
+        w, v = geom.width, geom.vocab_slots
+        self.compose = geom.compose
+        self.pos = nn.Embedding(geom.pos_max, w)
+        self.drop = nn.Dropout(geom.dropout)
+        if not geom.compose:
+            self.emb = nn.Embedding(v, w)
+            self.head = nn.Linear(w, v)
+        if geom.arch == "transformer":
+            layer = nn.TransformerEncoderLayer(
+                d_model=w, nhead=geom.heads, dim_feedforward=4 * w,
+                # PASSED, NOT HARDCODED. The old tree wrote dropout=0.0 into this constructor, so
+                # LM_DROPOUT was 100% inert on the transformer arm while the report told the
+                # operator to raise it.
+                dropout=geom.dropout, batch_first=True, norm_first=True)
+            self.body = nn.TransformerEncoder(layer, num_layers=geom.layers)
+        else:
+            self.body = nn.GRU(w, w, num_layers=geom.layers, batch_first=True,
+                               dropout=geom.dropout if geom.layers > 1 else 0.0)
+
+    def token_table(self):
+        """The (vocab_slots, width) table, whichever arm built it. Under compose it is the
+        ByteComposer's output, TIED as both the input embedding and the output head."""
+        return self.composed_table() if self.compose else self.emb.weight
+
+    def composed_table(self):
+        raise NotImplementedError(
+            "LM.compose: the ByteComposer is P4's TOK-side row and lands with LM.mint_rows. The "
+            "compose arm is reachable (LM_COMPOSE=1 resolves and this module refuses to build a "
+            "dead emb/head for it) and its table is not built yet.")
 
 
 def resolve(lm: Config):
@@ -183,6 +243,18 @@ def _param_estimate(arch, width, layers, ctx, vocab_slots, compose):
     return int(tok_table + pos + body + head)
 
 
+def _is_scale(name):
+    """Is this 1-D parameter a MULTIPLICATIVE scale rather than an additive bias?
+
+    By name, because torch does not mark it: nn.LayerNorm and nn.GroupNorm both call their scale
+    `weight`, exactly as a Linear calls its matrix `weight`, and the only thing separating them at
+    this level is the dimension count -- which is what made the mistake available. A scale
+    initialised to 0 is a branch that outputs zero forever; a bias initialised to 1 is merely a
+    small offset. The asymmetry is why this is decided rather than defaulted.
+    """
+    return name.endswith("weight") and (".norm" in name or "norm." in name or name.startswith("norm"))
+
+
 def build_model(lm: Config, geom, *, device, seed):
     """Construct the network described by `geom` and return an nn.Module.
 
@@ -238,9 +310,35 @@ def build_model(lm: Config, geom, *, device, seed):
                  rng.issued()["lm"]
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.build_model: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    # ONE STREAM, AND EVERY TENSOR FROM IT, so LM's initialisation cannot be reordered by another
+    # package's draws. again=True because RUN.streams already minted "lm" into the register at
+    # step 0 -- this is that stream being used, not a second one.
+    stream = _rng.rng_for("lm", int(seed), again=True)
+    gen = torch.Generator(device="cpu")
+    gen.manual_seed(stream.randint(0, 2 ** 31 - 1))
+
+    model = _LM(geom)
+    for name, t in model.named_parameters():
+        with torch.no_grad():
+            if t.dim() >= 2:
+                # Xavier-uniform by fan, computed here rather than through nn.init so every tensor
+                # draws from the ONE generator above and the order is this loop's, not torch's.
+                fan_in, fan_out = t.shape[-1], t.shape[0]
+                bound = math.sqrt(6.0 / (fan_in + fan_out))
+                t.uniform_(-bound, bound, generator=gen)
+            elif _is_scale(name):
+                # A 1-D PARAMETER IS NOT ALWAYS ADDITIVE, and the first draft of this loop assumed
+                # it was. `t.zero_()` on every 1-D tensor zeroes each LayerNorm's WEIGHT, which
+                # MULTIPLIES the normalised activation -- so every residual branch in the
+                # transformer output zero, half its tensors got no gradient, and the loss still
+                # came out at exactly ln(vocab_slots) because a uniform distribution is what a dead
+                # network produces. A plausible number from a broken model is this project's whole
+                # subject; it was caught by counting which tensors received a gradient, not by
+                # reading the loss.
+                t.fill_(1.0)
+            else:
+                t.zero_()
+    return model.to(device)
 
 
 def embed(lm: Config, model, x):
@@ -334,10 +432,32 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
                  clamp reaching the new tree), lm.encode.extra_applied
     """
     lm = lm.owned_by("LM")
-    _ = lm.d_pos_max                             # WIRE READ HERE -- the refusal, not a clamp
-    raise NotImplementedError(
-        "LM.encode: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    pos_max = int(lm.d_pos_max)                  # WIRE READ HERE -- the refusal, not a clamp
+    L = int(x.shape[1])
+    if L > pos_max:
+        # RAISES, DOES NOT CLAMP, and names both numbers. The old clamp gave every position past
+        # the table's height ONE shared embedding, silently. That refusal is what the d_pos_max
+        # wire is FOR: grep finds the height and lever.py refuses a lever that shadows it, but
+        # until something refuses the overflow the guarantee is not paid for.
+        raise ValueError(
+            f"LM.encode was handed a window of {L} token(s) against a positional table of "
+            f"{pos_max} row(s) (LM_CTX={int(lm.ctx)} through the d_pos_max wire). Refused rather "
+            f"than clamped: a clamp gives every position past the height one shared embedding, "
+            f"with no error and nothing in the report.")
+
+    e = model.token_table()[x] if model.compose else model.emb(x)
+    h = model.drop(e + model.pos.weight[:L].unsqueeze(0))
+    if model.geom.arch == "transformer":
+        # CAUSAL, because this is a language model: a window that can see its own future scores a
+        # loss no autoregressive decode can reproduce.
+        mask = torch.triu(torch.full((L, L), float("-inf"), device=h.device), diagonal=1)
+        h = model.body(h, mask=mask, is_causal=True)
+    else:
+        h, _ = model.body(h)
+    # UNDROPPED ON THE WAY OUT. Three packages consume this -- MEM as keys, FAB as routing input,
+    # LM as the readout source -- and a value three packages consume must not carry one consumer's
+    # regulariser. There is no `for_key=` keyword and there must not be one.
+    return h
 
 
 def decode(lm: Config, model, h, *, live_vocab, retired_ids):
@@ -380,9 +500,31 @@ def decode(lm: Config, model, h, *, live_vocab, retired_ids):
                  (mask on, nothing dead -- reported SEPARATELY from "off")
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.decode: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    # THE REGULARISED READOUT, and this is the only site. Arithmetically identical to the old
+    # `head(drop(h))`; what moved is that encode()'s return no longer carries it.
+    h = model.drop(h)
+    if model.compose:
+        table = model.token_table()
+        logits = h @ table.t()
+    else:
+        logits = model.head(h)
+
+    if bool(lm.mask_dead_rows):
+        # MASKED HERE, ONCE, so training and every eval path share ONE distribution. Masking at the
+        # LOSS only was measurably WORSE than not masking at all -- 86.7% dead width scored 4.746
+        # unmasked against 6.100 masked-at-the-loss-only -- because the model is never taught to
+        # push the dead rows down and every eval path then scores it with those untrained rows
+        # still in the denominator.
+        dead = torch.zeros(logits.shape[-1], dtype=torch.bool, device=logits.device)
+        dead[int(live_vocab):] = True            # never minted: a suffix
+        if retired_ids:
+            # RETIRED ROWS ARE BELOW live_vocab AND ARE NOT A SUFFIX. Probation pops from seq2id
+            # while leaving id2bytes intact so ids stay positional, so a suffix rule would mask the
+            # wrong rows -- and on the probation arms most minted tokens were retired.
+            idx = torch.tensor(sorted(retired_ids), dtype=torch.long, device=logits.device)
+            dead[idx] = True
+        logits = logits.masked_fill(dead, float("-inf"))
+    return logits
 
 
 def lm_loss(lm: Config, logits, y):
