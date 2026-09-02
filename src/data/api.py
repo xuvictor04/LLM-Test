@@ -60,7 +60,7 @@ def open_areas(dat: Config, *, seed: int):
         (data.area_label_collision). The label is what every per-area score, the holdout stream key
         below and ACROSS THE RUN BOUNDARY look up by name, and a run whose report prints one label
         for two corpora reproduces the desynchronised-DN defect this package exists to end
-        (ISSUES:1421).
+        (ISSUES C19).
 
     On dat.source == "synthetic": builds dat.n_processes order-2 Markov generators over the five
     15-symbol alphabets (self_organize.py:1084-1099, :1314-1315), seeded from
@@ -69,8 +69,10 @@ def open_areas(dat: Config, *, seed: int):
     between-seed spread with the data held constant (DEFECT D-A13). Holds nothing out.
 
     THE HELD-OUT BLOCK IS A SEEDED RANDOM CONTIGUOUS BLOCK PER AREA, from
-    rng_for("data.holdout." + label, seed) -- ONE CHILD STREAM PER AREA, KEYED BY THE AREA'S LABEL
-    AND NOT BY DRAW ORDER -- of size min(holdout_frac * present, val_cap) -- NOT the tail.
+    rng_for("data.holdout." + key, seed) -- ONE CHILD STREAM PER AREA, KEYED BY THE AREA'S LABEL
+    (normalised; the exact rule is three paragraphs down and it is the KEY, not the raw label, that
+    is spliced in) AND NOT BY DRAW ORDER -- of size min(holdout_frac * present, val_cap) -- NOT the
+    tail.
     The tail is a sample only if the corpus was written in no particular order, and the measured
     cost of assuming it was is py held out at 5.061 +/- 0.560 against 2.922 in-stream while eng
     (shuffled upstream) was 2.273 against 2.303 (self_organize.py:1173-1198). val_cap applies on
@@ -83,12 +85,12 @@ def open_areas(dat: Config, *, seed: int):
     function of HOW MANY AREAS WERE DRAWN BEFORE IT: insert or reorder one entry and every later
     area's held-out text moves. Three things break at once when it does -- restore_stream_state
     below refuses the resume by its own stated reason, ACROSS THE RUN BOUNDARY compares two
-    different texts, and EVAL's held-out window (eval/levers.py:201-202) already DECLARES the
+    different texts, and EVAL's held-out window (eval/levers.py::EVALLevers) already DECLARES the
     opposite property in as many words: "KEYED BY DOMAIN NAME, not by index, so adding a domain
     does not shift the comparison. That property is part of the lever's meaning and has to survive
     the port." DATA is the half that produces the text EVAL then windows, so the two must key the
     same way or the paired add-an-area comparison is destroyed on the one run type it exists to
-    measure. spine/rng.py:107-109 declares dotted child streams ("fabric.cull") as the supported
+    measure. spine/rng.py::_check_name declares dotted child streams ("fabric.cull") as the supported
     shape, and DATA already derives per-epoch child names ("data.stream.e0") itself, so this needs
     no new RNG_SUBSYSTEMS entry -- "data.holdout" stays the declared parent.
 
@@ -104,7 +106,10 @@ def open_areas(dat: Config, *, seed: int):
     An area whose usable body is below max(dat.seg_max + 1, MIN_AREA_BYTES) is a STARTUP REFUSAL,
     not a silent drop: dropping desynchronised CORP from DN and made report_holdout label the
     Python corpus 'eng', which the next run compared against last run's English and reported as
-    forgetting (self_organize.py:1142-1160, ISSUES:1421). The floor is DERIVED from seg_max rather
+    forgetting (self_organize.py:1142-1160, ISSUES C19 -- CITED BY ID, NOT BY LINE: this was
+    ISSUES:1421 in four places across this package and that line has held three different defects
+    across three commits; today it is L15, an LR_DECAY default in a research note). The floor is
+    DERIVED from seg_max rather
     than the old literal 5000, which raised on rerun.sh's SEG_MIN=8000 (ISSUES L75).
 
     RECEIVES: seed <- RUN.seed, as an argument. DATA calls rng_for itself; assemble.NOT_WIRES
@@ -123,7 +128,7 @@ def open_areas(dat: Config, *, seed: int):
                  data.holdout_block (prints offset+size AND the rng key per area),
                  data.holdout_seam (one per area -- removing a MIDDLE block leaves exactly one
                  manufactured discontinuity in a body seg_contig=True reads in order, and
-                 data/levers.py:349-360 claims the only boundaries left are the text's own; one
+                 data/levers.py::DATALevers claims the only boundaries left are the text's own; one
                  seam per area against the thousands seg_from manufactures is a good trade, but it
                  is a PRINTED NUMBER and not an assumption. Unreachable when a block lands at
                  offset 0 or at the tail, which is the state it must say rather than read 0),
@@ -166,7 +171,7 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     against Areas.names at this parse site and REFUSED loudly on a name no area carries, beside the
     existing refusal on an out-of-range index. "eng|eng|rust|rust" and "0|0|1|1" are the same
     schedule at DATA_AREAS="eng,rust". This is what closes D2 as a RESOLVER ruling rather than as a
-    lever default: data/levers.py:339-343 says "there is no literal string that means the added area
+    lever default: data/levers.py::DATALevers says "there is no literal string that means the added area
     alone independent of how many areas there are", and a name IS that string -- "rust|rust|rust|rust"
     is pure-add at any area count and does not silently become a different experiment when the area
     ORDER changes. It also ends the defect the harness carries in the open: longrun.sh:930-932
@@ -196,7 +201,7 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     is written by the launcher as a schedule of names, and Plan.protocol prints which one ran on
     every run -- which is the half D2 actually needed and the half that did not exist.
     WHAT WOULD SETTLE THE ARM: the two protocols disagreed 10x on the same toy (+0.046 HELD
-    rehearsed vs +0.444 WORSE pure, data/levers.py:344-350). The run that retires the question is
+    rehearsed vs +0.444 WORSE pure, data/levers.py::DATALevers). The run that retires the question is
     one pair at fixed seed and fixed DATA_AREAS="eng,<new>": arm R with PHASE_SCHED="eng|eng|<new>|<new>",
     arm P with PHASE_SCHED="<new>|<new>|<new>|<new>", reading ACROSS THE RUN BOUNDARY on eng's
     held-out block at the end of each. Rehearsal keeps eng trained, so only arm P measures what the
@@ -207,7 +212,7 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     exposure = draw * epochs / body_bytes. It is a WHOLE-RUN quantity: 60 MB of English beside
     8 MB of Python draws 2.00 MB/epoch from each -- quiet -- while over 8 epochs the added area is
     seen 2.1x and the original is 28% sampled, and "adding py cost eng X bits/byte" is then
-    confounded with "py was memorised and eng was skimmed" (ISSUES:1620).
+    confounded with "py was memorised and eng was skimmed" (ISSUES H22).
 
     THREE DECLARED GATES, each printing its own arithmetic so "did not fire" is distinguishable
     from "could not fire":
@@ -322,7 +327,8 @@ def restore_stream_state(dat: Config, areas, state):
     set-equality. An add-an-area run is BY DEFINITION a resume whose area list gained a name --
     longrun.sh:938 runs DOMAINS="eng,$NAME" against a parent trained on eng -- so a set-equality
     reading refuses goal B's headline experiment at startup, and this row runs unconditionally
-    whenever "DATA" is in the snapshot (compose.py:304-309). The rule is:
+    whenever "DATA" is in the snapshot (the `restore` row, compose.py::ASSEMBLY_ORDER, and the call at
+    compose.py::compose). The rule is:
 
       * every area name PRESENT IN THE RECORD must be present now, with the same holdout offset,
         the same holdout size and the same rng key -> restore its cursor. A disagreement on any of

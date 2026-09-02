@@ -99,11 +99,11 @@ THE THREE CENSUS DEFECTS, CHECKED HERE
        rather than papering over: the resume defect at :4991, where the boundary clock restarted at 0
        and the fold would have swallowed every restored domain, is precisely the class Clock exists for.
      * CONFLICT, NAMED NOT RESOLVED: this package's `manage_every` was SPLIT OFF from MANAGE_EVERY,
-       which is now FAB's field of the same name -- and spine/assemble.py:686 wraps that field as
+       which is now FAB's field of the same name -- and spine/assemble.py::_owner_blocks wraps that field as
        `derive.flush_period(Steps(r["FAB"].manage_every), r["TRAIN"].batch_w)` while the census types
        it Windows. Two files, one counter, two kinds. It reaches into this package the moment a DOM
        cadence is needed in flushes, because derive.flush_period REFUSES anything but Steps
-       (derive.py:223-226): there is today NO legal conversion from a Windows-typed cadence to the
+       (derive.py::flush_period): there is today NO legal conversion from a Windows-typed cadence to the
        flush clock. Whoever ports the manager must either add a Windows arm to spine.derive or change
        what FAB.manage_every is typed as. Choosing here, silently, is how one number gets two meanings.
 
@@ -128,7 +128,7 @@ WHAT IS DELIBERATELY ABSENT
 --------------------------------------------------------------------------------------------------
 ONE WIRE ARRIVES, and it must NOT be declared here -- lever.py refuses a d_-named lever precisely so a
 declaration cannot shadow the wire that writes it:
-    d_expert_slots = FAB.slots        (spine/assemble.py:629-643, reducible)
+    d_expert_slots = FAB.slots        (spine/assemble.py::_view, reducible)
 It is the old MAX_DOMAINS, the canonical computed-default defect: `MAX_DOMAINS = _i("MAX_DOMAINS",
 _i("FAB_NMAX", 4096))` at :598 read FAB_NMAX eagerly into the audit on every run, and the SAME name was
 read as `_i("MAX_DOMAINS", 32)` at :4874 when sizing the memory source census -- one knob, two defaults,
@@ -188,7 +188,7 @@ unreachable -- under DOM_RELATIVE=1 the entire NEW_DIST branch at :3545-3556 can
 turns that into a declaration, and gives the isolation sweep three arms instead of a boolean cube.
 """
 # ABSOLUTE, NOT `from ..spine.lever import ...`. Every entry point in this tree puts `src` ITSELF on
-# sys.path -- tests/test_derive.py:33, tests/test_ownership.py's SRC insert, and the verification
+# sys.path -- tests/test_derive.py::<module>, tests/test_ownership.py's SRC insert, and the verification
 # command for this file -- which makes `domains` a TOP-LEVEL package, and a relative import one level
 # above a top-level package raises "attempted relative import beyond top-level package" at import time.
 # Verified, not assumed. The sibling packages src/fabric/levers.py and src/memory/levers.py spell it
@@ -250,7 +250,7 @@ class DOMLevers(LeverSet):
     # CLOCK: Windows, and the census and the source agree -- `step % DOM_MANAGE_EVERY` at :6693, and
     # `step` advances once per WINDOW (:7708). See the module header's DEFECT 2 for the conflict this
     # inherits from its sibling: FAB.manage_every, the field it was SPLIT OFF from, is typed Windows by
-    # the census and wrapped as `Steps(...)` by spine/assemble.py:686. Not resolved here.
+    # the census and wrapped as `Steps(...)` by spine/assemble.py::_owner_blocks. Not resolved here.
     # LOAD-BEARING, AND THE SPLIT IS WHY. Sharing MANAGE_EVERY=500 with the expert and world
     # populations meant it essentially never ran: a 60 kB run is 468 steps, so `step % 500 == 0` was
     # NEVER true and merge/cull/fold executed ZERO times; the 120 kB GH200 runs are 937 steps and fired

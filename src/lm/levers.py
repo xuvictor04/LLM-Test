@@ -72,7 +72,7 @@ that it was looked for rather than skipped.
 
   DEFECT 1 -- DOUBLED ENV NAMES. FOURTEEN of this package's rows name their target as PREFIX.PREFIX_FIELD
   -- `LM.LM_VOCAB_SLOTS`, `LM.LM_WIDTH`, `LM.LM_ARCH` and so on (CENSUS.md:305, 307, 313, 314, 315, 323,
-  324, 344, 402, 412, 413, 414, 417, 418). lever.py:104-106 generates the environment name as
+  324, 344, 402, 412, 413, 414, 417, 418). lever.py::Lever.env_name_for generates the environment name as
   PREFIX + "_" + FIELD.upper(), so `LM.LM_WIDTH` taken literally declares a field `LM_WIDTH` answering to
   LM_LM_WIDTH: a name no operator would ever type, that from_env() would never find, and that therefore
   leaves the lever pinned at its default forever while every static check reports it declared, owned and
@@ -98,7 +98,7 @@ that it was looked for rather than skipped.
     * `ctx` is typed TOKENS and that is metadata, not a clock. It is a WIDTH -- how many positions are in
       one window -- and it is what MAKES `step` a window counter; it is never itself compared against
       one. Its real unit hazard is the other one the census names: it was spent as a BYTE length in three
-      places (ISSUES:170, ISSUES:413, and _sigwidth()'s reconstruction of max(WIN, WIN*bpt)), which is a
+      places (ISSUES.md PART 1, H27 and M37, and _sigwidth()'s reconstruction of max(WIN, WIN*bpt)), which is a
       metadata mismatch that U.TOKENS makes visible and that the named conversion
       spine.derive.signature_width_bytes fixes at the one place it is used.
     * `anchor_uses` counts APPEARANCES of one token in trained-on material -- `_tok_seen` at :6307, which
@@ -120,10 +120,17 @@ that it was looked for rather than skipped.
   invented, nothing is left standing on its own, and no lever below exists only because a merge pointed
   at it.
 
-TWO CONFLICTS WITH THE SPINE, STATED RATHER THAN RESOLVED. Picking a side inside a declaration file is
-how a knob acquires two meanings, so both are recorded here and neither is decided here.
+TWO CONFLICTS WITH THE SPINE, RECORDED WHEN THIS FILE WAS WRITTEN AND BOTH SETTLED SINCE, IN THE SPINE.
+Picking a side inside a declaration file is how a knob acquires two meanings, so neither was decided
+here -- and each was then decided in spine/assemble.py, which is where a wiring decision belongs. BOTH
+ARE KEPT, EACH WITH ITS OUTCOME, and the outcomes were read off the tree on 2026-09-03. Keeping them
+matters more than usual here: assemble.py's own `TOK.d_vocab_ceiling` row cites "lm/levers.py::<module>
+and tok/levers.py::<module>" as the two files that "record it as the outstanding repair" -- so a reader who
+follows that pointer arrives at a paragraph calling settled work outstanding, which is the C12 shape at
+one indirection.
 
-  (a) OWNERSHIP OF THE SOFTMAX WIDTH. spine/assemble.py:722-724 declares
+  (a) OWNERSHIP OF THE SOFTMAX WIDTH -- SETTLED IN LM'S FAVOUR; THE EDGE WAS REVERSED. AS ASKED:
+  spine/assemble.py declared
   `Coupling(src="TOK.vmax", dst="LM.d_softmax_width", compute=lambda r: int(r["TOK"].vmax))` -- it reads
   `vmax` off TOK's Config and hands the result to THIS package as a wire. The census says the opposite:
   VMAX is LM's (verdict rename -> LM_VOCAB_SLOTS, CENSUS.md:323) and "TOK receives it as the wire
@@ -139,51 +146,99 @@ how a knob acquires two meanings, so both are recorded here and neither is decid
   named twice, not two numbers that happen to agree"). Declaring `vmax` here as well to keep assemble
   quiet would put the softmax width in two packages at once, which is the exact failure the ownership
   spine exists to prevent.
+  WHAT IS TRUE NOW: the edge runs the other way. `Coupling(src="LM.vocab_slots",
+  dst="TOK.d_vocab_ceiling", compute=lambda r: int(r["LM"].vocab_slots))` is in COUPLINGS, its `why`
+  says "DIRECTION CORRECTED HERE" in as many words, and `LM.d_softmax_width` DOES NOT EXIST -- the
+  string survives in src/ only inside this paragraph, the absent-levers list at the foot of this file,
+  assemble.py's record of what the row used to say, and tok/levers.py's mirror of this conflict.
+  `assemble.build({})` does not raise; the six suites are green and `compose()` reaches
+  RUN.process_setup. The repair was the one named here, made where it belonged.
 
-  (b) WHERE d_pos_max COMES FROM. MAXLEN is promote-to-wire (CENSUS.md:415) and its reason says the value
+  (b) WHERE d_pos_max COMES FROM -- SETTLED AS THE LOCAL COUPLING THIS PARAGRAPH PREDICTED. AS ASKED: MAXLEN is promote-to-wire (CENSUS.md:415) and its reason says the value
   "arrives d_-prefixed from DATA's window lever". DATA HAS NO WINDOW LEVER: WIN's own row moves the window
   to LM as LM_CTX (CENSUS.md:344), and no row in the whole census gives DATA a width. So the wire's source
   is this package's own `ctx`, which makes it a LOCAL coupling in assemble's sense -- one owner, no edge,
   no budget, still d_-prefixed -- rather than the cross-package wire the row describes. It is not declared
-  here either way, because lever.py:83-87 refuses a d_-named lever precisely so a declaration cannot
+  here either way, because lever.py::Lever.__set_name__ refuses a d_-named lever precisely so a declaration cannot
   shadow the wire that writes it. What must not happen is that nobody writes it: at :1586 the transformer
   arm does `p = torch.arange(L).clamp(max=s.maxlen - 1)`, so a context wider than the positional table
   silently gives every position past the end ONE shared embedding -- no error, no report line, a model
   that cannot tell those positions apart. That clamp is why this quantity is a wire and not a free
   literal, and until the coupling exists the guarantee it buys does not.
+  WHAT IS TRUE NOW: the coupling exists and is exactly the shape argued for -- `Coupling(src="LM.ctx",
+  dst="LM.d_pos_max", compute=lambda r: int(r["LM"].ctx))`, LOCAL, one owner, no cross-package edge, no
+  budget spent, still d_-prefixed. Its `why` carries the same reasoning this paragraph gives, including
+  the :1586 clamp. And the guarantee is not just declared but ARMED: `LM.build_model` reads
+  `lm.d_pos_max`, and `LM.encode` RAISES rather than clamps when L exceeds it, naming LM_CTX and the
+  actual L. So the sentence "until the coupling exists the guarantee it buys does not" has been
+  answered, and the census row it came from (MAXLEN promote-to-wire) is honoured by a local wire rather
+  than by the cross-package one its own reason described.
 
 THE WIRES: values this package uses or supplies that it must NOT declare. Written down because `grep d_`
 is only complete in both directions if the receiving end says what it expects (O4 audits exactly this).
+THE THIRD COLUMN SAID "NOT (YET) IN THE LEDGER" ON FOUR OF THESE AND IS NOW A VERDICT ON EACH, verified
+2026-09-03 against spine.assemble.COUPLINGS and the frozen signatures: a value that is not a wire
+because it is an ARGUMENT is a different fact from a wire nobody has written, and both were spelled the
+same way here.
     INCOMING
       d_pos_max            positional rows, from this package's own `ctx`     (census promote-to-wire;
-                                                                               NOT YET IN THE LEDGER)
-      d_softmax_width      ENTRIES, from TOK.vmax                             (assemble.py:722, and see
-                                                                               conflict (a) -- under the
-                                                                               census this edge reverses)
-      d_live_vocab         how many rows have actually been minted            (LOSS_MASK_DEAD's row;
-      d_retired_ids        which minted rows were retired on probation         both NOT YET IN THE LEDGER)
-      d_max_token_bytes    longest token in bytes, from TOK.max_bytes         (MAX_TOK's row, CENSUS.md:308;
+                                                                               IN THE LEDGER, as the
+                                                                               LOCAL coupling conflict
+                                                                               (b) argued for)
+      d_softmax_width      -- GONE. The edge was reversed (conflict (a)): the
+                              softmax width leaves this package as
+                              d_vocab_ceiling below, and no LM.d_softmax_width
+                              is declared or read anywhere.
+      d_live_vocab         how many rows have actually been minted            (LOSS_MASK_DEAD's row. NOT
+      d_retired_ids        which minted rows were retired on probation         WIRES AND NOT MISSING:
+                                                                               both are ARGUMENTS to
+                                                                               LM.decode -- runtime
+                                                                               counts that do not exist
+                                                                               when build() freezes)
+      d_max_token_bytes    longest token in bytes, from TOK.max_bytes         (MAX_TOK's row, CENSUS.md:308.
+                                                                               IN THE LEDGER, src
+                                                                               TOK.max_bytes, and read by
+                                                                               LM.build_model. The defect
+                                                                               it exists for stands:
                                                                                ByteComposer hardcodes
-                                                                               maxb=16 today and does NOT
-                                                                               follow the tokenizer, so a
-                                                                               longer token is silently
-                                                                               truncated to its first 16
-                                                                               bytes. NOT IN THE LEDGER)
-      d_device             cpu/cuda, from RUN                                 (DEVICE's row, CENSUS.md:416)
+                                                                               maxb=16 and does NOT follow
+                                                                               the tokenizer, so a longer
+                                                                               token is silently truncated
+                                                                               to its first 16 bytes --
+                                                                               the wire is what lets the
+                                                                               composer size itself)
+      d_device             cpu/cuda, from RUN                                 (DEVICE's row, CENSUS.md:416.
+                                                                               NOT A WIRE: `device` is an
+                                                                               ARGUMENT to build_model)
     OUTGOING
-      d_vocab_ceiling      to TOK, from `vocab_slots`                         (VMAX's row; see (a))
-      d_residual_ratio     to TOK, ||delta||/||composite|| from the composer   (TOK_PROBATION_MIN's row;
-                                                                               TOK's probation "embed" arm
-                                                                               has nothing to compare
-                                                                               without it. NOT IN THE
-                                                                               LEDGER)
-      the new-row init also writes enc.emb -- SIG's tensor -- which must become a declared wire to SIG
-      rather than the inline reach at :7702-7705.
-Six of those nine are not in spine/assemble.COUPLINGS today. That is not this file's to fix, but a
-missing wire that nobody has written down becomes a direct reach the first time somebody needs the value.
+      d_vocab_ceiling      to TOK, from `vocab_slots`                         (VMAX's row; IN THE LEDGER,
+                                                                               and it IS conflict (a)'s
+                                                                               resolution)
+      d_residual_ratio     to TOK, ||delta||/||composite|| from the composer   (TOK_PROBATION_MIN's row.
+                                                                               NOT A WIRE, AND IT CANNOT
+                                                                               BE: it is read off a live
+                                                                               tensor after build()
+                                                                               freezes. Q-TOK-11 gave it
+                                                                               a producer instead --
+                                                                               LM.residual_ratios, the
+                                                                               122nd entry point -- and
+                                                                               it reaches TOK as an
+                                                                               ARGUMENT to
+                                                                               judge_probation)
+      the new-row init also writes enc.emb -- SIG's tensor. IT DID NOT BECOME A WIRE AND IT IS NOT AN
+      INLINE REACH EITHER: LM.on_mint takes `sig_emb=SIG.encoder_embedding(...)`, assembled by the
+      composition root, which is the same idiom as MEM.write(key_fn=...) and is why :7702-7705 has no
+      successor in this tree.
+NINE VALUES, NINE ANSWERS, and none of them is the case this paragraph warned about: THREE are in
+spine/assemble.COUPLINGS (d_pos_max, d_max_token_bytes, d_vocab_ceiling), FIVE are ARGUMENTS because a
+runtime value can never be a build-time wire (d_live_vocab, d_retired_ids, d_device, d_residual_ratio,
+sig_emb), and ONE no longer exists because its edge was reversed (d_softmax_width). The warning this
+paragraph carried -- "a missing wire that nobody has written down becomes a direct reach the first time
+somebody needs the value" -- was right, and it is now the reason each of the five ARGUMENTS is named on
+a frozen signature rather than left to be reached for.
 
 IMPORT STYLE. Absolute, `from spine.lever import ...`, matching fabric, sig, memory, domains, eval and
-tok. Every entry point puts src/ itself on sys.path (tests/test_derive.py:33, tests/test_ownership.py's
+tok. Every entry point puts src/ itself on sys.path (tests/test_derive.py::<module>, tests/test_ownership.py's
 SRC insert, and this file's own verification command), which makes `lm` a TOP-LEVEL package; a relative
 `from ..spine.lever import ...` is then an ImportError ("attempted relative import beyond top-level
 package"), not a fallback. Seven packages spelling one import one way is worth more than matching a
@@ -257,14 +312,14 @@ class LMLevers(LeverSet):
     # name, nothing in self_organize.py read D_MODEL_B at all, so `D_MODEL_B=768 python3 self_organize.py`
     # silently ran at d=128 -- it mis-sized every direct-invocation run including the GPU bench, which
     # reported 4.3M/5.1M parameters instead of the intended 28.7M/53.9M, and including the pilot command
-    # handed to the owner (ISSUES.md:2003). (2) The fix introduced the mirror image, ISSUES.md L26 at
+    # handed to the owner (ISSUES.md PART 4, the [archive/facts] D_MODEL_B entry). (2) The fix introduced the mirror image, ISSUES.md L26 at
     # :842-844: the nested `_i` reads D_MODEL_B EAGERLY and then discards it whenever D_MODEL is set,
     # while both land in _ENV_ASKED and _ENV_READ -- so the audit reported both as read and accounted for,
     # only one affected the run, and no OVERRIDE note was printed. Under the spine an alias is
     # structurally impossible: the env name is GENERATED from the field, so one field is one name.
     # Launchers that quote D_MODEL_B get a one-line edit; that is not a reason to keep a second door.
     # WHY THE NAME IS NOT `d_model`. Two reasons, both hard. A field starting with `d_` is a WIRE in this
-    # tree and lever.py:83-87 refuses to declare one, so the old spelling is not available at all; and
+    # tree and lever.py::Lever.__set_name__ refuses to declare one, so the old spelling is not available at all; and
     # "d_model" is transformer vocabulary applied to a default path that is a GRU, so it names the arm it
     # is not. LM_WIDTH is true on both arms.
 
@@ -274,7 +329,7 @@ class LMLevers(LeverSet):
     # THIS DEFAULT REALLY IS COMPUTED FROM ANOTHER KNOB, AND THAT MAKES IT A DERIVATION. The old tree
     # recorded `_DERIVED["LAYERS"] = ("MODEL",)` at :89 with the comment "4 for transformer, 1 for gru",
     # and exempted the knob from its own default-mismatch refusal (:74) to make that legal. L1 does not
-    # have that escape: a Lever default must be an ast.Constant, and lever.py:58-61 refuses anything else
+    # have that escape: a Lever default must be an ast.Constant, and lever.py::Lever.__init__ refuses anything else
     # at declaration time with the reason spelled out ("a value derived from another lever is a WIRE, not
     # a default"). The census's instruction is therefore to make the per-arm depth "a named function in
     # spine.derive keyed off LM_ARCH with the lever's own literal default meaning 'use the arm's'"
@@ -286,13 +341,13 @@ class LMLevers(LeverSet):
     # model, it is a broken constructor. Until `derive.layers_for_arm(arch, layers)` exists, whoever
     # builds the network must resolve the sentinel at the single place it is read, and the resolved value
     # is what goes in the checkpoint and the banner.
-    # WHY A SENTINEL AND NOT TWO LEVERS. The same limit domains/levers.py:262 and tok/levers.py record:
+    # WHY A SENTINEL AND NOT TWO LEVERS. The same limit domains/levers.py::DOMLevers and tok/levers.py record:
     # `choices=` cannot express "0, or any positive int", and inventing a second lever to hold the "use
     # the arm's" state would be minting a knob the census never voted on. The sentinel stands, declared
     # in the help text where an operator will actually see it.
     # WHAT ONE DECLARATION ENDS. The depth was read at two sites with two different arm defaults (:1599
     # and :1600 building the model, :5340 writing the checkpoint), and the notes corpus states LAYERS=4
-    # flatly while _SPEC says otherwise (ISSUES.md:637) -- so a reader could not tell what depth a saved
+    # flatly while _SPEC says otherwise (ISSUES.md PART 1, M93) -- so a reader could not tell what depth a saved
     # model was. DEPTH IS ALSO NOT FREE ELSEWHERE: :1582 records that at LAYERS=12 the memory-key path was
     # paying twelve layers of attention over an 8-token window, thousands of rows per step, which is what
     # made the transformer lose overall despite matching the GRU's LM step time. That is the KEY_LAYERS
@@ -320,9 +375,9 @@ class LMLevers(LeverSet):
     # NOT A DATA KNOB, AND THE MISFILING IS WHAT MADE IT WRONG. It was filed under `data` because the
     # stream is sliced by it, and that is how it came to be spent as a BYTE length in three places: the
     # signature windows are read as ENC_SEQ[q:q+WIN] with q a TOKEN index into a BYTE stream, so under the
-    # default ONLINE + SIG_SPACE=bytes every signature is drawn from the wrong place (ISSUES:170);
+    # default ONLINE + SIG_SPACE=bytes every signature is drawn from the wrong place (ISSUES.md PART 1, H27);
     # route_at labels only the first WIN bytes of a ~WIN*bpt-byte span, leaving 46-75% of the span at -1
-    # (ISSUES:413); and _sigwidth() has to reconstruct max(WIN, WIN*bytes_per_token) to recover the byte
+    # (ISSUES.md PART 1, M37); and _sigwidth() has to reconstruct max(WIN, WIN*bytes_per_token) to recover the byte
     # width it needed. The token width is the lever; the byte width is a NAMED derivation --
     # spine.derive.signature_width_bytes -- and it reaches SIG as a d_ wire so the conversion exists once,
     # with a name, instead of three times by hand.
@@ -348,7 +403,7 @@ class LMLevers(LeverSet):
     # DEFAULT 0.0 IS A STATEMENT ABOUT THE CORPUS, NOT ABOUT THE MECHANISM. The model is UNDERFIT at the
     # current corpus size, and the report tells the operator to raise this the moment the held-out gap
     # exceeds ~0.5 (:7990). It is kept rather than dropped precisely because that instruction exists.
-    # THE COUPLING DEFECT CARRIES AS A FIXED BUG, NOT AS A KNOB. ISSUES.md:441 records that holdout_bpb's
+    # THE COUPLING DEFECT CARRIES AS A FIXED BUG, NOT AS A KNOB. ISSUES.md PART 1, M44 records that holdout_bpb's
     # finally block unconditionally returns the model to TRAIN mode, so RETENTION and every later eval
     # section run with dropout LIVE. At 0.0 that is inert, which is why nobody saw it; it becomes a wrong
     # number the instant anyone follows the report's own advice, and the numbers it would corrupt are the
@@ -392,7 +447,7 @@ class LMLevers(LeverSet):
     # ONE DECLARATION KILLS THE REGISTRY'S OWN WORST-CASE EXAMPLE. self_organize.py:69-70 records that
     # "the tokenizer targeted 4096 while ByteComposer sized its per-token tables to 2048, so an unset
     # VMAX indexed past the end of delta/dbias" -- because :1455-1456 read os.environ a SECOND time with
-    # a different literal. Under this spine there is one reader (lever.py:153-164) and one default, so
+    # a different literal. Under this spine there is one reader (lever.py::<module>) and one default, so
     # two tables cannot be sized from two answers to one question.
     # THE RESUME FAILURE THIS NUMBER OWNS IS A MISSING WIRE, AND GOAL B IS WHAT IT COST. At :1234-1241:
     # VMAX was doubled 2048 -> 4096 and emb/head were widened to match, but the saved tokenizer's own
@@ -408,7 +463,7 @@ class LMLevers(LeverSet):
     # Census: LOSS_MASK_DEAD -> LM_MASK_DEAD_ROWS, verdict rename, default 0. Field corrected from
     # `LM_MASK_DEAD_ROWS` to `mask_dead_rows` (DEFECT 1). Declared False rather than 0 so that
     # LM_MASK_DEAD_ROWS=off means off: Lever.coerce picks its branch from the DEFAULT's type
-    # (lever.py:122), and an int default would raise on "off" while the bool default accepts it. The
+    # (lever.py::Lever.coerce), and an int default would raise on "off" while the bool default accepts it. The
     # bool branch's own hazard is stated in fabric/levers.py and applies here unchanged -- any string
     # outside ("0","","off","no","none","false") reads as True, so LM_MASK_DEAD_ROWS=flase is silently on.
     # PLAN SECTION 1'S OWN EXAMPLE OF A TAG DRIFTING FROM AN OWNER: tagged "# tokenizer" at :251 while
@@ -528,10 +583,13 @@ class LMLevers(LeverSet):
     # WHAT IS DELIBERATELY ABSENT, one line each, because a reader who finds them missing will otherwise
     # go looking for a mistake. Full reasons are in the header.
     #
-    #   d_pos_max          promote-to-wire (CENSUS.md:415). Positional rows. Would shadow the wire.
-    #   d_softmax_width    assemble.py:722 writes it from TOK.vmax; conflict (a) -- the census reverses
-    #                      that edge, and `vocab_slots` above is this package's side of it.
-    #   d_live_vocab / d_retired_ids / d_max_token_bytes / d_device   incoming wires, not levers.
+    #   d_pos_max          promote-to-wire (CENSUS.md:415). Positional rows. Would shadow the wire, which
+    #                      is now declared LOCAL (src LM.ctx, dst LM.d_pos_max) -- conflict (b), settled.
+    #   d_softmax_width    NO LONGER EXISTS. assemble.py used to write it from TOK.vmax; the census
+    #                      reversed that edge and `vocab_slots` above is this package's side of it, which
+    #                      leaves as TOK.d_vocab_ceiling. Kept in this list so the name is findable.
+    #   d_live_vocab / d_retired_ids / d_device   NOT WIRES: arguments to LM.decode and LM.build_model.
+    #   d_max_token_bytes  an incoming wire, not a lever -- and it is in the ledger.
     #   TOK_ANCHOR_TAU     dropped (CENSUS.md:297): a second unit for `anchor_uses`'s one horizon, and
     #                      three couplings (OPT, DATA, TOK) bought for the privilege.
     #   WARMSTART_OPT      dropped (CENSUS.md:298): its motivation was checked and is false -- Adam's

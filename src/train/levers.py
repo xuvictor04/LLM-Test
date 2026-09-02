@@ -71,7 +71,7 @@ THREE CENSUS DEFECTS, CHECKED AGAINST ALL NINE ROWS
 1. DOUBLED ENVIRONMENT NAMES -- SEVEN ROWS SEEN, SEVEN CORRECTIONS LANDED. Every one of this package's
    seven surviving rows names its target as PREFIX.PREFIX_FIELD: `RUN.RUN_EPOCHS`, `RUN.RUN_SEED`,
    `RUN.RUN_DEVICE`, `RUN.RUN_TF32`, `RUN.RUN_AMP`, `RUN.RUN_BENCH`, `RUN.RUN_PROFILE` (CENSUS.md:340,
-   352, 355, 398, 404-405, 416). spine/lever.py:104-106 generates the environment name as
+   352, 355, 398, 404-405, 416). spine/lever.py::Lever.env_name_for generates the environment name as
    PREFIX + "_" + FIELD.upper(), so `RUN.RUN_SEED` taken literally declares a field `RUN_SEED` answering
    to RUN_RUN_SEED -- a name no operator would ever type, that from_env() would never find, and that
    therefore pins the lever at its default forever while every static check reports it declared, owned
@@ -94,12 +94,12 @@ THREE CENSUS DEFECTS, CHECKED AGAINST ALL NINE ROWS
    RUN DECLARES NO CADENCE AND NO THRESHOLD. Nothing in this file is of the form `step % X == 0` or
    `clock >= X`, which is a claim about this package a later reader can test by grepping it.
    THE CONFLICT IS ONE LEVEL OUT, AND IT IS THIS PACKAGE'S TO STATE BECAUSE THE CLOCK IN DISPUTE IS THE
-   LOOP'S. spine/assemble.py:684-712 builds three per-flush cadences as
+   LOOP'S. spine/assemble.py::_owner_blocks builds three per-flush cadences as
    `derive.flush_period(Steps(r["FAB"].manage_every), r["TRAIN"].batch_w)` and the same for
    `r["TRAIN"].grow_cap_every`, and derive.flush_period REFUSES anything that is not exactly Steps
-   (derive.py:223). The census types both of those inputs Windows-shaped: MANAGE_EVERY -> FAB, Windows,
-   declared `manage_every` at fabric/levers.py:648 with the conflict recorded there; GROW_CAP_EVERY ->
-   CAP_PIN_STEPS, which capacity/levers.py:305 declares as `pin_windows`, U.Windows, for the same reason.
+   (derive.py::flush_period). The census types both of those inputs Windows-shaped: MANAGE_EVERY -> FAB, Windows,
+   declared `manage_every` at fabric/levers.py::FABLevers with the conflict recorded there; GROW_CAP_EVERY ->
+   CAP_PIN_STEPS, which capacity/levers.py::CAPLevers.lift_min declares as `pin_windows`, U.Windows, for the same reason.
    Both those files reached the same reading independently: the divisor is `step`, and units.py says
    `step` counts WINDOWS. This file agrees with them and changes nothing, because the number in dispute is
    not RUN's to relabel -- but the fact the dispute is ABOUT is: the loop advances `step` once per window
@@ -140,7 +140,7 @@ src/train/ will assume this is that package. IT IS NOT, and the difference is no
   local coupling on OPT, not a wire this package can receive. The repair is per-field retargeting, in
   assemble.py, by whoever ports the loop.
   WHAT HAPPENS TODAY, reproduced by opt/levers.py rather than predicted: build() does not fail on this.
-  A coupling naming an unregistered package is DEFERRED with a warning (assemble.py:875-885) and TRAIN is
+  A coupling naming an unregistered package is DEFERRED with a warning (assemble.py::COUPLINGS) and TRAIN is
   registered by nobody, so all four rows print "DEFERRED ... package(s) ['TRAIN'] not registered" and are
   NOT MADE. Declaring this file does not change that, and that is exactly the state to be alarmed by: a
   declared-but-unmade wire reads as "not ported yet" long after it has become "ported, and wired to a name
@@ -153,25 +153,25 @@ src/train/ will assume this is that package. IT IS NOT, and the difference is no
 --------------------------------------------------------------------------------------------------
 THE WIRES: values this package supplies or needs that it must NOT declare
 --------------------------------------------------------------------------------------------------
-lever.py:83-87 refuses a d_-named lever precisely so a declaration cannot shadow the wire that writes it,
+lever.py::Lever.__set_name__ refuses a d_-named lever precisely so a declaration cannot shadow the wire that writes it,
 and O4 audits the d_ namespace in BOTH directions -- so the receiving end saying what it expects is half
 of what makes `grep d_` complete. NONE OF THE FOLLOWING EXISTS IN spine/assemble.COUPLINGS TODAY.
     OUTGOING
       d_device        cpu/cuda, to LM, MEM, FAB, SIG, WORLD and CKPT   (DEVICE's row, CENSUS.md:416;
-                                                                       lm/levers.py:172 already declares
+                                                                       lm/levers.py::<module> already declares
                                                                        it incoming and names that row)
       d_epochs        the run length, to DATA                          (EPOCHS's row: the whole-run
                                                                        exposure audit at :5514-5520 and
                                                                        the resample count; data/levers.py
                                                                        :137 declares it incoming)
       d_total_steps   the run length in steps, to OPT                  (EPOCHS's row calls it that;
-                                                                       opt/levers.py:184 expects the same
+                                                                       opt/levers.py::<module> expects the same
                                                                        quantity as `d_run_steps`. ONE
                                                                        VALUE, TWO SPELLINGS, neither in
                                                                        the ledger -- recorded so whoever
                                                                        writes it picks one on purpose)
     NOT A WIRE, BY AN EXPLICIT REJECTION THIS FILE AGREES WITH
-      d_seed          assemble.py:775 refuses it. What a package needs is not the number but a STREAM:
+      d_seed          assemble.py::COUPLINGS refuses it. What a package needs is not the number but a STREAM:
                       rng_for("fabric", seed) is per-subsystem, name-keyed, stable across processes, and
                       recorded by rng.issued() -- so a subsystem with zero draws reads armed-but-inert
                       and one that never asked does not appear at all (G4). WHAT THAT MEANS FOR THIS
@@ -190,7 +190,7 @@ nowhere to live in a declaration:
     EPOCHS      `max(1, _i("EPOCHS", 1))` at :5467. RUN_EPOCHS=0 now resolves to 0 and the loop runs no
                 passes; whoever writes the loop owes a startup refusal, in one place.
     SEED        nothing clamped it and nothing should, but note rng.derive_seed keeps the SIGN meaningful
-                (rng.py:148-150) while some harnesses use -1 as "unset". A negative seed is a real run.
+                (rng.py::derive_seed) while some harnesses use -1 as "unset". A negative seed is a real run.
     TF32/AMP    both were gated on `DEV == "cuda"` at the read site, which is a RELATION between two
                 levers. `choices=` cannot state one. The startup code that applies them must, and it must
                 say when it declines to (see `amp`).
@@ -200,7 +200,7 @@ and it is the difference between a continual-learning experiment and the same ex
 
 IMPORT STYLE, AND WHY IT DEPARTS FROM THE ASSIGNMENT'S SKETCH. `from ..spine.lever import ...` cannot work
 here. Every entry point in this tree puts `src/` ITSELF on sys.path (tests/test_ownership.py,
-tests/test_derive.py:33, and this file's own verification command), which makes `train` a TOP-LEVEL
+tests/test_derive.py::<module>, and this file's own verification command), which makes `train` a TOP-LEVEL
 package, and a relative import that walks above one raises ImportError, "attempted relative import beyond
 top-level package". The absolute form below is what all twelve sibling levers.py files use.
 """
@@ -215,7 +215,7 @@ class RUNLevers(LeverSet):
     Read `cfg.seed`, never an environment name. Every value here is resolved once by spine.assemble and
     frozen; a function receiving this Config should open with `run.owned_by("RUN")`, because a Config is
     an ordinary object and a foreign one handed in reads happily and wrongly -- `memory_prune(configs
-    ["FAB"])` returning 2048 is the reproduced case behind that method's existence (lever.py:238-261).
+    ["FAB"])` returning 2048 is the reproduced case behind that method's existence (lever.py::Config).
 
     Grouped by the decision each group makes. The grouping is load-bearing in one place: `device` decides
     whether `amp` is reachable AT ALL (the autocast branch is guarded on `DEV == "cuda"`, :1072-1081) and
@@ -283,7 +283,7 @@ class RUNLevers(LeverSet):
     # (subsystem #1 at seed=1 and subsystem #0 at seed=2 both get 2, so two "independent" replicates share
     # streams pairwise and the between-seed spread they measure is smaller than the real one) and makes
     # the mapping depend on declaration ORDER, so inserting a subsystem reseeds every one after it.
-    # assemble.py:775 refuses a d_seed wire for the same reason; what travels is the stream, not the
+    # assemble.py::COUPLINGS refuses a d_seed wire for the same reason; what travels is the stream, not the
     # number, and rng.issued() records every stream handed out.
     # LOAD-BEARING TWICE OVER IN THE NEW PLAN, which is why it is a lever and not a constant: G2's
     # test_determinism runs two identical seeded CPU runs to establish the measured float noise floor that
@@ -294,13 +294,13 @@ class RUNLevers(LeverSet):
     # banner while compare.py pairs runs by reading the seed out of that banner (:5901-5909), so the tool
     # built to make the project's claims trustworthy could not find the one number those claims turn on --
     # and its own failure text says the state it found was the normal one ("NEITHER ARM HAS A SEED ... the
-    # state of every log this project has ever produced", compare.py:251).
+    # state of every log this project has ever produced", compare.py::main).
     # THE UNIT IS A KNOWN MISLABEL, carried from the census and harmless in the way metadata is: a seed is
     # not a count OF anything, and units.py has no SEED or OPAQUE constant. U.COUNT is the least-wrong
     # existing label; adding one is a spine edit and this file has no standing to make one (the same
     # ruling opt/levers.py reached for its learning rate).
     # A NEGATIVE SEED IS A REAL RUN. rng.derive_seed includes the sign in the hashed text so seed=-1 and
-    # seed=1 are different keys (rng.py:148-150), stated there because some harnesses use -1 to mean
+    # seed=1 are different keys (rng.py::derive_seed), stated there because some harnesses use -1 to mean
     # "unset" and an alias onto a real run is unrecoverable after the fact. Note also that coercion is
     # int(float(raw)), so RUN_SEED=1e6 resolves to 1000000 rather than failing.
 
@@ -350,7 +350,7 @@ class RUNLevers(LeverSet):
                        "computed.", U.FLAG)
     # Census: TF32 -> RUN.RUN_TF32, verdict rename, default 1, unit on/off (CENSUS.md:405). Field
     # corrected from `RUN_TF32` to `tf32` (DEFECT 1).
-    # DECLARED True, NOT 1, following the rule fabric/levers.py:99-107 states for the whole tree: the
+    # DECLARED True, NOT 1, following the rule fabric/levers.py::<module> states for the whole tree: the
     # VALUE is identical (True == 1 and bool is an int, so this is the census's literal), but the declared
     # TYPE selects a coercion branch -- with a bool default RUN_TF32=off means off, with an int default it
     # raises. The honest cost of the bool branch is stated there too and applies here: any spelling
@@ -488,16 +488,16 @@ class RUNLevers(LeverSet):
     #               message is "a lie" for unattended grid runs, and its reader was spelled
     #               _i(chr(80)+chr(82)+chr(79)+..., 12) at :4320 so grepping the knob's name did not find
     #               its call site -- the invisibility the generated-name registry exists to end.
-    #   BATCH_W / ACCUM   OPT's (OPT_BATCH_WINDOWS, OPT_ACCUM). assemble.py:684-762 sources them from a
+    #   BATCH_W / ACCUM   OPT's (OPT_BATCH_WINDOWS, OPT_ACCUM). assemble.py::_owner_blocks sources them from a
     #               prefix `TRAIN`; see the header. They are the size of a flush and the size of an
     #               optimizer step, not properties of the process.
-    #   GROW_CAP_EVERY    CAP's, declared `pin_windows` (capacity/levers.py:305). Same stale prefix.
+    #   GROW_CAP_EVERY    CAP's, declared `pin_windows` (capacity/levers.py::CAPLevers.lift_min). Same stale prefix.
     #   MANAGE_EVERY      FAB's cadence; RATE_EVERY is EVAL's curve tick; CKPT_EVERY/RESUME/SAVE_CKPT are
     #               CKPT's; STREAM_LEN and DISK_STREAM are DATA's; WIN is LM's context width. A loop that
     #               declared any of them would own a mechanism it does not implement.
     #   d_device / d_epochs / d_total_steps   outgoing wires, not levers -- lever.py refuses a d_-named
     #               lever so a declaration cannot shadow the wire that writes it. None is in
     #               spine/assemble.COUPLINGS yet.
-    #   d_seed      refused on purpose (assemble.py:775). What travels is the per-subsystem stream from
+    #   d_seed      refused on purpose (assemble.py::COUPLINGS). What travels is the per-subsystem stream from
     #               rng_for(name, seed), not the number.
     # ==============================================================================================

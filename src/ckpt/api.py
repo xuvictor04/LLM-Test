@@ -96,7 +96,7 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
     multiplies that defect n times over. A SNAPSHOT'S VOCABULARY IS PART OF THE SNAPSHOT -- BUT NOT
     IN `payload`, AND THIS SENTENCE USED TO SAY OTHERWISE (corrected 2026-09-02, Q-TOK-10). The
     merges live in the FILE at d_vocab_save_path: build_vocabulary REPLAYS them from
-    d_vocab_read_path on a resume (tok/api.py:50-56), and TOK.vocab_state carries "everything a
+    d_vocab_read_path on a resume (tok/api.py::build_vocabulary), and TOK.vocab_state carries "everything a
     resume needs THAT THE MERGE LIST ALONE DOES NOT CARRY", i.e. explicitly not the merges. Two
     frozen docstrings disagreed about where a snapshot's vocabulary lives; the repair is that
     TOK.save_vocabulary now takes the SAME `suffix` this call takes, so the tokenizer file travels
@@ -227,7 +227,7 @@ class Retention:
     def consider(self, curve_bpb, step):
         """One held-out probe arrives. Returns BestAction(save_best, rotate_slot).
 
-        curve_bpb IS AN ARGUMENT, NOT A WIRE. eval/levers.py:124 declares an outgoing d_curve_bpb
+        curve_bpb IS AN ARGUMENT, NOT A WIRE. eval/levers.py::<module> declares an outgoing d_curve_bpb
         and ckpt/levers.py expects it, but a Config freezes when build() returns and this number is
         produced thousands of windows into the run -- so it cannot be a Coupling row. Recorded
         because "declared as a wire and never made" reads as "not ported yet" long after it has

@@ -51,11 +51,11 @@ error going the other way.
   self_organize.py:7708) while the loop body runs once per FLUSH -- units.py names that confusion the
   project's single most repeated defect. Both are therefore declared U.Windows, which is what the census
   says, against source comments that say "steps" (self_organize.py:4879). No correction was needed to the
-  census on these two. THE CONFLICT WITH THE SPINE, stated rather than resolved: spine/assemble.py:686
+  census on these two. THE CONFLICT WITH THE SPINE, stated rather than resolved: spine/assemble.py::_owner_blocks
   wraps the analogous fabric cadence as `derive.flush_period(Steps(r["FAB"].manage_every), ...)` while
   the census types MANAGE_EVERY as `windows` -- the same counter, two kinds, in two files. That is FAB's
   row to settle, but it reaches into this package the moment anyone needs a MEM cadence in flushes:
-  derive.flush_period REFUSES anything but Steps (derive.py:223-226), so there is today no legal
+  derive.flush_period REFUSES anything but Steps (derive.py::flush_period), so there is today no legal
   conversion from a Windows-typed cadence to the flush clock. Whoever ports the probe must either add a
   Windows->Flushes conversion to spine.derive or change what FAB.manage_every is typed as. Picking one
   here, silently, is exactly how a knob acquires two meanings.
@@ -90,7 +90,7 @@ recorded as E7.40 with no line in any log. After this, an operator sizes the sto
     mismatches, before and after).
 
 IMPORT STYLE, AND WHY IT DEPARTS FROM THE ASSIGNMENT'S SKETCH. `from ..spine.lever import ...` cannot
-work here: every entry point in this tree puts `src/` itself on sys.path (tests/test_derive.py:33,
+work here: every entry point in this tree puts `src/` itself on sys.path (tests/test_derive.py::<module>,
 tests/test_ownership.py's SRC insert, and the verification command for this file), which makes `memory` a
 TOP-LEVEL package, and a relative import that walks above one raises
 "ImportError: attempted relative import beyond top-level package" at import time -- verified, not assumed.
@@ -353,7 +353,7 @@ class MEMLevers(LeverSet):
     # counter. Setting this to 0 disarms every retrieval-based rule above; the report must say so.
     # UNIT: Windows. The comment at :4879 says "steps", but _due (:5283) compares against `step`, which
     # advances once per WINDOW (`i += WIN; step += 1`, :7708) while the loop body runs once per FLUSH.
-    # See DEFECT 2 in the header: spine/assemble.py:686 types the analogous FAB cadence as Steps, and
+    # See DEFECT 2 in the header: spine/assemble.py::_owner_blocks types the analogous FAB cadence as Steps, and
     # derive.flush_period refuses anything else, so the two files do not currently agree about what
     # `step` counts. That disagreement is stated, not resolved here.
 
@@ -503,7 +503,7 @@ class MEMLevers(LeverSet):
     recon_tok = Lever(
         32, "Width of the fixed token-code space the reconstructor predicts into.", U.COUNT)
     # THE OLD NAME WAS ACTIVELY MISLEADING AND THAT IS WHY THE RENAME EARNS ITS PLACE: RECON_TOK is
-    # `tok_dim` (verification.py:28-34), the width of a fixed NON-LEARNED token code -- not a count of
+    # `tok_dim` (verification.py::Reconstructor.__init__), the width of a fixed NON-LEARNED token code -- not a count of
     # tokens. The codes are deliberately non-learned so that "reconstruct the token" cannot be gamed by
     # collapsing an embedding toward a constant. Anyone reading RECON_TOK=32 as 32 tokens gets the size
     # of the whole mechanism wrong.

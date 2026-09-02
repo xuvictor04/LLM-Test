@@ -247,7 +247,7 @@ def mint_burst(tok: Config, vocab, *, step):
     never minted and scored 3.600 b/B against a ~1.96 baseline. If nothing in the window passes,
     take the most frequent candidate clearing min_pair, SCANNED IN FREQUENCY ORDER HELD SEPARATELY
     from the re-ranked list -- the shipped fallback re-used the novelty-sorted list, so at
-    mint_novel > 0 it took the most NOVEL one (ISSUES:573). A candidate refused for max_bytes or
+    mint_novel > 0 it took the most NOVEL one (ISSUES M77). A candidate refused for max_bytes or
     for already existing is SKIPPED, not returned as "nothing left to mint": that hole stalled a
     vocabulary at 658/4000 with 1866 pairs still above min_pair. A candidate whose bytes already
     exist at a RETIRED id is a REINSTATEMENT -- put the old id back in the match table, mint
@@ -360,7 +360,7 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     best-snapshot resume path could not work at all.
 
     IT CANNOT BE A WIRE, and that is the framework rule rather than a preference: the suffix is
-    chosen AT RUNTIME by the retention policy (CKPT.BestAction, ckpt/api.py:23) and a coupling's
+    chosen AT RUNTIME by the retention policy (CKPT.BestAction, ckpt/api.py::<module>) and a coupling's
     compute sees only frozen Configs. A runtime value reaches a package as an ARGUMENT -- the same
     rule that made bytes_per_token an argument to DATA.data_plan and curve_bpb an argument to
     CKPT.Retention.consider.
@@ -381,8 +381,12 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     equivalent and must not be written: the tail has two dots, so splitext yields
     <base>.dyntok.best3.json while the read side looks for <base>.best3.dyntok.json.
     THE OTHER OPTION IS NOT TAKEN AND THE REASON IS RECORDED: moving the merges into payload["TOK"]
-    would make the snapshot self-contained (which ckpt/api.py:96-99 already claims), but
-    build_vocabulary's merge source is the FILE (tok/api.py:50-56) and the payload is not one of
+    would make the snapshot self-contained -- which ckpt/api.py::save CLAIMED UNTIL THIS SAME RULING
+    CORRECTED IT, and reading that sentence in the present tense is now wrong: it says "A SNAPSHOT'S
+    VOCABULARY IS PART OF THE SNAPSHOT -- BUT NOT IN `payload`", which is this ruling and not the
+    alternative to it. What follows is why the alternative was priced and refused, not a live
+    disagreement between two frozen docstrings. build_vocabulary's merge source is the FILE
+    (tok/api.py::build_vocabulary) and the payload is not one of
     its arguments, so it costs either a second signature change (build_vocabulary gains `saved=`)
     or re-chartering restore_vocab from "refuse on mismatch" to "install the match table" -- which
     throws away a full corpus build and leaves bytes_per_token measured on a vocabulary that was

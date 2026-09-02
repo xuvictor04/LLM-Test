@@ -84,7 +84,7 @@ if someone can see that it was looked for.
     spine/assemble.py, and neither is settled here because picking a side in a declaration file is how a
     knob acquires two meanings.
 
-    (a) OWNERSHIP OF VMAX. assemble.py:723-725 declares `Coupling(src="TOK.vmax", dst="LM.d_softmax_width",
+    (a) OWNERSHIP OF VMAX. assemble.py::COUPLINGS declares `Coupling(src="TOK.vmax", dst="LM.d_softmax_width",
     compute=lambda r: int(r["TOK"].vmax))` -- it reads `vmax` off THIS package's Config. The census gives
     VMAX to LM as LM_VOCAB_SLOTS (verdict rename, default 4096, unit slots, family `tokenizer`), so under
     the census there is no `TOK.vmax` to read and build() will raise LeverError at startup the moment both
@@ -93,15 +93,15 @@ if someone can see that it was looked for.
     ownership spine exists to prevent, and the coupling's own `why` argues for LM's side ("emb.weight and
     head.weight have exactly this many rows... one number named twice"). The repair is one line in
     assemble.py -- src/compute read from LM -- and it is assemble's to make, not this file's. Note the
-    same spelling appears in assemble.py:495 inside a docstring example; that one is prose and harmless.
+    same spelling appears in assemble.py::Coupling.__init__ inside a docstring example; that one is prose and harmless.
 
-    (b) TWO CLOCK KINDS ARRIVE AT ONE PACKAGE. assemble.py:708-719 wires `TOK.d_cap_lift_period` as a
+    (b) TWO CLOCK KINDS ARRIVE AT ONE PACKAGE. assemble.py::COUPLINGS wires `TOK.d_cap_lift_period` as a
     FLUSHES clock, derived by `derive.flush_period(Steps(r["TRAIN"].grow_cap_every), r["TRAIN"].batch_w)`
     -- correctly, since the capacity valve's own knob is typed Steps (census: GROW_CAP_EVERY ->
     CAP.CAP_PIN_STEPS, unit Steps). So this package will hold four Windows cadences of its own and one
     Flushes period from the valve, and units.Clock refuses every comparison and every sum between them --
     including `==`. There is today NO legal conversion in either direction: derive.flush_period accepts
-    Steps and nothing else (derive.py:223-226), and spine.derive has no Windows->Flushes function at all.
+    Steps and nothing else (derive.py::flush_period), and spine.derive has no Windows->Flushes function at all.
     Whoever ports the vocabulary cap must therefore either add that named conversion to spine.derive or
     change what the valve hands over; doing it inline at the comparison is the pin_tick defect again, and
     the refusal that will be raised is the mechanism working, not a bug in this file. MEM's levers.py
@@ -116,24 +116,34 @@ if someone can see that it was looked for.
   anywhere because it was never in the old `_SPEC` at all -- it is read at tokenizer.py:140 behind the
   registry's back, which is why the audit printed "NOTHING READ THESE: TOK_MINT_NOVEL_K ... This run used
   the DEFAULTS" when an operator set it, a false sentence about a knob that was read and used (M23,
-  ISSUES.md:357). An unregistered knob absorbed into a declared lever is a completed merge with one silent
+  ISSUES M23). An unregistered knob absorbed into a declared lever is a completed merge with one silent
   half, not a merge with a missing target, and `cand_window` below is the single width it becomes.
 
 WHAT IS DELIBERATELY ABSENT. Values this package uses that it does not own, and must not declare --
 lever.py refuses a d_-named lever precisely so a declaration cannot shadow the wire that writes it:
     d_cap_lift_period   Flushes, from TRAIN.batch_w x TRAIN.grow_cap_every   (assemble.py, declared)
     d_vocab_path        the tokenizer json's path, owned by CKPT             (census promote-to-wire)
-    d_residual_ratio    ||delta||/||composite|| from LM.compose              (NOT YET IN THE LEDGER)
-The third is the one to watch. TOK_PROBATION_MIN's census reason states that the ratio "arrives as the
-wire d_residual_ratio from LM", and no such Coupling exists in assemble.COUPLINGS today. Until it does,
-`probation_by="embed"` has a threshold with nothing to compare -- which is the shape of the defect the
-embed arm already had once: TOK_PROBATION_BY=embed with TOK_COMPOSE=0 left the composer as None and fell
-through to the "use" test with no warning, while the banner and the end-of-run [vocab] line at :7864 both
-reported "judged by embed" (M41). A missing wire is better than that, because it fails loudly, but it is
-still missing and this is the record of it.
+    d_residual_ratio    ||delta||/||composite|| from LM                      (NOT A WIRE, AND IT
+                                                                             CANNOT BE -- see below)
+THE THIRD IS NOT A MISSING WIRE AND THIS PARAGRAPH SAID IT WAS UNTIL 2026-09-03 (Q-TOK-11, RESOLVED
+2026-09-02). TOK_PROBATION_MIN's census reason states that the ratio "arrives as the wire
+d_residual_ratio from LM", and three statements in this file repeated it and told the next author to
+declare the Coupling. THE COUPLING MUST NEVER BE DECLARED: a Coupling.compute sees only frozen
+Configs, and this ratio is read off a LIVE TENSOR after build() freezes, so it is the same class of
+value as d_live_vocab and d_device -- lm/levers.py's outgoing table now says so at its own end, and
+docs/04_CONTRACT.md's refused-wires table in section 0 carries the row. What the ruling gave it
+instead is a PRODUCER and an ARGUMENT: LM.residual_ratios(lm, model), a judgement-time pure read on
+a B row immediately before TOK.judge_probation, reaching this package as judge_probation's
+`residual_ratio=` keyword. The threshold and the retire decision stay TOK's.
+THE DEFECT THE OLD PARAGRAPH WARNED ABOUT IS STILL REAL AND IS ANSWERED THE SAME WAY: at
+TOK_PROBATION_BY=embed with LM_COMPOSE=0 there is no composer, the call returns None, and the embed
+arm must be declared UNREACHABLE by its Gate rather than falling through to the "use" test in
+silence -- which is what happened once, with the banner and the end-of-run [vocab] line at :7864
+both reporting "judged by embed" (M41). A refused wire does not fix that; the printed Gate does, and
+tok/api.py's judge_probation declares it.
 
 IMPORT STYLE. Absolute, `from spine.lever import ...`, matching fabric, sig, memory and domains. Every
-entry point here puts src/ itself on sys.path (tests/test_derive.py:33, tests/test_ownership.py's SRC
+entry point here puts src/ itself on sys.path (tests/test_derive.py::<module>, tests/test_ownership.py's SRC
 insert, and this file's own verification command), which makes `tok` a TOP-LEVEL package; a relative
 `from ..spine.lever import ...` raises "attempted relative import beyond top-level package" under that
 convention, which is the only convention this tree has.
@@ -181,7 +191,8 @@ class TOKLevers(LeverSet):
     # three states is why whole knobs are unreachable per branch and nobody can see it: GROW_PASSES is
     # never read at TOK_ONLINE=1 (the default) and SEED_VOCAB/SEED_PASSES are never read at
     # TOK_ONLINE=0, so setting one on the wrong branch is silently ignored AND produces a "NOTHING READ
-    # THESE" line whose stated cause -- a typo -- is false (ISSUES.md:820, :2089). The source already
+    # THESE" line whose stated cause -- a typo -- is false (ISSUES L20, and the [so-config/facts]
+    # entry beginning "GROW_PASSES is never read at the default configuration"). The source already
     # admitted the encoding was wrong: self_organize.py:5848 reports ("TOK_ONLINE", USE_TOK and
     # TOK_ONLINE), i.e. the printed value of one knob is an AND of two.
     # ONE COUPLING DIES WITH THE MERGE AND THAT IS DELIBERATE. self_organize.py:1102-1106 raised
@@ -206,7 +217,7 @@ class TOKLevers(LeverSet):
     # as activity. The rebuild should report them as skipped rather than pretend they did not happen.
     # 0 IS STILL A SENTINEL AND THE CENSUS ASKED FOR THAT TO END. Its reason says 0-means-never should
     # become "an explicit off value under choices/derivation rather than a sentinel". choices= cannot
-    # express "0, or any positive window" -- the same limit domains/levers.py:262 records -- and inventing
+    # express "0, or any positive window" -- the same limit domains/levers.py::DOMLevers records -- and inventing
     # a second lever to hold the off switch would be minting a knob the census never voted on. So the
     # sentinel stands, declared in the help text where a reader will see it, and the honest repair is a
     # derivation inside this package that names the frozen state once.
@@ -227,7 +238,7 @@ class TOKLevers(LeverSet):
     # TWO COUPLINGS MUST SURVIVE AS DECLARED WIRES AND NEITHER IS IN THE LEDGER YET. (1) It bounds the
     # signature lookahead horizon: :6663-6664 computes _H = min(_H, RETOK_EVERY - ...). (2) A retok
     # invalidates _VALT/_BL, remaps mem.ctx and decays asm.tokc (:7766-7788), so it reaches SIG, MEM and
-    # DOM. domains/levers.py:615 already states the other end of (2) correctly -- DOM must not read this
+    # DOM. domains/levers.py::<module> already states the other end of (2) correctly -- DOM must not read this
     # cadence, the retok arrives as a SIGNAL -- and that is the shape the rest should take too.
 
     grow_every = Lever(200, "Cadence at which the vocabulary mints a burst of new tokens.", U.Windows)
@@ -279,7 +290,8 @@ class TOKLevers(LeverSet):
     # ONE QUANTITY THAT WAS READ ON OPPOSITE SIDES OF ONE TERNARY: :1225 is
     # `_passes = _i("SEED_PASSES", 2) if TOK_ONLINE else _i("GROW_PASSES", 8)`, so exactly one of the two
     # is reachable in any run and the other triggers a false "NOTHING READ THESE" typo report
-    # (ISSUES.md:820, :2089). Two names for one number, each unreachable half the time, is the merge case
+    # (ISSUES L20, and the [so-config/facts] entry beginning "GROW_PASSES is never read at the
+    # default configuration"). Two names for one number, each unreachable half the time, is the merge case
     # in its purest form.
     # THE DEFAULT IS 2 BECAUSE 2 IS WHAT THE DEFAULT CONFIGURATION RAN. GROW_PASSES=8 was the offline
     # build's literal and it is NOT lost information: the offline build genuinely wants more passes,
@@ -287,13 +299,19 @@ class TOKLevers(LeverSet):
     # default must be one literal.
     # RULED 2026-09-02 (Q-TOK-9): THERE IS ONE LITERAL, 2, AND IT IS READ ON ALL THREE ARMS. This
     # comment used to say the 8 "carries over as the fixed arm's declared target inside this package's
-    # build code", which put a second number where the generated lever reference cannot reach it:
-    # docs/04_LEVERS.md is generated from these declarations (fabric/levers.py:104, domains/levers.py:166,
-    # opt/levers.py:499 -- "reads the default off the registry instead of retyping it"), so an 8 in
-    # build code prints as 2 for the arm where it is wrong. That is L1's failure with a second literal
-    # instead of a second environment name, and src/tok/api.py:57 and :75 already told P4 the opposite
-    # of this comment -- two frozen surfaces, opposite instructions, different tok.v0 on the arm that
-    # carries the project's largest recorded effect (4.364 vs 2.175 b/B).
+    # build code", which is a second literal in a second place. THE DECIDING FACT IS THE Lever ITSELF,
+    # NOT A DOCUMENT: a Lever carries exactly one default, L1 is one declaration in one place, and a
+    # number living in build code is reachable by no generator or audit that reads the registry.
+    # docs/04_LEVERS.md is the PLANNED consumer that three levers.py files already name
+    # (fabric/levers.py::<module>, domains/levers.py::<module>, opt/levers.py::OPTLevers -- "reads the default off the
+    # registry instead of retyping it"); IT IS NOT YET ON DISK -- `ls docs/` is 02_OPERATIONS.md,
+    # 03_WIRING.md, 04_CONTRACT.md and proposals/ -- so this ruling does not lean on it and says so
+    # rather than arguing from a file a reader cannot open. That is L1's failure with a second literal
+    # instead of a second environment name, and before this ruling src/tok/api.py told P4 the opposite
+    # of this comment at what are now :70 ("Otherwise: tok.build_passes tally-and-mint passes") and
+    # :88 (LEVERS READ, which lists build_passes once, with no arm branch) -- two frozen surfaces,
+    # opposite instructions, different tok.v0 on the arm that carries the project's largest recorded
+    # effect (4.364 vs 2.175 b/B). Both now say what this comment says.
     # THE 8 SURVIVES AS A DECLARED GATE, NOT AS A NUMBER: build_vocabulary's tok.build_passes_advice
     # prints the recommendation with its predicate on mode="fixed" and prints "unreachable" otherwise.
     # It must NOT come back as a second lever: that is the state the merge removed, and N1 has one row
@@ -320,7 +338,9 @@ class TOKLevers(LeverSet):
     # A frequency floor, a length ceiling, a candidate window, and two re-rankers that compose. Every
     # one of them was read on the fresh-construction branch only (:1256): DynamicTokenizer.load
     # reconstructs them from the saved json, so ON EVERY RESUME the environment value was silently
-    # ignored (M80, ISSUES.md:2085). Under L1 this package holds ONE declaration, and a load either
+    # ignored (ISSUES M80, and the [so-config/facts] entry beginning "On the tokenizer LOAD path,
+    # MIN_PAIR, MAX_TOK and TOK_DROPOUT are never read from the environment"). Under L1 this package
+    # holds ONE declaration, and a load either
     # matches it or is reported as a reconciliation -- never silently wins.
     # ==============================================================================================
 
@@ -329,7 +349,7 @@ class TOKLevers(LeverSet):
     # Census: MIN_PAIR -> TOK_MIN_PAIR, verdict rename. Field corrected (DEFECT 1).
     # THE FREQUENCY FLOOR THE WHOLE MINT RANKING SITS ON (tokenizer.py:290-297, :481).
     # IT HAD TWO DEFAULTS AND THAT IS THE EXACT FAILURE THIS SPINE EXISTS FOR: the registry said 50 and
-    # DynamicTokenizer.__init__ said 200 (tokenizer.py:130). lever.py:66-72 describes the five-defaults
+    # DynamicTokenizer.__init__ said 200 (tokenizer.py:130). lever.py::Lever describes the five-defaults
     # problem in the abstract; this is it in the concrete, and it survived because it lived in the OTHER
     # FILE, where the registry could not see it. 50 is the registry's literal and the one the recorded
     # runs were configured with, so 50 is the declaration. If the construction path wants 200 it is now
@@ -358,7 +378,7 @@ class TOKLevers(LeverSet):
     # width from both re-rankers -- `_k = 1; if novel>0: _k = max(_k, novel_k); if pmin>0: _k = max(_k,
     # gate_k)` (tokenizer.py:257-260) -- and TOK_MINT_NOVEL_K was read at :140 while being absent from
     # _SPEC, so setting it made the audit print "NOTHING READ THESE: TOK_MINT_NOVEL_K ... This run used
-    # the DEFAULTS", which was false (M23, ISSUES.md:357). A knob the audit cannot see is worse than a
+    # the DEFAULTS", which was false (ISSUES M23). A knob the audit cannot see is worse than a
     # knob that does not exist, because the audit is what the operator trusts.
     # THE FLOOR ABOVE 1 IS A REQUIREMENT AND IT CANNOT BE DECLARED HERE. At _k=1 the window is a single
     # pair, so "walk on to the next candidate" has nothing to walk and one unmintable top pair ends the
@@ -386,7 +406,7 @@ class TOKLevers(LeverSet):
     # tokenizer.py:158, behind the registry's back -- lever.py's own module docstring names this exact
     # read as the reason from_env is the single reader, and O1 now makes it impossible. (2) h_pmin_seen
     # must stop accumulating one float per candidate for the whole run (millions of floats at
-    # cand_window=1024, ISSUES.md:1012); that is a Sample, and it belongs below the instrument line.
+    # cand_window=1024, ISSUES L68); that is a Sample, and it belongs below the instrument line.
 
     mint_novel = Lever(0.0, "Exponent re-ranking mint candidates by how much a pair has grown since it "
                             "was last considered; 0 reproduces plain most-frequent minting.", U.FRACTION)
@@ -401,7 +421,7 @@ class TOKLevers(LeverSet):
     # at TOK_MINT_NOVEL=0.5 landed at 5.360 held-out (:974), a single arm with a confounder, and the
     # mechanism has a known open bug that would explain it -- the fail-open fallback claims to take "the
     # most frequent candidate clearing min_pair", but _top has ALREADY been re-sorted by novelty, so it
-    # takes the most NOVEL one instead (ISSUES.md:573). The two re-rankers were designed to compose and
+    # takes the most NOVEL one instead (ISSUES M77). The two re-rankers were designed to compose and
     # the fallback silently inherits one. Fix that before re-measuring; a number taken against a broken
     # composition is not evidence about the mechanism.
     # UNIT IS A LABEL AND IT IS THE CLOSEST WRONG ONE. This is a dimensionless EXPONENT, not a proportion.
@@ -419,7 +439,7 @@ class TOKLevers(LeverSet):
     # from the process-global `random`, so any value above 0 shifts the RNG stream of the ENTIRE RUN --
     # including maintenance segmentations that are supposed to be observational -- in a codebase that
     # otherwise guards this carefully (frozen_rng and no_rng_drift exist because diagnostics were
-    # silently editing runs, ISSUES.md:1016). It must draw from this package's own generator via
+    # silently editing runs, ISSUES L69). It must draw from this package's own generator via
     # spine/rng.py. Without that, G3's fingerprint diff reads this lever as a coupling into every other
     # package, and L3's isolation sweep -- whose only oracle is affects() -- reports a leak that is real
     # but not the one anybody is looking for.
@@ -470,14 +490,17 @@ class TOKLevers(LeverSet):
     # SIG_MODE, MODEL, VERIFY, LR_SCHED, KEY_SRC, SIG_SPACE, EVICT, CULL_MODE, WARMSTART_MODE,
     # CHAIN_ROUTE). (1) An unrecognised value falls into whichever branch is the else rather than being
     # refused, compared case-sensitively -- the same class as DATA_MODE=Real silently taking the
-    # synthetic branch (ISSUES.md:361, :2093). TOK_PROBATION_BY=Embed ran the "use" test and said nothing.
+    # synthetic branch (ISSUES M24, and the [so-config/facts] entry beginning "AMP is the only string
+    # knob in the region that is case-normalised"). TOK_PROBATION_BY=Embed ran the "use" test and
+    # said nothing.
     # (2) TOK_PROBATION_BY=embed with TOK_COMPOSE=0 leaves _emb = None and falls through to the "use"
     # test with NO warning anywhere, while the banner prints the requested mode and the end-of-run
     # [vocab] line at :7864 reports "judged by embed" (M41) -- a wrong-measurement record in the largest
     # defect class in the survey. choices= fixes (1) outright. It does NOT fix (2): the embed arm must be
     # reachable only through a declared Gate on the composer's existence, and the arithmetic must print
-    # when that gate is shut. See the d_residual_ratio note in the header -- the wire that arm needs is
-    # not in the ledger yet.
+    # when that gate is shut. See the d_residual_ratio note in the header: what that arm needs is NOT
+    # a wire and never can be -- it is judge_probation's `residual_ratio=` argument, produced by
+    # LM.residual_ratios at judgement time (Q-TOK-11).
 
     probation_residual = Lever(0.10, "Minimum ratio of a token's learned residual to its byte composite "
                                      "for the token to be judged worth its slot.", U.FRACTION)
@@ -489,6 +512,12 @@ class TOKLevers(LeverSet):
     # :7607-7611 requires _earned AND the residual test, for a stated reason -- "a residual that is near
     # zero because the token was never seen says nothing about the merge". Dropping either turns a
     # two-sided judgement into a one-sided one that retires tokens for not having been looked at.
-    # THE THRESHOLD IS TOK'S; THE RATIO IS NOT. The ratio is computed from model.compose and arrives as
-    # the wire d_residual_ratio from LM. The retire decision stays here because retirement pops from
-    # seq2id, which is this package's table and nobody else's.
+    # THE THRESHOLD IS TOK'S; THE RATIO IS NOT. The ratio is computed from model.compose and arrives
+    # as an ARGUMENT -- judge_probation's `residual_ratio=`, from LM.residual_ratios(lm, model). It is
+    # NOT the wire d_residual_ratio, which this comment named until 2026-09-03 and which can never
+    # exist: a Coupling.compute sees only frozen Configs and this is a read off a live tensor
+    # (Q-TOK-11). The census reason for this row still says "arrives as the wire d_residual_ratio
+    # from LM"; that is the owner's ledger, it is not edited here, and the contract records the
+    # conflict under Q-TOK-11.
+    # The retire decision stays here because retirement pops from seq2id, which is this package's
+    # table and nobody else's.

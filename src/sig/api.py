@@ -86,7 +86,7 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
     Dense (train_every) while the stream is within dense_window of the last detected boundary,
     throttled (train_every_idle) once it has been stable. All three thresholds are Windows and are
     compared against a Windows clock; windows_since_boundary is supplied by the caller from DOM's
-    last boundary -- SIG DOES NOT REACH FOR IT. sig/levers.py:385 calls it "d_last_boundary"; it is
+    last boundary -- SIG DOES NOT REACH FOR IT. sig/levers.py::SIGLevers calls it "d_last_boundary"; it is
     RUNTIME STATE and cannot be a build-time wire, which is a correction to that comment and not a
     disagreement with L2: the value still arrives from outside and the reader still never names the
     foreign lever.

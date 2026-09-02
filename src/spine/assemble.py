@@ -756,7 +756,7 @@ COUPLINGS = [
             "clamped ids into the 64-wide table would have re-broken it at exactly the scale it was "
             "written for. This is the SECOND landing of the census's MAX_DOMAINS promote-to-wire, which "
             "names both (CENSUS.md:208: 'it lands on DOM as d_expert_slots and on MEM as d_src_hint'); "
-            "the field is named d_source_slots because memory/levers.py:69 declares that spelling as what "
+            "the field is named d_source_slots because memory/levers.py::<module> declares that spelling as what "
             "it expects to receive. The formula is the shipped one; only its input was wrong. Reducible: "
             "a census that grows on demand needs no bound at all, and that is the better repair when it "
             "is written."),
@@ -780,7 +780,7 @@ COUPLINGS = [
             "int -- an int compares fine against a threshold in the wrong unit. UNIT RESOLVED HERE: this "
             "row used to read `derive.flush_period(Steps(r['FAB'].manage_every), ...)` and its reason "
             "said 'MANAGE_EVERY is written in STEPS'; the census (CENSUS.md, FAB family) and "
-            "fabric/levers.py:648 both type it Windows, and the source agrees with them, so the Steps "
+            "fabric/levers.py::FABLevers both type it Windows, and the source agrees with them, so the Steps "
             "assumption is withdrawn and the conversion is derive.flush_period_windows."),
     Coupling(
         src=("OPT.batch_windows", "CAP.pin_windows"),
@@ -796,7 +796,7 @@ COUPLINGS = [
             "enough' -- a true sentence about a false clock. A second gate one layer up then compared "
             "fabgrow.n (calls) to the same threshold and lifted nothing for a further whole round, the "
             "first fault masking the second. The knob is now CAP.pin_windows (census GROW_CAP_EVERY -> "
-            "CAP_PIN_STEPS, re-typed and re-named to CAP_PIN_WINDOWS at capacity/levers.py:305 because "
+            "CAP_PIN_STEPS, re-typed and re-named to CAP_PIN_WINDOWS at capacity/levers.py::CAPLevers.lift_min because "
             "the counter it is compared against is `step`). THE VALVE PORT IS NOW SETTLED, and this row is "
             "no longer the valve's comparison. derive.pin_tick accumulates WINDOWS as of 2026-08-30 -- "
             "repair (a), because units.py reserves Steps for the LR horizon and nothing else while the "
@@ -837,8 +837,8 @@ COUPLINGS = [
             "where dead rows scale with VMAX and quietly take probability mass. DIRECTION CORRECTED HERE: "
             "this row read `src='TOK.vmax', dst='LM.d_softmax_width'`, and TOK has no lever called vmax "
             "-- the census gives VMAX to LM as LM_VOCAB_SLOTS and says in as many words that 'TOK "
-            "receives it as the wire d_vocab_ceiling' (CENSUS.md:323), which is what lm/levers.py:127-141 "
-            "and tok/levers.py:87 both record as the outstanding repair. Left as it was, importing the "
+            "receives it as the wire d_vocab_ceiling' (CENSUS.md:323), which is what lm/levers.py::<module> "
+            "and tok/levers.py::<module> both record as the outstanding repair. Left as it was, importing the "
             "real packages made build() raise 'TOKLevers has no lever vmax' -- the mechanism working, on "
             "a row that named an owner nobody had."),
 
@@ -856,7 +856,7 @@ COUPLINGS = [
             "already split the write side out by hand as `_TOK_SAVE = SAVE_CKPT + '.dyntok.json'` "
             "(self_organize.py:1010-1012), and that rule is the compute here, so a run's vocabulary lands "
             "beside its own checkpoint. Empty in, empty out: CKPT_DIR='' means saving is off entirely "
-            "(ckpt/levers.py:143), and a save target computed from it would otherwise be the file "
+            "(ckpt/levers.py::CKPTLevers.dir), and a save target computed from it would otherwise be the file "
             "'.dyntok.json' in whatever directory the run happened to start in. Reducible: a checkpoint "
             "format that carried the vocabulary inside itself would need no path at all."),
     Coupling(
@@ -867,7 +867,7 @@ COUPLINGS = [
         irreducible=False,
         why="TWO FIELDS, NOT ONE, AND THE SPLIT IS THE POINT OF THE PROMOTE. TOKENIZER_PATH had two jobs "
             "-- 'the file a resume READS its parent's vocabulary from, and the file the run SAVES its own "
-            "to' -- and conflating them made a run overwrite its parent's vocabulary; ckpt/levers.py:84-97 "
+            "to' -- and conflating them made a run overwrite its parent's vocabulary; ckpt/levers.py::<module> "
             "says plainly that a single d_vocab_path would re-conflate what the promote exists to "
             "separate. The read path is the parent's SAVE target under the same rule, which is the repair "
             "the sibling-guess heuristic at self_organize.py:1215-1222 never made: on the supported "
@@ -890,8 +890,8 @@ COUPLINGS = [
             "`b = bs[:s.maxb]`. With MAX_TOK above 16 two distinct long tokens sharing their first 16 "
             "bytes get IDENTICAL composites and identical starting vectors, silently -- the property the "
             "composer exists to provide, inverted, with no error (ISSUES M21). The defaults agreeing "
-            "today is luck, not design, and luck is what a wire replaces: lm/levers.py:165 already names "
-            "d_max_token_bytes as the incoming value it expects and tok/levers.py:337 records the same "
+            "today is luck, not design, and luck is what a wire replaces: lm/levers.py::<module> already names "
+            "d_max_token_bytes as the incoming value it expects and tok/levers.py::TOKLevers records the same "
             "coupling as missing from this table. Wired rather than passed as an argument because the "
             "composition root would otherwise be free to hand LM a different number than the tokenizer "
             "mints against, and affects() would not see it."),
@@ -906,7 +906,7 @@ COUPLINGS = [
         why="The valve lifts a SOFT cap toward a HARD one, and the hard one is the preallocated expert "
             "slot pool: A, B and cent are allocated to FAB.slots rows and growth only advances n_live, "
             "so a soft cap above the pool is a cap that can never be reached and a lift past it is "
-            "arithmetic on capacity that does not exist. capacity/levers.py:119 names this exact field "
+            "arithmetic on capacity that does not exist. capacity/levers.py::<module> names this exact field "
             "as what CAP_FAB_START's 0 sentinel resolves to and :123 records that it is absent from this "
             "table. The sentinel is why it must be a wire and not a literal: `fab_start = 0` means START "
             "AT THE HARD CEILING, and lever.py refuses a default computed from another lever, so 0 has "
@@ -923,7 +923,7 @@ COUPLINGS = [
             "vocabulary cap above emb.weight's row count reserves ids the model has no row for, which is "
             "the failure C31 records from the other end -- `grew 2048 -> 2048 (+0)` on the first "
             "continual-learning run, a second language spelled entirely with the first one's merges. "
-            "capacity/levers.py:120 and :244 both name d_vocab_slots as the wire this package expects "
+            "capacity/levers.py::<module> and :244 both name d_vocab_slots as the wire this package expects "
             "and state that TOK holds no ceiling of its own to give.",),
     Coupling(
         src="LM.mask_dead_rows",
@@ -935,7 +935,7 @@ COUPLINGS = [
             "the vocabulary cap reserves rows; a reserved row nobody has minted sits in the softmax "
             "denominator at its initialisation for the whole run unless the dead-row mask is on, so at "
             "8192 reserved against 2048 minted the run measures 6144 dead rows rather than the mechanism "
-            "(capacity/levers.py:262, and the measurement at self_organize.py:3971-3979: 86.7% dead "
+            "(capacity/levers.py::CAPLevers, and the measurement at self_organize.py:3971-3979: 86.7% dead "
             "width scored 4.746 unmasked against 6.100 masked at the loss only). CAP does not get to "
             "decide this -- it is the model's output layer -- so it arrives as a wire and the valve "
             "reports the vocabulary arm as dishonest rather than silently lifting into unmasked rows. "
@@ -950,7 +950,7 @@ COUPLINGS = [
         why="THE RELATION THAT WAS RECORDED AS RELOCATED AND NEVER LANDED (ISSUES H53). The old "
             "declaration was `_i(\"ENC_EVERY_IDLE\", max(ENC_EVERY * 6, 12))` -- a default read from "
             "another lever, which spine/lever.py refuses by construction. The census's repair was not "
-            "to delete the relation but to MOVE it, and sig/levers.py:402-410 says so in as many "
+            "to delete the relation but to MOVE it, and sig/levers.py::SIGLevers says so in as many "
             "words: 'the census proposes SIG.d_idle_cadence = max(train_every*6, train_every_idle) "
             "declared in spine/assemble.py, so the relation prints in the coupling graph instead of "
             "hiding inside a default' -- and then, in its own words, 'it is simply not declared "
@@ -995,7 +995,7 @@ COUPLINGS = [
             "at it and the domain manager smooths per-domain competence at it, and two rates would make "
             "'this domain is better than the population' a comparison between two differently smoothed "
             "series. FAB owns the number because the fabric's cull and spare rules are where it was "
-            "first needed (fabric/levers.py:693 says so and names both this field and d_comp_protect as "
+            "first needed (fabric/levers.py::FABLevers.manage_every says so and names both this field and d_comp_protect as "
             "what DOM receives). The old tree had DOM reach for FAB's value directly -- "
             "self_organize.py:6720 reads the population baseline off the fabric object -- which is a "
             "coupling with no wire and nothing in affects(). Reducible: domains could legitimately "
@@ -1014,7 +1014,7 @@ COUPLINGS = [
             "deleted 200,000 memory entries under a phased schedule, which is catastrophic forgetting "
             "performed by the manager rather than suffered by the model. Wired rather than passed so "
             "that a run cannot have the brake on for experts and off for domains without anybody saying "
-            "so; fabric/levers.py:693 names this field as the receiving spelling.",),
+            "so; fabric/levers.py::FABLevers.manage_every names this field as the receiving spelling.",),
 
     # --- the optimizer's two rate endpoints -> the fabric's per-expert envelope ---------------------
     Coupling(
@@ -1030,8 +1030,8 @@ COUPLINGS = [
             "spellable at all: `_lrv` is assigned only inside `if LR_SCHED != \'none\'` at :7093-7094 and "
             "read unconditionally by the per-expert block at :7195, so LR_SCHED=none with FAB_LR_OWN=1 "
             "dies with a NameError on the first flush. THE NAME IS d_base_lr AND NOT d_lr_peak because "
-            "the RECEIVING package already declares that spelling (fabric/levers.py:756) and the "
-            "receiver's `grep d_` is the one that has to find the field; opt/levers.py:186 records both "
+            "the RECEIVING package already declares that spelling (fabric/levers.py::FABLevers) and the "
+            "receiver's `grep d_` is the one that has to find the field; opt/levers.py::<module> records both "
             "spellings as an open choice, and this row settles it. The PEAK is a frozen lever and "
             "belongs here; the LIVE rate the ratio clamp compares against is a different number and "
             "stays a call argument, which is the distinction the two independent specs of this mechanism "
@@ -1045,7 +1045,7 @@ COUPLINGS = [
         why="The other endpoint of the same envelope, needed in the same block: :7251 is "
             "`_lo = LR * LR_MIN_FRAC`, so the floor the per-expert rate anneals toward is the "
             "optimizer's floor fraction and shipping one endpoint without the other leaves the fabric "
-            "with half a rate. It is the schedule's floor and OPT owns it -- opt/levers.py:187 names "
+            "with half a rate. It is the schedule's floor and OPT owns it -- opt/levers.py::<module> names "
             "d_lr_min_frac as the outgoing half -- and the floor exists for a goal-B reason that makes a "
             "second copy actively harmful: a schedule that anneals to nothing cannot learn anything that "
             "ARRIVES LATE, and the add-an-area entry point is the late-arrival case. Two packages "
@@ -1081,7 +1081,7 @@ COUPLINGS = [
             "taken at a batch size other than the one it is filed under. OWNER CORRECTED HERE: it was "
             "declared as TRAIN.d_effective_batch_windows reading TRAIN.batch_w and TRAIN.accum, and there "
             "is no TRAIN package -- the loop is RUN and both levers are OPT's (BATCH_W -> "
-            "OPT_BATCH_WINDOWS, ACCUM -> OPT_ACCUM), which opt/levers.py:133-147 states as the repair. It "
+            "OPT_BATCH_WINDOWS, ACCUM -> OPT_ACCUM), which opt/levers.py::<module> states as the repair. It "
             "is still LOCAL: one owner, no edge, no budget."),
     Coupling(
         src="LM.ctx",
@@ -1100,7 +1100,7 @@ COUPLINGS = [
             "LOCAL AND SINGLE-SOURCE, which is unusual and deliberate: the census's reason says the value "
             "'arrives d_-prefixed from DATA's window lever', but no row in the census gives DATA a width "
             "-- WIN became LM_CTX (CENSUS.md:344) -- so both ends are LM's and there is no edge to book "
-            "(lm/levers.py:143-152 reaches the same conclusion). What the row buys is not arithmetic but "
+            "(lm/levers.py::<module> reaches the same conclusion). What the row buys is not arithmetic but "
             "the refusal of a second literal: `grep -rn d_ src/` finds the height, and lever.py will not "
             "let anyone declare a lever that shadows it."),
 ]

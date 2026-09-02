@@ -53,7 +53,7 @@ Not emitted, by verdict: 1 merge, 0 drop, 0 promote-to-wire.
                   branched on PHASED alone (:8099, :8133, :9809), and the whole-process UNLEARN test ran
                   OUTSIDE the `if PHASED:` guard holding the other two edit tests, so it could delete
                   what _edit_test had already deleted and print "LOCAL" from an edit that removed
-                  nothing (ISSUES:525). See DEFECT 3 for the one thing the merge still requires.
+                  nothing (ISSUES M65). See DEFECT 3 for the one thing the merge still requires.
 
 --------------------------------------------------------------------------------------------------
 THE THREE CENSUS DEFECTS, CHECKED HERE
@@ -97,7 +97,7 @@ THE THREE CENSUS DEFECTS, CHECKED HERE
        byte/token confusion this family keeps producing, and it is why `stream_bytes` carries the unit
        in its NAME as well as its metadata. It cannot be typed away: U.BYTES and U.TOKENS are metadata
        labels, not runtime types, and only Clocks are enforced.
-     * ASSEMBLE ALREADY NAMES A QUANTITY THIS PACKAGE DOES NOT OWN. spine/assemble.py:789 records a
+     * ASSEMBLE ALREADY NAMES A QUANTITY THIS PACKAGE DOES NOT OWN. spine/assemble.py::COUPLINGS records a
        rejected wire as "SIG.d_signature_width_bytes from DATA.win x the measured bytes/token", i.e. it
        calls the loop window DATA.win. The census gives WIN to LM (WIN -> LM.LM_CTX, 128, TOKENS), and
        this file declares no window lever. The rejection itself still stands on its own reasoning and is
@@ -111,7 +111,7 @@ THE THREE CENSUS DEFECTS, CHECKED HERE
    WHAT THE MERGE STILL REQUIRES OF THE READER, because a merge that the resolver cannot express is a
    dropped mechanism wearing a merge's clothes: PHASED=0 was the STATIONARY stream, every area present
    throughout, and the generator CANNOT produce it. `derive.phase_schedule` reproduces the shipped rule
-   including `if w >= n_areas: w = n_areas - 1` (derive.py:524-525, self_organize.py:1346) -- never
+   including `if w >= n_areas: w = n_areas - 1` (derive.py::pin_tick, self_organize.py:1346) -- never
    all-active, deliberately, because `faded` is read off the last phase and an all-active last phase
    makes the unlearn test skip itself as vacuous. So the stationary arm exists only as an EXPLICIT
    schedule, "0,1,2,3" at four areas: one phase, everyone live. The port must accept that string, and
@@ -127,8 +127,11 @@ lever.py refuses a d_-named lever precisely so a declaration cannot shadow the w
 
 ONE VALUE LEAVES, AND IT IS NOT DECLARED HERE EITHER -- NOR IS IT A WIRE. The census's val_cap row asks
 for the RESOLVED held-out size to reach EVAL "as a wire so the Sample can state how many bytes it
-actually covered". THAT WIRE DOES NOT EXIST AND MUST NOT: docs/04_CONTRACT.md:74 lists
-EVAL.d_holdout_bytes among the REFUSED wires, because the size depends on how many bytes are on disk,
+actually covered". THAT WIRE DOES NOT EXIST AND MUST NOT: docs/04_CONTRACT.md section 0's
+"Candidates examined and refused as wires" table lists EVAL.d_holdout_bytes among the REFUSED wires
+-- cited by SECTION and not by line, because the contract grew 1908 lines on 2026-09-02 and the
+line number this comment used to give (:74) now lands twelve lines above the table -- because the
+size depends on how many bytes are on disk,
 so build() would have to stat the corpus -- IO inside the ownership spine and a non-reproducible
 startup -- and wiring val_cap instead would print the CEILING as the size. It is the same refusal that
 holds for bytes_per_token and the SIG width. The resolved size travels as an ARGUMENT and is recorded
@@ -167,7 +170,7 @@ derivation would appear in the coupling graph as an edge from DATA to DATA). It 
 resolver, computed once and printed, and `n_processes` below must never be written to.
 """
 # ABSOLUTE, NOT `from ..spine.lever import ...`. Every entry point in this tree puts `src` ITSELF on
-# sys.path -- tests/test_derive.py:33, tests/test_ownership.py's SRC insert, and this file's own
+# sys.path -- tests/test_derive.py::<module>, tests/test_ownership.py's SRC insert, and this file's own
 # verification command -- which makes `data` a TOP-LEVEL package, and a relative import one level above
 # a top-level package raises "attempted relative import beyond top-level package" at import time. All
 # six sibling packages (domains, eval, fabric, memory, sig, tok) spell it exactly this way; two packages
@@ -205,14 +208,16 @@ class DATALevers(LeverSet):
     # choices= IS THE REPAIR, NOT DECORATION. This is knob number one of the eleven ISSUES M24 records
     # where an unrecognised string falls into whichever branch is the `else` -- "DATA_MODE, SIG_MODE,
     # MODEL, VERIFY, KEY_SRC, LR_SCHED, SIG_SPACE, WARMSTART_MODE, TOK_PROBATION_BY, CHAIN_ROUTE,
-    # CULL_MODE and EVICT are all compared case-sensitively" (ISSUES:2093, :360). The comparison is
+    # CULL_MODE and EVICT are all compared case-sensitively" (ISSUES M24, and the [so-config/facts]
+    # entry beginning "AMP is the only string knob in the region that is case-normalised").
+    # The comparison is
     # `if DATA_MODE == "real"` at :1102/:1120, so DATA_MODE=Real takes the SYNTHETIC branch silently and
     # then dies at :1104 with a message that reads as if the operator had asked for synthetic. With
     # choices, DATA_SOURCE=Real is a startup refusal naming the two legal values. Case is NOT normalised
     # here: AMP is the only knob in the tree that lowercases, and refusing is honest where silently
     # accepting two spellings is a second name for one arm.
     # THE DEFAULT IS THE CENSUS'S LITERAL AND IT IS KNOWN-BROKEN IN COMBINATION. Shipped default
-    # synthetic + TOKENIZER=1 exits at startup (ISSUES:345), and the synthetic path itself crashed on a
+    # synthetic + TOKENIZER=1 exits at startup (ISSUES M20), and the synthetic path itself crashed on a
     # bare NameError for twelve days -- VALC/CORP/DN/SEG_LEN/DISK_STREAM only exist under the real
     # branch -- with preflight.sh's END-TO-END SMOKE the only caller that ever exercised it (C33, H9).
     # The default is not changed here because the fix is TOK's (its row merges TOKENIZER into TOK_MODE
@@ -246,7 +251,7 @@ class DATALevers(LeverSet):
     # both: an absolute entry or one containing ".." is refused (otherwise this is an arbitrary-path
     # read), and two entries whose BASENAMES collide are refused with both source paths printed --
     # because the label is what per-area scores, the holdout rng key and ACROSS THE RUN BOUNDARY look
-    # up by name, and one label over two corpora is ISSUES:1421 from the other side.
+    # up by name, and one label over two corpora is ISSUES C19 from the other side.
     # Census: DOMAINS -> DATA_AREAS. RENAMED FOR A GLOSSARY COLLISION THAT IS ALREADY PRODUCING WRONG
     # NUMBERS (G12). "Domain" in the DOM package is a self-assembled partition cell; this knob is a list
     # of corpus DIRECTORIES. Two meanings, one word, and the old _DERIVED table even wired SEG_CONTIG's
@@ -259,7 +264,7 @@ class DATALevers(LeverSet):
     # with an undersized eng: VALC[0] is the PYTHON corpus and the report calls it 'eng'. Because ACROSS
     # THE RUN BOUNDARY looks the previous run's probe up BY NAME, the next run then compares this run's
     # Python against last run's English and reports the difference AS FORGETTING -- the one number goal B
-    # rests on, computed across two languages (ISSUES:1421). The trigger is an undersized corpus: a
+    # rests on, computed across two languages (ISSUES C19). The trigger is an undersized corpus: a
     # partial fetch, an interrupted download, a gated dataset that wrote nothing -- i.e. the single most
     # likely thing to go wrong on the very run that adds a second area.
     # AND THE CHECKPOINT USED TO RECORD `_env('DOMAINS','')`, so any run that did not set it stored an
@@ -394,7 +399,7 @@ class DATALevers(LeverSet):
     # truncates and overshoots -- `per = STREAM_LEN // len(PHASE_SCHED)` at :1402 plus a whole 700-1800
     # byte segment past each bound -- so PH_BOUNDS drift and the stream comes out short (ISSUES L22);
     # (2) the `[a for a in act if a < NP] or list(range(NP))` fallback at :1404 is unreachable dead code
-    # (ISSUES:812), and the parser at :1358-1361 is what makes it unreachable, so the port must not
+    # (ISSUES L18), and the parser at :1358-1361 is what makes it unreachable, so the port must not
     # reintroduce it as a safety net that quietly re-enables every area in a phase.
     # THE STATIONARY ARM IS EXPRESSIBLE ONLY EXPLICITLY -- see DEFECT 3 in the module header.
 
@@ -408,7 +413,7 @@ class DATALevers(LeverSet):
     # reads DOMAINS (ISSUES L2). The generator itself replaced a per-n lookup table for the stated reason
     # that a rule applies the same shape at any n (:1332-1336).
     # THE FLOOR OF TWO IS A PORT REQUIREMENT THIS DECLARATION CANNOT ENFORCE. The shipped resolution is
-    # `p = p or max(2, _i("PHASES", 4))` (:1343) and spine/derive.py:506-508 says in as many words that
+    # `p = p or max(2, _i("PHASES", 4))` (:1343) and spine/derive.py::pin_tick says in as many words that
     # the floor "belongs on the lever declaration" -- but `choices=` enumerates a closed set and cannot
     # express "any integer >= 2", and lever.py has no bounds parameter. So the guard lives at the read
     # site, and the reason it must exist is concrete: one phase cannot have anything fade, and `faded` is
@@ -431,11 +436,11 @@ class DATALevers(LeverSet):
     # 0 IS A SENTINEL, NOT A VALUE, and it is the literal that keeps the derivation where it belongs.
     # THE LITERAL THE RUN ACTUALLY USED WAS 2 -- (4 + 1) // 2 at the default four areas -- but declaring
     # 2 here would FREEZE the width at 2 for every area count and reproduce M18 from the other side:
-    # add a fifth area and the schedule shape stops following it, silently. spine/derive.py:522 resolves
+    # add a fifth area and the schedule shape stops following it, silently. spine/derive.py::pin_tick.held resolves
     # `width or max(1, min(n_areas, (n_areas + 1) // 2))`, so a falsy value routes to the derivation the
     # spine already owns and replays against the oracle. Any positive value overrides it -- and note that
     # a caller-supplied width is NOT clamped to n_areas by that first expression, only by the
-    # `>= n_areas` line below it (derive.py:522-525), which reproduces the shipped behaviour exactly.
+    # `>= n_areas` line below it (derive.py::pin_tick.held), which reproduces the shipped behaviour exactly.
     # UNIT: this counts AREAS. units.py has no AREAS constant and U.DOMAINS means DOM's partition cells,
     # which is the collision `areas` was renamed to avoid, so it carries U.COUNT and says so here.
     # Adding an AREAS label is a spine edit, not a data edit.
@@ -472,12 +477,15 @@ class DATALevers(LeverSet):
     # DISK_STREAM branch only -- so on the disk path the held-out set is the tail truncated to 4 MB while
     # on the RAM path it is the ENTIRE holdout_frac tail (:1170). ISSUES M82, stated exactly: "every
     # held-out number is computed over a different amount of text depending on a knob that is nominally
-    # about where bytes live" (M81 and M83 are the same root, ISSUES:593). The memorization check, the
+    # about where bytes live" (M81 and M83 are the same root; the quoted sentence is M82's). The
+    # memorization check, the
     # anchors and ACROSS THE RUN BOUNDARY were therefore computed over different amounts of text in two
     # configurations that differ in paging, and nothing in either report said which.
     # WHAT LEAVES THIS PACKAGE IS THE RESOLVED SIZE, NOT THE CAP -- AND NOT AS A WIRE. The census asks for
     # the held-out byte count to reach EVAL as a wire so the Sample can state how many bytes it actually
-    # covered. docs/04_CONTRACT.md:74 REFUSES that wire (EVAL.d_holdout_bytes) and gives the reason: the
+    # covered. docs/04_CONTRACT.md section 0's refused-wires table REFUSES that wire
+    # (EVAL.d_holdout_bytes) and gives the reason -- cited by section, not by line, for the reason the
+    # header gives at the same claim: the
     # size depends on bytes on disk, so build() would have to stat the corpus, and wiring this ceiling
     # instead would print the cap as the size. It travels as an argument and is recorded on the Sample.
     # This comment claimed the wire was declared in spine.assemble; grep finds no such coupling, and the
@@ -502,7 +510,7 @@ class DATALevers(LeverSet):
     # of Python draws 2.00 MB/epoch from each -- under the cap, quiet, fine -- while over EPOCHS=8 that
     # is 16 MB drawn from 7.6 MB of Python against 16 MB drawn from 57 MB of English. The added area is
     # seen 2.1x over while the original is 28% sampled, and "adding py cost eng X bits/byte" is then
-    # confounded with "py was memorised and eng was skimmed" (ISSUES:1620, :5490-5496).
+    # confounded with "py was memorised and eng was skimmed" (ISSUES H22, self_organize.py:5490-5496).
 
     exposure_skew = Lever(3.0, "Max/min exposure ratio across areas above which the data plan is "
                                "flagged as imbalanced.", U.COUNT)

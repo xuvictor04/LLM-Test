@@ -59,7 +59,7 @@ THE THREE CENSUS DEFECTS REPAIRED HERE
        steps at BATCH_W=16. The census row describes that defect in its own reason and then files the
        unit as Steps anyway; it is declared Windows here.
      * CONFLICT, NOT RESOLVED: `manage_every`. See its declaration -- the census says Windows,
-       spine/assemble.py:686 wraps the same field in `Steps(...)`, and both cannot be true.
+       spine/assemble.py::_owner_blocks wraps the same field in `Steps(...)`, and both cannot be true.
 
 3. UNRESOLVED MERGES -- 2 rows emitted that the census intended to fold away.
    A merge is only a merge if the surviving lever exists. Two FAB rows name a target that no row in
@@ -109,7 +109,7 @@ COULD exceed 1 is a judgement call and this file is not the place to relitigate 
 MULTIPLIER constant and adding one is a spine edit, not a fabric edit.
 """
 # ABSOLUTE, NOT `from ..spine.lever import ...`. The tree is imported with `src` itself on
-# sys.path -- tests/test_derive.py:33 does it, and so does the verification command for this
+# sys.path -- tests/test_derive.py::<module> does it, and so does the verification command for this
 # file -- which makes `fabric` a TOP-LEVEL package, and a relative import one level above a
 # top-level package is an ImportError ("attempted relative import beyond top-level package"),
 # not a fallback. The sibling package src/memory/levers.py imports the spine the same way, and
@@ -668,9 +668,12 @@ class FABLevers(LeverSet):
     # recorded here because this lever's own citation is the thing that would invite it back.
     # :6570 is `fabgrow.note_shift(step)` under the comment "same entry point a regression uses:
     # makes growth eligible now", and it does the OPPOSITE. note_shift sets `blackout = t` (:2948),
-    # and blackout's only two readers are :3004 (`if unexpected and t - s.blackout >= s.cool`) and
-    # :3012 (`if t - s.last < s.cool or t - s.blackout < s.cool: return 0`), both of which SUPPRESS
-    # growth for `cooldown` windows. So MEM_PRESSURE_ACT=1 printed "growth made eligible at step N"
+    # and every reader of `blackout` SUPPRESSES rather than enables: :3004 (`if unexpected and
+    # t - s.blackout >= s.cool`) and :3012 (`if t - s.last < s.cool or t - s.blackout < s.cool:
+    # return 0`) inside PlateauGrowth.step, and -- the one this comment called "only two" until
+    # 2026-09-03 -- :7397 at the LOOP CALL SITE, `_blackout = (step - fabgrow.blackout) <
+    # fabgrow.cool`, which gates the capacity valve and arrives in this rebuild as CAP.observe's
+    # `blackout` boolean. Three readers, one direction. So MEM_PRESSURE_ACT=1 printed "growth made eligible at step N"
     # while BLOCKING growth for the next 400 windows. In the rebuild the signal arrives as
     # grow_check's own `memory_pressure` argument and this lever gates on it there, which is why the
     # defect does not carry -- but a P4 author following the :6569-6571 citation would rebuild it.
@@ -693,9 +696,9 @@ class FABLevers(LeverSet):
     # field's kind and both are already written:
     #   * THIS CENSUS ROW says Windows, and gives the mechanism: it is compared against `step`
     #     (:6716, :6764, :6836, :6961, :6988, :7077, :7321) and `step` advances once per WINDOW.
-    #   * spine/assemble.py:686 computes FAB.d_manage_period as
+    #   * spine/assemble.py::_owner_blocks computes FAB.d_manage_period as
     #     derive.flush_period(Steps(r["FAB"].manage_every), r["TRAIN"].batch_w), and
-    #     derive.flush_period REFUSES anything that is not exactly Steps (derive.py:223). Its stated
+    #     derive.flush_period REFUSES anything that is not exactly Steps (derive.py::flush_period). Its stated
     #     reason -- "MANAGE_EVERY is written in STEPS" -- is the opposite claim about the same field.
     # Declared Windows here, because the reading that can be checked against the source wins over the
     # one that cannot: the divisor is `step`, and units.py is explicit that `step` counts windows.

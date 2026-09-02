@@ -94,7 +94,7 @@ def build_model(lm: Config, geom, *, device, seed):
     dropout, the inter-layer dropout at depth > 1, and the READOUT dropout, applied inside decode()
     before the head. Arithmetically that is the old `head(drop(h))` exactly -- nothing about the
     LM's own regularisation changes -- and it makes the key path train/eval consistent
-    STRUCTURALLY rather than by convention, so ISSUES.md:441 (holdout_bpb's finally block returning
+    STRUCTURALLY rather than by convention, so ISSUES.md PART 1, M44 (holdout_bpb's finally block returning
     the model to TRAIN unconditionally) can no longer corrupt the store: the key path has no
     dropout left to leave switched on. On the transformer arm dropout is passed to
     nn.TransformerEncoderLayer(dropout=...), which the old tree HARDCODED to 0.0 at :1567, so

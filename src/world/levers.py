@@ -78,7 +78,7 @@ THE THREE CENSUS DEFECTS, AS THEY LAND HERE
      (self_organize.py:6768). That test is `step % MANAGE_EVERY == 0` and it sits ABOVE the batch
      early-out at :6795-6796 (`if len(_bx) < BATCH_W: i += WIN; step += 1; continue`), so it is evaluated
      on EVERY window and `step` advances once per WINDOW -- the cadence is WINDOWS on this path, which is
-     what CENSUS.md:218 says the unit is. spine/assemble.py:686 wraps the same field as
+     what CENSUS.md:218 says the unit is. spine/assemble.py::_owner_blocks wraps the same field as
      `derive.flush_period(Steps(r["FAB"].manage_every), r["TRAIN"].batch_w)` and publishes it as
      FAB.d_manage_period in FLUSHES, whose `why` states the block "sits below the batch early-out". Both
      are true of DIFFERENT call sites: the sites below the early-out (:6961, :6988, :7077, :7325) gate on
@@ -150,7 +150,7 @@ imports os at L74 and never uses it. All gating lives in self_organize.py. Under
 this package, and `from_env` is the only reader of the environment anywhere.
 """
 # ABSOLUTE, NOT `from ..spine.lever import ...`. The tree is imported with `src` itself on sys.path --
-# tests/test_derive.py:33 does it, and so does this file's own verification command -- which makes
+# tests/test_derive.py::<module> does it, and so does this file's own verification command -- which makes
 # `world` a TOP-LEVEL package, and a relative import one level above a top-level package is an
 # ImportError ("attempted relative import beyond top-level package"), not a fallback. All eight sibling
 # packages (fabric, lm, memory, sig, domains, eval, tok, data) spell it exactly this way; two packages
@@ -364,7 +364,7 @@ class WORLDLevers(LeverSet):
     # THE CADENCE THIS FIRES ON IS NOT THIS PACKAGE'S AND ITS UNIT IS DISPUTED -- census defect 2, left
     # standing rather than silently resolved. The trigger is `step % MANAGE_EVERY == 0` at :6768, which
     # sits ABOVE the batch early-out at :6795-6796, so it is tested on every window and `step` advances
-    # per WINDOW: on THIS path the cadence is Windows, as CENSUS.md:218 says. spine/assemble.py:686
+    # per WINDOW: on THIS path the cadence is Windows, as CENSUS.md:218 says. spine/assemble.py::_owner_blocks
     # publishes the same FAB field as FAB.d_manage_period in FLUSHES, via
     # `derive.flush_period(Steps(r["FAB"].manage_every), r["TRAIN"].batch_w)`, and its `why` says the
     # management block sits BELOW the early-out -- true of :6961/:6988/:7077/:7325, which gate on

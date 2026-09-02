@@ -16,7 +16,7 @@ either boundary, which is how the Windows/Flushes clash is removed rather than c
 THE CLOCK REPAIR THIS CONTRACT ADOPTS. derive.pin_tick is re-typed to accumulate units.Windows and
 the threshold stays cap.pin_windows (Windows); NO CONVERSION HAPPENS ANYWHERE. The delta the clock
 accumulates is `step - _pin_prev` (:7368), a WINDOW delta, so Windows is the kind the arithmetic
-already has. capacity/levers.py:88-108 sets out two legal repairs and records that applying BOTH
+already has. capacity/levers.py::<module> sets out two legal repairs and records that applying BOTH
 fires the valve 16x TOO EARLY -- the second repair is dividing the threshold by batch_w, which is
 exactly what the FAB.d_cap_lift_period and TOK.d_cap_lift_period ledger rows do. Those rows
 survive in this contract as REPORTING wires only (see FOR THE OWNER Q-CLOCK-1); the valve does not
@@ -50,7 +50,7 @@ def new_valve(cap: Config, *, restored=None):
     LM.vocab_slots). Both starting caps are SENTINELS -- `fab_start == 0` means "start at the hard
     ceiling, i.e. no room to earn" -- and a default computed from another lever is what lever.py
     refuses by construction, so the literal stays 0 and the fallback is the wire. Until this
-    contract added those two rows neither existed in COUPLINGS (capacity/levers.py:123 says so),
+    contract added those two rows neither existed in COUPLINGS (capacity/levers.py::<module> says so),
     which means the sentinel stood for a number nothing supplied.
 
     `targets == "off"` MUST ALSO MEAN THE STARTING CAPS ARE NOT APPLIED, and this is the note the

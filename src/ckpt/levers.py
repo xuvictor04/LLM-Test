@@ -84,7 +84,7 @@ refuses a d_-named lever precisely so a declaration cannot shadow the wire that 
     d_vocab_path        OUTGOING, and this package's own. Census promote-to-wire: TOKENIZER_PATH was
                         never a lever, it is the checkpoint's own artifact path. Computed from `dir` and
                         `resume`, both declared here. NOT IN THE LEDGER TODAY -- assemble.COUPLINGS has no
-                        row for it, and tok/levers.py:125 already lists it as a value TOK expects to
+                        row for it, and tok/levers.py::<module> already lists it as a value TOK expects to
                         receive and does not declare.
                         ONE WIRE IS PROBABLY NOT ENOUGH, AND THIS IS THE PLACE TO SAY SO BEFORE IT IS
                         WRITTEN. The census's own reason for the promote is that TOKENIZER_PATH had TWO
@@ -96,12 +96,12 @@ refuses a d_-named lever precisely so a declaration cannot shadow the wire that 
                         promote exists to separate; two fields (the read source and the save target) is
                         the shape that keeps the fix.
     d_curve_bpb         INCOMING from EVAL: the held-out bits/byte of the latest curve probe, which is
-                        what `best_keep_tol` compares against. eval/levers.py:124 declares the other end
+                        what `best_keep_tol` compares against. eval/levers.py::<module> declares the other end
                         ("outgoing d_curve_bpb to CKPT"). Also NOT IN THE LEDGER TODAY.
     the geometry gates  INCOMING from LM, FAB and WORLD: LM.vocab_slots, FAB.dk, FAB.slots and the
                         population caps. A checkpoint built at one softmax width or one dk cannot load
                         into a model built at another, and the run already refuses it (:4442-4468 for the
-                        vocabulary, :4451-4456 for dk); fabric/levers.py:453 says the refusal becomes
+                        vocabulary, :4451-4456 for dk); fabric/levers.py::FABLevers.ind_k says the refusal becomes
                         CKPT's, reading those as wires. None of them exist as couplings yet.
     the SIGUSR1 save    Not a knob at all: `kill -USR1 <pid>` sets a flag the loop drains beside the
                         periodic save (:7709). It has no lever, it needs none, and it is recorded here so
@@ -238,7 +238,7 @@ class CKPTLevers(LeverSet):
     #   IF THE PORT REALLY WANTS A FLUSH BUDGET -- and there is a case for it, since a flush is the unit
     #   of work the save interrupts -- the conversion must be a NAMED function in spine.derive, like
     #   derive.flush_period. There is no Windows->Flushes function there today (flush_period takes Steps
-    #   and refuses anything else, derive.py:200-234), so the conversion would have to be added with its
+    #   and refuses anything else, derive.py::flush_period), so the conversion would have to be added with its
     #   own oracle row. Doing it inline at the comparison is how pin_tick happened.
     #   THE BATCH WIDTH IT WOULD CONVERT THROUGH IS NOT THIS PACKAGE'S: census BATCH_W -> OPT
     #   (OPT_BATCH_WINDOWS, unit Windows, default 1), while spine/assemble.py spells the same value
@@ -270,7 +270,7 @@ class CKPTLevers(LeverSet):
     #       saving gets no warning that it has stayed elevated: the recorded case lost 4.6 bits/byte and
     #       then spent about 520,000 further steps -- roughly seven hours -- never getting back, with
     #       nothing said until the end-of-run report, which called it PLATEAUED. In the rebuild that alarm
-    #       is an EVAL Reading over the curve (spine/derive.py:437 blowup_stale already carries its rule:
+    #       is an EVAL Reading over the curve (spine/derive.py::pin_tick blowup_stale already carries its rule:
     #       what separates a blow-up from ordinary wander is not the size of the excursion but how long
     #       the run stays elevated without setting a new best), and the .best save is this retention
     #       policy. ISSUES L43 goes with the flag too: the block rescans the whole _CURVE list once per
@@ -309,7 +309,7 @@ class CKPTLevers(LeverSet):
     # of 0.043 bits/byte, not 0.02. FRACTION is the honest unit label for that; it is a fraction OF the
     # best, and it is not a bits/byte quantity even though everything it compares is.
     # THE NUMBER IT COMPARES AGAINST IS NOT THIS PACKAGE'S. The held-out b/B comes from the eval curve
-    # probe and must arrive as the declared wire d_curve_bpb -- eval/levers.py:124 already states the
+    # probe and must arrive as the declared wire d_curve_bpb -- eval/levers.py::<module> already states the
     # other end of it -- which is precisely the coupling the new tree is required to print rather than
     # hide. It is not in spine/assemble.py's COUPLINGS today, and until it is, this lever has a threshold
     # with nothing to compare.

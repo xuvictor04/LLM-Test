@@ -6,7 +6,7 @@ tf32, amp), and which half of the program executes (bench, profile). It serves G
 continual-learning claim is a claim about what survives a SECOND PASS, and in the old tree EPOCHS
 set the run length AND the cosine horizon (:6016-6028), so every retention number ever produced
 was confounded with an unrequested schedule change. It serves GOAL A because `seed` is the number
-every paired comparison turns on, and compare.py:251 records that it was absent from the _EFF
+every paired comparison turns on, and compare.py::main records that it was absent from the _EFF
 banner it pairs runs from.
 
 RUN DECLARES NO CADENCE AND NO THRESHOLD. The loop's cadences belong to the mechanisms they fire;

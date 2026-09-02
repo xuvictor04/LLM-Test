@@ -27,7 +27,7 @@ WHY THESE ARE THE LEVERS, against the two goals and nothing else.
     * `lr_shift_warm` is the schedule's half of `note_shift()`. Growth is already told "this jump is
       OURS, not the data's" for a retok and for an epoch resample; the LEARNING RATE meets the same fresh
       text at whatever the cosine says, which has been 96-99% of peak at the second boundary in every run
-      measured, and is what destroyed round13 (ISSUES.md:1580). An added area IS a self-inflicted
+      measured, and is what destroyed round13 (ISSUES.md PART 3, H12). An added area IS a self-inflicted
       distribution shift.
     * `weight_decay` is a forgetting term the OPTIMISER introduces, orthogonal to anything the fabric or
       the memory does: decoupled decay is applied every step to every parameter regardless of gradient,
@@ -78,7 +78,7 @@ because "nothing to fix here" is only useful if a reader can see that it was loo
 
   DEFECT 1 -- DOUBLED ENV NAMES. THIRTEEN of this package's fourteen rows name their target as
   PREFIX.PREFIX_FIELD -- `OPT.OPT_LR`, `OPT.OPT_LR_SCHED`, `OPT.OPT_BATCH_WINDOWS` and so on
-  (CENSUS.md:387-397, 401, 403). spine/lever.py:104-106 generates the environment name as
+  (CENSUS.md:387-397, 401, 403). spine/lever.py::Lever.env_name_for generates the environment name as
   PREFIX + "_" + FIELD.upper(), so `OPT.OPT_LR` taken literally declares a field `OPT_LR` answering to
   OPT_OPT_LR: a name no operator would ever type, that from_env() would never find, and that therefore
   leaves the lever pinned at its default forever while every static check reports it declared, owned and
@@ -111,8 +111,8 @@ because "nothing to fix here" is only useful if a reader can see that it was loo
 
     (b) `batch_windows` STAYS Windows AND `accum` STAYS Backwards, with the tension recorded. Both are
     per-something quantities -- windows per flush, backward passes per optimizer step -- and this tree
-    has twice declared that a ratio must NOT wear a clock kind (eval/levers.py:179 on `windows`,
-    sig/levers.py:296 on `positive_radius_windows`, both reasoning that typing a ratio as a clock invites
+    has twice declared that a ratio must NOT wear a clock kind (eval/levers.py::EVALLevers on `windows`,
+    sig/levers.py::SIGLevers on `positive_radius_windows`, both reasoning that typing a ratio as a clock invites
     the very comparison units.py exists to refuse). The census types them Windows and Backwards anyway,
     and they are left that way for a reason the source supports: `batch_windows` is the SIZE OF A FLUSH
     MEASURED IN WINDOWS and `accum` is the SIZE OF AN OPTIMIZER STEP MEASURED IN BACKWARD PASSES -- each
@@ -143,75 +143,131 @@ because "nothing to fix here" is only useful if a reader can see that it was loo
   step count that nothing holds fixed -- "LR_EPOCHS=8" has meant 48,000 steps at STREAM_LEN=4e6 and
   840,000 at 94e6, a 17x range under one number (:4718-4722).
 
-THREE CONFLICTS WITH THE SPINE, STATED RATHER THAN RESOLVED. Picking a side inside a declaration file is
-how a knob acquires two meanings, so all three are recorded and none is decided here.
+THREE CONFLICTS WITH THE SPINE, RECORDED WHEN THIS FILE WAS WRITTEN AND ALL THREE SETTLED SINCE, IN THE
+SPINE. Picking a side inside a declaration file is how a knob acquires two meanings, so none of the
+three was decided here -- and each was then decided in spine/assemble.py, which is where a wiring
+decision belongs. THE THREE ARE KEPT, EACH WITH ITS OUTCOME, because this file predicted the failure
+mode of leaving them alone: a conflict paragraph that has stopped being true "will read as 'not ported
+yet' long after it has become 'ported'". It then became exactly that, and stayed that way through the
+2026-09-02 apply commit, until 2026-09-03. Every "what is true now" below was read off the tree, not
+off a document.
 
-  (a) WHO OWNS THE BATCH. spine/assemble.py:684-762 reads `r["TRAIN"].batch_w` and `r["TRAIN"].accum` in
-  four couplings (FAB.d_manage_period, FAB.d_cap_lift_period, TOK.d_cap_lift_period, and the local
-  TRAIN.d_effective_batch_windows). The census says these two levers are OPT's -- BATCH_W -> rename
-  OPT_BATCH_WINDOWS (CENSUS.md:401), ACCUM -> keep OPT_ACCUM (CENSUS.md:387) -- and there is no package
-  TRAIN anywhere in the census at all: the loop package is RUN, with 9 levers (CENSUS.md:40). So the
-  disagreement is TWO-LAYERED. The PREFIX differs (TRAIN vs OPT), and so does the FIELD (`batch_w` vs the
-  renamed `batch_windows`), which means correcting only the prefix would still not resolve.
-  WHAT ACTUALLY HAPPENS TODAY, reproduced rather than predicted: build() does not fail on this. Any
-  coupling naming an unregistered package is DEFERRED with a warning (assemble.py:875-885), and TRAIN is
-  registered by nobody, so all four rows print "DEFERRED ... package(s) ['TRAIN'] not registered" and are
-  NOT MADE. Importing this package does not change that. The state to be alarmed by is exactly that: the
-  numbers those four couplings need now EXIST, under this prefix, and the edges still do not happen --
-  a declared-but-unmade wire is the untrippable-guard shape the DEFERRED warning was written to expose,
-  and it will read as "not ported yet" long after it has become "ported, and wired to a name nobody
-  owns". The repair is in assemble.py (retarget the four sources to OPT.batch_windows / OPT.accum, and
-  move d_effective_batch_windows onto OPT as a local coupling); it is not this file's, because a lever
-  file quietly editing the wiring file to agree with itself is how one number acquires two answers. What
-  this file will NOT do is declare `batch_w` as a second spelling to keep assemble quiet -- that would
-  put the flush size in two names at once, which is the failure the ownership spine exists to prevent.
+  (a) WHO OWNS THE BATCH -- SETTLED IN OPT'S FAVOUR. AS ASKED: spine/assemble.py read
+  `r["TRAIN"].batch_w` and `r["TRAIN"].accum` in four couplings (FAB.d_manage_period,
+  FAB.d_cap_lift_period, TOK.d_cap_lift_period, and the local TRAIN.d_effective_batch_windows). The
+  census says these two levers are OPT's -- BATCH_W -> rename OPT_BATCH_WINDOWS (CENSUS.md:401),
+  ACCUM -> keep OPT_ACCUM (CENSUS.md:387) -- and there is no package TRAIN anywhere in the census at
+  all: the loop package is RUN, which CENSUS.md:40 gives 9 ROWS (7 declarations survive them --
+  the same rows-vs-declarations gap this file's own accounting header explains for OPT's 14).
+  spine/assemble.py's header says "7 levers" for the same reason. The disagreement was TWO-LAYERED. The
+  PREFIX differed (TRAIN vs OPT) and so did the FIELD (`batch_w` vs the renamed `batch_windows`), so
+  correcting only the prefix would not have resolved it. And build() did not fail on any of it: a
+  coupling naming an unregistered package is DEFERRED with a warning, TRAIN was registered by nobody,
+  so all four rows printed "DEFERRED ... package(s) ['TRAIN'] not registered" and were NOT MADE. A
+  declared-but-unmade wire is the untrippable-guard shape that warning exists to expose.
+  WHAT IS TRUE NOW: the sources are retargeted and the edges are made. `FAB.d_manage_period`,
+  `FAB.d_cap_lift_period` and `TOK.d_cap_lift_period` compute from `r["OPT"].batch_windows`, and
+  `d_effective_batch_windows` is `OPT.d_effective_batch_windows` -- still LOCAL, now local to the
+  package the census gives it to, computed as `r["OPT"].batch_windows * r["OPT"].accum`. The string
+  `r["TRAIN"]` does not appear in assemble.py at all; that file's own header records the same three
+  renames (TRAIN.batch_w -> OPT.batch_windows, TRAIN.grow_cap_every -> CAP.pin_windows,
+  TRAIN.accum -> OPT.accum). The repair was made where it belonged and this file still did not make it.
+  What this file will NOT do, then or now, is declare `batch_w` as a second spelling to keep assemble
+  quiet: that would put the flush size in two names at once, which is the failure the ownership spine
+  exists to prevent.
 
-  (b) ONE WIRE, TWO NAMES, AND NOTHING IN THE LEDGER YET. The peak rate is read outside this package --
-  :7252 `_oa = _lo + (LR - _lo) * ...` builds the per-expert own-rate inside the fabric block, and
-  :6467/:6608/:7148 print "% of peak" -- so under L2 it must arrive at FAB as a d_ wire. The receiving
-  end already wrote its expectation down as `d_base_lr` (fabric/levers.py:756, and CENSUS.md:141 on
-  FAB_LR_MAXR), while THIS package's own census row asks for `d_lr_peak` (CENSUS.md:388). One value, two
-  spellings, neither in spine.assemble.COUPLINGS. O4 audits the d_ namespace in BOTH directions, so
-  whichever name is declared, the other side's comment becomes a dangling reference the moment the
-  coupling lands. Recorded here so that whoever writes it picks one on purpose. The same applies to
-  `d_lr_min_frac`, which :7251 `_lo = LR * LR_MIN_FRAC` needs in the same block.
+  (b) ONE WIRE, TWO NAMES -- SETTLED AS `d_base_lr`, AND IT IS IN THE LEDGER. AS ASKED: the peak rate is
+  read outside this package -- :7252 `_oa = _lo + (LR - _lo) * ...` builds the per-expert own-rate
+  inside the fabric block, and :6467/:6608/:7148 print "% of peak" -- so under L2 it must arrive at FAB
+  as a d_ wire. The receiving end had written its expectation as `d_base_lr` (fabric/levers.py::FABLevers, and
+  CENSUS.md:141 on FAB_LR_MAXR) while THIS package's census row asked for `d_lr_peak` (CENSUS.md:388):
+  one value, two spellings, and at that moment neither was in spine.assemble.COUPLINGS.
+  WHAT IS TRUE NOW: `FAB.d_base_lr` <- `OPT.lr` is a Coupling, and so is `FAB.d_lr_min_frac` <-
+  `OPT.lr_min_frac` for the `_lo = LR * LR_MIN_FRAC` half of the same block. THE RECEIVER'S SPELLING
+  WON, on the ground that the receiver's `grep d_` is the one that has to find it. `d_lr_peak` is a dead
+  spelling: the only four places it survives in src/ are this paragraph, the `lr` row below, the table
+  entry below that, and assemble.py's own row prose saying which name it is NOT.
+  O4 audits the d_ namespace in BOTH directions, which is what would have caught the other choice, and
+  it is why the losing spelling is named here rather than quietly dropped.
 
-  (c) THE HORIZON WIRE THAT WAS CORRECTLY REFUSED, noted because it is agreement and a reader should not
-  have to re-derive it. assemble.py's NOT_WIRES lists "TRAIN.epochs -> OPT.d_lr_horizon" and rejects it:
-  "it IS the defect ... OPT owns its horizon as a declared lever". `lr_wavelength` below is this
-  package's side of that rejection, and the two documents agree. What they do NOT settle is the sentinel:
-  `lr_wavelength = 0` still has to resolve to something, and the census says the run length arrives as
-  `d_run_steps` so the sentinel resolves in one visible place. That coupling does not exist yet either.
+  (c) THE HORIZON WIRE THAT WAS CORRECTLY REFUSED -- STILL REFUSED, AND THE SECOND HALF IS NOW REFUSED
+  TOO. assemble.py's NOT_WIRES rejects the epoch-to-horizon edge ("it IS the defect ... OPT owns its
+  horizon as a declared lever"); it is spelled `RUN.epochs -> OPT.d_lr_horizon` now, not
+  `TRAIN.epochs`. `lr_wavelength` below is this package's side of that rejection, and the two documents
+  agree. WHAT CHANGED IS THE SENTINEL, AND IT CHANGED INTO ITS OPPOSITE. This paragraph used to end
+  "the census says the run length arrives as `d_run_steps` so the sentinel resolves in one visible
+  place. That coupling does not exist yet either." IT NEVER WILL. NOT_WIRES gained a row on 2026-09-02
+  (Q-OPT-1) refusing "the run length in windows -> OPT.d_run_steps / OPT.d_total_steps", on a ground
+  DIFFERENT from the epochs one: the value does not EXIST at freeze, because it is
+  len(Segmentation.ids) // LM.ctx times RUN.epochs and Segmentation does not exist until TOK.tokenize
+  has run -- many assembly rows after every build() has returned, and a Config that can still be written
+  after startup is a Config the report cannot claim the run used. The run length reaches this package as
+  the `run_windows` ARGUMENT to OPT.build, and the named computation is spine/compose.py's
+  `_run_windows`. A candidate refused with a reason and a candidate that "does not exist yet" are
+  OPPOSITE instructions to the next author, which is why this correction is made in the file the next
+  author reads and not only in the contract.
 
 THE WIRES: values this package uses or supplies that it must NOT declare. Written down because `grep d_`
 is only complete in both directions if the receiving end says what it expects (O4 audits exactly this),
-and because lever.py:83-87 refuses a d_-named lever precisely so a declaration cannot shadow the wire
-that writes it.
+and because lever.py::Lever.__set_name__ refuses a d_-named lever precisely so a declaration cannot shadow the wire
+that writes it. THE THIRD COLUMN CARRIED THE BARE PHRASE "NOT IN THE LEDGER" ON THREE OF THESE AND IS
+NOW A VERDICT ON EACH, because a value that is not a wire because it is an ARGUMENT is a different fact
+from a wire nobody has written, and both were spelled the same way here.
     INCOMING
-      d_best_bpb        the best held-out bits/byte so far, from EVAL       (eval/levers.py:124 declares
+      d_best_bpb        the best held-out bits/byte so far, from EVAL       (eval/levers.py::<module> declares
                                                                             this outgoing; it is what
                                                                             `lr_restart_damp` judges a
-                                                                            cycle by. NOT IN THE LEDGER)
-      d_shift_at        the step of the last epoch resample, from DATA      (LR_SHIFT_WARM's row; the old
-                                                                            trigger reaches into DATA's
-                                                                            resample branch to write
-                                                                            `_shift_at`. NOT IN THE
-                                                                            LEDGER)
+                                                                            cycle by. NOT A WIRE AND
+                                                                            NOT MISSING: it arrives as
+                                                                            maybe_step's `best_bpb`
+                                                                            ARGUMENT -- a runtime
+                                                                            measurement can never be a
+                                                                            build-time coupling)
+      d_shift_at        the step of the last epoch resample, from DATA      (LR_SHIFT_WARM's row. NOT A
+                                                                            WIRE, same ground: the
+                                                                            composition root supplies
+                                                                            maybe_step's `shift_at`,
+                                                                            and FAB.grow_check takes
+                                                                            the same argument since
+                                                                            Q-FAB-6)
       d_run_steps       the run length in steps, for the 0 sentinel         (LR_STEPS's row; see (c).
-                                                                            NOT IN THE LEDGER)
+                                                                            REFUSED, with its own
+                                                                            NOT_WIRES row and its own
+                                                                            reason -- it arrives as
+                                                                            `run_windows`)
     OUTGOING
-      d_base_lr / d_lr_peak   the peak rate, to FAB and to the report       (see conflict (b))
-      d_lr_min_frac           the floor, to FAB's per-expert block          (LR_MIN_FRAC's row)
-      d_effective_batch_windows  batch_windows x accum                      (assemble.py:752-762 declares
-                                                                            it LOCAL to TRAIN; under the
-                                                                            census it is local to OPT)
-      the four flush cadences FAB/TOK/CAP derive through
-      derive.flush_period(Steps(period), batch_windows)                     (assemble.py:684-712)
-Five of those eight are not in spine/assemble.COUPLINGS today. That is not this file's to fix, but a
-missing wire nobody has written down becomes a direct reach the first time somebody needs the value --
-and one of these five, `d_best_bpb`, is a HELD-OUT MEASUREMENT crossing back into a training decision.
-PLAN 3.8 forbids a verdict on n=1 and a damped restart is a verdict, so the Reading that supplies it
-must carry its seed count.
+      d_base_lr               the peak rate, to FAB and to the report       (IN THE LEDGER; `d_lr_peak`
+                                                                            is the spelling that lost,
+                                                                            see (b))
+      d_lr_min_frac           the floor, to FAB's per-expert block          (IN THE LEDGER; LR_MIN_FRAC's
+                                                                            row)
+      d_effective_batch_windows  batch_windows x accum                      (IN THE LEDGER, and LOCAL to
+                                                                            OPT since the (a) repair)
+      the three flush cadences FAB and TOK derive from this package's
+      batch width through derive.flush_period_windows(Windows(period),
+      batch_windows)                                                       (IN THE LEDGER, all three:
+                                                                            FAB.d_manage_period,
+                                                                            FAB.d_cap_lift_period,
+                                                                            TOK.d_cap_lift_period)
+THIS LINE SAID "the FOUR flush cadences FAB/TOK/CAP derive through derive.flush_period(Steps(period),
+batch_windows)" AND WAS WRONG TWICE. There are THREE, and there have been three in every version of
+spine/assemble.py in this repository's history -- checked back to the commit that first wrote the
+table, where they sit at :338, :350 and :363. And CAP is not among the destinations at all: CAP is the
+SOURCE of the pin threshold (CAP.pin_windows feeds two of the three) and is never a destination, which
+is the same fact Q-CLOCK-1 states as "CAP's only outbound edges". The conversion is also no longer
+derive.flush_period(Steps(...), ...): the held clock is Windows since Q-DERIVE-1 repair (a), so it is
+derive.flush_period_windows, and pin_tick raises UnitError on a Steps or Flushes held value by name.
+
+SEVEN VALUES, SEVEN ANSWERS, and no unanswered case left: FOUR entries are in
+spine/assemble.COUPLINGS (d_base_lr, d_lr_min_frac, d_effective_batch_windows, and the flush-cadence
+line, which is three rows on its own -- SIX coupling rows behind four table entries, and the two
+numbers are different on purpose); TWO are ARGUMENTS, because a runtime measurement can never be a
+build-time wire; and ONE is REFUSED with its own NOT_WIRES row. The sentence this paragraph carried --
+"a missing wire nobody has written down becomes a direct reach the first time somebody needs the
+value" -- was the right warning, and none of the seven is that case any more. What survives of it is
+the constraint on `d_best_bpb`: it is a HELD-OUT MEASUREMENT crossing back into a training decision,
+PLAN 3.8 forbids a verdict on n=1, and a damped restart is a verdict -- so the Reading that supplies
+it must carry its seed count, which is why `best_bpb` is documented as a Reading and not as a float.
 
 WHAT THIS FILE CANNOT EXPRESS, AND WHERE THE OLD GUARDS WENT. Every one of these levers was read in the
 old tree through a clamp at the read site -- `max(0, _i("LR_SHIFT_WARM", 0))`, `max(1, _i("BATCH_W", 1))`,
@@ -219,7 +275,7 @@ old tree through a clamp at the read site -- `max(0, _i("LR_SHIFT_WARM", 0))`, `
 enumerates, it does not bound. Three of those clamps survive elsewhere and one does not, which is worth
 knowing before somebody sweeps a value:
     batch_windows = 0   REFUSED, loudly. derive.flush_period raises UnitError ("a flush covers at least
-                        one window", derive.py:228).
+                        one window", derive.py::flush_period).
     accum = 0           SILENTLY CLAMPED to 1 by derive.accum_due (`k = max(1, int(accum))`).
     lr_wavelength < 0   harmless only because the sentinel path treats anything falsy as "one wavelength
                         spans the run"; a negative is not falsy and has no meaning.
@@ -230,7 +286,7 @@ knowing before somebody sweeps a value:
                         standing there. Whoever writes the schedule owes a startup refusal, in one place.
 
 IMPORT STYLE, AND WHY IT DEPARTS FROM THE ASSIGNMENT'S SKETCH. `from ..spine.lever import ...` cannot
-work here: every entry point in this tree puts `src/` ITSELF on sys.path (tests/test_derive.py:33,
+work here: every entry point in this tree puts `src/` ITSELF on sys.path (tests/test_derive.py::<module>,
 tests/test_ownership.py's SRC insert, and this file's own verification command), which makes `opt` a
 TOP-LEVEL package -- a relative import then raises ImportError, "attempted relative import beyond
 top-level package". Absolute it is, matching the eight packages already written.
@@ -250,8 +306,8 @@ class OPTLevers(LeverSet):
     Grouped by the decision each group makes rather than alphabetically, and the grouping is load-bearing
     twice. `lr_sched` decides whether the whole of group 2 and group 3 runs at all (the entire LR block
     at :7093-7154 is inside `if LR_SCHED != "none"`), and `lr_restarts` decides whether `lr_restart_damp`
-    and `lr_decay` are reachable BY ARITHMETIC rather than by a flag -- ISSUES.md:2029 files that exact
-    pair as the canonical "off by arithmetic, not armed and inert" case. In the old tree those two facts
+    and `lr_decay` are reachable BY ARITHMETIC rather than by a flag -- ISSUES.md PART 4's [chat-b/carry_forward]
+    entry files that exact pair as the canonical "off by arithmetic, not armed and inert" case. In the old tree those two facts
     were spread across :4716, :6290 and :4777-4786 with nothing anywhere saying they were one decision.
     """
 
@@ -281,9 +337,11 @@ class OPTLevers(LeverSet):
     # is the bar the restart detector uses (`_lrv > 0.5 * LR`, :7118).
     # IT IS ALSO READ OUTSIDE THIS PACKAGE, WHICH IS THE L2 VIOLATION TO CARRY OVER AS A WIRE: :7252
     # builds the per-expert own-rate as `_oa = _lo + (LR - _lo) * ...` inside the fabric block, and
-    # :6467/:6608/:7148 print "% of peak" in the report. Those become declared wires (see conflict (b) --
-    # `d_base_lr` or `d_lr_peak`, one name), not a global read. Until the coupling exists, FAB_LR_OWN=1
-    # has no legal way to learn this number.
+    # :6467/:6608/:7148 print "% of peak" in the report. Those are declared wires now, not a global read,
+    # and the name that landed is `d_base_lr` -- the RECEIVER's spelling, not this package's `d_lr_peak`
+    # (see conflict (b)). This comment said "until the coupling exists, FAB_LR_OWN=1 has no legal way to
+    # learn this number"; the coupling EXISTS, `FAB.d_base_lr <- OPT.lr`, and FAB_LR_OWN=1 has its legal
+    # way. Corrected 2026-09-03.
     # THE DEFAULT IS THE HYPOTHESIS UNDER TEST, not a tuned value: a constant 2e-3 on AdamW for 48k steps
     # is the shape all 17 pilots showed (bottom ~2.4 at step 6000, rise to 3.8-4.1 by 48,000). It stays
     # at 2e-3 because that is the literal every existing record was measured under, and a default that
@@ -389,7 +447,7 @@ class OPTLevers(LeverSet):
     # restarts, the damping, the envelope and the re-warm are ALL structurally unreachable -- eight
     # levers inert, and the old tree printed every one of them on the EFFECTIVE line as though it had
     # applied. The gate must print its own predicate.
-    # AND IT CARRIES AN UNFIXED CRASH THAT THE PORT MUST NOT INHERIT (ISSUES.md:120 H15). LR_SCHED="none"
+    # AND IT CARRIES AN UNFIXED CRASH THAT THE PORT MUST NOT INHERIT (ISSUES.md PART 1, H15). LR_SCHED="none"
     # together with FAB_LR_OWN=1 leaves `_lrv` unbound and dies with a NameError on the FIRST FLUSH: the
     # per-expert path at :7194 reads a variable that is only assigned inside this branch. That is the
     # foreign read L2 forbids, in its most literal form -- one package reading another's local. Under the
@@ -440,13 +498,19 @@ class OPTLevers(LeverSet):
     # note that a run stretched by EPOCHS is "NOT comparable at fixed LR" (:6020).
     # THE 0 SENTINEL IS DOCUMENTED, NOT RESOLVED HERE, and that is deliberate. In the old tree the zero
     # was resolved by READING ANOTHER KNOB (`if LR_STEPS: return LR_STEPS`, else project from LR_EPOCHS,
-    # :6371) -- which is the computed default lever.py:58-61 refuses by construction. The run length
-    # arrives as the wire `d_run_steps` so the sentinel resolves in ONE visible place; that coupling does
-    # not exist yet (see conflict (c)), so until it does, whoever builds the schedule must resolve the
-    # zero at the single point it is read and put the resolved number in the banner.
+    # :6371) -- which is the computed default lever.py::Lever.__init__ refuses by construction. The run length
+    # arrives as `d_run_steps` so the sentinel resolves in ONE visible place -- AND THAT WIRE IS REFUSED,
+    # not merely unwritten. This comment said "that coupling does not exist yet (see conflict (c)), so
+    # until it does, whoever builds the schedule must resolve the zero at the single point it is read",
+    # which told the next author to WAIT for an edge the tree has since rejected by name: NOT_WIRES
+    # carries "the run length in windows -> OPT.d_run_steps / OPT.d_total_steps" as of 2026-09-02
+    # (Q-OPT-1), because the value does not exist until TOK.tokenize has run and build() has long since
+    # frozen. So the single visible place is REAL and it is not a wire: OPT.build resolves the sentinel
+    # from its `run_windows` ARGUMENT, once, and puts the resolved number in the banner
+    # (opt.build.wavelength_from_sentinel is the counter that says it happened).
     # WHY A SENTINEL RATHER THAN A SECOND LEVER: `choices=` cannot express "0, or any positive int", and
     # a second lever holding the "spans the run" state would be minting a knob the census never voted on
-    # -- the same limit lm/levers.py:`layers`, domains/levers.py:262 and tok/levers.py all record.
+    # -- the same limit lm/levers.py:`layers`, domains/levers.py::DOMLevers and tok/levers.py all record.
     # REAL SETTINGS ON RECORD, so nobody has to re-find them: 280000 for round16, 260000 for
     # lr_075_short, 90000 for lr_075_rst.
 
@@ -475,8 +539,8 @@ class OPTLevers(LeverSet):
     #
     # `lr_restarts` is a GATE over the other two (G4), not a setting beside them: at 0 the code forces
     # `_p = min(1.0, _prog); _n, _ci = 1, 0` (:4787), which makes BOTH `lr_restart_damp` and `lr_decay`
-    # unreachable BY ARITHMETIC. ISSUES.md:2029 files exactly this pair as the canonical "off by
-    # arithmetic, not armed and inert" case, and ISSUES.md:1393 is why it matters: commit b990c9d fixed
+    # unreachable BY ARITHMETIC. ISSUES.md PART 4's [chat-b/carry_forward] entry files exactly this pair as the
+    # canonical "off by arithmetic, not armed and inert" case, and PART 3's C12 is why it matters: commit b990c9d fixed
     # a restart failure by setting LR_RESTARTS=0 and 704c432, one commit later, added damping to fix the
     # same failure -- while the armed-and-inert audit had 20 rows and not one about the learning rate,
     # the part of the system that has broken the most runs.
@@ -488,7 +552,7 @@ class OPTLevers(LeverSet):
     # corrected from `OPT_LR_RESTARTS` to `lr_restarts` (DEFECT 1).
     # DECLARED True AND NOT 1, AND THE OLD SOURCE AGREES: :6290 reads `LR_RESTARTS = bool(_i("LR_RESTARTS",
     # 1))`, so the int in _SPEC was already a boolean by the time anything used it. Lever.coerce picks its
-    # branch from the DEFAULT's type (lever.py:122), so declaring True is what makes OPT_LR_RESTARTS=off
+    # branch from the DEFAULT's type (lever.py::Lever.coerce), so declaring True is what makes OPT_LR_RESTARTS=off
     # mean off; an int default would raise on "off". The bool branch's own hazard is stated in
     # fabric/levers.py and applies here unchanged -- any string outside ("0","","off","no","none","false")
     # reads as True, so OPT_LR_RESTARTS=flase is silently ON. It also means OPT_LR_RESTARTS=3 does not
@@ -530,7 +594,7 @@ class OPTLevers(LeverSet):
     # PORT REQUIREMENT, AND IT IS THE MOST IMPORTANT LINE IN THIS FILE. This lever reads `_best_bpb` --
     # a HELD-OUT MEASUREMENT -- and turns it into a training decision (:7137-7139). That is a number
     # crossing the instrument line BACKWARDS. It must arrive as the declared wire `d_best_bpb` from EVAL
-    # (eval/levers.py:124 already declares the outgoing half), and the Reading it comes from must carry
+    # (eval/levers.py::<module> already declares the outgoing half), and the Reading it comes from must carry
     # its seed count, because PLAN 3.8 forbids a verdict on n=1 and a damped restart IS a verdict.
     # NO RANGE GUARD SURVIVES THE PORT. The old read was `min(1.0, max(0.0, _f(...)))` at :4739; a Lever
     # has no bounds, so OPT_LR_RESTART_DAMP=1.5 now AMPLIFIES each failed restart cumulatively -- see the
@@ -578,7 +642,7 @@ class OPTLevers(LeverSet):
     # growth "this jump is OURS, not the data's" for a retok and for an epoch resample -- but the LEARNING
     # RATE meets the same fresh text at whatever the cosine says, which has been 96-99% of peak at the
     # second boundary in EVERY run measured. Both round12 and round13 were destabilised there; the one
-    # whose rate then fell quickly recovered, the one held near peak did not (ISSUES.md:1580).
+    # whose rate then fell quickly recovered, the one held near peak did not (ISSUES.md PART 3, H12).
     # AN ATTENUATION, NEVER A REPLACEMENT, and the sign is the design (:4814-4820). Returning `LR * ramp`
     # would RAISE the rate whenever a shift lands late in the anneal -- a schedule that steps back up
     # mid-run, which is what the monotone-progress clamp exists to prevent. It MULTIPLIES, so it can only
@@ -591,10 +655,19 @@ class OPTLevers(LeverSet):
     # IT IS THE ADD-AREA LEVER. P7's entry point creates exactly the boundary this attenuates: an added
     # area IS a self-inflicted distribution shift, which makes this the schedule's contribution to goal B
     # rather than to convergence.
-    # THE TRIGGER IS A WIRE, AND WITHOUT IT THE LEVER IS INERT. The old code reaches into DATA -- the
-    # DISK_STREAM epoch-resample branch writes `_shift_at` (:6518-6521), which `_lr_at` then reads as a
-    # closure variable. Under L2 the resample step arrives as `d_shift_at` and the schedule stays a pure
-    # function of it. That coupling is NOT IN THE LEDGER, so today this lever has nothing to fire on.
+    # THE TRIGGER IS NOT A WIRE, AND THAT IS THE ANSWER RATHER THAN A GAP. The old code reaches into
+    # DATA -- the DISK_STREAM epoch-resample branch writes `_shift_at` (:6518-6521), which `_lr_at` then
+    # reads as a CLOSURE VARIABLE. Under L2 the schedule must stay a pure function of the value, and
+    # this comment used to say the value "arrives as `d_shift_at`" and that "that coupling is NOT IN THE
+    # LEDGER, so today this lever has nothing to fire on". BOTH HALVES ARE WRONG NOW AND THE SECOND WAS
+    # ALWAYS THE WRONG SHAPE: the step of the last self-inflicted shift is a RUNTIME event, so it can
+    # never be a build-time Coupling -- the same ground that refuses d_run_steps and the SIG width. It
+    # arrives as `shift_at`, a declared keyword on OPT.maybe_step's frozen signature, stamped by the
+    # composition root at the epoch-resample / retok / add-area events, and FAB.grow_check takes the same
+    # event as its own `shift_at` (Q-FAB-6). So the lever HAS something to fire on. What it still needs
+    # is the report line that separates the two zero-cases, and maybe_step declares it:
+    # `opt.shift.notifications` at 0 means NOBODY IS SUPPLYING shift_at, which is a different statement
+    # from lr_shift_warm == 0, and the report must make both. Corrected 2026-09-03.
 
     # ==============================================================================================
     # 5. WHAT ONE OPTIMIZER STEP IS TAKEN OVER
@@ -623,7 +696,7 @@ class OPTLevers(LeverSet):
     #   * `step % MANAGE_EVERY == 0` fired for 4 of 16 flush residues and zero for the other 12
     #     (:6829-6830);
     #   * at BATCH_W=4 with MANAGE_EVERY=20 the intersection is EMPTY, so _greach, ROUTING MIX, CHAIN
-    #     ORDER and maybe_deepen never ran AT ALL (ISSUES.md:1513).
+    #     ORDER and maybe_deepen never ran AT ALL (ISSUES.md PART 3, C42).
     # THE CONVERSION HAS ONE HOME: derive.flush_period(Steps(period), batch_windows), never
     # `// max(1, BATCH_W)` written inline at eight call sites (:6795, 6819, 6836, 6961, 6988, 7077, 7325,
     # 7368). That function also carries the surviving guard: batch_windows < 1 raises UnitError, so the
@@ -674,7 +747,7 @@ class OPTLevers(LeverSet):
     #   d_best_bpb       incoming wire from EVAL, not a lever -- lr_restart_damp's input.
     #   d_shift_at       incoming wire from DATA, not a lever -- lr_shift_warm's trigger.
     #   d_run_steps      incoming wire, not a lever -- what lr_wavelength's 0 sentinel resolves against.
-    #   d_effective_batch_windows   batch_windows x accum, a derived field (G5); assemble.py:752 declares
+    #   d_effective_batch_windows   batch_windows x accum, a derived field (G5); assemble.py::COUPLINGS declares
     #                    it today as local to a package called TRAIN.
     #   DROPOUT          LM's lever, not OPT's, though _SPEC filed it under `optim`: it is a layer in the
     #                    model, constructed at :1550-1551. Its measured interaction with weight_decay is

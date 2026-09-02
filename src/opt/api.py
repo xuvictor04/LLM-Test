@@ -33,7 +33,7 @@ function today (verified)", and then the horizon four lines below did
 
 which IS a Windows->Steps conversion: a window count divided by windows-per-optimizer-step, inline,
 on bare ints, in a package body. A reviewer found the assertion and the line together. Nothing was
-numerically wrong at the defaults -- that is what made it survive -- but units.py:86 is explicit
+numerically wrong at the defaults -- that is what made it survive -- but units.py::Clock.convert is explicit
 that the point is naming: "There is no implicit path between kinds ... call the named function in
 spine.derive that already knows the rate, so the conversion exists in one place with a name." It
 was the only unnamed cross-kind conversion left in the tree.
@@ -336,7 +336,7 @@ def counters(opt: Config, st):
     flag), weight_decay > 0, lr_decay > 0 and n_cycles > 1, lr_shift_warm > 0 and a shift_at ever
     supplied. Two levers are reachable only by arithmetic and every result this project has
     recorded came from a single-cycle schedule, so neither lr_restart_damp nor lr_decay has ever
-    fired in anger -- ISSUES.md:2029 files exactly this pair as the canonical "off by arithmetic,
+    fired in anger -- ISSUES.md PART 4's [chat-b/carry_forward] entry files exactly this pair as the canonical "off by arithmetic,
     not armed and inert" case.
 
     RENDERS -- DOES NOT COMPUTE -- the observed global gradient norm (opt.grad_norm.p50/p99, base

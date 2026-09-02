@@ -66,7 +66,7 @@ one that can go stale in silence — this one had.)*
 | `CAP.d_operating_population` | `FAB.pressure × FAB.slots` | The irreducible coupling the valve must **declare rather than remove**: a soft cap above the cull's settling point never pins, so the pin clock never accumulates and the valve is dead while looking armed. A second landing of the identical `derive.operating_population` call, so the fabric's setpoint and the valve's refusal cannot disagree. |
 | `DOM.d_comp_ema` | `FAB.comp_ema` | One smoothing rate for two populations, or "this domain beats the population" is a comparison between two differently smoothed series. `fabric/levers.py:693` names both this and the next; `self_organize.py:6720` is the direct attribute reach it replaces. |
 | `DOM.d_comp_protect` | `FAB.comp_protect` | One brake policy for two populations. The domain cull is the mechanism that deleted 200,000 memory entries under a phased schedule. |
-| `FAB.d_base_lr` | `OPT.lr` | `:7252` builds the per-expert envelope from the **peak**. Until some name lands, `FAB_LR_OWN=1` has no legal way to learn the number — which is what makes ISSUES H15 (`NameError: _lrv`) spellable. Named `d_base_lr` and not `d_lr_peak` because the **receiver** already declares that spelling (`fabric/levers.py:756`) and the receiver's `grep d_` is the one that has to find it. This settles the open name conflict `opt/levers.py:186` records. |
+| `FAB.d_base_lr` | `OPT.lr` | `:7252` builds the per-expert envelope from the **peak**. Until some name lands, `FAB_LR_OWN=1` has no legal way to learn the number — which is what makes ISSUES H15 (`NameError: _lrv`) spellable. Named `d_base_lr` and not `d_lr_peak` because the **receiver** already declares that spelling (`fabric/levers.py:848`) and the receiver's `grep d_` is the one that has to find it. This settles the open name conflict `opt/levers.py`'s conflict (b) records — **and that paragraph said "neither in `spine.assemble.COUPLINGS`" until 2026-09-03, when the row had been in the ledger for a day; it now records which spelling lost.** |
 | `FAB.d_lr_min_frac` | `OPT.lr_min_frac` | `:7251` is `_lo = LR * LR_MIN_FRAC`, needed in the same block; shipping one endpoint without the other leaves the fabric with half a rate. |
 
 Consequences recorded in the fixtures rather than hidden: `affects("FAB_SLOTS")` widens to
@@ -793,7 +793,7 @@ stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go
 did-it-fire surface the encoder's cadence has. That is stated in its row rather than left for a
 reader to discover from a missing ledger line.
 
-### 3.6 `DEFERRED_ENTRY_POINTS` — fourteen, and no longer only EVAL
+### 3.6 `DEFERRED_ENTRY_POINTS` — fifteen, and no longer only EVAL
 
 `{"PFX.entry": "the phase that will call it, and why it cannot be called now"}`. K6 reads it **both
 ways**: an entry no row names is accepted, and an entry a row **now** names is reported as *stale*
@@ -818,7 +818,7 @@ the whole tree is stubs.
 | `EVAL.verification_fit` | P6 | Same missing copy; its inner loop is genuine `units.Steps` and must never be compared against `curve_every`. |
 | `MEM.read` | P5 | **New.** Nothing produces `queries`. The deleted `R` row named none of them, and the probe contexts it would key on are the same held-out material `holdout_probe`'s `units_by_domain` needs — one missing join, and deferring only one of the two was the inconsistency. **Deferred as a ROW, reached in-package:** Q-MEM-9 (RESOLVED (a)) makes `MEM.maintain`'s job 1 *this call*, with `queries` maintain encoded itself. K6 is satisfied by the absence of a row, not the absence of a call, so this deferral is current and not stale. |
 | `MEM.blend` | P5 | **New.** `retrieval` comes from `MEM.read`; `model_probs` are **probabilities** while every scoring hook takes a `logits_fn` (Q-MEM-10, RESOLVED (a) 2026-09-02: the join is a composition-root closure, `_logits_fn(sysm, *, use_memory)`, and **no signature moves on either side** — but the `logits_fn` still has no producer, so this deferral stands) — which the deleted row's own prose conceded while being written anyway. `model_probs` is also the first positional after the Config, which K10 drops as "the package's own live object" — it is not (MEM's is `store`), so the check is structurally blind here and the deferral is the only record. |
-| `MEM.judge` | P4/P5 | **New.** `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). That callable does not exist, and scoring a **stored** ctx needs a signature — the domain id is `Store.src`, so only the *declared shape* was missing, and it is now two arguments (Q-MEM-8). **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:259-261` itself names as the inert state. |
+| `MEM.judge` | P4/P5 | **New.** `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). That callable does not exist, and scoring a **stored** ctx needs a signature — the domain id is `Store.src`, so only the *declared shape* was missing, and it is now two arguments (Q-MEM-8). **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:350-352` itself names as the inert state. |
 | `FAB.contribution` | P4 | **New.** `candidates` is the eligible past-grace set, which lives in `Population`'s books — no entry point exports it and O10 forbids the root reaching into `pop`. `baseline_logits_fn` is the same missing callable as EVAL's, and it is load-bearing rather than convenient: the whole C3/H11 repair is that the baseline must come from **the same callable** that produced `baseline_loss`. |
 | `CAP.observe` | P4 | **New.** `improving` = `(slow - fast)/|slow|` off the growth controller's EMAs, which live **inside FAB** and are on no returned record; `observations` is the valve-evaluation count tied to a hardcoded 0.998 EMA rate the caller cannot see. The root must **not** maintain a second EMA pair over the same loss to manufacture them — two mechanisms deciding independently whether the run has stalled is the recorded defect where the valve fired hardest exactly when the run was degrading worst. `blackout`'s home is now half-built: **Q-FAB-6** gave `FAB.grow_check` the `shift_at` stamp and put the resulting blackout state on `GrowReport`, so CAP neither reads FAB's `cooldown` at the call site nor has to mint a blackout-window lever it has no census row for; what is still missing is the root join and the two EMAs. |
 | `WORLD.manage` | P4 | **New.** `plateau` contradicts the package's own `state_dict`, which says the plateau state `(_wl_ema, _wl_lastgrow)` **moves inside this package** and travels in the checkpoint — if the state is inside, the boolean is computed inside, and both sentences cannot hold. `add_param_group` needs OPT to name one of its two AdamW instances (**Q-OPT-7**). `latent` is real but arrives **backwards** (`loss_terms` is a `B` row, this pass was `A`). |
@@ -848,9 +848,10 @@ tables claiming one, and it names the producer each is waiting on.
   `units.Windows` — a **frozen-signature move**, made now because 118 of the 123 entry points are stubs
   and the same change after P4 writes the WATCH→BURST→RECOVER machine is a body rewrite. It went on
   `grow_check` and **not** on `manage` as the question proposed, because in the old tree the blackout
-  gates **growth**: `note_shift` sets `blackout` at `:2948` and its only two consumers are `:3004`
-  and `:3012`, both inside `PlateauGrowth.step`, which is `grow_check` here. `manage` is
-  cull-and-spare and has no cooldown to suppress.
+  gates **growth**: `note_shift` sets `blackout` at `:2948` and two of its three consumers are
+  `:3004` and `:3012`, both inside `PlateauGrowth.step`, which is `grow_check` here. (The third is
+  `:7397`, the loop's own capacity valve, which is `CAP.observe`'s `blackout` — see Q-FAB-6.)
+  `manage` is cull-and-spare and has no cooldown to suppress.
 * **A resegment for MEM at an epoch roll.** `MEM.maintain(resegment=...)` is documented for a
   *retokenization*. An epoch redraw is a new stream, not a new segmentation, and the old tree does
   not resegment the store there. Inventing the call would have been the easiest row in this edit and
@@ -993,6 +994,45 @@ input to `MEM.write`'s `surprise`) and `token_seen` (the per-token appearance co
 `LM.anchor_term`'s `token_seen` and `TOK.judge_probation`'s `appearances` — **one tensor, two
 spellings**, owned by the loop and returned by no entry point; C5).
 
+### 3.11 The six findings three reviewers left open, and what each turned out to be — **2026-09-03**
+
+Every one was verified against the tree before it was acted on, because a finding that has already
+been fixed is a real outcome and acting on it writes a second wrong sentence. **All six were live.**
+
+1. **`residual_ratio` could never be a wire, and four statements still said to declare one.** All
+   four were in `src/tok/levers.py`. Fixed; the fifth copy is the owner's census reason and is
+   recorded, not edited — see **Q-TOK-11**.
+2. **The manifest's field count lived in three places, all wrong**, and one of them was inside
+   `ROW_ARGUMENTS_ELSEWHERE["CKPT.check_geometry"]` — *a declaration a check reads*. Both counts are
+   now deleted rather than corrected, which is what **Q-CKPT-1** ruled; the third statement was the
+   C-block's "the recorded side carries `WORLD.geometry`'s five fields and the gate refuses the other
+   ten", which is arithmetic over the **withdrawn C12 claim** and is rewritten around the
+   declaration that runs. **K13 found the first two mechanically and now guards them.**
+3. **`_periods`' sixth key was visible to no check.** `K9` read the order tables and `'progress'`
+   has no row, so `RUN.PROGRESS_WINDOWS` could have become a bare `100` — the H51 shape, which makes
+   `Cadences.due` raise on its first evaluation — with all six suites green. **K9 was widened to read
+   the mapping itself**, and three statements that offered the blind spot as an explanation now
+   record it as the defect it was. This is the branch the finding demanded: *a check sees it.*
+4. **"`blackout`'s only two consumers are `:3004` and `:3012`" was wrong in four places.**
+   `self_organize.py:7397` is a third, at the **loop call site**, gating the capacity valve. The
+   **Q-FAB-6** ruling is unmoved — both consumers that decide *growth* are in `grow_check` — but the
+   corrected sentence is what makes the rebuild's split legible: FAB applies the cooldown, the state
+   rides `GrowReport`, and the root joins it into `CAP.observe`'s `blackout`.
+5. **Two statements in this document named two different signatures for `EVAL.coherence`.** One
+   called the change a `sample` → `seed_units` **rename** and "the only reopening EVAL's frozen
+   surface needs"; **Q-EVAL-10** replaced one parameter with **two** (`units_by_domain`, `encode`)
+   and refuses `seed_units` by name. The pointer now points at the ruling instead of restating it.
+6. **Two line citations written in the previous commit landed on the wrong lines.**
+   `memory/api.py:259-261`, cited twice for the `n_checked = 0` inert state, is
+   `apply_domain_plan`'s docstring; the state is named at **`:350-352`**. `tok/api.py:108-110`,
+   cited for BPE-dropout's train/inference protocol "word for word", is `tokenize`'s opening; the
+   sentence is at **`:130-131`**. Both fixed, along with `memory/api.py:265` in
+   `tests/test_contract.py` (the same defect, one commit older), `memory/api.py:238-240` in a live
+   `compose.py` row note (the scorer's forward-path rule is at `:289`), and `opt/levers.py:559`,
+   which the previous pass had *just corrected* from `:499` and which the same day's Q-OPT-3/Q-OPT-4
+   edits moved to `:623`. **That last one is the argument, in one line, for citing a defect ID or a
+   quoted sentence instead of a number.**
+
 ---
 
 ## 4. UNCONSUMED LEVERS
@@ -1037,7 +1077,56 @@ It changes both wires and the whole partition, so it is fully consumed — throu
 Unioned from the five specs, deduplicated, with everything resolvable from the source already
 resolved above. What is left needs a ruling.
 
-### Q-CLOCK-1 — retire `FAB.d_cap_lift_period` and `TOK.d_cap_lift_period`?
+**HOW TO READ A SECTION HERE, AND WHY THE HEADING IS NORMATIVE (convention fixed 2026-09-03).** Every
+section keeps three layers, in this order and never fewer: the **heading**, which carries the verdict;
+the **original framing**, kept verbatim as the record of what was asked and therefore still describing
+the *unfixed* problem in the present tense; and the **ruling**, which states what is true now. A
+resolved question is not deleted — it is the record of a decision, and the next reader needs the
+question to understand the answer.
+
+That makes the heading the index, and **an index that disagrees with its own bodies is this project's
+C12 defect** — a CRITICAL was once filed against prose that a declaration in the same file had already
+refuted, and withdrawing it cost a round. On 2026-09-02 nineteen sections were ruled and their bodies
+rewritten while their **headings were left stating only the problem**, so a reader scanning `grep
+'^### Q-'` under the sentence *"what is left needs a ruling"* would count nineteen open questions that
+were not open. Nine of them (`Q-DATA-4`, `Q-DATA-6`, `Q-DATA-7`, `Q-DATA-8`, `Q-TOK-3`, `Q-TOK-9`,
+`Q-TOK-10`, `Q-TOK-11`, `Q-TOK-12`) are corrected here.
+
+The remaining ten — `Q-CLOCK-1`, `Q-OPT-1`, `Q-OPT-2`, `Q-OPT-3`, `Q-OPT-4`, `Q-OPT-5`, `Q-OPT-6`,
+`Q-OPT-7`, `Q-LM-9`, `Q-LM-12` — **were marked on 2026-09-03, and the index is now complete: every
+`### Q-` heading in this section carries its verdict, and `grep '^### Q-'` is an accurate count of
+what is open.** Nine of the ten are `RESOLVED` and `Q-CLOCK-1` is `MEASURABLE`; **not one of the
+nineteen was ever open**, and the sentence four paragraphs up — *"what is left needs a ruling"* — is
+now true only of the sections whose headings say so.
+
+`Q-OPT-3` was the sharpest and is worth keeping as the worked example. Its framing paragraph still
+reads *"neither package declares a lever and the census has no dropped row for one"* — which is
+correct **as the record of what was asked** and false as a statement about the tree, because
+`OPT.grad_clip` is declared, `.rework/CENSUS.md` and `.rework/census.json` carry an `amendments`
+group for it, and `tests/test_census.py` N1 examines `amend` rows. Under the three-layer convention
+the framing paragraph **stays** and the heading is what tells the reader not to act on it. That is
+the whole of the convention in one section.
+
+**And the heading itself is now held to it by a check, which is the part the convention could not
+supply (2026-09-03).** `Q-OPT-3`'s heading read *"nothing in this system clips gradients"* — a
+present-tense absence claim about a lever declared four hundred lines below it, which is the C12
+shape in the one place the convention makes normative. It now reads *"nothing in this system
+**clipped** gradients when this was asked, and `OPT.grad_clip` now declares one"*, and
+`tests/test_contract.py`'s **K13 arm (b)** refuses the old form mechanically: it matches every
+`### Q-` heading that negates something, word by word, against the levers and entry points its own
+package declares, and reports one that resolves and is *not named in the heading*. A heading that
+names the thing and negates a **property** of it — `Q-SIG-1`'s *"`prototype_frac` has no supplier"*
+— is admitted, because naming it is the opposite of claiming it is absent. The check reads headings
+and nothing else, so the framing paragraphs stay invisible to it **by design**: they are supposed to
+describe the unfixed problem.
+
+**THE DEFAULT `Q-OPT-3` SETS, STATED HERE AND NOT ONLY IN ITS OWN SECTION, because the owner's
+standing instruction is "tell me the defaults, so I know what is off and on":** `OPT_GRAD_CLIP =
+0.0`, which is **OFF**. The mechanism is declared, reachable from the environment, and does nothing
+until somebody sets it. Every number this project has recorded was taken with no clipping, and off
+is that configuration exactly.
+
+### Q-CLOCK-1 — retire `FAB.d_cap_lift_period` and `TOK.d_cap_lift_period`? — **MEASURABLE 2026-09-02: (a) STANDS, BOTH ROWS KEPT, AND THE CONDITION THAT FLIPS IT TO (b) IS WRITTEN DOWN. NO WIRE MOVED — LEDGER STAYS 19 OF 25**
 Three specs recommend it. This contract **keeps both rows as reporting wires** and adopts pin-clock
 repair (a) so the valve reads neither. **Options:** (a) keep as reporting wires (what is written);
 (b) delete both rows, freeing 2 of the 25-wire budget and removing the trap where a later reader
@@ -1093,6 +1182,15 @@ these rows are the only surviving answer and (a) is final.
 trap is already foreclosed **by construction**: `Windows >= Flushes` raises, and `pin_tick` refuses
 a `Flushes` by name. Deleting on that ground would be deleting for a danger that cannot happen.
 
+*One repair made 2026-09-03 while re-verifying the above.* `spine/derive.py`'s `pin_tick` docstring
+said the two rows are read *"at `fabric/api.py:305` and `tok/api.py:313`"*; the live reads are at
+`fabric/api.py:492` and `tok/api.py:438`, and the cited lines had drifted onto unrelated prose. The
+same paragraph now also says what this section says — that the two rows are **MEASURABLE, not
+permanent** — so a reader who arrives at `pin_tick` first is not left believing the reporting wires
+are settled. `pin_tick`'s own point, *do not convert the threshold*, does not rest on them and
+survives their deletion; that is stated there too, so the atomic edit this section specifies does not
+have to re-derive which half of the message is load-bearing.
+
 ### Q-DERIVE-1 — re-type `derive.pin_tick` from `Steps` to `Windows`? — **RESOLVED 2026-08-30, repair (a) adopted**
 
 It was re-typed. `derive.pin_tick` now accumulates `Windows` and raises on `Steps`, `Flushes` or
@@ -1128,7 +1226,7 @@ them against the clock. Both repairs can no longer be live in the valve at once 
 valve sixteen times too *early* — harder to see than the original, because a valve that fires looks
 like a valve that works.
 
-### Q-DATA-4 — `data/continual/` and `data/ood/` are unreachable from any DATA lever
+### Q-DATA-4 — `data/continual/` and `data/ood/` are unreachable from any DATA lever — **RESOLVED 2026-09-02: THE SLASH RULE ADOPTED, PLUS THE TWO STARTUP REFUSALS IT DID NOT NAME. NO LEVER, NO WIRE, NO DEFAULT MOVES**
 `datastream.py:72` hardcodes `{data_dir}/train/{d}/*`. The repository ships
 `data/continual/{01_rust,02_sawyer,03_dracula,04_num2}` (1.5 MB) and `data/ood/` (764 KB) — **the
 material the add-an-area benchmark exists for** — and `grep` finds them read only by
@@ -1162,7 +1260,57 @@ refused **naming the area and the field**; a name present now and absent from th
 under its own counter, because "an area arrived" and "an area vanished" are two different statements
 and only one is an experiment.
 
-### Q-DATA-7 — how is D2 (PURE_ADD) actually produced?
+**FIVE LINE CITATIONS IN `src/data/` POINTED AT THE WRONG LINES AND ARE FIXED 2026-09-03.** The
+2026-09-02 rulings were written against the tree *before* the same commit edited it, so `levers.py`
+and `compose.py` moved under their own citations. `open_areas` cited `eval/levers.py:201-202` for the
+KEYED-BY-DOMAIN-NAME quote (now `:221-222` — `:201` is the paired-comparison argument) and
+`data/levers.py:349-360` for `seg_contig`'s *"the only boundaries left are the text's own"* (now
+`:306-307` — `:349-360` is the `phase_sched` block, a different lever entirely); `data_plan` cited
+`data/levers.py:339-343` and `:344-350` for the no-literal-string argument and the 10× disagreement
+(now `:381-383` and `:386-389`); `restore_stream_state` cited `compose.py:304-309` for the row that
+runs it (that is the `geom` row — the `restore` row is `:323` and the call is `:1802`). None changes a
+ruling; all five send a P4 author to the wrong paragraph, which is the same failure as prose that
+contradicts a declaration, one indirection out.
+
+**AND THE SAME FAILURE AT SCALE: EVERY `ISSUES:<line>` CITATION IN `src/` POINTS AT THE WRONG
+DEFECT.** Found while checking one of them. `src/data/api.py` cited `ISSUES:1421` in four places for
+the desynchronised-`DN` defect; line 1421 is **L15**, an `LR_DECAY` default in a research note, and it
+has held three different defects across three commits. The drift is mechanical and measurable:
+`.rework/ISSUES.md` grew from 1983 to 2270 lines and **every defect header moved down by 88 lines**,
+every `[so-config/facts]` entry by **90**. The proof is not the arithmetic but the three citations in
+`src/` that name a defect ID *beside* the line number — `capacity/levers.py:346` (`M38`, cited 417),
+`capacity/levers.py:363` (`M36`, cited 409), `tok/levers.py:367` (`M23`, cited 357). In all three the
+`+88` line owns that ID and the raw line owns a different one, with **no counter-example**; six more
+were confirmed by matching the citing sentence against the defect body (`M65`, `M77`, `M24`, `L69`,
+`M20`, `C19`).
+
+**Repaired in `src/data/` and `src/tok/` only: 17 citations, converted to the defect's ID
+(`ISSUES M77`), which does not move.** The `[so-config/facts]` entries have no ID and are now cited by
+their opening words. **50 line citations remain in the other twelve packages and are all wrong by the
+same 88/90.** They are not silently rebased here: a blind `+88` is the wrong repair — the two offsets
+differ, so it would land some citations one entry off — and each replacement has to be confirmed
+against the defect's text, which is the slice owner's read to make. Whoever touches a package next
+should convert its citations rather than add another line number.
+
+**`src/opt/` AND `src/lm/` CONVERTED 2026-09-03: 15 more citations, and THE "88/90" ABOVE IS TOO
+NEAT.** Every one of the fifteen was confirmed by matching the citing sentence against the defect
+body, and the offsets measured are **+56, +88 and +90** — three, not two. `ISSUES.md:441` →
+`M44` at 529 (+88, and the raw 441 is `M22`, a different defect the citing sentence does not
+describe); `ISSUES.md:1580` → `H12` at 1668/1670 (+88 on the header, +90 on the body sentence
+actually quoted); `ISSUES.md:2029` → the `[chat-b/carry_forward]` entry at 2119 (+90);
+`ISSUES:170` → `H27` at 224 (**+54 on the header, +56 on the sentence**), which no rebase rule
+would have found. That is the evidence for the paragraph above's own conclusion, stated harder:
+**a blind offset is not merely risky, it is arithmetically impossible to get right**, because the
+file grew unevenly and the drift is a different number in each region. Only content matching works.
+
+**AND ONE HAZARD THE ID CONVERSION ITSELF CARRIES, worth knowing before the remaining 35 are done.**
+`ISSUES.md` reuses defect IDs across its parts: `H15` is *both* the `_lrv` `NameError` (PART 1,
+`:176`) and *"A corpus smaller than STREAM_LEN duplicates itself"* (PART 3, `:1680`). An ID alone is
+therefore ambiguous by construction, so every citation converted here names the **part** as well —
+`ISSUES.md PART 1, H15` — and the two PART 4 entries, which have no ID at all, are cited by their
+tag and subject (`PART 4, the [archive/facts] D_MODEL_B entry`). The seventeen already converted in
+`src/data/` and `src/tok/` carry the bare ID and should gain the part when they are next touched.
+### Q-DATA-7 — how is D2 (PURE_ADD) actually produced? — **RESOLVED 2026-09-02: (c), THE PROTOCOL IS RECOGNISED NOT GENERATED, AND A `phase_sched` ENTRY MAY BE AN AREA NAME. `DATA_PHASE_SCHED` DEFAULT UNCHANGED (EMPTY = REHEARSED). THE REHEARSED-vs-PURE ARM IS LEFT MEASURABLE**
 `PURE_ADD` is not and never was a knob (0 occurrences in `self_organize.py`); it is `longrun.sh`
 shorthand expanding to `PHASE_SCHED="1|1|1|1"`, and only because that harness runs exactly two
 areas. **Options:** (a) the last entry of `DATA.areas` is the arriving area — general at any n, no
@@ -1220,7 +1368,7 @@ the end of each. Rehearsal keeps `eng` trained, so only arm P measures what the 
 if R's `eng` retention is not materially better than P's, rehearsal buys nothing and pure-add is the
 honest default everywhere.
 
-### Q-DATA-6 — the held-out split becomes a seeded random block
+### Q-DATA-6 — the held-out split becomes a seeded random block — **RESOLVED 2026-09-02: (b) CONFIRMED, PLUS ONE REPAIR THE QUESTION DID NOT CONTAIN — ONE HOLD-OUT RNG STREAM PER AREA, KEYED BY NAME. ⚠ EVERY HISTORICAL HELD-OUT NUMBER BECOMES NON-COMPARABLE**
 `holdout_frac` currently takes the **last** fraction of each area, which is a sample only if the
 corpus was written in no particular order. Measured: py held out at **5.061 ± 0.560** against 2.922
 in-stream while eng (shuffled upstream) was 2.273 against 2.303 — the gap was the ordering, and the
@@ -1239,7 +1387,7 @@ keyed by the area's label** — `rng_for("data.holdout." + key, seed)` — not f
 position is a function of **how many areas were drawn before it**: insert or reorder one entry and
 every later area's held-out text moves. Three things then break at once — `restore_stream_state`
 refuses the resume by its own stated reason, ACROSS THE RUN BOUNDARY compares two different texts,
-and `eval/levers.py:201-202` **already declares the opposite property**: *"KEYED BY DOMAIN NAME, not
+and `eval/levers.py:221-222` **already declares the opposite property**: *"KEYED BY DOMAIN NAME, not
 by index, so adding a domain does not shift the comparison. That property is part of the lever's
 meaning and has to survive the port."* DATA produces the text EVAL then windows, so the two must key
 the same way or the paired add-an-area comparison is destroyed on the one run type it exists to
@@ -1264,11 +1412,22 @@ grouped/temporal-split literature cuts the other way and is worth stating: rando
 non-independent rows inflate metrics. It does not transfer here, because this randomises **where a
 contiguous block sits**, not which rows are sampled.
 
-**Two stale sentences corrected in the same edit.** `src/data/levers.py:130` and `:441` asserted the
-resolved held-out size reaches EVAL as a wire *"declared in spine.assemble (`EVAL.d_holdout_bytes`)"*.
+**Two stale sentences corrected in the same edit.** `src/data/levers.py` asserted, in its header and
+again on `val_cap` (the corrected text now sits at `:128-140` and `:478-486`), **that** the resolved
+held-out size reaches EVAL as a wire *"declared in spine.assemble (`EVAL.d_holdout_bytes`)"*.
 It is not declared and **must not be** — §0 refuses it, on the ground that `build()` would have to
 `stat` the corpus. A P4 author following those sentences would try to declare a coupling A1/K5 then
-bounces with a message that does not explain why.
+bounces with a message that does not explain why. **Both now cite §0's refused-wires table by
+section rather than by line** (2026-09-03): they gave `docs/04_CONTRACT.md:74`, and this document
+grew 1908 lines on 2026-09-02, so that number now lands twelve lines above the table it names.
+
+**One thing this ruling wrote two ways, repaired 2026-09-03.** `open_areas` gave the draw as
+`rng_for("data.holdout." + label, seed)` in the paragraph that states the rule and as the
+**normalised key** three paragraphs down, where the normalisation is defined — while
+`spine/compose.py:127` and `src/eval/api.py:141` both say the key. Two readings of one splice in one
+docstring is what this whole phase exists to remove, so the rule paragraph now says `+ key` and
+points at the normalisation. Nothing else moves: the key *is* the label whenever the label is already
+lowercase `[a-z0-9_]`, which every shipped area name is.
 
 **The break is confirmed and belongs on P9's list of numbers that moved:** every historical held-out
 number is non-comparable with the rebuild's, because the text being scored changed. The Sample carries
@@ -1279,7 +1438,7 @@ rather than mixing silently — which is the half of this ruling that makes the 
 carried: `counters(opt, st)` cannot see a gradient, because `maybe_step` step 5 zeroes them. The rule
 being borrowed is *"a Reading costs no lever"*, not that instance.
 
-### Q-DATA-8 — steps per epoch, and what a "window" is measured in
+### Q-DATA-8 — steps per epoch, and what a "window" is measured in — **RESOLVED 2026-09-02: (a) CONFIRMED; AND THIS QUESTION'S OWN ACCOUNT OF THE OLD TREE WAS WRONG AND IS CORRECTED BELOW**
 `steps = STREAM_LEN // WIN` (`:4317`, `:4719`) divides a **byte** budget by a **token** window.
 Under `mode="bytes"` a window really is `LM.ctx` bytes; under `fixed`/`online` it is `LM.ctx`
 **tokens**. So "a window is WIN bytes" is true on one arm of one lever and false on the others, and
@@ -1316,7 +1475,7 @@ exists to end. The root holds all five (`sysm.segmentation.ids`, `LM.ctx`,
 them together, and is exempt from the ownership rule that stops RUN assembling them. It prints once,
 after the `segment` stage, **on every run**; the row says so.
 
-### Q-TOK-3 — does `dropout` reach the training stream, or only the build tallies?
+### Q-TOK-3 — does `dropout` reach the training stream, or only the build tallies? — **RESOLVED 2026-09-02: (b) CONFIRMED, IT REACHES THE TRAINING STREAM. DEFAULT UNCHANGED AT `TOK_DROPOUT = 0.0`, WHERE BOTH ARMS ARE IDENTICAL**
 `tokenizer.py:187` applies dropout only to `count=True` segmentations, and the only `count=True`
 call in the tree is the build pass (`:1264`). So at `mode="online"` the regularizer runs during the
 seed build and **never again**, while the lever's own purpose says it exists "so byte-level material
@@ -1333,7 +1492,7 @@ missing.** `regularize=False` is a frozen parameter of `TOK.tokenize`, the root 
 `regularize=True` at all three segmentation sites, and `"tok.dropout"` is a declared RNG subsystem,
 so the process-global draw that shifted the whole run's stream is gone. The literature is decisive
 and agrees with what the framework already permits: BPE-Dropout (Provilkov et al., ACL 2020) *is*
-dropout during training with deterministic BPE at inference, which is `tok/api.py:108-110` word for
+dropout during training with deterministic BPE at inference, which is `tok/api.py:130-131` word for
 word. (a) would require **removing** a frozen parameter — a signature change in the expensive
 direction — to buy a lever that is inert after the seed build at `mode="online"`.
 
@@ -1349,7 +1508,7 @@ follow correctly, but a width that changed with no SIG lever set is explained he
 **Default unchanged: `TOK_DROPOUT=0.0`, where (a) and (b) are identical and no recorded number
 moves.**
 
-### Q-TOK-9 — `build_passes` had a per-arm default (2 online, 8 offline)
+### Q-TOK-9 — `build_passes` had a per-arm default (2 online, 8 offline) — **RESOLVED 2026-09-02: ONE LITERAL, 2, READ ON ALL THREE ARMS. THE 8 SURVIVES AS A DECLARED GATE. DEFAULT UNCHANGED**
 `:1225` is `_passes = _i("SEED_PASSES", 2) if TOK_ONLINE else _i("GROW_PASSES", 8)`. A Lever carries
 one default. `tok/levers.py:284-289` proposes carrying the 8 "inside this package's build code",
 which is a second literal in a second place — the thing L1 exists to end. **Recommendation:** one
@@ -1359,19 +1518,27 @@ recommending `TOK_BUILD_PASSES=8` for `mode="fixed"`. A value the operator canno
 
 **RESOLVED 2026-09-02 — (a), one literal, argued from the registry rather than from a document that
 does not exist yet.** `tok/levers.py` told P4 to write `8 if mode == "fixed" else tok.build_passes`
-while `tok/api.py:57` and `:75` told P4 to write `tok.build_passes` — two frozen surfaces, opposite
+while `tok/api.py` told P4 to write `tok.build_passes` — at `:57` and in its `LEVERS READ:`
+line, `:57` and `:75` before the ruling and `:57` and `:88` after it — two frozen surfaces, opposite
 instructions, and a different `tok.v0` on the arm carrying the project's largest recorded effect
 (4.364 vs 2.175 b/B). The deciding fact is mechanical: **a `Lever` carries exactly one default**, and
 L1 is one declaration in one place; a second literal in build code cannot be reached by any generator
 or audit that reads the registry. (`docs/04_LEVERS.md` is the *planned* consumer three `levers.py`
-files already name — it is not yet on disk, and this ruling does not lean on it.) The 8 survives as
+files already name — it is not yet on disk, and this ruling does not lean on it.) **`tok/levers.py`
+did lean on it, and was brought into line 2026-09-03:** its comment read *"docs/04_LEVERS.md **is
+generated** from these declarations"* in the present tense about a file `ls docs/` does not show, and
+cited `opt/levers.py:499` for a sentence that is at `:623` (`:559` before the same day's Q-OPT-3/Q-OPT-4 edits moved it, and this correction was itself stale within the hour — which is the argument for citing a defect ID or a quoted sentence rather than a line). It now argues from the `Lever`'s one
+default — the fact that does not depend on a document — and names the planned consumer as planned.
+The same present-tense phrasing survives at `fabric/levers.py:104` and `domains/levers.py:166`, which
+are other slices' files and are **not** touched here; whoever generates that document should correct
+them in the commit that creates it. The 8 survives as
 a **declared Gate with its predicate**, `tok.build_passes_advice`: on `mode="fixed"` it prints
 `build_passes=2; the offline build historically used 8 — set TOK_BUILD_PASSES=8 to reproduce it`, and
 on the other arms it prints `unreachable (mode != fixed)`. Advice that appears sometimes and says
 nothing when it does not is armed-but-inert applied to prose. **Nothing changed the default (2).** A
 `mode="fixed"` run at 2 passes is **not** the offline build of record → P9's moved-numbers list.
 
-### Q-OPT-1 — `run_windows` as an argument
+### Q-OPT-1 — `run_windows` as an argument — **RESOLVED 2026-09-02: THE `NOT_WIRES` ROW WAS ADDED. `d_run_steps` IS NOW REFUSED BY NAME, ON THE TOKENIZATION GROUND, NOT MERELY UNWRITTEN. NO SIGNATURE, NO LEVER, NO WIRE**
 Recorded and acted on above (see §0, refused candidates). **The ask:** add a `NOT_WIRES` row for
 `d_run_steps` with the *measurement* reason, so the next reader does not have to re-derive that the
 rejection is real and is **not** the `RUN.epochs` one. The contract phase did not add it because
@@ -1392,7 +1559,71 @@ omitting the most-proposed rejected candidate in the tree. Option (c) — foldin
 and folded, a reader who fixes the EPOCHS conflation would believe the tokenization objection went
 with it.
 
-### Q-OPT-2 — the LR schedule indexed by optimizer steps
+**AND THE HALF OF THIS QUESTION THE ROW DID NOT CLOSE, REPAIRED 2026-09-03: `src/opt/levers.py` was
+still telling the next author to WAIT for the wire this row refuses.** Two places, both in the file a
+P4 optimizer author reads first. Its conflict `(c)` ended *"the census says the run length arrives as
+`d_run_steps` so the sentinel resolves in one visible place. That coupling does not exist yet
+either."* And the `lr_wavelength` sentinel comment said *"the run length arrives as the wire
+`d_run_steps` … that coupling does not exist yet (see conflict (c)), so until it does, whoever builds
+the schedule must resolve the zero at the single point it is read."* **A candidate refused with a
+reason and a candidate that "does not exist yet" are opposite instructions**, and adding the
+`NOT_WIRES` row without touching them left the tree holding both. Both now say the wire is refused by
+name and that the value arrives as `OPT.build`'s `run_windows` argument, resolved once, with
+`opt.build.wavelength_from_sentinel` as the counter that says the sentinel fired.
+
+**The same file's other two "conflicts with the spine" had also been settled and still read as open**,
+and they are corrected in the same edit because they are the same defect: `(a)` said `spine/assemble.py`
+reads `r["TRAIN"].batch_w` / `r["TRAIN"].accum` in four couplings that all print *"DEFERRED …
+package(s) ['TRAIN'] not registered"* and are **not made** — the string `r["TRAIN"]` does not occur in
+`assemble.py` at all today, the three flush cadences read `r["OPT"].batch_windows`, and
+`d_effective_batch_windows` is `OPT.d_effective_batch_windows`. `(b)` said the peak rate had two
+spellings and *"neither in `spine.assemble.COUPLINGS`"* — `FAB.d_base_lr ← OPT.lr` and
+`FAB.d_lr_min_frac ← OPT.lr_min_frac` are both rows, and `d_lr_peak` is the spelling that lost. The
+file's own `THE WIRES` table said *"five of those eight are not in `spine/assemble.COUPLINGS` today"*;
+seven table entries are now answered — four are rows (six `Coupling` rows behind them, because the
+flush-cadence entry is three), two (`best_bpb`, `shift_at`) are **arguments**, because a runtime
+measurement can never be a build-time wire, and one (`d_run_steps`) is refused. Two counts inside that
+table were also wrong independently of any drift: it said *"the FOUR flush cadences FAB/TOK/CAP"* —
+there are **three**, there have been three in every version of `spine/assemble.py` in this repository
+(checked back to the commit that first wrote the table, where they sit at `:338`, `:350`, `:363`), and
+**CAP is a source, never a destination**, which is the same fact `Q-CLOCK-1` states as *"CAP's only
+outbound edges"*. The paragraph that has been repaired is the one that predicted its own failure:
+*"it will read as 'not ported yet' long after it has become 'ported'."* It did, for every reader
+between the port and this edit.
+
+**And one more in the same file, on a different lever.** `lr_shift_warm`'s row said *"the resample step
+arrives as `d_shift_at` … that coupling is NOT IN THE LEDGER, so today this lever has nothing to fire
+on."* It is not in the ledger and **never can be** — the step of the last self-inflicted shift is a
+runtime event, refused on the same ground as `d_run_steps` — and the lever is **not** inert: `shift_at`
+is a declared keyword on `OPT.maybe_step`'s frozen signature, the composition root stamps it at the
+epoch-resample / retok / add-area events, and `FAB.grow_check` takes the same event since `Q-FAB-6`.
+The row now says so, and points at `opt.shift.notifications`, which is the counter that distinguishes
+*nobody is supplying `shift_at`* from *`lr_shift_warm` fired zero times*.
+
+**THE IDENTICAL DEFECT IN `src/lm/levers.py`, FOUND BY LOOKING FOR IT, AND REPAIRED IN THE SAME EDIT.**
+LM's header carries a `TWO CONFLICTS WITH THE SPINE` block of the same shape, and **both were settled
+in `spine/assemble.py` and still read as open** — with an extra turn of the screw: `assemble.py`'s own
+`TOK.d_vocab_ceiling` row cites *"lm/levers.py:127-141 and tok/levers.py:87"* as the two files that
+*"record it as the outstanding repair"*, so the pointer from the file that made the repair led to a
+paragraph calling it outstanding. **(a)** said `assemble.py` declares
+`Coupling(src="TOK.vmax", dst="LM.d_softmax_width", …)` and that importing the real packages *"today
+raises `TOKLevers has no lever 'vmax'`"* — the edge was reversed to `LM.vocab_slots →
+TOK.d_vocab_ceiling`, `LM.d_softmax_width` does not exist anywhere in `src/`, and `assemble.build({})`
+does not raise. **(b)** said `d_pos_max`'s coupling did not exist and *"until the coupling exists the
+guarantee it buys does not"* — `LM.ctx → LM.d_pos_max` is declared, **local**, exactly the shape (b)
+argued for, `LM.build_model` reads it and `LM.encode` **raises** rather than clamps. LM's `THE WIRES`
+table said *"six of those nine are not in `spine/assemble.COUPLINGS` today"*; all nine are answered —
+**three** are rows (`d_pos_max`, `d_max_token_bytes`, `d_vocab_ceiling`), **five** are arguments
+(`live_vocab`, `retired_ids`, `device`, `residual_ratio`, `sig_emb`), and **one** (`d_softmax_width`)
+no longer exists because its edge was reversed.
+
+**What I did not repair, named precisely so it is a one-line fix and not a rediscovery:**
+`src/tok/levers.py:87` carries the mirror of LM's conflict (a) — *"assemble.py:723-725 declares
+`Coupling(src="TOK.vmax", dst="LM.d_softmax_width", …`"* — and is stale for the same reason. It is the
+data-tok slice's file and that slice had already finished; `assemble.py`'s row names both files
+together, so whoever touches TOK next should take it with this one.
+
+### Q-OPT-2 — the LR schedule indexed by optimizer steps — **RESOLVED 2026-09-02: (a) CONFIRMED, NOT CHOSEN — THE TREE HAD ALREADY ADOPTED IT IN THREE UNIT-ENFORCED PLACES. NOTHING IN `src/` CHANGED; ONE STALE SENTENCE AND THE P9 ENTRY DID**
 At the shipped defaults (`batch_windows=1`, `accum=1`) the new counter and the old one are
 identical, so **no recorded result moves**; at `fetch_big.py`'s own recommended heavy-run command
 (`WIN=256 BATCH_W=16 ACCUM=4`) they differ by **64×**, and one of the two readings makes a warmup
@@ -1422,7 +1653,7 @@ becomes a file or a section is the owner's; the text is here so it is not re-der
 than per micro-batch is standard, and stepping it per micro-batch under gradient accumulation is a
 filed bug upstream (`huggingface/accelerate#963`). The framework forced the same answer first.
 
-### Q-OPT-3 — nothing in this system clips gradients
+### Q-OPT-3 — nothing in this system clipped gradients when this was asked, and `OPT.grad_clip` now declares one — **INSTRUMENT RESOLVED 2026-09-02 (THE NORM MOVES TO `maybe_step`); THE CLIP IS MEASURABLE BEHIND A NEW LEVER. ⚠ CENSUS AMENDMENT `OPT_GRAD_CLIP`, AND ⚠ THE DEFAULT IS `0.0` = OFF — DECLARED AND NOT FIRING, WHICH THE REPORT MUST SAY OUT LOUD**
 Verified by exhaustive grep: no `clip_grad_norm_`, no `clip_grad_value_`, no manual norm clamp
 anywhere in `self_organize.py`; every match for "clip" is prose. Neither package declares a lever
 and the census has no dropped row for one. This matters because unclipped gradients are a **second,
@@ -1450,8 +1681,10 @@ ancestor knob — `grep -c clip self_organize.py` → 2, both prose about the fo
 there is no `(family, old_name)` key a `DEPARTURES` entry could be written under, and N2 could only
 be satisfied by amending the census itself. That was done, loudly and in one edit:
 `.rework/census.json` gained an `amendments` group, `.rework/CENSUS.md` gained an `amendments`
-section, `src/opt/levers.py`'s accounting header says this package holds the tree's only amendment,
-and **`tests/test_census.py` N1 was widened to check `amend` rows** so that deleting the lever fails
+section, `src/opt/levers.py`'s accounting header says this package holds **one of the tree's two**
+amendments — it said *"the tree's only"* until the same commit found `MEM_JUDGE_FRAC` had been minted
+the same day by another slice, and this sentence was the last copy of the wrong word (corrected
+2026-09-03) — and **`tests/test_census.py` N1 was widened to check `amend` rows** so that deleting the lever fails
 a check instead of leaving an orphaned census row. **The 328 is unchanged**: it counts the old
 `_SPEC`'s knobs and this was never one of them.
 
@@ -1480,6 +1713,19 @@ stated default, a startup refusal, and its own DID IT FIRE counters: `opt.clip.a
 `opt.clip.armed_no_clip`, because *clipping on and nothing ever exceeded the norm* is a different
 statement from *clipping off* and the report must make both.
 
+**THE THREE STATES, WRITTEN OUT, because a mechanism shipped OFF is the case the discipline is
+easiest to fail on.** The framework rule is that every gated mechanism answers *fired* /
+*armed-but-0* / *unreachable*, and at the shipped default this one is in the third state on every
+run — which is exactly when a report is tempted to print nothing. It may not. **Unreachable/off:**
+`grad_clip == 0.0`, and `Gate opt.build.grad_clip` prints `"off (0.0)"` — a printed line, not an
+omitted one, so a reader can tell "this run did not clip" from "this report does not mention
+clipping". **Armed but 0:** `grad_clip > 0` and `opt.clip.applied == 0` while
+`opt.clip.armed_no_clip == opt.step` — the clip was live and no step ever reached the max-norm,
+which is a *result* about the gradients and not a configuration fact. **Fired:**
+`opt.clip.applied > 0`, with `opt.grad_norm.p99` beside it saying how far over. The three are
+distinguishable from the counters alone, without reading the environment, which is the property
+that makes the measurement below runnable from a report rather than from a launcher's memory.
+
 **THE MEASUREMENT THAT RETIRES IT — one run, and the owner has offered the GPU time.** Run the
 shipped configuration at `OPT_GRAD_CLIP=0` and read `opt.grad_norm.p50` and `opt.grad_norm.p99` from
 `OPT.counters` across the whole run, including the window where held-out bits/byte turns from ~2.4
@@ -1491,7 +1737,7 @@ same seed set as the `lr_sched="none"` ablation so the two explanations are comp
 rather than one after the other. The default moves to `1.0` only on that pair, never on the
 literature alone.
 
-### Q-LM-9 — the gru arm's third dropout site is the memory-key source
+### Q-LM-9 — the gru arm's third dropout site is the memory-key source — **RESOLVED 2026-09-02: (b). `LM.encode` RETURNS THE UNDROPPED HIDDEN AND THE READOUT DROPOUT MOVES INTO `LM.decode`. NO SIGNATURE MOVED; `LM_DROPOUT` DEFAULT UNCHANGED AT `0.0`, WHERE NOTHING MOVES — BUT ITS HELP TEXT DID, IT NAMED TWO OF THREE SITES**
 `:1556-1558` has three dropout sites and the lever's help text names two. The **third** drops out the
 returned hidden state, and the source's own comment on that line says `(B,L,D) hidden -- also the
 memory-key source`. So with `dropout > 0` the memory keys written during training are computed from
@@ -1795,14 +2041,30 @@ covers **six** gates, so "the progress line cannot fire at this run length" is a
 prints rather than a claim in a docstring.
 
 **What it does NOT need, and this is why nothing was minted.** No typed accessor and therefore **no
-new entry point**. The four accessors exist because `Config` hands back a bare `int` for all 35
-Clock-unit *levers* (ISSUES H51, three of five gates handed bare ints until 2026-08-30); a module
-constant has no `Config` to drop its kind, so it is written `units.Windows` at its definition. That
-is a **construction, not a conversion** — it re-attaches a kind, it does not cross one. `K9` reads
-the order tables only, and this gate has **no row**: rows are entry-point calls and no entry point
-prints the progress line — the loop driver does, the way it owns the window cut `_window_bounds`
-names. So six keys, five of them rowed, and that asymmetry is stated at `_periods`, at
-`new_cadences` and in the `cadence` row rather than left for a reader to notice.
+new entry point**. The **five** accessors — `EVAL.curve_period`, `DOM.manage_period`,
+`FAB.manage_period`, `MEM.rekey_period`, `CKPT.save_period` — exist because `Config` hands back a
+bare `int` for all 35 Clock-unit *levers* (ISSUES H51, three of five gates handed bare ints until
+2026-08-30); a module constant has no `Config` to drop its kind, so it is written `units.Windows` at
+its definition. That is a **construction, not a conversion** — it re-attaches a kind, it does not
+cross one. *(This sentence said "four" until 2026-09-03. It is the sixth count this document has got
+wrong, and the one K13 cannot catch: **`four` is a word, and the check reads digits.** It is listed
+in K13's own docstring as the worked example of what it does not see.)*
+
+**And this gate has no row**: rows are entry-point calls and no entry point prints the progress line
+— the loop driver does, the way it owns the window cut `_window_bounds` names. So six keys, five of
+them rowed, and that asymmetry is stated at `_periods`, at `new_cadences` and in the `cadence` row.
+
+**⚠ THE ASYMMETRY IS NO LONGER ONLY STATED — K9 WAS WIDENED TO READ THE MAPPING (2026-09-03).** This
+section said *"`K9` reads the order tables only"*, and that was true and was the defect: the sixth
+period was the one period **no check in the suite could see**, so `PROGRESS_WINDOWS` could have been
+edited to a bare `100` — the exact H51 shape, which makes `Cadences.due` raise on its first
+evaluation — with all six suites green. `K9` now reads the `_periods` mapping itself in addition to
+the rows: every value must be a **call** (the typed accessor) or a module-level constant
+**constructed with a Clock kind** at its definition, which is what `RUN.PROGRESS_WINDOWS` is. Its
+detail line prints `6 period(s) in _periods, 1 of them a module constant with no order-table row`,
+so the asymmetry is now a number the suite prints rather than a claim three docstrings make. Two
+self-test cases hold it: the constant written `= 100` must fail, and the same constant written
+`U.Windows(100)` must pass.
 
 **Where "RUN owns no threshold" stands now.** It is narrowed, in the two places that carry it, to
 *no threshold that decides anything the model computes* — and the one log cadence is named as the
@@ -2114,7 +2376,7 @@ statements at once — including a sentence added to *un-stale* the count that w
 four when it landed. The manifest is data; run the function. Prose states the **shape** (one flat,
 prefixed map) and the **rules**, which do not drift.
 
-### Q-OPT-4 — `OPT.build(resume=...)` and `OPT.load_state(opt, st, saved)` overlap
+### Q-OPT-4 — `OPT.build(resume=...)` and `OPT.load_state(opt, st, saved)` overlap — **RESOLVED 2026-09-02: (d), WHICH WAS NOT IN THE OPTION LIST. ⚠ A FROZEN SIGNATURE MOVED — `resume` IS GONE FROM `OPT.build` AND `load_state` IS THE WHOLE RESTORE PATH. `param_group_shape` NOW HAS A PRODUCER, SO THE L50 GUARD STOPS BEING UNTRIPPABLE**
 `build`'s `RECEIVES:` block explains `run_windows` and **never mentions `resume`** (`opt/api.py:78-82`),
 while `load_state` is documented as the restore-or-refuse — it carries the `param_group_shape`
 refusal (L50) and the `opt.ckpt.loaded`/`refused` counters, and its refusal needs the **live** groups,
@@ -2147,7 +2409,19 @@ would create a second restore path with **no counters on it** — `opt.ckpt.load
 `opt.ckpt.refused` live on `load_state`, so state would move through one path while the counters
 described another. That is the shape Q-MEM-9 names one layer down. (b) is the fallback if a signature
 may not move, but then the parameter must be reported as **armed-but-inert**, not described as
-restoring anything. **The CAP analogue argues for (d), not (a):** `new_valve(restored=)` takes the
+restoring anything.
+
+**Against the owner's `NO COMPROMISES` rule and `D4` (*a mechanism kept for future use is KEPT with a
+switch, not deleted*), stated rather than assumed:** removing `resume` removes **no capability**,
+because there is no capability behind it to keep. `D4` protects mechanisms — a ported arm, a lever
+with an unimplemented branch — and `resume=None` is neither: it is a parameter whose only possible
+work (restoring the param-group structure) is already done, before this call, by the module restores,
+and every byte of the checkpoint it could have seen reaches OPT through `load_state`. Nothing becomes
+unreachable, no arm is lost, and no future run can ask for something it can no longer have. **If the
+owner reads it the other way, the reversal is one line in each of three places** — `src/opt/api.py`'s
+`build` signature, §7's `contract` block, and `spine/compose.py`'s live call — and the parameter comes
+back as `(b)`, documented armed-but-inert. That is the shape of the overrule, written down so it does
+not have to be re-derived. **The CAP analogue argues for (d), not (a):** `new_valve(restored=)` takes the
 lifted cap alone because `Valve.origin` must record where the starting cap came from — a fact the
 constructor cannot obtain any other way. `OPT.build` has no equivalent fact.
 
@@ -2163,7 +2437,7 @@ from the live groups, which is the only moment the "live" side of the comparison
 same defect Q-CKPT-2 records for the geometry manifest and the FAB/SIG sidecars, and it should be
 read with them.
 
-### Q-OPT-5 — the horizon is a projection and the epoch length is a measurement
+### Q-OPT-5 — the horizon is a projection and the epoch length is a measurement — **RESOLVED 2026-09-02: (a), PRINT THE RESIDUAL AND NAME ITS SIGN (UNDER-ANNEAL). NO SIGNATURE, NO LEVER. THE MAGNITUDE IS UNMEASURED AND THE PRINTED LINE IS WHAT MEASURES IT**
 `OPT.build` resolves the LR horizon **once**, from `run_windows`; `RunClock.begin_epoch` re-measures
 `len(Segmentation.ids) // ctx` **every epoch**, and online minting lengthens tokens and shortens
 every later epoch. Both are `units.Windows`, so nothing raises and nothing reconciles them. The
@@ -2398,8 +2672,13 @@ which is why the declared callable is **`scorer(ctx, src) -> logits`** (see Q-ME
 written once.
 
 **Consequence for the EVAL slice, since two agents could otherwise decide this differently:** because
-(c) is overruled, **Q-EVAL-10's `sample` → `seed_units` rename is the only reopening EVAL's frozen
-surface needs.** They do not have to land in one edit.
+(c) is overruled, **Q-EVAL-10 is the only other question that reopens EVAL's frozen surface.** They
+do not have to land in one edit. *(This sentence named the change as a `sample` → `seed_units`
+**rename** until 2026-09-03. It is neither. Q-EVAL-10 ruled `coherence(ev, *, logits_fn, sample,
+rng)` → `coherence(ev, *, logits_fn, units_by_domain, encode, rng)` — one parameter replaced by
+**two**, under a different name — and Q-EVAL-10's own section below **refuses** `seed_units` by
+name, because the per-domain keys are load-bearing and `seed_units` would throw the labels away. Two statements in one document naming two different signatures for one entry point is
+the C12 shape; the ruling wins, and this sentence now points at it instead of restating it.)*
 
 **Literature bore, narrowly.** kNN-LM (Khandelwal et al., ICLR 2020) interpolates **in probability
 space** — `p = (1-λ)·p_LM + λ·p_kNN` — and reports the perplexity of that mixture, i.e. it takes the
@@ -2407,7 +2686,7 @@ log of the interpolated distribution and scores it. So `MEM.blend`'s probability
 the standard formulation and option (a) is what the field already does. The literature does **not**
 bear on where the join lives in this tree; that is settled by O10 and by the C8/C9 record.
 
-### Q-TOK-10 — `TOK.save_vocabulary` takes no suffix, so M46 is not closed
+### Q-TOK-10 — `TOK.save_vocabulary` takes no suffix, so M46 is not closed — **RESOLVED 2026-09-02: (b), OVERRULING THIS DOCUMENT'S OWN RECOMMENDATION (a). ⚠ A FROZEN SIGNATURE MOVED: `save_vocabulary(tok, vocab, *, suffix="")`**
 `CKPT.save` has a `suffix` and says *"THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT"*;
 `save_vocabulary(tok, vocab)` has **no suffix parameter** and writes `d_vocab_save_path`, a string
 frozen at `build()`. So a `reason="bestN"` save writes `runs/x.best3/ckpt.pt` **and** overwrites the
@@ -2453,13 +2732,18 @@ looks for `<base>.best3.dyntok.json`. The considered alternative — couplings c
 named `..._path` carrying something that is not a path, and changes both wires' resolved values and
 the hand-computed fixtures that pin them. Not taken; recorded so the next reader need not re-derive
 it. **`ckpt/api.py`'s *"the tokenizer bytes go in `payload`"* is corrected in the same edit** — that
-was the second half of the two-frozen-docstrings disagreement.
+was the second half of the two-frozen-docstrings disagreement. **A third copy of it survived the
+repair and is fixed 2026-09-03:** `save_vocabulary`'s own paragraph pricing the refused option (a)
+said moving the merges into `payload` *"would make the snapshot self-contained (which
+`ckpt/api.py:96-99` **already claims**)"* — present tense, pointing at the very sentence this same
+ruling had just reversed. The disagreement it describes is now history, not a live conflict between
+two frozen surfaces, and the text says so.
 
 **Honest priority:** this closes a defect that cannot *fire* until `CKPT.Retention.consider` lands at
 P5 (it is deferred, and `Saves.best` can never be non-zero today). It is done now because a frozen
 signature costs one line now and a coordinated ten-agent edit later.
 
-### Q-TOK-11 — `residual_ratio` is sourced at mint time, when it is zero by construction
+### Q-TOK-11 — `residual_ratio` is sourced at mint time, when it is zero by construction — **RESOLVED 2026-09-02: (a) NOW, WITH (c) PERMANENTLY ALONGSIDE. ⚠ THE FROZEN SET GREW 121 → 122 (`LM.residual_ratios`)**
 `judge_probation`'s `embed` arm keeps a token iff `earned AND residual_ratio[t] >=
 probation_residual`. `tok/api.py:232-234` sources `residual_ratio` from LM's `MintReport`, produced by
 `LM.on_mint` **at the moment the row is created**, when the free residual *starts at zero* — so the
@@ -2497,12 +2781,36 @@ silently running the `use` test, which is ISSUES M41 exactly.
 inert as shipped** — this makes the `embed` arm *correct when switched on* rather than wrong by
 construction.
 
-**⚠ FOR WHOEVER RULES Q-LM-12 (`obs_emb`).** That question's option (b) also adds an `LM` entry
-point. **The set is now 122, not 121**: adding `LM.embed` makes it **123**, and both edits touch §7,
-the §LM table and `src/lm/api.py`, with K1 comparing document against tree in both directions. This
-document's §7 header is where the count is written; point at it rather than restating it. Note also
-that this document's own recommendation for Q-LM-12 is **(a)** — state that `LM.encode(...,
-n_layers=0)` is the embedding — which adds nothing.
+**⚠ THE RULING'S BLAST RADIUS, FINISHED 2026-09-03 — four live statements were still telling the next
+author to declare the wire.** `residual_ratio` can never be a `Coupling`: a `compute` sees only frozen
+`Config`s and this is a read off a live tensor after `build()` freezes, which is why §0's refused-wires
+table carries the row. `src/tok/levers.py` said the opposite in four places — the DELIBERATELY ABSENT
+table (`d_residual_ratio … NOT YET IN THE LEDGER`), the paragraph under it (*"no such Coupling exists
+in `assemble.COUPLINGS` today. Until it does…"*), the `probation_by` comment (*"the wire that arm needs
+is not in the ledger yet"*) and `probation_residual`'s own comment (*"arrives as the wire
+`d_residual_ratio` from LM"*). All four now name the **argument** and its producer instead. The
+warning those paragraphs carried is kept, because it is still true and is answered by the Gate rather
+than by a wire: at `probation_by="embed"` with `lm.compose = 0` the call returns `None`, and the arm
+must print *unreachable* rather than run the `use` test (M41).
+
+**THE FIFTH COPY IS THE OWNER'S AND IS DELIBERATELY NOT EDITED.** `TOK_PROBATION_MIN`'s census reason
+— `.rework/CENSUS.md`, the `tokenizer` family, and the same string in `.rework/census.json` — still
+reads *"The ratio itself is computed from model.compose and so arrives as the wire `d_residual_ratio`
+from LM"*. The census is the record of what the old tree's knobs **were** and of the verdict passed on
+each; the routing sentence inside a reason is this rebuild's business and this ruling overrules it.
+Rewriting a census reason is a census amendment in everything but name, `tests/test_census.py` N3 keys
+`DEPARTURES` on `(family, old_name)` and not on reason text, and no check reads the sentence. **The
+conflict is recorded here rather than resolved silently**: if the owner wants the ledger to match, the
+one-line edit is to that reason, and it changes no identity, no verdict and no default.
+
+**⚠ THE WARNING THIS SECTION CARRIED TO Q-LM-12, AND WHAT CAME OF IT.** This ruling was written not
+knowing that Q-LM-12 (`obs_emb`) was, in another slice on the same day, preparing to add an `LM`
+entry point of its own and to write "121 → 122" for it. It left a warning here. **Q-LM-12 was ruled
+(b) and `LM.embed` landed, so the set is 123, not 122** — the two additions are counted once, in §7's
+header, which is the only place the number is normative. Nothing about *this* ruling changed; what
+would have gone wrong is the count, and it did not. The mechanism that saved it is the one to keep:
+**the count lives in one place and every other mention points at it**, which is why §7's header now
+says so in as many words.
 
 ### Q-SIG-1 — `prototype_frac` has no supplier and is therefore structurally unreachable — **RESOLVED 2026-09-02: (c), WHICH THE SIGNATURE ALREADY SPECIFIED; THE LIVE DEFECT WAS AN ILLEGAL WIRE IN TWO COMMENTS**
 `SIG.train_step`'s `reservoir` is documented as *"a list of (window, window) pairs drawn from ONE
@@ -2541,7 +2849,7 @@ consumed while being structurally unreachable; `sig/api.py` now requires the cou
 are legitimate build-time couplings that are still undeclared; **no question owns them**, and whoever
 takes the SIG wiring should take all three together.
 
-### Q-OPT-6 — does `OPT.maybe_step` step the ENCODER optimizer?
+### Q-OPT-6 — does `OPT.maybe_step` step the ENCODER optimizer? — **RESOLVED 2026-09-02: NO — (a). IT WRITES `lr` TO BOTH AND STEPS `base` ONLY; SIG OWNS THE ENCODER STEP. NO SIGNATURE MOVED. ONE DECISION WITH Q-OPT-7, WHICH SUPPLIES THE WORD `encoder` THIS ANSWER NEEDS**
 `maybe_step` step 5 says *"write `lr` into EVERY param group of BOTH optimizers, then step and
 zero_grad both."* **The run of record does not do that.** `self_organize.py:7153-7154` writes the
 rate into `om` *and* `oe`; `:7287` steps **`om` alone**; `grep "oe.step"` over 9,859 lines returns
@@ -2599,7 +2907,7 @@ was added: `opt.encoder_steps_here`, which MUST BE 0.** Without it the double st
 silently, because both call sites look correct in isolation. `src/sig/` needed no edit; its
 docstrings were already written for (a).
 
-### Q-OPT-7 — `OptState` declares "both AdamW instances" and names neither
+### Q-OPT-7 — `OptState` declares "both AdamW instances" and names neither — **RESOLVED 2026-09-02: (a). THEY ARE `base` AND `encoder`, `build`'s OWN `param_groups` KEYS. NO SIGNATURE MOVED, AND K11 MAKES `encoder` A CHECKABLE `produces` TOKEN. THIS UNBLOCKED TWO CONSUMERS, NOT ONE**
 `SIG.warm_up` and `SIG.train_step` both document their `opt` parameter as **THE ENCODER OPTIMIZER,
 BUILT BY OPT AND HANDED IN** — and the hander is the composition root, which holds only the
 `OptState` that `OPT.build` returned. `opt/api.py:29-31` describes that record as *"both AdamW
@@ -2646,12 +2954,26 @@ At an epoch roll, at a retok and at an **LR restart** the old tree calls `fabgro
 (`:6515`, `:7787`, `:7120`) to open a growth blackout, so the loss jump *we caused* does not read as
 a distribution the fabric must grow into. No FAB entry point accepted it. **(a) is adopted, with one
 correction to where it lands:** the question proposed the keyword on `FAB.manage`; in the old tree the
-blackout gates **growth**, not selection — `note_shift` sets `blackout` at `:2948` and its **only two
-consumers** are `:3004` (`if unexpected and t - s.blackout >= s.cool`) and `:3012` (`if t - s.last <
-s.cool or t - s.blackout < s.cool: return 0`), both inside `PlateauGrowth.step`, which in this
-rebuild is `FAB.grow_check`. `manage` is cull-and-spare and has no cooldown to suppress, so the
-keyword would have been unreachable there. **Deciding the wrong entry point costs as much as not
+blackout gates **growth**, not selection — `note_shift` sets `blackout` at `:2948` and **two of its
+three consumers** are `:3004` (`if unexpected and t - s.blackout >= s.cool`) and `:3012` (`if
+t - s.last < s.cool or t - s.blackout < s.cool: return 0`), both inside `PlateauGrowth.step`, which
+in this rebuild is `FAB.grow_check`. `manage` is cull-and-spare and has no cooldown to suppress, so
+the keyword would have been unreachable there. **Deciding the wrong entry point costs as much as not
 deciding.**
+
+**⚠ "ONLY TWO" WAS WRONG, AND IT WAS WRONG IN FOUR PLACES — corrected 2026-09-03 without moving the
+ruling.** `self_organize.py:7397` is a **third** consumer and it sits at the **loop call site**, not
+inside `PlateauGrowth.step`: `_blackout = fabgrow is not None and (step - fabgrow.blackout) <
+fabgrow.cool`, guarding the `GROW_CAP` capacity valve two lines below. This document said "only two"
+here and at §2's `FAB` entry, and `src/fabric/api.py` and `src/fabric/levers.py` said it too. It
+changes nothing about **where the keyword lands** — both consumers that decide *growth* are in
+`grow_check`, and `manage` still has no cooldown — but it changes what the sentence *proves*: the
+old tree read one blackout in **two** places, and the rebuild therefore needs the state in two
+places as well. It has it: `FAB.grow_check` applies its own `cooldown` to `step_windows - shift_at`,
+and the resulting state rides out on `GrowReport` for the root to join into `CAP.observe`'s
+`blackout` boolean — which is exactly the route `ROW_ARGUMENTS_ELSEWHERE["CAP.observe"]` already
+named, and the reason CAP mints no blackout-window lever of its own. A sentence that undercounted
+the consumers was one sentence away from justifying a second, independent blackout in CAP.
 
 **⚠ THE SIGNATURE:** `FAB.grow_check(fab, pop, *, flush_loss, step_windows, soft_cap,
 memory_pressure, signature, shift_at=None)`. Made **now** because 118 of the 123 entry points are stubs
@@ -2844,7 +3166,7 @@ record would empty a checked mechanism into an unchecked one. **(b) is refused**
 then invent the field names and the four `produces` entries would certify a round trip nothing can
 verify — which is `TOK.vocab_state`'s D-T3 exactly, one package over.
 
-### Q-TOK-12 — which window's `Due` does the flush act on?
+### Q-TOK-12 — which window's `Due` does the flush act on? — **RESOLVED 2026-09-02: (b), THE OR, PER CADENCE KEY. IDENTICAL TO (a) AT THE SHIPPED `OPT_BATCH_WINDOWS = 1`; NO SIGNATURE MOVES**
 `TOK.on_window` is asked per WINDOW; `mint_burst`, the retok and `judge_probation` act per FLUSH
 (§3.10). `batch_windows` Dues therefore reach one flush and nothing in the frozen surfaces says which
 one wins. **Options:** (a) the LAST window's — simple, and silently drops up to `batch_windows - 1`
@@ -2886,7 +3208,7 @@ is born up to `batch_windows-1` windows after the window that raised it. `probat
 **At the shipped `OPT_BATCH_WINDOWS = 1` the two readings are identical and no recorded result
 moves.** The divergence appears at `BATCH_W=16`, which is the heavy-run configuration.
 
-### Q-LM-12 — what call produces `WORLD.loss_terms`' `obs_emb`?
+### Q-LM-12 — what call produces `WORLD.loss_terms`' `obs_emb`? — **RESOLVED 2026-09-02: (b), `LM.embed`. ⚠ THE FROZEN SET GREW 122 → 123 (LIVE COUNT RE-VERIFIED 2026-09-03 BY SCRIPT: 123 IN THE TREE, 123 IN §7, LM HOLDS 12). THE CONTRACT'S OWN RECOMMENDATION (a) IS REFUTED ON BOTH ARMS**
 `world/api.py:58-63` wants "LM's EMBEDDING of the batch, (B, W, d_model) — the lowest layer, the
 point where a new sense plugs in". **LM exposes no embedding entry point**: `LM.encode` returns the
 `(B, L, width)` HIDDEN, and its `n_layers` argument "runs only the first n blocks", so `n_layers=0`
@@ -2944,6 +3266,16 @@ table the world model observed a printed fact.
 **Cheap now, expensive later:** LM's bodies are unwritten, so this cost one stub, one §7 line, one
 row and one deleted exemption. After P4 it is a coordinated edit across ten independent agents.
 
+**THE COUNT WAS RE-VERIFIED BY SCRIPT ON 2026-09-03, NOT COPIED FROM THIS DOCUMENT**, because
+`Q-TOK-11` and this question collided on it once already and a fifth stale count would be the sixth
+time. Running `test_contract.api_signatures()` — K1's own AST walk, the same oracle the check uses —
+over `src/` returns **123 entry points**, against **123 declared** in §7's ```contract block, all
+distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 7,
+RUN 14, SIG 10, TOK 9, WORLD 8. LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
+**`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
+`state_dict` — the two additions are both present and both in §7, so 121 + 2 = 123 is the arithmetic
+and the tree agrees with it in both directions.
+
 ---
 
 ## 6. What `tests/test_contract.py` checks
@@ -2958,8 +3290,11 @@ row and one deleted exemption. After P4 it is a coordinated edit across ten inde
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
 | K8 | every RNG stream the root takes is one `RNG_SUBSYSTEMS` minted, and none is reached with `.get()` | `streams.get("world")` returning `None` into a required `rng=` |
-| K9 | every `Cadences.due` period in the tables is a **typed accessor**, not a bare lever read | `Cadences.due('fab.manage', FAB.manage_every, clock)` — an int where `due` requires `units.Windows` |
+| K9 | every `Cadences.due` period in the tables is a **typed accessor**, not a bare lever read — **and every value in `compose._periods` is a call or a module constant constructed with a Clock kind** (widened 2026-09-03) | `Cadences.due('fab.manage', FAB.manage_every, clock)` — an int where `due` requires `units.Windows`; or `PROGRESS_WINDOWS = 100`, the sixth period, which has no row and which nothing in the suite could see until the mapping half was added |
 | K10 | every **required** argument of a rowed entry point is produced by an EARLIER row's `produces` column, named in that row's own note, listed in `ROW_ARGUMENTS_ELSEWHERE`, or the entry point is deferred | write a row for a call whose arguments nothing supplies — which is what `EVAL.curve_probe` was, against a deferral for the byte-identical `EVAL.holdout_probe` |
+| K11 | no `produces` entry names a value its entry point does not return | certify a six-field record as the whole geometry comparison by writing the bare token `geometry` in a column |
+| K12 | every deferral reason names **every** required argument that has no producer | defer `FAB.contribution` with a reason listing two of the four arguments nothing supplies |
+| K13 | every **number the prose writes about a countable thing** equals the tree's number, and no `### Q-` heading says a thing is **absent** that the tree declares | write "a manifest of 15 fields" against twenty, or head a question *"nothing in this system clips gradients"* while `OPT.grad_clip` is declared |
 
 **K6 is the check K4 is not, and the gap was 56 entry points wide.** K4 asks whether some stub's
 docstring *names* a lever; K6 asks whether that stub is ever *called*. K4 passed at 257 named / 2
@@ -2977,8 +3312,27 @@ defaults to `selfcon`. Only reading the docstring can, which is why that one is 
 hand. It is also blind to `MEM.blend`'s `model_probs`, which it drops as "the package's own live
 object" — MEM's live object is `store`, and `blend` is the one entry point that does not take it.
 
+**K13 is the one that stops a recurrence rather than a class of defect**, and it is the youngest.
+Counts in this document's prose have been wrong **six** times: the geometry manifest's field count
+(written 15 and 16, against twenty); `WORLD.geometry`'s width (five, against six);
+`CKPT.check_geometry`'s argument count ("two", against four); the size of the frozen signature set
+(written 121 in four present-tense places at once, against the 123 that §7 declares); the
+rejected-candidate count in `NOT_WIRES` (6, against 7); and the typed-accessor count ("the four
+accessors", against five). Every one was found by a human reading and every one was a `grep` away.
+*(Those six are written here without the shapes K13 searches for, deliberately: the check found two
+of them in the first draft of this paragraph, which is the check doing its job to its own
+documentation.)* K13 counts the live tree by AST, searches a listed
+set of English shapes for numbers about those quantities, and compares. **It prints the shapes it
+searched for and the ones it did not**, because a prose check over English is a heuristic and a
+heuristic that will not say what it missed is worse than no check: it cannot read a number written
+in **words** (which is exactly how "the four accessors" and §3.6's "fourteen" survived it), it
+skips any claim in a past-tense sentence and prints the list of what it skipped, and it sees only
+the shapes in its table. Arm (b) reads the 39 `### Q-` headings and nothing else. **It fails when it
+finds nothing**, because "no claims found" and "no claims wrong" are the same output from a check
+that has stopped reading.
+
 Each carries a `_report()` line printing **the size of the population it examined**, and
-`selftest()` trips every one of the ten against a synthetic tree in a temp directory. That is not
+`selftest()` trips every one of the thirteen against a synthetic tree in a temp directory. That is not
 ceremony: this repository has **sixty** untrippable guards on record, and one of them was written
 into `tests/test_ownership.py` *by the patch that was fixing `tests/test_ownership.py`*. A check
 nobody has watched fail is indistinguishable from a check that cannot fail.

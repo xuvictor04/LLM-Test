@@ -44,7 +44,7 @@ present; the third was not, and the negative is recorded too, because "no unreso
 anything if a later reader can see that it was looked for.
 
   DEFECT 1 -- DOUBLED ENVIRONMENT NAMES. ALL NINE rows name their target as PREFIX.PREFIX_FIELD:
-  `CAP.CAP_TARGETS`, `CAP.CAP_LIFT`, `CAP.CAP_PIN_STEPS` and so on. spine/lever.py:104-106 generates the
+  `CAP.CAP_TARGETS`, `CAP.CAP_LIFT`, `CAP.CAP_PIN_STEPS` and so on. spine/lever.py::Lever.env_name_for generates the
   environment name as f"{PREFIX}_{FIELD.upper()}", so `CAP.CAP_LIFT` taken literally declares a field
   named `CAP_LIFT` answering to CAP_CAP_LIFT -- a name no operator would ever type, that from_env() would
   never find, and that would therefore sit at its default for the life of the tree while every static
@@ -136,10 +136,10 @@ is a number another package owns:
     d_mask_dead_rows <- LM.mask_dead_rows the honesty precondition on lifting the vocabulary (below)
     the LIFTED CAPS  <- CKPT             earned state, not configuration (see `fab_start`)
 NONE OF THE FOUR IS IN spine/assemble.py's COUPLINGS TODAY. The only d_expert_slots row there targets DOM
-(assemble.py:630-631), there is no d_vocab_slots row at all, and the two rows that DO need this package's
+(assemble.py::_view), there is no d_vocab_slots row at all, and the two rows that DO need this package's
 numbers -- FAB.d_cap_lift_period and TOK.d_cap_lift_period -- source them from a prefix named TRAIN that
 no package in the census owns (the loop is RUN; the batch width is OPT.batch_windows). Those rows are
-therefore DEFERRED at build() with a warning (assemble.py:875-885) rather than failing, which is the
+therefore DEFERRED at build() with a warning (assemble.py::COUPLINGS) rather than failing, which is the
 untrippable-guard shape all over again: the numbers now EXIST, under this prefix, and the edges still do
 not happen. Declaring this file leaves O4 green, and for an unflattering reason rather than a good one:
 there are no CAP wires to be found unread, because there are no CAP wires. (O4 reports 10 declared
@@ -209,9 +209,9 @@ class CAPLevers(LeverSet):
     # the merge, exactly like DOM's `accept_rule` and `shift_rule`, and without choices= `CAP_TARGETS=
     # Experts` or `=vocabulary` would land in whichever branch the reader writes last and run an arm the
     # operator did not ask for. Note also that choices= could not have saved the three booleans it
-    # replaces: lever.py:122 coerces anything outside ("0","","off","no","none","false") to True, so
+    # replaces: lever.py::Lever.coerce coerces anything outside ("0","","off","no","none","false") to True, so
     # GROW_CAP_FAB=flase would have been ON, and choices=(True, False) would pass every typo it was
-    # added to catch (the argument eval/levers.py:102-107 makes at length).
+    # added to catch (the argument eval/levers.py::<module> makes at length).
 
     # ==============================================================================================
     # WHERE EACH CEILING STARTS -- the valve only ever lifts, so this is the floor of the whole run
@@ -222,7 +222,7 @@ class CAPLevers(LeverSet):
                          "ceiling.", U.EXPERTS)
     # 0 IS A SENTINEL AND THAT IS WHY IT IS STILL THE LITERAL. The old line is
     # `_cap_fab = [int(_i("GROW_CAP_FAB0", 0)) or FAB_NMAX]` (:5209): zero means "use FAB_NMAX". A
-    # default computed from another knob is precisely what lever.py:54-61 refuses -- "a value derived
+    # default computed from another knob is precisely what lever.py::Lever.__init__ refuses -- "a value derived
     # from another lever is a WIRE, not a default" -- so the fallback becomes the declared wire
     # d_expert_slots from FAB and the LEVER keeps only its literal, which is 0, which is what the census
     # records and what the old _SPEC records. THE LITERAL THE DEFAULT RUN ACTUALLY USED was FAB's ceiling:
@@ -327,7 +327,7 @@ class CAPLevers(LeverSet):
     # reserves Steps for the LR horizon and nothing else.
     # IT IS A THRESHOLD, NOT A CADENCE, WHICH IS WHY `_EVERY` HAD TO GO. `pin_tick` accumulates the delta
     # while the population is at its cap and DECAYS it while below (self_organize.py:930-948, now
-    # spine/derive.py:265), so this is time-spent-pinned, accumulated -- not time since the last lift and
+    # spine/derive.py::flush_period_windows), so this is time-spent-pinned, accumulated -- not time since the last lift and
     # not a modulo. The first version stored the step at which a cap first saturated and required an
     # UNBROKEN run, which is harmless for a vocabulary (it never shrinks) and fatal for the experts
     # (a cull drops the population below its cap within a thousand steps and the clock restarted every

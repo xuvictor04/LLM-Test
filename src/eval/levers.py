@@ -52,7 +52,7 @@ THREE CENSUS DEFECTS REPAIRED WHILE READING IT. All three were real. All three a
 than fixed in silence, because a correction nobody can find reads exactly like a transcription error.
 
   DEFECT 1 -- DOUBLED ENV NAMES. SIXTEEN emitted rows named their target as PREFIX.PREFIX_FIELD.
-  lever.py generates the environment name as PREFIX + "_" + FIELD.upper() (lever.py:104-106), so
+  lever.py generates the environment name as PREFIX + "_" + FIELD.upper() (lever.py::Lever.env_name_for), so
   `EVAL.EVAL_COH_LEN` taken literally declares a field named `eval_coh_len` answering to
   EVAL_EVAL_COH_LEN -- a name no operator would type and no run would ever read, and one that no static
   check would flag, since a doubled name is a perfectly well-formed name. The prefix is stripped from the
@@ -74,15 +74,15 @@ than fixed in silence, because a correction nobody can find reads exactly like a
     Reconstructor post hoc, on a settled store, in its own loop that has no windows and no flushes in it.
     Steps is right and stays Steps -- and the two levers being different kinds in one file is the point,
     not an inconsistency.
-    THE CONFLICT WITH THE SPINE, STATED RATHER THAN RESOLVED. spine/assemble.py:686, :698 and :711 wrap
+    THE CONFLICT WITH THE SPINE, STATED RATHER THAN RESOLVED. spine/assemble.py::_owner_blocks, :698 and :711 wrap
     the analogous `step`-counter cadences as `derive.flush_period(Steps(r["FAB"].manage_every), ...)` and
     `Steps(r["TRAIN"].grow_cap_every)` -- typing as Steps the same counter this file (and derive.py's own
     docstring at :207, "`step` advances once per WINDOW") types as Windows. The same counter therefore has
     two kinds in two files. The practical consequence for whoever ports the curve probe: derive.flush_period
-    REFUSES anything but Steps (derive.py:223-226), so there is today NO legal conversion from a
+    REFUSES anything but Steps (derive.py::flush_period), so there is today NO legal conversion from a
     Windows-typed cadence to the flush clock. Either spine.derive gains a Windows->Flushes conversion or
     FAB.manage_every and TRAIN.grow_cap_every change kind. Picking one here, silently, is how a knob
-    acquires two meanings; src/memory/levers.py:49-56 records the identical conflict from its own side,
+    acquires two meanings; src/memory/levers.py::<module> records the identical conflict from its own side,
     which is evidence that this is the spine's row to settle and not a per-package taste.
 
   DEFECT 3 -- A MERGE WITH TWO DEFAULTS. EXPERT_NULLS (20 draws, the SPECIALIZATION null at :9171) merges
@@ -99,7 +99,7 @@ DATA_MODE, SIG_MODE, MODEL, VERIFY, LR_SCHED, KEY_SRC, SIG_SPACE, EVICT, CULL_MO
 TOK_PROBATION_BY, CHAIN_ROUTE) are every one of them owned elsewhere -- FAB, MEM, SIG, TOK, DATA, OPT --
 and they carry choices= in those files. EVAL owns no string-valued knob at all: fifteen numbers and two
 flags. AND THE HONEST LIMIT ON THE TWO FLAGS, because this is the same class of defect from a direction
-choices= cannot reach: a bool lever's coercion (lever.py:122) reads anything outside
+choices= cannot reach: a bool lever's coercion (lever.py::Lever.coerce) reads anything outside
 ("0", "", "off", "no", "none", "false") as TRUE, so `EVAL_GENERATE=of` -- one dropped letter -- resolves
 to ON, silently, exactly like an unrecognised string falling into an else. choices=(True, False) would be
 vacuous, since coercion has already collapsed the typo to a member of that set before the check runs. The
@@ -362,7 +362,7 @@ class EVALLevers(LeverSet):
     # UNIT: Windows. The guard is `step % RATE_EVERY == 0` and `step` advances per WINDOW, not per
     # optimizer step, so this knob has always been denominated in Windows while its name and every
     # discussion of it said steps -- at BATCH_W > 1 the cadence a reader sets is not the cadence they get.
-    # See DEFECT 2 in the header for the conflict with spine/assemble.py:686/698/711, which types the same
+    # See DEFECT 2 in the header for the conflict with spine/assemble.py::_owner_blocks/698/711, which types the same
     # counter as Steps, and for why that is the spine's row to settle rather than this file's.
     # THE SAME GUARD LINE IS WHERE A CRASH LIVED: `... and VALC:` with VALC built only inside
     # `if DATA_MODE == 'real':`, so every synthetic run died the first time the meter came round -- for

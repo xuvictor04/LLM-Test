@@ -160,7 +160,7 @@ although they are loss weights and not counts of anything. units.py has no TEMPE
 constant, and adding one is a spine edit, not an encoder edit.
 """
 # ABSOLUTE, NOT `from ..spine.lever import ...`, and this is not a style preference. The tree is
-# imported with `src` itself on sys.path -- tests/test_derive.py:33 does it, and so does this file's
+# imported with `src` itself on sys.path -- tests/test_derive.py::<module> does it, and so does this file's
 # own verification command -- which makes `sig` a TOP-LEVEL package, and a relative import one level
 # above a top-level package is an ImportError ("attempted relative import beyond top-level package"),
 # not a fallback. The sibling packages src/fabric/levers.py and src/memory/levers.py spell it this

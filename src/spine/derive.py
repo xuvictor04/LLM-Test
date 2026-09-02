@@ -350,7 +350,7 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
     UNIT IN: run_windows = Windows, effective_batch_windows = windows per optimizer step (count).
     UNIT OUT: Steps.
 
-    THE ONE CROSS-KIND CONVERSION IN THE TREE THAT HAD NO NAME. units.py:86 states the rule -- "There
+    THE ONE CROSS-KIND CONVERSION IN THE TREE THAT HAD NO NAME. units.py::Clock.convert states the rule -- "There
     is no implicit path between kinds ... call the named function in spine.derive that already knows
     the rate, so the conversion exists in one place with a name" -- and opt/api.py said in as many
     words that "no conversion function is needed -- which matters, because spine/derive.py has no
@@ -437,20 +437,26 @@ def pin_tick(held, pinned, dstep):
     the type that was added to prevent it.
 
     THE CONTRADICTION THIS RESOLVES, because it was frozen on two surfaces at once.
-    src/capacity/levers.py:88-108 sets out two legal repairs and records that applying BOTH fires the
-    valve 16x too EARLY. capacity/api.py:16 then froze repair (a) as done -- "pin_tick is re-typed to
+    src/capacity/levers.py::<module> sets out two legal repairs and records that applying BOTH fires the
+    valve 16x too EARLY. capacity/api.py::<module> then froze repair (a) as done -- "pin_tick is re-typed to
     accumulate units.Windows ... NO CONVERSION HAPPENS ANYWHERE" -- while this function still refused
     a Windows, and docs/04_CONTRACT.md stated the same repair as done in one section and proposed in
     another. A P4 implementer following the CAP contract would have written
     pin_tick(held_windows, pinned, elapsed_windows) and got UnitError on the first flush; the only
-    non-raising implementation left was `int(held) >= cap.pin_windows`, which capacity/levers.py:107
+    non-raising implementation left was `int(held) >= cap.pin_windows`, which capacity/levers.py::<module>
     names as "the original defect again". This is repair (a), applied here, once.
 
     Repair (b) -- converting the THRESHOLD to Flushes -- stays only in FAB.d_cap_lift_period and
-    TOK.d_cap_lift_period, which fabric/api.py:305 and tok/api.py:313 read for REPORTING beside the
+    TOK.d_cap_lift_period, which fabric/api.py::grow_check and tok/api.py::vocab_state._ read for REPORTING beside the
     lift counters, because "0 lifts" cannot otherwise distinguish "never full" from "never
-    plateaued". Nothing compares them against this clock, and Windows >= Flushes raises, so both
-    repairs cannot be live in the valve at once by construction rather than by discipline.
+    plateaued". (Those two line numbers were :305 and :313 until 2026-09-03 and had drifted onto
+    unrelated prose; the reads are the `_ = fab.d_cap_lift_period` and `_ = tok.d_cap_lift_period`
+    lines, which K5 will fail on if either goes.) Nothing compares them against this clock, and
+    Windows >= Flushes raises, so both repairs cannot be live in the valve at once by construction
+    rather than by discipline. THE REPORTING WIRES ARE NOT PERMANENT: Q-CLOCK-1 is MEASURABLE, and
+    the condition that retires both rows -- CAP.counters rendering its block-reason histogram beside
+    the pinned high-water mark -- is written out there. The point THIS message makes does not depend
+    on them and survives their deletion: do not convert the threshold.
 
     THE 32 ORACLE CASES ARE UNAFFECTED. They record raw ints in and raw ints out -- the shipped
     function had no types to capture -- so the arithmetic they pin is identical and only the wrapper
@@ -504,7 +510,7 @@ def pin_tick(held, pinned, dstep):
                         f"the same defect wearing the kind units.py reserves for the LR horizon and "
                         f"nothing else. Do not convert the threshold either: FAB.d_cap_lift_period and "
                         f"TOK.d_cap_lift_period exist for the REPORT, and applying both repairs at once "
-                        f"fires the valve 16x too EARLY (capacity/levers.py:88-108).")
+                        f"fires the valve 16x too EARLY (capacity/levers.py::<module>).")
     if isinstance(dstep, Clock) and type(dstep) is not Windows:
         raise UnitError(f"pin_tick: dstep must be Windows, got {type(dstep).__name__}. The delta is how "
                         f"many windows elapsed since the last call, not how many times the loop body ran "

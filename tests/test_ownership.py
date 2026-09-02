@@ -1764,6 +1764,98 @@ class FabricLevers(LeverSet):
     alpha = Lever(0.5, "not a clock", U.FLAG)
 """
 
+# =====================================================================================================
+def check_o12_citations_name_symbols(mods):
+    """O12 -- a citation into one of OUR files names a SYMBOL; only the frozen old tree gets line numbers.
+
+    THREE CONSECUTIVE REVIEW ROUNDS WERE SPENT ON THIS AND EACH ONE MADE IT WORSE. Reviewers reported
+    "three of the five fixed citations landed on the wrong lines", "the citation repair replaced one
+    wrong line number with another wrong line number", and "five citations this run wrote or
+    invalidated point at the wrong text -- four of them moved by this same working tree". Agents
+    fixing citations broke citations, because a line number in a file that is still being edited is
+    wrong the moment anyone inserts a paragraph above it.
+
+    Measured before the sweep: 288 citations into our own moving files, 150 into the frozen old tree,
+    and .rework/ISSUES.md had grown by 287 lines so every defect header in it had moved by 88.
+
+    THE FROZEN OLD TREE KEEPS ITS LINE NUMBERS AND THAT IS THE POINT OF THE RULE. self_organize.py,
+    memory.py, tokenizer.py, vocab.py, datastream.py and world_model.py are not edited -- they are the
+    evidence. `self_organize.py:6796` will mean the same thing in a year. `spine/derive.py:265` did
+    not survive one commit.
+
+    A SYMBOL CITATION IS CHECKABLE AND A LINE NUMBER IS NOT, which is the deeper reason. This check
+    verifies that every cited symbol EXISTS in the file it names. Nothing could verify that line 265
+    was still the right line.
+
+    WHAT THE CONVERSION DID NOT DO, said plainly because it matters: it did not VALIDATE the
+    citations. A citation whose line number was already stale converted to a confidently wrong symbol
+    -- `spine/derive.py:265` became `spine/derive.py flush_period_windows` beside prose about a clock
+    being "accumulated", which is pin_tick. That is not worse than the stale number it replaced; it is
+    differently wrong and it is VISIBLE, because a reader sees a symbol name that contradicts the
+    sentence around it. A wrong line number shows a reader nothing.
+
+    WHAT IT CANNOT CATCH: a citation naming a symbol that exists and is the wrong one. That is a
+    semantic error, no different from any wrong sentence, and no check reaches it.
+    """
+    FROZEN = ("self_organize.py", "memory.py", "tokenizer.py", "vocab.py", "datastream.py",
+              "world_model.py", "holdout.py", "prompt.py", "runs.py")
+    _LINE = re.compile(r"\b((?:[\w./]+/)?[\w_]+\.py):(\d+)")
+    # `::` AND NOT A SPACE. The first version matched `file.py <word>`, which is ordinary English --
+    # it reported "units.py is", "spine/derive.py still" and "capacity/levers.py and" as citations to
+    # symbols that do not exist. A citation needs a separator prose cannot produce by accident, and
+    # `::` is greppable besides: `grep -rn "\.py::" src/` enumerates every one.
+    _SYM = re.compile(r"\b((?:[\w./]+/)?[\w_]+\.py)::([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*|<module>)")
+
+    # Every symbol each of our files defines, from the modules already parsed for this pass.
+    defined, by_base = {}, {}
+    for m in mods:
+        names = set()
+        def _walk(nodes, prefix=""):
+            for n in nodes:
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    names.add(prefix + n.name)
+                    _walk(n.body, prefix + n.name + ".")
+                elif isinstance(n, ast.Assign):
+                    for t in n.targets:
+                        if isinstance(t, ast.Name):
+                            names.add(prefix + t.id)
+        _walk(m.tree.body)
+        defined[m.rel] = names
+        by_base.setdefault(os.path.basename(m.rel), []).append(m.rel)
+
+    findings, lines_ok, syms = [], 0, 0
+    for m in mods:
+        for i, line in enumerate(m.lines, 1):
+            for cited, lineno in _LINE.findall(line):
+                if os.path.basename(cited) in FROZEN and "/" not in cited:
+                    lines_ok += 1
+                    continue
+                if not by_base.get(os.path.basename(cited)):
+                    lines_ok += 1                      # not one of ours; nothing to say about it
+                    continue
+                findings.append(
+                    f"{m.rel}:{i}  cites {cited}:{lineno} -- a LINE NUMBER into a file this tree still "
+                    f"edits. It is wrong the moment anything is inserted above it, and three review "
+                    f"rounds were spent repairing citations that repair broke. Name the symbol: "
+                    f"'{cited}::some_function'. Line numbers are for the frozen old tree only.")
+            for cited, sym in _SYM.findall(line):
+                cands = by_base.get(os.path.basename(cited)) or []
+                if not cands:
+                    continue
+                syms += 1
+                if sym == "<module>":
+                    continue                       # module level: the file is the location
+                if not any(sym in defined[c] or sym.split(".")[0] in defined[c] for c in cands):
+                    findings.append(
+                        f"{m.rel}:{i}  cites '{cited} {sym}' and {cited} defines no such symbol. A "
+                        f"symbol citation is checkable, which is the whole reason for using one.")
+    return _report("O12", "citations name symbols, except into the frozen old tree", not findings,
+                   f"{syms} symbol citation(s) resolved against {len(defined)} parsed file(s); "
+                   f"{lines_ok} line citation(s) into the frozen old tree or outside the tree, left "
+                   f"alone", findings, vacuous=not (syms or lines_ok))
+
+
+
 # --- O10 fixtures. The check had no self-test cases until the route it was written to close was
 # --- reopened by src/spine/compose.py and a reviewer walked through it with every check green.
 
@@ -1910,6 +2002,7 @@ _BY_TAG = {
     "O9": check_o9_one_config_per_signature,
     "O10": check_o10_no_backdoor_imports,
     "O11": check_o11_no_unnamed_clock_arithmetic,
+    "O12": check_o12_citations_name_symbols,
 }
 
 
@@ -1983,6 +2076,7 @@ CHECKS = (
     check_o9_one_config_per_signature,
     check_o10_no_backdoor_imports,
     check_o11_no_unnamed_clock_arithmetic,
+    check_o12_citations_name_symbols,
 )
 
 

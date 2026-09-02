@@ -89,7 +89,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     vote and for spending HALT mass on the base representation. targets: (B, L) token ids, needed
     only for hop_sup and ind_w; when None those two terms are UNREACHABLE and say so.
     live_domains: DOM's live domain count -- RUNTIME STATE, so an argument, not the frozen wire
-    fabric/levers.py:408 calls d_live_domains. `hold_out`: one expert id excluded from EVERY hop's
+    fabric/levers.py::FABLevers.bal_floor calls d_live_domains. `hold_out`: one expert id excluded from EVERY hop's
     routing distribution.
 
     Depth is min(depth_now, hops, 2 + n_live//2); society=True pins depth at 1 and keeps per-expert
@@ -419,10 +419,16 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
     the step of the last SELF-INFLICTED distribution shift -- an epoch resample, a retok, an LR
     restart -- as units.Windows. This function applies its OWN `cooldown` to
     `step_windows - shift_at` and suppresses BOTH growth legs while it is open, which is precisely
-    what the old tree did: note_shift(t) sets `blackout` (:2948) and its ONLY two consumers are
+    what the old tree did: note_shift(t) sets `blackout` (:2948) and TWO OF ITS THREE consumers are
     :3004 (`if unexpected and t - s.blackout >= s.cool`) and :3012 (`if t - s.last < s.cool or
-    t - s.blackout < s.cool: return 0`), BOTH inside PlateauGrowth.step -- which in this rebuild is
-    this function. The contract question proposed the keyword on FAB.manage; manage is
+    t - s.blackout < s.cool: return 0`), both inside PlateauGrowth.step -- which in this rebuild is
+    this function. THE THIRD IS :7397, AND THIS DOCSTRING SAID "ONLY TWO" UNTIL 2026-09-03: the loop
+    computes `_blackout = (step - fabgrow.blackout) < fabgrow.cool` at its own call site and gates
+    the CAPACITY VALVE on it. That one is not this function's -- it is CAP.observe's `blackout`
+    boolean, joined by the root from the state this function puts on GrowReport -- and it does not
+    move the ruling: both consumers that decide GROWTH are here, and `manage` is cull-and-spare with
+    no cooldown to suppress. It is named because a reader who greps `blackout` finds three sites and
+    has to know which one this keyword answers. The contract question proposed the keyword on FAB.manage; manage is
     cull-and-spare and has no cooldown to suppress, so the keyword would have been unreachable
     there. Deciding the wrong entry point costs as much as not deciding.
     THE THRESHOLD STAYS IN THE PACKAGE THAT DECLARES IT. The root supplies only the STAMP; FAB
@@ -606,7 +612,7 @@ def manage_period(fab: Config):
     FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.
 
     THE WRAP BELONGS HERE AND NOT AT THE CALL SITE because this is where the kind is DECLARED.
-    fabric/levers.py:648 types manage_every Windows; a root that wrote Windows(fab.manage_every)
+    fabric/levers.py::FABLevers types manage_every Windows; a root that wrote Windows(fab.manage_every)
     would be asserting that kind from outside the package that owns it, in three places, each free
     to be wrong on its own. One accessor per period is the same rule the wires follow.
 

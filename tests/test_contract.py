@@ -37,15 +37,22 @@ rule -- which is how the old tree ended up with a report path and an audit path 
 numbers for one quantity. On a SYNTHETIC tree (the self-test) the cross-check is skipped and said to
 be skipped, because importing a temp directory's spine is not what is under test there.
 
+    K13 every NUMBER THIS TREE'S PROSE WRITES ABOUT A COUNTABLE THING equals the number the tree
+        actually holds, and no `### Q-` heading says a thing is ABSENT that the tree declares.
+        Counts in prose have gone stale six times here; a prose check over English is a heuristic
+        and this one prints both the shapes it searched for and the ones it did not.
+
 VACUITY IS PRINTED. Every check reports the size of the population it examined, and selftest() trips
-all five against synthetic trees in a temp directory. This repository has SIXTY untrippable guards on
-record and one of them was written into tests/test_ownership.py by the patch that was fixing
-tests/test_ownership.py. A check nobody has watched fail is indistinguishable from a check that
-cannot fail.
+every one of them against synthetic trees in a temp directory. This repository has SIXTY untrippable
+guards on record and one of them was written into tests/test_ownership.py by the patch that was
+fixing tests/test_ownership.py. A check nobody has watched fail is indistinguishable from a check
+that cannot fail. K13 goes one step further and FAILS when it finds nothing to check, because "no
+claims found" and "no claims wrong" print the same way.
 """
 import ast
 import contextlib
 import io
+import json
 import os
 import re
 import shutil
@@ -754,6 +761,11 @@ class Config:
         return self
 '''
 
+# THE COUNTS AND THE ONE QUESTION HEADING BELOW ARE K13'S POPULATION. Every number in them is TRUE
+# of the stand-in tree above -- two entry points, both stubs, two DATA levers, one coupling whose
+# source is FAB and whose destination is DATA. The cases then break one number at a time. Without
+# them K13 would examine nothing on the control tree and pass VACUOUSLY, which is the state it
+# exists to refuse.
 _GOOD_DOC = """# contract
 
 ## 3. UNCONSUMED LEVERS
@@ -761,12 +773,23 @@ _GOOD_DOC = """# contract
 | lever | env name | why it has no reader | disposition |
 |---|---|---|---|
 
+## 5. THE QUESTIONS
+
+### Q-DATA-1 — `DATA.stream_bytes` has no second reader — **RESOLVED: one is enough**
+
 ## 6. THE FROZEN SIGNATURE SET
 
 ```contract
 DATA: open_areas(dat: Config, *, seed: int)
 DATA: data_plan(dat: Config, *, areas)
 ```
+
+## 7. THE INDEX
+
+### DATA — `src/data/api.py` (2 levers)
+
+2 of the 2 entry points are stubs, against 2 declared levers and 1 coupling.
+The ledger stands at 1 of 4.
 """
 
 _BASE_TREE = {
@@ -784,7 +807,8 @@ _CASES = (
     ("control -- nothing wrong with this tree", {}, {
         "K1": (False, None), "K2": (False, None), "K3": (False, None),
         "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None),
-        "K8": (False, None), "K9": (False, None), "K10": (False, None), "K11": (False, None), "K12": (False, None)}),
+        "K8": (False, None), "K9": (False, None), "K10": (False, None), "K11": (False, None),
+        "K12": (False, None), "K13": (False, None)}),
 
     ("K1: a parameter was renamed in the tree and not in the document",
      {"src/data/api.py": _GOOD_API.replace("*, seed: int", "*, run_seed: int")},
@@ -1024,6 +1048,86 @@ DEFERRED_ENTRY_POINTS = {"DATA.data_plan": "P6. Nothing produces areas."}
           "|---|---|---|---|\n| `DATA.seg_min` | `DATA_SEG_MIN` | TBD | later |\n")},
      {"K4": (True, "SEG_MIN")}),
 
+    # ---- K13. Counts in prose have been wrong five times; a question asserted an absence once.
+    # THE ADMIT SIDE IS HALF OF THESE ON PURPOSE. A check that refuses every document passes every
+    # regression case above and is worth nothing -- and two of the four admits below are the
+    # check's own STATED LIMITS, written as cases so they cannot be quietly widened into refusals
+    # or quietly forgotten.
+    ("K13: a lever count in the prose that the tree contradicts",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace("against 2 declared levers",
+                                               "against 3 declared levers")},
+     {"K13": (True, "levers_total")}),
+
+    ("K13: an entry-point total that drifted while the stub count stayed right",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace("2 of the 2 entry points",
+                                               "2 of the 9 entry points")},
+     {"K13": (True, "entry_points")}),
+
+    ("K13: a per-package lever count in a section heading that drifted",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace("(2 levers)", "(5 levers)")},
+     {"K13": (True, "levers:DATA")}),
+
+    ("K13: a coupling count that drifted",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace("and 1 coupling", "and 6 couplings")},
+     {"K13": (True, "couplings")}),
+
+    ("K13: a wrong count inside a PAST-TENSE sentence is admitted -- a stated limit, as a case",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace(
+         "2 of the 2 entry points are stubs, against 2 declared levers and 1 coupling.",
+         "There were 9 declared levers before the split.")},
+     {"K13": (False, None)}),
+
+    ("K13: a question heading that says a declared lever is absent",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace(
+         "### Q-DATA-1 — `DATA.stream_bytes` has no second reader — **RESOLVED: one is enough**",
+         "### Q-DATA-1 — nothing in this system draws a stream of bytes — **OPEN**")},
+     {"K13": (True, "stream_bytes")}),
+
+    ("K13: a heading that NAMES the lever it negates a property of is admitted",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace(
+         "has no second reader", "cannot reach a second reader")},
+     {"K13": (False, None)}),
+
+    ("K13: a document with no counts and no questions FAILS instead of passing empty",
+     {"docs/04_CONTRACT.md": _GOOD_DOC.replace(
+         "2 of the 2 entry points are stubs, against 2 declared levers and 1 coupling.\n"
+         "The ledger stands at 1 of 4.\n", "")
+         .replace("### Q-DATA-1 — `DATA.stream_bytes` has no second reader — "
+                  "**RESOLVED: one is enough**\n", "")
+         .replace(" (2 levers)", "")},
+     {"K13": (True, "failure of this check")}),
+
+    # ---- K9, widened. The sixth period has no order-table row, so only the mapping half sees it.
+    ("K9: the one period with no row is a module constant with no Clock kind",
+     {"src/spine/compose.py": _GOOD_COMPOSE + '''
+from data import api as data_api
+
+
+def _periods(sysm):
+    return {"progress": data_api.PROGRESS_WINDOWS}
+''',
+      "src/data/api.py": _GOOD_API + "\n\nPROGRESS_WINDOWS = 100\n"},
+     {"K9": (True, "progress")}),
+
+    ("K9: the same period written units.Windows at its definition is admitted",
+     {"src/spine/compose.py": _GOOD_COMPOSE + '''
+from data import api as data_api
+
+
+def _periods(sysm):
+    return {"progress": data_api.PROGRESS_WINDOWS}
+''',
+      "src/data/api.py": _GOOD_API + "\n\nPROGRESS_WINDOWS = U.Windows(100)\n"},
+     {"K9": (False, None)}),
+
+    ("K9: a period in the mapping that is a bare Config read",
+     {"src/spine/compose.py": _GOOD_COMPOSE + '''
+
+def _periods(sysm):
+    return {"curve": sysm.configs["DATA"].stream_bytes}
+'''},
+     {"K9": (True, "neither a call nor a typed module constant")}),
+
     ("K5: a declared wire no stub reads",
      {"src/data/api.py": _GOOD_API.replace("    _ = dat.d_expert_slots\n", "")
                                   .replace("    WIRES READ: d_expert_slots\n",
@@ -1053,6 +1157,8 @@ _BY_TAG = {
     "K10": lambda d: check_k10_rows_name_their_arguments(os.path.join(d, "src")),
     "K11": lambda d: check_k11_produces_is_not_fabricated(os.path.join(d, "src")),
     "K12": lambda d: check_k12_deferral_reasons_are_complete(os.path.join(d, "src")),
+    "K13": lambda d: check_k13_counts_and_absence_claims(
+        os.path.join(d, "src"), os.path.join(d, "docs", "04_CONTRACT.md")),
 }
 
 
@@ -1568,9 +1674,21 @@ def check_k9_cadence_periods_are_typed(src_dir=SRC):
     crossing kinds unnamed -- manage_every // batch_w, Windows to Flushes -- which is
     derive.flush_period_windows and is not this.
 
+    THE SIXTH PERIOD HAS NO ROW, AND THIS CHECK NOW READS IT ANYWAY (widened 2026-09-03).
+    _periods gained a 'progress' key under Q-RUN-1 whose period is RUN.PROGRESS_WINDOWS, a module
+    constant rather than a lever, and which NO ROW NAMES -- rows are entry-point calls and no entry
+    point prints the progress line. Reading the order tables alone therefore left one of the six
+    gates unexaminable, and _periods' own docstring said so in as many words. The second half below
+    reads the mapping ITSELF: every value it returns must be a CALL (the typed accessor) or a
+    module-level constant CONSTRUCTED with a Clock kind at its definition. A bare `cfg.something`
+    there is the same defect the first half refuses on a row, and a constant written `= 100` is the
+    H51 shape one level further out -- Cadences.due would raise on it at the first evaluation.
+
     WHAT IT CANNOT CATCH: an accessor that returns the wrong kind, or the right kind computed
-    wrongly. It reads the ORDER TABLES, which are data; whether P4's loop actually calls due() with
-    what the row says is L2's, and does not exist yet.
+    wrongly. It reads the ORDER TABLES and the _periods mapping, which are both data; whether P4's
+    loop actually calls due() with what the row says is L2's, and does not exist yet. Nor can it see
+    a period that reaches Cadences.due without passing through either -- a key invented at a call
+    site is what compose.py's own rule forbids in prose, and prose is all that forbids it.
     """
     path = os.path.join(src_dir, "spine", "compose.py")
     if not os.path.isfile(path):
@@ -1611,9 +1729,67 @@ def check_k9_cadence_periods_are_typed(src_dir=SRC):
                 f"and a Config hands back an int for every lever that declares a Clock unit. Give "
                 f"the owning package a typed period accessor, as EVAL.curve_period and "
                 f"CKPT.save_period already are.")
+    # ---- THE MAPPING ITSELF, so the one period with no row is not the one period nothing reads.
+    _CLOCK = ("Windows", "Steps", "Flushes", "Backwards", "Epochs", "Selections")
+    aliases = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module in PKG_DIR.values():
+            for a in node.names:
+                if a.name == "api":
+                    aliases[a.asname or a.name] = node.module
+    periods = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_periods":
+            for st in ast.walk(node):
+                if isinstance(st, ast.Return) and isinstance(st.value, ast.Dict):
+                    for k, v in zip(st.value.keys, st.value.values):
+                        if isinstance(k, ast.Constant):
+                            periods[k.value] = v
+    for key, v in sorted(periods.items()):
+        if isinstance(v, ast.Call):
+            continue                       # the typed accessor, which the row half also demands
+        if isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name) \
+                and v.value.id in aliases:
+            mod = os.path.join(src_dir, aliases[v.value.id], "api.py")
+            kind, found = None, False
+            if os.path.isfile(mod):
+                with open(mod, "r", encoding="utf-8") as fh:
+                    mtext = fh.read()
+                try:
+                    mtree = ast.parse(mtext)
+                except SyntaxError:
+                    mtree = None
+                for st in (mtree.body if mtree else ()):
+                    if (isinstance(st, ast.Assign)
+                            and any(getattr(t, "id", "") == v.attr for t in st.targets)):
+                        found = True
+                        if isinstance(st.value, ast.Call):
+                            kind = getattr(st.value.func, "attr", None) or \
+                                getattr(st.value.func, "id", None)
+            if kind in _CLOCK:
+                continue
+            saw = (f"it is constructed with {kind!r}" if kind
+                   else "it is assigned a bare value" if found
+                   else "no module-level assignment for that name was found")
+            findings.append(
+                f"src/spine/compose.py  _periods['{key}'] is the module constant "
+                f"{v.value.id}.{v.attr}, and src/{aliases[v.value.id]}/api.py does not construct it "
+                f"with a Clock kind ({saw}). Cadences.due states 'period MUST be units.Windows. An "
+                f"int raises', and this period has NO ORDER-TABLE ROW, so nothing else in the "
+                f"suite looks at it.")
+            continue
+        findings.append(
+            f"src/spine/compose.py  _periods['{key}'] is neither a call nor a typed module "
+            f"constant. Every period in this mapping is handed straight to Cadences.due, which "
+            f"raises on a bare int, and a Config returns a bare int for every Clock-unit lever "
+            f"(ISSUES H51).")
+
     return _report("K9", "no cadence gate is handed a bare lever read", not findings,
-                   f"{gates} Cadences.due gate(s) declared across {len(prose)} row note(s)",
-                   findings, vacuous=not gates)
+                   f"{gates} Cadences.due gate(s) declared across {len(prose)} row note(s); "
+                   f"{len(periods)} period(s) in _periods, "
+                   f"{sum(1 for v in periods.values() if not isinstance(v, ast.Call))} of them a "
+                   f"module constant with no order-table row",
+                   findings, vacuous=not (gates or periods))
 
 
 
@@ -1644,7 +1820,7 @@ def _required_params(src_dir=SRC):
     ask about it. That is a real limit and it is where MEM.judge sat:
     judge(mem, store, *, scorer=None, reconstructor=None) with MEM.verify defaulting to "selfcon",
     which needs a scorer -- so a row calling judge(mem, store) yields n_checked=0 forever, which
-    memory/api.py:265 itself names as the inert state. K10 cannot see that; only reading the
+    memory/api.py:350-352 itself names as the inert state. K10 cannot see that; only reading the
     docstring can, and that is why the row was fixed by hand and this docstring says so.
     """
     out = {}
@@ -1788,7 +1964,7 @@ def check_k10_rows_name_their_arguments(src_dir=SRC):
     this check does not ask about it. That is a real limit and it is where MEM.judge sat:
     judge(mem, store, *, scorer=None, reconstructor=None) with MEM.verify defaulting to "selfcon",
     which needs a scorer -- so a row calling judge(mem, store) yields n_checked=0 forever, which
-    memory/api.py:265 itself names as the inert state. K10 cannot see that; only reading the
+    memory/api.py:350-352 itself names as the inert state. K10 cannot see that; only reading the
     docstring can, and that is why the row was fixed by hand and this docstring says so.
 
     THE EXEMPTION TABLE IS A DECLARATION. compose.ROW_ARGUMENTS_ELSEWHERE names rows whose arguments
@@ -2146,6 +2322,442 @@ def check_k12_deferral_reasons_are_complete(src_dir=SRC):
                    f"{len(produced)} value(s) the assembly produces", findings, vacuous=not checked)
 
 
+# ==================================================================================================
+# K13 -- a number written in prose must equal the number in the tree, and a question may not
+#        assert that something is absent while the tree declares it
+# ==================================================================================================
+#
+# WHY THIS CHECK EXISTS, IN THE RECORD THAT PRODUCED IT. Counts written in this contract's prose have
+# been wrong five separate times, every one found by a human reading and every one a `grep` away:
+#   * the geometry manifest's field count, written 15 and 16 against 20 in three live statements;
+#   * `WORLD.geometry` called five fields against six;
+#   * `CKPT.check_geometry` called "two arguments" against four;
+#   * "121 entry points" against 123, in four present-tense places at once;
+#   * "6 rejected candidates in NOT_WIRES" against 7.
+# And once in the other direction: Q-OPT-3's heading said "nothing in this system clips gradients"
+# while `OPT.grad_clip` was declared four hundred lines below it. A count in prose is a copy of a
+# fact, and this repository's own name for a copy that drifts is C12.
+
+_K13_PAST = re.compile(r"\b(?:was|were|had|used\s+to|stood\s+at|historically|no\s+longer)\b"
+                       r"|\buntil\s+20\d\d", re.I)
+_K13_TRANSITION = re.compile(r"(?:→|->)\s*\**\d*\s*$")
+
+# (label printed in the detail line, regex, quantity per capture group, words the sentence must
+# contain for the match to count). The labels ARE the report: a reader has to be able to see the
+# shape of what was searched for, and therefore the shape of what was not.
+_K13_PATTERNS = (
+    ("<n> of <m> entry points",
+     r"\b(\d+)\s+of\s+(?:the\s+)?(\d+)\s+(?:frozen\s+)?entry[- ]points\b",
+     ("stubs", "entry_points"), ()),
+    ("<n> of <m>, in a sentence that says 'entry point'",
+     r"\b(\d+)\s+of\s+(\d+)\b", ("stubs", "entry_points"), ("entry point",)),
+    ("<n> entry points",
+     r"\b(\d+)\s+(?:frozen\s+|documented\s+)?entry[- ]points\b", ("entry_points",), ()),
+    ("<n> declared deferred / <n> deferred entries",
+     r"\b(\d+)\**\s+(?:declared\s+deferred|deferred\s+entr)", ("deferred",), ()),
+    ("<n> declared levers",
+     r"\b(\d+)\**\s+(?:of\s+the\s+)?declared\s+levers\b", ("levers_total",), ()),
+    ("<n> declared, in a sentence that says 'entry point'",
+     r"\b(\d+)\**\s+declared\b", ("entry_points",), ("entry point",)),
+    ("### <PFX> ... (<n> levers)",
+     r"^###\s+([A-Z][A-Z]{1,4})\s+—\s+`src/\w+/api\.py`\s*\((\d+)\s+levers\b",
+     ("PFX", "levers"), ()),
+    ("<n> couplings / <n> coupling rows",
+     r"\b(\d+)\s+(?:declared\s+)?coupling\s*(?:rows?|s)?\b", ("couplings",), ()),
+    ("<n> of <m>, in a sentence that says 'budget' or 'ledger'",
+     r"\b(\d+)\s+of\s+(?:a\s+)?(\d+)\b", ("wires", "wire_budget"), ("budget", "ledger")),
+    ("<n> cross-package wires",
+     r"\b(\d+)\s+cross-package\s+wires\b", ("wires",), ()),
+    ("<n> intra-package",
+     r"\b(\d+)\s+intra-package\b", ("intra_couplings",), ()),
+    ("<n> rejected candidates",
+     r"\b(\d+)\s+rejected\s+candidates?\b", ("not_wires",), ()),
+    ("<n> fields, in a sentence that says 'manifest' or 'geometry'",
+     r"\b(\d+)\s+fields\b", ("manifest_fields",), ("manifest", "geometry")),
+    ("<n> RNG subsystems",
+     r"\b(\d+)\s+(?:declared\s+)?RNG\s+subsystems?\b", ("rng_subsystems",), ()),
+    ("<n> rows in ASSEMBLY_ORDER / LOOP_ORDER",
+     r"\b(\d+)\s+rows?\s+in\s+`?(ASSEMBLY_ORDER|LOOP_ORDER)`?", ("ORDER", "order_rows"), ()),
+    ("<n> entries in ROW_ARGUMENTS_ELSEWHERE",
+     r"\b(\d+)\s+entr(?:y|ies)\s+in\s+`?ROW_ARGUMENTS_ELSEWHERE`?",
+     ("row_arguments_elsewhere",), ()),
+    ("a mapping spanning <n> packages",
+     r"spanning\s+(\d+)\s+packages\b", ("packages",), ()),
+    ("the census's <n>",
+     r"census['’]s\s+(\d+)\b", ("census_old_rows",), ()),
+    ("<n> census rows",
+     r"\b(\d+)\s+census\s+rows?\b", ("census_rows",), ()),
+    ("The <n> is unchanged, in a sentence that says 'census'",
+     r"\bThe\s+(\d+)\s+is\s+unchanged\b", ("census_old_rows",), ("census",)),
+)
+
+# A heading asserts an ABSENCE when one of these stands in the question half of it. `no` and `not`
+# are in the list on purpose -- narrowing to `nothing` alone would have missed nothing yet, but the
+# suppression rule below, not this list, is what keeps the arm quiet.
+_K13_NEG = re.compile(r"\b(?:nothing|nobody|never|neither|none|nowhere|no|not|cannot|"
+                      r"can't|doesn't)\b", re.I)
+
+# Words that carry no identity. A name whose only matching part is one of these has not been
+# described by the heading, it has been described by English.
+_K13_STOP = frozenset("""the and for with that this its are was were has have from into any all one
+two but who how what when which than then only does did not can cannot system tree contract
+resolved measurable open nothing never neither none nowhere also own new old still would there
+here about over under both each same other""".split())
+
+
+def _k13_parse(path):
+    if not os.path.isfile(path):
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        return ast.parse(text)
+    except SyntaxError:
+        return None
+
+
+def _k13_seq_len(tree, name):
+    """len() of the literal sequence/dict assigned to `name` at module level, or None."""
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == name for t in node.targets):
+            v = node.value
+            if isinstance(v, ast.Call) and v.args:        # types.MappingProxyType({...})
+                v = v.args[0]
+            if isinstance(v, (ast.Tuple, ast.List, ast.Set)):
+                return len(v.elts)
+            if isinstance(v, ast.Dict):
+                return len(v.keys)
+    return None
+
+
+def _k13_dict_in_function(tree, func, var):
+    """len() of the dict literal bound to `var` inside `func` (or returned by it), or None."""
+    if tree is None:
+        return None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.FunctionDef) and node.name == func):
+            continue
+        for st in ast.walk(node):
+            if (isinstance(st, ast.Assign) and len(st.targets) == 1
+                    and getattr(st.targets[0], "id", "") == var
+                    and isinstance(st.value, ast.Dict)):
+                return len(st.value.keys)
+            if var == "return" and isinstance(st, ast.Return) and isinstance(st.value, ast.Dict):
+                return len(st.value.keys)
+    return None
+
+
+def _k13_entry_points(src_dir):
+    """[(PFX, name, is_stub)] -- the same surface api_signatures() counts, plus the stub flag."""
+    out = []
+    for pfx, d in sorted(PKG_DIR.items()):
+        tree = _k13_parse(os.path.join(src_dir, d, "api.py"))
+        if tree is None:
+            continue
+
+        def _is_stub(fn):
+            return any(isinstance(n, ast.Raise) and "NotImplementedError" in ast.dump(n)
+                       for n in ast.walk(fn))
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and \
+                    not node.name.startswith("_"):
+                out.append((pfx, node.name, _is_stub(node)))
+            elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+                for m in node.body:
+                    if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and \
+                            not m.name.startswith("_"):
+                        out.append((pfx, f"{node.name}.{m.name}", _is_stub(m)))
+    return out
+
+
+def k13_live_counts(src_dir=SRC):
+    """{quantity: (value, where it was counted)} -- every countable thing the prose talks about.
+
+    Read by AST, like every other reader in this file, so it runs against the self-test's synthetic
+    tree. A quantity whose source is missing is simply ABSENT from the map, and a claim about an
+    absent quantity is not checked -- reported, so the reader can see the check shrank.
+    """
+    eps = _k13_entry_points(src_dir)
+    lev, _ = declared_levers(src_dir)
+    cps = []
+    atree = _k13_parse(os.path.join(src_dir, "spine", "assemble.py"))
+    for node in ast.walk(atree) if atree else ():
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "Coupling":
+            kw = {k.arg: k.value for k in node.keywords if k.arg}
+            dst, src = kw.get("dst"), kw.get("src")
+            srcs = []
+            if isinstance(src, ast.Constant) and isinstance(src.value, str):
+                srcs = [src.value]
+            elif isinstance(src, (ast.Tuple, ast.List)):
+                srcs = [e.value for e in src.elts
+                        if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if isinstance(dst, ast.Constant) and isinstance(dst.value, str):
+                cps.append((srcs, dst.value))
+    # A WIRE IS A COUPLING WITH A FOREIGN SOURCE. assemble.py's own header states the rule -- an
+    # edge from a package to itself books nothing and spends no budget -- so the 23 rows are 19
+    # wires and 4 local couplings, and the prose says "19 of 25" for the first number.
+    wires = [r for r in cps if any(s.split(".")[0] != r[1].split(".")[0] for s in r[0])]
+    ctree = _k13_parse(os.path.join(src_dir, "spine", "compose.py"))
+    wtree = _k13_parse(os.path.join(src_dir, "spine", "wire.py"))
+    budget = None
+    for node in ast.walk(wtree) if wtree else ():
+        if (isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "WIRE_BUDGET"
+                                                 for t in node.targets)
+                and isinstance(node.value, ast.Constant) and isinstance(node.value.value, int)):
+            budget = node.value.value
+
+    out = {}
+
+    def put(key, value, how):
+        if value is not None:
+            out[key] = (value, how)
+
+    put("entry_points", len(eps) or None,
+        "public functions and public methods in src/*/api.py")
+    put("stubs", sum(1 for e in eps if e[2]) or None,
+        "entry points whose body raises NotImplementedError")
+    put("implemented", (len(eps) - sum(1 for e in eps if e[2])) or None,
+        "entry points that do not raise NotImplementedError")
+    put("levers_total", sum(len(v) for v in lev.values()) or None,
+        "Lever(...) assignments in src/*/levers.py")
+    for pfx, fields in lev.items():
+        put("levers:" + pfx, len(fields),
+            f"Lever(...) assignments in src/{PKG_DIR.get(pfx, '?')}/levers.py")
+    put("packages", len(lev) or None, "packages with a levers.py declaring a PREFIX")
+    put("couplings", len(cps) or None, "Coupling(...) calls in spine/assemble.py")
+    put("wires", len(wires) or None, "couplings with a source outside the destination's package")
+    put("intra_couplings", (len(cps) - len(wires)) or None, "couplings - wires")
+    put("wire_budget", budget, "spine/wire.py WIRE_BUDGET")
+    put("not_wires", _k13_seq_len(atree, "NOT_WIRES"), "spine/assemble.py NOT_WIRES")
+    put("assembly_rows", _k13_seq_len(ctree, "ASSEMBLY_ORDER"), "compose.py ASSEMBLY_ORDER")
+    put("loop_rows", _k13_seq_len(ctree, "LOOP_ORDER"), "compose.py LOOP_ORDER")
+    put("deferred", _k13_seq_len(ctree, "DEFERRED_ENTRY_POINTS"),
+        "compose.py DEFERRED_ENTRY_POINTS")
+    put("row_arguments_elsewhere", _k13_seq_len(ctree, "ROW_ARGUMENTS_ELSEWHERE"),
+        "compose.py ROW_ARGUMENTS_ELSEWHERE")
+    put("rng_subsystems", _k13_seq_len(ctree, "RNG_SUBSYSTEMS"), "compose.py RNG_SUBSYSTEMS")
+    put("manifest_fields", _k13_dict_in_function(ctree, "_geometry_manifest", "man"),
+        "the keys of `man` in compose.py's _geometry_manifest")
+    put("periods", _k13_dict_in_function(ctree, "_periods", "return"),
+        "the keys compose.py's _periods returns")
+    # THE CENSUS IS THE OWNER'S LEDGER AND LIVES OUTSIDE src/. Absent on a synthetic tree, which is
+    # why every use of these two keys is guarded by presence rather than assumed.
+    census = os.path.join(os.path.dirname(os.path.abspath(src_dir)), ".rework", "census.json")
+    if os.path.isfile(census):
+        try:
+            with open(census, "r", encoding="utf-8") as fh:
+                groups = json.load(fh)
+            put("census_rows", sum(len(g.get("entries", ())) for g in groups),
+                ".rework/census.json entries")
+            put("census_old_rows",
+                sum(len(g.get("entries", ())) for g in groups
+                    if g.get("family") != "amendments"),
+                ".rework/census.json entries outside the `amendments` group")
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return out
+
+
+def _k13_sentences(text):
+    """[(start, end)] -- sentence spans. A boundary is .!? followed by whitespace, or a blank line.
+
+    `compose.py:1117` and `0.75 GB` survive this because the character after the dot is not
+    whitespace. `e.g. ` does not, and splitting there costs nothing.
+    """
+    spans, start = [], 0
+    for m in re.finditer(r"(?<=[.!?])[ \n]|\n\n", text):
+        spans.append((start, m.end()))
+        start = m.end()
+    spans.append((start, len(text)))
+    return spans
+
+
+def _k13_scan(paths, counts, root):
+    """Every numeric claim the patterns can see, checked against `counts`."""
+    findings, examined, skipped, unchecked = [], [], [], []
+    for path in paths:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        spans = _k13_sentences(text)
+        taken = []
+        for label, rx, keys, ctx in _K13_PATTERNS:
+            for m in re.finditer(rx, text, re.I | re.M):
+                if any(a <= m.start() and m.end() <= b for a, b in taken):
+                    continue          # already claimed by a more specific pattern
+                sentence = next((text[a:b] for a, b in spans if a <= m.start() < b),
+                                text[max(0, m.start() - 200):m.end() + 200])
+                if ctx and not any(c in sentence.lower() for c in ctx):
+                    continue
+                taken.append((m.start(), m.end()))
+                rel = os.path.relpath(path, root)
+                ln = text.count("\n", 0, m.start()) + 1
+                where = f"{rel}:{ln}"
+                if _K13_TRANSITION.search(text[max(0, m.start() - 40):m.start()]):
+                    skipped.append(f"{where} {m.group(0)!r} -- reads as a transition (N -> M)")
+                    continue
+                if _K13_PAST.search(sentence):
+                    skipped.append(f"{where} {m.group(0)!r} -- sentence is past-tense")
+                    continue
+                if keys[0] == "PFX":
+                    pairs = [("levers:" + m.group(1).upper(), m.group(2))]
+                elif keys[0] == "ORDER":
+                    pairs = [({"ASSEMBLY_ORDER": "assembly_rows",
+                               "LOOP_ORDER": "loop_rows"}[m.group(2).upper()], m.group(1))]
+                else:
+                    pairs = list(zip(keys, m.groups()))
+                for key, got in pairs:
+                    if key not in counts:
+                        unchecked.append(f"{where} {m.group(0)!r} -- no live source for {key!r}")
+                        continue
+                    want, how = counts[key]
+                    examined.append((where, key))
+                    if int(got) != want:
+                        findings.append(
+                            f"{where} says {key} = {got}; the tree has {want} ({how}). "
+                            f"Matched {m.group(0)!r} by the pattern [{label}]. A count in prose is "
+                            f"a copy of a fact; delete it or correct it, do not add a second copy.")
+    return findings, examined, skipped, unchecked
+
+
+def _k13_absence_claims(doc_text, src_dir, root_rel):
+    """Arm (b): a `### Q-` heading that says a thing is ABSENT while a matching name resolves."""
+    lev, _ = declared_levers(src_dir)
+    eps = {}
+    for pfx, name, _stub in _k13_entry_points(src_dir):
+        eps.setdefault(pfx, set()).add(name.split(".")[-1])
+    findings, headings, negatives = [], 0, 0
+    for m in re.finditer(r"^###\s+Q-([A-Z]+)-\d+\b(.*)$", doc_text, re.M):
+        headings += 1
+        pfx, rest = m.group(1), m.group(2)
+        # The QUESTION half only. Everything from the verdict em-dash on is the ANSWER, and an
+        # answer naming the mechanism it created is not an assertion that the mechanism is absent.
+        question = re.split(r"—\s*\*\*", rest, 1)[0]
+        if not _K13_NEG.search(question):
+            continue
+        negatives += 1
+        words = {w for w in re.findall(r"[a-z][a-z0-9]{2,}", question.lower())
+                 if w not in _K13_STOP}
+        pool = []
+        pkgs = [pfx] if (pfx in lev or pfx in eps) else sorted(set(lev) | set(eps))
+        for p in pkgs:
+            pool += [("lever", p, n) for n in sorted(lev.get(p, ()))]
+            pool += [("entry point", p, n) for n in sorted(eps.get(p, ()))]
+        low = question.lower()
+        for kind, p, name in pool:
+            parts = [q for q in name.split("_") if len(q) >= 3]
+            if not parts:
+                continue
+            # A PART MATCHES A WORD when the word begins with the part ("gradients" carries
+            # "grad"). The reverse -- the part beginning with the word -- is allowed only for a
+            # word of five characters or more, because "tok" otherwise matches `tokenize` and every
+            # heading in the TOK section resolves against every entry point in it.
+            if not all(any(w.startswith(q) or (len(w) >= 5 and q.startswith(w)) for w in words)
+                       for q in parts):
+                continue
+            # IF THE HEADING NAMES IT, THE HEADING IS NOT SAYING IT IS ABSENT. `Q-SIG-1 --
+            # prototype_frac has no supplier` negates a PROPERTY of a lever it spells out;
+            # `Q-OPT-3 -- nothing in this system clips gradients` negates the EXISTENCE of one it
+            # never learned the name of. Only the second is the stale shape.
+            if name.lower() in low or name.lower().replace("_", "") in low.replace("_", ""):
+                continue
+            ln = doc_text.count("\n", 0, m.start()) + 1
+            findings.append(
+                f"{root_rel}:{ln} Q-{pfx}-{m.group(0).split('-')[2].split()[0]} asserts an absence "
+                f"-- {question.strip()[:90]!r} -- while {kind} {p}.{name} is declared in the tree "
+                f"and every part of its name is a word in that assertion. Either the assertion is "
+                f"stale, or it must name {p}.{name} and say what is still absent about it.")
+    return findings, headings, negatives
+
+
+def check_k13_counts_and_absence_claims(src_dir=SRC, doc_path=DOC):
+    """K13 -- every number the prose writes about a countable thing equals the tree's number, and
+    no question heading says a thing is absent that the tree declares.
+
+    (a) THE COUNTS. Every pattern in _K13_PATTERNS is searched for in docs/04_CONTRACT.md and in
+    every .py under src/, and each captured number is compared against the live tree, which is
+    counted by AST here and printed with its provenance. The patterns are LISTED IN THE DETAIL LINE
+    so a reader can see the size of what was examined and, more importantly, the shape of what was
+    not.
+
+    (b) THE ABSENCE CLAIMS. Every `### Q-` heading that negates something is matched, word by word,
+    against the levers and entry points its own package declares. Q-OPT-3's heading said "nothing
+    in this system clips gradients" while `OPT.grad_clip` was declared: both parts of the name are
+    words in the assertion, and the assertion never spells the name. A heading that DOES spell the
+    name is not making an existence claim -- `Q-SIG-1 -- prototype_frac has no supplier` negates a
+    property of a lever it names -- and is admitted.
+
+    WHAT IT CANNOT CATCH, AND THE LIST IS LONGER THAN THE CHECK.
+      * A NUMBER WRITTEN IN WORDS. "The four accessors exist" against five, and "DEFERRED_ENTRY_
+        POINTS -- fourteen" against fifteen, were both live in this document while this check was
+        being written, and it saw neither. Both were found by reading.
+      * TENSE. A stale count survives by sitting in a sentence containing "was", "were", "had",
+        "used to", "stood at", "historically", "no longer" or "until <year>" -- those sentences are
+        SKIPPED, and the skipped list is printed with its size, because a history is allowed to
+        record the number it recorded. A live claim in such a sentence is equally invisible. The
+        same applies to a number written as the target of an arrow (`19 -> 17 of 25`), which is a
+        transition and not a claim about today.
+      * A CLAIM PHRASED DIFFERENTLY. The patterns are literal English shapes. "the manifest holds a
+        score of fields" is a claim; nothing here sees it. The remedy when a count goes stale in a
+        shape this check cannot see is to add the shape, not to argue the check is complete.
+      * WHETHER THE NUMBER IS WORTH WRITING. `ROW_ARGUMENTS_ELSEWHERE["CKPT.save"]` says the count
+        is deliberately absent because it "stood at 15, 16 and 20 in three live statements at
+        once". This check makes a copy cheap to verify; it does not make a copy a good idea.
+      * ARM (b) READS HEADINGS AND NOTHING ELSE. The same stale assertion inside a body paragraph
+        is invisible to it, and its word matching is a prefix comparison, so a lever whose name
+        shares no stem with the English of the assertion is invisible too.
+
+    IT MUST NOT PASS VACUOUSLY. A tree in which the patterns match nothing, or a document with no
+    `### Q-` headings, FAILS -- because "no claims found" and "no claims wrong" are the same output
+    from a check that has quietly stopped reading, and this repository has sixty records of that.
+    """
+    root = os.path.dirname(os.path.abspath(src_dir))
+    counts = k13_live_counts(src_dir)
+    paths = []
+    if os.path.isfile(doc_path):
+        paths.append(doc_path)
+    for dirpath, dirnames, filenames in os.walk(src_dir):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        paths += [os.path.join(dirpath, f) for f in sorted(filenames) if f.endswith(".py")]
+    findings, examined, skipped, unchecked = _k13_scan(paths, counts, root)
+
+    doc = doc_text(doc_path) if os.path.isfile(doc_path) else ""
+    b_findings, headings, negatives = _k13_absence_claims(
+        doc, src_dir, os.path.relpath(doc_path, root))
+    findings = findings + b_findings
+
+    if not examined:
+        findings.append(
+            "NO NUMERIC CLAIM MATCHED ANY PATTERN in any of the "
+            f"{len(paths)} file(s) read. That is a failure of this check, not a clean tree: "
+            "either the prose stopped writing counts, or the shapes below stopped matching it.")
+    if not headings:
+        findings.append(
+            f"NO `### Q-` HEADING was found in {os.path.relpath(doc_path, root)}, so arm (b) "
+            "examined nothing. A check with an empty population is a check that cannot fail.")
+
+    quantities = ", ".join(f"{k}={v[0]}" for k, v in sorted(counts.items()))
+    shapes = "; ".join(label for label, _, _, _ in _K13_PATTERNS)
+    detail = (f"{len(examined)} numeric claim(s) checked across {len(paths)} file(s), "
+              f"{len(skipped)} skipped as past-tense or as a transition, "
+              f"{len(unchecked)} matched with no live source; "
+              f"{negatives} of {headings} `### Q-` heading(s) assert an absence"
+              f"\n          LIVE COUNTS: {quantities}"
+              f"\n          PATTERNS SEARCHED FOR: {shapes}"
+              f"\n          NOT SEARCHED FOR: a number written in words; a claim in a past-tense "
+              f"sentence; any shape not listed above")
+    if skipped:
+        detail += "\n          SKIPPED: " + "; ".join(skipped[:8])
+        if len(skipped) > 8:
+            detail += f"; ... and {len(skipped) - 8} more"
+    if unchecked:
+        detail += "\n          NO LIVE SOURCE: " + "; ".join(unchecked[:5])
+    return _report("K13", "a count in prose equals the count in the tree, and no question asserts "
+                          "an absence the tree contradicts", not findings, detail, findings)
+
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
@@ -2159,6 +2771,7 @@ CHECKS = (
     check_k10_rows_name_their_arguments,
     check_k11_produces_is_not_fabricated,
     check_k12_deferral_reasons_are_complete,
+    check_k13_counts_and_absence_claims,
 )
 
 
