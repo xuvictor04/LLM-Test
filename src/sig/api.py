@@ -21,7 +21,63 @@ RECORD TYPES RETURNED (P4 defines them):
   WarmupReport  verdict ("plateau" | "collapsing" | "budget"), curve, separation_peak,
                 separation_final, steps, probes
 """
+import dataclasses
+
+import torch
+from torch import nn
+
 from spine.lever import Config
+
+
+class _Encoder(nn.Module):
+    """The learned signature encoder: an alphabet embedding, a mean over the window, a projection.
+
+    SMALL ON PURPOSE. The signature is a ROUTING key, not a representation -- FAB keys on it, DOM
+    partitions on it -- and a signature model with capacity to memorise the window would make the
+    router's decision a function of content it should be abstracting over. What it must have is a
+    FIXED input width, which is why width_units is frozen on SigState and every call reads it from
+    there.
+    """
+
+    def __init__(self, alphabet_size, d, generator):
+        super().__init__()
+        self.emb = nn.Embedding(alphabet_size, d)
+        self.proj = nn.Linear(d, d)
+        with torch.no_grad():
+            self.emb.weight.uniform_(-0.1, 0.1, generator=generator)
+            self.proj.weight.uniform_(-0.1, 0.1, generator=generator)
+            self.proj.bias.zero_()
+
+    def forward(self, units):
+        # MEAN OVER THE WINDOW, then project, then L2-normalise. The normalisation is here and not
+        # at the call site because every consumer compares signatures by cosine, and a caller that
+        # forgot to normalise would get a comparison weighted by window content length.
+        h = self.emb(units).mean(dim=1)
+        v = self.proj(h)
+        return v / v.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+
+
+@dataclasses.dataclass
+class SigState:
+    """The encoder and THE ONE WINDOW WIDTH FOR THE RUN.
+
+    NOT FROZEN, because the encoder trains and the counters advance -- but `width_units` is written
+    once, here, and every later call in this package reads it FROM THIS OBJECT. There is no second
+    place a width can come from and no recompute as the vocabulary grows. That is the whole of the
+    C4/C5 repair: the old tree resolved the same quantity at two sites, 614 bytes in training and
+    ONE BYTE in eval, so every eval-path routing decision in every report was made on a one-byte
+    signature and nothing failed.
+    """
+    encoder: object
+    width_units: int
+    positive_radius_units: int
+    alphabet_size: int
+    space: str
+    mode: str
+    d: int
+    counters: dict
+    warmup_curve: list
+    rng: object
 
 
 def build(sig: Config, *, width_units, alphabet_size, device, generator):
@@ -52,9 +108,41 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
                  call that observes a width other than sig.width_units RAISES.
     """
     sig = sig.owned_by("SIG")
-    raise NotImplementedError(
-        "SIG.build: P4 (sig) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section SIG.")
+    width = int(width_units)
+    if width < 1:
+        raise ValueError(
+            f"SIG.build was handed width_units={width}. The signature window cannot be empty, and "
+            f"this is the quantity C4/C5 are about: the old eval path resolved it to ONE BYTE from "
+            f"max(1, SIG_WIN) while training used 614, so every eval-path routing decision in "
+            f"every report was made on a one-byte signature and nothing failed.")
+
+    gen = torch.Generator(device="cpu")
+    gen.manual_seed(generator.randint(0, 2 ** 31 - 1))
+    mode = str(sig.mode)
+    if mode == "learned":
+        encoder = _Encoder(int(alphabet_size), int(sig.d), gen).to(device)
+    elif mode == "bigram":
+        # THE FROZEN TABLE ARM. A random projection of bigram counts -- no parameters that train,
+        # which is what makes it the control arm the learned encoder is read against.
+        table = torch.empty(int(sig.bigram_dim), int(sig.d), device=device)
+        with torch.no_grad():
+            table.uniform_(-0.1, 0.1, generator=gen)
+        encoder = table
+    else:
+        raise ValueError(f"SIG_MODE={mode!r} has no constructor here. choices= admits only the "
+                         f"spellings this function builds.")
+
+    return SigState(
+        encoder=encoder,
+        width_units=width,
+        positive_radius_units=round(float(sig.positive_radius_windows) * width),
+        alphabet_size=int(alphabet_size),
+        space=str(sig.space), mode=mode, d=int(sig.d),
+        counters={"sig.width_units": width, "sig.alphabet_size": int(alphabet_size),
+                  "sig.encoder_built": 1 if mode == "learned" else 0,
+                  "sig.bigram_built": 1 if mode == "bigram" else 0,
+                  "sig.encode_calls": 0, "sig.train_steps": 0},
+        warmup_curve=[], rng=generator)
 
 
 def encode(sig: Config, st, windows):
@@ -75,9 +163,28 @@ def encode(sig: Config, st, windows):
                  alarm and is a HARD FAILURE, not a warning
     """
     sig = sig.owned_by("SIG")
-    raise NotImplementedError(
-        "SIG.encode: P4 (sig) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section SIG.")
+    units = windows if torch.is_tensor(windows) else torch.as_tensor(windows, dtype=torch.long)
+    if units.dim() != 2 or int(units.shape[1]) != st.width_units:
+        # AN EXCEPTION, NEVER A NARROWER WINDOW AND NEVER A ZERO VECTOR. This is the whole of the
+        # C4/C5 repair: the eval path used to resolve its own width and got one byte, and because
+        # a one-byte signature is a perfectly well-formed vector nothing anywhere failed.
+        got = tuple(units.shape)
+        raise ValueError(
+            f"SIG.encode was handed windows of shape {got} against the width frozen at build, "
+            f"{st.width_units} unit(s) of {st.space!r}. There is no eval variant, no gist "
+            f"placeholder and no fallback -- a caller that cannot supply the frozen width gets "
+            f"this, because the alternative measured a whole project's routing on one byte.")
+
+    st.counters["sig.encode_calls"] += int(units.shape[0])
+    if st.mode == "bigram":
+        # Bigram counts hashed into the frozen table, then normalised the same way the encoder
+        # normalises, so the two arms produce comparable vectors.
+        idx = ((units[:, :-1] * 31 + units[:, 1:]) % st.encoder.shape[0]).long()
+        v = torch.zeros(units.shape[0], st.d, device=st.encoder.device)
+        v.index_add_(0, torch.arange(units.shape[0], device=v.device).repeat_interleave(idx.shape[1]),
+                     st.encoder[idx.reshape(-1)])
+        return v / v.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    return st.encoder(units.to(next(st.encoder.parameters()).device))
 
 
 def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):

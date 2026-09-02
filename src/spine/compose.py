@@ -1307,6 +1307,13 @@ DEFERRED_ENTRY_POINTS = {
     # embedding rows, TOK's own minting rows and EVAL's decode, none of which have bodies yet. Every
     # one of them takes only `self` (or an id), so there is no argument without a producer: what is
     # missing is the CALLER, and that is the whole reason each line below says which one.
+    "FAB.Population.n":
+        "P4, with the rows that read the live population size: FAB.manage's cull budget, CAP's "
+        "startup refusal against CAP_FAB_START, and the banner. It is the accessor the growth "
+        "clamp reads -- `min(burst, cap - fab.n())` went NEGATIVE on a resume whose checkpoint "
+        "carried a larger n0 than the arm's start cap, and the run then trained to completion "
+        "having grown nothing on a configuration whose purpose is to study growth. Takes only "
+        "self, so there is no argument without a producer; what is missing is the caller.",
     "TOK.Vocabulary.size":
         "P4, with the rows that read the live vocabulary size: LM.mint_rows and TOK.mint_burst "
         "against the cap, and the banner. No unproduced argument -- it takes only self.",

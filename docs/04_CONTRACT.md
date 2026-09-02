@@ -31,7 +31,7 @@ with no reader still lands there with a reason or the check fails.
 **Naming is not calling**: which stubs the composition root actually reaches is section 3, and 108
 of the entry points (§7 holds the count, and it is the only place that does — this sentence was one
 of five copies) are named by a row — 94 in a row's entry column and 14 by a call written
-into a row's note — with the remaining **22 declared deferred**, each with the argument that has no
+into a row's note — with the remaining **23 declared deferred**, each with the argument that has no
 producer as the reason. That number was seven until the order tables grew a `produces` column and
 the same standard was applied to every row rather than to EVAL alone (§3.6). *(This sentence said
 "14" while `DEFERRED_ENTRY_POINTS` held 15; corrected 2026-09-02. K6 prints all three numbers, so
@@ -845,7 +845,7 @@ tables claiming one, and it names the producer each is waiting on.
   blackout. No FAB entry point accepted it: `manage`, `observe` and `grow_check` took `step_windows`
   and losses, not a shift event, so the valve half had a route (`CAP.observe`'s `blackout`) and the
   fabric half did not. **Q-FAB-6 is RESOLVED**: `FAB.grow_check` gained `shift_at=None`, typed
-  `units.Windows` — a **frozen-signature move**, made now because 101 of the 130 entry points are stubs
+  `units.Windows` — a **frozen-signature move**, made now because 99 of the 131 entry points are stubs
   and the same change after P4 writes the WATCH→BURST→RECOVER machine is a body rewrite. It went on
   `grow_check` and **not** on `manage` as the question proposed, because in the old tree the blackout
   gates **growth**: `note_shift` sets `blackout` at `:2948` and two of its three consumers are
@@ -2320,7 +2320,7 @@ left standing as an intention.** The manifest's *defining* property is that it e
 first allocation** — that is what lets the gate refuse in seconds instead of after a warm GPU. A
 package's `geometry()` can only be called after that package has built something. So the eight or
 eleven new functions would either (i) take a `Config` and no object, at which point each one is a
-lever read the root already does — eight new entry points on a surface where 101 of 130 are already
+lever read the root already does — eight new entry points on a surface where 99 of 131 are already
 stubs, for zero new information — or (ii) need a built object, and then they cannot be called at the
 gate at all. And in either case the **EXACT / MAY_WIDEN rule migrates into the package**, while
 `ckpt/api.py` says in as many words that **RULES ARE THE OWNER'S**: a package would be grading the
@@ -2763,7 +2763,7 @@ row immediately before `TOK.judge_probation`**. `docs/04_CONTRACT.md`'s §0 refu
 `d_residual_ratio` moved in the same edit, because it named the old route and two frozen documents
 naming two different producers is the defect this ruling repairs.
 
-**Why now rather than "when the surface opens": the surface is open.** 101 of 130 entry points are
+**Why now rather than "when the surface opens": the surface is open.** 99 of 131 entry points are
 stubs and LM's bodies are unwritten, so this cost one stub, one §7 line and one row. After P4 it costs
 a coordinated edit across ten independent agents. And it is **not new machinery** — `LM.anchor_term`
 already computes ‖delta‖/‖composite‖ every flush; what was missing was an entry point that *returns*
@@ -2976,7 +2976,7 @@ named, and the reason CAP mints no blackout-window lever of its own. A sentence 
 the consumers was one sentence away from justifying a second, independent blackout in CAP.
 
 **⚠ THE SIGNATURE:** `FAB.grow_check(fab, pop, *, flush_loss, step_windows, soft_cap,
-memory_pressure, signature, shift_at=None)`. Made **now** because 101 of the 130 entry points are stubs
+memory_pressure, signature, shift_at=None)`. Made **now** because 99 of the 131 entry points are stubs
 and the same change after P4 has written the WATCH→BURST→RECOVER machine is a body rewrite. The
 ```contract block, the `compose.py` row and `System.__slots__` moved in the same edit.
 
@@ -3269,7 +3269,7 @@ row and one deleted exemption. After P4 it is a coordinated edit across ten inde
 **THE COUNT WAS RE-VERIFIED BY SCRIPT ON 2026-09-03, NOT COPIED FROM THIS DOCUMENT**, because
 `Q-TOK-11` and this question collided on it once already and a fifth stale count would be the sixth
 time. Running `test_contract.api_signatures()` — K1's own AST walk, the same oracle the check uses —
-over `src/` returns **130 entry points**, against **130 declared** in §7's ```contract block, all
+over `src/` returns **131 entry points**, against **131 declared** in §7's ```contract block, all
 distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 7,
 RUN 14, SIG 10, TOK 9, WORLD 8. LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
 **`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
@@ -3341,7 +3341,7 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 130 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 131 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123). Both are LM, both landed on the same
 day from two different rulings, and **that is why the count lives here and nowhere else**: the first
 of the two wrote "121 → 122" while the second was independently preparing to write "121 → 122" for a
@@ -3403,6 +3403,7 @@ EVAL: verdicts(ev: Config, *, domain_sizes, silhouettes, affiliation, coherence_
 EVAL: wrongness_probe(ev: Config, *, store_copy, scorer, rng)
 EVAL: verification_fit(ev: Config, *, store_copy, rng)
 FAB: build(fab: Config, *, d_model, signature_dim, device, generator)
+FAB: Population.n(self)
 FAB: forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None, step_windows, domain_id, live_domains, training, hold_out=None)
 FAB: observe(fab: Config, pop, out, *, per_window_loss, domain_id)
 FAB: contribution(fab: Config, pop, *, h, signature, novelty, head, targets, baseline_loss, baseline_logits_fn, step_windows, domain_id, live_domains, candidates)

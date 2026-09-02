@@ -27,8 +27,66 @@ RECORD TYPES RETURNED (P4 defines them):
   ManageReport   cull_fail, cull_util, spared_*, rescued, deepened, cull_gate arithmetic
   GrowReport     asked vs grown, per trigger; declined_cap, declined_newfrac, lineage counts
 """
+import dataclasses
+
+import torch
+from torch import nn
+
 from spine.lever import Config
+from spine import derive as _derive
+from spine.gate import Gate
 from spine import units as U
+
+
+class Population:
+    """The preallocated pool and the books. GROWTH NEVER REALLOCATES; only n_live moves.
+
+    THE WHOLE POOL EXISTS FROM STEP 0. A, B and cent are (cap, ...) tensors and growth advances
+    n_live into rows that are already there, so the optimizer never sees a new parameter and a
+    checkpoint's param-group structure survives a run that grew. That is not an optimisation: it is
+    what makes OPT's param_group_shape refusal meaningful, because a fabric that minted parameters
+    would make every resume of a grown run a shape mismatch.
+
+    B IS ZERO-INIT, SO EVERY EXPERT IS BORN AN IDENTITY. The expert's contribution is B(A(x)), so a
+    newborn adds exactly zero to what already works -- which is goal B's requirement at the level of
+    a single expert: adding capacity may not disturb what the population has already learned.
+
+    EVERY FOUNDER GETS A BIRTHDAY AND A ZERO USE-CLOCK. The old tree wrote `born` only in grow(), so
+    at n0=2048 the entire founding population read age 0 forever and was permanently immune to
+    culling -- the cull, which the owner called "semicritical to our evolutionary mechanism", could
+    not touch 2048 of 2048 experts.
+    """
+
+    __slots__ = ("A", "B", "cent", "n_live", "cap", "depth_now", "born", "use", "uage", "dom_of",
+                 "ef", "es", "comp", "contrib", "births", "rescued", "parent", "mutscale",
+                 "modules", "counters", "rng", "on", "hop_arm", "gates")
+
+    def __init__(self, *, cap, n0, d_model, rank, signature_dim, device, rng, on, hop_arm):
+        self.cap, self.n_live, self.depth_now = cap, n0, 1
+        self.A = torch.zeros(cap, d_model, rank, device=device)
+        self.B = torch.zeros(cap, rank, d_model, device=device)
+        self.cent = torch.zeros(cap, signature_dim, device=device)
+        self.born = [0] * cap            # every founder HAS a birthday; see the class docstring
+        self.use = [0] * cap
+        self.uage = [0] * cap
+        self.dom_of = [-1] * cap
+        self.ef = [0.0] * cap
+        self.es = [0.0] * cap
+        self.comp = [0.0] * cap
+        self.contrib = [0.0] * cap
+        self.births = 0
+        self.rescued = 0
+        self.parent = [-1] * cap
+        self.mutscale = [1.0] * cap
+        self.modules = None
+        self.rng = rng
+        self.on = on
+        self.hop_arm = hop_arm
+        self.counters = {}
+        self.gates = ()
+
+    def n(self):
+        return self.n_live
 
 
 def build(fab: Config, *, d_model, signature_dim, device, generator):
@@ -73,10 +131,87 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                  the transition arm never reaches a counter because the refusal is at startup)
     """
     fab = fab.owned_by("FAB")
-    _ = fab.d_operating_population       # WIRE READ HERE -- the setpoint, printed with the gate
-    raise NotImplementedError(
-        "FAB.build: P4 (fabric) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section FAB.")
+    setpoint = fab.d_operating_population    # WIRE READ HERE -- the setpoint, printed with the gate
+
+    arm = str(fab.hop_mode)
+    if arm != "soc":
+        # REFUSED AT STARTUP, NAMING THE ARM AND WHAT PORTING IT WOULD COST (Q-FAB-1). Accepting
+        # the value and running soc is the M24 shape exactly: `s.loop_soc = (_env("CHAIN_ROUTE",
+        # "soc") == "soc")` made every typo the OTHER walk, silently. The lever is NOT dropped and
+        # its census row is NOT retired -- the owner's standing rule is that a mechanism kept for
+        # future use is kept with a switch -- so this refusal is what makes "declared but not
+        # built" loud instead of silent.
+        raise NotImplementedError(
+            f"FAB_HOP_MODE={arm!r} is declared and NOT BUILT (Q-FAB-1, resolved 2026-09-02: the "
+            f"lever stays). The ported walk is 'soc' -- re-route from scratch each hop with the "
+            f"current state in the query. The 'transition' arm is the learned successor walk and "
+            f"needs the R matrix, the per-expert SRC marks and the `ctrl` summary, none of which "
+            f"exist in this tree. Refused rather than silently running soc.")
+
+    n0, slots = int(fab.n0), int(fab.slots)
+    cap = max(n0, slots)
+    d_model, rank = int(d_model), int(fab.rank)
+    on = bool(fab.on)
+
+    pop = Population(cap=cap, n0=n0, d_model=d_model, rank=rank,
+                     signature_dim=int(signature_dim), device=device, rng=generator,
+                     on=on, hop_arm=arm)
+
+    # A is drawn, B stays ZERO. Every expert is born an identity; see Population's docstring.
+    gen = torch.Generator(device="cpu")
+    gen.manual_seed(generator.randint(0, 2 ** 31 - 1))
+    with torch.no_grad():
+        a = torch.empty(cap, d_model, rank)
+        a.uniform_(-(1.0 / max(1, d_model)) ** 0.5, (1.0 / max(1, d_model)) ** 0.5, generator=gen)
+        pop.A.copy_(a.to(device))
+        c = torch.empty(cap, int(signature_dim))
+        c.uniform_(-0.1, 0.1, generator=gen)
+        c = c / c.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+        pop.cent.copy_(c.to(device))
+
+    dk, hid = int(fab.dk), int(fab.emb_hid)
+    pop.modules = nn.ModuleDict({
+        "eemb": nn.Sequential(nn.Linear(int(signature_dim), hid), nn.Tanh(), nn.Linear(hid, dk)),
+        "edec": nn.Sequential(nn.Linear(dk, hid), nn.Tanh(), nn.Linear(hid, int(signature_dim))),
+        "q_route": nn.Linear(d_model, dk),
+        "hproj": nn.Linear(d_model, d_model),
+        "halt_key": nn.Linear(d_model, 1),
+    }).to(device)
+    with torch.no_grad():
+        for t in pop.modules.parameters():
+            if t.dim() >= 2:
+                t.uniform_(-0.1, 0.1, generator=gen)
+            else:
+                t.zero_()
+
+    pop.counters = {
+        "fab.built": 1, "fab.n0": n0, "fab.cap": cap,
+        # PRINTED BESIDE THE CULL GATE so the setpoint and the gate are ONE statement. A report that
+        # prints "0 culls" without the population it was compared against cannot distinguish a
+        # healthy population from a gate that never opened.
+        "fab.operating_population": int(_derive.operating_population(float(fab.pressure), slots)),
+        "fab.off": 0 if on else 1,
+        "fab.hop_arm": arm,
+    }
+    pop.gates = (
+        Gate("fab.on", on, on, True) if on else
+        Gate("fab.on", False, False, True, reachable=False,
+             reason="FAB_ON=0: the forward is the identity and every other fabric row reports "
+                    "unreachable rather than 'armed but 0' -- two different statements"),
+        Gate("fab.cull_gate",
+             _derive.cull_gate_open(n0, slots, float(fab.pressure)),
+             f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure)),
+    )
+    # THE WIRE IS READ AND COMPARED, not merely touched: d_operating_population is the same
+    # derive.operating_population call the counter above makes, computed by the assembly from the
+    # same two levers, so a disagreement here means the coupling table and this package are
+    # computing one quantity two ways -- which is the defect the whole spine exists to remove.
+    if int(setpoint) != pop.counters["fab.operating_population"]:
+        raise ValueError(
+            f"FAB.d_operating_population arrived as {int(setpoint)} while this package computes "
+            f"{pop.counters['fab.operating_population']} from FAB_PRESSURE and FAB_SLOTS. One "
+            f"quantity, two answers.")
+    return pop
 
 
 def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None, step_windows,
