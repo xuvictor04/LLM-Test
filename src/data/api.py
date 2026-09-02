@@ -60,7 +60,7 @@ def open_areas(dat: Config, *, seed: int):
         (data.area_label_collision). The label is what every per-area score, the holdout stream key
         below and ACROSS THE RUN BOUNDARY look up by name, and a run whose report prints one label
         for two corpora reproduces the desynchronised-DN defect this package exists to end
-        (ISSUES C19).
+        (ISSUES P3-C19).
 
     On dat.source == "synthetic": builds dat.n_processes order-2 Markov generators over the five
     15-symbol alphabets (self_organize.py:1084-1099, :1314-1315), seeded from
@@ -76,9 +76,9 @@ def open_areas(dat: Config, *, seed: int):
     The tail is a sample only if the corpus was written in no particular order, and the measured
     cost of assuming it was is py held out at 5.061 +/- 0.560 against 2.922 in-stream while eng
     (shuffled upstream) was 2.273 against 2.303 (self_organize.py:1173-1198). val_cap applies on
-    BOTH paths; it applied only under DISK_STREAM before (ISSUES M82). The block is physically
+    BOTH paths; it applied only under DISK_STREAM before (ISSUES P1-M82). The block is physically
     removed from the training body, so no sampling rule anywhere can reach it and there is no
-    length any caller can read that includes it (ISSUES M81).
+    length any caller can read that includes it (ISSUES P1-M81).
 
     ONE STREAM PER AREA IS THE RULING, NOT A DETAIL (Q-DATA-6, 2026-09-02). A single
     "data.holdout" stream draws the areas in list order, so every area's block position is a
@@ -106,11 +106,11 @@ def open_areas(dat: Config, *, seed: int):
     An area whose usable body is below max(dat.seg_max + 1, MIN_AREA_BYTES) is a STARTUP REFUSAL,
     not a silent drop: dropping desynchronised CORP from DN and made report_holdout label the
     Python corpus 'eng', which the next run compared against last run's English and reported as
-    forgetting (self_organize.py:1142-1160, ISSUES C19 -- CITED BY ID, NOT BY LINE: this was
+    forgetting (self_organize.py:1142-1160, ISSUES P3-C19 -- CITED BY ID, NOT BY LINE: this was
     ISSUES:1421 in four places across this package and that line has held three different defects
     across three commits; today it is L15, an LR_DECAY default in a research note). The floor is
     DERIVED from seg_max rather
-    than the old literal 5000, which raised on rerun.sh's SEG_MIN=8000 (ISSUES L75).
+    than the old literal 5000, which raised on rerun.sh's SEG_MIN=8000 (ISSUES P1-L75).
 
     RECEIVES: seed <- RUN.seed, as an argument. DATA calls rng_for itself; assemble.NOT_WIRES
     rejects a d_seed by name.
@@ -161,7 +161,7 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     THE SCHEDULE. dat.phase_sched non-empty is parsed here and refused loudly at startup on an
     empty phase or an out-of-range area id (self_organize.py:1355-1366) -- validation lives at the
     parse site only, with no `[a for a in act if a < NP] or list(range(NP))` fallback, which was
-    unreachable dead code that would have quietly re-enabled every area in a phase (ISSUES L18).
+    unreachable dead code that would have quietly re-enabled every area in a phase (ISSUES P1-L18).
     Empty generates derive.phase_schedule(n_areas, dat.phases, dat.phase_live), which at four
     areas is [[0,1],[1,2],[1,2],[2,3]] -- a REHEARSED sliding window, not pure add. dat.phases is
     floored at 2 AT THIS READ SITE: one phase cannot have anything fade and `faded` is read off the
@@ -176,7 +176,7 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     is pure-add at any area count and does not silently become a different experiment when the area
     ORDER changes. It also ends the defect the harness carries in the open: longrun.sh:930-932
     hand-types _AI=1 under a comment claiming it is computed from the DOMAINS order, and nothing
-    reads DOMAINS (ISSUES L2).
+    reads DOMAINS (ISSUES P1-L2).
 
     PLAN.PROTOCOL IS RECOGNISED, NOT GENERATED, and the four predicates are written out here so two
     P4 authors cannot disagree about them:
@@ -212,19 +212,19 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     exposure = draw * epochs / body_bytes. It is a WHOLE-RUN quantity: 60 MB of English beside
     8 MB of Python draws 2.00 MB/epoch from each -- quiet -- while over 8 epochs the added area is
     seen 2.1x and the original is 28% sampled, and "adding py cost eng X bits/byte" is then
-    confounded with "py was memorised and eng was skimmed" (ISSUES H22).
+    confounded with "py was memorised and eng was skimmed" (ISSUES P3-H22).
 
     THREE DECLARED GATES, each printing its own arithmetic so "did not fire" is distinguishable
     from "could not fire":
       data.exposure_max     max(exposure) > dat.exposure_max. COMPUTED AT ONE AREA TOO: both reads
                             sat inside `if DATA_MODE == "real" and NP > 1`, so the check was
                             unavailable on exactly the single-area goal-A configuration where
-                            accidental repetition is easiest to reach (ISSUES L21).
+                            accidental repetition is easiest to reach (ISSUES P1-L21).
       data.exposure_skew    max/min > dat.exposure_skew. Declared UNREACHABLE at n_areas == 1 with
                             the reason printed -- a max/min ratio over one area is undefined.
       data.splice_window    mean_segment_bytes / (win_tokens * bytes_per_token) < 8. The one place
                             the byte/token boundary is crossed, and it is crossed with the MEASURED
-                            bytes/token handed in, never with an estimate (ISSUES H16).
+                            bytes/token handed in, never with an estimate (ISSUES P1-H16).
 
     RECEIVES: epochs <- RUN.epochs; win_tokens <- LM.ctx; bytes_per_token <- TOK, measured by
     derive.bytes_per_token after build_vocabulary. All three are arguments: bytes_per_token cannot
@@ -264,7 +264,7 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     THE PHASE FILL IS EXACT: phase k covers [round(k*B/P), round((k+1)*B/P)) and the final segment
     of a phase is TRUNCATED to the bound rather than overshooting it by a whole 700-1800 byte
     segment, so phase bounds do not drift and len(Stream.bytes) == dat.stream_bytes exactly
-    (ISSUES L22).
+    (ISSUES P1-L22).
 
     The generator is rng_for(f"data.stream.e{epoch}", seed): what text a run trains on depends on
     the seed and the epoch and nothing else, so two arms differing in one unrelated knob still read
@@ -274,11 +274,11 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
 
     `area_changes` is the subset of splice starts where the area actually CHANGED. The old tree
     scored boundary precision/recall against every splice start including consecutive segments from
-    the same area, so on a one-area run all ~96 'true switches' were artefacts (ISSUES H10). BOTH
+    the same area, so on a one-area run all ~96 'true switches' were artefacts (ISSUES P1-H10). BOTH
     lists leave this package so no consumer has to guess which one it wanted.
 
     Stream carries an `epoch` and a `stream_id` so MEM can invalidate or re-base provenance rather
-    than silently carrying byte offsets into a stream that no longer exists (ISSUES M83).
+    than silently carrying byte offsets into a stream that no longer exists (ISSUES P1-M83).
 
     RETURNS: Stream.
 

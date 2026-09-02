@@ -116,7 +116,7 @@ if someone can see that it was looked for.
   anywhere because it was never in the old `_SPEC` at all -- it is read at tokenizer.py:140 behind the
   registry's back, which is why the audit printed "NOTHING READ THESE: TOK_MINT_NOVEL_K ... This run used
   the DEFAULTS" when an operator set it, a false sentence about a knob that was read and used (M23,
-  ISSUES M23). An unregistered knob absorbed into a declared lever is a completed merge with one silent
+  ISSUES P1-M23). An unregistered knob absorbed into a declared lever is a completed merge with one silent
   half, not a merge with a missing target, and `cand_window` below is the single width it becomes.
 
 WHAT IS DELIBERATELY ABSENT. Values this package uses that it does not own, and must not declare --
@@ -191,7 +191,7 @@ class TOKLevers(LeverSet):
     # three states is why whole knobs are unreachable per branch and nobody can see it: GROW_PASSES is
     # never read at TOK_ONLINE=1 (the default) and SEED_VOCAB/SEED_PASSES are never read at
     # TOK_ONLINE=0, so setting one on the wrong branch is silently ignored AND produces a "NOTHING READ
-    # THESE" line whose stated cause -- a typo -- is false (ISSUES L20, and the [so-config/facts]
+    # THESE" line whose stated cause -- a typo -- is false (ISSUES P1-L20, and the [so-config/facts]
     # entry beginning "GROW_PASSES is never read at the default configuration"). The source already
     # admitted the encoding was wrong: self_organize.py:5848 reports ("TOK_ONLINE", USE_TOK and
     # TOK_ONLINE), i.e. the printed value of one knob is an AND of two.
@@ -290,7 +290,7 @@ class TOKLevers(LeverSet):
     # ONE QUANTITY THAT WAS READ ON OPPOSITE SIDES OF ONE TERNARY: :1225 is
     # `_passes = _i("SEED_PASSES", 2) if TOK_ONLINE else _i("GROW_PASSES", 8)`, so exactly one of the two
     # is reachable in any run and the other triggers a false "NOTHING READ THESE" typo report
-    # (ISSUES L20, and the [so-config/facts] entry beginning "GROW_PASSES is never read at the
+    # (ISSUES P1-L20, and the [so-config/facts] entry beginning "GROW_PASSES is never read at the
     # default configuration"). Two names for one number, each unreachable half the time, is the merge case
     # in its purest form.
     # THE DEFAULT IS 2 BECAUSE 2 IS WHAT THE DEFAULT CONFIGURATION RAN. GROW_PASSES=8 was the offline
@@ -338,7 +338,7 @@ class TOKLevers(LeverSet):
     # A frequency floor, a length ceiling, a candidate window, and two re-rankers that compose. Every
     # one of them was read on the fresh-construction branch only (:1256): DynamicTokenizer.load
     # reconstructs them from the saved json, so ON EVERY RESUME the environment value was silently
-    # ignored (ISSUES M80, and the [so-config/facts] entry beginning "On the tokenizer LOAD path,
+    # ignored (ISSUES P1-M80, and the [so-config/facts] entry beginning "On the tokenizer LOAD path,
     # MIN_PAIR, MAX_TOK and TOK_DROPOUT are never read from the environment"). Under L1 this package
     # holds ONE declaration, and a load either
     # matches it or is reported as a reconciliation -- never silently wins.
@@ -378,7 +378,7 @@ class TOKLevers(LeverSet):
     # width from both re-rankers -- `_k = 1; if novel>0: _k = max(_k, novel_k); if pmin>0: _k = max(_k,
     # gate_k)` (tokenizer.py:257-260) -- and TOK_MINT_NOVEL_K was read at :140 while being absent from
     # _SPEC, so setting it made the audit print "NOTHING READ THESE: TOK_MINT_NOVEL_K ... This run used
-    # the DEFAULTS", which was false (ISSUES M23). A knob the audit cannot see is worse than a
+    # the DEFAULTS", which was false (ISSUES P1-M23). A knob the audit cannot see is worse than a
     # knob that does not exist, because the audit is what the operator trusts.
     # THE FLOOR ABOVE 1 IS A REQUIREMENT AND IT CANNOT BE DECLARED HERE. At _k=1 the window is a single
     # pair, so "walk on to the next candidate" has nothing to walk and one unmintable top pair ends the
@@ -406,7 +406,7 @@ class TOKLevers(LeverSet):
     # tokenizer.py:158, behind the registry's back -- lever.py's own module docstring names this exact
     # read as the reason from_env is the single reader, and O1 now makes it impossible. (2) h_pmin_seen
     # must stop accumulating one float per candidate for the whole run (millions of floats at
-    # cand_window=1024, ISSUES L68); that is a Sample, and it belongs below the instrument line.
+    # cand_window=1024, ISSUES P1-L68); that is a Sample, and it belongs below the instrument line.
 
     mint_novel = Lever(0.0, "Exponent re-ranking mint candidates by how much a pair has grown since it "
                             "was last considered; 0 reproduces plain most-frequent minting.", U.FRACTION)
@@ -421,7 +421,7 @@ class TOKLevers(LeverSet):
     # at TOK_MINT_NOVEL=0.5 landed at 5.360 held-out (:974), a single arm with a confounder, and the
     # mechanism has a known open bug that would explain it -- the fail-open fallback claims to take "the
     # most frequent candidate clearing min_pair", but _top has ALREADY been re-sorted by novelty, so it
-    # takes the most NOVEL one instead (ISSUES M77). The two re-rankers were designed to compose and
+    # takes the most NOVEL one instead (ISSUES P1-M77). The two re-rankers were designed to compose and
     # the fallback silently inherits one. Fix that before re-measuring; a number taken against a broken
     # composition is not evidence about the mechanism.
     # UNIT IS A LABEL AND IT IS THE CLOSEST WRONG ONE. This is a dimensionless EXPONENT, not a proportion.
@@ -439,7 +439,7 @@ class TOKLevers(LeverSet):
     # from the process-global `random`, so any value above 0 shifts the RNG stream of the ENTIRE RUN --
     # including maintenance segmentations that are supposed to be observational -- in a codebase that
     # otherwise guards this carefully (frozen_rng and no_rng_drift exist because diagnostics were
-    # silently editing runs, ISSUES L69). It must draw from this package's own generator via
+    # silently editing runs, ISSUES P1-L69). It must draw from this package's own generator via
     # spine/rng.py. Without that, G3's fingerprint diff reads this lever as a coupling into every other
     # package, and L3's isolation sweep -- whose only oracle is affects() -- reports a leak that is real
     # but not the one anybody is looking for.
@@ -490,7 +490,7 @@ class TOKLevers(LeverSet):
     # SIG_MODE, MODEL, VERIFY, LR_SCHED, KEY_SRC, SIG_SPACE, EVICT, CULL_MODE, WARMSTART_MODE,
     # CHAIN_ROUTE). (1) An unrecognised value falls into whichever branch is the else rather than being
     # refused, compared case-sensitively -- the same class as DATA_MODE=Real silently taking the
-    # synthetic branch (ISSUES M24, and the [so-config/facts] entry beginning "AMP is the only string
+    # synthetic branch (ISSUES P1-M24, and the [so-config/facts] entry beginning "AMP is the only string
     # knob in the region that is case-normalised"). TOK_PROBATION_BY=Embed ran the "use" test and
     # said nothing.
     # (2) TOK_PROBATION_BY=embed with TOK_COMPOSE=0 leaves _emb = None and falls through to the "use"

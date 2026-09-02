@@ -42,8 +42,10 @@ WHAT THIS FILE CANNOT CATCH:
     runs the dropped branch on a hardcoded constant would pass every check here.
 """
 import importlib
+import io
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -616,6 +618,120 @@ def check_n6_row_identity_is_unique(rows, env_names, wire_dsts):
                    vacuous=not rows)
 
 
+ISSUES_MD = os.path.join(ROOT, ".rework", "ISSUES.md")
+
+# Where PART 1 / 2 / 3 / 4 begin in .rework/ISSUES.md, read from the headings themselves rather than
+# typed, so inserting a defect above a boundary cannot silently re-part every id below it.
+_PART_HEADING = re.compile(r"^## (PART (\d+))\b")
+_DEF = re.compile(r"^\*\*(P\d-[A-Z]{1,4}\d+(?:\.\d+)?)\.\s")
+_CITE = re.compile(r"\bISSUES(?:\.md)? ([A-Za-z0-9-]+)")
+_QUALIFIED = re.compile(r"^P\d-[A-Z]{1,4}\d+(?:\.\d+)?$")
+_BARE = re.compile(r"^[A-Z]{1,4}\d+(?:\.\d+)?$")
+
+
+def _issue_ids():
+    """Every defect id ISSUES.md defines, and how many times it defines it."""
+    import collections as _c
+    seen = _c.Counter()
+    try:
+        for line in io.open(ISSUES_MD, encoding="utf-8"):
+            m = _DEF.match(line)
+            if m:
+                seen[m.group(1)] += 1
+    except OSError:
+        pass
+    return seen
+
+
+def check_n7_issue_citations_resolve(rows, env_names, wire_dsts):
+    """N7 -- every `ISSUES <id>` citation names exactly one defect, and ISSUES.md defines each id once.
+
+    MEASURED, WHICH IS WHY THIS EXISTS. ISSUES.md is four parts and PARTS 1, 2 and 3 each numbered
+    from C1. So it defined 481 ids of which only 317 were distinct: 119 ids meant more than one
+    defect, C1/C2/C3 meant THREE each, and 169 of the 245 citations in this tree pointed at an
+    identifier with more than one referent. `src/fabric/levers.py` cited a bare `C2` twice, eleven
+    lines apart, meaning two different defects -- the open load-balance one at :420 and the archived
+    society decision at :163. A reader following either citation lands on whichever entry they grep
+    first, and the wrong one reads plausibly.
+
+    Every id now carries the part that defines it (`P1-C11`, `P2-C2`, `P3-C3`) at the definition and
+    at every citation, and this check is what stops the collision coming back: adding a PART 3 defect
+    numbered like a PART 1 one is now legal and harmless, because the two ids differ.
+
+    THE SECOND HALF IS THE LINE NUMBERS. A citation may not carry a `:NNNN` that indexes ISSUES.md.
+    Twelve did, and every one was stale by 88-90 lines -- the amount the file had grown since they
+    were written -- so a `C3` citation carrying `:1355` pointed at M24's tag line,
+    an `H29` one carrying `:1646` at an unrelated AttributeError, and an `M24` one at M2. That is O12's rule (cite a moving file by name, not by
+    line) applied to the one moving file O12 does not read, because ISSUES.md is prose and has no
+    symbols to name. The qualified id IS the anchor: `grep "P3-C3" .rework/ISSUES.md` returns one line.
+
+    WHAT IT DOES NOT CHECK. A `, :NNNN` that follows a citation is left alone: in this project's prose
+    a bare `:NNNN` means `self_organize.py:NNNN`, the frozen tree O12 exempts, and seven of them
+    genuinely do (`P1-M31, :2263` is the cull ratchet in the old source). Telling those apart needed
+    the arithmetic above -- the stale ones were all short by the file's own growth -- and that is
+    evidence, not a rule a check can apply. So this check catches a citation that names nothing and a
+    citation that names two things; it does not catch a citation that names the wrong one of them.
+    """
+    defined = _issue_ids()
+    dup = {k: v for k, v in defined.items() if v > 1}
+    findings = []
+    for k, v in sorted(dup.items()):
+        findings.append(f".rework/ISSUES.md defines {k} {v} times; an id must name one defect.")
+
+    cited = 0
+    for path in _tree_files():
+        rel = os.path.relpath(path, ROOT)
+        if rel == os.path.join(".rework", "ISSUES.md"):
+            continue
+        try:
+            text = io.open(path, encoding="utf-8").read()
+        except OSError:
+            continue
+        for m in _CITE.finditer(text):
+            tok = m.group(1)
+            if not (_QUALIFIED.match(tok) or _BARE.match(tok)):
+                continue                      # `ISSUES lists`, `ISSUES records` -- ordinary English
+            cited += 1
+            line = text.count("\n", 0, m.start()) + 1
+            if _BARE.match(tok):
+                findings.append(
+                    f"{rel}:{line} cites `ISSUES {tok}` unqualified. Three parts number from C1, so a "
+                    f"bare id can name three defects; write the part (P1-{tok}, P2-{tok}, P3-{tok}).")
+            elif defined.get(tok, 0) == 0:
+                findings.append(f"{rel}:{line} cites `ISSUES {tok}`, which .rework/ISSUES.md does not define.")
+            # A `:NNNN` riding on the citation that lands inside ISSUES.md is an index into a file
+            # that grows, which is the drift this check's docstring measures.
+            tail = text[m.end():m.end() + 12]
+            mt = re.match(r"(?::| \(:)(\d+)", tail)
+            if mt:
+                findings.append(
+                    f"{rel}:{line} cites `ISSUES {tok}:{mt.group(1)}` -- a line index into ISSUES.md, "
+                    f"which moves. The qualified id is the anchor; drop the number.")
+
+    detail = (f"{cited} ISSUES citation(s) across the tree against {sum(defined.values())} definition(s) "
+              f"in {len(defined)} distinct id(s)")
+    return _report("N7", "every ISSUES citation names exactly one defect", not findings, detail,
+                   findings, vacuous=(cited == 0 or not defined))
+
+
+def _issues_line_count():
+    try:
+        return sum(1 for _ in io.open(ISSUES_MD, encoding="utf-8"))
+    except OSError:
+        return 0
+
+
+def _tree_files():
+    """Our own .py and .md, excluding the frozen archive and the runs the owner asked not to touch."""
+    out = []
+    for root, dirs, fs in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", "archive", "runs", ".rework_old")]
+        for f in fs:
+            if f.endswith((".py", ".md")):
+                out.append(os.path.join(root, f))
+    return sorted(out)
+
+
 CHECKS = (
     check_n1_every_kept_knob_landed,
     check_n2_every_lever_traces_back,
@@ -623,6 +739,7 @@ CHECKS = (
     check_n4_drops_actually_dropped,
     check_n5_the_shadowed_names_still_resolve_to_src,
     check_n6_row_identity_is_unique,
+    check_n7_issue_citations_resolve,
 )
 
 

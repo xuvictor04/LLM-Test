@@ -31,11 +31,11 @@ There is already a **depth** mechanism, and reading it before designing on top o
 
 - `FAB.hop_mode` defaults to `'soc'` — *"re-routes from scratch each hop"*. `FAB.hops` (4) is the
   budget and effective depth is `min(depth0-stage, hops, 2 + n_live//2)`.
-- **The alternative arm is armed and inert** (`fabric/levers.py:186`, ISSUES M27): the transition
+- **The alternative arm is armed and inert** (`fabric/levers.py:186`, ISSUES P1-M27): the transition
   branch is the only thing that fills `fab._hops`, so under the shipped `hop_mode="soc"` any hop
   value above zero adds nothing. Whether to port it at all is **Q-FAB-1**, still open.
 - `FAB.ponder` (0.01) charges routed depth *"so the chain does not take hops it does not need"* —
-  and `ponder_warm` is 8000 windows, longer than a default run can reach (ISSUES C11), so on today's
+  and `ponder_warm` is 8000 windows, longer than a default run can reach (ISSUES P1-C11), so on today's
   defaults the charge never arms.
 
 **Hops are not layers.** A hop re-routes within *one* population; the proposal stacks *distinct*
@@ -48,7 +48,7 @@ Two more facts the design has to live with:
   `SIG.d`-dimensional vectors (64), in `SIG.space` (`'bytes'`), from a learned encoder
   (`SIG.mode='learned'`). `sig/api.py:8` states the stake: a collapsed encoder routes every window
   to the same experts.
-- **`ISSUES C3` voids the counterfactual on the shipped path.** `fab.contrib` — the marginal-
+- **`ISSUES P1-C3` voids the counterfactual on the shipped path.** `fab.contrib` — the marginal-
   contribution signal that gates both cull-spare rules and picks replication parents — is measured
   by re-walking with `ban1` set, and the soc-loop never applies `ban1` to any logit. Every expert
   gets the same number. **So "measurements showed the depth arm did not help" is a statement about
@@ -97,7 +97,7 @@ Three consequences follow, and none is optional:
   comparing them raises. Whether a parent decides on the next window, the next flush, or after a
   fixed budget of pending results is a units decision, and at the shipped `OPT.batch_windows=1,
   accum=1` **all three are numerically identical**, so a wrong choice is invisible until the batch
-  width moves (ISSUES H52, which amended P3's exit criterion for exactly this reason).
+  width moves (ISSUES P1-H52, which amended P3's exit criterion for exactly this reason).
 - **The decision to defer is itself a gate** and needs its DID IT FIRE surface: how many results were
   buffered, how many were acted on, how many are still pending at the end of the run. A parent that
   never decides looks identical to a parent with nothing to decide.
@@ -152,7 +152,7 @@ Numbered for the branch. None is answered here.
 | R8 | How does the sibling-independence sweep get an oracle? | `affects(L)` is **computed** from the wire ledger (graft G1) and is about *levers*. Runtime siblings need an equivalent that is also computed and not hand-declared. |
 | R9 | Does a router route on the **same signature** as its children, or on something coarser? | If every level sees the same 64-d vector, the levels are not doing different work. This is the question that connects to Proposal 01. |
 | R10 | What is the depth limit and what enforces it? | Unbounded recursion with a growth rule is a capacity question; the capacity valve (`CAP`) is the existing mechanism and it is currently **unreachable at the defaults** (C11). |
-| R11 | Does `contrib` mean anything at a node? | ISSUES C3 says the leave-one-out is void on the shipped path. A hierarchy built on a signal carrying no information inherits that, and the spare and replication rules read it. |
+| R11 | Does `contrib` mean anything at a node? | ISSUES P1-C3 says the leave-one-out is void on the shipped path. A hierarchy built on a signal carrying no information inherits that, and the spare and replication rules read it. |
 
 ## What to build first
 

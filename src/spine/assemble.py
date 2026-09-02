@@ -872,7 +872,7 @@ COUPLINGS = [
             "separate. The read path is the parent's SAVE target under the same rule, which is the repair "
             "the sibling-guess heuristic at self_organize.py:1215-1222 never made: on the supported "
             "RESUME=runs/x/ckpt.pt form it guessed runs/x/ckpt.dyntok.json, that file did not exist, and "
-            "it fell through to the shared data/dyntok.json (ISSUES.md M19). A resume must reuse the "
+            "it fell through to the shared data/dyntok.json (ISSUES.md P1-M19). A resume must reuse the "
             "saved vocabulary or 'the restored embedding table would be indexed by a DIFFERENT "
             "vocabulary' (:1226-1227). Empty resume, empty path: there is no parent to read."),
 
@@ -889,7 +889,7 @@ COUPLINGS = [
             "constructs it as `ByteComposer(d)` so the default always wins, and :1487 truncates with "
             "`b = bs[:s.maxb]`. With MAX_TOK above 16 two distinct long tokens sharing their first 16 "
             "bytes get IDENTICAL composites and identical starting vectors, silently -- the property the "
-            "composer exists to provide, inverted, with no error (ISSUES M21). The defaults agreeing "
+            "composer exists to provide, inverted, with no error (ISSUES P1-M21). The defaults agreeing "
             "today is luck, not design, and luck is what a wire replaces: lm/levers.py::<module> already names "
             "d_max_token_bytes as the incoming value it expects and tok/levers.py::TOKLevers records the same "
             "coupling as missing from this table. Wired rather than passed as an argument because the "
@@ -947,7 +947,7 @@ COUPLINGS = [
         compute=lambda r: max(int(r["SIG"].train_every) * 6, int(r["SIG"].train_every_idle)),
         unit=U.Windows,
         irreducible=False,
-        why="THE RELATION THAT WAS RECORDED AS RELOCATED AND NEVER LANDED (ISSUES H53). The old "
+        why="THE RELATION THAT WAS RECORDED AS RELOCATED AND NEVER LANDED (ISSUES P1-H53). The old "
             "declaration was `_i(\"ENC_EVERY_IDLE\", max(ENC_EVERY * 6, 12))` -- a default read from "
             "another lever, which spine/lever.py refuses by construction. The census's repair was not "
             "to delete the relation but to MOVE it, and sig/levers.py::SIGLevers says so in as many "
@@ -1026,7 +1026,7 @@ COUPLINGS = [
         why="The per-expert triangular2 envelope is built from the PEAK rate: self_organize.py:7252 is "
             "`_oa = _lo + (LR - _lo) * (1.0 - _x).clamp_min(0.0) * _amp`, where LR is the optimizer's "
             "peak. FAB may not read OPT's lever and must not carry a second one, and until some name "
-            "lands FAB_LR_OWN=1 has no legal way to learn the number -- which is what makes ISSUES H15 "
+            "lands FAB_LR_OWN=1 has no legal way to learn the number -- which is what makes ISSUES P1-H15 "
             "spellable at all: `_lrv` is assigned only inside `if LR_SCHED != \'none\'` at :7093-7094 and "
             "read unconditionally by the per-expert block at :7195, so LR_SCHED=none with FAB_LR_OWN=1 "
             "dies with a NameError on the first flush. THE NAME IS d_base_lr AND NOT d_lr_peak because "

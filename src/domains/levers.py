@@ -177,7 +177,7 @@ selects a coercion branch in Lever.coerce, so DOM_ENABLED=off means off; with an
 The honest cost, which is the spine's rule for every bool in the tree and not a choice made here: any
 unrecognised string outside ("0", "", "off", "no", "none", "false") reads as True, so DOM_FOLD=flase is
 silently on. Separately, `accept_rule` and `shift_rule` are declared with choices= rather than as the
-booleans they were. That is not decoration. ISSUES M24 records eleven knobs -- SIG_MODE, EVICT,
+booleans they were. That is not decoration. ISSUES P1-M24 records eleven knobs -- SIG_MODE, EVICT,
 CULL_MODE, CHAIN_ROUTE, LR_SCHED and six more -- where an unrecognised string falls into whichever
 branch is the `else`, so a typo silently runs a configuration the operator did not ask for and the log
 names the arm they meant. These two levers are NEW string knobs; without choices= they would be the
@@ -459,7 +459,7 @@ class DOMLevers(LeverSet):
     # about a healthy population and removed the only rule that could drive one to a single domain
     # (:3648-3663). A population too small for a proportional cull is not culled proportionally; the
     # empty-cull and the merge still run, and both are lossless. THE FABRIC STILL CARRIES THE SAME
-    # max(1, ...) ratchet (ISSUES M31, :2263), so this lever's history is also the argument for FAB's.
+    # max(1, ...) ratchet (ISSUES P1-M31, :2263), so this lever's history is also the argument for FAB's.
 
     cull_act_min = Lever(15, "Cull threshold on a domain's DECAYED activity counter -- not a window "
                              "count, and never readable as one.", U.COUNT)

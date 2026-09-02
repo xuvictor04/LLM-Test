@@ -59,14 +59,14 @@ tunable, that is one census row and one lever, added deliberately.
 WHY 100 WINDOWS, STATED BECAUSE IT IS A DEFAULT AND DEFAULTS ARE THE OWNER'S. It has to be sane at
 BOTH ends of the range because nothing can move it. At the shipped defaults a run is at most 937
 windows and about 506 at the project's measured 1.85 bytes/token, so 100 fires ~5 times: the old
-default of 2000 would fire ZERO times and put this line straight onto the ISSUES C11 list, which is
+default of 2000 would fire ZERO times and put this line straight onto the ISSUES P1-C11 list, which is
 the one cadence where being unreachable is a pure loss -- no measurement is confounded by a progress
 line, and a meter that never prints is not a meter. It is also the shortest cadence already declared
 in the tree (DOM.manage_every = 100), so it can never be the reason a report has nothing in it. On a
 long run (94 MB, ~400k windows) it is ~4000 lines over hours, which is what an ETA meter is for.
 
 WHY units.Windows AND NOT A BARE int. Cadences.due states "period MUST be units.Windows. An int
-raises", and Config hands back a bare int for all 35 levers that declare a Clock unit -- ISSUES H51,
+raises", and Config hands back a bare int for all 35 levers that declare a Clock unit -- ISSUES P1-H51,
 three of five gates were handed bare ints until 2026-08-30. The accessors (EVAL.curve_period and its
 three siblings) exist to re-attach the kind a lever declares and drops. A module constant has no
 Config to drop it, so it is written typed at its definition and needs no accessor and no new entry
@@ -340,7 +340,7 @@ def bench_summary(run: Config, clock, *, elapsed_s, bytes_per_window, n_params, 
     """Throughput, printed INSTEAD of the eval battery. Returns the lines, or None when bench is
     off.
 
-    bytes_per_window ARRIVES AS AN ARGUMENT and must be the LIVE value. ISSUES L42: `_bpw` was
+    bytes_per_window ARRIVES AS AN ARGUMENT and must be the LIVE value. ISSUES P1-L42: `_bpw` was
     initialised at the SEED vocabulary (:6237) and refreshed only inside the RATE_EVERY tick
     (:6493), so a short BENCH run that never reached a tick quoted kB/s and GB/day at the seed
     vocabulary. Note what makes that structural: a RUN-owned throughput number whose correctness
@@ -390,7 +390,7 @@ def cadence_audit(run: Config, *, run_windows, periods):
     report that cannot separate "the mechanism ran and did nothing" from "the mechanism was never
     reached". So this returns the sentences and the caller prints them before the first window.
 
-    THE MEASUREMENT THAT MADE IT NECESSARY (ISSUES C11, confirmed 2026-08-30). At the shipped
+    THE MEASUREMENT THAT MADE IT NECESSARY (ISSUES P1-C11, confirmed 2026-08-30). At the shipped
     defaults DATA.stream_bytes=120000, LM.ctx=128 and RUN.epochs=1 give AT MOST 937 windows, about
     506 at the project's own measured 1.85 bytes/token -- and TEN cadence-shaped defaults are longer
     than that:

@@ -203,7 +203,7 @@ class CAPLevers(LeverSet):
     # -- otherwise "off" still clamps growth and the untrippable guard survives the rebuild that was
     # supposed to remove it.
     # choices= IS PREVENTION HERE, NOT REPAIR, AND THE DISTINCTION IS WORTH STATING. None of CAP's old
-    # knobs is among the eleven silent-else knobs ISSUES M24 lists (SIG_MODE, MODEL, VERIFY, LR_SCHED,
+    # knobs is among the eleven silent-else knobs ISSUES P1-M24 lists (SIG_MODE, MODEL, VERIFY, LR_SCHED,
     # KEY_SRC, SIG_SPACE, EVICT, CULL_MODE, WARMSTART_MODE, TOK_PROBATION_BY, CHAIN_ROUTE) -- they were
     # all ints and bools, so they had no else-branch to fall into. This is a NEW string knob minted by
     # the merge, exactly like DOM's `accept_rule` and `shift_rule`, and without choices= `CAP_TARGETS=

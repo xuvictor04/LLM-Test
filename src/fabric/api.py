@@ -144,7 +144,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  term is multiplying a zero again), fab.div_applied, fab.ind_applied,
                  fab.hopsup_applied, fab.ident_refreshed, fab.holdout_applied, fab.spawned,
                  fab.spawn_declined with fab.spawn_gap and fab.spawn_typ recorded AS A PAIR (the
-                 old report printed the gap with no scale to compare it to, ISSUES L29)
+                 old report printed the gap with no scale to compare it to, ISSUES P1-L29)
     """
     fab = fab.owned_by("FAB")
     raise NotImplementedError(
@@ -196,7 +196,7 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
     DID IT FIRE: fab.observed_windows, fab.experts_with_use (DISTINCT experts ever credited -- the
                  number that reads 43 of 4096 when attribution samples one row in sixteen),
                  fab.experts_past_grace_ever (CUMULATIVE, not the snapshot that made
-                 fabric.cull_eligible read ARMED AND INERT, ISSUES M58),
+                 fabric.cull_eligible read ARMED AND INERT, ISSUES P1-M58),
                  fab.uage_per_expert_per_pass BESIDE it, because a cumulative zero does not say
                  WHY: "0 experts past grace=48; mean uage 2.0 over 506 windows at n_live=2048" is
                  an unreachable line carrying its own arithmetic, which is what G4 asks for,
@@ -230,7 +230,7 @@ def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, base
           to contrib: a signal carrying no information must be ABSENT, not plausible.
       (2) THE COUNTERFACTUAL WAS SCORED THROUGH A DIFFERENT FUNCTION from the loss it was
           subtracted from -- `model.head(_h3)` at :6992 against a `loss` that came from the trained
-          per-hop vote blend (ISSUES H11) -- so a fixed offset was added to every contribution and
+          per-hop vote blend (ISSUES P1-H11) -- so a fixed offset was added to every contribution and
           contrib's SIGN, the thing both spare rules test, was set by that offset. The baseline is
           now produced by `baseline_logits_fn`, THE SAME CALLABLE that produced `baseline_loss`.
 
@@ -350,7 +350,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     DID IT FIRE: fab.cull_fail, fab.cull_util, fab.spared_contrib, fab.spared_comp,
                  fab.spared_shift, fab.rescued (CUMULATIVE, and its gate arms on `rescue > 0 OR the
                  count is nonzero` -- the old row armed on cull_ran, a snapshot reassigned every
-                 pass, and discarded a nonzero count, ISSUES M57), fab.deepened, fab.cull_gate,
+                 pass, and discarded a nonzero count, ISSUES P1-M57), fab.deepened, fab.cull_gate,
                  fab.cull_rank_spread (max/min `use` INSIDE the eligible set: at ~1 the ranking
                  carries no information and H12 survived the use/uage split in a new dress, because
                  routing concentrates -- the pilot's top expert took 79.5% of traffic -- so the
@@ -518,7 +518,7 @@ def own_lr_scale(fab: Config, pop, *, applied_lr):
     -- so d_base_lr and d_lr_min_frac are build-time wires. The RATIO CLAMP compares against "what
     the optimizer is ABOUT to apply", which is a live number and arrives as `applied_lr` from
     OPT.maybe_step's StepOutcome. There is no configuration in which this function reads an
-    undefined global: ISSUES H15 was a NameError on `_lrv` whenever LR_SCHED=none and lr_own=1, and
+    undefined global: ISSUES P1-H15 was a NameError on `_lrv` whenever LR_SCHED=none and lr_own=1, and
     the crash is now unspellable rather than merely fixed.
 
     LEVERS READ: lr_own, lr_cycle, lr_gamma, lr_amin, lr_maxr, lr_boost, cull_frac, grace
@@ -606,7 +606,7 @@ def manage_period(fab: Config):
 
     WHY THIS EXISTS RATHER THAN THE ROOT PASSING cfg.manage_every. Cadences.due states that its
     period "MUST be units.Windows. An int raises; a Flushes raises." -- and Config hands back a bare
-    int for all 35 levers that declare a Clock unit (ISSUES H51), so the row that read
+    int for all 35 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
     `Cadences.due('fab.manage', FAB.manage_every, clock)` was passing an int into a function whose
     contract refuses one. EVAL and CKPT already had typed accessors (curve_period, save_period);
     FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.

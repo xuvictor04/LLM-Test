@@ -160,13 +160,13 @@ class FABLevers(LeverSet):
     society = Lever(False, "One hop with experts blended at the PREDICTION level, instead of "
                            "multi-hop chaining through Fabric.forward.", U.FLAG)
     # Census: SOCIETY -> FAB_SOCIETY. Needs a dated glossary entry: an archived decision file records
-    # society-vs-chaining as SETTLED against the configuration that is now the default (ISSUES C2).
+    # society-vs-chaining as SETTLED against the configuration that is now the default (ISSUES P2-C2).
 
     hop_mode = Lever("soc", "Which multi-hop path exists: 'soc' re-routes from scratch each hop with "
                             "the current state in the query, 'transition' walks the learned successor "
                             "matrix R with SRC marks.", U.NAME,
                      choices=("soc", "transition"))
-    # choices= IS THE REPAIR, and this knob is one of the eleven ISSUES M24 names (with SIG_MODE,
+    # choices= IS THE REPAIR, and this knob is one of the eleven ISSUES P1-M24 names (with SIG_MODE,
     # EVICT, CULL_MODE, LR_SCHED, KEY_SRC and the rest) where an unrecognised value silently ran a
     # path nobody asked for. The mechanism is one line: `s.loop_soc = (_env("CHAIN_ROUTE","soc") ==
     # "soc")` at :1843 -- so CHAIN_ROUTE=Soc, or a typo, is not "the default", it is the TRANSITION
@@ -205,7 +205,7 @@ class FABLevers(LeverSet):
 
     hop_sup = Lever(0.0, "Weight on per-hop deep supervision: a cross-entropy at every hop, not only "
                          "at the end of the walk.", U.FRACTION)
-    # ARMED AND INERT, by wiring rather than by design (ISSUES M27): it reads fab._hops, which only
+    # ARMED AND INERT, by wiring rather than by design (ISSUES P1-M27): it reads fab._hops, which only
     # the transition branch fills -- `s._hops.append` occurs at EXACTLY ONE site over 9,859 lines,
     # :2819, inside that branch -- so under the shipped hop_mode="soc" any value above zero adds
     # exactly nothing to the loss and nothing at the config layer says so. Kept because the
@@ -291,7 +291,7 @@ class FABLevers(LeverSet):
     # N0=3 -> 2.117 b/B (spread 0.326), GROW=0 N0=2048 -> 1.999 (spread 0.080), GROW=1 NMAX=4096 ->
     # 3.384 (spread 2.074). The structure -- that the interaction is the whole effect -- is what
     # survives; the numbers do not. Also carries the repository's most expensive stale value: FAB_N0=3
-    # is still asserted as current in an archived twin file and in nine notes (ISSUES H1).
+    # is still asserted as current in an archived twin file and in nine notes (ISSUES P2-H1).
 
     slots = Lever(4096, "Preallocated slot count: cap = max(n0, slots); memory cost is 2*cap*d*rank "
                         "floats and it is the hard ceiling on every growth path.", U.SLOTS)
@@ -324,7 +324,7 @@ class FABLevers(LeverSet):
     # sweep needs. Two live defects belong WITH it rather than against it: spawn_from creates experts
     # independently of this switch, so a grow=off run still drifted 3 -> 6 experts (:7332-7335); and
     # growth_test.py is the only gate that does not stub _env, so an ambient FAB_GROW=0 in the shell
-    # produces 5 failures and makes two "no false positives" checks pass vacuously (ISSUES H41).
+    # produces 5 failures and makes two "no false positives" checks pass vacuously (ISSUES P1-H41).
 
     # ==============================================================================================
     # 3. ROUTING: WHO GETS THE TOKEN
@@ -357,7 +357,7 @@ class FABLevers(LeverSet):
     # makes the distribution selectable at all (:2350, :2441). It is meaningful as ONE temperature
     # only because FAB_KEY_NORM was dropped -- at its default 0 the learned term was an unbounded raw
     # dot while the HALT logit was always a normalized cosine, so the two operators it divides sat on
-    # different scales and halting was decided by key magnitude (ISSUES M29).
+    # different scales and halting was decided by key magnitude (ISSUES P1-M29).
 
     cent_topk = Lever(8, "How many routed centroids EMA toward the served signature on each grounded "
                          "update.", U.EXPERTS)
@@ -368,7 +368,7 @@ class FABLevers(LeverSet):
     # term scores against noise (:2400-2404). Performance defect to fix at port, not a lever
     # question: each of the k centroids is written back with .cpu() and a float() that forces a
     # device sync per expert, so 8 centroids x 4 hops is dozens of synchronisations per step for a
-    # slow-moving EMA (ISSUES M35).
+    # slow-moving EMA (ISSUES P1-M35).
 
     discover = Lever(0.35, "Cosine distance beyond which a signature counts as material NOTHING owns "
                            "and is handed to the least-used expert.", U.FRACTION)
@@ -394,7 +394,7 @@ class FABLevers(LeverSet):
     # port must hold it to: training-passes-only (a digest assertion, G7), and that the cold set is
     # actually sampled -- today `sorted(range(N), key=use)` is a stable sort over a mostly-tied key,
     # so exploration samples the LOWEST-INDEXED zero-use experts, a fixed prefix of the slot array
-    # rather than the population (ISSUES M25).
+    # rather than the population (ISSUES P1-M25).
 
     ec_w = Lever(0.0, "Expert-choice deficit bonus: nudge routing toward experts under their share, "
                       "by construction rather than by a loss.", U.FRACTION)
@@ -417,7 +417,7 @@ class FABLevers(LeverSet):
     # the decay should instead be denominated in flushes, that is a conversion with a name
     # (derive.flush_period) and a Windows source, not a relabelled threshold.
     #
-    # ALL THREE BALANCE LEVERS ARE INERT TODAY AND NOT ONE OF THEM IS A DEAD MECHANISM (ISSUES C2):
+    # ALL THREE BALANCE LEVERS ARE INERT TODAY AND NOT ONE OF THEM IS A DEAD MECHANISM (ISSUES P1-C2):
     # under the shipped hop_mode="soc" the quantity they scale is a freshly allocated zero scalar with
     # no graph (soc-loop return at :2694, consumed at :7031), so the balance pressure has been exactly
     # 0.0 in every shipped configuration and there is no DID IT FIRE row for it. That is broken
@@ -484,7 +484,7 @@ class FABLevers(LeverSet):
     # The parameter that decides whether a population of thousands is affordable: 12.3k parameters
     # per expert at r=8 against 2.36M for the old full MLP (:1643-1650). Documentation drift to
     # correct, not a defect in the knob: a research brief still gives the expert rank as 4
-    # (ISSUES M22).
+    # (ISSUES P2-M22).
 
     emb_hid = Lever(128, "Hidden width of the shared identity embedder eemb and its inverse edec.",
                     U.COUNT)
@@ -516,7 +516,7 @@ class FABLevers(LeverSet):
     # newborn's weights into q_route so the router learns to specify (:1701-1708). Two defects to fix
     # rather than reasons to drop: it ignores `grow` and the soft cap, so a frozen population still
     # drifts upward (:7332-7335); and the mid-chain variant reads _hopq, which only the transition
-    # branch fills, so it can never fire under the default hop_mode (ISSUES M26).
+    # branch fills, so it can never fire under the default hop_mode (ISSUES P1-M26).
 
     spawn_mult = Lever(2.0, "How many times the population's own median nearest-neighbour distance a "
                             "query must exceed to count as material nothing serves.", U.COUNT)
@@ -847,7 +847,7 @@ class FABLevers(LeverSet):
                           "its own use count.", U.FLAG)
     # The saving from leaving it off is real and belongs in the docs: the rescaling path clones every
     # live row of A and B on each optimizer step, about 50 MB at 2048 experts. UNFIXED CRASH ON THE
-    # ON PATH (ISSUES H15): _lrv is undefined when LR_SCHED=none and lr_own is on -- a NameError on
+    # ON PATH (ISSUES P1-H15): _lrv is undefined when LR_SCHED=none and lr_own is on -- a NameError on
     # the first flush. The global rate is OPT's number and must arrive as the wire d_base_lr.
 
     lr_cycle = Lever(24.0, "Half-cycle of the per-expert triangular2 schedule, measured on the "

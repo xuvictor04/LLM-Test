@@ -2,9 +2,9 @@
 
 ---
 
-### [CRITICAL] ISSUES C12's premise is contradicted by the tree's own K10-checked declaration: under the declaration that a machine check actually reads, **no resume raises at all**
+### [CRITICAL] ISSUES P1-C12's premise is contradicted by the tree's own K10-checked declaration: under the declaration that a machine check actually reads, **no resume raises at all**
 
-**Which question(s)** Q-CKPT-2, and directly ISSUES C12 — the reviewer prompt asked "Would every resume really raise? … if it would NOT, that is a critical finding against ISSUES C12 and I want it."
+**Which question(s)** Q-CKPT-2, and directly ISSUES P1-C12 — the reviewer prompt asked "Would every resume really raise? … if it would NOT, that is a critical finding against ISSUES P1-C12 and I want it."
 
 **Why it is real**
 `Snapshot.geometry` is written by exactly one thing: `CKPT.save`'s `geometry` argument (`src/ckpt/api.py:16` declares `Snapshot payload, geometry, step, epoch, best_state`; `:83` is `def save(ckpt, *, payload, geometry, step, epoch, reason, suffix="")`). So the question "what does the save side record" reduces to "what produces `CKPT.save`'s `geometry`".

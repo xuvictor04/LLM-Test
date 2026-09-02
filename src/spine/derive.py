@@ -295,7 +295,7 @@ def cadences_that_cannot_fire(run_windows, periods):
     including EVAL.curve_every=2000, so the learning curve is never probed, and OPT.lr_warmup=1000,
     so the run ends INSIDE warm-up. Every cadence carries the old system's value, tuned against
     STREAM_LEN=94000000 and 60k-step runs; stream_bytes carries a smoke-test value. Neither is wrong
-    alone. Together they describe a run in which almost nothing happens (ISSUES C11).
+    alone. Together they describe a run in which almost nothing happens (ISSUES P1-C11).
 
     WHAT IT IS FOR IS THE REPORT, NOT THE ARITHMETIC. The check is one comparison; the reason it
     exists is that PLAN's P3 exit criterion is "empty environment, 200 steps, reaches the end", and

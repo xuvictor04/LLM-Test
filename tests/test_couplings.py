@@ -374,7 +374,7 @@ LEVERS = {
     "CKPT":  {"dir": "runs/a/ckpt", "resume": "runs/parent/ckpt"},
     "DOM":   {},        # declares no lever of its own; its namespace bound arrives as a wire
     "TOK":   {"max_bytes": 24},   # sources LM.d_max_token_bytes; its own four values arrive as wires
-    # SIG joined this map with SIG.d_idle_cadence, the coupling ISSUES H53 records as declared in a
+    # SIG joined this map with SIG.d_idle_cadence, the coupling ISSUES P1-H53 records as declared in a
     # comment for six commits and nowhere else. Both its ends are SIG's, so without a SIG stand-in
     # the row deferred on every build here and C4 reported the deferral -- correctly, since a
     # deferred row on a build where every package is present is the shape that hid thirteen rows
@@ -411,7 +411,7 @@ EXPECTED = {
     # so this number discriminates: at train_every=1 the formula gives max(6, 12) = 12, which is also
     # what train_every_idle alone gives, so a compute that ignored train_every entirely would pass.
     # That is the shape a known-answer table exists to refuse, and it is the shape this coupling was
-    # in for six commits -- a literal 12 with no connection to train_every at all (ISSUES H53).
+    # in for six commits -- a literal 12 with no connection to train_every at all (ISSUES P1-H53).
     "SIG.d_idle_cadence":              18,
     "FAB.d_operating_population":      3072,          # ceil(0.75 x 4096); LOCAL, no edge, no budget
     "OPT.d_effective_batch_windows":   64,            # 16 x 4; LOCAL. The batch the run actually trains at
@@ -435,7 +435,7 @@ EXPECTED = {
 
 LOCAL_DSTS = {"FAB.d_operating_population", "OPT.d_effective_batch_windows", "LM.d_pos_max",
               # SIG.d_idle_cadence: both ends are SIG's, so it books no edge and spends no
-              # budget -- the fourth of this shape, added with ISSUES H53.
+              # budget -- the fourth of this shape, added with ISSUES P1-H53.
               "SIG.d_idle_cadence"}
 
 

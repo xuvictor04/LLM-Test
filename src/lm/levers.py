@@ -283,7 +283,7 @@ class LMLevers(LeverSet):
     # and `model` the live nn.Module, all in the same scopes -- and the config audit had to list MODEL by
     # hand in a `_plumb` allowlist at :5761-5762 to stop the typo net firing on its own knob. A name that
     # needs an allowlist entry to survive the audit that protects it is the wrong name.
-    # choices= IS THE REPAIR, AND THIS IS ONE OF THE ELEVEN. ISSUES.md M24 (:361) names MODEL in the list
+    # choices= IS THE REPAIR, AND THIS IS ONE OF THE ELEVEN. ISSUES.md P1-M24 names MODEL in the list
     # of knobs where "an unrecognised value falls into whichever branch is the else, rather than being
     # refused": build_lm is `if MODEL_TYPE == "transformer": TinyTransformer(...)` and everything else
     # returns MiniLM (:1598-1600), so MODEL=Transformer, MODEL=xformer and MODEL=grru all silently train
@@ -292,7 +292,7 @@ class LMLevers(LeverSet):
     # IT GATES THREE OTHER LEVERS AND THAT MUST BE PRINTED, NOT INFERRED. `heads` is read only on the
     # transformer arm; `layers` means 4 there and 1 here; and `compose` is a no-op there because
     # TinyTransformer has no compose attribute at all and forwards through s.head unconditionally
-    # (ISSUES.md M22, :351-353) while the coupling banner at :6038 prints a sentence describing a
+    # (ISSUES.md P1-M22) while the coupling banner at :6038 prints a sentence describing a
     # mechanism that model does not have. Under G4 each of those is a declared Gate that prints its own
     # predicate; "set but inert" and "not set" are two different statements and the old tree made both
     # look like silence.
@@ -312,7 +312,7 @@ class LMLevers(LeverSet):
     # name, nothing in self_organize.py read D_MODEL_B at all, so `D_MODEL_B=768 python3 self_organize.py`
     # silently ran at d=128 -- it mis-sized every direct-invocation run including the GPU bench, which
     # reported 4.3M/5.1M parameters instead of the intended 28.7M/53.9M, and including the pilot command
-    # handed to the owner (ISSUES.md PART 4, the [archive/facts] D_MODEL_B entry). (2) The fix introduced the mirror image, ISSUES.md L26 at
+    # handed to the owner (ISSUES.md PART 4, the [archive/facts] D_MODEL_B entry). (2) The fix introduced the mirror image, ISSUES.md P1-L26 at
     # :842-844: the nested `_i` reads D_MODEL_B EAGERLY and then discards it whenever D_MODEL is set,
     # while both land in _ENV_ASKED and _ENV_READ -- so the audit reported both as read and accounted for,
     # only one affected the run, and no OVERRIDE note was printed. Under the spine an alias is
@@ -381,7 +381,7 @@ class LMLevers(LeverSet):
     # width it needed. The token width is the lever; the byte width is a NAMED derivation --
     # spine.derive.signature_width_bytes -- and it reaches SIG as a d_ wire so the conversion exists once,
     # with a name, instead of three times by hand.
-    # ONE DECLARATION ALSO ENDS ISSUES M14. fetch_data.sh tells the operator to set WIN=256 while
+    # ONE DECLARATION ALSO ENDS ISSUES P1-M14. fetch_data.sh tells the operator to set WIN=256 while
     # run_full_unfrozen.sh re-assigns WIN=96 on its own env line, so an operator following the documented
     # command trains at 96 believing 256. Under L1 there is one declaration and the run banner prints the
     # resolved value, so the launcher and the run cannot disagree in silence.
@@ -505,7 +505,7 @@ class LMLevers(LeverSet):
     # that measurement by 0.340 but LOST one short end-to-end toy, 5.214 against 5.100, which is well
     # inside the 0.066-0.131 b/B seed spread -- so under PLAN rule 8 neither result may be reported as a
     # verdict from n=1, and the default stays at "mean", which is what the record was taken under.
-    # choices= CLOSES A SILENT ELSE, AND THIS IS ANOTHER OF THE ELEVEN ISSUES M24 (:361) NAMES. The
+    # choices= CLOSES A SILENT ELSE, AND THIS IS ANOTHER OF THE ELEVEN ISSUES P1-M24 NAMES. The
     # source is `if _wm == "mean": ... else: <last/first>` at :7688-7699, so WARMSTART_MODE=Mean,
     # =average or any typo runs last/first while the banner echoes what was typed -- the same class as
     # DATA_MODE=Real. With choices= it is a startup LeverError listing the three legal arms.
@@ -535,7 +535,7 @@ class LMLevers(LeverSet):
     # IT IS UNTRIPPABLE ON HALF THE MODEL SPACE AND THAT IS THE FIRST THING TO FIX WITH IT. TinyTransformer
     # (:1561) has no compose attribute at all, so LM_COMPOSE=1 with LM_ARCH=transformer is silently a
     # no-op while :6038 prints a coupling sentence describing a mechanism that model does not have
-    # (ISSUES.md M22). That is the untrippable-guard class; only a declared Gate printing its own
+    # (ISSUES.md P1-M22). That is the untrippable-guard class; only a declared Gate printing its own
     # arithmetic (G4) makes it visible, and it is a Gate over TWO of this package's own levers.
     # ITS TABLE MUST BE SIZED FROM `vocab_slots`, NOT FROM A SECOND ENVIRONMENT READ. :1455-1456 sized
     # delta/dbias from its own os.environ read defaulting to 2048 while the tokenizer targeted 4096 --

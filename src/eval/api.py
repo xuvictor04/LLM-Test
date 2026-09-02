@@ -75,8 +75,8 @@ def curve_period(ev: Config):
     # NOT A STUB, AND THE THREE SIBLINGS ARE NOT EITHER. A period accessor is one
     # construction over one declared lever, and its whole job is that Cadences.due REFUSES a
     # bare int while Config hands one back for all 35 levers that declare a Clock unit
-    # (ISSUES H51). Leaving it a stub kept spine.compose._periods -- and therefore
-    # RUN.cadence_audit, the one statement that makes ISSUES C11 visible -- unreachable
+    # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
+    # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
     return U.Windows(int(ev.curve_every))
 
@@ -97,7 +97,7 @@ def curve_probe(ev: Config, *, units_by_domain, logits_fn, rng):
     is 64/16 = 4x, and it belongs on P9's list of numbers expected to move. BUT IT IS 4x OF ZERO AT
     THE SHIPPED DEFAULTS AND THE P9 ENTRY MUST SAY SO: curve_every=2000 against a default run of
     506-937 windows (DATA.stream_bytes=120000, LM.ctx=128, RUN.epochs=1) means this probe NEVER
-    FIRES, which is ISSUES C11. An unconditional "the default probe cost rose 4x" is a number nobody
+    FIRES, which is ISSUES P1-C11. An unconditional "the default probe cost rose 4x" is a number nobody
     can reproduce -- the failure P9 exists to prevent -- so the entry reads "4x on runs long enough
     to probe; does not exist at the shipped defaults". If the C11 run-length ruling raises
     stream_bytes or epochs, this question should be re-read, not carried.
@@ -124,7 +124,7 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng):
     "did adding an area damage what was already known".
 
     WINDOW STARTS ARE DRAWN IN BYTE COORDINATES from DATA's held-out block and tokenize() is
-    applied to the fixed byte windows. ISSUES H20: :5087-5088 drew them as
+    applied to the fixed byte windows. ISSUES P1-H20: :5087-5088 drew them as
     `randint(0, len(_v) - WIN - 2)` where `_v` is the TOKENISED validation text, whose length
     shrinks over a run under online minting and differs between parent and child -- so `prev` and
     `now` were measured on DIFFERENT WINDOWS, on the one number the file calls "the ONLY number
@@ -132,7 +132,7 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng):
     must survive a re-segmentation can be a byte offset.
 
     `units_by_domain` carries DATA's Areas.holdout_bytes with it, and the SIZE is recorded on the
-    Sample: ISSUES M82 is precisely the case where two configurations covered different amounts of
+    Sample: ISSUES P1-M82 is precisely the case where two configurations covered different amounts of
     text and neither report said so.
 
     THE COMPARISON IS PAIRED, AND THE PAIRING IS PINNED HERE RATHER THAN LEFT TO P5 (Q-EVAL-9,
@@ -181,7 +181,7 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng):
 def null_excess(ev: Config, *, real, permute, rng):
     """The permutation null every 2-sigma verdict is judged against. Returns NullReading.
 
-    REFUSES draws < 2 AT CONSTRUCTION. ISSUES L44: null_draws=0 gives an empty list and
+    REFUSES draws < 2 AT CONSTRUCTION. ISSUES P1-L44: null_draws=0 gives an empty list and
     `sum(_nl)/len(_nl)` is a ZeroDivisionError that takes the whole remainder of the report with it
     (compose_test at :8949 has no try/except while the very next section does). L45: at 1 draw the
     sd is exactly 0.0 and `real - null > 2*sd + 1e-9` reduces to "any excess above 1e-9" -- a

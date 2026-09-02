@@ -154,7 +154,7 @@ points**) and one open question about whether its cadence is even the right kind
 | M4 | One package per modality, or modality as a lever? | Names are generated from `PREFIX`; a knob that changes what other knobs mean is the coupling class. |
 | M5 | Does each modality get its own tokenizer, or is there one joint vocabulary? | `LM.vocab_slots` is the model's row count and `TOK` may not mint past it — one wire, or three. |
 | M6 | Is a still image one window or many patches? | Decides whether images have an internal sequence at all, and therefore whether `LM.ctx` means anything for them. |
-| M7 | Does generation share the routed path with reading, or is there a second forward? | `ISSUES C4/C5` are what happens when a second path resolves a shared quantity differently — the eval signature came out at one byte while training used 614. |
+| M7 | Does generation share the routed path with reading, or is there a second forward? | `ISSUES P1-C4/C5` are what happens when a second path resolves a shared quantity differently — the eval signature came out at one byte while training used 614. |
 | M8 | Where does cross-modal prediction live — `WORLD`, or a new package? | `WORLD.forecast` is already a latent generator with a `feedback` switch. |
 | M9 | What is the held-out split for a modality with no natural byte order? | `Q-DATA-6` asks this for text and is unresolved; images make it sharper. |
 | M10 | Does adding a modality count as **adding an area** for the continual-learning benchmark? | If yes, this is goal B's benchmark and the R matrix (graft G8) has to carry it. If no, say what it is instead. |

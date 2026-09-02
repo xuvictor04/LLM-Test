@@ -74,8 +74,8 @@ def save_period(ckpt: Config):
     # NOT A STUB, AND THE THREE SIBLINGS ARE NOT EITHER. A period accessor is one
     # construction over one declared lever, and its whole job is that Cadences.due REFUSES a
     # bare int while Config hands one back for all 35 levers that declare a Clock unit
-    # (ISSUES H51). Leaving it a stub kept spine.compose._periods -- and therefore
-    # RUN.cadence_audit, the one statement that makes ISSUES C11 visible -- unreachable
+    # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
+    # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
     return U.Windows(int(ckpt.every))
 
@@ -88,7 +88,7 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
     `reason` is one of "periodic" | "sigusr1" | "best" | "bestN" | "final" and is RECORDED, so the
     log can name the route that fired rather than describing the mechanism that did nothing.
 
-    THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT, NOT ONLY TO ckpt.pt. ISSUES M46: `ck = ck + suffix`
+    THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT, NOT ONLY TO ckpt.pt. ISSUES P1-M46: `ck = ck + suffix`
     (:5335-5337) suffixed the checkpoint while `TOK.save(_TOK_SAVE)` (:5344-5348) ALWAYS wrote the
     BASE vocabulary path, so every later save overwrote the file a .bestN snapshot records as its
     own; by the end of a run a .best checkpoint's recorded merge count no longer matches the file
@@ -149,7 +149,7 @@ def resume_source(ckpt: Config):
 def load(ckpt: Config):
     """Read the resume source. Returns Snapshot(payload, geometry, step, epoch, best_state) or None.
 
-    `best_state` IS IN THE CHECKPOINT -- ISSUES M45: `_best_bpb` starts cold on every process
+    `best_state` IS IN THE CHECKPOINT -- ISSUES P1-M45: `_best_bpb` starts cold on every process
     (:4243) and nothing carried it, so the first post-resume probe satisfied "no best yet" and
     OVERWROTE THE PARENT'S best-by-held-out snapshot with the Adam re-warm bump. That is this
     package's own bug, not a coupling: the best-so-far is checkpoint state.
@@ -240,7 +240,7 @@ class Retention:
         2.175 b/B the default 0.02 admits up to 2.219, a window of 0.043 bits/byte.
 
         EVENT-DRIVEN, NOT A SCAN. It is called only when a curve probe returned a value on this
-        window. ISSUES L43: `_cs = [b for st, _p, b, _a in _CURVE if st == step]` ran once per
+        window. ISSUES P1-L43: `_cs = [b for st, _p, b, _a in _CURVE if st == step]` ran once per
         window over a list that grows by len(VALC) entries every RATE_EVERY steps, returning empty
         on all but 1-in-RATE_EVERY of them.
 

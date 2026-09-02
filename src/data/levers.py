@@ -53,7 +53,7 @@ Not emitted, by verdict: 1 merge, 0 drop, 0 promote-to-wire.
                   branched on PHASED alone (:8099, :8133, :9809), and the whole-process UNLEARN test ran
                   OUTSIDE the `if PHASED:` guard holding the other two edit tests, so it could delete
                   what _edit_test had already deleted and print "LOCAL" from an edit that removed
-                  nothing (ISSUES M65). See DEFECT 3 for the one thing the merge still requires.
+                  nothing (ISSUES P1-M65). See DEFECT 3 for the one thing the merge still requires.
 
 --------------------------------------------------------------------------------------------------
 THE THREE CENSUS DEFECTS, CHECKED HERE
@@ -205,10 +205,10 @@ class DATALevers(LeverSet):
                                 "DATA_DIR, `synthetic` generates from Markov processes.",
                    U.NAME, choices=("real", "synthetic"))
     # Census: DATA_MODE -> DATA_SOURCE. "Mode" names nothing; the knob picks the stream's SOURCE.
-    # choices= IS THE REPAIR, NOT DECORATION. This is knob number one of the eleven ISSUES M24 records
+    # choices= IS THE REPAIR, NOT DECORATION. This is knob number one of the eleven ISSUES P1-M24 records
     # where an unrecognised string falls into whichever branch is the `else` -- "DATA_MODE, SIG_MODE,
     # MODEL, VERIFY, KEY_SRC, LR_SCHED, SIG_SPACE, WARMSTART_MODE, TOK_PROBATION_BY, CHAIN_ROUTE,
-    # CULL_MODE and EVICT are all compared case-sensitively" (ISSUES M24, and the [so-config/facts]
+    # CULL_MODE and EVICT are all compared case-sensitively" (ISSUES P1-M24, and the [so-config/facts]
     # entry beginning "AMP is the only string knob in the region that is case-normalised").
     # The comparison is
     # `if DATA_MODE == "real"` at :1102/:1120, so DATA_MODE=Real takes the SYNTHETIC branch silently and
@@ -217,7 +217,7 @@ class DATALevers(LeverSet):
     # here: AMP is the only knob in the tree that lowercases, and refusing is honest where silently
     # accepting two spellings is a second name for one arm.
     # THE DEFAULT IS THE CENSUS'S LITERAL AND IT IS KNOWN-BROKEN IN COMBINATION. Shipped default
-    # synthetic + TOKENIZER=1 exits at startup (ISSUES M20), and the synthetic path itself crashed on a
+    # synthetic + TOKENIZER=1 exits at startup (ISSUES P1-M20), and the synthetic path itself crashed on a
     # bare NameError for twelve days -- VALC/CORP/DN/SEG_LEN/DISK_STREAM only exist under the real
     # branch -- with preflight.sh's END-TO-END SMOKE the only caller that ever exercised it (C33, H9).
     # The default is not changed here because the fix is TOK's (its row merges TOKENIZER into TOK_MODE
@@ -251,7 +251,7 @@ class DATALevers(LeverSet):
     # both: an absolute entry or one containing ".." is refused (otherwise this is an arbitrary-path
     # read), and two entries whose BASENAMES collide are refused with both source paths printed --
     # because the label is what per-area scores, the holdout rng key and ACROSS THE RUN BOUNDARY look
-    # up by name, and one label over two corpora is ISSUES C19 from the other side.
+    # up by name, and one label over two corpora is ISSUES P3-C19 from the other side.
     # Census: DOMAINS -> DATA_AREAS. RENAMED FOR A GLOSSARY COLLISION THAT IS ALREADY PRODUCING WRONG
     # NUMBERS (G12). "Domain" in the DOM package is a self-assembled partition cell; this knob is a list
     # of corpus DIRECTORIES. Two meanings, one word, and the old _DERIVED table even wired SEG_CONTIG's
@@ -264,7 +264,7 @@ class DATALevers(LeverSet):
     # with an undersized eng: VALC[0] is the PYTHON corpus and the report calls it 'eng'. Because ACROSS
     # THE RUN BOUNDARY looks the previous run's probe up BY NAME, the next run then compares this run's
     # Python against last run's English and reports the difference AS FORGETTING -- the one number goal B
-    # rests on, computed across two languages (ISSUES C19). The trigger is an undersized corpus: a
+    # rests on, computed across two languages (ISSUES P3-C19). The trigger is an undersized corpus: a
     # partial fetch, an interrupted download, a gated dataset that wrote nothing -- i.e. the single most
     # likely thing to go wrong on the very run that adds a second area.
     # AND THE CHECKPOINT USED TO RECORD `_env('DOMAINS','')`, so any run that did not set it stored an
@@ -367,7 +367,7 @@ class DATALevers(LeverSet):
     # at any area count -- "rust|rust|rust|rust" -- which the paragraph below says no literal string
     # could express, and it removes the order-fragility longrun.sh:930-932 is living with (it hand-types
     # _AI=1 under a comment claiming the index is computed from DOMAINS, and nothing reads DOMAINS,
-    # ISSUES L2). Second, DATA.data_plan RECOGNISES the protocol from the resolved schedule -- four
+    # ISSUES P1-L2). Second, DATA.data_plan RECOGNISES the protocol from the resolved schedule -- four
     # written predicates, no generator, no new lever -- so Plan.protocol names explicit / generated /
     # stationary / pure_add on every run.
     # WHAT IS DELIBERATELY NOT DONE, AND THE OWNER IS OWED THE SENTENCE: empty still generates the
@@ -397,9 +397,9 @@ class DATALevers(LeverSet):
     # REHEARSED sliding window, not pure add.
     # TWO DEFECTS TO CARRY, both from the census evidence rather than from the knob: (1) the phase fill
     # truncates and overshoots -- `per = STREAM_LEN // len(PHASE_SCHED)` at :1402 plus a whole 700-1800
-    # byte segment past each bound -- so PH_BOUNDS drift and the stream comes out short (ISSUES L22);
+    # byte segment past each bound -- so PH_BOUNDS drift and the stream comes out short (ISSUES P1-L22);
     # (2) the `[a for a in act if a < NP] or list(range(NP))` fallback at :1404 is unreachable dead code
-    # (ISSUES L18), and the parser at :1358-1361 is what makes it unreachable, so the port must not
+    # (ISSUES P1-L18), and the parser at :1358-1361 is what makes it unreachable, so the port must not
     # reintroduce it as a safety net that quietly re-enables every area in a phase.
     # THE STATIONARY ARM IS EXPRESSIBLE ONLY EXPLICITLY -- see DEFECT 3 in the module header.
 
@@ -410,7 +410,7 @@ class DATALevers(LeverSet):
     # KEPT RATHER THAN "JUST WRITE THE SCHEDULE OUT", because a hand-written schedule silently becomes
     # wrong when the area order changes, and the tree is living with that defect right now: longrun.sh
     # hand-types `_AI=1` under a comment claiming it is computed from the DOMAINS order, and nothing
-    # reads DOMAINS (ISSUES L2). The generator itself replaced a per-n lookup table for the stated reason
+    # reads DOMAINS (ISSUES P1-L2). The generator itself replaced a per-n lookup table for the stated reason
     # that a rule applies the same shape at any n (:1332-1336).
     # THE FLOOR OF TWO IS A PORT REQUIREMENT THIS DECLARATION CANNOT ENFORCE. The shipped resolution is
     # `p = p or max(2, _i("PHASES", 4))` (:1343) and spine/derive.py::pin_tick says in as many words that
@@ -420,7 +420,7 @@ class DATALevers(LeverSet):
     # computed off the last phase, so PHASES=1 makes the unlearn-a-faded-area test skip itself as
     # vacuous -- a test that reports passing because it had nothing to check.
     # AND DO NOT REPRODUCE THE ALIASING: the shipped n<=1 path returned `[[0] if n else []] * p`, which
-    # is p references to ONE list (ISSUES L23). derive.phase_schedule builds independent lists and is
+    # is p references to ONE list (ISSUES P1-L23). derive.phase_schedule builds independent lists and is
     # equal by value to the oracle; the difference appears the moment anyone mutates a phase.
 
     phase_live = Lever(0, "How many areas are live in each phase of the GENERATED schedule; 0 derives "
@@ -430,7 +430,7 @@ class DATALevers(LeverSet):
     # THE DEFAULT WAS COMPUTED, AND ITS DECLARED PARENT WAS WRONG -- which is the census catching itself.
     # The old _DERIVED table says PHASE_W follows PHASES (:91, "window width follows the phase count"),
     # while the code reads `w = w or max(1, min(n, _i("PHASE_W", (n + 1) // 2)))` at :1345 where n is the
-    # AREA count (ISSUES M18). So changing PHASES left it untouched, and losing a corpus to the
+    # AREA count (ISSUES P1-M18). So changing PHASES left it untouched, and losing a corpus to the
     # 5000-byte drop filter silently changed the schedule SHAPE. A declared-vs-actual parent mismatch is
     # exactly what spine.derive's replay table exists to make impossible.
     # 0 IS A SENTINEL, NOT A VALUE, and it is the literal that keeps the derivation where it belongs.
@@ -475,7 +475,7 @@ class DATALevers(LeverSet):
     # name as an instance of the doubled-name defect (DEFECT 1 in the module header).
     # IT APPLIES ON BOTH PATHS NOW, AND THAT IS THE FIX. Read at exactly one site, :1168, inside the
     # DISK_STREAM branch only -- so on the disk path the held-out set is the tail truncated to 4 MB while
-    # on the RAM path it is the ENTIRE holdout_frac tail (:1170). ISSUES M82, stated exactly: "every
+    # on the RAM path it is the ENTIRE holdout_frac tail (:1170). ISSUES P1-M82, stated exactly: "every
     # held-out number is computed over a different amount of text depending on a knob that is nominally
     # about where bytes live" (M81 and M83 are the same root; the quoted sentence is M82's). The
     # memorization check, the
@@ -498,7 +498,7 @@ class DATALevers(LeverSet):
     # :5538) sit inside `if DATA_MODE == "real" and NP > 1` at :5497, so the whole-run repetition check
     # is unavailable on exactly the single-area configuration goal A runs in -- which is where accidental
     # repetition is EASIEST to reach, since one corpus plus a large stream_bytes is the default way to
-    # hit it (ISSUES L21, :2091). The quantity is perfectly well defined at one area.
+    # hit it (ISSUES P1-L21, :2091). The quantity is perfectly well defined at one area.
     # PORT REQUIREMENT: move the read out of the NP>1 guard, and print the arithmetic as a declared Gate
     # (G4) so "did not fire" is distinguishable from "could not fire". A guard that cannot trip reads
     # exactly like a healthy run.
@@ -510,7 +510,7 @@ class DATALevers(LeverSet):
     # of Python draws 2.00 MB/epoch from each -- under the cap, quiet, fine -- while over EPOCHS=8 that
     # is 16 MB drawn from 7.6 MB of Python against 16 MB drawn from 57 MB of English. The added area is
     # seen 2.1x over while the original is 28% sampled, and "adding py cost eng X bits/byte" is then
-    # confounded with "py was memorised and eng was skimmed" (ISSUES H22, self_organize.py:5490-5496).
+    # confounded with "py was memorised and eng was skimmed" (ISSUES P3-H22, self_organize.py:5490-5496).
 
     exposure_skew = Lever(3.0, "Max/min exposure ratio across areas above which the data plan is "
                                "flagged as imbalanced.", U.COUNT)
@@ -554,7 +554,7 @@ class DATALevers(LeverSet):
     # 78-81), where it bounds the disk read on both the mmap and the RAM path.
     # THE DEFAULT IS THE MOST EXPENSIVE TRAP IN THE TREE AND IT IS DECLARED HERE UNCHANGED, ON PURPOSE.
     # 2,000,000 bytes per area means a multi-day run trains on 2 MB per area no matter what is on disk.
-    # ISSUES H8 and M15 both record SHIPPED scripts that ask for more than the cap allows
+    # ISSUES P1-H8 and M15 both record SHIPPED scripts that ask for more than the cap allows
     # (run_full_unfrozen.sh PART B, run_cl_test.sh part 3: a 6 MB / 2 MB stream against a 2 MB
     # per-area cap); preflight.sh's own header lists "a multi-day run that would have trained on 2 MB"
     # as a known past failure; and self_organize.py:5616-5618 warns about ITS OWN DEFAULT -- a knob whose

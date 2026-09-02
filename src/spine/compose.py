@@ -58,7 +58,7 @@ No package imports spine.compose, and no <pkg>.api imports spine.assemble, so ad
 closes no loop. `python3 -c "import sys;sys.path.insert(0,'src');import spine.compose"` was run and
 imports cleanly.
 
-THE IMPORT HAZARD, MEASURED (ISSUES C10). Running with the REPOSITORY ROOT ahead of `src` on
+THE IMPORT HAZARD, MEASURED (ISSUES P1-C10). Running with the REPOSITORY ROOT ahead of `src` on
 sys.path makes `import memory` return the old 654-line ./memory.py, and `import data` would return
 the tracked ./data/ CORPUS DIRECTORY as a namespace package. src/data/ survives that collision only
 because src/data/__init__.py exists -- a regular package outranks a namespace portion found earlier
@@ -365,7 +365,7 @@ ASSEMBLY_ORDER = (
                                               "in, so the recorded key set is byte-identical to the "
                                               "live one and the missing-field set is EMPTY by "
                                               "construction (Q-CKPT-2, first half resolved "
-                                              "2026-08-30; ISSUES C12 withdrawn as filed). THE "
+                                              "2026-08-30; ISSUES P1-C12 withdrawn as filed). THE "
                                               "FIELD COUNT IS NOT WRITTEN HERE, DELIBERATELY. It "
                                               "was written in four places and three of them went "
                                               "stale inside one week -- 15, 16, 20 -- so the count "
@@ -544,7 +544,7 @@ ASSEMBLY_ORDER = (
                                               "the module's RECORD TYPES block, so `encoder` is now "
                                               "checkable provenance"),
     ("restore",   "OPT",   "load_state",      "(st, saved=Snapshot.payload['OPT']) -- AFTER build "
-                                              "because the param_group_shape refusal (ISSUES L50) "
+                                              "because the param_group_shape refusal (ISSUES P1-L50) "
                                               "compares the saved shape against the LIVE groups, "
                                               "which do not exist until build returns. It is the "
                                               "entry point that carries opt.ckpt.loaded/refused, "
@@ -624,7 +624,7 @@ ASSEMBLY_ORDER = (
                                               "five cannot fire at this run's length BEFORE the "
                                               "first window. At the shipped defaults a run is at "
                                               "most 937 windows and ten cadence defaults are longer "
-                                              "(ISSUES C11), so without this a green P3 certifies a "
+                                              "(ISSUES P1-C11), so without this a green P3 certifies a "
                                               "system in which every cadenced mechanism fired zero "
                                               "times. It states, it does not raise: a short run is "
                                               "legitimate, a report that cannot tell 'ran and did "
@@ -1127,7 +1127,7 @@ LOOP_ORDER = (
     # and therefore the thing that runs, says CKPT.save's `geometry` IS _geometry_manifest(sysm).
     # The recorded key set is byte-identical to the live one and check_geometry's missing-field set
     # is EMPTY BY CONSTRUCTION. The claim that the recorded side carries WORLD.geometry alone is
-    # ISSUES C12, WITHDRAWN AS FILED; the "other ten" this comment reported as refused was
+    # ISSUES P1-C12, WITHDRAWN AS FILED; the "other ten" this comment reported as refused was
     # arithmetic over that claim and over a miscount of WORLD.geometry's own width, which the B row
     # for it below states.
     # WHAT IS ACTUALLY LEFT is narrower, and it is Q-CKPT-2's residue rather than this block's: the
@@ -1239,7 +1239,7 @@ LOOP_ORDER = (
                                       "because its gate cannot go through Cadences.ledger"),
     ("R", "FAB",   "counters",        "(pop)"),
     ("R", "OPT",   "counters",        "(st) -- it ASSERTS backward // accum == step, which is the "
-                                      "only thing that proves ISSUES H29 is dead"),
+                                      "only thing that proves ISSUES P3-H29 is dead"),
     ("R", "CAP",   "counters",        "(valve) -- including the BLOCK-REASON histogram, without "
                                       "which '0 lifts' cannot say which condition refused. With "
                                       "CAP.observe deferred every one of those reasons reads "
@@ -1575,7 +1575,7 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "THE SENTENCE THAT USED TO FOLLOW HERE SAID 'Ten of its fields have no writer on the save "
         "side today', WHICH CONTRADICTED THE ONE BEFORE IT: if geometry IS _geometry_manifest(sysm), "
         "that one call is the writer of EVERY field in it -- a count is deliberately not written here, because it stood at 15, 16 and 20 in three live statements at once and the sentence added to un-stale it was stale by four when it landed. It was the C-block's claim leaking into the "
-        "entry that refutes it, and ISSUES C12 was then filed against a claim this declaration had "
+        "entry that refutes it, and ISSUES P1-C12 was then filed against a claim this declaration had "
         "already answered -- see C12, corrected 2026-08-30.",
     "RUN.bench_summary":
         "n_params is _n_params(sysm) -- BOTH param groups, never just the base list, because a report "
@@ -1937,7 +1937,7 @@ def compose(environ=None, *, restored=None):
         # the module restores above run STRICTLY BEFORE this point precisely so the param groups
         # assembled at :1726-1729 already have the checkpoint's structure. A second restore path
         # would also carry state past opt.ckpt.loaded / opt.ckpt.refused, which live here.
-        # The param_group_shape refusal (ISSUES L50) compares the saved shape against the LIVE
+        # The param_group_shape refusal (ISSUES P1-L50) compares the saved shape against the LIVE
         # groups, which do not exist until build returns; OPT.state_dict now DECLARES it writes
         # that shape, which it did not until the same edit, so the refusal has something to
         # compare against instead of being armed against nothing.
@@ -1988,7 +1988,7 @@ def compose(environ=None, *, restored=None):
     sysm.cadences = run_api.new_cadences(run, periods=periods)
 
     # AND THE AUDIT WAS A ROW NOBODY CALLED. `grep cadence_audit` found it only inside its own row
-    # prose: the one statement that makes ISSUES C11 visible -- ten cadence defaults longer than a
+    # prose: the one statement that makes ISSUES P1-C11 visible -- ten cadence defaults longer than a
     # 937-window run -- was never executed, while K6 credited the row and passed. It STATES, it does
     # not raise, so its lines join the warnings the report must print; an EMPTY list is a real
     # result and must be printed as one.
@@ -2038,7 +2038,7 @@ def _alphabet_size(sig, lm):
     """The encoder embedding's row count: 256 under space="bytes", LM.vocab_slots under "tokens".
 
     Sized at the SLOT CEILING and not at the live vocab_size, because widening an embedding mid-run
-    changes the encoder optimizer's moment shapes -- ISSUES H24 from the other side. SIG records it
+    changes the encoder optimizer's moment shapes -- ISSUES P3-H24 from the other side. SIG records it
     in its checkpoint sidecar and refuses a resume that disagrees.
     """
     return int(lm.vocab_slots) if sig.space == "tokens" else 256
@@ -2078,7 +2078,7 @@ def _base_parameters(sysm):
             sysm.warnings.append(
                 f"OPT.build: {name} exposes no parameters(), so it contributes NOTHING to the "
                 f"'base' param group. Nothing else in the tree says so, and an optimizer that "
-                f"silently trains fewer tensors than the report claims is ISSUES L50 from the "
+                f"silently trains fewer tensors than the report claims is ISSUES P1-L50 from the "
                 f"other side.")
     return out
 
@@ -2117,7 +2117,7 @@ def _run_windows(sysm):
     and derive.opt_steps_from_windows does the same (derive.py::opt_steps_from_windows), so RUN.cadence_audit would
     have raised on its first call and OPT.build on its first horizon -- unreachable today only
     because RUN.process_setup raises several rows earlier, which is this file's oldest shape and
-    the reason K7 exists. ISSUES H51 is the general case: all 35 Clock-unit levers resolve to bare
+    the reason K7 exists. ISSUES P1-H51 is the general case: all 35 Clock-unit levers resolve to bare
     ints and the typing is real only where derive or assemble puts it back, which for this quantity
     is here, at the one place it is computed.
     """
@@ -2559,7 +2559,7 @@ def _periods(sysm):
 
     THE ACCESSORS EXIST BECAUSE Cadences.due REFUSES A BARE INT. Three of the five gates were handed
     cfg.manage_every directly until 2026-08-30, and Config hands back a bare int for all 35 levers
-    that declare a Clock unit (ISSUES H51), so three of the five would have raised on their first
+    that declare a Clock unit (ISSUES P1-H51), so three of the five would have raised on their first
     evaluation while the row said they were fine. K9 refuses that shape now.
 
     THE KEYS ARE THIS FILE'S. 'dom.rekey' takes MEM's period, which reads wrong and is not: the old
@@ -2601,7 +2601,7 @@ def _n_params(sysm):
 def _bytes_per_window(sysm):
     """RUN.bench_summary's `bytes_per_window`: LM.ctx x the LIVE bytes/token.
 
-    Measured on the LAST segmentation, not the seed vocabulary -- ISSUES L42 is the old number
+    Measured on the LAST segmentation, not the seed vocabulary -- ISSUES P1-L42 is the old number
     initialised once at the seed vocabulary and refreshed only inside an instrument's tick, so
     every throughput line in the report described a compression ratio the run had left behind.
     """

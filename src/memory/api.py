@@ -146,7 +146,7 @@ def read(mem: Config, store, *, queries, promote=True):
 
     `conf` is the top cosine similarity and `blend` is computed HERE from conf, match_floor and
     blend_max -- THE CALLER NEVER RECOMPUTES EITHER. Recomputing conf at the blend site is what
-    reproduced the ungated 50/50 mix one layer up in prompt.py (ISSUES C8) and cl_bench.py (C9).
+    reproduced the ungated 50/50 mix one layer up in prompt.py (ISSUES P1-C8) and cl_bench.py (C9).
 
     promote=False is the read that MUST NOT MOVE THE STORE: it skips the use/last/prob updates. The
     report path uses it, because holdout_bpb(use_mem=True) mutating use, prob and last is L49 and
@@ -455,7 +455,7 @@ def rekey_period(mem: Config):
     """The memory rekey cadence, AS units.Windows. Handed to RUN's Cadences.due under 'dom.rekey'.
 
     Same reason as FAB.manage_period and DOM.manage_period: Cadences.due refuses a bare int, and
-    Config hands one back for every lever that declares a Clock unit (ISSUES H51). This was one of
+    Config hands one back for every lever that declares a Clock unit (ISSUES P1-H51). This was one of
     the three rows that would have raised on the first evaluation.
 
     THE KEY IS 'dom.rekey' AND THE PERIOD IS MEM'S, which looks wrong and is not: the old line made

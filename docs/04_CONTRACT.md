@@ -59,14 +59,14 @@ one that can go stale in silence — this one had.)*
 
 | new row | src | why it is a wire and not an argument |
 |---|---|---|
-| `LM.d_max_token_bytes` | `TOK.max_bytes` | `ByteComposer.__init__(s, d, maxb=16)` at `:1441` is constructed as `ByteComposer(d)` at `:1549` so the default always wins, and `:1487` truncates. With `MAX_TOK > 16` two long tokens sharing their first 16 bytes get **identical composites** — the composer's whole property, inverted, silently (ISSUES M21). `lm/levers.py:165` names the field; `tok/levers.py:337` records the row as missing. The defaults agreeing today is luck. |
+| `LM.d_max_token_bytes` | `TOK.max_bytes` | `ByteComposer.__init__(s, d, maxb=16)` at `:1441` is constructed as `ByteComposer(d)` at `:1549` so the default always wins, and `:1487` truncates. With `MAX_TOK > 16` two long tokens sharing their first 16 bytes get **identical composites** — the composer's whole property, inverted, silently (ISSUES P1-M21). `lm/levers.py:165` names the field; `tok/levers.py:337` records the row as missing. The defaults agreeing today is luck. |
 | `CAP.d_expert_slots` | `FAB.slots` | `CAP_FAB_START = 0` is a **sentinel meaning "start at the hard ceiling"**, and `lever.py` refuses a default computed from another lever — so 0 stood for a number nothing supplied. `capacity/levers.py:119`, and `:123` says in as many words that the row is absent. |
 | `CAP.d_vocab_slots` | `LM.vocab_slots` | The same sentinel on the other target. `capacity/levers.py:244` records that TOK holds no ceiling of its own to give. |
 | `CAP.d_mask_dead_rows` | `LM.mask_dead_rows` | The honesty precondition on the vocabulary arm: 8192 reserved against 2048 minted is 6144 rows in the softmax denominator indexing nothing, so the run measures the reservation and not the mechanism. LM owns the output layer; CAP does not get to decide this. |
 | `CAP.d_operating_population` | `FAB.pressure × FAB.slots` | The irreducible coupling the valve must **declare rather than remove**: a soft cap above the cull's settling point never pins, so the pin clock never accumulates and the valve is dead while looking armed. A second landing of the identical `derive.operating_population` call, so the fabric's setpoint and the valve's refusal cannot disagree. |
 | `DOM.d_comp_ema` | `FAB.comp_ema` | One smoothing rate for two populations, or "this domain beats the population" is a comparison between two differently smoothed series. `fabric/levers.py:693` names both this and the next; `self_organize.py:6720` is the direct attribute reach it replaces. |
 | `DOM.d_comp_protect` | `FAB.comp_protect` | One brake policy for two populations. The domain cull is the mechanism that deleted 200,000 memory entries under a phased schedule. |
-| `FAB.d_base_lr` | `OPT.lr` | `:7252` builds the per-expert envelope from the **peak**. Until some name lands, `FAB_LR_OWN=1` has no legal way to learn the number — which is what makes ISSUES H15 (`NameError: _lrv`) spellable. Named `d_base_lr` and not `d_lr_peak` because the **receiver** already declares that spelling (`fabric/levers.py:848`) and the receiver's `grep d_` is the one that has to find it. This settles the open name conflict `opt/levers.py`'s conflict (b) records — **and that paragraph said "neither in `spine.assemble.COUPLINGS`" until 2026-09-03, when the row had been in the ledger for a day; it now records which spelling lost.** |
+| `FAB.d_base_lr` | `OPT.lr` | `:7252` builds the per-expert envelope from the **peak**. Until some name lands, `FAB_LR_OWN=1` has no legal way to learn the number — which is what makes ISSUES P1-H15 (`NameError: _lrv`) spellable. Named `d_base_lr` and not `d_lr_peak` because the **receiver** already declares that spelling (`fabric/levers.py:848`) and the receiver's `grep d_` is the one that has to find it. This settles the open name conflict `opt/levers.py`'s conflict (b) records — **and that paragraph said "neither in `spine.assemble.COUPLINGS`" until 2026-09-03, when the row had been in the ledger for a day; it now records which spelling lost.** |
 | `FAB.d_lr_min_frac` | `OPT.lr_min_frac` | `:7251` is `_lo = LR * LR_MIN_FRAC`, needed in the same block; shipping one endpoint without the other leaves the fabric with half a rate. |
 
 Consequences recorded in the fixtures rather than hidden: `affects("FAB_SLOTS")` widens to
@@ -89,7 +89,7 @@ promote-to-wire that quietly became nothing is indistinguishable from one nobody
 | `d_curve_bpb`, `d_best_bpb` | arguments to `Retention.consider` / `maybe_step` | held-out **measurements**, produced thousands of windows into the run. `d_best_bpb` additionally carries a seed count, because a damped restart is a verdict and PLAN 3.8 forbids a verdict on n=1. |
 | `d_run_steps` / `d_total_steps` | `run_windows` argument to `opt.build` | the stream length in windows depends on the **tokenization**, which has not happened at freeze. This is the *second* NOT_WIRES ground, not the `RUN.epochs → d_lr_horizon` one; both rejections are real and they are different. |
 | `d_shift_at` | argument to `maybe_step` | the optimizer step of the last self-inflicted shift is runtime state. The old form read it as a **closure variable** written by DATA's resample branch (`:6518-6521`). |
-| `d_residual_ratio` | `LM.residual_ratios(lm, model)` → argument to `judge_probation` | read off a live tensor **after `build()` freezes**, so no compute can see it. It was routed from `MintReport.residual_ratio` until 2026-09-02, which is mint time — zero by construction (Q-TOK-11). At `lm.compose = False` the call returns None and TOK's `probation_by="embed"` arm is Gate-declared unreachable rather than silently running the "use" test (ISSUES M41). |
+| `d_residual_ratio` | `LM.residual_ratios(lm, model)` → argument to `judge_probation` | read off a live tensor **after `build()` freezes**, so no compute can see it. It was routed from `MintReport.residual_ratio` until 2026-09-02, which is mint time — zero by construction (Q-TOK-11). At `lm.compose = False` the call returns None and TOK's `probation_by="embed"` arm is Gate-declared unreachable rather than silently running the "use" test (ISSUES P1-M41). |
 | `d_live_vocab`, `d_retired_ids` | arguments to `decode` | change on every mint. |
 | `d_live_domains` | argument to `fab.forward` | changes at every domain manage pass. `fabric/levers.py:408` calls it a wire; this is a correction to that comment, not a disagreement with L2 — the value still arrives from outside and the reader still never names the foreign lever. |
 | `d_last_boundary`, `d_prototype_reservoir` | arguments to `cadence_due` / `train_step` | same shape; `sig/levers.py:385` calls the first a wire. |
@@ -631,7 +631,7 @@ it — an exemption table is a place a row stops being read.
 **This heading said "two entries, and why only two" while the table held 24, and that is not a style
 note — it is the recorded contributing cause of a critical defect filed against nothing.** The
 normative answer to Q-CKPT-2's first half (`CKPT.save`'s `geometry` **is** `_geometry_manifest(sysm)`)
-lives in that table, and the commit that filed ISSUES C12 as *"every resume raises"* never read it,
+lives in that table, and the commit that filed ISSUES P1-C12 as *"every resume raises"* never read it,
 because a declaration that says "two, and readers stop here" is a declaration readers stop at. The
 `compose.py` header was corrected on 2026-09-02; this heading was the last copy. **The rule the
 sentence was reaching for stands and is the thing to keep:** an entry is written here only when
@@ -877,7 +877,7 @@ tables claiming one, and it names the producer each is waiting on.
   image of an argument with no producer, and the row says so rather than leaving the reader to
   discover it from an unread return.
 * **`Stream.splice_starts` and `Stream.area_changes`.** `data/api.py:153-156` argues hard that BOTH
-  must leave the package "so no consumer has to guess which one it wanted" — against ISSUES H10,
+  must leave the package "so no consumer has to guess which one it wanted" — against ISSUES P1-H10,
   where boundary precision/recall was scored on every splice start and on a one-area run all ~96
   "true switches" were artefacts. **No signature in the tree names either.** `DOM.observe` *produces*
   boundaries rather than consuming ground truth, and every boundary-scoring instrument is deferred.
@@ -904,12 +904,12 @@ this project's oldest"*.
    call site passed `run` alone — a `TypeError` on every `compose()` the moment the first stub gets
    a body. The signature was fixed on 2026-08-30 and the call site was not. Now built and passed.
 2. **`cadence_audit` was a row nobody called.** `grep` found it only inside its own row prose: the
-   one statement that makes ISSUES C11 visible — ten cadence defaults longer than a 937-window run
+   one statement that makes ISSUES P1-C11 visible — ten cadence defaults longer than a 937-window run
    — never ran, while K6 credited the row and passed. It now runs, and its lines join
    `System.warnings`; an **empty** list is a real result and must be printed as one.
 3. **`_run_windows` returned a bare `int`** into two functions that refuse one:
    `derive.cadences_that_cannot_fire` and `derive.opt_steps_from_windows` both raise `UnitError` on
-   a non-`Windows` (ISSUES H51: all 35 Clock-unit levers resolve to bare ints and the typing is real
+   a non-`Windows` (ISSUES P1-H51: all 35 Clock-unit levers resolve to bare ints and the typing is real
    only where `derive` puts it back). It now returns `units.Windows`.
 4. **`_run_windows`' row said `run_windows=Plan's measured length`.** `Plan` has no such field
    (`data/api.py:22`) — the same wrong fact the helper's own docstring had already caught once, in
@@ -938,7 +938,7 @@ need the list. What is worth stating is the **shape**: one FLAT map with PREFIXE
 **What this section said until 2026-09-02, and why it was wrong.** It said the recorded side is
 `WORLD.geometry` alone — five fields — so ten of fifteen are in the live manifest and absent from
 the recording, which `ckpt/api.py` specifies as a **REFUSAL**, and therefore *every resume raises
-`GeometryRefusal` the day P4 lands*. **ISSUES C12 was filed on that and is withdrawn as filed.**
+`GeometryRefusal` the day P4 lands*. **ISSUES P1-C12 was filed on that and is withdrawn as filed.**
 `ROW_ARGUMENTS_ELSEWHERE["CKPT.save"]` — which K10 reads in both directions, so it is the
 declaration that runs — says `CKPT.save`'s `geometry` **is** `_geometry_manifest(sysm)`. The save
 side and the child call the same function over the same frozen Configs, so the recorded key set is
@@ -1285,7 +1285,7 @@ were confirmed by matching the citing sentence against the defect body (`M65`, `
 `M20`, `C19`).
 
 **Repaired in `src/data/` and `src/tok/` only: 17 citations, converted to the defect's ID
-(`ISSUES M77`), which does not move.** The `[so-config/facts]` entries have no ID and are now cited by
+(`ISSUES P1-M77`), which does not move.** The `[so-config/facts]` entries have no ID and are now cited by
 their opening words. **50 line citations remain in the other twelve packages and are all wrong by the
 same 88/90.** They are not silently rebased here: a blind `+88` is the wrong repair — the two offsets
 differ, so it would land some citations one entry off — and each replacement has to be confirmed
@@ -1349,7 +1349,7 @@ itself, which is one default and one line.
    area alone"* **writable at any area count** — `"rust|rust|rust|rust"` — which `data/levers.py`
    said no literal string could express, and it removes the order-fragility `longrun.sh:930-932` is
    living with in the open (it hand-types `_AI=1` under a comment claiming the index is computed
-   from `DOMAINS`, and nothing reads `DOMAINS`; ISSUES L2).
+   from `DOMAINS`, and nothing reads `DOMAINS`; ISSUES P1-L2).
 
 **THE DEFAULT, STATED BECAUSE THE OWNER ASKED TO BE TOLD WHAT IS ON.** `DATA_PHASE_SCHED=""` still
 generates the **rehearsed** sliding window. The owner's ruling — *"Pure add seems to be for testing
@@ -1647,7 +1647,7 @@ cross-kind conversion in the tree — was given a name. §OPT now says so.
 optimizer steps, not by windows; at `batch_windows=1, accum=1` (shipped) the two counters coincide
 and no recorded number moves; at `WIN=256 BATCH_W=16 ACCUM=4` — `fetch_big.py`'s own recommended
 heavy-run command — they differ by 64×, so `lr_warmup=1000` under the old reading completed 64 times
-sooner than its lever text said. Attributable to the ISSUES H29 counter repair.* Whether P9's list
+sooner than its lever text said. Attributable to the ISSUES P3-H29 counter repair.* Whether P9's list
 becomes a file or a section is the owner's; the text is here so it is not re-derived.
 **Literature agrees and does not decide it:** stepping the scheduler per optimizer update rather
 than per micro-batch is standard, and stepping it per micro-batch under gradient accumulation is a
@@ -1994,7 +1994,7 @@ five. **No frozen signature moved. No lever, wire, coupling or default moved. No
 Windows. It was chosen to be sane at both ends of the range, because nothing can move it: at the
 shipped defaults a run is at most 937 windows and about 506 at the measured 1.85 bytes/token, so 100
 fires ~5 times, while the old `RATE_EVERY` default of **2000 would fire zero times** and put this
-line straight onto the ISSUES C11 list. It is also the shortest cadence already declared in the tree
+line straight onto the ISSUES P1-C11 list. It is also the shortest cadence already declared in the tree
 (`DOM.manage_every = 100`), so it can never be the reason a report has nothing in it. On a long run
 (94 MB, ~400k windows) it is ~4000 lines over hours, which is what an ETA meter is for.
 
@@ -2043,7 +2043,7 @@ prints rather than a claim in a docstring.
 **What it does NOT need, and this is why nothing was minted.** No typed accessor and therefore **no
 new entry point**. The **five** accessors — `EVAL.curve_period`, `DOM.manage_period`,
 `FAB.manage_period`, `MEM.rekey_period`, `CKPT.save_period` — exist because `Config` hands back a
-bare `int` for all 35 Clock-unit *levers* (ISSUES H51, three of five gates handed bare ints until
+bare `int` for all 35 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
 2026-08-30); a module constant has no `Config` to drop its kind, so it is written `units.Windows` at
 its definition. That is a **construction, not a conversion** — it re-attaches a kind, it does not
 cross one. *(This sentence said "four" until 2026-09-03. It is the sixth count this document has got
@@ -2426,7 +2426,7 @@ lifted cap alone because `Valve.origin` must record where the starting cap came 
 constructor cannot obtain any other way. `OPT.build` has no equivalent fact.
 
 **AND THE HALF OF THIS QUESTION THAT SHIPS WHICHEVER OPTION IS TAKEN.** `OPT.load_state` REFUSES
-when `saved.param_group_shape` differs from the live one — the ISSUES L50 guard, the one thing
+when `saved.param_group_shape` differs from the live one — the ISSUES P1-L50 guard, the one thing
 standing between a resume and AdamW moments reattached **positionally** to different tensors after
 the population grew. `OPT.state_dict` enumerated optimizers, `opt_step`, `n_backward`, `lr_prev`,
 `restart_amp`, `cycle_best`, `cycle_index`, the horizon and the counters — and **not**
@@ -2775,7 +2775,7 @@ cadence — an instrument computed thousands of times and discarded.
 
 **(c) is required alongside, not instead.** At `lm.compose = False` there is no composer and the call
 returns `None`; TOK's Gate must then print *unreachable (no residual_ratio supplied)* rather than
-silently running the `use` test, which is ISSUES M41 exactly.
+silently running the `use` test, which is ISSUES P1-M41 exactly.
 
 **Default unchanged and worth stating: `TOK_PROBATION_USES = 0`, so the whole probation family is
 inert as shipped** — this makes the `embed` arm *correct when switched on* rather than wrong by
@@ -3022,7 +3022,7 @@ one and `check_geometry`'s missing-field set is empty by construction. K10 reads
 directions, so the entry is live and normative.
 
 Six other statements in `compose.py` and this document said the save side records `WORLD.geometry`
-alone, and **ISSUES C12 was filed against those** — a critical defect asserted against a claim the
+alone, and **ISSUES P1-C12 was filed against those** — a critical defect asserted against a claim the
 same file had already refuted. C12 is withdrawn as filed and the record is kept there. *Where a
 declaration and a comment disagree, the declaration is what runs.*
 

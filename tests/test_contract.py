@@ -1656,7 +1656,7 @@ def check_k9_cadence_periods_are_typed(src_dir=SRC):
     raises; a Flushes raises." Three rows handed it a bare lever read --
     Cadences.due('fab.manage', FAB.manage_every, clock), and the same for DOM.manage_every and
     MEM.rekey_every -- and Config hands back a bare int for all 35 levers that declare a Clock unit
-    (ISSUES H51). So three of the five periodic gates in the system would have raised on their first
+    (ISSUES P1-H51). So three of the five periodic gates in the system would have raised on their first
     evaluation, and the row said they were fine.
 
     EVAL and CKPT already had typed accessors (curve_period, save_period) and did not raise. That is
@@ -1782,7 +1782,7 @@ def check_k9_cadence_periods_are_typed(src_dir=SRC):
             f"src/spine/compose.py  _periods['{key}'] is neither a call nor a typed module "
             f"constant. Every period in this mapping is handed straight to Cadences.due, which "
             f"raises on a bare int, and a Config returns a bare int for every Clock-unit lever "
-            f"(ISSUES H51).")
+            f"(ISSUES P1-H51).")
 
     return _report("K9", "no cadence gate is handed a bare lever read", not findings,
                    f"{gates} Cadences.due gate(s) declared across {len(prose)} row note(s); "

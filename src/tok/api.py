@@ -21,7 +21,7 @@ ever added an area).
 TWO PATH WIRES, AND THEY ARE TWO ON PURPOSE. d_vocab_save_path (from CKPT.dir) is where this run
 writes its own vocabulary; d_vocab_read_path (from CKPT.resume) is where a resume reads its
 parent's. One knob doing both jobs made a run overwrite its parent's vocabulary and made eleven
-concurrent smoke arms race for data/dyntok.json (ISSUES M5, L7, M19, M46).
+concurrent smoke arms race for data/dyntok.json (ISSUES P1-M5, L7, M19, M46).
 
 RECORD TYPES RETURNED (P4 defines them; other packages receive them as arguments and call their
 methods, which is not an import):
@@ -45,13 +45,13 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     mode="online"  -> build to tok.seed_vocab as a TARGET and keep minting during training.
     The three-state lever replaces two booleans encoding three states, which is why GROW_PASSES was
     unreachable at TOK_ONLINE=1 and SEED_VOCAB/SEED_PASSES unreachable at TOK_ONLINE=0 while the
-    audit reported the unset one as an operator typo (ISSUES L20).
+    audit reported the unset one as an operator typo (ISSUES P1-L20).
 
     If d_vocab_read_path is non-empty and exists, the parent's merges are REPLAYED instead of
     built -- a resume MUST reuse the saved vocabulary or the restored embedding table is indexed by
     a different vocabulary. The file's recorded vmax/min_pair/max_tok/dropout DO NOT WIN: this
     package holds one declaration, the levers, and any disagreement is printed as a reconciliation
-    line and counted (ISSUES M80, L20 -- a resume setting MIN_PAIR=200 ran with the parent's value
+    line and counted (ISSUES P1-M80, L20 -- a resume setting MIN_PAIR=200 ran with the parent's value
     and the audit then printed "NOTHING READ THESE" naming a knob that was set and ignored).
 
     ONE LITERAL FOR THE PASS COUNT (Q-TOK-9, ruled 2026-09-02). It is tok.build_passes on ALL
@@ -70,10 +70,10 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     Otherwise: tok.build_passes tally-and-mint passes over
     b"".join(h[:tok.build_bytes] for h in area_heads), breaking early when a pass mints nothing.
     The counting segmentation applies tok.dropout, drawing from rng_for("tok.dropout", seed) --
-    never the process-global `random`, which shifted the RNG stream of the entire run (ISSUES L69).
+    never the process-global `random`, which shifted the RNG stream of the entire run (ISSUES P1-L69).
     bytes_per_token over the build sample is measured with derive.bytes_per_token(len(sample),
     len(ids)) and returned on the Vocabulary, because it is what DATA's splice gate and SIG's width
-    need and THERE IS NO SECOND ESTIMATOR (ISSUES H16: the mean-over-vocabulary-entries estimator
+    need and THERE IS NO SECOND ESTIMATOR (ISSUES P1-H16: the mean-over-vocabulary-entries estimator
     read 1.50 against 1.85 as used, and its error changes SIGN with vocabulary size -- the axis
     those runs were compared along).
 
@@ -109,7 +109,7 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
 
     Returns Segmentation(ids, byte_pos, labels, bytes_per_token) where byte_pos[k] is the BYTE
     offset of token k -- the stable coordinate that lets every downstream metric survive a
-    re-segmentation, and the surface ISSUES H20 needs: the run-boundary probe drew window starts in
+    re-segmentation, and the surface ISSUES P1-H20 needs: the run-boundary probe drew window starts in
     TOKEN coordinates off a validation text whose length shrinks as the vocabulary grows, so `prev`
     and `now` were measured on DIFFERENT windows. start>0 segments only the unconsumed tail:
     minting is append-only, so an already-emitted prefix keeps its meaning.
@@ -247,12 +247,12 @@ def mint_burst(tok: Config, vocab, *, step):
     never minted and scored 3.600 b/B against a ~1.96 baseline. If nothing in the window passes,
     take the most frequent candidate clearing min_pair, SCANNED IN FREQUENCY ORDER HELD SEPARATELY
     from the re-ranked list -- the shipped fallback re-used the novelty-sorted list, so at
-    mint_novel > 0 it took the most NOVEL one (ISSUES M77). A candidate refused for max_bytes or
+    mint_novel > 0 it took the most NOVEL one (ISSUES P1-M77). A candidate refused for max_bytes or
     for already existing is SKIPPED, not returned as "nothing left to mint": that hole stalled a
     vocabulary at 658/4000 with 1866 pairs still above min_pair. A candidate whose bytes already
     exist at a RETIRED id is a REINSTATEMENT -- put the old id back in the match table, mint
     nothing -- because retire() pops from seq2id and leaves id2bytes, so re-minting creates two ids
-    with identical bytes and splits the statistics between them (ISSUES M79).
+    with identical bytes and splits the statistics between them (ISSUES P1-M79).
 
     A refusal at min(soft_cap, ceiling) is its own counter, not silence.
 
@@ -285,7 +285,7 @@ def judge_probation(tok: Config, vocab, *, step, appearances, residual_ratio=Non
       nothing about the merge. If residual_ratio is None the embed arm is UNREACHABLE and SAYS SO
       through its Gate -- it must never silently fall through to the "use" test while the banner
       reports "judged by embed", which is what happened at TOK_PROBATION_BY=embed with
-      TOK_COMPOSE=0 (ISSUES M41).
+      TOK_COMPOSE=0 (ISSUES P1-M41).
 
     RETIREMENT IS SOFT: the bytes are popped from the match table so segmentation stops producing
     the token and its text re-segments to its parts, while the id and its embedding row stay. Ids
@@ -352,7 +352,7 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     A FROZEN SIGNATURE MOVED HERE). CKPT.save takes `suffix` and says "THE SUFFIX APPLIES TO THE
     WHOLE SNAPSHOT, NOT ONLY TO ckpt.pt", and A SNAPSHOT'S VOCABULARY IS PART OF THE SNAPSHOT.
     Without it this call always wrote the base file, so a reason="bestN" save wrote
-    runs/x.best3/ckpt.pt and OVERWROTE runs/x.dyntok.json -- ISSUES M46 exactly, multiplied n times
+    runs/x.best3/ckpt.pt and OVERWROTE runs/x.dyntok.json -- ISSUES P1-M46 exactly, multiplied n times
     over by best_keep. It is worse in this tree than an overwrite: resuming from a best snapshot
     sets CKPT.resume to that snapshot's base, so d_vocab_read_path resolves to
     <base>.best3.dyntok.json, A FILE NOTHING EVER WROTE; build_vocabulary falls through to "build",

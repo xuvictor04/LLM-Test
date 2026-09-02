@@ -64,6 +64,8 @@ WHAT IT CANNOT CATCH:
     near-miss net inside the families, not a spell-checker over the environment.
 """
 import contextlib
+import difflib
+import glob
 import io
 import os
 import re
@@ -168,7 +170,7 @@ def packages():
     answers depending on which file you read.
 
     THESE ARE STAND-INS AND NOT THE REAL PACKAGES, WHICH NOW EXIST -- and the reason is A3, not inertia.
-    src/*/levers.py declares 259 levers across thirteen packages; A3 requires a stated reach for EVERY
+    src/*/levers.py declares 261 levers across thirteen packages; A3 requires a stated reach for EVERY
     declared lever, because an oracle checked only where somebody remembered to check it is not an
     oracle. Nine stand-ins carrying the fourteen fields the coupling table actually names keep that
     requirement meetable and keep the fixture readable. What the stand-ins may NOT do is drift from the
@@ -243,7 +245,7 @@ def packages():
             seed = Lever(1234, "the run seed every subsystem stream is derived from", U.COUNT)
 
         class Signature(LeverSet):
-            # ADDED WITH SIG.d_idle_cadence, which is the coupling ISSUES H53 records as declared in
+            # ADDED WITH SIG.d_idle_cadence, which is the coupling ISSUES P1-H53 records as declared in
             # a comment for six commits and nowhere else. Its two ends are both SIG's, so without a
             # SIG stand-in the row deferred on every build here and three checks reported the
             # deferral as a defect -- correctly. The stand-ins are the reason A1/A2/A4 can assert
@@ -281,7 +283,7 @@ EXPECTED_DEFAULT = {
     "TOK.d_vocab_save_path":           "runs/a/ckpt.dyntok.json",       # _TOK_SAVE's shipped rule
     "TOK.d_vocab_read_path":           "runs/parent/ckpt.dyntok.json",  # the parent's, by the same rule
     "SIG.d_idle_cadence":              12,             # max(1 x 6, 12); LOCAL, both ends SIG's --
-                                                      # the relation ISSUES H53 records as declared
+                                                      # the relation ISSUES P1-H53 records as declared
                                                       # in a comment and nowhere else for six commits
     "FAB.d_operating_population":      3072,           # ceil(0.75 x 4096); LOCAL, no edge, no budget
     "OPT.d_effective_batch_windows":   64,             # 16 x 4; LOCAL. The batch the run actually trains at
@@ -636,7 +638,7 @@ def check_a3_affects():
                                           # a LOCAL coupling books no edge, so the reach stays {SIG}
                                           # even though the value genuinely moves. That is the same
                                           # shape LM_CTX and OPT_ACCUM have above, and it is why
-                                          # ISSUES H53 -- the relation declared in a comment and
+                                          # ISSUES P1-H53 -- the relation declared in a comment and
                                           # nowhere else -- was invisible to affects() as well.
         "SIG_TRAIN_EVERY_IDLE": {"SIG"},  # the other end of that coupling
         "RUN_SEED":            {"RUN"},   # deliberately NOT wired -- see NOT_WIRES, and A7
@@ -1080,6 +1082,143 @@ def check_a7_rng_accounting():
 
 
 # ==================================================================================================
+# A8 -- a count written in prose about the WHOLE tree still matches the whole tree
+# ==================================================================================================
+
+# The four whole-tree quantities, and how to read each one off the live registry. NOT a snapshot: each
+# entry is a callable, so the expected value is whatever the tree says at the moment the check runs.
+#
+# WHY A CHECK AND NOT A CORRECTED NUMBER. A8 exists because line 171 of this file said "declares 259
+# levers" for two lever generations after the tree declared 261, and docs/03_WIRING.md -- a GENERATED
+# file, carrying its own regeneration script in its header -- sat at 13 couplings and 10 wires against a
+# live 23 and 19. Both were fixed by hand once already. A number a human corrects by hand is a number
+# that drifts again on the next commit that changes the tree, and neither of those two was found by a
+# check: they were found by a reviewer reading prose. That is the recorded-never-read defect wearing
+# documentation's clothes.
+_LIVE_COUNTS = {
+    "levers": (lambda: sum(len(s._levers) for s in registry.all_sets().values()),
+               "levers declared across src/*/levers.py"),
+    "packages": (lambda: len(registry.all_sets()), "packages declaring a LeverSet"),
+    "couplings": (lambda: len(assemble.COUPLINGS), "rows in spine.assemble.COUPLINGS"),
+    "budget": (lambda: WIRE_BUDGET, "spine.wire.WIRE_BUDGET"),
+}
+
+# Each pattern's ONE capturing group is the stated number, and the key names which live quantity it
+# claims. The phrasings are narrow on purpose. A blanket sweep for `\d+ levers` would collect "7 levers"
+# from a paragraph describing ONE package and report a defect against a sentence that is true -- an
+# oracle that cries wolf is switched off, and a switched-off oracle is the state A8 is here to prevent.
+# What makes a phrasing eligible is that it names the whole tree in the same breath as the number:
+# `src/*/levers.py`, `the N declared levers`, `N declared couplings`. Add a phrasing here when you write
+# one; the VACUOUS line below is what tells you the population went to zero if you do not.
+_STATED = (
+    ("levers", re.compile(r"src/\*/levers\.py declares (\d+) levers")),
+    ("levers", re.compile(r"(?:the|All) \**(\d+)\** (?:of the )?declared levers")),
+    ("levers", re.compile(r"(?:the|All) \**(\d+)\** of the declared levers")),
+    ("couplings", re.compile(r"(\d+) declared coupling")),
+    ("budget", re.compile(r"of (\d+) wires")),
+)
+
+_SWEPT = ("tests/*.py", "docs/*.md", "src/spine/*.py")
+
+
+def check_a8_stated_counts():
+    """Every whole-tree count written in prose equals the count the live tree reports.
+
+    HOW THIS CAN FAIL. Add a fourteenth package, or a lever, or a COUPLINGS row, and the sentences that
+    state those totals become false in the same commit. A8 fails on that commit rather than two
+    generations later, and it names the file and line, so the fix is a one-line edit and not an
+    archaeology session.
+
+    WHAT IT DOES NOT COVER, said plainly. A count stated in a phrasing not listed in _STATED is
+    invisible to A8 -- this is an allowlist of sentence shapes, and an allowlist's failure mode is
+    silence. Two things keep it honest: the detail line prints the population, so a phrasing that stops
+    matching shows up as the number dropping; and VACUOUS fires if the whole sweep collects nothing,
+    which is the state where A8 is green and looking at an empty set. docs/03_WIRING.md is NOT covered
+    by a phrasing at all, and does not need to be: it is generated whole from assemble.render(), and A4
+    checks the renderer. Its drift was a stale FILE, which is a different oracle -- regenerate and
+    diff -- and that is A9, below.
+    """
+    findings, examined = [], 0
+    for pattern in _SWEPT:
+        for path in sorted(glob.glob(os.path.join(ROOT, pattern))):
+            rel = os.path.relpath(path, ROOT)
+            try:
+                text = io.open(path, encoding="utf-8").read()
+            except OSError as e:
+                findings.append(f"{rel}: unreadable ({e})")
+                continue
+            for key, rx in _STATED:
+                live_fn, what = _LIVE_COUNTS[key]
+                live = live_fn()
+                for m in rx.finditer(text):
+                    examined += 1
+                    stated = int(m.group(1))
+                    if stated == live:
+                        continue
+                    line = text.count("\n", 0, m.start()) + 1
+                    findings.append(
+                        f"{rel}:{line} states {stated} where the tree has {live} {what} "
+                        f"-- {m.group(0).strip()!r}")
+
+    live_now = {k: fn() for k, (fn, _) in _LIVE_COUNTS.items()}
+    detail = (f"{examined} stated count(s) swept across {len(_SWEPT)} glob(s); live tree: "
+              f"{live_now['levers']} levers in {live_now['packages']} packages, "
+              f"{live_now['couplings']} couplings, wire budget {live_now['budget']}")
+    return _report("A8", "prose counts about the whole tree match the whole tree",
+                   not findings, detail, findings, vacuous=(examined == 0))
+
+
+# ==================================================================================================
+# A9 -- docs/03_WIRING.md is what the generator would write right now
+# ==================================================================================================
+
+def check_a9_wiring_doc_current():
+    """The generated coupling document on disk equals what tools/render_wiring.py produces today.
+
+    WHAT THIS CATCHES THAT A8 CANNOT. A8 sweeps prose for stated totals; this file is not prose. It is
+    the whole return value of assemble.render() plus a generated summary line, and it went stale by a
+    whole ledger generation -- 13 couplings and 10 wires on disk against 23 and 19 in the tree -- while
+    every check in this suite stayed green, because nothing read the file. That is the
+    recorded-never-read family (39 of the survey's 475) with a document in the recorded position. A
+    header that says "Nothing here is written by hand" is not a check; running the generator and
+    diffing is.
+
+    WHY IT IMPORTS A TOOL RATHER THAN RE-RENDERING. Rendering here and comparing would test that two
+    call sites agree, which they would, since both would be this file's idea of how to render. The
+    oracle has to be the thing the human is told to run: docs/03_WIRING.md's header names
+    `python3 tools/render_wiring.py`, so A9 calls that module's `wiring_markdown()` and nothing else.
+    If the generator is wrong, the document and the check are wrong together and A4 -- which reads
+    render()'s sections directly -- is what disagrees.
+
+    THE FAILURE IS ACTIONABLE BY DESIGN: the finding names the command that fixes it. A check whose
+    remedy is a research task gets suppressed.
+    """
+    findings = []
+    n_lines = 0
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import render_wiring
+        want = render_wiring.wiring_markdown()
+        have = io.open(render_wiring.DOC, encoding="utf-8").read()
+        n_lines = len(want.splitlines())
+        if have != want:
+            hl, wl = have.splitlines(), want.splitlines()
+            diff = [d for d in difflib.unified_diff(hl, wl, "on disk", "regenerated", n=0)
+                    if d.startswith(("+", "-")) and not d.startswith(("+++", "---"))]
+            findings.append(f"docs/03_WIRING.md is stale: {len(diff)} changed line(s). "
+                            f"Regenerate with `python3 tools/render_wiring.py`.")
+            for d in diff[:6]:
+                findings.append(f"    {d[:160]}")
+    except Exception as e:
+        findings.append(f"could not run the generator: {type(e).__name__}: {e}")
+
+    detail = (f"{n_lines} generated line(s) compared against docs/03_WIRING.md via "
+              f"tools/render_wiring.py::wiring_markdown")
+    return _report("A9", "the generated coupling document matches the live table",
+                   not findings, detail, findings, vacuous=(n_lines == 0))
+
+
+# ==================================================================================================
 # The runner
 # ==================================================================================================
 
@@ -1091,6 +1230,8 @@ CHECKS = (
     check_a5_build_runs_once,
     check_a6_deferred_is_visible,
     check_a7_rng_accounting,
+    check_a8_stated_counts,
+    check_a9_wiring_doc_current,
 )
 
 

@@ -259,7 +259,7 @@ class RUNLevers(LeverSet):
     # THE GUARD THAT MUST SURVIVE, and it belongs to neither package alone: EPOCHS>1 with DISK_STREAM=0
     # replays byte-identical text every epoch, because _resample runs only under DISK_STREAM (:5470-5472).
     # A continual-learning result taken that way is a memorisation result.
-    # ONE HARNESS DEFECT TO END RATHER THAN PORT (ISSUES L9, longrun.sh:1538 vs :225): the grid banner
+    # ONE HARNESS DEFECT TO END RATHER THAN PORT (ISSUES P1-L9, longrun.sh:1538 vs :225): the grid banner
     # prints the SWEEP's epoch count even for an arm that overrode it -- `vmax8k` sets EPOCHS=18 while the
     # banner has already printed 8. A single declaration read once and printed from the resolved Config
     # is what removes the second source of that number.
@@ -330,7 +330,7 @@ class RUNLevers(LeverSet):
     # :5746, :5750) and the peak-memory line in the BENCH summary (:7812) -- so RUN_DEVICE=cuda:1 runs on
     # a GPU with autocast silently off and with the profiler attributing asynchronous kernel time to
     # whichever span happened to be open. That is a value the operator did not ask for, taken silently,
-    # which is the class the eleven silent-else knobs belong to (ISSUES M24 also files the case-sensitivity
+    # which is the class the eleven silent-else knobs belong to (ISSUES P1-M24 also files the case-sensitivity
     # half: "Cuda" takes the else branch too). Every launcher in this repo sets exactly "cpu" or "cuda",
     # so nothing shipped is lost today. WHEN SOMEBODY NEEDS A SECOND GPU the repair is not a wider string:
     # it is one derived predicate (is-this-cuda) resolved in one place and wired, so that adding a device
@@ -401,7 +401,7 @@ class RUNLevers(LeverSet):
     # at the right point in that cycle breaks accumulation silently instead. That is deliberate work in
     # OPT's territory, not a value to accept here.
     # WHAT choices= DOES NOT CARRY OVER: the old reader lowercased (`_env("AMP", "off").lower()` at :1063,
-    # and AMP is the ONLY string knob in the old tree that normalised at all -- which is why ISSUES M24 is
+    # and AMP is the ONLY string knob in the old tree that normalised at all -- which is why ISSUES P1-M24 is
     # phrased "string knobs OTHER THAN AMP are compared case-sensitively"). So AMP=BF16 used to work and
     # RUN_AMP=BF16 now raises. Lever.coerce does no normalisation, and adding one here would mean a second
     # parse of the same value in the one file that exists to end second parses. The refusal names the
@@ -438,7 +438,7 @@ class RUNLevers(LeverSet):
     # writing to something nobody reads twice -- it would work only by accident of ordering. "Do not run
     # the report" is the entry point choosing which half to run; one flag doing both jobs is how the
     # throughput arm and the sampler ended up sharing a switch.
-    # ONE REQUIREMENT IT CARRIES (ISSUES L42, wrong-measurement): `_bpw`, the bytes-per-window behind kB/s
+    # ONE REQUIREMENT IT CARRIES (ISSUES P1-L42, wrong-measurement): `_bpw`, the bytes-per-window behind kB/s
     # and GB/day, is initialised at the SEED vocabulary (:6237) and refreshed only inside the RATE_EVERY
     # tick (:6493), so a short BENCH run that never reaches a tick quotes both figures at the seed
     # vocabulary -- the exact staleness the refresh was added to fix for the rate meter. Note the cadence

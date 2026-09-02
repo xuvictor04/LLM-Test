@@ -202,12 +202,12 @@ class SIGLevers(LeverSet):
     # anywhere and no else-branch that means anything: the function's last line is
     # `return F.normalize(FROZEN[t].mean(0), dim=0)` against a module that defines `_FROZEN` and
     # `_frozen_tbl` and no `FROZEN`, so any third value is a NameError raised nine call sites away
-    # from the mistake (ISSUES H42). With choices= the same typo is a startup LeverError naming both
+    # from the mistake (ISSUES P1-H42). With choices= the same typo is a startup LeverError naming both
     # legal values.
     # ONE DEFECT DOES NOT TRAVEL WITH THIS LEVER AND MUST NOT BE FIXED HERE: the run-completion
     # marker was built by .format(SIG_MODE) at :9855, so a bigram arm never matched '_done', was
     # re-run forever by the grid and was reported by equiv.sh as "did not reach the report" despite
-    # finishing cleanly (ISSUES L4). That is a rule about run markers -- a marker may not be derived
+    # finishing cleanly (ISSUES P1-L4). That is a rule about run markers -- a marker may not be derived
     # from a lever value -- and it belongs to the harness, not to this declaration.
 
     space = Lever("bytes", "Alphabet the signature is built over: raw bytes, or the LM's token "
@@ -306,7 +306,7 @@ class SIGLevers(LeverSet):
     # of window events. Typing it as a clock would make `positive_radius_windows` comparable against
     # `train_every` -- two numbers that are both "about windows" and mean nothing to each other --
     # which is the confusion units.py exists to prevent rather than to enable.
-    # THE PORT OWES A REFUSAL HERE (ISSUES L15). The old clamp was
+    # THE PORT OWES A REFUSAL HERE (ISSUES P1-L15). The old clamp was
     # `_pmax = max(2*WIN, _i("ENC_POS_MAX", ...))`, so ENC_POS_MAX=64 at WIN=128 ran at 256 with no
     # message: the knob could only ever WIDEN the radius, while the comment three lines above it told
     # the operator that narrowing it was the fix for the defect the comment describes. A silent
@@ -442,7 +442,7 @@ class SIGLevers(LeverSet):
     # dense cadence left the idle one where it was, silently. At the shipped train_every=1,
     # max(1*6, 12) = 12 and no recorded result moves -- which is exactly what let it survive. It was
     # found by tests/test_ownership.py's O11, which reads the docstring SPECIFICATIONS precisely
-    # because every body here is still a stub (ISSUES H53).
+    # because every body here is still a stub (ISSUES P1-H53).
     # THIS LEVER ABSORBS THE ONE MERGE ROW IN THE SIG CENSUS, and the merge is RESOLVED -- the target
     # is this row, which exists, so nothing had to be invented (census defect 3). SIG_LOOK capped how
     # many upcoming windows the signature lookahead could pre-compute:
@@ -498,11 +498,11 @@ class SIGLevers(LeverSet):
     # adaptive stop -- described in the file as the #1 startup cost saving -- was off in every run
     # that used the defaults, and the run that paid the full budget was told it had converged.
     # Worse, d267864 corrected the registry to 200 and left the call site at 3000, so _env's
-    # mismatch check SystemExited every run for five commits (ISSUES C13).
+    # mismatch check SystemExited every run for five commits (ISSUES P3-C13).
     # AS A FRACTION THE INVERTED PAIR IS NOT MERELY DETECTED, IT IS UNREPRESENTABLE: a fraction of
     # the budget cannot exceed the budget. The run-time warning at :5046 and the min() clamp both
     # disappear with it. The literal 0.25 is 200/800 -- the behaviour of record, not the shipped
-    # 3000. NOTE ISSUES M11: a doc prescription asserting the default is 3000 is itself wrong and is
+    # 3000. NOTE ISSUES P2-M11: a doc prescription asserting the default is 3000 is itself wrong and is
     # deliberately not carried into this comment.
     # THE GUARD COMES BACK IF THE PORT EVER COMPARES THIS TO AN ABSOLUTE STEP COUNT. It is a fraction
     # of `warmup` and must be multiplied by it at the one site that uses it.
@@ -514,7 +514,7 @@ class SIGLevers(LeverSet):
     # THE DEFECT TRAVELS WITH THE INSTRUMENT, NOT WITH THIS LEVER, and the distinction is why the
     # lever keeps its meaning unchanged: `_sep <= _prev_sep * (1 + eps)` is true when separation is
     # FLAT and equally true when it is COLLAPSING. On a single-corpus stream running 0.16 -> 0.05 --
-    # a 69% collapse -- it reported a converged plateau and stopped (ISSUES H49), after which
+    # a 69% collapse -- it reported a converged plateau and stopped (ISSUES P3-H49), after which
     # SHIFT_DIST never fired, the run found 0 boundaries and 1 domain, and every downstream report
     # line still printed. The post-hoc collapse warning at :5049 patches the REPORT, not the STOP.
     # Under P5 the stop becomes a Gate whose predicate is a pure function of the probe samples and

@@ -431,7 +431,7 @@ class OPTLevers(LeverSet):
                      U.NAME, choices=("cosine", "none"))
     # Census: LR_SCHED -> OPT_LR_SCHED, verdict keep, default "cosine" (CENSUS.md:393). Field corrected
     # from `OPT_LR_SCHED` to `lr_sched` (DEFECT 1).
-    # choices= IS THE REPAIR, AND THIS IS ONE OF THE ELEVEN THE SURVEY FOUND. ISSUES.md M24 (:361) names
+    # choices= IS THE REPAIR, AND THIS IS ONE OF THE ELEVEN THE SURVEY FOUND. ISSUES.md P1-M24 names
     # LR_SCHED in the list of string knobs compared case-sensitively with no normalisation and no
     # refusal -- "an unrecognised value falls into whichever branch is the else, rather than being
     # refused". `if LR_SCHED == "none": return LR` at :4752 means LR_SCHED=None, =NONE, =off and =nome
@@ -690,7 +690,7 @@ class OPTLevers(LeverSet):
     # is a Windows-against-Flushes comparison that Clock now raises on:
     #   * the capacity valve's pin clock read 2,650 against 43,645 real steps at BATCH_W=16 -- 16x slow,
     #     and the valve reported "reached the cap but never held it long enough", a true sentence about
-    #     a false clock (ISSUES.md C3:1355);
+    #     a false clock (ISSUES.md P3-C3);
     #   * GROW_CAP_EVERY=20000 silently meant 320,000 steps at BATCH_W=16 and 640,000 at 32 (:940), so a
     #     knob's meaning depended on the batch size;
     #   * `step % MANAGE_EVERY == 0` fired for 4 of 16 flush residues and zero for the other 12
@@ -717,7 +717,7 @@ class OPTLevers(LeverSet):
     # THIS LEVER IS WHY units.py HAS A Backwards CLOCK AT ALL -- that class's docstring cites ACCUM by
     # name. The measurement to preserve as a test: the gate was `(step + 1) % ACCUM == 0`, keyed on the
     # WINDOW counter while the body ran per flush, so it accumulated NOTHING at any value -- 55 om.step()
-    # calls against 13 due, over ~52 backward passes at BATCH_W=4 ACCUM=4 (ISSUES.md H29:1646). The
+    # calls against 13 due, over ~52 backward passes at BATCH_W=4 ACCUM=4 (ISSUES.md P3-H29). The
     # repaired form is `if _nbwd % ACCUM == 0` at :7193, i.e. count the thing the decision is about, and
     # derive.accum_due is the one place it lives now -- it REFUSES anything but a Backwards clock for the
     # counter, so the window counter cannot be handed to it a second time.

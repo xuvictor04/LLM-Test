@@ -324,7 +324,7 @@ def manage_period(dom: Config):
 
     WHY THIS EXISTS RATHER THAN THE ROOT PASSING cfg.manage_every. Cadences.due states that its
     period "MUST be units.Windows. An int raises; a Flushes raises." -- and Config hands back a bare
-    int for all 35 levers that declare a Clock unit (ISSUES H51), so the row that read
+    int for all 35 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
     `Cadences.due('dom.manage', FAB.manage_every, clock)` was passing an int into a function whose
     contract refuses one. EVAL and CKPT already had typed accessors (curve_period, save_period);
     FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.

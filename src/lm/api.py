@@ -14,7 +14,7 @@ probability mass from rows somebody has.
 ONE LOGITS PATH. `decode` is the only place logits are produced, on both arms, for training, for
 eval and for the fabric (which receives it as a callable). The old tree had two -- training and
 fab_logits through model.head (:6899, :4006) while model.forward and generate went through the
-composed table (:1562, :3865) -- which is ISSUES L51, and it is worse than the dead-weight
+composed table (:1562, :3865) -- which is ISSUES P1-L51, and it is worse than the dead-weight
 reading L13 gives it: not dead weight, two differently-trained decoders.
 
 RECORD TYPES RETURNED (P4 defines them):
@@ -73,9 +73,9 @@ def build_model(lm: Config, geom, *, device, seed):
     ByteComposer's output and is TIED as both the input embedding and the output head, ON THE
     TRANSFORMER ARM AS WELL. In the old tree TinyTransformer had no `compose` attribute at all
     (:1563-1594), so LM_COMPOSE=1 with LM_ARCH=transformer was a silent no-op while :6038 printed
-    a coupling sentence about a mechanism that model did not have (ISSUES M22). When compose is
+    a coupling sentence about a mechanism that model did not have (ISSUES P1-M22). When compose is
     FALSE, emb and head are constructed; when TRUE they are NOT constructed at all, so the ~6.3M
-    dead parameters ISSUES L13 counts into every reported model size and every checkpoint do not
+    dead parameters ISSUES P1-L13 counts into every reported model size and every checkpoint do not
     exist.
 
     THE POSITIONAL TABLE IS d_pos_max ROWS TALL AND THERE IS NO CLAMP. :1586 did
@@ -346,7 +346,7 @@ def on_mint(lm: Config, model, mints, id2bytes, *, at_window, sig_emb=None):
 
     The composer's byte tables are sized to geom.max_token_bytes (the d_max_token_bytes wire), not
     to a hardcoded 16 (:1441): with MAX_TOK > 16 two distinct long tokens sharing their first 16
-    bytes got IDENTICAL composites and identical starting vectors (ISSUES M21).
+    bytes got IDENTICAL composites and identical starting vectors (ISSUES P1-M21).
 
     MintReport.residual_ratio (||delta[nid]|| / ||composite[nid]||) is the value TOK's probation
     "embed" arm has nothing to compare without.
@@ -394,7 +394,7 @@ def residual_ratios(lm: Config, model):
     THE GATE STAYS, ALONGSIDE, AND IS NOT AN ALTERNATIVE TO THIS CALL. At lm.compose = False there
     is no composer and no residual to read, so this returns None and TOK's Gate must print
     "unreachable (no residual_ratio supplied)" rather than silently running the "use" test -- which
-    is ISSUES M41, the record of the embed arm running the use test while the banner said embed.
+    is ISSUES P1-M41, the record of the embed arm running the use test while the banner said embed.
 
     RETURNS: a (vocab_slots,) float vector indexed exactly as TOK's `appearances` is, or None.
 
@@ -446,7 +446,7 @@ def load_state(lm: Config, model, geom, saved):
     arch, resolved layers, heads, ctx/pos_max or compose; a missing key the live model has. The old
     tree used strict=True on the model while the fabric loaded strict=False for exactly this
     reason, so adding one parameter to the LM made every existing checkpoint unresumable with a raw
-    torch error (ISSUES M49). A COMPOSE FLIP IS REFUSED IN BOTH DIRECTIONS and named: under compose
+    torch error (ISSUES P1-M49). A COMPOSE FLIP IS REFUSED IN BOTH DIRECTIONS and named: under compose
     emb/head do not exist, so the two are not resume-compatible either way, and a resume across it
     would index a trained head by a vocabulary that means something different.
 

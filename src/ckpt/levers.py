@@ -185,7 +185,7 @@ class CKPTLevers(LeverSet):
     # FOUR COUPLINGS, EACH WITH A DOCUMENTED FAILURE, AND EACH MUST ARRIVE AS A DECLARED WIRE:
     #   (1) The sibling-vocabulary guess breaks on the SUPPORTED RESUME=runs/x/ckpt.pt form: the candidate
     #       is runs/x/ckpt.dyntok.json, which does not exist, so it falls through to the shared
-    #       data/dyntok.json "which belongs to whichever run wrote it last" (ISSUES.md M19, :341).
+    #       data/dyntok.json "which belongs to whichever run wrote it last" (ISSUES.md P1-M19).
     #   (2) A resume with checkpointing off can save NO vocabulary at all: the only file it could write is
     #       the one it read its parent's vocabulary from, and overwriting that is the failure the block
     #       exists to stop (:1007, :7847-7849).
@@ -196,7 +196,7 @@ class CKPTLevers(LeverSet):
     #       (:5233-5246). The refusal is CKPT's in the rebuild and it reads FAB's numbers as wires.
     #   (4) `_best_bpb` starts cold on every process and nothing in the checkpoint carries it, so the
     #       first post-resume probe satisfies "no best yet" and overwrites the PARENT's best-by-held-out
-    #       snapshot with the Adam re-warm bump (ISSUES.md M45, :445). That one is this package's own bug,
+    #       snapshot with the Adam re-warm bump (ISSUES.md P1-M45). That one is this package's own bug,
     #       not a coupling: the best-so-far is checkpoint state and belongs in the checkpoint.
 
     # ==============================================================================================
@@ -273,7 +273,7 @@ class CKPTLevers(LeverSet):
     #       is an EVAL Reading over the curve (spine/derive.py::pin_tick blowup_stale already carries its rule:
     #       what separates a blow-up from ordinary wander is not the size of the excursion but how long
     #       the run stays elevated without setting a new best), and the .best save is this retention
-    #       policy. ISSUES L43 goes with the flag too: the block rescans the whole _CURVE list once per
+    #       policy. ISSUES P1-L43 goes with the flag too: the block rescans the whole _CURVE list once per
     #       window with no cadence guard, returning empty on all but 1-in-RATE_EVERY of them.
     # WHY IT EXISTS, AND WHY IT IS AN INTEGER RATHER THAN A BOOLEAN. Direct owner instruction ("For the
     # long run, I want to checkpoint every local low point"), against a real loss: the best-by-held-out

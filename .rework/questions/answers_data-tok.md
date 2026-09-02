@@ -364,7 +364,7 @@ The diagnosis is correct in every part.
 **Recommendation**
 **(a) now, with (c) permanently as the fallback** — a small departure from the written *"(a) when the surface opens, (c) until then"*, because **the surface is open right now**. 116 of 121 entry points are stubs, LM's bodies are unwritten, and a 122nd entry point costs one stub, one row in `docs/04_CONTRACT.md` §7, one row in `LOOP_ORDER`. After P4 it costs a coordinated edit across ten independent agents.
 
-(c) is not an alternative to (a) — it is required **alongside** it, because `residual_ratio` legitimately has no value at `lm.compose == False` (there is no composer to read), and ISSUES M41 is the record of what happens when the embed arm silently runs the `use` test while the banner says `embed`. The Gate must print either way.
+(c) is not an alternative to (a) — it is required **alongside** it, because `residual_ratio` legitimately has no value at `lm.compose == False` (there is no composer to read), and ISSUES P1-M41 is the record of what happens when the embed arm silently runs the `use` test while the banner says `embed`. The Gate must print either way.
 
 Shape the entry point must have, so P4 does not guess: it returns a value indexed the same way `appearances` is (a `vocab_slots`-length vector, or `None`); it returns `None` when `lm.compose` is False; its `DID IT FIRE` is `lm.residual_read` / `Gate lm.residual_unreachable (compose off)`.
 

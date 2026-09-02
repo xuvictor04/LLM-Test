@@ -98,7 +98,7 @@ THE THREE CENSUS DEFECTS, AS THEY LAND HERE
 choices=, AND WHY THIS FILE HAS NONE
 -------------------------------------------------------------------------------------------------
 The survey found eleven knobs (SIG_MODE, EVICT, CULL_MODE, LR_SCHED, KEY_SRC, CHAIN_ROUTE and the rest,
-ISSUES M24) where an unrecognised value fell silently into a default branch, so a typo ran a path the
+ISSUES P1-M24) where an unrecognised value fell silently into a default branch, so a typo ran a path the
 operator did not ask for. Not one of them is a WORLD knob: every lever below is a bool, an int or a
 float, and there is no string-valued choice in this package. `choices=` is therefore absent by
 arithmetic, not by oversight. The corresponding hazard here is the bool one the house rule already

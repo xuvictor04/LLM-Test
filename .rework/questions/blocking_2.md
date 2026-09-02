@@ -39,7 +39,7 @@ Dropping `hop_mode` requires deleting the word `ctrl` from `FAB.state_dict`'s pa
 **Q-FAB-2 ↔ Q-FAB-5 (both mine, but they interact and the interaction is easy to lose).**
 The contract's Q-FAB-2 recommendation runs the merge "over the **eligible** set". Under my Q-FAB-5 finding the past-grace eligible set is **provably empty at the shipped defaults** (mean `uage` = 1.98 vs `grace` = 48). So a merge gated on eligibility inherits the cull's unreachability and would ship as a mechanism that can never fire. My recommendation gates only the **absorbed** expert on grace, over the live set. If the synthesis pass adopts Q-FAB-2 as the contract phrases it without Q-FAB-5's arithmetic, it will ship an unreachable merge and report it as armed.
 
-**Q-FAB-5 → whoever holds ISSUES C11 / the defaults ruling / Q-RUN-1.**
+**Q-FAB-5 → whoever holds ISSUES P1-C11 / the defaults ruling / Q-RUN-1.**
 My grace-reachability arithmetic (12,288 windows needed at `depth0=1`, `n0=2048`, against a 506-937 window run) is a **C11-class finding that the C11 audit structurally cannot see**: `derive.cadences_that_cannot_fire` (`spine/derive.py:317-322`) refuses anything that is not `units.Windows`, and `grace` is `units.Selections`. If the owner raises `DATA.stream_bytes` or `RUN.epochs` in answer to C11, the number changes and the FAB-5 retune should be re-derived, not carried. Whoever answers C11 should be told that `grace` is a *second* unreachable-threshold family living outside the audit's reach.
 
 **Q-EVAL-5 and Q-EVAL-9 → the same C11 / run-length ruling.**

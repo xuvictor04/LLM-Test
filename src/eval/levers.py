@@ -94,7 +94,7 @@ than fixed in silence, because a correction nobody can find reads exactly like a
   the declaration: the specialization null gets COARSER, from 20 draws to 5, under one name that now sizes
   both. Both old literals are recorded there so the choice is auditable rather than inferred.
 
-WHY NOT ONE LEVER HERE CARRIES choices=. The eleven silent-else knobs the survey found (ISSUES M24:
+WHY NOT ONE LEVER HERE CARRIES choices=. The eleven silent-else knobs the survey found (ISSUES P1-M24:
 DATA_MODE, SIG_MODE, MODEL, VERIFY, LR_SCHED, KEY_SRC, SIG_SPACE, EVICT, CULL_MODE, WARMSTART_MODE,
 TOK_PROBATION_BY, CHAIN_ROUTE) are every one of them owned elsewhere -- FAB, MEM, SIG, TOK, DATA, OPT --
 and they carry choices= in those files. EVAL owns no string-valued knob at all: fifteen numbers and two
@@ -120,7 +120,7 @@ EVAL). They are listed so the port has the list rather than rediscovering it:
                                wire; either way it is not a lever and not declared here. At the shipped
                                default it built the eval signature from ONE byte while training encoded
                                >= 256, so every eval-path routing decision in every report was made on a
-                               one-byte signature (ISSUES C4/C5).
+                               one-byte signature (ISSUES P1-C4/C5).
     outgoing  d_curve_bpb to CKPT and d_best_bpb to OPT -- a held-out measurement crossing back into a
                                training decision. OPT_LR_RESTART_DAMP turns `_best_bpb` into a restart,
                                and PLAN 3.8 forbids a verdict on n=1, so the Reading that supplies it must
@@ -210,7 +210,7 @@ class EVALLevers(LeverSet):
     #     claimed, and no comparison may be reported from fewer than two seeds. Raising this lever
     #     tightens the within-run term 8x more expensively while leaving the larger term untouched.
     # SIZE, STATED SO IT IS VISIBLE: 32 windows x LM.ctx=128 is about 7.6 kB of text per domain --
-    # smaller than one splice segment -- against a default run of 506-937 windows (ISSUES C11). If
+    # smaller than one splice segment -- against a default run of 506-937 windows (ISSUES P1-C11). If
     # the owner raises DATA.stream_bytes, re-ask this question with the noise floor in hand.
     # NOTHING MOVES ON P9: this number does not change.
     # TWO COUPLINGS THAT MUST NOT COME BACK. Before c76dc74, changing this 4 -> 16 moved 48 report lines
@@ -237,7 +237,7 @@ class EVALLevers(LeverSet):
     # evidence for reversing it is written down.
     # WHY IT EXISTS AT ALL: with a single draw the null has no error bar, and two runs of the SAME
     # configuration printed OPPOSITE conclusions at excess +0.010 and +0.013 against a 0.010 cutoff.
-    # THE FLOOR IS NOT EXPRESSIBLE HERE, AND THAT IS A GAP, NOT AN OVERSIGHT. ISSUES L44 (this knob at 0
+    # THE FLOOR IS NOT EXPRESSIBLE HERE, AND THAT IS A GAP, NOT AN OVERSIGHT. ISSUES P1-L44 (this knob at 0
     # -> ZeroDivisionError) and L45 (at 1 -> the 2-sigma test is a rubber stamp, since a one-sample null
     # has zero spread) both want a floor of 2. `choices=` cannot express "any integer >= 2" without
     # enumerating an unbounded set, so the floor belongs in the nulls module that consumes this, as a

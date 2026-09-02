@@ -61,7 +61,7 @@ RECORD TYPES RETURNED (P4 defines them):
   LoadReport   restored, refused, reason
 
 `param_group_shape` IS IN THAT LIST BECAUSE load_state REFUSES ON IT (Q-OPT-4). state_dict wrote
-every other field and not that one, so ISSUES L50's refusal -- the one thing standing between a
+every other field and not that one, so ISSUES P1-L50's refusal -- the one thing standing between a
 resume and AdamW moments attached positionally to the wrong tensors -- compared against a value
 nothing produced. An untrippable guard reads exactly like a guard that never had to fire.
 """
@@ -108,7 +108,7 @@ def build(opt: Config, *, param_groups, run_windows):
     the cosine reached only p=0.760 on E8 and p=0.730 on E18 because the projected horizon overran
     the run, and on a resume `_ep_start` started at 0 while `step` started at the checkpoint's
     step, so the first epoch length was inflated and every remaining epoch was priced at half the
-    last, latched and never revised upward (ISSUES H17). And the WARMUP CLAMP is a fix that must
+    last, latched and never revised upward (ISSUES P1-H17). And the WARMUP CLAMP is a fix that must
     survive: at LR_WARMUP=1000 a 360-step run NEVER LEAVES WARMUP and trains at a third of peak
     throughout, which reads as the schedule hurting when it is the schedule never having run.
 
@@ -223,7 +223,7 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     refuses Windows(55) and bare 55. The measurement this repairs: the old gate was
     `(step + 1) % ACCUM == 0` keyed on the WINDOW counter while the body ran per flush, so it
     accumulated NOTHING at any value -- 55 om.step() calls against 13 due, over ~52 backward passes
-    at BATCH_W=4 ACCUM=4 (ISSUES H29). Every learning-rate result taken against that configuration
+    at BATCH_W=4 ACCUM=4 (ISSUES P3-H29). Every learning-rate result taken against that configuration
     is filed under a batch size it was not taken at.
 
     When due, IN THIS ORDER:
@@ -250,7 +250,7 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
          amplitude;
       5. write `lr` into EVERY param group of BOTH optimizers -- st.base and st.encoder -- then
          READ THE GRADIENT NORM, CLIP IF ASKED, and step and zero_grad THE BASE OPTIMIZER ONLY.
-         Writing the rate UNCONDITIONALLY is what kills ISSUES H15: `_lrv` is assigned only inside
+         Writing the rate UNCONDITIONALLY is what kills ISSUES P1-H15: `_lrv` is assigned only inside
          `if LR_SCHED != "none"` (:7094) and read unconditionally by the per-expert path (:7195),
          so LR_SCHED="none" with FAB_LR_OWN=1 dies with a NameError on the FIRST flush. Here the
          rate always exists and always leaves this package AS A RETURN VALUE, never as a local
@@ -412,7 +412,7 @@ def load_state(opt: Config, st, saved):
     """Restore, or refuse by name. Returns a LoadReport.
 
     REFUSES when saved.param_group_shape differs from the live one: the optimizer moment restore in
-    the old tree did not verify that the module composition matched the checkpoint (ISSUES L50),
+    the old tree did not verify that the module composition matched the checkpoint (ISSUES P1-L50),
     and AdamW state is POSITIONAL over param groups, so a changed group order silently attaches one
     tensor's moments to another. REPORTS rather than refuses when the horizon changed (a legitimate
     resume at a different run length), and prints both horizons.

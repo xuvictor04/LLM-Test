@@ -39,7 +39,7 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
     `alphabet_size` is the encoder embedding's row count: 256 under space="bytes", LM.vocab_slots
     under space="tokens". It is an ARGUMENT, not a read of LM. Under space="tokens" it is sized at
     the SLOT CEILING and not at the live vocab_size, because widening an embedding mid-run changes
-    the encoder optimizer's moment shapes -- which is ISSUES H24 from the other side.
+    the encoder optimizer's moment shapes -- which is ISSUES P3-H24 from the other side.
 
     positive_radius_units = round(sig.positive_radius_windows * width_units), frozen here.
 
@@ -96,7 +96,7 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
     was recorded as "relocated" out of the old computed default
     `_i("ENC_EVERY_IDLE", max(ENC_EVERY * 6, 12))` and into a coupling -- and the coupling was never
     declared, so for six commits train_every_idle sat at a literal 12 with no connection to
-    train_every at all (ISSUES H53). At the shipped train_every=1 the two agree exactly, which is
+    train_every at all (ISSUES P1-H53). At the shipped train_every=1 the two agree exactly, which is
     what let it survive. Reading the wire is what makes "the idle cadence follows the dense one"
     true rather than a sentence in a comment.
 
@@ -152,7 +152,7 @@ def train_step(sig: Config, st, *, stream, seen_units, opt, reservoir=None):
 
     The positive offset is drawn in [width_units//2, positive_radius_units], and the radius MAY GO
     BELOW ONE WINDOW: the old `max(2*WIN, ENC_POS_MAX)` clamp (:3311) could only WIDEN it, while
-    the file's own diagnosis says narrowing is the fix (ISSUES L15).
+    the file's own diagnosis says narrowing is the fix (ISSUES P1-L15).
 
     The step is SKIPPED (loss returned, opt untouched) when loss <= ln(1+(B-1)/floor_kinds).
 
@@ -243,7 +243,7 @@ def state_dict(sig: Config, st):
     any boundary invalidates anyway. The encoder optimizer's moments belong to OPT and are
     checkpointed there; SIG asserts only that a resized alphabet_size invalidates them -- which the
     old tree got wrong in the opposite direction, dropping the encoder's moments for a FABRIC
-    widening (ISSUES H24).
+    widening (ISSUES P3-H24).
 
     LEVERS READ: none
     WIRES READ: none
