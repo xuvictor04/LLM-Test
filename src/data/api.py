@@ -29,6 +29,7 @@ import re
 
 from spine.lever import Config
 from spine import rng as _rng
+from spine.gate import Gate
 
 
 class CorpusError(ValueError):
@@ -392,6 +393,41 @@ def _synthetic_areas(dat, seed, entries):
     return raw, present, taken, sources
 
 
+@dataclasses.dataclass(frozen=True)
+class Plan:
+    """What this configuration will expose the model to, computed before a single step runs.
+
+    `protocol` is RECOGNISED from the resolved schedule, never generated, and it is printed by name
+    on every run -- one of four, never blank. That is the half D2 actually needed: the launcher
+    writes pure-add as a schedule of names, and the report says which protocol ran.
+    """
+    protocol: str
+    schedule: tuple
+    phase_bounds: tuple
+    per_area_draw: dict
+    exposure: dict
+    gates: tuple
+
+
+@dataclasses.dataclass(frozen=True)
+class Stream:
+    """One epoch's bytes, with both boundary lists and the provenance MEM needs.
+
+    BOTH LISTS LEAVE THIS PACKAGE so no consumer has to guess which one it wanted. `splice_starts`
+    is every segment start; `area_changes` is the subset where the area actually changed. Scoring
+    boundary precision against the first made all ~96 "true switches" artefacts on a one-area run.
+    """
+    bytes: bytes
+    labels: list
+    splice_starts: tuple
+    area_changes: tuple
+    phase_bounds: tuple
+    area_names: tuple
+    per_area_drawn: dict
+    epoch: int
+    stream_id: str
+
+
 def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_token: float):
     """Resolve the phase schedule and compute, BEFORE A SINGLE STEP RUNS, what this configuration
     will actually expose the model to.
@@ -480,9 +516,114 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                  Gate data.splice_window
     """
     dat = dat.owned_by("DATA")
-    raise NotImplementedError(
-        "DATA.data_plan: P4 (data) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DATA.")
+    from spine import derive as _derive
+    names = list(areas.names)
+    n_areas = len(names)
+    by_name = {n: i for i, n in enumerate(names)}
+
+    raw = str(dat.phase_sched).strip()
+    n_by_name = 0
+    if raw:
+        # VALIDATION LIVES AT THE PARSE SITE ONLY. The old `[a for a in act if a < NP] or
+        # list(range(NP))` fallback was unreachable dead code that would have quietly re-enabled
+        # EVERY area in a phase if it ever ran (ISSUES P1-L18) -- a silent widening of the
+        # experiment, in the one lever that decides what the experiment is.
+        schedule = []
+        for k, part in enumerate(raw.split("|")):
+            live = []
+            for tokstr in part.split(","):
+                tokstr = tokstr.strip()
+                if not tokstr:
+                    continue
+                # AN ENTRY MAY BE A NAME AS WELL AS AN INDEX (Q-DATA-7). A name IS the string that
+                # means "the added area alone" at any area count: "rust|rust|rust|rust" is pure-add
+                # whether there are two areas or four, and it does not silently become a different
+                # experiment when the area ORDER changes -- which is the failure the harness carries
+                # in the open, hand-typing _AI=1 under a comment claiming it reads DOMAINS.
+                if tokstr in by_name:
+                    live.append(by_name[tokstr])
+                    n_by_name += 1
+                elif tokstr.lstrip("-").isdigit():
+                    idx = int(tokstr)
+                    if not 0 <= idx < n_areas:
+                        raise CorpusError(
+                            f"DATA_PHASE_SCHED phase {k} names area index {idx}, and there are "
+                            f"{n_areas} area(s): {names}. Refused at the parse site.")
+                    live.append(idx)
+                else:
+                    raise CorpusError(
+                        f"DATA_PHASE_SCHED phase {k} names {tokstr!r}, which is neither an area "
+                        f"index nor one of {names}. Refused at the parse site.")
+            if not live:
+                raise CorpusError(
+                    f"DATA_PHASE_SCHED phase {k} is empty. A phase with no live area streams "
+                    f"nothing; refused rather than skipped.")
+            schedule.append(tuple(dict.fromkeys(live)))
+        schedule = tuple(schedule)
+    else:
+        # FLOORED AT 2 AT THIS READ SITE. One phase cannot have anything FADE, and `faded` is read
+        # off the last phase, so PHASES=1 makes the unlearn test skip itself as vacuous while every
+        # report line still prints.
+        schedule = tuple(tuple(p) for p in _derive.phase_schedule(
+            n_areas, max(2, int(dat.phases)), int(dat.phase_live) or None))
+
+    # RECOGNISED, NOT GENERATED. The four predicates are written out because two P4 authors reading
+    # the same paragraph must not disagree about them.
+    if not raw:
+        protocol = "generated"
+    elif len(schedule) == 1 and len(schedule[0]) == n_areas:
+        protocol = "stationary"
+    elif n_areas > 1 and len({p for p in schedule}) == 1 and len(schedule[0]) == 1:
+        protocol = "pure_add"
+    else:
+        protocol = "explicit"
+
+    # THE PHASE FILL IS EXACT: phase k covers [round(k*B/P), round((k+1)*B/P)).
+    total = int(dat.stream_bytes)
+    n_phases = len(schedule)
+    bounds = tuple((round(k * total / n_phases), round((k + 1) * total / n_phases))
+                   for k in range(n_phases))
+
+    per_area_draw = {n: 0 for n in names}
+    for (lo, hi), live in zip(bounds, schedule):
+        span = hi - lo
+        for j, idx in enumerate(live):
+            # The phase's bytes split evenly among its live areas, with the remainder on the first
+            # so the per-area totals sum to the phase span exactly.
+            share = span // len(live) + (1 if j < span % len(live) else 0)
+            per_area_draw[names[idx]] += share
+
+    # A WHOLE-RUN QUANTITY, WHICH IS THE POINT. 60 MB of English beside 8 MB of Python draws 2 MB
+    # from each per epoch -- quiet -- while over 8 epochs the added area is seen 2.1x and the
+    # original is 28% sampled, and "adding py cost eng X b/B" is then confounded with "py was
+    # memorised and eng was skimmed".
+    exposure = {n: (per_area_draw[n] * int(epochs) / max(1, len(areas.bodies[n]))) for n in names}
+
+    gates = []
+    vals = [exposure[n] for n in names]
+    # COMPUTED AT ONE AREA TOO. Both old reads sat inside `if DATA_MODE == "real" and NP > 1`, so
+    # the check was unavailable on exactly the single-area goal-A configuration where accidental
+    # repetition is easiest to reach (ISSUES P1-L21).
+    gates.append(Gate("data.exposure_max", max(vals) > float(dat.exposure_max),
+                      round(max(vals), 4), float(dat.exposure_max)))
+    if n_areas == 1:
+        gates.append(Gate("data.exposure_skew", False, None, float(dat.exposure_skew),
+                          reachable=False,
+                          reason="a max/min ratio over ONE area is undefined; this gate cannot "
+                                 "fire on a single-area run and says so rather than reading 0"))
+    else:
+        skew = max(vals) / min(vals) if min(vals) > 0 else float("inf")
+        gates.append(Gate("data.exposure_skew", skew > float(dat.exposure_skew),
+                          round(skew, 4), float(dat.exposure_skew)))
+    mean_seg = (int(dat.seg_min) + int(dat.seg_max)) / 2.0
+    # THE ONE PLACE THE BYTE/TOKEN BOUNDARY IS CROSSED, and it is crossed with the MEASURED
+    # bytes/token handed in, never with an estimate (ISSUES P1-H16).
+    windows_per_segment = mean_seg / (int(win_tokens) * float(bytes_per_token))
+    gates.append(Gate("data.splice_window", windows_per_segment < 8.0,
+                      round(windows_per_segment, 3), 8.0))
+
+    return Plan(protocol=protocol, schedule=schedule, phase_bounds=bounds,
+                per_area_draw=per_area_draw, exposure=exposure, gates=tuple(gates))
 
 
 def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
@@ -529,9 +670,77 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                  rng.issued()["data.stream.e0"].draws (0 draws = armed-but-inert)
     """
     dat = dat.owned_by("DATA")
-    raise NotImplementedError(
-        "DATA.draw_stream: P4 (data) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DATA.")
+    # RESAMPLE IS READ HERE, NOT BY THE CALLER. The composition root calls this once per epoch
+    # UNCONDITIONALLY, so "every epoch is a byte-identical replay" is a statement this function
+    # makes rather than a branch the root takes -- and RUN.startup_refusals already refuses
+    # epochs > 1 with resampling off, because a continual-learning result taken that way is a
+    # memorisation result.
+    if int(epoch) > 0 and not bool(dat.resample):
+        cached = _REPLAY.get(id(areas))
+        if cached is not None:
+            return dataclasses.replace(cached, epoch=int(epoch))
+
+    names = list(areas.names)
+    # WHAT TEXT A RUN TRAINS ON DEPENDS ON THE SEED AND THE EPOCH AND NOTHING ELSE. Two arms
+    # differing in one unrelated knob still read the same text at epoch 2, and a resume at epoch 5
+    # reads what an uninterrupted run read at epoch 5. The old form read SEED out of os.environ
+    # from INSIDE the stream builder, which is the L2 violation this replaces.
+    stream = _rng.rng_for(f"data.stream.e{int(epoch)}", seed, again=True)
+
+    out = bytearray()
+    labels, splice, changes = [], [], []
+    per_area = {n: 0 for n in names}
+    cursors = dict(areas.cursors)
+    last_area = None
+    seg_min, seg_max = int(dat.seg_min), int(dat.seg_max)
+    contig = bool(dat.seg_contig)
+
+    for (lo, hi), live in zip(plan.phase_bounds, plan.schedule):
+        while len(out) < hi:
+            idx = live[stream.randrange(len(live))] if len(live) > 1 else live[0]
+            label = names[idx]
+            body = areas.bodies[label]
+            want = stream.randint(seg_min, seg_max)
+            # TRUNCATED TO THE PHASE BOUND rather than overshooting it by a whole segment, so phase
+            # bounds do not drift and len(bytes) == stream_bytes EXACTLY (ISSUES P1-L22).
+            want = min(want, hi - len(out))
+            if contig:
+                # THE CURSOR PERSISTS ACROSS EPOCHS, so an English-only run has only the text's own
+                # boundaries rather than discontinuities we manufacture every 8-20 KB. eng_only
+                # reported 71 domains partly by counting our own seek points.
+                start = cursors[label] % len(body)
+                chunk = body[start:start + want]
+                if len(chunk) < want:
+                    chunk = chunk + body[:want - len(chunk)]      # data.contig_wrap
+                cursors[label] = start + want
+            else:
+                start = stream.randint(0, max(0, len(body) - want))
+                chunk = body[start:start + want]
+            splice.append(len(out))
+            if last_area is not None and label != last_area:
+                # THE SUBSET WHERE THE AREA ACTUALLY CHANGED. Scoring boundary precision against
+                # every splice start made all ~96 "true switches" artefacts on a one-area run.
+                changes.append(len(out))
+            last_area = label
+            out += chunk
+            labels.extend([label] * len(chunk))
+            per_area[label] += len(chunk)
+
+    st = Stream(bytes=bytes(out), labels=labels, splice_starts=tuple(splice),
+                area_changes=tuple(changes), phase_bounds=tuple(plan.phase_bounds),
+                area_names=tuple(names), per_area_drawn=per_area, epoch=int(epoch),
+                # MEM CAN INVALIDATE OR RE-BASE PROVENANCE rather than silently carrying byte
+                # offsets into a stream that no longer exists (ISSUES P1-M83).
+                stream_id=f"s{seed}.e{int(epoch)}.{len(out)}")
+    if not bool(dat.resample):
+        _REPLAY[id(areas)] = st
+    return st
+
+
+# The byte-identical replay at resample=False. Keyed by the Areas object rather than by a module
+# global holding one stream, so two Areas in one process (the isolation sweep runs many 200-step
+# runs per interpreter) cannot hand each other's text back.
+_REPLAY = {}
 
 
 def stream_state(dat: Config, areas):

@@ -1493,7 +1493,14 @@ def check_o10_no_backdoor_imports(mods):
     Do not read a green O10 as "there is no other route". That sentence is the reason a reviewer stops
     looking, and this file has now been corrected for a version of it twice.
     """
-    ALLOWED_SPINE = ("lever", "units", "derive", "rng", "wire")
+    # "gate" JOINED ON 2026-09-02, and the standard it met is the one the others meet: it is shared
+    # VOCABULARY, not a mechanism. spine/gate.py holds one frozen record with no state, no lever
+    # read, and no import of its own; what it fixes is how the three DID IT FIRE states are SAID, so
+    # a reader can tell FIRED from ARMED-AND-INERT from UNREACHABLE across the whole report. The
+    # alternative was thirteen private Gate classes, which is thirteen chances for one of them to
+    # collapse the last two states -- and those are 57 and 60 records of the survey respectively,
+    # two different bugs needing two different words.
+    ALLOWED_SPINE = ("lever", "units", "derive", "rng", "wire", "gate")
     findings = []
     _PKG_DIRS = {m.rel.split("/")[1] for m in mods
                  if m.rel.startswith("src/") and m.rel.count("/") >= 2} - {"spine"}
