@@ -23,7 +23,66 @@ them as arguments, which is not an import and O10 does not refuse it):
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
           epoch, stream_id
 """
+import dataclasses
+import os
+import re
+
 from spine.lever import Config
+from spine import rng as _rng
+
+
+class CorpusError(ValueError):
+    """A corpus configuration that cannot produce a comparable measurement, refused at startup.
+
+    REFUSED AND NOT DROPPED, which is the whole point. Dropping a short corpus desynchronised the
+    domain-name list from the corpus list, so report_holdout labelled the Python corpus 'eng' and
+    the next run compared that against the previous run's English and reported the difference as
+    FORGETTING (ISSUES P3-C19). A silent drop in this package is a wrong number in goal B's
+    headline experiment, arriving with nothing in the log.
+    """
+
+
+# THE FLOOR IS DERIVED, NOT THE OLD LITERAL 5000. At rerun.sh's SEG_MIN=8000 the literal admitted
+# corpora that no segment could be drawn from, and `randint(0, SEG_LEN - L - 1)` then raised on a
+# negative bound (ISSUES P1-L75). An area must hold at least one maximum-length segment plus a byte.
+MIN_AREA_BYTES = 5000
+
+
+@dataclasses.dataclass(frozen=True)
+class Areas:
+    """Every area's training body and held-out block, with the arithmetic that produced them.
+
+    `bytes_present` BESIDE `bytes_taken` is the corpus cap's DID IT FIRE: the old tree warned about
+    its own default instead of printing what the cap actually cost, so an operator could not tell a
+    2 MB corpus from a 40 MB corpus truncated to 2 MB.
+
+    `holdout` IS PHYSICALLY REMOVED from `bodies`. Not masked, not skipped -- removed, so no
+    sampling rule anywhere can reach it and no length any caller can read includes it
+    (ISSUES P1-M81).
+    """
+    names: tuple
+    bodies: dict
+    holdout: dict
+    holdout_bytes: dict
+    bytes_present: dict
+    bytes_taken: dict
+    cursors: dict
+    rng_holdout: dict
+
+
+def _holdout_key(label):
+    """The rng subsystem name for one area's held-out stream: the label, normalised.
+
+    spine/rng.py refuses uppercase (so "Fabric" and "fabric" cannot become two streams for one
+    subsystem) and refuses "/" (its seed separator). Area labels are directory names and may carry
+    both -- "code_OOD" today, and "continual/01_rust" under the slash rule. So the key is the label
+    lowercased with everything outside [a-z0-9_] replaced by "_", and two areas whose KEYS collide
+    are the same startup refusal as two whose labels collide. That is exactly the objection rng.py
+    raises, answered at startup rather than papered over.
+    """
+    return re.sub(r"[^a-z0-9_]", "_", str(label).lower())
+
+
 
 
 def open_areas(dat: Config, *, seed: int):
@@ -149,9 +208,188 @@ def open_areas(dat: Config, *, seed: int):
                  statement from a block of size 0 and G4 requires the report to make both
     """
     dat = dat.owned_by("DATA")
-    raise NotImplementedError(
-        "DATA.open_areas: P4 (data) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DATA.")
+    entries = [e.strip() for e in str(dat.areas).split(",") if e.strip()]
+    if not entries:
+        raise CorpusError("DATA_AREAS is empty: there is nothing to train on.")
+
+    floor = max(int(dat.seg_max) + 1, MIN_AREA_BYTES)
+    raw = {}                       # label -> bytes, before the held-out block is removed
+    present, taken, sources = {}, {}, {}
+
+    if str(dat.source) == "synthetic":
+        raw, present, taken, sources = _synthetic_areas(dat, seed, entries)
+    else:
+        labels = []
+        for entry in entries:
+            # THE PATH REFUSAL, FIRST, because without it `areas` is an arbitrary-path read -- a
+            # corpus lever that can open /etc -- and the message must name both the entry and what
+            # it resolved to, or an operator cannot see which of the two is wrong.
+            if os.path.isabs(entry) or ".." in entry.split("/"):
+                raise CorpusError(
+                    f"DATA_AREAS entry {entry!r} is absolute or contains '..'. Refused: an area "
+                    f"entry is joined under DATA_DIR and may not escape it, or this lever is an "
+                    f"arbitrary-path read.")
+            # THE SLASH RULE (Q-DATA-4). No slash keeps "train/" as the implicit prefix, which is
+            # the shipped meaning and does not move; a slash is joined verbatim, which is what makes
+            # data/continual/* and data/ood/* reachable without moving files on disk -- the material
+            # goal B's add-an-area experiment exists for.
+            rel = entry if "/" in entry else os.path.join("train", entry)
+            labels.append((entry, os.path.basename(entry.rstrip("/")), os.path.join(str(dat.dir), rel)))
+
+        # THE LABEL AND KEY COLLISION REFUSALS, with BOTH source paths printed. The label is what
+        # every per-area score and the across-the-boundary comparison look up by name, so one label
+        # over two corpora reproduces the desynchronised-DN defect exactly.
+        by_label, by_key = {}, {}
+        for entry, label, path in labels:
+            if label in by_label:
+                raise CorpusError(
+                    f"two DATA_AREAS entries resolve to the label {label!r}: {by_label[label]!r} "
+                    f"and {path!r}. Every per-area score and the across-the-run-boundary comparison "
+                    f"look up by label, so one label over two corpora reports one corpus's loss as "
+                    f"the other's.")
+            key = _holdout_key(label)
+            if key in by_key:
+                raise CorpusError(
+                    f"labels {by_key[key][0]!r} and {label!r} both normalise to the rng key "
+                    f"{key!r}, so they would draw their held-out blocks from ONE stream. Rename "
+                    f"one area directory.")
+            by_label[label] = path
+            by_key[key] = (label, path)
+
+        for entry, label, path in labels:
+            body, n_present = _read_area(path, int(dat.corpus_cap))
+            if not body:
+                raise CorpusError(
+                    f"area {label!r} at {path!r} holds no usable bytes. Refused rather than "
+                    f"dropped: dropping an area desynchronises the label list from the corpus list "
+                    f"and the next run reports one corpus's loss under another's name "
+                    f"(ISSUES P3-C19).")
+            raw[label], present[label], taken[label], sources[label] = body, n_present, len(body), path
+
+    names = tuple(raw)
+    bodies, holdout, holdout_bytes, rng_holdout, cursors = {}, {}, {}, {}, {}
+    for label in names:
+        blob = raw[label]
+        # THE FLOOR IS CHECKED ON THE USABLE BODY, i.e. after the held-out block comes out, which is
+        # why the arithmetic is done before the refusal rather than after.
+        n_hold = min(int(len(blob) * float(dat.holdout_frac)), int(dat.val_cap))
+        if str(dat.source) == "synthetic":
+            n_hold = 0             # the synthetic path holds nothing out
+        if len(blob) - n_hold < floor:
+            raise CorpusError(
+                f"area {label!r} has {len(blob) - n_hold} usable byte(s) after a {n_hold}-byte "
+                f"held-out block, below the floor of {floor} (max(DATA_SEG_MAX + 1, "
+                f"{MIN_AREA_BYTES})). Refused, not dropped. The floor is DERIVED from seg_max: the "
+                f"old literal 5000 admitted corpora no segment could be drawn from and the sampler "
+                f"then raised on a negative bound (ISSUES P1-L75).")
+
+        if n_hold > 0:
+            # ONE CHILD STREAM PER AREA, KEYED BY THE AREA'S NAME AND NOT BY DRAW ORDER (Q-DATA-6).
+            # A single stream drawn in list order makes every area's block position a function of
+            # how many areas preceded it, so inserting one entry moves every later area's held-out
+            # text -- and the across-the-boundary comparison then compares two different texts on
+            # the one run type it exists to measure. EVAL's window already declares the opposite
+            # property; the two halves have to key the same way.
+            key = _holdout_key(label)
+            stream = _rng.rng_for(f"data.holdout.{key}", seed)
+            # A SEEDED RANDOM CONTIGUOUS BLOCK, NOT THE TAIL. The tail is a sample only if the
+            # corpus was written in no particular order; measured, py held out at 5.061 +/- 0.560
+            # against 2.922 in-stream, while eng (shuffled upstream) was 2.273 against 2.303.
+            start = stream.randint(0, len(blob) - n_hold)
+            holdout[label] = blob[start:start + n_hold]
+            # REMOVED, NOT MASKED. One manufactured seam per area is the cost, and it is a good
+            # trade against the thousands seg_from manufactures -- but it is stated, not hidden.
+            bodies[label] = blob[:start] + blob[start + n_hold:]
+            rng_holdout[label] = {"key": f"data.holdout.{key}", "offset": start, "size": n_hold,
+                                  "seam_at": start}
+        else:
+            holdout[label] = b""
+            bodies[label] = blob
+            rng_holdout[label] = {"key": None, "offset": 0, "size": 0, "seam_at": None,
+                                  "why": "source=synthetic holds nothing out"}
+        holdout_bytes[label] = len(holdout[label])
+        cursors[label] = 0
+
+    return Areas(names=names, bodies=bodies, holdout=holdout, holdout_bytes=holdout_bytes,
+                 bytes_present=present, bytes_taken=taken, cursors=cursors,
+                 rng_holdout=rng_holdout)
+
+
+def _read_area(path, cap):
+    """Every usable file under `path`, concatenated, up to `cap` bytes. Returns (bytes, present).
+
+    SKIPS basenames starting with "_" and anything ending .json: fetch manifests were being spliced
+    into the corpus and trained on as if they were English. `present` is the total the directory
+    HOLDS, counted even past the cap, because the cap's bite has to be a printed number rather than
+    a warning about a default.
+    """
+    if not os.path.isdir(path):
+        return b"", 0
+    out, present = bytearray(), 0
+    for name in sorted(os.listdir(path)):
+        if name.startswith("_") or name.endswith(".json"):
+            continue
+        f = os.path.join(path, name)
+        if not os.path.isfile(f):
+            continue
+        n = os.path.getsize(f)
+        present += n
+        if len(out) < cap:
+            with open(f, "rb") as fh:
+                out += fh.read(cap - len(out))
+    return bytes(out), present
+
+
+# The five 15-symbol alphabets, from the old tree's synthetic generator.
+_ALPHABETS = ("abcdefghijklmno", "pqrstuvwxyzABCD", "EFGHIJKLMNOPQRS",
+              "TUVWXYZ0123456", "789!?.,;:'\"-()")
+
+
+def _synthetic_areas(dat, seed, entries):
+    """`dat.n_processes` order-2 Markov generators, one area each. Holds nothing out.
+
+    SEEDED FROM THE RUN SEED, NOT FROM THE PROCESS INDEX. The old make_proc was seeded by the index
+    alone, so `DATA_SOURCE=synthetic` measured a between-seed spread with the DATA HELD CONSTANT --
+    every replicate saw byte-identical text and the spread it reported was the model's
+    initialisation alone (DEFECT D-A13). Two run seeds are now two different corpora.
+
+    ONE CHILD STREAM PER PROCESS, `data.synth.<label>`, AND `data.synth` IS A PARENT NOTHING DRAWS
+    FROM -- the same shape Q-DATA-6 ruled for `data.holdout`, adopted here because the collision
+    guard in spine/rng.py found the conflict: RUN.streams mints every name in RNG_SUBSYSTEMS so
+    rng.issued() is a complete register at step 0, and this function drawing on `data.synth`
+    directly is a SECOND generator for one name -- two call sites replaying one sequence while each
+    believes it has its own. The per-child form fixes that and buys the property Q-DATA-6 argues
+    for on the other stream: an area's text stops being a function of how many areas were generated
+    before it, so inserting one entry no longer moves every later area's corpus. The parent keeps
+    its RNG_SUBSYSTEMS row and reports zero draws, which is the honest reading -- declared, never
+    drawn -- and is what `data.holdout` already does.
+    """
+    n = int(dat.n_processes)
+    # Enough text that the floor is clearable and a 120,000-byte stream can be drawn without the
+    # sampler wrapping: the areas are generated, so there is no corpus to be short.
+    per_area = max(int(dat.seg_max) + 1, MIN_AREA_BYTES, int(dat.stream_bytes) // max(1, n)) * 2
+    raw, present, taken, sources = {}, {}, {}, {}
+    labels = entries[:n] if len(entries) >= n else [f"p{i}" for i in range(n)]
+    for i, label in enumerate(labels):
+        stream = _rng.rng_for(f"data.synth.{_holdout_key(label)}", seed)
+        alpha = _ALPHABETS[i % len(_ALPHABETS)]
+        # ORDER 2: the next symbol is a function of the previous two, so the process has structure a
+        # unigram model cannot reach and a domain router has something to separate.
+        table = {}
+        prev = (alpha[0], alpha[0])
+        out = bytearray()
+        while len(out) < per_area:
+            row = table.get(prev)
+            if row is None:
+                row = table[prev] = [alpha[stream.randrange(len(alpha))] for _ in range(3)]
+            ch = row[stream.randrange(len(row))]
+            out += ch.encode("ascii")
+            prev = (prev[1], ch)
+        raw[label] = bytes(out)
+        present[label] = len(out)
+        taken[label] = len(out)
+        sources[label] = f"synthetic:order2:{i}"
+    return raw, present, taken, sources
 
 
 def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_token: float):

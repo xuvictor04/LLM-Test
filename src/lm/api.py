@@ -23,7 +23,51 @@ RECORD TYPES RETURNED (P4 defines them):
   MintReport   rows_initialised, arm_used, sig_rows_written, composer_rows, residual_ratio
   LoadReport   widened, refused, reason
 """
+import dataclasses
+
 from spine.lever import Config
+
+
+class GeometryError(ValueError):
+    """A shape decision that cannot produce a model, refused BY LEVER NAME before any allocation.
+
+    NAMED RATHER THAN A BARE AssertionError, which is the whole repair. Verified by running it:
+    nn.TransformerEncoderLayer(130, 8, ...) raises `AssertionError: embed_dim must be divisible by
+    num_heads`, which names neither LM_WIDTH nor LM_HEADS, arrives on a warm device after the
+    corpus has been pulled, and tells the operator nothing about which of the two numbers they
+    typed to change.
+    """
+
+
+@dataclasses.dataclass(frozen=True)
+class LMGeometry:
+    """Every shape decision, RESOLVED, and the record the checkpoint gate compares against.
+
+    `layers` IS THE RESOLVED DEPTH AND NEVER THE SENTINEL. The old tree read the depth at two sites
+    with two different arm defaults -- `_i("LAYERS", 4)` and `_i("LAYERS", 1)` -- and wrote a third
+    number at save time, so a reader of a checkpoint could not tell what depth the saved model was.
+    _geometry_manifest raises if it is built before this record exists, for the same reason: a
+    manifest recording 0 makes a run at LM_LAYERS=0 and one at LM_LAYERS=4 the same model under two
+    values, which is a spurious EXACT mismatch refusing a resume that would have worked.
+    """
+    arch: str
+    width: int
+    layers: int
+    heads: int
+    ctx: int
+    pos_max: int
+    vocab_slots: int
+    compose: bool
+    dropout: float
+    max_token_bytes: int
+    param_estimate: int
+
+
+# The depth each arm means by the 0 sentinel. NOT in spine.derive, and that is checked rather than
+# assumed: there is no arm-to-depth function in that file, and inventing one would put a decision
+# about THIS package's constructor in the shared arithmetic module. 0 layers is not a small model,
+# it is a broken constructor, so the sentinel has to resolve to something and the arm is what knows.
+_SENTINEL_DEPTH = {"gru": 1, "transformer": 4}
 
 
 def resolve(lm: Config):
@@ -60,10 +104,83 @@ def resolve(lm: Config):
                  the run actually used)
     """
     lm = lm.owned_by("LM")
-    _ = (lm.d_pos_max, lm.d_max_token_bytes)     # WIRES READ HERE -- both are geometry
-    raise NotImplementedError(
-        "LM.resolve: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    pos_max, max_token_bytes = int(lm.d_pos_max), int(lm.d_max_token_bytes)
+
+    arch, width, heads = str(lm.arch), int(lm.width), int(lm.heads)
+    ctx, dropout = int(lm.ctx), float(lm.dropout)
+    vocab_slots, compose = int(lm.vocab_slots), bool(lm.compose)
+    declared_layers = int(lm.layers)
+
+    # EVERY REFUSAL CARRIES BOTH NUMBERS AND THE ENVIRONMENT NAME. A Lever has no range facility and
+    # `choices=` enumerates rather than bounds, so these cannot be declarations; what they must not
+    # become is a bare exception from a constructor three frames down.
+    bad = []
+    if width < 1:
+        bad.append(f"LM_WIDTH={width}: the model has no hidden dimension.")
+    if heads < 1:
+        bad.append(f"LM_HEADS={heads}: at least one attention head is required.")
+    if ctx < 1:
+        bad.append(f"LM_CTX={ctx}: a window of no tokens has nothing to predict.")
+    if vocab_slots < 1:
+        bad.append(f"LM_VOCAB_SLOTS={vocab_slots}: the embedding and output tables have no rows.")
+    if declared_layers < 0:
+        bad.append(f"LM_LAYERS={declared_layers}: negative depth. 0 is the sentinel meaning "
+                   f"'this arm's default'; a negative number means nothing.")
+    if not 0.0 <= dropout < 1.0:
+        bad.append(f"LM_DROPOUT={dropout}: must be in [0.0, 1.0). At 1.0 every activation is "
+                   f"dropped and the loss is constant.")
+    if float(lm.anchor_uses) <= 0:
+        # NAMES THE DROPPED LEVER, so a reader finds out here that the alternative went on purpose.
+        bad.append(f"LM_ANCHOR_USES={float(lm.anchor_uses)}: there is no second release rule any "
+                   f"more -- TOK_ANCHOR_TAU is dropped and the steps branch of anchor() went with "
+                   f"it -- so 0 or less means 'hold every minted token at its composite forever', "
+                   f"which no operator means to ask for.")
+    if arch == "transformer" and width % heads != 0:
+        # THE LOCAL COUPLING OVER TWO OF THIS PACKAGE'S OWN LEVERS, which is why it lives here and
+        # not in either declaration: neither lever may read the other.
+        bad.append(f"LM_WIDTH={width} is not divisible by LM_HEADS={heads} on the transformer arm. "
+                   f"nn.TransformerEncoderLayer raises a bare 'embed_dim must be divisible by "
+                   f"num_heads' naming neither knob, on a warm device, after the corpus is pulled.")
+    if bad:
+        raise GeometryError("LM.resolve refuses this geometry:\n  - " + "\n  - ".join(bad))
+
+    layers = _SENTINEL_DEPTH.get(arch, 1) if declared_layers == 0 else declared_layers
+
+    # ASSERTED SO IT STAYS UNREACHABLE. d_pos_max is today the local wire computed from ctx, so this
+    # cannot fire; if that wire is ever re-sourced from somewhere else, a positional table shorter
+    # than the window is an index error inside the forward pass rather than a refusal at startup.
+    if ctx > pos_max:
+        raise GeometryError(
+            f"LM_CTX={ctx} exceeds the positional extent d_pos_max={pos_max}. This is unreachable "
+            f"while d_pos_max is the intra-package coupling from ctx, and it is checked so that it "
+            f"STAYS unreachable if that wire is ever re-sourced.")
+
+    return LMGeometry(
+        arch=arch, width=width, layers=layers, heads=heads, ctx=ctx, pos_max=pos_max,
+        vocab_slots=vocab_slots, compose=compose, dropout=dropout,
+        max_token_bytes=max_token_bytes,
+        param_estimate=_param_estimate(arch, width, layers, ctx, vocab_slots, compose))
+
+
+def _param_estimate(arch, width, layers, ctx, vocab_slots, compose):
+    """A count for the banner and the manifest, computed from the SHAPES, not from a built module.
+
+    AN ESTIMATE AND LABELLED ONE. The authoritative number is compose._n_params over the parameters
+    the optimizer actually holds; this exists because the geometry gate runs BEFORE the first
+    allocation and a refusal that cannot say how big the two models were is half a message. Under
+    `compose` the token table is the ByteComposer's output and is TIED as input embedding and output
+    head, so it is counted once and the ~6.3M dead parameters ISSUES P1-L13 counts do not exist.
+    """
+    tok_table = 0 if compose else vocab_slots * width       # tied: one table, or none under compose
+    pos = ctx * width
+    if arch == "transformer":
+        # 4 * w^2 attention (q,k,v,o) + 8 * w^2 feed-forward at the usual 4x expansion, per layer.
+        body = layers * (4 * width * width + 8 * width * width)
+    else:
+        # GRU: 3 gates, each over input and hidden, per layer.
+        body = layers * (3 * (width * width + width * width))
+    head = 0 if compose else vocab_slots * width
+    return int(tok_table + pos + body + head)
 
 
 def build_model(lm: Config, geom, *, device, seed):
