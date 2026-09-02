@@ -1299,6 +1299,33 @@ LOOP_ORDER = (
 # arguments nothing supplies. The deferral does not remove a mechanism, it stops the tables claiming
 # one, and it names the producer each mechanism is waiting on.
 DEFERRED_ENTRY_POINTS = {
+    # THE FIVE Vocabulary ACCESSORS. They arrived with the record in P4's TOK slice, one increment
+    # before the rows that call them, for the same reason RUN.Timing's two did: TOK.build_vocabulary
+    # has to RETURN a Vocabulary, and the contract's RECORD TYPES block names these five as that
+    # object's surface. They are accessors on a record other packages receive as an argument and
+    # call methods on -- which the contract states is not an import -- so their callers are LM's
+    # embedding rows, TOK's own minting rows and EVAL's decode, none of which have bodies yet. Every
+    # one of them takes only `self` (or an id), so there is no argument without a producer: what is
+    # missing is the CALLER, and that is the whole reason each line below says which one.
+    "TOK.Vocabulary.size":
+        "P4, with the rows that read the live vocabulary size: LM.mint_rows and TOK.mint_burst "
+        "against the cap, and the banner. No unproduced argument -- it takes only self.",
+    "TOK.Vocabulary.live_size":
+        "P4, with TOK's retire path. It is size() minus the retired set, and it exists separately "
+        "BECAUSE retire() changes the match table without shortening id2bytes -- the embedding row "
+        "keeps its meaning. Nothing calls it until a row can retire. No unproduced argument.",
+    "TOK.Vocabulary.at_cap":
+        "P4, with TOK.mint_burst and CAP's vocabulary arm. THE ONE PREDICATE over min(soft_cap, "
+        "ceiling): a caller re-deriving that comparison is a second copy of a rule whose two halves "
+        "mean different things -- the model's embedding row count and a valve position that moves. "
+        "No unproduced argument.",
+    "TOK.Vocabulary.blen":
+        "P4, with the byte-length accounting in EVAL's bits/byte and DATA's exposure audit. Its one "
+        "argument `i` is a token id the caller already holds, not a value any entry point returns.",
+    "TOK.Vocabulary.decode":
+        "P4, with EVAL's generation and the report's sample lines. Its one argument `ids` is a "
+        "Segmentation.ids the caller already holds -- TOK.tokenize produces it, and that entry "
+        "point HAS a body; what is missing is the eval row that calls both.",
     "RUN.Timing.span":
         "P4, WITH THE FLUSH BODY, AND IT ARRIVED BEFORE ITS CALLER ON PURPOSE. RUN.mode has to "
         "return a RunMode, RunMode carries a `timing`, and the contract's RECORD TYPES block names "

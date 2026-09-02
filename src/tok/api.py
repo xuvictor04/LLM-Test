@@ -34,7 +34,108 @@ methods, which is not an import):
   Judgement     kept, retired_ids, pending, live_size
   RetokEvent    the signal the composition root hands to SIG, MEM, DOM and FAB
 """
+import collections
+import dataclasses
+
 from spine.lever import Config
+from spine import derive as _derive
+from spine import rng as _rng
+
+
+@dataclasses.dataclass(frozen=True)
+class Segmentation:
+    """One text, segmented, with the BYTE offset of every token.
+
+    `byte_pos[k]` is the stable coordinate. Without it every downstream metric is measured in token
+    indices off a text whose token length CHANGES as the vocabulary grows, which is exactly how the
+    run-boundary probe came to compare `prev` and `now` on two different windows (ISSUES P1-H20).
+    """
+    ids: list
+    byte_pos: list
+    labels: list
+    bytes_per_token: float
+
+
+class Vocabulary:
+    """The merge table as it now stands, plus the two caps and the measurement.
+
+    NOT FROZEN, because minting is the mechanism: `online` mode adds ids during training. What is
+    protected instead is that ONE object exists per run and every package receives it as an
+    argument, so there is no second vocabulary anywhere to disagree with this one.
+
+    TWO CAPS, AND THEY ARE DIFFERENT THINGS. `ceiling` is HARD and arrives as the wire
+    d_vocab_ceiling from LM.vocab_slots -- it is the model's embedding row count, and minting past
+    it reserves ids the model has no row for. `soft_cap` is CAP's valve position and moves during
+    the run. Minting compares against min(soft_cap, ceiling); at_cap() is the predicate, so no call
+    site re-derives it.
+    """
+
+    __slots__ = ("id2bytes", "seq2id", "merges", "bytes_per_id", "mlbf", "maxlen", "retired",
+                 "prov", "pair", "ceiling", "soft_cap", "v0", "bytes_per_token", "max_bytes")
+
+    def __init__(self, *, ceiling, soft_cap=None, max_bytes=16):
+        self.id2bytes = [bytes([b]) for b in range(256)]
+        self.seq2id = {bytes([b]): b for b in range(256)}
+        self.merges = []
+        self.bytes_per_id = [1] * 256
+        # LONGEST MATCH NEEDS A BOUND PER FIRST BYTE, not one global bound: with a single maxlen the
+        # matcher probes every length from maxlen down at every position, which is the whole segment
+        # cost multiplied by the longest token in the table. mlbf[b] is the longest sequence in the
+        # table that STARTS with byte b, so a position whose byte begins no merge costs one lookup.
+        self.mlbf = [1] * 256
+        self.maxlen = 1
+        self.retired = set()
+        self.prov = {}               # id -> how it was minted ("build" | "online" | "replay")
+        self.pair = {}               # id -> (left_id, right_id) that produced it
+        self.ceiling = int(ceiling)
+        self.soft_cap = None if soft_cap is None else int(soft_cap)
+        self.v0 = 256                # the size the run ENTERED training with; set by build
+        self.bytes_per_token = 1.0
+        self.max_bytes = int(max_bytes)
+
+    def size(self):
+        return len(self.id2bytes)
+
+    def live_size(self):
+        """Ids that can still be MATCHED. Not size(): retire() removes a sequence from the match
+        table without shortening id2bytes, because the embedding row keeps its meaning."""
+        return len(self.id2bytes) - len(self.retired)
+
+    def at_cap(self):
+        """THE ONE PREDICATE. A caller re-deriving min(soft_cap, ceiling) is a second copy of the
+        rule, and the two caps mean different things -- one is the model's row count and one is a
+        valve position that moves."""
+        return self.size() >= self._cap()
+
+    def _cap(self):
+        return self.ceiling if self.soft_cap is None else min(int(self.soft_cap), self.ceiling)
+
+    def blen(self, i):
+        return self.bytes_per_id[i]
+
+    def decode(self, ids):
+        return b"".join(self.id2bytes[i] for i in ids)
+
+    def _add(self, seq, *, prov, pair=None):
+        """Mint one sequence. Returns its id, or None when the cap or max_bytes refuses it."""
+        if seq in self.seq2id or len(seq) > self.max_bytes or self.at_cap():
+            return None
+        i = len(self.id2bytes)
+        self.id2bytes.append(seq)
+        self.seq2id[seq] = i
+        self.bytes_per_id.append(len(seq))
+        self.prov[i] = prov
+        if pair is not None:
+            self.pair[i] = pair
+            self.merges.append(pair)
+        b0 = seq[0]
+        if len(seq) > self.mlbf[b0]:
+            self.mlbf[b0] = len(seq)
+        if len(seq) > self.maxlen:
+            self.maxlen = len(seq)
+        return i
+
+
 
 
 def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
@@ -97,10 +198,131 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
                  (self_organize.py:1274-1281)
     """
     tok = tok.owned_by("TOK")
-    _ = (tok.d_vocab_ceiling, tok.d_vocab_read_path)     # WIRES READ HERE -- see the docstring
-    raise NotImplementedError(
-        "TOK.build_vocabulary: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    mode = str(tok.mode)
+    vocab = Vocabulary(ceiling=int(tok.d_vocab_ceiling), soft_cap=soft_cap,
+                       max_bytes=int(tok.max_bytes))
+
+    # THE BUILD SAMPLE. build_bytes bounds the BUILD; DATA.corpus_cap already bounded what was
+    # opened. Two genuinely different quantities, which is why both exist and neither is derived
+    # from the other.
+    # AREA ORDER IS PART OF THE MEASUREMENT, so it is taken from the mapping rather than from a
+    # set: `bodies` is keyed by area label in DATA_AREAS order, dicts preserve insertion order, and
+    # the merge table this sample produces depends on which area's text the tally saw first. Sorting
+    # here would silently make the vocabulary independent of a lever the operator set.
+    heads = area_heads.values() if hasattr(area_heads, "values") else area_heads
+    sample = b"".join(bytes(h)[:int(tok.build_bytes)] for h in heads)
+
+    if mode == "bytes":
+        # Nothing else in this file is reachable on this arm: no merges, no minting, no candidate
+        # window. v0 is 256 and stays there.
+        vocab.v0 = vocab.size()
+        vocab.bytes_per_token = 1.0
+        return vocab
+
+    read_path = str(tok.d_vocab_read_path)
+    if read_path:
+        # A RESUME MUST REUSE THE SAVED VOCABULARY or the restored embedding table is indexed by a
+        # DIFFERENT vocabulary. The file's recorded settings DO NOT WIN -- this package holds one
+        # declaration, the levers -- and any disagreement is a printed reconciliation, not a silent
+        # adoption (ISSUES P1-M80, P1-L20: a resume setting MIN_PAIR=200 ran with the parent's value
+        # while the audit printed "NOTHING READ THESE" naming a knob that was set and ignored).
+        replayed = _replay_merges(vocab, read_path)
+        if replayed is not None:
+            vocab.v0 = vocab.size()
+            ids, _pos = _segment(vocab, sample, dropout=0.0, stream=None)
+            vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
+            return vocab
+
+    target = min(int(tok.seed_vocab), vocab._cap())
+    # ONE LITERAL FOR THE PASS COUNT, ON ALL THREE ARMS (Q-TOK-9). An 8 living in build code would
+    # print as 2 in the generated lever reference, which is the L1 failure the SEED_PASSES/
+    # GROW_PASSES merge exists to end, moved from a second environment name into a second number.
+    passes = int(tok.build_passes)
+    # DRAWN FROM THE DECLARED STREAM, never the process-global `random`, which shifted the RNG
+    # stream of the ENTIRE run (ISSUES P1-L69).
+    stream = _rng.rng_for("tok.dropout", seed) if float(tok.dropout) > 0 else None
+
+    for _ in range(passes):
+        if vocab.size() >= target:
+            break
+        ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
+        tally = collections.Counter()
+        for a, b in zip(ids, ids[1:]):
+            tally[(a, b)] += 1
+        minted = 0
+        for (a, b), n in tally.most_common():
+            if n < int(tok.min_pair) or vocab.size() >= target:
+                break
+            if vocab._add(vocab.id2bytes[a] + vocab.id2bytes[b], prov="build", pair=(a, b)) is not None:
+                minted += 1
+        if minted == 0:
+            break                    # a pass that mints nothing will mint nothing next time either
+
+    if mode == "fixed":
+        # THE CEILING AS WELL AS THE TARGET. On this arm the run never mints again, so the cap has
+        # to bind here or `at_cap()` reads False for the whole run over a vocabulary that is closed.
+        vocab.soft_cap = vocab.size()
+
+    vocab.v0 = vocab.size()
+    # THE ONE ESTIMATOR (ISSUES P1-H16). The mean-over-vocabulary-entries form read 1.50 against
+    # 1.85 as used, and its error changes SIGN with vocabulary size -- which is the axis those runs
+    # were compared along. Measured here, on the build sample, with the counting segmentation.
+    ids, _pos = _segment(vocab, sample, dropout=0.0, stream=None)
+    vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
+    return vocab
+
+
+def _replay_merges(vocab, path):
+    """Replay a parent's merges into `vocab`. Returns the vocabulary, or None if unreadable."""
+    import json
+    import os
+    if not os.path.isfile(path):
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        blob = json.load(fh)
+    for seq_hex in blob.get("id2bytes", [])[256:]:
+        vocab._add(bytes.fromhex(seq_hex), prov="replay")
+    return vocab
+
+
+def _segment(vocab, data, *, dropout=0.0, stream=None, start=0):
+    """Greedy longest match from `start`. Returns (ids, byte_pos).
+
+    LONGEST MATCH, NOT A MERGE REPLAY, and the difference is that this one function serves the
+    initial segmentation, every in-loop re-segmentation, the final one and the held-out encode --
+    a merge replay would need the merge ORDER to be meaningful, and `retire()` changes the match
+    table without changing that order.
+
+    `mlbf[b]` bounds the probe per FIRST BYTE. A global maxlen would probe every length from the
+    longest token in the table downward at every position, so one 16-byte token would make every
+    position cost sixteen dict lookups whether or not any 16-byte token starts with that byte.
+    """
+    ids, pos = [], []
+    n, i = len(data), start
+    s2i, mlbf, retired = vocab.seq2id, vocab.mlbf, vocab.retired
+    while i < n:
+        b0 = data[i]
+        hi = min(mlbf[b0], n - i)
+        took = 0
+        for L in range(hi, 1, -1):
+            j = s2i.get(data[i:i + L])
+            if j is None or j in retired:
+                continue
+            # BPE-DROPOUT (Provilkov et al., ACL 2020): skip an available merge with probability
+            # `dropout`, falling back toward the raw byte, which is always in the table. Used for
+            # the TRAINING stream and never for held-out text, generation or the final segmentation.
+            if dropout > 0.0 and stream is not None and stream.random() < dropout:
+                continue
+            ids.append(j)
+            pos.append(i)
+            i += L
+            took = L
+            break
+        if not took:
+            ids.append(b0)
+            pos.append(i)
+            i += 1
+    return ids, pos
 
 
 def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False, seed=0):
@@ -154,9 +376,22 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
                  (unreachable at dropout=0.0, the default), tok.byte_fallback
     """
     tok = tok.owned_by("TOK")
-    raise NotImplementedError(
-        "TOK.tokenize: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    drop = float(tok.dropout) if regularize else 0.0
+    # THE STREAM IS ASKED FOR ONLY WHEN IT WILL BE DRAWN ON. rng.issued() is a register: a name
+    # appearing with zero draws means armed-but-inert, and minting a stream this call will not
+    # touch would make "dropout is off" indistinguishable from "dropout is on and never fired".
+    stream = _rng.rng_for("tok.dropout", seed, again=True) if drop > 0 else None
+    ids, byte_pos = _segment(vocab, data, dropout=drop, stream=stream, start=start)
+
+    # THE LABEL PER TOKEN, carried from the per-byte labels DATA produced. A token spans bytes and
+    # therefore could span a splice seam; it takes the label of its FIRST byte, which is the one
+    # the byte_pos coordinate names, so a per-area score and a byte offset always agree.
+    out_labels = None
+    if labels is not None:
+        out_labels = [labels[p] for p in byte_pos]
+
+    return Segmentation(ids=ids, byte_pos=byte_pos, labels=out_labels,
+                        bytes_per_token=_derive.bytes_per_token(len(data) - start, len(ids)))
 
 
 def on_window(tok: Config, vocab, ids, *, step):
