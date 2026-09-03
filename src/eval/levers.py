@@ -74,16 +74,23 @@ than fixed in silence, because a correction nobody can find reads exactly like a
     Reconstructor post hoc, on a settled store, in its own loop that has no windows and no flushes in it.
     Steps is right and stays Steps -- and the two levers being different kinds in one file is the point,
     not an inconsistency.
-    THE CONFLICT WITH THE SPINE, STATED RATHER THAN RESOLVED. spine/assemble.py::_owner_blocks, :698 and :711 wrap
-    the analogous `step`-counter cadences as `derive.flush_period(Steps(r["FAB"].manage_every), ...)` and
-    `Steps(r["TRAIN"].grow_cap_every)` -- typing as Steps the same counter this file (and derive.py's own
-    docstring at :207, "`step` advances once per WINDOW") types as Windows. The same counter therefore has
-    two kinds in two files. The practical consequence for whoever ports the curve probe: derive.flush_period
-    REFUSES anything but Steps (derive.py::flush_period), so there is today NO legal conversion from a
-    Windows-typed cadence to the flush clock. Either spine.derive gains a Windows->Flushes conversion or
-    FAB.manage_every and TRAIN.grow_cap_every change kind. Picking one here, silently, is how a knob
-    acquires two meanings; src/memory/levers.py::<module> records the identical conflict from its own side,
-    which is evidence that this is the spine's row to settle and not a per-package taste.
+    THE CONFLICT WITH THE SPINE: SETTLED, AND THIS PARAGRAPH ASSERTED IT OPEN AFTER IT WAS CLOSED. It read
+    "STATED RATHER THAN RESOLVED", said spine/assemble.py wraps the analogous `step`-counter cadences as
+    `derive.flush_period(Steps(r["FAB"].manage_every), ...)` and `Steps(r["TRAIN"].grow_cap_every)`, and
+    concluded that "there is today NO legal conversion from a Windows-typed cadence to the flush clock" so
+    that "either spine.derive gains a Windows->Flushes conversion or FAB.manage_every and
+    TRAIN.grow_cap_every change kind". Checked against the tree on 2026-09-03, all three clauses are false:
+    spine/derive.py::flush_period_windows IS that conversion and is declared beside flush_period rather
+    than inside it, precisely so flush_period keeps refusing a Windows; spine/assemble.py's FAB.
+    d_manage_period and FAB.d_cap_lift_period rows both call flush_period_windows on a Windows-typed
+    threshold, and the FAB row's own reason records the Steps assumption as withdrawn; and there is no
+    package TRAIN and no lever grow_cap_every -- spine/assemble.py::_check_endpoints records that name as
+    corrected to CAP.pin_windows, which is where this file's sibling capacity/levers.py::<module> also
+    documents the settlement. So the two levers below are not in tension with anything: `curve_every` is
+    Windows because `step` advances once per window, `verify_fit_steps` is Steps because its loop has no
+    windows in it, and the spine now types both kinds and converts between them in one named place.
+    WHAT REMAINS TRUE, AND IS NOT THIS PACKAGE'S ROW: the identical stale paragraph survives in
+    src/memory/levers.py::<module>, which is another package's file.
 
   DEFECT 3 -- A MERGE WITH TWO DEFAULTS. EXPERT_NULLS (20 draws, the SPECIALIZATION null at :9171) merges
   into EVAL_NULL_DRAWS, and INFO_NULLS (5 draws, the PARTITION INFORMATIVE null at :3831) renames to the
@@ -107,9 +114,15 @@ repair, if it is wanted, belongs in Lever.coerce as a refusal for unrecognised f
 choices= list here that would pass every typo it was added to catch.
 
 WHAT IS DELIBERATELY ABSENT. No `d_` field is declared here -- lever.py refuses a d_-named lever precisely
-so a declaration cannot shadow the wire that writes it. Four couplings that touch this package are named
-by census rows and NONE of them exists in spine/assemble.py yet (verified by grep: no coupling there names
-EVAL). They are listed so the port has the list rather than rediscovering it:
+so a declaration cannot shadow the wire that writes it. FIVE couplings that touch this package are named
+by census rows, in five separate rows, and none of them exists in spine/assemble.py yet (verified against
+the table on 2026-09-03: no Coupling there names EVAL as src or dst; the one EVAL mention is the
+`EVAL.gist` entry in the rejected-candidates list, which is recorded as a coupling that cannot be made).
+The count said FOUR while the list below carried five wires in four bullets -- the outgoing bullet is two
+couplings into two packages, not one -- so the outgoing pair is split out here and the number now matches
+what a reader can count. They are listed so the port has the list rather than rediscovering it, and the
+budget matters: spine/wire.py::WIRE_BUDGET leaves room for two more edges in the whole tree, so wiring
+even the two outgoing rows is a budget decision somebody has to take deliberately, not a tidy-up:
     incoming  d_prior_blend    DOM.prior_blend, so the domain-prior probe scores the same blend weight
                                training accumulated (census: domains/DOM_PRIOR)
     incoming  the held-out size resolved by DATA.val_cap, so a Sample can state how many bytes it
@@ -121,10 +134,14 @@ EVAL). They are listed so the port has the list rather than rediscovering it:
                                default it built the eval signature from ONE byte while training encoded
                                >= 256, so every eval-path routing decision in every report was made on a
                                one-byte signature (ISSUES P1-C4/C5).
-    outgoing  d_curve_bpb to CKPT and d_best_bpb to OPT -- a held-out measurement crossing back into a
-                               training decision. OPT_LR_RESTART_DAMP turns `_best_bpb` into a restart,
-                               and PLAN 3.8 forbids a verdict on n=1, so the Reading that supplies it must
-                               carry its seed count.
+    outgoing  d_curve_bpb to CKPT -- the held-out bits/byte the retention policy compares against, which
+                               the census's BEST_KEEP_TOL row requires to arrive as a declared wire
+                               rather than be read off a report line.
+    outgoing  d_best_bpb to OPT -- a held-out measurement crossing back into a TRAINING decision, which
+                               is the one direction the instrument line otherwise forbids.
+                               OPT_LR_RESTART_DAMP turns `_best_bpb` into a restart, and PLAN 3.8 forbids
+                               a verdict on n=1, so the Reading that supplies it must carry its seed
+                               count.
 
 IMPORT STYLE, AND WHY IT DEPARTS FROM THE ASSIGNMENT'S SKETCH. `from ..spine.lever import ...` cannot work
 here: every entry point in this tree puts `src/` itself on sys.path (tests/test_derive.py, test_ownership's

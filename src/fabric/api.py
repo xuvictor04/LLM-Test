@@ -60,7 +60,7 @@ class Population:
 
     __slots__ = ("A", "B", "cent", "n_live", "cap", "depth_now", "born", "use", "uage", "dom_of",
                  "ef", "es", "comp", "contrib", "births", "rescued", "parent", "mutscale",
-                 "modules", "counters", "rng", "on", "hop_arm", "gates")
+                 "modules", "counters", "rng", "on", "hop_arm", "gates", "halt_b")
 
     def __init__(self, *, cap, n0, d_model, rank, signature_dim, device, rng, on, hop_arm,
                 depth_now):
@@ -90,6 +90,12 @@ class Population:
         self.rescued = 0
         self.parent = [-1] * cap
         self.mutscale = [1.0] * cap
+        # THE LEARNED HALT PRIOR, ALLOCATED HERE RATHER THAN IN `modules` BECAUSE nn.ModuleDict
+        # CANNOT HOLD A BARE PARAMETER. Shape and initialisation are the frozen old tree's, not a
+        # guess: `s.halt_b = nn.Parameter(torch.zeros(1))` at :1733, "prior on halting, learned;
+        # 0 = whatever the query says". It sits beside A and B, which is also how state_dict's
+        # parameter list reads it -- the list is parameters, not module keys.
+        self.halt_b = nn.Parameter(torch.zeros(1, device=device))
         self.modules = None
         self.rng = rng
         self.on = on
@@ -110,7 +116,7 @@ class Population:
         list is the same length on every step of every run and a checkpoint's param-group structure
         cannot depend on how much the population grew.
         """
-        return [self.A, self.B] + list(self.modules.parameters())
+        return [self.A, self.B, self.halt_b] + list(self.modules.parameters())
 
 
 def build(fab: Config, *, d_model, signature_dim, device, generator):
@@ -118,8 +124,9 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
 
     cap = max(n0, slots); allocates A (cap, d_model, rank), B (cap, rank, d_model) ZERO-INIT (every
     expert is born an identity, so adding one never disrupts what already works), cent
-    (cap, signature_dim), and the shared eemb/edec/q_route/hproj/halt_key modules. GROWTH NEVER
-    REALLOCATES and the optimizer never sees a new parameter; only n_live moves.
+    (cap, signature_dim), the shared eemb/edec/q_route/hproj/halt_key/norm/nov_proj modules and
+    the learned halt prior halt_b. GROWTH NEVER REALLOCATES and the optimizer never sees a new
+    parameter; only n_live moves.
 
     EVERY FOUNDER GETS A BIRTHDAY AND A ZERO USE-CLOCK. The old tree wrote `born` only in grow(),
     so at n0=2048 the entire founding population read age 0 forever and was permanently immune to
@@ -158,6 +165,32 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     counter kept printing the operator's number. Fixed the M24 way: `depth_now = hops if depth0==0
     else depth0`, so the sentinel and the literal both take effect at step 0 and the curriculum, if
     any, extends FROM there.
+
+    THE FOUR NAMES `state_dict` CLAIMED AND THIS FUNCTION DID NOT ALLOCATE, RULED 2026-09-03.
+    state_dict's parameter list named eleven tensors; this function created five, so four of them
+    were a SAVE-SIDE CLAIM only a resume could ever test -- a name in that list that nothing builds
+    is a checkpoint round-trip that silently loses it. Three are now built here and one is dropped
+    from the list (see state_dict, which records why `q_entry` is `ctrl`'s twin rather than
+    nov_proj's). The three are built to the FROZEN OLD TREE'S OWN CONSTRUCTORS rather than to a
+    guess -- `s.norm = nn.LayerNorm(d)` and `s.nov = nn.Linear(1, dk)` at :1907-1908,
+    `s.halt_b = nn.Parameter(torch.zeros(1))` at :1733 -- and each is READ ON THE WALK THIS TREE
+    PORTS: norm at :2575 (the norm_only ablation), :2677 and :2683 (the soc loop's per-hop vote and
+    its residual step); nov at :2361, inside the grounded `entry_logits` this contract keeps, which
+    is the very line `forward` cites for the M28 novelty repair; halt_b at :2628, inside
+    `if s.loop_soc:`. "forward is still a stub, so none of these can be exercised today" is an
+    argument for allocating them at the geometry the old tree used, NOT for leaving the claim
+    outstanding: A, B and the other five modules are unexercised for exactly the same reason, and
+    the alternative -- raising spine/gate.py::NotBuilt at a point of use that does not exist yet --
+    would refuse a mechanism this tree has not declared unported, which is the one thing NotBuilt
+    must not be spent on.
+
+    HALT'S PRIOR IS ONE SCALAR AND WAS NEARLY TWO. In the old tree `halt_key` is a bare (dk,)
+    Parameter with no bias of its own (:1724) and the learned prior is added beside it
+    (`_hl + s.halt_b`, :2442). This tree had already re-specified halt_key as nn.Linear(d_model, 1),
+    whose OWN bias occupies precisely halt_b's additive position -- so allocating halt_b beside it
+    would have put two learned scalars in one place, one of which must be dead: the armed-but-inert
+    shape this package's own history is made of. halt_key is therefore allocated `bias=False` and
+    the prior carries the name the contract gives it. The parameter count is unchanged.
 
     LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode,
                  depth0, hops
@@ -240,7 +273,19 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         "edec": nn.Sequential(nn.Linear(dk, hid), nn.Tanh(), nn.Linear(hid, int(signature_dim))),
         "q_route": nn.Linear(d_model, dk),
         "hproj": nn.Linear(d_model, d_model),
-        "halt_key": nn.Linear(d_model, 1),
+        # bias=False, AND THE HALT PRIOR IS `halt_b` INSTEAD -- see the ruling paragraph above.
+        # A biased halt_key plus a halt_b would be two learned scalars in one additive position,
+        # one of which must be dead. The parameter count is unchanged either way.
+        "halt_key": nn.Linear(d_model, 1, bias=False),
+        # LayerNorm over d_model, per :1908 `s.norm = nn.LayerNorm(d)`. Read on every arm: the
+        # norm_only ablation (:2575), the soc loop's per-hop vote and residual step (:2677, :2683),
+        # and the unported transition walk (:2781, :2814).
+        "norm": nn.LayerNorm(d_model),
+        # The (B,) novelty scalar projected INTO THE ROUTING QUERY, per :1907 `s.nov =
+        # nn.Linear(1, dk)`. `forward` cites :2361 -- where the old tree summed it into the LOGITS
+        # and it cancelled in the softmax -- as the M28 defect; the repair needs this module, so
+        # the name is here rather than waiting for the body that will call it.
+        "nov_proj": nn.Linear(1, dk),
     }).to(device)
     with torch.no_grad():
         for name, t in pop.modules.named_parameters():
@@ -343,7 +388,12 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     NOVELTY ENTERS THE QUERY, not the logit vector. `logits + s.nov(nov[:,None]).sum(-1,
     keepdim=True)` (:2361) collapses the term to a per-ROW scalar broadcast identically across all
     N expert logits, so it CANCELS in the softmax over experts and survives only as a shift against
-    HALT -- while the class docstring describes it as biasing expert selection (M28).
+    HALT -- while the class docstring describes it as biasing expert selection (M28). THE MODULE
+    THE REPAIR NEEDS NOW EXISTS: `pop.modules["nov_proj"]` (the old tree's `s.nov`, nn.Linear from
+    the novelty scalar into dk), and `pop.modules["norm"]` for the per-hop vote below, both
+    allocated by fabric/api.py::build -- state_dict named them and nothing built them until
+    2026-09-03. The learned halt prior is `pop.halt_b`, beside A and B rather than in `modules`,
+    because nn.ModuleDict cannot hold a bare Parameter.
 
     HALT GATES THE STATE UPDATE. :2683 applies the mixture at full strength on every hop regardless
     of how much probability has already halted, so the hidden state keeps changing after the router
@@ -780,16 +830,49 @@ def counters(fab: Config, pop):
 
 
 def state_dict(fab: Config, pop):
-    """Parameters (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, q_entry, nov_proj),
-    the `cent` BUFFER, every book, the cumulative counter ledger, and the package RNG stream.
+    """Parameters (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, nov_proj), the `cent`
+    BUFFER, every book, the cumulative counter ledger, and the package RNG stream.
+
+    EVERY NAME IN THAT LIST IS NOW ALLOCATED BY `build`, WHICH IT WAS NOT UNTIL 2026-09-03. The
+    list named eleven tensors and build created five; halt_b, norm and nov_proj are now built
+    (fabric/api.py::build carries the constructors, the old-tree line each came from, and where
+    each is read), and q_entry joins ctrl in being dropped, for the reason below. A name here that
+    nothing allocates is not a harmless aspiration: state_dict is the SAVE side, so the claim can
+    only ever be falsified by a resume, which is the same shape as the `ctrl` defect this docstring
+    already recorded.
 
     `ctrl` IS NOT IN THAT LIST AND THE ABSENCE IS THE STATEMENT. It was, until 2026-09-02, and
-    nothing built it: `ctrl` exists only on the transition hop arm (:1907 mints it, :2827 is its
-    only read, both inside the transition branch), `build`'s allocation list creates no such
-    module, and Q-FAB-1 rules that the arm stays DECLARED and UNPORTED. So the contract promised to
-    checkpoint a parameter nothing allocates -- a save-side claim that could only ever be tested by
-    a resume. It returns to this list in the same commit that ports the arm, and not before;
-    `q_entry` (:2557, :2564) and `nov_proj` (:2554) stay, because both walks use them.
+    nothing built it: `ctrl` belongs to the transition hop arm alone -- :1907 mints it in
+    __init__, on one line with q_entry and nov (this sentence said "both inside the transition
+    branch", which is wrong about the MINT and right about the arm), and :2827
+    `bias = nb + s.ctrl(summ)` is its ONLY read, inside the transition branch. `build`'s allocation
+    list creates no such module and Q-FAB-1 rules that the arm stays DECLARED and UNPORTED. So the
+    contract promised to checkpoint a parameter nothing allocates -- a save-side claim that could
+    only ever be tested by a resume. It returns to this list in the same commit that ports the arm,
+    and not before.
+
+    `q_entry` IS DROPPED ON THE SAME GROUND, REVERSING THIS DOCSTRING'S OWN EARLIER RULING. That
+    ruling read "q_entry (:2557, :2564) and nov_proj (:2554) stay, because both walks use them",
+    and two of its three line citations no longer resolve to either name. Re-read against the
+    frozen old tree, q_entry has exactly three readers and this tree ports the arm behind none of
+    them:
+      :2591  the `else` of `if s.grounded:` -- the ROUTE_GROUNDED=0 entry router, which the old
+             tree's own comment two lines above calls "a different and strictly weaker router",
+             and which fabric/levers.py::FABLevers.cent_ema records as DROPPED here ("now that
+             ROUTE_GROUNDED's alternative router is dropped");
+      :2597  the `else` of `if s.halt_on`, on that same non-grounded branch;
+      :2564  `seed_key`, whose single caller is `s.K[j] = s.seed_key(gist)` (:2143) -- a write into
+             the FREE identity parameters, and fabric/levers.py::FABLevers.dk records FAB_DERIVE_IDS=0
+             as dropped, so there is no K to seed: an expert's key is DERIVED from its weights
+             through eemb.
+    The old tree measured the consequence itself, twice. Its ROUTER LEARNING audit printed
+    "never gradiented -> ctrl, q_entry" at the shipped ROUTE_GROUNDED=1 (:9141), and two
+    armed-but-inert records in .rework/ISSUES.md name the SPECIALIZATION section as having
+    partitioned the population with a randomly-initialised q_entry for the whole life of the probe.
+    q_entry returns to this list in the same commit that ports a non-grounded entry router, and not
+    before. `nov_proj` STAYS and is now BUILT, because the reading that kept it is the one that
+    survives: its read at :2361 is inside `entry_logits`, the grounded router this contract does
+    port, and it is the same line `forward` cites for the M28 novelty repair.
 
     `cent` is a BUFFER and not a plain attribute: as an attribute it was absent from state_dict(),
     so the centroids that ARE the routing function were never saved and generation routed on

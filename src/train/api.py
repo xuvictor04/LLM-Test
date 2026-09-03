@@ -252,9 +252,9 @@ def process_setup(run: Config):
     DID IT FIRE: Process.tf32_applied, Process.amp_state, Process.torch_seed -- the last one read
                  back with torch.initial_seed() AFTER the write, so it is what torch is running on
                  and not what this function asked for. It equals derive_seed("torch.global", seed)
-                 on every process at that RUN_SEED and differs at a different one; two runs whose
-                 reported torch_seed matches and whose LM.encode output does not have a
-                 non-determinism that is NOT this one.
+                 on every process at that RUN_SEED and differs at a different one. Two runs that
+                 report the SAME torch_seed and still disagree on LM.encode have some OTHER
+                 non-determinism, and this field is what lets a reader rule this one out.
     """
     run = run.owned_by("RUN")
     device = str(run.device)

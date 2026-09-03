@@ -38,6 +38,27 @@ TWO RULES EVERY FUNCTION BELOW OBEYS, both from the survey:
       softmax -> blend -> log is the ungated mix recomputed at a consumer site, i.e. C8 (prompt.py)
       and C9 (cl_bench.py) rebuilt inside the instrument line.
 
+TWO DECLARED OUTPUTS HAVE NO CHANNEL IN THE FROZEN SIGNATURE THAT MUST PRODUCE THEM, RECORDED HERE
+RATHER THAN QUIETLY DROPPED (found 2026-09-03, and neither is closed):
+  * `CurveReading.step` below is returned by curve_probe, whose signature is
+    `(ev, *, units_by_domain, logits_fn, rng)`. `step` is RUN's window counter; no argument carries
+    it and EVAL owns no clock, so the field cannot be filled by the function that returns it.
+  * `verification_fit`'s DID IT FIRE declares a Gate on `verify != "off"` and says it is "rendered
+    from the value the composition root passed" -- and the signature is
+    `(ev, *, store_copy, rng)`, which has no such parameter. MEM's Store carries no verify field
+    either (its __slots__ are the entry arrays, the partition and the census), so the value cannot
+    be recovered from `store_copy`, and reading MEM's Config here is exactly what owned_by refuses.
+BOTH ARE SIGNATURE QUESTIONS AND NEITHER IS EVAL'S ALONE TO SETTLE, which is why they are written
+down instead of patched: docs/04_CONTRACT.md declares these signatures and tests/test_contract.py's
+K1 compares the two directions, so widening one here without the document is a failing suite and a
+second source of truth. The two repairs, with their costs: a keyword argument (`step=`, and a
+`verify_mode=` or the value on MEM's Store) costs one edit in the document and one in the
+composition root's row, and is the smaller change; a wire (EVAL.d_verify_mode <- MEM.verify) costs
+one of the two edges spine/wire.py::WIRE_BUDGET has left in the whole tree and buys nothing the
+argument does not, because this value is consumed by an instrument and never by a mechanism. THE
+GATE AND THE FIELD STAY DECLARED. Deleting either to make this file self-consistent would trade a
+recorded gap for a silently missing reading, which is the trade this package exists to refuse.
+
 RECORD TYPES RETURNED (P4/P5 define them):
   CurveReading   per_domain_bpb, mean_bpb, windows_drawn, units_drawn (the total this probe spent:
                  windows_drawn summed across domains x LM.ctx -- Q-EVAL-5), step
@@ -72,7 +93,12 @@ def curve_period(ev: Config):
     DID IT FIRE: Cadences.ledger()["curve"]
     """
     ev = ev.owned_by("EVAL")
-    # NOT A STUB, AND THE THREE SIBLINGS ARE NOT EITHER. A period accessor is one
+    # NOT A STUB, AND THE FOUR SIBLINGS ARE NOT EITHER -- DOM.manage_period, FAB.manage_period,
+    # MEM.rekey_period and CKPT.save_period, each verified stub-free. This comment said THREE, which
+    # is the same off-by-one docs/04_CONTRACT.md corrected in its own sentence about these five
+    # accessors on 2026-09-03, one row over and for the same reason it gave: the number is spelled
+    # as a WORD and tests/test_contract.py's K13 reads digits, so nothing in the tree could see it.
+    # A period accessor is one
     # construction over one declared lever, and its whole job is that Cadences.due REFUSES a
     # bare int while Config hands one back for all 35 levers that declare a Clock unit
     # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
@@ -330,7 +356,12 @@ def verification_fit(ev: Config, *, store_copy, rng):
     WIRES READ: none
     DID IT FIRE: the fit's step count, its precision, and the Gate on `verify != "off"` -- which is
                  MEM's lever, so the gate is rendered from the value the composition root passed
-                 rather than from a read of MEM's Config
+                 rather than from a read of MEM's Config. THE ROOT HAS NOWHERE TO PASS IT TODAY:
+                 this signature takes only store_copy and rng, and MEM's Store carries no verify
+                 field, so the Gate is declared and unbuildable until the signature gains a channel.
+                 See the module docstring for the two candidate repairs and what each costs. The
+                 Gate stays declared: an instrument that silently omits a reading because its input
+                 was never wired is the armed-and-inert failure with the evidence removed.
     """
     ev = ev.owned_by("EVAL")
     raise NotImplementedError(

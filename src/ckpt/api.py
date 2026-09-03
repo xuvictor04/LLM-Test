@@ -28,6 +28,7 @@ import os
 import torch
 
 from spine.lever import Config
+from spine.gate import Gate
 from spine import units as U
 
 
@@ -119,11 +120,63 @@ def save_period(ckpt: Config):
     it at the flush tail costs nothing and needs no conversion -- THERE IS NO WINDOWS->FLUSHES CALL
     ANYWHERE IN THIS PACKAGE.
 
-    LEVERS READ: every
+    THE DECLARED GATE IS BUILT HERE AND RIDES ON THE RETURNED PERIOD (ruled 2026-09-03). This line
+    has claimed a Gate since the surface was frozen and the body produced none, so the condition it
+    names -- CKPT_DIR set with CKPT_EVERY == 0, i.e. "the only saves are the final one plus
+    SIGUSR1" -- was stated nowhere. IT CANNOT BE RECOVERED FROM WHAT THE RUN ALREADY PRINTS, and
+    that was checked rather than assumed. spine/derive.py::cadences_that_cannot_fire does report a
+    period of zero, and its own comment names this file while doing it -- but it never reads `dir`,
+    so it returns the SAME answer on two configurations that are not the same run. Measured through
+    spine.assemble.build on the resolved defaults, with the run length held at sixty thousand
+    windows:
+
+        CKPT_DIR         CKPT_EVERY   saving_on   cadences_that_cannot_fire
+        "" (shipped)              0       False   [("ckpt", 0, 0)]
+        runs/x                    0        True   [("ckpt", 0, 0)]
+        "" (shipped)           4000       False   []
+        runs/x                 4000        True   []
+
+    Two pairs of genuinely different states, rendered identically. At the SHIPPED DEFAULTS the
+    honest answer is the third state and not the second: CKPT_DIR is empty, so an operator who
+    reads "the ckpt gate cannot fire" and raises CKPT_EVERY still saves nothing. Collapsing
+    armed-but-zero into unreachable is exactly what spine/gate.py::Gate exists to refuse, so the
+    three arms are spelled here: UNREACHABLE when saving is off at all, armed-and-not-fired at
+    every == 0 with the final-plus-SIGUSR1 sentence as its reason, FIRED otherwise.
+
+    WHY IT RIDES ON THE RETURNED Windows RATHER THAN CHANGING THE SHAPE OR MINTING AN ACCESSOR.
+    Three alternatives, each priced by running it rather than by preference:
+      (a) return (Windows, Gate), or a small record. REFUSED: this value is read UNWRAPPED into the
+          `periods` mapping at two sites in spine/compose.py, which this package does not own, and
+          both train/api.py::Cadences.due and spine/derive.py::cadences_that_cannot_fire refuse
+          anything whose type is not exactly Windows -- a SUBCLASS raises too, which was checked
+          (`cadences_that_cannot_fire` on a Windows subclass raises UnitError).
+      (b) a new public gates()/periodic_gate() accessor, which is what FAB, CAP, MEM and TOK all
+          effectively have. REFUSED HERE AS A BODY FIX, WITH THE COST MEASURED: adding one to this
+          file was tried, and the suite answers K1 (a public surface docs/04_CONTRACT.md does not
+          declare), K6 (named by no row in ASSEMBLY_ORDER or LOOP_ORDER and not deferred) and K13
+          (the entry-point total, written in seven present-tense claims across six locations in
+          docs/04_CONTRACT.md). Every one of those repairs lands in docs/04_CONTRACT.md or
+          spine/compose.py. It is the right shape if CKPT is ever to have a package-wide DID IT
+          FIRE surface, and it is a REFERRED EDIT, not something a body-writer may take
+          unilaterally.
+      (c) delete the claim from this line and leave the condition unsaid. REFUSED: that is the
+          quiet narrowing, and it would put the sentence nowhere at all.
+    So the Gate goes where the four packages that already produce one put theirs -- on the object
+    the entry point returns, under the name `.gates` (fabric/api.py::build's pop.gates,
+    capacity/api.py::new_valve's valve.gates, memory/api.py::open_store's store.gates,
+    tok/api.py::build_vocabulary's vocab.gates). THE ONE COST, STATED SO IT IS NOT DISCOVERED: a
+    Clock is a value object whose arithmetic returns a FRESH instance, so `period + Windows(0)` or
+    a re-wrap `Windows(period)` drops the tuple. Nothing in the tree does either today -- both
+    consumers read `.n` off the object they are handed -- and whoever writes Cadences.due must not
+    normalise its argument.
+
+    LEVERS READ: every, dir (through saving_on, for the gate's reachability arm)
     WIRES READ: none
-    DID IT FIRE: Cadences.ledger()["ckpt"]; plus a declared Gate for the :5619-5621 warning -- dir
-                 set and every == 0 means the only save is the final one plus SIGUSR1, printed with
-                 its own condition rather than as a warning string
+    DID IT FIRE: Cadences.ledger()["ckpt"] counts the fires; the `.gates` tuple on the returned
+                 period carries ckpt.periodic_armed, which is the :5619-5621 warning replaced by a
+                 gate with its own condition -- dir set and every == 0 prints armed-and-not-fired
+                 with "the only saves are the final one plus SIGUSR1" as its reason, and dir off
+                 prints UNREACHABLE instead of a zero the ledger cannot explain
     """
     ckpt = ckpt.owned_by("CKPT")
     # NOT A STUB, AND THE THREE SIBLINGS ARE NOT EITHER. A period accessor is one
@@ -132,7 +185,27 @@ def save_period(ckpt: Config):
     # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
-    return U.Windows(int(ckpt.every))
+    every = int(ckpt.every)
+    period = U.Windows(every)
+    # ONE PREDICATE, NOT A SECOND COPY OF THE SIX SPELLINGS OF OFF. saving_on is this package's own
+    # answer to "is this run persisting anything", and re-typing its test here is the defect that
+    # wrote a directory literally named `0` into the repository root.
+    if not saving_on(ckpt):
+        gate = Gate("ckpt.periodic_armed", False, every, 1, reachable=False,
+                    reason=f"CKPT_DIR={str(ckpt.dir)!r} is off, so nothing is saved at all and "
+                           f"periodic saving has no state to be in. Reported UNREACHABLE rather "
+                           f"than as an unmet condition, which would send an operator to raise "
+                           f"CKPT_EVERY and change nothing observable.")
+    elif every > 0:
+        gate = Gate("ckpt.periodic_armed", True, every, 1)
+    else:
+        gate = Gate("ckpt.periodic_armed", False, every, 1,
+                    reason="CKPT_EVERY=0 with CKPT_DIR set: the only saves this run makes are the "
+                           "FINAL one and any SIGUSR1. A legitimate configuration, and one the "
+                           "report must SAY -- without this line it is indistinguishable from a "
+                           "run that is not saving at all.")
+    period.gates = (gate,)
+    return period
 
 
 def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):

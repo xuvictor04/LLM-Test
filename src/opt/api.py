@@ -55,7 +55,17 @@ RECORD TYPES RETURNED (P4 defines them):
                `produces` token against this block, so `encoder` is now a CHECKABLE provenance
                token rather than a comment;
                n_backward (Backwards), opt_step (Steps), lr_prev, restart_amp, cycle_best,
-               cycle_index, horizon, param_group_shape, counters
+               cycle_index, horizon, param_group_shape, counters,
+               shift_at, grad_norms -- TWO FIELDS ADDED BY P4 ON 2026-09-03, because two frozen
+               docstrings below already read them and this block did not list them. lr_at's second
+               modifier is spelled `0 <= opt_step - st.shift_at < opt.lr_shift_warm`, so the step
+               of the last self-inflicted shift has to LIVE on the state between maybe_step (which
+               is handed it) and lr_at (which is pure and can only read what it is given);
+               counters() promises to RENDER quantiles "accumulated in maybe_step", so the sample
+               they are taken over has to live somewhere, and every other field on this record is
+               a scalar. Both travel in state_dict for the same reason restart_amp does: a re-warm
+               that spans a run boundary, or a norm distribution that restarts empty, is the
+               "came back at FULL AMPLITUDE" defect in a second and third place;
   Horizon      run_steps, warmup, wavelength, n_cycles
   StepOutcome  stepped, lr, restart, damped
   LoadReport   restored, refused, reason
@@ -65,9 +75,289 @@ every other field and not that one, so ISSUES P1-L50's refusal -- the one thing 
 resume and AdamW moments attached positionally to the wrong tensors -- compared against a value
 nothing produced. An untrippable guard reads exactly like a guard that never had to fire.
 """
+import dataclasses
+import math
+
+import torch
+
 from spine.lever import Config
 from spine import derive
+from spine import units as U
+from spine.gate import Gate
 
+
+# ==================================================================================================
+# THE RECORD TYPES. Fields only, no methods: every public method on a public class in an api.py is
+# an ENTRY POINT (tests/test_contract.py::api_signatures counts them, K1 compares the set against
+# docs/04_CONTRACT.md's ```contract block), and this package's surface is the seven functions
+# below and nothing else.
+# ==================================================================================================
+
+@dataclasses.dataclass(frozen=True)
+class Horizon:
+    """The schedule's horizon, resolved ONCE at build() and never re-projected.
+
+    run_steps, warmup and wavelength are units.Steps and not bare ints, because units.Steps is
+    "what the LR schedule's horizon is denominated in, and nothing else" and the whole of Q-OPT-2
+    is that the counter this is compared against is the optimizer-step counter rather than the
+    window counter they coincide with at batch_windows=1, accum=1. n_cycles is a COUNT of cycles,
+    not a clock: nothing compares it against a threshold in any kind.
+    """
+    run_steps: object
+    warmup: object
+    wavelength: object
+    n_cycles: int
+
+
+@dataclasses.dataclass
+class OptState:
+    """Both optimizers and everything the closed loop carries across a run boundary.
+
+    NOT frozen, and that is the one mutable record this package has: opt_step and n_backward are
+    counters, and a counter that cannot be advanced is not a counter. Every WRITE to it happens in
+    exactly two functions -- scaled_backward advances n_backward, maybe_step advances everything
+    else -- so "the schedule's counter, and the ONLY thing that advances it" is a property a reader
+    can check by grepping this file for `st.`.
+    """
+    base: object
+    encoder: object
+    n_backward: object
+    opt_step: object
+    lr_prev: float
+    restart_amp: float
+    cycle_best: object
+    cycle_index: int
+    horizon: Horizon
+    param_group_shape: tuple
+    counters: dict
+    shift_at: object = None
+    grad_norms: list = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(frozen=True)
+class StepOutcome:
+    """What one call to maybe_step did. `lr` LEAVES THIS PACKAGE AS A RETURN VALUE, never as a
+    local another package reads -- ISSUES P1-H15 is `_lrv` assigned inside `if LR_SCHED != "none"`
+    and read unconditionally by the per-expert path, a NameError on the FIRST flush."""
+    stepped: bool
+    lr: float
+    restart: bool
+    damped: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class LoadReport:
+    """The resume verdict, by name. `refused` is the L50 guard having fired; `reason` is what it
+    disagreed about, and it is a sentence rather than a flag because "shape mismatch" over a
+    positional moment restore names nothing a reader can act on."""
+    restored: bool
+    refused: bool
+    reason: str
+
+
+# ==================================================================================================
+# PRIVATE HELPERS. Underscore-prefixed so they are not entry points, and none of them takes a
+# Config: tests/test_ownership.py::check_o9_one_config_per_signature requires every function with a
+# Config-annotated parameter to assert its owner, and an owner assertion repeated in six helpers is
+# six chances to write the wrong prefix. The public seven assert once and hand values down.
+# ==================================================================================================
+
+_FLOOR = 1e-12                       # only ever a denominator guard, never a rate
+
+
+def _param_group_shape(param_groups):
+    """The LIVE group structure load_state refuses against: order, tensor count, and each shape.
+
+    THE ORDER IS PART OF THE ANSWER AND THAT IS THE WHOLE POINT. AdamW state is POSITIONAL over
+    param groups, so a changed group ORDER silently attaches one tensor's moments to another
+    (ISSUES P1-L50); a shape summary that sorted its keys would compare equal across exactly the
+    rearrangement the guard exists to catch.
+    """
+    return tuple((str(name), len(tensors),
+                  tuple(tuple(int(d) for d in tuple(getattr(t, "shape", ()))) for t in tensors))
+                 for name, tensors in param_groups)
+
+
+def _normalised_shape(shape):
+    """A param_group_shape as nested tuples, so a list that survived a JSON round trip compares."""
+    out = []
+    for row in shape:
+        name, count, tensors = row[0], row[1], row[2]
+        out.append((str(name), int(count),
+                    tuple(tuple(int(d) for d in t) for t in tensors)))
+    return tuple(out)
+
+
+def _shape_summary(shape):
+    """The one-line form of a param_group_shape, for a refusal message."""
+    return ", ".join(f"{row[0]}:{row[1]} tensor(s)" for row in shape) or "(no groups)"
+
+
+def _cycle_index(horizon, step, restarts):
+    """Which cosine cycle `step` falls in, 0-based. Pure arithmetic on one horizon.
+
+    Split out of the schedule because maybe_step has to record st.cycle_index and the schedule is
+    documented PURE -- it returns a rate, not a state.
+    """
+    w = int(horizon.warmup)
+    run_end = int(horizon.run_steps)
+    n = max(1, int(horizon.n_cycles))
+    if not restarts:
+        return 0
+    if step >= run_end:
+        return n - 1
+    per_c = max(1.0, (run_end - w) / n)
+    return max(0, int((step - w) / per_c))
+
+
+def _schedule(*, lr, sched, min_frac, restarts, decay, shift_warm, restart_amp, shift_at,
+              horizon, step):
+    """The rate at `step`, plus the four gate observations. PURE: every input is an argument.
+
+    Returns (rate, flags) where flags is (in_warmup, damped, shift_warm_applied, envelope_applied).
+
+    THE OLD VERSION REACHED OUT OF ITSELF for `_shift_at`, which DATA's resample branch wrote as a
+    closure variable (:6518-6521) -- the L2 violation this replaces. Here the shift step arrives as
+    an argument that maybe_step read off the state that the composition root stamped.
+    """
+    if sched == "none":
+        # THE ONE-FLAG ABLATION, and it returns the peak flat -- "none" restores the pre-schedule
+        # behaviour EXACTLY, which is the property that makes it an ablation rather than an arm.
+        return float(lr), (False, False, False, False)
+
+    w = max(1, int(horizon.warmup))
+    if step < w:
+        # PAID ONCE, NOT PER CYCLE: the point of warmup is that the optimizer state is COLD, which
+        # is only true the first time (:4762-4765). A restart returns to peak in ONE step by
+        # design, which is exactly why the damping in group 3 exists.
+        return float(lr) * (step + 1) / w, (True, False, False, False)
+
+    run_end = int(horizon.run_steps)
+    wave = max(1, int(horizon.wavelength))
+    span = max(1, wave - w)
+    n = max(1, int(horizon.n_cycles))
+
+    if restarts:
+        # WHOLE CYCLES ONLY, FITTED AT build(). Truncating instead left a 30-epoch run with 2
+        # cycles and a THIRD of its length parked at the floor. At n == 1 this branch is
+        # bit-identical to restarts=off (:4785), which is what keeps every earlier result
+        # reproducible under the new default.
+        per_c = max(1.0, (run_end - w) / n)
+        if step < run_end:
+            p = ((step - w) / per_c) % 1.0
+            ci = max(0, int((step - w) / per_c))
+        else:
+            p = 1.0
+            ci = n - 1
+    else:
+        p = min(1.0, (step - w) / span)
+        ci = 0
+
+    cyc = min_frac + (1.0 - min_frac) * 0.5 * (1.0 + math.cos(math.pi * p))
+
+    damped = ci > 0 and restart_amp < 1.0
+    if damped:
+        # DAMP THE SWING ABOVE THE FLOOR, NEVER BELOW IT.
+        cyc = min_frac + (cyc - min_frac) * restart_amp
+
+    warmed = bool(shift_warm) and shift_at is not None and 0 <= step - int(shift_at) < shift_warm
+    if warmed:
+        # AN ATTENUATION, NEVER A REPLACEMENT. Returning `lr * ramp` would RAISE the rate whenever
+        # a shift lands late in the anneal; this MULTIPLIES, so it can only ever lower the rate and
+        # rejoins the cycle exactly where the cycle would have been.
+        cyc *= max(min_frac, (step - int(shift_at) + 1) / shift_warm)
+
+    enveloped = decay > 0.0 and n > 1 and run_end > w
+    if enveloped:
+        # GATED ON n > 1. Without the gate it multiplied a SINGLE cycle's cosine by a second cosine
+        # that also bottoms at the floor, so a run that should end at lr_min_frac ended at
+        # lr_min_frac SQUARED -- 0.0025 of peak, which is why LR_DECAY sat at 0.0 from the day it
+        # was written.
+        gp = min(1.0, max(0.0, (step - w) / max(1, run_end - w)))
+        env = min_frac + (1.0 - min_frac) * 0.5 * (1.0 + math.cos(math.pi * gp))
+        cyc = cyc * ((1.0 - decay) + decay * env)
+
+    # THE FLOOR IS A FLOOR, AND THIS LINE IS WHAT MAKES lr_at's STATED PROPERTY TRUE. lr_at
+    # promises "the schedule's minimum over a whole run equals lr * lr_min_frac at EVERY restart
+    # count, single-cycle included". Each modifier above is individually floored at min_frac, and
+    # that is NOT enough: the envelope MULTIPLIES a cycle that already bottoms at min_frac by a
+    # second cosine that also bottoms at min_frac, so at n_cycles > 1 with the shipped
+    # lr_decay = 1.0 the last cycle ends at min_frac SQUARED -- the identical arithmetic the `n > 1`
+    # gate was added to remove from the single-cycle case, surviving one level up where the gate
+    # cannot see it. Measured, at lr=2e-3, lr_min_frac=0.05, n_cycles=3: 5.0e-06 without this
+    # clamp against 1.0e-04 with it, a factor of 20 below the floor an operator set. The same
+    # applies to the shift re-warm, whose ramp can multiply a mid-anneal cycle below the floor.
+    # lr_min_frac is a GOAL B lever -- "a schedule that anneals to nothing cannot learn anything
+    # that ARRIVES LATE" -- so a floor that the composition of two floored terms can dive under is
+    # not a floor, it is a coincidence that holds at the shipped defaults.
+    cyc = max(min_frac, cyc)
+    return float(lr) * cyc, (False, damped, warmed, enveloped)
+
+
+def _quantile(sorted_values, q):
+    """The q-quantile of an already-sorted list, by nearest rank. Empty -> None, never 0.0.
+
+    NONE AND NOT ZERO, because Q-OPT-3's whole first half is that a norm of 0.0 reported for a run
+    that never measured one is indistinguishable from a run whose gradients were zero -- which is
+    exactly what reporting the quantile from counters(), after the zero_grad, would have produced
+    with every check in this repository green.
+    """
+    if not sorted_values:
+        return None
+    k = min(len(sorted_values) - 1, max(0, int(round(q * (len(sorted_values) - 1)))))
+    return float(sorted_values[k])
+
+
+def _params_of(optimizer):
+    """Every tensor an optimizer holds, in group order. The base group's, for the norm and the clip."""
+    return [p for g in optimizer.param_groups for p in g["params"]]
+
+
+def _global_grad_norm(params):
+    """The global L2 norm over `params`' gradients -- the BASE group's, read while they still exist.
+
+    SCOPE IS THE BASE GROUP AND THAT IS Q-OPT-3'S SECOND HALF: the encoder's gradients at flush time
+    are produced on SIG's cadence and stepped by SIG (Q-OPT-6), so folding them into one number
+    makes it uninterpretable.
+    """
+    total = 0.0
+    for p in params:
+        g = getattr(p, "grad", None)
+        if g is None:
+            continue
+        n = float(g.detach().float().norm(2))
+        total += n * n
+    return total ** 0.5
+
+
+def _reading(best_bpb):
+    """(value, seed_count) out of whatever EVAL handed over, or (None, 0) for no reading at all.
+
+    IT REFUSES A BARE FLOAT, and that refusal is the most important line this package has. The
+    lever this feeds turns a HELD-OUT MEASUREMENT into a training decision -- the only number in
+    the system crossing the instrument line backwards -- and PLAN 3.8 forbids a verdict on n=1. A
+    float carries no seed count, so accepting one would make the seed-count rule unenforceable at
+    the one site it exists for, silently, in the direction that always looks like it works.
+    """
+    if best_bpb is None:
+        return None, 0
+    value = getattr(best_bpb, "value", None)
+    seeds = getattr(best_bpb, "seed_count", None)
+    if value is None and seeds is None and isinstance(best_bpb, (tuple, list)) \
+            and len(best_bpb) == 2:
+        value, seeds = best_bpb
+    if value is None or seeds is None:
+        raise ValueError(
+            f"OPT.maybe_step: best_bpb={best_bpb!r} carries no seed count. It is documented as a "
+            f"Reading (value, seed_count) because a damped restart IS a verdict and PLAN 3.8 "
+            f"forbids a verdict on n=1 -- a bare float would make that rule unenforceable at the "
+            f"one site it exists for. Pass EVAL's Reading, a (value, seed_count) pair, or None.")
+    return float(value), int(seeds)
+
+
+# ==================================================================================================
+# THE SEVEN ENTRY POINTS
+# ==================================================================================================
 
 def build(opt: Config, *, param_groups, run_windows):
     """Construct both optimizers, resolve the schedule horizon, and refuse the illegal settings.
@@ -131,6 +421,15 @@ def build(opt: Config, *, param_groups, run_windows):
     each group's tensor count and shapes -- but it must be computed HERE, from the live groups,
     since that is the only moment the "live" side of load_state's comparison exists.
 
+    NOTHING HANDED OVER IS DROPPED, AND THE EMPTY GROUP IS COUNTED RATHER THAN REFUSED. Both
+    optimizers are constructed over an explicit param-group dict, so a group that arrives EMPTY
+    still exists and still gets the rate written into it; docs/04_CONTRACT.md warns that a group
+    left out means "the fabric contributes zero parameters to the optimizer" while the loss curve
+    looks fine, which silently disables goal B's entire mechanism. opt.build.params.base and
+    opt.build.params.encoder are the two numbers that make that visible, and a key in param_groups
+    that is neither "base" nor "encoder" IS refused, because dropping it is the same defect
+    arriving through a spelling.
+
     RECEIVES: run_windows <- RUN/DATA, resolved once after the stream and the tokenizer exist. It
     CANNOT be a build-time Coupling: the stream length in windows depends on the tokenization,
     which has not happened when build() freezes -- the same rejection assemble.NOT_WIRES gives the
@@ -148,10 +447,158 @@ def build(opt: Config, *, param_groups, run_windows):
                  leave to be inferred from a missing line
     """
     opt = opt.owned_by("OPT")
-    _ = opt.d_effective_batch_windows            # WIRE READ HERE -- the horizon's divisor
-    raise NotImplementedError(
-        "OPT.build: P4 (opt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section OPT.")
+    effective = opt.d_effective_batch_windows    # WIRE READ HERE -- the horizon's divisor
+
+    # -- the startup refusals, in one place, because every one was a clamp at the old read site --
+    lr = float(opt.lr)
+    weight_decay = float(opt.weight_decay)
+    grad_clip = float(opt.grad_clip)
+    damp = float(opt.lr_restart_damp)
+    decay = float(opt.lr_decay)
+    min_frac = float(opt.lr_min_frac)
+    warmup_asked = int(opt.lr_warmup)
+    wavelength_asked = int(opt.lr_wavelength)
+    n_accum = int(opt.accum)
+    n_batch_windows = int(opt.batch_windows)
+
+    if damp > 1.0:
+        raise ValueError(
+            f"OPT_LR_RESTART_DAMP={damp!r} is above 1.0, which INVERTS the mechanism. The damping "
+            f"multiplies the restart amplitude CUMULATIVELY, so a value above 1.0 AMPLIFIES every "
+            f"failed restart instead of shrinking it -- the ratchet this lever exists to stop, "
+            f"driven by the lever that stops it. The old `min(1.0, max(0.0, ...))` at :4739 was "
+            f"the only thing standing there and a Lever has no range facility.")
+    if damp < 0.0:
+        raise ValueError(f"OPT_LR_RESTART_DAMP={damp!r} is negative; a negative multiplier flips "
+                         f"the sign of the restart swing.")
+    if lr <= 0.0:
+        raise ValueError(f"OPT_LR={lr!r} must be positive: every rate this system applies is this "
+                         f"number times a multiplier in 0..1.")
+    if weight_decay < 0.0:
+        raise ValueError(f"OPT_WEIGHT_DECAY={weight_decay!r} is negative, which GROWS every "
+                         f"parameter every step regardless of gradient.")
+    if not 0.0 <= min_frac < 1.0:
+        raise ValueError(f"OPT_LR_MIN_FRAC={min_frac!r} is outside [0.0, 1.0). It is a fraction of "
+                         f"peak and 1.0 would make the cosine a constant.")
+    if not 0.0 <= decay <= 1.0:
+        raise ValueError(f"OPT_LR_DECAY={decay!r} is outside [0.0, 1.0]. 0.0 restores the "
+                         f"pre-2026-08-26 behaviour (restarts return to full peak) and 1.0 is the "
+                         f"full envelope; the values between are meaningful and the ones outside "
+                         f"are not.")
+    if warmup_asked < 0:
+        raise ValueError(f"OPT_LR_WARMUP={warmup_asked!r} is negative; a warmup is a length.")
+    if wavelength_asked < 0:
+        raise ValueError(
+            f"OPT_LR_WAVELENGTH={wavelength_asked!r} is negative. 0 is the sentinel for 'one "
+            f"wavelength spans the whole run' and anything above it is a period in optimizer "
+            f"steps; a negative is not falsy, so it would take the sentinel's branch nowhere.")
+    if n_accum < 1:
+        raise ValueError(
+            f"OPT_ACCUM={n_accum!r} is below 1. derive.accum_due clamps it to 1 in SILENCE "
+            f"(`k = max(1, int(accum))`), which is where a typo hides -- and batch_windows < 1 "
+            f"already raises UnitError in derive.flush_period_windows, so this one must not be "
+            f"quieter than that one.")
+    if n_batch_windows < 1:
+        raise ValueError(
+            f"OPT_BATCH_WINDOWS={n_batch_windows!r} is below 1: a flush covers at least one "
+            f"window, and the effective batch this package divides the horizon by is "
+            f"batch_windows x accum.")
+    if grad_clip < 0.0:
+        raise ValueError(
+            f"OPT_GRAD_CLIP={grad_clip!r} is negative. 0.0 is OFF and is the shipped default; a "
+            f"negative max-norm is a typo that would clip every step to nothing.")
+
+    # -- the groups, in a declared order, with nothing dropped ------------------------------------
+    groups = dict(param_groups)
+    unknown = sorted(k for k in groups if k not in ("base", "encoder"))
+    if unknown:
+        raise ValueError(
+            f"OPT.build: param_groups carries {unknown!r}, which are neither 'base' nor 'encoder'. "
+            f"Those two keys ARE the OptState field names (Q-OPT-7) and this function has nowhere "
+            f"to put a third -- accepting it would drop the tensors on the floor, which is exactly "
+            f"the shape docs/04_CONTRACT.md warns about when it says a group left out means the "
+            f"package 'contributes zero parameters to the optimizer' while the loss curve looks "
+            f"fine.")
+    ordered = (("base", list(groups.get("base", ()))), ("encoder", list(groups.get("encoder", ()))))
+
+    # ONE AdamW PER GROUP, BUILT OVER AN EXPLICIT PARAM-GROUP DICT. torch refuses a bare empty list
+    # ("optimizer got an empty parameter list"), so a package that contributed nothing would take
+    # the whole run down at construction; built this way the empty group EXISTS, gets the rate
+    # written into it every step, and is COUNTED below, which is the distinction between "zero
+    # parameters" measured and "zero parameters" invisible.
+    base_opt = torch.optim.AdamW([{"params": ordered[0][1]}], lr=lr, weight_decay=weight_decay)
+    enc_opt = torch.optim.AdamW([{"params": ordered[1][1]}], lr=lr, weight_decay=weight_decay)
+
+    # -- the horizon, in optimizer steps, through the NAMED conversion ----------------------------
+    # derive.opt_steps_from_windows refuses a non-Windows at one end and a divisor below 1 at the
+    # other. The inline `run_windows // d_effective_batch_windows` this replaces was the last
+    # unnamed cross-kind conversion in the tree.
+    run_steps = derive.opt_steps_from_windows(run_windows, effective)
+    total_steps = int(run_steps)
+
+    from_sentinel = not wavelength_asked
+    wavelength = run_steps if from_sentinel else U.Steps(wavelength_asked)
+
+    # A TENTH OF THE HORIZON, IN THE HORIZON'S OWN KIND. This is a Steps -> Steps scaling and not a
+    # conversion: no kind boundary is crossed, which is why it is written here rather than named in
+    # spine.derive alongside opt_steps_from_windows.
+    warmup_cap = max(1, total_steps // 10)
+    warmup_n = min(warmup_asked, warmup_cap)
+    warmup = U.Steps(warmup_n)
+
+    if bool(opt.lr_restarts):
+        n_cycles = max(1, round((total_steps - warmup_n)
+                                / max(1, int(wavelength) - warmup_n)))
+    else:
+        n_cycles = 1
+
+    horizon = Horizon(run_steps=run_steps, warmup=warmup, wavelength=wavelength,
+                      n_cycles=int(n_cycles))
+
+    shape = _param_group_shape(ordered)
+    overlap = len({id(t) for t in ordered[0][1]} & {id(t) for t in ordered[1][1]})
+
+    counters = {
+        "opt.build.calls": 1,
+        "opt.build.wavelength_from_sentinel": 1 if from_sentinel else 0,
+        "opt.build.wavelength": int(wavelength),
+        "opt.build.warmup_clamped": 1 if warmup_asked > warmup_cap else 0,
+        "opt.build.warmup_asked": warmup_asked,
+        "opt.build.warmup": warmup_n,
+        "opt.build.run_steps": total_steps,
+        "opt.build.cycles_fitted": int(n_cycles),
+        "opt.build.params.base": len(ordered[0][1]),
+        "opt.build.params.encoder": len(ordered[1][1]),
+        "opt.build.group_overlap": overlap,
+        "opt.backward": 0,
+        "opt.step": 0,
+        "opt.step.not_due": 0,
+        "opt.restart.detected": 0,
+        "opt.restart.damped": 0,
+        "opt.restart.damp_refused_n1": 0,
+        "opt.restart.readings": 0,
+        "opt.lr.writes.base": 0,
+        "opt.lr.writes.encoder": 0,
+        "opt.lr.in_warmup": 0,
+        "opt.lr.damped_this_step": 0,
+        "opt.lr.shift_warm_applied": 0,
+        "opt.lr.envelope_applied": 0,
+        "opt.encoder_steps_here": 0,
+        "opt.clip.applied": 0,
+        "opt.clip.armed_no_clip": 0,
+        "opt.shift.notifications": 0,
+        "opt.ckpt.saved": 0,
+        "opt.ckpt.loaded": 0,
+        "opt.ckpt.refused": 0,
+        "opt.ckpt.horizon_changed": 0,
+    }
+
+    return OptState(
+        base=base_opt, encoder=enc_opt,
+        n_backward=U.Backwards(0), opt_step=U.Steps(0),
+        lr_prev=0.0, restart_amp=1.0, cycle_best=None, cycle_index=0,
+        horizon=horizon, param_group_shape=shape, counters=counters,
+        shift_at=None, grad_norms=[])
 
 
 def lr_at(opt: Config, st, opt_step):
@@ -181,6 +628,17 @@ def lr_at(opt: Config, st, opt_step):
     schedule's minimum over a whole run equals lr * lr_min_frac at EVERY restart count,
     single-cycle included.
 
+    P4 NOTE, 2026-09-03, ON WHAT MAKES THAT PROPERTY TRUE RATHER THAN NEARLY TRUE. The `n_cycles > 1`
+    gate removes the compounding from the single-cycle case and NOT from the multi-cycle one: at
+    n_cycles = 3 with the shipped lr_decay = 1.0 the last cycle's cosine bottoms at lr_min_frac and
+    the envelope bottoms at lr_min_frac on the same step, so their product is lr_min_frac SQUARED.
+    The rate is therefore clamped at lr * lr_min_frac as the last act of the schedule, which leaves
+    every arm that already satisfied the property bit-identical and makes the two that did not --
+    the envelope past its last peak, and a shift re-warm landing mid-anneal -- satisfy it too.
+    `st.cycle_index` is maintained by maybe_step and equals the cycle index of the step being
+    priced whenever this is called from there; the damping gate reads the index OF THE STEP IT IS
+    PRICING, so a probe at an arbitrary step gets that step's answer rather than the last one taken.
+
     LEVERS READ: lr, lr_sched, lr_min_frac, lr_restarts, lr_restart_damp, lr_decay, lr_shift_warm,
                  lr_warmup, lr_wavelength (the last two through st.horizon)
     WIRES READ: none
@@ -188,9 +646,40 @@ def lr_at(opt: Config, st, opt_step):
                  opt.lr.envelope_applied (the n_cycles > 1 gate, the old _nenv)
     """
     opt = opt.owned_by("OPT")
-    raise NotImplementedError(
-        "OPT.lr_at: P4 (opt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section OPT.")
+    if type(opt_step) is not U.Steps:
+        raise U.UnitError(
+            f"OPT.lr_at: opt_step must be units.Steps, got {type(opt_step).__name__}. The LR "
+            f"horizon is denominated in optimizer steps and nothing else; the window counter they "
+            f"coincide with at batch_windows=1, accum=1 is the confusion Q-OPT-2 exists to refuse, "
+            f"and at WIN=256 BATCH_W=16 ACCUM=4 the two differ by 64x.")
+
+    # THE SHIFT LENGTH IS BOUND TO A LOCAL BEFORE IT IS DIVIDED BY, and the reason is worth one
+    # line: lr_shift_warm declares units.Steps, and the ramp below is a Steps/Steps RATIO -- a
+    # dimensionless attenuation, not a cross-kind conversion. The named-conversion rule
+    # (units.py::Clock.convert, tests/test_ownership.py::check_o11_no_unnamed_clock_arithmetic) is
+    # about crossing kinds; there is no kind to cross here and no spine.derive function could name
+    # this one without inventing a kind for "fraction of a re-warm".
+    shift_warm = int(opt.lr_shift_warm)
+
+    rate, flags = _schedule(
+        lr=float(opt.lr), sched=str(opt.lr_sched), min_frac=float(opt.lr_min_frac),
+        restarts=bool(opt.lr_restarts), decay=float(opt.lr_decay), shift_warm=shift_warm,
+        restart_amp=float(st.restart_amp), shift_at=st.shift_at,
+        horizon=st.horizon, step=int(opt_step))
+
+    # THE ONLY WRITES THIS FUNCTION MAKES, and they do not reach the return value: the four gate
+    # observations its own DID IT FIRE line names. The old tree wrote _nenv from inside _lr_at for
+    # the same reason -- the gate is only observable where it is evaluated.
+    in_warmup, damped, warmed, enveloped = flags
+    if in_warmup:
+        st.counters["opt.lr.in_warmup"] += 1
+    if damped:
+        st.counters["opt.lr.damped_this_step"] += 1
+    if warmed:
+        st.counters["opt.lr.shift_warm_applied"] += 1
+    if enveloped:
+        st.counters["opt.lr.envelope_applied"] += 1
+    return rate
 
 
 def scaled_backward(opt: Config, st, total):
@@ -211,9 +700,11 @@ def scaled_backward(opt: Config, st, total):
                  the number the report must print instead of the configured one)
     """
     opt = opt.owned_by("OPT")
-    raise NotImplementedError(
-        "OPT.scaled_backward: P4 (opt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section OPT.")
+    divisor = max(1, int(opt.accum))
+    (total / divisor).backward()
+    st.n_backward = st.n_backward + U.Backwards(1)
+    st.counters["opt.backward"] = int(st.n_backward)
+    return st.n_backward
 
 
 def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
@@ -303,6 +794,13 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     DID IT FIRE: opt.step (BASE optimizer steps -- the encoder's are sig.train_stepped and live in
                  SIG), opt.step.not_due, opt.restart.detected, opt.restart.damped,
                  opt.restart.damp_refused_n1,
+                 opt.restart.readings (ADDED BY P4, 2026-09-03: the mirror of
+                 opt.shift.notifications on the other runtime argument. compose.py's LOOP_ORDER row
+                 states that best_bpb HAS NO PRODUCER, so opt.restart.damped and
+                 opt.restart.damp_refused_n1 are "UNREACHABLE, not zero" -- and with only those two
+                 counters nothing at RUNTIME can tell a run where no Reading ever arrived from a
+                 run where every Reading said the cycle paid. This is the count that makes that
+                 declared UNREACHABLE checkable instead of asserted),
                  opt.lr.writes.base and opt.lr.writes.encoder (each must equal opt.step -- the
                  rate is written to both optimizers on every step; the old single counter said
                  "must equal opt.step, on BOTH optimizers" and could not distinguish a missing
@@ -317,9 +815,83 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                  opt.shift.notifications (0 means nobody is supplying shift_at)
     """
     opt = opt.owned_by("OPT")
-    raise NotImplementedError(
-        "OPT.maybe_step: P4 (opt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section OPT.")
+
+    # THE SHIFT IS STAMPED WHETHER OR NOT A STEP IS DUE. A self-inflicted shift lands on a WINDOW,
+    # and the flush that notices it may not be a due one; recording it only on due flushes would
+    # lose up to accum-1 of them and make lr_shift_warm's fire depend on the batch size.
+    if shift_at is not None:
+        st.shift_at = int(shift_at)
+        st.counters["opt.shift.notifications"] += 1
+
+    if not derive.accum_due(st.n_backward, opt.accum):
+        st.counters["opt.step.not_due"] += 1
+        # THE RATE THE OPTIMIZER IS CURRENTLY AT, not a fresh one: no step was taken, so nothing
+        # rewrote the param groups, and returning a newly computed rate would tell FAB.own_lr_scale
+        # a number the optimizer is not using.
+        return StepOutcome(stepped=False, lr=float(st.lr_prev), restart=False, damped=False)
+
+    # 1. the schedule's counter, and the ONLY thing that advances it.
+    st.opt_step = st.opt_step + U.Steps(1)
+    st.counters["opt.step"] = int(st.opt_step)
+
+    # 2. the rate.
+    lr = lr_at(opt, st, st.opt_step)
+    # THE INDEX OF THE STEP JUST PRICED. _schedule computes the same number from the same horizon
+    # and the same step, so st.cycle_index and the index the damping gate used are equal by
+    # construction on this path; the field exists so state_dict can carry it and counters can print
+    # it, not as a second source the schedule reads back.
+    st.cycle_index = _cycle_index(st.horizon, int(st.opt_step), bool(opt.lr_restarts))
+
+    # 3. the restart detector. BOTH conditions: the warmup ramp climbs from zero, so the ratio bar
+    #    alone reported a restart at steps 15 and 31 of an 18-epoch run, at 2% and 3% of peak.
+    peak = float(opt.lr)
+    restart = bool(st.lr_prev > 0 and lr > 1.5 * st.lr_prev and lr > 0.5 * peak)
+    damped = False
+    if restart:
+        st.counters["opt.restart.detected"] += 1
+        # 4. the closed loop. A damped restart IS a verdict, so the Reading has to carry its seed
+        #    count and a count below 2 is refused rather than damping quietly (PLAN 3.8).
+        value, seeds = _reading(best_bpb)
+        if value is not None:
+            st.counters["opt.restart.readings"] += 1
+        paid = st.cycle_best is None or (value is not None and value < st.cycle_best - 1e-6)
+        if not paid and float(opt.lr_restart_damp) < 1.0:
+            if seeds < 2:
+                st.counters["opt.restart.damp_refused_n1"] += 1
+            else:
+                st.restart_amp *= float(opt.lr_restart_damp)
+                st.counters["opt.restart.damped"] += 1
+                damped = True
+        st.cycle_best = value
+    st.lr_prev = float(lr)
+
+    # 5. the rate reaches BOTH optimizers; the step and the zero_grad are the BASE one's.
+    for g in st.base.param_groups:
+        g["lr"] = lr
+    st.counters["opt.lr.writes.base"] += 1
+    for g in st.encoder.param_groups:
+        g["lr"] = lr
+    st.counters["opt.lr.writes.encoder"] += 1
+
+    base_params = _params_of(st.base)
+    norm = _global_grad_norm(base_params)
+    st.grad_norms.append(norm)
+
+    clip = float(opt.grad_clip)
+    if clip > 0.0:
+        # AFTER the norm is recorded and BEFORE the step: an instrument that measures its own
+        # remedy answers nothing. Clip-by-norm, never clip-by-value.
+        if norm > clip:
+            st.counters["opt.clip.applied"] += 1
+            torch.nn.utils.clip_grad_norm_(base_params, clip)
+        else:
+            st.counters["opt.clip.armed_no_clip"] += 1
+
+    st.base.step()
+    st.base.zero_grad(set_to_none=True)
+    # st.encoder IS NOT STEPPED HERE (Q-OPT-6). The counter stays 0 for the life of the run and a
+    # nonzero value is the double step returning.
+    return StepOutcome(stepped=True, lr=float(lr), restart=restart, damped=damped)
 
 
 def counters(opt: Config, st):
@@ -350,8 +922,8 @@ def counters(opt: Config, st):
     Beside them it prints the CLIP gate: opt.grad_clip, and opt.clip.applied against
     opt.clip.armed_no_clip. There is NO gradient clipping anywhere in self_organize.py (verified by
     exhaustive grep: two matches, both prose about the forgetting measure F), so 0.0 is the setting
-    every recorded number was taken under; see FOR THE OWNER Q-OPT-3 for the measurement that
-    settles whether it should stay there.
+    every recorded number was taken under; see FOR THE OWNER Q-OPT-3 for what measurement settles
+    the default.
 
     AND IT PRINTS THE HORIZON AGAINST THE RUN THAT ACTUALLY HAPPENED (Q-OPT-5). st.horizon.run_steps
     was resolved ONCE at build() from epoch 0's measured length times RUN.epochs; minting merges
@@ -369,16 +941,221 @@ def counters(opt: Config, st):
     /`_proj_lr` (:6335-6376), which produced E8 p=0.760 and E18 p=0.730 and the H17 resume defect,
     and it would require writing into a horizon resolved from a frozen Config.
 
+    ⚠ P4 COULD NOT BUILD THAT LAST PARAGRAPH AND SAYS SO RATHER THAN PRINTING A HALF OF IT AS THE
+    WHOLE. The observed side has no route into this function. The signature is frozen at
+    `counters(opt, st)`, spine/compose.py's stage-R row is `("R", "OPT", "counters", "(st) -- ...")`
+    with no second argument, and nothing stamps a window total onto the OptState, so the join the
+    paragraph describes -- "joined here by the composition root" -- has no parameter to arrive
+    through. What this call renders is the PROJECTION alone, under `opt.horizon.run_steps`, plus
+    `opt.horizon.steps_taken` (st.opt_step, which IS observed and IS in hand) and their difference
+    in Steps. That difference is a WEAKER statement than Q-OPT-5 asks for: it measures the schedule
+    against the steps the loop actually took, not against the windows the stream actually yielded,
+    so it cannot separate "the horizon over-projected" from "the run stopped early". The residual
+    Q-OPT-5 names needs either a third parameter on this signature or the observed window total on
+    the OptState, and both are frozen surfaces this package may not move alone.
+
+    RETURNS the ledger as {name: count | Gate}, with the rendered report under
+    `opt.report_lines`. A Gate value carries its own arithmetic and prints itself through
+    spine/gate.py::Gate.line, which is what keeps FIRED, armed-and-inert and UNREACHABLE three
+    words rather than one number across thirteen packages.
+
     LEVERS READ: accum, batch_windows, lr_sched, lr_restarts, lr_decay, lr_shift_warm,
                  weight_decay, lr_restart_damp, grad_clip
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: this call IS the DID IT FIRE surface for the package
     """
     opt = opt.owned_by("OPT")
-    _ = opt.d_effective_batch_windows        # WIRE READ HERE -- printed beside opt.backward
-    raise NotImplementedError(
-        "OPT.counters: P4 (opt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section OPT.")
+    effective = opt.d_effective_batch_windows  # WIRE READ HERE -- printed beside opt.backward
+
+    divisor = max(1, int(opt.accum))
+    windows_per_flush = int(opt.batch_windows)
+    n_bwd = int(st.n_backward)
+    n_step = int(st.opt_step)
+    due_steps = n_bwd // divisor
+    if due_steps != n_step:
+        raise ValueError(
+            f"OPT.counters: the accumulation invariant is broken -- backward={n_bwd}, "
+            f"accum={divisor}, so {due_steps} optimizer steps were due and {n_step} were taken. "
+            f"The old tree could not even make this statement because it counted the wrong thing: "
+            f"the gate was `(step + 1) % ACCUM == 0` on the WINDOW counter while the body ran per "
+            f"flush, which produced 55 om.step() calls against 13 due at BATCH_W=4 ACCUM=4 "
+            f"(ISSUES P3-H29). A run that violates this is running H29 again under a new name.")
+
+    sched = str(opt.lr_sched)
+    n_cycles = int(st.horizon.n_cycles)
+    decay = float(opt.lr_decay)
+    damp = float(opt.lr_restart_damp)
+    shift_warm = int(opt.lr_shift_warm)
+    wd = float(opt.weight_decay)
+    clip = float(opt.grad_clip)
+    restarts_on = bool(opt.lr_restarts)
+    notifications = int(st.counters["opt.shift.notifications"])
+    readings = int(st.counters["opt.restart.readings"])
+
+    norms = sorted(st.grad_norms)
+    p50, p99 = _quantile(norms, 0.50), _quantile(norms, 0.99)
+
+    ledger = dict(st.counters)
+    ledger["opt.accum"] = divisor
+    ledger["opt.batch_windows"] = windows_per_flush
+    ledger["opt.d_effective_batch_windows"] = int(effective)
+    ledger["opt.grad_norm.p50"] = p50
+    ledger["opt.grad_norm.p99"] = p99
+    ledger["opt.grad_norm.samples"] = len(norms)
+    ledger["opt.horizon.run_steps"] = int(st.horizon.run_steps)
+    ledger["opt.horizon.steps_taken"] = n_step
+    ledger["opt.horizon.residual_steps"] = int(st.horizon.run_steps - st.opt_step)
+    ledger["opt.restart_amp"] = float(st.restart_amp)
+
+    gates = [
+        Gate("opt.accum.invariant", True, f"{n_bwd} backward // {divisor}", n_step,
+             reason="backward // accum == step -- the one statement that proves ISSUES P3-H29 dead"),
+        Gate("opt.lr.sched", sched != "none", sched, "cosine",
+             reachable=True,
+             reason=("OPT_LR_SCHED=none: warmup, wavelength, floor, restarts, damping, envelope "
+                     "and re-warm are ALL structurally unreachable, which is what makes this an "
+                     "ablation rather than an arm")
+             if sched == "none" else ""),
+        Gate("opt.build.grad_clip", clip > 0.0, clip if clip > 0.0 else "off (0.0)", "> 0.0",
+             reachable=clip > 0.0,
+             reason="" if clip > 0.0 else
+                    "OPT_GRAD_CLIP=0.0 is OFF, which is the setting every recorded number in this "
+                    "project was taken under (Q-OPT-3). 'No clipping' is a run-level fact the "
+                    "report states rather than leaving to be inferred from a missing line."),
+    ]
+
+    if clip > 0.0:
+        gates.append(Gate("opt.clip.applied", st.counters["opt.clip.applied"] > 0,
+                          st.counters["opt.clip.applied"], f"max-norm {clip}",
+                          reason=("armed and NOTHING exceeded the norm -- a different statement "
+                                  "from grad_clip == 0")
+                          if not st.counters["opt.clip.applied"] else ""))
+    else:
+        gates.append(Gate("opt.clip.applied", False, 0, "n/a", reachable=False,
+                          reason=f"OPT_GRAD_CLIP={clip} is OFF, so no step can clip. This is not "
+                                 f"'armed and did not fire'."))
+
+    # THE RESTART GATE IS ARITHMETIC AND NOT THE FLAG. `_ncyc = [1]  # "armed" for a restart means
+    # >1, not LR_RESTARTS=1` (:4746). Every result this project has recorded came from a
+    # single-cycle schedule, which is why the two levers below it have never fired in anger.
+    if not restarts_on:
+        gates.append(Gate("opt.lr.restarts", False, n_cycles, "> 1 cycle", reachable=False,
+                          reason="OPT_LR_RESTARTS=off, so the cosine holds at the floor after one "
+                                 "cycle and no restart exists to detect."))
+    elif n_cycles <= 1:
+        why = ("the 0 sentinel makes one wavelength span the whole run"
+               if not int(opt.lr_wavelength) else "the period does not divide the run twice")
+        gates.append(Gate("opt.lr.restarts", False, n_cycles, "> 1 cycle", reachable=False,
+                          reason=f"OPT_LR_RESTARTS is on and exactly ONE cycle fits: "
+                                 f"OPT_LR_WAVELENGTH={int(opt.lr_wavelength)} against a horizon of "
+                                 f"{int(st.horizon.run_steps)} steps ({why}), so the schedule is "
+                                 f"bit-identical to restarts=off and no restart can occur."))
+    else:
+        gates.append(Gate("opt.lr.restarts", st.counters["opt.restart.detected"] > 0,
+                          st.counters["opt.restart.detected"], f"{n_cycles} cycles fitted"))
+
+    if n_cycles <= 1:
+        gates.append(Gate("opt.lr.restart_damp", False, damp, "< 1.0 past cycle 0", reachable=False,
+                          reason=f"the damping is gated on cycle_index > 0 and only "
+                                 f"{n_cycles} cycle(s) fit this run, so OPT_LR_RESTART_DAMP={damp} "
+                                 f"is off BY ARITHMETIC rather than armed and inert."))
+    elif readings == 0:
+        gates.append(Gate("opt.lr.restart_damp", False, damp, "< 1.0 on a losing cycle",
+                          reachable=False,
+                          reason="no Reading has ever arrived (opt.restart.readings == 0), so the "
+                                 "held-out measurement the damping judges a cycle by does not "
+                                 "exist. A damped restart is a verdict and PLAN 3.8 forbids one on "
+                                 "n<2; with no Reading at all there is nothing to refuse."))
+    else:
+        gates.append(Gate("opt.lr.restart_damp", st.counters["opt.restart.damped"] > 0,
+                          st.counters["opt.restart.damped"],
+                          f"damp={damp}, refused_n1={st.counters['opt.restart.damp_refused_n1']}"))
+
+    if decay <= 0.0:
+        gates.append(Gate("opt.lr.decay", False, decay, "> 0.0", reachable=False,
+                          reason="OPT_LR_DECAY=0.0 restores the pre-2026-08-26 behaviour exactly: "
+                                 "restarts return to full peak and no envelope is applied."))
+    elif n_cycles <= 1:
+        gates.append(Gate("opt.lr.decay", False, decay, "> 0.0 and n_cycles > 1", reachable=False,
+                          reason=f"the envelope is gated on n_cycles > 1 and {n_cycles} cycle(s) "
+                                 f"fit, so OPT_LR_DECAY={decay} is off BY ARITHMETIC. Without that "
+                                 f"gate it squeezed a single cycle to lr_min_frac SQUARED."))
+    else:
+        gates.append(Gate("opt.lr.decay", st.counters["opt.lr.envelope_applied"] > 0,
+                          st.counters["opt.lr.envelope_applied"], f"decay={decay}"))
+
+    if shift_warm <= 0:
+        gates.append(Gate("opt.lr.shift_warm", False, shift_warm, "> 0", reachable=False,
+                          reason="OPT_LR_SHIFT_WARM=0, the shipped default and the setting every "
+                                 "recorded result was produced under."))
+    elif notifications == 0:
+        gates.append(Gate("opt.lr.shift_warm", False, notifications, "a shift_at ever supplied",
+                          reachable=False,
+                          reason=f"OPT_LR_SHIFT_WARM={shift_warm} is armed and NOBODY IS SUPPLYING "
+                                 f"shift_at (opt.shift.notifications == 0), which is a DIFFERENT "
+                                 f"statement from lr_shift_warm == 0 and the report must make "
+                                 f"both."))
+    else:
+        gates.append(Gate("opt.lr.shift_warm", st.counters["opt.lr.shift_warm_applied"] > 0,
+                          st.counters["opt.lr.shift_warm_applied"],
+                          f"{notifications} notification(s) x {shift_warm} steps"))
+
+    gates.append(Gate("opt.weight_decay", wd > 0.0, wd, "> 0.0",
+                      reachable=wd > 0.0,
+                      reason="" if wd > 0.0 else
+                             "OPT_WEIGHT_DECAY=0.0. AdamW's own default is 0.01, so before this "
+                             "lever existed the run WAS decaying dormant experts and nobody had "
+                             "chosen it; a dormant expert loses ~71% of its magnitude over a "
+                             "62.5k-step run."))
+
+    gates.append(Gate("opt.encoder_steps_here", st.counters["opt.encoder_steps_here"] > 0,
+                      st.counters["opt.encoder_steps_here"], 0,
+                      reason="Q-OPT-6 REGRESSION COUNTER, READ BACKWARDS: this MUST be 0, so "
+                             "'armed, did not fire' IS the passing state and FIRED is the defect. "
+                             "A nonzero value is the double step returning -- SIG.train_step on "
+                             "SIG's cadence and this flush gate both stepping the encoder, which "
+                             "makes SIG's InfoNCE floor and its three cadence levers inert by "
+                             "construction, and it returns silently because both call sites look "
+                             "correct in isolation."))
+
+    if not st.grad_norms:
+        gates.append(Gate("opt.grad_norm", False, None, "any optimizer step", reachable=False,
+                          reason="no optimizer step has been taken, so no gradient has ever been "
+                                 "measured. This is 'never reached', not 'measured 0.0' -- the "
+                                 "distinction Q-OPT-3's first half is entirely about."))
+    else:
+        gates.append(Gate("opt.grad_norm", True, f"p50={p50:.4g} p99={p99:.4g}",
+                          f"{len(norms)} step(s)",
+                          reason="read in maybe_step between the gradient's last use and the "
+                                 "zero_grad; rendered here, never computed here"))
+
+    lines = [
+        f"opt.backward={n_bwd}  opt.step={n_step}  accum={divisor}  "
+        f"batch_windows={windows_per_flush}  d_effective_batch_windows={int(effective)}  "
+        f"-- the batch this run TRAINED at, printed rather than configured",
+        f"opt.lr.writes.base={st.counters['opt.lr.writes.base']}  "
+        f"opt.lr.writes.encoder={st.counters['opt.lr.writes.encoder']}  "
+        f"(each must equal opt.step={n_step})",
+        f"opt.horizon: run_steps={int(st.horizon.run_steps)} (projected once at build, from "
+        f"run_windows) vs steps_taken={n_step}; residual="
+        f"{int(st.horizon.run_steps - st.opt_step)} steps. Q-OPT-5's residual is against the "
+        f"OBSERVED WINDOW TOTAL and this signature has no parameter for it -- see this function's "
+        f"docstring.",
+        f"opt.horizon: warmup={int(st.horizon.warmup)} (asked "
+        f"{st.counters['opt.build.warmup_asked']}, clamped="
+        f"{bool(st.counters['opt.build.warmup_clamped'])})  "
+        f"wavelength={int(st.horizon.wavelength)} (from the 0 sentinel="
+        f"{bool(st.counters['opt.build.wavelength_from_sentinel'])})  cycles_fitted={n_cycles}",
+        f"opt.params: base={st.counters['opt.build.params.base']} tensor(s), "
+        f"encoder={st.counters['opt.build.params.encoder']} tensor(s), "
+        f"overlap={st.counters['opt.build.group_overlap']}",
+    ]
+    lines.extend(g.line() for g in gates)
+
+    for g in gates:
+        ledger[g.name] = g
+    ledger["opt.report_lines"] = tuple(lines)
+    return ledger
 
 
 def state_dict(opt: Config, st):
@@ -398,14 +1175,36 @@ def state_dict(opt: Config, st):
     restarted at zero so a mechanism that fired 4,000 times read "armed but 0". A continual-learning
     system whose LR controller forgets across the run boundary is answering the wrong goal.
 
+    shift_at AND grad_norms TRAVEL TOO (P4, 2026-09-03), on the identical argument. A re-warm that
+    spans a checkpoint comes back with nothing to re-warm from, so the boundary itself cancels the
+    lever whose whole job is boundaries; and a norm distribution that restarts empty makes
+    opt.grad_norm.p50/p99 describe the tail of a run rather than the run, which is the same
+    "mechanism that fired 4,000 times read 'armed but 0'" defect one field over.
+
     LEVERS READ: none (everything comes off st)
     WIRES READ: none
     DID IT FIRE: opt.ckpt.saved
     """
     opt = opt.owned_by("OPT")
-    raise NotImplementedError(
-        "OPT.state_dict: P4 (opt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section OPT.")
+    st.counters["opt.ckpt.saved"] += 1
+    return {
+        "base": st.base.state_dict(),
+        "encoder": st.encoder.state_dict(),
+        "opt_step": int(st.opt_step),
+        "n_backward": int(st.n_backward),
+        "lr_prev": float(st.lr_prev),
+        "restart_amp": float(st.restart_amp),
+        "cycle_best": st.cycle_best,
+        "cycle_index": int(st.cycle_index),
+        "shift_at": st.shift_at,
+        "horizon": {"run_steps": int(st.horizon.run_steps),
+                    "warmup": int(st.horizon.warmup),
+                    "wavelength": int(st.horizon.wavelength),
+                    "n_cycles": int(st.horizon.n_cycles)},
+        "param_group_shape": st.param_group_shape,
+        "counters": dict(st.counters),
+        "grad_norms": list(st.grad_norms),
+    }
 
 
 def load_state(opt: Config, st, saved):
@@ -422,6 +1221,62 @@ def load_state(opt: Config, st, saved):
     DID IT FIRE: opt.ckpt.loaded, opt.ckpt.refused (with the reason)
     """
     opt = opt.owned_by("OPT")
-    raise NotImplementedError(
-        "OPT.load_state: P4 (opt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section OPT.")
+
+    live = st.param_group_shape
+    was = saved.get("param_group_shape")
+    if was is None:
+        st.counters["opt.ckpt.refused"] += 1
+        return LoadReport(
+            restored=False, refused=True,
+            reason="the checkpoint carries no param_group_shape. The old checkpoint saved opt_m "
+                   "and opt_e (:5372) and nothing else from this package, so there is nothing for "
+                   "the L50 guard to compare against -- and a positional moment restore taken "
+                   "without that comparison is exactly what the guard exists to stop.")
+    was = tuple(tuple(r) if isinstance(r, (list, tuple)) else r for r in was)
+    if _normalised_shape(was) != _normalised_shape(live):
+        st.counters["opt.ckpt.refused"] += 1
+        return LoadReport(
+            restored=False, refused=True,
+            reason=f"param_group_shape disagrees (ISSUES P1-L50). Checkpoint: "
+                   f"{_shape_summary(was)}; live: {_shape_summary(live)}. AdamW state is POSITIONAL "
+                   f"over param groups, so restoring across this difference attaches one tensor's "
+                   f"moments to another and the run trains on scrambled second moments with every "
+                   f"loss curve looking plausible.")
+
+    st.base.load_state_dict(saved["base"])
+    st.encoder.load_state_dict(saved["encoder"])
+    st.opt_step = U.Steps(int(saved["opt_step"]))
+    st.n_backward = U.Backwards(int(saved["n_backward"]))
+    st.lr_prev = float(saved["lr_prev"])
+    st.restart_amp = float(saved["restart_amp"])
+    st.cycle_best = saved.get("cycle_best")
+    st.cycle_index = int(saved.get("cycle_index", 0))
+    st.shift_at = saved.get("shift_at")
+    st.grad_norms = list(saved.get("grad_norms", ()))
+
+    # THE COUNTERS COME BACK, EXCEPT THE ONES THAT DESCRIBE THIS PROCESS'S CONSTRUCTION. A mechanism
+    # that fired 4,000 times before the boundary must not read "armed but 0" after it; but
+    # opt.build.* describes the horizon THIS build resolved, and taking those from the checkpoint
+    # would report the parent run's warmup clamp against this run's schedule.
+    for key, value in dict(saved.get("counters", {})).items():
+        if key.startswith("opt.build."):
+            continue
+        st.counters[key] = value
+    st.counters["opt.ckpt.loaded"] += 1
+
+    saved_h = dict(saved.get("horizon", {}))
+    live_h = {"run_steps": int(st.horizon.run_steps), "warmup": int(st.horizon.warmup),
+              "wavelength": int(st.horizon.wavelength), "n_cycles": int(st.horizon.n_cycles)}
+    if saved_h and saved_h != live_h:
+        # REPORTED, NEVER REFUSED: resuming at a different run length is legitimate, and the LIVE
+        # horizon is the one this run's run_windows resolved. Re-projecting mid-run is the
+        # `_project`/`_lr_total`/`_proj_lr` machinery (:6335-6376) that produced E8 p=0.760.
+        st.counters["opt.ckpt.horizon_changed"] += 1
+        return LoadReport(
+            restored=True, refused=False,
+            reason=f"the horizon changed across the boundary and the LIVE one is in force. "
+                   f"Checkpoint: {saved_h}; live: {live_h}. The schedule now prices "
+                   f"step {int(st.opt_step)} against the live horizon, so a resume at a different "
+                   f"run length moves every rate from here on -- which is the legitimate case, "
+                   f"stated rather than silently taken.")
+    return LoadReport(restored=True, refused=False, reason="")

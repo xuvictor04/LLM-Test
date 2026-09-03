@@ -128,28 +128,43 @@ anything if a later reader can see that it was looked for.
   none.) The census's own reason for the merge is checked and holds: three booleans over exactly four
   reachable behaviours, with the master defined as the OR of the two arms.
 
-WHAT IS DELIBERATELY ABSENT -- four values this package NEEDS and may not declare. lever.py refuses a
+WHAT IS DELIBERATELY ABSENT -- the values this package NEEDS and may not declare. lever.py refuses a
 d_-named lever precisely so a declaration cannot shadow the wire that writes it, and every one of these
-is a number another package owns:
-    d_expert_slots   <- FAB.slots        the hard expert ceiling; `fab_start = 0` means "start here"
-    d_vocab_slots    <- LM.vocab_slots   the hard vocabulary ceiling; `vocab_start = 0` means the same
-    d_mask_dead_rows <- LM.mask_dead_rows the honesty precondition on lifting the vocabulary (below)
-    the LIFTED CAPS  <- CKPT             earned state, not configuration (see `fab_start`)
-NONE OF THE FOUR IS IN spine/assemble.py's COUPLINGS TODAY. The only d_expert_slots row there targets DOM
-(assemble.py::_view), there is no d_vocab_slots row at all, and the two rows that DO need this package's
-numbers -- FAB.d_cap_lift_period and TOK.d_cap_lift_period -- source them from a prefix named TRAIN that
-no package in the census owns (the loop is RUN; the batch width is OPT.batch_windows). Those rows are
-therefore DEFERRED at build() with a warning (assemble.py::COUPLINGS) rather than failing, which is the
-untrippable-guard shape all over again: the numbers now EXIST, under this prefix, and the edges still do
-not happen. Declaring this file leaves O4 green, and for an unflattering reason rather than a good one:
-there are no CAP wires to be found unread, because there are no CAP wires. (O4 reports 10 declared
-destinations, 0 declared-but-unread, 10 deferred, both before this file and after it. Note that its
-deferral rule is no longer the one memory/levers.py predicted it would trip -- tests/test_ownership.py:
-693-697 defers on whether a package has a MODULE OTHER THAN levers.py/__init__.py, not on whether it has
-a LeverSet, exactly because thirteen levers.py files landed with no readers behind them. So an empty
-`capacity/` package cannot go red here even in principle.) The repair is in assemble.py and it belongs to
-whoever ports the valve, not to this file: a lever file quietly editing the wiring file to agree with
-itself is how one number acquires two answers.
+is a number another package owns. ALL FOUR WIRES NOW EXIST IN spine/assemble.py's COUPLINGS and every one
+of them is read by a body or a stub in capacity/api.py:
+    d_expert_slots         <- FAB.slots              the hard expert ceiling; `fab_start = 0` means
+                                                     "start here". Read by capacity/api.py::new_valve.
+    d_vocab_slots          <- LM.vocab_slots         the hard vocabulary ceiling; `vocab_start = 0`
+                                                     means the same. capacity/api.py::new_valve.
+    d_mask_dead_rows       <- LM.mask_dead_rows      the honesty precondition on lifting the vocabulary
+                                                     (below). capacity/api.py::new_valve.
+    d_operating_population <- FAB.pressure x FAB.slots, through the SAME spine/derive.py::
+                                                     operating_population call the fabric's own row
+                                                     uses. The soft cap must sit at or below the cull's
+                                                     settling point or the population never pins.
+                                                     Read by capacity/api.py::startup_refusals.
+    the LIFTED CAPS        <- CKPT                   NOT a wire and must not become one: earned state,
+                                                     not configuration (see `fab_start`). It arrives as
+                                                     new_valve's `restored` argument.
+
+THIS PARAGRAPH SAID THE OPPOSITE FOR SEVERAL COMMITS AND THE STALENESS HAD TEETH. It read "NONE OF THE
+FOUR IS IN spine/assemble.py's COUPLINGS TODAY ... there are no CAP wires to be found unread, because
+there are no CAP wires", said the only d_expert_slots row targeted DOM, said no d_vocab_slots row existed
+at all, and said the two rows that need this package's numbers -- FAB.d_cap_lift_period and
+TOK.d_cap_lift_period -- source them from a prefix named TRAIN. Checked against the tree on 2026-09-03:
+all four CAP destinations are declared, both cap-lift rows source ("OPT.batch_windows", "CAP.pin_windows")
+under this package's own prefix, and spine/assemble.py::_check_endpoints itself records TRAIN as a
+corrected name. The cost of leaving it standing is not cosmetic: it tells whoever ports the valve to ADD
+four couplings that already exist, and the wire budget in spine/wire.py::WIRE_BUDGET has room for two
+more edges in total -- so acting on the sentence would fail at build() with an over-budget refusal, on
+work that was already done. A file that reports an absence for something present corrupts the ledger in
+exactly the direction that is hardest to notice, because nobody greps to confirm a "not there yet".
+
+O4 IS GREEN FOR A REAL REASON NOW, WHICH IT WAS NOT WHEN THAT PARAGRAPH WAS WRITTEN. It reports twenty-
+three declared destinations, zero declared-but-unread and zero deferred; CAP contributes four of the
+destinations and reads all four. The old note that O4 could not go red here even in principle no longer
+applies to this package: tests/test_ownership.py's O4 defers only while a package has no module other
+than levers.py/__init__.py, and capacity/api.py is that module, so an unread CAP wire would now fail.
 
 IMPORT STYLE, AND WHY IT DEPARTS FROM THE ASSIGNMENT'S SKETCH. `from ..spine.lever import ...` cannot work
 here. Every entry point in this tree puts `src/` itself on sys.path (tests/test_ownership.py,
@@ -245,11 +260,17 @@ class CAPLevers(LeverSet):
     #       this lever. :5221-5227 is the shipped half-repair (restore from the checkpoint unless
     #       GROW_CAP_FAB0 was set explicitly) and it depends on reading os.environ to know whether the
     #       operator asked -- which from_env() answers properly through Config.given().
-    # AND ONE COUPLING THAT IS IRREDUCIBLE, TO DECLARE RATHER THAN REMOVE: the soft cap must sit at or
-    # below the cull settling point FAB_PRESSURE x FAB_SLOTS (0.45 x 8192 = 3686 at the launch config) or
-    # the population never pins, the pin clock never accumulates, and the valve is dead while looking
-    # armed. That is a relationship between three levers in two packages; it is a startup check
-    # somebody must write, not a default anybody can pick.
+    # AND ONE COUPLING THAT IS IRREDUCIBLE, DECLARED RATHER THAN REMOVED: the soft cap must sit at or
+    # below the cull settling point FAB_PRESSURE x FAB_SLOTS or the population never pins, the pin clock
+    # never accumulates, and the valve is dead while looking armed. It arrives as the wire
+    # d_operating_population and capacity/api.py::startup_refusals is the check that compares against it.
+    # THE NUMBER, AT THE SHIPPED DEFAULTS, BECAUSE THIS COMMENT CARRIED A STALE ONE: it said
+    # "0.45 x 8192 = 3686 at the launch config", and FAB_SLOTS defaults to 4096, not 8192 -- no config in
+    # this tree sets 8192. The wire actually delivers 0.45 x 4096 -> 1844, verified by building CAP and
+    # reading cap.d_operating_population. The stale figure was twice the real one in the direction that
+    # hurts: a soft cap of 3000, which every sched_* arm used, passes a check against 3686 and sits ABOVE
+    # 1844, so the population never reaches it, the pin clock never accumulates, and the valve is dead
+    # while every report line says it is armed -- the exact failure the sentence exists to prevent.
 
     vocab_start = Lever(0, "Soft vocabulary cap the valve starts from and only lifts; 0 means start at "
                            "the model's row count, i.e. no room to earn.", U.TOKENS)

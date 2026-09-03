@@ -18,10 +18,11 @@ implementation agents share; nothing else about the layout is load-bearing.
 
 RECORD TYPES RETURNED (P4 defines them; they are DATA's objects and other packages receive
 them as arguments, which is not an import and O10 does not refuse it):
-  Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout
+  Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout,
+          counters, gates
   Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
-          epoch, stream_id, draws
+          epoch, stream_id, draws, counters, gates
 """
 import dataclasses
 import os
@@ -61,6 +62,16 @@ class Areas:
     `holdout` IS PHYSICALLY REMOVED from `bodies`. Not masked, not skipped -- removed, so no
     sampling rule anywhere can reach it and no length any caller can read includes it
     (ISSUES P1-M81).
+
+    `counters` AND `gates` CARRY THE DID IT FIRE SURFACE open_areas DECLARES, and the split between
+    them is decided by ONE question: is there a configuration on which the mechanism CANNOT run? A
+    name with such an arm is a `spine.gate.Gate` in `gates`, because Gate is the only record in this
+    tree that can say UNREACHABLE and carry the reason; a name that is always evaluable is a reading
+    in `counters`, because wrapping a reading in a Gate prints "armed, did not fire" for a number
+    that never had a condition to meet. Every declared name lands in exactly one of the two, so a
+    report greps both and finds each name once. Until this field existed, every one of those names
+    was computed nowhere and DATA's armed-but-0 and UNREACHABLE states were the same silence --
+    which is the one distinction spine/gate.py::Gate exists to preserve.
     """
     names: tuple
     bodies: dict
@@ -70,6 +81,8 @@ class Areas:
     bytes_taken: dict
     cursors: dict
     rng_holdout: dict
+    counters: dict = dataclasses.field(default_factory=dict)
+    gates: tuple = ()
 
 
 def _holdout_key(label):
@@ -204,7 +217,25 @@ def open_areas(dat: Config, *, seed: int):
                  a lever this line used to omit; declared here rather than silently left off a second
                  time)
     WIRES READ: none
-    DID IT FIRE: data.area_open (one per area; unreachable on source=synthetic),
+    DID IT FIRE: EVERY NAME BELOW IS CARRIED OUT ON THE RETURNED `Areas`, exactly once, and which
+                 field it lands in follows the rule stated on the record: a name with a
+                 configuration on which the mechanism CANNOT run is a `Gate` in `Areas.gates`,
+                 because Gate is the only record here that can say UNREACHABLE and carry the reason;
+                 a name that is always evaluable is a reading in `Areas.counters`. `data.holdout_seam`
+                 is ONE GATE PER AREA (its name suffixed with the label) because its unreachable arm
+                 is a property of THAT AREA'S DRAW -- a block that landed at the body's leading edge
+                 or its tail -- and not of the configuration, so a single aggregate record would have
+                 to pick one of the three states for a run whose areas genuinely disagree, which is
+                 the collapse the record exists to refuse. The alternative -- ONE aggregate gate,
+                 with the per-area edge reason left in `rng_holdout[label]["why"]` -- was rejected
+                 because an aggregate would have to pick one of the three states for a set of areas
+                 that need not share one: the edge draw is per area, so a run in which one area's
+                 block lands at its leading edge while the others sit interior is REACHABLE. It is
+                 rare -- the draw range is the usable body, whose floor is
+                 max(DATA_SEG_MAX + 1, MIN_AREA_BYTES), so an edge is at most a two-in-floor
+                 outcome per area -- and rarity is the wrong reason to collapse two states, since
+                 the whole cost of this record is paid on the runs nobody expected.
+                 data.area_open (one per area; unreachable on source=synthetic),
                  data.area_nested (one per areas entry containing "/" -- 0 is the shipped default
                  and means every area came from train/, which is a STATEMENT and not silence),
                  data.area_path_refused, data.area_label_collision (both exit at startup, so N>0
@@ -281,11 +312,22 @@ def open_areas(dat: Config, *, seed: int):
 
     raw = {}                       # label -> bytes, before the held-out block is removed
     present, taken, sources = {}, {}, {}
+    # THE DID IT FIRE TALLIES, INCREMENTED AT THE DECISION POINT THAT OWNS EACH ONE rather than
+    # reconstructed from the returned dicts afterwards. The difference is not cosmetic: `n_open`
+    # counts directories this function actually opened, which on the synthetic arm is a number that
+    # does not exist rather than a zero, and reconstructing it from `len(taken)` would manufacture
+    # the zero this whole surface exists to distinguish from silence.
+    n_open, n_nested, n_path_checked, n_cap_trip = 0, 0, 0, 0
+    n_block, n_val_cap = 0, 0
+    frac_bytes = {}                # label -> int(body * HOLDOUT_FRAC), the val cap's other term
 
     if str(dat.source) == "synthetic":
         raw, present, taken, sources = _synthetic_areas(dat, seed, entries, labels)
     else:
         for entry, label in zip(entries, labels):
+            # COUNTED BEFORE THE REFUSAL, because data.area_path_refused's threshold is what the
+            # refusal LOOKED AT: "0 refused of 4 checked" is a reading and "0" alone is not.
+            n_path_checked += 1
             # THE PATH REFUSAL, because without it `areas` is an arbitrary-path read -- a corpus
             # lever that can open /etc -- and the message must name both the entry and what it
             # resolved to, or an operator cannot see which of the two is wrong. Scoped to this
@@ -300,7 +342,14 @@ def open_areas(dat: Config, *, seed: int):
             # the shipped meaning and does not move; a slash is joined verbatim, which is what makes
             # data/continual/* and data/ood/* reachable without moving files on disk -- the material
             # goal B's add-an-area experiment exists for.
-            rel = entry if "/" in entry else os.path.join("train", entry)
+            if "/" in entry:
+                # data.area_nested, COUNTED AT THE BRANCH THAT MAKES IT TRUE. This is the only line
+                # in the tree where an entry is joined under DATA_DIR verbatim instead of under
+                # train/, so it is the only honest place to count one.
+                n_nested += 1
+                rel = entry
+            else:
+                rel = os.path.join("train", entry)
             path = os.path.join(str(dat.dir), rel)
             body, n_present = _read_area(path, int(dat.corpus_cap))
             if not body:
@@ -310,6 +359,11 @@ def open_areas(dat: Config, *, seed: int):
                     f"and the next run reports one corpus's loss under another's name "
                     f"(ISSUES P3-C19).")
             raw[label], present[label], taken[label], sources[label] = body, n_present, len(body), path
+            n_open += 1
+            if len(body) < n_present:
+                # data.corpus_cap_trip: the cap BIT for this area. `_read_area` counts `present`
+                # past the cap on purpose, so this comparison is the cap's cost and not a guess.
+                n_cap_trip += 1
 
     names = tuple(raw)
     bodies, holdout, holdout_bytes, rng_holdout, cursors = {}, {}, {}, {}, {}
@@ -317,9 +371,15 @@ def open_areas(dat: Config, *, seed: int):
         blob = raw[label]
         # THE FLOOR IS CHECKED ON THE USABLE BODY, i.e. after the held-out block comes out, which is
         # why the arithmetic is done before the refusal rather than after.
-        n_hold = min(int(len(blob) * float(dat.holdout_frac)), int(dat.val_cap))
+        # THE VAL CAP'S DID IT FIRE IS THIS min(), and nowhere else: DATA_VAL_CAP tripped for this
+        # area exactly when the cap, and not the fraction, was the binding term. Both numbers are
+        # kept per area because the gate below prints the arithmetic rather than a verdict.
+        frac_bytes[label] = int(len(blob) * float(dat.holdout_frac))
+        n_hold = min(frac_bytes[label], int(dat.val_cap))
         if str(dat.source) == "synthetic":
             n_hold = 0             # the synthetic path holds nothing out
+        elif frac_bytes[label] > int(dat.val_cap):
+            n_val_cap += 1
         if len(blob) - n_hold < floor:
             raise CorpusError(
                 f"area {label!r} has {len(blob) - n_hold} usable byte(s) after a {n_hold}-byte "
@@ -364,6 +424,7 @@ def open_areas(dat: Config, *, seed: int):
                 # this question (Lee et al. arXiv:2107.06499).
                 "overlap": _holdout_overlap(holdout[label], bodies[label]),
             }
+            n_block += 1
             if not interior_seam:
                 rng_holdout[label]["why"] = (
                     "block landed at the body's own leading edge (offset 0): no text precedes it, "
@@ -396,9 +457,152 @@ def open_areas(dat: Config, *, seed: int):
         holdout_bytes[label] = len(holdout[label])
         cursors[label] = 0
 
+    # ---- THE DID IT FIRE SURFACE THIS FUNCTION DECLARES ------------------------------------------
+    # Built here, at the end, from tallies taken at the decision points above -- so a name whose
+    # branch never ran reads as a measured 0 and a name whose mechanism CANNOT run on this
+    # configuration reads as UNREACHABLE with the lever and value that made it so. Before this block
+    # existed, both read as nothing at all, and a reader could not tell "the cap never bit" from
+    # "there is no cap on this arm" from "nobody wrote the counter".
+    synthetic = str(dat.source) == "synthetic"
+    n_entries = len(entries)
+    counters = {
+        # A READING, NOT A GATE, AND THE DOCSTRING SAYS SO IN AS MANY WORDS: the near-duplicate
+        # fraction per area (Lee et al. arXiv:2107.06499). It is read back out of `rng_holdout`
+        # rather than recomputed here, so there is ONE measurement with two places to find it and
+        # not two measurements that can disagree.
+        #
+        # THREE STATES IN A READING THAT CANNOT BE A Gate. A float is the measured fraction. `None`
+        # is the UNDEFINED reading _holdout_overlap returns when the block is shorter than one
+        # n-gram window -- not a measured 0.0. An area that HAS NO BLOCK AT ALL is a third thing
+        # again, and returning None for it too would collapse "undefined on the block we drew" into
+        # "there was no block", so that arm carries its own sentence instead. This is the same
+        # three-way distinction Gate makes, spelled into the value because the contract above
+        # declares this row a reading and not a gate, and contradicting that would be worse.
+        "data.holdout_overlap": {
+            label: (rng_holdout[label]["overlap"] if "overlap" in rng_holdout[label]
+                    else f"no block to measure -- {rng_holdout[label].get('why', 'none drawn')}")
+            for label in names},
+    }
+
+    gates = []
+    if synthetic:
+        gates.append(Gate(
+            "data.area_open", False, None, n_entries, reachable=False,
+            reason="DATA_SOURCE=synthetic: no directory is opened at all -- every area is generated "
+                   "by data/api.py::_synthetic_areas -- so 'areas opened from disk' has no value to "
+                   "read here rather than a value of zero"))
+        gates.append(Gate(
+            "data.area_nested", False, None, n_entries, reachable=False,
+            reason="DATA_SOURCE=synthetic: a DATA_AREAS entry never becomes a filesystem path on "
+                   "this arm, so nothing is joined under DATA_DIR and 'nested' is not a property "
+                   "this configuration has"))
+        gates.append(Gate(
+            "data.area_path_refused", False, None, n_entries, reachable=False,
+            reason="DATA_SOURCE=synthetic: the absolute-or-'..' refusal is scoped to the real-corpus "
+                   "branch on purpose, because refusing an entry that never becomes a path would be "
+                   "refusing a LABEL rather than a path -- so there is no check here to have "
+                   "refused nothing"))
+        gates.append(Gate(
+            "data.corpus_cap_trip", False, None, int(dat.corpus_cap), reachable=False,
+            reason=f"DATA_SOURCE=synthetic: each area is generated to the size the sampler needs and "
+                   f"nothing is read off disk, so DATA_CORPUS_CAP={int(dat.corpus_cap)} truncates "
+                   f"nothing and bytes_present == bytes_taken by construction, not by measurement"))
+        gates.append(Gate(
+            "data.holdout_block", False, None, n_entries, reachable=False,
+            reason="DATA_SOURCE=synthetic: this arm holds nothing out, so no block is drawn and no "
+                   "data.holdout.<key> child stream is minted for any area -- an area with no child "
+                   "in rng.issued() never asked for a block, which is a different statement from a "
+                   "block of size zero"))
+        gates.append(Gate(
+            "data.val_cap_trip", False, None, int(dat.val_cap), reachable=False,
+            reason=f"DATA_SOURCE=synthetic: with nothing held out there is no block for "
+                   f"DATA_VAL_CAP={int(dat.val_cap)} to bind, so the cap is not armed-and-inert "
+                   f"here -- it has nothing to be armed against"))
+    else:
+        gates.append(Gate(
+            "data.area_open", n_open > 0, n_open, n_entries,
+            reason="an entry that produced no usable bytes is REFUSED above rather than dropped, so "
+                   "on this source the count reaches the entry count or startup did not finish"))
+        gates.append(Gate(
+            "data.area_nested", n_nested > 0, n_nested, n_entries,
+            reason="a zero here is the STATEMENT 'every area came from DATA_DIR/train/', which is "
+                   "the shipped default; a nonzero count is the entries joined under DATA_DIR "
+                   "verbatim by the slash rule (Q-DATA-4), which is what makes data/continual/* and "
+                   "data/ood/* reachable without moving files on disk"))
+        gates.append(Gate(
+            "data.area_path_refused", False, 0, n_path_checked,
+            reason="a refused entry raises CorpusError and exits at startup, so this row reads zero "
+                   "in every Areas that exists; it is declared so the arbitrary-path refusal is a "
+                   "NAMED mechanism rather than an unnamed assertion, and the threshold is how many "
+                   "entries it looked at"))
+        cap_detail = "; ".join(f"{label}: {taken[label]} taken of {present[label]} present"
+                               for label in names)
+        gates.append(Gate(
+            "data.corpus_cap_trip", n_cap_trip > 0, n_cap_trip, len(names),
+            reason=f"DATA_CORPUS_CAP={int(dat.corpus_cap)}, and the cap's bite is a PRINTED NUMBER "
+                   f"per area rather than a warning about a default -- {cap_detail}"))
+        block_detail = "; ".join(
+            f"{label}: {rng_holdout[label]['key']} offset {rng_holdout[label]['offset']} "
+            f"size {rng_holdout[label]['size']}" for label in names)
+        gates.append(Gate(
+            "data.holdout_block", n_block > 0, n_block, len(names),
+            reason=f"one CHILD stream per area, keyed by the area's label and not by draw order "
+                   f"(Q-DATA-6) -- {block_detail}"))
+        cap_arith = "; ".join(
+            f"{label}: min({frac_bytes[label]}, {int(dat.val_cap)}) = {holdout_bytes[label]}"
+            for label in names)
+        gates.append(Gate(
+            "data.val_cap_trip", n_val_cap > 0, n_val_cap, len(names),
+            reason=f"DATA_VAL_CAP={int(dat.val_cap)} against int(body * "
+                   f"DATA_HOLDOUT_FRAC={float(dat.holdout_frac)}) per area; the cap TRIPPED for an "
+                   f"area exactly when it, and not the fraction, was the binding term -- "
+                   f"{cap_arith}"))
+
+    # RUNS FOR BOTH SOURCES, because the label and rng-key collision checks do: they were hoisted
+    # above the source branch precisely so the synthetic arm could not reach an unchecked rng_for,
+    # so declaring this gate unreachable on that arm would contradict the code above it.
+    gates.append(Gate(
+        "data.area_label_collision", False, 0, n_entries,
+        reason="the label and rng-key collision checks run for BOTH sources, before the source "
+               "branch; a collision raises CorpusError and exits, so this row reads zero in every "
+               "Areas that exists and its threshold is the number of entries it compared"))
+    gates.append(Gate(
+        "data.area_refused", False, 0, n_entries,
+        reason="every refusal in this function raises CorpusError and exits at startup -- an empty "
+               "DATA_AREAS, a label or rng-key collision, an entry that escapes DATA_DIR, an area "
+               "with no usable bytes, a body under the derived floor, a real area whose held-out "
+               "block rounded to zero, or DATA_N_PROCESSES out of range -- so this row reads zero "
+               "in every Areas that exists. It is declared so a refusal is a named mechanism and "
+               "not an assertion nobody counts"))
+
+    # ONE SEAM GATE PER AREA, because the unreachable arm is a property of THAT AREA'S DRAW and not
+    # of the configuration: a block that landed at the body's leading edge or at its tail manufactures
+    # no discontinuity, which is not the same statement as "this area's removal left no seam". An
+    # aggregate would have to choose one of the three states for a run whose areas disagree.
+    for label in names:
+        rh = rng_holdout[label]
+        body_len = len(bodies[label])
+        if rh["seam_at"] is not None:
+            gates.append(Gate(
+                f"data.holdout_seam[{label}]", True, rh["seam_at"], body_len,
+                reason="removing a MIDDLE block leaves exactly one manufactured discontinuity in a "
+                       "body DATA_SEG_CONTIG=1 reads in order; the value is where it is and the "
+                       "threshold is the body it is in"))
+        else:
+            why = rh.get("why") or "no held-out block was drawn for this area"
+            gates.append(Gate(
+                f"data.holdout_seam[{label}]", False,
+                # THE ARITHMETIC SURVIVES THE UNREACHABLE ARM where there IS one: an edge draw has a
+                # real offset to print against the body length (leading edge reads 0, a tail read
+                # reads the body's own length). An area with no block at all has no offset that
+                # means anything, so it prints none rather than a zero that looks like a position.
+                rh["offset"] if rh["size"] else None, body_len, reachable=False,
+                reason=(f"DATA_SOURCE={dat.source}: {why}" if rh["size"] == 0
+                        else f"the block's own drawn position, not a lever: {why}")))
+
     return Areas(names=names, bodies=bodies, holdout=holdout, holdout_bytes=holdout_bytes,
                  bytes_present=present, bytes_taken=taken, cursors=cursors,
-                 rng_holdout=rng_holdout)
+                 rng_holdout=rng_holdout, counters=counters, gates=tuple(gates))
 
 
 def _read_area(path, cap):
