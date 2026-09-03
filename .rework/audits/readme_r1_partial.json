@@ -1,0 +1,341 @@
+{
+ "summary": "WHAT I DID. I read src/spine/{lever,assemble,units,wire,gate,compose,derive,registry,rng}.py, extracted the module docstring of every src/*/api.py and src/*/levers.py by AST, parsed ASSEMBLY_ORDER and LOOP_ORDER as data, ran spine.assemble.build(), ran spine.compose.compose(), ran all seven test files in tests/, and cross-checked every number against .rework/ISSUES.md PART 2 and notes/05_ERRORS.md's invalidation list. Everything below is from a file I read or a command I ran.\n\nWHAT THE SYSTEM IS TODAY. It is a DECLARED, MOSTLY-UNIMPLEMENTED SYSTEM. There are 13 packages under src/ plus a non-package spine/. Every package has exactly three files that matter: __init__.py (a marker with no code, deliberately), levers.py (the package's configuration declarations), and api.py (its frozen public signature set). 262 levers are declared across the 13 levers.py files. 131 public entry points are declared across the 13 api.py files, and 94 of them are stubs whose body is `raise NotImplementedError`; 37 have real bodies. compose(environ={}) executes and stops at the first stub, which today is CAP.startup_refusals \u2014 it gets through RUN's process setup, the resume read, RUN/WORLD refusals, LM geometry, the corpus open, vocabulary build, the geometry gate, the data plan, epoch-0 draw, tokenize, model build, signature, fabric, world, store, partition and the valve constructor before it stops. So the skeleton runs; the mechanisms mostly do not exist yet. There is no training loop in src/ at all \u2014 compose.py says so explicitly (\"IT DOES NOT RUN A TRAINING LOOP\") and LOOP_ORDER is a reading order for whoever writes one.\n\nTHE OWNERSHIP SPINE. The problem it solves is stated in numbers the repo counts for itself: the old tree kept 328 knobs in one `_SPEC` table with hand-typed owner comments that drifted (LOSS_MASK_DEAD tagged `# tokenizer` inside the `--- domains ---` block; 41 knobs filed under `misc`), values were materialised as module globals and read anywhere via `_env`/`_i`/`_f` with each call site restating its own default, and modules read os.environ directly behind the registry's back. The spine's answer: a lever is a class attribute on exactly ONE LeverSet subclass and its environment name is GENERATED as f\"{PREFIX}_{FIELD.upper()}\", so there is no `name=` parameter and no owner comment to drift; the default must be a literal, checked at declaration; `LeverSet.from_env()` is the only code permitted to name os.environ; and a resolved Config is frozen. What it GUARANTEES is narrower than the marketing, and the code says so at length: a module cannot MINT a foreign Config (O1 no os.environ, O3 no two lever sets, O8 no from_env outside spine/assemble.py), a function cannot hold two Configs by signature (O9), and a runtime latch closes from_env after build() returns. What it does NOT stop is a caller HANDING a foreign Config to a function \u2014 `memory_prune(configs[\"FAB\"])` returning FAB_SLOTS was reproduced by a reviewer. `Config.owned_by(\"MEM\")` is the assertion at the read site, and O9 requires it of annotated parameters; unannotated parameters remain uncovered. IMPORTANT FOR A README: .rework/PLAN.md:57 still carries the retracted overclaim (\"reading a foreign lever is a NameError at author time\"), which lever.py:32 and assemble.py:9-11 both explicitly correct as false. Do not repeat it.\n\nLEVER / WIRE / COUPLING. A LEVER is one declared knob owned by one package, carrying default + help + unit + optional choices; read as `cfg.field`. A COUPLING is a row in `spine/assemble.py::COUPLINGS` \u2014 a value computed from more than one lever, with declared sources, a destination `PREFIX.d_field`, a `compute` function and a mandatory prose reason. A WIRE is a coupling whose sources cross a package boundary; it goes in the `Wires` ledger, spends budget, and widens `affects()`. A coupling whose sources are all in the destination's own package is LOCAL \u2014 still `d_`-prefixed, but not a wire and not budgeted. Live counts from build(): 23 coupling rows = 19 cross-package wires (budget 25) + 4 local. The destination name is chosen by the WIRE, not the receiver, and `Config._wire` refuses any name not starting with `d_` \u2014 so `grep -rn 'd_' src/` enumerates every coupling. `affects(L)` is computed from the ledger rather than hand-written, because a hand-maintained table would be authored by the same person whose leak the isolation sweep exists to catch.\n\nCLOCK KINDS. units.py declares six: Steps, Flushes, Windows, Backwards, Epochs, Selections. They are NOT int subclasses \u2014 deliberately, since `class Steps(int)` would let `Steps(4000) >= 250` pass silently. Comparison, arithmetic and even `==` across kinds raise UnitError; the only legal crossing is `convert(to, per)` with an explicit rate. They exist because 32 of the survey's 475 defect records are unit mismatches and the recurring one is a clock: pin_tick counted FLUSHES against a threshold declared in STEPS (16x slow at BATCH_W=16), the capacity valve's clock counted calls not steps, and four subsystems' modulo cadences never coincided with a flush step so they never fired. Non-clock units (BYTES, TOKENS, BITS_PER_BYTE, FRACTION, ...) are metadata only, never enforced.\n\nDID IT FIRE. gate.py holds one frozen dataclass, `Gate(name, fired, value, threshold, reachable, reason)`, with THREE states that must never collapse: FIRED; armed-and-did-not-fire (a real measurement); and UNREACHABLE (the condition cannot be met on this configuration \u2014 not a measurement at all, and a `reason` is REQUIRED on that arm, enforced in __post_init__). The counts behind it: 57 of 475 records are mechanisms armed and inert while the report said nothing, and 60 more are guards whose condition could not be satisfied. Gate.line() always prints the arithmetic (`value vs threshold`), including on the unreachable arm. `NotBuilt` is a separate exception, deliberately NOT subclassing NotImplementedError, because NotImplementedError is a MARKER in this tree for \"P4 has not written this yet\" and the tooling counts it. Every one of the 134 entry-point docstrings in src/*/api.py carries a `DID IT FIRE:` block naming the counters that would prove the mechanism ran.\n\nTHE COMPOSITION ROOT. src/spine/compose.py. It holds every package's Config and every package's objects at once, because O10 forbids one package importing another, so a cross-package value must arrive as an argument the spine passed in. It exposes `plan()` (returns the two order tables as data, calling nothing) and `compose(environ, restored=None)` (resolves all 13 Configs via spine.assemble.build, then builds objects in order). ASSEMBLY_ORDER has 39 rows across stages process/resume/refuse/geometry/corpus/restore/vocab/gate/plan/stream/segment/model/signature/fabric/world/store/partition/valve/optimizer/clock/epoch0/warmup/cadence/audit/persist/retention/signal. LOOP_ORDER has 58 rows across five stages driven by one RunClock: E (per epoch), A (per window), B (per flush), C (the checkpoint fan-out, an event not a clock), R (the report, once). Every row is a 4- or 5-tuple whose fifth element names what the row PRODUCES, spelled as the CONSUMING signature spells it \u2014 that column exists so \"nothing supplies this argument\" is decidable. 23 entry points are declared in DEFERRED_ENTRY_POINTS with the missing producer as the reason; 24 entries in ROW_ARGUMENTS_ELSEWHERE.\n\nTHE AMBITION SENTENCE \u2014 the parent's guess needs correcting. The canonical statement is notes/00_INDEX.md:24-36: \"A byte-level language model with five things bolted to it, each of which can be turned off: 1. a dynamic BPE tokenizer that mints new merges during training; 2. the Fabric \u2014 a preallocated population of low-rank expert adapters, routed per window, born, ranked, mutated and culled during the run; 3. a self-organising domain assembler that clusters the stream into domains from a learned signature space, with no labels; 4. an editable external memory \u2014 a surprise-gated kNN store of context\u2192token pairs that can be read, re-keyed, flagged wrong, and deleted per entry or per source; 5. a world model that predicts the next latent state.\" FIVE, not four, and the domain assembler and the signature space it clusters in are two separate packages (DOM and SIG) in the rebuild. The phrase \"society of independent experts\" is the OLD README's and is misleading \u2014 it is the Fabric's `society` forward arm, not an ExpertBank/ExpertRouter population (that mechanism is dropped by the census). Do not use it.\n\nWHAT IS FOR THE README AUTHOR TO AVOID. The current README.md:83-136 is the old-tree landing page. Its headline \"-0.0009 collateral\" is retracted three ways (notes/08_GLOSSARY.md:230 calls it \"not reproducible at HEAD and not the project's stated goal\"; INV-13 voids every arm comparison before 2026-08-13; .rework/ISSUES.md P2-C3 catalogues it). It also directs readers to STATE.md, garry/GARRY.md and CL_TESTBED.md, none of which exist at those paths any more (all moved under archive/). Two prose-vs-tree drifts are LIVE and failing in the test suite right now: tests/test_assemble.py:173 says 261 levers where the tree has 262, and docs/04_CONTRACT.md:218 says DATA has 17 levers where it has 18. Also note the task's premise is partly wrong: self_organize.py, memory.py, tokenizer.py, vocab.py, datastream.py and world_model.py are all still at the REPOSITORY ROOT, not under archive/. archive/ holds garry/, legacy/, handoff/, docs/, STATE.md, CL_TESTBED.md and agent-transcripts/.",
+ "claims": [
+  {
+   "claim": "src/ contains exactly 13 lever-owning packages plus a non-package 'spine' directory. The 13 directory names are capacity, ckpt, data, domains, eval, fabric, lm, memory, opt, sig, tok, train, world; their PREFIXes are CAP, CKPT, DATA, DOM, EVAL, FAB, LM, MEM, OPT, SIG, TOK, RUN, WORLD.",
+   "source": "ls src/; python3 -c \"import sys;sys.path.insert(0,'src');from spine.assemble import PACKAGES;print(sorted(PACKAGES))\" -> ['CAP','CKPT','DATA','DOM','EVAL','FAB','LM','MEM','OPT','RUN','SIG','TOK','WORLD']; src/spine/compose.py::APIS",
+   "confidence": "verified",
+   "caveat": "Two PREFIXes do not match their directory: src/train/ owns PREFIX 'RUN' and src/capacity/ owns 'CAP'. src/train/__init__.py states this is deliberate: 'THE DIRECTORY IS `train` AND THE PREFIX IS `RUN`, deliberately and not by oversight ... the environment name is generated from the PREFIX, never from the directory'."
+  },
+  {
+   "claim": "Each package owns exactly one line of purpose, taken verbatim from the first line of its levers.py docstring: CAP 'the earned-capacity valve: the one mechanism that lets a run become bigger than it was'; CKPT 'the run's persistent state: where it is written, where a run continues from, and what is kept'; DATA 'the bytes the run trains on: which corpora, in what order, cut where, and what is held back'; DOM 'the self-assembling partition: where the stream is cut, what the pieces are called, and which of those names are allowed to survive'; EVAL 'the instruments: how much is measured, how long, how often, and where the verdict line sits'; FAB 'the expert population: who exists, who gets the token, who is born, who is removed'; LM 'the base language model: which network is built, how big it is, and what a new symbol costs it'; MEM 'the editable store: what gets written into it, what gets thrown out of it, and how it is read'; OPT 'the schedule and the optimiser: the one absolute learning rate, its shape over time, and the size of the batch that rate is applied to'; SIG 'the signature encoder: the one description of a window that every router reads'; TOK 'the online byte-BPE: what the run's symbols ARE, and when they are allowed to change'; RUN 'the training loop: how long the run is, what root of randomness it starts from, what machine it runs on, how that machine's arithmetic is executed, and which half of the program runs at all'; WORLD 'the world model: a latent state for the observed stream, and a population that predicts it forward'.",
+   "source": "src/*/levers.py line 1 of each module docstring, extracted via ast.get_docstring",
+   "confidence": "verified",
+   "caveat": "These are the packages' own self-descriptions, not an independent audit of what their (mostly unwritten) bodies do."
+  },
+  {
+   "claim": "262 levers are declared across the 13 src/*/levers.py files. Per package: FAB 82, DOM 28, MEM 26, DATA 18, SIG 18, TOK 18, EVAL 17, OPT 13, LM 12, WORLD 11, CAP 7, RUN 7, CKPT 5.",
+   "source": "AST count of Lever(...) assignments in src/*/levers.py; independently confirmed by tests/test_contract.py's own LIVE COUNTS line: 'levers_total=262, levers:FAB=82, levers:DOM=28, levers:MEM=26, levers:DATA=18, levers:SIG=18, levers:TOK=18, levers:EVAL=17, levers:OPT=13, levers:LM=12, levers:WORLD=11, levers:CAP=7, levers:RUN=7, levers:CKPT=5'",
+   "confidence": "verified",
+   "caveat": "This is NOT the same number as .rework/CENSUS.md's per-package table (FAB 110, MEM 36, DOM 33, SIG 24, TOK 21, EVAL 19, DATA 18, LM 17, OPT 14, WORLD 11, RUN 9, CAP 9, CKPT 7 = 328). The census table classifies all 328 OLD knobs by intended owner including the 41 dropped and 25 merged; the 262 is what actually exists as a declaration in src/. Do not quote 328 as a count of levers in the rebuild."
+  },
+  {
+   "claim": "Two prose-count claims in the repository are currently WRONG and the test suite is failing on both: tests/test_assemble.py:173 states 261 levers where the tree has 262, and docs/04_CONTRACT.md:218 states DATA has 17 levers where the tree has 18.",
+   "source": "python3 tests/test_assemble.py -> 'FAIL A8 ... tests/test_assemble.py:173 states 261 where the tree has 262'; python3 tests/test_contract.py -> 'FAIL K13 ... docs/04_CONTRACT.md:218 says levers:DATA = 17; the tree has 18'",
+   "confidence": "verified",
+   "caveat": "These are live failures as of the working tree I ran against (git HEAD 8cb00e3 with 9 modified files uncommitted). They are exactly the drift class the README author must not add to."
+  },
+  {
+   "claim": "131 public entry points are declared across the 13 src/*/api.py files; 94 of them are stubs whose body raises NotImplementedError, and 37 have real bodies.",
+   "source": "tests/test_contract.py LIVE COUNTS line: 'entry_points=131, implemented=37, stubs=94'; counting rule at tests/test_contract.py::_k13_entry_points (top-level public functions plus public methods of public classes in api.py; stub = any ast.Raise mentioning NotImplementedError)",
+   "confidence": "verified",
+   "caveat": "My own independent AST walk gave 134/40 because it recursed into nested classes and matched NotImplementedError anywhere in the unparsed function rather than only in a raise. The 131/94/37 figures are the harness's own and are the ones the repo's checks use. Both counts agree on the shape: roughly three quarters of the surface is unwritten."
+  },
+  {
+   "claim": "compose(environ={}) executes and stops at the first unimplemented stub, which is CAP.startup_refusals \u2014 with the message 'CAP.startup_refusals: P4 (capacity) fills this in. The contract is frozen here; see docs/04_CONTRACT.md, section CAP.'",
+   "source": "python3 -c \"import sys;sys.path.insert(0,'src');from spine.compose import compose;compose(environ={})\"",
+   "confidence": "verified",
+   "caveat": "docs/04_CONTRACT.md:38-40 still says the stop is at 'RUN.process_setup', which is STALE: RUN.process_setup, RUN.mode, RUN.streams and RUN.startup_refusals all have bodies now (verified by AST). The doc's claim that the root is executable is true; the specific function it names is not."
+  },
+  {
+   "claim": "The composition root does NOT run a training loop, and src/ contains no training loop at all. compose.py builds objects, wires arguments and returns an assembled System; LOOP_ORDER is a reading order for whoever writes the loop.",
+   "source": "src/spine/compose.py module docstring: 'WHAT THIS FILE IS NOT. IT DOES NOT RUN A TRAINING LOOP. The loop is RUN package mechanism -- RunClock.advance is the only site in the tree that increments a counter, and Cadences.due is the only cadence primitive. This file builds the objects, wires the arguments and returns the assembled system'",
+   "confidence": "verified",
+   "caveat": "None."
+  },
+  {
+   "claim": "ASSEMBLY_ORDER has 39 rows and LOOP_ORDER has 58 rows, both declared as tuples of tuples and returned as data by spine.compose.plan() without calling anything.",
+   "source": "ast.literal_eval of the ASSEMBLY_ORDER and LOOP_ORDER assignments in src/spine/compose.py; confirmed by running plan() -> 39, 58; and by tests/test_contract.py LIVE COUNTS 'assembly_rows=39, loop_rows=58'",
+   "confidence": "verified",
+   "caveat": "None."
+  },
+  {
+   "claim": "LOOP_ORDER has five stages, all driven by one RunClock: E = per EPOCH (runs before the first window of an epoch and again on Tick.rolled); A = per WINDOW, above the batch accumulator; B = per FLUSH; C = the CHECKPOINT FAN-OUT, an EVENT not a clock, entered from three routes; R = the REPORT, once, after Tick.finished.",
+   "source": "src/spine/compose.py, comment block immediately above LOOP_ORDER: 'FIVE STAGES, all driven by the one RunClock: E = per EPOCH ... A = per WINDOW, above the batch accumulator. B = per FLUSH. C = the CHECKPOINT FAN-OUT. An EVENT, not a clock ... R = the REPORT, once, after Tick.finished.'",
+   "confidence": "verified",
+   "caveat": "The same comment records a consequence worth stating: RUN.epochs defaults to 1, advance() sets both `rolled` and `finished` on the single roll a default run takes, and `finished` WINS -- so 'THE E ROWS IN THIS TABLE NEVER RUN ON A ONE-EPOCH RUN'. Epoch 0's material comes from ASSEMBLY_ORDER instead."
+  },
+  {
+   "claim": "Every ASSEMBLY_ORDER/LOOP_ORDER row is a 4- or 5-tuple; the fifth element names what that row PRODUCES for later rows, spelled the way the CONSUMING signature spells it, and a row that produces nothing a later row consumes keeps four elements deliberately.",
+   "source": "src/spine/compose.py comment above ASSEMBLY_ORDER: 'Every row is (stage, PREFIX, entry point, what it receives that is not its own Config, what it PRODUCES for later rows). A row that yields nothing a later row consumes ... keeps FOUR elements, and that is a statement rather than a default.' Verified by parsing: rows have len 4 or 5.",
+   "confidence": "verified",
+   "caveat": "The same comment records why the fifth column was added: two mechanical heuristics were tried and both failed (30 findings and 25 findings respectively), because the tables could not separate PRODUCED BY AN EARLIER ROW from MENTIONED IN PASSING until they recorded what a row produces."
+  },
+  {
+   "claim": "23 entry points are declared in DEFERRED_ENTRY_POINTS \u2014 the list of entry points the order tables do not yet reach, each with the phase that will reach it and the argument that has no producer. They are: CAP.observe, CKPT.Retention.consider, EVAL.coherence, EVAL.curve_probe, EVAL.generate, EVAL.holdout_probe, EVAL.null_excess, EVAL.verdicts, EVAL.verification_fit, EVAL.wrongness_probe, FAB.Population.n, FAB.contribution, MEM.blend, MEM.judge, MEM.read, RUN.Timing.span, RUN.Timing.spans, TOK.Vocabulary.at_cap, TOK.Vocabulary.blen, TOK.Vocabulary.decode, TOK.Vocabulary.live_size, TOK.Vocabulary.size, WORLD.manage.",
+   "source": "python3 -c \"...;import spine.compose as C;print(len(C.DEFERRED_ENTRY_POINTS));print(sorted(C.DEFERRED_ENTRY_POINTS))\"",
+   "confidence": "verified",
+   "caveat": "compose.py's docstring states this table 'is checked backwards -- an entry a row now names is reported stale -- so it cannot become the place orphans go to be forgotten'. Note the whole retrieval read path (MEM.read/blend/judge) and almost all of EVAL are in here."
+  },
+  {
+   "claim": "The ownership spine replaces a table of 328 knobs whose owner was a hand-typed comment. Two named symptoms of the drift: LOSS_MASK_DEAD is tagged '# tokenizer' inside the '--- domains ---' block, and 41 knobs are filed under 'misc'.",
+   "source": "src/spine/lever.py module docstring, 'THE FAILURE THIS REPLACES'; the misc figure is corroborated by .rework/CENSUS.md 'The old tree filed 40 knobs under misc and 16 under report -- neither is an owner'",
+   "confidence": "verified",
+   "caveat": "lever.py says 41 under misc and CENSUS.md says 40 under misc plus 16 under report, with the .rework/CENSUS.md 'misc (41)' section heading listing 41. The one-off is unreconciled in the sources; if you cite it, say 'about 40'."
+  },
+  {
+   "claim": "Ownership is the namespace, not a tag: a lever is a class attribute on exactly one LeverSet subclass and its environment name is GENERATED as f\"{PREFIX}_{FIELD.upper()}\". There is no name= parameter, so a name cannot be attached to a foreign owner.",
+   "source": "src/spine/lever.py, 'OWNERSHIP IS THE NAMESPACE, NOT A TAG' paragraph and Lever.env_name_for(prefix)",
+   "confidence": "verified",
+   "caveat": "The prefix is deliberately never cached on the Lever object. lever.py::Lever.__set_name__ records why: an earlier version wrote v.prefix = cls.PREFIX onto the Lever, so a Lever reachable from two classes took whichever prefix was defined last, silently retargeting a base class's lever to a subclass's env name with every static check still passing."
+  },
+  {
+   "claim": "A lever's default must be a literal, checked at declaration time in Lever.__init__ rather than by an AST rule.",
+   "source": "src/spine/lever.py::Lever.__init__: 'if not isinstance(default, (int, float, str, bool, type(None))): raise LeverError(\"default must be a literal ... A value derived from another lever is a WIRE, not a default\")'",
+   "confidence": "verified",
+   "caveat": "The stated reason is a specific old-tree failure: nine knobs whose default was another knob, e.g. MAX_DOMAINS = _i(\"MAX_DOMAINS\", _i(\"FAB_NMAX\", 4096)), which reads FAB_NMAX eagerly and poisons the 'nothing read this knob' audit."
+  },
+  {
+   "claim": "LeverSet.from_env() is the only code in the tree permitted to name os.environ, and this is checked mechanically.",
+   "source": "src/spine/lever.py::LeverSet.from_env docstring; tests/test_ownership.py check O1 'os.environ is named in exactly one file' -> PASS",
+   "confidence": "verified",
+   "caveat": "lever.py records that the old tree needed this: 'tokenizer.py read TOK_MINT_PMIN and TOK_MINT_GATE_K straight from os.environ, invisible to the registry and to every audit built on it'."
+  },
+  {
+   "claim": "A resolved Config is immutable and frozen. _freeze() replaces the value mappings with types.MappingProxyType, not merely setting a flag.",
+   "source": "src/spine/lever.py::Config._freeze",
+   "confidence": "verified",
+   "caveat": "The code records that the first version set a _frozen flag which only _wire consulted, so `cfg._vals['slots'] = 8` walked straight past the refusal \u2014 'reproduced'. Worth stating as an example of the repo's method: the guarantee is written next to the defect that forced it."
+  },
+  {
+   "claim": "The ownership spine's guarantee is NARROWER than 'a package cannot read another package's levers'. What is structural: a module may not name os.environ (O1), may not hold two lever sets under any spelling (O3), and may not call from_env outside spine/assemble.py (O8) \u2014 so a module cannot MINT a foreign Config. Being HANDED one is not prevented.",
+   "source": "src/spine/lever.py module docstring, 'WHAT OWNERSHIP DOES NOT BUY' paragraph; and src/spine/assemble.py module docstring, 'WHAT THAT BUYS, STATED CORRECTLY THIS TIME'",
+   "confidence": "verified",
+   "caveat": "Both files record the same reproduced counterexample verbatim: `def memory_prune(cfg): return cfg.slots` called as `memory_prune(configs[\"FAB\"])` returns 2048 with no error. Both files state that an earlier version of their own docstring called this 'an author-time NameError' and that this was false."
+  },
+  {
+   "claim": ".rework/PLAN.md:57 still carries the retracted overclaim: 'A package receives only its own record as a parameter, so `def cull(pop, fab: FabricLevers, ...)` has no `mem`, `tok` or `dom` in scope: reading a foreign lever is a NameError at author time, not a policy.'",
+   "source": "grep -n NameError .rework/PLAN.md -> line 57; contradicted by src/spine/lever.py:32 'which a reviewer ran, against docstrings in this file and in spine/assemble.py that called it an \"author-time NameError\". It is not one.'",
+   "confidence": "verified",
+   "caveat": "This is the single most important thing for a README author not to copy. PLAN.md is a proposal document whose own header says 'Status: proposed, not started. Nothing in src/ exists yet' \u2014 it predates the correction."
+  },
+  {
+   "claim": "Config.owned_by(prefix) is the only owner check that happens at the point of use. It raises naming both packages, returns self so it composes, and tests/test_ownership.py's O9 requires the call of any function outside the spine that annotates a parameter as a Config, with the prefix as a string literal.",
+   "source": "src/spine/lever.py::Config.owned_by docstring and body; tests/test_ownership.py O9 'no function outside the wiring file receives two packages' Configs' -> PASS",
+   "confidence": "verified",
+   "caveat": "owned_by's own docstring says what it cannot see: 'a function that takes an UNANNOTATED parameter and never asserts. O9 cannot require an assertion it has no way to know is needed'. It is an assertion, not a capability: a function that never calls it is exactly as exposed as before."
+  },
+  {
+   "claim": "There is a process-wide assembly latch: build() calls from_env exactly 13 times and then sets a module flag, after which any from_env call raises. This closes the runtime half of routes that no name-based check can see.",
+   "source": "src/spine/lever.py::_close_assembly/_reopen_assembly/assembly_closed and the refusal at the head of from_env",
+   "confidence": "verified",
+   "caveat": "lever.py is explicit about the latch's limits and about not overselling it: it is 'Not a security boundary and not described as one'; it does NOT close the DECLARATION half \u2014 `sib._levers[\"alpha\"].default` reads a foreign lever with no from_env call and no Config, and only the behavioural L3 sweep could catch that. That sweep, tests/test_lever_isolation.py, DOES NOT EXIST (verified: ls returns 'No such file or directory')."
+  },
+  {
+   "claim": "A WIRE is a recorded coupling that crosses a package boundary. The destination field name is part of the wire record and the wire performs the assignment itself via Wires.add(..., into=cfg) -> Config._wire, so the receiving package never chooses the name it arrives under; Config._wire refuses any name not starting with 'd_'.",
+   "source": "src/spine/wire.py module docstring and Wires.add; src/spine/lever.py::Config._wire",
+   "confidence": "verified",
+   "caveat": "The stated consequence is checkable and worth quoting: 'a plain `grep -rn \"d_\" src/` enumerates every coupling in the system, with no tooling, no AST pass and nothing to keep in sync.' This answers a design-review objection quoted verbatim in both files: 'wires launder couplings -- fab.nmax arrives in domains as expert_slots and looks owned'."
+  },
+  {
+   "claim": "The live coupling ledger holds 23 coupling rows: 19 cross-package wires against a WIRE_BUDGET of 25, plus 4 intra-package (local) derivations. NOT_WIRES holds 7 rejected candidates.",
+   "source": "python3 build(environ={}) -> len(wires)=19, budget=25, len(COUPLINGS)=23, len(NOT_WIRES)=7; tests/test_contract.py LIVE COUNTS 'couplings=23, intra_couplings=4, not_wires=7, wire_budget=25, wires=19'",
+   "confidence": "verified",
+   "caveat": "docs/04_CONTRACT.md:52-56 states these same four numbers and explicitly warns 'Do not restate these numbers elsewhere ... any prose copy is one that can go stale in silence -- this one had.' Take that warning literally for a README."
+  },
+  {
+   "claim": "The 19 live wires and the packages they connect: FAB.slots -> DOM.d_expert_slots, MEM.d_owner_blocks, MEM.d_capacity, MEM.d_source_slots, CAP.d_expert_slots; OPT.batch_windows -> FAB.d_manage_period; OPT.batch_windows + CAP.pin_windows -> FAB.d_cap_lift_period and TOK.d_cap_lift_period; LM.vocab_slots -> TOK.d_vocab_ceiling and CAP.d_vocab_slots; CKPT.dir -> TOK.d_vocab_save_path; CKPT.resume -> TOK.d_vocab_read_path; TOK.max_bytes -> LM.d_max_token_bytes; LM.mask_dead_rows -> CAP.d_mask_dead_rows; FAB.pressure + FAB.slots -> CAP.d_operating_population; FAB.comp_ema -> DOM.d_comp_ema; FAB.comp_protect -> DOM.d_comp_protect; OPT.lr -> FAB.d_base_lr; OPT.lr_min_frac -> FAB.d_lr_min_frac. The 4 local derivations are FAB.d_operating_population, LM.d_pos_max, OPT.d_effective_batch_windows, SIG.d_idle_cadence.",
+   "source": "python3 build(environ={}) then iterating wires and diffing wires.dsts() against every Config's wired() keys",
+   "confidence": "verified",
+   "caveat": "Values shown are at the empty environment (all defaults). EVAL, DATA, RUN, WORLD and CKPT receive no wires at all; EVAL and RUN and DATA and WORLD emit none either."
+  },
+  {
+   "claim": "affects(L) = {owner(L)} union {owner(d) : L in reads(d)} and is COMPUTED from the ledger, never declared in a table.",
+   "source": "src/spine/wire.py::Wires.affects and the module docstring section 'WHY affects() IS COMPUTED HERE AND NOT WRITTEN DOWN (graft G1)'",
+   "confidence": "verified",
+   "caveat": "The stated reason is worth repeating because it generalises: 'A hand-maintained AFFECTS = {...} table would be written by the same person whose leak the sweep exists to catch: they add the lever, they add its reach, and the sweep is permanently green for that lever from the day it is declared.' affects() is deliberately ONE HOP, and Wire.__init__ refuses a wire whose source is itself a d_ field to keep it so."
+  },
+  {
+   "claim": "A compute function's free names are checked at coupling-construction (import) time against COMPUTE_ALLOWLIST in spine/assemble.py, and the argument it receives is a restricted _Reads view exposing only the declared source fields plus the destination package's own levers.",
+   "source": "src/spine/assemble.py::COMPUTE_ALLOWLIST, _check_compute, _Fields, _Reads, _view; tests/test_couplings.py C2 'a compute cannot NAME its way out of its declared sources' -> PASS",
+   "confidence": "verified",
+   "caveat": "assemble.py records the exact demonstrated bypass this closes: a module-level helper `_peek()` calling `FabricLevers.from_env().manage_every` inside a compute 'left all seven ownership checks PASSING, made MEM.d_source_slots move with FAB_MANAGE_EVERY, and left affects(\"FAB_MANAGE_EVERY\") == {\"FAB\"}'. The view restricts the argument; the allowlist restricts the closure; neither alone is sufficient."
+  },
+  {
+   "claim": "WIRE_BUDGET = 25 is described in its own source as a speed bump and explicitly not a guarantee.",
+   "source": "src/spine/wire.py: 'WIRE_BUDGET IS A SPEED BUMP, NOT THE GUARANTEE. It is one edit away from being 26 ... Its only real work is to make growing the coupling graph a visible act'",
+   "confidence": "verified",
+   "caveat": "The load-bearing checks are named there and are two-directional: every wire's destination must be a d_ field that exists on the receiving Config, and every d_ field on every Config must correspond to a declared wire. tests/test_ownership.py O4 checks both directions and passes."
+  },
+  {
+   "claim": "units.py declares exactly six clock kinds: Steps (optimizer steps), Flushes (batch flushes), Windows (stream windows, what `step` counts), Backwards (backward passes), Epochs (passes over the stream), Selections (times an expert was chosen).",
+   "source": "src/spine/units.py, class definitions and CLOCK_KINDS = (Steps, Flushes, Windows, Backwards, Epochs, Selections)",
+   "confidence": "verified",
+   "caveat": "None."
+  },
+  {
+   "claim": "Clock is deliberately NOT an int subclass, and cross-kind comparison, addition, subtraction AND equality all raise UnitError. The only legal crossing is convert(to, per) with an explicit positive rate.",
+   "source": "src/spine/units.py::Clock \u2014 '_same' raises on type mismatch for +, -, ==, <, <=, >, >=; convert() is the documented sole path",
+   "confidence": "verified",
+   "caveat": "units.py records that __eq__ raising was a correction: the first version returned plain False across kinds, so `Flushes(10) == Steps(10)` was quietly False and `Steps(4000) == 4000` was quietly False \u2014 'a mismatch reported as a legitimate answer, in the module whose entire mechanism is that a cross-kind comparison cannot pass silently'."
+  },
+  {
+   "claim": "The clock types exist because of specific measured defects, named in units.py: pin_tick counted FLUSHES against a threshold declared in STEPS (16x slow at BATCH_W=16); the capacity valve's clock counted calls, not steps; four subsystems' modulo cadences never coincided with a flush step so they never fired; and `step` advances per WINDOW while the loop body runs per FLUSH.",
+   "source": "src/spine/units.py module docstring, numbered point 2",
+   "confidence": "verified",
+   "caveat": "units.py is explicit that unit typing is narrow ON PURPOSE: only clocks are runtime-typed. Every other unit (bytes, bits/byte, fractions) is metadata, printed but never enforced, because 'static unit inference over arbitrary Python arithmetic is a type-inference engine with no type system underneath it'."
+  },
+  {
+   "claim": "32 of the survey's 475 defect records are unit mismatches; 130 of 475 are wrong-measurement or unit-mismatch combined; 57 are armed-but-inert; 60 are untrippable-guard; 29 are silent-overwrite; 47 coupling; 39 recorded-never-read; 98 wrong-measurement; 25 crash.",
+   "source": ".rework/PLAN.md section 0 'The survey's bug classes, counted' (98/60/57/47/39/32/29/25); the 32 and 130 figures are restated in src/spine/units.py and src/spine/derive.py respectively",
+   "confidence": "verified",
+   "caveat": "These are counts of AGENT-PRODUCED survey records, not independently audited defects. .rework/README.md says so directly: 'These are AGENT OUTPUT, not verified truth ... anything load-bearing must be checked against the source before it is written into documentation.' Cite them as 'the survey classified' rather than 'the system had'."
+  },
+  {
+   "claim": "The DID IT FIRE discipline is one frozen dataclass, spine/gate.py::Gate(name, fired, value, threshold, reachable, reason), with three states that must not collapse: FIRED; fired=False + reachable=True (armed and did not fire \u2014 a measurement); and reachable=False (the condition CANNOT be met on this configuration \u2014 not a measurement at all). A reason is REQUIRED on the unreachable arm, enforced in __post_init__.",
+   "source": "src/spine/gate.py::Gate and Gate.__post_init__ ('Gate {name!r} is declared unreachable with no reason. UNREACHABLE without a reason is indistinguishable from armed-and-inert to every reader of the report')",
+   "confidence": "verified",
+   "caveat": "Gate.line() always prints the arithmetic '(value vs threshold)' including on the unreachable arm; gate.py records that the first version dropped the numbers there, which is 'the same verdict without the arithmetic this record exists to refuse'."
+  },
+  {
+   "claim": "Gate lives in the spine rather than in each package because all 13 packages must print the same three states in the same shape. It reads no lever, holds no state and imports nothing.",
+   "source": "src/spine/gate.py module docstring: 'Thirteen private Gate classes would be thirteen chances for one of them to collapse the last two states'",
+   "confidence": "verified",
+   "caveat": "gate.py cites 57 armed-but-inert and 60 untrippable-guard records as the two bugs the two states distinguish: 'Those are two different bugs and they need two different words.'"
+  },
+  {
+   "claim": "gate.py also declares NotBuilt, an exception for a mechanism that is DECLARED and deliberately NOT BUILT. It deliberately does not subclass NotImplementedError.",
+   "source": "src/spine/gate.py::NotBuilt docstring",
+   "confidence": "verified",
+   "caveat": "The reason is mechanical, not stylistic: in this tree `raise NotImplementedError` is a MARKER that tests/test_contract.py::k13_live_counts and tools/sync_counts.py both count textually. Overloading it made FAB.build (which has a full body) count as a stub, so the documented progress numbers said one more entry point was unwritten than actually was."
+  },
+  {
+   "claim": "Every entry point in src/*/api.py carries a machine-readable docstring block of the form 'LEVERS READ: ... / WIRES READ: ... / DID IT FIRE: ...'. There are 134 'DID IT FIRE:' lines and 116 'LEVERS READ:' lines across the 13 api.py files.",
+   "source": "grep -rh 'DID IT FIRE' src/*/api.py | wc -l -> 134; grep -rh 'LEVERS READ' src/*/api.py | wc -l -> 116; format specified in docs/04_CONTRACT.md:13-20",
+   "confidence": "verified",
+   "caveat": "tests/test_contract.py's own closing note says what this does NOT prove: 'They do not prove that a body, once written, does what its docstring says, that a DID IT FIRE counter is ever incremented, or that the levers a stub CLAIMS to read are the ones it reads -- `LEVERS READ:` is prose that passes a parser.'"
+  },
+  {
+   "claim": "The composition root is src/spine/compose.py. It is in the spine because tests/test_ownership.py's O10 refuses any import of one package from another, so something must hold every Config and every object at once; compose.py and spine/assemble.py are the two files exempt from O9 and O10.",
+   "source": "src/spine/compose.py module docstring, 'WHY THIS FILE IS IN src/spine/'",
+   "confidence": "verified",
+   "caveat": "compose.py records that its own first draft said 'There is no other route' and that this was false: three routes past it were demonstrated with every check green, including `from spine.compose import build` through a re-export that shipped for four commits and let a memory module read FAB.alpha=0.9 and LM.dropout=0.37 from the live environment. O10 is now an allowlist of spine.{lever, units, derive, rng, wire}."
+  },
+  {
+   "claim": "compose.py exposes plan() and compose(). plan() returns (ASSEMBLY_ORDER, LOOP_ORDER) as data without calling anything, so the shape can be inspected on a tree where nothing is implemented; compose(environ, restored=None) resolves every Config via spine.assemble.build and then builds objects in ASSEMBLY_ORDER.",
+   "source": "src/spine/compose.py::plan and ::compose docstrings and bodies; both run",
+   "confidence": "verified",
+   "caveat": "plan() deliberately does NOT return DEFERRED_ENTRY_POINTS, 'because it is not part of the order' and folding it in 'would let a reader take \"in plan()\" as \"called\"'."
+  },
+  {
+   "claim": "compose() declares 10 named RNG subsystems: lm, sig, fabric, memory, domains, world, tok.dropout, data.synth, data.holdout, eval. rng.issued() is the DID-IT-FIRE surface for randomness: a subsystem present with zero draws is armed-but-inert; a subsystem ABSENT never asked.",
+   "source": "src/spine/compose.py::RNG_SUBSYSTEMS and the comment block below it; confirmed at runtime; tests/test_contract.py LIVE COUNTS 'rng_subsystems=10'",
+   "confidence": "verified",
+   "caveat": "The comment records a bug found in this exact mechanism: 'world' was missing from the tuple and the root reached for it with .get(), so WORLD.build received rng=None while the report would have said WORLD never asked for randomness \u2014 'a third state G4 has no name for, and it is worse than either of the two it distinguishes'."
+  },
+  {
+   "claim": "Per-subsystem RNG streams exist so that the (not-yet-written) lever-isolation sweep means anything: with one global stream, draw order is a channel between packages that no declaration mentions, and a lever that makes the tokenizer take 3 extra draws shifts every later draw in the fabric, memory and stream sampler.",
+   "source": "src/spine/rng.py module docstring",
+   "confidence": "verified",
+   "caveat": "rng.py names this as a recorded failure class, not a hypothetical: the old tree grew frozen_rng and a @no_rng_drift decorator 'specifically because diagnostics were silently editing runs'."
+  },
+  {
+   "claim": "spine/derive.py holds the pure derived quantities, one named function each: a value computed from more than one lever exists in exactly one place under one name, and no consumer recomputes it. A derivation differs from a wire in that its sources are all in one package, so it books no ledger edge and spends no budget.",
+   "source": "src/spine/derive.py module docstring; src/spine/assemble.py 'TWO KINDS OF COUPLING LIVE IN THE TABLE, AND ONLY ONE OF THEM IS A WIRE'; src/spine/wire.py::Wire.__init__ refuses a src in the same package as dst",
+   "confidence": "verified",
+   "caveat": "derive.py names the two recomputation defects that forced the rule: bytes-per-token estimated three ways with an error whose SIGN FLIPS with vocabulary size, and the signature width resolved in two places from one knob whose zero meant 614 bytes in training and 1 byte in eval."
+  },
+  {
+   "claim": "tests/test_derive.py replays 575 captured oracle cases against derive.py with 0 mismatches, across the tables blowup_stale, bwt_of, cull_gate_open, curve_verdict, forgetting_of, lift_to, pin_tick and a smoke case.",
+   "source": "python3 tests/test_derive.py -> '575 oracle cases, 0 mismatches'; oracle files in .rework/oracle/",
+   "confidence": "verified",
+   "caveat": "These are known-answer replays of pure functions captured from the old tree at rm-predict @ aee4a52 (per .rework/PLAN.md P0). They are evidence that the derived formulas were ported faithfully; they are not evidence about any mechanism, any measurement, or any result."
+  },
+  {
+   "claim": "tests/test_ownership.py runs 12 checks (O1..O12) plus a self-test and all pass. They are: O1 os.environ named in exactly one file; O2 every Lever default is a literal; O3 no module outside the wiring file holds two lever sets; O4 every d_ read is a declared wire and every declared wire is read; O5 no module-level mutable global written by another module; O6 every coupling states a reason as a literal; O7 clock kinds never compared against bare int literals; O8 from_env called only from the wiring file; O9 no function outside the wiring file receives two packages' Configs; O10 no package reaches the assembly, the registry, or another package; O11 no package body does arithmetic on a lever declaring a Clock unit; O12 citations name symbols.",
+   "source": "python3 tests/test_ownership.py -> 12 PASS lines + 'PASS SELF' + '=== 12 checks + 18 self-test cases, 0 failing ==='",
+   "confidence": "verified",
+   "caveat": "The file's own closing paragraph states the limit: 'They do NOT prove it cannot READ one. A Config handed to the wrong package as an ordinary argument is legal Python and returns the wrong package's numbers ... Nor can any of this see a coupling through shared mutable state, RNG draw order or the data.'"
+  },
+  {
+   "claim": "Current test-suite state: test_ownership 12 checks 0 failing; test_census 7 checks 0 failing; test_couplings 4 checks 0 failing; test_derive 575 oracle cases 0 mismatches; test_determinism reports a noise floor of abs 0.0 / rel 0.0 across 3 within-process repeats; test_assemble 9 checks 1 failing (A8); test_contract 13 checks 1 substantive failure (K13) plus its SELF arm failing consequentially.",
+   "source": "Ran each of tests/test_*.py directly and read the summary line of each",
+   "confidence": "verified",
+   "caveat": "Both failures are prose-vs-tree count drifts (261 vs 262 levers; DATA 17 vs 18 levers), not mechanism failures. test_contract's SELF arm fails because K13 fails on the control tree, i.e. it is the same one defect surfacing twice."
+  },
+  {
+   "claim": "tests/test_lever_isolation.py \u2014 the behavioural sweep that PLAN.md's rule L3 names, and which lever.py, wire.py, assemble.py, compose.py, rng.py, test_ownership.py and test_couplings.py all name as the load-bearing check for couplings through shared state, RNG draw order or the data \u2014 DOES NOT EXIST.",
+   "source": "ls tests/test_lever_isolation.py -> 'No such file or directory'; ls tests/ shows only test_assemble, test_census, test_contract, test_couplings, test_derive, test_determinism, test_ownership",
+   "confidence": "verified",
+   "caveat": "Every source that names it also says it does not exist yet (e.g. lever.py: 'it does not exist yet. Do not read this latch as \"there is no other route\"'). This is the single largest gap between what the spine's static checks prove and what the architecture claims."
+  },
+  {
+   "claim": "The canonical statement of what the system is, as five components on a byte-level LM, is notes/00_INDEX.md:24-36: (1) a dynamic BPE tokenizer that mints new merges DURING training so vocabulary and segmentation both move while the model learns against them; (2) the Fabric \u2014 a preallocated population of low-rank expert adapters, routed per window, born, ranked, mutated and culled during the run; (3) a self-organising domain assembler that clusters the stream into domains from a learned signature space, with no labels; (4) an editable external memory \u2014 a surprise-gated kNN store of context->token pairs that can be read, re-keyed, flagged wrong, and deleted per entry or per source; (5) a world model that predicts the next latent state. Each can be turned off.",
+   "source": "notes/00_INDEX.md, section 'What the system is'",
+   "confidence": "verified",
+   "caveat": "It is FIVE, not four. The rebuild splits component 3 into two packages: DOM (the partition) and SIG (the signature space it clusters in). The list maps onto packages as TOK, FAB, DOM+SIG, MEM, WORLD \u2014 with LM the byte-level model itself and DATA, OPT, CAP, CKPT, RUN, EVAL the supporting spine. notes/00_INDEX.md describes the OLD tree, but every one of the five survives as a named package in src/."
+  },
+  {
+   "claim": "The phrase 'a society of independent experts' comes from the stale README.md:83/86 and is misleading. In the code, 'society' is an ARM of the Fabric's single forward pass (society=True is the soc loop at depth 1 with per-expert logits retained), not a separate expert population.",
+   "source": "README.md:83, :86; src/fabric/api.py: 'ONE FORWARD PASS, BOTH ARMS. `society=True` is the soc loop at depth 1 with per-expert logits retained -- NOT a second path.'",
+   "confidence": "verified",
+   "caveat": "The separate ExpertBank/ExpertRouter population the README's phrase evokes is DROPPED by the census: .rework/CENSUS.md records that ExpertRouter's constructor is guarded `if EXPERTS else None`, EXPERTS defaults to 0, and it is mutually exclusive with FABRIC. Do not use 'society of independent experts' in a rebuilt README."
+  },
+  {
+   "claim": "The owner's two goals, verbatim: 'the final goal is A good language production, and B continual learning capabilities (we designed modularity, and able to strap additional modalities)'.",
+   "source": ".rework/COMPACTION_SUMMARIES.md:588 (quoted user message), restated at :493 and :498",
+   "confidence": "verified",
+   "caveat": ".rework/DECISIONS.md:4 states the standing rule: 'Everything here is a DECISION or a PREFERENCE; the only DEFINITIVES remain the two goals.' Every src/*/levers.py and src/*/api.py docstring argues its package against these two goals explicitly, so the two-goal framing is genuinely load-bearing in the code, not just in the chat record."
+  },
+  {
+   "claim": "README.md is the old tree's landing page and is stale in ways that are documented inside this repository. Its headline claim \u2014 'deleting an entire expert's WEIGHTS costs -0.0009 collateral -- cleaner than deleting memory rows (0.0303) and ~25,000x cleaner than gradient-ascent unlearning (24.79)' \u2014 is retracted.",
+   "source": "README.md:90; notes/08_GLOSSARY.md:230 lists the '-0.0009 collateral' headline under README.md and garry/GARRY.md with the verdict 'The frozen garry/ milestone's number. Not reproducible at HEAD and not the project's stated goal (9d90416)'; notes/00_INDEX.md:18 calls it 'a \"-0.0009 collateral\" headline that no longer means anything'",
+   "confidence": "verified",
+   "caveat": "The retraction is multi-sourced: .rework/ISSUES.md P2-C3 states that INV-13 voids every arm comparison before 2026-08-13 (diagnostics were editing the run), INV-02 voids every domain/coherence/bits-byte conclusion before 2026-07-29 (FABRIC=0 in every run), INV-36 voids the +0.709 fabric number that justified defaulting FABRIC on, and INV-06 degrades every memory-contribution figure. Do not reprint any of these numbers."
+  },
+  {
+   "claim": "README.md directs readers to three files that do not exist at the paths it gives: STATE.md, garry/GARRY.md and CL_TESTBED.md. All three were moved under archive/ on 2026-08-27.",
+   "source": "README.md:95, :96, :128, :129; test for existence: STATE.md MISSING, garry/GARRY.md MISSING, CL_TESTBED.md MISSING; ls archive/ shows CL_TESTBED.md, STATE.md, garry/, and ARCHIVE.md documents the move",
+   "confidence": "verified",
+   "caveat": "run_full_unfrozen.sh, prompt.py, self_organize.py and cl_bench.py DO still exist at the root, so those README instructions still resolve to files \u2014 they just drive the frozen old tree, not the rebuild."
+  },
+  {
+   "claim": "The old tree has NOT been moved under archive/. self_organize.py (845 KB), memory.py, tokenizer.py, vocab.py, datastream.py and world_model.py are all still at the repository root, alongside ~40 other top-level scripts. archive/ holds a different set: garry/ (a T33 snapshot), legacy/, handoff/, docs/, STATE.md, CL_TESTBED.md and agent-transcripts/.",
+   "source": "ls -la of repo root; ls archive/; find archive -name self_organize.py -> archive/garry/self_organize.py only",
+   "confidence": "verified",
+   "caveat": "This directly contradicts the framing I was given. It matters practically: ARCHIVE.md warns that a repo-wide grep for FAB_N0 returns both archive/garry/self_organize.py (default 3) and the live one (default 2048), 'and the wrong one is in a file that looks exactly like the right one'. src/spine/compose.py records a live version of the same hazard: running with the repository root ahead of src on sys.path makes `import memory` return the root memory.py, which is why entry points must do sys.path.insert(0, <root>/src) and never PYTHONPATH=src."
+  },
+  {
+   "claim": "Each package's __init__.py is deliberately empty of code, so that `import <pkg>` does not register a LeverSet as a side effect and registration order does not depend on import order.",
+   "source": "src/*/__init__.py docstrings, e.g. src/opt/__init__.py: 'a package __init__ that imports its own submodules makes `import opt` resolve opt.levers, which would run the LeverSet declaration -- and therefore the registry registration -- as a side effect ... Registration would then depend on which name an entry point happened to touch first, which is a difference between two runs that no seed controls.'",
+   "confidence": "verified",
+   "caveat": "src/data/__init__.py has no docstring at all and is 0 bytes. src/spine/compose.py notes this file's mere existence is load-bearing: it is what stops the tracked ./data/ corpus directory from shadowing src/data/ as a namespace package."
+  },
+  {
+   "claim": "The import graph was verified rather than assumed, and its direction is: spine.lever -> spine.{registry, units}; spine.assemble -> spine.{lever,registry,wire,derive,units} plus all 13 <pkg>.levers; <pkg>.api -> spine.lever ONLY; spine.compose -> spine.assemble plus all 13 <pkg>.api. No package imports spine.compose and no <pkg>.api imports spine.assemble.",
+   "source": "src/spine/compose.py module docstring, 'IMPORT CYCLE, CHECKED RATHER THAN ASSUMED'; I independently confirmed spine.compose imports cleanly with sys.path.insert(0,'src')",
+   "confidence": "verified",
+   "caveat": "spine/ has no __init__.py, so it is a namespace package; that is deliberate and documented in the same paragraph."
+  },
+  {
+   "claim": "src/spine/assemble.py is the only file in the tree allowed to hold more than one LeverSet, and its import block of the 13 levers modules is what registers them. It uses ABSOLUTE imports (from capacity.levers import CAPLevers) because every entry point puts src/ itself on sys.path, making each package top-level.",
+   "source": "src/spine/assemble.py import block and the comment above it; PACKAGES = MappingProxyType built from the 13 classes",
+   "confidence": "verified",
+   "caveat": "assemble.py records that before those imports existed, build() DEFERRED every coupling row with a warning, so 'a table of thirteen correct names and a table of nine correct names produced identical output' \u2014 four of ten declared rows named declarations that did not exist (TRAIN.batch_w, TRAIN.grow_cap_every, TRAIN.accum, TOK.vmax). _check_endpoints now closes that at import."
+  },
+  {
+   "claim": "src/train/api.py records a live naming residue: 'the directory is src/train/, the class is RUNLevers, PREFIX = \"RUN\". Two stale `TRAIN.*` strings survive inside spine/assemble.py's NOT_WIRES prose; the live table names no TRAIN package and build(environ={}) resolves without one.'",
+   "source": "src/train/api.py module docstring, 'NAMING NOTE, VERIFIED'",
+   "confidence": "verified",
+   "caveat": "I confirmed the operative half \u2014 build(environ={}) resolves 13 configs with no TRAIN prefix \u2014 but did not separately re-grep NOT_WIRES for the two stale strings. Treat 'two' as the file's own count."
+  },
+  {
+   "claim": "The repository is mid-P4 (body-writing phase). The last eight commits are all titled 'P4: ...' and the working tree has 9 uncommitted modified files (.rework/ISSUES.md, .rework/census.json, docs/03_WIRING.md, src/data/api.py, src/data/levers.py, src/spine/gate.py, tests/_noise_floor.json, tests/test_assemble.py, tools/sync_counts.py).",
+   "source": "git log --oneline -8 -> 8cb00e3 'P4: the domain partition and the capacity valve', 2088e3d, a79d205, d8afb7b, 38a5d7e, f046b25, 5bdbbc5, a478ef5; git status --short",
+   "confidence": "verified",
+   "caveat": "Every number in this report was measured against that working tree, including the two uncommitted-file-related test failures. A README written now should describe the rebuild as in progress, not as a system that runs."
+  },
+  {
+   "claim": "docs/ contains three generated or written documents: 02_OPERATIONS.md (8 KB), 03_WIRING.md (55 KB, generated from the live coupling table by tools/render_wiring.py) and 04_CONTRACT.md (293 KB, the frozen signature set), plus docs/proposals/.",
+   "source": "ls -la docs/; tests/test_assemble.py A9 'the generated coupling document matches the live table' -> PASS",
+   "confidence": "verified",
+   "caveat": "04_CONTRACT.md is the largest single document in the repository and is the authority for signatures \u2014 but it is also where the one live prose-count failure (K13, DATA 17 vs 18) sits, so it is not self-consistent right now."
+  },
+  {
+   "claim": "The spine's own files and sizes: lever.py 370 lines, assemble.py 1506, units.py 152, wire.py 404, gate.py 106, compose.py 2661, derive.py 728, registry.py 72, rng.py 579 \u2014 6578 lines total for 9 files, none of which is a package.",
+   "source": "wc -l src/spine/*.py",
+   "confidence": "verified",
+   "caveat": "For scale: the frozen old tree's self_organize.py alone is 845 KB at the repository root. The spine is deliberately small relative to what it governs."
+  }
+ ]
+}
