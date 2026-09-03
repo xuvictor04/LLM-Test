@@ -26,6 +26,7 @@ them as arguments, which is not an import and O10 does not refuse it):
 import dataclasses
 import os
 import re
+import weakref
 
 from spine.lever import Config
 from spine import rng as _rng
@@ -114,19 +115,39 @@ def open_areas(dat: Config, *, seed: int):
     TWO STARTUP REFUSALS COME WITH THE SLASH, and neither is optional:
       * an entry that is absolute or contains ".." is REFUSED. Without it `areas` is an
         arbitrary-path read -- a corpus lever that can open /etc -- and the refusal must name the
-        entry and the resolved path (data.area_path_refused).
+        entry and the resolved path (data.area_path_refused). Scoped to dat.source == "real": a
+        synthetic entry never becomes a filesystem path, so refusing it for looking like one would be
+        refusing a label rather than a path.
       * the area LABEL is the basename ("continual/01_rust" labels as "01_rust"), and two entries
-        resolving to the same label are REFUSED with BOTH source paths printed
+        resolving to the same label are REFUSED, with both DATA_AREAS entries printed
         (data.area_label_collision). The label is what every per-area score, the holdout stream key
         below and ACROSS THE RUN BOUNDARY look up by name, and a run whose report prints one label
         for two corpora reproduces the desynchronised-DN defect this package exists to end
-        (ISSUES P3-C19).
+        (ISSUES P3-C19). THIS CHECK, AND THE BASENAME RULE ABOVE IT, RUN ONCE FOR BOTH SOURCES,
+        BEFORE THE SOURCE BRANCH (audit finding, confirmed live: they used to live only in the
+        real-corpus branch, so on source=synthetic the label space was the RAW entry text, slash
+        included, and a collision surfaced as spine.rng.RngError naming an RNG subsystem instead of
+        this CorpusError naming DATA_AREAS and the two colliding entries). Neither check touches
+        disk, so running them before the branch changes nothing about what they refuse -- it only
+        stops the synthetic arm from reaching a per-area rng_for call unchecked.
 
     On dat.source == "synthetic": builds dat.n_processes order-2 Markov generators over the five
     15-symbol alphabets (self_organize.py:1084-1099, :1314-1315), seeded from
     rng_for("data.synth", seed) so that two run seeds are two different synthetic corpora. Today
     they are not: make_proc is seeded by the PROCESS INDEX, so `DATA_SOURCE=synthetic` measures a
     between-seed spread with the data held constant (DEFECT D-A13). Holds nothing out.
+
+    DATA_AREAS NAMING FEWER ENTRIES THAN DATA_N_PROCESSES IS A STARTUP REFUSAL, not a license to
+    invent labels (audit finding, confirmed live). `DATA_SOURCE=synthetic DATA_AREAS=eng
+    DATA_N_PROCESSES=4` used to silently discard "eng" and generate four areas named p0..p3 --
+    reproduced live, `areas.names == ('p0','p1','p2','p3')`, with the operator's one requested area
+    appearing nowhere and no error, warning or refusal at any point. Every per-area score, the
+    holdout rng keys and DATA_PHASE_SCHED's by-name lookup are keyed by the DECLARED name, so this
+    was the desynchronised-label failure (ISSUES P3-C19) reached through the synthetic arm's own
+    fallback rather than through a dropped corpus. Refused instead, naming DATA_AREAS and
+    DATA_N_PROCESSES with both counts; DATA_N_PROCESSES < 1 is refused the same way rather than
+    silently clamped to 1 (the old `max(1, n)` produced a stream from zero areas with nothing in the
+    log to say so).
 
     THE HELD-OUT BLOCK IS A SEEDED RANDOM CONTIGUOUS BLOCK PER AREA, from
     rng_for("data.holdout." + key, seed) -- ONE CHILD STREAM PER AREA, KEYED BY THE AREA'S LABEL
@@ -176,7 +197,12 @@ def open_areas(dat: Config, *, seed: int):
     rejects a d_seed by name.
     RETURNS: Areas.
 
-    LEVERS READ: source, dir, areas, n_processes, corpus_cap, holdout_frac, val_cap, seg_max
+    LEVERS READ: source, dir, areas, n_processes, corpus_cap, holdout_frac, val_cap, seg_max,
+                 stream_bytes (audit finding, confirmed live: on the DEFAULT source=synthetic arm,
+                 _synthetic_areas sizes every generated corpus from DATA_STREAM_BYTES, so the shipped
+                 configuration's build sample, merge table and measured bytes_per_token all move with
+                 a lever this line used to omit; declared here rather than silently left off a second
+                 time)
     WIRES READ: none
     DID IT FIRE: data.area_open (one per area; unreachable on source=synthetic),
                  data.area_nested (one per areas entry containing "/" -- 0 is the shipped default
@@ -214,17 +240,57 @@ def open_areas(dat: Config, *, seed: int):
         raise CorpusError("DATA_AREAS is empty: there is nothing to train on.")
 
     floor = max(int(dat.seg_max) + 1, MIN_AREA_BYTES)
+
+    # THE LABEL SPACE IS COMPUTED ONCE, FOR BOTH SOURCES, BEFORE THE SOURCE BRANCH (audit finding,
+    # confirmed live). It used to be computed twice and differently: the real branch took
+    # os.path.basename(entry) here, while the synthetic branch (inside _synthetic_areas) took the
+    # RAW entry text verbatim, slash included. Reproduced: DATA_AREAS="continual/01_rust,eng" gave
+    # areas.names == ('01_rust', 'eng') on DATA_SOURCE=real and ('continual/01_rust', 'eng') on
+    # DATA_SOURCE=synthetic -- one lever value, two label spaces, with nothing declaring the split.
+    # Every per-area score, DATA_PHASE_SCHED's by-name lookup and the across-the-run-boundary
+    # comparison are keyed off this label, so a run that only changed DATA_SOURCE could silently
+    # change what its own report calls the same area. This computes the basename once and the same
+    # way for every entry, on either source.
+    labels = [os.path.basename(entry.rstrip("/")) for entry in entries]
+
+    # THE LABEL AND KEY COLLISION REFUSALS, NOW RUN REGARDLESS OF SOURCE (audit finding, confirmed
+    # live). This loop used to sit only inside the real-corpus branch below, so
+    # `DATA_SOURCE=synthetic DATA_AREAS="rustA,rusta,x,y"` reached _synthetic_areas's per-area
+    # rng_for call unchecked, and the collision surfaced as spine.rng.RngError ("stream
+    # 'data.synth.rusta' was already issued for seed 0") -- a message about generator identity,
+    # naming neither DATA_AREAS nor which two entries collided, for what this package's own rule
+    # says must be a startup refusal naming the lever. Neither check below touches disk, so hoisting
+    # them above the branch changes nothing about what they refuse, only which arm can reach an
+    # unchecked rng_for call.
+    by_label, by_key = {}, {}
+    for entry, label in zip(entries, labels):
+        if label in by_label:
+            raise CorpusError(
+                f"two DATA_AREAS entries resolve to the label {label!r}: {by_label[label]!r} "
+                f"and {entry!r}. Every per-area score and the across-the-run-boundary comparison "
+                f"look up by label, so one label over two corpora reports one corpus's loss as "
+                f"the other's.")
+        key = _holdout_key(label)
+        if key in by_key:
+            raise CorpusError(
+                f"labels {by_key[key][0]!r} and {label!r} both normalise to the rng key "
+                f"{key!r}, so they would draw their held-out (or, on DATA_SOURCE=synthetic, their "
+                f"generator) blocks from ONE stream. Rename one DATA_AREAS entry.")
+        by_label[label] = entry
+        by_key[key] = (label, entry)
+
     raw = {}                       # label -> bytes, before the held-out block is removed
     present, taken, sources = {}, {}, {}
 
     if str(dat.source) == "synthetic":
-        raw, present, taken, sources = _synthetic_areas(dat, seed, entries)
+        raw, present, taken, sources = _synthetic_areas(dat, seed, entries, labels)
     else:
-        labels = []
-        for entry in entries:
-            # THE PATH REFUSAL, FIRST, because without it `areas` is an arbitrary-path read -- a
-            # corpus lever that can open /etc -- and the message must name both the entry and what
-            # it resolved to, or an operator cannot see which of the two is wrong.
+        for entry, label in zip(entries, labels):
+            # THE PATH REFUSAL, because without it `areas` is an arbitrary-path read -- a corpus
+            # lever that can open /etc -- and the message must name both the entry and what it
+            # resolved to, or an operator cannot see which of the two is wrong. Scoped to this
+            # branch deliberately: a synthetic entry never becomes a filesystem path, so refusing it
+            # for looking like one would be refusing a label, not a path.
             if os.path.isabs(entry) or ".." in entry.split("/"):
                 raise CorpusError(
                     f"DATA_AREAS entry {entry!r} is absolute or contains '..'. Refused: an area "
@@ -235,29 +301,7 @@ def open_areas(dat: Config, *, seed: int):
             # data/continual/* and data/ood/* reachable without moving files on disk -- the material
             # goal B's add-an-area experiment exists for.
             rel = entry if "/" in entry else os.path.join("train", entry)
-            labels.append((entry, os.path.basename(entry.rstrip("/")), os.path.join(str(dat.dir), rel)))
-
-        # THE LABEL AND KEY COLLISION REFUSALS, with BOTH source paths printed. The label is what
-        # every per-area score and the across-the-boundary comparison look up by name, so one label
-        # over two corpora reproduces the desynchronised-DN defect exactly.
-        by_label, by_key = {}, {}
-        for entry, label, path in labels:
-            if label in by_label:
-                raise CorpusError(
-                    f"two DATA_AREAS entries resolve to the label {label!r}: {by_label[label]!r} "
-                    f"and {path!r}. Every per-area score and the across-the-run-boundary comparison "
-                    f"look up by label, so one label over two corpora reports one corpus's loss as "
-                    f"the other's.")
-            key = _holdout_key(label)
-            if key in by_key:
-                raise CorpusError(
-                    f"labels {by_key[key][0]!r} and {label!r} both normalise to the rng key "
-                    f"{key!r}, so they would draw their held-out blocks from ONE stream. Rename "
-                    f"one area directory.")
-            by_label[label] = path
-            by_key[key] = (label, path)
-
-        for entry, label, path in labels:
+            path = os.path.join(str(dat.dir), rel)
             body, n_present = _read_area(path, int(dat.corpus_cap))
             if not body:
                 raise CorpusError(
@@ -301,9 +345,50 @@ def open_areas(dat: Config, *, seed: int):
             # REMOVED, NOT MASKED. One manufactured seam per area is the cost, and it is a good
             # trade against the thousands seg_from manufactures -- but it is stated, not hidden.
             bodies[label] = blob[:start] + blob[start + n_hold:]
-            rng_holdout[label] = {"key": f"data.holdout.{key}", "offset": start, "size": n_hold,
-                                  "seam_at": start}
+            # SEAM_AT IS THE MANUFACTURED-DISCONTINUITY POSITION, NOT THE BLOCK OFFSET (audit
+            # finding, confirmed live). Removing a MIDDLE block leaves one seam; removing a PREFIX
+            # (start == 0) or a SUFFIX (start + n_hold == len(blob)) leaves none, because there is no
+            # text on the missing side to be discontinuous with. The old line recorded `start`
+            # unconditionally, so a block at offset 0 read seam_at: 0 -- a position -- in exactly the
+            # two cases the docstring's own DID IT FIRE contract says must read UNREACHABLE instead
+            # (reproduced by forcing start=0 via a patched Rng.randint: rng_holdout['eng']['seam_at']
+            # came back 0, not None, on a run with no interior seam at all).
+            interior_seam = 0 < start and start + n_hold < len(blob)
+            rng_holdout[label] = {
+                "key": f"data.holdout.{key}", "offset": start, "size": n_hold,
+                "seam_at": start if interior_seam else None,
+                # THE ONE INSTRUMENT FOR NEAR-DUPLICATE CONTAMINATION (audit finding, confirmed live:
+                # declared in the DID IT FIRE list, never computed anywhere -- `grep -n
+                # holdout_overlap src/data/api.py` returned only the docstring line itself). See
+                # _holdout_overlap for what it measures and why the split rule alone cannot answer
+                # this question (Lee et al. arXiv:2107.06499).
+                "overlap": _holdout_overlap(holdout[label], bodies[label]),
+            }
+            if not interior_seam:
+                rng_holdout[label]["why"] = (
+                    "block landed at the body's own leading edge (offset 0): no text precedes it, "
+                    "so removing it manufactures no discontinuity" if start == 0 else
+                    "block landed at the body's own tail: no text follows it, so removing it "
+                    "manufactures no discontinuity")
         else:
+            if str(dat.source) != "synthetic":
+                # A REAL AREA'S HOLDOUT ROUNDING TO ZERO IS A REFUSAL, NOT A SILENT SKIP (audit
+                # finding, confirmed live). The `else` branch below is written for exactly one
+                # reason -- "source=synthetic holds nothing out" -- and used to run unconditionally,
+                # so a real corpus with DATA_VAL_CAP=0 (or a DATA_HOLDOUT_FRAC too small to clear one
+                # byte) got that SAME false reason string stamped on a real disk area: reproduced,
+                # DATA_SOURCE=real DATA_AREAS=eng,py DATA_VAL_CAP=0 came back with
+                # rng_holdout['eng']['why'] == 'source=synthetic holds nothing out' on real text, no
+                # refusal, no error. Goal A's one generalisation number and every
+                # across-the-run-boundary comparison for this area would then have nothing held out
+                # to be computed against, silently. Refused instead, naming both levers and the
+                # arithmetic that zeroed the block.
+                raise CorpusError(
+                    f"area {label!r} computed a 0-byte held-out block: min(int({len(blob)} * "
+                    f"{float(dat.holdout_frac)}), {int(dat.val_cap)}) == 0 from DATA_HOLDOUT_FRAC="
+                    f"{dat.holdout_frac} and DATA_VAL_CAP={int(dat.val_cap)} against a "
+                    f"{len(blob)}-byte body. Refused rather than trained on with no held-out block "
+                    f"at all: raise DATA_HOLDOUT_FRAC or DATA_VAL_CAP.")
             holdout[label] = b""
             bodies[label] = blob
             rng_holdout[label] = {"key": None, "offset": 0, "size": 0, "seam_at": None,
@@ -708,9 +793,15 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     # epochs > 1 with resampling off, because a continual-learning result taken that way is a
     # memorisation result.
     if int(epoch) > 0 and not bool(dat.resample):
-        cached = _REPLAY.get(id(areas))
-        if cached is not None:
-            return dataclasses.replace(cached, epoch=int(epoch))
+        # ID-KEYED, SO THE HIT MUST BE CONFIRMED AGAINST A LIVE REFERENCE, NOT JUST THE ADDRESS.
+        # CPython reuses a freed object's id, and a plain `_REPLAY.get(id(areas))` cannot tell this
+        # run's Areas from a PRIOR run's Areas that happened to land on the same address -- measured:
+        # freeing one Areas and building a fresh one reused the id within single-digit allocations in
+        # this process. `ref() is areas` is the check that turns "same address" back into "same
+        # object" before the stale run's bytes could be handed to this one.
+        entry = _REPLAY.get(id(areas))
+        if entry is not None and entry[0]() is areas:
+            return dataclasses.replace(entry[1], epoch=int(epoch))
 
     names = list(areas.names)
     seg_min, seg_max = int(dat.seg_min), int(dat.seg_max)
@@ -727,7 +818,25 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     # differing in one unrelated knob still read the same text at epoch 2, and a resume at epoch 5
     # reads what an uninterrupted run read at epoch 5. The old form read SEED out of os.environ
     # from INSIDE the stream builder, which is the L2 violation this replaces.
-    stream = _rng.rng_for(f"data.stream.e{int(epoch)}", seed, again=True)
+    #
+    # NO again=True HERE, AND THAT WAS THE BUG (audit finding, confirmed live). This call used to pass
+    # again=True unconditionally, with no rebuild in sight to justify it -- "data.stream" is not in
+    # compose.RNG_SUBSYSTEMS, nothing pre-mints "data.stream.e<n>", so there was no pre-existing
+    # registration to work around, only the ordinary rng.py guard against two call sites sharing one
+    # sequence. Reproduced: calling draw_stream(epoch=0, seed=0) twice in one process with again=True
+    # returned two Rng objects whose .bytes came back byte-IDENTICAL, silently -- no RngError, no sign
+    # anywhere that the "second" epoch-0 draw was a replay of the first rather than an independent one.
+    # This function's own docstring says it is "Called once per epoch by the composition root,
+    # UNCONDITIONALLY", so under correct usage the guard would never have tripped anyway; what
+    # again=True bought was permission for a caller BUG (a retry after a downstream exception, a
+    # duplicate call in a loop) to pass silently instead of raising the RngError this project relies
+    # on everywhere else to catch exactly this two-call-sites-one-sequence shape (three prior instances
+    # -- lm.init, tok.dropout.mint, data.synth.<label> -- were already repaired with a child stream;
+    # this was the site that still had the guard itself switched off rather than a genuine rebuild
+    # path). If a real rebuild ever needs it (a resume that redraws the epoch it was interrupted in,
+    # inside the SAME process rather than a fresh one), pass again=True only on that path and say so
+    # at the call site -- not unconditionally on every draw.
+    stream = _rng.rng_for(f"data.stream.e{int(epoch)}", seed)
 
     out = bytearray()
     labels, splice, changes = [], [], []
@@ -827,13 +936,29 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                 # offsets into a stream that no longer exists (ISSUES P1-M83).
                 stream_id=f"s{seed}.e{int(epoch)}.{len(out)}")
     if not bool(dat.resample):
-        _REPLAY[id(areas)] = st
+        # THE WEAKREF'S CALLBACK IS THE EVICTION, not a periodic sweep: when this Areas is collected,
+        # the callback fires and pops exactly this id() entry, which is what lets the cached Stream
+        # (bytes plus a per-byte labels list -- the largest object this package produces) be freed
+        # instead of retained in _REPLAY for the rest of the process, and what stops a LATER Areas
+        # landing on the freed id from ever seeing this entry (the `is areas` check above would fail
+        # anyway, but a dead entry with no path back to `st` also means `st` itself is reclaimable).
+        key = id(areas)
+        _REPLAY[key] = (weakref.ref(areas, lambda _ref, key=key: _REPLAY.pop(key, None)), st)
     return st
 
 
-# The byte-identical replay at resample=False. Keyed by the Areas object rather than by a module
-# global holding one stream, so two Areas in one process (the isolation sweep runs many 200-step
-# runs per interpreter) cannot hand each other's text back.
+# The byte-identical replay at resample=False. Keyed by id(areas) -- Areas itself cannot be the dict
+# KEY because it carries dict fields (bodies, holdout, ...) and is therefore unhashable -- but the
+# VALUE is (weakref.ref(areas, evict), Stream), and the weakref's callback pops its own id() entry
+# the moment that Areas is actually collected. THIS WAS A LIVE COLLISION, NOT A THEORETICAL ONE: a
+# small repro (free one Areas, build a fresh one) landed the new object on the freed id within single
+# digits of allocations in this same interpreter, and a plain id-keyed dict has no way to tell "the
+# same run's Areas, still alive" from "a different run's Areas that happens to share an address" --
+# exactly the isolation-sweep scenario this comment used to warn about while doing nothing to prevent
+# it. Storing the weakref alongside the Stream and checking `ref() is areas` before trusting a hit
+# closes that hole, and the eviction callback is what stops every resample=False Stream (bytes plus a
+# per-byte labels list) from being retained for the life of the process: the entry -- and the big
+# object it points to -- is freed the moment its Areas is, instead of sitting in this dict forever.
 _REPLAY = {}
 
 

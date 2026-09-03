@@ -487,6 +487,15 @@ def decode(lm: Config, model, h, *, live_vocab, retired_ids):
     retired and sailed straight through a suffix-only mask, :3982-3987). The mask is cached on
     (live_vocab, len(retired_ids)); both only ever grow.
 
+    `live_vocab` IS `Vocabulary.size()` AND NOT `live_size` -- the positional BOUNDARY where
+    never-minted rows begin, not a count of the rows that are live. The two differ by exactly the
+    retired count, and since retired ids sit BELOW the boundary (the paragraph above), passing
+    `live_size` moves the boundary down and masks that many LIVE rows to -inf. Written into this
+    docstring on 2026-09-03 and not left in a comment in the body, because the contract is the
+    docstring: two independently worded rows in `spine/compose.py` had both named `live_size`, and
+    the refusal being invisible to a check is what let them. tests/test_contract.py's K14 reads this
+    sentence now.
+
     LEVERS READ: mask_dead_rows, vocab_slots, compose -- NOT `dropout`. The readout dropout is the
                  nn.Dropout MODULE build_model constructed from geom; this function applies it, it
                  does not re-read the probability. A second read here would be a second declaration
