@@ -40,7 +40,46 @@ RECORD TYPES RETURNED (P4 defines them):
   Decision  checks, pinned_experts/vocab, held_experts/vocab, improving, lifted, block_reason
   Caps      experts, vocab, and headroom(n) -> max(0, cap - n)
 """
+import dataclasses
+
 from spine.lever import Config
+from spine import units as U
+from spine.gate import Gate
+
+
+@dataclasses.dataclass
+class Valve:
+    """The two soft caps, the two pin clocks, and where each cap came from.
+
+    `origin` IS NOT DECORATION. A cap can arrive three ways -- the operator asked for it, a
+    checkpoint carried a lifted one, or the sentinel resolved to the hard ceiling -- and the whole
+    point of the restore rule is that those are different. The old tree rebuilt `_cap_fab` from the
+    environment on every resume, so a run that spent hours lifting handed its successor the starting
+    cap back; the first repair took the max instead, which made an explicit CAP_FAB_START=8 lose to
+    a checkpoint that had reached 48 and left the startup refusal unreachable on every checkpoint
+    written from then on. Recording where the number came from is what makes both of those visible.
+
+    THE PIN CLOCKS ACCUMULATE WINDOWS, not flushes and not Steps. That is repair (a) of the valve
+    port: units.py reserves Steps for the LR horizon, and the clock accumulates deltas of `step`,
+    which counts windows. So the clock and CAP_PIN_WINDOWS are the same kind and meet without a
+    conversion -- and applying the OTHER repair as well would fire the valve 16x too early at
+    BATCH_W=16, which is harder to see than the original fault because a valve that fires looks
+    like a valve that works.
+    """
+    cap_experts: int
+    cap_vocab: int
+    pin_experts: object = U.Windows(0)
+    pin_vocab: object = U.Windows(0)
+    hi_experts: int = 0
+    hi_vocab: int = 0
+    hi_pin_experts: object = U.Windows(0)
+    hi_pin_vocab: object = U.Windows(0)
+    best_improving: float = 0.0
+    stall_checks: int = 0
+    last_window: int = -1
+    origin: tuple = ()
+    counters: dict = dataclasses.field(default_factory=dict)
+    gates: tuple = ()
 
 
 def new_valve(cap: Config, *, restored=None):
@@ -80,10 +119,69 @@ def new_valve(cap: Config, *, restored=None):
                  is visible
     """
     cap = cap.owned_by("CAP")
-    _ = (cap.d_expert_slots, cap.d_vocab_slots, cap.d_mask_dead_rows)   # WIRES READ HERE
-    raise NotImplementedError(
-        "CAP.new_valve: P4 (capacity) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CAP.")
+    hard_experts = int(cap.d_expert_slots)      # WIRES READ HERE -- the two hard ceilings
+    hard_vocab = int(cap.d_vocab_slots)
+    mask_dead = bool(cap.d_mask_dead_rows)
+    targets = str(cap.targets)
+
+    def _resolve(given, asked, hard, what):
+        """The sentinel, the operator, and the checkpoint, in that order of precedence."""
+        if targets == "off":
+            # "off" MEANS THE STARTING CAPS ARE NOT APPLIED EITHER, and this is the note the port
+            # must not lose. GROW_CAP_FAB read as "the expert valve is off" while the starting cap
+            # it nominally governed was read UNGATED and fed the growth clamp anyway -- an
+            # off-switch that does not switch the mechanism off. One choices-valued lever makes
+            # "off" mean one thing at both targets, with no second boolean to contradict it.
+            return hard, "off (valve disabled; the cap is the hard ceiling)"
+        if given:
+            # AN EXPLICIT REQUEST WINS OVER A RESTORED CAP. Taking the max instead made
+            # CAP_FAB_START=8 lose to a checkpoint that had reached 48, which left the startup
+            # refusal unreachable on every checkpoint written from then on. "Did the operator ask"
+            # is answered by Config.given(), never by reading the environment.
+            return int(asked), f"operator ({what}={asked})"
+        if restored is not None and restored.get(what) is not None:
+            # THE LIFTED CAP IS EARNED STATE, NOT A KNOB. Rebuilding it from the environment on
+            # every resume handed a run that had spent hours lifting its starting cap back.
+            return int(restored[what]), f"checkpoint (lifted to {int(restored[what])})"
+        # THE SENTINEL. 0 means START AT THE HARD CEILING -- no room to earn -- and it must be a
+        # sentinel rather than a literal because lever.py refuses a default computed from another
+        # lever, so the number it stands for can only arrive as the wire.
+        return hard, f"sentinel 0 -> hard ceiling {hard}"
+
+    # Config.given() returns the WHOLE map of what the environment actually supplied; membership in
+    # it is the answer to "did the operator ask", and it is the only correct source -- reading
+    # os.environ here would be the L2 violation the whole spine removes.
+    asked = cap.given()
+    ce, oe = _resolve("fab_start" in asked, cap.fab_start, hard_experts, "fab_start")
+    cv, ov = _resolve("vocab_start" in asked, cap.vocab_start, hard_vocab, "vocab_start")
+
+    valve = Valve(cap_experts=ce, cap_vocab=cv, origin=(oe, ov))
+    valve.counters = {
+        "cap.targets": targets,
+        "cap.cap_experts": ce, "cap.cap_vocab": cv,
+        "cap.hard_experts": hard_experts, "cap.hard_vocab": hard_vocab,
+        "cap.origin_experts": oe, "cap.origin_vocab": ov,
+    }
+    valve.gates = (
+        Gate("cap.valve", targets != "off", targets, "off")
+        if targets != "off" else
+        Gate("cap.valve", False, targets, "off", reachable=False,
+             reason="CAP_TARGETS=off: both caps sit at their hard ceilings and no lift can happen. "
+                    "Reported unreachable rather than as 0 lifts, which would read as a valve that "
+                    "ran and never fired -- the exact confusion this mechanism's own history is."),
+        # THE HONESTY PRECONDITION ON THE VOCABULARY ARM, and it is LM's flag, not a lever here.
+        # Lifting the vocabulary while dead rows are unmasked reserves ids that sit in the softmax
+        # denominator indexing nothing -- 6144 of them at 8192 reserved against 2048 minted -- so
+        # the run measures the reservation instead of the mechanism.
+        Gate("cap.vocab_arm_honest", mask_dead, mask_dead, True)
+        if mask_dead or targets == "off" else
+        Gate("cap.vocab_arm_honest", False, False, True, reachable=False,
+             reason="LM_MASK_DEAD_ROWS=0: the vocabulary arm can lift, but every row it reserves "
+                    "sits unmasked in the softmax denominator, so what the run would measure is "
+                    "the reservation and not the valve. Declared dishonest rather than lifted "
+                    "silently."),
+    )
+    return valve
 
 
 def observe(cap: Config, valve, *, elapsed_windows, live_experts, live_vocab, improving,

@@ -32,8 +32,66 @@ RECORD TYPES RETURNED (P4 defines them):
                packages under two vocabularies is why "spell it as the consumer does" is not a
                function and cannot be a rule.
 """
+import torch
+
 from spine.lever import Config
 from spine import units as U
+
+
+class Partition:
+    """The live domains and their books. Sparse by id, because ids are not indices.
+
+    KEYED BY ID AND NOT BY POSITION. A domain's id is what every per-area score, the memory source
+    census and the across-the-run-boundary comparison look it up by; a positional array would make
+    those lookups shift the moment a domain is culled, which is the desynchronisation this project
+    has already paid for once at the corpus level.
+
+    THE RESERVOIR IS SAVED STATE, NOT A CACHE. The old blob reset `wins = {i: [] for i in cent}` on
+    every restore with the note "sample windows are stream-local". They are not: the reservoir is
+    the UNCENSORED SAMPLE the measured radius is estimated from, so discarding it puts every
+    restored domain back on the pooled fallback radius until its next rekey -- on the resume that
+    IS the continual-learning experiment.
+    """
+
+    __slots__ = ("cent", "reservoir", "size", "act", "born", "last", "visits", "bornb", "rad",
+                 "tokc", "comp", "next_id", "merged", "cur", "run", "run_sig", "pend", "sh",
+                 "nb", "radp", "comp_glob", "collapsed_at", "adj_hist", "slots", "sig_dim",
+                 "vocab_slots", "counters", "rng")
+
+    def __init__(self, *, sig_dim, vocab_slots, slots, device, rng):
+        self.sig_dim, self.vocab_slots, self.slots = sig_dim, vocab_slots, slots
+        self.cent = {}            # id -> (sig_dim,) tensor
+        self.reservoir = {}       # id -> [window samples]  -- SAVED STATE, see the class docstring
+        self.size = {}
+        self.act = {}
+        self.born = {}            # id -> the window this domain was created at
+        self.last = {}
+        self.visits = {}
+        self.bornb = {}           # id -> the BOUNDARY clock at creation; see open_partition
+        self.rad = {}
+        self.tokc = {}            # id -> token histogram, the prior
+        self.comp = {}
+        self.next_id = 0
+        self.merged = {}
+        self.cur = -1
+        self.run = 0
+        self.run_sig = None
+        self.pend = None
+        self.sh = 0
+        self.nb = 0               # THE BOUNDARY CLOCK -- must not restart across a resume
+        self.radp = 0.0
+        self.comp_glob = 0.0
+        self.collapsed_at = None
+        self.adj_hist = []        # the adjacent-distance history behind the relative shift test
+        self.counters = {}
+        self.rng = rng
+
+    # `device` IS DELIBERATELY NOT A FIELD. Nothing in this package allocates after construction
+    # except from a centroid handed in by SIG, which already carries its own device -- storing one
+    # here would be a second place a device can come from, and the two would be free to disagree.
+
+    def _live(self):
+        return sorted(self.cent)
 
 
 def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=None):
@@ -64,10 +122,61 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
     DID IT FIRE: part.n_opened, part.n_restored_domains
     """
     dom = dom.owned_by("DOM")
-    _ = dom.d_expert_slots       # WIRE READ HERE -- the domain id namespace bound
-    raise NotImplementedError(
-        "DOM.open_partition: P4 (domains) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DOM.")
+    slots = int(dom.d_expert_slots)   # WIRE READ HERE -- the domain id namespace bound
+    part = Partition(sig_dim=int(sig_dim), vocab_slots=int(vocab_slots), slots=slots,
+                     device=device, rng=rng)
+
+    n_restored = 0
+    if restored is not None:
+        for key, blob in (restored.get("domains") or {}).items():
+            i = int(key)
+            part.cent[i] = torch.as_tensor(blob["cent"], dtype=torch.float32, device=device)
+            # ALL FOUR OF THE OMITTED FIELDS COME BACK. The old blob dropped the reservoir, comp and
+            # comp_glob, tokc, and the adjacent-distance history: competence protection protected
+            # nothing after a resume, the prior histogram restarted empty while still being paid for
+            # every window, and the relative shift test had no history to be relative to.
+            part.reservoir[i] = [torch.as_tensor(x, dtype=torch.float32, device=device)
+                                 for x in (blob.get("reservoir") or [])]
+            part.size[i] = int(blob.get("size", 0))
+            part.act[i] = float(blob.get("act", 0.0))
+            part.born[i] = int(blob.get("born", 0))
+            part.last[i] = int(blob.get("last", 0))
+            part.visits[i] = int(blob.get("visits", 0))
+            part.rad[i] = float(blob.get("rad", 0.0))
+            part.tokc[i] = dict(blob.get("tokc") or {})
+            part.comp[i] = float(blob.get("comp", 0.0))
+            n_restored += 1
+        part.next_id = int(restored.get("next_id", (max(part.cent) + 1) if part.cent else 0))
+        part.merged = {int(k): int(v) for k, v in (restored.get("merged") or {}).items()}
+        part.radp = float(restored.get("radp", 0.0))
+        part.comp_glob = float(restored.get("comp_glob", 0.0))
+        part.adj_hist = list(restored.get("adj_hist") or [])
+        part.sh = int(restored.get("sh", 0))
+        # THE BOUNDARY CLOCK MUST NOT RESTART, and this is the line the whole paragraph in the
+        # docstring is about. `grace` re-arming above and `nb` restarting here are the SAME WORD
+        # with opposite consequences: re-arming grace protects a restored domain, restarting nb
+        # makes every restored domain look as though it has seen no boundaries, so the fold
+        # swallows any that has not happened to be re-entered twice since the resume.
+        part.nb = int(restored.get("nb", 0))
+        # THE GRACE CLOCK RE-ARMS, AND IT MUST BE STAMPED AFTER nb IS RESTORED. Written above the
+        # line that restores nb it read 0 against a restored boundary clock of 17, so every restored
+        # domain entered already seventeen boundaries old -- grace EXPIRED rather than re-armed,
+        # which is the opposite of the conservative direction. Found by printing both numbers.
+        for i in part.cent:
+            part.bornb[i] = int(part.nb)
+        # `cur` is NOT restored. The current domain is a property of the stream position, and the
+        # resume starts a new stream; carrying it would attribute the first window of the resumed
+        # run to whatever the parent was in the middle of.
+        part.cur = -1
+        part.run, part.run_sig, part.pend = 0, None, None
+
+    part.counters = {
+        "part.n_opened": len(part.cent),
+        "part.n_restored_domains": n_restored,
+        "part.id_namespace": slots,
+        "part.boundary_clock": part.nb,
+    }
+    return part
 
 
 def observe(dom: Config, part, *, signature, sample_window, tokens, now):
