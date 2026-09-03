@@ -128,7 +128,10 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
     order (M50). Restore rebuilds the census EXACTLY -- a resume left it at zeros and the floor
     protected nothing for the rest of the run while the banner printed "src floor 0.5" and
     selftest.sh asserted that line was present (C16) -- and carries nsrc_max forward from the blob
-    rather than re-deriving it from the restored counts (M53/M67).
+    rather than re-deriving it from the restored counts (M53/M67). `recon`/`selfcon` per entry and
+    `gate_theta` store-wide are ALSO restored (M66, ISSUES:537) -- the other two of the four
+    checkpointed additions docs/04_CONTRACT.md's MEM section names, alongside `prob` and
+    `nsrc_max` above; before this fix both silently reset to zero at every resume boundary.
 
     `lm_kind` is stored ONLY so the key_depth Gate can print its own arithmetic; nothing else reads
     it. `rng` is one spine.rng.Rng for the subsystem "memory"; every stochastic choice draws from
@@ -220,6 +223,15 @@ def _restore_by_block(store, blob):
         store.use[free] = int(r.get("use", 0))
         store.last[free] = int(r.get("last", 0))
         store.born[free] = int(r.get("born", 0))
+        # `recon` AND `selfcon` ARE TWO OF THE FOUR CHECKPOINTED ADDITIONS docs/04_CONTRACT.md
+        # names as fixed (M66 for recon) -- but the field-by-field restore above stopped at `born`
+        # and never read either back from the row, so every resume reset both to Store.__init__'s
+        # zero default regardless of what judge() had measured before the checkpoint. selfcon==0.0
+        # (rather than judge's -1 "unchecked" sentinel) after a restore is itself the tell: a
+        # freshly-opened store and a resumed one were indistinguishable to the wrongness detector,
+        # which is exactly the M66/H32 shape this restore exists to close.
+        store.recon[free] = float(r.get("recon", 0.0))
+        store.selfcon[free] = float(r.get("selfcon", 0.0))
         restored += 1
         # THE CENSUS IS REBUILT EXACTLY. A resume left it at zeros and the source floor protected
         # nothing for the rest of the run while the banner still printed "src floor 0.5" and a
@@ -243,6 +255,15 @@ def _restore_by_block(store, blob):
     # re-deriving it forgets every source that was evicted before the save.
     store.nsrc_max = int(blob.get("nsrc_max", int(store.nsrc.max()) if store.nsrc.numel() else 0))
     store.live_src = int((store.nsrc > 0).sum())
+    # gate_theta IS THE FOURTH OF THE FOUR CHECKPOINTED ADDITIONS docs/04_CONTRACT.md's MEM section
+    # names as fixed and, until this fix, was the one never actually wired: Store.__init__'s literal
+    # 0.0 default survived every restore untouched. gate_theta is the adaptive write-admission floor
+    # `write` evolves IN WINDOW ORDER (open_store's own docstring); resuming at 0.0 instead of the
+    # threshold the run stopped with is a resumed run writing against a different admission bar than
+    # the one measured up to the checkpoint, which is exactly the boundary goal B's forgetting
+    # numbers are measured across. Restored from the BLOB TOP LEVEL, not per-row: it is a store-wide
+    # scalar, alongside tick/n_written/nsrc_max above.
+    store.gate_theta = float(blob.get("gate_theta", 0.0))
     return restored, refused
 
 
