@@ -19,7 +19,8 @@ reading L13 gives it: not dead weight, two differently-trained decoders.
 
 RECORD TYPES RETURNED (P4 defines them):
   LMGeometry   arch, width, layers (RESOLVED, never the sentinel), heads, ctx, pos_max,
-               vocab_slots, compose, dropout, max_token_bytes, param_estimate
+               vocab_slots, compose, dropout, max_token_bytes, param_estimate,
+               layers_from_sentinel
   MintReport   rows_initialised, arm_used, sig_rows_written, composer_rows, residual_ratio
   LoadReport   widened, refused, reason
 """
@@ -33,6 +34,31 @@ from spine.lever import Config
 from spine import rng as _rng
 from spine.gate import NotBuilt
 from spine.init import is_scale as _is_scale
+
+
+# PROCESS-LIFETIME DID-IT-FIRE TALLY. `counters()` below is documented to return {name: int} for
+# every gate this package declares, and it is STILL a P4 stub (raises NotImplementedError, and it
+# is not one of the eleven items this pass was asked to repair) -- so until that body exists there
+# is nowhere else for "N calls" or "N rows masked" to accumulate. This dict is what it will read.
+# A plain dict rather than collections.Counter so `.get(name, 0)` stays the one lookup: a name
+# absent from it is "never touched this process" and a name present with 0 is "touched, fired
+# zero times" -- the same armed-vs-untouched distinction spine/rng.py's Rng.draws makes for random
+# streams, kept here for the same reason (G4's three states start at whether a mechanism was even
+# reached).
+_COUNTS = {}
+
+
+def _bump(name, n=1):
+    _COUNTS[name] = _COUNTS.get(name, 0) + n
+
+
+def _set(name, value):
+    # A GAUGE, NOT A TALLY -- for a quantity like "how many rows are dead right now", summing
+    # across calls (`_bump`) would make lm.mask.rows_masked grow with every decode() call instead
+    # of reporting the vocabulary's actual dead fraction, which only grows with the vocabulary
+    # itself. The LATEST value is the informative one; counters() reads this the same dict as
+    # `_bump`'s, the two just disagree about whether repetition should accumulate.
+    _COUNTS[name] = value
 
 
 class GeometryError(ValueError):
@@ -56,6 +82,16 @@ class LMGeometry:
     _geometry_manifest raises if it is built before this record exists, for the same reason: a
     manifest recording 0 makes a run at LM_LAYERS=0 and one at LM_LAYERS=4 the same model under two
     values, which is a spurious EXACT mismatch refusing a resume that would have worked.
+
+    `layers_from_sentinel` IS A SEPARATE FACT FROM `layers`. Before this field existed, a run at
+    LM_ARCH=transformer LM_LAYERS=0 and one at LM_LAYERS=4 produced an IDENTICAL LMGeometry (both
+    resolve to layers=4), so nothing in the returned record -- and nothing in the report built from
+    it -- could say which of the two numbers the operator actually typed. That is exactly the
+    confusion the docstring above cites for `layers` itself, one level up: not "what depth did the
+    run use" (answered) but "did the operator ask for that depth by name, or get it by omission".
+    resolve()'s own DID IT FIRE line already promised `lm.resolve.layers_from_sentinel`; this field
+    is what lets that promise be kept from a value carried on the record, not a global counted only
+    by whoever happened to call resolve() last.
     """
     arch: str
     width: int
@@ -68,6 +104,7 @@ class LMGeometry:
     dropout: float
     max_token_bytes: int
     param_estimate: int
+    layers_from_sentinel: bool
 
 
 # The depth each arm means by the 0 sentinel. NOT in spine.derive, and that is checked rather than
@@ -108,6 +145,20 @@ class _LM(nn.Module):
         if not geom.compose:
             self.emb = nn.Embedding(v, w)
             self.head = nn.Linear(w, v)
+        else:
+            # THE COMPOSE ARM'S OUTPUT BIAS. decode()'s docstring promises the composed readout is
+            # `h @ table.t() + bias`, and until this line nothing built a `bias` for that arm to
+            # add: LM_COMPOSE=1 would have produced a strictly bias-free softmax the moment
+            # composed_table() became buildable (it still raises NotBuilt -- the ByteComposer is a
+            # separate, still-stubbed TOK-side piece, so this arm cannot be exercised end-to-end
+            # yet), while the banner and the checkpoint went on describing a decoder with a
+            # per-row bias -- every logit and every reported bits/byte would have shifted relative
+            # to the non-compose arm the numbers are compared against, silently. NOT part of the
+            # tied table (that is exactly (vocab_slots, width); this is a second, (vocab_slots,)
+            # parameter beside it) and NOT the ~6.3M dead parameters ISSUES P1-L13 counts -- L13 is
+            # emb/head existing AND UNUSED, and this exists only under compose and is added on
+            # every compose decode.
+            self.compose_bias = nn.Parameter(torch.zeros(v))
         if geom.arch == "transformer":
             layer = nn.TransformerEncoderLayer(
                 d_model=w, nhead=geom.heads, dim_feedforward=4 * w,
@@ -119,6 +170,13 @@ class _LM(nn.Module):
         else:
             self.body = nn.GRU(w, w, num_layers=geom.layers, batch_first=True,
                                dropout=geom.dropout if geom.layers > 1 else 0.0)
+        # decode()'s dead-row mask cache, keyed on (live_vocab, len(retired_ids)) -- see decode()'s
+        # docstring. A plain python attribute (a tuple containing a tensor, not a bare Parameter or
+        # Module), so nn.Module.__setattr__ does not register it as a parameter or buffer: it must
+        # not appear in state_dict() or move with a bare .to(device) the way a real buffer would,
+        # because decode() re-checks the tensor's device against `logits.device` on every lookup
+        # and rebuilds on a mismatch rather than trusting a stale cross-device cache.
+        self._dead_mask_cache = None
 
     def token_table(self):
         """The (vocab_slots, width) table, whichever arm built it. Under compose it is the
@@ -166,6 +224,7 @@ def resolve(lm: Config):
                  the run actually used)
     """
     lm = lm.owned_by("LM")
+    _bump("lm.resolve.calls")
     pos_max, max_token_bytes = int(lm.d_pos_max), int(lm.d_max_token_bytes)
 
     arch, width, heads = str(lm.arch), int(lm.width), int(lm.heads)
@@ -206,6 +265,14 @@ def resolve(lm: Config):
     if bad:
         raise GeometryError("LM.resolve refuses this geometry:\n  - " + "\n  - ".join(bad))
 
+    # RECORDED ON THE GEOMETRY, NOT JUST COUNTED: LM_LAYERS=0 and LM_LAYERS=4 on the transformer
+    # arm both resolve `layers` to 4, so the resolved field alone cannot say which one the operator
+    # typed -- and this is the exact confusion `layers` itself was made RESOLVED to end, one level
+    # up. Measured before this field existed: two LMGeometry values built from those two lever
+    # settings compared dataclasses.asdict()-equal on every field.
+    layers_from_sentinel = declared_layers == 0
+    if layers_from_sentinel:
+        _bump("lm.resolve.layers_from_sentinel")
     layers = _SENTINEL_DEPTH.get(arch, 1) if declared_layers == 0 else declared_layers
 
     # ASSERTED SO IT STAYS UNREACHABLE. d_pos_max is today the local wire computed from ctx, so this
@@ -221,7 +288,8 @@ def resolve(lm: Config):
         arch=arch, width=width, layers=layers, heads=heads, ctx=ctx, pos_max=pos_max,
         vocab_slots=vocab_slots, compose=compose, dropout=dropout,
         max_token_bytes=max_token_bytes,
-        param_estimate=_param_estimate(arch, width, layers, ctx, vocab_slots, compose))
+        param_estimate=_param_estimate(arch, width, layers, ctx, vocab_slots, compose),
+        layers_from_sentinel=layers_from_sentinel)
 
 
 def _param_estimate(arch, width, layers, ctx, vocab_slots, compose):
@@ -284,8 +352,20 @@ def build_model(lm: Config, geom, *, device, seed):
     sets dropout > 0, and at dropout > 0 on either arm FAB's routing input and MEM's keys change.
     AT THE 0.0 DEFAULT NOTHING MOVES AT ALL, on either arm.
 
-    Seeding: calls spine.rng.rng_for("lm", seed) and initialises every tensor from that one stream,
-    so LM's initialisation cannot be reordered by another package's draws.
+    Seeding: calls spine.rng.rng_for("lm.init", seed) -- A CHILD OF THE "lm" STREAM RUN.streams
+    MINTS AT STEP 0, NOT "lm" ITSELF -- and initialises every tensor from that one stream, so LM's
+    initialisation cannot be reordered by another package's draws. THIS SENTENCE SAID "lm" UNTIL
+    2026-09-03 and the code beneath it had already stopped touching that name: RUN.streams mints
+    "lm" into spine.rng's register unconditionally at step 0 (compose.RNG_SUBSYSTEMS), so asking for
+    it again here -- even under `again=True` -- would produce a second live Rng replaying the
+    identical sequence while the object the root holds kept reporting zero draws forever, which is
+    the P1-H55 / P1-H56 collision shape. The repair drew from a child stream instead and left "lm"
+    declared and untouched by design; what it did not do was update this paragraph or the DID IT
+    FIRE row below to say so, so a reader following THIS docstring to check "did build_model seed
+    itself" would grep rng.issued() for "lm" and find it present in every process regardless of
+    whether build_model ever ran -- RUN.streams put it there either way -- and read that as proof
+    of firing. It is not: "lm" reporting zero draws forever is the CORRECT state, and "lm.init" is
+    where a reader must look instead.
 
     RECEIVES: device <- RUN.device, seed <- RUN.seed, geom <- resolve().
     RETURNS: nn.Module.
@@ -297,7 +377,9 @@ def build_model(lm: Config, geom, *, device, seed):
     DID IT FIRE: lm.build.arm_gru / lm.build.arm_transformer (exactly one is 1),
                  lm.build.compose_on, lm.build.heads_used (0 on gru -- the armed-but-inert
                  statement), lm.build.emb_head_allocated (must be 0 under compose -- kills L13),
-                 rng.issued()["lm"]
+                 rng.issued()["lm.init"] (NOT "lm" -- "lm" is expected to report ZERO draws
+                 forever; that is the declared parent staying declared, not a mechanism failing to
+                 fire)
     """
     lm = lm.owned_by("LM")
     # A CHILD OF THE DECLARED PARENT, NOT A SECOND "lm". RUN.streams mints "lm" into the register
@@ -422,13 +504,20 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
     PROBE=0 split at the second logged step (6.1199 vs 6.1125) and never rejoined. A timing probe
     decided the run.
 
-    LEVERS READ: none directly
+    LEVERS READ: ctx -- ONLY on the pos-overflow refusal path, to print LM_CTX beside the actual
+                 window length in the raised message. Every other line in this function reads
+                 nothing off `lm` directly: the shapes and arm come off `model`/`model.geom`, which
+                 is why WIRES READ carries d_pos_max instead of a second read of `ctx` for the
+                 boundary check itself -- resolve() already asserts ctx == d_pos_max's source, so a
+                 second lever read here would be a second declaration of the one number it checks
+                 against.
     WIRES READ: d_pos_max
     DID IT FIRE: lm.encode.calls, lm.encode.key_path_truncated (n_layers actually reduced the
                  stack), lm.encode.pos_overflow_refused (MUST BE 0 -- a nonzero value is the 512
                  clamp reaching the new tree), lm.encode.extra_applied
     """
     lm = lm.owned_by("LM")
+    _bump("lm.encode.calls")
     pos_max = int(lm.d_pos_max)                  # WIRE READ HERE -- the refusal, not a clamp
     L = int(x.shape[1])
     if L > pos_max:
@@ -436,6 +525,7 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
         # the table's height ONE shared embedding, silently. That refusal is what the d_pos_max
         # wire is FOR: grep finds the height and lever.py refuses a lever that shadows it, but
         # until something refuses the overflow the guarantee is not paid for.
+        _bump("lm.encode.pos_overflow_refused")
         raise ValueError(
             f"LM.encode was handed a window of {L} token(s) against a positional table of "
             f"{pos_max} row(s) (LM_CTX={int(lm.ctx)} through the d_pos_max wire). Refused rather "
@@ -448,9 +538,82 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
         # CAUSAL, because this is a language model: a window that can see its own future scores a
         # loss no autoregressive decode can reproduce.
         mask = torch.triu(torch.full((L, L), float("-inf"), device=h.device), diagonal=1)
-        h = model.body(h, mask=mask, is_causal=True)
+        # n_layers RUNS ONLY THE FIRST n BLOCKS, BY A MANUAL LOOP OVER model.body.layers RATHER
+        # THAN nn.TransformerEncoder's OWN forward. nn.TransformerEncoder has no depth argument --
+        # slicing .layers is the only way to stop early -- and looping by hand is also what buys
+        # the dropout fix immediately below: whichever layer's output IS this call's return, full
+        # stack or truncated key path alike, needs different treatment than the layers before it.
+        # This loop reproduces nn.TransformerEncoder.forward's own per-layer call exactly
+        # (src_mask=mask, is_causal=True) and that module's internal fast/nested-tensor path never
+        # engages on the plain forward either, because that path requires src_key_padding_mask,
+        # which this function never passes -- so a full-depth call through this loop is numerically
+        # identical to the old `model.body(h, mask=mask, is_causal=True)` (verified: max|dh|=0.0
+        # between the two on a built model, both arms, several seeds).
+        n_run = model.geom.layers if n_layers is None else int(n_layers)
+        if n_layers is not None:
+            # MEM.key_depth's cut. Before this branch existed, n_layers reached this function and
+            # nothing here read it: model.body(h, ...) always ran the FULL stack regardless of what
+            # the caller asked for, so at LM_LAYERS=12 the key path paid twelve layers of attention
+            # over an 8-token window on every step -- thousands of rows per training step -- and
+            # the declared counter below could never be nonzero. Measured before this fix:
+            # encode(..., n_layers=1) against the full-depth call differed by max|dh|=0.0.
+            _bump("lm.encode.key_path_truncated")
+        for i, layer in enumerate(model.body.layers[:n_run]):
+            if i == n_run - 1:
+                # THE LAST LAYER ACTUALLY RUN -- full stack or truncated key path alike -- computed
+                # WITHOUT ITS OWN INTERNAL DROPOUT: the attention-probability dropout inside
+                # self_attn, and the two residual dropouts (dropout1, dropout2), by toggling
+                # eval() for this one call and restoring the layer's prior mode after. nn.GRU
+                # already gives this for free -- torch documents its `dropout=` as applied "to the
+                # output of each GRU layer EXCEPT THE LAST", so the gru arm's `h, _ =
+                # model.body(h)` below was already clean -- but nn.TransformerEncoder has no such
+                # carve-out: every layer it owns drops, INCLUDING the one whose output is this
+                # function's return, and that is a fourth dropout site nobody chose. Measured
+                # before this fix: built at LM_DROPOUT=0.2, arch=transformer, set model.drop.p=0.0
+                # (silencing ONLY the embedding-dropout site) and called encode() twice in train
+                # mode on one input under no_grad -- the two returns still differed; in eval mode
+                # two calls agreed with each other and disagreed with the train-mode value, which
+                # is what proves the leak lived inside TransformerEncoderLayer's own dropout sites
+                # and not in `model.drop`. LayerNorm is unaffected by .eval()/.train(), so toggling
+                # the layer's mode for one call changes nothing but its dropout sites.
+                was_training = layer.training
+                layer.eval()
+                try:
+                    h = layer(h, src_mask=mask, is_causal=True)
+                finally:
+                    layer.train(was_training)
+            else:
+                h = layer(h, src_mask=mask, is_causal=True)
     else:
         h, _ = model.body(h)
+        # n_layers IS ACCEPTED AND IGNORED HERE, ON PURPOSE -- a DECLARED GATE, not a silence.
+        # nn.GRU is one fused recurrence over its whole depth, not a ModuleList this function can
+        # slice the way the transformer arm's stack allows, so "run only the first n blocks" has no
+        # meaning on this arm. CENSUS.md:250 records the old KEY_LAYERS knob as "silently inert
+        # twice over" because nothing anywhere said this arm could not honour it; this comment, and
+        # the "DECLARED GATE" framing in the docstring above, are what keep the inertness a stated
+        # fact instead of a second occurrence of that same defect.
+
+    if extra is not None:
+        # THE ADDITIVE CONDITIONING TERM, ON THE FINAL HIDDEN STATE -- not fed into the stack as a
+        # second input, added to what the stack produced, because it exists to condition what MEM
+        # and FAB see, not to change how the transformer/GRU itself computes (WORLD.forecast's own
+        # docstring: "the forecast the LM's hidden state IS CONDITIONED ON"). Shape- and
+        # device-checked rather than silently broadcast or moved: a caller passing (B, width) would
+        # otherwise broadcast into (B, L, width) and condition every position with a
+        # batch-mean-shaped typo, and a caller building `extra` on a stale device is a bug this
+        # function should not paper over with a .to() nobody asked for.
+        if extra.shape != h.shape:
+            raise ValueError(
+                f"LM.encode: extra has shape {tuple(extra.shape)}, hidden has shape "
+                f"{tuple(h.shape)}. extra must be exactly (B, L, width) or None.")
+        if extra.device != h.device:
+            raise ValueError(
+                f"LM.encode: extra is on device {extra.device}, hidden is on {h.device}. Refused "
+                f"rather than silently moved.")
+        h = h + extra
+        _bump("lm.encode.extra_applied")
+
     # UNDROPPED ON THE WAY OUT. Three packages consume this -- MEM as keys, FAB as routing input,
     # LM as the readout source -- and a value three packages consume must not carry one consumer's
     # regulariser. There is no `for_key=` keyword and there must not be one.
@@ -470,12 +633,15 @@ def decode(lm: Config, model, h, *, live_vocab, retired_ids):
     the arm's other dropout sites: inert at the 0.0 default, a changed number the instant anyone
     raises it, and stated rather than discovered.
 
-    Under compose it is `h @ table.t() + bias` from the tied composed table; otherwise the head
-    Linear. Then mask_dead_rows is applied HERE, once, so training and every eval path share one
-    masked distribution. Masking at the LOSS only was measurably WORSE than not masking at all
-    (86.7% dead width: unmasked 4.746, masked-at-the-loss-only 6.100, :3971-3979), because the
-    model is never taught to push the dead rows down and every eval path then scores it with those
-    untrained rows still in the denominator.
+    Under compose it is `h @ table.t() + bias` from the tied composed table (`model.compose_bias`,
+    a second (vocab_slots,) parameter beside the tied table -- NOT part of it, and NOT the ~6.3M
+    dead parameters ISSUES P1-L13 counts, which is emb/head existing AND UNUSED); otherwise the
+    head Linear, whose own bias is already inside `model.head`. Then mask_dead_rows is applied
+    HERE, once, so training and every eval path share one masked distribution. Masking at the LOSS
+    only was measurably WORSE than not masking at all (86.7% dead width: unmasked 4.746,
+    masked-at-the-loss-only 6.100, :3971-3979), because the model is never taught to push the dead
+    rows down and every eval path then scores it with those untrained rows still in the
+    denominator.
 
     This function is what the spine hands to FAB as a plain callable so the fabric can decode its
     expert outputs without importing lm. O10 refuses the import; a callable another package
@@ -496,22 +662,28 @@ def decode(lm: Config, model, h, *, live_vocab, retired_ids):
     the refusal being invisible to a check is what let them. tests/test_contract.py's K14 reads this
     sentence now.
 
-    LEVERS READ: mask_dead_rows, vocab_slots, compose -- NOT `dropout`. The readout dropout is the
-                 nn.Dropout MODULE build_model constructed from geom; this function applies it, it
-                 does not re-read the probability. A second read here would be a second declaration
-                 of one number, which is what L1 exists to stop.
+    LEVERS READ: mask_dead_rows -- NOT `vocab_slots` or `compose`, which the body takes off
+                 `logits.shape[-1]` (already resolved when the table/head was built) and
+                 `model.compose` (the module's own flag, set once in the constructor) rather than
+                 re-reading either off the Config, for the same reason `dropout` is not re-read
+                 below: a second read here would be a second declaration of a number that already
+                 has an owner. NOT `dropout` either -- the readout dropout is the nn.Dropout MODULE
+                 build_model constructed from geom; this function applies it, it does not re-read
+                 the probability. A second read here would be a second declaration of one number,
+                 which is what L1 exists to stop.
     WIRES READ: none
     DID IT FIRE: lm.decode.calls, lm.mask.applied, lm.mask.rows_masked (the count, so the dead
                  fraction is a number the report prints rather than infers), lm.mask.armed_no_rows
                  (mask on, nothing dead -- reported SEPARATELY from "off")
     """
     lm = lm.owned_by("LM")
+    _bump("lm.decode.calls")
     # THE REGULARISED READOUT, and this is the only site. Arithmetically identical to the old
     # `head(drop(h))`; what moved is that encode()'s return no longer carries it.
     h = model.drop(h)
     if model.compose:
         table = model.token_table()
-        logits = h @ table.t()
+        logits = h @ table.t() + model.compose_bias
     else:
         logits = model.head(h)
 
@@ -521,21 +693,41 @@ def decode(lm: Config, model, h, *, live_vocab, retired_ids):
         # unmasked against 6.100 masked-at-the-loss-only -- because the model is never taught to
         # push the dead rows down and every eval path then scores it with those untrained rows
         # still in the denominator.
-        dead = torch.zeros(logits.shape[-1], dtype=torch.bool, device=logits.device)
-        # `live_vocab` IS THE COUNT OF MINTED ROWS, AND IT IS ALSO WHERE THEY END, because ids are
-        # positional and minting is append-only: rows [0, live_vocab) exist and [live_vocab, slots)
-        # never did. THE TWO ARE ONLY THE SAME NUMBER WHEN NOTHING IS RETIRED, and the caller passes
-        # Vocabulary.size() -- the full id count -- rather than live_size(), precisely so that this
-        # boundary does not move when a row is retired. Retired ids are handled BELOW, by id, for
-        # the same reason: retire() pops from the match table and leaves id2bytes intact so ids stay
-        # positional, so retired rows are scattered below the boundary and are not a suffix.
-        dead[int(live_vocab):] = True
-        if retired_ids:
-            # RETIRED ROWS ARE BELOW live_vocab AND ARE NOT A SUFFIX. Probation pops from seq2id
-            # while leaving id2bytes intact so ids stay positional, so a suffix rule would mask the
-            # wrong rows -- and on the probation arms most minted tokens were retired.
-            idx = torch.tensor(sorted(retired_ids), dtype=torch.long, device=logits.device)
-            dead[idx] = True
+        _bump("lm.mask.applied")
+        # CACHED ON THE MODEL, KEYED ON (live_vocab, len(retired_ids)) -- THE DOCSTRING'S OWN KEY,
+        # AND BOTH HALVES ONLY EVER GROW. Before this cache existed, every single decode() call
+        # allocated a fresh `vocab_slots`-length bool tensor and, whenever anything was retired, a
+        # fresh sorted index tensor from a Python set -- once per window, on the hot path, at
+        # LM_VOCAB_SLOTS=16384 with hundreds of retired ids on the probation arms -- which is pure
+        # waste the docstring's own cache key already ruled out. A cache MISS still costs exactly
+        # what the old unconditional build cost; a HIT costs one tuple comparison.
+        key = (int(live_vocab), len(retired_ids))
+        cached = model._dead_mask_cache
+        if cached is not None and cached[0] == key and cached[1].device == logits.device:
+            dead = cached[1]
+        else:
+            dead = torch.zeros(logits.shape[-1], dtype=torch.bool, device=logits.device)
+            # `live_vocab` IS THE COUNT OF MINTED ROWS, AND IT IS ALSO WHERE THEY END, because ids
+            # are positional and minting is append-only: rows [0, live_vocab) exist and
+            # [live_vocab, slots) never did. THE TWO ARE ONLY THE SAME NUMBER WHEN NOTHING IS
+            # RETIRED, and the caller passes Vocabulary.size() -- the full id count -- rather than
+            # live_size(), precisely so that this boundary does not move when a row is retired.
+            # Retired ids are handled BELOW, by id, for the same reason: retire() pops from the
+            # match table and leaves id2bytes intact so ids stay positional, so retired rows are
+            # scattered below the boundary and are not a suffix.
+            dead[int(live_vocab):] = True
+            if retired_ids:
+                # RETIRED ROWS ARE BELOW live_vocab AND ARE NOT A SUFFIX. Probation pops from
+                # seq2id while leaving id2bytes intact so ids stay positional, so a suffix rule
+                # would mask the wrong rows -- and on the probation arms most minted tokens were
+                # retired.
+                idx = torch.tensor(sorted(retired_ids), dtype=torch.long, device=logits.device)
+                dead[idx] = True
+            model._dead_mask_cache = (key, dead)
+        n_dead = int(dead.sum().item())
+        _set("lm.mask.rows_masked", n_dead)          # a gauge: dead rows AS OF THIS CALL
+        if not n_dead:
+            _bump("lm.mask.armed_no_rows")            # a tally: how many calls found nothing dead
         logits = logits.masked_fill(dead, float("-inf"))
     return logits
 

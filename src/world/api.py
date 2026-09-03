@@ -88,7 +88,7 @@ def build(world: Config, *, d_model, device, ctx_tokens, rng):
     (3, 6, 128, 24) at :4156 -- four of five differ, so reading world_model.py alone tells a reader
     the wrong population size, cap and key width. Every value comes from this Config.
 
-    LEVERS READ: enabled, lat, hid, route_d, n0, nmax, feedback
+    LEVERS READ: enabled, lat, hid, route_d, n0, nmax, feedback, horizon
     WIRES READ: none
     DID IT FIRE: World.built ("live" | "null"), and the constructed shape as a record
     """
@@ -109,7 +109,14 @@ def build(world: Config, *, d_model, device, ctx_tokens, rng):
             f"pool. Refused rather than clamped -- a clamp would make the banner print a founding "
             f"size the run did not use.")
 
-    gen = torch.Generator(device="cpu")
+    # ON THE TARGET DEVICE, matching the repair already applied to FAB.build, LM.build_model and
+    # SIG.build (commit b95c4a4): torch's in-place random ops require the generator and the tensor
+    # it fills to share one device, and this constructor draws directly into w.encoder/world_proj/
+    # qproj AFTER they are moved `.to(device)` two lines below. A cpu generator there raised
+    # RuntimeError on every RUN_DEVICE=cuda run, before any tensor in the world model was built --
+    # latent on the CPU-only suite this project runs, which is exactly why the sibling packages'
+    # fix (b95c4a4) missed this fourth copy of the identical shape.
+    gen = torch.Generator(device=device)
     gen.manual_seed(rng.randint(0, 2 ** 31 - 1))
     w = World(built="live", nmax=nmax, n_live=n0, horizon=int(world.horizon),
               feedback=bool(world.feedback), lat=lat, rng=rng)
@@ -142,9 +149,13 @@ def build(world: Config, *, d_model, device, ctx_tokens, rng):
                 t.zero_()
         # keys are drawn; preds stay ZERO so a newly grown predictor is the identity-free zero map
         # and adding one perturbs nothing that already works -- the same rule as the fabric's B.
-        k = torch.empty(nmax, route_d)
-        k.uniform_(-0.1, 0.1, generator=gen)
-        w.keys.copy_(k.to(device))
+        # DRAWN DIRECTLY INTO w.keys, IN PLACE, rather than filling an implicit-cpu `k =
+        # torch.empty(nmax, route_d)` and copying it over: now that `gen` lives on `device` (the
+        # fix two lines above this block), a cpu-allocated intermediate tensor would itself raise
+        # the same device-mismatch RuntimeError this whole repair exists to remove on
+        # RUN_DEVICE=cuda. w.keys was already allocated with device=device at construction, so
+        # writing into it directly needs no intermediate tensor and no .to(device) copy at all.
+        w.keys.uniform_(-0.1, 0.1, generator=gen)
 
     w.counters.update({
         "world.built": "live", "world.live": n0, "world.nmax": nmax,
@@ -398,6 +409,16 @@ def startup_refusals(world: Config, *, ctx_tokens):
     DID IT FIRE: the returned list; an empty list is a positive result and is printed as one
     """
     world = world.owned_by("WORLD")
+    if not bool(world.enabled):
+        # THE NULL WORLD IS A LEGAL CONFIGURATION (the class docstring's D4 repair), and both
+        # refusals below are about the LIVE loss slices -- build() never computes them on the
+        # disabled arm (`if not bool(world.enabled): return World(built="null", ...)`), so a horizon
+        # value that would nan a live run's loss cannot nan a run that never builds one. Without
+        # this early return, a stale WORLD_HORIZON left over in an operator's environment refused a
+        # run that was never going to use it: reproduced with WORLD_ENABLED=0, WORLD_HORIZON=0 and
+        # again with WORLD_ENABLED=0, WORLD_HORIZON=999 against ctx_tokens=64 -- both raised on a
+        # nan-loss reason that only the live arm can ever reach.
+        return []
     out = []
     horizon = int(world.horizon)
     if horizon == 0:

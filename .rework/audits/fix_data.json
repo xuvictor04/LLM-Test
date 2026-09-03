@@ -1,0 +1,205 @@
+{
+  "package": "DATA",
+  "files": [
+    "src/data/api.py",
+    "src/data/levers.py"
+  ],
+  "fixer_note": "32 filed items across data.json (31) and data_levers.json (1). Many are the same underlying defect re-filed by both audit rounds (round1 and r2_hunt_pipeline/r2_hunt_h58) against identical or near-identical lines; each is reported once per original filed item so every ledger id resolves, with duplicates pointing at the shared fix. All 2 CRITICAL and all 6 HIGH items were verified against the current tree and either fixed or found already-fixed by the supervisor's prior commit; 4 already-fixed items (the zero-length-segment hang, the SEG_MIN>SEG_MAX refusal, the planned-law budget accumulation, the draw_stream docstring) match exactly what the task description named as pre-fixed, verified live rather than taken on faith. One further already-fixed item (levers.py's stale lever-count docstring) was found already correct in the current tree and is reported the same way. The only items not fixed are the two duplicate filings of the comprehensive Areas/Stream counters-and-gates surface, reported as ran-out-of-room with the partial, verified progress made toward it (Stream.draws, Plan.counters, and rng_holdout's now-conditional seam_at/overlap/why) stated explicitly.",
+  "fixed": [
+    {
+      "title": "The seg_contig cursor is advanced on a private copy and thrown away, so every epoch re-reads the identical head of every area and the exposure guard reports a number the run did not experience.",
+      "severity": "critical",
+      "what_changed": "DEFECT: the seg_contig cursor was never persisted (critical). Line ~973 `cursors = dict(areas.cursors)` copied the dict; the copy was advanced and thrown away, so areas.cursors stayed all-zero forever and every epoch re-read the same head of every area. FIX: bind the SAME dict object (`cursors = areas.cursors`, no copy) -- Areas is a frozen dataclass but `cursors` is an ordinary mutable dict VALUE, so mutating it in place is not a frozen-field reassignment and every write now lands on the one dict the composition root holds across every epoch's draw_stream call. Also changed the write-back from the unbounded `start + want` to `(start + want) % len(body)` so the value a checkpoint would carry is bounded.",
+      "proof": "Ran /tmp/.../scratchpad (verify cursor persistence): DATA_SOURCE=real DATA_AREAS=eng DATA_CORPUS_CAP=200000 DATA_SEG_CONTIG=1 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000, epochs 0/1/2 through the real open_areas->data_plan->draw_stream path on one shared `areas` object (as the composition root does). BEFORE (git HEAD): areas.cursors stayed {'eng': 0} after every call and epoch0.bytes == epoch1.bytes (byte-identical). AFTER: areas.cursors printed {'eng': 40000} after epoch 0 and {'eng': 80000} after epoch 1; epoch0.bytes == body[0:40000] -> True; epoch1.bytes == body[40000:80000] -> True; epoch2.bytes == body[80000:120000] -> True; epoch0.bytes == epoch1.bytes -> False. The cursor now genuinely advances and each epoch reads a distinct, contiguous slice of the body, matching the docstring's 'PERSISTS ACROSS EPOCHS' claim."
+    },
+    {
+      "title": "the seg_contig cursor is copied into a local dict and thrown away, so it does not persist across epochs",
+      "severity": "high",
+      "what_changed": "Same defect and same fix as the critical cursor-copy finding above (identical lines).",
+      "proof": "Ran /tmp/.../scratchpad (verify cursor persistence): DATA_SOURCE=real DATA_AREAS=eng DATA_CORPUS_CAP=200000 DATA_SEG_CONTIG=1 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000, epochs 0/1/2 through the real open_areas->data_plan->draw_stream path on one shared `areas` object (as the composition root does). BEFORE (git HEAD): areas.cursors stayed {'eng': 0} after every call and epoch0.bytes == epoch1.bytes (byte-identical). AFTER: areas.cursors printed {'eng': 40000} after epoch 0 and {'eng': 80000} after epoch 1; epoch0.bytes == body[0:40000] -> True; epoch1.bytes == body[40000:80000] -> True; epoch2.bytes == body[80000:120000] -> True; epoch0.bytes == epoch1.bytes -> False. The cursor now genuinely advances and each epoch reads a distinct, contiguous slice of the body, matching the docstring's 'PERSISTS ACROSS EPOCHS' claim."
+    },
+    {
+      "title": "The seg_contig cursor is mutated on a local copy and never written back, so it does not persist across epochs as documented",
+      "severity": "high",
+      "what_changed": "Same defect and same fix as the critical cursor-copy finding above (identical lines).",
+      "proof": "Ran /tmp/.../scratchpad (verify cursor persistence): DATA_SOURCE=real DATA_AREAS=eng DATA_CORPUS_CAP=200000 DATA_SEG_CONTIG=1 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000, epochs 0/1/2 through the real open_areas->data_plan->draw_stream path on one shared `areas` object (as the composition root does). BEFORE (git HEAD): areas.cursors stayed {'eng': 0} after every call and epoch0.bytes == epoch1.bytes (byte-identical). AFTER: areas.cursors printed {'eng': 40000} after epoch 0 and {'eng': 80000} after epoch 1; epoch0.bytes == body[0:40000] -> True; epoch1.bytes == body[40000:80000] -> True; epoch2.bytes == body[80000:120000] -> True; epoch0.bytes == epoch1.bytes -> False. The cursor now genuinely advances and each epoch reads a distinct, contiguous slice of the body, matching the docstring's 'PERSISTS ACROSS EPOCHS' claim."
+    },
+    {
+      "title": "DATA_DRAW=planned (the new shipped default) measurably worsens the pre-existing estimate-vs-realized gap in Gate data.splice_window, which H58's own rationale for defaulting to planned never accounts for",
+      "severity": "high",
+      "what_changed": "data_plan runs before a single byte is drawn, so data.splice_window's mean_seg cannot become 'measured, not estimated' without moving the check to after the draw (turning a startup gate into a report line). Instead gave the Gate a `reason` caveat -- always present, not just under DATA_DRAW=uniform -- stating plainly that this is a startup PREDICTION, that under the shipped 'planned' law draw_stream additionally truncates to each area's remaining per-phase budget (not just the phase bound), and quoting the measured 8-seed false-negative rate (8/8 under planned vs 6/8 under uniform at the same sweep) and the phase-count-scaling gap (7.6/10.4/17.7/32.3% under planned vs 3.7/4.9/10.0/17.9% under uniform at 8/10/20/40 phases), mirroring the caveat pattern exposure_max/exposure_skew already carry for the same law.",
+      "proof": "Read the new `reason=splice_caveat` text on the returned Gate('data.splice_window', ...) object in a live data_plan() call -- confirmed present on every arm (not conditioned on DATA_DRAW, unlike the exposure gates' caveat which is empty under 'planned'), containing the measured 8/8 figure and the phase-count table. This does not change the gate's fired/not-fired arithmetic (that would require measuring after the draw, contradicting the docstring's 'computed BEFORE A SINGLE STEP RUNS'); it makes the prediction's known bias direction and magnitude legible on the gate itself rather than left for a reader to rediscover."
+    },
+    {
+      "title": "draw_stream mints its per-epoch RNG stream with an unconditional again=True, disarming the duplicate-stream collision guard",
+      "severity": "high",
+      "what_changed": "Dropped the unconditional `again=True` from the `_rng.rng_for(f\"data.stream.e{epoch}\", seed, again=True)` call. Nothing legitimately re-mints 'data.stream.e<n>' in one process today (the resample=False cache-hit path returns before this line for epoch>0, and each epoch has a distinct name), so the flag existed only to silence the guard against a genuine caller bug.",
+      "proof": "Ran draw_stream(dat, areas, plan, epoch=0, seed=0) twice in one process with no reset_issued() between calls. BEFORE (again=True unconditional): the second call succeeded silently and st_a.bytes == st_b.bytes was True -- two 'independent' epoch-0 draws silently replayed one sequence. AFTER (again=True dropped): the second call raised spine.rng.RngError(\"stream 'data.stream.e0' was already issued for seed 0 ...\"), restoring the guard. Also verified the resample=False cached-epoch path is unaffected: it returns before ever reaching the rng_for call, so dropping again=True changes nothing about epoch>0 replays."
+    },
+    {
+      "title": "draw_stream passes again=True on every epoch stream with no rebuild to justify it, disarming the duplicate-stream guard",
+      "severity": "medium",
+      "what_changed": "Same defect and same fix as the again=True finding above (identical line).",
+      "proof": "Ran draw_stream(dat, areas, plan, epoch=0, seed=0) twice in one process with no reset_issued() between calls. BEFORE (again=True unconditional): the second call succeeded silently and st_a.bytes == st_b.bytes was True -- two 'independent' epoch-0 draws silently replayed one sequence. AFTER (again=True dropped): the second call raised spine.rng.RngError(\"stream 'data.stream.e0' was already issued for seed 0 ...\"), restoring the guard. Also verified the resample=False cached-epoch path is unaffected: it returns before ever reaching the rng_for call, so dropping again=True changes nothing about epoch>0 replays."
+    },
+    {
+      "title": "`again=True` is passed unconditionally to rng_for with no justification, disabling the one guard against two call sites sharing a stream name.",
+      "severity": "medium",
+      "what_changed": "Same defect and same fix as the again=True finding above (identical line).",
+      "proof": "Ran draw_stream(dat, areas, plan, epoch=0, seed=0) twice in one process with no reset_issued() between calls. BEFORE (again=True unconditional): the second call succeeded silently and st_a.bytes == st_b.bytes was True -- two 'independent' epoch-0 draws silently replayed one sequence. AFTER (again=True dropped): the second call raised spine.rng.RngError(\"stream 'data.stream.e0' was already issued for seed 0 ...\"), restoring the guard. Also verified the resample=False cached-epoch path is unaffected: it returns before ever reaching the rng_for call, so dropping again=True changes nothing about epoch>0 replays."
+    },
+    {
+      "title": "draw_stream passes an undeclared again=True and discards the Rng, so the declared DID IT FIRE row rng.issued()[\"data.stream.e0\"].draws cannot be evaluated at all",
+      "severity": "low",
+      "what_changed": "Two changes on this line's finding: (1) dropped again=True (see the sibling again=True fix); (2) the docstring's declared DID IT FIRE row `rng.issued()[\"data.stream.e0\"].draws` is unevaluable (issued() returns (seed, run_seed) tuples, not the live Rng) so added `Stream.draws: int` (read off the local Rng via `stream.draws` before it goes out of scope) and rewrote the DID IT FIRE line to point at it instead.",
+      "proof": "Confirmed `rng.issued()['data.stream.e0']` returns a plain 2-tuple and `issued['data.stream.e0'].draws` raises AttributeError, as the finding describes. After the fix, a live draw_stream() call's returned Stream.draws read 275-294 (nonzero, matching the segment count) across the smoke sweep, and is now the field the rewritten docstring line names."
+    },
+    {
+      "title": "On the default source=synthetic arm, DATA_AREAS is silently ignored and replaced with p0..pN-1 whenever it names fewer areas than DATA_N_PROCESSES",
+      "severity": "high",
+      "what_changed": "Added a startup refusal in _synthetic_areas: when len(entries) < DATA_N_PROCESSES, raise CorpusError naming DATA_AREAS (with the actual entries) and DATA_N_PROCESSES (with both counts) instead of silently generating p0..p{n-1}. Also refuse DATA_N_PROCESSES < 1 the same way, closing the sibling silent `max(1, n)` clamp in the same function (see the low-severity stream_bytes/clamp finding).",
+      "proof": "Ran four scenarios against the live open_areas/_synthetic_areas: (1) DATA_SOURCE=synthetic DATA_AREAS=eng DATA_N_PROCESSES=4 -- BEFORE: areas.names == ('p0','p1','p2','p3') with no error; AFTER: CorpusError naming DATA_AREAS (1 area) and DATA_N_PROCESSES (4). (2) DATA_AREAS='continual/01_rust,eng' on both sources -- BEFORE: synthetic names == ('continual/01_rust','eng') vs real names == ('01_rust','eng') (diverging label spaces); AFTER: both sources give ('01_rust','eng') -- verified equal by assertion. (3) DATA_SOURCE=synthetic DATA_AREAS='eng,Eng' -- BEFORE: spine.rng.RngError naming the RNG subsystem 'data.synth.eng', not DATA_AREAS; AFTER: data_api.CorpusError naming DATA_AREAS and both colliding entries ('eng','Eng'), raised before any rng_for call. (4) DATA_SOURCE=synthetic DATA_N_PROCESSES=0 DATA_AREAS=eng,py -- BEFORE: areas.names == () with no refusal; AFTER: CorpusError naming DATA_N_PROCESSES=0."
+    },
+    {
+      "title": "On the synthetic path the operator's declared area names are silently replaced by p0..pN-1 whenever DATA_AREAS holds fewer entries than DATA_N_PROCESSES, and the label/key collision refusals are not applied at all.",
+      "severity": "medium",
+      "what_changed": "This item's title combines two defects filed separately elsewhere on this list: the p0..pN-1 fallback (fixed as above) and the missing collision refusal (fixed as the label/key collision hoist below). Both halves verified together.",
+      "proof": "Ran four scenarios against the live open_areas/_synthetic_areas: (1) DATA_SOURCE=synthetic DATA_AREAS=eng DATA_N_PROCESSES=4 -- BEFORE: areas.names == ('p0','p1','p2','p3') with no error; AFTER: CorpusError naming DATA_AREAS (1 area) and DATA_N_PROCESSES (4). (2) DATA_AREAS='continual/01_rust,eng' on both sources -- BEFORE: synthetic names == ('continual/01_rust','eng') vs real names == ('01_rust','eng') (diverging label spaces); AFTER: both sources give ('01_rust','eng') -- verified equal by assertion. (3) DATA_SOURCE=synthetic DATA_AREAS='eng,Eng' -- BEFORE: spine.rng.RngError naming the RNG subsystem 'data.synth.eng', not DATA_AREAS; AFTER: data_api.CorpusError naming DATA_AREAS and both colliding entries ('eng','Eng'), raised before any rng_for call. (4) DATA_SOURCE=synthetic DATA_N_PROCESSES=0 DATA_AREAS=eng,py -- BEFORE: areas.names == () with no refusal; AFTER: CorpusError naming DATA_N_PROCESSES=0."
+    },
+    {
+      "title": "The synthetic arm skips both declared collision refusals, so colliding area labels surface as a spine RngError naming neither the lever nor the paths",
+      "severity": "medium",
+      "what_changed": "Hoisted the label + rng-key collision refusal loop in open_areas to run ONCE, before the real/synthetic source branch, over the (entry, basename) pairs computed for both sources -- so a colliding DATA_AREAS pair is now caught by DATA's own CorpusError (naming DATA_AREAS and both entries) on either source, instead of only on the real-corpus branch.",
+      "proof": "Ran four scenarios against the live open_areas/_synthetic_areas: (1) DATA_SOURCE=synthetic DATA_AREAS=eng DATA_N_PROCESSES=4 -- BEFORE: areas.names == ('p0','p1','p2','p3') with no error; AFTER: CorpusError naming DATA_AREAS (1 area) and DATA_N_PROCESSES (4). (2) DATA_AREAS='continual/01_rust,eng' on both sources -- BEFORE: synthetic names == ('continual/01_rust','eng') vs real names == ('01_rust','eng') (diverging label spaces); AFTER: both sources give ('01_rust','eng') -- verified equal by assertion. (3) DATA_SOURCE=synthetic DATA_AREAS='eng,Eng' -- BEFORE: spine.rng.RngError naming the RNG subsystem 'data.synth.eng', not DATA_AREAS; AFTER: data_api.CorpusError naming DATA_AREAS and both colliding entries ('eng','Eng'), raised before any rng_for call. (4) DATA_SOURCE=synthetic DATA_N_PROCESSES=0 DATA_AREAS=eng,py -- BEFORE: areas.names == () with no refusal; AFTER: CorpusError naming DATA_N_PROCESSES=0."
+    },
+    {
+      "title": "The synthetic path has no label/key collision refusal; a collision surfaces as an unnamed spine RngError instead of DATA's own named CorpusError",
+      "severity": "medium",
+      "what_changed": "Same defect and same fix as the collision-refusal finding above.",
+      "proof": "Ran four scenarios against the live open_areas/_synthetic_areas: (1) DATA_SOURCE=synthetic DATA_AREAS=eng DATA_N_PROCESSES=4 -- BEFORE: areas.names == ('p0','p1','p2','p3') with no error; AFTER: CorpusError naming DATA_AREAS (1 area) and DATA_N_PROCESSES (4). (2) DATA_AREAS='continual/01_rust,eng' on both sources -- BEFORE: synthetic names == ('continual/01_rust','eng') vs real names == ('01_rust','eng') (diverging label spaces); AFTER: both sources give ('01_rust','eng') -- verified equal by assertion. (3) DATA_SOURCE=synthetic DATA_AREAS='eng,Eng' -- BEFORE: spine.rng.RngError naming the RNG subsystem 'data.synth.eng', not DATA_AREAS; AFTER: data_api.CorpusError naming DATA_AREAS and both colliding entries ('eng','Eng'), raised before any rng_for call. (4) DATA_SOURCE=synthetic DATA_N_PROCESSES=0 DATA_AREAS=eng,py -- BEFORE: areas.names == () with no refusal; AFTER: CorpusError naming DATA_N_PROCESSES=0."
+    },
+    {
+      "title": "Synthetic areas are labelled with the raw DATA_AREAS entry, slash included, while real areas are labelled with the basename -- one lever value, two label spaces",
+      "severity": "medium",
+      "what_changed": "The label computation (`os.path.basename(entry.rstrip(\"/\"))`) is now done ONCE, before the source branch, and used by both the real and the synthetic arm (via the new `labels` parameter on _synthetic_areas) -- so DATA_AREAS=\"continual/01_rust,eng\" now produces the SAME ('01_rust', 'eng') label space regardless of DATA_SOURCE, instead of the synthetic arm keeping the raw entry text (slash included).",
+      "proof": "Ran four scenarios against the live open_areas/_synthetic_areas: (1) DATA_SOURCE=synthetic DATA_AREAS=eng DATA_N_PROCESSES=4 -- BEFORE: areas.names == ('p0','p1','p2','p3') with no error; AFTER: CorpusError naming DATA_AREAS (1 area) and DATA_N_PROCESSES (4). (2) DATA_AREAS='continual/01_rust,eng' on both sources -- BEFORE: synthetic names == ('continual/01_rust','eng') vs real names == ('01_rust','eng') (diverging label spaces); AFTER: both sources give ('01_rust','eng') -- verified equal by assertion. (3) DATA_SOURCE=synthetic DATA_AREAS='eng,Eng' -- BEFORE: spine.rng.RngError naming the RNG subsystem 'data.synth.eng', not DATA_AREAS; AFTER: data_api.CorpusError naming DATA_AREAS and both colliding entries ('eng','Eng'), raised before any rng_for call. (4) DATA_SOURCE=synthetic DATA_N_PROCESSES=0 DATA_AREAS=eng,py -- BEFORE: areas.names == () with no refusal; AFTER: CorpusError naming DATA_N_PROCESSES=0."
+    },
+    {
+      "title": "Synthetic-path area names keep the raw DATA_AREAS entry (slashes included); real-path names are basenames -- one lever, two label spaces",
+      "severity": "medium",
+      "what_changed": "Same defect and same fix as the basename-unification finding above.",
+      "proof": "Ran four scenarios against the live open_areas/_synthetic_areas: (1) DATA_SOURCE=synthetic DATA_AREAS=eng DATA_N_PROCESSES=4 -- BEFORE: areas.names == ('p0','p1','p2','p3') with no error; AFTER: CorpusError naming DATA_AREAS (1 area) and DATA_N_PROCESSES (4). (2) DATA_AREAS='continual/01_rust,eng' on both sources -- BEFORE: synthetic names == ('continual/01_rust','eng') vs real names == ('01_rust','eng') (diverging label spaces); AFTER: both sources give ('01_rust','eng') -- verified equal by assertion. (3) DATA_SOURCE=synthetic DATA_AREAS='eng,Eng' -- BEFORE: spine.rng.RngError naming the RNG subsystem 'data.synth.eng', not DATA_AREAS; AFTER: data_api.CorpusError naming DATA_AREAS and both colliding entries ('eng','Eng'), raised before any rng_for call. (4) DATA_SOURCE=synthetic DATA_N_PROCESSES=0 DATA_AREAS=eng,py -- BEFORE: areas.names == () with no refusal; AFTER: CorpusError naming DATA_N_PROCESSES=0."
+    },
+    {
+      "title": "n_by_name is counted and then discarded, so the declared data.phase_name_resolved surface cannot exist",
+      "severity": "medium",
+      "what_changed": "Added `counters: dict` to Plan (default `{}` so existing callers/tests constructing a bare Plan are unaffected) and populated it in data_plan with data.phase_resolved (len(schedule)), data.protocol_named (the recognised protocol string) and data.phase_name_resolved (the previously-discarded n_by_name count) -- so the docstring's declared data.phase_name_resolved row now has an actual value to report, including the honest '0' reading when every schedule entry was given as an index.",
+      "proof": "Ran data_plan with DATA_PHASE_SCHED='eng|eng|py|py' at DATA_AREAS=eng,py -- BEFORE: n_by_name was computed (4) and discarded, nothing on Plan carried it. AFTER: plan.counters == {'data.phase_resolved': 4, 'data.protocol_named': 'explicit', 'data.phase_name_resolved': 4}. Cross-checked the shipped generated-schedule default (phase_sched unset): plan.counters['data.phase_name_resolved'] == 0, the honest 'every entry was an index' reading (there were no name entries to resolve at all under the generated schedule)."
+    },
+    {
+      "title": "n_by_name is counted while parsing DATA_PHASE_SCHED but discarded -- data.phase_name_resolved cannot exist",
+      "severity": "low",
+      "what_changed": "Same defect and same fix as the n_by_name finding above.",
+      "proof": "Ran data_plan with DATA_PHASE_SCHED='eng|eng|py|py' at DATA_AREAS=eng,py -- BEFORE: n_by_name was computed (4) and discarded, nothing on Plan carried it. AFTER: plan.counters == {'data.phase_resolved': 4, 'data.protocol_named': 'explicit', 'data.phase_name_resolved': 4}. Cross-checked the shipped generated-schedule default (phase_sched unset): plan.counters['data.phase_name_resolved'] == 0, the honest 'every entry was an index' reading (there were no name entries to resolve at all under the generated schedule)."
+    },
+    {
+      "title": "On the REAL path a zero-size held-out block is recorded with the reason \"source=synthetic holds nothing out\", and nothing refuses the configuration that produced it.",
+      "severity": "medium",
+      "what_changed": "The `else` branch (n_hold == 0) used to hard-code why='source=synthetic holds nothing out' regardless of dat.source. Added a guard: on the real path, a 0-byte computed holdout now raises CorpusError naming DATA_HOLDOUT_FRAC, DATA_VAL_CAP, the body length and the resulting 0, instead of silently falling through with the false synthetic-only reason string. The `else` branch is now reachable only when dat.source really is 'synthetic' (n_hold is forced to 0 there unconditionally a few lines up), so the existing reason string is correct on every path that still reaches it.",
+      "proof": "Ran DATA_SOURCE=real DATA_AREAS=eng,py DATA_VAL_CAP=0 -- BEFORE: open_areas succeeded with no refusal and rng_holdout['eng']['why'] read 'source=synthetic holds nothing out' on a real disk corpus. AFTER: raises CorpusError naming DATA_HOLDOUT_FRAC=0.05, DATA_VAL_CAP=0, the body length and the computed 0, before any area is silently trained on with no held-out block."
+    },
+    {
+      "title": "`seam_at` is recorded as the block offset unconditionally, so a block at offset 0 or at the tail reports a manufactured seam that does not exist -- the unreachable state the contract requires it to say.",
+      "severity": "low",
+      "what_changed": "seam_at now reads `start if (0 < start and start + n_hold < len(blob)) else None`, with a `why` key explaining which edge (leading or tail) the block landed on when it is None -- instead of unconditionally recording `start` (a position) even when the removed block was a prefix or a suffix and manufactured no interior seam at all.",
+      "proof": "Monkeypatched spine.rng.Rng.randint to always return the low bound (forcing start=0), ran open_areas at DATA_SOURCE=real DATA_AREAS=eng DATA_HOLDOUT_FRAC=0.3 -- BEFORE: rng_holdout['eng']['seam_at'] read 0 (a position) on a block with no interior seam. AFTER: seam_at reads None with why='block landed at the body's own leading edge (offset 0): no text precedes it, so removing it manufactures no discontinuity'. An ordinary (interior) block on the same corpus still gets a numeric seam_at (verified separately, e.g. offset 1330940 on the unpatched run)."
+    },
+    {
+      "title": "seam_at is recorded as the block's offset unconditionally, so a held-out block landing at byte 0 or at the tail reports a manufactured seam that isn't there",
+      "severity": "low",
+      "what_changed": "Same defect and same fix as the seam_at finding above.",
+      "proof": "Monkeypatched spine.rng.Rng.randint to always return the low bound (forcing start=0), ran open_areas at DATA_SOURCE=real DATA_AREAS=eng DATA_HOLDOUT_FRAC=0.3 -- BEFORE: rng_holdout['eng']['seam_at'] read 0 (a position) on a block with no interior seam. AFTER: seam_at reads None with why='block landed at the body's own leading edge (offset 0): no text precedes it, so removing it manufactures no discontinuity'. An ordinary (interior) block on the same corpus still gets a numeric seam_at (verified separately, e.g. offset 1330940 on the unpatched run)."
+    },
+    {
+      "title": "data.holdout_overlap is never computed, so the one instrument declared for near-duplicate contamination between the held-out block and the training body produces no number at all.",
+      "severity": "low",
+      "what_changed": "Added `_holdout_overlap(holdout_bytes, body_bytes, n=50)`: builds a hash set of the body's 50-byte n-gram windows and reports the fraction of the holdout's own 50-byte windows that also occur in that set (None if the holdout is shorter than one window -- an unreachable reading, not a 0.0). Wired into open_areas as `rng_holdout[label]['overlap']` for every area with a nonzero holdout, closing the previously entirely-uncomputed data.holdout_overlap reading.",
+      "proof": "grep -n holdout_overlap src/data/api.py BEFORE matched only the docstring's own declaration -- no field anywhere carried a value. AFTER: ran open_areas at DATA_SOURCE=real DATA_AREAS=eng,py and read rng_holdout[label]['overlap'] for both areas: eng -> 0.00082, py -> 0.01006 (both floats in [0,1], computed from a real 50-byte-window set-membership check against each area's own body). Timed the n-gram set build on a 2,000,000-byte body (the shipped DATA_CORPUS_CAP): ~0.85s, stated in the function's own docstring as the cost this pays."
+    },
+    {
+      "title": "data.holdout_overlap is declared as a startup reading but never computed anywhere",
+      "severity": "low",
+      "what_changed": "Same defect and same fix as the holdout_overlap finding above.",
+      "proof": "grep -n holdout_overlap src/data/api.py BEFORE matched only the docstring's own declaration -- no field anywhere carried a value. AFTER: ran open_areas at DATA_SOURCE=real DATA_AREAS=eng,py and read rng_holdout[label]['overlap'] for both areas: eng -> 0.00082, py -> 0.01006 (both floats in [0,1], computed from a real 50-byte-window set-membership check against each area's own body). Timed the n-gram set build on a 2,000,000-byte body (the shipped DATA_CORPUS_CAP): ~0.85s, stated in the function's own docstring as the cost this pays."
+    },
+    {
+      "title": "open_areas reads dat.stream_bytes on the DEFAULT source arm while its LEVERS READ list omits it",
+      "severity": "low",
+      "what_changed": "Added `stream_bytes` to open_areas' own LEVERS READ docstring line (with an explanatory note), and replaced the silent `max(1, n)` clamp inside _synthetic_areas' per_area arithmetic with an explicit refusal (`DATA_N_PROCESSES < 1` raises CorpusError naming the value) before that arithmetic runs -- so DATA_N_PROCESSES=0 is now a named startup refusal instead of a silently clamped divide-by-zero guard that returned an empty Areas.",
+      "proof": "Ran DATA_SOURCE=synthetic DATA_N_PROCESSES=0 DATA_AREAS=eng,py through open_areas -- BEFORE: no refusal, areas.names == () (the silent max(1,n) clamp swallowed the 0). AFTER: CorpusError naming DATA_N_PROCESSES=0, raised before the per_area arithmetic that used to clamp it. Also confirmed stream_bytes is now named in open_areas' own LEVERS READ docstring line."
+    },
+    {
+      "title": "the resample=False replay cache is keyed by id(areas), an address CPython reuses, so the stated per-Areas isolation does not hold and every Stream is retained forever",
+      "severity": "low",
+      "what_changed": "_REPLAY's values are now `(weakref.ref(areas, evict_callback), Stream)` pairs instead of a bare Stream, still keyed by id(areas) (Areas itself is unhashable -- it has dict fields -- so it cannot be a WeakKeyDictionary key directly). The read path checks `ref() is areas` before trusting a hit, closing the id-reuse collision; the weakref's callback pops its own id() entry the moment that Areas is actually collected, closing the unbounded-retention half of the finding (every resample=False Stream used to live for the rest of the process).",
+      "proof": "Built an Areas/Plan/Stream at DATA_RESAMPLE=0, captured id(areas), deleted the objects and ran gc.collect(). BEFORE (plain dict keyed by id(areas), no eviction): the entry would remain in _REPLAY forever and a later object landing on the freed id would silently receive the stale cached Stream (reproduced separately: a small repro that frees and reallocates small objects reused an id within single-digit allocations). AFTER: `old_id in data_api._REPLAY` was True right after the draw and False after gc.collect() -- the weakref callback evicted the entry the moment the Areas was actually collected, and the read path additionally checks `ref() is areas` before trusting any hit, so a same-id-different-object collision can no longer return someone else's bytes even in the window before the callback runs."
+    }
+  ],
+  "not_fixed": [
+    {
+      "title": "DATA_SEG_MIN=DATA_SEG_MAX=0 makes draw_stream loop forever",
+      "severity": "critical",
+      "reason": "already-fixed",
+      "detail": "Ran DATA_SOURCE=real DATA_AREAS=eng DATA_SEG_MIN=0 DATA_SEG_MAX=0 (and separately DATA_SEG_MIN=0 DATA_SEG_MAX=3 DATA_STREAM_BYTES=3000, the round-1 zero-length-segment reproduction) through open_areas->data_plan->draw_stream: both raise CorpusError ('DATA_SEG_MIN=0 and DATA_SEG_MAX=... a segment must be at least one byte...') immediately, before any draw loop runs. Additionally ran a 432-trial sweep (both draw laws, 3 area counts, 4 phase counts, 3 seg_min/seg_max pairs including (1,5), 6 seeds each) through the REAL data_plan-produced Plan and confirmed zero duplicate/zero-length splice_starts anywhere -- the 'zero-length segment recorded as a false area-change boundary' half of the round-1 finding is also closed by this same refusal, since seg_min>=1 is now guaranteed before the draw loop is ever entered."
+    },
+    {
+      "title": "DATA_SEG_MIN > DATA_SEG_MAX passes every startup gate then dies inside the draw with an unnamed ValueError",
+      "severity": "high",
+      "reason": "already-fixed",
+      "detail": "Ran DATA_SOURCE=real DATA_AREAS=eng DATA_SEG_MIN=2000 DATA_SEG_MAX=1800 through open_areas->data_plan->draw_stream: raises CorpusError('DATA_SEG_MIN=2000 and DATA_SEG_MAX=1800: ... the minimum may not exceed the maximum...') naming both levers and both values, instead of the bare stdlib ValueError('empty range for randrange()') round 1/2 both reproduced."
+    },
+    {
+      "title": "DATA_SEG_MIN > DATA_SEG_MAX passes every startup gate and then dies inside the draw with a bare ValueError that names no lever.",
+      "severity": "medium",
+      "reason": "already-fixed",
+      "detail": "Ran DATA_SOURCE=real DATA_AREAS=eng DATA_SEG_MIN=2000 DATA_SEG_MAX=1800 through open_areas->data_plan->draw_stream: raises CorpusError('DATA_SEG_MIN=2000 and DATA_SEG_MAX=1800: ... the minimum may not exceed the maximum...') naming both levers and both values, instead of the bare stdlib ValueError('empty range for randrange()') round 1/2 both reproduced. (duplicate filing of the same lines/fix as the sibling SEG_MIN>SEG_MAX finding.)"
+    },
+    {
+      "title": "The 'planned' law's per-phase budget dict uses assignment, not accumulation, so it silently disagrees with data_plan's per_area_draw (which DOES accumulate) the moment a phase's live-area list repeats an index -- and the code's own comment claims the two 'agree by construction', which is false",
+      "severity": "medium",
+      "reason": "already-fixed",
+      "detail": "Hand-built a Plan with schedule=((2,0,0,1),) (a repeated area index within one phase, the reproduction the finding used) and ran draw_stream against it. data_plan-style accumulating expectation: eng=60000, py=30000, num=30000, c=0. Measured st.per_area_drawn: {'eng': 60000, 'py': 30000, 'num': 30000, 'c': 0} -- matches exactly; the budget dict at api.py:766 now reads `budget[idx] = budget.get(idx, 0) + share` (accumulating), not a plain assignment."
+    },
+    {
+      "title": "draw_stream's frozen-contract docstring still states segments are drawn 'from an area chosen uniformly among the phase's live areas' at 'randint(seg_min, seg_max)' bytes -- no longer true under the shipped default DATA_DRAW=planned, and unlike data_plan's docstring in the same commit, this one was not updated to say so",
+      "severity": "medium",
+      "reason": "already-fixed",
+      "detail": "Read draw_stream.__doc__: it now contains an explicit paragraph ('\"planned\" (the shipped default) -- uniformly among the phase's live areas THAT STILL HAVE REMAINING BUDGET, and the segment is truncated to that budget as well as to the phase bound... a minority of segments come out SHORTER than seg_min (at the shipped defaults, about 4% of them, down to ~171 bytes)') describing the planned/uniform allocation rule in the docstring proper, not just an inline code comment."
+    },
+    {
+      "title": "A zero-length segment is recorded as a splice start and as an area change, and at DATA_SEG_MIN=DATA_SEG_MAX=0 the draw loop never terminates.",
+      "severity": "medium",
+      "reason": "already-fixed",
+      "detail": "Ran DATA_SOURCE=real DATA_AREAS=eng DATA_SEG_MIN=0 DATA_SEG_MAX=0 (and separately DATA_SEG_MIN=0 DATA_SEG_MAX=3 DATA_STREAM_BYTES=3000, the round-1 zero-length-segment reproduction) through open_areas->data_plan->draw_stream: both raise CorpusError ('DATA_SEG_MIN=0 and DATA_SEG_MAX=... a segment must be at least one byte...') immediately, before any draw loop runs. Additionally ran a 432-trial sweep (both draw laws, 3 area counts, 4 phase counts, 3 seg_min/seg_max pairs including (1,5), 6 seeds each) through the REAL data_plan-produced Plan and confirmed zero duplicate/zero-length splice_starts anywhere -- the 'zero-length segment recorded as a false area-change boundary' half of the round-1 finding is also closed by this same refusal, since seg_min>=1 is now guaranteed before the draw loop is ever entered. (This title's zero-length-segment-as-boundary half is closed by the same seg_min<1 refusal, verified by the 432-trial sweep finding zero duplicate/zero-length splice_starts anywhere.)"
+    },
+    {
+      "title": "open_areas and draw_stream produce none of the counters and gates their DID IT FIRE blocks declare, so DATA's armed-but-0 and unreachable states are indistinguishable everywhere",
+      "severity": "medium",
+      "reason": "ran-out-of-room",
+      "detail": "The declared DID IT FIRE surface is large (open_areas: data.area_open, data.area_nested, data.area_path_refused, data.area_label_collision, data.corpus_cap_trip, data.holdout_block, data.holdout_seam, data.holdout_overlap, data.val_cap_trip, data.area_refused; draw_stream: data.stream_draw, data.segment, data.contig_wrap, data.resample, data.phase_entered) and a faithful implementation needs a `counters`/`gates` field on BOTH Areas and Stream, populated correctly at every declared decision point. I made real, verified progress adjacent to this (Stream.draws for the stream's own draw count, Plan.counters for data_plan's three declared readings, and rng_holdout now carrying seam_at/overlap/why per area, which already answers data.holdout_block/data.holdout_seam/data.holdout_overlap without a new top-level field), but did not implement the comprehensive Areas.counters/Stream.counters surface this finding asks for. Two of the declared items also have genuinely ambiguous semantics I did not want to guess at under time pressure: data.resample and data.stream_draw appear to need a cross-call accumulator (similar to areas.cursors) rather than anything one draw_stream call can report alone, since a single call cannot see how many OTHER epochs in the same run redrew vs replayed. Given the size of the rest of the work list, I judged completing the remaining well-scoped items correctly was a better use of the remaining budget than a partial, semantically-uncertain counters implementation across two record types."
+    },
+    {
+      "title": "open_areas and draw_stream produce none of the counters/gates their own DID IT FIRE contracts declare",
+      "severity": "medium",
+      "reason": "ran-out-of-room",
+      "detail": "The declared DID IT FIRE surface is large (open_areas: data.area_open, data.area_nested, data.area_path_refused, data.area_label_collision, data.corpus_cap_trip, data.holdout_block, data.holdout_seam, data.holdout_overlap, data.val_cap_trip, data.area_refused; draw_stream: data.stream_draw, data.segment, data.contig_wrap, data.resample, data.phase_entered) and a faithful implementation needs a `counters`/`gates` field on BOTH Areas and Stream, populated correctly at every declared decision point. I made real, verified progress adjacent to this (Stream.draws for the stream's own draw count, Plan.counters for data_plan's three declared readings, and rng_holdout now carrying seam_at/overlap/why per area, which already answers data.holdout_block/data.holdout_seam/data.holdout_overlap without a new top-level field), but did not implement the comprehensive Areas.counters/Stream.counters surface this finding asks for. Two of the declared items also have genuinely ambiguous semantics I did not want to guess at under time pressure: data.resample and data.stream_draw appear to need a cross-call accumulator (similar to areas.cursors) rather than anything one draw_stream call can report alone, since a single call cannot see how many OTHER epochs in the same run redrew vs replayed. Given the size of the rest of the work list, I judged completing the remaining well-scoped items correctly was a better use of the remaining budget than a partial, semantically-uncertain counters implementation across two record types. (Duplicate filing of the same underlying gap as the sibling counters/gates finding.)"
+    },
+    {
+      "title": "The module docstring's census accounting ('This file emits 17 levers ... 17 Lever declarations, all reachable as DATA_<FIELD>') is now stale: the file declares 18 Levers since d8eadd5 added the amendment lever `draw`",
+      "severity": "low",
+      "reason": "already-fixed",
+      "detail": "Read src/data/levers.py lines 41-49: the file now says 'This file emits 18 levers: 11 rows with verdict rename + 6 rows with verdict keep + 1 amendment: DATA_DRAW ... = 18 Lever declarations, all reachable as DATA_<FIELD>' -- matching `grep -c '^    [a-z_]* = Lever(' src/data/levers.py` == 18. The '17 levers' text the finding quotes does not appear anywhere in the current file; this was already corrected before this fixer's pass (no edit made)."
+    }
+  ],
+  "needs_shared_edit": []
+}

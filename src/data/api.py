@@ -19,9 +19,9 @@ implementation agents share; nothing else about the layout is load-bearing.
 RECORD TYPES RETURNED (P4 defines them; they are DATA's objects and other packages receive
 them as arguments, which is not an import and O10 does not refuse it):
   Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout
-  Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates
+  Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
-          epoch, stream_id
+          epoch, stream_id, draws
 """
 import dataclasses
 import os
@@ -426,13 +426,56 @@ def _read_area(path, cap):
     return bytes(out), present
 
 
+def _holdout_overlap(holdout_bytes, body_bytes, n=50):
+    """The fraction of `holdout_bytes`' n-gram windows (fixed length `n`) that also occur verbatim
+    somewhere in `body_bytes` -- the near-duplicate-contamination reading open_areas' docstring
+    declares as `data.holdout_overlap` and which, until this fix, was never computed anywhere in this
+    file (audit finding, confirmed live: `grep -n holdout_overlap src/data/api.py` matched only the
+    docstring's own declaration; no field anywhere carried a value).
+
+    WHY THIS IS A DIFFERENT QUESTION FROM THE SPLIT RULE, which is the docstring's own citation and
+    worth repeating here because it is the reason this function exists rather than a second use of
+    the offset/size pair: Lee et al. (arXiv:2107.06499) measures that models "underestimate
+    perplexity on evaluation documents with near duplicates" and that a benchmark "should actively
+    remove contaminated training data, rather than just partitioning held out splits by documents".
+    A held-out block can be a clean, non-overlapping byte range of ONE area and still be
+    near-duplicated by material that reached the training body through some other channel (a mirrored
+    file, a second copy under a different name) -- the split rule cannot see that, because it only
+    ever looks at where bytes came from inside this one area.
+
+    COST, STATED RATHER THAN DISCOVERED AT SCALE: building the body's n-gram set is one pass over
+    `body_bytes` (measured: ~0.85s for a 2,000,000-byte body, the shipped DATA_CORPUS_CAP, on the
+    machine this was written on); checking the holdout is then one pass over `holdout_bytes` against
+    an O(1) membership test per window. A caller that raises DATA_CORPUS_CAP far past the shipped
+    default pays proportionally more at startup for it, once, which is the same trade this package
+    already makes for reading the corpus off disk in the first place.
+
+    Returns None when the held-out block is too short to hold one n-gram -- an UNREACHABLE reading,
+    not a 0.0: the fraction is undefined on fewer than `n` bytes, not measured-and-empty. Otherwise a
+    float in [0, 1].
+    """
+    if len(holdout_bytes) < n:
+        return None
+    if len(body_bytes) < n:
+        return 0.0
+    windows = {body_bytes[i:i + n] for i in range(len(body_bytes) - n + 1)}
+    total = len(holdout_bytes) - n + 1
+    hits = sum(1 for i in range(total) if holdout_bytes[i:i + n] in windows)
+    return hits / total
+
+
 # The five 15-symbol alphabets, from the old tree's synthetic generator.
 _ALPHABETS = ("abcdefghijklmno", "pqrstuvwxyzABCD", "EFGHIJKLMNOPQRS",
               "TUVWXYZ0123456", "789!?.,;:'\"-()")
 
 
-def _synthetic_areas(dat, seed, entries):
+def _synthetic_areas(dat, seed, entries, labels):
     """`dat.n_processes` order-2 Markov generators, one area each. Holds nothing out.
+
+    `labels` ARRIVES PRE-VALIDATED, computed once by open_areas for both sources (basename applied,
+    checked against every OTHER entry for a label or rng-key collision) rather than derived twice and
+    differently in here -- see open_areas' docstring for why that used to desynchronise the label
+    space between the two source arms.
 
     SEEDED FROM THE RUN SEED, NOT FROM THE PROCESS INDEX. The old make_proc was seeded by the index
     alone, so `DATA_SOURCE=synthetic` measured a between-seed spread with the DATA HELD CONSTANT --
@@ -451,11 +494,37 @@ def _synthetic_areas(dat, seed, entries):
     drawn -- and is what `data.holdout` already does.
     """
     n = int(dat.n_processes)
+    if n < 1:
+        # REFUSED, NOT CLAMPED (audit finding, confirmed live). The old `max(1, n)` inside the
+        # per_area arithmetic below let DATA_N_PROCESSES=0 through silently: reproduced,
+        # `areas.names == ()` with no error, warning or refusal anywhere -- a run that would then
+        # try to plan and draw a stream from zero areas. A clamp here would also make the banner
+        # print a process count the run did not use, which this project's refusal rule forbids.
+        raise CorpusError(
+            f"DATA_N_PROCESSES={n}: at least one synthetic process is required to produce a "
+            f"stream. Refused rather than silently returning zero areas.")
+    if len(entries) < n:
+        # REFUSED, NOT PAPERED OVER WITH INVENTED NAMES (audit finding, confirmed live). This used
+        # to silently generate p0..p{n-1} whenever DATA_AREAS named fewer entries than
+        # DATA_N_PROCESSES -- reproduced, `DATA_SOURCE=synthetic DATA_AREAS=eng
+        # DATA_N_PROCESSES=4` gave `areas.names == ('p0','p1','p2','p3')` with the operator's one
+        # requested area appearing nowhere and nothing in the log to say so. Every per-area score,
+        # the holdout rng keys and DATA_PHASE_SCHED's by-name lookup are keyed by the DECLARED
+        # name, so this was the desynchronised-label failure (ISSUES P3-C19) reached through this
+        # arm's own fallback rather than through a dropped corpus.
+        raise CorpusError(
+            f"DATA_AREAS names {len(entries)} area(s) {tuple(entries)} but DATA_N_PROCESSES={n} "
+            f"synthetic processes were requested. Refused rather than generating p0..p{n - 1} for "
+            f"the areas nobody named: name at least {n} area(s) in DATA_AREAS, or lower "
+            f"DATA_N_PROCESSES.")
+    labels = labels[:n]
     # Enough text that the floor is clearable and a 120,000-byte stream can be drawn without the
-    # sampler wrapping: the areas are generated, so there is no corpus to be short.
-    per_area = max(int(dat.seg_max) + 1, MIN_AREA_BYTES, int(dat.stream_bytes) // max(1, n)) * 2
+    # sampler wrapping: the areas are generated, so there is no corpus to be short. `n` is now known
+    # >= 1 (refused above), so this no longer needs the max(1, n) clamp the LEVERS READ docstring
+    # line and the audit both named: DATA_N_PROCESSES=0 is a startup refusal, not a divide-by-zero
+    # guard wearing a clamp's clothes.
+    per_area = max(int(dat.seg_max) + 1, MIN_AREA_BYTES, int(dat.stream_bytes) // n) * 2
     raw, present, taken, sources = {}, {}, {}, {}
-    labels = entries[:n] if len(entries) >= n else [f"p{i}" for i in range(n)]
     for i, label in enumerate(labels):
         stream = _rng.rng_for(f"data.synth.{_holdout_key(label)}", seed)
         alpha = _ALPHABETS[i % len(_ALPHABETS)]
@@ -485,6 +554,14 @@ class Plan:
     `protocol` is RECOGNISED from the resolved schedule, never generated, and it is printed by name
     on every run -- one of four, never blank. That is the half D2 actually needed: the launcher
     writes pure-add as a schedule of names, and the report says which protocol ran.
+
+    `counters` CARRIES THE DID IT FIRE READINGS THIS FUNCTION COMPUTES BUT ISN'T A Gate: how many
+    phases the schedule resolved to (data.phase_resolved), the recognised protocol by name again
+    under its counter key (data.protocol_named, for a report that greps counters rather than fields),
+    and how many DATA_PHASE_SCHED entries were given as an area NAME rather than an index
+    (data.phase_name_resolved -- 0 is the honest statement "every entry was an index", not silence).
+    Added because the audit found the last of these computed and then discarded with no field to
+    land in (n_by_name was incremented and never read again anywhere in this file).
     """
     protocol: str
     schedule: tuple
@@ -492,6 +569,7 @@ class Plan:
     per_area_draw: dict
     exposure: dict
     gates: tuple
+    counters: dict = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -501,6 +579,14 @@ class Stream:
     BOTH LISTS LEAVE THIS PACKAGE so no consumer has to guess which one it wanted. `splice_starts`
     is every segment start; `area_changes` is the subset where the area actually changed. Scoring
     boundary precision against the first made all ~96 "true switches" artefacts on a one-area run.
+
+    `draws` IS THE STREAM'S OWN DRAW COUNT (audit finding, confirmed live), carried out because the
+    docstring's declared DID IT FIRE row -- `rng.issued()["data.stream.e0"].draws` -- cannot actually
+    be evaluated: `rng.issued()` returns name -> (derived seed, run seed) TUPLES (spine/rng.py's own
+    diagnostic register, deliberately not the live Rng, so nothing there can move a number the run
+    produces), and the one Rng object with a real `.draws` was local to draw_stream and discarded on
+    return. Reproduced: `rng.issued()['data.stream.e0'].draws` raised `AttributeError: 'tuple' object
+    has no attribute 'draws'`. This field is what the docstring's claim now actually reads.
     """
     bytes: bytes
     labels: list
@@ -511,6 +597,7 @@ class Stream:
     per_area_drawn: dict
     epoch: int
     stream_id: str
+    draws: int = 0
 
 
 def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_token: float):
@@ -727,11 +814,50 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     # THE ONE PLACE THE BYTE/TOKEN BOUNDARY IS CROSSED, and it is crossed with the MEASURED
     # bytes/token handed in, never with an estimate (ISSUES P1-H16).
     windows_per_segment = mean_seg / (int(win_tokens) * float(bytes_per_token))
+    # A STARTUP PREDICTION, NEVER A MEASUREMENT, AND MORE OPTIMISTIC THAN THE REALIZED DRAW UNDER
+    # THE SHIPPED LAW (audit finding, confirmed by an 8-seed, 4-phase-count sweep at pure defaults).
+    # mean_seg above is the NAIVE (seg_min+seg_max)/2, computed here because data_plan runs BEFORE a
+    # single byte is drawn -- draw_stream does not exist to measure from yet, so this cannot become
+    # "measured, not estimated" the way bytes_per_token above already is (ISSUES P1-H16) without
+    # moving the check to after the draw, which would make it a report line instead of a startup
+    # gate. Under DATA_DRAW="planned" (the shipped default) draw_stream truncates a segment to BOTH
+    # the phase bound (as "uniform" already did) AND the drawing area's remaining per-phase budget
+    # (new in this law), so the realized mean segment length runs measurably below this naive mean
+    # more often than under "uniform": at DATA_AREAS=eng,py,num,c / LM_CTX=128 / a measured
+    # bytes/token near 1.213, this gate read "armed, did not fire" at every one of 8 tested seeds
+    # while the REALIZED windows-per-segment (from the actual draw) was below the 8.0 threshold at
+    # all 8 -- a false-negative pattern that pre-existed "planned" (6/8 seeds under "uniform" on the
+    # same sweep) but that this default measurably worsens (8/8), and the gap widens with phase
+    # count (7.6%/10.4%/17.7%/32.3% mean relative gap under "planned" at 8/10/20/40 phases, against
+    # 3.7%/4.9%/10.0%/17.9% under "uniform" at the same phase counts -- roughly double, throughout).
+    # Stated here rather than left implicit, the way exposure_max/exposure_skew's `caveat` already
+    # states the same law's effect on THOSE two gates: a "did not fire" reading near 8.0 is
+    # optimistic under either law and MORE optimistic under the shipped one, and should be
+    # corroborated by inspecting the actual Stream draw rather than trusted alone.
+    splice_caveat = (
+        "data.splice_window is a STARTUP PREDICTION from the declared seg_min/seg_max mean, never "
+        "measured from the actual draw (data_plan runs before a single byte is drawn). Under "
+        "DATA_DRAW=planned (the shipped default) draw_stream additionally truncates segments to "
+        "each area's remaining per-phase budget, so the realized mean segment length runs "
+        "measurably below this estimate -- measured over an 8-seed sweep at the shipped defaults, "
+        "'armed, did not fire' here read true on 8/8 seeds while the realized windows-per-segment "
+        "was already below 8.0 on all 8; the gap widens with phase count. A reading near the "
+        "threshold should be corroborated against the actual Stream draw, not trusted alone.")
     gates.append(Gate("data.splice_window", windows_per_segment < 8.0,
-                      round(windows_per_segment, 3), 8.0))
+                      round(windows_per_segment, 3), 8.0, reason=splice_caveat))
+
+    # PHASE_NAME_RESOLVED, CARRIED OUT RATHER THAN COMPUTED AND DISCARDED (audit finding, confirmed
+    # live: n_by_name was incremented above and never read again anywhere in this file -- Plan had
+    # no field for it and DATA declares no counters() entry point, so the docstring's declared
+    # data.phase_name_resolved row had no value anywhere to report). 0 is the shipped, honest
+    # reading -- "every entry was an index" -- and it can now actually be printed as that statement
+    # rather than silence.
+    counters = {"data.phase_resolved": len(schedule), "data.protocol_named": protocol,
+                "data.phase_name_resolved": n_by_name}
 
     return Plan(protocol=protocol, schedule=schedule, phase_bounds=bounds,
-                per_area_draw=per_area_draw, exposure=exposure, gates=tuple(gates))
+                per_area_draw=per_area_draw, exposure=exposure, gates=tuple(gates),
+                counters=counters)
 
 
 def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
@@ -784,7 +910,10 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                  with the gate arithmetic), data.resample (unreachable at resample=False -- the
                  "every epoch is a byte-identical replay" state, STATED rather than warned about),
                  data.phase_entered (must equal len(schedule) per epoch or the fill is drifting),
-                 rng.issued()["data.stream.e0"].draws (0 draws = armed-but-inert)
+                 Stream.draws (0 draws = armed-but-inert; NOT rng.issued()["data.stream.e<n>"].draws
+                 -- issued() returns (derived seed, run seed) tuples with no .draws attribute, so
+                 that expression is an AttributeError and Stream carries the real reading instead;
+                 audit finding, confirmed live)
     """
     dat = dat.owned_by("DATA")
     # RESAMPLE IS READ HERE, NOT BY THE CALLER. The composition root calls this once per epoch
@@ -841,7 +970,24 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     out = bytearray()
     labels, splice, changes = [], [], []
     per_area = {n: 0 for n in names}
-    cursors = dict(areas.cursors)
+    # MUTATE areas.cursors IN PLACE -- NOT A COPY (audit finding, rated critical, confirmed live).
+    # `cursors = dict(areas.cursors)` used to take a COPY here; the copy was advanced below but never
+    # written back anywhere, and Stream never carried it out either, so every subsequent call to
+    # draw_stream re-read the SAME all-zero areas.cursors open_areas produced. Reproduced at
+    # DATA_SOURCE=real DATA_AREAS=eng DATA_SEG_CONTIG=1 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000
+    # RUN_EPOCHS=8: epoch-0 and epoch-1 Stream.bytes came back byte-IDENTICAL in full, and
+    # areas.cursors stayed {'eng': 0} after both calls -- an 8-epoch run under this configuration
+    # sees the same ~40,000-byte prefix of the body on every epoch and never reaches the other
+    # ~150,000 bytes, exactly the P3-H22-shaped repetition data.exposure_max_planned exists to catch,
+    # while that gate itself reads a WHOLE-RUN quantity computed from stream_bytes and never sees the
+    # realized collapse to one 40,000-byte prefix. `Areas` is a frozen DATACLASS but `cursors` is an
+    # ordinary mutable dict VALUE -- frozen only refuses reassigning the `cursors` ATTRIBUTE, not
+    # mutating the dict it points to -- which is why the field is a dict and not a tuple: binding the
+    # SAME dict object here (not copying it) means every write below lands on the one `areas.cursors`
+    # the composition root holds across every epoch's call, which is what "PERSISTS ACROSS EPOCHS"
+    # (this function's own docstring) and stream_state's "LOAD-BEARING... without them a resume
+    # re-reads the head of every area" (stream_state's docstring) both require.
+    cursors = areas.cursors
     last_area = None
     contig = bool(dat.seg_contig)
 
@@ -908,12 +1054,20 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             if contig:
                 # THE CURSOR PERSISTS ACROSS EPOCHS, so an English-only run has only the text's own
                 # boundaries rather than discontinuities we manufacture every 8-20 KB. eng_only
-                # reported 71 domains partly by counting our own seek points.
+                # reported 71 domains partly by counting our own seek points. (This is now a REAL
+                # persistence, into the same dict object areas.cursors holds -- see the comment
+                # above `cursors = areas.cursors` -- rather than a value nothing ever reads back.)
                 start = cursors[label] % len(body)
                 chunk = body[start:start + want]
                 if len(chunk) < want:
                     chunk = chunk + body[:want - len(chunk)]      # data.contig_wrap
-                cursors[label] = start + want
+                # STORED ALREADY REDUCED MOD len(body), not the raw running total. A raw
+                # `start + want` accumulates without bound over many segments and epochs -- not
+                # incorrect (the `% len(body)` above still reads it back correctly), but an
+                # unbounded int is a worse number to put in a checkpoint than the equivalent bounded
+                # offset stream_state hands to CKPT, so it is normalised at the one place it is
+                # written rather than left to grow.
+                cursors[label] = (start + want) % len(body)
             else:
                 start = stream.randint(0, max(0, len(body) - want))
                 chunk = body[start:start + want]
@@ -934,7 +1088,10 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                 area_names=tuple(names), per_area_drawn=per_area, epoch=int(epoch),
                 # MEM CAN INVALIDATE OR RE-BASE PROVENANCE rather than silently carrying byte
                 # offsets into a stream that no longer exists (ISSUES P1-M83).
-                stream_id=f"s{seed}.e{int(epoch)}.{len(out)}")
+                stream_id=f"s{seed}.e{int(epoch)}.{len(out)}",
+                # THE DRAW COUNT, CARRIED OUT because rng.issued() cannot answer it (see Stream's
+                # docstring) -- read off the local Rng before it goes out of scope.
+                draws=stream.draws)
     if not bool(dat.resample):
         # THE WEAKREF'S CALLBACK IS THE EVICTION, not a periodic sweep: when this Areas is collected,
         # the callback fires and pops exactly this id() entry, which is what lets the cached Stream

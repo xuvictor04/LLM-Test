@@ -121,6 +121,24 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
     gen = torch.Generator(device=device)
     gen.manual_seed(generator.randint(0, 2 ** 31 - 1))
     mode = str(sig.mode)
+    if mode == "bigram" and width < 2:
+        # A REFUSAL, NOT THE ZERO VECTOR THIS USED TO PRODUCE. encode()'s bigram arm hashes
+        # consecutive PAIRS of units (`units[:, :-1] * 31 + units[:, 1:]`); at width_units=1 that
+        # slice is empty, index_add_ adds nothing, and `v / v.norm(...).clamp_min(1e-8)` returns an
+        # exact, well-formed all-zero unit vector on every call -- reproduced: SIG_MODE=bigram,
+        # SIG_WIDTH_UNITS=1 (reachable at LM_CTX=1) gave every window an identical zero signature,
+        # so FAB's routing cosine was identical for every expert and DOM's boundary test could never
+        # fire, with nothing anywhere raising. That is exactly the C4/C5 failure this package's own
+        # docstring says encode() may never produce ("a caller that cannot supply width_units units
+        # gets an EXCEPTION, never a narrower window and never a zero vector"). The learned arm has
+        # no such hole -- its embedding mean is well-defined at width 1 -- so this refusal is
+        # bigram-only and fires at build time, before any window is ever encoded.
+        raise ValueError(
+            f"SIG_MODE=bigram needs at least two units to form a bigram; SIG_WIDTH_UNITS={width} "
+            f"cannot produce one. A bigram encoder run at width_units=1 does not fail loudly -- it "
+            f"returns a well-formed all-zero signature for every window, which collapses FAB's "
+            f"routing and DOM's boundary test with no error anywhere. Raise SIG_WIDTH_UNITS to at "
+            f"least 2, or use SIG_MODE=learned, which has no width floor.")
     if mode == "learned":
         encoder = _Encoder(int(alphabet_size), int(sig.d), gen, device=device)
     elif mode == "bigram":
@@ -143,7 +161,17 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
         counters={"sig.width_units": width, "sig.alphabet_size": int(alphabet_size),
                   "sig.encoder_built": 1 if mode == "learned" else 0,
                   "sig.bigram_built": 1 if mode == "bigram" else 0,
-                  "sig.encode_calls": 0, "sig.train_steps": 0},
+                  # FOUR SEPARATE SURFACES, SEEDED HERE SO A REPORT READ BEFORE THE FIRST encode()
+                  # CALL SEES ZEROS AND NOT A MISSING KEY. encode_calls counts INVOCATIONS,
+                  # encode_windows counts the units-of-work inside them (they collapsed into one
+                  # number -- the window count stored under the "calls" name -- until this repair;
+                  # a report reading that row printed N windows-per-call as N calls). width_seen is
+                  # the last-observed width for the report to eyeball against width_units, and
+                  # width_mismatch is the C4 alarm: nonzero means encode() detected a width other
+                  # than st.width_units and RAISED rather than reshaping around it.
+                  "sig.encode_calls": 0, "sig.encode_windows": 0,
+                  "sig.encode_width_seen": 0, "sig.encode_width_mismatch": 0,
+                  "sig.train_steps": 0},
         warmup_curve=[], rng=generator)
 
 
@@ -158,7 +186,8 @@ def encode(sig: Config, st, windows):
     Runs under no_grad and never touches the optimizer, so an instrument calling it cannot move the
     encoder (the G7 digest holds across it).
 
-    LEVERS READ: mode, d, bigram_dim
+    LEVERS READ: none directly -- everything comes off SigState (st.mode, st.d, st.width_units,
+                 st.encoder), which build() froze from mode, d and bigram_dim once
     WIRES READ: none
     DID IT FIRE: sig.encode_calls, sig.encode_windows, and sig.encode_width_seen asserted equal to
                  st.width_units on EVERY call -- a nonzero sig.encode_width_mismatch is the C4
@@ -169,7 +198,10 @@ def encode(sig: Config, st, windows):
     if units.dim() != 2 or int(units.shape[1]) != st.width_units:
         # AN EXCEPTION, NEVER A NARROWER WINDOW AND NEVER A ZERO VECTOR. This is the whole of the
         # C4/C5 repair: the eval path used to resolve its own width and got one byte, and because
-        # a one-byte signature is a perfectly well-formed vector nothing anywhere failed.
+        # a one-byte signature is a perfectly well-formed vector nothing anywhere failed. The
+        # mismatch is counted BEFORE the raise so a process that dies here still leaves the ledger
+        # holding a nonzero sig.encode_width_mismatch -- the C4 alarm -- for the report to find.
+        st.counters["sig.encode_width_mismatch"] += 1
         got = tuple(units.shape)
         raise ValueError(
             f"SIG.encode was handed windows of shape {got} against the width frozen at build, "
@@ -177,16 +209,34 @@ def encode(sig: Config, st, windows):
             f"placeholder and no fallback -- a caller that cannot supply the frozen width gets "
             f"this, because the alternative measured a whole project's routing on one byte.")
 
-    st.counters["sig.encode_calls"] += int(units.shape[0])
-    if st.mode == "bigram":
-        # Bigram counts hashed into the frozen table, then normalised the same way the encoder
-        # normalises, so the two arms produce comparable vectors.
-        idx = ((units[:, :-1] * 31 + units[:, 1:]) % st.encoder.shape[0]).long()
-        v = torch.zeros(units.shape[0], st.d, device=st.encoder.device)
-        v.index_add_(0, torch.arange(units.shape[0], device=v.device).repeat_interleave(idx.shape[1]),
-                     st.encoder[idx.reshape(-1)])
-        return v / v.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-    return st.encoder(units.to(next(st.encoder.parameters()).device))
+    # sig.encode_calls counts INVOCATIONS and sig.encode_windows counts the units of work inside
+    # them; these used to be the same counter (encode_calls incremented by the window count), so a
+    # report printing "sig.encode_calls" after one call on a batch of 512 windows read 512, and the
+    # two quantities the contract wants separated -- how often the encoder was invoked vs how many
+    # windows were characterised -- collapsed into one number that was neither's label.
+    st.counters["sig.encode_calls"] += 1
+    st.counters["sig.encode_windows"] += int(units.shape[0])
+    st.counters["sig.encode_width_seen"] = int(units.shape[1])
+
+    # RUNS UNDER no_grad, AND THIS IS THE WHOLE OF THE REPAIR. Without it, this arm built an
+    # autograd graph through _Encoder.emb/.proj -- both live in OPT's "encoder" param group
+    # (compose.py's opt_api.build param_groups={"encoder": sig_api.encoder_parameters(...)}) -- so
+    # ANY caller that computed a signature for routing and later called .backward() on the LM/FAB
+    # loss accumulated gradient into the signature encoder, and the next optimizer step applied it:
+    # the router's only input moved under a loss that is not its own contrastive objective, and
+    # sig.train_steps counted none of it. Reproduced before this fix: encode(...).sum().backward()
+    # left a non-None grad on st.encoder.emb.weight. Training already has its own entry points
+    # (train_step, warm_up); no_grad here costs this function nothing it was using.
+    with torch.no_grad():
+        if st.mode == "bigram":
+            # Bigram counts hashed into the frozen table, then normalised the same way the encoder
+            # normalises, so the two arms produce comparable vectors.
+            idx = ((units[:, :-1] * 31 + units[:, 1:]) % st.encoder.shape[0]).long()
+            v = torch.zeros(units.shape[0], st.d, device=st.encoder.device)
+            v.index_add_(0, torch.arange(units.shape[0], device=v.device).repeat_interleave(idx.shape[1]),
+                         st.encoder[idx.reshape(-1)])
+            return v / v.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+        return st.encoder(units.to(next(st.encoder.parameters()).device))
 
 
 def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):

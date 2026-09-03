@@ -182,3 +182,38 @@ management for those agents**:
   this reason: the next round reads the file instead of being retold.
 
 This ruling is about METHOD and does not touch the two definitive goals.
+
+## D11 · 2026-09-03 · A recommendation is a researched artefact, not a generated one
+
+> "From now on your recommendations, if you haven't, should be researched and thought out, with
+> rationales, alternatives, etc… I don't want material plain generated from you."
+
+**Ruling: standing, and it binds the assistant rather than the code.** When the assistant proposes a
+course of action — what to fix next, which of two repairs to take, whether a mechanism should be a
+lever, what a default should be — that proposal must be the OUTPUT OF RESEARCH, not the output of
+fluency. Concretely, a recommendation that reaches the owner carries:
+
+1. **What was actually read or run.** The files, the measurements, the commands. A recommendation
+   with no evidence trail is an opinion wearing a recommendation's clothes, and this project's whole
+   subject is plausible statements that were never checked. The assistant has already produced two of
+   those in this session — asserting the old tree had moved under `archive/` (it had not, and an
+   agent checking the filesystem contradicted it), and blaming concurrency for an API failure that
+   was model capacity (four runs and ~50 lost agents before a controlled A/B settled it).
+2. **The alternatives that were considered and why they lost.** Not a strawman pair. If there is only
+   one option, say that and say why the space is that narrow.
+3. **What it costs and what it forecloses.** Including the case where the answer is "do nothing yet".
+4. **What would change the answer** — the measurement that would settle it, since the owner has ruled
+   that *"the ultimate deciding factor will be performance"* and *"if anything needs gpu time, I will
+   run it"*. A recommendation that cannot name its own falsifier is not yet finished.
+
+**WHY THIS IS NOT ALREADY COVERED BY D10.** D10 says substantive WORK is decomposed to agents. This
+says the same of JUDGEMENT. The two failure modes differ: D10 guards against the assistant doing by
+hand what a fleet should do, while D11 guards against the assistant *summarising* agent output into a
+confident recommendation the agents never actually supported. The second is harder to see, because
+the prose reads the same either way.
+
+**WHAT IT DOES NOT MEAN.** It does not mean every question goes to a workflow before it can be
+answered — a factual lookup is a lookup, and stalling on ceremony is its own failure. It binds
+RECOMMENDATIONS: proposals about what the project should do next.
+
+This ruling is about METHOD and does not touch the two definitive goals.

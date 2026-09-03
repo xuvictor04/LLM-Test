@@ -1,0 +1,92 @@
+{
+  "package": "TOK",
+  "file": "src/tok/api.py",
+  "fixer_note": "13 filed items collapse to 5 distinct defects (several items are the same defect re-filed by different audit rounds against the same lines). Each is reported once per original filed item below so the audit ledger's ids all resolve, with the underlying defect noted.",
+  "fixed": [
+    {
+      "title": "bytes_per_token is measured on a dropout-free segmentation, but the frozen contract says it is measured WITH dropout applied -- so SIG's one signature width and DATA's splice gate use a number the training stream never produces.",
+      "severity": "high",
+      "what_changed": "DEFECT A (fixed on the resume/replay branch; the fresh-build branch was already fixed at HEAD). build_vocabulary's `if read_path:` block called `_segment(vocab, sample, dropout=0.0, stream=None)` unconditionally on the resume path. Changed to `stream = vocab.dropout_rng if float(tok.dropout) > 0 else None; _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)`, mirroring the already-fixed fresh-build arm and matching tokenize()'s own docstring ('bytes_per_token IS MEASURED WITH DROPOUT APPLIED', unconditionally -- it does not carve out an exception for a resumed vocabulary). `vocab.dropout_rng` was already minted unconditionally three lines earlier (P1-H56's fix), so this reuses that stream rather than minting a second one.",
+      "proof": "Ran /tmp/.../scratchpad/prove_replay_dropout.py: built a parent online vocabulary at TOK_DROPOUT=0.3 (bytes_per_token=3.536), saved it in the `entries` sidecar shape, resumed via CKPT_RESUME at TOK_DROPOUT=0.3. BEFORE this fix the resumed vocab.bytes_per_token read 4.0 (the deterministic, dropout-free value) -- a 12-13% error against a live dropout-applied cross-check (~3.53), reproducing the audit's own measured error class. AFTER: resumed.bytes_per_token = 3.5169988..., cross-checked against an independent dropout=0.3 segmentation of the identical sample (3.5301...) -- relative error 0.0037 (essentially seed noise), and clearly distinct from the dropout-free value (4.0, 12.08% off). Script printed 'PASS: resume/replay branch now measures bytes_per_token WITH dropout applied.'"
+    },
+    {
+      "title": "The RESUME/replay path still measures bytes_per_token dropout-free even though the BUILD path was already fixed to measure it with dropout applied.",
+      "severity": "high",
+      "what_changed": "Same defect and same fix as the item above (DEFECT A) -- this is round2's re-filing of the same line after only the fresh-build arm had been fixed.",
+      "proof": "Same run as above: /tmp/.../scratchpad/prove_replay_dropout.py. See proof text on the sibling finding."
+    },
+    {
+      "title": "The resume/replay branch of build_vocabulary still measures bytes_per_token on a dropout-free segmentation, even though b95c4a4 fixed this exact defect on the build path -- the repair is only half-applied.",
+      "severity": "high",
+      "what_changed": "Same defect and same fix as DEFECT A (third independent filing of the identical line).",
+      "proof": "Same run as above: /tmp/.../scratchpad/prove_replay_dropout.py."
+    },
+    {
+      "title": "The resume branch measures bytes_per_token with dropout hardcoded to 0.0, ignoring TOK_DROPOUT",
+      "severity": "high",
+      "what_changed": "Same defect and same fix as DEFECT A (fourth independent filing of the identical line).",
+      "proof": "Same run as above: /tmp/.../scratchpad/prove_replay_dropout.py."
+    },
+    {
+      "title": "tokenize performs a re-segmentation whose match table has not moved, instead of refusing it and counting tok.retok_noop",
+      "severity": "medium",
+      "what_changed": "DEFECT B. Added a one-slot cache (`Vocabulary._retok_cache`, holding (data, start, len(data), stamp, Segmentation)) and a comparison at the top of tokenize(): when the SAME `data` object (identity, not content-equality -- the composition root re-tokenizes its own live stream buffer, it does not rebuild an equal-content one) is segmented again from the SAME `start` and the (vocab.size(), len(vocab.seq2id)) stamp has not moved AND drop<=0.0, the cached Segmentation is returned and `vocab.counters['tok.retok_noop']` is incremented instead of re-running `_segment`. Per the docstring's own qualifier ('THE SKIP TEST ABOVE IS DISABLED WHENEVER dropout > 0'), the refusal is skipped whenever drop>0 since the emitted stream is then not a deterministic function of the vocabulary alone. A real re-segmentation (stamp moved, or dropout forced a fresh draw) is counted separately as `tok.retok`, and every segmentation that actually runs counts `tok.segment` -- matching the docstring's 'reported SEPARATELY so a frozen run's 39 no-op re-tokenizations read as skipped rather than as activity'.",
+      "proof": "Ran /tmp/.../scratchpad/prove_retok_noop.py against BOTH the pre-fix file (git HEAD, loaded standalone via importlib) and the current tree. BEFORE: two consecutive tokenize() calls on the identical 940-byte buffer both returned fresh, distinct Segmentation objects (`seg2 is seg1: False`) and `vocab.counters` did not even exist (`None`) -- exact reproduction of the finding. AFTER: `seg2 is seg1: True`, `vocab.counters: {'tok.segment': 1, 'tok.retok_noop': 1}`. Also verified the dropout>0 qualifier: two regularize=True calls at TOK_DROPOUT=0.5 on the same buffer are NOT treated as a no-op (`s2 is s1: False`, `counters: {'tok.segment': 2, 'tok.retok': 1}`, retok_noop stayed at 0) -- confirming the skip test is disabled under dropout as required."
+    },
+    {
+      "title": "the replay path neither reconciles the file's recorded settings nor distinguishes an unreadable parent vocabulary from a cold start",
+      "severity": "medium",
+      "what_changed": "DEFECT C, half 1 (reconciliation) and half 2 (unreadable parent). Half 1: `_replay_merges` now takes an optional `recon` dict (min_pair, max_tok, dropout, vmax -- the run's own resolved levers plus the wire-sourced ceiling as it stood before replay) and, for every key the loaded file actually records, compares it against the resolved value; a mismatch is appended to `vocab.counters['tok.load_reconciled_detail']` and counted in `vocab.counters['tok.load_reconciled']` (present, possibly 0, whenever a replay was attempted -- absent otherwise, so 'compared and agreed' reads differently from 'never compared'). The file's value never wins -- the vocabulary was already built from the resolved levers before this comparison runs; the comparison only produces a report. Half 2: when `_replay_merges` returns None (the file at `d_vocab_read_path` does not exist), build_vocabulary now raises a ValueError naming the path and the reason, instead of falling through to the fresh-build arm. That fall-through used to (a) silently return a freshly-minted vocabulary with no refusal at all (round1's original repro) and (b) after the P1-H56 dropout_rng fix, instead crash with an unrelated-looking `RngError: stream 'tok.dropout.mint' was already issued` from a second unconditional mint on the fall-through path -- a regression round2's triage caught on the current HEAD. Raising immediately, before the fall-through code is ever reached, removes both symptoms at their one root cause.",
+      "proof": "Ran /tmp/.../scratchpad/prove_reconcile_gate.py (check_reconciliation + check_missing_file), against BEFORE (git HEAD) and AFTER. Reconciliation: built a parent at TOK_MIN_PAIR=2, hand-wrote a sidecar recording min_pair=2 (standing in for save_vocabulary, itself still an unwritten P4 stub not in this fixer's scope), resumed at TOK_MIN_PAIR=200. BEFORE: `resumed.counters: None` (no comparison happened at all). AFTER: `resumed.counters: {'tok.load_reconciled': 1, 'tok.load_reconciled_detail': (\"tok.load_reconciled: '.../_recon_AFTER.dyntok.json' recorded min_pair=2, this run resolves 200 (TOK_MIN_PAIR) -- the file's value does not win\",)}`. Missing-parent: pointed CKPT_RESUME at a nonexistent base. BEFORE: `RAISED RngError: stream 'tok.dropout.mint' was already issued for seed 9 ...` (the regression described above, message names neither TOK.d_vocab_read_path nor 'does not exist'). AFTER: `RAISED ValueError: TOK.d_vocab_read_path='.../_does_not_exist_AFTER.dyntok.json' does not exist. A resume must reuse the parent's saved vocabulary or the restored embedding table is indexed by a different one; refused rather than silently building a fresh vocabulary against a checkpoint that was trained on a different one.` Script printed 'PASS' after asserting both."
+    },
+    {
+      "title": "the declared Gate tok.build_passes_advice is never produced on any arm, so mode=\"fixed\" runs silently at 2 passes where the build of record used 8",
+      "severity": "medium",
+      "what_changed": "DEFECT C, half 3 (the Gate). Added `from spine.gate import Gate` (the module previously imported nothing from spine.gate at all) and a `gates` slot on Vocabulary (default `()`, populated once per build_vocabulary call, never appended to piecemeal). Every return path of build_vocabulary now sets `vocab.gates`: mode=\"bytes\" -> unreachable, reason 'mode != fixed'; the resume/replay arm -> unreachable regardless of mode, reason 'resumed via d_vocab_read_path: no build pass ran on this branch, so there is no achieved pass count to compare' (the docstring's own two-state description does not cover the replay arm, so this is a deliberate, stated design choice rather than a silent gap); the fresh-build arm (fixed/online) -> fired=True with value=passes, threshold=8 and the historical-8 reason when mode==\"fixed\", else unreachable ('mode != fixed'). Caught and fixed a real bug of my own while proving this: the first version wrote `vocab.gates = (Gate(...) if mode==\"fixed\" else Gate(...))` -- parens around a ternary are NOT a 1-tuple without a trailing comma, so `vocab.gates` held a bare Gate object, not the declared `gates: tuple`. Fixed to `((... if ... else ...),)`.",
+      "proof": "Ran /tmp/.../scratchpad/prove_reconcile_gate.py (check_gate), against BEFORE and AFTER, across mode in {bytes, fixed, online}. BEFORE: `module has Gate imported: False`; `vocab.gates` is `None` on every arm (the attribute does not exist at all -- AttributeError-shaped via getattr default). AFTER: `module has Gate imported: True`; mode=bytes -> `Gate tok.build_passes_advice: UNREACHABLE (None vs 8) -- mode != fixed`; mode=fixed (built to 2 passes) -> `Gate tok.build_passes_advice: FIRED (2 vs 8) -- the offline build historically used 8 -- set TOK_BUILD_PASSES=8 to reproduce it; a mode=\"fixed\" run at this value is not that build of record`; mode=online -> `Gate tok.build_passes_advice: UNREACHABLE (2 vs 8) -- mode != fixed`. The tuple-vs-bare-object bug was caught by this same run (`TypeError: 'Gate' object is not iterable` on the first attempt) and fixed before the proof above was captured."
+    },
+    {
+      "title": "The re-segmentation no-op refusal is absent: no invariant is stamped, so a re-tokenization whose match table has not moved is performed rather than refused, and tok.retok_noop can never be counted.",
+      "severity": "medium",
+      "what_changed": "Same defect and same fix as DEFECT B (duplicate filing).",
+      "proof": "Same run as the first tok.retok_noop entry above: /tmp/.../scratchpad/prove_retok_noop.py."
+    },
+    {
+      "title": "The saved file's recorded settings are never read, so the documented reconciliation (tok.load_reconciled) and the tok.build_passes_advice Gate are mechanisms that cannot fire.",
+      "severity": "medium",
+      "what_changed": "Same defect and same fix as DEFECT C (this filing bundles both halves 1 and 3 into one item; both are fixed -- see the two entries above for the precise change).",
+      "proof": "Same runs as the two DEFECT C entries above: /tmp/.../scratchpad/prove_reconcile_gate.py."
+    },
+    {
+      "title": "The re-segmentation no-op refusal the docstring specifies does not exist in the body",
+      "severity": "medium",
+      "what_changed": "Same defect and same fix as DEFECT B (third filing of the same line).",
+      "proof": "Same run as the tok.retok_noop entries above: /tmp/.../scratchpad/prove_retok_noop.py."
+    },
+    {
+      "title": "build_vocabulary declares cand_window, mint_pmin and mint_novel as LEVERS READ and reads none of them, so three knobs are inert during the build with the audit reporting them as read",
+      "severity": "low",
+      "what_changed": "DEFECT D. This is the docstring's own contract line disagreeing with the code beneath it, not the code disagreeing with the docstring -- the build loop genuinely never touches cand_window/mint_pmin/mint_novel (they are mint_burst's selection rules, applied during online minting, and mint_burst's own LEVERS READ line already names them correctly). Removed the three names from build_vocabulary's `LEVERS READ` line and added a comment explaining why (selection-by-window/novelty/p(b|a) belongs to mint_burst, not the seed build) so a future reader does not re-add them by analogy with mint_burst's line.",
+      "proof": "`grep -n 'LEVERS READ' src/tok/api.py` on build_vocabulary's docstring now reads `LEVERS READ: mode, seed_vocab, build_passes, build_bytes, min_pair, max_bytes, dropout` (cand_window/mint_pmin/mint_novel removed); `grep -n 'cand_window\\|mint_pmin\\|mint_novel' src/tok/api.py` confirms the three names now appear only in mint_burst's own docstring/LEVERS READ line and in the explanatory comment on build_vocabulary's line, never as a build_vocabulary declaration. No runtime behavior changed (build_vocabulary's body already did not read them, matching the original finding's own evidence); this closes the docstring-vs-code gap the finding names, not a code path."
+    },
+    {
+      "title": "The fixed arm overwrites Vocabulary.ceiling, the field the package header declares comes from the wire on every path, with the achieved build size",
+      "severity": "low",
+      "what_changed": "DEFECT E. The round2 triage's own residue note is precise about what was still wrong after round1: the narrowing behavior itself (`vocab.ceiling = vocab.size()` on mode=\"fixed\") is safe and was already defended in build_vocabulary's own docstring (P1-H57's paragraph: it can only ever narrow, since the build already capped at min(seed_vocab, wire ceiling), and the model keeps its spare rows either way) -- but the MODULE HEADER and the Vocabulary CLASS docstring still stated unconditionally that ceiling 'is HARD and arrives as the wire on every path', with no cross-reference to the exception, leaving the contract internally inconsistent for a reader who reads only the header or only the class doc. Rather than re-deriving that judgement call (adopt the round1-suggested `closed_at` field, which would mean a second field, updated call sites in whichever future package reads `.ceiling` as 'the model's row count', and a re-litigation of an already-argued tradeoff), this fix resolves the FILED inconsistency directly: added a matching 'ONE NARROWING EXCEPTION' paragraph to both the module header and the Vocabulary class docstring, cross-referencing build_vocabulary's P1-H57 paragraph and stating precisely why the narrowing is a bound DERIVED FROM the wire (monotonic, capped at build time) rather than a second source contradicting it -- the opposite shape from D-T1, which was a SAVED FILE's value outliving and overriding the wire. No behavior changed.",
+      "proof": "Read the module header and Vocabulary class docstring before and after: before, the 'THE CEILING IS NOT OURS' paragraph (module header) and the 'TWO CAPS' paragraph (class docstring) stated the wire-sourced/hard claim with no exception noted anywhere outside build_vocabulary's own body comment, which is exactly the finding's complaint ('the contract is now internally inconsistent rather than resolved'). After: both now carry a paragraph naming the mode=\"fixed\" narrowing explicitly and cross-referencing the code paragraph that argues it. `python3 -c \"import ast; ast.parse(open('src/tok/api.py').read())\"` -> SYNTAX OK; ran the DEFECT A/B/C proof scripts again after this doc-only edit to confirm nothing behavioral regressed -- all still PASS (see their outputs above, captured after this edit)."
+    },
+    {
+      "title": "build_vocabulary's LEVERS READ declares cand_window, mint_pmin and mint_novel; the function body never reads any of them",
+      "severity": "low",
+      "what_changed": "Same defect and same fix as DEFECT D (duplicate filing).",
+      "proof": "Same check as the DEFECT D entry above: grep against the current LEVERS READ line."
+    }
+  ],
+  "not_fixed": [],
+  "needs_shared_edit": [],
+  "notes": [
+    "Verified the supervisor's stated change (Judgement carries id_count beside live_size, distinct from live_size) is present and internally consistent in the current docstring's RECORD TYPES RETURNED block; not touched, nothing to fix.",
+    "tests/test_contract.py's K2 check ('the composition root imports and fails only at a stub') currently fails with 'TypeError: Plan.__init__() got an unexpected keyword argument counters', raised from src/data/api.py -- a file this fixer does not own. Confirmed via `git stash push -- src/tok/api.py` (reverting this session's entire tok/api.py diff back to HEAD) that K2 fails identically without any of these fixes applied, and that the specific error message changed between two check-suite runs in this same session (first 'TypeError: _synthetic_areas() takes 3 positional arguments but 4 were given', later 'Plan.__init__() got an unexpected keyword argument counters') -- src/data/api.py is being actively edited by a concurrent fixer in real time, so no needs_shared_edit is filed here: any find/replace text would already be stale. All other check-suite entries (ownership, contract K1/K3-K14, census, assemble, couplings, derive) pass.",
+    "save_vocabulary, vocab_state, restore_vocab, lift_vocab_cap, mint_burst, on_window and judge_probation remain unwritten stubs (raise NotImplementedError) -- none were in this fixer's todo list, none were audited (an audit only fires on a written body), and none were touched. The reconciliation fix's blob key names (vmax/min_pair/max_tok/dropout) match the frozen docstring's own wording so a future save_vocabulary body, if it follows this contract's key names, produces a file this reconciliation already reads correctly."
+  ]
+}

@@ -62,8 +62,9 @@ class Population:
                  "ef", "es", "comp", "contrib", "births", "rescued", "parent", "mutscale",
                  "modules", "counters", "rng", "on", "hop_arm", "gates")
 
-    def __init__(self, *, cap, n0, d_model, rank, signature_dim, device, rng, on, hop_arm):
-        self.cap, self.n_live, self.depth_now = cap, n0, 1
+    def __init__(self, *, cap, n0, d_model, rank, signature_dim, device, rng, on, hop_arm,
+                depth_now):
+        self.cap, self.n_live, self.depth_now = cap, n0, depth_now
         # nn.Parameter, NOT A PLAIN TENSOR, and this is the difference between a society of experts
         # and 4096 frozen zeros. The first version allocated A and B with torch.zeros, so
         # requires_grad was False, `parameters()` did not exist, and the composition root's
@@ -146,12 +147,30 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     kept for future use is kept with a switch, and a drop here would make the port a census
     amendment later. The refusal is what makes "declared but not built" loud instead of silent.
 
-    LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode
+    THE DEPTH0 SENTINEL IS RESOLVED HERE, THE WAY LM.resolve RESOLVES LM_LAYERS==0. depth0 is
+    POPULATION STATE (Population.depth_now) that only maybe_deepen ever advances past its start --
+    the curriculum's own docstring on `manage` step 6 gates the staged-depth advance on
+    "0 < depth0 < hops", which presupposes depth_now already carries depth0's resolved value at
+    step 0. The unresolved sentinel was a hardcoded `1`: every configuration, including
+    FAB_DEPTH0=0 ("no curriculum", start at the full `hops` budget per fabric/levers.py:227-228),
+    started the chain at exactly one hop and depended on the manage_every=500 cadence to reach
+    depth0's OWN literal value, let alone `hops` -- while fab.operating_population and every other
+    counter kept printing the operator's number. Fixed the M24 way: `depth_now = hops if depth0==0
+    else depth0`, so the sentinel and the literal both take effect at step 0 and the curriculum, if
+    any, extends FROM there.
+
+    LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode,
+                 depth0, hops
     WIRES READ: d_operating_population
     DID IT FIRE: fab.built, fab.n0, fab.cap, fab.operating_population (from
                  derive.operating_population, printed BESIDE the cull gate so the setpoint and the
                  gate are one statement), fab.off, fab.hop_arm (the ported walk, by name -- "soc";
-                 the transition arm never reaches a counter because the refusal is at startup)
+                 the transition arm never reaches a counter because the refusal is at startup),
+                 fab.depth_now (the RESOLVED starting depth -- hops when depth0==0, else depth0
+                 verbatim -- printed so a report reader never has to re-derive which branch fired),
+                 fab.norm_only / fab.grow / fab.halt (the three control arms AS CONFIGURED, so a
+                 report reader can see which arm was armed even before forward/grow_check/counters
+                 -- the entry points that act on it -- have bodies)
     """
     fab = fab.owned_by("FAB")
     setpoint = fab.d_operating_population    # WIRE READ HERE -- the setpoint, printed with the gate
@@ -175,10 +194,31 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     cap = max(n0, slots)
     d_model, rank = int(d_model), int(fab.rank)
     on = bool(fab.on)
+    # THREE CONTROL ARMS, RECORDED AT THE ONE SITE THAT SEES THE CONFIG BEFORE ANY GATED BEHAVIOUR
+    # RUNS. norm_only/grow/halt are consumed by forward/grow_check/counters (each already names the
+    # lever in its own LEVERS READ), so build() does not re-implement their behaviour -- but before
+    # this fix build's docstring CLAIMED to read all three while its body read none of them, so
+    # FAB_NORM_ONLY=1 built a Population byte-identical to FAB_NORM_ONLY=0 and nothing this function
+    # produced said which arm was configured. Reading and recording them here (before forward/manage
+    # exist) is what makes the control arm visible on the ledger from step 0 rather than only once
+    # the consuming stub grows a body -- and it turns this docstring's own LEVERS READ line from a
+    # claim into a true one.
+    norm_only, grow, halt = bool(fab.norm_only), bool(fab.grow), bool(fab.halt)
+
+    # THE SENTINEL IS RESOLVED HERE, ONCE, THE WAY LM.resolve RESOLVES LM_LAYERS==0 -- not left for
+    # `manage`'s maybe_deepen to discover. depth0=0 is documented as "start at the full `hops`
+    # budget (no curriculum)" (fabric/levers.py:227-228); depth0>0 is a literal starting hop count
+    # the curriculum extends FROM. Before this fix depth_now was hardcoded to 1 in
+    # Population.__init__ regardless of either value, so FAB_DEPTH0=0 ran ONE hop per pass instead
+    # of the full budget and FAB_DEPTH0=3 also started at 1 and waited on manage_every=500 to climb
+    # -- while fab.operating_population and the rest of the ledger kept printing the operator's
+    # configured numbers as if depth_now had used them.
+    depth0, hops = int(fab.depth0), int(fab.hops)
+    depth_now = hops if depth0 == 0 else depth0
 
     pop = Population(cap=cap, n0=n0, d_model=d_model, rank=rank,
                      signature_dim=int(signature_dim), device=device, rng=generator,
-                     on=on, hop_arm=arm)
+                     on=on, hop_arm=arm, depth_now=depth_now)
 
     # A is drawn, B stays ZERO. Every expert is born an identity; see Population's docstring.
     # THE GENERATOR IS CREATED ON THE TARGET DEVICE. torch's in-place random ops require the
@@ -219,6 +259,17 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         "fab.operating_population": int(_derive.operating_population(float(fab.pressure), slots)),
         "fab.off": 0 if on else 1,
         "fab.hop_arm": arm,
+        # THE RESOLVED STARTING DEPTH, not the sentinel: a report reader who sees FAB_DEPTH0=0 in
+        # the environment and fab.depth_now=4 (== hops) here does not have to re-derive that the 0
+        # meant "no curriculum" -- the resolution already happened and its answer is on the ledger.
+        "fab.depth_now": depth_now,
+        # THE THREE CONTROL ARMS, AS CONFIGURED -- not as exercised; forward/grow_check/counters
+        # still decide what each arm DOES. This is what stops FAB_NORM_ONLY=1 from building a
+        # Population indistinguishable from FAB_NORM_ONLY=0: a reader of fab.counters can now see
+        # the arm was armed even before the entry point that acts on it has a body.
+        "fab.norm_only": 1 if norm_only else 0,
+        "fab.grow": 1 if grow else 0,
+        "fab.halt": 1 if halt else 0,
     }
     # THE TWO GATES WERE INVERTED IN THE FIRST VERSION and the inversion is worth naming, because
     # it is the exact confusion spine/gate.py exists to prevent, committed inside the gate wiring.

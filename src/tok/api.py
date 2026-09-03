@@ -18,6 +18,19 @@ row for. The ceiling is HARD AND COMES FROM THE WIRE ON EVERY PATH, INCLUDING A 
 for the whole run, measured as "!! ZERO tokenizer.mint 0 ARMED AND INERT" on the first run that
 ever added an area).
 
+ONE NARROWING EXCEPTION, AND IT IS THE OPPOSITE OF D-T1'S SHAPE, RECORDED HERE SO THE TWO
+PARAGRAPHS DO NOT READ AS DISAGREEING (round1 finding against tok/api.py::build_vocabulary, ruled 2026-09-03): on
+tok.mode="fixed", build_vocabulary closes vocab.ceiling down to the achieved build size once the
+seed build finishes, on both the fresh-build and the resume/replay arms, so the arm's "never mint
+again" promise cannot be defeated by CAP's lift_vocab_cap reaching a soft_cap this arm does not
+even close. This never ADOPTS a value from outside the wire -- the new ceiling is vocab.size(),
+which the build already capped at min(seed_vocab, wire ceiling), so the write can only ever
+narrow, and it derives FROM the wire's own bound rather than contradicting it. D-T1 was a SAVED
+FILE'S recorded vmax outliving the wire and being trusted as if it still were the wire; this is
+the wire's own bound applied once and left in place. See build_vocabulary's own paragraph on this
+(P1-H57) for the full argument, and for the alternative (a separate `closed_at` field, keeping
+`ceiling` itself untouched) that was priced and not taken.
+
 TWO PATH WIRES, AND THEY ARE TWO ON PURPOSE. d_vocab_save_path (from CKPT.dir) is where this run
 writes its own vocabulary; d_vocab_read_path (from CKPT.resume) is where a resume reads its
 parent's. One knob doing both jobs made a run overwrite its parent's vocabulary and made eleven
@@ -49,6 +62,7 @@ import dataclasses
 from spine.lever import Config
 from spine import derive as _derive
 from spine import rng as _rng
+from spine.gate import Gate
 
 
 @dataclasses.dataclass(frozen=True)
@@ -76,12 +90,15 @@ class Vocabulary:
     d_vocab_ceiling from LM.vocab_slots -- it is the model's embedding row count, and minting past
     it reserves ids the model has no row for. `soft_cap` is CAP's valve position and moves during
     the run. Minting compares against min(soft_cap, ceiling); at_cap() is the predicate, so no call
-    site re-derives it.
+    site re-derives it. ONE NARROWING EXCEPTION: on tok.mode="fixed", build_vocabulary closes
+    `ceiling` down to the achieved build size, once, immediately after the seed build -- see the
+    module header's "ONE NARROWING EXCEPTION" paragraph and build_vocabulary's own P1-H57 note for
+    why that is a bound derived from the wire rather than a second source contradicting it.
     """
 
     __slots__ = ("id2bytes", "seq2id", "merges", "bytes_per_id", "mlbf", "maxlen", "retired",
                  "prov", "pair", "ceiling", "soft_cap", "v0", "bytes_per_token", "max_bytes",
-                 "dropout_rng")
+                 "dropout_rng", "counters", "gates", "_retok_cache")
 
     def __init__(self, *, ceiling, soft_cap=None, max_bytes=16):
         self.id2bytes = [bytes([b]) for b in range(256)]
@@ -108,6 +125,22 @@ class Vocabulary:
         # tokenize() restarts from the same seed on every call, so all of those segmentations came
         # out byte-identical: the knob was on, the code ran, and the mechanism did nothing.
         self.dropout_rng = None
+        # THE DID-IT-FIRE CHANNEL (graft G4), same shape as CAP.Valve.counters/.gates and
+        # FAB.Population.counters/.gates: a flat name->value dict for counts, a tuple of spine.gate
+        # .Gate objects for three-state predicates. Empty here and populated by build_vocabulary at
+        # each of its return points, never appended to piecemeal, so a reader of `vocab.gates` after
+        # a build sees the whole declared surface for that call in one place.
+        self.counters = {}
+        self.gates = ()
+        # THE RE-SEGMENTATION NO-OP CACHE (round1 tok/api.py::build_vocabulary/420, re-filed at :462). One slot,
+        # not a dict keyed by every text ever segmented: the contract's own words are "since the
+        # LAST one", singular, and tokenize() is called once per epoch plus on every
+        # retokenization -- a growing cache of every held-out probe this run ever segmented would
+        # be an unbounded leak for a check whose entire job is to catch the one specific pattern
+        # measured at 2.189 b/B and 68 points of word quality: the SAME data re-segmented from the
+        # SAME start while nothing minted in between. (data, start, len(data), stamp, Segmentation);
+        # None until the first call.
+        self._retok_cache = None
 
     def size(self):
         return len(self.id2bytes)
@@ -202,8 +235,15 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     seed <- RUN.seed; soft_cap <- CAP.
     RETURNS: Vocabulary.
 
-    LEVERS READ: mode, seed_vocab, build_passes, build_bytes, min_pair, max_bytes, cand_window,
-                 mint_pmin, mint_novel, dropout
+    LEVERS READ: mode, seed_vocab, build_passes, build_bytes, min_pair, max_bytes, dropout
+    # cand_window, mint_pmin and mint_novel are NOT read here (round1 + r2 finding, tok/api.py::build_vocabulary):
+    # the build pass below selects purely by tally.most_common() and tok.min_pair; the candidate
+    # window, the novelty re-rank and the p(b|a) floor are mint_burst's selection rules (see its own
+    # LEVERS READ line), applied during ONLINE minting, not during the seed build. Declaring them
+    # here said these three knobs were read by a call that never touches them -- the ISSUES
+    # P1-M80/L20 shape ("NOTHING READ THESE") applied to this package's OWN contract line rather
+    # than to an operator's environment -- and it silently widened the L3 isolation sweep's
+    # precomputed affects() set for this entry point to cover a coupling that cannot exist here.
     WIRES READ: d_vocab_ceiling, d_vocab_read_path
     DID IT FIRE: tok.build_pass, tok.build_mint, tok.build_converged, tok.load_reconciled,
                  Gate tok.build_passes_advice (fires on mode="fixed" with the two numbers;
@@ -236,6 +276,14 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         vocab.dropout_rng = _rng.rng_for("tok.dropout.mint", seed)
         vocab.v0 = vocab.size()
         vocab.bytes_per_token = 1.0
+        # THE GATE IS EMITTED ON EVERY ARM, NOT ONLY THE ONE WHERE IT FIRES (round1/r2 finding: this
+        # file did not import spine.gate at all, so the declared "unreachable (mode != fixed)" state
+        # was never actually printed anywhere -- it was simply absent, which is the armed-but-inert
+        # collapse this record type exists to refuse). mode="bytes" never reads build_passes, so
+        # there is no achieved-vs-historical pair to show; value stays None rather than a number that
+        # was never resolved.
+        vocab.gates = (Gate("tok.build_passes_advice", False, None, 8, reachable=False,
+                             reason="mode != fixed"),)
         return vocab
 
     read_path = str(tok.d_vocab_read_path)
@@ -250,17 +298,58 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         # first segmentation -- the same crash, reintroduced on the one branch the fix did not
         # cover. Minted BEFORE the early return, unconditionally, for exactly that reason.
         vocab.dropout_rng = _rng.rng_for("tok.dropout.mint", seed)
-        replayed = _replay_merges(vocab, read_path)
-        if replayed is not None:
-            vocab.v0 = vocab.size()
-            if mode == "fixed":
-                # THE FIXED ARM CLOSES ITS CEILING ON THIS PATH AS WELL. Closing it only on the
-                # build path meant a resumed "fixed" run had an OPEN ceiling and could keep minting
-                # -- the arm's one promise, broken by which branch the run happened to take.
-                vocab.ceiling = vocab.size()
-            ids, _pos = _segment(vocab, sample, dropout=0.0, stream=None)
-            vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
-            return vocab
+        # THE RECONCILIATION INPUT (P1-M80, P1-L20). vmax is checked against the WIRE-sourced
+        # ceiling as it stood at entry -- BEFORE any fixed-arm narrowing below -- because vmax is a
+        # recorded fact about the PARENT's ceiling, and comparing it against a value this call may
+        # itself still narrow would blame the parent for a change this run made.
+        recon = {"min_pair": int(tok.min_pair), "max_tok": int(tok.max_bytes),
+                 "dropout": float(tok.dropout), "vmax": vocab.ceiling}
+        replayed = _replay_merges(vocab, read_path, recon=recon)
+        if replayed is None:
+            # A MISSING PARENT IS NOT A COLD START (round1 finding, tok/api.py::build_vocabulary). The old body
+            # fell through to the fresh-build arm below and returned a freshly minted vocabulary
+            # with no refusal at all -- the restored embedding table would then be indexed by a
+            # vocabulary the checkpoint never saw. Falling through here ALSO used to crash a step
+            # later and for an unrelated-looking reason: `vocab.dropout_rng` is minted,
+            # unconditionally, three lines above, and the fresh-build arm mints the very same name
+            # again at "tok.dropout.mint" once execution reached it -- spine/rng.py's
+            # two-call-sites-one-sequence guard then raised RngError from inside build_vocabulary,
+            # which is the correct guard firing on the wrong root cause. Both symptoms were one
+            # defect: a missing d_vocab_read_path treated as "nothing was asked for" instead of
+            # "the resume the operator asked for cannot happen". Refusing HERE, before any of that,
+            # removes the crash along with the silent success it replaced.
+            raise ValueError(
+                f"TOK.d_vocab_read_path={read_path!r} does not exist. A resume must reuse the "
+                f"parent's saved vocabulary or the restored embedding table is indexed by a "
+                f"different one; refused rather than silently building a fresh vocabulary against "
+                f"a checkpoint that was trained on a different one.")
+        vocab.v0 = vocab.size()
+        if mode == "fixed":
+            # THE FIXED ARM CLOSES ITS CEILING ON THIS PATH AS WELL. Closing it only on the
+            # build path meant a resumed "fixed" run had an OPEN ceiling and could keep minting
+            # -- the arm's one promise, broken by which branch the run happened to take.
+            vocab.ceiling = vocab.size()
+        # MEASURED WITH DROPOUT APPLIED, ON THIS ARM TOO (round1 tok/api.py::build_vocabulary, re-filed three more
+        # times against this exact line after the fresh-build arm below was fixed and this one was
+        # not). tokenize()'s own docstring is unconditional: "bytes_per_token IS MEASURED WITH
+        # DROPOUT APPLIED" -- it does not carve out an exception for a resumed vocabulary, and
+        # derive.signature_width_bytes and data_plan's splice_window read whatever this call
+        # returns regardless of which arm produced it. `stream` reuses the dropout_rng minted three
+        # lines above (not a second mint -- see P1-H56 and the crash that a second mint caused on
+        # this exact branch before that fix).
+        stream = vocab.dropout_rng if float(tok.dropout) > 0 else None
+        ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
+        vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
+        # THE GATE, EVEN THOUGH NO BUILD PASS RAN HERE. build_passes_advice's predicate is about a
+        # FRESH build reaching mode="fixed" at some achieved pass count against the historical 8;
+        # a replay never calls the build loop at all; on the offline analogue of the round1 fix that
+        # left mode-out arms silent, staying silent here instead of naming the reason would be the
+        # same collapse under a different cause. Reachable=False regardless of mode, because the
+        # thing the gate reports on (a pass count) was never resolved on this branch.
+        vocab.gates = (Gate("tok.build_passes_advice", False, None, 8, reachable=False,
+                             reason="resumed via d_vocab_read_path: no build pass ran on this "
+                                    "branch, so there is no achieved pass count to compare"),)
+        return vocab
 
     target = min(int(tok.seed_vocab), vocab._cap())
     # ONE LITERAL FOR THE PASS COUNT, ON ALL THREE ARMS (Q-TOK-9). An 8 living in build code would
@@ -319,10 +408,22 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     # regularisation on. At the 0.0 default the two are identical and nothing moves.
     ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
     vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
+    # THE DECLARED GATE (Q-TOK-9). Round1 and r2 both filed this as absent because the module did
+    # not even import spine.gate -- the three-state surface the docstring promises was not merely
+    # unfired, it did not exist. `fired` is "does this arm need the advisory", which is exactly
+    # mode == "fixed"; the achieved `passes` and the historical 8 travel as value/threshold so the
+    # arithmetic is checkable rather than asserted, per Gate's own contract (spine/gate.py).
+    vocab.gates = (
+        (Gate("tok.build_passes_advice", True, passes, 8,
+              reason="the offline build historically used 8 -- set TOK_BUILD_PASSES=8 to reproduce "
+                     "it; a mode=\"fixed\" run at this value is not that build of record")
+         if mode == "fixed" else
+         Gate("tok.build_passes_advice", False, passes, 8, reachable=False, reason="mode != fixed")),
+    )
     return vocab
 
 
-def _replay_merges(vocab, path):
+def _replay_merges(vocab, path, *, recon=None):
     """Replay a parent's vocabulary into `vocab`, EXACTLY or not at all. None if unreadable.
 
     IDS ARE POSITIONS IN THE EMBEDDING TABLE, so a replay that drops one entry and shifts every id
@@ -336,6 +437,17 @@ def _replay_merges(vocab, path):
     given a pair, and the first version passed none -- so a replayed vocabulary carried an EMPTY
     merge history, was not the parent's vocabulary by its own accounting, and the next save
     propagated the loss. The pair is recorded in the file and is replayed with the sequence.
+
+    `recon`, WHEN GIVEN, IS A RECONCILIATION, NOT AN ADOPTION (P1-M80, P1-L20). It carries this
+    run's own RESOLVED levers (min_pair, max_tok, dropout) plus the wire-sourced ceiling (vmax),
+    keyed to match whatever the file happens to record under those same names. The file's values
+    NEVER WIN -- this function already builds the vocabulary from the levers the caller resolved,
+    never from the blob's settings -- so this block only ever produces a report, counted on
+    `vocab.counters["tok.load_reconciled"]` (present and possibly 0 whenever recon is given, absent
+    when it is not, so "compared and agreed" reads differently from "never compared" the same way
+    every other DID IT FIRE row here does). A key the file does not carry is skipped rather than
+    treated as a mismatch against `None`: an old save predates a field and that is not a disagreement
+    about a value, it is the absence of one.
     """
     import json
     import os
@@ -343,6 +455,22 @@ def _replay_merges(vocab, path):
         return None
     with open(path, "r", encoding="utf-8") as fh:
         blob = json.load(fh)
+
+    if recon is not None:
+        lines = []
+        for key, lever_name in (("min_pair", "TOK_MIN_PAIR"), ("max_tok", "TOK_MAX_BYTES"),
+                                 ("dropout", "TOK_DROPOUT"), ("vmax", "the wire d_vocab_ceiling")):
+            recorded = blob.get(key)
+            if recorded is None:
+                continue
+            resolved = recon.get(key)
+            if recorded != resolved:
+                lines.append(
+                    f"tok.load_reconciled: {path!r} recorded {key}={recorded!r}, this run resolves "
+                    f"{resolved!r} ({lever_name}) -- the file's value does not win")
+        vocab.counters["tok.load_reconciled"] = len(lines)
+        if lines:
+            vocab.counters["tok.load_reconciled_detail"] = tuple(lines)
 
     entries = blob.get("entries")
     if entries is None:
@@ -483,6 +611,38 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
             "no dropout stream. build_vocabulary mints it; a Vocabulary that did not come from "
             "there cannot be regularized, and silently segmenting without dropout would report a "
             "BPE-dropout run that never dropped anything.")
+
+    # THE RE-SEGMENTATION REFUSAL (round1 tok/api.py::build_vocabulary/420, re-filed at :462 -- the body had no
+    # stamp, no comparison and no counter at all). `_retok_cache` holds the LAST call's (data
+    # object, start, length, stamp); a call is a re-segmentation of the SAME material precisely when
+    # `data` is the SAME OBJECT (not merely equal content -- identity is O(1) and is what the
+    # composition root actually does: it re-tokenizes its own live stream buffer, it does not build
+    # a new bytes object with the same content) at the SAME start. THE INVARIANT IS (size,
+    # len(seq2id)), NOT size ALONE, because retire() pops a sequence from the match table -- taking
+    # segmentation down a different path -- without moving vocab.size(); a stamp of size alone would
+    # call a retire-only change a no-op and skip a rebuild the match table actually needs.
+    stamp = (vocab.size(), len(vocab.seq2id))
+    cache = vocab._retok_cache
+    is_retok = cache is not None and cache[0] is data and cache[1] == start and cache[2] == len(data)
+    if is_retok and drop <= 0.0 and cache[3] == stamp:
+        # THE SKIP TEST IS DISABLED WHENEVER dropout > 0 (the docstring's own words), because a
+        # regularized call is no longer a deterministic function of the vocabulary alone -- it also
+        # depends on the draw from `stream`, so returning the cached Segmentation here would freeze
+        # BPE-dropout's output across an entire retok cadence instead of drawing a new mask, which
+        # is the mechanism, not a shortcut around it. `drop <= 0.0` rather than `not regularize`
+        # because the two arms agree at TOK_DROPOUT=0 (the shipped default) and the guard should
+        # track the ACTUAL draw, not the caller's intent, in case a future caller ever regularizes
+        # at dropout=0.
+        vocab.counters["tok.retok_noop"] = vocab.counters.get("tok.retok_noop", 0) + 1
+        return cache[4]
+    if is_retok:
+        # A REAL RE-SEGMENTATION: the match table moved since the cached call (or dropout forced a
+        # fresh draw), so the rebuild is not byte-identical and is counted as activity rather than
+        # folded into tok.segment, which is why the docstring reports the two SEPARATELY -- a frozen
+        # run's no-op retoks must read as skipped, not as work performed.
+        vocab.counters["tok.retok"] = vocab.counters.get("tok.retok", 0) + 1
+    vocab.counters["tok.segment"] = vocab.counters.get("tok.segment", 0) + 1
+
     ids, byte_pos = _segment(vocab, data, dropout=drop, stream=stream, start=start)
 
     # THE LABEL PER TOKEN, carried from the per-byte labels DATA produced. A token spans bytes and
@@ -492,8 +652,13 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     if labels is not None:
         out_labels = [labels[p] for p in byte_pos]
 
-    return Segmentation(ids=ids, byte_pos=byte_pos, labels=out_labels,
-                        bytes_per_token=_derive.bytes_per_token(len(data) - start, len(ids)))
+    seg = Segmentation(ids=ids, byte_pos=byte_pos, labels=out_labels,
+                       bytes_per_token=_derive.bytes_per_token(len(data) - start, len(ids)))
+    # CACHED FOR THE NEXT CALL'S COMPARISON, ALWAYS -- including the dropout>0 arm, so that a
+    # subsequent deterministic call (dropout back at 0, or the final pre-eval segmentation) has a
+    # real stamp to compare against rather than one left over from two calls ago.
+    vocab._retok_cache = (data, start, len(data), stamp, seg)
+    return seg
 
 
 def on_window(tok: Config, vocab, ids, *, step):

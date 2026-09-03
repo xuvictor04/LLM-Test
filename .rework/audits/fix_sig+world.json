@@ -1,0 +1,70 @@
+{
+  "package": "SIG + WORLD",
+  "file": "src/sig/api.py, src/world/api.py",
+  "fixer_note": "10 filed items across two packages. sig.json's 6 items collapse to 3 distinct defects in encode() (missing no_grad -- filed twice; the bigram width<2 zero vector; the encode_calls/encode_windows counter collapse -- filed three times with increasing detail). world.json's 4 items collapse to 2 distinct defects (the CPU-generator device mismatch in build() -- filed twice, the second copy also catching a second cpu-tensor site my own fix would otherwise have re-introduced; and startup_refusals ignoring world.enabled) plus one standalone docstring accuracy item (build's LEVERS READ omitting horizon). All 10 filed items verified still-real against the current tree before fixing (per each item's own _triage_evidence, and re-confirmed here), then fixed and proven with scratchpad scripts. No finding was rejected as not-a-defect; no shared-file edit was required -- every repair was containable inside src/sig/api.py and src/world/api.py, both fully owned files.",
+  "fixed": [
+    {
+      "title": "SIG.encode does not run under no_grad despite its docstring, and the encoder is in the optimizer's param groups, so any caller's backward trains it",
+      "severity": "high",
+      "what_changed": "Confirmed still real against current tree (v2 verified against HEAD, not just the round-1 repro). Wrapped encode()'s whole computation (both the bigram and learned arms) in `with torch.no_grad():`, after the shape-mismatch check. No .detach() needed since ops run inside no_grad produce leaf-like non-graph tensors. Left train_step/warm_up as the only places the encoder optimizer steps.",
+      "proof": "Ran scratchpad/verify_sig.py Test 1. BEFORE: v = SIG.encode(cfg, st, windows) had requires_grad=True, grad_fn set, and v.sum().backward() left a non-None grad on st.encoder.emb.weight.grad (matching the finding's own repro exactly). AFTER: printed 'requires_grad: False grad_fn: None', v.sum().backward() raised RuntimeError('element 0 of tensors does not require grad and does not have a grad_fn'), and st.encoder.emb.weight.grad stayed None. Script printed 'PASS: encode() output carries no grad, encoder.emb.weight.grad stayed None'."
+    },
+    {
+      "title": "SIG.encode does not run under no_grad, so an instrument that calls it can move the encoder",
+      "severity": "high",
+      "what_changed": "Same underlying defect and same fix as the item above (both filed against sig/api.py:186-187, the same encode() body) -- the no_grad wrap fixes both filed copies at once.",
+      "proof": "Same run as above (scratchpad/verify_sig.py Test 1): backward() through encode()'s output no longer reaches st.encoder.emb.weight -- grad stays None both before and after the (now-raising) backward() call."
+    },
+    {
+      "title": "The bigram arm returns an all-zero signature whenever width_units < 2, which is exactly the zero vector the contract says it may never return.",
+      "severity": "medium",
+      "what_changed": "Added a refusal in SIG.build: `if mode == \"bigram\" and width < 2: raise ValueError(...)`, naming SIG_MODE, SIG_WIDTH_UNITS and both numbers, exactly as the finding's fix field specified. Placed before the mode dispatch so it fires at build time, before any window is ever encoded. The learned arm is untouched (it has no such floor).",
+      "proof": "Ran scratchpad/verify_sig.py Test 2. BEFORE (reproduced the finding's own repro first): SIG.build(mode='bigram', width_units=1, ...) succeeded, and encode() on a (4,1) batch returned a (4,8) tensor that was exactly all zeros. AFTER: SIG.build(mode='bigram', width_units=1, ...) raises ValueError('SIG_MODE=bigram needs at least two units to form a bigram; SIG_WIDTH_UNITS=1 cannot produce one...'). Also verified the fix doesn't overreach: bigram at width_units=4 still builds and encode() returns nonzero unit-norm vectors (printed norms of 1.0)."
+    },
+    {
+      "title": "sig.encode_calls is incremented by the number of windows, so the ledger's 'calls' counter holds the 'windows' quantity and sig.encode_windows does not exist at all.",
+      "severity": "medium",
+      "what_changed": "Same underlying defect as the two items below (all three filed against sig/api.py:178, the same `st.counters[\"sig.encode_calls\"] += int(units.shape[0])` line). Fixed once: `sig.encode_calls` now increments by 1 per call, a new `sig.encode_windows` counter increments by the window count, both seeded to 0 in build()'s counters dict.",
+      "proof": "Ran scratchpad/verify_sig.py Test 3. BEFORE (reproduced): one encode() call on a batch of 4 windows left counters['sig.encode_calls'] == 4 with no 'sig.encode_windows' key at all. AFTER: same call leaves sig.encode_calls==1, sig.encode_windows==4; a second call of 10 windows leaves sig.encode_calls==2, sig.encode_windows==14. Printed 'PASS: calls and windows counted separately and correctly'."
+    },
+    {
+      "title": "encode adds the WINDOW count to sig.encode_calls and never produces sig.encode_windows, so the two documented counters collapse into one wrong number",
+      "severity": "medium",
+      "what_changed": "Same defect and fix as above. This item's fix also flagged encode()'s docstring 'LEVERS READ: mode, d, bigram_dim' as inaccurate (the body reads only st.mode/st.d/st.encoder off the frozen SigState, never sig.mode/sig.d/sig.bigram_dim off the Config) -- corrected that line to 'none directly -- everything comes off SigState (st.mode, st.d, st.width_units, st.encoder), which build() froze from mode, d and bigram_dim once'. K4 (every declared lever has a reader) is unaffected: build()'s and counters()'s LEVERS READ lines already separately name mode, d and bigram_dim.",
+      "proof": "Same counter fix verified as above. Docstring correction verified by reading the file after the edit and by tests/test_contract.py's K4 check still passing (0 failing) -- confirming mode/d/bigram_dim are still credited as read elsewhere in the package."
+    },
+    {
+      "title": "sig.encode_calls is incremented by the WINDOW count, and the three other counters the contract names are never created",
+      "severity": "low",
+      "what_changed": "Same defect as the two items above; this item's fix additionally asked for sig.encode_width_seen and sig.encode_width_mismatch. Added both: encode_width_seen is set to int(units.shape[1]) on every successful call (always equal to st.width_units, since a mismatch raises first); encode_width_mismatch increments in the raise path, BEFORE the raise, so a process that dies there still leaves a nonzero counter -- the C4 alarm -- on the ledger. Both seeded to 0 in build().",
+      "proof": "Ran scratchpad/verify_sig.py Tests 3-4. Test 3 shows sig.encode_width_seen==16 after a call with 16-unit windows. Test 4: BEFORE a mismatched call, sig.encode_width_mismatch==0; called encode() with (4,8) windows against a width_units=16 state -> raised ValueError as before AND left sig.encode_width_mismatch==1. Printed 'PASS: mismatch counter incremented on the raise path'."
+    },
+    {
+      "title": "WORLD.build seeds a CPU torch.Generator and draws directly into encoder/world_proj/qproj parameters already moved to `device` -- RuntimeError on every RUN_DEVICE=cuda run with WORLD_ENABLED=1",
+      "severity": "high",
+      "what_changed": "Changed `gen = torch.Generator(device=\"cpu\")` to `gen = torch.Generator(device=device)` (world/api.py:112-119 area), matching the already-fixed sibling packages (fabric/api.py:189, sig/api.py:121, lm/api.py:314). This box is CPU-only so the CUDA RuntimeError itself cannot be executed here; verified instead that (a) the source no longer contains the cpu-hardcoded generator, (b) it now reads `torch.Generator(device=device)`, and (c) a live build on device='cpu' still succeeds unchanged (the fix is a no-op on the CPU-only sandbox by construction, since device=='cpu' either way there).",
+      "proof": "Ran scratchpad/verify_world.py Test 1. BEFORE: `'torch.Generator(device=\"cpu\")'` was present verbatim in the source. AFTER: that string is absent, `'torch.Generator(device=device)'` is present, and `world_api.build(cfg, d_model=32, device='cpu', ctx_tokens=64, rng=FakeRng(0))` still returns built=='live' with w.encoder and w.keys both on the cpu device as before. Printed 'PASS: build() source draws with a device-generator directly into device-resident tensors'."
+    },
+    {
+      "title": "WORLD.build still seeds a CPU torch.Generator and draws with it into modules already moved to `device` -- the exact device-mismatch crash b95c4a4 fixed in FAB.build, LM.build_model and SIG.build, left unrepaired in the fourth copy of the same pattern.",
+      "severity": "high",
+      "what_changed": "Same defect and fix as the item above. This item's fix additionally named the w.keys draw (`k = torch.empty(nmax, route_d)` on an implicit-cpu tensor, then `w.keys.copy_(k.to(device))`) as needing the same normalization the other three packages already applied -- and it does: once `gen` moved to `device`, that intermediate cpu tensor would itself raise a device mismatch against the now-device generator on a real cuda run (a bug my own fix would otherwise have introduced). Replaced it with `w.keys.uniform_(-0.1, 0.1, generator=gen)`, drawing directly into the already-device-resident nn.Parameter with no intermediate tensor and no .to(device) copy.",
+      "proof": "Ran scratchpad/verify_world.py Test 1, which also asserts the old `k = torch.empty(nmax, route_d)` intermediate-tensor shape is gone from build()'s source ('FAIL: still allocates an implicit-cpu intermediate tensor' assertion did not fire) and that `w.keys.uniform_` is present. Live cpu build still succeeds and w.keys is populated (nonzero after the draw, verified via the same build() call as the item above)."
+    },
+    {
+      "title": "startup_refusals never reads world.enabled, so a run with the world subsystem OFF is refused for a horizon it will never use",
+      "severity": "medium",
+      "what_changed": "Added `if not bool(world.enabled): return []` at the top of startup_refusals, before the horizon==0 and horizon>=ctx_tokens checks -- both of those refusals are about the LIVE loss slices, which build() never computes on the disabled arm, so a stale WORLD_HORIZON left in an operator's environment can no longer refuse a run that was never going to use it.",
+      "proof": "Ran scratchpad/verify_world.py Tests 2-3. BEFORE (reproduced the finding's own repro): WORLD_ENABLED=0, WORLD_HORIZON=0 returned the WORLD_HORIZON=0 refusal; WORLD_ENABLED=0, WORLD_HORIZON=999 against ctx_tokens=64 returned the horizon>=ctx refusal. AFTER: both calls return [] (printed 'PASS: disabled world produces no refusals regardless of a stale WORLD_HORIZON'). Test 3 confirms the live arm (WORLD_ENABLED=1) is completely unchanged: WORLD_HORIZON=0 still refuses, WORLD_HORIZON=999 against ctx_tokens=64 still refuses with the same nan-loss reasoning, and WORLD_HORIZON=4 still returns []."
+    },
+    {
+      "title": "build's LEVERS READ omits `horizon`, which the body reads and stamps into World.horizon and the counters ledger on every arm, live and null",
+      "severity": "low",
+      "what_changed": "Corrected build()'s docstring line from 'LEVERS READ: enabled, lat, hid, route_d, n0, nmax, feedback' to '...feedback, horizon', matching the body which reads world.horizon on both the null-world return (World(built='null', horizon=int(world.horizon), ...)) and the live arm (World(..., horizon=int(world.horizon), ...) and the counters.update horizon entry).",
+      "proof": "Ran scratchpad/verify_world.py Test 4: `'LEVERS READ: enabled, lat, hid, route_d, n0, nmax, feedback, horizon' in W.build.__doc__` is True. tests/test_contract.py (K4 and the docstring-block checks) still reports 0 failing after the change."
+    }
+  ],
+  "not_fixed": [],
+  "needs_shared_edit": [],
+  "suite_after": "--- ownership ---\n=== 12 checks + 18 self-test cases, 0 failing ===\n--- contract ---\n=== 14 checks + 46 self-test cases, 0 failing ===\n--- census ---\n=== 7 checks + the self-test, 0 failing ===\n--- assemble ---\n=== 9 checks, 0 failing ===\n--- couplings ---\n=== 4 checks, 0 failing ===\n--- derive ---\n575 oracle cases, 0 mismatches"
+}
