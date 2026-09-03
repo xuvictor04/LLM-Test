@@ -1,0 +1,662 @@
+[
+ {
+  "file": "src/fabric/api.py",
+  "line": 66,
+  "symbol": "Population.__init__",
+  "title": "The expert pool A and B are plain tensors, not nn.Parameter, so no expert can ever train and every expert's contribution stays exactly zero for the whole run.",
+  "failure": "Any run with FAB_ON=1. `pop.A`/`pop.B` are created by `torch.zeros(...)` with the default `requires_grad=False`. B is zero-init by design (\"every expert is born an identity\"), and because it receives no gradient it stays zero forever, so the expert contribution B(A(x)) is exactly 0.0 at step 0 and at step N. Verified: after `FAB.build(... d_model=16, signature_dim=8, rank=4 ...)`, `pop.A.requires_grad` -> False, `pop.B.requires_grad` -> False, `isinstance(pop.A, torch.nn.Parameter)` -> False, and `((x @ pop.A[0]) @ pop.B[0]).grad_fn` is None with output sum 0.0. The whole fabric is a permanent identity while the report prints n_live experts and a cull gate.",
+  "evidence": "Body: `self.A = torch.zeros(cap, d_model, rank, device=device)` / `self.B = torch.zeros(cap, rank, d_model, device=device)` (fabric/api.py:66-67). Contract it contradicts: FAB.state_dict's frozen docstring enumerates them as parameters -- \"Parameters (A, B, q_route, hproj, eemb, edec, halt_key, ...), the `cent` BUFFER\" (fabric/api.py:695-696) -- and the Population docstring's \"growth advances n_live into rows that are already there, so the optimizer NEVER SEES A NEW PARAMETER and a checkpoint's param-group structure survives a run that grew\" (fabric/api.py:44-48) is only meaningful if the founding rows ARE parameters. `cent` being a plain tensor is correct; A and B are not.",
+  "severity": "critical",
+  "fix": "Wrap A and B as `nn.Parameter(torch.zeros(...))` (leave `cent` a buffer, as state_dict specifies) and hold them in an nn.Module (or register them on `pop.modules`) so they are reachable by the optimizer and by `pop.state_dict()`."
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 173,
+  "symbol": "build",
+  "title": "Population exposes no parameters(), so the router, the identity autoencoder and the halt head that build allocates never reach the optimizer either.",
+  "failure": "Any run with FAB_ON=1. `spine/compose.py::_base_parameters` harvests the fabric with `params = getattr(obj, \"parameters\", None); if callable(params): out.extend(params())`. `Population.__slots__` defines no `parameters` and the class defines no such method, so the branch is skipped and the fabric contributes ZERO tensors to OPT's 'base' param group -- only a string appended to `sysm.warnings`. Verified: `hasattr(pop, 'parameters')` -> False while `sum(p.numel() for p in pop.modules.parameters())` -> 765 at (signature_dim=8, dk=6, emb_hid=12, d_model=16). q_route (the router), eemb/edec (the identity round-trip that ae_w and emb_var penalise) and halt_key (which decides every hop) are randomly initialised and then frozen for the entire run, so FAB_AE_W, FAB_EMB_VAR, FAB_HALT and every routing lever multiply a never-updated network.",
+  "evidence": "`pop.modules = nn.ModuleDict({...}).to(device)` (fabric/api.py:173-179) assigns an nn.Module onto a __slots__ plain object (fabric/api.py:60-62), so nothing registers it in a module tree and no `parameters()`/`state_dict()`/`to()` surface exists. spine/compose.py:2116-2122 states the consequence in advance: \"Population's declared fields (fabric/api.py::<module>) include no parameters() -- so if P4 does not add one, the fabric contributes ZERO parameters to the optimizer and every check in this tree stays green.\" P4 wrote the class and did not add one.",
+  "severity": "critical",
+  "fix": "Make Population hold an nn.Module (or add `def parameters(self): return itertools.chain([self.A, self.B], self.modules.parameters())`) so `_base_parameters` harvests A, B and the five shared modules; the warning path should then be a refusal rather than a note."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 397,
+  "symbol": "encode",
+  "title": "encode accepts n_layers and never uses it, so MEM's key-depth truncation is 100% inert -- the exact 'silently inert twice over' defect the docstring exists to end.",
+  "failure": "MEM.key_depth is documented to arrive here as an argument so the memory-key path runs only the first n transformer blocks (\"at LAYERS=12 the key path was paying twelve layers of attention over an 8-token window\"). The body after the pos_max refusal never references `n_layers`: it always runs `model.body(h, ...)` in full. Verified on a 2-layer transformer (width 32, heads 4, ctx 8): `encode(..., n_layers=1)` and `encode(..., n_layers=0)` both differ from the full-stack output by max |dh| = 0.0. Consequence: the declared counter `lm.encode.key_path_truncated` can never be nonzero, MEM's key cost is whatever LM_LAYERS says, and the keys MEM stores are the full-depth hidden regardless of what key_depth is set to.",
+  "evidence": "Signature `def encode(lm: Config, model, x, *, n_layers=None, extra=None)` (lm/api.py:397); body lines 449-461 contain no read of `n_layers`. Contract line contradicted: \"n_layers runs only the first n blocks on the transformer arm, for the memory-key path (:1580-1593)... On the gru arm it is accepted and ignored, and that is a DECLARED GATE, not a silence -- CENSUS.md:250 records KEY_LAYERS as 'silently inert twice over'\" (lm/api.py:415-421), plus \"DID IT FIRE: ... lm.encode.key_path_truncated (n_layers actually reduced the stack)\" (lm/api.py:432-433).",
+  "severity": "high",
+  "fix": "On the transformer arm, when `n_layers` is not None, run only `model.body.layers[:n_layers]` (applying the same causal mask) and record `lm.encode.key_path_truncated`; on the gru arm record the declared unreachable Gate instead of silently ignoring the argument."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 397,
+  "symbol": "encode",
+  "title": "encode accepts `extra` and never adds it, so WORLD's forecast conditioning term is silently discarded.",
+  "failure": "`extra` is documented as \"an optional additive term on the hidden state, (B, L, width) or None\" whose whole purpose is to let WORLD.forecast condition the LM as a parameter instead of monkey-patching model.encode. The body never adds it. Verified: `encode(cfg, m, x, extra=torch.ones(2,8,32))` differs from `encode(cfg, m, x)` by max |dh| = 0.0. WORLD's forecast therefore conditions on nothing while believing it does, the returned hidden (and every logit decoded from it) is the unconditioned one, and the declared counter `lm.encode.extra_applied` can never fire.",
+  "evidence": "Signature `def encode(lm: Config, model, x, *, n_layers=None, extra=None)` (lm/api.py:397); the body at lines 449-461 is `e = ...; h = model.drop(e + pos); h = model.body(h, ...); return h` with no use of `extra`. Contract contradicted: lm/api.py:423-428 (\"It exists so WORLD's forecast can condition the LM as a PARAMETER rather than by rebinding model.encode: the monkey-patch at :4158-4169 let a timing probe... A timing probe decided the run.\") and lm/api.py:434 (\"lm.encode.extra_applied\").",
+  "severity": "high",
+  "fix": "Add the term where the contract puts it -- on the hidden state, e.g. `h = h + extra` after the body (validating extra.shape == h.shape and extra.device == h.device) -- and set `lm.encode.extra_applied` when it is not None."
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 183,
+  "symbol": "build",
+  "title": "FAB.build initialises the shared modules AFTER moving them to the device, using a CPU generator -- RuntimeError on every RUN_DEVICE=cuda run.",
+  "failure": "With RUN_DEVICE=cuda (a shipped value: train/levers.py:317 declares `choices=(\"cpu\",\"cuda\")` and the comment records longrun.sh:578 hardcoding DEVICE=cuda), `pop.modules` is created and `.to(device)` is applied at line 179, then line 183 calls `t.uniform_(-0.1, 0.1, generator=gen)` on the now-CUDA parameters with `gen = torch.Generator(device=\"cpu\")`. ATen's check_generator (torch/include/ATen/core/Generator.h:155) raises `Expected a 'cuda' device type for generator but found 'cpu'`, so FAB.build aborts at startup and no GPU run of the fabric can be constructed at all.",
+  "evidence": "fabric/api.py:179 `}).to(device)` followed by fabric/api.py:180-185 `with torch.no_grad(): for t in pop.modules.parameters(): if t.dim() >= 2: t.uniform_(-0.1, 0.1, generator=gen)`. The same function does it correctly ten lines above for A and cent -- `a = torch.empty(cap, d_model, rank)` on CPU, `a.uniform_(..., generator=gen)`, then `pop.A.copy_(a.to(device))` (fabric/api.py:164-166) -- and LM.build_model does it correctly too (`model = _LM(geom)`, init loop, `return model.to(device)`, lm/api.py:319-346), so the module branch is the inconsistent one.",
+  "severity": "high",
+  "fix": "Build the ModuleDict on CPU, run the init loop, then `.to(device)` -- i.e. move the `.to(device)` from line 179 to after the `with torch.no_grad()` block."
+ },
+ {
+  "file": "src/sig/api.py",
+  "line": 129,
+  "symbol": "build",
+  "title": "SIG.build's bigram arm fills a device tensor from a CPU generator -- RuntimeError on every RUN_DEVICE=cuda run with SIG_MODE=bigram.",
+  "failure": "With RUN_DEVICE=cuda and SIG_MODE=bigram, line 127 allocates `table = torch.empty(int(sig.bigram_dim), int(sig.d), device=device)` on the GPU and line 129 calls `table.uniform_(-0.1, 0.1, generator=gen)` where `gen = torch.Generator(device=\"cpu\")` (line 119). check_generator raises `Expected a 'cuda' device type for generator but found 'cpu'`. The bigram arm is the frozen control the learned encoder is read against, so on GPU that control cannot be built and the comparison the arm exists for is unrunnable.",
+  "evidence": "sig/api.py:127-130 `table = torch.empty(int(sig.bigram_dim), int(sig.d), device=device)` / `table.uniform_(-0.1, 0.1, generator=gen)` / `encoder = table`. The learned arm two lines earlier gets the order right -- `_Encoder(int(alphabet_size), int(sig.d), gen).to(device)` (sig/api.py:123) constructs and seeds on CPU before moving -- which is what makes this an oversight rather than a decision. ATen check: torch/include/ATen/core/Generator.h:155.",
+  "severity": "high",
+  "fix": "Allocate the table on CPU, `uniform_` it with `gen`, then `.to(device)` -- matching the learned arm's order."
+ },
+ {
+  "file": "src/sig/api.py",
+  "line": 182,
+  "symbol": "encode",
+  "title": "The bigram arm returns an all-zero signature whenever width_units < 2, which is exactly the zero vector the contract says it may never return.",
+  "failure": "At SIG_MODE=bigram with width_units=1 (reachable at LM_CTX=1, which LM.resolve accepts, and accepted by SIG.build which only refuses width < 1), `units[:, :-1]` is empty, so `idx` has shape (N, 0), `v.index_add_` adds nothing, and `v / v.norm(...).clamp_min(1e-8)` returns exact zeros. Verified: `S.encode(cfg_bigram, st_width1, torch.randint(0,256,(4,1)))` -> a (4, 8) tensor of all 0.0, no exception. Every window then has an identical (zero) signature: FAB's routing cosine is identical for every expert, DOM's boundary test can never fire, every centroid is the zero vector, and nothing anywhere fails -- the precise C4/C5 failure mode this function was written to make impossible.",
+  "evidence": "sig/api.py:182-186 `idx = ((units[:, :-1] * 31 + units[:, 1:]) % st.encoder.shape[0]).long()` ... `return v / v.norm(dim=-1, keepdim=True).clamp_min(1e-8)`. Contract contradicted, in the same function's docstring: \"a caller that cannot supply width_units units gets an EXCEPTION, never a narrower window and never a zero vector. This is the whole of the C4/C5 repair.\" (sig/api.py:152-154). The learned arm has no such hole -- at width_units=1 it still returns unit vectors.",
+  "severity": "medium",
+  "fix": "Refuse in SIG.build when `mode == \"bigram\" and width < 2`, naming SIG_MODE, SIG_WIDTH_UNITS and both numbers (a bigram encoder needs at least two units), rather than emitting a well-formed zero vector."
+ },
+ {
+  "file": "src/sig/api.py",
+  "line": 178,
+  "symbol": "encode",
+  "title": "sig.encode_calls is incremented by the number of windows, so the ledger's 'calls' counter holds the 'windows' quantity and sig.encode_windows does not exist at all.",
+  "failure": "The contract declares two distinct counters: `sig.encode_calls` and `sig.encode_windows`. The body has only the first and adds the window count to it. Verified: after `SIG.build(...)` (`counters['sig.encode_calls'] == 0`) and ONE call `S.encode(cfg, st, torch.randint(0,256,(4,16)))`, `st.counters['sig.encode_calls'] == 4`. A report reading that row prints 4 encoder calls for 1 call, and the two quantities the contract wants separated -- how often the encoder was invoked vs how many windows were characterised -- collapse into one number that is neither's label.",
+  "evidence": "sig/api.py:178 `st.counters[\"sig.encode_calls\"] += int(units.shape[0])`; the dict built at sig/api.py:141-144 contains `\"sig.encode_calls\": 0` and no `sig.encode_windows` key. Contract: \"DID IT FIRE: sig.encode_calls, sig.encode_windows, and sig.encode_width_seen asserted equal to st.width_units on EVERY call\" (sig/api.py:161-163).",
+  "severity": "medium",
+  "fix": "`st.counters[\"sig.encode_calls\"] += 1` and `st.counters[\"sig.encode_windows\"] += int(units.shape[0])`, seeding both keys in build()."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 317,
+  "symbol": "build_model",
+  "title": "build_model mints a SECOND live generator for the stream name 'lm' with again=True, so the register's 'lm' stream reports zero draws while LM actually drew.",
+  "failure": "RUN.streams (train/api.py:269) mints every declared subsystem stream up front -- \"MINTED HERE, ALL OF THEM, AND THAT IS WHY rng.issued() IS A REGISTER RATHER THAN A SAMPLE\" -- including \"lm\". build_model then calls `_rng.rng_for(\"lm\", int(seed), again=True)`, which constructs a NEW Rng seeded from the same (name, seed) pair rather than using the one the register holds. Verified: `a = rng_for(\"lm\", 99); b = rng_for(\"lm\", 99, again=True)` gives identical sequences [229110047, 613756711, 746243018] from both. The register's object never advances, so `sysm.streams[\"lm\"].draws` stays 0 for the whole run while LM's initialisation consumed draws -- and `.draws == 0` is exactly the value the ledger uses to mean armed-but-inert (rng.py:334-336), so the DID IT FIRE line reports 'LM asked for randomness and never drew' about a stream that was used. `again=True` is documented as being for \"a legitimate rebuild of one stream (checkpoint restore)\"; this is not one, and the call-site comment asserts the opposite of what rng_for does.",
+  "evidence": "lm/api.py:314-317: \"again=True because RUN.streams already minted 'lm' into the register at step 0 -- this is that stream being used, not a second one.\" / `stream = _rng.rng_for(\"lm\", int(seed), again=True)`. rng_for returns `Rng(subsystem, seed, again=again)` (rng.py:328) -- a fresh object, never the registered one. Every other package takes its stream as an argument instead (`generator=sysm.streams[\"sig\"]`, `sysm.streams[\"fabric\"]`, `rng=sysm.streams[\"world\"]` at compose.py:1921-1956).",
+  "severity": "medium",
+  "fix": "Hand LM the stream the way FAB/SIG/WORLD get theirs -- pass `sysm.streams[\"lm\"]` into build_model as a `generator` argument -- or, if the frozen signature must keep taking `seed`, drop \"lm\" from RNG_SUBSYSTEMS so there is exactly one mint of the name and no again=True."
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 65,
+  "symbol": "Population.__init__",
+  "title": "depth_now is hardcoded to 1 and FAB_DEPTH0 is never read at build, so the lever's documented 0 sentinel ('no curriculum') cannot be selected.",
+  "failure": "`self.cap, self.n_live, self.depth_now = cap, n0, 1` fixes the starting hop count at 1 for every configuration. FAB_DEPTH0 is declared as \"Hop count the chain starts at before staged depth extends it; 0 means start at the full `hops` budget (no curriculum)\" (fabric/levers.py:227-228) and FAB.forward computes \"Depth is min(depth_now, hops, 2 + n_live//2)\". Nothing in the written code ever writes depth_now from depth0, and depth_now is population state that only maybe_deepen advances. So at FAB_DEPTH0=0 the run does 1 hop per pass instead of the full `hops` budget, and at FAB_DEPTH0=3 it starts at 1 and waits on the manage_every=500 cadence -- while the banner prints the operator's number. This is the M24 silent-sentinel shape the tree's own `choices=` repair exists to end.",
+  "evidence": "fabric/api.py:65 `self.cap, self.n_live, self.depth_now = cap, n0, 1` -- the only assignment to depth_now in the file; `grep -n depth0 src/fabric/api.py` finds it only in forward's and counters' LEVERS READ prose. Verified at build: `pop.depth_now == 1` regardless of the FAB config passed.",
+  "severity": "medium",
+  "fix": "Resolve the sentinel in build (the way LM.resolve resolves LM_LAYERS==0) and pass it in: `depth_now = int(fab.hops) if int(fab.depth0) == 0 else int(fab.depth0)`, adding depth0 (and hops) to build's LEVERS READ and recording which branch resolved it."
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 173,
+  "symbol": "build",
+  "title": "build allocates five of the nine modules the frozen surfaces name, so FAB.forward's per-hop vote and FAB.state_dict's parameter list refer to tensors nothing creates.",
+  "failure": "FAB.state_dict's frozen docstring enumerates what the checkpoint holds: \"Parameters (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, q_entry, nov_proj)\". build creates eemb, edec, q_route, hproj and halt_key only. FAB.forward's contract describes \"the loop already forms head(norm(state)) per hop for the vote (:2675-2680)\" and \"NOVELTY ENTERS THE QUERY, not the logit vector\" against `s.nov(...)` -- both of which need modules (`norm`, `nov_proj`) that do not exist on `pop.modules`, so the hop-vote path and the novelty-in-query repair have nothing to call. The tree already applied exactly this reasoning to remove `ctrl` from state_dict's list: \"build's allocation list creates no such module... the contract promised to checkpoint a parameter nothing allocates -- a save-side claim that could only ever be tested by a resume\" (fabric/api.py:697-700). The same is now true of four more names.",
+  "evidence": "fabric/api.py:173-179 allocates exactly `eemb`, `edec`, `q_route`, `hproj`, `halt_key`; verified `list(pop.modules.keys())` returns those five. fabric/api.py:695-696 (state_dict) lists eleven; fabric/api.py:246 and :254 (forward) require `norm` and the novelty projection.",
+  "severity": "medium",
+  "fix": "Either allocate `norm` (a LayerNorm over d_model), `nov_proj`, `q_entry` and `halt_b` here alongside the other five, or amend state_dict's list the way `ctrl` was amended, so that the save-side claim matches what build creates in both directions."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 509,
+  "symbol": "decode",
+  "title": "The compose branch of decode drops the bias term its own docstring specifies.",
+  "failure": "Under lm.compose the docstring states the readout is \"`h @ table.t() + bias` from the tied composed table\"; the body computes `logits = h @ table.t()` with no bias, and no bias parameter is constructed on the compose arm (_LM.__init__ builds `emb`/`head` only when `not geom.compose`). When the ByteComposer lands, LM_COMPOSE=1 will produce a strictly bias-free softmax while the banner and the checkpoint describe a decoder with a per-row bias, which shifts every logit and every reported bits/byte relative to the non-compose arm the numbers are compared against. Currently masked by `_LM.composed_table` raising NotImplementedError, so it is latent rather than firing.",
+  "evidence": "lm/api.py:507-509 `if model.compose: table = model.token_table(); logits = h @ table.t()` against lm/api.py:481 \"Under compose it is `h @ table.t() + bias` from the tied composed table; otherwise the head Linear.\" _LM.__init__ (lm/api.py:106-108) constructs `self.head = nn.Linear(w, v)` only under `if not geom.compose`, so no bias exists for the compose arm to add.",
+  "severity": "low",
+  "fix": "Allocate a `(vocab_slots,)` output bias on the compose arm in _LM.__init__ (it is not part of the tied table and does not reintroduce the L13 dead weight) and add it here, or amend the docstring to state that the composed readout is bias-free."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 245,
+  "symbol": "build_vocabulary",
+  "title": "The resume branch of build_vocabulary returns without minting Vocabulary.dropout_rng, so every resume of a TOK_DROPOUT>0 run dies at the first segmentation",
+  "failure": "CKPT_RESUME=runs/x/ckpt.pt (so d_vocab_read_path=runs/x/ckpt.pt.dyntok.json exists) plus TOK_DROPOUT=0.3. build_vocabulary takes the `if replayed is not None:` early return at :241-245, which never assigns vocab.dropout_rng, so it stays None from Vocabulary.__init__ (:103). compose.py stage 'segment' then calls tokenize(..., regularize=True), which hits the new guard at tok/api.py:415 and raises ValueError('...against a Vocabulary carrying no dropout stream. build_vocabulary mints it; a Vocabulary that did not come from there cannot be regularized'). Reproduced: fabricated a parent .dyntok.json, replayed 2 merges, `vocab size after replay: 258 dropout_rng: None`, then `RAISED ValueError`. The resume is the one run type goal B is measured across, and the message blames a caller that did exactly what the contract says.",
+  "evidence": "Body :233-245: `read_path = str(tok.d_vocab_read_path)` / `if read_path:` / `replayed = _replay_merges(vocab, read_path)` / `if replayed is not None:` / `vocab.v0 = vocab.size()` / `ids, _pos = _segment(...)` / `vocab.bytes_per_token = ...` / `return vocab` -- no `vocab.dropout_rng = _rng.rng_for(\"tok.dropout.mint\", seed)`, which the two other exits (:228 bytes arm, :260 build arm) both do. Contract, tok/api.py:150-153: 'If d_vocab_read_path is non-empty and exists, the parent's merges are REPLAYED instead of built -- a resume MUST reuse the saved vocabulary'; and the class comment at :98-103 says the stream is 'MINTED ONCE' and lives on the Vocabulary.",
+  "severity": "high",
+  "fix": "Mint the stream before the branch, not inside each arm: move `vocab.dropout_rng = _rng.rng_for(\"tok.dropout.mint\", seed)` to immediately after `vocab = Vocabulary(...)` at :211 and delete the two per-arm assignments at :228 and :260. That also keeps the ledger key present on all four exits, which is what the :255-258 comment claims."
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 183,
+  "symbol": "build",
+  "title": "FAB.build seeds a CPU torch.Generator and then draws with it into parameters already moved to `device`, so RUN_DEVICE=cuda raises before any expert exists",
+  "failure": "RUN_DEVICE=cuda (a declared choice: train/levers.py:318 `choices=(\"cpu\", \"cuda\")`). At :179 `pop.modules = nn.ModuleDict({...}).to(device)` puts every Linear on CUDA; at :183 `t.uniform_(-0.1, 0.1, generator=gen)` passes the CPU generator built at :161-162. ATen's check_generator (torch/include/ATen/core/Generator.h:155, present in this tree's torch 2.13.0+cu130) does TORCH_CHECK(T::device_type() == gen->device().type(), \"Expected a '\", ..., \"' device type for generator but found '\", ...), so this raises RuntimeError: Expected a 'cuda' device type for generator but found 'cpu'. Every GPU run dies in the fabric constructor, naming neither FAB nor the seed. The A/cent draws at :165/:168 escape only because those tensors are built on CPU first and copied.",
+  "evidence": ":161-162 `gen = torch.Generator(device=\"cpu\")` / `gen.manual_seed(generator.randint(0, 2 ** 31 - 1))`; :179 `}).to(device)`; :180-185 `with torch.no_grad(): for t in pop.modules.parameters(): if t.dim() >= 2: t.uniform_(-0.1, 0.1, generator=gen)`. spine/rng.py:265 provides `Rng.torch_generator(device=\"cpu\")` for exactly this ('A torch.Generator for this subsystem, to be passed as `generator=` to torch's random ops'), taking the device as an argument; build() does not use it.",
+  "severity": "high",
+  "fix": "Build the modules on CPU, draw into them there, and `.to(device)` afterwards -- the shape the A/cent path at :164-170 already uses -- or take the generator from `generator.torch_generator(device=device)` so the generator and the tensors agree. Do not create the raw torch.Generator here at all; spine/rng.py exists so the torch seed is derived from (run seed, 'fabric.torch') rather than from a draw off the package stream."
+ },
+ {
+  "file": "src/sig/api.py",
+  "line": 129,
+  "symbol": "build",
+  "title": "SIG.build's bigram arm allocates its table on `device` and fills it with a CPU generator, so SIG_MODE=bigram on CUDA raises",
+  "failure": "SIG_MODE=bigram with RUN_DEVICE=cuda. :127 `table = torch.empty(int(sig.bigram_dim), int(sig.d), device=device)` allocates on CUDA; :129 `table.uniform_(-0.1, 0.1, generator=gen)` passes the CPU generator from :119-120, and ATen's check_generator raises RuntimeError: Expected a 'cuda' device type for generator but found 'cpu'. The bigram arm is the frozen control arm the learned encoder is read against (:124-126, 'no parameters that train, which is what makes it the control arm'), so the control arm is unrunnable on the only device the experiments run on. The learned arm at :123 escapes because _Encoder draws on CPU and then `.to(device)`.",
+  "evidence": ":119-120 `gen = torch.Generator(device=\"cpu\")` / `gen.manual_seed(generator.randint(0, 2 ** 31 - 1))`; :127-129 `table = torch.empty(int(sig.bigram_dim), int(sig.d), device=device)` / `with torch.no_grad():` / `table.uniform_(-0.1, 0.1, generator=gen)`. torch/include/ATen/core/Generator.h:155 carries the TORCH_CHECK that fires.",
+  "severity": "high",
+  "fix": "Allocate on CPU and move: `table = torch.empty(bigram_dim, d); table.uniform_(-0.1, 0.1, generator=gen); encoder = table.to(device)` -- matching the learned arm one line above -- or take `gen = generator.torch_generator(device=device)`."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 106,
+  "symbol": "_LM.__init__",
+  "title": "Nothing in the new bodies seeds torch's global generator, so at LM_DROPOUT>0 two runs at the same RUN_SEED diverge and G2's determinism floor absorbs the difference",
+  "failure": "LM_DROPOUT=0.2, LM_ARCH=transformer. `self.drop = nn.Dropout(geom.dropout)` (:106) and `nn.TransformerEncoderLayer(dropout=geom.dropout)` (:114-119) draw their forward-time masks from torch's DEFAULT global generator, which torch seeds from OS entropy at first use and which no code in this tree ever calls torch.manual_seed on (only train/levers.py:277 mentions the old call, as a defect being removed). Measured: three processes printed torch.initial_seed() = 13989758112835367564 / 4786972063193561826 / 11264655507350687211. Running the identical script twice at RUN_SEED=0, LM.encode() on a zero batch summed to -92.9096450805664 and -102.38495635986328. So the trajectory is not a function of the seed. train/levers.py:290-292 says G2's test_determinism 'runs two identical seeded CPU runs to establish the measured float noise floor that every isolation result is read against' -- with dropout on, that floor is inflated by whole dropout masks and every isolation verdict is read against a threshold that is not a noise floor.",
+  "evidence": "lm/api.py:106 `self.drop = nn.Dropout(geom.dropout)`; :114-119 `nn.TransformerEncoderLayer(..., dropout=geom.dropout, ...)`. train/levers.py:272-273 declares seed as 'Root seed for the whole run; every module's initialisation and the data stream derive from it.' spine/rng.py:265-284 supplies Rng.torch_generator() for exactly this interop and no call site in src/ uses it; `grep -rn manual_seed src/` finds only the three raw `torch.Generator(device=\"cpu\")` seeds in lm/sig/fabric build, none of which reaches nn.Dropout.",
+  "severity": "high",
+  "fix": "Seed the process-global torch stream once, from the run seed, in RUN.process_setup (which already owns 'the process-wide arithmetic settings ONCE, before any package is built'): `torch.manual_seed(spine.rng.derive_seed(\"torch.global\", int(run.seed)))`, and record it on Process so the banner can print it. nn.Dropout takes no generator, so a per-subsystem stream cannot cover it; the alternative is to state in the contract that the run is only reproducible at dropout=0."
+ },
+ {
+  "file": "src/sig/api.py",
+  "line": 186,
+  "symbol": "encode",
+  "title": "SIG.encode does not run under no_grad despite its docstring, and the encoder is in the optimizer's param groups, so any caller's backward trains it",
+  "failure": "SIG_MODE=learned (the default arm). The body has no torch.no_grad() anywhere: :186 returns `st.encoder(units.to(...))`, which builds an autograd graph through _Encoder.emb and _Encoder.proj. compose.py:1985-1987 puts those very parameters into the optimizer: `opt_api.build(opt, param_groups={..., \"encoder\": list(sig_api.encoder_parameters(sig, sysm.sig))}, ...)`. So whenever the loop computes a signature for routing and later calls backward on the LM/FAB loss, encoder gradients accumulate and the next optimizer step applies them -- the signature encoder is trained by a loss that is not its contrastive objective, while sig.train_steps (:144) counts only SIG.train_step. The same path lets an instrument that calls encode() inside a graph move the encoder, which is the exact thing the docstring promises it cannot do.",
+  "evidence": "Docstring :155-156: 'Runs under no_grad and never touches the optimizer, so an instrument calling it cannot move the encoder (the G7 digest holds across it).' Body :164-186 contains no `torch.no_grad()` and no `.detach()`; contrast sig/api.py:46 and :128, where build() does wrap its draws in `with torch.no_grad():`.",
+  "severity": "high",
+  "fix": "Wrap the whole computation: `with torch.no_grad():` around :177-186 (both the bigram and learned arms), returning a detached tensor. If some future caller genuinely needs a differentiable signature, that has to be a separate declared entry point, because this one's contract is that it cannot move the encoder."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 317,
+  "symbol": "build_model",
+  "title": "build_model's again=True mints a SECOND live Rng for \"lm\"; the ledger object the root holds reports 0 draws forever and replays the exact value build_model consumed",
+  "failure": "RUN.streams (train/api.py:269) mints every name in RNG_SUBSYSTEMS including 'lm', and compose.py:1911-1913 hands build_model only `seed`, never `streams[\"lm\"]`. build_model then calls rng_for('lm', seed, again=True), producing a second Rng at position 0 over the same derived seed. Measured after a real build_model: `streams['lm'].draws == 0`, and `streams['lm'].randint(0, 2**31-1)` returned 108554737 -- byte-identical to the value build_model's own stream drew to seed its torch generator. Two consequences: (a) the DID IT FIRE row the docstring declares (rng.issued()[\"lm\"]) can only ever report LM as never having drawn, so 'LM asked for randomness' and 'LM never asked' are indistinguishable, which is the G4 collapse this project counts 57+60 records of; (b) the first draw any future LM row takes off streams['lm'] is the torch init seed already in use, i.e. a genuine replayed sequence, not a rebuild.",
+  "evidence": ":317 `stream = _rng.rng_for(\"lm\", int(seed), again=True)` under the comment ':315-316 again=True because RUN.streams already minted \"lm\" into the register at step 0 -- this is that stream being used, not a second one.' It is not: spine/rng.py:176-183 says two calls for one name and seed 'return two generators that produce the SAME sequence, so two call sites would draw identical \"random\" numbers while each believes it has its own stream', and again=True is documented for 'a legitimate rebuild of one stream (checkpoint restore)'. This is neither. The repair the tree already applied twice for the identical shape is a child stream (data/api.py:355-366 for data.synth; tok/api.py:249-260 for tok.dropout.mint).",
+  "severity": "medium",
+  "fix": "Same repair as data.synth and tok.dropout.mint: draw from a child, `_rng.rng_for(\"lm.init\", int(seed))`, with no again=; 'lm' stays the declared parent in RNG_SUBSYSTEMS reporting zero draws. Or have compose.py pass `generator=sysm.streams[\"lm\"]` the way it already does for SIG, FAB, WORLD, MEM and DOM."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 455,
+  "symbol": "encode",
+  "title": "On the transformer arm LM.encode's return DOES carry dropout, so MEM's keys are written dropped in train mode and queried undropped at eval -- the defect Q-LM-9 claims to have removed",
+  "failure": "LM_ARCH=transformer, LM_DROPOUT>0. nn.TransformerEncoderLayer with norm_first=True computes `x = x + self._ff_block(self.norm2(x))` where _ff_block ends in dropout2, so the LAST layer's output dropout is on encode()'s return path. Measured: built the model at LM_DROPOUT=0.2, arch=transformer, then set `m.drop.p = 0.0` to disable the embedding-dropout site and called encode twice in train mode -- the two returns still differ; in eval mode they are equal, and the train-mode value differs from the eval-mode one. compose.py binds key_fn to LM.encode, so at dropout>0 the store is written with regularised keys during the loop and read with unregularised ones at eval, and FAB's router sees a different input in train and eval.",
+  "evidence": "Docstring :215-216 and body comment :457-459: 'UNDROPPED ON THE WAY OUT. Three packages consume this -- MEM as keys, FAB as routing input, LM as the readout source -- and a value three packages consume must not carry one consumer's regulariser.' build_model's docstring :280-289 claims the three sites are 'the embedding dropout, the inter-layer dropout at depth > 1, and the READOUT dropout, applied inside decode()' and that this 'makes the key path train/eval consistent STRUCTURALLY rather than by convention'. On the transformer arm there is a fourth site nobody chose: `nn.TransformerEncoderLayer(..., dropout=geom.dropout, ..., norm_first=True)` at lm/api.py:114-119, whose last layer drops the value returned at :461.",
+  "severity": "medium",
+  "fix": "Either state the arm difference in the contract, or make it structural: run the encoder body's last layer without its output dropout (e.g. build the stack with dropout=0.0 on the final layer, or apply the encoder under a `torch.nn.utils` dropout-off scope for the key path). A `for_key=` keyword is explicitly forbidden by the docstring, so the fix belongs in the constructor at :114-119, not at the call site."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 375,
+  "symbol": "_synthetic_areas",
+  "title": "The synthetic arm skips both declared collision refusals, so colliding area labels surface as a spine RngError naming neither the lever nor the paths",
+  "failure": "DATA_SOURCE=synthetic with DATA_AREAS='rustA,rusta,x,y'. open_areas dispatches to _synthetic_areas at :221 BEFORE the label-collision and key-collision checks, which live only in the `else:` (real-corpus) branch at :239-259. _holdout_key('rustA') and _holdout_key('rusta') both give 'rusta', so :375 calls rng_for('data.synth.rusta', seed) twice. Reproduced: `RngError: stream 'data.synth.rusta' was already issued for seed 0. A second generator for one subsystem replays the same sequence...` -- an operator gets a message about generator identity for what the contract says is a startup refusal naming DATA_AREAS and both source paths.",
+  "evidence": "Contract, open_areas docstring :117-123: 'two entries resolving to the same label are REFUSED with BOTH source paths printed (data.area_label_collision)'; and :140-146: 'TWO AREAS WHOSE KEYS COLLIDE ARE THE SAME STARTUP REFUSAL as the label collision above -- which is exactly the objection rng.py raises, answered at startup rather than papered over.' Body: `if str(dat.source) == \"synthetic\": raw, present, taken, sources = _synthetic_areas(dat, seed, entries)` at :220-221, with the two refusals unreachable from that path.",
+  "severity": "medium",
+  "fix": "Hoist the label and rng-key collision loop (:239-259) above the source branch at :220 so it runs on the entry list regardless of source, and let _synthetic_areas receive the already-validated (label, key) pairs."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 370,
+  "symbol": "_synthetic_areas",
+  "title": "Synthetic areas are labelled with the raw DATA_AREAS entry, slash included, while real areas are labelled with the basename -- one lever value, two label spaces",
+  "failure": "DATA_AREAS='continual/01_rust,eng'. On the real arm open_areas:236 sets the label to `os.path.basename(entry.rstrip(\"/\"))` = '01_rust'. On the synthetic arm _synthetic_areas:370 sets `labels = entries[:n]`, so the label is 'continual/01_rust'. Reproduced: `synthetic names: ('continual/01_rust', 'eng')`. Everything keyed by label then diverges between arms: per-area scores, Areas.rng_holdout keys, and DATA_PHASE_SCHED by name -- data_plan:523-529 looks each schedule token up in `by_name`, so PHASE_SCHED='01_rust|01_rust|01_rust|01_rust' (the documented pure-add spelling) resolves on the real arm and raises CorpusError('names '01_rust', which is neither an area index nor one of [...]') on the synthetic arm with the same DATA_AREAS.",
+  "evidence": ":370 `labels = entries[:n] if len(entries) >= n else [f\"p{i}\" for i in range(n)]` versus open_areas :236 `labels.append((entry, os.path.basename(entry.rstrip(\"/\")), os.path.join(str(dat.dir), rel)))`. The docstring rules the label at :112-114: 'the area LABEL is the basename (\"continual/01_rust\" labels as \"01_rust\")' -- stated without an exemption for the synthetic arm.",
+  "severity": "medium",
+  "fix": "Apply the same basename rule in _synthetic_areas: `labels = [os.path.basename(e.rstrip(\"/\")) for e in entries[:n]] if len(entries) >= n else [f\"p{i}\" ...]`. Better, compute the (entry, label, key) triples once in open_areas before the source branch and pass them down."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 313,
+  "symbol": "open_areas",
+  "title": "open_areas and draw_stream produce none of the counters and gates their DID IT FIRE blocks declare, so DATA's armed-but-0 and unreachable states are indistinguishable everywhere",
+  "failure": "On any run: Areas (returned at :313-315) carries names/bodies/holdout/holdout_bytes/bytes_present/bytes_taken/cursors/rng_holdout and no counters or gates field; Stream (returned at :729-737) carries no counters or gates field either. So data.corpus_cap_trip, data.val_cap_trip, data.area_open, data.area_nested, data.holdout_seam, data.holdout_overlap (all declared at :180-209) and data.stream_draw, data.segment, data.contig_wrap, data.resample, data.phase_entered (declared at :667-671) have no value anywhere in the returned records. Concretely: at DATA_SEG_CONTIG=0 the contract requires the report to say data.contig_wrap is UNREACHABLE with its arithmetic, and at DATA_SEG_CONTIG=1 to print how many wraps fired; the body has a bare comment `# data.contig_wrap` at :720 and no counter, so both read as nothing. data_plan is the only DATA entry point that returns Gate objects, which shows the mechanism was available and not used here.",
+  "evidence": "open_areas DID IT FIRE, :180-209, names ten counters including 'data.corpus_cap_trip (fired N / armed but 0, prints taken vs present per area)' and 'data.holdout_seam ... Unreachable when a block lands at offset 0 or at the tail, which is the state it must say rather than read 0'. draw_stream DID IT FIRE, :667-671, names 'data.contig_wrap (unreachable at seg_contig=False, with the gate arithmetic)'. Neither Areas (:63-71) nor Stream (:410-...) has a counters or gates field, and spine/gate.py:24 Gate exists precisely so 'a reader can tell FIRED from ARMED-AND-INERT from UNREACHABLE across the entire report'.",
+  "severity": "medium",
+  "fix": "Add `counters: dict` and `gates: tuple` to Areas and Stream and fill them in both bodies -- taken vs present per area for corpus_cap_trip, the val_cap bite, one holdout_seam per area with Gate(reachable=False, reason=...) when the block lands at offset 0 or the tail, and a contig_wrap counter plus Gate(reachable=False, reason='DATA_SEG_CONTIG=0') on the other arm. data_plan's gates list (:604-623) is the pattern to copy."
+ },
+ {
+  "file": "src/sig/api.py",
+  "line": 178,
+  "symbol": "encode",
+  "title": "sig.encode_calls is incremented by the WINDOW count, and the three other counters the contract names are never created",
+  "failure": "One call with a batch of 512 windows adds 512 to a counter named 'calls', so a report printing sig.encode_calls=1024000 after 2000 calls states a number no path produced. The contract names four surfaces and the body creates one: sig.encode_windows, sig.encode_width_seen and sig.encode_width_mismatch never appear in st.counters (initialised at :143-145 with only width_units, alphabet_size, encoder_built, bigram_built, encode_calls, train_steps), so 'the C4 alarm' the docstring says is 'a HARD FAILURE, not a warning' has no counter to be nonzero.",
+  "evidence": "Body :178 `st.counters[\"sig.encode_calls\"] += int(units.shape[0])`. Docstring :160-162: 'DID IT FIRE: sig.encode_calls, sig.encode_windows, and sig.encode_width_seen asserted equal to st.width_units on EVERY call -- a nonzero sig.encode_width_mismatch is the C4 alarm'. Initialiser :143-145 lists neither encode_windows nor encode_width_seen nor encode_width_mismatch.",
+  "severity": "low",
+  "fix": "`st.counters[\"sig.encode_calls\"] += 1` and `st.counters[\"sig.encode_windows\"] += int(units.shape[0])`; add encode_width_seen (set to int(units.shape[1])) and encode_width_mismatch (incremented in the raise path at :171-175 before raising) to the initialiser at :143-145."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 197,
+  "symbol": "build_vocabulary",
+  "title": "build_vocabulary declares cand_window, mint_pmin and mint_novel as LEVERS READ and reads none of them, so three knobs are inert during the build with the audit reporting them as read",
+  "failure": "TOK_MINT_NOVEL=1 (or TOK_MINT_PMIN=0.2, or TOK_CAND_WINDOW=64) with TOK_MODE=fixed or online. The build loop at :262-276 selects purely by `tally.most_common()` and `tok.min_pair`; there is no candidate window, no novelty re-sort and no conditional-probability floor. The resulting vocabulary is byte-identical to the run with those knobs unset, while the declared LEVERS READ line says this entry point consumed them. That is the ISSUES P1-M80/L20 shape the same docstring cites ('the audit then printed \"NOTHING READ THESE\" naming a knob that was set and ignored'), and it widens the computed affects() set the L3 isolation sweep is read against, so a real coupling through those levers would be pre-declared and invisible.",
+  "evidence": ":197-198 `LEVERS READ: mode, seed_vocab, build_passes, build_bytes, min_pair, max_bytes, cand_window, mint_pmin, mint_novel, dropout`. `grep -n 'cand_window\\|mint_pmin\\|mint_novel' src/tok/api.py` finds them only in prose and in mint_burst's own LEVERS READ line at :533 -- mint_burst is still a stub, so nothing in the tree reads them.",
+  "severity": "low",
+  "fix": "Either implement the selection rules in the build pass (the docstring at :511-523 spells them out: materialize cand_window candidates floored at 2, re-sort by novelty when mint_novel > 0, skip candidates whose p(b|a) is below mint_pmin) or remove the three names from build_vocabulary's LEVERS READ line and leave them declared on mint_burst alone."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 702,
+  "symbol": "draw_stream",
+  "title": "draw_stream passes an undeclared again=True and discards the Rng, so the declared DID IT FIRE row rng.issued()[\"data.stream.e0\"].draws cannot be evaluated at all",
+  "failure": "The docstring's DID IT FIRE line asks the report to read `rng.issued()[\"data.stream.e0\"].draws`. spine/rng.py:331-338 returns `dict(_ISSUED)` whose values are `(derived seed, run seed)` TUPLES, which have no .draws -- evaluating that line is an AttributeError. The only Rng object for that name is the local `stream` at :702, discarded when the function returns, and 'data.stream' is not in compose.RNG_SUBSYSTEMS, so RUN.streams holds no object for it either. The result: for the one stream that decides what bytes the run trains on, nothing anywhere can distinguish 'epoch 3's stream was never drawn' from 'it was drawn'. The `again=True` compounds it by permanently disabling spine/rng.py's duplicate-stream guard on that name, so a second call site drawing epoch 3's text would be accepted in silence.",
+  "evidence": ":702 `stream = _rng.rng_for(f\"data.stream.e{int(epoch)}\", seed, again=True)` -- the docstring at :662 states the call without again: 'The generator is rng_for(f\"data.stream.e{epoch}\", seed)'. DID IT FIRE line :671: 'rng.issued()[\"data.stream.e0\"].draws (0 draws = armed-but-inert)'. spine/rng.py:338 `return dict(_ISSUED)`, where _ISSUED maps name -> (seed, run_seed) (:192).",
+  "severity": "low",
+  "fix": "Return the stream's draw count on the Stream record (a counters dict, alongside the data.stream_draw/data.segment counters this body also owes), and drop again= -- if the root genuinely calls draw_stream twice for one epoch, that is the thing to fix at the call site, which is what the guard is for."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 290,
+  "symbol": "build_vocabulary",
+  "title": "The fixed arm overwrites Vocabulary.ceiling, the field the package header declares comes from the wire on every path, with the achieved build size",
+  "failure": "TOK_MODE=fixed with LM_VOCAB_SLOTS=4096 and a build that reaches 512. After :290, vocab.ceiling is 512 while the model's embedding and head still have 4096 rows. Every later reader of vocab.ceiling as 'the model's embedding row count' -- the banner, vocab_state's recorded vmax, LM.mint_rows' bound, and the D-T1 reconciliation that compares a saved file's vmax against the wire -- now reads a number DATA/TOK computed rather than the one LM.vocab_slots supplies, and a resume's reconciliation is taken against a package-mutated value. The intended effect (never mint again) is already available through soft_cap without touching the wire-sourced field.",
+  "evidence": ":290 `vocab.ceiling = vocab.size()`. Module header :14-16: 'The ceiling is HARD AND COMES FROM THE WIRE ON EVERY PATH, INCLUDING A RESUME; the `vmax` inside a saved tokenizer file is a recorded fact to reconcile against, never an authority (DEFECT D-T1...)'. Class docstring :63-67: '`ceiling` is HARD and arrives as the wire d_vocab_ceiling from LM.vocab_slots -- it is the model's embedding row count'.",
+  "severity": "low",
+  "fix": "Add a third, TOK-owned field (e.g. `closed_at`) that at_cap()/_cap() also min()s over, and leave `ceiling` holding the wire value for the life of the run. That gives the fixed arm its hard stop without making the recorded ceiling disagree with LM.vocab_slots, which is what P1-H57's repair was reaching for when it moved the write off soft_cap."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 520,
+  "symbol": "decode",
+  "title": "decode uses live_vocab (a COUNT of live rows) as the index where never-minted rows begin, so it masks the top len(retired_ids) LIVE token rows to -inf",
+  "failure": "compose.py:338 binds `live_vocab` to `Vocabulary.live_size()`, which P4 defines as `len(id2bytes) - len(retired)`. Ran it: a Vocabulary with 280 minted ids and retired={260,261,262} gives live_size()=277, and `LM.decode(..., live_vocab=277, retired_ids={260,261,262})` returns -inf at ids [260,261,262,277,278,279] -- 277/278/279 are live, matchable tokens the tokenizer emits. The docstring's own example scale (probation arms: 224 of 256 minted tokens retired) means 224 live rows get -inf; any window whose target is one of them yields an infinite cross-entropy, and those tokens can never be predicted.",
+  "evidence": "Body: `dead[int(live_vocab):] = True            # never minted: a suffix`. Docstring: \"Never-minted rows are [live_vocab:]; RETIRED ROWS ARE BELOW live_vocab AND ARE NOT A SUFFIX\" -- both sentences are only true if live_vocab is the minted-row COUNT. tok/api.py:`def live_size(self): return len(self.id2bytes) - len(self.retired)`; compose.py:338 \"live_vocab -- Vocabulary.live_size under LM.decode's spelling\". This is exactly the \"a suffix rule would mask the wrong rows\" failure the comment three lines below warns about, in the opposite direction.",
+  "severity": "critical",
+  "fix": "Start the never-minted suffix at the number of positional rows (`vocab.size()`), not the live count: either change the root's binding to pass `vocab.size()` under this spelling, or have decode take the minted count and mask `dead[minted:]` plus `dead[sorted(retired_ids)]`."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 436,
+  "symbol": "encode",
+  "title": "encode silently ignores both n_layers and extra, so the memory-key depth cut and WORLD's forecast conditioning do nothing",
+  "failure": "Ran it: `encode(cfg, m, x, n_layers=1)` and `encode(cfg, m, x, extra=torch.ones(2,8,32)*5.0)` both return tensors byte-identical to `encode(cfg, m, x)`. So (a) MEM.key_depth's n_layers cut never happens -- at LM_LAYERS=12 the key path still pays twelve layers of attention over an 8-token window, the exact cost the docstring cites; (b) WORLD's forecast term is dropped on the floor while the caller believes the LM was conditioned, which is a wrong hidden state feeding MEM's keys and FAB's router with nothing anywhere saying so. The documented surfaces lm.encode.key_path_truncated and lm.encode.extra_applied can never be nonzero.",
+  "evidence": "Signature `def encode(lm: Config, model, x, *, n_layers=None, extra=None)`; the body between lines 436 and 461 never mentions `n_layers` or `extra`. Docstring: \"n_layers runs only the first n blocks on the transformer arm ... On the gru arm it is accepted and ignored, and that is a DECLARED GATE, not a silence\" and \"`extra` is an optional additive term on the hidden state ... so WORLD's forecast can condition the LM as a PARAMETER rather than by rebinding model.encode\".",
+  "severity": "high",
+  "fix": "Add `h = h + extra` after the embedding sum (shape-checked against (B, L, width)), run `model.body.layers[:n_layers]` on the transformer arm when n_layers is not None, and emit the two documented gates -- including the gru arm's declared accepted-and-ignored gate rather than silence."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 707,
+  "symbol": "draw_stream",
+  "title": "the seg_contig cursor is copied into a local dict and thrown away, so it does not persist across epochs",
+  "failure": "`cursors = dict(areas.cursors)` copies, `cursors[label] = start + want` mutates the copy, and nothing writes back to `areas.cursors`. Ran it at DATA_SEG_CONTIG=1, two synthetic areas, epochs=2: after `draw_stream(epoch=0)` `areas.cursors` is still `{'a': 0, 'b': 0}`, and epoch 1's first 40 bytes equal epoch 0's. Every epoch restarts each area from byte 0, so at RUN_EPOCHS>1 with resampling on the head of every corpus is trained on repeatedly and the tail is never reached -- and DATA.stream_state, documented to checkpoint \"the per-area read cursors\" because \"without them a resume re-reads the head of every area under seg_contig\", will checkpoint zeros.",
+  "evidence": "Docstring: \"True reads the body in order from a cursor that PERSISTS ACROSS EPOCHS\". Body line 707 `cursors = dict(areas.cursors)`, line 729 `cursors[label] = start + want`, and the function returns at line 751 without ever assigning back into `areas.cursors`.",
+  "severity": "high",
+  "fix": "Write the advanced cursors back into `areas.cursors` before returning (Areas is frozen but `cursors` is a mutable dict, which is why it is a dict), or return them on the Stream for the root to carry."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 317,
+  "symbol": "build_model",
+  "title": "build_model mints a SECOND generator named \"lm\" with again=True, so two live streams replay one sequence and the register reports LM as having drawn nothing",
+  "failure": "RUN.streams already minted \"lm\" (it is in compose.RNG_SUBSYSTEMS) and compose never hands `sysm.streams[\"lm\"]` to anything. Ran it: after `build_model`, `streams[\"lm\"].draws == 0` while the duplicate did the drawing, and `streams[\"lm\"].randint(0,10**9) == R.rng_for(\"lm\",3,again=True).randint(0,10**9)` is True -- the two objects are the same sequence. The report's G4 line for LM therefore reads armed-but-inert (\"declared, never drew\") for a subsystem that drew, which compose.py:142-148 calls out by name as \"a third state G4 has no name for, and it is worse than either of the two it distinguishes\". Any later consumer handed streams[\"lm\"] replays build_model's exact init sequence.",
+  "evidence": "`stream = _rng.rng_for(\"lm\", int(seed), again=True)` with the call-site justification \"again=True because RUN.streams already minted 'lm' ... this is that stream being used, not a second one\" -- but rng.py hands out a NEW `random.Random(self.seed)`, it does not return the minted one. rng.py: again=True is \"a legitimate rebuild of one stream (checkpoint restore)\". build_model's own docstring says only \"calls spine.rng.rng_for(\\\"lm\\\", seed)\". This is P1-H55/P1-H56 recurring in a third package; TOK fixed the identical collision at tok/api.py:253 with a child stream (`tok.dropout.mint`) instead.",
+  "severity": "high",
+  "fix": "Draw from a declared child, `rng_for(\"lm.init\", seed)`, exactly as TOK does for `tok.dropout.mint` -- or take the stream as an argument the way FAB/SIG/WORLD do. Drop again=True; it disarms the guard that exists to catch this."
+ },
+ {
+  "file": "src/sig/api.py",
+  "line": 187,
+  "symbol": "encode",
+  "title": "SIG.encode does not run under no_grad, so an instrument that calls it can move the encoder",
+  "failure": "Ran it: `v = SIG.encode(cfg, st, windows)` returns `requires_grad=True` with a grad_fn, and `v.sum().backward()` leaves a non-None `st.encoder.emb.weight.grad`. Any diagnostic, probe or eval path that calls encode and backwards through the value it produced accumulates gradients into the signature encoder -- and since the encoder is in OPT's \"encoder\" param group, the next optimizer step applies them. That is the class of defect spine/rng.py's frozen_rng exists for (\"diagnostics were silently editing runs\"), reaching the router's only input.",
+  "evidence": "Docstring: \"Runs under no_grad and never touches the optimizer, so an instrument calling it cannot move the encoder (the G7 digest holds across it).\" The body has no `torch.no_grad()` anywhere; line 187 is a bare `return st.encoder(units.to(...))`. Training has its own entry points (SIG.train_step, SIG.warm_up), so no_grad here costs nothing.",
+  "severity": "high",
+  "fix": "Wrap the whole body after the shape refusal in `with torch.no_grad():` on both arms (the bigram arm's `index_add_` too)."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 310,
+  "symbol": "_replay_merges (called from build_vocabulary)",
+  "title": "the resume replay path rebuilds id2bytes but leaves Vocabulary.merges and Vocabulary.pair empty",
+  "failure": "`_add(seq, prov=\"replay\")` is called with no `pair`, and `_add` appends to `self.merges` only when `pair is not None`. Ran it: a vocabulary built online reaches size 300 with 44 merges; replaying that same table from a file gives size 300 with 0 merges. TOK.restore_vocab's frozen contract is to \"REFUSE LOUDLY if the state's merge count does not match the vocabulary just built from the file\" (and compose.py:345-348 says the same), so every legitimate resume will compare a recorded 44 against a live 0 and be refused -- and TOK.save_vocabulary writing `merges` would write an empty list for a full table, which is the M46 family this package exists to end.",
+  "evidence": "`for seq_hex in blob.get(\"id2bytes\", [])[256:]: vocab._add(bytes.fromhex(seq_hex), prov=\"replay\")`; `_add`: `if pair is not None: self.pair[i] = pair; self.merges.append(pair)`. build_vocabulary's docstring: \"the parent's merges are REPLAYED instead of built\". The module RECORD TYPES block names `merges` and `pair` as part of the Vocabulary surface.",
+  "severity": "high",
+  "fix": "Persist and replay the (left_id, right_id) pairs, not only the byte sequences, so `merges` and `pair` come back populated; or reconstruct the pair for each replayed sequence from the table as it is rebuilt."
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 201,
+  "symbol": "build",
+  "title": "at FAB_ON=0 the cull gate is reported FIRED and the fab.on gate is reported UNREACHABLE -- both states are the inverse of what the contract requires",
+  "failure": "Ran build at FAB_ON=0 with n0=8, slots=16, pressure=0.45: the ledger prints `Gate fab.cull_gate: FIRED (8/16=0.500 vs 0.45)` on a fabric that is not in the forward path and can never cull anything, and `Gate fab.on: UNREACHABLE -- FAB_ON=0 ...` for the one gate whose condition is a lever that resolved perfectly well to False. A reader of the report is told the utilization cull is open on an inert fabric -- the armed-vs-unreachable collapse this record type exists to prevent, printed backwards.",
+  "evidence": "Docstring: \"Returns an INERT Population whose forward is the identity when `on` is False ... the ledger then records fab.off and reports every other row as 'unreachable (FAB_ON=0)' rather than 'armed but 0'\". Body lines 197-206: the `on` branch declares `Gate(\"fab.on\", False, False, True, reachable=False, reason=...)`, and `Gate(\"fab.cull_gate\", _derive.cull_gate_open(...), ...)` is built identically whether `on` is True or False.",
+  "severity": "high",
+  "fix": "Report `Gate(\"fab.on\", fired=on, value=on, threshold=True)` (reachable on both arms -- it is a measurement), and when `on` is False build every OTHER fabric gate with `reachable=False, reason=\"FAB_ON=0: the forward is the identity\"`."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 405,
+  "symbol": "tokenize",
+  "title": "tokenize performs a re-segmentation whose match table has not moved, instead of refusing it and counting tok.retok_noop",
+  "failure": "The documented refusal and its (size, len(seq2id)) invariant stamp are entirely absent from the body. Ran it: two consecutive `tokenize` calls on the same bytes with an unchanged vocabulary both run in full and both return 500 ids -- no stamp, no refusal, no counter. The docstring puts a price on this: \"the rebuild is byte-identical but the side effects are not, and the measured cost of not refusing was 2.189 b/B and 68 points of word quality (23 retoks, 22 adding zero tokens)\". Nothing distinguishes a real retokenization from a no-op one in any artifact.",
+  "evidence": "Docstring: \"A RE-SEGMENTATION WHOSE MATCH TABLE HAS NOT MOVED since the last one is REFUSED here and counted as tok.retok_noop, not performed ... The invariant stamped is (size, len(seq2id)) and NOT size alone, because retire() changes the match table without changing vocab_size.\" The body (lines 405-431) computes `drop`, picks the stream, calls `_segment`, maps labels and returns.",
+  "severity": "medium",
+  "fix": "Stamp (vocab.size(), len(vocab.seq2id)) on the Vocabulary at each segmentation; on a call whose stamp is unchanged return the previous Segmentation and increment tok.retok_noop, with the skip test disabled whenever dropout > 0 as the docstring specifies."
+ },
+ {
+  "file": "src/world/api.py",
+  "line": 401,
+  "symbol": "startup_refusals",
+  "title": "startup_refusals never reads world.enabled, so a run with the world subsystem OFF is refused for a horizon it will never use",
+  "failure": "Ran it: `WORLD_ENABLED=0 WORLD_HORIZON=0` returns the WORLD_HORIZON=0 refusal, and `WORLD_ENABLED=0 WORLD_HORIZON=999` against ctx_tokens=64 returns the horizon>=ctx refusal. compose.py raises on a non-empty refusal list before any tensor is allocated, so a legal configuration -- the null world, which build() constructs specifically so that \"OFF is a configuration a run can actually take\" -- is made unrunnable by a stale WORLD_HORIZON left in an operator's environment. Both refusals name a nan that a null world can never compute.",
+  "evidence": "Docstring: \"LEVERS READ: horizon, enabled\". The body reads only `world.horizon` (line 402) and never `world.enabled`. Reasons given for both refusals are about the loss slices, which only the live world evaluates (build(): `if not bool(world.enabled): return World(built=\"null\", ...)`).",
+  "severity": "medium",
+  "fix": "Open with `if not bool(world.enabled): return []`, or emit the two refusals as unreachable-with-reason gates on the disabled arm so the ledger still says why they could not fire."
+ },
+ {
+  "file": "src/sig/api.py",
+  "line": 178,
+  "symbol": "encode",
+  "title": "encode adds the WINDOW count to sig.encode_calls and never produces sig.encode_windows, so the two documented counters collapse into one wrong number",
+  "failure": "`st.counters[\"sig.encode_calls\"] += int(units.shape[0])` adds N, not 1. Ran it: one call encoding 4 windows leaves `sig.encode_calls: 4`. The counters dict built in build() has no `sig.encode_windows` key, and SIG.counters(sig, st) is the only channel out, so the windows figure does not exist and the calls figure is really the windows figure. A reader computing windows-per-call, or checking that the encoder was queried once per flush, gets a number the run did not produce.",
+  "evidence": "Docstring: \"DID IT FIRE: sig.encode_calls, sig.encode_windows, and sig.encode_width_seen asserted equal to st.width_units on EVERY call\". build() line 144 initialises `\"sig.encode_calls\": 0, \"sig.train_steps\": 0` and nothing else. Also: encode's \"LEVERS READ: mode, d, bigram_dim\" names three levers the body never reads (it reads st.mode, st.d and st.encoder.shape[0]), which is what lets K4 report them declared-and-read on prose alone.",
+  "severity": "medium",
+  "fix": "`counters[\"sig.encode_calls\"] += 1` and `counters[\"sig.encode_windows\"] += int(units.shape[0])`, initialising both in build(); record sig.encode_width_seen and correct encode's LEVERS READ line to \"none directly -- everything comes off SigState\"."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 240,
+  "symbol": "build_vocabulary",
+  "title": "the replay path neither reconciles the file's recorded settings nor distinguishes an unreadable parent vocabulary from a cold start",
+  "failure": "`_replay_merges` reads only `blob[\"id2bytes\"]` and drops every other key, so a resume launched with TOK_MIN_PAIR=200 against a parent built at 50 runs on the parent's table and prints nothing -- ISSUES P1-M80/L20 exactly, which the docstring cites as the thing this arm exists to fix. Separately, `_replay_merges` returns None when the file is missing and the body falls straight through to a fresh build: ran it with d_vocab_read_path=\"/nonexistent/parent.dyntok.json\" and got a freshly minted 340-token vocabulary and no refusal, so the restored embedding table is indexed by a different vocabulary -- the failure the same paragraph says MUST NOT happen -- while CKPT.load raises loudly for the analogous missing checkpoint.",
+  "evidence": "Docstring: \"The file's recorded vmax/min_pair/max_tok/dropout DO NOT WIN: this package holds one declaration, the levers, and any disagreement is printed as a reconciliation line and counted\" and \"a resume MUST reuse the saved vocabulary or the restored embedding table is indexed by a different vocabulary\". DID IT FIRE names `tok.load_reconciled`. Body: `replayed = _replay_merges(vocab, read_path); if replayed is not None: ...` with no else branch.",
+  "severity": "medium",
+  "fix": "Compare blob['min_pair'|'max_bytes'|'dropout'|'vmax'] against the resolved levers and emit one reconciliation line per disagreement with a tok.load_reconciled count; and raise when read_path is non-empty but unreadable, naming the path, instead of silently building a new vocabulary."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 279,
+  "symbol": "build_vocabulary",
+  "title": "the declared Gate tok.build_passes_advice is never produced on any arm, so mode=\"fixed\" runs silently at 2 passes where the build of record used 8",
+  "failure": "The contract makes this a three-state gate that is never silent: on mode=\"fixed\" it must print `build_passes=2; the offline build historically used 8 -- set TOK_BUILD_PASSES=8 to reproduce it`, and on the other two arms `unreachable (mode != fixed)`. The body creates no Gate at all -- tok/api.py does not even import spine.gate -- and there is no TOK counters() entry point and no counters/gates slot on Vocabulary, so there is no channel for it. An operator running mode=\"fixed\" at the default build_passes=2 gets no statement that this is not the offline build of record, which the docstring flags as belonging on P9's list of numbers that moved.",
+  "evidence": "Docstring: \"The 8 is not lost: it is a DECLARED GATE with its predicate, tok.build_passes_advice ... Advice that appears sometimes and says nothing when it does not is armed-but-inert applied to prose.\" Imports at the head of tok/api.py: `from spine import derive as _derive` and `from spine import rng as _rng` -- no `Gate`. The same absence kills the other named surfaces here (tok.build_pass, tok.build_mint, tok.build_converged, tok.load_reconciled).",
+  "severity": "medium",
+  "fix": "Import spine.gate, carry a `gates`/`counters` slot on Vocabulary (or add TOK.counters), and emit Gate(\"tok.build_passes_advice\", fired=(mode==\"fixed\"), value=build_passes, threshold=8, reachable=(mode==\"fixed\"), reason=\"mode != fixed\")."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 548,
+  "symbol": "data_plan",
+  "title": "n_by_name is counted and then discarded, so the declared data.phase_name_resolved surface cannot exist",
+  "failure": "`n_by_name` is initialised at line 528, incremented at 548 for each schedule entry given as an area name, and never read again -- Plan carries only (protocol, schedule, phase_bounds, per_area_draw, exposure, gates) and DATA has no counters() entry point, so nothing can report it. The contract makes 0 a positive statement (\"every entry was an index, which is the shipped spelling and a statement rather than silence\"), and that statement cannot be made either way. A run launched with the Q-DATA-7 name spelling (\"rust|rust|rust|rust\") and one launched with \"1|1|1|1\" produce identical artifacts.",
+  "evidence": "Docstring: \"DID IT FIRE: data.phase_resolved, data.protocol_named ..., data.phase_name_resolved (entries given as a NAME rather than an index; 0 means every entry was an index ...)\". `grep -n n_by_name src/data/api.py` returns exactly lines 528 and 548.",
+  "severity": "medium",
+  "fix": "Carry the counter out -- either as a field the root reads off Plan, or as a Gate in Plan.gates (Plan already has a gates tuple), and do the same for data.phase_resolved / data.protocol_named."
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 134,
+  "symbol": "build",
+  "title": "build declares norm_only, grow and halt in LEVERS READ but reads none of them, and no api.py body in the tree reads them either",
+  "failure": "`grep -rn '\\.norm_only\\b|\\.halt\\b|\\.grow\\b' src/*/api.py` returns nothing. FAB.build is the only FAB entry point with a body, and it stores only `on` and `hop_arm` on the Population (`__slots__` has no norm_only/grow/halt) and records only fab.built/n0/cap/operating_population/off/hop_arm in pop.counters. So FAB_NORM_ONLY=1 -- a declared CONTROL ARM -- builds a Population byte-identical to FAB_NORM_ONLY=0, and nothing in any artifact this function produces says which arm ran. K4 passes on the prose, which is precisely the armed-but-inert shape it cannot catch.",
+  "evidence": "Docstring: \"LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode\". Body reads hop_mode, n0, slots, rank, on, dk, emb_hid, pressure and the d_operating_population wire, and nothing else. Verified by building at FAB_NORM_ONLY=1 FAB_GROW=0 FAB_HALT=0: counters are identical to the defaults apart from fab.off.",
+  "severity": "medium",
+  "fix": "Either read and record the three on the Population (a `fab.norm_only`/`fab.grow`/`fab.halt` counter apiece, which is what makes the control arm visible in the ledger) or move them out of build's LEVERS READ into the entry points that actually consume them."
+ },
+ {
+  "file": "src/ckpt/api.py",
+  "line": 126,
+  "symbol": "save_period",
+  "title": "save_period declares a Gate for the dir-set/every==0 condition and produces none, so \"the only saves are the final one plus SIGUSR1\" is never stated",
+  "failure": "The body returns a bare `U.Windows(int(ckpt.every))`. CKPT has no counters() entry point and no gate channel anywhere in the package (ckpt/api.py does not import spine.gate), so with CKPT_DIR set and CKPT_EVERY=0 -- the shipped default of `every` -- nothing anywhere tells the operator that periodic saving is off on a run that IS persisting. That is the :5619-5621 warning the contract asks to be replaced by a gate with its own condition, dropped rather than replaced.",
+  "evidence": "Docstring: \"DID IT FIRE: Cadences.ledger()[\\\"ckpt\\\"]; plus a declared Gate for the :5619-5621 warning -- dir set and every == 0 means the only save is the final one plus SIGUSR1, printed with its own condition rather than as a warning string.\" Line 126 is the whole body after owned_by.",
+  "severity": "medium",
+  "fix": "Return the period and expose the gate through a channel the root can read -- a package-level counters()/gates() accessor, or Gate(\"ckpt.periodic_armed\", fired=(every>0), value=every, threshold=1, reachable=saving_on(ckpt), reason=\"CKPT_DIR is off: nothing is saved at all\")."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 702,
+  "symbol": "draw_stream",
+  "title": "draw_stream passes again=True on every epoch stream with no rebuild to justify it, disarming the duplicate-stream guard",
+  "failure": "\"data.stream\" is not in compose.RNG_SUBSYSTEMS, so nothing pre-mints `data.stream.e0` and there is no collision to work around -- the flag is pure suppression. With it, a second `draw_stream(epoch=0, seed=S)` anywhere in a process (a re-draw after a restore, a harness that redraws an epoch, the isolation sweep) silently gets a second generator replaying the first one's sequence instead of the RngError that exists to catch it. This is the same flag whose use in tokenize produced P1-H56 (\"three regularize=True calls on one text produced ONE distinct segmentation\").",
+  "evidence": "`stream = _rng.rng_for(f\"data.stream.e{int(epoch)}\", seed, again=True)`. rng.py: \"again=True if you are deliberately rebuilding this stream (checkpoint restore)\". The call-site comment justifies determinism across seeds and epochs -- which the NAME already buys -- not a rebuild. compose.RNG_SUBSYSTEMS = (\"lm\",\"sig\",\"fabric\",\"memory\",\"domains\",\"world\",\"tok.dropout\",\"data.synth\",\"data.holdout\",\"eval\").",
+  "severity": "medium",
+  "fix": "Drop again=True. If a legitimate rebuild is needed (a resume that re-draws the epoch it was interrupted in), pass it only on that path and say so at that call site."
+ },
+ {
+  "file": "src/ckpt/api.py",
+  "line": 213,
+  "symbol": "load",
+  "title": "load raises on a missing resume file and never constructs a Resume, so the attempted-without-loaded state the record exists for is unreachable",
+  "failure": "Nothing in the package constructs `Resume`; `load` returns Snapshot or None and raises FileNotFoundError in between. The one state the record's own docstring says the old tree could not report -- \"a RESUME that named a path nothing could be read from\" -- is now a crash, and the run has no artifact that says attempted=True/loaded=False. resume_source's \"DID IT FIRE: Resume.attempted\" and load's \"DID IT FIRE: Resume(attempted, loaded, step_restored, epoch_restored, best_restored)\" have no producer, so step_restored/epoch_restored/best_restored are never reported either, even on a successful resume.",
+  "evidence": "`@dataclasses.dataclass(frozen=True) class Resume: ... attempted: bool; loaded: bool; ...` with docstring \"`attempted` without `loaded` is the state the old tree could not report\"; `grep -n 'Resume(' src/ckpt/api.py` finds only the class definition. Body: `if not os.path.isfile(src): raise FileNotFoundError(...)` then `return Snapshot(...)`.",
+  "severity": "medium",
+  "fix": "Build and return/record the Resume alongside the Snapshot (attempted from resume_source, loaded/step/epoch/best from the blob), and keep the refusal as the loud arm -- the two are not exclusive, the record is what the report prints after the run survives."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 371,
+  "symbol": "open_areas (via _synthetic_areas)",
+  "title": "open_areas reads dat.stream_bytes on the DEFAULT source arm while its LEVERS READ list omits it",
+  "failure": "`_synthetic_areas` sizes each generated corpus as `max(seg_max+1, MIN_AREA_BYTES, stream_bytes // max(1, n)) * 2`, and DATA_SOURCE defaults to \"synthetic\", so on the shipped configuration DATA_STREAM_BYTES changes the generated corpus text -- and therefore the build sample, the merge table, the measured bytes_per_token and the derived signature width -- through an entry point whose contract says it does not read that lever. A reader auditing \"which levers decide the corpus\" from the frozen contract will not find it. The same list also omits nothing else, so it is not a blanket omission.",
+  "evidence": "Docstring: \"LEVERS READ: source, dir, areas, n_processes, corpus_cap, holdout_frac, val_cap, seg_max\". Line 371: `per_area = max(int(dat.seg_max) + 1, MIN_AREA_BYTES, int(dat.stream_bytes) // max(1, n)) * 2`. Also note `max(1, n)` here is the silent clamp the project forbids: at DATA_N_PROCESSES=0 the body returns an Areas with names=() instead of refusing by name.",
+  "severity": "low",
+  "fix": "Add stream_bytes to open_areas' LEVERS READ, and replace `max(1, n)` with a refusal naming DATA_N_PROCESSES and printing the value."
+ },
+ {
+  "file": "src/spine/gate.py",
+  "line": 58,
+  "symbol": "Gate.line",
+  "title": "the UNREACHABLE arm of line() drops value and threshold even when the caller supplied them",
+  "failure": "`data_plan` builds `Gate(\"data.exposure_skew_planned\", False, None, float(dat.exposure_skew), reachable=False, reason=...)` -- the threshold is supplied -- and `line()` prints only \"Gate data.exposure_skew_planned: UNREACHABLE -- a max/min ratio over ONE area is undefined\". Confirmed the same way for fab.on at FAB_ON=0, where value=False and threshold=True are supplied and neither appears. A reader cannot see what the gate was armed at, which is the one thing the class docstring says the numbers are printed for.",
+  "evidence": "Class docstring: \"`value` and `threshold` are printed so the reader can do the arithmetic themselves. A gate that reports a verdict without the numbers behind it is a claim, and this project has paid for those.\" Body: `if not self.reachable: return f\"Gate {self.name}: UNREACHABLE -- {self.reason}\"` -- returns before the value/threshold branch.",
+  "severity": "low",
+  "fix": "Append the supplied numbers on the unreachable arm too, e.g. `... UNREACHABLE ({value} vs {threshold}) -- {reason}` when either is not None."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 750,
+  "symbol": "draw_stream / _REPLAY",
+  "title": "the resample=False replay cache is keyed by id(areas), an address CPython reuses, so the stated per-Areas isolation does not hold and every Stream is retained forever",
+  "failure": "`id()` is only unique among live objects. Demonstrated: after freeing one Areas, a newly built Areas landed on the same address within 134 allocations in the same interpreter -- exactly the isolation-sweep scenario the comment names. A stale entry from a freed run is then returned to a different run for any epoch>0 request that precedes that run's own epoch-0 draw. Independently, `_REPLAY` holds every Stream (bytes plus a per-byte labels list) for the life of the process with no eviction, so a sweep of many runs per interpreter leaks one full stream per run.",
+  "evidence": "Comment above `_REPLAY`: \"Keyed by the Areas object rather than by a module global holding one stream, so two Areas in one process (the isolation sweep runs many 200-step runs per interpreter) cannot hand each other's text back.\" Body: `_REPLAY[id(areas)] = st` and `cached = _REPLAY.get(id(areas))`.",
+  "severity": "low",
+  "fix": "Cache on the Areas object itself (a mutable field the record already permits, like `cursors`) or use a `weakref.WeakKeyDictionary`, so the entry dies with the Areas rather than outliving its address."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 208,
+  "symbol": "resolve",
+  "title": "LMGeometry carries no record of whether the layer count came from the 0 sentinel, so lm.resolve.layers_from_sentinel cannot be reported",
+  "failure": "`layers = _SENTINEL_DEPTH.get(arch, 1) if declared_layers == 0 else declared_layers` and LMGeometry stores only the resolved `layers`. A run at LM_ARCH=transformer LM_LAYERS=0 and one at LM_LAYERS=4 produce an identical LMGeometry and an identical geometry manifest, so the report cannot make the statement the contract asks for -- which number the run actually used -- even though that is the exact confusion (\"a reader could not tell what depth a saved model was\") the paragraph above it cites.",
+  "evidence": "Docstring: \"DID IT FIRE: lm.resolve.calls (must be exactly 1 per process), lm.resolve.layers_from_sentinel (1 when cfg.layers == 0 -- proves which number the run actually used)\". LMGeometry fields: arch, width, layers, heads, ctx, pos_max, vocab_slots, compose, dropout, max_token_bytes, param_estimate.",
+  "severity": "low",
+  "fix": "Add a `layers_from_sentinel: bool` (or the declared value beside the resolved one) to LMGeometry so LM.counters can report it, and count resolve() calls."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 445,
+  "symbol": "encode",
+  "title": "encode reads lm.ctx while declaring \"LEVERS READ: none directly\"",
+  "failure": "The pos-overflow refusal interpolates `int(lm.ctx)` into its message, so encode does read an LM lever on the refusal path -- the one path where a reader most needs the contract to be accurate about where the number came from. The declared list says the function reads no lever directly, and the value it prints is a lever read rather than the wire it names in the same sentence.",
+  "evidence": "Docstring: \"LEVERS READ: none directly / WIRES READ: d_pos_max\". Body line 445: `f\"{pos_max} row(s) (LM_CTX={int(lm.ctx)} through the d_pos_max wire). Refused rather \"`.",
+  "severity": "low",
+  "fix": "Either name `ctx` in encode's LEVERS READ, or print only `d_pos_max` and let the wire ledger say where it came from."
+ },
+ {
+  "file": "src/lm/api.py",
+  "line": 525,
+  "symbol": "decode",
+  "title": "the dead-row mask is rebuilt on every decode call although the contract specifies it is cached",
+  "failure": "Every call allocates a bool tensor of vocab_slots, and when anything is retired also `torch.tensor(sorted(retired_ids))`, then a masked_fill -- once per window on the hot path, at LM_VOCAB_SLOTS=16384 with hundreds of retired ids on the probation arms. The documented cache key exists precisely because both inputs are monotone, so the rebuild is pure waste that the contract already ruled out.",
+  "evidence": "Docstring: \"The mask is cached on (live_vocab, len(retired_ids)); both only ever grow.\" Body lines 519-526 build `dead` and `idx` unconditionally on each call. The same docstring's \"LEVERS READ: mask_dead_rows, vocab_slots, compose\" also names two levers the body never reads (it uses model.compose and logits.shape[-1]).",
+  "severity": "low",
+  "fix": "Memoise the mask on the model keyed by (live_vocab, len(retired_ids)) and reuse it, and correct the LEVERS READ line to the one lever actually read."
+ },
+ {
+  "file": "src/train/api.py",
+  "line": 484,
+  "symbol": "startup_refusals",
+  "title": "startup_refusals declares device and amp in LEVERS READ and reads neither",
+  "failure": "The body reads only `run.epochs`. RUN_DEVICE and RUN_AMP are named as read by this entry point, which is what lets K4 report them covered on prose alone -- and clause (3) of the same docstring is a statement ABOUT amp and device (\"amp != off with device == cpu is NOT refused\") that the body cannot make, because it never looks at either value and returns no record saying the pair was considered.",
+  "evidence": "Docstring: \"LEVERS READ: epochs, device, amp\" and \"(3) amp != \\\"off\\\" with device == \\\"cpu\\\" is NOT refused: it is legal and inert, and Process.amp_state says so.\" Body lines 484-503 mention only `run.epochs` and the `disk_stream` argument.",
+  "severity": "low",
+  "fix": "Drop device and amp from this list (Process.amp_state already carries the third state and process_setup declares both), or read them here to emit the not-refused case as an explicit unreachable gate."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 707,
+  "symbol": "draw_stream",
+  "title": "The seg_contig cursor is advanced on a private copy and thrown away, so every epoch re-reads the identical head of every area and the exposure guard reports a number the run did not experience.",
+  "failure": "DATA_SOURCE=real DATA_AREAS=eng DATA_CORPUS_CAP=200000 DATA_SEG_CONTIG=1 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000 RUN_EPOCHS=8. Measured: draw_stream(epoch=0/1/2) each return bytes exactly equal to bodies['eng'][:40000] (byte-identical, verified), and areas.cursors stays {'eng': 0} after every call. The run therefore sees 40,000 of the 190,000-byte body (21%) eight times and never sees the other 150,000 bytes, while data_plan's Gate data.exposure_max_planned prints 'armed, did not fire (1.6842 vs 2.0)'. Realized repetition on the material actually trained on is 8.0, i.e. 4x the guard's own threshold, and the guard exists precisely for P3-H22 ('py was memorised and eng was skimmed'). It also silently turns DATA_RESAMPLE=1 into the byte-identical-replay state the contract reserves for resample=False, with nothing reporting it.",
+  "evidence": "Line 707 `cursors = dict(areas.cursors)` takes a COPY; line 729 `cursors[label] = start + want` writes only to the copy; the copy is never written back to `areas.cursors`, never returned on `Stream`, and `draw_stream` returns at line 751 discarding it. The docstring at lines 651-653 says the contiguous read comes \"from a cursor that PERSISTS ACROSS EPOCHS, so an English-only run has only the text's own boundaries rather than discontinuities we manufacture every 8-20 KB\", and `stream_state`'s docstring (lines 763-765) says \"The cursors are LOAD-BEARING: without them a resume re-reads the head of every area under seg_contig and silently trains a second time on material the parent already used.\" The value it would checkpoint is permanently 0.",
+  "severity": "critical",
+  "fix": "Mutate `areas.cursors` in place (it is a plain dict on a frozen dataclass, which is why the field exists) rather than copying it -- `cursors = areas.cursors` -- or return the advanced cursors on `Stream` and have the composition root write them back. Store the cursor already reduced mod len(body) so the checkpointed value is bounded."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 310,
+  "symbol": "_replay_merges",
+  "title": "_replay_merges silently DROPS any saved entry that `_add` refuses and renumbers every id after it, so a resume attaches the parent's embedding rows to different tokens.",
+  "failure": "Parent run at TOK_MAX_BYTES=32, TOK_SEED_VOCAB=4000, TOK_BUILD_PASSES=10 over data/train/{eng,py} builds 2565 ids, 4 of them longer than 16 bytes. Child resume at the default TOK_MAX_BYTES=16 with CKPT_RESUME=<parent>: `_add` returns None for those 4 (len(seq) > self.max_bytes), the child ends at 2561 ids, and from id 2556 onward every id means a different byte sequence than in the parent -- measured: parent[2556] = b':\\n                ' vs child[2556] = b'raise '. LM.load_state then restores the parent's emb.weight/head.weight rows by index onto these renumbered tokens. No exception, no reconciliation line, no counter; the run continues and every logit for ids >= 2556 is attached to the wrong token. The same silent renumbering happens for any duplicate entry in the file and any entry refused by at_cap().",
+  "evidence": "Line 309-310: `for seq_hex in blob.get(\"id2bytes\", [])[256:]: vocab._add(bytes.fromhex(seq_hex), prov=\"replay\")`. `_add` (line 129) returns None on `seq in self.seq2id or len(seq) > self.max_bytes or self.at_cap()` and the return value is discarded, while the new id is always `len(self.id2bytes)` (line 131) -- so a skip shifts every subsequent id by one. judge_probation's docstring (lines 562-564) states the invariant this breaks: \"Ids are POSITIONAL -- merges[] is replayed in order and every later token is built on this one's index -- so removing an id would renumber the vocabulary and invalidate every checkpoint.\" build_vocabulary's docstring (lines 160-162) requires the opposite of silence: \"a resume MUST reuse the saved vocabulary or the restored embedding table is indexed by a different vocabulary.\"",
+  "severity": "critical",
+  "fix": "Install replayed entries at their recorded index rather than by appending, and refuse loudly (naming the id, the recorded byte length, TOK_MAX_BYTES and the ceiling) when an entry cannot be installed -- a parent vocabulary that does not fit this run's caps is a resume that cannot be honoured, not one to truncate."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 309,
+  "symbol": "_replay_merges",
+  "title": "_replay_merges reads only a key called \"id2bytes\"; a vocabulary file in the `merges` format the contract says to write replays nothing and the resume silently trains with a 256-symbol byte vocabulary.",
+  "failure": "Write the sidecar in the format save_vocabulary's docstring mandates and the only writer in this tree produces -- {\"merges\": [...], \"vmax\":..., \"min_pair\":..., \"max_tok\":..., \"dropout\":...}, i.e. exactly `tokenizer.py::ByteBPE.save` at line 473 -- and resume from it. Measured: build_vocabulary returns size=256, v0=256, bytes_per_token=1.0, with no exception and no warning. `blob.get(\"id2bytes\", [])` is empty, the loop does nothing, `_replay_merges` still returns a truthy `vocab`, and line 241-245 takes the early return, SKIPPING the build entirely. The restored 4096-row embedding table is then indexed by a byte vocabulary that shares nothing with the parent's, and bytes_per_token=1.0 propagates into derive.signature_width_bytes and data_plan's splice gate. This is the exact failure the docstring exists to prevent.",
+  "evidence": "Line 309 `blob.get(\"id2bytes\", [])[256:]` versus save_vocabulary's docstring line 618: \"Write merges plus the settings this run actually used\". `_replay_merges` returns `vocab` unconditionally at line 311 whenever the path is a file, so build_vocabulary's guard `if replayed is not None` (line 241) cannot distinguish \"replayed the parent\" from \"read a file it did not understand\". Line 302 promises \"Returns the vocabulary, or None if unreadable\", but the only None is a missing path (line 305); a JSON parse error escapes instead -- verified: a truncated file raises json.decoder.JSONDecodeError out of build_vocabulary.",
+  "severity": "critical",
+  "fix": "Read the key the writer writes, and refuse loudly when the file carries no recognisable merge/vocabulary payload instead of returning a 256-id vocabulary: `raise` naming the path and the keys found. Wrap json.load so a corrupt file becomes the documented None or a named refusal, not a JSONDecodeError."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 240,
+  "symbol": "build_vocabulary",
+  "title": "The resume path never mints `tok.dropout.mint`, so every resume with TOK_DROPOUT>0 dies in tokenize -- P1-H56's crash reintroduced on the branch the repair did not cover.",
+  "failure": "CKPT_RESUME=<parent> with TOK_DROPOUT=0.3. Measured: build_vocabulary returns a Vocabulary with dropout_rng=None, and the very next row of the composition root (compose.py:1906, `tok_api.tokenize(..., regularize=True)`) raises ValueError('TOK.tokenize was asked to regularize with TOK_DROPOUT>0 against a Vocabulary carrying no dropout stream'). compose() cannot build the system at a supported lever value on any resume -- which is what P1-H56 records as \"a supported lever value that could not build the system\". Separately, `tok.dropout.mint` is ABSENT from rng.issued() on every resume, so the ledger cannot distinguish \"declared and never asked\" from \"never existed\" -- the three-state collapse G4 forbids.",
+  "evidence": "Lines 240-245 return from the replay branch without ever executing line 260 `vocab.dropout_rng = _rng.rng_for(\"tok.dropout.mint\", seed)`. The bytes arm at line 228 mints it deliberately with the comment \"The stream is still minted so the ledger carries the key with zero draws -- DECLARED AND NEVER ASKED, which is a different statement from absent\"; the replay arm does neither. tokenize lines 414-419 raise rather than segment without dropout.",
+  "severity": "high",
+  "fix": "Mint `vocab.dropout_rng` immediately after constructing the Vocabulary (line 211), before any of the three return paths, so all four arms -- bytes, replay, fixed, online -- carry the stream."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 296,
+  "symbol": "build_vocabulary",
+  "title": "bytes_per_token is measured on a dropout-free segmentation, but the frozen contract says it is measured WITH dropout applied -- so SIG's one signature width and DATA's splice gate use a number the training stream never produces.",
+  "failure": "DATA_AREAS=eng,py, DATA_CORPUS_CAP=200000, TOK_DROPOUT=0.3. Measured: vocab.bytes_per_token = 1.7955 (the deterministic segmentation) while the segmentation the training stream actually consumes yields 1.5639 -- a 12.9% error. Downstream at LM_CTX=128, derive.signature_width_bytes gives 229 bytes instead of 200, so the domain encoder describes 14.5% more material than one loop stride covers, fixed for the lifetime of the run (the exact class of defect signature_width_bytes' own docstring records: \"the domain encoder was reading 42% of the material it claimed to describe\"). And the verdict of Gate data.splice_window flips: at DATA_SEG_MIN=1500/DATA_SEG_MAX=1900 it prints 'FIRED (7.397 vs 8.0)' on the reported value and 'armed, did not fire (8.492 vs 8.0)' on the value the run actually trains at.",
+  "evidence": "Line 296 `ids, _pos = _segment(vocab, sample, dropout=0.0, stream=None)` then line 297 measures over those ids (same at line 243 on the replay path). tokenize's docstring, paragraph 2 (lines 391-396), is explicit: \"bytes_per_token IS MEASURED WITH DROPOUT APPLIED. build_vocabulary measures it over the COUNTING segmentation, which applies tok.dropout, so more and shorter tokens lower it -- and derive.signature_width_bytes(LM.ctx, bytes_per_token) (SIG's one width) and data_plan's splice_window threshold both move with a TOK regularizer.\"",
+  "severity": "high",
+  "fix": "Measure over a counting segmentation carrying the same dropout as the build passes: `_segment(vocab, sample, dropout=float(tok.dropout), stream=stream)`, on both the build and replay paths."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 310,
+  "symbol": "_replay_merges",
+  "title": "A replayed vocabulary carries an EMPTY `merges` and `pair` table, so it is not the parent's vocabulary and the next save propagates the loss.",
+  "failure": "Resume from a parent with 256 merges: measured `len(v2.merges) == 0` while `v2.size() == 512`. Three consequences follow with no error anywhere: restore_vocab's documented refusal (\"REFUSE LOUDLY if the state's merge count does not match the vocabulary just built from the file\") must fire on every honest resume, because the state records 256 and the vocabulary reports 0; save_vocabulary (\"Write merges plus the settings this run actually used\") writes an empty merge list, so a grandchild resume gets a 256-symbol byte vocabulary; and `vocab.pair` is empty, so nothing downstream can recover the (left_id, right_id) provenance the Mint/composer path is specified against.",
+  "evidence": "Line 310 calls `vocab._add(bytes.fromhex(seq_hex), prov=\"replay\")` with no `pair=` argument, and `_add` only appends to `self.merges` inside `if pair is not None` (lines 136-138). The module header (line 28) lists `merges` as part of the Vocabulary record; restore_vocab's docstring (line 716-717) makes the merge count the resume's refusal criterion.",
+  "severity": "high",
+  "fix": "Recover each replayed sequence's constituent pair from the table built so far (the longest existing prefix/suffix split, or read the file's own `merges` list) and pass it as `pair=` so `merges` and `pair` reconstruct the parent's."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 279,
+  "symbol": "build_vocabulary",
+  "title": "mode=\"fixed\" closes the hard ceiling only on the build path; on a resume the ceiling is never closed, so a \"fixed\" vocabulary can keep minting.",
+  "failure": "Same corpus, TOK_MODE=fixed. Build path: size=512, ceiling=512, at_cap()=True. Resume path (CKPT_RESUME=<parent>, parent of 600 ids): size=600, ceiling=4096, at_cap()=False -- the vocabulary is free to mint another 3496 ids on the one arm whose entire promise is \"build to tok.seed_vocab as the CEILING as well as the target, then never mint\". Every recorded fixed-arm resume is therefore not a fixed-arm run, and nothing says so.",
+  "evidence": "Lines 279-290 (`if mode == \"fixed\": vocab.ceiling = vocab.size()`) sit AFTER the replay early-return at lines 241-245, so the replay branch never reaches them. This is P1-H57 (\"the fixed arm's central promise at the mercy of an unrelated package's valve\") repaired on one branch only.",
+  "severity": "high",
+  "fix": "Apply the `mode == \"fixed\"` ceiling closure on the replay path too -- hoist it above the early return, or repeat it before line 245."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 310,
+  "symbol": "open_areas",
+  "title": "On the REAL path a zero-size held-out block is recorded with the reason \"source=synthetic holds nothing out\", and nothing refuses the configuration that produced it.",
+  "failure": "DATA_SOURCE=real DATA_AREAS=eng,py DATA_VAL_CAP=0 (or DATA_HOLDOUT_FRAC=0.0, or any frac small enough that int(len(blob)*frac) == 0). Measured: every area comes back with hold=0 and rng_holdout = {'key': None, 'offset': 0, 'size': 0, 'seam_at': None, 'why': 'source=synthetic holds nothing out'} on a real disk corpus. The run has no held-out block at all -- the one number goal A and the across-the-run-boundary comparison rest on -- and the startup record states a false cause, so the operator cannot see which lever removed it. No refusal names DATA_HOLDOUT_FRAC or DATA_VAL_CAP and no two numbers are printed, which is the project's stated rule for refusals.",
+  "evidence": "Lines 287-310: the `if n_hold > 0` test is the only guard, and the `else` branch hard-codes `\"why\": \"source=synthetic holds nothing out\"` regardless of `dat.source`. `n_hold` is computed at line 276 as `min(int(len(blob) * float(dat.holdout_frac)), int(dat.val_cap))`, which is 0 for either lever at 0. The class docstring (lines 56-62) and the DID IT FIRE list name `data.val_cap_trip` and require `holdout` to be a real removed block.",
+  "severity": "medium",
+  "fix": "Branch on `str(dat.source) == \"synthetic\"` for the reason string, and on the real path raise CorpusError naming DATA_HOLDOUT_FRAC, DATA_VAL_CAP, len(blob) and the resulting 0 when a real area's holdout rounds to zero."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 733,
+  "symbol": "draw_stream",
+  "title": "A zero-length segment is recorded as a splice start and as an area change, and at DATA_SEG_MIN=DATA_SEG_MAX=0 the draw loop never terminates.",
+  "failure": "DATA_SEG_MIN=0 DATA_SEG_MAX=3, two areas, 3000 bytes: measured 2021 splice_starts of which only 1509 are distinct (512 zero-length segments recorded as boundaries), and 206 of 1011 entries in `area_changes` point at an offset where labels[p] == labels[p-1] -- i.e. they are not changes at all. That is exactly the artefact `area_changes` exists to remove (P1-H10: \"on a one-area run all ~96 'true switches' were artefacts\"), reintroduced through the zero-length case, and boundary precision/recall scored against it is wrong. With DATA_SEG_MIN=0 DATA_SEG_MAX=0 the same path never terminates: `want` is always 0, `out` never grows, the `while len(out) < hi` loop spins forever appending to `splice` until memory is exhausted -- verified by a 20 s timeout with data_plan having already printed 'Gate data.splice_window: FIRED (0.0 vs 8.0)' and passed.",
+  "evidence": "Line 717 `want = stream.randint(seg_min, seg_max)` can yield 0; line 720 can shrink it further; lines 733-741 append to `splice`, update `last_area` and append to `changes` unconditionally, before `out += chunk` adds nothing. Nothing in open_areas or data_plan refuses a seg_min below 1.",
+  "severity": "medium",
+  "fix": "Refuse DATA_SEG_MIN < 1 at startup in open_areas or data_plan, naming the lever and the value; and record the splice start / area change only after a non-empty chunk has been appended."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 702,
+  "symbol": "draw_stream",
+  "title": "`again=True` is passed unconditionally to rng_for with no justification, disabling the one guard against two call sites sharing a stream name.",
+  "failure": "The composition root's own tables call draw_stream twice for epoch 0 -- ASSEMBLY_ORDER's `stream` row (compose.py:1902, epoch=0) and LOOP_ORDER's `E` row (compose.py:687, epoch=clock.epoch, which is 0 on the first epoch). Two generators are therefore issued for `data.stream.e0` in one run, and `again=True` makes that silent. Any further consumer that asks for `data.stream.e<n>` -- a diagnostic, an eval replay, a future stratified draw -- receives a generator replaying DATA's exact sequence while believing it has its own, and neither RngError nor rng.issued() (which records one entry per name) can show it.",
+  "evidence": "Line 702 `stream = _rng.rng_for(f\"data.stream.e{int(epoch)}\", seed, again=True)`; the comment above it (lines 698-701) explains the epoch-keyed NAME and says nothing about `again`. spine/rng.py's Rng.__init__ documents the flag as \"a legitimate rebuild of one stream (checkpoint restore) passes again=True and says so at the call site\", and the module header calls two call sites on one name \"the thing this whole module removes\".",
+  "severity": "medium",
+  "fix": "Drop `again=True`; if the root genuinely draws epoch 0 twice, have the second caller reuse the Stream (as the resample=False path already does) or call reset_issued() between runs. If a checkpoint-restore rebuild really needs it, pass it only on that path and say so in the comment."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 420,
+  "symbol": "tokenize",
+  "title": "The re-segmentation no-op refusal is absent: no invariant is stamped, so a re-tokenization whose match table has not moved is performed rather than refused, and tok.retok_noop can never be counted.",
+  "failure": "tokenize is the single entry point for the initial segmentation, every in-loop re-segmentation, the final one and the held-out encode, and it holds no state whatsoever about the previous call. Calling it twice with an unchanged vocabulary performs the full segmentation again and returns a fresh Segmentation both times, with no way for any caller or report to tell a real retokenization from a no-op. The measured cost of not refusing is stated in the contract as 2.189 b/B and 68 points of word quality over 23 retoks of which 22 added zero tokens; that cost is fully reintroduced, and the three-state DID IT FIRE row tok.retok / tok.retok_noop collapses to one.",
+  "evidence": "Lines 404-430 are the whole body: read dropout, pick the stream, `_segment`, map labels, return. The docstring at lines 365-369 requires the opposite: \"A RE-SEGMENTATION WHOSE MATCH TABLE HAS NOT MOVED since the last one is REFUSED here and counted as tok.retok_noop, not performed ... The invariant stamped is (size, len(seq2id)) and NOT size alone, because retire() changes the match table without changing vocab_size.\" `Vocabulary.__slots__` (lines 74-76) carries no slot for the stamp, so P4 did not build the surface either.",
+  "severity": "medium",
+  "fix": "Add a stamp slot to Vocabulary, record (vocab.size(), len(vocab.seq2id)) on each segmentation, and when a caller asks for a re-segmentation at an unchanged stamp, return the previous Segmentation and count tok.retok_noop -- disabling the test whenever drop > 0, as the docstring requires."
+ },
+ {
+  "file": "src/tok/api.py",
+  "line": 240,
+  "symbol": "build_vocabulary",
+  "title": "The saved file's recorded settings are never read, so the documented reconciliation (tok.load_reconciled) and the tok.build_passes_advice Gate are mechanisms that cannot fire.",
+  "failure": "A resume that sets TOK_MIN_PAIR=200 against a parent saved at min_pair=50 -- the case the docstring cites by id -- produces no reconciliation line, no counter and no difference in behaviour: the body reads nothing from the file except id2bytes, so the divergence between this run's declaration and the parent's recorded fact is invisible in exactly the way P1-M80/P1-L20 record (\"the audit then printed 'NOTHING READ THESE' naming a knob that was set and ignored\"). Likewise a TOK_MODE=fixed run at the default TOK_BUILD_PASSES=2 prints nothing saying it is not the offline build of record, because the Gate that was supposed to carry the retired literal 8 does not exist -- spine.gate is not even imported in this module and Vocabulary has no field to hang it on, so the Q-TOK-9 ruling's replacement for the number is silence.",
+  "evidence": "Line 309 reads only `blob.get(\"id2bytes\", ...)`; `vmax`, `min_pair`, `max_tok`, `dropout` are never touched, against the docstring at lines 160-164 (\"The file's recorded vmax/min_pair/max_tok/dropout DO NOT WIN ... any disagreement is printed as a reconciliation line and counted\") and lines 200-203 (\"DID IT FIRE: ... tok.load_reconciled, Gate tok.build_passes_advice (fires on mode=\\\"fixed\\\" with the two numbers; 'unreachable (mode != fixed)' otherwise -- never silence)\"). `grep Gate src/tok/api.py` finds only docstring text.",
+  "severity": "medium",
+  "fix": "Read the recorded settings, compare each against the resolved lever, and carry the disagreements plus the build_passes_advice Gate (from spine.gate) out on the Vocabulary so the report can print them."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 373,
+  "symbol": "_synthetic_areas",
+  "title": "On the synthetic path the operator's declared area names are silently replaced by p0..pN-1 whenever DATA_AREAS holds fewer entries than DATA_N_PROCESSES, and the label/key collision refusals are not applied at all.",
+  "failure": "DATA_SOURCE=synthetic DATA_AREAS=\"e,p\" DATA_N_PROCESSES=4: measured names ('p0','p1','p2','p3'). Every per-area score, the holdout rng keys and the across-the-run-boundary lookup then use labels that appear in no lever, and changing n_processes on a resume renames every area -- the desynchronised-label failure (P3-C19) this package exists to end. Separately, DATA_AREAS=\"x,x\" or \"a-b,a.b\" on the synthetic path aborts with spine.rng.RngError(\"stream 'data.synth.a_b' was already issued\") instead of the CorpusError naming both entries that the real path raises for the same condition, so the documented data.area_label_collision refusal is reachable on only one of the two sources.",
+  "evidence": "Line 373 `labels = entries[:n] if len(entries) >= n else [f\"p{i}\" for i in range(n)]`; line 375 `_rng.rng_for(f\"data.synth.{_holdout_key(label)}\", seed)` with no prior collision check. open_areas performs the label and key collision refusals only inside the `else` (real) branch, lines 243-258. DATA_AREAS is declared as \"The corpora to stream, in order; their names label every per-area score in the report and across the run boundary\" (data/levers.py:241).",
+  "severity": "medium",
+  "fix": "Run the same label and key collision refusals over the synthetic labels before any rng_for call, and refuse (naming DATA_AREAS and DATA_N_PROCESSES with both counts) when the two disagree rather than inventing p0..pN-1."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 717,
+  "symbol": "draw_stream",
+  "title": "DATA_SEG_MIN > DATA_SEG_MAX passes every startup gate and then dies inside the draw with a bare ValueError that names no lever.",
+  "failure": "DATA_SOURCE=real DATA_AREAS=eng DATA_SEG_MIN=2000 DATA_SEG_MAX=1800: open_areas succeeds (its floor is derived from seg_max alone, max(1801, 5000)), data_plan succeeds and prints 'Gate data.splice_window: armed, did not fire (16.493 vs 8.0)' computed from a mean segment of 1900 bytes that no draw can ever produce, and only then draw_stream raises ValueError('empty range for randrange() (2000, 1801, -199)'). The operator gets a stdlib message naming neither DATA_SEG_MIN nor DATA_SEG_MAX nor their values, after a gate has already reported an arithmetic result about a distribution that does not exist.",
+  "evidence": "Line 717 `want = stream.randint(seg_min, seg_max)` with no ordering check; line 216 `floor = max(int(dat.seg_max) + 1, MIN_AREA_BYTES)` reads only seg_max; line 632 `mean_seg = (int(dat.seg_min) + int(dat.seg_max)) / 2.0` computes a mean over an empty range. The project rule is that a refusal names the lever and prints both numbers.",
+  "severity": "medium",
+  "fix": "Refuse at the top of data_plan (or open_areas) when seg_min > seg_max, naming DATA_SEG_MIN and DATA_SEG_MAX and printing both values; derive the area floor from max(seg_min, seg_max) + 1."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 305,
+  "symbol": "open_areas",
+  "title": "`seam_at` is recorded as the block offset unconditionally, so a block at offset 0 or at the tail reports a manufactured seam that does not exist -- the unreachable state the contract requires it to say.",
+  "failure": "When the drawn `start` is 0 the removal takes a prefix and leaves no manufactured discontinuity, yet the record reads seam_at: 0, which a report renders as a seam at position 0. When start + n_hold == len(blob) the removal takes the tail and again leaves no seam, yet the record reads seam_at: start -- an offset that is the END of the body. Either way the data.holdout_seam reading counts a discontinuity the body does not contain, and DATALevers' claim that the only boundaries left under seg_contig are the text's own is checked against a number that is wrong in exactly the two cases where the claim is true.",
+  "evidence": "Line 305 `rng_holdout[label] = {..., \"seam_at\": start}` with no test on start or start + n_hold. The DID IT FIRE list at lines 189-194 requires the opposite: data.holdout_seam is \"Unreachable when a block lands at offset 0 or at the tail, which is the state it must say rather than read 0\".",
+  "severity": "low",
+  "fix": "Set `\"seam_at\": start if 0 < start and start + n_hold < len(blob) else None`, with a `why` naming which of the two boundary cases applies, so the report can print UNREACHABLE rather than a position."
+ },
+ {
+  "file": "src/data/api.py",
+  "line": 211,
+  "symbol": "open_areas",
+  "title": "data.holdout_overlap is never computed, so the one instrument declared for near-duplicate contamination between the held-out block and the training body produces no number at all.",
+  "failure": "The contract makes the overlap a per-area reading printed once at startup and states why the split rule alone cannot answer it (Lee et al. arXiv:2107.06499: models \"underestimate perplexity on evaluation documents with near duplicates\", so \"NEITHER the tail nor the random block is safe on its own\"). open_areas computes nothing of the kind and `Areas` carries no field for it -- `rng_holdout` holds key/offset/size/seam_at only. A run on data/train/eng, whose seven files include dracula.txt while data/continual/03_dracula exists as a separate area, has no way to report that its held-out English overlaps its training material, and every held-out b/B figure the project publishes is uncontrolled for it.",
+  "evidence": "Lines 211-316 contain no n-gram or overlap computation; the returned Areas fields are fixed at lines 64-71. The DID IT FIRE list at lines 195-202 declares data.holdout_overlap as \"a READING, not a lever and not a gate: the fraction of held-out bytes that also occur verbatim in the training body at a fixed n-gram length, per area, printed once at startup. It costs no lever, no wire and no default, and it answers the one question the split rule CANNOT\".",
+  "severity": "low",
+  "fix": "Compute the fraction of held-out bytes covered by n-grams (fixed length, e.g. 50) that also occur in bodies[label], and carry it per area on rng_holdout so the startup banner can print it beside the offset and size."
+ }
+]
