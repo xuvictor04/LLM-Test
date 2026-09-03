@@ -12,7 +12,7 @@ python3 tools/render_wiring.py --check    # exit 1 and print the diff if it is s
 ```
 
 The command used to be a here-doc pasted into this header, and this file still drifted a whole ledger
-generation: it said 13 couplings and 10 wires while the tree resolved 23 and 19. A command in prose is a
+generation: it said 23 couplings and 10 wires while the tree resolved 23 and 19. A command in prose is a
 command nobody runs. `--check` is now an entry point `tests/test_assemble.py`'s A9 calls, so the numbers
 below are evidence rather than a claim, and a commit that changes the coupling table fails the suite
 until this file is regenerated.

@@ -5386,6 +5386,24 @@
     ],
     "purpose": "Share of the ALREADY-CHECKED store that MEM.judge re-scores on each pass, on top of the entries written since the last one. 0.0 re-scores nothing and is the shipped default; 1.0 is a full re-score every pass. Anything between is an amortized sweep covering the checked population once per ceil(1/judge_frac) passes, taken by deterministic stride from a rotating cursor.",
     "reason": "AMENDMENT, 2026-09-02, ruled under FOR THE OWNER Q-MEM-8. There is no ancestor knob: the old selfcheck (self_organize.py:4048-4060) is \"single pass, every entry judged\", called ONCE from the report, and neither a scope knob nor a cadence knob for it exists anywhere in self_organize.py, memory.py or verification.py. Because there is no ancestor there is no (family, old_name) key a DEPARTURES entry could be written under, so N2 could only be satisfied by amending the census -- which is what this row is, declared rather than smuggled. IT DOES NOT CHANGE THE 328: that count is about the old _SPEC's knobs and this was never one. WHY: judge is CADENCED in this tree, not end-of-run, and `selfcon` is a persistent per-entry field where -1 means unchecked while the flag rule reads every entry with selfcon >= 0. That gives two legitimate checked sets which no frozen surface picks between and which are ~20x apart in cost AND different in meaning. Incremental (0.0): ~100 new entries x key_win 8 = ~800 forward tokens per 100-Window dom.manage interval, about 6% of the interval -- but an entry keeps forever the score it got under the model that wrote it, so the adaptive median + k*MAD population mixes scores taken thousands of windows apart. Full (1.0): 8192 x 8 = 65,536 forward tokens, about 1.7x the ENTIRE training compute of that interval, and every score from one model snapshot. Both are compatible with the framework and neither is forced, so under the owner's rule the arms stay reachable and the question is made measurable rather than closed by argument. DEFAULT 0.0 = THE RE-SCORE IS OFF is deliberate: there is no recorded number under either arm (in the old tree every write reset selfcon to -1 and the detector was structurally inert for the whole run), so \"preserve what the numbers were taken under\" selects nothing; what decides it is that 1.0 would more than double the cost of every run by default, which is itself a confound, while 0.0 costs nothing and still checks strictly more than the old tree ever did in-loop. Read by MEM.judge; counters store.n_rescored and store.n_judge_cursor_wraps beside n_checked; n_rescored == 0 at 0.0 reports \"armed but 0 (judge_frac=0.0)\" and never \"unreachable\". A separate knob rather than reusing rekey_every, which spine/compose.py already flags as ONE LEVER, TWO MECHANISMS. docs/04_CONTRACT.md's Q-MEM-8 states the run that retires this lever."
+   },
+   {
+    "old_name": "(amendment: DATA_DRAW)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_DRAW",
+    "unit": "name",
+    "purpose": "Which law allocates a phase's bytes across its live areas. 'planned' (the shipped default) gives each area its scheduled share and randomises only order and offsets, so Plan.per_area_draw and Stream.per_area_drawn agree and the exposure gates are exact. 'uniform' picks an area independently per segment, which is the law every recorded result in this project was taken under.",
+    "reason": "AMENDMENT, 2026-09-02, ruled by the owner under ISSUES P1-H58 (\"we can make H58 a lever, and make planned default\"). There is no ancestor knob: the old tree had one law, `_r.choice(act)` per segment at self_organize.py's stream builder, and no switch over it -- so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census, which is what this row is. IT DOES NOT CHANGE THE 328: that figure counts the old _SPEC's knobs and this was never one of them. WHY IT EXISTS: data_plan tests exposure_max/exposure_skew against the SCHEDULED per-area split while the run trained on a random draw from it -- measured over eight seeds at the shipped defaults, the worst per-area deviation was 47.9%. So the guard against P3-H22 could read 'did not fire' on a run whose realized exposure crossed its threshold. 'planned' is the default because it is the only value under which the startup gate is exact, and a startup gate is the only thing that can refuse a bad configuration before it spends GPU time. 'uniform' is kept, not dropped, because it is the law the recorded results were taken under and is therefore the arm that reproduces them.",
+    "couples_with": [
+     "DATA_PHASE_SCHED",
+     "DATA_STREAM_BYTES",
+     "DATA_SEG_MIN",
+     "DATA_SEG_MAX",
+     "DATA_EXPOSURE_MAX",
+     "DATA_EXPOSURE_SKEW"
+    ]
    }
   ]
  }

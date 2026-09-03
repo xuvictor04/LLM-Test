@@ -547,6 +547,34 @@ class DATALevers(LeverSet):
     # cost is the spine's for every bool and not a choice made here: any string outside
     # ("0", "", "off", "no", "none", "false") reads as True, so DATA_RESAMPLE=flase is silently on.
 
+    draw = Lever("planned", "How a phase's bytes are allocated across its live areas: 'planned' "
+                            "gives each area its scheduled share and randomises only the order and "
+                            "the offsets; 'uniform' picks an area independently per segment.",
+                 U.NAME, choices=("planned", "uniform"))
+    # AMENDMENT, 2026-09-02, ruled by the owner under ISSUES P1-H58. NO ANCESTOR KNOB: the old tree had
+    # one law, `_r.choice(act)` per segment, and no switch over it.
+    # THE MEASUREMENT THAT MADE IT A LEVER. DATA.data_plan computes `per_area_draw` by distributing
+    # stream_bytes across the schedule and tests exposure_max / exposure_skew against it, under a
+    # docstring saying it computes what the run "will actually" be exposed to. Under the old law
+    # draw_stream then picked an area UNIFORMLY AT RANDOM per segment, so the run trained on a DRAW
+    # from that distribution rather than the distribution: measured over eight seeds at the shipped
+    # defaults, the worst per-area deviation was 47.9% (seed 0: planned eng 15,000 / py 45,000,
+    # realized 14,396 / 42,499). A gate that reads "armed, did not fire" on a planned split while the
+    # realized split crossed its threshold is a true sentence about the wrong number -- in the
+    # instrument whose whole job is catching P3-H22, where an added area seen 2.1x while the original
+    # was 28% sampled made "adding py cost eng X b/B" indistinguishable from "py was memorised and eng
+    # was skimmed".
+    # WHY "planned" IS THE DEFAULT AND NOT THE OTHER WAY ROUND. It is the only value under which the
+    # startup gate is EXACT, and a startup gate is the only thing that can refuse a bad configuration
+    # BEFORE it spends the GPU time. Defaulting to the law that makes the guard approximate would keep
+    # the instrument and throw away the guarantee.
+    # WHAT "uniform" IS FOR, because it is kept and not dropped: it is the law every recorded result in
+    # this project was taken under, so it is the arm that reproduces them. The owner's standing rule is
+    # that a mechanism kept for future use is kept with a switch.
+    # THE PAIRED INSTRUMENT is Stream.per_area_drawn beside Plan.per_area_draw: under 'planned' they
+    # agree to within one segment per area, and under 'uniform' the difference is the error bar on
+    # every exposure number the run reports. The gates say which law produced them.
+
     corpus_cap = Lever(2000000, "Bytes read from disk per area before any holdout split or stream "
                                 "draw; the ceiling on how much of a corpus this run can see.", U.BYTES)
     # Census: CORPUS_CAP, verdict keep. GENUINELY DISTINCT FROM stream_bytes: one caps what is OPENED,

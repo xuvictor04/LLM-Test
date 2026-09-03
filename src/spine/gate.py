@@ -56,13 +56,25 @@ class Gate:
                 f"a report carrying both says nothing.")
 
     def line(self):
-        """The one printed form. Every package uses it, so the report has one shape."""
+        """The one printed form. Every package uses it, so the report has one shape.
+
+        THE ARITHMETIC SURVIVES THE UNREACHABLE ARM, and the first version dropped it: a gate that
+        says only "UNREACHABLE" throws away the two numbers a reader needs to check the claim, which
+        is the same "verdict without the arithmetic" this record exists to refuse on the other arms.
+
+        A `reason` IS PRINTED WHENEVER IT IS SET, not only when unreachable. A gate can be reachable,
+        computed, and still carry a caveat about what it measured -- DATA's exposure gates under
+        DATA_DRAW=uniform are exactly that: they fire correctly against a PREDICTED split while the
+        run trains on a draw from it. Rendering the caveat only on the unreachable arm would put that
+        sentence nowhere.
+        """
+        nums = "" if (self.value is None and self.threshold is None) \
+            else f" ({self.value} vs {self.threshold})"
         if not self.reachable:
-            return f"Gate {self.name}: UNREACHABLE -- {self.reason}"
+            return f"Gate {self.name}: UNREACHABLE{nums} -- {self.reason}"
         verdict = "FIRED" if self.fired else "armed, did not fire"
-        if self.value is None and self.threshold is None:
-            return f"Gate {self.name}: {verdict}"
-        return f"Gate {self.name}: {verdict} ({self.value} vs {self.threshold})"
+        note = f" -- {self.reason}" if self.reason else ""
+        return f"Gate {self.name}: {verdict}{nums}{note}"
 
 
 class NotBuilt(Exception):

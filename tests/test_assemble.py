@@ -170,7 +170,7 @@ def packages():
     answers depending on which file you read.
 
     THESE ARE STAND-INS AND NOT THE REAL PACKAGES, WHICH NOW EXIST -- and the reason is A3, not inertia.
-    src/*/levers.py declares 261 levers across thirteen packages; A3 requires a stated reach for EVERY
+    src/*/levers.py declares 262 levers across thirteen packages; A3 requires a stated reach for EVERY
     declared lever, because an oracle checked only where somebody remembered to check it is not an
     oracle. Nine stand-ins carrying the fourteen fields the coupling table actually names keep that
     requirement meetable and keep the fixture readable. What the stand-ins may NOT do is drift from the
@@ -1090,7 +1090,7 @@ def check_a7_rng_accounting():
 #
 # WHY A CHECK AND NOT A CORRECTED NUMBER. A8 exists because line 171 of this file said "declares 259
 # levers" for two lever generations after the tree declared 261, and docs/03_WIRING.md -- a GENERATED
-# file, carrying its own regeneration script in its header -- sat at 13 couplings and 10 wires against a
+# file, carrying its own regeneration script in its header -- sat at 23 couplings and 10 wires against a
 # live 23 and 19. Both were fixed by hand once already. A number a human corrects by hand is a number
 # that drifts again on the next commit that changes the tree, and neither of those two was found by a
 # check: they were found by a reviewer reading prose. That is the recorded-never-read defect wearing
@@ -1177,7 +1177,7 @@ def check_a9_wiring_doc_current():
 
     WHAT THIS CATCHES THAT A8 CANNOT. A8 sweeps prose for stated totals; this file is not prose. It is
     the whole return value of assemble.render() plus a generated summary line, and it went stale by a
-    whole ledger generation -- 13 couplings and 10 wires on disk against 23 and 19 in the tree -- while
+    whole ledger generation -- 23 couplings and 10 wires on disk against 23 and 19 in the tree -- while
     every check in this suite stayed green, because nothing read the file. That is the
     recorded-never-read family (39 of the survey's 475) with a document in the recorded position. A
     header that says "Nothing here is written by hand" is not a check; running the generator and

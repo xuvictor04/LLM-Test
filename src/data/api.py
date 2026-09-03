@@ -506,16 +506,17 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     RETURNS: Plan.
 
     LEVERS READ: phase_sched, phases, phase_live, stream_bytes, seg_min, seg_max, exposure_max,
-                 exposure_skew
+                 exposure_skew, draw
     WIRES READ: none
     DID IT FIRE: data.phase_resolved, data.protocol_named (the recognised protocol, printed by
                  name -- one of the four, never blank), data.phase_name_resolved (entries given as
                  a NAME rather than an index; 0 means every entry was an index, which is the
                  shipped spelling and a statement rather than silence),
-                 Gate data.exposure_max_planned, Gate data.exposure_skew_planned -- BOTH NAMED
-                 `_planned` since 2026-09-02 because they test the SCHEDULED split and the run
-                 trains on a random draw from it, which deviated by up to 47.9% per area over
-                 eight seeds at the defaults (ISSUES P1-H58, open),
+                 Gate data.exposure_max, Gate data.exposure_skew -- EXACT under the shipped
+                 DATA_DRAW="planned" and a PREDICTION under "uniform", where the run trains on a
+                 random draw from the scheduled split that deviated by up to 47.9% per area over
+                 eight seeds. The caveat rides on the gate's `reason` and not on its name, so a
+                 report can be grepped across both arms (ISSUES P1-H58, ruled),
                  Gate data.splice_window
     """
     dat = dat.owned_by("DATA")
@@ -604,31 +605,39 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
 
     gates = []
     vals = [exposure[n] for n in names]
-    # THE GATES BELOW ARE COMPUTED ON THE PLANNED SPLIT, AND THEY SAY SO IN THEIR NAMES (P1-H58).
-    # `per_area_draw` distributes stream_bytes by the schedule; draw_stream then picks an area
-    # UNIFORMLY AT RANDOM per segment, so what the run actually trains on is a draw from that
-    # distribution, not the distribution. Measured over eight seeds at the shipped defaults, the
-    # worst per-area deviation between planned and realized was 47.9%. A gate that reads "armed, did
-    # not fire" on a planned split while the realized split crossed its threshold is a true sentence
-    # about the wrong number -- and this gate is the guard against P3-H22, where an added area seen
-    # 2.1x while the original was 28% sampled made "adding py cost eng X b/B" indistinguishable from
-    # "py was memorised and eng was skimmed". Naming them `_planned` is the honest half and costs
-    # nothing; the realized figure is a WHOLE-RUN quantity that cannot exist until the last epoch is
-    # drawn, so closing this properly is an owner decision recorded in ISSUES P1-H58.
+    # WHICH LAW ALLOCATES THE BYTES DECIDES WHETHER THESE GATES ARE EXACT (P1-H58, ruled by the
+    # owner 2026-09-02: it became DATA_DRAW, and "planned" is the default).
+    #   planned -> draw_stream gives every area its scheduled share, so `per_area_draw` IS what the
+    #              run trains on and the gate below is a MEASUREMENT.
+    #   uniform -> draw_stream picks an area independently per segment, so the run trains on a DRAW
+    #              from this distribution and the gate is a PREDICTION. Measured over eight seeds at
+    #              the shipped defaults the worst per-area deviation was 47.9%, and a gate reading
+    #              "armed, did not fire" on a split the run did not train on is a true sentence
+    #              about the wrong number -- in the guard against P3-H22, where an added area seen
+    #              2.1x while the original was 28% sampled made "adding py cost eng X b/B"
+    #              indistinguishable from "py was memorised and eng was skimmed".
+    # ONE GATE NAME UNDER BOTH LAWS. A report whose keys change with the configuration cannot be
+    # grepped across arms, which costs more than the caveat it would save, so the caveat rides on
+    # the gate's own `reason` -- which spine/gate.py prints on every arm for exactly this case.
+    law = str(dat.draw)
+    caveat = "" if law == "planned" else (
+        "DATA_DRAW=uniform: this is the SCHEDULED split and the run trains on a random draw from "
+        "it (measured deviation up to 47.9% per area), so read it as a prediction and read "
+        "Stream.per_area_drawn for what happened.")
     # COMPUTED AT ONE AREA TOO. Both old reads sat inside `if DATA_MODE == "real" and NP > 1`, so
     # the check was unavailable on exactly the single-area goal-A configuration where accidental
     # repetition is easiest to reach (ISSUES P1-L21).
-    gates.append(Gate("data.exposure_max_planned", max(vals) > float(dat.exposure_max),
-                      round(max(vals), 4), float(dat.exposure_max)))
+    gates.append(Gate("data.exposure_max", max(vals) > float(dat.exposure_max),
+                      round(max(vals), 4), float(dat.exposure_max), reason=caveat))
     if n_areas == 1:
-        gates.append(Gate("data.exposure_skew_planned", False, None, float(dat.exposure_skew),
+        gates.append(Gate("data.exposure_skew", False, None, float(dat.exposure_skew),
                           reachable=False,
                           reason="a max/min ratio over ONE area is undefined; this gate cannot "
                                  "fire on a single-area run and says so rather than reading 0"))
     else:
         skew = max(vals) / min(vals) if min(vals) > 0 else float("inf")
-        gates.append(Gate("data.exposure_skew_planned", skew > float(dat.exposure_skew),
-                          round(skew, 4), float(dat.exposure_skew)))
+        gates.append(Gate("data.exposure_skew", skew > float(dat.exposure_skew),
+                          round(skew, 4), float(dat.exposure_skew), reason=caveat))
     mean_seg = (int(dat.seg_min) + int(dat.seg_max)) / 2.0
     # THE ONE PLACE THE BYTE/TOKEN BOUNDARY IS CROSSED, and it is crossed with the MEASURED
     # bytes/token handed in, never with an estimate (ISSUES P1-H16).
@@ -675,7 +684,7 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
 
     RETURNS: Stream.
 
-    LEVERS READ: stream_bytes, seg_min, seg_max, seg_contig, resample
+    LEVERS READ: stream_bytes, seg_min, seg_max, seg_contig, resample, draw
     WIRES READ: none
     DID IT FIRE: data.stream_draw, data.segment, data.contig_wrap (unreachable at seg_contig=False,
                  with the gate arithmetic), data.resample (unreachable at resample=False -- the
@@ -709,15 +718,52 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     seg_min, seg_max = int(dat.seg_min), int(dat.seg_max)
     contig = bool(dat.seg_contig)
 
+    # WHICH LAW ALLOCATES THE BYTES (DATA_DRAW; P1-H58, ruled by the owner 2026-09-02).
+    #   planned -- the shipped default -- gives each live area its SCHEDULED SHARE of the phase and
+    #     randomises only which order the segments come in and where in the body each is read from.
+    #     `Plan.per_area_draw` is then what the run actually trains on, so data_plan's exposure gates
+    #     are exact rather than predictive.
+    #   uniform picks an area independently per segment. That is the law every recorded result in
+    #     this project was taken under, and it is kept for exactly that reason -- but under it the
+    #     realized split is a DRAW from the scheduled one, and the worst per-area deviation measured
+    #     over eight seeds at the shipped defaults was 47.9%.
+    law = str(dat.draw)
     for (lo, hi), live in zip(plan.phase_bounds, plan.schedule):
+        # THE PLANNED LAW'S REMAINING BUDGET, per area, in the same shares data_plan computed. It is
+        # recomputed here from the phase span rather than read off Plan.per_area_draw because that
+        # field is the WHOLE-RUN total across every phase an area appears in; taking a phase's share
+        # out of a whole-run total is the kind of arithmetic that silently drifts. Both use the same
+        # rule -- floor division with the remainder on the first live areas -- so the two agree by
+        # construction and not by coincidence.
+        span = hi - lo
+        budget = {}
+        for j, idx in enumerate(live):
+            budget[idx] = span // len(live) + (1 if j < span % len(live) else 0)
         while len(out) < hi:
-            idx = live[stream.randrange(len(live))] if len(live) > 1 else live[0]
+            if law == "planned":
+                # Uniform among the areas that still have budget, so the ORDER is random and the
+                # SHARES are not. An area drops out of the choice when its budget is spent.
+                avail = [i for i in live if budget[i] > 0]
+                if not avail:
+                    # Rounding can leave the phase a byte or two short of its bound with every
+                    # budget spent. Give the remainder to the first live area rather than leaving
+                    # the stream short, because len(bytes) == stream_bytes EXACTLY is P1-L22.
+                    avail = list(live)
+                    budget[avail[0]] = hi - len(out)
+                idx = avail[stream.randrange(len(avail))] if len(avail) > 1 else avail[0]
+            else:
+                idx = live[stream.randrange(len(live))] if len(live) > 1 else live[0]
             label = names[idx]
             body = areas.bodies[label]
             want = stream.randint(seg_min, seg_max)
             # TRUNCATED TO THE PHASE BOUND rather than overshooting it by a whole segment, so phase
             # bounds do not drift and len(bytes) == stream_bytes EXACTLY (ISSUES P1-L22).
             want = min(want, hi - len(out))
+            if law == "planned":
+                # AND TRUNCATED TO THIS AREA'S REMAINING SHARE, which is what makes the realized
+                # split equal the scheduled one. A segment that overran its area's budget would put
+                # the difference on whichever area happened to be drawn next.
+                want = min(want, budget[idx])
             if contig:
                 # THE CURSOR PERSISTS ACROSS EPOCHS, so an English-only run has only the text's own
                 # boundaries rather than discontinuities we manufacture every 8-20 KB. eng_only
@@ -739,6 +785,8 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             out += chunk
             labels.extend([label] * len(chunk))
             per_area[label] += len(chunk)
+            if law == "planned":
+                budget[idx] -= len(chunk)
 
     st = Stream(bytes=bytes(out), labels=labels, splice_starts=tuple(splice),
                 area_changes=tuple(changes), phase_bounds=tuple(plan.phase_bounds),
