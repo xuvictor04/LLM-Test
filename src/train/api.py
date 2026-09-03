@@ -22,7 +22,8 @@ stale `TRAIN.*` strings survive inside spine/assemble.py's NOT_WIRES prose; the 
 no TRAIN package and `build(environ={})` resolves without one.
 
 RECORD TYPES RETURNED (P4 defines them):
-  Process   device, autocast, tf32_applied, amp_state ("off" | "active" | "declined"), amp_reason
+  Process   device, autocast, tf32_applied, torch_seed,
+            amp_state ("off" | "active" | "declined"), amp_reason
   RunMode   bench, profile, timing
   Tick      step, epoch, flush_due, rolled, finished
   Timing    span(name) -> a context manager; spans() -> {name: seconds}
@@ -109,12 +110,20 @@ class Process:
     flag, because the defect this record answers is a knob that reported itself off while cuDNN ran
     TF32 anyway from its own default. `amp_state` carries the third state: "declined" is bf16 asked
     for on a device that has no autocast for it, which is legal, inert, and must be readable.
+
+    `torch_seed` is the seed torch's PROCESS-GLOBAL default generator IS ACTUALLY RUNNING ON, read
+    back out of torch after it was written, and it is here for the same reason `tf32_applied` is:
+    both are process-wide state this function mutates, and a mutation nobody can read back is
+    indistinguishable from one that never happened. It is what makes seeding that generator a
+    DECLARED setting rather than a silent global side effect -- process_setup names it on its own
+    DID IT FIRE line, and a reader checks it against torch.initial_seed() directly.
     """
     device: str
     autocast: object
     tf32_applied: tuple
     amp_state: str
     amp_reason: str
+    torch_seed: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -160,9 +169,9 @@ class Timing:
 def process_setup(run: Config):
     """Apply the process-wide arithmetic settings ONCE, before any package is built.
 
-    Returns Process(device, autocast, tf32_applied, amp_state, amp_reason). `autocast` is a
-    zero-argument callable returning a context manager -- torch.autocast when device == "cuda" and
-    amp == "bf16", otherwise contextlib.nullcontext. amp_state "declined" is THE LEGAL-AND-INERT
+    Returns Process(device, autocast, tf32_applied, amp_state, amp_reason, torch_seed). `autocast`
+    is a zero-argument callable returning a context manager -- torch.autocast when device == "cuda"
+    and amp == "bf16", otherwise contextlib.nullcontext. amp_state "declined" is THE LEGAL-AND-INERT
     CASE (RUN_AMP=bf16 on CPU) and amp_reason carries the sentence, because that is G4's
     armed-but-inert state and must be reportable rather than silent -- :5719-5725 printed it once,
     at step 0, in a line no grid ever read, and it covered every spelling but "fp16": RUN_AMP=
@@ -183,13 +192,86 @@ def process_setup(run: Config):
     on any box. The census was misled by the source's own comment three lines above, which is true
     of the autocast branch and false of the refusal later placed over it.
 
-    LEVERS READ: device, tf32, amp
+    TORCH'S PROCESS-GLOBAL GENERATOR IS ONE OF THESE SETTINGS AND IT WAS THE ONE NOBODY SET
+    (2026-09-03). Every explicit torch random op in src/ already passes `generator=` a per-subsystem
+    stream -- src/lm/api.py::build_model, src/sig/api.py::build, src/fabric/api.py::build and
+    src/world/api.py::build all do -- but `nn.Dropout` and `nn.TransformerEncoderLayer`'s internal
+    attention and residual dropout take NO `generator=` argument at the installed torch, so they
+    draw from the global default generator, which torch seeds from OS entropy at import. That is a
+    torch API gap and not an oversight in this tree: checked at torch 2.13.0+cu130 against
+    inspect.signature of nn.Dropout.forward, nn.TransformerEncoderLayer.forward and
+    torch.nn.functional.dropout, and none of the three has a generator parameter to receive one.
+    MEASURED BEFORE FIXING, on this machine: two fresh CPU processes at RUN_SEED=0, LM_DROPOUT=0.2
+    reported torch.initial_seed() of 3695151007048800332 and 4263715014176632393, and LM.encode()
+    over an identical zero batch summed to 3.682344 against 4.750506 on the gru arm (-106.479309
+    against -212.809799 on the transformer arm at LM_LAYERS=2), while the SAME pair of processes at
+    LM_DROPOUT=0.0 agreed exactly (5.071722 twice) and every model parameter agreed on every run
+    (-19.315695), because initialisation was already on a named stream. G2's determinism floor is
+    measured from two identical seeded runs, so at LM_DROPOUT>0 an entirely different dropout mask
+    was being absorbed into a number this project reports as float noise.
+
+    WHY THIS FUNCTION OWNS IT, AND WHAT WAS REJECTED. The first line of this docstring already
+    claims the process-wide settings ONCE, before any package is built, and a generator seeded from
+    OS entropy is a process-wide setting in exactly the sense tf32 is: nothing about WHAT is
+    computed, everything about whether two runs of it agree. It has to be applied before any build,
+    because the first consumer to draw from an unseeded global takes OS entropy and no later call
+    can put that back. No package can own it -- src/lm/api.py::build_model runs after other packages
+    may already have drawn, and its own contract declares it reads no lever -- and
+    src/spine/rng.py::rng_for cannot reach the consumer at all, since its whole discipline is a
+    stream handed down as an argument and nn.Dropout has nowhere to receive one. Declaring a
+    "torch.global" entry in src/spine/compose.py::RNG_SUBSYSTEMS was considered and rejected on two
+    counts: that tuple is minted into a map the root SUBSCRIPTS to hand each package its own stream,
+    so an entry no package holds would put a non-subsystem into a register whose documented three
+    states (drew / armed-but-inert / never asked) are statements about packages; and it is a spine
+    edit this package has no standing to make.
+
+    WHAT IT DOES NOT BUY, SAID PLAINLY: REPRODUCIBILITY IS NOT ISOLATION. nn.Dropout still draws
+    from one shared stream, so torch DRAW ORDER remains a channel between packages that no wire
+    declares -- a lever that changes how many masks LM draws still shifts every mask drawn after it,
+    which is the exact confound src/spine/rng.py's module docstring exists to remove for the streams
+    it does cover. Seeding gives every run at one seed the same sequence; it does not give each
+    package its own. Closing that needs generator-aware dropout replacing both nn.Dropout and
+    nn.TransformerEncoderLayer's internals, which is LM's arithmetic to change and is not written.
+    Named here so a reader of the L3 sweep knows which channel the per-subsystem register does not
+    cover, rather than inferring from its silence that there is none.
+
+    "torch.global" IS A DERIVATION LABEL, NOT A MINTED STREAM, and this sentence exists because the
+    opposite mistake has already been made once in this tree (a docstring naming rng.issued()["lm"]
+    as its own firing surface when the draw had moved to a child). It will NEVER appear in
+    src/spine/rng.py::issued() and nobody should grep for it there: src/spine/rng.py::derive_seed is
+    a pure blake2b of (run seed, name) that mints nothing, so this function stays callable twice in
+    one process, which rng_for would not be. The distinct name rather than the bare run seed is
+    src/spine/rng.py::Rng.torch_generator's own stated rule -- one integer standing beside two
+    different generators in every log is a thing no reader can check. The firing surface is
+    Process.torch_seed, read back out of torch.
+
+    LEVERS READ: device, tf32, amp, seed (new on 2026-09-03; the process-global torch generator is
+                 seeded from it through spine/rng.py::derive_seed, and the three paragraphs above
+                 say why this function and not a package is the site)
     WIRES READ: none
-    DID IT FIRE: Process.tf32_applied, Process.amp_state
+    DID IT FIRE: Process.tf32_applied, Process.amp_state, Process.torch_seed -- the last one read
+                 back with torch.initial_seed() AFTER the write, so it is what torch is running on
+                 and not what this function asked for. It equals derive_seed("torch.global", seed)
+                 on every process at that RUN_SEED and differs at a different one; two runs whose
+                 reported torch_seed matches and whose LM.encode output does not have a
+                 non-determinism that is NOT this one.
     """
     run = run.owned_by("RUN")
     device = str(run.device)
     tf32 = bool(run.tf32)
+    seed = int(run.seed)
+
+    # SEEDED HERE AND NOWHERE ELSE, AND BEFORE THE tf32 WRITES BELOW -- not because tf32 draws, but
+    # because "before any package is built" is only true if it is the first thing this function
+    # does. derive_seed MINTS NOTHING (pure blake2b of the pair), which is what keeps this callable
+    # twice in one process; rng_for("torch.global", seed) would raise on the second call, and a
+    # process-wide settings applier that fails the second time it is asked is a new failure mode
+    # with nothing to do with its job. The name is a derivation label, not a stream -- see above.
+    torch.manual_seed(_rng.derive_seed("torch.global", seed))
+    # READ BACK, NOT ASSUMED, exactly like tf32_applied below: the record carries the seed torch is
+    # RUNNING ON. A number this function merely passed to a setter is the same class of claim as the
+    # knob that reported itself off while cuDNN ran TF32 from its own default.
+    torch_seed = int(torch.initial_seed())
 
     # ASSIGNED, NOT GUARDED, on BOTH attributes -- the docstring above says why. `if tf32:` would
     # leave cudnn.allow_tf32 at its own default of True on a run launched with RUN_TF32=0 to rule
@@ -219,7 +301,7 @@ def process_setup(run: Config):
         cast = contextlib.nullcontext
 
     return Process(device=device, autocast=cast, tf32_applied=applied,
-                   amp_state=state, amp_reason=reason)
+                   amp_state=state, amp_reason=reason, torch_seed=torch_seed)
 
 
 def mode(run: Config):
