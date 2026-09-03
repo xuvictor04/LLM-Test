@@ -31,8 +31,78 @@ RECORD TYPES RETURNED (P4 defines them):
                  is not even a function: DOM.census's `live` reaches MEM as `live_sources` while its
                  `n_live` reaches FAB as `live_domains`, so one record feeds two vocabularies.
 """
+import torch
+
 from spine.lever import Config
+from spine.gate import Gate
 from spine import units as U
+
+
+class StoreError(ValueError):
+    """A restore that cannot be performed without losing entries, refused by name.
+
+    NAMED AND NOT TRUNCATED. Lowering MEM_OWNERS between a parent run and its resume leaves entries
+    whose recorded block no longer exists; the old path kept whatever fitted in SAVE ORDER, so which
+    memories survived a resume was a function of the order they happened to be written in, and the
+    report said nothing. In a system whose goal-B claim is measured ACROSS a resume boundary, that is
+    the measurement quietly changing under the thing being measured.
+    """
+
+
+class Store:
+    """The entry arrays, the block partition, and the source census.
+
+    ONE BLOCK LAYOUT AND NO SPECIAL CASE FOR owners == 1. Block b owns rows [b*quota, (b+1)*quota),
+    and one block covering the store is just b == 0. A second code path for the single-owner case is
+    a path that only runs on one configuration, which is how the single-owner arm drifted from the
+    partitioned one.
+
+    `born` IS A SEPARATE FIELD FROM `last`, AND THE SPLIT IS THE POINT. The old tree used one `last`
+    for the write tick and the retrieval tick, so "LRU" meant write-recency: the domain that STOPPED
+    BEING WRITTEN was evicted oldest-first BY CONSTRUCTION. That is goal B's failure mode performed
+    by the eviction rule itself -- the store forgets exactly the area the run has moved on from,
+    which is the area a continual-learning measurement is about.
+    """
+
+    __slots__ = ("keys", "tok", "src", "pos", "ctx", "own", "active", "prob", "use", "last",
+                 "born", "selfcon", "recon", "tick", "gate_theta", "n_written", "rekey_cursor",
+                 "nsrc", "nsrc_max", "live_src", "capacity", "quota", "owners", "key_dim",
+                 "lm_kind", "counters", "gates", "rng")
+
+    def __init__(self, *, capacity, quota, owners, key_dim, device, rng, lm_kind):
+        z = lambda *shape, dtype=torch.float32: torch.zeros(*shape, dtype=dtype, device=device)
+        self.capacity, self.quota, self.owners = capacity, quota, owners
+        self.key_dim, self.lm_kind, self.rng = key_dim, lm_kind, rng
+        self.keys = z(capacity, key_dim)
+        self.tok = z(capacity, dtype=torch.long)
+        self.src = z(capacity, dtype=torch.long)
+        self.pos = z(capacity, dtype=torch.long)
+        self.ctx = z(capacity, dtype=torch.long)
+        self.own = z(capacity, dtype=torch.long)
+        self.active = z(capacity, dtype=torch.bool)
+        self.prob = z(capacity, dtype=torch.bool)
+        self.use = z(capacity, dtype=torch.long)
+        self.last = z(capacity, dtype=torch.long)      # RETRIEVAL tick
+        self.born = z(capacity, dtype=torch.long)      # WRITE tick -- see the class docstring
+        self.selfcon = z(capacity)
+        self.recon = z(capacity)
+        for b in range(owners):
+            self.own[b * quota:(b + 1) * quota] = b
+        self.tick = 0
+        self.gate_theta = 0.0
+        self.n_written = 0
+        self.rekey_cursor = 0
+        self.nsrc = None                # the census; sized by open_store, GROWS on demand
+        self.nsrc_max = 0
+        self.live_src = 0
+        self.counters = {}
+        self.gates = ()
+
+    def _block_of(self, row):
+        return int(row) // self.quota
+
+    def _rows_of(self, block):
+        return range(block * self.quota, (block + 1) * self.quota)
 
 
 def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, restored=None):
@@ -70,10 +140,110 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
     DID IT FIRE: store.n_opened, store.n_restored_entries, store.n_restore_refused
     """
     mem = mem.owned_by("MEM")
-    _ = (mem.d_capacity, mem.d_owner_blocks, mem.d_source_slots)   # WIRES READ HERE -- the shape
-    raise NotImplementedError(
-        "MEM.open_store: P4 (memory) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section MEM.")
+    capacity = int(mem.d_capacity)                     # WIRES READ HERE -- the shape
+    owners = int(mem.d_owner_blocks)
+    source_slots = int(mem.d_source_slots)
+    quota = int(mem.quota)
+
+    # NOT A SIZE ARGUMENT ANYWHERE. The operator sizes the store through `quota` and `owners`, and
+    # d_capacity is DERIVED from exactly those two by the coupling table -- so nothing here can
+    # silently override a number somebody typed, which is what the old `if n_own > 1: cap = n_own *
+    # quota` did to a requested MEM_CAP of 200,000 (a 24x shrink, recorded with no line in any log).
+    if capacity != owners * quota:
+        raise StoreError(
+            f"MEM.d_capacity arrived as {capacity} while MEM_OWNERS={owners} x MEM_QUOTA={quota} is "
+            f"{owners * quota}. A partitioned store holds blocks x quota entries and has no size "
+            f"independent of its partition; one quantity, two answers.")
+
+    store = Store(capacity=capacity, quota=quota, owners=owners, key_dim=int(key_dim),
+                  device=device, rng=rng, lm_kind=str(lm_kind))
+    # THE CENSUS GROWS ON DEMAND AND IS NEVER CLAMPED. d_source_slots is a starting width, not a
+    # bound: clamping ids into a fixed-width table is the exact pattern that re-broke this at the
+    # scale it was written for -- the table was 64 rows wide on every default run while a real one
+    # carried 125 source ids.
+    store.nsrc = torch.zeros(source_slots, dtype=torch.long, device=device)
+
+    n_restored, n_refused = 0, 0
+    if restored is not None:
+        n_restored, n_refused = _restore_by_block(store, restored)
+
+    store.counters = {
+        "store.n_opened": capacity,
+        "store.n_restored_entries": n_restored,
+        "store.n_restore_refused": n_refused,
+        "store.blocks": owners,
+        "store.census_slots": source_slots,
+    }
+    store.gates = (
+        # `lm_kind` IS STORED ONLY SO THIS GATE CAN PRINT ITS OWN ARITHMETIC; nothing else reads it.
+        Gate("mem.key_depth", int(mem.key_depth) > 0, int(mem.key_depth), 0)
+        if str(mem.key_src) == "model" and str(lm_kind) == "transformer" else
+        Gate("mem.key_depth", False, int(mem.key_depth), 0, reachable=False,
+             reason=f"MEM_KEY_SRC={str(mem.key_src)!r} on LM_ARCH={str(lm_kind)!r}: there is no "
+                    f"layer stack to take a depth from, so this knob cannot select anything. "
+                    f"Reported unreachable rather than as a depth of 0, which would read as a "
+                    f"choice the operator made."),
+    )
+    return store
+
+
+def _restore_by_block(store, blob):
+    """Put a checkpoint's entries back BY OWNER BLOCK. Returns (restored, refused).
+
+    NO BULK PREFIX COPY AND NO UNCONDITIONAL active[:n] = True. The old restore cleared `active`,
+    rebuilt the owner blocks, and then six lines later ran `mem.active[:_mn] = True` in BOTH
+    branches -- reactivating the first rows regardless of ownership and undoing the partition
+    restore it had just performed.
+
+    A ROW WHOSE BLOCK NO LONGER EXISTS IS REFUSED, NOT TRUNCATED. Lowering MEM_OWNERS makes some
+    recorded blocks unreachable; keeping whatever fitted in save order made the surviving memories a
+    function of write order, silently, on the boundary every goal-B number is measured across.
+    """
+    rows = blob.get("rows") or []
+    restored, refused = 0, 0
+    for r in rows:
+        b = int(r.get("own", -1))
+        if not 0 <= b < store.owners:
+            refused += 1
+            continue
+        # Into the recorded block, at the first free row OF THAT BLOCK.
+        free = next((i for i in store._rows_of(b) if not bool(store.active[i])), None)
+        if free is None:
+            refused += 1
+            continue
+        store.keys[free] = torch.as_tensor(r["key"], device=store.keys.device)
+        for field in ("tok", "src", "pos", "ctx"):
+            getattr(store, field)[free] = int(r.get(field, 0))
+        store.own[free] = b
+        store.active[free] = True
+        store.prob[free] = bool(r.get("prob", False))
+        store.use[free] = int(r.get("use", 0))
+        store.last[free] = int(r.get("last", 0))
+        store.born[free] = int(r.get("born", 0))
+        restored += 1
+        # THE CENSUS IS REBUILT EXACTLY. A resume left it at zeros and the source floor protected
+        # nothing for the rest of the run while the banner still printed "src floor 0.5" and a
+        # selftest asserted that line was present.
+        sid = int(r.get("src", 0))
+        if sid >= store.nsrc.numel():
+            grown = torch.zeros(sid + 1, dtype=store.nsrc.dtype, device=store.nsrc.device)
+            grown[:store.nsrc.numel()] = store.nsrc
+            store.nsrc = grown
+        store.nsrc[sid] += 1
+    if refused:
+        raise StoreError(
+            f"{refused} checkpoint entr(y/ies) name an owner block this run does not have "
+            f"(MEM_OWNERS={store.owners}, quota={store.quota}). Refused rather than truncated: "
+            f"keeping whatever fitted in save order makes which memories survive a resume a "
+            f"function of write order, on the boundary every continual-learning number in this "
+            f"project is measured across.")
+    store.tick = int(blob.get("tick", 0))
+    store.n_written = int(blob.get("n_written", 0))
+    # nsrc_max IS CARRIED FORWARD from the blob rather than re-derived from the restored counts:
+    # re-deriving it forgets every source that was evicted before the save.
+    store.nsrc_max = int(blob.get("nsrc_max", int(store.nsrc.max()) if store.nsrc.numel() else 0))
+    store.live_src = int((store.nsrc > 0).sum())
+    return restored, refused
 
 
 def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn,

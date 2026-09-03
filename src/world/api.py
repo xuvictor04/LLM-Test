@@ -29,7 +29,50 @@ RECORD TYPES RETURNED (P4 defines them):
   WorldStep     loss, latent, inv, latent_std
   ManageResult  grow_attempted, grown, soft_culled, live, blocked_reason
 """
+import dataclasses
+
+import torch
+from torch import nn
+
 from spine.lever import Config
+
+
+class World:
+    """The dynamics subsystem, or a NULL one that every method still answers for.
+
+    THE NULL WORLD IS NOT None AND THAT IS THE WHOLE OF THE D4 REPAIR. At WORLD_ENABLED=0 this
+    object still exists and every method returns the inert answer -- zero loss terms, no forecast,
+    an empty manage result, an empty geometry. A None would make every caller test for it, and the
+    branch that only runs when the subsystem is off is the branch that rots between the runs that
+    use it. Here OFF is a configuration the run can actually take, on the same code path.
+
+    `built` is "live" or "null" and is the first thing the report prints about this package,
+    because "0 world loss" from a live subsystem and "0 world loss" from a null one are different
+    statements and the survey has 57 records of them being printed the same way.
+
+    EVERY SHAPE COMES FROM THE Config. world_model.py's own signature defaults are
+    (n0=2, nmax=8, hid=128, route_dim=32, tau=1.0) while the product loop passed (3, 6, 128, 24) --
+    four of five differ, so a reader who trusts the module tells themselves the wrong population
+    size, cap and key width.
+    """
+
+    __slots__ = ("built", "encoder", "preds", "keys", "qproj", "world_proj", "fit", "mass",
+                 "alive", "grown", "nmax", "n_live", "horizon", "feedback", "lat",
+                 "_wl_ema", "_wl_lastgrow", "counters", "rng")
+
+    def __init__(self, *, built, nmax=0, n_live=0, horizon=1, feedback=False, lat=0, rng=None):
+        self.built = built
+        self.encoder = self.qproj = self.world_proj = None
+        self.preds = self.keys = None
+        self.fit = self.mass = self.alive = self.grown = None
+        self.nmax, self.n_live = nmax, n_live
+        self.horizon, self.feedback, self.lat = horizon, feedback, lat
+        self._wl_ema, self._wl_lastgrow = None, 0
+        self.counters = {"world.built": built, "world.live": n_live, "world.nmax": nmax}
+        self.rng = rng
+
+    def _is_live(self):
+        return self.built == "live"
 
 
 def build(world: Config, *, d_model, device, ctx_tokens, rng):
@@ -50,9 +93,66 @@ def build(world: Config, *, d_model, device, ctx_tokens, rng):
     DID IT FIRE: World.built ("live" | "null"), and the constructed shape as a record
     """
     world = world.owned_by("WORLD")
-    raise NotImplementedError(
-        "WORLD.build: P4 (world) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section WORLD.")
+    if not bool(world.enabled):
+        # THE NULL WORLD. Constructed, not None -- see the class docstring. It carries the horizon
+        # and the feedback flag so a caller can still print what the run WOULD have done, and
+        # `built` reads "null" so no report can confuse an inert subsystem with a live one that
+        # measured zero.
+        return World(built="null", horizon=int(world.horizon), feedback=bool(world.feedback),
+                     lat=int(world.lat), rng=rng)
+
+    lat, hid, route_d = int(world.lat), int(world.hid), int(world.route_d)
+    n0, nmax = int(world.n0), int(world.nmax)
+    if n0 > nmax:
+        raise ValueError(
+            f"WORLD_N0={n0} exceeds WORLD_NMAX={nmax}: the founding population does not fit in the "
+            f"pool. Refused rather than clamped -- a clamp would make the banner print a founding "
+            f"size the run did not use.")
+
+    gen = torch.Generator(device="cpu")
+    gen.manual_seed(rng.randint(0, 2 ** 31 - 1))
+    w = World(built="live", nmax=nmax, n_live=n0, horizon=int(world.horizon),
+              feedback=bool(world.feedback), lat=lat, rng=rng)
+
+    w.encoder = nn.Sequential(nn.Linear(int(d_model), hid), nn.Tanh(), nn.Linear(hid, lat)).to(device)
+    w.world_proj = nn.Linear(lat, int(d_model)).to(device)
+    w.qproj = nn.Linear(lat, route_d).to(device)
+    # PREALLOCATED TO nmax, LIKE THE FABRIC'S POOL, so growth advances n_live into rows that already
+    # exist. A dynamics population that MINTS parameters mid-run is the case OPT's add_param_group
+    # callable exists for, and it is the one that makes a resume's param-group structure depend on
+    # how much the parent grew.
+    w.preds = nn.Parameter(torch.zeros(nmax, lat, lat, device=device))
+    w.keys = nn.Parameter(torch.zeros(nmax, route_d, device=device))
+    # BUFFERS SIZED nmax, NOT n_live. world_model.py registered fit/mass/alive as buffers of size
+    # nmax and the resume path read only world_cfg["n"], so a resume at a different WORLD_NMAX
+    # reached load_state_dict with mismatched buffer shapes -- which is ISSUES P1-H22 from the side
+    # this constructor controls.
+    w.fit = torch.zeros(nmax, device=device)
+    w.mass = torch.zeros(nmax, device=device)
+    w.alive = torch.zeros(nmax, dtype=torch.bool, device=device)
+    w.alive[:n0] = True
+    w.grown = torch.zeros(nmax, dtype=torch.long, device=device)
+
+    with torch.no_grad():
+        for t in list(w.encoder.parameters()) + list(w.world_proj.parameters()) + \
+                list(w.qproj.parameters()):
+            if t.dim() >= 2:
+                t.uniform_(-0.1, 0.1, generator=gen)
+            else:
+                t.zero_()
+        # keys are drawn; preds stay ZERO so a newly grown predictor is the identity-free zero map
+        # and adding one perturbs nothing that already works -- the same rule as the fabric's B.
+        k = torch.empty(nmax, route_d)
+        k.uniform_(-0.1, 0.1, generator=gen)
+        w.keys.copy_(k.to(device))
+
+    w.counters.update({
+        "world.built": "live", "world.live": n0, "world.nmax": nmax,
+        "world.lat": lat, "world.route_d": route_d, "world.horizon": int(world.horizon),
+        "world.ctx_tokens": int(ctx_tokens),
+        "world.feedback": 1 if bool(world.feedback) else 0,
+    })
+    return w
 
 
 def loss_terms(world: Config, w, obs_emb):
