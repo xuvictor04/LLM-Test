@@ -32,6 +32,7 @@ from torch import nn
 from spine.lever import Config
 from spine import rng as _rng
 from spine.gate import NotBuilt
+from spine.init import is_scale as _is_scale
 
 
 class GeometryError(ValueError):
@@ -244,18 +245,6 @@ def _param_estimate(arch, width, layers, ctx, vocab_slots, compose):
     return int(tok_table + pos + body + head)
 
 
-def _is_scale(name):
-    """Is this 1-D parameter a MULTIPLICATIVE scale rather than an additive bias?
-
-    By name, because torch does not mark it: nn.LayerNorm and nn.GroupNorm both call their scale
-    `weight`, exactly as a Linear calls its matrix `weight`, and the only thing separating them at
-    this level is the dimension count -- which is what made the mistake available. A scale
-    initialised to 0 is a branch that outputs zero forever; a bias initialised to 1 is merely a
-    small offset. The asymmetry is why this is decided rather than defaulted.
-    """
-    return name.endswith("weight") and (".norm" in name or "norm." in name or name.startswith("norm"))
-
-
 def build_model(lm: Config, geom, *, device, seed):
     """Construct the network described by `geom` and return an nn.Module.
 
@@ -311,14 +300,21 @@ def build_model(lm: Config, geom, *, device, seed):
                  rng.issued()["lm"]
     """
     lm = lm.owned_by("LM")
-    # ONE STREAM, AND EVERY TENSOR FROM IT, so LM's initialisation cannot be reordered by another
-    # package's draws. again=True because RUN.streams already minted "lm" into the register at
-    # step 0 -- this is that stream being used, not a second one.
-    stream = _rng.rng_for("lm", int(seed), again=True)
-    gen = torch.Generator(device="cpu")
+    # A CHILD OF THE DECLARED PARENT, NOT A SECOND "lm". RUN.streams mints "lm" into the register
+    # at step 0; asking for that same name again -- even with again=True, which is documented for a
+    # checkpoint rebuild -- produces a SECOND live Rng replaying the identical sequence, so the
+    # object the root holds reports zero draws forever while this function quietly consumed the
+    # values it would have handed out. That is the P1-H55 / P1-H56 shape a third time, and the
+    # repair is the one already ruled twice: the parent stays declared and this package draws from
+    # a child.
+    stream = _rng.rng_for("lm.init", int(seed))
+    # ON THE TARGET DEVICE. torch's in-place random ops require the generator and the tensor to
+    # share a device, so a cpu Generator filling parameters already moved to cuda raises on every
+    # GPU run while every CPU test passes.
+    gen = torch.Generator(device=device)
     gen.manual_seed(stream.randint(0, 2 ** 31 - 1))
 
-    model = _LM(geom)
+    model = _LM(geom).to(device)
     for name, t in model.named_parameters():
         with torch.no_grad():
             if t.dim() >= 2:
@@ -339,7 +335,7 @@ def build_model(lm: Config, geom, *, device, seed):
                 t.fill_(1.0)
             else:
                 t.zero_()
-    return model.to(device)
+    return model
 
 
 def embed(lm: Config, model, x):
@@ -517,7 +513,14 @@ def decode(lm: Config, model, h, *, live_vocab, retired_ids):
         # push the dead rows down and every eval path then scores it with those untrained rows
         # still in the denominator.
         dead = torch.zeros(logits.shape[-1], dtype=torch.bool, device=logits.device)
-        dead[int(live_vocab):] = True            # never minted: a suffix
+        # `live_vocab` IS THE COUNT OF MINTED ROWS, AND IT IS ALSO WHERE THEY END, because ids are
+        # positional and minting is append-only: rows [0, live_vocab) exist and [live_vocab, slots)
+        # never did. THE TWO ARE ONLY THE SAME NUMBER WHEN NOTHING IS RETIRED, and the caller passes
+        # Vocabulary.size() -- the full id count -- rather than live_size(), precisely so that this
+        # boundary does not move when a row is retired. Retired ids are handled BELOW, by id, for
+        # the same reason: retire() pops from the match table and leaves id2bytes intact so ids stay
+        # positional, so retired rows are scattered below the boundary and are not a suffix.
+        dead[int(live_vocab):] = True
         if retired_ids:
             # RETIRED ROWS ARE BELOW live_vocab AND ARE NOT A SUFFIX. Probation pops from seq2id
             # while leaving id2bytes intact so ids stay positional, so a suffix rule would mask the

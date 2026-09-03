@@ -35,6 +35,7 @@ from torch import nn
 from spine.lever import Config
 from spine import derive as _derive
 from spine.gate import Gate, NotBuilt
+from spine.init import is_scale as _is_scale
 from spine import units as U
 
 
@@ -63,8 +64,18 @@ class Population:
 
     def __init__(self, *, cap, n0, d_model, rank, signature_dim, device, rng, on, hop_arm):
         self.cap, self.n_live, self.depth_now = cap, n0, 1
-        self.A = torch.zeros(cap, d_model, rank, device=device)
-        self.B = torch.zeros(cap, rank, d_model, device=device)
+        # nn.Parameter, NOT A PLAIN TENSOR, and this is the difference between a society of experts
+        # and 4096 frozen zeros. The first version allocated A and B with torch.zeros, so
+        # requires_grad was False, `parameters()` did not exist, and the composition root's
+        # `_base_parameters` would have appended a warning and trained nothing: every expert's
+        # contribution stays EXACTLY ZERO for the whole run while the population grows, culls and
+        # replicates around it, and every report line still prints. That is both goals' central
+        # mechanism, inert, with the arithmetic intact.
+        self.A = nn.Parameter(torch.zeros(cap, d_model, rank, device=device))
+        self.B = nn.Parameter(torch.zeros(cap, rank, d_model, device=device))
+        # `cent` IS NOT A PARAMETER and must not become one. Centroids are moved by an EMA in
+        # ground_update, not by a gradient; making them trainable would put the router's key space
+        # under the loss and let the model minimise by moving the keys rather than the experts.
         self.cent = torch.zeros(cap, signature_dim, device=device)
         self.born = [0] * cap            # every founder HAS a birthday; see the class docstring
         self.use = [0] * cap
@@ -87,6 +98,18 @@ class Population:
 
     def n(self):
         return self.n_live
+
+    def parameters(self):
+        """Every trainable tensor this package owns, for the composition root's `base` group.
+
+        THE ROOT ASKS THE OBJECT, IT DOES NOT WALK A MODULE TREE. compose._base_parameters calls
+        `getattr(obj, "parameters", None)` on the model, the population and the world and appends a
+        WARNING when it is missing -- so a Population without this method does not fail, it trains
+        nothing and says so in a line nobody has to read. The expert pool is preallocated, so this
+        list is the same length on every step of every run and a checkpoint's param-group structure
+        cannot depend on how much the population grew.
+        """
+        return [self.A, self.B] + list(self.modules.parameters())
 
 
 def build(fab: Config, *, d_model, signature_dim, device, generator):
@@ -158,16 +181,18 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                      on=on, hop_arm=arm)
 
     # A is drawn, B stays ZERO. Every expert is born an identity; see Population's docstring.
-    gen = torch.Generator(device="cpu")
+    # THE GENERATOR IS CREATED ON THE TARGET DEVICE. torch's in-place random ops require the
+    # generator and the tensor to be on the SAME device, so a cpu Generator filling tensors already
+    # moved to cuda raises -- on every GPU run, which is every real run, while every CPU smoke test
+    # passes. A device mismatch that only fails on the hardware you cannot test on is the worst
+    # shape this defect can take.
+    gen = torch.Generator(device=device)
     gen.manual_seed(generator.randint(0, 2 ** 31 - 1))
     with torch.no_grad():
-        a = torch.empty(cap, d_model, rank)
-        a.uniform_(-(1.0 / max(1, d_model)) ** 0.5, (1.0 / max(1, d_model)) ** 0.5, generator=gen)
-        pop.A.copy_(a.to(device))
-        c = torch.empty(cap, int(signature_dim))
-        c.uniform_(-0.1, 0.1, generator=gen)
-        c = c / c.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-        pop.cent.copy_(c.to(device))
+        bound = (1.0 / max(1, d_model)) ** 0.5
+        pop.A.uniform_(-bound, bound, generator=gen)
+        pop.cent.uniform_(-0.1, 0.1, generator=gen)
+        pop.cent.div_(pop.cent.norm(dim=-1, keepdim=True).clamp_min(1e-8))
 
     dk, hid = int(fab.dk), int(fab.emb_hid)
     pop.modules = nn.ModuleDict({
@@ -178,9 +203,11 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         "halt_key": nn.Linear(d_model, 1),
     }).to(device)
     with torch.no_grad():
-        for t in pop.modules.parameters():
+        for name, t in pop.modules.named_parameters():
             if t.dim() >= 2:
                 t.uniform_(-0.1, 0.1, generator=gen)
+            elif _is_scale(name):
+                t.fill_(1.0)
             else:
                 t.zero_()
 
@@ -193,14 +220,27 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         "fab.off": 0 if on else 1,
         "fab.hop_arm": arm,
     }
+    # THE TWO GATES WERE INVERTED IN THE FIRST VERSION and the inversion is worth naming, because
+    # it is the exact confusion spine/gate.py exists to prevent, committed inside the gate wiring.
+    # `fab.on` is the SWITCH: at FAB_ON=0 it did not fail to be reachable, it was reachable and READ
+    # FALSE -- the operator turned the fabric off and the report must say the switch is off, not
+    # that the switch could not be evaluated. What becomes UNREACHABLE at FAB_ON=0 is every gate
+    # BELOW it, `fab.cull_gate` among them: a cull cannot fire in a population whose forward is the
+    # identity, so reporting it as FIRED (which the first version did, because the arithmetic is
+    # still true) claims a mechanism ran that could not have.
+    cull_open = _derive.cull_gate_open(n0, slots, float(fab.pressure))
     pop.gates = (
-        Gate("fab.on", on, on, True) if on else
-        Gate("fab.on", False, False, True, reachable=False,
-             reason="FAB_ON=0: the forward is the identity and every other fabric row reports "
-                    "unreachable rather than 'armed but 0' -- two different statements"),
-        Gate("fab.cull_gate",
-             _derive.cull_gate_open(n0, slots, float(fab.pressure)),
-             f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure)),
+        Gate("fab.on", on, on, True,
+             reason="" if on else "FAB_ON=0: the forward is the identity, so every gate below this "
+                                  "one reports UNREACHABLE rather than 'armed but 0'."),
+        Gate("fab.cull_gate", cull_open,
+             f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure))
+        if on else
+        Gate("fab.cull_gate", False,
+             f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure), reachable=False,
+             reason="FAB_ON=0: there is no population to cull. The occupancy arithmetic still "
+                    "evaluates, and printing it as FIRED would claim a mechanism ran that the "
+                    "switch above had already turned off."),
     )
     # THE WIRE IS READ AND COMPARED, not merely touched: d_operating_population is the same
     # derive.operating_population call the counter above makes, computed by the assembly from the

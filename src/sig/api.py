@@ -39,10 +39,10 @@ class _Encoder(nn.Module):
     there.
     """
 
-    def __init__(self, alphabet_size, d, generator):
+    def __init__(self, alphabet_size, d, generator, *, device=None):
         super().__init__()
-        self.emb = nn.Embedding(alphabet_size, d)
-        self.proj = nn.Linear(d, d)
+        self.emb = nn.Embedding(alphabet_size, d, device=device)
+        self.proj = nn.Linear(d, d, device=device)
         with torch.no_grad():
             self.emb.weight.uniform_(-0.1, 0.1, generator=generator)
             self.proj.weight.uniform_(-0.1, 0.1, generator=generator)
@@ -116,11 +116,13 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
             f"max(1, SIG_WIN) while training used 614, so every eval-path routing decision in "
             f"every report was made on a one-byte signature and nothing failed.")
 
-    gen = torch.Generator(device="cpu")
+    # ON THE TARGET DEVICE: torch's in-place random ops require the generator and the tensor to
+    # share one, so a cpu Generator filling a table allocated on cuda raises on every GPU run.
+    gen = torch.Generator(device=device)
     gen.manual_seed(generator.randint(0, 2 ** 31 - 1))
     mode = str(sig.mode)
     if mode == "learned":
-        encoder = _Encoder(int(alphabet_size), int(sig.d), gen).to(device)
+        encoder = _Encoder(int(alphabet_size), int(sig.d), gen, device=device)
     elif mode == "bigram":
         # THE FROZEN TABLE ARM. A random projection of bigram counts -- no parameters that train,
         # which is what makes it the control arm the learned encoder is read against.

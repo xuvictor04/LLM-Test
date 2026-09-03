@@ -1500,7 +1500,13 @@ def check_o10_no_backdoor_imports(mods):
     # alternative was thirteen private Gate classes, which is thirteen chances for one of them to
     # collapse the last two states -- and those are 57 and 60 records of the survey respectively,
     # two different bugs needing two different words.
-    ALLOWED_SPINE = ("lever", "units", "derive", "rng", "wire", "gate")
+    # "init" JOINED ON 2026-09-02, on the same standard as "gate": shared VOCABULARY, not a
+    # mechanism. spine/init.py holds one pure predicate -- is this 1-D parameter a multiplicative
+    # scale or an additive bias -- with no state, no lever read and no import. Three packages
+    # allocate modules and all three must answer it identically; the measured cost of one copy
+    # getting it wrong is a transformer whose every residual branch outputs zero while the loss
+    # reads exactly ln(vocab_slots), which is what a dead network produces.
+    ALLOWED_SPINE = ("lever", "units", "derive", "rng", "wire", "gate", "init")
     findings = []
     _PKG_DIRS = {m.rel.split("/")[1] for m in mods
                  if m.rel.startswith("src/") and m.rel.count("/") >= 2} - {"spine"}

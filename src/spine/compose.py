@@ -1307,6 +1307,16 @@ DEFERRED_ENTRY_POINTS = {
     # embedding rows, TOK's own minting rows and EVAL's decode, none of which have bodies yet. Every
     # one of them takes only `self` (or an id), so there is no argument without a producer: what is
     # missing is the CALLER, and that is the whole reason each line below says which one.
+    "FAB.Population.parameters":
+        "P4, with OPT.build. IT IS ALREADY CALLED, by name, from this file: _base_parameters does "
+        "`getattr(obj, \"parameters\", None)` on the model, the population and the world and appends "
+        "a WARNING when it is missing -- so the row that consumes it exists and OPT.build, which "
+        "receives the list, does not. Listed here rather than credited to _base_parameters because "
+        "a helper in the composition root is not an order-table row. It takes only self, so there "
+        "is no argument without a producer. THE COST OF ITS ABSENCE IS MEASURED: without it the "
+        "expert pool contributed nothing to the base param group, so every expert's contribution "
+        "stayed exactly zero while the population grew, culled and replicated around it -- both "
+        "goals' central mechanism, inert, with every report line still printing.",
     "FAB.Population.n":
         "P4, with the rows that read the live population size: FAB.manage's cull budget, CAP's "
         "startup refusal against CAP_FAB_START, and the banner. It is the accessor the growth "

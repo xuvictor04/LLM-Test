@@ -237,9 +237,19 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         # declaration, the levers -- and any disagreement is a printed reconciliation, not a silent
         # adoption (ISSUES P1-M80, P1-L20: a resume setting MIN_PAIR=200 ran with the parent's value
         # while the audit printed "NOTHING READ THESE" naming a knob that was set and ignored).
+        # MINTED ON THIS BRANCH TOO. P1-H56's repair minted `tok.dropout.mint` on the build path
+        # and returned from here without it, so every RESUME of a TOK_DROPOUT>0 run died at the
+        # first segmentation -- the same crash, reintroduced on the one branch the fix did not
+        # cover. Minted BEFORE the early return, unconditionally, for exactly that reason.
+        vocab.dropout_rng = _rng.rng_for("tok.dropout.mint", seed)
         replayed = _replay_merges(vocab, read_path)
         if replayed is not None:
             vocab.v0 = vocab.size()
+            if mode == "fixed":
+                # THE FIXED ARM CLOSES ITS CEILING ON THIS PATH AS WELL. Closing it only on the
+                # build path meant a resumed "fixed" run had an OPEN ceiling and could keep minting
+                # -- the arm's one promise, broken by which branch the run happened to take.
+                vocab.ceiling = vocab.size()
             ids, _pos = _segment(vocab, sample, dropout=0.0, stream=None)
             vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
             return vocab
@@ -292,22 +302,70 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     vocab.v0 = vocab.size()
     # THE ONE ESTIMATOR (ISSUES P1-H16). The mean-over-vocabulary-entries form read 1.50 against
     # 1.85 as used, and its error changes SIGN with vocabulary size -- which is the axis those runs
-    # were compared along. Measured here, on the build sample, with the counting segmentation.
-    ids, _pos = _segment(vocab, sample, dropout=0.0, stream=None)
+    # were compared along.
+    # MEASURED WITH DROPOUT APPLIED, because the contract says "the COUNTING segmentation applies
+    # tok.dropout" and because this number is what SIG's one signature width and DATA's splice gate
+    # are computed from. A dropout-free measurement describes a segmentation the TRAINING stream
+    # never produces: at TOK_DROPOUT>0 the stream is longer in tokens than the estimate, so the
+    # signature window is too narrow and the splice gate is optimistic, on every run that turns
+    # regularisation on. At the 0.0 default the two are identical and nothing moves.
+    ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
     vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
     return vocab
 
 
 def _replay_merges(vocab, path):
-    """Replay a parent's merges into `vocab`. Returns the vocabulary, or None if unreadable."""
+    """Replay a parent's vocabulary into `vocab`, EXACTLY or not at all. None if unreadable.
+
+    IDS ARE POSITIONS IN THE EMBEDDING TABLE, so a replay that drops one entry and shifts every id
+    after it does not produce a smaller vocabulary -- it produces a DIFFERENT one, attaching the
+    parent's trained embedding rows to different tokens. The first version called `_add` in a loop
+    and ignored its refusals (`_add` returns None past max_bytes, past the cap, or on a duplicate),
+    which is exactly that renumbering, silently, on the resume every continual-learning number in
+    this project is measured across. So a refused entry is now a REFUSAL of the whole replay.
+
+    THE MERGE TABLE IS PART OF THE VOCABULARY. `_add` only appends to `merges` and `pair` when it is
+    given a pair, and the first version passed none -- so a replayed vocabulary carried an EMPTY
+    merge history, was not the parent's vocabulary by its own accounting, and the next save
+    propagated the loss. The pair is recorded in the file and is replayed with the sequence.
+    """
     import json
     import os
     if not os.path.isfile(path):
         return None
     with open(path, "r", encoding="utf-8") as fh:
         blob = json.load(fh)
-    for seq_hex in blob.get("id2bytes", [])[256:]:
-        vocab._add(bytes.fromhex(seq_hex), prov="replay")
+
+    entries = blob.get("entries")
+    if entries is None:
+        # THE OLD SHAPE, ACCEPTED AND NAMED. A file carrying only `id2bytes` has no pair history to
+        # replay, so the vocabulary comes back with the right ids and an empty merge table -- which
+        # is a real loss and is recorded on the object rather than passed off as a clean restore.
+        raw = blob.get("id2bytes")
+        if raw is None:
+            raise ValueError(
+                f"{path!r} carries neither `entries` nor `id2bytes`. A resume must reuse the saved "
+                f"vocabulary or the restored embedding table is indexed by a different one; "
+                f"replaying nothing would silently train a 256-symbol byte vocabulary against a "
+                f"checkpoint built on the parent's.")
+        entries = [{"bytes": h} for h in raw[256:]]
+        vocab.prov[-1] = "replay:id2bytes-only (no pair history in the file)"
+
+    for k, ent in enumerate(entries):
+        seq = bytes.fromhex(ent["bytes"]) if isinstance(ent, dict) else bytes.fromhex(ent)
+        pair = tuple(ent["pair"]) if isinstance(ent, dict) and ent.get("pair") else None
+        got = vocab._add(seq, prov="replay", pair=pair)
+        if got is None:
+            raise ValueError(
+                f"{path!r} entry {k} (id {256 + k}) could not be replayed: {seq!r} is a duplicate, "
+                f"longer than TOK_MAX_BYTES={vocab.max_bytes}, or past the ceiling "
+                f"{vocab.ceiling}. REFUSED rather than skipped -- ids are positions in the "
+                f"embedding table, so dropping one entry renumbers every id after it and attaches "
+                f"the parent's trained rows to different tokens.")
+        if got != 256 + k:
+            raise ValueError(
+                f"{path!r} replayed entry {k} landed at id {got}, not {256 + k}. The id space has "
+                f"drifted and the parent's embedding rows no longer line up.")
     return vocab
 
 
