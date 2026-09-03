@@ -1,0 +1,142 @@
+[
+  {
+    "file": "src/data/api.py",
+    "line": 758,
+    "symbol": "draw_stream",
+    "title": "DATA_SEG_MIN=DATA_SEG_MAX=0 makes draw_stream loop forever",
+    "failure": "With DATA_SEG_MIN=0 and DATA_SEG_MAX=0 (both zero-length), `want = stream.randint(seg_min, seg_max)` is always 0, so `chunk` is always b\"\", `len(out)` never advances, and the `while len(out) < hi:` loop at line 742 spins forever without ever hitting the phase bound. The run hangs with no error, no traceback, and no clock to time it out.",
+    "evidence": "Reproduced live: `DATA_AREAS=eng DATA_SOURCE=real DATA_SEG_MIN=0 DATA_SEG_MAX=0` through open_areas -> data_plan -> draw_stream, run under `timeout 30`, process had to be killed (`Terminated`, exit 143) with no output after open_areas/data_plan succeeded. Traced by hand: `want=min(want, hi-len(out))=0`, `min(want, budget[idx])=0` (budget never depletes since chunks add 0 bytes), so `avail` never empties and the `if not avail:` rescue branch that would otherwise force progress is never reached. This is the still-live instance of round1's data/api.py:733 finding; the code is byte-for-byte unchanged since that finding was filed.",
+    "severity": "critical",
+    "fix": "Before the draw loop, refuse SEG_MIN==0 and SEG_MAX==0 (or more generally SEG_MAX==0) as a named startup condition (`DATA_SEG_MIN/SEG_MAX ... produces zero-length segments and would never terminate`), the same way SEG_MIN>SEG_MAX is refused; or clamp `want` to at least 1 byte per segment inside the loop and count it as a gate rather than looping silently."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 758,
+    "symbol": "draw_stream",
+    "title": "DATA_SEG_MIN > DATA_SEG_MAX passes every startup gate then dies inside the draw with an unnamed ValueError",
+    "failure": "Nothing in open_areas or data_plan validates seg_min <= seg_max, so a DATA_SEG_MIN > DATA_SEG_MAX configuration builds a config and computes a Plan successfully. The crash only happens once draw_stream calls `stream.randint(seg_min, seg_max)`, and the resulting exception is CPython's own `ValueError: empty range for randrange()`, which names neither DATA_SEG_MIN nor DATA_SEG_MAX -- the exact 'refusal must name the lever' rule this codebase otherwise follows everywhere else in this file.",
+    "evidence": "Reproduced live: `DATA_AREAS=eng DATA_SOURCE=real DATA_SEG_MIN=2000 DATA_SEG_MAX=1000`. open_areas and data_plan both succeed and print gate values; draw_stream then raises:\n```\nValueError: empty range for randrange() (2000, 1001, -999)\n  File \".../data/api.py\", line 758, in draw_stream\n    want = stream.randint(seg_min, seg_max)\n```\nStill live -- identical to round1's data/api.py:717 finding; no commits have touched this file since that finding was filed (git log shows src/data/api.py unchanged since commit dd1ca9f).",
+    "severity": "high",
+    "fix": "Add a startup refusal in open_areas or data_plan (or at the top of draw_stream, before any draw): `if int(dat.seg_min) > int(dat.seg_max): raise CorpusError(f\"DATA_SEG_MIN={dat.seg_min} > DATA_SEG_MAX={dat.seg_max} ...\")`, naming both numbers, so the refusal happens once at startup instead of nondeterministically inside the first draw of the first epoch."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 711,
+    "symbol": "draw_stream",
+    "title": "draw_stream mints its per-epoch RNG stream with an unconditional again=True, disarming the duplicate-stream collision guard",
+    "failure": "`_rng.rng_for(f\"data.stream.e{int(epoch)}\", seed, again=True)` passes again=True on every call with no rebuild (checkpoint restore or otherwise) to justify it. draw_stream's own docstring says it is 'Called once per epoch by the composition root, UNCONDITIONALLY', so under correct usage the guard would never trip anyway -- but with it permanently disabled, a caller bug that invokes draw_stream twice for the same epoch (a retry after a downstream exception, a duplicate call in a loop) silently gets two live generators replaying the identical sequence instead of the RngError this project relies on everywhere else to catch exactly this class of two-call-sites-one-sequence collision.",
+    "evidence": "Reproduced live: called `draw_stream(dat, areas, plan, epoch=0, seed=1)` twice in one process (same areas/plan). No RngError raised on the second call; `st_a.bytes == st_b.bytes` is True -- the two 'independent' streams silently replayed the same values. With again=False (the normal rng_for behaviour used everywhere else, e.g. data.holdout.<key> and data.synth.<label>), the second call would instead raise `RngError: stream 'data.stream.e0' was already issued for seed 1`. This is the still-live instance of round1's data/api.py:702/707 finding (three other instances of this exact pattern -- lm.init, tok.dropout.mint, data.synth.<label> -- have already been repaired with the documented child-stream fix; this is the site that was missed).",
+    "severity": "high",
+    "fix": "Drop `again=True` from the rng_for call at line 711 (nothing legitimately re-mints 'data.stream.e<n>' in one process), or if a genuine rebuild path exists, gate `again=True` on that specific condition and pass `again=False` on the ordinary call path so a genuine duplicate call is caught."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 716,
+    "symbol": "draw_stream",
+    "title": "The seg_contig cursor is mutated on a local copy and never written back, so it does not persist across epochs as documented",
+    "failure": "`cursors = dict(areas.cursors)` (line 716) makes a private copy; `cursors[label] = start + want` (line 775) updates only that copy. `areas` is a frozen dataclass and draw_stream never returns the advanced cursors anywhere the next call can read them, so every subsequent call to draw_stream re-reads `areas.cursors`, which is still all zeros from open_areas. Under DATA_SEG_CONTIG=True this means every epoch restarts reading each area from byte 0 instead of continuing where the previous epoch left off, directly contradicting the docstring's claim that the cursor 'PERSISTS ACROSS EPOCHS, so an English-only run has only the text's own boundaries rather than discontinuities we manufacture every 8-20 KB.'",
+    "evidence": "Reproduced live with DATA_RESAMPLE=1 (to force a fresh draw every epoch, ruling out the resample=False replay cache) and DATA_SEG_CONTIG=1, DATA_AREAS=eng, DATA_SOURCE=real:\n  st0 = draw_stream(epoch=0), st1 = draw_stream(epoch=1)\n  st0.bytes == body['eng'][0:len(st0.bytes)]  -> True\n  st1.bytes == body['eng'][0:len(st1.bytes)]  -> True   (epoch 1 re-reads from byte 0)\n  st1.bytes == body['eng'][len(st0.bytes):len(st0.bytes)+len(st1.bytes)] -> False  (the correct, cursor-persisted answer)\n  areas.cursors after both epochs is still {'eng': 0}\nStill live -- identical in mechanism to round1's data/api.py:707/733 findings ('the seg_contig cursor is copied into a local dict and thrown away'); unchanged since that finding was filed.",
+    "severity": "high",
+    "fix": "Thread the advanced cursor dict back out of draw_stream (e.g. attach it to the returned Stream, or make Areas.cursors mutable state owned by a wrapper the composition root updates between calls) so the next epoch's draw_stream call starts from where the previous epoch left off, matching stream_state/restore_stream_state's stated job of checkpointing 'the per-area read cursors'."
+  },
+  {
+    "file": "src/tok/api.py",
+    "line": 253,
+    "symbol": "build_vocabulary",
+    "title": "The resume branch measures bytes_per_token with dropout hardcoded to 0.0, ignoring TOK_DROPOUT",
+    "failure": "On the parent-replay path (`read_path` set), bytes_per_token is measured via `_segment(vocab, sample, dropout=0.0, stream=None)` (line 253) -- dropout is a literal 0.0 regardless of what `tok.dropout` is set to. The fresh-build path a few lines later (line 312) correctly measures with `dropout=float(tok.dropout), stream=stream`, and the docstring explicitly requires the dropout-applied measurement ('MEASURED WITH DROPOUT APPLIED, because the contract says \"the COUNTING segmentation applies tok.dropout\" ... A dropout-free measurement describes a segmentation the TRAINING stream never produces'). So every resumed run with TOK_DROPOUT>0 computes a bytes_per_token that the resumed run's own training stream will never actually produce, and that wrong number feeds directly into SIG's signature width (derive.signature_width_bytes) and DATA's data_plan splice_window gate threshold.",
+    "evidence": "Reproduced live: built a fresh vocabulary (TOK_DROPOUT=0), wrote it out in the `entries` format _replay_merges expects, pointed CKPT_RESUME at it, then rebuilt with TOK_DROPOUT=0.5 so build_vocabulary took the resume/replay branch.\n  resumed vocab.bytes_per_token (as actually produced) = 1.8613551037426268\n  bytes_per_token measured on the SAME sample with dropout=0.5 applied (what the contract requires) = 1.4357707935505175\nThe resumed value is identical to the dropout=0 value and about 30% off from what the contract specifies. This is a distinct, still-live bug from round1's tok/api.py:296 finding -- that finding was about the general/build measurement, which has since been fixed on the fresh-build arm (line 312 now correctly applies dropout); the fix was never extended to the resume/replay branch, the same 'fixed on one branch, missed on the other' pattern already recorded twice in this file's comments (tok.dropout.mint minting, and the fixed-arm ceiling close).",
+    "severity": "high",
+    "fix": "Change line 253 to `ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=vocab.dropout_rng if float(tok.dropout) > 0 else None)`, mirroring the fresh-build path, so a resumed dropout>0 run measures bytes_per_token the same way a fresh one does."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 373,
+    "symbol": "_synthetic_areas",
+    "title": "On the default source=synthetic arm, DATA_AREAS is silently ignored and replaced with p0..pN-1 whenever it names fewer areas than DATA_N_PROCESSES",
+    "failure": "`dat.source` defaults to \"synthetic\" (data/levers.py's `source = Lever(\"synthetic\", ...)`), so an operator who sets only DATA_AREAS without also setting DATA_SOURCE=real gets the synthetic generator. `labels = entries[:n] if len(entries) >= n else [f\"p{i}\" for i in range(n)]` (line 373) means that whenever `len(entries) < dat.n_processes` (the default n_processes is 4), every declared area name is thrown away and replaced by generic p0..p3 labels -- the operator's DATA_AREAS value has no effect on the run at all, silently.",
+    "evidence": "Reproduced live: `assemble.build(environ={\"DATA_AREAS\": \"eng\"})` (no DATA_SOURCE override) then `open_areas(...)`. Result: `areas.names == ('p0', 'p1', 'p2', 'p3')` -- the requested single area 'eng' never appears anywhere, and 4 synthetic Markov-process areas are trained on instead. No error, warning or refusal at any point; the config assembles and the pipeline runs to completion producing a result that has nothing to do with what was asked for. This is the still-live instance of round1's data/api.py:373 finding (label replacement) combined with the DEFAULT-SOURCE trap that makes it fire on the exact 'single area (DATA_AREAS=eng)' configuration this audit's Part 2 names.",
+    "severity": "high",
+    "fix": "When `len(entries) < n`, refuse at startup naming DATA_AREAS and DATA_N_PROCESSES (e.g. 'DATA_AREAS names 1 area(s) but DATA_N_PROCESSES=4 synthetic processes were requested; name at least 4 areas or lower DATA_N_PROCESSES') instead of silently discarding the operator's area names. Separately, consider whether DATA_SOURCE defaulting to \"synthetic\" rather than \"real\" is the intended default given every real-data example in this audit and in data/ is reachable only by explicitly setting DATA_SOURCE=real."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 374,
+    "symbol": "_synthetic_areas",
+    "title": "Synthetic-path area names keep the raw DATA_AREAS entry (slashes included); real-path names are basenames -- one lever, two label spaces",
+    "failure": "On the real-source path, an area's label is deliberately the basename (`os.path.basename(entry.rstrip(\"/\"))`, line 238), so \"continual/01_rust\" labels as \"01_rust\". On the synthetic path, `labels = entries[:n] if len(entries) >= n else ...` (line 373) takes the RAW entry string verbatim, slash and all, so the same DATA_AREAS value produces a completely different set of area names depending only on DATA_SOURCE. A label containing '/' also violates the invariant _holdout_key and the real-path collision refusals are built around (labels are meant to be simple, collidable-by-normalisation names).",
+    "evidence": "Reproduced live with DATA_AREAS=\"continual/01_rust,continual/02_sawyer,continual/03_dracula,continual/04_num2\":\n  DATA_SOURCE=synthetic -> areas.names == ('continual/01_rust', 'continual/02_sawyer', 'continual/03_dracula', 'continual/04_num2')\n  DATA_SOURCE=real      -> areas.names == ('01_rust', '02_sawyer', '03_dracula', '04_num2')\nSame lever value, two different label spaces depending on an unrelated lever. Still live -- unchanged since round1's data/api.py:370 finding.",
+    "severity": "medium",
+    "fix": "Apply the same basename rule to the synthetic path's labels (or otherwise normalise them) so DATA_AREAS produces one label space regardless of DATA_SOURCE."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 375,
+    "symbol": "_synthetic_areas",
+    "title": "The synthetic path has no label/key collision refusal; a collision surfaces as an unnamed spine RngError instead of DATA's own named CorpusError",
+    "failure": "The real-source path explicitly refuses two entries that resolve to the same label or the same normalised rng key, printing both source paths (lines 244-258). The synthetic path has no equivalent check before calling `_rng.rng_for(f\"data.synth.{_holdout_key(label)}\", seed)` per area (line 375), so two DATA_AREAS entries that normalise to the same key (e.g. \"eng\" and \"Eng\") are not caught by DATA at all; the first collides successfully and the second blows up spine/rng.py's own duplicate-stream guard with a generic RngError that names the RNG subsystem, not DATA_AREAS or which two entries collided.",
+    "evidence": "Reproduced live: `DATA_AREAS=\"eng,Eng\" DATA_SOURCE=synthetic DATA_N_PROCESSES=2` raises:\n`RngError: stream 'data.synth.eng' was already issued for seed 1. A second generator for one subsystem replays the same sequence ...`\nrather than a CorpusError naming DATA_AREAS and the two colliding entries the way the real path's `area_label_collision`/key-collision refusals do. Still live -- the still-live instance of round1's data/api.py:375 finding ('the synthetic arm skips both declared collision refusals').",
+    "severity": "medium",
+    "fix": "Run the same by_label/by_key collision check used on the real path (lines 240-258) against the synthetic path's resolved labels before minting any per-area RNG stream, raising DATA's own CorpusError naming DATA_AREAS and the colliding entries."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 305,
+    "symbol": "open_areas",
+    "title": "seam_at is recorded as the block's offset unconditionally, so a held-out block landing at byte 0 or at the tail reports a manufactured seam that isn't there",
+    "failure": "`rng_holdout[label] = {..., \"seam_at\": start}` (line 305) always records `start` as the seam position with no check for whether `start == 0` or `start + n_hold == len(blob)`. The docstring's own DID IT FIRE contract for data.holdout_seam says this is 'Unreachable when a block lands at offset 0 or at the tail, which is the state it must say rather than read 0' -- but the code has no branch that ever produces that unreachable state; every held-out block, regardless of where it lands, is reported as manufacturing exactly one interior seam.",
+    "evidence": "Static: lines 287-305 contain no conditional on `start` or `start + n_hold` before setting seam_at; the field is set unconditionally on every path through the `n_hold > 0` branch. Confirmed the randint draw is inclusive of both endpoints (`stream.randint(0, len(blob) - n_hold)`), so offset 0 and the tail are both reachable outcomes of ordinary operation, not edge cases requiring adversarial input. Still live -- identical to round1's data/api.py:305 finding; the file is byte-for-byte unchanged in this region since that finding was filed.",
+    "severity": "low",
+    "fix": "After computing `start`, set `seam_at = start if 0 < start and start + n_hold < len(blob) else None` (or a similar boundary check) so the docstring's declared unreachable state is actually reachable and printed rather than silently never occurring."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 195,
+    "symbol": "open_areas",
+    "title": "data.holdout_overlap is declared as a startup reading but never computed anywhere",
+    "failure": "The docstring declares `data.holdout_overlap` as 'a READING, not a lever and not a gate: the fraction of held-out bytes that also occur verbatim in the training body at a fixed n-gram length, per area, printed once at startup' -- the one instrument this package has for near-duplicate contamination between the held-out block and the training body. No code anywhere in open_areas (or anywhere else in this file) computes an n-gram overlap between `holdout[label]` and `bodies[label]`.",
+    "evidence": "`grep -n holdout_overlap src/data/api.py` returns exactly one hit, the docstring line itself (195); no assignment, no function, no return value carries this reading anywhere in the module. Still live -- identical to round1's data/api.py:211 finding.",
+    "severity": "low",
+    "fix": "Compute the declared n-gram overlap between `holdout[label]` and `bodies[label]` for each area after the split and surface it (e.g. as a field on Areas, or through the same reporting channel the other DID IT FIRE rows use), or narrow the docstring if this reading is being deferred to a later package version."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 313,
+    "symbol": "open_areas",
+    "title": "open_areas and draw_stream produce none of the counters/gates their own DID IT FIRE contracts declare",
+    "failure": "Both docstrings enumerate an extensive DID IT FIRE surface (open_areas: data.area_open, data.area_nested, data.area_path_refused, data.area_label_collision, data.corpus_cap_trip, data.holdout_block, data.holdout_seam, data.holdout_overlap, data.val_cap_trip, data.area_refused; draw_stream: data.stream_draw, data.segment, data.contig_wrap, data.resample, data.phase_entered). Neither returned record type carries a place for any of them: `Areas` (fields: names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout) and `Stream` (fields: bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn, epoch, stream_id) have no counters/gates field at all, unlike `Plan`, which does carry a `gates: tuple`. So none of these mechanisms can ever be observed as fired / armed-but-0 / unreachable -- the three-state distinction this codebase calls its most repeated defect collapses to nothing for the entire open_areas/draw_stream surface.",
+    "evidence": "Read both dataclass definitions (lines 52-71 and 412-428) end to end: no counters, no gates, no Gate(...) construction anywhere in open_areas' or draw_stream's bodies (contrast with data_plan, which does build and return `gates`). Still live -- identical to round1's data/api.py:313/702 findings.",
+    "severity": "medium",
+    "fix": "Add a counters/gates surface to Areas and Stream (or a side-channel the composition root can read after calling these functions) and populate each declared DID IT FIRE row at the point in the code where the corresponding decision is made (the path refusal, the label collision check, the corpus-cap truncation, the per-epoch draw loop, etc.)."
+  },
+  {
+    "file": "src/data/api.py",
+    "line": 529,
+    "symbol": "data_plan",
+    "title": "n_by_name is counted while parsing DATA_PHASE_SCHED but discarded -- data.phase_name_resolved cannot exist",
+    "failure": "`n_by_name` is incremented every time a DATA_PHASE_SCHED entry resolves as an area NAME rather than an index (line 549), but it is never placed on `Plan` (whose fields are protocol, schedule, phase_bounds, per_area_draw, exposure, gates) or returned any other way. The docstring's declared DID IT FIRE row `data.phase_name_resolved` therefore has no value to report; the count is computed and then thrown away.",
+    "evidence": "`grep -n n_by_name src/data/api.py` shows only the initialisation (line 529) and the increment (line 549); `Plan`'s field list (lines 396-409) has no matching field, and the `return Plan(...)` statement (line 648) does not mention it. Still live -- identical to round1's data/api.py:548 finding.",
+    "severity": "low",
+    "fix": "Either add a `phase_name_resolved` field to Plan and populate it with `n_by_name`, or surface it through whatever counters mechanism is added for the open_areas/draw_stream gap above."
+  },
+  {
+    "file": "src/tok/api.py",
+    "line": 197,
+    "symbol": "build_vocabulary",
+    "title": "build_vocabulary's LEVERS READ declares cand_window, mint_pmin and mint_novel; the function body never reads any of them",
+    "failure": "The docstring's LEVERS READ list (line 197-198) includes `cand_window, mint_pmin, mint_novel` alongside the levers build_vocabulary actually uses. Reading the whole function body (lines 208-314), none of `tok.cand_window`, `tok.mint_pmin`, or `tok.mint_novel` is referenced anywhere -- they belong to mint_burst (whose own, correctly-scoped LEVERS READ list at line 591 also names them), which is still a stub. An audit or report that trusts build_vocabulary's declared LEVERS READ list would report these three knobs as read by the build when they are inert on every arm of it.",
+    "evidence": "`grep -n \"tok.cand_window\\|tok.mint_pmin\\|tok.mint_novel\"` inside build_vocabulary's body (lines 208-314) returns nothing; the only occurrences of these three names in the file are the two LEVERS READ declarations (build_vocabulary's at line 198, mint_burst's at line 591) and mint_burst's docstring prose. Still live -- identical to round1's tok/api.py:197 finding.",
+    "severity": "low",
+    "fix": "Remove cand_window, mint_pmin and mint_novel from build_vocabulary's LEVERS READ list -- they are mint_burst's, not the build's."
+  },
+  {
+    "file": "src/tok/api.py",
+    "line": 462,
+    "symbol": "tokenize",
+    "title": "The re-segmentation no-op refusal the docstring specifies does not exist in the body",
+    "failure": "tokenize's docstring (lines 423-427) specifies: 'A RE-SEGMENTATION WHOSE MATCH TABLE HAS NOT MOVED since the last one is REFUSED here and counted as tok.retok_noop, not performed ... The invariant stamped is (size, len(seq2id)) and NOT size alone.' The actual body (lines 462-488) has no state to compare against a previous call, no stamped invariant, and no refusal path -- it unconditionally calls `_segment` on every invocation regardless of whether the vocabulary's match table moved since the last call. tok.retok_noop, one of the function's declared DID IT FIRE rows, can therefore never be counted because nothing in this function ever computes or checks the condition that would increment it.",
+    "evidence": "Read tokenize's full body (lines 462-488): the only state read is `tok.mode`, `tok.dropout`, and `vocab`'s live fields for segmentation itself; there is no comparison of `(vocab.size(), len(vocab.seq2id))` against any prior value, no cache, no early return. Still live -- identical to round1's tok/api.py:405/420 findings, and the docstring's own measured cost figures ('2.189 b/B and 68 points of word quality (23 retoks, 22 adding zero tokens)') describe exactly the failure mode this missing check would prevent.",
+    "severity": "medium",
+    "fix": "Track `(vocab.size(), len(vocab.seq2id))` from the previous tokenize() call that had regularize=False/represented a real re-tokenization (module-level or Vocabulary-attached state), compare it at entry, and short-circuit with a tok.retok_noop count instead of calling _segment when the invariant is unchanged."
+  }
+]

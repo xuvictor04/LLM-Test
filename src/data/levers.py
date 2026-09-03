@@ -38,12 +38,15 @@ they arrive from THREE families, which is the whole argument for owning by prefi
      2 rows from the `misc` family      -- n_processes and val_cap, both mis-tagged, and the survey's
                                            so-config record says so outright for both.
 
-This file emits 17 levers:
+This file emits 18 levers:
 
     11  rows with verdict rename
   +  6  rows with verdict keep
+  +  1  amendment: DATA_DRAW, minted 2026-09-02 under the owner's ruling on ISSUES P1-H58. It has no
+         census ancestor -- the old tree had one draw law and no switch over it -- so it is carried
+         as an `amendments` row in census.json, which is what N2 reads.
   -------
-    17  Lever declarations, all reachable as DATA_<FIELD>
+    18  Lever declarations, all reachable as DATA_<FIELD>
 
 Not emitted, by verdict: 1 merge, 0 drop, 0 promote-to-wire.
   MERGED (folds into a lever this file DOES declare, so it is not an unresolved merge):

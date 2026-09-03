@@ -1,0 +1,134 @@
+[
+  {
+    "title": "The synthetic arm skips both declared collision refusals, so colliding area labels surface as a spine RngError naming neither the lever nor the paths",
+    "state": "still-present",
+    "evidence": "src/data/api.py: open_areas dispatches to _synthetic_areas at line 220-221 (`if str(dat.source) == \"synthetic\": raw, present, taken, sources = _synthetic_areas(...)`) BEFORE the label/key collision loop, which lives only in the `else` branch at lines 240-258. Ran DATA_SOURCE=synthetic DATA_AREAS='rustA,rusta,x,y' through spine.assemble.build then data_api.open_areas: raised `RngError: stream 'data.synth.rusta' was already issued for seed 0. A second generator for one subsystem replays the same sequence...` -- exactly the round-1 reproduction, naming neither DATA_AREAS nor the colliding paths.",
+    "residue": "None -- the code path is unchanged from round 1's description."
+  },
+  {
+    "title": "Synthetic areas are labelled with the raw DATA_AREAS entry, slash included, while real areas are labelled with the basename -- one lever value, two label spaces",
+    "state": "still-present",
+    "evidence": "src/data/api.py line 373: `labels = entries[:n] if len(entries) >= n else [f\"p{i}\" for i in range(n)]` uses the raw entry text, with no os.path.basename call, unlike the real arm's line 238 `os.path.basename(entry.rstrip(\"/\"))`. Ran DATA_SOURCE=synthetic DATA_AREAS='continual/01_rust,eng' DATA_N_PROCESSES=2: areas.names == ('continual/01_rust', 'eng') -- the slash survives into the label on the synthetic arm, confirming the two-label-space divergence from the real arm.",
+    "residue": "None."
+  },
+  {
+    "title": "open_areas and draw_stream produce none of the counters and gates their DID IT FIRE blocks declare, so DATA's armed-but-0 and unreachable states are indistinguishable everywhere",
+    "state": "still-present",
+    "evidence": "Areas dataclass (line 52-71) fields: names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout -- no counters/gates field. Stream dataclass (line 412-428) fields: bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn, epoch, stream_id -- also no counters/gates field. Verified programmatically: `hasattr(areas, 'counters')`, `hasattr(areas, 'gates')`, `hasattr(stream, 'counters')`, `hasattr(stream, 'gates')` all return False after a real open_areas/draw_stream call. data_plan is still the only DATA entry point returning Gate objects.",
+    "residue": "None."
+  },
+  {
+    "title": "draw_stream passes an undeclared again=True and discards the Rng, so the declared DID IT FIRE row rng.issued()[\"data.stream.e0\"].draws cannot be evaluated at all",
+    "state": "still-present",
+    "evidence": "src/data/api.py line 711: `stream = _rng.rng_for(f\"data.stream.e{int(epoch)}\", seed, again=True)`; the returned `stream` Rng object is used locally and never attached to the Stream record. Ran draw_stream(epoch=0) then `rng.issued()['data.stream.e0']` -> `(2581139399886376055, 0)`, a plain tuple; `issued['data.stream.e0'].draws` raises `AttributeError: 'tuple' object has no attribute 'draws'`, exactly as round 1 describes. Stream carries no counters field to substitute for it (see the counters/gates finding above).",
+    "residue": "None."
+  },
+  {
+    "title": "the seg_contig cursor is copied into a local dict and thrown away, so it does not persist across epochs",
+    "state": "still-present",
+    "evidence": "src/data/api.py line 716: `cursors = dict(areas.cursors)` copies; line 775 `cursors[label] = start + want` mutates only the copy; the function returns at line 799 without ever writing back into `areas.cursors`. Ran DATA_SOURCE=real DATA_AREAS=eng DATA_SEG_CONTIG=1 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000 RUN_EPOCHS=8: `areas.cursors` stayed `{'eng': 0}` after both an epoch-0 and an epoch-1 draw_stream call, and the two epochs' Stream.bytes were byte-identical in full (not just a 40-byte prefix). Confirms the cursor never persists.",
+    "residue": "None -- same defect as the 'critical' duplicate title below, unfixed on both."
+  },
+  {
+    "title": "startup_refusals never reads world.enabled, so a run with the world subsystem OFF is refused for a horizon it will never use",
+    "state": "still-present",
+    "evidence": "src/world/api.py startup_refusals (line 386-415) reads only `world.horizon` (line 402); `world.enabled` (a declared Lever, src/world/levers.py:182) is never referenced in the body. Ran WORLD_ENABLED=0 WORLD_HORIZON=0 -> returned the WORLD_HORIZON=0 refusal; ran WORLD_ENABLED=0 WORLD_HORIZON=999 against ctx_tokens=64 -> returned the horizon>=ctx refusal with the nan-loss reasoning that only applies to a live world. Both refusals fire on a disabled world exactly as round 1 reproduced.",
+    "residue": "None."
+  },
+  {
+    "title": "n_by_name is counted and then discarded, so the declared data.phase_name_resolved surface cannot exist",
+    "state": "still-present",
+    "evidence": "src/data/api.py: `n_by_name = 0` at line 529, incremented at line 549 for each schedule entry resolved by name, and never read again anywhere in the file (grep for `n_by_name` returns only those two lines). Plan (line 396-409) carries only protocol/schedule/phase_bounds/per_area_draw/exposure/gates -- no field for it, and DATA has no counters() entry point (grep for 'def counters' in data/api.py returns nothing) to surface it another way.",
+    "residue": "None."
+  },
+  {
+    "title": "save_period declares a Gate for the dir-set/every==0 condition and produces none, so \"the only saves are the final one plus SIGUSR1\" is never stated",
+    "state": "still-present",
+    "evidence": "src/ckpt/api.py save_period body (line 119-126) is `ckpt = ckpt.owned_by(\"CKPT\"); return U.Windows(int(ckpt.every))` -- a bare Windows value, no Gate. ckpt/api.py imports only `dataclasses, os, torch, spine.lever.Config, spine.units as U` (lines 25-31); `spine.gate.Gate` is not imported anywhere in the file, and grep for 'Gate' in ckpt/api.py matches only prose comments, never a constructed object. No counters()/gates() channel exists elsewhere in the package either.",
+    "residue": "None."
+  },
+  {
+    "title": "draw_stream passes again=True on every epoch stream with no rebuild to justify it, disarming the duplicate-stream guard",
+    "state": "still-present",
+    "evidence": "Same line as above, src/data/api.py:711, `again=True` unconditional on every call regardless of epoch or resume state. Demonstrated the guard is disarmed: called draw_stream(epoch=0, seed=0) twice in one process (no reset_issued, no restore/rebuild context) and the second call succeeded silently instead of raising RngError -- the exact 'two call sites, one sequence' collision spine/rng.py exists to catch.",
+    "residue": "None -- 'data.stream' is still absent from compose.RNG_SUBSYSTEMS (checked src/spine/compose.py:124-125), so there is still no pre-mint collision to justify the flag; the only concrete draw_stream call site in compose.py (line 1912-1913, epoch=0, in the assemble-time `compose()` function) calls it once, so the flag currently suppresses a collision that today's actual (non-stub) code never triggers -- but the flag itself, and the guard it disables, are unchanged from round 1."
+  },
+  {
+    "title": "load raises on a missing resume file and never constructs a Resume, so the attempted-without-loaded state the record exists for is unreachable",
+    "state": "still-present",
+    "evidence": "src/ckpt/api.py load() (line 200-236): `if not os.path.isfile(src): raise FileNotFoundError(...)`, then falls through to `return Snapshot(...)` on success -- no Resume is ever built on either arm. grep for 'Resume(' in ckpt/api.py matches only the dataclass field-list docstring at line 210, never a constructor call. Ran ckpt_api.load() with CKPT_RESUME pointed at a nonexistent path: raised FileNotFoundError as before, confirming the attempted=True/loaded=False state is still unreachable.",
+    "residue": "None."
+  },
+  {
+    "title": "open_areas reads dat.stream_bytes on the DEFAULT source arm while its LEVERS READ list omits it",
+    "state": "still-present",
+    "evidence": "open_areas' docstring (line 179) still lists 'LEVERS READ: source, dir, areas, n_processes, corpus_cap, holdout_frac, val_cap, seg_max' with no stream_bytes; _synthetic_areas line 371 still reads `int(dat.stream_bytes) // max(1, n)` to size each generated corpus, and DATA_SOURCE still defaults to \"synthetic\" (src/data/levers.py). Also re-confirmed the silent `max(1, n)` clamp named in the same finding: ran DATA_SOURCE=synthetic DATA_N_PROCESSES=0 DATA_AREAS=eng,py through open_areas -- no refusal, areas.names == () (an empty Areas) rather than a startup refusal naming DATA_N_PROCESSES.",
+    "residue": "None."
+  },
+  {
+    "title": "the UNREACHABLE arm of line() drops value and threshold even when the caller supplied them",
+    "state": "fixed",
+    "evidence": "src/spine/gate.py Gate.line() (lines 58-77) now computes `nums = \"\" if (self.value is None and self.threshold is None) else f\" ({self.value} vs {self.threshold})\"` BEFORE branching on reachability, and the unreachable arm returns `f\"Gate {self.name}: UNREACHABLE{nums} -- {self.reason}\"`, i.e. it includes `nums`. Ran it directly: `Gate('data.exposure_skew_planned', False, None, 2.0, reachable=False, reason='...').line()` -> `'Gate data.exposure_skew_planned: UNREACHABLE (None vs 2.0) -- a max/min ratio over ONE area is undefined'`, and `Gate('fab.on', False, False, True, reachable=False, reason='fab off').line()` -> `'Gate fab.on: UNREACHABLE (False vs True) -- fab off'`. Both numbers now print on the unreachable arm.",
+    "residue": "None -- fully fixed, confirmed both by reading the code and by executing Gate.line() directly."
+  },
+  {
+    "title": "the resample=False replay cache is keyed by id(areas), an address CPython reuses, so the stated per-Areas isolation does not hold and every Stream is retained forever",
+    "state": "still-present",
+    "evidence": "src/data/api.py: `_REPLAY = {}` module-level dict (line 805); `cached = _REPLAY.get(id(areas))` (line 702) and `_REPLAY[id(areas)] = st` (line 798) are unchanged -- keyed by the CPython object address, no weakref, no eviction. CPython does reuse addresses of freed objects (demonstrated with a small repro: freeing and reallocating small objects reused an id within 2 allocations), so the described isolation-sweep collision remains structurally possible, and the dict still has no eviction path, so every resample=False Stream is retained for the life of the process.",
+    "residue": "None."
+  },
+  {
+    "title": "startup_refusals declares device and amp in LEVERS READ and reads neither",
+    "state": "still-present",
+    "evidence": "src/train/api.py startup_refusals docstring (line 479) still says 'LEVERS READ: epochs, device, amp'; the body (lines 483-504) reads only `run.epochs` and the `disk_stream` argument -- no reference to `run.device` or `run.amp` anywhere in the function. Confirmed by reading the full body: only two refusal branches (epochs<1, epochs>1 and not disk_stream) plus a comment noting amp/device is deliberately not refused, but no code reads either lever to even record that the pair was considered.",
+    "residue": "None."
+  },
+  {
+    "title": "The seg_contig cursor is advanced on a private copy and thrown away, so every epoch re-reads the identical head of every area and the exposure guard reports a number the run did not experience.",
+    "state": "still-present",
+    "evidence": "Same underlying code as the earlier cursor finding (src/data/api.py lines 716-799: cursors copied at 716, mutated at 775, never written back). Ran the exact scenario: DATA_SOURCE=real DATA_AREAS=eng DATA_CORPUS_CAP=200000 DATA_SEG_CONTIG=1 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000 RUN_EPOCHS=8. Measured epoch-0 and epoch-1 Stream.bytes were byte-identical in FULL (not just the first 40 bytes), and areas.cursors stayed {'eng': 0} after both calls -- confirming the run would see the same ~40,000-byte prefix on every epoch and never advance into the rest of the 190KB+ body, exactly the P3-H22-shaped failure round 1 describes. This is the most severe (round-1-rated 'critical') of the two cursor-copy titles and remains fully unfixed.",
+    "residue": "None -- critical severity, unfixed."
+  },
+  {
+    "title": "On the REAL path a zero-size held-out block is recorded with the reason \"source=synthetic holds nothing out\", and nothing refuses the configuration that produced it.",
+    "state": "still-present",
+    "evidence": "src/data/api.py lines 306-310: the `else` branch (n_hold == 0) hard-codes `\"why\": \"source=synthetic holds nothing out\"` with no test on `dat.source`. Ran DATA_SOURCE=real DATA_AREAS=eng,py DATA_VAL_CAP=0: open_areas succeeded with no refusal, and both areas' rng_holdout read `{'key': None, 'offset': 0, 'size': 0, 'seam_at': None, 'why': 'source=synthetic holds nothing out'}` on a real disk corpus -- the false reason string prints exactly as round 1 reproduced, and no CorpusError names DATA_HOLDOUT_FRAC or DATA_VAL_CAP.",
+    "residue": "None."
+  },
+  {
+    "title": "A zero-length segment is recorded as a splice start and as an area change, and at DATA_SEG_MIN=DATA_SEG_MAX=0 the draw loop never terminates.",
+    "state": "still-present",
+    "evidence": "src/data/api.py draw_stream: `want = stream.randint(seg_min, seg_max)` (line 758) has no floor check, and splice/area-change bookkeeping (lines 779-784) runs unconditionally before `out += chunk` even when chunk is empty. Ran DATA_SOURCE=real DATA_AREAS=eng,py DATA_SEG_MIN=0 DATA_SEG_MAX=3 DATA_STREAM_BYTES=3000: got 1963 splice_starts of which only 1479 were distinct (484 zero-length segments recorded as boundaries). Separately ran DATA_SEG_MIN=0 DATA_SEG_MAX=0 DATA_STREAM_BYTES=3000 with a 10s timeout after data_plan had already printed 'Gate data.splice_window: FIRED (0.0 vs 8.0)': draw_stream hung and was killed by the timeout (exit code 124), confirming the infinite loop.",
+    "residue": "None."
+  },
+  {
+    "title": "`again=True` is passed unconditionally to rng_for with no justification, disabling the one guard against two call sites sharing a stream name.",
+    "state": "partly-fixed",
+    "evidence": "The core defect (line 711, `again=True` unconditional, no rebuild context, guard disarmed) is unchanged and verified live: a second draw_stream(epoch=0, seed=0) call in one process succeeds silently instead of raising RngError. However, the SPECIFIC failure narrative round 1 gave for this title -- 'the composition root's own tables call draw_stream twice for epoch 0 -- ASSEMBLY_ORDER's stream row (compose.py:1902) and LOOP_ORDER's E row (compose.py:687, epoch=clock.epoch, which is 0 on the first epoch)' -- no longer holds against the current compose.py: there is exactly ONE actual call site to data_api.draw_stream in executable code (compose.py line 1912-1913, epoch=0, inside the real compose() function). LOOP_ORDER is a documentation-only tuple (explicitly commented 'NOT EXECUTED HERE -- the loop is RUN mechanism'), and its own comment at compose.py lines 651-664 now states the E-stage's epoch-0 rows come ONLY from ASSEMBLY_ORDER and that 'THE E ROWS IN THIS TABLE NEVER RUN ON A ONE-EPOCH RUN' -- LOOP_ORDER's E row only re-enters on Tick.rolled, i.e. after epoch has already incremented past 0, so it would pass epoch>=1, not epoch=0. The loop driver itself (RunClock.advance/begin_epoch in train/api.py) is still an unwritten stub, so the double-epoch-0-call scenario cannot even be exercised today. So: the underlying vulnerability (unjustified again=True disabling the guard) is confirmed still live, but the specific 'two generators for data.stream.e0 in one run' reproduction this title's failure text relies on is not reproducible against the current tree's documented composition order.",
+    "residue": "The again=True flag itself remains unjustified and unfixed (verified live), but the concrete epoch-0 double-call path this title's evidence cites is no longer accurate as compose.py is currently written/commented -- treat the general guard-disarming as still-present and the specific ASSEMBLY_ORDER/LOOP_ORDER double-call story as unverifiable/likely stale."
+  },
+  {
+    "title": "On the synthetic path the operator's declared area names are silently replaced by p0..pN-1 whenever DATA_AREAS holds fewer entries than DATA_N_PROCESSES, and the label/key collision refusals are not applied at all.",
+    "state": "still-present",
+    "evidence": "src/data/api.py line 373: `labels = entries[:n] if len(entries) >= n else [f\"p{i}\" for i in range(n)]`. Ran DATA_SOURCE=synthetic DATA_AREAS='e,p' DATA_N_PROCESSES=4: areas.names == ('p0', 'p1', 'p2', 'p3') -- the declared 'e','p' names are discarded and replaced. Also re-confirmed (same test as title #1 above) that DATA_AREAS='rustA,rusta,x,y' on the synthetic path raises spine.rng.RngError naming a stream, not data_api.CorpusError naming DATA_AREAS, because the collision loop still lives only in the real-path else-branch.",
+    "residue": "None."
+  },
+  {
+    "title": "DATA_SEG_MIN > DATA_SEG_MAX passes every startup gate and then dies inside the draw with a bare ValueError that names no lever.",
+    "state": "still-present",
+    "evidence": "src/data/api.py: open_areas' floor computation (line 216) reads only seg_max, and data_plan's mean_seg (line 641) computes `(seg_min + seg_max) / 2.0` with no ordering check; draw_stream's `want = stream.randint(seg_min, seg_max)` (line 758) has no guard either. Ran DATA_SOURCE=real DATA_AREAS=eng DATA_SEG_MIN=2000 DATA_SEG_MAX=1800 DATA_STREAM_BYTES=50000: open_areas succeeded, data_plan succeeded and printed 'Gate data.splice_window: armed, did not fire (8.024 vs 8.0)' computed from the impossible mean of 1900, and only draw_stream raised: `ValueError: empty range for randrange() (2000, 1801, -199)` -- a bare stdlib message naming neither DATA_SEG_MIN nor DATA_SEG_MAX.",
+    "residue": "None."
+  },
+  {
+    "title": "`seam_at` is recorded as the block offset unconditionally, so a block at offset 0 or at the tail reports a manufactured seam that does not exist -- the unreachable state the contract requires it to say.",
+    "state": "still-present",
+    "evidence": "src/data/api.py lines 304-305: `rng_holdout[label] = {..., \"seam_at\": start}` with no test on `start` or `start + n_hold`. Forced start=0 by monkeypatching `Rng.randint` to always return 0 (class-level patch, since Rng uses __slots__) and ran open_areas on DATA_AREAS=eng DATA_HOLDOUT_FRAC=0.3: got `rng_holdout['eng'] == {'key': 'data.holdout.eng', 'offset': 0, 'size': 6000, 'seam_at': 0}` -- seam_at reads 0 (a position) instead of None/UNREACHABLE at exactly the boundary case the docstring says must be UNREACHABLE.",
+    "residue": "None."
+  },
+  {
+    "title": "data.holdout_overlap is never computed, so the one instrument declared for near-duplicate contamination between the held-out block and the training body produces no number at all.",
+    "state": "still-present",
+    "evidence": "grep for 'overlap' in src/data/api.py matches only the docstring prose at line 195 declaring the DID-IT-FIRE surface; there is no n-gram/overlap computation anywhere in the file, and Areas.rng_holdout entries (verified via the live open_areas runs above) contain only key/offset/size/seam_at(/why) -- no overlap fraction field exists on Areas or anywhere else in the returned records.",
+    "residue": "None."
+  }
+]

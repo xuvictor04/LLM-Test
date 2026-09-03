@@ -32,7 +32,15 @@ methods, which is not an import):
   Segmentation  ids, byte_pos, labels, bytes_per_token
   Due           mint, retok, probation, frozen
   Mint          new_id, left_id, right_id, token_bytes, count
-  Judgement     kept, retired_ids, pending, live_size
+  Judgement     kept, retired_ids, pending, live_size, id_count
+                `live_size` and `id_count` are DIFFERENT NUMBERS and both are needed. id_count is
+                the positional boundary -- where never-minted rows begin, i.e. Vocabulary.size() --
+                and it is what LM.decode's `live_vocab` argument must receive, because ids are
+                positional: retire() pops from the match table and leaves id2bytes intact, so
+                retired rows sit BELOW the boundary and are handled separately, by id. live_size is
+                that boundary minus the retired count, and passing it to decode would move the
+                boundary down and mask exactly that many LIVE rows to -inf. The composition root's
+                own wiring table named live_size here until 2026-09-03.
   RetokEvent    the signal the composition root hands to SIG, MEM, DOM and FAB
 """
 import collections

@@ -31,7 +31,7 @@ with no reader still lands there with a reason or the check fails.
 **Naming is not calling**: which stubs the composition root actually reaches is section 3, and 108
 of the entry points (§7 holds the count, and it is the only place that does — this sentence was one
 of five copies) are named by a row — 94 in a row's entry column and 14 by a call written
-into a row's note — with the remaining **24 declared deferred**, each with the argument that has no
+into a row's note — with the remaining **23 declared deferred**, each with the argument that has no
 producer as the reason. That number was seven until the order tables grew a `produces` column and
 the same standard was applied to every row rather than to EVAL alone (§3.6). *(This sentence said
 "14" while `DEFERRED_ENTRY_POINTS` held 15; corrected 2026-09-02. K6 prints all three numbers, so

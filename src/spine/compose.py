@@ -336,7 +336,16 @@ ASSEMBLY_ORDER = (
                                               "else in the tree mints; bytes_per_token -- "
                                               "DATA.data_plan's argument and _signature_width's "
                                               "input; live_vocab -- "
-                                              "Vocabulary.live_size under LM.decode's spelling; "
+                                              "Vocabulary.size() under LM.decode's spelling, and NOT "
+                                              "live_size: decode uses this number as the INDEX where "
+                                              "never-minted rows begin, and ids are positional "
+                                              "because retire() pops from the match table while "
+                                              "leaving id2bytes intact. live_size is size minus the "
+                                              "retired count, so passing it moves the boundary down "
+                                              "and masks that many LIVE rows to -inf. This row said "
+                                              "live_size until 2026-09-03 and would have "
+                                              "reintroduced that defect the moment it was wired; "
+                                              "retired rows are handled separately, BY ID; "
                                               "retired_ids -- Vocabulary.retired under LM.decode's. "
                                               "THIS ROW IS THE FIRST-FLUSH PRODUCER OF BOTH: "
                                               "TOK.judge_probation refreshes them at B, twenty-six "
@@ -1095,8 +1104,15 @@ LOOP_ORDER = (
                                       "check asked about it",
                                       "retired_ids -- Judgement.retired_ids, LM.decode's exact "
                                       "spelling and the REFRESH of what the vocabulary produced at "
-                                      "assembly; live_vocab -- Judgement.live_size under the same "
-                                      "consumer's spelling"),
+                                      "assembly; live_vocab -- Judgement.id_count, NOT "
+                                      "Judgement.live_size, for the reason the `vocab` row states "
+                                      "in full: it is the INDEX where never-minted rows begin, not "
+                                      "a count of live ones, and the two differ by exactly the "
+                                      "retired rows this refresh exists to track. The record "
+                                      "carried only live_size until 2026-09-03, so it could not "
+                                      "supply what LM.decode requires -- the row and the record "
+                                      "were wrong together, which is why naming the field was not "
+                                      "enough on its own"),
     ("B", "DOM",   "note_competence", "did from DOM.observe; bits from the per-window loss; the "
                                       "rate is the d_comp_ema wire"),
     ("B", "CKPT",  "save",            "Cadences.due('ckpt', CKPT.save_period(ck), clock), or the "
@@ -1324,9 +1340,6 @@ DEFERRED_ENTRY_POINTS = {
         "carried a larger n0 than the arm's start cap, and the run then trained to completion "
         "having grown nothing on a configuration whose purpose is to study growth. Takes only "
         "self, so there is no argument without a producer; what is missing is the caller.",
-    "TOK.Vocabulary.size":
-        "P4, with the rows that read the live vocabulary size: LM.mint_rows and TOK.mint_burst "
-        "against the cap, and the banner. No unproduced argument -- it takes only self.",
     "TOK.Vocabulary.live_size":
         "P4, with TOK's retire path. It is size() minus the retired set, and it exists separately "
         "BECAUSE retire() changes the match table without shortening id2bytes -- the embedding row "

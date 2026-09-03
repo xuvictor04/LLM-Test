@@ -1,0 +1,266 @@
+[
+  {
+    "title": "The expert pool A and B are plain tensors, not nn.Parameter, so no expert can ever train and every expert's contribution stays exactly zero for the whole run.",
+    "state": "fixed",
+    "evidence": "fabric/api.py:74-75 now build `self.A = nn.Parameter(torch.zeros(cap, d_model, rank, device=device))` and the same for B (cent stays a plain buffer tensor, correctly). Ran it: isinstance(pop.A, torch.nn.Parameter) and isinstance(pop.B, torch.nn.Parameter) are both True, requires_grad is True for both.",
+    "residue": "none"
+  },
+  {
+    "title": "Population exposes no parameters(), so the router, the identity autoencoder and the halt head that build allocates never reach the optimizer either.",
+    "state": "fixed",
+    "evidence": "Population.parameters() now exists (fabric/api.py:102-112): `return [self.A, self.B] + list(self.modules.parameters())`. Ran it: hasattr(pop,'parameters') is True and list(pop.parameters()) returns 16 tensors totalling 1,059,945 elements, so compose._base_parameters's getattr(obj,'parameters',None) branch now harvests the fabric.",
+    "residue": "Only 5 of the 9 named modules (eemb/edec/q_route/hproj/halt_key) are ever allocated by build(), so parameters() returns fewer tensors than state_dict's own list promises -- see the separate 'five of the nine modules' finding, which is still present."
+  },
+  {
+    "title": "encode accepts n_layers and never uses it, so MEM's key-depth truncation is 100% inert -- the exact 'silently inert twice over' defect the docstring exists to end.",
+    "state": "still-present",
+    "evidence": "lm/api.py's encode() body (lines 431-457) never references `n_layers`. Ran it on a 2-layer transformer (width 32, heads 4, ctx 8): encode(cfg, model, x, n_layers=1) vs encode(cfg, model, x) gave max |diff| = 0.0. lm.encode.key_path_truncated can still never be nonzero.",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "encode accepts `extra` and never adds it, so WORLD's forecast conditioning term is silently discarded.",
+    "state": "still-present",
+    "evidence": "Same body, same test run: encode(cfg, model, x, extra=torch.ones(2,8,32)*5.0) vs encode(cfg, model, x) gave max |diff| = 0.0. `extra` is not referenced anywhere in the function.",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "FAB.build initialises the shared modules AFTER moving them to the device, using a CPU generator -- RuntimeError on every RUN_DEVICE=cuda run.",
+    "state": "fixed",
+    "evidence": "fabric/api.py:189 now builds `gen = torch.Generator(device=device)` (not \"cpu\") and seeds it from the package RNG stream, matching the device the ModuleDict is moved to at :204. Generator and tensors now agree on device regardless of order, so the CUDA check_generator assertion this finding predicted cannot fire. (No CUDA device is available in this sandbox to execute the raise/no-raise directly; verified by code inspection that the CPU-vs-device mismatch that caused it is gone.)",
+    "residue": "none"
+  },
+  {
+    "title": "SIG.build's bigram arm fills a device tensor from a CPU generator -- RuntimeError on every RUN_DEVICE=cuda run with SIG_MODE=bigram.",
+    "state": "fixed",
+    "evidence": "sig/api.py:121 now builds `gen = torch.Generator(device=device)`, and the bigram table at :129 is allocated on `device` and filled with that same-device generator. Verified by reading the code; the device mismatch is gone.",
+    "residue": "none"
+  },
+  {
+    "title": "The bigram arm returns an all-zero signature whenever width_units < 2, which is exactly the zero vector the contract says it may never return.",
+    "state": "still-present",
+    "evidence": "SIG.build has no `mode==\"bigram\" and width<2` refusal (only a blanket `width<1` check at sig/api.py:112-117), and encode()'s bigram branch (lines 181-188) is unchanged. Ran it: SIG.build(mode=bigram, width_units=1, ...) then encode() on a (4,1) batch returns a (4,8) tensor that is exactly all zeros.",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "sig.encode_calls is incremented by the number of windows, so the ledger's 'calls' counter holds the 'windows' quantity and sig.encode_windows does not exist at all.",
+    "state": "still-present",
+    "evidence": "sig/api.py:180 is unchanged: `st.counters[\"sig.encode_calls\"] += int(units.shape[0])`. build()'s counters dict (lines 143-146) still has no `sig.encode_windows` key. Ran it: one encode() call on a batch of 4 windows leaves sig.encode_calls == 4.",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "build_model mints a SECOND live generator for the stream name 'lm' with again=True, so the register's 'lm' stream reports zero draws while LM actually drew.",
+    "state": "fixed",
+    "evidence": "lm/api.py:310 now draws from a declared child stream, `_rng.rng_for(\"lm.init\", int(seed))`, with no again=True -- the same repair pattern already applied to tok.dropout.mint and data.synth. The parent name \"lm\" stays untouched in the register.",
+    "residue": "none"
+  },
+  {
+    "title": "depth_now is hardcoded to 1 and FAB_DEPTH0 is never read at build, so the lever's documented 0 sentinel ('no curriculum') cannot be selected.",
+    "state": "still-present",
+    "evidence": "fabric/api.py:66 is unchanged: `self.cap, self.n_live, self.depth_now = cap, n0, 1`. build()'s body (lines 156-254) never reads fab.depth0. Ran it: FAB.build with FAB_DEPTH0=3 gives pop.depth_now==1, and FAB_DEPTH0=0 (sentinel, should resolve to FAB_HOPS) also gives pop.depth_now==1.",
+    "residue": "exact reproduction of round 1's repro, confirmed for both the explicit-value and sentinel cases"
+  },
+  {
+    "title": "build allocates five of the nine modules the frozen surfaces name, so FAB.forward's per-hop vote and FAB.state_dict's parameter list refer to tensors nothing creates.",
+    "state": "still-present",
+    "evidence": "fabric/api.py:198-204 still only builds {eemb, edec, q_route, hproj, halt_key}. state_dict's docstring (line 732) still lists all 11 items (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, q_entry, nov_proj). Ran it: list(pop.modules.keys()) == ['eemb','edec','q_route','hproj','halt_key']. halt_b, norm, q_entry and nov_proj still do not exist.",
+    "residue": "forward() is itself still a stub, so this is currently latent rather than firing at runtime, but the build()-vs-state_dict() docstring mismatch this finding names is unchanged"
+  },
+  {
+    "title": "The compose branch of decode drops the bias term its own docstring specifies.",
+    "state": "still-present",
+    "evidence": "lm/api.py:503-507 is unchanged: `if model.compose: table = model.token_table(); logits = h @ table.t()`, no bias. No output-bias parameter is constructed in _LM.__init__ for the compose arm. decode()'s docstring (line 473) still promises 'h @ table.t() + bias'.",
+    "residue": "still latent: _LM.composed_table() (line 128-132) still raises NotBuilt, so this branch cannot actually execute until the ByteComposer (a separate, still-stubbed TOK-side piece) lands -- same as round 1's own characterisation"
+  },
+  {
+    "title": "The resume branch of build_vocabulary returns without minting Vocabulary.dropout_rng, so every resume of a TOK_DROPOUT>0 run dies at the first segmentation",
+    "state": "fixed",
+    "evidence": "tok/api.py:244 now mints `vocab.dropout_rng = _rng.rng_for(\"tok.dropout.mint\", seed)` unconditionally, immediately inside `if read_path:`, before `_replay_merges` is even called -- so it runs on the replay-success early-return path too. Ran an actual parent-build + resume round trip (TOK_DROPOUT=0.3, CKPT_RESUME pointing at a saved parent .dyntok.json): resumed vocab.dropout_rng is not None, and TOK.tokenize(..., regularize=True) on it succeeds without raising.",
+    "residue": "see the separate finding below: a resume whose read_path is set but the parent FILE DOES NOT EXIST now crashes with an unrelated RngError, because build_vocabulary mints tok.dropout.mint again at line 270 when it falls through past the (now unconditional) mint at line 244 -- a new duplicate-mint bug on that specific fallback path"
+  },
+  {
+    "title": "FAB.build seeds a CPU torch.Generator and then draws with it into parameters already moved to `device`, so RUN_DEVICE=cuda raises before any expert exists",
+    "state": "fixed",
+    "evidence": "Same fix as the other FAB CPU-generator finding: fabric/api.py:189 builds the generator on `device`, not \"cpu\".",
+    "residue": "none"
+  },
+  {
+    "title": "SIG.build's bigram arm allocates its table on `device` and fills it with a CPU generator, so SIG_MODE=bigram on CUDA raises",
+    "state": "fixed",
+    "evidence": "Same fix as the other SIG CPU-generator finding: sig/api.py:121 builds the generator on `device`.",
+    "residue": "none"
+  },
+  {
+    "title": "Nothing in the new bodies seeds torch's global generator, so at LM_DROPOUT>0 two runs at the same RUN_SEED diverge and G2's determinism floor absorbs the difference",
+    "state": "still-present",
+    "evidence": "`grep -rn manual_seed src/` finds only the three package-local `torch.Generator(device=...)` seedings (fabric/sig/lm build) plus one dead comment in train/levers.py noting the old global `torch.manual_seed` call was removed; no call anywhere seeds torch's process-global generator. train/api.py's process_setup (lines 160-200) sets TF32/AMP flags only, no manual_seed. Ran it in two fresh processes at the same RUN_SEED=0, LM_DROPOUT=0.2, transformer arch: torch.initial_seed() printed 14029224735880684544 and 4654533202693680726 (different), and LM.encode() on an identical zero batch summed to -50.40 and -96.44 respectively.",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "SIG.encode does not run under no_grad despite its docstring, and the encoder is in the optimizer's param groups, so any caller's backward trains it",
+    "state": "still-present",
+    "evidence": "sig/api.py's encode() body (lines 167-189) still has no torch.no_grad() anywhere. Ran it: v = SIG.encode(cfg, st, windows) has requires_grad=True and a live grad_fn; v.sum().backward() populates st.encoder.emb.weight.grad (not None).",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "build_model's again=True mints a SECOND live Rng for \"lm\"; the ledger object the root holds reports 0 draws forever and replays the exact value build_model consumed",
+    "state": "fixed",
+    "evidence": "Same fix as the other 'lm' again=True finding: build_model now draws from the child stream \"lm.init\" with no again=True (lm/api.py:310).",
+    "residue": "none"
+  },
+  {
+    "title": "On the transformer arm LM.encode's return DOES carry dropout, so MEM's keys are written dropped in train mode and queried undropped at eval -- the defect Q-LM-9 claims to have removed",
+    "state": "still-present",
+    "evidence": "lm/api.py:117 still passes `dropout=geom.dropout` into nn.TransformerEncoderLayer(..., norm_first=True), and encode() (lines 445-457) returns model.body(h,...) directly with nothing stripping that layer's internal dropout before return. Ran it: built at LM_DROPOUT=0.2, arch=transformer, set model.drop.p=0.0 (disabling ONLY the embedding-dropout site) and called encode() twice in train mode on the same input under no_grad -- the two outputs still differed (not equal); in eval mode two calls were identical to each other and different from the train-mode value. This proves the transformer body's own internal dropout (not model.drop) is still leaking onto encode()'s returned hidden state.",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "sig.encode_calls is incremented by the WINDOW count, and the three other counters the contract names are never created",
+    "state": "still-present",
+    "evidence": "Same body as the other encode_calls finding: sig/api.py:180 adds units.shape[0] (window count) to sig.encode_calls, and build()'s counters dict (lines 143-146) has no sig.encode_windows, sig.encode_width_seen or sig.encode_width_mismatch keys. Ran it: one call on 4 windows leaves sig.encode_calls==4 with no other counters present.",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "build_vocabulary declares cand_window, mint_pmin and mint_novel as LEVERS READ and reads none of them, so three knobs are inert during the build with the audit reporting them as read",
+    "state": "still-present",
+    "evidence": "tok/api.py:197-198 still lists cand_window, mint_pmin, mint_novel in LEVERS READ. `grep -n 'cand_window|mint_pmin|mint_novel' src/tok/api.py` (restricted to build_vocabulary's body, lines 208-314) finds none; they appear only in mint_burst's docstring, and mint_burst is still a stub (raises NotImplementedError).",
+    "residue": "mint_burst, where these levers actually belong, is a still-in-progress stub, per the task's own instruction not to flag stub entry points -- but the finding is specifically about build_vocabulary's LEVERS READ line, which is not a stub and is unchanged"
+  },
+  {
+    "title": "The fixed arm overwrites Vocabulary.ceiling, the field the package header declares comes from the wire on every path, with the achieved build size",
+    "state": "still-present",
+    "evidence": "tok/api.py:300 still does `vocab.ceiling = vocab.size()` on the build path (and, newly, also at :252 on the replay path -- see the separate 'closes only on the build path' finding, now fixed for that specific inconsistency). The module header (lines 15-19) and the Vocabulary class docstring (lines 67-71) are unchanged and still say unconditionally that ceiling 'is HARD and arrives as the wire d_vocab_ceiling from LM.vocab_slots -- it is the model's embedding row count.' Ran it: build a mode=fixed vocabulary against LM_VOCAB_SLOTS=4096 that reaches only 512 tokens -- vocab.ceiling reads 512, not 4096.",
+    "residue": "a long defending paragraph was added inside build_vocabulary's own docstring (lines 289-300) arguing this narrowing is safe because it can only ever shrink the cap and the model keeps its spare rows -- but the class- and module-level docstrings that state ceiling always equals the wire value were not updated to carve out this exception, so the contract is now internally inconsistent rather than resolved, and round 1's suggested fix (a separate closed_at field) was not adopted"
+  },
+  {
+    "title": "decode uses live_vocab (a COUNT of live rows) as the index where never-minted rows begin, so it masks the top len(retired_ids) LIVE token rows to -inf",
+    "state": "still-present",
+    "evidence": "decode()'s masking code (lm/api.py:515-530) is functionally unchanged: `dead[int(live_vocab):] = True` still treats its argument as the boundary of minted rows. Ran it directly: with a 280-minted / 3-retired vocabulary, decode(..., live_vocab=Vocabulary.live_size()==277, retired_ids={260,261,262}) masks ids 277, 278 and 279 to -inf even though they are live, minted, matchable tokens; decode(..., live_vocab=Vocabulary.size()==280, ...) masks correctly.",
+    "residue": "a new explanatory comment was added inside decode() (lines 516-522) insisting the caller must pass Vocabulary.size(), not live_size() -- but spine/compose.py's own coupling table (round 1's cited evidence, line 338, outside this file's scope) is unchanged and still literally reads 'live_vocab -- Vocabulary.live_size under LM.decode's spelling,' so if that documented wiring is what the composition root actually uses, the exact failure round 1 measured still reproduces; decode() itself cannot be the site of a further fix since it already does what its own top-level docstring specifies"
+  },
+  {
+    "title": "encode silently ignores both n_layers and extra, so the memory-key depth cut and WORLD's forecast conditioning do nothing",
+    "state": "still-present",
+    "evidence": "Duplicate of the n_layers/extra findings above at the same function; both arguments remain completely unused in encode()'s body. Same test: both n_layers=1 and extra=<nonzero tensor> produce max |diff| = 0.0 against the default call.",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "build_model mints a SECOND generator named \"lm\" with again=True, so two live streams replay one sequence and the register reports LM as having drawn nothing",
+    "state": "fixed",
+    "evidence": "Duplicate of the other 'lm' again=True findings; build_model now uses the child stream \"lm.init\" with no again=True.",
+    "residue": "none"
+  },
+  {
+    "title": "SIG.encode does not run under no_grad, so an instrument that calls it can move the encoder",
+    "state": "still-present",
+    "evidence": "Duplicate of the other SIG no_grad finding; confirmed by the same backward() test (grad populated on st.encoder.emb.weight).",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "the resume replay path rebuilds id2bytes but leaves Vocabulary.merges and Vocabulary.pair empty",
+    "state": "fixed",
+    "evidence": "_replay_merges (tok/api.py:317-369) now reads a `pair` field per entry and passes it through to `vocab._add(seq, prov=\"replay\", pair=pair)`, which appends to both `merges` and `pair` when a pair is given. Ran a real parent-build + resume round trip: parent vocab had merges=256/pair=256; the resumed (replayed) vocab also came back with merges=256 and pair=256, matching exactly.",
+    "residue": "depends on the writer (save_vocabulary) actually emitting the `pair` field per entry in its 'entries' format -- save_vocabulary is still a stub (raises NotImplementedError), so this is unverified end-to-end against the real writer and was tested by hand-writing a sidecar file in the format _replay_merges expects"
+  },
+  {
+    "title": "at FAB_ON=0 the cull gate is reported FIRED and the fab.on gate is reported UNREACHABLE -- both states are the inverse of what the contract requires",
+    "state": "fixed",
+    "evidence": "fabric/api.py:232-244 now builds Gate(\"fab.on\", on, on, True, reason=...) with reachable defaulting to True (a measurement) and, when `on` is False, builds fab.cull_gate with reachable=False. Ran it at FAB_ON=0: fab.on renders as 'armed, did not fire (False vs True)' (reachable) and fab.cull_gate renders as 'UNREACHABLE (2048/4096=0.500 vs 0.45)' -- exactly the corrected orientation the fix asked for.",
+    "residue": "none"
+  },
+  {
+    "title": "tokenize performs a re-segmentation whose match table has not moved, instead of refusing it and counting tok.retok_noop",
+    "state": "still-present",
+    "evidence": "tokenize()'s body (tok/api.py:462-488) is unchanged: no stamp is taken, no comparison against a previous (size, len(seq2id)) pair, and no tok.retok_noop counter exists anywhere. Vocabulary.__slots__ (lines 74-76) still carries no stamp field. `grep -n retok_noop src/tok/api.py` finds it only in docstring prose.",
+    "residue": "exact reproduction of round 1's finding -- no code change in this area"
+  },
+  {
+    "title": "encode adds the WINDOW count to sig.encode_calls and never produces sig.encode_windows, so the two documented counters collapse into one wrong number",
+    "state": "still-present",
+    "evidence": "Duplicate of the sig.encode_calls findings above; same unchanged code, same test result (encode_calls==4 after one 4-window call, no encode_windows key).",
+    "residue": "exact reproduction of round 1's repro"
+  },
+  {
+    "title": "the replay path neither reconciles the file's recorded settings nor distinguishes an unreadable parent vocabulary from a cold start",
+    "state": "still-present",
+    "evidence": "No reconciliation of the file's vmax/min_pair/max_tok/dropout against the resolved levers exists anywhere in build_vocabulary or _replay_merges -- confirmed by reading both functions in full; there is no tok.load_reconciled counter or comparison code. For the 'unreadable parent' half: ran build_vocabulary with CKPT_RESUME pointing at a path whose .dyntok.json does not exist -- it no longer silently falls through to a fresh build (round 1's exact repro); instead it now RAISES RngError('tok.dropout.mint was already issued for seed 0') from inside build_vocabulary itself, because the unconditional mint added at line 244 (for the dropout_rng fix) is minted a second time at line 270 when `_replay_merges` returns None and execution falls through past the early-return block.",
+    "residue": "the specific silent-fresh-build repro round 1 measured no longer occurs verbatim (it crashes instead of silently succeeding), but neither half of what the finding asks for -- reconciliation, or a clear NAMED refusal distinguishing an unreadable parent from a cold start -- exists; the current behavior is an unrelated, confusing RngError rather than either the old silent success or the requested clear refusal, which is arguably a regression introduced by the partial dropout_rng fix"
+  },
+  {
+    "title": "the declared Gate tok.build_passes_advice is never produced on any arm, so mode=\"fixed\" runs silently at 2 passes where the build of record used 8",
+    "state": "still-present",
+    "evidence": "tok/api.py has no `from spine import gate` / `from spine.gate import Gate` import (confirmed: only collections, dataclasses, spine.lever.Config, spine.derive, spine.rng are imported), no Gate(...) call anywhere in the file, and Vocabulary.__slots__ has no counters/gates field to carry one on. `grep -n build_passes_advice src/tok/api.py` finds it only in docstring prose.",
+    "residue": "exact reproduction of round 1's finding -- no code change in this area"
+  },
+  {
+    "title": "build declares norm_only, grow and halt in LEVERS READ but reads none of them, and no api.py body in the tree reads them either",
+    "state": "still-present",
+    "evidence": "fabric/api.py:149 still declares 'LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode'. Grepped build()'s body (lines 115-254) for norm_only/.grow/.halt -- none found; the only reads are on, n0, slots, rank, dk, emb_hid, pressure, hop_mode, plus the d_operating_population wire.",
+    "residue": "exact reproduction of round 1's finding -- no code change in this area"
+  },
+  {
+    "title": "LMGeometry carries no record of whether the layer count came from the 0 sentinel, so lm.resolve.layers_from_sentinel cannot be reported",
+    "state": "still-present",
+    "evidence": "LMGeometry's dataclass fields (lm/api.py:60-70) are unchanged: arch, width, layers, heads, ctx, pos_max, vocab_slots, compose, dropout, max_token_bytes, param_estimate -- no layers_from_sentinel field or equivalent. resolve() (lines 168-224) computes `layers` and discards whether declared_layers was 0.",
+    "residue": "exact reproduction of round 1's finding -- no code change in this area"
+  },
+  {
+    "title": "encode reads lm.ctx while declaring \"LEVERS READ: none directly\"",
+    "state": "still-present",
+    "evidence": "encode()'s LEVERS READ line (lm/api.py:425) is unchanged: 'LEVERS READ: none directly'. The pos-overflow refusal at line 441 still interpolates `int(lm.ctx)` into its message.",
+    "residue": "exact reproduction of round 1's finding -- no code change in this area"
+  },
+  {
+    "title": "the dead-row mask is rebuilt on every decode call although the contract specifies it is cached",
+    "state": "still-present",
+    "evidence": "decode()'s docstring (line 487) still says 'The mask is cached on (live_vocab, len(retired_ids)); both only ever grow,' but the body (lines 515-529) allocates a fresh `dead = torch.zeros(...)` tensor and, when retired_ids is non-empty, a fresh `torch.tensor(sorted(retired_ids), ...)` on every single call, with no cache keyed on the model or elsewhere.",
+    "residue": "exact reproduction of round 1's finding -- no code change in this area"
+  },
+  {
+    "title": "_replay_merges silently DROPS any saved entry that `_add` refuses and renumbers every id after it, so a resume attaches the parent's embedding rows to different tokens.",
+    "state": "fixed",
+    "evidence": "_replay_merges (tok/api.py:354-368) now explicitly checks the return of `_add`: `if got is None: raise ValueError(...)` naming the path, the entry index, the id, and whether it was a duplicate/too-long/at-ceiling; and `if got != 256+k: raise ValueError(...)` when the id space has drifted. Refusals are no longer silent.",
+    "residue": "none -- confirmed by code reading; the two explicit raise sites directly replace the old silent-skip behavior"
+  },
+  {
+    "title": "_replay_merges reads only a key called \"id2bytes\"; a vocabulary file in the `merges` format the contract says to write replays nothing and the resume silently trains with a 256-symbol byte vocabulary.",
+    "state": "fixed",
+    "evidence": "_replay_merges (tok/api.py:339-352) now looks for an `entries` key first, falling back to `id2bytes` only if `entries` is absent, and raises ValueError naming the path when NEITHER key exists, rather than silently returning a 256-token vocabulary. Ran it: fed a file shaped like round 1's cited legacy writer format (`{\"merges\": [...], \"vmax\":..., ...}`, no `entries`/`id2bytes`) into _replay_merges -- it raised ValueError(\"... carries neither `entries` nor `id2bytes`\") rather than silently succeeding.",
+    "residue": "a truncated/corrupt JSON file still propagates json.decoder.JSONDecodeError uncaught rather than a custom named-refusal message (json.load is not wrapped in try/except) -- but JSONDecodeError is itself a ValueError subclass, so it is at least the documented exception type, just without a message naming the path the way the other refusals do"
+  },
+  {
+    "title": "The resume path never mints `tok.dropout.mint`, so every resume with TOK_DROPOUT>0 dies in tokenize -- P1-H56's crash reintroduced on the branch the repair did not cover.",
+    "state": "fixed",
+    "evidence": "Duplicate of the earlier dropout_rng finding; the unconditional mint at tok/api.py:244 now covers the replay-success path. Confirmed by the same resume round-trip test: tokenize(..., regularize=True) on the resumed vocabulary succeeds.",
+    "residue": "a resume whose parent FILE IS MISSING (read_path set, no file) now crashes with an unrelated RngError from a duplicate mint of the same stream name -- see the 'replay path neither reconciles... nor distinguishes an unreadable parent' finding above"
+  },
+  {
+    "title": "bytes_per_token is measured on a dropout-free segmentation, but the frozen contract says it is measured WITH dropout applied -- so SIG's one signature width and DATA's splice gate use a number the training stream never produces.",
+    "state": "partly-fixed",
+    "evidence": "The BUILD path (tok/api.py:312) now measures with `_segment(vocab, sample, dropout=float(tok.dropout), stream=stream)` -- fixed, matching the docstring. Ran it at TOK_DROPOUT=0.3: build-path vocab.bytes_per_token came out 1.9410, matching a fresh dropout-applied measurement (~1.937) and clearly NOT the dropout-free value (2.264). But the REPLAY/resume path (tok/api.py:253) still calls `_segment(vocab, sample, dropout=0.0, stream=None)` unconditionally. Ran a resume round trip at TOK_DROPOUT=0.3: the resumed vocab.bytes_per_token came out 2.1746, while measuring the SAME sample with dropout actually applied gives 1.8018 -- a ~21% error, reproducing round 1's exact failure mode, but only on the resume branch.",
+    "residue": "the resume/replay branch (line 253) still needs `dropout=float(tok.dropout), stream=stream` (vocab.dropout_rng, which is now minted before this point) -- this is exactly the 'fixed on one branch, live on another' pattern the task asked to watch for"
+  },
+  {
+    "title": "A replayed vocabulary carries an EMPTY `merges` and `pair` table, so it is not the parent's vocabulary and the next save propagates the loss.",
+    "state": "fixed",
+    "evidence": "Duplicate of the earlier merges/pair finding; confirmed by the same round-trip test (resumed vocab merges==256, pair==256, matching the parent).",
+    "residue": "same caveat as the other merges/pair finding: unverified against the real writer since save_vocabulary is still a stub"
+  },
+  {
+    "title": "mode=\"fixed\" closes the hard ceiling only on the build path; on a resume the ceiling is never closed, so a \"fixed\" vocabulary can keep minting.",
+    "state": "fixed",
+    "evidence": "tok/api.py:248-252 now applies the identical `if mode == \"fixed\": vocab.ceiling = vocab.size()` closure on the replay/resume branch, before the early return, matching the build path's closure at line 300. Ran a resume round trip with TOK_MODE=fixed: the resumed vocabulary's ceiling came back as 512 (the achieved replayed size), not 4096 (the wire ceiling) -- at_cap() is now True immediately after resume, matching the build-path behavior.",
+    "residue": "none for the specific build-vs-resume inconsistency this finding names; the separate, broader concern that overwriting ceiling at all contradicts the class-level 'ceiling is always the wire value' docstring is still open (see that finding)"
+  },
+  {
+    "title": "The re-segmentation no-op refusal is absent: no invariant is stamped, so a re-tokenization whose match table has not moved is performed rather than refused, and tok.retok_noop can never be counted.",
+    "state": "still-present",
+    "evidence": "Duplicate of the earlier retok_noop finding; same unchanged tokenize() body, same absence of a stamp field on Vocabulary.",
+    "residue": "exact reproduction of round 1's finding -- no code change in this area"
+  },
+  {
+    "title": "The saved file's recorded settings are never read, so the documented reconciliation (tok.load_reconciled) and the tok.build_passes_advice Gate are mechanisms that cannot fire.",
+    "state": "still-present",
+    "evidence": "Duplicate of the reconciliation half of the earlier 'replay path neither reconciles...' finding, plus the Gate absence confirmed above (no spine.gate import, no Gate calls in tok/api.py). _replay_merges (lines 317-369) reads only `entries`/`id2bytes` and `pair`; it never reads or compares vmax/min_pair/max_tok/dropout from the blob.",
+    "residue": "exact reproduction of round 1's finding -- no code change in this area"
+  }
+]

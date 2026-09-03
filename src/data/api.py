@@ -656,7 +656,16 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     but only said so in a warning), and data.resample counts the redraws.
 
     Segments of _rng.randint(dat.seg_min, dat.seg_max) bytes are drawn from an area chosen
-    uniformly among the phase's live areas. dat.seg_contig=False seeks to a random offset inside
+    according to dat.draw (P1-H58):
+      "planned" (the shipped default) -- uniformly among the phase's live areas THAT STILL HAVE
+        REMAINING BUDGET, and the segment is truncated to that budget as well as to the phase bound.
+        So the realized per-area split equals Plan.per_area_draw exactly, and TWO consequences
+        follow that the uniform law does not have: the area distribution shifts through a phase as
+        areas exhaust their share, and a minority of segments come out SHORTER than seg_min (at the
+        shipped defaults, about 4% of them, down to ~171 bytes). Both are the price of the realized
+        split matching the scheduled one, and they are stated here rather than discovered.
+      "uniform" -- uniformly among all the phase's live areas, every segment a full
+        randint(seg_min, seg_max). This is the law every recorded result was taken under. dat.seg_contig=False seeks to a random offset inside
     the area body each segment; True reads the body in order from a cursor that PERSISTS ACROSS
     EPOCHS, so an English-only run has only the text's own boundaries rather than discontinuities
     we manufacture every 8-20 KB (self_organize.py:1291-1298 -- eng_only reported 71 domains partly
@@ -704,6 +713,16 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             return dataclasses.replace(cached, epoch=int(epoch))
 
     names = list(areas.names)
+    seg_min, seg_max = int(dat.seg_min), int(dat.seg_max)
+    if seg_min < 1 or seg_max < seg_min:
+        # REFUSED AT THE TOP, NAMING BOTH NUMBERS. DATA_SEG_MIN=DATA_SEG_MAX=0 hung the draw
+        # forever, and DATA_SEG_MIN > DATA_SEG_MAX passed every startup gate and then died inside
+        # the loop with a bare ValueError from randint naming no lever. A segment of no bytes is not
+        # a small segment, it is a stream that cannot advance.
+        raise CorpusError(
+            f"DATA_SEG_MIN={seg_min} and DATA_SEG_MAX={seg_max}: a segment must be at least one "
+            f"byte and the minimum may not exceed the maximum. Refused here rather than clamped, "
+            f"because a clamp would make the banner print a segment length the run did not use.")
     # WHAT TEXT A RUN TRAINS ON DEPENDS ON THE SEED AND THE EPOCH AND NOTHING ELSE. Two arms
     # differing in one unrelated knob still read the same text at epoch 2, and a resume at epoch 5
     # reads what an uninterrupted run read at epoch 5. The old form read SEED out of os.environ
@@ -715,7 +734,6 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     per_area = {n: 0 for n in names}
     cursors = dict(areas.cursors)
     last_area = None
-    seg_min, seg_max = int(dat.seg_min), int(dat.seg_max)
     contig = bool(dat.seg_contig)
 
     # WHICH LAW ALLOCATES THE BYTES (DATA_DRAW; P1-H58, ruled by the owner 2026-09-02).
@@ -735,10 +753,18 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         # out of a whole-run total is the kind of arithmetic that silently drifts. Both use the same
         # rule -- floor division with the remainder on the first live areas -- so the two agree by
         # construction and not by coincidence.
+        #
+        # ACCUMULATED, NOT ASSIGNED, AND THE FIRST VERSION ASSIGNED (found by the H58 review). A phase
+        # whose live list repeats an index -- schedule ((2, 0, 0, 1),) -- gave area 0 two shares in
+        # data_plan, which accumulates, and ONE in this loop, which overwrote. Measured on that
+        # schedule: data_plan said eng 60,000 / num 30,000 and the draw produced eng 30,000 /
+        # num 60,000, so 25% of the run went to the wrong area -- the exact per-area exposure
+        # corruption H58 exists to catch, committed by H58's own repair. The comment above claimed
+        # the two "agree by construction", which is what made it worth checking.
         span = hi - lo
         budget = {}
         for j, idx in enumerate(live):
-            budget[idx] = span // len(live) + (1 if j < span % len(live) else 0)
+            budget[idx] = budget.get(idx, 0) + span // len(live) + (1 if j < span % len(live) else 0)
         while len(out) < hi:
             if law == "planned":
                 # Uniform among the areas that still have budget, so the ORDER is random and the
@@ -759,6 +785,12 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             # TRUNCATED TO THE PHASE BOUND rather than overshooting it by a whole segment, so phase
             # bounds do not drift and len(bytes) == stream_bytes EXACTLY (ISSUES P1-L22).
             want = min(want, hi - len(out))
+            # AND FLOORED AT ONE BYTE, or the loop cannot terminate. At DATA_SEG_MIN=DATA_SEG_MAX=0
+            # every draw was zero-length, `out` never grew, and `while len(out) < hi` spun forever
+            # with no error, no traceback and no clock -- a hang is the one failure a report cannot
+            # describe. The floor is not a silent clamp of the operator's number: seg_min is refused
+            # at startup below, and this line only guarantees progress for a bound that got here.
+            want = max(1, want)
             if law == "planned":
                 # AND TRUNCATED TO THIS AREA'S REMAINING SHARE, which is what makes the realized
                 # split equal the scheduled one. A segment that overran its area's budget would put
