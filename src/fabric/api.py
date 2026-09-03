@@ -152,7 +152,7 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     the curriculum's own docstring on `manage` step 6 gates the staged-depth advance on
     "0 < depth0 < hops", which presupposes depth_now already carries depth0's resolved value at
     step 0. The unresolved sentinel was a hardcoded `1`: every configuration, including
-    FAB_DEPTH0=0 ("no curriculum", start at the full `hops` budget per fabric/levers.py::FABLevers.depth0-228),
+    FAB_DEPTH0=0 ("no curriculum", start at the full `hops` budget per fabric/levers.py::FABLevers.depth0),
     started the chain at exactly one hop and depended on the manage_every=500 cadence to reach
     depth0's OWN literal value, let alone `hops` -- while fab.operating_population and every other
     counter kept printing the operator's number. Fixed the M24 way: `depth_now = hops if depth0==0
@@ -207,7 +207,7 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
 
     # THE SENTINEL IS RESOLVED HERE, ONCE, THE WAY LM.resolve RESOLVES LM_LAYERS==0 -- not left for
     # `manage`'s maybe_deepen to discover. depth0=0 is documented as "start at the full `hops`
-    # budget (no curriculum)" (fabric/levers.py::FABLevers.depth0-228); depth0>0 is a literal starting hop count
+    # budget (no curriculum)" (fabric/levers.py::FABLevers.depth0); depth0>0 is a literal starting hop count
     # the curriculum extends FROM. Before this fix depth_now was hardcoded to 1 in
     # Population.__init__ regardless of either value, so FAB_DEPTH0=0 ran ONE hop per pass instead
     # of the full budget and FAB_DEPTH0=3 also started at 1 and waited on manage_every=500 to climb

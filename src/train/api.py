@@ -476,7 +476,17 @@ def startup_refusals(run: Config, *, disk_stream):
     (3) amp != "off" with device == "cpu" is NOT refused: it is legal and inert, and
         Process.amp_state says so.
 
-    LEVERS READ: epochs, device, amp
+    THE NOT-REFUSED CASE IN (3) NAMES device AND amp BUT READS NEITHER, AND THE LEVERS READ LINE
+    USED TO CLAIM IT DID. (3) is prose ABOUT the pair -- it explains why no code below checks
+    them -- not a read of either: process_setup (this package's OWN entry point) already declares
+    both in its own LEVERS READ and already returns the third state, Process.amp_state ==
+    "declined", with amp_reason carrying the sentence. Adding a read here would duplicate that
+    declaration rather than complete it -- two packages, or even two entry points in the same
+    package, computing one verdict twice is the exact defect the coupling table exists to prevent
+    (see FAB.build's d_operating_population cross-check for the general case). Trimmed to what
+    this function's body actually reads.
+
+    LEVERS READ: epochs
     WIRES READ: none
     DID IT FIRE: the returned list; an empty list is a positive result and is printed as one
     """

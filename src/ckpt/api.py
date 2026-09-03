@@ -15,7 +15,7 @@ composition root assembles from every package's own state_dict; `geometry` is a 
 prints the arithmetic; it never learns what a "rank" is.
 
 RECORD TYPES RETURNED (P4 defines them):
-  Snapshot         payload, geometry, step, epoch, best_state
+  Snapshot         payload, geometry, step, epoch, best_state, resume
   GeometryField    value, rule (EXACT | MAY_WIDEN | MAY_NARROW), env_name, why
   GeometryReport   checked, unchecked, refused, both values per field
   Saves            periodic, sigusr1, best, best_keep_by_slot, final, refused_off
@@ -51,12 +51,21 @@ class Snapshot:
     CKPT never learns what a "rank" is: payload is a mapping the composition root assembles from
     every package's own state_dict and hands back whole, and geometry is a manifest of records each
     package produced. This package compares recorded against live and prints the arithmetic.
+
+    `resume` CARRIES THE Resume RECORD THIS LOAD PRODUCED (attempted=True, loaded=True, plus the
+    step/epoch/best_state this snapshot holds) -- load()'s own DID IT FIRE line has always claimed
+    Resume as its surface and nothing before this field ever built one, so a report reading a
+    successful resume had no artifact to print beside "loaded from ckpt.pt" (round1/round2 finding
+    on ckpt.load). It is carried ON Snapshot rather than as a second return value because load()'s
+    signature is read directly by spine/compose.py (`restored = ckpt_api.load(ckpt)`) and a tuple
+    return would be a breaking change to a call site outside this package.
     """
     payload: dict
     geometry: dict
     step: int
     epoch: int
     best_state: object
+    resume: "Resume"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -198,16 +207,40 @@ def resume_source(ckpt: Config):
 
 
 def load(ckpt: Config):
-    """Read the resume source. Returns Snapshot(payload, geometry, step, epoch, best_state) or None.
+    """Read the resume source. Returns Snapshot(payload, geometry, step, epoch, best_state, resume)
+    or None.
 
     `best_state` IS IN THE CHECKPOINT -- ISSUES P1-M45: `_best_bpb` starts cold on every process
     (:4243) and nothing carried it, so the first post-resume probe satisfied "no best yet" and
     OVERWROTE THE PARENT'S best-by-held-out snapshot with the Adam re-warm bump. That is this
     package's own bug, not a coupling: the best-so-far is checkpoint state.
 
+    THE Resume RECORD IS BUILT HERE, ON THE PATH THAT SURVIVES. Before this fix nothing in the
+    package ever constructed a Resume: the class existed, this docstring's own DID IT FIRE line
+    named it, and no call site anywhere returned one -- so step_restored/epoch_restored/
+    best_restored were unreachable even on a SUCCESSFUL resume, the case the finding's own fix note
+    calls "the record ... the report prints after the run survives". Fixed by attaching
+    Resume(attempted=True, loaded=True, step_restored=step, epoch_restored=epoch,
+    best_restored=(best_state is not None)) to the returned Snapshot as `resume`, rather than as a
+    second return value: this function's return is read directly at one call site
+    (spine/compose.py's `restored = ckpt_api.load(ckpt)`), and a tuple return would change that
+    call's shape outside this package.
+    THE attempted-WITHOUT-loaded STATE STAYS UNREACHABLE FROM HERE, ON PURPOSE, AND THAT IS NOT
+    THIS FINDING. The missing-file branch below RAISES rather than returning: the docstring's own
+    reasoning for that raise -- "a cold start where a resume was asked for is not a slower run, it
+    is a different experiment" -- means the run does not survive to print a report line at all, and
+    a Resume record has nowhere to attach when this function never returns. Rendering
+    "attempted=True, loaded=False" as a printed state INSTEAD of a crash would reverse an already
+    -settled refusal for a different, narrower defect (M19/the old silent fallback); that is a
+    call for whoever owns the raise decision, not a body fix. `resume_source`'s own "DID IT FIRE:
+    Resume.attempted" is already answerable without this function: `sysm.resume_src =
+    ckpt_api.resume_source(ckpt)` in spine/compose.py is `is not None` exactly when a resume was
+    attempted, before this function is ever called.
+
     LEVERS READ: resume
     WIRES READ: none
-    DID IT FIRE: Resume(attempted, loaded, step_restored, epoch_restored, best_restored)
+    DID IT FIRE: Resume(attempted, loaded, step_restored, epoch_restored, best_restored) -- on the
+                 SURVIVING (successful-load) path only; see the note above for the raise path
     """
     ckpt = ckpt.owned_by("CKPT")
     src = resume_source(ckpt)
@@ -229,11 +262,17 @@ def load(ckpt: Config):
     # `best_state` IS IN THE CHECKPOINT (ISSUES P1-M45). `_best_bpb` started cold on every process,
     # so the first post-resume probe satisfied "no best yet" and overwrote the PARENT's
     # best-by-held-out snapshot with the Adam re-warm bump. Reading it back is the whole repair.
+    step, epoch = int(blob.get("step", 0)), int(blob.get("epoch", 0))
+    best_state = blob.get("best_state")
+    # THE Resume RECORD, BUILT ON THE PATH THAT SURVIVES. attempted=True and loaded=True are both
+    # certain here -- resume_source already returned a non-None source and the file has just been
+    # read without raising -- so the only real numbers to report are the three the checkpoint
+    # carried: step, epoch and whether a best-so-far snapshot rode along.
+    resume = Resume(attempted=True, loaded=True, step_restored=step, epoch_restored=epoch,
+                    best_restored=best_state is not None)
     return Snapshot(payload=blob.get("payload") or {},
                     geometry=blob.get("geometry") or {},
-                    step=int(blob.get("step", 0)),
-                    epoch=int(blob.get("epoch", 0)),
-                    best_state=blob.get("best_state"))
+                    step=step, epoch=epoch, best_state=best_state, resume=resume)
 
 
 def check_geometry(ckpt: Config, snapshot, geometry):

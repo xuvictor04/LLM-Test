@@ -117,7 +117,13 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
     had not happened to be re-entered twice since the resume. Same word, opposite consequence; the
     difference is which side of the comparison the reset lands on.
 
-    LEVERS READ: enabled, reservoir, prior_blend
+    LEVERS READ: none directly -- see d_expert_slots under WIRES READ. `enabled` and `reservoir`
+                 are consumed by observe (this package's own next entry point, still a stub) and
+                 `prior_blend` by state_dict/prior/census (also stubs), each of which already
+                 names it in its own LEVERS READ line; this line used to list all three as if this
+                 function's body read them, and it never has -- DOM_ENABLED=0 builds the identical
+                 live Partition DOM_ENABLED=1 does, which is correct for THIS entry point (an empty
+                 partition either way costs nothing to allocate) but was not what the claim said.
     WIRES READ: d_expert_slots
     DID IT FIRE: part.n_opened, part.n_restored_domains
     """

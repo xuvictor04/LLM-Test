@@ -137,8 +137,14 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
     it. `rng` is one spine.rng.Rng for the subsystem "memory"; every stochastic choice draws from
     it, never from the global torch stream.
 
-    LEVERS READ: quota, owners, key_src, key_win, key_depth, evict, probation_frac, src_share,
-                 verify, recon_hid, recon_tok, topk, write_mode, write_gate
+    LEVERS READ: quota, key_src, key_depth, owners (read by spine/assemble.py to COMPUTE
+                 d_capacity and d_owner_blocks -- not by this package's own code, which never
+                 reads it directly; see WIRES READ. The other ten of the fourteen this line used
+                 to claim -- key_win, evict, probation_frac, src_share, verify, recon_hid,
+                 recon_tok, topk, write_mode, write_gate -- are consumed by write/read/maintain/
+                 judge, each of which already names them in its own LEVERS READ line, and were
+                 never read by THIS entry point's body: trimmed rather than left as a claim this
+                 function's own code cannot back)
     WIRES READ: d_capacity, d_owner_blocks, d_source_slots
     DID IT FIRE: store.n_opened, store.n_restored_entries, store.n_restore_refused
     """
