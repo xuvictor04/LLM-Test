@@ -95,7 +95,7 @@ culls under its own selection pressure.
 
 **Read this before anything else: the repository is mid-rebuild.** There are two trees here. The old
 one still runs and is what every recorded result came from. The new one — `src/` — has a complete,
-frozen public surface and **38 of its 132 entry points have bodies**. Nothing has been trained at
+frozen public surface and **48 of its 132 entry points have bodies**. Nothing has been trained at
 scale under it. Do not read the numbers in this file's history as current; see *Status* below.
 
 ## The central idea: ownership is the namespace
@@ -143,7 +143,7 @@ defect in this codebase's history.
 |---|---|
 | lever-owning packages | 13 |
 | declared levers | 262 |
-| public entry points | 132 — **38 implemented, 94 stubs, 24 declared deferred** |
+| public entry points | 132 — **48 implemented, 84 stubs, 23 declared deferred** |
 | couplings | 23 (19 cross-package wires of a 25 budget, 4 intra-package, 7 rejected candidates) |
 | assembly / loop order rows | 39 / 58 |
 | RNG subsystems | 10 |
@@ -169,17 +169,29 @@ try: compose.compose(environ={})
 except NotImplementedError as e: print('stops at:', str(e).split(chr(10))[0])"
 ```
 
-The suite is **12 + 13 + 7 + 9 + 4 checks and 575 replayed oracle cases, 0 failing**. Three
-packages — `data`, `tok`, `lm` — do connect end to end on CPU with a plain `torch.optim.AdamW`
-standing in for the unwritten `OPT`, and the loss falls. That is a smoke path assembled by hand, not
-a run: `OPT` and `RUN` are still stubs, so nothing schedules, accumulates, checkpoints or measures.
+The suite is **12 + 14 + 7 + 9 + 4 checks and 575 replayed oracle cases, 0 failing**. Three
+packages — `data`, `tok`, `lm` — do connect end to end on CPU, and the loss falls: a 30-step run on a
+fixed batch took cross-entropy from 8.320 to 0.144 while the fabric's expert tensors moved under the
+same optimizer (`max|A_before − A_after| = 0.000529`). That is a smoke path assembled by hand — one
+fixed batch, overfitted on purpose — not a run, and not a generalisation claim.
+
+**`OPT` is now written**: all seven entry points, where the whole package was stubbed a day ago. Its
+schedule warms to `OPT_LR` over `OPT_LR_WARMUP` steps and cosines to the `lr_min_frac` floor, which
+then holds past the horizon; `OPT_LR_SCHED=none` gives a flat rate, the one-flag ablation for the
+shape recorded below under *Retracted*. `RUN`'s clock and cadences are still stubs, so nothing yet
+schedules, checkpoints or measures — the hand-built loop above is still hand-built.
 
 ### What does not work yet
 
 - **No training loop.** No checkpointing, no evaluation battery, no report.
-- **94 entry points are stubs**, including all of `EVAL`, most of `MEM`, `DOM`, `CAP`, `FAB`, `WORLD`
-  and `OPT`. 24 are *declared deferred* with the phase that will reach them and the argument that has
-  no producer.
+- **84 entry points are stubs**, including all of `EVAL`, most of `MEM`, `DOM`, `CAP`, `FAB` and
+  `WORLD`. 23 are *declared deferred* with the phase that will reach them and the argument that has
+  no producer. `OPT` is no longer among them — it is the first package to reach zero stubs.
+- **`compose(environ={})` still stops**, at `CAP.startup_refusals`. Of the 44 package entry points it
+  calls, 18 are stubs, but 9 of those sit behind a resume guard (`if "LM" in saved:` and its
+  siblings) and are unreachable on a fresh run. The fresh-run blocker set is **six entry points**:
+  `CAP.startup_refusals`, `RUN.new_clock`, `RUN.new_cadences`, `RUN.cadence_audit`,
+  `CKPT.new_retention`, `CKPT.install_save_signal`.
 - **`tests/test_lever_isolation.py` does not exist**, and seven files name it as the load-bearing
   check for couplings that travel through shared state, RNG draw order or the data. Until it exists,
   the coupling ledger is evidence about *declared* couplings only.

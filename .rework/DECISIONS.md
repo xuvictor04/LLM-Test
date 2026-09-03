@@ -217,3 +217,129 @@ answered — a factual lookup is a lookup, and stalling on ceremony is its own f
 RECOMMENDATIONS: proposals about what the project should do next.
 
 This ruling is about METHOD and does not touch the two definitive goals.
+
+---
+
+## D12 · 2026-09-03 · `RUN.process_setup` owns torch's global generator, and says what that does not buy
+
+The `lm` fixer found a defect it could not fix inside its own package and referred it up: nothing in
+the tree seeds torch's PROCESS-GLOBAL default generator, so at `LM_DROPOUT>0` two runs at the same
+`RUN_SEED` diverge and G2's determinism floor absorbs the difference. `nn.Dropout`,
+`nn.TransformerEncoderLayer` and `torch.nn.functional.dropout` take no `generator=` argument at torch
+2.13.0+cu130, so the per-subsystem streams this tree is built on structurally cannot reach them.
+
+**Four options were weighed.**
+
+| | option | why it lost, or won |
+|---|---|---|
+| (a) | seed the global inside `RUN.process_setup` | **CHOSEN**, refined — see below |
+| (b) | declare `"torch.global"` in `compose.RNG_SUBSYSTEMS` so `RUN.streams` mints it like any other | rejected: `rng_for` raises on re-issue, so the name could be minted once per process and `process_setup` could not be called twice; and it would advertise a *stream* where what exists is a *seed* |
+| (c) | thread an explicit generator to every consumer | rejected on evidence, not taste: the three call sites have no parameter to receive one. Checked at the installed torch version rather than assumed |
+| (d) | leave it, and make the non-determinism merely REPORTABLE | its argument is **correct** and is answered rather than dismissed — see below |
+
+**Option (d)'s objection is the important one, and it shaped the fix.** A silent process-wide
+mutation is exactly what the ownership spine exists to prevent, so the answer is not to decline the
+mutation but to make it *declared and checkable*. `Process` gains a frozen `torch_seed` field READ
+BACK out of `torch.initial_seed()` after the write — the same shape `Process.tf32_applied` already
+has, which records "THE PAIR OF VALUES ACTUALLY WRITTEN, not the requested flag". The read-back is
+the load-bearing half of the ruling, not decoration: it is what turns seeding into a DID IT FIRE
+line instead of an invisible side effect. No new idiom enters the package.
+
+On the docstring's own phrase — "the process-wide arithmetic settings ONCE, before any package is
+built" — the ruling is that this is not being stretched. A generator seeded from OS entropy is
+process-wide in the same sense tf32 is, and is strictly *narrower*: tf32 moves the arithmetic, while
+seeding changes nothing about what is computed and everything about whether two runs of it agree.
+The call is placed before the tf32 writes so "before any package is built" is literally true.
+
+`"torch.global"` IS A DERIVATION LABEL, NOT A MINTED STREAM. It goes through
+`spine/rng.py::derive_seed`, a pure blake2b of (run seed, name) that mints nothing, so the function
+stays callable twice in one process — which `rng_for` would not be. Nobody should grep for it in
+`rng.py::issued()`.
+
+**WHAT THIS DOES NOT BUY, stated because a determinism claim that overreaches is worse than none.**
+Seeding gives every run at one seed the same sequence. It does NOT give each package an independent
+one: every consumer that cannot take a `generator=` still draws from one shared stream, so torch
+DRAW ORDER remains a channel between packages that no wire covers. Adding a package that draws from
+the global, or reordering two that do, still moves the numbers of every package downstream of it.
+That is a real remaining coupling and it is recorded here rather than papered over.
+
+**Verified, by the supervisor, after the agent's own verifier was killed by the session limit.** Two
+fresh processes at `RUN_SEED=0, LM_DROPOUT=0.2` now report identical `torch.initial_seed()`
+(3734753547471956429) and identical `LM.encode()` sums (0.768035); `RUN_SEED=7` gives a different
+seed and a different sum (4.814884), reproducibly. Both halves matter — a fix that made every seed
+agree would be a worse bug than the one it replaced.
+
+---
+
+## D13 · 2026-09-03 · `FAB.state_dict`'s list and `FAB.build`'s allocation must agree name for name
+
+`FAB.build` allocated five of the nine module-level names `FAB.state_dict`'s docstring lists as
+checkpointed Parameters. `halt_b`, `norm`, `q_entry` and `nov_proj` were declared and never built —
+so a checkpoint round-trip silently lost each of them.
+
+The fixer that referred this up gave a blocking premise: that these names "have no specified shape
+anywhere in the reachable tree". **That premise is false**, and establishing so is what unblocked the
+ruling — all four are minted with exact constructors in the frozen old tree at
+`self_organize.py:1733` and `:1907-1908`.
+
+Re-reading the call sites splits the four cleanly, so no single answer covers them:
+
+- `norm`, `nov_proj`, `halt_b` are read on the walk **this tree ports**, so `FAB.build` now builds
+  them, to the old tree's own constructors.
+- `q_entry`'s only three readers all belong to arms this rebuild has **explicitly dropped**. It is
+  therefore dropped from `state_dict`'s list, exactly as `ctrl` was, with the reason recorded —
+  which **reverses** that docstring's own earlier ruling that "q_entry and nov_proj stay, because
+  both walks use them". Half of that sentence survives; half does not, and the reversal is written
+  down rather than quietly applied.
+
+The rejected alternative was raising `NotBuilt` at the point of use for names P4 has not reached.
+It loses because these names are not deferred mechanisms — three are needed by a walk that exists,
+and the fourth belongs to a walk that does not. `NotBuilt` would encode "not yet" for a case that is
+actually "never".
+
+---
+
+## D14 · 2026-09-03 · `CKPT.save_period` keeps its return type and carries its Gate on it
+
+`CKPT.save_period` returned a bare `units.Windows` and declared no Gate, though its own DID IT FIRE
+line has always claimed one for the dir-set-but-`every==0` condition — "the only saves are the final
+one plus SIGUSR1", which is precisely the armed-but-0 versus UNREACHABLE distinction `spine/gate.py`
+exists for.
+
+**The return type does not change.** Widening it to a `(Windows, Gate)` pair or a new record would
+touch `spine/compose.py`, which the ruling's owner did not own, and would make the call shape a
+second thing to keep in sync. Instead `Gate('ckpt.periodic_armed', ...)` rides on the returned
+`Windows` as a `.gates` tuple — the same convention FAB, CAP and MEM already use — with all three of
+`gate.py`'s states spelled out. Unchanged type, unchanged call shape, and the declared Gate now
+exists.
+
+What is still owed is recorded rather than taken: CKPT has no package-wide DID IT FIRE accessor, and
+giving it one needs `docs/04_CONTRACT.md` and `spine/compose.py` together. Referred, not spent.
+
+---
+
+## D15 · 2026-09-03 · A Gate's reachability is keyed on the arm it reports, not on the package switch
+
+`capacity/api.py::new_valve` built `Gate cap.vocab_arm_honest` so that on the **shipped defaults**
+(`CAP_TARGETS=off`, `LM_MASK_DEAD_ROWS=False`) it printed "armed, did not fire" — a reachable,
+unfired reading — for a mechanism that could not fire on any configuration of `LM_MASK_DEAD_ROWS`,
+because `CAP_TARGETS=off` means no vocabulary lift ever happens. Its sibling `cap.valve`, two lines
+above, evaluated the same condition correctly. Every stock run of this tree printed it.
+
+The filed fix proposed keying reachability on `targets == "off"`. **The ruling is narrower and the
+difference is the point:** reachability is keyed on whether the VOCABULARY ARM is armed —
+`targets in ("vocab", "both")` — and the unreachable arm prints `targets` against `'vocab|both'` as
+its arithmetic, mirroring `cap.valve`, with `LM_MASK_DEAD_ROWS`'s value carried in the reason so
+nothing is hidden.
+
+The filed fix would have been right on the shipped default and **wrong at `CAP_TARGETS=experts`**,
+where the valve is on, the package switch is not "off", and yet no vocabulary lift can happen either.
+A Gate reports one mechanism; its reachability belongs to that mechanism's own arm, not to the
+package-level switch that merely happens to disable everything at the default. Generalised: when a
+Gate and its package switch appear to ask the same question, they agree only at the defaults.
+
+This is the first finding filed against `capacity/`, which — with `eval/` — had never been audited by
+anyone: neither appears in any findings file and neither had an entry in `.rework/audits/todo/`.
+That pass found six further defects, among them a mutable default shared across every `Valve` in the
+process and a sentinel collision in which an explicitly-set `CAP_FAB_START=0` resolves a soft expert
+cap of zero.

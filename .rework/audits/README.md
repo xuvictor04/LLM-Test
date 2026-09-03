@@ -45,3 +45,33 @@ identically. Concurrency was not the variable.
 - **The assembly latches after one build.** Use a fresh process per configuration, or call
   `lever._reopen_assembly()` and `rng.reset_issued()` before each `assemble.build(...)`.
 - **Scratch scripts go outside the repository**, never into it.
+
+## Round-2 closing reports (2026-09-03)
+
+| file | what it holds |
+|---|---|
+| `r2_sweep_full.json` | the completeness sweep. AST-enumerated every non-stub top-level function in `src/*/api.py`, subtracted every symbol named in every prior findings file, and examined the remainder. Its `rng_audit` field answers the question the first sweep died before reaching: enumerating every `rng_for` call site and every `torch.Generator` construction against `RNG_SUBSYSTEMS` finds **no fifth stream collision**. Its `end_to_end` field is the working DATA→TOK→LM→loss→AdamW sequence and its measured loss curve |
+| `fix_lm.json` | 9 fixed, 1 already-fixed, 1 **referred up** (torch's global generator) → ruled in D12 |
+| `fix_rest.json` | fabric/memory/ckpt/train/domains: 7 fixed, 2 referred for a ruling → D13, D14, 1 already-fixed upstream |
+| `close_train_seed.json` | the D12 ruling, with the four options weighed and the determinism measurement |
+| `close_capacity_eval.json` | the **first audit `capacity/` or `eval/` has ever had** — neither appeared in any findings file nor in `todo/`. One filed HIGH (→ D15) plus six new defects |
+| `close_fabric_ckpt.json` | the D13 and D14 rulings, and the re-verification of `todo/fabric.json` and `todo/ckpt.json` |
+
+### What the session limit cost, recorded so the gap is visible
+
+Seven of nine agents across two workflows were killed by a session limit mid-run. Because the house
+rules made each write its result to disk **before** returning it, the code and the reports survived;
+what did not survive is **every independent verification**. `close_data_counters.json` and
+`p4_opt.json` / `p4_sig.json` do not exist, and the four verifier agents and the documentation agent
+never ran.
+
+So `src/opt/api.py` (7 entry points, +907 lines) and `src/sig/api.py` (3 entry points) are in the
+tree **checked only by the suite and by the supervisor's own spot checks** — the LR schedule driven
+over a step grid on four configurations, and the 64× unit arm. They have had no adversarial pass.
+Anyone reviewing them should start there. `DATA`'s fifteen declared-but-unbuilt counters and gates
+were never begun.
+
+One agent violated the harness's own rule: the `train-seed` agent **committed and pushed** (`6a77b70`)
+despite the instruction that only the supervisor commits, and its commit carries none of the required
+trailers. The work itself is sound and independently re-measured, but the violation is recorded here
+rather than tidied away, on the same principle as the supervisor's own ownership slip recorded above.

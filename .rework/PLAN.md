@@ -1,7 +1,13 @@
 # Implementation plan — the rm-predict-DC rework
 
-Status: **proposed, not started.** Nothing in `src/` exists yet. This document is the "first implementation
-instructions and details" and is the thing to argue with before any code is written.
+Status: **in progress.** Written when nothing in `src/` existed; the tree now has 13 packages, 262
+levers and 132 frozen entry points, 48 of them implemented. The document below is still the thing to
+argue with, but it is no longer a document about the future, and §5's phase table in particular has
+drifted from what the tree actually did — see **the amendment to §5** at the end of that section.
+
+Corrected 2026-09-03: this line read "proposed, not started. Nothing in `src/` exists yet" for the
+whole of the build so far. A status line that is a copy of a fact rots exactly the way a count does,
+which is why `tools/sync_counts.py` exists for the counts; this one had no such guard.
 
 Built from: `.rework/survey/` (16 areas, 1,149 facts, 558 lever records, 475 bugs, 305 carry-forward),
 `.rework/COMMIT_RECORD.md` (379 commits), four independently-produced architectures, three judges with
@@ -188,6 +194,42 @@ Each is independently verifiable. **P3 is the first launchable system**, deliber
 **Explicit non-goal:** the new tree will not reproduce rm-predict's numbers, and must not be judged on it.
 You chose clean-break; two of the confirmed defects mean several old numbers were measuring the wrong
 thing, so agreement with them would be evidence of a bug faithfully carried forward.
+
+### The amendment to §5, added 2026-09-03: the table above is not the numbering the tree uses
+
+The table was never amended as the build proceeded, and the tree diverged from it. Established by
+counting, not by reading intentions:
+
+- **84 stub markers across `src/*/api.py` say `P4 (<pkg>) fills this in`** — train 10, fabric 9,
+  sig 8, memory 8, lm 8, domains 8, tok 7, opt 7, ckpt 7, world 6, capacity 6, data 2. So the tree
+  calls *writing the bodies* P4.
+- Commit `7ed06bb` is titled **"P3 contract: the composition root's 117 entry points"**.
+- `docs/04_CONTRACT.md` agrees with the markers: "the tensor layout — is P4's business", and
+  "no file in `src/` imports torch at P3".
+
+So **P3 was split in practice into two phases** — P3 freezes the contract (signatures, docstrings, no
+torch), P4 writes the bodies — and the table above still shows the unsplit form, giving P3 both jobs.
+
+**Three consequences, and the second is the one that matters.**
+
+1. `src/eval/api.py`'s stub markers say P5 and P6, which match the table's *unsplit* numbering, while
+   every other package matches the *split* one. Both conventions are live in `src/` today.
+2. **The Isolation phase has fallen out of the schedule with no number.** It is the table's P4, its
+   deliverable is `tests/test_lever_isolation.py` (G1, G3), and five checks across the suite
+   currently cite that file's absence as the reason they cannot supply evidence. Lever isolation is
+   the second of the two disciplines §1 says the architecture rests on; it did not lose an argument,
+   it lost a slot.
+3. Eighty-four stub messages cite a phase whose plan row describes a different deliverable. A stub
+   message is what an implementer reads to know what to write and when, so this is the
+   wrong-measurement family — 98 of the survey's 475 records — applied to the schedule itself.
+
+**The ruling: the phases renumber, the markers do not.** The markers and `docs/04_CONTRACT.md` agree
+with each other and this table is the lone dissenter, so the table is what is wrong. `eval`'s markers
+are the exception and move when the renumbering lands. The renumbering is not applied in this edit —
+it touches every row below P2 and the phase currently in flight is P4 under the split numbering; it
+is written down here first so that the next reader is not misled by a table this paragraph now
+contradicts.
+
 
 ## 6. Documents to be generated
 
