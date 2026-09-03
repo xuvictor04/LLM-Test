@@ -139,10 +139,20 @@ page and it is part of the deliverable, not a courtesy. Two obligations follow, 
 rather than aspirational:
 
 1. **It describes the tree that exists.** At the time of this ruling the README documented the OLD
-   tree exclusively — it told a reader to start with `STATE.md` and `garry/GARRY.md`, to run
-   `run_full_unfrozen.sh` and `self_organize.py`, and to read `CL_TESTBED.md`, all of which had moved
-   under `archive/`. A landing page that names paths the repository does not have is the
-   citation-rot class (O12, N7) on the one file every reader opens first.
+   tree exclusively, and three of the files it tells a reader to "Start here" with — `STATE.md`,
+   `garry/GARRY.md` and `CL_TESTBED.md` — had been moved under `archive/`. A landing page that names
+   paths the repository does not have is the citation-rot class (O12, N7) on the one file every
+   reader opens first.
+
+   **CORRECTION, same day, against myself.** The first version of this entry also asserted that
+   `run_full_unfrozen.sh` and `self_organize.py` had moved under `archive/`. They have not: both are
+   still at the repository root, alongside 48 other top-level scripts, and `self_organize.py` is
+   828 KB of live code. A research agent verified the filesystem and contradicted me; I had inferred
+   the move from the fact that the REBUILD lives in `src/` and never checked. The consequence for the
+   page is the opposite of what I wrote — the old tree's COMMANDS still work, and what is stale is
+   narrower and more specific than "everything". Recorded rather than quietly fixed, because the
+   error is the same shape as the defects this project exists to catalogue: a plausible claim about
+   a tree, asserted without reading it.
 2. **It republishes no retracted number.** The README's headline paragraph quoted measured figures
    sourced to `STATE.md §7`, and ISSUES P2-C3 records that that section is headed *"authoritative"*
    while every headline number in it is void under a later invalidation. Any figure on the landing
