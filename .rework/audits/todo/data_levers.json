@@ -1,0 +1,13 @@
+[
+ {
+  "file": "src/data/levers.py",
+  "line": 41,
+  "symbol": "DATALevers",
+  "title": "The module docstring's census accounting ('This file emits 17 levers ... 17 Lever declarations, all reachable as DATA_<FIELD>') is now stale: the file declares 18 Levers since d8eadd5 added the amendment lever `draw`",
+  "failure": "grep -c '^    [a-z_]* = Lever(' src/data/levers.py returns 18, and tests/test_contract.py's own live-count line already reports 'levers:DATA=18' (matching docs/04_CONTRACT.md, which is checked). The levers.py module docstring at lines 41-46 was written before this commit and still says 'This file emits 17 levers: 11 rows with verdict rename + 6 rows with verdict keep = 17 Lever declarations, all reachable as DATA_<FIELD>' -- an arithmetic paragraph this same file's own culture treats as load-bearing precision (the whole 'WHAT WAS EMITTED' section exists to make the census-to-lever count checkable by a reader), and it undercounts by exactly the one amendment lever this commit added.",
+  "evidence": "src/data/levers.py:41 'This file emits 17 levers:' and :46 '17  Lever declarations, all reachable as DATA_<FIELD>'; the `draw` lever (an AMENDMENT, not a census rename/keep row, per its own comment at levers.py:554-556) is declared at levers.py:550-553, bringing the class's total Lever count to 18. No test currently checks this specific docstring number (tests/test_contract.py checks docs/04_CONTRACT.md's separate claim, which IS correct at 18), so nothing caught the drift.",
+  "severity": "low",
+  "fix": "Add one sentence noting the amendment lever, e.g. '... 17 Lever declarations from the census, plus 1 amendment (`draw`, ISSUES P1-H58) = 18 Levers total', matching the pattern other amended files would need going forward.",
+  "_origin": "r2_hunt_h58.json"
+ }
+]

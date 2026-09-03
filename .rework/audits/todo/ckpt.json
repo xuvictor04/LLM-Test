@@ -1,0 +1,30 @@
+[
+ {
+  "file": "src/ckpt/api.py",
+  "line": 126,
+  "symbol": "save_period",
+  "title": "save_period declares a Gate for the dir-set/every==0 condition and produces none, so \"the only saves are the final one plus SIGUSR1\" is never stated",
+  "failure": "The body returns a bare `U.Windows(int(ckpt.every))`. CKPT has no counters() entry point and no gate channel anywhere in the package (ckpt/api.py does not import spine.gate), so with CKPT_DIR set and CKPT_EVERY=0 -- the shipped default of `every` -- nothing anywhere tells the operator that periodic saving is off on a run that IS persisting. That is the :5619-5621 warning the contract asks to be replaced by a gate with its own condition, dropped rather than replaced.",
+  "evidence": "Docstring: \"DID IT FIRE: Cadences.ledger()[\\\"ckpt\\\"]; plus a declared Gate for the :5619-5621 warning -- dir set and every == 0 means the only save is the final one plus SIGUSR1, printed with its own condition rather than as a warning string.\" Line 126 is the whole body after owned_by.",
+  "severity": "medium",
+  "fix": "Return the period and expose the gate through a channel the root can read -- a package-level counters()/gates() accessor, or Gate(\"ckpt.periodic_armed\", fired=(every>0), value=every, threshold=1, reachable=saving_on(ckpt), reason=\"CKPT_DIR is off: nothing is saved at all\").",
+  "_origin": "round1",
+  "_state": "still-present",
+  "_triage_evidence": "src/ckpt/api.py save_period body (line 119-126) is `ckpt = ckpt.owned_by(\"CKPT\"); return U.Windows(int(ckpt.every))` -- a bare Windows value, no Gate. ckpt/api.py imports only `dataclasses, os, torch, spine.lever.Config, spine.units as U` (lines 25-31); `spine.gate.Gate` is not imported anywhere in the file, and grep for 'Gate' in ckpt/api.py matches only prose comments, never a constructed object. No counters()/gates() channel exists elsewhere in the package either.",
+  "_residue": "None."
+ },
+ {
+  "file": "src/ckpt/api.py",
+  "line": 213,
+  "symbol": "load",
+  "title": "load raises on a missing resume file and never constructs a Resume, so the attempted-without-loaded state the record exists for is unreachable",
+  "failure": "Nothing in the package constructs `Resume`; `load` returns Snapshot or None and raises FileNotFoundError in between. The one state the record's own docstring says the old tree could not report -- \"a RESUME that named a path nothing could be read from\" -- is now a crash, and the run has no artifact that says attempted=True/loaded=False. resume_source's \"DID IT FIRE: Resume.attempted\" and load's \"DID IT FIRE: Resume(attempted, loaded, step_restored, epoch_restored, best_restored)\" have no producer, so step_restored/epoch_restored/best_restored are never reported either, even on a successful resume.",
+  "evidence": "`@dataclasses.dataclass(frozen=True) class Resume: ... attempted: bool; loaded: bool; ...` with docstring \"`attempted` without `loaded` is the state the old tree could not report\"; `grep -n 'Resume(' src/ckpt/api.py` finds only the class definition. Body: `if not os.path.isfile(src): raise FileNotFoundError(...)` then `return Snapshot(...)`.",
+  "severity": "medium",
+  "fix": "Build and return/record the Resume alongside the Snapshot (attempted from resume_source, loaded/step/epoch/best from the blob), and keep the refusal as the loud arm -- the two are not exclusive, the record is what the report prints after the run survives.",
+  "_origin": "round1",
+  "_state": "still-present",
+  "_triage_evidence": "src/ckpt/api.py load() (line 200-236): `if not os.path.isfile(src): raise FileNotFoundError(...)`, then falls through to `return Snapshot(...)` on success -- no Resume is ever built on either arm. grep for 'Resume(' in ckpt/api.py matches only the dataclass field-list docstring at line 210, never a constructor call. Ran ckpt_api.load() with CKPT_RESUME pointed at a nonexistent path: raised FileNotFoundError as before, confirming the attempted=True/loaded=False state is still unreachable.",
+  "_residue": "None."
+ }
+]

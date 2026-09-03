@@ -1,0 +1,49 @@
+[
+ {
+  "file": "src/world/api.py",
+  "line": 112,
+  "symbol": "build",
+  "title": "WORLD.build seeds a CPU torch.Generator and draws directly into encoder/world_proj/qproj parameters already moved to `device` -- RuntimeError on every RUN_DEVICE=cuda run with WORLD_ENABLED=1",
+  "failure": "RUN_DEVICE=cuda (a declared choice: train/levers.py `choices=(\"cpu\",\"cuda\")`) with WORLD_ENABLED=1. Line 112 builds `gen = torch.Generator(device=\"cpu\")`. Lines 117-119 construct `w.encoder`/`w.world_proj`/`w.qproj` and immediately `.to(device)` them. The loop at lines 136-142 then calls `t.uniform_(-0.1, 0.1, generator=gen)` directly on those CUDA-resident parameters using the CPU generator. ATen's check_generator (torch/include/ATen/core/Generator.h:155) raises `RuntimeError: Expected a 'cuda' device type for generator but found 'cpu'`, so every GPU run with the world model on dies inside WORLD.build before any tensor is trained -- the exact defect class round1 found (and this tree already fixed) in FAB.build and SIG.build. Only the `w.keys` draw here is safe, because it fills a CPU-allocated `k = torch.empty(nmax, route_d)` first and copies it to device afterward (lines 145-147) -- the encoder/world_proj/qproj loop does not follow that pattern.",
+  "evidence": "world/api.py:112 `gen = torch.Generator(device=\"cpu\")`; :117-119 `w.encoder = nn.Sequential(...).to(device)` / `w.world_proj = nn.Linear(...).to(device)` / `w.qproj = nn.Linear(...).to(device)`; :136-142 `for t in list(w.encoder.parameters()) + list(w.world_proj.parameters()) + list(w.qproj.parameters()): if t.dim() >= 2: t.uniform_(-0.1, 0.1, generator=gen)`. Contrast the now-fixed sibling packages: fabric/api.py:189 `gen = torch.Generator(device=device)` (with the comment \"THE GENERATOR IS CREATED ON THE TARGET DEVICE ... a device mismatch that only fails on the hardware you cannot test on is the worst shape this defect can take\") and sig/api.py:121 `gen = torch.Generator(device=device)`. WORLD.build never received the equivalent fix.",
+  "severity": "high",
+  "fix": "Build `gen = torch.Generator(device=device)` (matching fabric/api.py and sig/api.py) instead of `device=\"cpu\"`, or move the encoder/world_proj/qproj construction to happen before `.to(device)`, draw with the CPU generator, then move to device afterward -- the same shape the `w.keys` draw two lines below already uses correctly.",
+  "_origin": "r2_hunt_contract.json"
+ },
+ {
+  "file": "src/world/api.py",
+  "line": 112,
+  "symbol": "build",
+  "title": "WORLD.build still seeds a CPU torch.Generator and draws with it into modules already moved to `device` -- the exact device-mismatch crash b95c4a4 fixed in FAB.build, LM.build_model and SIG.build, left unrepaired in the fourth copy of the same pattern.",
+  "failure": "Any run with the default levers (WORLD_ENABLED defaults to True -- src/world/levers.py:182 `enabled = Lever(True, ...)`) and RUN_DEVICE=cuda. world.api.build() does `gen = torch.Generator(device=\"cpu\")` (line 112), then builds `w.encoder`, `w.world_proj`, `w.qproj` and moves each `.to(device)` (lines 117-119), then at line 136-140 draws IN PLACE into those already-moved parameters with `t.uniform_(-0.1, 0.1, generator=gen)`. torch requires an in-place random op's generator and its tensor to share a device; a cpu generator writing into a cuda tensor raises RuntimeError before the world model exists -- on every RUN_DEVICE=cuda run, the same failure b95c4a4's own commit message names as 'EVERY GPU RUN WOULD HAVE CRASHED... A device mismatch that only fails on the hardware you cannot test on is the worst shape this defect takes.' WORLD.build is not a stub (no NotImplementedError; it is called from spine/compose.py:1947 as `sysm.world = world_api.build(...)`) and was already written (commit 2088e3d, before round 1's findings were even recorded), so this is not new or incomplete code -- it is the one instance of the pattern the repair missed. Verified: `grep -rn 'torch.Generator(device=' src/*/api.py` shows fabric/api.py:189, lm/api.py:314 and sig/api.py:121 all now read `torch.Generator(device=device)` (the fixed form) while world/api.py:112 is the lone remaining `torch.Generator(device=\"cpu\")`. Also verified WORLD.build runs and returns a live World on RUN_DEVICE=cpu (the crash is latent there, exactly as FAB/LM/SIG were before their fix), so nothing in the CPU-only suite this project runs would catch it.",
+  "evidence": "src/world/api.py:112 `gen = torch.Generator(device=\"cpu\")`; :117-119 `w.encoder = nn.Sequential(...).to(device)`, `w.world_proj = nn.Linear(...).to(device)`, `w.qproj = nn.Linear(...).to(device)`; :136-140 `for t in list(w.encoder.parameters()) + list(w.world_proj.parameters()) + list(w.qproj.parameters()): if t.dim() >= 2: t.uniform_(-0.1, 0.1, generator=gen)`. Compare src/fabric/api.py:189, src/lm/api.py:314, src/sig/api.py:121, all `torch.Generator(device=device)` post-repair, and b95c4a4's own commit message: 'FAB.build, LM.build_model and SIG.build each seeded a torch.Generator(device=\"cpu\") and then drew with it into parameters already moved to the target device... All three now create the generator on the target device and allocate modules there directly' -- WORLD is not named among the three and its copy of the identical code shape was not touched by that commit (git log -- src/world/api.py shows build() last modified in 2088e3d, before b95c4a4).",
+  "severity": "high",
+  "fix": "Change line 112 to `gen = torch.Generator(device=device)`, matching the repair already applied to FAB.build, LM.build_model and SIG.build. Also normalize line 145-147 (`k = torch.empty(nmax, route_d)` drawn on an implicit-cpu tensor, then `w.keys.copy_(k.to(device))`) to draw directly into `w.keys` in place with the device generator, for the same reason the other three packages stopped using the intermediate-cpu-tensor-then-copy shape.",
+  "_origin": "r2_hunt_fixes.json"
+ },
+ {
+  "file": "src/world/api.py",
+  "line": 401,
+  "symbol": "startup_refusals",
+  "title": "startup_refusals never reads world.enabled, so a run with the world subsystem OFF is refused for a horizon it will never use",
+  "failure": "Ran it: `WORLD_ENABLED=0 WORLD_HORIZON=0` returns the WORLD_HORIZON=0 refusal, and `WORLD_ENABLED=0 WORLD_HORIZON=999` against ctx_tokens=64 returns the horizon>=ctx refusal. compose.py raises on a non-empty refusal list before any tensor is allocated, so a legal configuration -- the null world, which build() constructs specifically so that \"OFF is a configuration a run can actually take\" -- is made unrunnable by a stale WORLD_HORIZON left in an operator's environment. Both refusals name a nan that a null world can never compute.",
+  "evidence": "Docstring: \"LEVERS READ: horizon, enabled\". The body reads only `world.horizon` (line 402) and never `world.enabled`. Reasons given for both refusals are about the loss slices, which only the live world evaluates (build(): `if not bool(world.enabled): return World(built=\"null\", ...)`).",
+  "severity": "medium",
+  "fix": "Open with `if not bool(world.enabled): return []`, or emit the two refusals as unreachable-with-reason gates on the disabled arm so the ledger still says why they could not fire.",
+  "_origin": "round1",
+  "_state": "still-present",
+  "_triage_evidence": "src/world/api.py startup_refusals (line 386-415) reads only `world.horizon` (line 402); `world.enabled` (a declared Lever, src/world/levers.py:182) is never referenced in the body. Ran WORLD_ENABLED=0 WORLD_HORIZON=0 -> returned the WORLD_HORIZON=0 refusal; ran WORLD_ENABLED=0 WORLD_HORIZON=999 against ctx_tokens=64 -> returned the horizon>=ctx refusal with the nan-loss reasoning that only applies to a live world. Both refusals fire on a disabled world exactly as round 1 reproduced.",
+  "_residue": "None."
+ },
+ {
+  "file": "src/world/api.py",
+  "line": 91,
+  "symbol": "build",
+  "title": "build's LEVERS READ omits `horizon`, which the body reads and stamps into World.horizon and the counters ledger on every arm, live and null",
+  "failure": "Any run, including WORLD_ENABLED=0. build() reads `world.horizon` twice: once in the null-world return (world/api.py:101, `World(built=\"null\", horizon=int(world.horizon), ...)`) and again in the live arm (world/api.py:114 and the counters update at world/api.py:151, `\"world.horizon\": int(world.horizon)`), yet its own LEVERS READ line lists only `enabled, lat, hid, route_d, n0, nmax, feedback`. Reproduced: with WORLD_HORIZON=1 vs WORLD_HORIZON=7 and everything else fixed, `world_api.build(...).horizon` is 1 in one run and 7 in the other on BOTH the null and live arms -- a real, reproducible effect this entry point's own declared read-list denies exists. This is the mirror image of the 'declared but not read' family already filed several times this round (tok.build_vocabulary, RUN.startup_refusals, DOM.open_partition, MEM.open_store): here a lever IS read and IS NOT declared, which is the more dangerous direction -- a real coupling invisible to anyone auditing WORLD_HORIZON's reach off this docstring, rather than a phantom one.",
+  "evidence": "world/api.py:91 `LEVERS READ: enabled, lat, hid, route_d, n0, nmax, feedback` (horizon absent). world/api.py:101 `return World(built=\"null\", horizon=int(world.horizon), feedback=bool(world.feedback), lat=int(world.lat), rng=rng)`; world/api.py:114-115 `w = World(built=\"live\", nmax=nmax, n_live=n0, horizon=int(world.horizon), feedback=bool(world.feedback), lat=lat, rng=rng)`; world/api.py:151 `\"world.horizon\": int(world.horizon)` inside `w.counters.update({...})`. world/levers.py:432 confirms `horizon` is a declared WORLD lever (`WORLD_HORIZON`).",
+  "severity": "low",
+  "fix": "Add `horizon` to build's LEVERS READ line: `LEVERS READ: enabled, lat, hid, route_d, n0, nmax, feedback, horizon`.",
+  "_origin": "r2_sweep.json"
+ }
+]

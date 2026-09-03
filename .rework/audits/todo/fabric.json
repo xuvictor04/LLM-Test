@@ -1,0 +1,44 @@
+[
+ {
+  "file": "src/fabric/api.py",
+  "line": 65,
+  "symbol": "Population.__init__",
+  "title": "depth_now is hardcoded to 1 and FAB_DEPTH0 is never read at build, so the lever's documented 0 sentinel ('no curriculum') cannot be selected.",
+  "failure": "`self.cap, self.n_live, self.depth_now = cap, n0, 1` fixes the starting hop count at 1 for every configuration. FAB_DEPTH0 is declared as \"Hop count the chain starts at before staged depth extends it; 0 means start at the full `hops` budget (no curriculum)\" (fabric/levers.py:227-228) and FAB.forward computes \"Depth is min(depth_now, hops, 2 + n_live//2)\". Nothing in the written code ever writes depth_now from depth0, and depth_now is population state that only maybe_deepen advances. So at FAB_DEPTH0=0 the run does 1 hop per pass instead of the full `hops` budget, and at FAB_DEPTH0=3 it starts at 1 and waits on the manage_every=500 cadence -- while the banner prints the operator's number. This is the M24 silent-sentinel shape the tree's own `choices=` repair exists to end.",
+  "evidence": "fabric/api.py:65 `self.cap, self.n_live, self.depth_now = cap, n0, 1` -- the only assignment to depth_now in the file; `grep -n depth0 src/fabric/api.py` finds it only in forward's and counters' LEVERS READ prose. Verified at build: `pop.depth_now == 1` regardless of the FAB config passed.",
+  "severity": "medium",
+  "fix": "Resolve the sentinel in build (the way LM.resolve resolves LM_LAYERS==0) and pass it in: `depth_now = int(fab.hops) if int(fab.depth0) == 0 else int(fab.depth0)`, adding depth0 (and hops) to build's LEVERS READ and recording which branch resolved it.",
+  "_origin": "round1",
+  "_state": "still-present",
+  "_triage_evidence": "fabric/api.py:66 is unchanged: `self.cap, self.n_live, self.depth_now = cap, n0, 1`. build()'s body (lines 156-254) never reads fab.depth0. Ran it: FAB.build with FAB_DEPTH0=3 gives pop.depth_now==1, and FAB_DEPTH0=0 (sentinel, should resolve to FAB_HOPS) also gives pop.depth_now==1.",
+  "_residue": "exact reproduction of round 1's repro, confirmed for both the explicit-value and sentinel cases"
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 173,
+  "symbol": "build",
+  "title": "build allocates five of the nine modules the frozen surfaces name, so FAB.forward's per-hop vote and FAB.state_dict's parameter list refer to tensors nothing creates.",
+  "failure": "FAB.state_dict's frozen docstring enumerates what the checkpoint holds: \"Parameters (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, q_entry, nov_proj)\". build creates eemb, edec, q_route, hproj and halt_key only. FAB.forward's contract describes \"the loop already forms head(norm(state)) per hop for the vote (:2675-2680)\" and \"NOVELTY ENTERS THE QUERY, not the logit vector\" against `s.nov(...)` -- both of which need modules (`norm`, `nov_proj`) that do not exist on `pop.modules`, so the hop-vote path and the novelty-in-query repair have nothing to call. The tree already applied exactly this reasoning to remove `ctrl` from state_dict's list: \"build's allocation list creates no such module... the contract promised to checkpoint a parameter nothing allocates -- a save-side claim that could only ever be tested by a resume\" (fabric/api.py:697-700). The same is now true of four more names.",
+  "evidence": "fabric/api.py:173-179 allocates exactly `eemb`, `edec`, `q_route`, `hproj`, `halt_key`; verified `list(pop.modules.keys())` returns those five. fabric/api.py:695-696 (state_dict) lists eleven; fabric/api.py:246 and :254 (forward) require `norm` and the novelty projection.",
+  "severity": "medium",
+  "fix": "Either allocate `norm` (a LayerNorm over d_model), `nov_proj`, `q_entry` and `halt_b` here alongside the other five, or amend state_dict's list the way `ctrl` was amended, so that the save-side claim matches what build creates in both directions.",
+  "_origin": "round1",
+  "_state": "still-present",
+  "_triage_evidence": "fabric/api.py:198-204 still only builds {eemb, edec, q_route, hproj, halt_key}. state_dict's docstring (line 732) still lists all 11 items (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, q_entry, nov_proj). Ran it: list(pop.modules.keys()) == ['eemb','edec','q_route','hproj','halt_key']. halt_b, norm, q_entry and nov_proj still do not exist.",
+  "_residue": "forward() is itself still a stub, so this is currently latent rather than firing at runtime, but the build()-vs-state_dict() docstring mismatch this finding names is unchanged"
+ },
+ {
+  "file": "src/fabric/api.py",
+  "line": 134,
+  "symbol": "build",
+  "title": "build declares norm_only, grow and halt in LEVERS READ but reads none of them, and no api.py body in the tree reads them either",
+  "failure": "`grep -rn '\\.norm_only\\b|\\.halt\\b|\\.grow\\b' src/*/api.py` returns nothing. FAB.build is the only FAB entry point with a body, and it stores only `on` and `hop_arm` on the Population (`__slots__` has no norm_only/grow/halt) and records only fab.built/n0/cap/operating_population/off/hop_arm in pop.counters. So FAB_NORM_ONLY=1 -- a declared CONTROL ARM -- builds a Population byte-identical to FAB_NORM_ONLY=0, and nothing in any artifact this function produces says which arm ran. K4 passes on the prose, which is precisely the armed-but-inert shape it cannot catch.",
+  "evidence": "Docstring: \"LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode\". Body reads hop_mode, n0, slots, rank, on, dk, emb_hid, pressure and the d_operating_population wire, and nothing else. Verified by building at FAB_NORM_ONLY=1 FAB_GROW=0 FAB_HALT=0: counters are identical to the defaults apart from fab.off.",
+  "severity": "medium",
+  "fix": "Either read and record the three on the Population (a `fab.norm_only`/`fab.grow`/`fab.halt` counter apiece, which is what makes the control arm visible in the ledger) or move them out of build's LEVERS READ into the entry points that actually consume them.",
+  "_origin": "round1",
+  "_state": "still-present",
+  "_triage_evidence": "fabric/api.py:149 still declares 'LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode'. Grepped build()'s body (lines 115-254) for norm_only/.grow/.halt -- none found; the only reads are on, n0, slots, rank, dk, emb_hid, pressure, hop_mode, plus the d_operating_population wire.",
+  "_residue": "exact reproduction of round 1's finding -- no code change in this area"
+ }
+]

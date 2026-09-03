@@ -1,0 +1,16 @@
+[
+ {
+  "file": "src/train/api.py",
+  "line": 484,
+  "symbol": "startup_refusals",
+  "title": "startup_refusals declares device and amp in LEVERS READ and reads neither",
+  "failure": "The body reads only `run.epochs`. RUN_DEVICE and RUN_AMP are named as read by this entry point, which is what lets K4 report them covered on prose alone -- and clause (3) of the same docstring is a statement ABOUT amp and device (\"amp != off with device == cpu is NOT refused\") that the body cannot make, because it never looks at either value and returns no record saying the pair was considered.",
+  "evidence": "Docstring: \"LEVERS READ: epochs, device, amp\" and \"(3) amp != \\\"off\\\" with device == \\\"cpu\\\" is NOT refused: it is legal and inert, and Process.amp_state says so.\" Body lines 484-503 mention only `run.epochs` and the `disk_stream` argument.",
+  "severity": "low",
+  "fix": "Drop device and amp from this list (Process.amp_state already carries the third state and process_setup declares both), or read them here to emit the not-refused case as an explicit unreachable gate.",
+  "_origin": "round1",
+  "_state": "still-present",
+  "_triage_evidence": "src/train/api.py startup_refusals docstring (line 479) still says 'LEVERS READ: epochs, device, amp'; the body (lines 483-504) reads only `run.epochs` and the `disk_stream` argument -- no reference to `run.device` or `run.amp` anywhere in the function. Confirmed by reading the full body: only two refusal branches (epochs<1, epochs>1 and not disk_stream) plus a comment noting amp/device is deliberately not refused, but no code reads either lever to even record that the pair was considered.",
+  "_residue": "None."
+ }
+]

@@ -2828,6 +2828,209 @@ def check_k13_counts_and_absence_claims(src_dir=SRC, doc_path=DOC, floor=None):
                           "an absence the tree contradicts", not findings, detail, findings)
 
 
+# ==================================================================================================
+# K14 -- an order-table row may not supply a spelling the consuming docstring explicitly refuses
+# ==================================================================================================
+
+# A docstring that says "NOT <name>" about an argument is making a NEGATIVE claim, and negative claims
+# are the ones prose loses. This finds them: `and NOT live_size`, `NOT Judgement.live_size`,
+# `rather than live_size`, `never an estimate`.
+# THE TRAILING SET MUST INCLUDE `:`, and leaving it out made the check report the very sentence that
+# states the refusal correctly. `... and NOT live_size: decode uses this number as ...` did not match,
+# so the negation was not stripped, so the token read as a supplied spelling. A check whose parser
+# cannot read its own subject matter's punctuation reports the fix as the defect.
+_K14_REFUSAL = re.compile(
+    r"\b(?:and\s+)?(?:NOT|not)\s+(?:`)?([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)(?:`|\(\))?"
+    r"(?=\s|,|\.|;|:|\)|--|$)")
+
+
+def check_k14_rows_honour_stated_refusals(src_dir=SRC):
+    """K14 -- no order-table row supplies an argument under a spelling that argument's own consumer
+    explicitly refuses.
+
+    THE CRITICAL THIS EXISTS FOR, and it is worth the whole check. LM.decode's frozen docstring says
+    its `live_vocab` argument must be `Vocabulary.size()` -- the positional boundary where
+    never-minted rows begin -- and says in as many words that it is NOT `live_size()`, because ids
+    are positional (retire() pops from the match table and leaves id2bytes intact) so live_size is
+    that boundary minus the retired count and passing it masks exactly that many LIVE rows to -inf.
+
+    TWO INDEPENDENTLY WORDED ROWS in compose.py both named live_size anyway -- the `vocab` row in
+    ASSEMBLY_ORDER and the `judge_probation` row in LOOP_ORDER -- so the defect an earlier audit had
+    already filed against LM.decode's BODY was sitting in the wiring table, ready to be reintroduced
+    the moment the loop driver was written. Neither K10 (does every argument have a producer) nor
+    K11 (does a produces entry name a real return value) can see it: the argument HAS a producer and
+    the field it names DOES exist. What was wrong was the CHOICE between two real fields, and the
+    consumer had already written down which one is wrong.
+
+    IT ALSO CAUGHT A HALF-FIX. Correcting the rows to name `Judgement.size` failed K11, because the
+    record declared only `live_size` -- the row and the record were wrong together, and the record
+    now carries `id_count` beside `live_size` with the distinction written out. A check that only
+    read the rows would have certified the first repair.
+
+    WHAT IT CANNOT CATCH, stated because the limit is the point. It reads a NEGATIVE claim that
+    somebody wrote down. A consumer that requires one of two plausible fields and never says which
+    is invisible here, and so is a row that supplies the wrong thing under a spelling nobody
+    forbade. The remedy when a quantity has two plausible spellings is to write the refusal into the
+    consumer's docstring -- which is a thing an author does, not a thing a check can do for them.
+    """
+    docs = doc_signatures(DOC)
+    rows = _rows_with_prose(src_dir)
+    entry_docs = _entry_docstrings(src_dir)
+
+    findings, checked, refusals = [], 0, 0
+    for target, text in sorted(entry_docs.items()):
+        # The refusals a consumer states about its OWN arguments.
+        banned = set()
+        for m in _K14_REFUSAL.finditer(text):
+            tok = m.group(1)
+            # ONLY A CODE SPELLING COUNTS, and the first version did not check that: this file's
+            # house style shouts in CAPITALS, so "NOT LIVE" and "NOT SAVING" were read as field
+            # names and the check reported 788 pairs of nonsense. A refused spelling must look like
+            # something a row could actually name -- dotted (`Judgement.live_size`) or snake_case
+            # (`live_size`) -- and must appear in BACKTICKS somewhere in the same docstring, which
+            # is how this codebase marks a value as opposed to a word.
+            if tok.lower() in _K14_ENGLISH or tok.isupper():
+                continue
+            if "." not in tok and not re.fullmatch(r"[a-z][a-z0-9_]*", tok):
+                continue
+            if f"`{tok}`" not in text and f"`{tok}()`" not in text:
+                continue
+            banned.add(tok)
+        if not banned:
+            continue
+        refusals += len(banned)
+        # PAIRED BY ARGUMENT NAME, which is how this table actually references things. Pairing by
+        # CONSUMER name was the second version and it was still untrippable on the case the check
+        # exists for: the `vocab` row says "under LM.decode's spelling" and names the consumer, but
+        # the `judge_probation` row says "under the same consumer's spelling" and does not -- so the
+        # row carrying the defect was the one the pairing could not see. A refusal is ABOUT an
+        # argument, the row SUPPLIES that argument by name, and that is the join.
+        short = target.split(".")[-1]
+        args = _K14_ARGS.get(target, set())
+        for lineno, entry, recv, produces in rows:
+            # BOTH COLUMNS. The third version read only `receives`, and the defect this check exists
+            # for lives in `produces`: the `vocab` row and the `judge_probation` row DECLARE
+            # live_vocab as something they hand to later rows, they do not receive it. A check that
+            # reads half the table is a check that cannot see half the table's claims -- and the
+            # half it could not see is the half that carried the critical.
+            # THE `--` IS PUT BACK. _rows_with_prose splits the produces column into {name:
+            # explanation}, and the clause regex below keys on `<name> -- <value>` because that is
+            # how the table is WRITTEN. Reconstructing it as "name value" left no separator, the
+            # clause never matched, and K14 passed on a tree carrying the defect it was built for --
+            # untrippable, which is the one outcome worse than a false positive and the class this
+            # repository has sixty records of.
+            joined = " ; ".join(f"{k} -- {v}" for k, v in (produces or {}).items()) \
+                if isinstance(produces, dict) else str(produces or "")
+            prose = recv + " ; " + joined
+            about = [a for a in args if re.search(r"\b" + re.escape(a) + r"\b", prose)]
+            if entry != target and short not in prose and target not in prose and not about:
+                continue
+            checked += 1
+            for tok in sorted(banned):
+                # ONLY THE VALUE CLAUSE, which is the text between `<arg> --` and the first negation
+                # or the next `;` separator. Stripping negations token-by-token was not enough and
+                # the failure was instructive: the `vocab` row's CORRECT prose reads
+                # `live_vocab -- Vocabulary.size() ... and NOT live_size: decode uses this number
+                # as the INDEX ...`, and everything after the negation is explanation that names
+                # the refused spelling repeatedly BECAUSE it is refusing it. A check that reads the
+                # explanation as a supply reports the fix as the defect -- and a check that cries
+                # wolf gets switched off, which is the state this file's own A8 docstring warns
+                # about. So the search is confined to what the row says it SUPPLIES, which is the
+                # clause before the first "not".
+                clause = None
+                for a in about:
+                    m = re.search(re.escape(a) + r"\s*--\s*(.*?)(?=;|$)", prose, re.S)
+                    if m:
+                        clause = _K14_REFUSAL.split(m.group(1))[0]
+                        break
+                if clause is None:
+                    continue
+                if re.search(r"\b" + re.escape(tok) + r"\b", clause):
+                    findings.append(
+                        f"src/spine/compose.py:{lineno}  the {entry} row supplies "
+                        f"{tok!r}, which {target}'s own docstring explicitly refuses. The consumer "
+                        f"wrote the refusal down because the two spellings are both real and only "
+                        f"one is right; a row naming the refused one is that defect, in the wiring "
+                        f"table, waiting for the driver to be written.")
+
+    detail = (f"{refusals} stated refusal(s) across {len(entry_docs)} entry point docstring(s), "
+              f"checked against {len(rows)} order-table row(s); {checked} row/consumer pair(s) "
+              f"examined")
+    return _report("K14", "no row supplies a spelling its consumer explicitly refuses",
+                   not findings, detail, findings, vacuous=(refusals == 0 or not rows))
+
+
+# Ordinary English after "not", which is never a value a row supplies. Without this the check reports
+# every "not a lever", "not the tail", "not merely" in 130 docstrings.
+_K14_ENGLISH = frozenset("""
+a an the this that these those it its by to of in on at from for with as and or but if then so
+merely only just simply always never both either neither all any some one two three yet still
+because since while when where which what who whom whose how why do does did done be been being
+is are was were am has have had can could may might must shall should will would
+enough true false none null empty zero more less same other another new old
+""".split())
+
+
+# INVERTED FROM PKG_DIR, not declared again: a second directory->prefix map is one quantity with
+# two answers, which is the shape this file's own checks exist to refuse.
+_DIR_TO_PREFIX = {v: k for k, v in PKG_DIR.items()}
+
+
+def _k14_args(src_dir=SRC):
+    """{"PFX.entry": {parameter names}} — what each entry point actually takes.
+
+    Read from the SIGNATURE by AST rather than from the contract document, because the join this
+    powers has to be about the code the row will call, and a document can be stale where a signature
+    cannot.
+    """
+    out = {}
+    for d in sorted(os.listdir(src_dir)):
+        path = os.path.join(src_dir, d, "api.py")
+        if not os.path.isfile(path):
+            continue
+        pfx = _DIR_TO_PREFIX.get(d, d.upper())
+        tree = _k13_parse(path)
+        if tree is None:
+            continue
+
+        def names(fn):
+            a = fn.args
+            return {x.arg for x in list(a.args) + list(a.kwonlyargs) if x.arg not in ("self",)}
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
+                out[f"{pfx}.{node.name}"] = names(node)
+            elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+                for m in node.body:
+                    if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and not m.name.startswith("_"):
+                        out[f"{pfx}.{node.name}.{m.name}"] = names(m)
+    return out
+
+
+_K14_ARGS = _k14_args()
+
+
+def _entry_docstrings(src_dir=SRC):
+    """{"PFX.entry": docstring} for every entry point in src/*/api.py, methods included."""
+    out = {}
+    for d in sorted(os.listdir(src_dir)):
+        path = os.path.join(src_dir, d, "api.py")
+        if not os.path.isfile(path):
+            continue
+        pfx = _DIR_TO_PREFIX.get(d, d.upper())
+        tree = _k13_parse(path)
+        if tree is None:
+            continue
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
+                out[f"{pfx}.{node.name}"] = ast.get_docstring(node) or ""
+            elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+                for m in node.body:
+                    if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and not m.name.startswith("_"):
+                        out[f"{pfx}.{node.name}.{m.name}"] = ast.get_docstring(m) or ""
+    return out
+
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
@@ -2842,6 +3045,7 @@ CHECKS = (
     check_k11_produces_is_not_fabricated,
     check_k12_deferral_reasons_are_complete,
     check_k13_counts_and_absence_claims,
+    check_k14_rows_honour_stated_refusals,
 )
 
 

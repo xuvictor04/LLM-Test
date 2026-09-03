@@ -1,0 +1,13 @@
+[
+ {
+  "file": "src/domains/api.py",
+  "line": 97,
+  "symbol": "open_partition",
+  "title": "open_partition's LEVERS READ line names enabled, reservoir and prior_blend; the body reads none of them",
+  "failure": "The docstring at line 120 declares \"LEVERS READ: enabled, reservoir, prior_blend\", but open_partition's body (lines 124-179) reads only the wire `dom.d_expert_slots` -- `dom.enabled`, `dom.reservoir` and `dom.prior_blend` are never referenced anywhere in the function. Confirmed by grepping the whole file: `dom.enabled`/`dom.reservoir`/`dom.prior_blend` do not appear at all in src/domains/api.py; those three levers are genuinely read only inside `observe` (which reads `enabled`, `reservoir`) and `prior`/`census` (which read `prior_blend`) -- both still-unimplemented stubs. So open_partition unconditionally builds a live Partition regardless of DOM_ENABLED, and its own declared LEVERS READ line makes a false claim about which levers this specific entry point consumes -- the same 'LEVERS READ list does not match what the body reads' shape round1 already found on fabric.build (norm_only/grow/halt) and tok.build_vocabulary (cand_window/mint_pmin/mint_novel), now present on a package round1 did not review.",
+  "evidence": "domains/api.py:120 \"LEVERS READ: enabled, reservoir, prior_blend\"; body at :124-179 reads only `dom.d_expert_slots` (a WIRE, correctly separately declared). `grep -n \"dom\\.\\(enabled\\|reservoir\\|prior_blend\\)\" src/domains/api.py` returns nothing. The three names ARE read elsewhere in the file: `enabled`/`reservoir` at line 218-219 (observe's own LEVERS READ, a stub) and `prior_blend` at lines 359/380/404 (state_dict/prior/census, also stubs).",
+  "severity": "low",
+  "fix": "Correct open_partition's LEVERS READ line to what the body actually reads (\"none directly -- see d_expert_slots under WIRES READ\"), or, if DOM_ENABLED is meant to gate whether a live Partition is built at all (a null-partition arm analogous to WORLD's `enabled=False`), implement that branch here rather than only declaring the lever.",
+  "_origin": "r2_hunt_contract.json"
+ }
+]
