@@ -34,7 +34,7 @@ from torch import nn
 
 from spine.lever import Config
 from spine import derive as _derive
-from spine.gate import Gate
+from spine.gate import Gate, NotBuilt
 from spine import units as U
 
 
@@ -141,7 +141,7 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         # its census row is NOT retired -- the owner's standing rule is that a mechanism kept for
         # future use is kept with a switch -- so this refusal is what makes "declared but not
         # built" loud instead of silent.
-        raise NotImplementedError(
+        raise NotBuilt(
             f"FAB_HOP_MODE={arm!r} is declared and NOT BUILT (Q-FAB-1, resolved 2026-09-02: the "
             f"lever stays). The ported walk is 'soc' -- re-route from scratch each hop with the "
             f"current state in the query. The 'transition' arm is the learned successor walk and "

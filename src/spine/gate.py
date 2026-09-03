@@ -63,3 +63,32 @@ class Gate:
         if self.value is None and self.threshold is None:
             return f"Gate {self.name}: {verdict}"
         return f"Gate {self.name}: {verdict} ({self.value} vs {self.threshold})"
+
+
+class NotBuilt(Exception):
+    """A mechanism that is DECLARED and deliberately NOT BUILT, refused at the point of use.
+
+    IT IS NOT A NotImplementedError, AND THAT IS THE WHOLE REASON IT EXISTS. In this tree
+    `raise NotImplementedError(...)` is not merely an exception, it is a MARKER: it is how P4 leaves
+    an entry point unwritten, how tests/test_contract.py::k13_live_counts decides an entry point is a
+    stub (a textual test for that name anywhere in the function), how tools/sync_counts.py reports
+    progress, and what K2 means by "the composition root raises NOTHING BUT NotImplementedError, and
+    it comes FROM A STUB". Two P4 bodies overloaded it for a different statement -- FAB.build
+    refusing hop_mode="transition" and LM's composer table -- and the effect was immediate and
+    silent: FAB.build has a full body and was counted as a stub, so the documented progress numbers
+    said one more entry point was unwritten than actually was, and a reader following the count to
+    find work would have opened a finished function.
+
+    THE TWO STATEMENTS ARE GENUINELY DIFFERENT and the project already treats them differently. "P4
+    has not written this yet" is a schedule fact that goes away on its own. "This arm is declared,
+    the lever stays, and no body for it exists in this tree" is a DESIGN decision the owner ruled on
+    -- Q-FAB-1 kept FAB_HOP_MODE with both spellings on the standing rule that a mechanism kept for
+    future use is kept with a switch -- and it does not go away when P4 finishes. Collapsing them
+    into one exception type is the same shape as collapsing armed-but-inert into unreachable, which
+    is what the rest of this module exists to refuse.
+
+    It does NOT subclass NotImplementedError. A subclass would be caught by `except
+    NotImplementedError`, and K2 catches exactly that to report "first unimplemented stub: X" -- so a
+    run on a declared-but-unbuilt arm would be reported as a missing body, which is the confusion
+    this type removes.
+    """

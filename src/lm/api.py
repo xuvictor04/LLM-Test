@@ -31,6 +31,7 @@ from torch import nn
 
 from spine.lever import Config
 from spine import rng as _rng
+from spine.gate import NotBuilt
 
 
 class GeometryError(ValueError):
@@ -124,7 +125,7 @@ class _LM(nn.Module):
         return self.composed_table() if self.compose else self.emb.weight
 
     def composed_table(self):
-        raise NotImplementedError(
+        raise NotBuilt(
             "LM.compose: the ByteComposer is P4's TOK-side row and lands with LM.mint_rows. The "
             "compose arm is reachable (LM_COMPOSE=1 resolves and this module refuses to build a "
             "dead emb/head for it) and its table is not built yet.")

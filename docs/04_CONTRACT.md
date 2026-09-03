@@ -845,7 +845,7 @@ tables claiming one, and it names the producer each is waiting on.
   blackout. No FAB entry point accepted it: `manage`, `observe` and `grow_check` took `step_windows`
   and losses, not a shift event, so the valve half had a route (`CAP.observe`'s `blackout`) and the
   fabric half did not. **Q-FAB-6 is RESOLVED**: `FAB.grow_check` gained `shift_at=None`, typed
-  `units.Windows` — a **frozen-signature move**, made now because 99 of the 131 entry points are stubs
+  `units.Windows` — a **frozen-signature move**, made now because 98 of the 131 entry points are stubs
   and the same change after P4 writes the WATCH→BURST→RECOVER machine is a body rewrite. It went on
   `grow_check` and **not** on `manage` as the question proposed, because in the old tree the blackout
   gates **growth**: `note_shift` sets `blackout` at `:2948` and two of its three consumers are
@@ -2320,7 +2320,7 @@ left standing as an intention.** The manifest's *defining* property is that it e
 first allocation** — that is what lets the gate refuse in seconds instead of after a warm GPU. A
 package's `geometry()` can only be called after that package has built something. So the eight or
 eleven new functions would either (i) take a `Config` and no object, at which point each one is a
-lever read the root already does — eight new entry points on a surface where 99 of 131 are already
+lever read the root already does — eight new entry points on a surface where 98 of 131 are already
 stubs, for zero new information — or (ii) need a built object, and then they cannot be called at the
 gate at all. And in either case the **EXACT / MAY_WIDEN rule migrates into the package**, while
 `ckpt/api.py` says in as many words that **RULES ARE THE OWNER'S**: a package would be grading the
@@ -2763,7 +2763,7 @@ row immediately before `TOK.judge_probation`**. `docs/04_CONTRACT.md`'s §0 refu
 `d_residual_ratio` moved in the same edit, because it named the old route and two frozen documents
 naming two different producers is the defect this ruling repairs.
 
-**Why now rather than "when the surface opens": the surface is open.** 99 of 131 entry points are
+**Why now rather than "when the surface opens": the surface is open.** 98 of 131 entry points are
 stubs and LM's bodies are unwritten, so this cost one stub, one §7 line and one row. After P4 it costs
 a coordinated edit across ten independent agents. And it is **not new machinery** — `LM.anchor_term`
 already computes ‖delta‖/‖composite‖ every flush; what was missing was an entry point that *returns*
@@ -2976,7 +2976,7 @@ named, and the reason CAP mints no blackout-window lever of its own. A sentence 
 the consumers was one sentence away from justifying a second, independent blackout in CAP.
 
 **⚠ THE SIGNATURE:** `FAB.grow_check(fab, pop, *, flush_loss, step_windows, soft_cap,
-memory_pressure, signature, shift_at=None)`. Made **now** because 99 of the 131 entry points are stubs
+memory_pressure, signature, shift_at=None)`. Made **now** because 98 of the 131 entry points are stubs
 and the same change after P4 has written the WATCH→BURST→RECOVER machine is a body rewrite. The
 ```contract block, the `compose.py` row and `System.__slots__` moved in the same edit.
 

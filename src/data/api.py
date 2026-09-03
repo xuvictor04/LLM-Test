@@ -512,7 +512,10 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                  name -- one of the four, never blank), data.phase_name_resolved (entries given as
                  a NAME rather than an index; 0 means every entry was an index, which is the
                  shipped spelling and a statement rather than silence),
-                 Gate data.exposure_max, Gate data.exposure_skew,
+                 Gate data.exposure_max_planned, Gate data.exposure_skew_planned -- BOTH NAMED
+                 `_planned` since 2026-09-02 because they test the SCHEDULED split and the run
+                 trains on a random draw from it, which deviated by up to 47.9% per area over
+                 eight seeds at the defaults (ISSUES P1-H58, open),
                  Gate data.splice_window
     """
     dat = dat.owned_by("DATA")
@@ -601,19 +604,30 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
 
     gates = []
     vals = [exposure[n] for n in names]
+    # THE GATES BELOW ARE COMPUTED ON THE PLANNED SPLIT, AND THEY SAY SO IN THEIR NAMES (P1-H58).
+    # `per_area_draw` distributes stream_bytes by the schedule; draw_stream then picks an area
+    # UNIFORMLY AT RANDOM per segment, so what the run actually trains on is a draw from that
+    # distribution, not the distribution. Measured over eight seeds at the shipped defaults, the
+    # worst per-area deviation between planned and realized was 47.9%. A gate that reads "armed, did
+    # not fire" on a planned split while the realized split crossed its threshold is a true sentence
+    # about the wrong number -- and this gate is the guard against P3-H22, where an added area seen
+    # 2.1x while the original was 28% sampled made "adding py cost eng X b/B" indistinguishable from
+    # "py was memorised and eng was skimmed". Naming them `_planned` is the honest half and costs
+    # nothing; the realized figure is a WHOLE-RUN quantity that cannot exist until the last epoch is
+    # drawn, so closing this properly is an owner decision recorded in ISSUES P1-H58.
     # COMPUTED AT ONE AREA TOO. Both old reads sat inside `if DATA_MODE == "real" and NP > 1`, so
     # the check was unavailable on exactly the single-area goal-A configuration where accidental
     # repetition is easiest to reach (ISSUES P1-L21).
-    gates.append(Gate("data.exposure_max", max(vals) > float(dat.exposure_max),
+    gates.append(Gate("data.exposure_max_planned", max(vals) > float(dat.exposure_max),
                       round(max(vals), 4), float(dat.exposure_max)))
     if n_areas == 1:
-        gates.append(Gate("data.exposure_skew", False, None, float(dat.exposure_skew),
+        gates.append(Gate("data.exposure_skew_planned", False, None, float(dat.exposure_skew),
                           reachable=False,
                           reason="a max/min ratio over ONE area is undefined; this gate cannot "
                                  "fire on a single-area run and says so rather than reading 0"))
     else:
         skew = max(vals) / min(vals) if min(vals) > 0 else float("inf")
-        gates.append(Gate("data.exposure_skew", skew > float(dat.exposure_skew),
+        gates.append(Gate("data.exposure_skew_planned", skew > float(dat.exposure_skew),
                           round(skew, 4), float(dat.exposure_skew)))
     mean_seg = (int(dat.seg_min) + int(dat.seg_max)) / 2.0
     # THE ONE PLACE THE BYTE/TOKEN BOUNDARY IS CROSSED, and it is crossed with the MEASURED

@@ -26,7 +26,8 @@ concurrent smoke arms race for data/dyntok.json (ISSUES P1-M5, L7, M19, M46).
 RECORD TYPES RETURNED (P4 defines them; other packages receive them as arguments and call their
 methods, which is not an import):
   Vocabulary    id2bytes, seq2id, merges, bytes_per_id, mlbf, maxlen, retired, prov, pair,
-                ceiling (hard, from the wire), soft_cap (mutable, from CAP), v0, bytes_per_token;
+                ceiling (hard, from the wire), soft_cap (mutable, from CAP), v0, bytes_per_token,
+                max_bytes, dropout_rng (the ONE segmentation stream, minted once -- see P1-H56);
                 methods decode, blen, size, live_size, at_cap
   Segmentation  ids, byte_pos, labels, bytes_per_token
   Due           mint, retok, probation, frozen
@@ -71,7 +72,8 @@ class Vocabulary:
     """
 
     __slots__ = ("id2bytes", "seq2id", "merges", "bytes_per_id", "mlbf", "maxlen", "retired",
-                 "prov", "pair", "ceiling", "soft_cap", "v0", "bytes_per_token", "max_bytes")
+                 "prov", "pair", "ceiling", "soft_cap", "v0", "bytes_per_token", "max_bytes",
+                 "dropout_rng")
 
     def __init__(self, *, ceiling, soft_cap=None, max_bytes=16):
         self.id2bytes = [bytes([b]) for b in range(256)]
@@ -92,6 +94,12 @@ class Vocabulary:
         self.v0 = 256                # the size the run ENTERED training with; set by build
         self.bytes_per_token = 1.0
         self.max_bytes = int(max_bytes)
+        # THE SEGMENTATION STREAM LIVES HERE AND IS MINTED ONCE (P1-H56). BPE-dropout has to give a
+        # DIFFERENT segmentation of the same text on each call -- that is the entire mechanism -- and
+        # tokenize() is called once per epoch plus on every retokenization. A stream minted inside
+        # tokenize() restarts from the same seed on every call, so all of those segmentations came
+        # out byte-identical: the knob was on, the code ran, and the mechanism did nothing.
+        self.dropout_rng = None
 
     def size(self):
         return len(self.id2bytes)
@@ -214,7 +222,10 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
 
     if mode == "bytes":
         # Nothing else in this file is reachable on this arm: no merges, no minting, no candidate
-        # window. v0 is 256 and stays there.
+        # window. v0 is 256 and stays there. The stream is still minted so the ledger carries the
+        # key with zero draws -- DECLARED AND NEVER ASKED, which is a different statement from
+        # absent, and this arm is exactly where a reader needs to see it.
+        vocab.dropout_rng = _rng.rng_for("tok.dropout.mint", seed)
         vocab.v0 = vocab.size()
         vocab.bytes_per_token = 1.0
         return vocab
@@ -238,9 +249,16 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     # print as 2 in the generated lever reference, which is the L1 failure the SEED_PASSES/
     # GROW_PASSES merge exists to end, moved from a second environment name into a second number.
     passes = int(tok.build_passes)
-    # DRAWN FROM THE DECLARED STREAM, never the process-global `random`, which shifted the RNG
-    # stream of the ENTIRE run (ISSUES P1-L69).
-    stream = _rng.rng_for("tok.dropout", seed) if float(tok.dropout) > 0 else None
+    # A CHILD OF THE DECLARED PARENT, MINTED ONCE, ALWAYS (P1-H56, and the same repair P1-H55 made
+    # for data.synth). `tok.dropout` is in RNG_SUBSYSTEMS, so RUN.streams already minted it into the
+    # register at step 0; this package asking for that exact name again is the two-call-sites-one-
+    # sequence collision spine/rng.py refuses, and it made TOK_DROPOUT>0 crash compose() outright.
+    # The parent stays declared and reports zero draws; the child is what this package draws from.
+    # MINTED EVEN AT dropout=0 so `.draws == 0` on the ledger is armed-but-inert rather than absent,
+    # and never the process-global `random`, which shifted the RNG stream of the ENTIRE run
+    # (ISSUES P1-L69).
+    vocab.dropout_rng = _rng.rng_for("tok.dropout.mint", seed)
+    stream = vocab.dropout_rng if float(tok.dropout) > 0 else None
 
     for _ in range(passes):
         if vocab.size() >= target:
@@ -259,9 +277,17 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
             break                    # a pass that mints nothing will mint nothing next time either
 
     if mode == "fixed":
-        # THE CEILING AS WELL AS THE TARGET. On this arm the run never mints again, so the cap has
-        # to bind here or `at_cap()` reads False for the whole run over a vocabulary that is closed.
-        vocab.soft_cap = vocab.size()
+        # THE CEILING, WHICH IS THE HARD CAP, AND NOT soft_cap (P1-H57). The docstring says this arm
+        # builds "to tok.seed_vocab as the CEILING as well as the target, then never mint", and the
+        # two caps are not interchangeable: `ceiling` is hard and arrives as the wire from
+        # LM.vocab_slots, while `soft_cap` is CAP's valve position and MOVES DURING THE RUN --
+        # capacity/api.py sends TOK a lift_vocab_cap(to=...) event. Closing the soft cap here left
+        # the fixed arm's central promise at the mercy of an unrelated package's valve: one lift and
+        # a "fixed" vocabulary starts minting again, silently, on the one arm whose entire point is
+        # that it does not. Lowering the ceiling is safe and is what the contract asks for -- the
+        # build already capped at min(seed_vocab, cap()), so this can only ever narrow, and the
+        # model keeps its spare embedding rows either way.
+        vocab.ceiling = vocab.size()
 
     vocab.v0 = vocab.size()
     # THE ONE ESTIMATOR (ISSUES P1-H16). The mean-over-vocabulary-entries form read 1.50 against
@@ -377,10 +403,20 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     """
     tok = tok.owned_by("TOK")
     drop = float(tok.dropout) if regularize else 0.0
-    # THE STREAM IS ASKED FOR ONLY WHEN IT WILL BE DRAWN ON. rng.issued() is a register: a name
-    # appearing with zero draws means armed-but-inert, and minting a stream this call will not
-    # touch would make "dropout is off" indistinguishable from "dropout is on and never fired".
-    stream = _rng.rng_for("tok.dropout", seed, again=True) if drop > 0 else None
+    # DRAWN FROM THE VOCABULARY'S STREAM, NOT MINTED HERE (P1-H56). This function is called once per
+    # epoch and again on every retokenization, all with regularize=True on the training stream, so
+    # the stream has to CONTINUE across calls: minting one here restarted the same sequence every
+    # time and every epoch got a byte-identical segmentation. BPE-dropout that returns the same
+    # answer on every call is not dropout, it is a second deterministic segmentation -- armed and
+    # inert, with the knob reading on. Measured before the repair: three calls on one text at
+    # TOK_DROPOUT=0.3 produced one distinct segmentation, all 2189 tokens long.
+    stream = vocab.dropout_rng if drop > 0 else None
+    if drop > 0 and stream is None:
+        raise ValueError(
+            "TOK.tokenize was asked to regularize with TOK_DROPOUT>0 against a Vocabulary carrying "
+            "no dropout stream. build_vocabulary mints it; a Vocabulary that did not come from "
+            "there cannot be regularized, and silently segmenting without dropout would report a "
+            "BPE-dropout run that never dropped anything.")
     ids, byte_pos = _segment(vocab, data, dropout=drop, stream=stream, start=start)
 
     # THE LABEL PER TOKEN, carried from the per-byte labels DATA produced. A token spans bytes and
