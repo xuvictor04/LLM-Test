@@ -26,8 +26,10 @@ a result.** The journal is at
 lines are all `{"type":"failed"}` produced nothing.
 
 **2. The failure was model capacity, not the provider.** Every lost agent returned
-`API Error: 529 Overloaded` while inheriting the session model. A single probe agent pinned to a
-different model returned in five seconds. `harness/p4_audit.js` therefore pins `model: 'sonnet'` on
+`API Error: 529 Overloaded` while inheriting the session model. Confirmed by a controlled A/B at the
+same instant: a probe agent pinned to `sonnet` returned in five seconds, while a probe agent pinned
+to `opus` failed with `529 Overloaded (model sent to the API: claude-opus-5)`. One model was
+unavailable and the other was not. `harness/p4_audit.js` therefore pins `model: 'sonnet'` on
 all four of its `agent()` call sites, with the reason recorded in the script. Reverting that pin
 means re-testing it — do not assume the constraint has lifted.
 
