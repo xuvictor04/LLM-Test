@@ -1262,7 +1262,7 @@ The decision file says 'The chained-mixture fabric (SOCIETY=0, legacy port) is r
 The section header reads 'Measured results (authoritative — from real GPU runs)' and states −0.0009 expert-deletion collateral, 1.967 b/B, 2.002 / +0.127 modularity, and memory contribution figures. INV-13 voids every arm comparison before 2026-08-13 because diagnostics were editing the runs; INV-02 voids every domain/coherence/bits-byte conclusion before 2026-07-29; INV-36 retracts the +0.709 fabric number that justified defaulting FABRIC on; INV-06 degrades every memory-contribution figure. A rebuild quoting §7 would re-publish retracted numbers under the word 'authoritative'.
 
 
-### HIGH (10)
+### HIGH (12)
 
 **P2-H1. archive/garry/self_organize.py:565 reads FAB_N0 default 3 in a file that looks exactly like the live one** *(unverified)*  
 `silent-overwrite` · archive · archive/garry/self_organize.py:565  
@@ -1304,6 +1304,15 @@ The file's C.12 verdict ('the decay to zero is CONTRADICTED by practice') and it
 `other` · notes-research · /home/user/LLM-Test/notes/RESEARCH_BRIEF_DIFFERENTIATION.md:255  
 The brief's decision table tells an external reader 'FAB_GROW now defaults off, which sidesteps the problem instead of solving it'. If growth is actually on by default, the growth pathology the brief documents (five experts born twenty steps before the end of a run) is live in the default configuration, not sidestepped — which changes the priority of the whole §2b question.
 
+
+
+**P2-H11. `.rework/PLAN.md` §5's phase table is not the numbering the tree uses, and the Isolation phase has fallen out of the schedule with no number** **[CONFIRMED 2026-09-03 — RULED, renumbering not yet applied]**  
+`wrong-measurement` · rebuild · `.rework/PLAN.md` §5 against `src/*/api.py` stub markers and `docs/04_CONTRACT.md`  
+Established by counting, not by reading intentions. 84 stub markers across `src/*/api.py` say `P4 (<pkg>) fills this in` (train 10, fabric 9, sig 8, memory 8, lm 8, domains 8, tok 7, opt 7, ckpt 7, world 6, capacity 6, data 2), commit `7ed06bb` is titled "P3 contract: the composition root's 117 entry points", and `docs/04_CONTRACT.md` agrees with both — "the tensor layout — is P4's business", "no file in `src/` imports torch at P3". So P3 was SPLIT in practice into contract-then-bodies and §5's table still shows the unsplit form, giving P3 both jobs and P4 to Isolation. Three consequences: `src/eval/api.py`'s markers say P5/P6 and match the table's *unsplit* numbering while every other package matches the split one, so **both conventions are live in `src/` today**; the Isolation phase — deliverable `tests/test_lever_isolation.py`, the second of the two disciplines §1 says the architecture rests on — is displaced with no number while five checks across the suite cite that file's absence as the reason they cannot supply evidence; and 84 stub messages, which are what an implementer reads to know what to write and when, cite a phase whose plan row describes a different deliverable. The ruling is that the phases renumber and the markers do not, since the markers and `docs/04_CONTRACT.md` agree with each other and the table is the lone dissenter; `eval`'s markers move with the renumbering. Recorded as an amendment at the end of PLAN.md §5. The renumbering itself is NOT yet applied — it touches every row below P2 and the phase in flight is P4 under the split numbering.
+
+**P2-H12. `.rework/PLAN.md` described the tree as nonexistent for the whole of the build** **[CONFIRMED — FIXED 2026-09-03]**  
+`wrong-measurement` · rebuild · `.rework/PLAN.md` header  
+The status line read "**proposed, not started.** Nothing in `src/` exists yet" from the day it was written until 2026-09-03, by which point the tree held 13 packages, 262 levers and 132 frozen entry points with 48 implemented. A status line is a copy of a fact and rots exactly the way a count does; `tools/sync_counts.py` guards the counts and nothing guarded this. Corrected in place, with the correction stated rather than silently applied.
 
 ### MEDIUM (25)
 
