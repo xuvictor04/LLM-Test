@@ -851,28 +851,73 @@ def state_dict(fab: Config, pop):
     only ever be tested by a resume. It returns to this list in the same commit that ports the arm,
     and not before.
 
-    `q_entry` IS DROPPED ON THE SAME GROUND, REVERSING THIS DOCSTRING'S OWN EARLIER RULING. That
-    ruling read "q_entry (:2557, :2564) and nov_proj (:2554) stay, because both walks use them",
-    and two of its three line citations no longer resolve to either name. Re-read against the
-    frozen old tree, q_entry has exactly three readers and this tree ports the arm behind none of
-    them:
+    `q_entry` IS DROPPED ON THE SAME GROUND, REVERSING THIS DOCSTRING'S OWN EARLIER RULING -- BUT
+    NOT ON THE EVIDENCE THIS PARAGRAPH CARRIED UNTIL 2026-09-04, WHICH WAS WRONG TWICE. The reversed
+    ruling read "q_entry (:2557, :2564) and nov_proj (:2554) stay, because both walks use them", and
+    two of its three line citations no longer resolve to either name. The reversal's own first
+    evidence was worse than that and is corrected here rather than left standing: it claimed q_entry
+    has "exactly three readers", all behind dropped arms. `grep -n q_entry self_organize.py` returns
+    SIX reader sites, and one is reached on an arm this tree SHIPS:
+      :2320  route_w's `else` -- the ROUTE_GROUNDED=0 hop router. Dropped arm.
       :2591  the `else` of `if s.grounded:` -- the ROUTE_GROUNDED=0 entry router, which the old
              tree's own comment two lines above calls "a different and strictly weaker router",
              and which fabric/levers.py::FABLevers.cent_ema records as DROPPED here ("now that
-             ROUTE_GROUNDED's alternative router is dropped");
-      :2597  the `else` of `if s.halt_on`, on that same non-grounded branch;
-      :2564  `seed_key`, whose single caller is `s.K[j] = s.seed_key(gist)` (:2143) -- a write into
-             the FREE identity parameters, and fabric/levers.py::FABLevers.dk records FAB_DERIVE_IDS=0
-             as dropped, so there is no K to seed: an expert's key is DERIVED from its weights
-             through eemb.
-    The old tree measured the consequence itself, twice. Its ROUTER LEARNING audit printed
-    "never gradiented -> ctrl, q_entry" at the shipped ROUTE_GROUNDED=1 (:9141), and two
-    armed-but-inert records in .rework/ISSUES.md name the SPECIALIZATION section as having
-    partitioned the population with a randomly-initialised q_entry for the whole life of the probe.
-    q_entry returns to this list in the same commit that ports a non-grounded entry router, and not
-    before. `nov_proj` STAYS and is now BUILT, because the reading that kept it is the one that
-    survives: its read at :2361 is inside `entry_logits`, the grounded router this contract does
-    port, and it is the same line `forward` cites for the M28 novelty repair.
+             ROUTE_GROUNDED's alternative router is dropped"). Dropped arm.
+      :2597  the `else` of `if s.halt_on` -- and it is NOT "on that same non-grounded branch", which
+             is what this paragraph asserted. `_hlg` (:2595) sits at the same eight-space indent as
+             `if s.grounded:` (:2584), i.e. AFTER that `if` has closed, so it is evaluated on BOTH
+             branches and gated on `s.halt_on` alone. FAB_HALT is not a dropped arm: the census
+             verdicts it `keep` in .rework/census.json (ROUTE_GROUNDED and FAB_DERIVE_IDS both
+             `drop`), fabric/levers.py::FABLevers.halt is Lever(True, ...), and
+             fabric/api.py::build reads it and records `fab.halt`. So at the shipped
+             ROUTE_GROUNDED=1 with FAB_HALT=0 this read IS reached, on the soc walk this tree ports.
+      :2567  `seed_key`'s body (:2564 is the def line), whose single caller is
+             `s.K[j] = s.seed_key(gist)` (:2143) -- a write into the FREE identity parameters, and
+             fabric/levers.py::FABLevers.dk records FAB_DERIVE_IDS=0 as dropped, so there is no K to
+             seed: an expert's key is DERIVED from its weights through eemb. Dropped arm.
+      :4019  `fab.q_entry.in_features`, a SHAPE read in fab_logits, used only to fabricate a zero
+             gist; this tree's `forward` takes `signature` as an argument and fabricates none.
+      :9156  the SPECIALIZATION probe's own `else` -- a diagnostic, not the walk.
+
+    THE DROP SURVIVES ANYWAY, ON THE ARGUMENT :2597 FORCES. Follow what that read produces on the
+    ported walk. `_hlg` is concatenated into `_elg` (:2598) and softmaxed into the pre-loop entry
+    distribution `c` (:2600); `c` is then consumed by exactly one line, `s.ground_update(gist,
+    c[:, :N], N)` (:2603); and the `if s.loop_soc:` block (:2618) returns at :2694 without reading
+    `c` again -- every later read of it (:2703 onward) is in the transition arm Q-FAB-1 leaves
+    unported. `ground_update`'s entire body is under `with torch.no_grad():` (:2404). So on the walk
+    this tree ports, q_entry has NO GRADIENT PATH at EITHER setting of FAB_HALT, which is the fact
+    the drop actually rests on.
+
+    WHAT THE DROP COSTS, MEASURED RATHER THAN WAVED AT -- because "it changes nothing numerically"
+    is also false. The halt logit enters `c`'s softmax denominator, rescaling row b's expert weights
+    by a per-row factor. `ground_update` means over the batch FIRST (`_wm = w.mean(0)`, :2410) and
+    renormalises only after (`_share = _iv / _iv.sum().clamp_min(1e-9)`, :2414), so that factor
+    cancels EXACTLY at batch 1 and does NOT cancel above it. Replaying :2598-2603 into :2410-2414
+    over 400 draws at B=8, N=32, FAB_CENT_TOPK=8, a q_entry-derived halt column against a pinned one
+    moved the top-k SET in 137 of 400 draws and the per-index EMA rate in 400 of 400 (max delta
+    0.056); at B=1, 0 of 400. That residue is a NEVER-TRAINED random projection perturbing a
+    centroid EMA -- a defect of the old tree, not a behaviour to port, and the old tree says as much
+    one screen down: the loop's own halt-off arm pins the halt logit to a constant,
+    `torch.full((h.size(0), 1), -1e4)` (:2628), instead of deriving it. :2597 is the pre-halt-lever
+    remnant, disagreeing with the loop it feeds, and a faithful port of FAB_HALT=0 takes :2628's
+    form and needs no q_entry.
+
+    The old tree measured the consequence twice and BOTH citations need their scope stated. Its
+    ROUTER LEARNING audit printed "never gradiented -> ctrl, q_entry" (:9141, audit loop at :7085)
+    at the shipped ROUTE_GROUNDED=1 AND the shipped FAB_HALT=1 (:1734) -- on its own it says nothing
+    about the halt-off arm, which is what the two paragraphs above had to establish. The two
+    armed-but-inert records naming the SPECIALIZATION section as having partitioned the population
+    with a randomly-initialised q_entry for the whole life of the probe are P3-C28 and P3-H30 in
+    .rework/ISSUES.md, cited by RECORD ID because that file's line numbers have already moved once.
+
+    THE TRIGGER FOR q_entry'S RETURN IS NOT "the same commit that ports a non-grounded entry router",
+    which is narrower than the truth: it is ANY LIVE CONSUMER OF THE PRE-LOOP ENTRY DISTRIBUTION `c`
+    -- a literal port of :2597 that keeps the derived halt logit, or any use of `c` beyond
+    `ground_update`'s no-grad EMA (a vote, an aux loss, a hop_sup target) -- because each of those
+    puts q_entry back on a gradient path. Until one exists it is not checkpointed. `nov_proj` STAYS
+    and is now BUILT, because the reading that kept it is the one that survives: its read at :2361
+    is inside `entry_logits`, the grounded router this contract does port, and it is the same line
+    `forward` cites for the M28 novelty repair.
 
     `cent` is a BUFFER and not a plain attribute: as an attribute it was absent from state_dict(),
     so the centroids that ARE the routing function were never saved and generation routed on

@@ -499,9 +499,20 @@ class SIGLevers(LeverSet):
     # that used the defaults, and the run that paid the full budget was told it had converged.
     # Worse, d267864 corrected the registry to 200 and left the call site at 3000, so _env's
     # mismatch check SystemExited every run for five commits (ISSUES P3-C13).
-    # AS A FRACTION THE INVERTED PAIR IS NOT MERELY DETECTED, IT IS UNREPRESENTABLE: a fraction of
-    # the budget cannot exceed the budget. The run-time warning at :5046 and the min() clamp both
-    # disappear with it. The literal 0.25 is 200/800 -- the behaviour of record, not the shipped
+    # AS A FRACTION THE INVERTED PAIR IS OUT OF THE DECLARED RANGE RATHER THAN OUT OF THE LANGUAGE,
+    # and the sentence here said the stronger thing -- "UNREPRESENTABLE: a fraction of the budget
+    # cannot exceed the budget" -- while sig/api.py::warm_up carried, and still carries, a declared
+    # unreachable arm for exactly the case it called impossible. A fraction AT OR ABOVE 1.0 puts the
+    # floor at or past the budget and reproduces the untrippable guard -- 1.0 included, and it is a
+    # legal reading of a lever declared over 0..1, so the boundary is worth stating exactly: the
+    # shape is impossible STRICTLY BELOW 1.0 and reported from 1.0 up. What the fraction bought is
+    # that no ordinary setting can reach it and that the shape is now printed with both numbers
+    # beside it instead of silently clamped. The other end is refused
+    # outright at the one site that multiplies: spine/lever.py::Lever carries choices and no numeric
+    # range, so units.FRACTION here is a label, and a NEGATIVE share would make a negative floor --
+    # not a lower guard but no guard, eligible from the first probe with no gate saying so. The
+    # run-time warning at :5046 and the min() clamp both disappear with the absolute unit. The
+    # literal 0.25 is 200/800 -- the behaviour of record, not the shipped
     # 3000. NOTE ISSUES P2-M11: a doc prescription asserting the default is 3000 is itself wrong and is
     # deliberately not carried into this comment.
     # THE GUARD COMES BACK IF THE PORT EVER COMPARES THIS TO AN ABSOLUTE STEP COUNT. It is a fraction
@@ -529,6 +540,15 @@ class SIGLevers(LeverSet):
     # GENUINELY INDEPENDENT OF THE STOP THRESHOLD -- grid resolution versus stopping criterion -- so
     # it is not merged into warmup_plateau_eps. It sets the resolution of the only curve that can say
     # whether the encoder separated or collapsed.
+    # WHAT THE SHIPPED PAIR BUYS, STATED HERE BECAUSE THE DEFAULT IS NOT NEUTRAL: 500 against
+    # SIG_WARMUP=800 puts a SINGLE probe in the budget, at step 500. The flatness test compares a
+    # probe with the one before it, so with one probe the early stop cannot fire at all and
+    # sig/api.py::warm_up declares Gate sig.adaptive_stop UNREACHABLE with that arithmetic printed.
+    # What remains live on the shipped pair is the ABSOLUTE arm of the collapse verdict, which is a
+    # statement about one probe -- and it was NOT live until 2026-09-04, because the verdict was
+    # held behind a two-probe guard that the absolute arm does not need, so a fully collapsed
+    # encoder returned "budget" at the defaults. Lowering this lever to 200 or below is what buys
+    # back the plateau stop; leaving it at 500 keeps the collapse alarm and nothing else.
     # ALREADY DECLARED AS MEASUREMENT RATHER THAN TRAINING, and the new declaration keeps that: the
     # probe carries `@no_rng_drift` at :5013 with the comment "ENC_WARMUP_PROBE is a cadence, not a
     # training knob", which is exactly the instrument-line property P5 formalises. Under P5 the probe

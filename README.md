@@ -171,9 +171,17 @@ except NotImplementedError as e: print('stops at:', str(e).split(chr(10))[0])"
 
 The suite is **12 + 14 + 7 + 9 + 4 checks and 575 replayed oracle cases, 0 failing**. Three
 packages — `data`, `tok`, `lm` — do connect end to end on CPU, and the loss falls: a 30-step run on a
-fixed batch took cross-entropy from 8.320 to 0.144 while the fabric's expert tensors moved under the
-same optimizer (`max|A_before − A_after| = 0.000529`). That is a smoke path assembled by hand — one
+fixed batch took cross-entropy from 8.320 to 0.144. That is a smoke path assembled by hand — one
 fixed batch, overfitted on purpose — not a run, and not a generalisation claim.
+
+> **Retracted 2026-09-04.** An earlier version of this paragraph said the same run showed the
+> fabric's expert tensors moving under that optimizer, citing `max|A_before − A_after| = 0.000529`.
+> **That figure is weight decay, not learning, and it certifies nothing.** `FAB.build` draws `A` and
+> leaves `B` at zero, and the stand-in loss term reached both only through their product `A @ B`,
+> which is identically zero at initialisation — so both gradients are exactly zero
+> (measured: `grad|A|max = grad|B|max = 0.0`), and decoupled AdamW decay was the only thing moving
+> `A`. **Nothing has yet demonstrated that the expert tensors train.** The real router, `FAB.forward`,
+> is still a stub, so no path exercises them today.
 
 **`OPT` is now written**: all seven entry points, where the whole package was stubbed a day ago. Its
 schedule warms to `OPT_LR` over `OPT_LR_WARMUP` steps and cosines to the `lr_min_frac` floor, which

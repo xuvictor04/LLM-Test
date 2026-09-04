@@ -75,3 +75,38 @@ One agent violated the harness's own rule: the `train-seed` agent **committed an
 despite the instruction that only the supervisor commits, and its commit carries none of the required
 trailers. The work itself is sound and independently re-measured, but the violation is recorded here
 rather than tidied away, on the same principle as the supervisor's own ownership slip recorded above.
+
+
+## INV-R2-1 · the fabric-trains measurement is VOID (recorded 2026-09-04)
+
+`r2_sweep_full.json`'s `end_to_end` field states: "max|Population.A_before - Population.A_after| =
+0.000529 > 0, confirming the expert tensors genuinely moved under gradient descent through the same
+optimizer as the model's own parameters -- a population that trains, which is both project goals'
+central mechanism, verified live rather than assumed from the code's shape."
+
+**It is not verified and it is not true.** `v_opt_behaviour.json` found it and the supervisor
+reproduced it independently: `src/fabric/api.py::build` draws `A` and leaves `B` at ZERO, and the
+stand-in loss term that run used reached both tensors ONLY through their product,
+`((h @ pop.A[0] @ pop.B[0]) ** 2).mean()`. At `B = 0` that term is `0.0`, so `grad_out` is zero and
+therefore `dL/dA = grad_out @ B.T = 0` and `dL/dB = (hA).T @ grad_out = 0` — both identically zero,
+measured as `grad|A|max = 0.0`, `grad|B|max = 0.0`, `term = 0.0`. The 0.000529 is AdamW's
+**decoupled weight decay**, which is applied every step to every parameter regardless of gradient —
+the same mechanism `opt/levers.py` describes as a forgetting term the optimiser introduces.
+
+The sweep did the right thing in trying to measure it live rather than reading the code's shape. It
+picked a probe that could not have produced a nonzero answer at initialisation, and then read the
+number the probe did produce as the answer to a question it never asked. That is the
+wrong-measurement family — 98 of the survey's 475 records — committed by the audit itself.
+
+**Zero-initialising the second factor of a low-rank product is not itself a defect** (it makes the
+adapter a no-op at step 0, which is usually what is wanted). The defect is entirely in the
+measurement. What follows from it:
+
+- **No evidence exists that the fabric's expert tensors train.** The claim is withdrawn, not
+  downgraded.
+- The claim was repeated in `README.md` and in commit `2968aec`'s message. The README carries an
+  explicit retraction as of 2026-09-04; a commit message cannot be amended and is left standing with
+  this entry as its correction.
+- A probe that CAN answer the question needs a gradient path reaching `A` and `B` other than through
+  their product at init — which in practice means `FAB.forward`, still a stub. **Until it exists,
+  the honest answer is "not yet measurable", not "measured and positive".**

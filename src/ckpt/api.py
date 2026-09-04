@@ -76,6 +76,23 @@ class Resume:
     `attempted` without `loaded` is the state the old tree could not report: a RESUME that named a
     path nothing could be read from fell through to a cold start with nothing in the log saying the
     continual-learning boundary the run was launched to measure had not happened.
+
+    THAT STATE IS STILL UNREACHABLE IN THIS TREE, AND SAYING SO IS THIS PARAGRAPH'S WHOLE JOB. The
+    only place in this package that constructs a Resume is ckpt/api.py::load, and it constructs one
+    shape: `attempted=True, loaded=True`, both literal. The branch that would produce the other
+    combination -- a resume source that names a file which is not there -- RAISES instead of
+    returning, so the run does not survive to carry a record at all. `attempted` and `loaded` are
+    therefore two-valued fields that can today hold exactly one value each, and the sentence above
+    describes the state this record was SHAPED for rather than one it can currently hold.
+
+    NEITHER FIELD IS DELETED AND THE RECORD IS NOT NARROWED TO THREE, because closing the gap is a
+    decision and not a body fix: it means turning ckpt/api.py::load's FileNotFoundError into a
+    printed state, which reverses the already-settled refusal that put the raise there (a cold
+    start where a resume was asked for is a DIFFERENT EXPERIMENT, not a slower run). That referral
+    is written out in full at ckpt/api.py::load. Round 1's audit item on this is closed on its FIX
+    NOTE -- build the record on the surviving path -- and NOT on its title, which asked for the
+    attempted-without-loaded state to become reachable; this paragraph exists so the ledger cannot
+    be read as having closed both.
     """
     attempted: bool
     loaded: bool
@@ -164,19 +181,51 @@ def save_period(ckpt: Config):
     So the Gate goes where the four packages that already produce one put theirs -- on the object
     the entry point returns, under the name `.gates` (fabric/api.py::build's pop.gates,
     capacity/api.py::new_valve's valve.gates, memory/api.py::open_store's store.gates,
-    tok/api.py::build_vocabulary's vocab.gates). THE ONE COST, STATED SO IT IS NOT DISCOVERED: a
-    Clock is a value object whose arithmetic returns a FRESH instance, so `period + Windows(0)` or
-    a re-wrap `Windows(period)` drops the tuple. Nothing in the tree does either today -- both
-    consumers read `.n` off the object they are handed -- and whoever writes Cadences.due must not
-    normalise its argument.
+    tok/api.py::build_vocabulary's vocab.gates; sig/api.py is the fifth producer and uses `.gates`
+    as a DICT keyed by gate name rather than a tuple, so a renderer will meet two shapes -- named
+    here because this paragraph is where the convention is claimed).
+
+    THREE COSTS, STATED SO NONE OF THEM IS DISCOVERED.
+
+    (1) A Clock is a value object whose arithmetic returns a FRESH instance, so `period +
+    Windows(0)` or a re-wrap `Windows(period)` drops the tuple -- checked: `period - Windows(1)`
+    comes back with no `.gates` at all. Nothing in the tree does either today (both consumers read
+    `.n` off the object they are handed) and whoever writes Cadences.due must not normalise its
+    argument.
+
+    (2) THE ATTACHMENT ITSELF WORKS BY AN OMISSION, NOT BY A DECLARED AFFORDANCE.
+    spine/units.py::Clock declares `__slots__ = ('n',)`; spine/units.py::Windows and its five kinds
+    declare a docstring and a KIND and NO `__slots__` OF THEIR OWN, so every subclass instance
+    carries an implicit `__dict__` and `period.gates = (gate,)` lands in it. Measured:
+    `'__slots__' in units.Windows.__dict__` is False, and after the assignment `period.__dict__`
+    is `{'gates': (...)}`. Adding `__slots__ = ()` to those six subclasses -- the ordinary tidy-up
+    for a subclass of a slotted class, and a plausible future edit by someone who has never read
+    this line -- turns this function's last-but-one statement into an AttributeError, and does the
+    same to the four sibling producers named above. What is NOT at risk was checked rather than
+    assumed: with the tuple attached, `int`/`__index__`/`bool`/`str`/`repr` are unchanged, `hash`
+    is still `hash((kind name, n))` so a gated Windows hashes and compares equal to a bare one,
+    and units.py's one reason for existing is intact -- `Steps(1) >= period` still raises UnitError
+    and `period == 0` still raises rather than silently comparing.
+
+    (3) NOTHING RENDERS IT YET, so the condition this Gate states reaches an OBJECT GRAPH and not
+    an operator. `grep -rn "[.]line()" src/` returns exactly one call site, in opt/api.py, over
+    OPT's own local list; `grep -rn "[.]gates" src/` finds five producers and NO consumer, compose
+    included. The path from here to a printed line exists -- spine/compose.py holds the same
+    `periods` mapping it passes to RUN.new_cadences and RUN.cadence_audit -- but both of those are
+    still `raise NotImplementedError` stubs, so the round-1 complaint that "the condition is stated
+    nowhere" is answered in the graph and NOT YET in any output. That is the universal P3 state
+    rather than a defect this ruling introduced, and it is written here so the audit item is not
+    read as fully retired.
 
     LEVERS READ: every, dir (through saving_on, for the gate's reachability arm)
     WIRES READ: none
     DID IT FIRE: Cadences.ledger()["ckpt"] counts the fires; the `.gates` tuple on the returned
-                 period carries ckpt.periodic_armed, which is the :5619-5621 warning replaced by a
-                 gate with its own condition -- dir set and every == 0 prints armed-and-not-fired
-                 with "the only saves are the final one plus SIGUSR1" as its reason, and dir off
-                 prints UNREACHABLE instead of a zero the ledger cannot explain
+                 period CARRIES (not yet renders -- see cost 3) ckpt.periodic_armed, which is the
+                 :5619-5621 warning replaced by a gate with its own condition -- dir set and
+                 every == 0 is armed-and-not-fired with "the only saves are the final one plus
+                 SIGUSR1" as its reason, and dir off is UNREACHABLE instead of a zero the ledger
+                 cannot explain. The word an operator sees is owed by RUN.cadence_audit, which is
+                 a stub; until it has a body this Gate is readable only from the returned object
     """
     ckpt = ckpt.owned_by("CKPT")
     # NOT A STUB, AND THE THREE SIBLINGS ARE NOT EITHER. A period accessor is one

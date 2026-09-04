@@ -1,0 +1,165 @@
+{
+ "owner": "src/data/api.py",
+ "summary": "ALL FIFTEEN OF THE DECLARED DID-IT-FIRE NAMES ARE NOW LIVE, and eleven of them can reach the UNREACHABLE state.\n\nWHAT I FOUND FIRST. The ten open_areas names were ALREADY BUILT in the current tree (Areas.counters carries data.holdout_overlap; Areas.gates carries the other nine, with data.holdout_seam as one gate per area) -- more than the previous fixer's report claims, so I verified each one live on both source arms rather than trusting the report, and changed none of them. The previous fixer's three named items are also present and correct: Stream.draws, Plan.counters (data.phase_resolved, data.protocol_named, data.phase_name_resolved) and rng_holdout's conditional seam_at/overlap/why.\n\nWHAT WAS ACTUALLY MISSING was the whole draw_stream half: the Stream record had no `counters` and no `gates` field at all -- the module docstring's RECORD TYPES list named both, and neither existed -- so data.stream_draw, data.segment, data.contig_wrap, data.resample and data.phase_entered were text in a frozen docstring and nothing else. All five are now produced, exactly once each, on the returned Stream.\n\nTHE SPLIT, BY THE RULE THE Areas RECORD ALREADY STATES. Four are Gates because a configuration exists on which the mechanism CANNOT run (data.stream_draw, data.contig_wrap, data.resample, data.phase_entered); data.segment is a reading in counters because it describes the BYTES and stays true when the same Stream is handed back for a later epoch.\n\nTHE THIRD STATE IS REAL ON THE DEFAULT CONFIGURATION, which is the part worth the work: at DATA_RESAMPLE=0 (shipped) draw_stream returns the first draw's Stream for every later epoch, and `dataclasses.replace` copies every field -- so the naive version would have printed 'data.stream_draw: FIRED (40000 vs 40000)' for an epoch that drew nothing at all. data/api.py::_replay_gates re-states all four gates UNREACHABLE naming DATA_RESAMPLE=0, the epoch and the replayed stream_id, and leaves the counters alone.\n\nCOUNTS. 15 of 15 live. 11 carry a demonstrated UNREACHABLE arm (area_open, area_nested, area_path_refused, corpus_cap_trip, holdout_block, holdout_seam[label], val_cap_trip on DATA_SOURCE=synthetic; stream_draw, contig_wrap, resample, phase_entered on the replay / DATA_SEG_CONTIG=0 / DATA_RESAMPLE=0 arms). data.holdout_overlap carries the same three-way distinction inside its VALUE (float measured / None undefined / a sentence when there is no block), because the contract declares it a reading and not a gate. Three have NO unreachable arm by construction and each says so in its reason: data.area_label_collision and data.area_refused exit at startup so they read 0 in every Areas that exists, and data.segment is always evaluable. Every unreachable arm names the lever and the value that made it so.\n\nPROVED, NOT ASSERTED. Every state above was produced by running a configuration and printing Gate.line(): eight configurations across both source arms (real eng; real eng + continual/01_rust nested with DATA_VAL_CAP=1000; real eng at DATA_CORPUS_CAP=20000/DATA_SEG_CONTIG=1 for the wrap; real eng at DATA_STREAM_BYTES=3 and 0 for the drift and the measured zero; DATA_RESAMPLE=1 over epochs 0 and 1; DATA_RESAMPLE=0 over epochs 0 and 1 for the replay; synthetic a,b at DATA_N_PROCESSES=2). No wire was spent -- src/data/api.py declares no d_ field and src/spine/assemble.py::COUPLINGS is untouched (git status shows one modified file). Measured on the build the suite runs, the ledger carries 19 rows against WIRE_BUDGET=25; the brief says 23 are spent, so one of the two numbers is stale and it is worth someone's look -- either way I added none. No RNG stream was minted, and draw_stream(epoch=0) twice in one process still raises RngError. The recorded end-to-end sequence reproduces its audited numbers byte for byte.\n\nNOT DONE, and listed individually in `unfinished`: the five DID-IT-FIRE names on DATA.stream_state and DATA.restore_stream_state. They are outside the fifteen and both entry points are still P4 NotImplementedError stubs, so there is no record for them to land on.",
+ "findings": [
+  {
+   "symbol": "src/data/api.py::open_areas -- data.area_open",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live in the current tree as a Gate in Areas.gates (not from this session's work). Real arm: fired/armed against n_entries. Synthetic arm: UNREACHABLE with a reason naming DATA_SOURCE=synthetic and pointing at data/api.py::_synthetic_areas. Verified live on both arms.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\"}' -- prints: 'Gate data.area_open: FIRED (1 vs 1)'; with DATA_SOURCE=synthetic DATA_AREAS=a,b DATA_N_PROCESSES=2 it prints 'Gate data.area_open: UNREACHABLE (None vs 2) -- DATA_SOURCE=synthetic: no directory is opened at all ...'"
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.area_nested",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live. Three states all reached: FIRED (1 vs 2) with DATA_AREAS=eng,continual/01_rust; armed-but-0 (0 vs 1) at the shipped default, whose reason states the zero as 'every area came from DATA_DIR/train/'; UNREACHABLE on synthetic.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng,continual/01_rust\",\"DATA_CORPUS_CAP\":\"100000000\"}' -- prints: 'Gate data.area_nested: FIRED (1 vs 2)'"
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.area_path_refused",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live. Reads 'armed, did not fire (0 vs n_path_checked)' in every Areas that exists because a refused entry raises CorpusError and exits; UNREACHABLE on synthetic, where the check is deliberately not run. Threshold is what the refusal looked at, so the zero is a reading.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\"}' -- prints: 'Gate data.area_path_refused: armed, did not fire (0 vs 1)'"
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.area_label_collision",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live. Runs for BOTH sources (the checks were hoisted above the source branch), so it has NO unreachable arm and its reason says exactly that: a collision exits at startup, so the row reads zero in every Areas that exists.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"synthetic\",\"DATA_AREAS\":\"a,b\",\"DATA_N_PROCESSES\":\"2\"}' -- prints: 'Gate data.area_label_collision: armed, did not fire (0 vs 2)' on the synthetic arm too"
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.corpus_cap_trip",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live, with all three states reached: FIRED (1 vs 1, printing 'eng: 2000000 taken of 3347711 present'); armed-but-0 at DATA_CORPUS_CAP=100000000; UNREACHABLE on synthetic naming the cap value.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\"}' -- prints: 'Gate data.corpus_cap_trip: FIRED (1 vs 1) -- DATA_CORPUS_CAP=2000000 ... eng: 2000000 taken of 3347711 present'"
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.holdout_block",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live. Prints offset, size AND the per-area rng child key ('eng: data.holdout.eng offset 1330940 size 100000'); UNREACHABLE on synthetic with the reason that an area with no child in rng.issued() never asked for a block.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\"}' -- prints: 'Gate data.holdout_block: FIRED (1 vs 1) -- ... eng: data.holdout.eng offset 1330940 size 100000'"
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.holdout_seam",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live as ONE GATE PER AREA, name suffixed with the label, because the unreachable arm is a property of that area's draw. FIRED prints the seam position against the body length; the no-block and edge-draw arms are UNREACHABLE carrying rng_holdout[label]['why'].",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng,continual/01_rust\",\"DATA_CORPUS_CAP\":\"100000000\",\"DATA_VAL_CAP\":\"1000\"}' -- prints: 'Gate data.holdout_seam[eng]: FIRED (2661881 vs 3346711)' and 'Gate data.holdout_seam[01_rust]: FIRED (76802 vs 79002)'; on synthetic both read 'UNREACHABLE (None vs 40000) -- DATA_SOURCE=synthetic: source=synthetic holds nothing out'"
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.holdout_overlap",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live as the one READING in Areas.counters (per-area near-duplicate fraction, Lee et al. arXiv:2107.06499), computed by data/api.py::_holdout_overlap. It carries the same three-way distinction inside the VALUE because the contract declares it a reading and not a gate: a float is measured, None is undefined (block shorter than one n-gram), and an area with no block at all gets its own sentence.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\"}' -- prints: \"data.holdout_overlap = {'eng': 0.0008204019969785195}\"; on synthetic \"{'a': 'no block to measure -- source=synthetic holds nothing out', ...}\""
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.val_cap_trip",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live, all three states reached: FIRED (2 vs 2) at DATA_VAL_CAP=1000 printing the arithmetic 'eng: min(167385, 1000) = 1000'; armed-but-0 at the shipped cap; UNREACHABLE on synthetic ('there is no block for DATA_VAL_CAP to bind').",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng,continual/01_rust\",\"DATA_CORPUS_CAP\":\"100000000\",\"DATA_VAL_CAP\":\"1000\"}' -- prints: 'Gate data.val_cap_trip: FIRED (2 vs 2) -- DATA_VAL_CAP=1000 ... eng: min(167385, 1000) = 1000'"
+  },
+  {
+   "symbol": "src/data/api.py::open_areas -- data.area_refused",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "Already live. Like data.area_label_collision it has no unreachable arm: every refusal exits at startup, so it reads 0 in every Areas that exists and the reason enumerates the seven refusals it stands for.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\"}' -- prints: 'Gate data.area_refused: armed, did not fire (0 vs 1)'"
+  },
+  {
+   "symbol": "src/data/api.py::draw_stream -- data.stream_draw",
+   "verdict": "DEFECT_CONFIRMED",
+   "severity": "medium",
+   "detail": "WAS declared in the frozen docstring and computed nowhere: Stream carried no counters and no gates field at all, so the name existed only as text (verified before the fix: the probe printed an empty '-- Stream.gates --' section). FIXED: now a Gate in Stream.gates whose value is the BYTES this call drew against DATA_STREAM_BYTES, with the rng draw count, the segment count and the realized mean segment length in the reason -- the corroboration data.splice_window's own reason asks for. All three states reached: FIRED (40000 vs 40000); armed-but-0 at DATA_STREAM_BYTES=0, whose reason says in as many words that it is a MEASURED zero and not the replay arm; UNREACHABLE on the replay arm (DATA_RESAMPLE=0, epoch>0) where the call performs no draw at all.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\",\"DATA_STREAM_BYTES\":\"40000\"}' '[0,1]' -- prints: epoch 0 'Gate data.stream_draw: FIRED (40000 vs 40000) -- the value is the BYTES this call drew ... in 66 rng draw(s)'; epoch 1 'Gate data.stream_draw: UNREACHABLE (None vs 40000) -- DATA_RESAMPLE=0 at epoch 1: draw_stream performs NO draw on this epoch ...'. DATA_STREAM_BYTES=0 gives 'armed, did not fire (0 vs 0)'"
+  },
+  {
+   "symbol": "src/data/api.py::draw_stream -- data.segment",
+   "verdict": "DEFECT_CONFIRMED",
+   "severity": "medium",
+   "detail": "Declared and computed nowhere. FIXED as the one READING in Stream.counters (data.segment = the number of segments these bytes are spliced from), deliberately NOT a Gate: it is a property of the BYTES, so it is still true when the same Stream is handed back for a later epoch under DATA_RESAMPLE=0, and a Gate would print 'armed, did not fire' for a number with no condition to meet. It is the reason the replay arm re-states the gates but carries the counters over unchanged.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\",\"DATA_STREAM_BYTES\":\"40000\"}' '[0,1]' -- prints: 'data.segment = 33' on the epoch-0 draw and the same 33 on the epoch-1 replay of those bytes"
+  },
+  {
+   "symbol": "src/data/api.py::draw_stream -- data.contig_wrap",
+   "verdict": "DEFECT_CONFIRMED",
+   "severity": "medium",
+   "detail": "Declared ('unreachable at seg_contig=False, with the gate arithmetic') and computed nowhere; the only trace was a trailing '# data.contig_wrap' comment on the wrap line. FIXED: n_wrap is incremented on the line that performs the wrap, and the Gate carries all three states -- FIRED (2 vs 33) when the cursor runs off a short body, armed-but-0 (0 vs 33) at DATA_SEG_CONTIG=1 on a body longer than the epoch's draw, UNREACHABLE at DATA_SEG_CONTIG=0 with the reason that a randint(0, len(body) - want) seek cannot run off the end and there is no cursor to wrap.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\",\"DATA_STREAM_BYTES\":\"40000\",\"DATA_SEG_CONTIG\":\"1\",\"DATA_CORPUS_CAP\":\"20000\"}' -- prints: 'Gate data.contig_wrap: FIRED (2 vs 33)'; drop DATA_CORPUS_CAP for 'armed, did not fire (0 vs 33)'; drop DATA_SEG_CONTIG for 'UNREACHABLE (None vs 33) -- DATA_SEG_CONTIG=0 ...'"
+  },
+  {
+   "symbol": "src/data/api.py::draw_stream -- data.resample",
+   "verdict": "DEFECT_CONFIRMED",
+   "severity": "medium",
+   "detail": "Declared ('unreachable at resample=False -- the every-epoch-is-a-byte-identical-replay state, STATED rather than warned about') and computed nowhere. FIXED: at DATA_RESAMPLE=0 the Gate is UNREACHABLE naming the lever, the replay arm and train/api.py::startup_refusals' RUN_EPOCHS>1 refusal; at DATA_RESAMPLE=1 it reads FIRED (1 vs 0) on epoch 1 and armed-but-0 (0 vs 0) on epoch 0, whose reason says why a FIRST draw is not a redraw.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\",\"DATA_STREAM_BYTES\":\"40000\",\"DATA_RESAMPLE\":\"1\"}' '[0,1]' -- prints: epoch 0 'Gate data.resample: armed, did not fire (0 vs 0)'; epoch 1 'Gate data.resample: FIRED (1 vs 0)'; with DATA_RESAMPLE unset 'UNREACHABLE (None vs 0) -- DATA_RESAMPLE=0 ...'"
+  },
+  {
+   "symbol": "src/data/api.py::draw_stream -- data.phase_entered",
+   "verdict": "DEFECT_CONFIRMED",
+   "severity": "medium",
+   "detail": "Declared ('must equal len(schedule) per epoch or the fill is drifting') and computed nowhere. FIXED: n_phase_entered is incremented at the one line that decides a phase is entered (the `if len(out) < hi` immediately above the fill loop, which is true exactly when the loop body runs), and the Gate fires only on equality with len(plan.schedule). The drift state is reachable and prints the mismatch: at DATA_STREAM_BYTES=3 with four phases one phase's span rounds to zero bytes and the gate reads 'armed, did not fire (3 vs 4) ... MISMATCH: 1 phase(s) were never entered'. UNREACHABLE on the replay arm.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\",\"DATA_STREAM_BYTES\":\"3\"}' -- prints: 'Gate data.phase_entered: armed, did not fire (3 vs 4) -- ... MISMATCH: 1 phase(s) were never entered because their span rounded to zero bytes'; at 40000 bytes it reads FIRED (4 vs 4)"
+  },
+  {
+   "symbol": "src/data/api.py::_replay_gates",
+   "verdict": "DEFECT_CONFIRMED",
+   "severity": "medium",
+   "detail": "NEW, and the part that makes the third state real rather than decorative. draw_stream's DATA_RESAMPLE=0 arm returns the first draw's Stream via dataclasses.replace, which copies EVERY field -- so once the gates existed, an epoch that drew nothing would have printed 'Gate data.stream_draw: FIRED (40000 vs 40000)', a positive reading for a mechanism that did not run. _replay_gates re-states all four draw-time gates UNREACHABLE, each naming DATA_RESAMPLE=0, the epoch and the replayed stream_id, and deliberately leaves Stream.counters carried over unchanged because data.segment is a reading about the bytes, which are the same bytes.",
+   "repro": "cd /home/user/LLM-Test && python3 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/data_counters/probe_data.py '{\"DATA_SOURCE\":\"real\",\"DATA_AREAS\":\"eng\",\"DATA_STREAM_BYTES\":\"40000\"}' '[0,1]' -- prints: all four epoch-1 gates read UNREACHABLE with 'DATA_RESAMPLE=0 at epoch 1: draw_stream performs NO draw on this epoch -- it returns the byte-identical replay of the first draw (s0.e0.40000)' while 'data.segment = 33' is still carried"
+  },
+  {
+   "symbol": "src/data/api.py::draw_stream -- the RNG rule",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "No stream is minted by any line this session added, and the duplicate-stream guard on data.stream.e<epoch> still bites: calling draw_stream(epoch=0) twice in one process raises spine.rng.RngError. The unconditional again=True stays removed.",
+   "repro": "cd /home/user/LLM-Test && python3 <scratch>/rng_guard.py -- prints \"RngError as required: stream 'data.stream.e0' was already issued for seed 0.\""
+  },
+  {
+   "symbol": "src/spine/compose.py::compose (end-to-end regression)",
+   "verdict": "CONFIRMED_CORRECT",
+   "severity": "none",
+   "detail": "The change is additive: the recorded end-to-end sequence (open_areas -> build_vocabulary -> data_plan -> draw_stream -> tokenize -> resolve -> build_model -> FAB.build -> 30 AdamW steps) reproduces the audit's numbers exactly -- 33141 tokens, bytes_per_token 1.8104, 292672 model params, losses[0]=8.320034980773926 and losses[-1]=0.14418929815292358, max|A_before-A_after| 0.0005294829607009888 -- so no byte of the draw moved.",
+   "repro": "cd /home/user/LLM-Test && python3 <scratch>/e2e_check.py (the script named in .rework/audits/r2_sweep_full.json's end_to_end field, copied unchanged)"
+  }
+ ],
+ "unfinished": [
+  {
+   "title": "data.state_written (DATA.stream_state)",
+   "reason": "Outside the fifteen and blocked: DATA.stream_state is still a P4 stub whose body is `raise NotImplementedError`, so there is no record for the counter to land on.",
+   "detail": "src/data/api.py::stream_state declares it under DID IT FIRE. Producing it means writing the entry point, which is P4's unwritten body and a different task from closing a declared-but-uncomputed counter. Not started, and nothing about it was changed this session."
+  },
+  {
+   "title": "data.state_restored (DATA.restore_stream_state)",
+   "reason": "Outside the fifteen and blocked: DATA.restore_stream_state is a P4 stub.",
+   "detail": "src/data/api.py::restore_stream_state declares it. Same reason as data.state_written -- the entry point has no body yet."
+  },
+  {
+   "title": "data.state_refused (DATA.restore_stream_state)",
+   "reason": "Outside the fifteen and blocked: DATA.restore_stream_state is a P4 stub.",
+   "detail": "Declared with 'the area and the field that moved' as its payload; needs the restore body first."
+  },
+  {
+   "title": "data.area_added (DATA.restore_stream_state)",
+   "reason": "Outside the fifteen and blocked: DATA.restore_stream_state is a P4 stub.",
+   "detail": "Declared as the add-an-area line ('0 on an ordinary resume, which is the statement this resume added nothing'); needs the restore body first."
+  },
+  {
+   "title": "data.area_vanished (DATA.restore_stream_state)",
+   "reason": "Outside the fifteen and blocked: DATA.restore_stream_state is a P4 stub.",
+   "detail": "Declared as the counterpart refusal to data.area_added; needs the restore body first."
+  },
+  {
+   "title": "Nothing PRINTS Stream.counters/Stream.gates yet",
+   "reason": "Not mine to write: the report/banner would live in src/spine/compose.py, which this session does not own, and no report writer exists in the tree today.",
+   "detail": "Verified by grep: `grep -n gates src/spine/compose.py` returns only prose in docstrings, no iteration over any record's .gates. The same is true of every other package's .gates (FAB, CAP, MEM, TOK, SIG, CKPT), so DATA is not behind -- the consumer simply does not exist yet. Every name is on the returned record and greppable; when the report writer lands it needs to read Areas.counters/Areas.gates, Plan.counters/Plan.gates and Stream.counters/Stream.gates."
+  }
+ ],
+ "suite_after": "GREEN, run after the last edit: ownership 12 checks + 18 self-test cases 0 failing; contract 14 checks + 46 self-test cases 0 failing; census 7 checks + the self-test 0 failing; assemble 9 checks 0 failing; couplings 4 checks 0 failing; derive 575 oracle cases 0 mismatches. tests/test_determinism.py also passes (int 20 keys ALL EXACT, float 6 keys max_abs 0.0) -- it rewrites tests/_noise_floor.json as a side effect, which I restored with `git checkout -- tests/_noise_floor.json` so tests/** is untouched. `git status --short` shows exactly one modified file: src/data/api.py. Nothing committed, nothing pushed."
+}

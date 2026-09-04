@@ -791,6 +791,21 @@ class Stream:
     produces), and the one Rng object with a real `.draws` was local to draw_stream and discarded on
     return. Reproduced: `rng.issued()['data.stream.e0'].draws` raised `AttributeError: 'tuple' object
     has no attribute 'draws'`. This field is what the docstring's claim now actually reads.
+
+    `counters` AND `gates` CARRY THE DID IT FIRE SURFACE draw_stream DECLARES, split by the SAME one
+    question `Areas` states: is there a configuration on which the mechanism CANNOT run? Every
+    draw-time name here has one, and it is not hypothetical -- at DATA_RESAMPLE=0 every epoch past
+    the first performs NO DRAW AT ALL, it returns this record again -- so `data.stream_draw`,
+    `data.contig_wrap`, `data.resample` and `data.phase_entered` are `spine.gate.Gate`s, the only
+    record in this tree that can say UNREACHABLE and carry the reason. `data.segment` is a reading in
+    `counters` instead: it counts the segments THESE BYTES are spliced from, which is as true of a
+    replayed Stream as of the draw that produced it, and wrapping a reading in a Gate prints "armed,
+    did not fire" for a number that never had a condition to meet.
+
+    A REPLAY RE-STATES THE GATES AND KEEPS THE COUNTERS, and that split is the whole point of having
+    both fields. The bytes are the first draw's and so is every reading about them; but "did THIS
+    epoch draw" is a question about this call, and its answer is UNREACHABLE -- not the FIRED the
+    first draw earned and not a measured zero either. See data/api.py::_replay_gates.
     """
     bytes: bytes
     labels: list
@@ -802,6 +817,8 @@ class Stream:
     epoch: int
     stream_id: str
     draws: int = 0
+    counters: dict = dataclasses.field(default_factory=dict)
+    gates: tuple = ()
 
 
 def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_token: float):
@@ -1110,14 +1127,33 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
 
     LEVERS READ: stream_bytes, seg_min, seg_max, seg_contig, resample, draw
     WIRES READ: none
-    DID IT FIRE: data.stream_draw, data.segment, data.contig_wrap (unreachable at seg_contig=False,
-                 with the gate arithmetic), data.resample (unreachable at resample=False -- the
-                 "every epoch is a byte-identical replay" state, STATED rather than warned about),
-                 data.phase_entered (must equal len(schedule) per epoch or the fill is drifting),
+    DID IT FIRE: EVERY NAME BELOW IS CARRIED OUT ON THE RETURNED `Stream`, exactly once, and which
+                 field it lands in follows the rule the Areas record states: a name with a
+                 configuration on which the mechanism CANNOT run is a Gate in `Stream.gates`,
+                 because Gate is the only record here that can say UNREACHABLE and carry the reason;
+                 a name that is always evaluable is a reading in `Stream.counters`.
+                 Gate data.stream_draw (the bytes THIS call drew, against DATA_STREAM_BYTES;
+                 a measured 0 is a draw that was armed and drew nothing, which the replay arm below
+                 is not),
+                 data.segment (a READING in `counters`: how many segments these bytes are spliced
+                 from -- as true of a replayed Stream as of the draw that made it, so it is not a
+                 gate),
+                 Gate data.contig_wrap (unreachable at seg_contig=False, with the gate arithmetic:
+                 a random-offset seek is bounded by the body it reads and there is no cursor to
+                 wrap, so 0 there is not a count),
+                 Gate data.resample (unreachable at resample=False -- the "every epoch is a
+                 byte-identical replay" state, STATED rather than warned about),
+                 Gate data.phase_entered (must equal len(schedule) per epoch or the fill is
+                 drifting),
                  Stream.draws (0 draws = armed-but-inert; NOT rng.issued()["data.stream.e<n>"].draws
                  -- issued() returns (derived seed, run seed) tuples with no .draws attribute, so
                  that expression is an AttributeError and Stream carries the real reading instead;
                  audit finding, confirmed live)
+                 THE REPLAY ARM IS THE UNREACHABLE ONE, and it is a shipped configuration rather
+                 than a hypothetical: at DATA_RESAMPLE=0 (the default) every epoch past the first
+                 returns the first draw's Stream, so all four gates are RE-STATED unreachable
+                 naming the lever and the epoch (data/api.py::_replay_gates) instead of being
+                 carried over reading FIRED for a draw this epoch did not perform.
     """
     dat = dat.owned_by("DATA")
     # RESAMPLE IS READ HERE, NOT BY THE CALLER. The composition root calls this once per epoch
@@ -1134,7 +1170,17 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         # object" before the stale run's bytes could be handed to this one.
         entry = _REPLAY.get(id(areas))
         if entry is not None and entry[0]() is areas:
-            return dataclasses.replace(entry[1], epoch=int(epoch))
+            # THE REPLAY'S DID IT FIRE IS NOT THE DRAW'S, and letting `dataclasses.replace` carry
+            # the draw's over would be the exact collapse spine/gate.py::Gate exists to refuse --
+            # worse than it, in fact. `replace` copies every field, so without this line the
+            # returned Stream would hand the report "Gate data.stream_draw: FIRED (120000 vs
+            # 120000)" for an epoch that drew nothing at all: not two states printed as one, but a
+            # positive reading for a mechanism that did not run. `counters` is deliberately carried
+            # over UNCHANGED, because data.segment is a reading about the BYTES -- how many segments
+            # they are spliced from -- and these are the same bytes.
+            return dataclasses.replace(
+                entry[1], epoch=int(epoch),
+                gates=_replay_gates(dat, plan, entry[1], int(epoch)))
 
     names = list(areas.names)
     seg_min, seg_max = int(dat.seg_min), int(dat.seg_max)
@@ -1194,6 +1240,12 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     cursors = areas.cursors
     last_area = None
     contig = bool(dat.seg_contig)
+    # THE DID IT FIRE TALLIES, TAKEN AT THE DECISION POINT THAT OWNS EACH ONE rather than
+    # reconstructed from the returned Stream afterwards -- the same rule open_areas' surface follows
+    # and for the same reason: `n_phase_entered` counts phases this loop actually entered, which is
+    # a different number from len(plan.schedule) exactly when the fill is drifting, and
+    # reconstructing it from the schedule would manufacture the agreement the gate exists to check.
+    n_wrap, n_phase_entered = 0, 0
 
     # WHICH LAW ALLOCATES THE BYTES (DATA_DRAW; P1-H58, ruled by the owner 2026-09-02).
     #   planned -- the shipped default -- gives each live area its SCHEDULED SHARE of the phase and
@@ -1224,6 +1276,12 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         budget = {}
         for j, idx in enumerate(live):
             budget[idx] = budget.get(idx, 0) + span // len(live) + (1 if j < span % len(live) else 0)
+        if len(out) < hi:
+            # data.phase_entered, COUNTED AT THE ONE LINE THAT DECIDES IT. The `while` below runs
+            # its body if and only if this is true, so this is the phase's entry and not a proxy for
+            # it: a phase whose span rounded to zero bytes is NOT entered, and that is precisely the
+            # drift the gate below is armed against (ISSUES P1-L22).
+            n_phase_entered += 1
         while len(out) < hi:
             if law == "planned":
                 # Uniform among the areas that still have budget, so the ORDER is random and the
@@ -1264,7 +1322,12 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                 start = cursors[label] % len(body)
                 chunk = body[start:start + want]
                 if len(chunk) < want:
-                    chunk = chunk + body[:want - len(chunk)]      # data.contig_wrap
+                    chunk = chunk + body[:want - len(chunk)]
+                    # data.contig_wrap, COUNTED HERE BECAUSE THIS LINE IS THE WRAP. The read ran off
+                    # the end of the body and was completed from its head; there is no other line in
+                    # this function where that happens, and counting it anywhere else would be
+                    # counting a condition rather than the event.
+                    n_wrap += 1
                 # STORED ALREADY REDUCED MOD len(body), not the raw running total. A raw
                 # `start + want` accumulates without bound over many segments and epochs -- not
                 # incorrect (the `% len(body)` above still reads it back correctly), but an
@@ -1287,6 +1350,87 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             if law == "planned":
                 budget[idx] -= len(chunk)
 
+    # ---- THE DID IT FIRE SURFACE THIS FUNCTION DECLARES ------------------------------------------
+    # Built here, at the end, from tallies taken at the decision points above -- so a name whose
+    # branch never ran reads as a MEASURED 0 and a name whose mechanism CANNOT run on this
+    # configuration reads as UNREACHABLE with the lever and the value that made it so. Before this
+    # block existed, every one of these names was declared in the docstring above and computed
+    # nowhere, so the two states were the same silence.
+    n_seg = len(splice)
+    n_phases = len(plan.schedule)
+    naive_mean = (seg_min + seg_max) / 2.0
+
+    # A READING, NOT A GATE, and the docstring above says so in as many words: how many segments
+    # these bytes are spliced from. It is a property of the BYTES, so it is still true when this
+    # Stream is handed back for a later epoch under DATA_RESAMPLE=0 -- which is why the replay arm
+    # carries `counters` over unchanged and re-states only the gates.
+    counters = {"data.segment": n_seg}
+
+    gates = []
+    if n_seg:
+        draw_reason = (
+            f"the value is the BYTES this call drew against DATA_STREAM_BYTES, from the child "
+            f"stream data.stream.e{int(epoch)} in {stream.draws} rng draw(s) (Stream.draws) under "
+            f"DATA_DRAW={law}: {n_seg} segment(s), realized mean {len(out) / n_seg:.1f} bytes "
+            f"against the naive ({seg_min}+{seg_max})/2 = {naive_mean:.1f} that data_plan's "
+            f"data.splice_window predicts from. That gate's own reason asks for exactly this "
+            f"corroboration -- 'a reading near the threshold should be corroborated against the "
+            f"actual Stream draw' -- and this is the number to do it with")
+    else:
+        draw_reason = (
+            f"DATA_STREAM_BYTES={int(dat.stream_bytes)}: no phase had a byte to fill, so the draw "
+            f"loop never ran a body and this call drew nothing in {stream.draws} rng draw(s). It is "
+            f"a MEASURED zero -- the draw was armed and drew nothing -- and NOT the replay arm's "
+            f"'no draw happened on this epoch at all'")
+    gates.append(Gate("data.stream_draw", len(out) > 0, len(out), int(dat.stream_bytes),
+                      reason=draw_reason))
+
+    if contig:
+        gates.append(Gate(
+            "data.contig_wrap", n_wrap > 0, n_wrap, n_seg,
+            reason="DATA_SEG_CONTIG=1: each area is read in order from a cursor that PERSISTS "
+                   "ACROSS EPOCHS, and a read that runs off the end of a body is completed from its "
+                   "head -- the value is how many of this epoch's segments wrapped and the "
+                   "threshold is how many were read"))
+    else:
+        gates.append(Gate(
+            "data.contig_wrap", False, None, n_seg, reachable=False,
+            reason="DATA_SEG_CONTIG=0 (the shipped default, and a LITERAL rather than a computed "
+                   "one): every segment seeks to randint(0, len(body) - want) and is cut to fit, so "
+                   "no read can run off the end of a body and there is no cursor to wrap. Wrapping "
+                   "is not something this configuration did zero times -- it is something it cannot "
+                   "do, and the threshold is the segments that were read the other way"))
+
+    if bool(dat.resample):
+        gates.append(Gate(
+            "data.resample", int(epoch) > 0, int(epoch), 0,
+            reason=f"DATA_RESAMPLE=1: every epoch draws a fresh stream, so this call is redraw "
+                   f"number {int(epoch)}. The threshold is the epoch index past which every call is "
+                   f"a redraw, which is why epoch 0 reads armed-and-did-not-fire rather than "
+                   f"unreachable: the mechanism is on, and a FIRST draw is not a redraw"))
+    else:
+        gates.append(Gate(
+            "data.resample", False, None, 0, reachable=False,
+            reason=f"DATA_RESAMPLE=0: every epoch after the first returns the byte-identical replay "
+                   f"of this draw instead of redrawing (the arm at the top of this function), so "
+                   f"'redraws so far' is not a number this configuration has. This call is the "
+                   f"FIRST draw for this Areas in this process and it happened; what cannot happen "
+                   f"here is a redraw. train/api.py::startup_refusals refuses RUN_EPOCHS>1 under "
+                   f"this lever for the same reason -- a continual-learning result taken on "
+                   f"replayed text is a memorisation result"))
+
+    phase_reason = (
+        f"the phase fill is EXACT -- phase k covers [round(k*B/P), round((k+1)*B/P)) at "
+        f"B=DATA_STREAM_BYTES={int(dat.stream_bytes)} and P={n_phases} -- so every declared phase "
+        f"must be entered on every epoch or the fill is drifting (ISSUES P1-L22)")
+    if n_phase_entered != n_phases:
+        phase_reason += (
+            f"; MISMATCH: {n_phases - n_phase_entered} phase(s) were never entered because their "
+            f"span rounded to zero bytes at this DATA_STREAM_BYTES, so the {len(out)} byte(s) drawn "
+            f"came from fewer phases than the schedule declares")
+    gates.append(Gate("data.phase_entered", n_phase_entered == n_phases, n_phase_entered, n_phases,
+                      reason=phase_reason))
+
     st = Stream(bytes=bytes(out), labels=labels, splice_starts=tuple(splice),
                 area_changes=tuple(changes), phase_bounds=tuple(plan.phase_bounds),
                 area_names=tuple(names), per_area_drawn=per_area, epoch=int(epoch),
@@ -1295,7 +1439,7 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                 stream_id=f"s{seed}.e{int(epoch)}.{len(out)}",
                 # THE DRAW COUNT, CARRIED OUT because rng.issued() cannot answer it (see Stream's
                 # docstring) -- read off the local Rng before it goes out of scope.
-                draws=stream.draws)
+                draws=stream.draws, counters=counters, gates=tuple(gates))
     if not bool(dat.resample):
         # THE WEAKREF'S CALLBACK IS THE EVICTION, not a periodic sweep: when this Areas is collected,
         # the callback fires and pops exactly this id() entry, which is what lets the cached Stream
@@ -1306,6 +1450,56 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         key = id(areas)
         _REPLAY[key] = (weakref.ref(areas, lambda _ref, key=key: _REPLAY.pop(key, None)), st)
     return st
+
+
+def _replay_gates(dat, plan, cached, epoch):
+    """draw_stream's four draw-time gates, re-stated UNREACHABLE for an epoch that performed NO draw.
+
+    THIS IS THE THIRD STATE, ARRIVING THROUGH THE ONE PATH THAT CAN PRODUCE IT ON EVERY NAME AT ONCE.
+    At DATA_RESAMPLE=0 -- the shipped default -- draw_stream returns the first draw's Stream for
+    every later epoch, so on those epochs no byte is drawn, no segment is read, no cursor moves and
+    no phase is entered. Carrying the first draw's gates out with `dataclasses.replace` would print
+    FIRED for all four, which is not the armed-but-inert/unreachable collapse spine/gate.py::Gate
+    exists to refuse but something worse: a positive reading for a mechanism that did not run.
+
+    WHAT IS NOT RE-STATED IS `Stream.counters`, and the asymmetry is the point. data.segment counts
+    the segments THESE BYTES are spliced from; the replay hands back the same bytes, so the reading
+    is still true and re-stating it as unreachable would be its own small lie. A gate answers "did
+    this call fire", a counter answers "what are these bytes" -- one of those questions changes on a
+    replay and the other does not.
+
+    `epoch` is named in every reason because the unreachable state is a property of THIS CALL and
+    not of the run: epoch 0 under the same lever drew normally and its gates say so.
+    """
+    ep = int(epoch)
+    n_seg = len(cached.splice_starts)
+    n_phases = len(plan.schedule)
+    where = (f"DATA_RESAMPLE=0 at epoch {ep}: draw_stream performs NO draw on this epoch -- it "
+             f"returns the byte-identical replay of the first draw ({cached.stream_id})")
+    return (
+        Gate("data.stream_draw", False, None, int(dat.stream_bytes), reachable=False,
+             reason=where + ", so 'how many bytes did THIS call draw' has no value to read here "
+                            "rather than a value of zero. The bytes are the first draw's and their "
+                            "reading is data.segment in Stream.counters, which this replay carries "
+                            "over unchanged"),
+        Gate("data.contig_wrap", False, None, n_seg, reachable=False,
+             reason=where + f", so no segment is read on this epoch, no cursor advances and nothing "
+                            f"can wrap. Whether a wrap is possible AT ALL is "
+                            f"DATA_SEG_CONTIG={int(bool(dat.seg_contig))}'s question and this epoch "
+                            f"never gets to ask it; the threshold is the segments the replayed "
+                            f"bytes were spliced from"),
+        Gate("data.resample", False, None, 0, reachable=False,
+             reason=where + ", which IS this row's unreachable state rather than a consequence of "
+                            "it: with resampling off no epoch ever redraws, so 'redraws so far' is "
+                            "not a number this configuration has. train/api.py::startup_refusals "
+                            "refuses RUN_EPOCHS>1 under this lever for that reason -- a "
+                            "continual-learning result taken on replayed text is a memorisation "
+                            "result"),
+        Gate("data.phase_entered", False, None, n_phases, reachable=False,
+             reason=where + f", so the phase loop does not run and no phase is entered on this "
+                            f"epoch. The {n_phases} phase(s) were entered by the draw this record "
+                            f"is a replay of, and that draw's own gate is where the count reads"),
+    )
 
 
 # The byte-identical replay at resample=False. Keyed by id(areas) -- Areas itself cannot be the dict

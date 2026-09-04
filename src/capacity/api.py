@@ -143,7 +143,12 @@ def new_valve(cap: Config, *, restored=None):
     where it comes back.
 
     LEVERS READ: targets, fab_start, vocab_start
-    WIRES READ: d_expert_slots, d_vocab_slots, d_mask_dead_rows
+    WIRES READ: d_expert_slots, d_vocab_slots, d_mask_dead_rows, d_operating_population
+                (the cull's settling point. Read HERE, and not only in startup_refusals,
+                because cap.valve cannot say whether the expert arm can pin without it --
+                a soft cap above the settling point is a cap the population never reaches.
+                It is the same derive.operating_population call FAB's own row makes, and
+                the row is already declared, so this costs no coupling)
     DID IT FIRE: THREE SURFACES, and this line used to name one of them with the wrong shape and a
                  source set the body never produced -- it said "for each target, (start, source)"
                  for a field that carries the two SOURCES alone, and named a closed set of three
@@ -158,10 +163,18 @@ def new_valve(cap: Config, *, restored=None):
                      visible because the four are spelled differently.
                  (2) Valve.counters -- cap.targets, the two caps, the two hard ceilings and the two
                      origins, which is the pairing (1) leaves to the reader.
-                 (3) Valve.gates -- cap.valve and cap.vocab_arm_honest, each carrying all THREE of
-                     spine/gate.py's states. They are the reason this entry point builds Gates at
-                     all and leaving them out of this line made the one that was WRONG invisible to
-                     every reader of the contract.
+                 (3) Valve.gates -- cap.valve and cap.vocab_arm_honest. They are the reason this
+                     entry point builds Gates at all, and leaving them out of this line made the one
+                     that was WRONG invisible to every reader of the contract.
+                     cap.vocab_arm_honest carries all THREE of spine/gate.py's states: UNREACHABLE
+                     when the vocabulary arm is not armed, the MIDDLE state when the arm is armed
+                     and LM_MASK_DEAD_ROWS is off (the precondition was tested and not met), and
+                     FIRED when the arm is armed and the mask is on.
+                     cap.valve carries TWO, and this line claimed THREE of it until 2026-09-04.
+                     Built at startup it can only answer "can a lift happen at all", so it prints
+                     UNREACHABLE or FIRED and never the middle state; FIRED on it is the ARMING
+                     answer and not a lift, because the lifts are CAP.counters' lifts_experts and
+                     lifts_vocab and a second count here would be a second source of truth for them.
     """
     cap = cap.owned_by("CAP")
     hard_experts = int(cap.d_expert_slots)      # WIRES READ HERE -- the two hard ceilings
@@ -170,7 +183,20 @@ def new_valve(cap: Config, *, restored=None):
     targets = str(cap.targets)
 
     def _resolve(given, asked, hard, what):
-        """The sentinel, the operator, and the checkpoint, in that order of precedence."""
+        """Where a starting cap comes from, in the order the four branches below decide it.
+
+        `targets == "off"` FIRST -- the valve disabled means the starting caps are not applied
+        either -- then the OPERATOR's explicit value, with an explicit 0 read as the documented
+        sentinel because the sentinel is a property of the VALUE and not of where it arrived
+        from; then the CHECKPOINT's lifted cap; then the declared default sentinel LAST.
+
+        This line read "The sentinel, the operator, and the checkpoint, in that order of
+        precedence" until 2026-09-04. It named the sentinel first though it resolves last, and
+        did not name `off` at all though `off` dominates every other branch. Every other
+        statement of the precedence in this file -- new_valve's own docstring, the two comments
+        below, and the four origin strings -- was already right, which is what made the one-line
+        summary a reader skims the only thing here that was not.
+        """
         if targets == "off":
             # "off" MEANS THE STARTING CAPS ARE NOT APPLIED EITHER, and this is the note the port
             # must not lose. GROW_CAP_FAB read as "the expert valve is off" while the starting cap
@@ -257,21 +283,129 @@ def new_valve(cap: Config, *, restored=None):
     elif mask_dead:
         vocab_arm = Gate("cap.vocab_arm_honest", True, mask_dead, True)
     else:
+        # THE MIDDLE STATE, AND IT READ UNREACHABLE UNTIL 2026-09-04. Two things make UNREACHABLE
+        # wrong on this branch, and the FIRST is the criterion the branch above writes down.
+        # (a) That branch reports the unarmed arm unreachable because sending an operator to set
+        #     LM_MASK_DEAD_ROWS=1 there "would change nothing observable". HERE IT CHANGES THE ONE
+        #     THING THIS GATE IS ABOUT -- setting it is the whole repair -- so by this file's own
+        #     test the condition is UNMET, not INAPPLICABLE. spine/gate.py::Gate.line prints the
+        #     reason on every arm on purpose, so nothing is lost by saying so on the middle one.
+        # (b) THE MECHANISM STILL RUNS. observe's block reasons are a CLOSED set -- targets_off |
+        #     not_pinned | warmup | blackout | not_stalled | threshold | at_hard_ceiling -- with no
+        #     entry for unmasked dead rows, and neither startup_refusals clause covers it either.
+        #     So nothing in this tree refuses the dishonest lift: the run makes it. Printing
+        #     UNREACHABLE put the vocabulary arm among the mechanisms that were INERT this run
+        #     while the arm was live and lifting, which is the reading spine/gate.py exists to
+        #     refuse, arriving from the opposite direction to the one D15 fixed.
         vocab_arm = Gate(
-            "cap.vocab_arm_honest", False, mask_dead, True, reachable=False,
-            reason="LM_MASK_DEAD_ROWS=0: the vocabulary arm can lift, but every row it reserves "
-                   "sits unmasked in the softmax denominator, so what the run would measure is "
-                   "the reservation and not the valve. Declared dishonest rather than lifted "
-                   "silently.")
-    valve.gates = (
-        Gate("cap.valve", targets != "off", targets, "off")
-        if targets != "off" else
-        Gate("cap.valve", False, targets, "off", reachable=False,
-             reason="CAP_TARGETS=off: both caps sit at their hard ceilings and no lift can happen. "
-                    "Reported unreachable rather than as 0 lifts, which would read as a valve that "
-                    "ran and never fired -- the exact confusion this mechanism's own history is."),
-        vocab_arm,
-    )
+            "cap.vocab_arm_honest", False, mask_dead, True,
+            reason="LM_MASK_DEAD_ROWS=0: the vocabulary arm IS armed, so this precondition was "
+                   "TESTED AND NOT MET -- every row a lift reserves would sit unmasked in the "
+                   "softmax denominator, and what the run measures is the reservation and not the "
+                   "valve. An UNMET CONDITION and not an unreachable one: setting "
+                   "LM_MASK_DEAD_ROWS=1 on this configuration changes the thing this gate is "
+                   "about, so an operator sent to set it is sent somewhere useful. NOTHING "
+                   "REFUSES THE LIFT -- observe's block-reason set has no entry for unmasked dead "
+                   "rows and neither startup_refusals clause covers it -- so the run lifts anyway "
+                   "and this line is the only place that says the lift was dishonest.")
+    # WHERE A LIFT CAN ACTUALLY GO, ARM BY ARM. This gate read `Gate("cap.valve", targets != "off",
+    # targets, "off")` until 2026-09-04, so its `fired` value and its reachability were the SAME
+    # predicate and the only thing it could say on the six armed corners was FIRED -- meaning "the
+    # switch is on", printed beside mechanisms that could not move. THREE WAYS AN ARMED ARM IS DEAD
+    # ON ARRIVAL, all six of which printed FIRED:
+    #   cap <= 0        the growth clamp `min(n_born, cap - fab.n())` is negative on the FIRST
+    #                   flush, so growth is frozen for the whole run with nothing in the log (C30).
+    #                   Reachable today: CAP_FAB_START=-5 resolves a soft expert cap of -5, and the
+    #                   declared catcher -- startup_refusals clause (1), "a soft cap below the
+    #                   population" -- is a stub, so no other line in the run says so.
+    #   cap >= ceiling  NO ROOM TO EARN. derive.lift_to returns `cap + max(floor, frac*cap)`, which
+    #                   from a cap at or above the hard ceiling lands above it and is refused as
+    #                   at_hard_ceiling. THIS IS THE SHIPPED DEFAULT: both starts are the sentinel,
+    #                   the sentinel resolves to the hard ceiling, and the lever's own help text
+    #                   spells out what that means -- "0 means start at the hard ceiling, i.e. no
+    #                   room to earn". Turning CAP_TARGETS on is NOT enough to arm anything.
+    #   cap > settling  (experts only) the cull settles the population at d_operating_population =
+    #                   FAB_PRESSURE x FAB_SLOTS = 1844 at the shipped config, so a soft cap above
+    #                   it is a cap the population never reaches: it never pins, the pin clock never
+    #                   accumulates, and the valve is dead while every report line says it is armed.
+    #                   That sentence is this package's OWN, in startup_refusals below and in the
+    #                   CAP.d_operating_population row of spine/assemble.py::COUPLINGS. The wire is
+    #                   already declared and already delivered onto this Config, so reading it here
+    #                   costs no coupling -- the WIRE_BUDGET is not the obstacle it looks like.
+    #
+    # THE VOCABULARY ARM GETS NO SETTLING-POINT TEST, DELIBERATELY. The settling point is the
+    # FABRIC's cull, and no wire delivers an equivalent for the minted vocabulary; inventing one
+    # here would be a number this package cannot support. Its two tests are the two that hold for
+    # any cap, and the omission is stated rather than left to be inferred from the code.
+    #
+    # THIS DOES NOT REPLACE startup_refusals AND DOES NOT DUPLICATE IT. That entry point REFUSES,
+    # reading the LIVE population, and it is where a run dies. This is the DID IT FIRE line, read
+    # at startup off the configuration alone. They share the wire on purpose: a disagreement
+    # between them would mean the report and the refusal disagree about whether the valve is alive.
+    operating = int(cap.d_operating_population)   # WIRE READ HERE -- the cull's settling point
+    expert_armed = targets in ("experts", "both")
+    vocab_armed = targets in ("vocab", "both")
+    expert_room = expert_armed and 0 < ce < hard_experts and ce <= operating
+    vocab_room = vocab_armed and 0 < cv < hard_vocab
+
+    arith = []
+    if expert_armed:
+        arith.append(f"experts {ce}/ceiling {hard_experts}/settles {operating}")
+    if vocab_armed:
+        arith.append(f"vocab {cv}/ceiling {hard_vocab}")
+    arith = ", ".join(arith) or targets
+    need = "a soft cap in 1..ceiling-1 that the population can reach"
+
+    dead = []
+    if expert_armed and not expert_room:
+        if ce <= 0:
+            dead.append(f"the expert arm's soft cap is {ce} (CAP_FAB_START={cap.fab_start}, {oe}), "
+                        f"and a cap at or below zero makes the growth clamp negative on the first "
+                        f"flush, freezing fabric growth for the whole run (C30)")
+        elif ce >= hard_experts:
+            dead.append(f"the expert arm's soft cap is {ce} against a hard ceiling of "
+                        f"{hard_experts} (CAP_FAB_START={cap.fab_start}, {oe}), so there is no "
+                        f"room to earn: every lift derive.lift_to computes lands above the ceiling "
+                        f"and is refused as at_hard_ceiling")
+        else:
+            dead.append(f"the expert arm's soft cap is {ce} against a cull settling point of "
+                        f"{operating} (CAP_FAB_START={cap.fab_start}, {oe}; "
+                        f"d_operating_population = FAB_PRESSURE x FAB_SLOTS), so the population "
+                        f"never reaches it, never pins, and the pin clock never accumulates")
+    if vocab_armed and not vocab_room:
+        if cv <= 0:
+            dead.append(f"the vocabulary arm's soft cap is {cv} (CAP_VOCAB_START="
+                        f"{cap.vocab_start}, {ov}), and a mint ceiling at or below zero refuses "
+                        f"every mint while the clamp that reads it goes negative (C30)")
+        else:
+            dead.append(f"the vocabulary arm's soft cap is {cv} against a hard ceiling of "
+                        f"{hard_vocab} (CAP_VOCAB_START={cap.vocab_start}, {ov}), so there is no "
+                        f"room to earn: every lift lands above the ceiling and is refused as "
+                        f"at_hard_ceiling")
+
+    if targets == "off":
+        valve_gate = Gate(
+            "cap.valve", False, targets, "off", reachable=False,
+            reason="CAP_TARGETS=off: both caps sit at their hard ceilings and no lift can happen. "
+                   "Reported unreachable rather than as 0 lifts, which would read as a valve that "
+                   "ran and never fired -- the exact confusion this mechanism's own history is.")
+    elif expert_room or vocab_room:
+        also = f" ONE ARMED ARM IS STILL DEAD ON ARRIVAL: {'; '.join(dead)}." if dead else ""
+        valve_gate = Gate(
+            "cap.valve", True, arith, need,
+            reason=f"CAP_TARGETS={targets}: an armed arm has room to earn and a cap the population "
+                   f"can reach. FIRED HERE IS THE ARMING ANSWER AND NOT A LIFT -- this gate is "
+                   f"built at startup, before the first flush, so no lift can have happened yet; "
+                   f"the lifts are CAP.counters' lifts_experts and lifts_vocab, and a second count "
+                   f"on this line would be a second source of truth for them.{also}")
+    else:
+        valve_gate = Gate(
+            "cap.valve", False, arith, need, reachable=False,
+            reason=f"CAP_TARGETS={targets} arms the valve and no armed arm can lift: "
+                   f"{'; '.join(dead)}. Reported unreachable rather than as a switch that is on, "
+                   f"which is what this line said until the arithmetic above was added -- FIRED, "
+                   f"printed for a mechanism that cannot move, on every corner but `off`.")
+    valve.gates = (valve_gate, vocab_arm)
     return valve
 
 
@@ -363,6 +497,15 @@ def startup_refusals(cap: Config, valve, *, live_experts):
 
     (1) A SOFT CAP BELOW THE POPULATION freezes growth for the run, silently (C30). Refuse, naming
         cap.fab_start, the population, and where the population came from.
+        A CAP AT OR BELOW ZERO IS THE SAME CLAUSE AND IS SPELLED OUT because it is reachable from
+        the environment and looks like a different kind of mistake: CAP_FAB_START=-5 resolves
+        cap_experts=-5 with origin "operator (fab_start=-5)", and CAP_VOCAB_START likewise. It is
+        below any population there can be, so this clause covers it -- `min(n_born, cap - fab.n())`
+        is negative on the FIRST flush and growth is frozen for the whole run with nothing in the
+        log. Naming it here is what the 2026-09-03 sentinel repair left owed: moving an explicit 0
+        out of the soft-cap space did not close the shape 0 belonged to. Until this body exists
+        nothing refuses it, and capacity/api.py::new_valve's cap.valve reports it as UNREACHABLE
+        with this arithmetic in the reason, which is a report line and not a refusal.
     (2) THE IRREDUCIBLE COUPLING, DECLARED RATHER THAN REMOVED: the soft cap must sit at or below
         the cull's settling point, which arrives as the wire d_operating_population (FAB.pressure x
         FAB.slots, through the SAME derive.operating_population call the fabric's own row uses).

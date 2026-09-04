@@ -304,7 +304,13 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
     DID IT FIRE: sig.cadence_dense, sig.cadence_idle, sig.cadence_checks. sig.cadence_idle == 0 for
                  a whole run means the gate never left the dense arm; sig.cadence_dense == 0 after
                  step dense_window means no boundary was ever detected and the gate is stuck open
-                 on idle -- two different findings the report must be able to separate.
+                 on idle -- two different findings the report must be able to separate. BOTH FIRE
+                 COUNTERS EXIST FROM THE FIRST CHECK ON EVERY ARM, which is what makes those two
+                 readings takeable: they are seeded before the due/not-due branch rather than
+                 inside one side of it, because at SIG_TRAIN_EVERY=1 -- the shipped default -- the
+                 dense period is 1, every window is due, and a seed on the not-due side never ran
+                 at all. A missing key and a zero say different things to a reader and only one of
+                 them is a measurement.
     """
     sig = sig.owned_by("SIG")
     idle_period = int(sig.d_idle_cadence)   # WIRE READ HERE -- the throttled arm's threshold
@@ -327,6 +333,16 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
     st.counters["sig.cadence_checks"] = checks
     dense_fires = int(st.counters.get("sig.cadence_dense", 0))
     idle_fires = int(st.counters.get("sig.cadence_idle", 0))
+    # BOTH KEYS EXIST FROM THE FIRST CHECK, AND SEEDING THEM ON ONE BRANCH SEEDED NEITHER AT THE
+    # SHIPPED DEFAULT. These two lines stood inside the ELSE of `if due:` -- so a run that never
+    # entered an arm saw a zero and not a missing key, EXCEPT at SIG_TRAIN_EVERY=1, where the dense
+    # period is 1, every window is due, the else never runs and sig.cadence_idle was ABSENT for the
+    # whole run. The reading this function's own DID IT FIRE block names -- "sig.cadence_idle == 0
+    # for a whole run means the gate never left the dense arm" -- was then a KeyError rather than
+    # the 0 it describes, and only on the one configuration the tree ships. Seeded BEFORE the
+    # branch, both keys exist from the first check on every arm, learned or bigram, due or not.
+    st.counters.setdefault("sig.cadence_dense", dense_fires)
+    st.counters.setdefault("sig.cadence_idle", idle_fires)
 
     # THE ARM SELECTION IS A Windows-AGAINST-Windows COMPARISON, which is what makes the three
     # levers in this function's block one family. `since < dense_for` raises UnitError against any
@@ -337,6 +353,28 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
     # two configured numbers do not move, and the fire counts live in the reason beside them.
     in_dense = since < dense_for
     period = dense_period if in_dense else idle_period
+
+    # THE INERT ARM IS ANSWERED BEFORE THE CADENCE IS JUDGED, AND THE ORDER IS THE WHOLE POINT.
+    # The refusal below and the reason sentence here disagreed: this gate declares
+    # SIG_TRAIN_EVERY, SIG_TRAIN_EVERY_IDLE and SIG_DENSE_WINDOW INERT under SIG_MODE=bigram --
+    # which is true, `due` short-circuits on the mode and the modulo is never evaluated -- while
+    # the `period < 1` refusal stood ABOVE it and took the run down on the first window of a
+    # SIG_MODE=bigram / SIG_TRAIN_EVERY=0 run, naming a modulo-by-zero that cannot happen on that
+    # arm. A lever the report calls inert cannot also be the lever that stops the run. The refusal
+    # keeps its full force on the arm where the division is real, which is the one below.
+    if mode != "learned":
+        why = (f"SIG_MODE={mode!r}: the frozen hashed-bigram table has no parameters, so there is "
+               f"no contrastive step for this gate to be due for. SIG_TRAIN_EVERY={dense_period}, "
+               f"SIG_TRAIN_EVERY_IDLE={lever_idle} and SIG_DENSE_WINDOW={int(dense_for)} are inert "
+               f"on this arm; a count of 0 fires here is not a cadence that declined to fire. That "
+               f"is why an incoherent cadence is not refused here either: this arm never divides "
+               f"by it.")
+        st.gates["sig.cadence_dense"] = Gate("sig.cadence_dense", False, dense_period,
+                                             int(dense_for), reachable=False, reason=why)
+        st.gates["sig.cadence_idle"] = Gate("sig.cadence_idle", False, idle_period,
+                                            int(dense_for), reachable=False, reason=why)
+        return False
+
     if period < 1:
         raise ValueError(
             f"the {'dense' if in_dense else 'idle'} arm of SIG's shift gate has a period of "
@@ -346,7 +384,9 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
             f"SIG_TRAIN_EVERY_IDLE={lever_idle}) = {idle_period}, declared in spine/assemble.py "
             f"and NOT the lever, which is the coupling that sat unlanded for six commits.")
 
-    due = bool(mode == "learned" and int(step) % period == 0)
+    # MODE IS "learned" FROM HERE DOWN -- the other arm returned above -- so the modulo IS
+    # evaluated on every call and the refusal above is the guard that makes it safe.
+    due = int(step) % period == 0
     if due:
         if in_dense:
             dense_fires += 1
@@ -354,22 +394,6 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
         else:
             idle_fires += 1
             st.counters["sig.cadence_idle"] = idle_fires
-    else:
-        # SEEDED SO A REPORT READ AFTER A RUN THAT NEVER ENTERED AN ARM SEES A ZERO AND NOT A
-        # MISSING KEY -- the same reason build() seeds the four encode counters.
-        st.counters.setdefault("sig.cadence_dense", dense_fires)
-        st.counters.setdefault("sig.cadence_idle", idle_fires)
-
-    if mode != "learned":
-        why = (f"SIG_MODE={mode!r}: the frozen hashed-bigram table has no parameters, so there is "
-               f"no contrastive step for this gate to be due for. SIG_TRAIN_EVERY={dense_period}, "
-               f"SIG_TRAIN_EVERY_IDLE={lever_idle} and SIG_DENSE_WINDOW={int(dense_for)} are inert "
-               f"on this arm; a count of 0 fires here is not a cadence that declined to fire.")
-        st.gates["sig.cadence_dense"] = Gate("sig.cadence_dense", False, dense_period,
-                                             int(dense_for), reachable=False, reason=why)
-        st.gates["sig.cadence_idle"] = Gate("sig.cadence_idle", False, idle_period,
-                                            int(dense_for), reachable=False, reason=why)
-        return due
 
     st.gates["sig.cadence_dense"] = (
         Gate("sig.cadence_dense", dense_fires > 0, dense_period, int(dense_for),
@@ -657,10 +681,26 @@ def _stop_verdict(curve, eps):
     So collapse is tested FIRST and the flatness test is TWO-SIDED (|change| <= eps, not
     change <= +eps) and is additionally required to sit at 0.85 of the curve's own peak. A falling
     curve can therefore only ever leave here as "collapsing", never as "plateau".
+
+    THE TWO ARMS NEED DIFFERENT AMOUNTS OF CURVE AND THIS FUNCTION IS WHERE THAT IS DECIDED. The
+    ABSOLUTE collapse arm (`sep < 0.15`) is a statement about ONE probe and needs no history; the
+    relative arm and the whole flatness test compare a probe against what came before it. Holding
+    the whole function behind "at least two probes" is what put the run-level failure verdict out
+    of reach at the shipped SIG_WARMUP=800 / SIG_WARMUP_PROBE_EVERY=500, which admit exactly one
+    probe: a fully collapsed encoder measured a separation of -0.000000 against this 0.15 and
+    warm_up still returned "budget" -- the historical failure this module was written to remove,
+    restored one level up. So a single-probe curve is accepted here, the collapse arms run on it,
+    and only the flatness test is skipped for want of a predecessor. On a one-point curve
+    `sep < 0.7 * peak` is `sep < 0.7 * sep`, which is False for any non-negative separation and
+    True only where the absolute arm already fires, so the relative arm neither gains nor loses a
+    verdict by being evaluated there.
     """
-    sep, prev, peak = curve[-1], curve[-2], max(curve)
+    sep, peak = curve[-1], max(curve)
     if sep < 0.7 * peak or sep < 0.15:
         return "collapsing"
+    if len(curve) < 2:
+        return None                      # the flatness test has no predecessor to compare against
+    prev = curve[-2]
     if abs(sep - prev) <= eps * abs(prev) and sep >= 0.85 * peak:
         return "plateau"
     return None
@@ -676,7 +716,24 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     THREE VERDICTS, never a binary:
         "plateau"    separation flat within warmup_plateau_eps and >= 0.85 of its own peak
         "collapsing" separation below 0.7 of its peak, or below 0.15 absolute
-        "budget"     the full budget ran with no plateau
+        "budget"     no stop fired -- INCLUDING THE ARMS WHERE NO STEP RAN AT ALL, and the
+                     record cannot tell those apart, so read it beside the two counters that
+                     can. SIG_MODE=bigram and SIG_WARMUP=0 both return "budget" with
+                     sig.warmup_steps and sig.warmup_probes at 0 and Gate sig.adaptive_stop
+                     UNREACHABLE with the reason; a budget that genuinely ran to its end
+                     returns it with steps == SIG_WARMUP. WarmupReport declares exactly these
+                     three spellings, so a fourth for "the budget was inert" would be a change
+                     to the record type and is the owner's to rule on, not this function's to
+                     take: what is written down here instead is that "budget" is the ABSENCE
+                     of a stop and not the presence of a spent budget.
+    THE TWO STOP ARMS NEED DIFFERENT AMOUNTS OF CURVE, and holding both behind the larger of the
+    two requirements is what put the run-level failure out of reach at the shipped defaults. The
+    absolute collapse test is a statement about ONE probe; the flatness test compares a probe with
+    the one before it and therefore needs TWO. SIG_WARMUP=800 with SIG_WARMUP_PROBE_EVERY=500 puts
+    a single probe in the budget, and while `len(curve) < 2` guarded the whole verdict a fully
+    collapsed encoder -- separation measured at -0.000000 against this 0.15 -- returned "budget",
+    which is the failure below restored one level up. src/sig/api.py::_stop_verdict now takes a
+    one-point curve and skips only the flatness test.
     The old test `_sep <= _prev_sep * (1 + eps)` (:5033) is true when separation is FLAT and
     EQUALLY TRUE WHEN IT IS COLLAPSING; on a single-corpus stream running 0.16 -> 0.05 (a 69%
     collapse) it reported a converged plateau, stopped, SHIFT_DIST never fired, the run found 0
@@ -684,11 +741,17 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     warning at :5049 patches the REPORT, not the STOP, and no value of warmup_plateau_eps fixes it
     -- a smaller eps just stops later. "collapsing" is a RUN-LEVEL FAILURE, surfaced as such.
 
-    The floor is a FRACTION of the budget, so the inverted pair (floor > budget) that made the
-    adaptive stop unreachable is UNREPRESENTABLE: `_wfloor = min(_i("ENC_WARMUP_MIN", 200), wu)`
-    at :5021 collapses the floor onto the full warmup whenever the absolute floor exceeds the
-    budget, and at 3000 against 800 that turned the file's own "#1 startup cost saving" off in
-    every default run while telling the run that paid the full budget it had converged.
+    The floor is a FRACTION of the budget, which makes the inverted pair (floor >= budget) that
+    made the adaptive stop unreachable IMPOSSIBLE EVERYWHERE STRICTLY BELOW 1.0 and REPORTED at 1.0
+    and above, rather than impossible outright: `_wfloor = min(_i("ENC_WARMUP_MIN", 200), wu)` at
+    :5021 collapses the floor onto the full warmup whenever the absolute floor exceeds the budget,
+    and at 3000 against 800 that turned the file's own "#1 startup cost saving" off in every
+    default run while telling the run that paid the full budget it had converged. AT exactly 1.0 --
+    a legal reading of a lever declared over 0..1 -- the floor IS the budget and the shape is back,
+    which is why this function's gate arm for it is selected at 1.0 and not above it, and prints
+    both numbers instead of clamping them together. spine/lever.py::Lever has choices and no
+    numeric range, so the other end of the interval is refused here at the one site that multiplies
+    the fraction by the budget: a negative fraction is not a lower floor but no floor at all.
 
     The probe draws from this package's own RNG stream, never the global one.
 
@@ -703,7 +766,13 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     DID IT FIRE: sig.warmup_steps, sig.warmup_probes, sig.warmup_verdict (one of the three
                  strings), sig.warmup_separation_peak, sig.warmup_separation_final, and
                  Gate sig.adaptive_stop with predicate int(warmup_min_frac*warmup) < warmup, so a
-                 floor that cannot fire prints its own arithmetic
+                 floor that cannot fire prints its own arithmetic. THE GATE REPORTS THE PLATEAU
+                 STOP AND NOT THE COLLAPSE VERDICT -- they have different probe requirements and
+                 the gate's own reason says on each unreachable arm whether a collapse is still
+                 reachable there, computed from the probe grid rather than promised. A collapse is
+                 read off sig.warmup_verdict; the number behind it is
+                 sig.warmup_separation_final, which is the surface that carries the truth on any
+                 setting where no probe reaches the floor.
     """
     sig = sig.owned_by("SIG")
     mode = str(sig.mode)
@@ -719,12 +788,34 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
             f"SIG_WARMUP_PROBE_EVERY={probe_every}: the probe cadence is how often the separation "
             f"curve is sampled and cannot be zero or negative. It is the resolution of the only "
             f"curve that can say whether the encoder separated or collapsed.")
-    # THE FLOOR IS A FRACTION OF THE BUDGET, SO THE INVERTED PAIR IS UNREPRESENTABLE. As an
-    # ABSOLUTE step count it was not: `_wfloor = min(ENC_WARMUP_MIN, ENC_WARMUP)` collapsed the
+    # THE FLOOR IS A FRACTION OF THE BUDGET, WHICH MAKES THE INVERTED PAIR IMPOSSIBLE STRICTLY
+    # BELOW 1.0 AND REPORTED FROM 1.0 UP -- and the first sentence here claimed the stronger thing,
+    # that it was unrepresentable full stop, while the `floor >= budget` arm of this function's own
+    # gate stood below as the proof that it is not. As an ABSOLUTE step count the inversion was
+    # neither reported nor detected: `_wfloor = min(ENC_WARMUP_MIN, ENC_WARMUP)` collapsed the
     # floor onto the whole budget whenever the floor exceeded it, and at the shipped 3000 against
     # 800 that turned the adaptive stop -- the file's own "#1 startup cost saving" -- off in every
-    # default run while telling the run that paid the full budget it had converged.
-    floor = int(float(sig.warmup_min_frac) * budget)
+    # default run while telling the run that paid the full budget it had converged. As a fraction
+    # the SAME shape returns at the TOP of the declared interval, where floor == budget, and it is
+    # a gate arm there rather than a clamp: the two numbers are printed and the arm says which
+    # values get the stop back.
+    frac = float(sig.warmup_min_frac)
+    if frac < 0.0:
+        # THE OTHER END OF THE SAME RANGE, REFUSED RATHER THAN SILENTLY HONOURED. spine/lever.py
+        # ::Lever carries `choices` and no numeric range, so units.FRACTION on the declaration is a
+        # LABEL and not a constraint; the refusal has to stand at the one site that multiplies the
+        # fraction by the budget. A negative fraction makes a negative floor, which is not a
+        # weaker guard but NO guard: `t >= floor` is then true at the very first probe, the stop
+        # becomes eligible before any of the budget the floor exists to protect has been spent, and
+        # no gate arm below says so -- every one of them reports a floor that is merely low. It is
+        # refused here for the reason SIG_MODE=bigram at width_units=1 is refused in build(): the
+        # failure is a mechanism quietly doing something other than what it is declared to do.
+        raise ValueError(
+            f"SIG_WARMUP_MIN_FRAC={frac}: the floor is a SHARE of SIG_WARMUP={budget} and a share "
+            f"cannot be negative. It would put the floor at {int(frac * budget)} step(s), which no "
+            f"step count is below, so the adaptive stop would be eligible from the first probe "
+            f"onward -- the guard removed rather than lowered, and reported by no gate.")
+    floor = int(frac * budget)
 
     # WHERE THE STOP COULD FIRE, COMPUTED FROM THE LEVERS AND BEFORE THE LOOP RUNS. It is a
     # CONFIGURATION fact, not an outcome: reachability that is read off how the run happened to turn
@@ -734,6 +825,14 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     # earliest probe it can ever run at is the second, and it may not run before the floor.
     grid = tuple(range(probe_every, budget + 1, probe_every))
     stop_points = tuple(t for i, t in enumerate(grid) if i >= 1 and t >= floor)
+    # THE COLLAPSE VERDICT HAS ITS OWN GRID AND IT IS WIDER, which is the whole content of the
+    # repair above: _stop_verdict's absolute arm is a statement about ONE probe, so every probe at
+    # or after the floor can produce it, while the flatness test the gate below names needs a
+    # PREDECESSOR and therefore starts at the second. The gate's unreachable arm asserts in writing
+    # which of the two survives its own setting, and that sentence has to be computed rather than
+    # believed -- it was written as an unconditional promise, and at the shipped cadence, where the
+    # two grids differ by exactly the one probe in the budget, it was false.
+    collapse_points = tuple(t for t in grid if t >= floor)
 
     curve, steps, probes, verdict = [], 0, 0, "budget"
     if mode == "learned":
@@ -770,7 +869,13 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
                 continue
             curve.append(_separation(sig, st, base, units, 2 * pairs, gen, d=d))
             probes += 1
-            if t < floor or len(curve) < 2:
+            # THE FLOOR IS THE ONLY THING THAT HOLDS A VERDICT BACK HERE, AND THE PROBE COUNT IS
+            # NOT. `len(curve) < 2` stood beside this test and gated the WHOLE call, including the
+            # absolute collapse arm that needs one probe by its own arithmetic -- so at the shipped
+            # cadence, which puts a single probe in the budget, the "collapsing" RUN-LEVEL FAILURE
+            # verdict could not be produced at all and a fully collapsed encoder returned "budget".
+            # _stop_verdict now takes the one-point curve and skips only the flatness test.
+            if t < floor:
                 continue
             stop = _stop_verdict(curve, eps)
             if stop is not None:
@@ -812,12 +917,38 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     elif floor >= budget:
         st.gates["sig.adaptive_stop"] = Gate(
             "sig.adaptive_stop", False, floor, budget, reachable=False,
-            reason=f"SIG_WARMUP_MIN_FRAC={float(sig.warmup_min_frac)} of SIG_WARMUP={budget} is a "
+            reason=f"SIG_WARMUP_MIN_FRAC={frac} of SIG_WARMUP={budget} is a "
                    f"floor of {floor} step(s), which is not below the budget: the stop is allowed "
                    f"to fire only after the floor, and the budget ends first. This is the "
-                   f"untrippable-guard shape the fraction was introduced to make unrepresentable, "
-                   f"and it is reachable again only above SIG_WARMUP_MIN_FRAC=1.0.")
+                   f"untrippable-guard shape the fraction was introduced to make unreachable "
+                   f"within its declared unit interval, and it is reachable again AT OR ABOVE "
+                   f"SIG_WARMUP_MIN_FRAC=1.0 -- at exactly 1.0 the floor IS the budget, this arm "
+                   f"is the one selected, and a reader who followed an earlier wording of this "
+                   f"sentence to 1.0 to get the stop back would have found it still unreachable. "
+                   f"Below 1.0 the floor lands inside the budget and the stop can fire again.")
     elif not stop_points:
+        # THE CLAUSE ABOUT THE OTHER MECHANISM IS COMPUTED FROM THIS RUN'S GRID, NOT PROMISED. It
+        # was written as an unconditional sentence -- "a collapse can still be declared" -- and at
+        # the shipped SIG_WARMUP=800 / SIG_WARMUP_PROBE_EVERY=500 it was false twice over: the
+        # collapse test was behind the two-probe guard removed above, and even with that gone the
+        # promise only holds while some probe lands at or after the floor. A reason sentence is the
+        # operator's instruction for what to read next; one that names a live surface which reads
+        # 'budget' on a collapsed encoder is the failure this gate exists to report, one level up.
+        still_live = (
+            f"WHAT IS STILL LIVE ON THIS SETTING: the 'collapsing' verdict's ABSOLUTE arm "
+            f"(separation below 0.15) is a statement about ONE probe and needs no predecessor, and "
+            f"the probe(s) at step(s) "
+            f"{list(collapse_points) if len(collapse_points) < 6 else list(collapse_points[:5]) + ['...']}"
+            f" are at or after the floor -- so a collapse CAN be declared here and "
+            f"sig.warmup_verdict is the surface that says so; what cannot fire is the early stop "
+            f"this gate names."
+            if collapse_points else
+            f"WHAT IS NOT LIVE EITHER, SAID HERE BECAUSE THIS IS THE SURFACE THAT WOULD OTHERWISE "
+            f"IMPLY IT: the 'collapsing' verdict's ABSOLUTE arm needs only one probe, but no probe "
+            f"lands at or after the floor of {floor} step(s), so NO verdict can be reached on this "
+            f"setting and sig.warmup_verdict reads 'budget' however the encoder ends up. The "
+            f"separation itself is on sig.warmup_separation_final, which is the only surface that "
+            f"can show a collapse here.")
         st.gates["sig.adaptive_stop"] = Gate(
             "sig.adaptive_stop", False, floor, budget, reachable=False,
             reason=f"SIG_WARMUP_PROBE_EVERY={probe_every} against SIG_WARMUP={budget} puts "
@@ -826,11 +957,7 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
                    f"is BOTH the second probe or later AND at or after the floor of {floor} "
                    f"step(s) -- so the flatness test, which compares a probe against the one "
                    f"before it, has nothing to compare. Lower SIG_WARMUP_PROBE_EVERY or raise "
-                   f"SIG_WARMUP until at least two probes land inside the budget. WHAT IS STILL "
-                   f"LIVE ON THIS SETTING: the 'collapsing' verdict's ABSOLUTE arm (separation "
-                   f"below 0.15) needs only one probe, so a collapse can still be declared and "
-                   f"sig.warmup_verdict is the surface that says so; what cannot fire is the early "
-                   f"stop this gate names.")
+                   f"SIG_WARMUP until at least two probes land inside the budget. " + still_live)
     else:
         st.gates["sig.adaptive_stop"] = Gate(
             "sig.adaptive_stop", verdict == "plateau", floor, budget,

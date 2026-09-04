@@ -1,0 +1,251 @@
+{
+  "owner": "src/opt/api.py and src/opt/levers.py",
+  "summary": "All 31 findings re-verified against the current tree before any edit; every one reproduced -- none was already fixed and none was refuted. 27 of the 29 that are mine are REPAIRED in src/opt/api.py and src/opt/levers.py; finding 11 is NARROWER_THAN_CLAIMED (the restarts-on vs restarts-off pricing difference is what OPT_LR_RESTARTS=off is declared to do; the defect is the false bit-identity sentence, printed in three places including a report line, and that is corrected in all four sites I own). Four things are deliberately NOT repaired and are listed under unfinished with what each needs: the Backwards-to-Steps conversion in counters() (needs a named function in src/spine/derive.py, which I do not own), the restart detector's blinding (changes what gets damped on the goal-A arm -- the owner's ruling, taken as such by three verifier lenses), the unbounded grad_norms carrier (changes what the quantiles mean), and arming Gate's unreachable-AND-fired self-check (would make counters() raise on a legitimate resume). Finding 27 is in src/fabric/api.py, which I do not own; it is still present and I say exactly how I established that. THE SHIPPED-DEFAULT SCHEDULE DID NOT MOVE except where the repair required it: all 901 post-warmup rates over a 1000-step horizon are bit-identical to a hand-computed reference cosine, the 0 sentinel still fits exactly one cycle, and the only changed rates are the warmup ramp's own rungs (now 1-based, peak at step w instead of w-1). Every repair was demonstrated with its own repro AND with a neighbouring configuration showing the mechanism still reachable where it CAN fire. Nothing outside my two files was touched; the concurrent modifications to src/capacity/api.py, src/data/api.py, src/sig/api.py and src/sig/levers.py in `git status` are other agents' and I did not open them for writing. Not committed, not pushed.",
+  "findings": [
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 1 -- RE-VERIFIED PRESENT, FIXED. Confirmed before touching code: at {OPT_BATCH_WINDOWS:16, OPT_ACCUM:4, OPT_LR_SHIFT_WARM:5} a units.Windows(15) stamp was accepted silently and st.shift_at became the bare int 15, while O.lr_at(opt, st, units.Windows(5)) raised UnitError one function away. REPAIR: maybe_step now refuses anything but units.Steps at the stamp, with a message naming clock.opt_steps, FAB's System.shift_at_windows, the adjacent spine/compose.py::LOOP_ORDER rows, and the fact that no Windows-to-Steps conversion for a runtime INSTANT exists to offer. This makes docs/04_CONTRACT.md's stated symmetry true in both directions. NOT converted, per the finding: converting would be a second horizon divisor.",
+      "repro": "AFTER: maybe_step(cfg, st, shift_at=units.Windows(15)) raises 'OPT.maybe_step: shift_at must be units.Steps, got Windows. ...'. NEIGHBOUR (the mechanism must still fire): the same build with shift_at=units.Steps(0) is accepted, st.shift_at=0, opt.shift.notifications=1, opt.lr.shift_warm_applied=1, and Gate opt.lr.shift_warm renders FIRED."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 2 -- RE-VERIFIED PRESENT, NOT FIXED, AND IT IS NOT MINE TO FIX. The accumulation invariant is still an inline Backwards-to-Steps division on int()-unwrapped operands: `due_steps = (n_bwd - base_bwd) // divisor` compared against a Steps count. The repair the finding names is a new NAMED function in src/spine/derive.py returning units.Steps; I own only src/opt/api.py and src/opt/levers.py, and derive.py has no Backwards-to-Steps COUNT conversion (re-read in full: cull_gate_open, operating_population, lift_to, bytes_per_token, signature_width_bytes, flush_period, flush_period_windows, cadences_that_cannot_fire, opt_steps_from_windows, accum_due, pin_tick, bwt_of, forgetting_of, curve_verdict, blowup_stale, phase_schedule). WHAT I DID: wrote the whole finding into counters()'s own docstring -- the site, why O11 cannot see it, that the number is right at every setting driven, the exact function that is missing, and that it is NOT a wire and costs nothing from the budget. The expression MOVED (finding 4's boundary subtraction) but did not change kind.",
+      "repro": "src/opt/api.py::counters still reads `due_steps = (n_bwd - base_bwd) // divisor` immediately followed by `if due_steps != n_step - base_step:`. `python3 tests/test_ownership.py` still reports O11 green ('12 checks + 18 self-test cases, 0 failing') while the site stands, because O11's AST half matches only `opt.<clock_lever>` attribute operands and both of these are locals."
+    },
+    {
+      "symbol": "src/opt/api.py::_schedule",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 3 (and 31, the same root) -- RE-VERIFIED PRESENT, FIXED. Confirmed before the edit at run_windows 15/20/30/200/1000: warmup resolved 1/2/3/20/100, opt.lr.in_warmup read 0/1/2/19/99, the first rate was 0.002/0.002/0.00133/0.0002/4e-05 and peak arrived at step 1/1/2/19/99. REPAIR (a+b): the ramp is `float(lr) * step / w` over `step < w`, the 1-based form for a counter maybe_step advances BEFORE pricing, so peak now arrives at exactly step w and the lowest rung is one warmup-fraction of peak instead of two. REPAIR (c): counters() carries a new Gate opt.lr.warmup with all three states, so a resolved warmup of 1 renders UNREACHABLE with OPT_LR_WARMUP, the clamp and the horizon in the reason instead of a bare 0. RELATED CLAIM: lr_at's minimum property is now scoped POST-WARMUP (and to the wavelength sentinel, see finding 11) with both counter-cases measured in the docstring.",
+      "repro": "AFTER, same grid: N=15 warmup=1 in_warmup=0 first 0.002 peak@1 and Gate opt.lr.warmup UNREACHABLE ('the resolved warmup is 1 optimizer step(s) (OPT_LR_WARMUP=1000 against build()'s clamp of a tenth of a 15-step horizon) ... a ramp that reaches peak at step 1 has no rung below peak'); N=20 warmup=2 in_warmup=1 first 0.001 peak@2 Gate FIRED; N=30 warmup=3 in_warmup=2 first 0.000666667 peak@3; N=200 warmup=20 in_warmup=19 first 0.0001 peak@20; N=1000 warmup=100 in_warmup=99 first 2e-05 peak@100 Gate FIRED (99 vs 99 step(s) below peak, peak at step 100). NEIGHBOUR (nothing else moved): over the shipped defaults all 901 post-warmup steps are bit-identical to a hand-computed reference cosine (0 of 901 differ)."
+    },
+    {
+      "symbol": "src/opt/api.py::load_state",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 4 -- RE-VERIFIED PRESENT, FIXED. Confirmed: parent at OPT_ACCUM=1 with 8 backward and 8 steps, child at OPT_ACCUM=4 -> LoadReport(restored=True, refused=False) and then counters() raised 'the accumulation invariant is broken -- backward=8, accum=4, so 2 optimizer steps were due and 8 were taken'. REPAIR: load_state stamps opt.ckpt.backward_at_load and opt.ckpt.step_at_load AFTER the counter restore (so the restore cannot overwrite them), and counters() measures the invariant on the DELTA since that boundary. Nothing re-bases n_backward -- the parent's backward count is a fact about the parent -- and the H29 guard stays live for the live process. What it gives up is written into both docstrings: a parent that miscounted is not re-caught in the child; the parent's own counters() call is where that reading belongs.",
+      "repro": "AFTER: the same two-phase resume loads and counters() returns, printing 'Gate opt.accum.invariant: FIRED (8 backward // 4 vs 8)'; 8 further backward passes at accum=4 give backward=16 step=10 and it still passes. NEIGHBOUR (a real miscount must still raise): forcing st.opt_step up by 3 gives 'OPT.counters: the accumulation invariant is broken -- backward=16, accum=4, so 10 optimizer steps were due and 13 were taken. Measured since the last resume, which restored backward=8 and step=8 ...'."
+    },
+    {
+      "symbol": "src/opt/api.py::build",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 5 -- RE-VERIFIED PRESENT, FIXED. Confirmed: OPT_LR_WAVELENGTH=300 over Windows(1000) fitted n_cycles=4 with restarts at steps 325/550/775, a realized cycle of 225 against the 300 asked; OPT_LR_WAVELENGTH=7 with warmup 100 fitted 900 cycles of one step. REPAIR: the fit is `max(1, round((total_steps - warmup_n) / max(1, int(wavelength))))` -- the warmup comes out of the SPAN only, not out of the PERIOD. The finding is right that the old line matched the frozen build() docstring character for character, so that docstring block is corrected too, and src/opt/levers.py::OPTLevers's lr_wavelength comment records that the declared period is now the delivered one.",
+      "repro": "AFTER: OPT_LR_WAVELENGTH=300 over Windows(1000) -> warmup=100, n_cycles=3, _cycle_steps(horizon)=300.0, restarts at steps 400 and 700 (a realized cycle of exactly 300). OPT_LR_WAVELENGTH=7 OPT_LR_WARMUP=100 -> n_cycles=129, cycle=6.98. NEIGHBOUR (the sentinel must not move): OPT_LR_WAVELENGTH=0 -> n_cycles=1, cycle=900.0, one restart-free cosine, and all 901 post-warmup rates bit-identical to the reference. The warmup can never exceed a tenth of the run, so (run_steps - warmup) / run_steps is always in [0.9, 1.0] and pins the sentinel at 1."
+    },
+    {
+      "symbol": "src/opt/api.py::_cycle_index",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 6 -- RE-VERIFIED PRESENT, FIXED AT THE ROOT. Confirmed: at Horizon(run_steps=1000, warmup=0, wavelength=250, n_cycles=4) the two disagreed at steps 250, 500, 750 and 1000. REPAIR: _schedule dropped its `max(1, ...)` so both read `int(horizon.warmup)` -- at a warmup of 0 there IS no warmup and the cosine spans the run from step 0, which is what _cycle_index already said -- and the per-cycle length is now ONE expression, src/opt/api.py::_cycle_steps, called by _schedule, _cycle_index and counters(). That removes the 'two computations of one number' shape rather than patching one side of it.",
+      "repro": "AFTER: a scan of run_steps 2..399 x n_cycles in (1,2,3,4,5,7) at warmup=0, pricing every step -- 478,794 (run_steps, n_cycles, step) triples, 0 disagreements. NEIGHBOUR: warmup >= 1 was already clean and stays clean; the shipped-default run's 901 post-warmup rates are bit-identical to the reference cosine."
+    },
+    {
+      "symbol": "src/opt/api.py::state_dict",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 7 -- RE-VERIFIED PRESENT, NOT FIXED, DELIBERATELY. Confirmed: driving 1000 windows at the defaults leaves opt.grad_norm.samples = 1000 and state_dict()['grad_norms'] has 1000 entries; the only writes to st.grad_norms are the append in maybe_step, the `[]` at construction and the restore in load_state. The finding's own reasoning is why I did not repair it: every candidate carrier (reservoir, histogram, decimation) CHANGES WHAT THE QUANTILES MEAN, and p50/p99 over a biased sample is a different instrument. That is the owner's ruling. WHAT I DID: wrote the cost into state_dict's docstring -- unbounded growth, the full list in every save, quadratic over a run, the 48,000-element figure -- so it is a stated cost rather than a discovered one.",
+      "repro": "src/opt/api.py::maybe_step still appends unconditionally on every stepped call and src/opt/api.py::state_dict still writes `list(st.grad_norms)`; 1000 windows at the defaults leave opt.grad_norm.samples = 1000."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "high",
+      "detail": "FINDINGS 8, 18 AND 29 (one root) -- RE-VERIFIED PRESENT, FIXED. Confirmed at OPT_LR_SCHED=none OPT_LR_WAVELENGTH=300 OPT_LR_SHIFT_WARM=50 over 1000 windows: the rate set was exactly [0.002] and the report printed 'Gate opt.lr.sched: armed, did not fire (none vs cosine) -- ... ALL structurally unreachable', 'Gate opt.lr.restarts: armed, did not fire (0 vs 4 cycles fitted)', 'Gate opt.lr.decay: armed, did not fire (0 vs decay=1.0)' and 'Gate opt.lr.shift_warm: armed, did not fire (0 vs 1 notification(s) x 50 steps)', with opt.lr.in_warmup a bare 0 and no Gate. REPAIR: opt.lr.sched is now reachable=(sched != 'none'), matching the lever-valued form opt.build.grad_clip and opt.weight_decay already use in the same list; every downstream gate tests `sched` FIRST and renders UNREACHABLE with a reason naming OPT_LR_SCHED=none and what is downstream of _schedule's first return; and the warmup and the floor, which had no Gate in any configuration, now have one.",
+      "repro": "AFTER, same configuration, rate set still exactly [0.002]: 'Gate opt.lr.sched: UNREACHABLE (none vs cosine)'; 'Gate opt.lr.warmup: UNREACHABLE (0 vs 99 step(s) below peak, peak at step 100)'; 'Gate opt.lr.min_frac: UNREACHABLE'; 'Gate opt.lr.restarts: UNREACHABLE (0 vs 3 cycles fitted) -- ... build() still FITS 3 cycle(s) and this report still prints them ... but no cycle is ever priced'; 'Gate opt.lr.restart_damp: UNREACHABLE'; 'Gate opt.lr.decay: UNREACHABLE'; 'Gate opt.lr.shift_warm: UNREACHABLE (0 vs 1 notification(s) x 50 steps) -- ... 1 shift notification(s) were still STAMPED ... but no re-warm was priced, so this line must not be read as lr_shift_warm having declined a shift.' NEIGHBOUR (every one must still be REACHABLE under the cosine): at the shipped defaults opt.lr.sched reads FIRED and opt.lr.warmup FIRED (99 vs 99); at OPT_LR_WAVELENGTH=610 OPT_LR_WARMUP=10 OPT_LR_DECAY=0.0 over 4000 windows opt.lr.restarts reads FIRED (6 vs 7 cycles fitted) and opt.lr.restart_damp FIRED; at OPT_LR_WAVELENGTH=300 opt.lr.decay reads FIRED and opt.lr.min_frac FIRED (219 clamped steps)."
+    },
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "high",
+      "detail": "FINDINGS 9, 20 AND 28 (one root) -- RE-VERIFIED PRESENT; THE REPORTING HALF IS FIXED, THE DETECTOR IS NOT, AND THAT IS DELIBERATE. Confirmed independently. Damp sweep over 4000 windows, 7 fitted cycles, 6 real wraps, envelope off, a losing Reading every step: damp=0.9 -> 6 detected / 5 damped / amp 0.59049; damp=0.5 (SHIPPED) -> 3 / 2 / amp latched at 0.25 with wraps 4,5,6 all at 28.75% of peak; damp=0.4 -> 2 / 1; damp=0.2 -> 2 / 1. Envelope ceiling over 2068 steps at restart_amp=1.0, real vs detectable: wavelength 1200 -> 1/1, 700 -> 1/2, 520 -> 2/3, 400 -> 2/4, 300 -> 3/6, 210 -> 5/9 at lr_decay=1.0, against a clean sweep at lr_decay=0.0. WHAT I DID NOT DO AND WHY: all three findings say the repair (count wraps from the cycle index, or floor the bar on restart_amp) changes what a restart MEANS and what gets damped -- i.e. it changes TRAINING on the goal-A arm the project is about to run -- and is the owner's call. I did not take it. WHAT I DID DO: made the ledger incapable of the misreading every one of the three names as its consequence. maybe_step now counts opt.restart.wraps (cycle-index advances, the structural restart count, not counted at sched=none because there is no cosine to wrap) and opt.restart.below_bar (a >1.5x jump the `lr > 0.5 * peak` condition rejected, EXCLUDING warmup steps, since suppressing those is that condition's documented job). counters() prints both beside detected on their own report line and in the opt.lr.restarts gate's reason, which says that a gap between them is the instrument going blind rather than the schedule settling. src/opt/levers.py::OPTLevers's lr_restart_damp comment carries the measured cap and the 0.4737 algebra, because it promised the opposite.",
+      "repro": "AFTER, same 4000-window sweep: damp=0.9 -> 'opt.restart: wraps=6 detected=6 below_bar=0 damped=5' and 'Gate opt.lr.restarts: FIRED (6 vs 7 cycles fitted) -- opt.restart.wraps=6 cosine wrap(s) actually occurred and opt.restart.below_bar=0 jump(s) fell under the detector's own bar ...'; damp=0.5 -> 'wraps=6 detected=3 below_bar=3 damped=2' with the same reason carrying 6 and 3. wraps - detected == below_bar in both arms. NEIGHBOUR: at the shipped defaults (one fitted cycle) wraps=0, detected=0, below_bar=0 and the gate is UNREACHABLE, so the new counters add no noise to the arm every recorded result came from."
+    },
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 10 -- RE-VERIFIED PRESENT, FIXED. Confirmed with Readings at chosen restart steps: the restart carrying None erased an inherited cycle_best of 2.0, the NEXT restart (9.0 against an inherited 2.0, the worst possible cycle) was judged PAID and went undamped, and opt.restart.damp_refused_n1 reached 2 -- the counter clause 4 reserves for the PLAN 3.8 seed-count refusal -- on the one state counters() says in writing has nothing to refuse. REPAIR: a restart with no Reading is not a verdict of any kind. It does not damp, does not refuse, does not disturb the inherited best, and has its own counter opt.restart.no_reading, which is rendered in the restart_damp gate's arithmetic. The finding says the repair cannot be read off the docstring; between its two candidates I took the less invasive one (leave cycle_best alone) because clause 4 judges a cycle against 'the best held-out IT INHERITED' and the field is named cycle_BEST, and I have said so here rather than presenting it as forced.",
+      "repro": "AFTER, the same shape re-run at the corrected wrap steps (325/550/775 at OPT_LR_WAVELENGTH=200 OPT_LR_DECAY=0.0, Readings {325: 2.0 seeds 3, 550: None, 775: 9.0 seeds 3}): step 325 cycle_best None -> 2.0 undamped; step 550 reading None -> cycle_best STAYS 2.0, amp 1.0; step 775 reading 9.0 against the inherited 2.0 -> NOT paid -> amp 0.5, damped True. Totals readings=2 damped=1 refused_n1=0 no_reading=1 (the same shape gave refused_n1=2 and damped=0 before). NEIGHBOUR (a genuine n=1 refusal must still count): the same build fed Reading(9.0, seed_count=1) every step gives refused_n1=2, damped=0."
+    },
+    {
+      "symbol": "src/opt/api.py::lr_at",
+      "verdict": "NARROWER_THAN_CLAIMED",
+      "severity": "medium",
+      "detail": "FINDING 11 -- THE MEASUREMENTS ARE ALL REPRODUCED; THE CLAIM OVERREACHES ON WHAT THE DEFECT IS. Reproduced exactly: restarts on vs off over 1000 steps differ on 0/1000 at OPT_LR_WAVELENGTH=0 and =1000, 899/1000 at =900 and =800, 900/1000 at =1500, and restarts=off at =1500 ends at 6.378e-04 against a floor of 1e-04. But the PRICING difference is not a defect: it is what OPT_LR_RESTARTS=off is declared to do -- 'instead of holding at the floor' -- so one cycle of the WAVELENGTH followed by the floor (a parked tail at a short wavelength) and an un-annealed tail at a long one are the operator's setting, and the opt.lr.restarts gate already tells them restarts are off. THE DEFECT IS THE SENTENCE, printed in three places including a report line. REPAIR: scoped in all four sites I own -- lr_at's docstring (with the measured table), _schedule's restarts-branch comment, the opt.lr.restarts gate reason (which now says 'no restart can occur' unconditionally and appends the bit-identity clause ONLY at the sentinel, and otherwise says explicitly that it is NOT bit-identical and why), and src/opt/levers.py::OPTLevers's lr_restarts comment. lr_at's minimum property is scoped to post-warmup AND to the sentinel, with both counter-cases measured. Nothing in docs/04_CONTRACT.md or src/spine/compose.py repeats the claim (grep for 'bit-identical' returns nothing there).",
+      "repro": "AFTER: OPT_LR_WAVELENGTH=0 -> 'Gate opt.lr.restarts: UNREACHABLE (1 vs > 1 cycle) -- ... (the 0 sentinel makes one wavelength span the whole run), so no restart can occur and the schedule is bit-identical to restarts=off.' OPT_LR_WAVELENGTH=900 -> '... so no restart can occur (the schedule is NOT bit-identical to restarts=off here: that branch anneals over the WAVELENGTH and holds at the floor, this one anneals over the RUN, and they coincide only at the 0 sentinel).' The measured diff counts are unchanged: 0/1000, 0/1000, 899/1000, 900/1000."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 12 -- RE-VERIFIED PRESENT, FIXED, AND ONE MORE OF THE SAME FAMILY FOUND. An AST sweep of `opt.<lever>` reads per function against each parsed LEVERS READ block confirmed counters -> READ-NOT-DECLARED ['lr_wavelength'], on the branch the SHIPPED configuration takes. REPAIR: lr_wavelength and lr_min_frac (new, for the floor gate) are in counters()'s LEVERS READ line, with the reason above the block rather than inside it. THE SAME SWEEP ALSO FOUND, unreported: maybe_step READ opt.lr_restarts (the cycle-index stamp) and never declared it -- now declared, together with lr_sched, which maybe_step now reads directly for the wrap counter.",
+      "repro": "AFTER: the same AST sweep gives READ-NOT-DECLARED=[] for all seven entry points. The prose was kept OUT of the parsed blocks: tests/test_contract.py::_split_items is depth-aware and strips parentheticals, and `python3 tests/test_contract.py` reports '14 checks + 46 self-test cases, 0 failing' with 262 declared levers all named by a stub."
+    },
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDINGS 13 AND 30 (one root) -- RE-VERIFIED PRESENT, FIXED. Confirmed at OPT_ACCUM=4: st.base.param_groups[0]['lr'] was 0.002 immediately after build(), and calls 1/2/3 returned stepped=False lr=0.0 while the live group held 0.002. REPAIR: the not-due branch returns src/opt/api.py::_applied_lr(st), which reads the base group's own lr -- the question the branch's own comment asks ('the rate the optimizer is CURRENTLY at'), answered from the only thing that knows it, with no new state. It is also correct after a resume, where st.lr_prev is at best stale.",
+      "repro": "AFTER at OPT_ACCUM=4: bwd 1/2/3 stepped=False returned=0.002 live=0.002; bwd 4 stepped=True returned=8e-05 live=8e-05; bwd 5/6 stepped=False returned=8e-05 live=8e-05. NEIGHBOUR (the shipped accum=1, where every call is due) is unaffected: the shipped-default 1000-window run reports opt.step.not_due absent from every line and opt.step=1000."
+    },
+    {
+      "symbol": "src/opt/api.py::build",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 14 -- RE-VERIFIED PRESENT, FIXED. The AST sweep confirmed build -> DECLARED-NOT-READ ['lr_sched']; `grep -n 'opt\\.lr_sched' src/opt/api.py` returned only lr_at and counters. REPAIR: lr_sched is out of build's LEVERS READ line, with a paragraph above the block saying what remains true and is worth a reader's attention -- that at OPT_LR_SCHED=none build() still resolves and PRINTS a horizon for a run whose rate is flat, and that counters() is what marks those mechanisms unreachable. K4 is unaffected because lr_at and counters still name the lever.",
+      "repro": "AFTER: the AST sweep gives build -> DECLARED-NOT-READ=[]; `python3 tests/test_contract.py` reports 262 declared levers, 262 named by a stub, 0 unaccounted for."
+    },
+    {
+      "symbol": "src/opt/api.py::lr_at",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 15 -- RE-VERIFIED PRESENT, FIXED. The AST sweep confirmed lr_at -> DECLARED-NOT-READ ['lr_restart_damp'] after discounting the two the line itself qualified. REPAIR: it is out of the line, with a paragraph above the block stating why the distinction is load-bearing -- st.restart_amp is the accumulated product maybe_step maintains and it travels in state_dict, while lr_restart_damp does not, which is the 'came back at FULL AMPLITUDE' separation state_dict's docstring is about. The remaining schedule levers now carry '(all through the shared unpack in _priced)' so the line says WHERE, the way it already did for st.horizon.",
+      "repro": "AFTER: `grep -n 'opt\\.lr_restart_damp' src/opt/api.py` still returns only build (the range refusals), maybe_step (the ratchet) and counters (printing) -- lr_at reads st.restart_amp and nothing else, and its LEVERS READ line now says so."
+    },
+    {
+      "symbol": "src/opt/api.py::load_state",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 16 -- RE-VERIFIED PRESENT, FIXED. (a) opt.ckpt.horizon_changed was written here, named in no DID IT FIRE line and given no Gate and no report line. It is now declared in load_state's DID IT FIRE block AND carried by a new Gate opt.ckpt.horizon_changed in counters(), with all three states. (b) opt.build.group_overlap was written by build and printed by counters with no docstring anywhere naming it; it is now in build's DID IT FIRE block with what a nonzero value means (a tensor in BOTH groups, i.e. one parameter stepped by OPT here and again by SIG -- the Q-OPT-6 hazard seen from the parameter side). (c) The softer half: opt.build.params.base and opt.build.params.encoder are now in build's enumeration too.",
+      "repro": "AFTER: a run with no resume prints 'Gate opt.ckpt.horizon_changed: UNREACHABLE (0 vs a checkpoint loaded) -- no checkpoint has been loaded in this process (opt.ckpt.loaded == 0), so no boundary exists for a horizon to change across. This is not \"a resume happened and the horizon held\".' NEIGHBOUR: a resume at Windows(1000) -> Windows(2000) prints 'Gate opt.ckpt.horizon_changed: FIRED (1 vs 1 load(s)) -- a changed horizon is the LEGITIMATE resume ... st.lr_prev was cleared 1 time(s) ... the accumulation invariant is measured from this boundary too'."
+    },
+    {
+      "symbol": "src/opt/api.py::lr_at",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 17 -- RE-VERIFIED PRESENT, FIXED. Confirmed: build at the shipped defaults, take NO step, then call lr_at over Steps(1..50) -- fifty pure probes left opt.lr.in_warmup=50 with opt.step=0. REPAIR: the Config unpack and the _schedule call moved into the private src/opt/api.py::_priced, which returns (rate, observations). lr_at discards the observations and now writes NOTHING, which is what 'PURE' always claimed; maybe_step records them, where a step happens. One unpack site, so the two cannot drift -- the 'two computations of one number' shape finding 6 is about. _priced takes the Config that its caller has ALREADY asserted ownership on and is not Config-annotated, so O9's one-assertion-per-entry-point rule is untouched, and the helper's docstring says exactly that.",
+      "repro": "AFTER: the same fifty probes leave in_warmup=0, envelope_applied=0, damped_this_step=0, shift_warm_applied=0, floor_applied=0, opt.step=0. NEIGHBOUR (real steps must still be counted): 300 driven steps at the shipped defaults leave opt.lr.in_warmup=99 against a resolved warmup of 100, and Gate opt.lr.warmup reads FIRED."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "high",
+      "detail": "FINDING 18 -- SAME ROOT AS FINDING 8, FIXED THERE. Recorded separately because the lens is different and the finding adds the DEFAULT-wavelength observation: at the default wavelength the same run printed UNREACHABLE on restarts/damp/decay for the CYCLE-FIT reason rather than for the ablation -- a true sentence about the wrong cause, telling an operator to change OPT_LR_WAVELENGTH when the schedule is switched off. That is now impossible: `sched` is tested FIRST in every one of those gates, so the ablation's reason wins over the arithmetic one.",
+      "repro": "AFTER at OPT_LR_SCHED=none with the DEFAULT wavelength (the 0 sentinel, n_cycles=1): opt.lr.restarts, opt.lr.restart_damp and opt.lr.decay all render UNREACHABLE with the OPT_LR_SCHED=none reason, not with the cycle-fit reason. Drop only OPT_LR_SCHED and the same build renders the cycle-fit reason again."
+    },
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "high",
+      "detail": "FINDING 19 -- RE-VERIFIED PRESENT, FIXED. Confirmed at pure shipped defaults on both sides: parent 1000 windows, saved opt_step=1000 lr_prev=0.0001; child at run_windows=2000 loaded it (restored=True) and its first maybe_step returned StepOutcome(stepped=True, lr=0.0012133326452654389, restart=True, damped=False), with opt.restart.detected=1 printed beside 'Gate opt.lr.restarts: UNREACHABLE (1 vs > 1 cycle) -- ... no restart can occur.' REPAIR: load_state clears st.lr_prev on the horizon-changed branch and counts it (opt.ckpt.lr_prev_cleared). Across a changed horizon the parent's last rate is not comparable -- the same step is re-priced against a different length -- so there is nothing for the ratio to mean. This closes the horizon route that was left open when checkpointing lr_prev closed the counter route (P1-H17), and with it the false self-inflicted-shift stamp that spine/compose.py::LOOP_ORDER feeds FAB.grow_check on exactly the first step after a resume. Cost, stated in the code: one step of restart detection on a boundary where the classification was meaningless.",
+      "repro": "AFTER, the identical two-phase run: first resumed step is StepOutcome(stepped=True, lr=0.0012133326452654389, restart=False, damped=False) -- the RATE is unchanged, only the classification -- with opt.restart.detected=0, opt.ckpt.lr_prev_cleared=1 and 'Gate opt.ckpt.horizon_changed: FIRED (1 vs 1 load(s))'. NEIGHBOUR (an unchanged horizon must keep lr_prev): the same checkpoint into run_windows=1000 leaves st.lr_prev=0.0001 and the first resumed step still reports restart=False, as it did before."
+    },
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "high",
+      "detail": "FINDING 20 -- SAME ROOT AS FINDING 9. Reporting fixed, detector semantics NOT changed (the owner's ruling). The measured damp sweep reproduced exactly (0.9 -> 6/5, 0.5 -> 3/2, 0.4 -> 2/1, 0.2 -> 2/1 over six real wraps) and the inversion the finding names -- the harder an operator damps, the fewer times the damping can be applied -- is now written into src/opt/levers.py::OPTLevers's lr_restart_damp comment beside the promise it contradicts, with the 0.4737 algebra and all four arms. The ledger can no longer be read as 'N restarts happened'.",
+      "repro": "AFTER: see the finding-9 entry. 'opt.restart: wraps=6 ... detected=3 ... below_bar=3 ... damped=2' and the opt.lr.restarts gate reason carrying both counts."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 21 -- RE-VERIFIED PRESENT; THE DATA LOSS AND THE ILLEGIBILITY ARE FIXED, THE Gate SELF-CHECK IS STILL NOT ARMED AND I SAY SO. Confirmed: a parent at OPT_GRAD_CLIP=0.001 OPT_LR_SHIFT_WARM=5 OPT_LR_WAVELENGTH=300 resumed into the shipped defaults printed opt.lr.envelope_applied=901, opt.lr.shift_warm_applied=4 and opt.restart.detected beside four UNREACHABLE lines, and ledger['opt.clip.applied'] was a Gate carrying the literal 0 while st.counters held 1000 -- the count erased from the ledger the report reads. REPAIR (a): the clip gate's unreachable arm now passes the REAL counter as its value, so the number survives the `ledger[g.name] = g` overwrite and prints inside the gate's own arithmetic. REPAIR (b): every unreachable arm routes its reason through src/opt/api.py::_stale_note, which appends the restored count and the load count and says the number was produced by a configuration no longer in force -- and, if there was NO resume to explain it, says to read it as a defect in this package. NOT DONE, deliberately: passing the live counter as `fired` would arm spine/gate.py::Gate.__post_init__ and make counters() RAISE on a legitimate resume, which is finding 4's failure mode in a second place -- it would take down the whole DID IT FIRE surface for a reading that is TRUE about the parent run.",
+      "repro": "AFTER, the same parent/child pair: ledger['opt.clip.applied'].value == 1000, and the line reads 'Gate opt.clip.applied: UNREACHABLE (1000 vs n/a) -- OPT_GRAD_CLIP=0.0 is OFF, so no step can clip. ... THE LEDGER CARRIES opt.clip.applied=1000 FROM BEFORE A RESUME (opt.ckpt.loaded=1): load_state restores every counter, this arm's reachability is computed from the LIVE Config, and that number was produced by a configuration no longer in force. It is not a measurement of this run.' The same sentence appears on opt.lr.restarts, opt.lr.decay and opt.lr.shift_warm. NEIGHBOUR (no resume): the same child WITHOUT the load_state prints the four UNREACHABLE lines with no stale sentence at all, because every counter is 0."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 22 -- RE-VERIFIED PRESENT, FIXED. Confirmed: OPT_LR_WAVELENGTH=300 driven 200 windows with a Reading on every one of the 200 steps and no wrap yet printed 'Gate opt.lr.restart_damp: UNREACHABLE ... no Reading has ever arrived (opt.restart.readings == 0)' with readings=0 -- a false statement about EVAL's output, sending a reader to debug another package. REPAIR: opt.restart.readings is incremented on ARRIVAL at the top of maybe_step, beside opt.shift.notifications and outside the due-ness check exactly as that one is, which is what its own DID IT FIRE line always claimed. _reading's refusal of a bare float consequently runs on EVERY call rather than only on restart steps, which is the direction that refusal wants. The gate's arms are now sched / restarts-off / one-cycle / no-Reading / measured.",
+      "repro": "AFTER: the same 200-window run reports readings=200, detected=0 and 'Gate opt.lr.restart_damp: armed, did not fire (0 vs damp=0.5, refused_n1=0, no_reading=0, readings=200)' -- a measurement, which is what it is. NEIGHBOUR (the UNREACHABLE arm must still be reachable): the identical run with NO Readings prints 'UNREACHABLE (0.5 vs < 1.0 on a losing cycle) -- no Reading has ever arrived (opt.restart.readings == 0, counted on ARRIVAL) ...', which is now true."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 23 -- RE-VERIFIED PRESENT, FIXED. Confirmed: the gate list held eleven gates and none of them was the warmup or the floor; at run_windows 15 the report said 'warmup=1 (asked 1000, clamped=True)' while opt.lr.in_warmup printed a bare 0 for a mechanism that could not fire. REPAIR: two new gates. Gate opt.lr.warmup carries all three states (UNREACHABLE at OPT_LR_SCHED=none, UNREACHABLE at a resolved warmup of 1 with OPT_LR_WARMUP, the clamp and the horizon named, otherwise measured against the ramp's own length). Gate opt.lr.min_frac carries the floor, fed by a new counter opt.lr.floor_applied that counts the steps where the clamp actually bit, so 'the schedule never returned zero' is attested rather than asserted. The WAVELENGTH is carried by opt.lr.restarts' arithmetic plus a new REALIZED cycle length on the horizon report line, which is the number the cosine is actually priced against. The report line also now says how many warmup steps were priced below peak.",
+      "repro": "AFTER: N=15 -> 'Gate opt.lr.warmup: UNREACHABLE (0 vs 0 step(s) below peak, peak at step 1) -- the resolved warmup is 1 optimizer step(s) (OPT_LR_WARMUP=1000 against build()'s clamp of a tenth of a 15-step horizon), and the counter this gate reads is 1-BASED ... This is not \"armed and did not fire\".' NEIGHBOUR: N=20 -> FIRED (1 vs 1 step(s) below peak, peak at step 2); N=1000 -> FIRED (99 vs 99, peak at step 100). Floor gate: shipped defaults -> 'armed, did not fire (0 vs min_frac=0.05 ...)'; OPT_LR_WAVELENGTH=300 (envelope live) -> FIRED with floor_applied=219 and a measured post-warmup minimum of exactly 1e-04."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 24 -- RE-VERIFIED PRESENT, FIXED. Confirmed: `grep -rn encoder_steps_here src/` returned four source lines (the init in build, two docstring lines, the Gate) plus one prose mention in spine/compose.py, and no `+= 1` anywhere. REPAIR: the counter is DERIVED, not declared. src/opt/api.py::_encoder_step_signature fingerprints the encoder optimizer's own step state (state length plus the summed per-parameter step, read defensively because AdamW stores it as a tensor on some builds), maybe_step samples it before and after its own body, and a change increments the counter. Only a step taken INSIDE maybe_step can move it between those two lines, which is exactly the Q-OPT-6 regression and nothing else -- crucially NOT `len(st.encoder.state)`, which SIG legitimately makes non-empty on its own cadence.",
+      "repro": "AFTER: a correct 5-step run leaves opt.encoder_steps_here=0. INJECTING THE DEFECT (wrapping st.base.step so it also calls st.encoder.step(), i.e. the flush gate stepping the encoder too) raises it to 1 on the next maybe_step. NEIGHBOUR (SIG's legitimate step must NOT trip it): five cycles of st.encoder.step(); st.encoder.zero_grad() OUTSIDE maybe_step, interleaved with normal scaled_backward+maybe_step pairs, leave it at 0."
+    },
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 25 -- RE-VERIFIED PRESENT, ANSWERED AS THE FINDING ASKS (a line in the report, not a repair). Confirmed in the damp sweep: at damp=0.5 the wrap at step 1150 that TRIGGERS the first damping is itself priced at 100.0% of peak and only the following cycle is at 52.5%. The ordering is forced -- the detector infers a restart from the rate ratio, so the undamped rate must exist before the verdict can. REPAIR: the opt.lr.restart_damp gate's measured arm carries a reason saying exactly this, with the live st.restart_amp printed, so a reader who finds the amplitude and the rate at the wrap inconsistent by one step is told why on the same line.",
+      "repro": "AFTER: 'Gate opt.lr.restart_damp: FIRED (2 vs damp=0.5, refused_n1=0, no_reading=0, readings=4000) -- the wrap that TRIGGERS a damping is itself priced before the multiplier lands, so it is delivered at full amplitude for that one optimizer step and the cycle after it is the first damped one ... A reader comparing restart_amp=0.25 against the rate at the wrap will find them inconsistent by exactly one step, and this is why.'"
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 26 -- RE-VERIFIED PRESENT, FIXED. Confirmed at OPT_LR_RESTARTS=off OPT_LR_WAVELENGTH=300 over 1000 windows: opt.lr.restart_damp and opt.lr.decay both routed through their n_cycles<=1 arms and named the cycle count, pointing an operator at the wavelength they had just set, while the gate one line above them said OPT_LR_RESTARTS=off. REPAIR: both gates have their own restarts-off arm, naming the switch, saying that build() forces the count to 1 BY DECREE rather than by fit, and printing the wavelength and the horizon so the reader can see that cycles WOULD have fitted.",
+      "repro": "AFTER, same configuration: 'Gate opt.lr.restart_damp: UNREACHABLE (0.5 vs < 1.0 past cycle 0) -- OPT_LR_RESTARTS=off, which forces the cycle count to 1 BY DECREE rather than by fit -- OPT_LR_WAVELENGTH=300 against a 1000-step horizon is not what switched this off.' and 'Gate opt.lr.decay: UNREACHABLE ... OPT_LR_RESTARTS=off, which forces the cycle count to 1 BY DECREE, and the envelope is gated on n_cycles > 1 -- so OPT_LR_DECAY=1.0 is off because of the SWITCH and not because OPT_LR_WAVELENGTH=300 failed to divide a 1000-step horizon twice.' NEIGHBOUR: drop OPT_LR_RESTARTS and the same wavelength gives n_cycles=3 and both gates become live."
+    },
+    {
+      "symbol": "src/fabric/api.py::build",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "high",
+      "detail": "FINDING 27 -- RE-VERIFIED PRESENT IN THE CURRENT TREE, AND IT IS NOT MINE. src/fabric/api.py still allocates both expert tensors at zero (`self.A = nn.Parameter(torch.zeros(...))`, `self.B = nn.Parameter(torch.zeros(...))`) and then draws A ONLY (`pop.A.uniform_(-bound, bound, generator=gen)`), leaving B at zero -- so any objective reaching A and B only through their product is stationary at init in both gradients. I own src/opt/api.py and src/opt/levers.py and nothing else, so I did not touch it. The finding itself already states the part that matters for THIS package: it is NOT a defect in src/opt/api.py, and the 0.000529 in .rework/audits/r2_sweep_full.json is torch's AdamW DEFAULT weight_decay=0.01, not learning -- which means the real OPT, whose OPT_WEIGHT_DECAY defaults to 0.0, correctly moves that stand-in by exactly 0.0 and must not be read as the regression.",
+      "repro": "grep -n 'self.A = nn.Parameter' src/fabric/api.py -> line 75, torch.zeros; grep -n 'uniform_' src/fabric/api.py -> line 266 pop.A.uniform_ and line 267 pop.cent.uniform_, with no draw of pop.B anywhere."
+    },
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "high",
+      "detail": "FINDING 28 -- SAME ROOT AS FINDING 9. Its independent quantity reproduced exactly: with restart_amp held at 1.0 over a 2068-step horizon at OPT_LR_WARMUP=20, restarts real vs detectable were 1/1, 1/2, 2/3, 2/4, 3/6 and 5/9 at wavelengths 1200/700/520/400/300/210 under the shipped OPT_LR_DECAY=1.0, against 1/1, 2/2, 3/3, 4/4, 6/6 and 10/10 at OPT_LR_DECAY=0.0 -- so the blinding is exactly the interaction of the two shipped defaults. Reporting fixed with finding 9; the detector is unchanged and that is the owner's ruling.",
+      "repro": "See the finding-9 entry: opt.restart.wraps, opt.restart.below_bar and opt.restart.detected are printed together on their own report line and inside the opt.lr.restarts gate reason."
+    },
+    {
+      "symbol": "src/opt/api.py::counters",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "high",
+      "detail": "FINDING 29 -- SAME ROOT AS FINDING 8, FIXED THERE. Its independent observation stands and is worth keeping: the ablation TRAINS correctly, which is why this was only ever a reporting defect. Re-confirmed here at OPT_LR_SCHED=none over 1000 windows: the set of distinct StepOutcome.lr values is exactly [0.002], both optimizers' param groups carry 0.002, and opt.lr.in_warmup / damped_this_step / shift_warm_applied / envelope_applied are all 0. ISSUES P1-H15 (the `_lrv` NameError on the first flush at LR_SCHED=none) remains dead: the rate always exists and always leaves as a return value.",
+      "repro": "AFTER: 'Gate opt.lr.sched: UNREACHABLE (none vs cosine) -- OPT_LR_SCHED=none: the warmup, the wavelength, the floor, the restarts, the damping, the envelope and the re-warm are ALL structurally unreachable ... Every gate below that names one of them says so on its own line.'"
+    },
+    {
+      "symbol": "src/opt/api.py::maybe_step",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "medium",
+      "detail": "FINDING 30 -- SAME ROOT AS FINDING 13, FIXED THERE. Its measurement (the live group value at the instant the 0.0 was returned) reproduced exactly and is what the repair reads.",
+      "repro": "AFTER at OPT_ACCUM=4: calls 1/2/3 return 0.002 with the live group at 0.002; call 4 returns and holds 8e-05."
+    },
+    {
+      "symbol": "src/opt/api.py::_schedule",
+      "verdict": "DEFECT_CONFIRMED",
+      "severity": "low",
+      "detail": "FINDING 31 -- SAME ROOT AS FINDING 3, FIXED THERE. Its numbers reproduced: at OPT_LR_WARMUP=20 the ramp had 19 rungs, reached peak at step 19 and never emitted its lowest rung. After the repair the ramp reaches peak at step 20 and its first rung is lr/20.",
+      "repro": "AFTER at the shipped defaults (warmup 100): rungs at steps 1..5 are 2e-05, 4e-05, 6e-05, 8e-05, 1e-04 (i.e. step/w of peak), step 99 is 0.00198 and step 100 is 0.002."
+    }
+  ],
+  "unfinished": [
+    {
+      "title": "The Backwards-to-Steps conversion in counters() needs a named function in src/spine/derive.py, which this agent does not own",
+      "reason": "OUT OF OWNERSHIP. I own src/opt/api.py and src/opt/levers.py only, and the repair the finding names is a new function in src/spine/derive.py.",
+      "detail": "The accumulation invariant is still `due_steps = (n_bwd - base_bwd) // divisor` compared against a Steps count, on int()-unwrapped operands, so units.Clock never sees either side. derive.py (read in full) has accum_due(Backwards, accum) -> bool and no Backwards-to-Steps COUNT conversion. What is needed: a function returning units.Steps, so the comparison becomes Steps against Steps and raises on its own if either side is ever the wrong kind. It is NOT a wire and costs nothing from the 25-budget (23 spent). The whole finding is written into counters()'s docstring so the next owner of derive.py has the case in front of them."
+    },
+    {
+      "title": "The restart detector's blinding is a TRAINING change and was left as the owner's ruling",
+      "reason": "OWNER'S CALL, stated as such by three independent verifier lenses (findings 9, 20, 28).",
+      "detail": "Detection requires `lr > 0.5 * opt.lr`, and both mechanisms it feeds -- the lr_decay envelope and the lr_restart_damp ratchet -- lower the peak it measures. A damped wrap peaks at lr x (min_frac + (1 - min_frac) x restart_amp), so at the shipped lr_min_frac=0.05 the bar is cleared only above restart_amp 0.4737: the closed loop caps at TWO applications at the shipped damp and at ONE for any damp at or below 0.4737. Changing the detector (count wraps from the cycle index, or floor the bar on restart_amp) changes what gets damped and therefore what the goal-A arm trains. I repaired the ledger instead -- opt.restart.wraps, opt.restart.below_bar, a report line and a gate reason carrying both -- and wrote the cap and its algebra into src/opt/levers.py::OPTLevers beside the promise it contradicts. The DECISION remains open: does a restart MEAN a cosine wrap, or a rate jump the instrument could see?"
+    },
+    {
+      "title": "st.grad_norms still grows without bound and is copied into every checkpoint",
+      "reason": "OWNER'S CALL: every candidate carrier changes what opt.grad_norm.p50/p99 mean.",
+      "detail": "48,000 floats in every save at the run lengths this package's docstring is about, quadratic in the number of saves. A reservoir, a histogram or decimation each make the quantiles describe a biased sample rather than the run. The cost is now stated in state_dict's docstring rather than left to be discovered."
+    },
+    {
+      "title": "spine/gate.py::Gate's unreachable-AND-fired self-check is still not armed by this package",
+      "reason": "ARMING IT WOULD MAKE counters() RAISE ON A LEGITIMATE RESUME -- finding 4's failure mode in a second place.",
+      "detail": "Every unreachable arm still passes a literal fired=False, so Gate.__post_init__'s second guard cannot trip. Passing the live (restored) counter as `fired` would raise ValueError on any resume that crosses a lever change and take down the entire DID IT FIRE surface for a reading that is TRUE about the parent run. What I did instead: src/opt/api.py::_stale_note names the restored count and the resume in the arm's own reason, and the clip gate now carries the real counter as its value so the `ledger[g.name] = g` overwrite cannot erase it. If the owner wants the guard armed, the right shape is probably a separate refusal at load time, not inside the report."
+    },
+    {
+      "title": "OBSERVATION, not in the verifier list: the re-warm ramp's last rung is exactly 1.0",
+      "reason": "NOT REPORTED, AND THE ARITHMETIC IS DEFENSIBLE -- I did not want to change a counter's meaning on my own initiative.",
+      "detail": "_schedule's re-warm is `cyc *= max(min_frac, (step - shift_at + 1) / shift_warm)` on a delta that is genuinely 0-BASED (0 on the shift step), so the rungs run 1/N .. N/N and the last warmed step is priced at no attenuation at all. At OPT_LR_SHIFT_WARM=1 the mechanism therefore 'fires' -- opt.lr.shift_warm_applied increments -- while changing no rate, which is the FIRED-BUT-INERT shape finding 3(b) called a defect for the warmup. Unlike the warmup, the first rung IS emitted here, so this is not the same off-by-one; it is the endpoint of an N-rung ramp. Deciding whether opt.lr.shift_warm_applied should count branch-taken or rate-lowered is a counter semantics change and belongs to whoever rules on finding 9."
+    }
+  ],
+  "suite_after": "cd /home/user/LLM-Test && for t in ownership contract census assemble couplings; do python3 tests/test_$t.py 2>&1 | grep -E '^===|^FAIL'; done && python3 tests/test_derive.py 2>&1 | tail -1\n=== ownership: L1 and L2 by AST over src ===\n=== 12 checks + 18 self-test cases, 0 failing ===\n=== contract: the document, the stubs and the composition root are one system ===\n=== 14 checks + 46 self-test cases, 0 failing ===\n=== the census against the tree ===\n=== 7 checks + the self-test, 0 failing ===\n=== the runtime spine: build(), the typo net, affects(), render(), the freeze ===\n=== 9 checks, 0 failing ===\n=== couplings: what a compute may name, and what the table builds ===\n=== 4 checks, 0 failing ===\n575 oracle cases, 0 mismatches\nALL GREEN, and green on the same baseline: the identical command produced the identical output before any edit. O11 examined 78 arithmetic sites against 35 clock-unit levers and O12 resolved 257 symbol citations, both including the new docstrings."
+}

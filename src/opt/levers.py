@@ -472,6 +472,19 @@ class OPTLevers(LeverSet):
     # restart" -- observed at steps 15 and 31 of an 18-epoch run, at 2% and 3% of peak. The `_lrv > 0.5 *
     # LR` bar at :7118 is what removes them, and a log that cries restart is a log nobody greps for
     # restarts.
+    # THE RAMP IS PRICED AGAINST A 1-BASED COUNTER (2026-09-04). src/opt/api.py::maybe_step advances
+    # its Steps counter BEFORE pricing, so the first step the schedule ever sees is 1, while the ramp
+    # was written in the 0-based form and reached full peak at step w-1 with a lowest rung of two
+    # warmup-fractions of peak rather than one. Measured across the grid: warmup 100 reached peak at
+    # 99, 20 at 19, 3 at 2, and at warmup 2 the single warmed step was priced at exactly the UNWARMED
+    # rate while the counter reported 1. It now reaches peak at exactly the step this lever names.
+    # AT A RESOLVED WARMUP OF 1 NO STEP CAN BE IN WARMUP, which is arithmetic and not a bug -- a ramp
+    # that reaches peak at step 1 has no rung below it -- and it is NOT exotic, because the clamp
+    # above makes it the resolved value of every run of 19 or fewer optimizer steps, including the
+    # OPT_BATCH_WINDOWS=16 OPT_ACCUM=4 arm. src/opt/api.py::counters carries a Gate opt.lr.warmup
+    # that declares that UNREACHABLE with both numbers; before it, opt.lr.in_warmup printed a bare 0
+    # no reader could tell from "it ran and never triggered", under a report line that still said
+    # "warmup=1 (asked 1000, clamped=True)".
     # UNIT: Steps, and the consumption defect is real -- see DEFECT 2(a). Today `_lr_at` is handed `step`,
     # a WINDOW counter, so this warmup completes batch_windows times sooner than it is written. The port
     # converts through spine.derive; it does not re-label the lever, because a warmup denominated in
@@ -496,6 +509,16 @@ class OPTLevers(LeverSet):
     # same fault -- taking two live consequences with it: the cosine reaching only p=0.760 on E8 and
     # p=0.730 on E18 because the projected horizon overran the run (:6248-6250), and the report's own
     # note that a run stretched by EPOCHS is "NOT comparable at fixed LR" (:6020).
+    # THE DECLARED PERIOD IS NOW THE DELIVERED ONE (2026-09-04). src/opt/api.py::build fitted the
+    # cycle count as (run_steps - warmup) / (wavelength - warmup), taking the warmup out of the
+    # PERIOD as well as out of the SPAN, while src/opt/api.py::_schedule prices a cycle as
+    # (run_steps - warmup) / n_cycles -- so the realized cycle came out at wavelength - warmup and an
+    # operator asking for 300 against a 1000-step horizon with warmup 100 got four cycles of 225. It
+    # was pathological where the period sat at or below the warmup: OPT_LR_WAVELENGTH=7 with warmup
+    # 100 over 1000 steps fitted 900 cycles of ONE step each. The divisor is the wavelength itself
+    # now, so 300 fits three cycles of exactly 300 and 7 fits 129 of 6.98, and the 0 sentinel is
+    # untouched because the warmup can never exceed a tenth of the run, which pins the fit at
+    # exactly one cycle. The report prints the ASKED wavelength and the REALIZED cycle side by side.
     # THE 0 SENTINEL IS DOCUMENTED, NOT RESOLVED HERE, and that is deliberate. In the old tree the zero
     # was resolved by READING ANOTHER KNOB (`if LR_STEPS: return LR_STEPS`, else project from LR_EPOCHS,
     # :6371) -- which is the computed default lever.py::Lever.__init__ refuses by construction. The run length
@@ -568,7 +591,17 @@ class OPTLevers(LeverSet):
     # period moves by at most ~1/(2n) from nominal, a few percent, against the 11x that EPOCHS-stretching
     # caused.
     # AT EPOCHS == ONE WAVELENGTH THE SCHEDULE IS BIT-IDENTICAL TO restarts=off (:4785), which is the
-    # property that keeps every earlier result reproducible under the new default.
+    # property that keeps every earlier result reproducible under the new default -- AND THAT CLAUSE
+    # MEANS WHAT IT SAYS: the wavelength has to BE the run, which the 0 sentinel forces and which
+    # every recorded result was taken under. It is NOT "at one fitted cycle", and the port said that
+    # for a while in three places including a printed gate reason. src/opt/api.py::_schedule prices
+    # the two branches against different lengths on purpose -- restarts on anneals over the RUN,
+    # restarts off anneals over the WAVELENGTH and then holds at the floor, which is what "instead of
+    # holding at the floor" in the declaration above means. Measured over a 1000-step horizon:
+    # OPT_LR_WAVELENGTH=0 and =1000 give 0 differing steps of 1000; =900 gives 899; =800 gives 899
+    # with a max ratio of 3.6; =1500 gives 900 and ends at 6.378e-04 against a floor of 1e-04. An
+    # operator who sets a bare wavelength and switches restarts off gets exactly what this lever
+    # promises, and is not reproducing an earlier result.
 
     lr_restart_damp = Lever(0.5, "Multiplier on the next restart's swing when the cycle that just ended "
                                  "failed to beat the best held-out it inherited; cumulative.",
@@ -586,6 +619,27 @@ class OPTLevers(LeverSet):
     # -- 81% of the run spent getting worse. A losing bet re-taken identically is not a schedule, it is a
     # ratchet. Cumulative damping means a schedule whose restarts keep failing anneals ITSELF off within
     # two or three of them, while one whose restarts genuinely help is untouched.
+    # AND THE MECHANISM STOPS BEING APPLIED AFTER THOSE TWO OR THREE, WHICH IS NOT THE SAME SENTENCE
+    # AND IS MEASURED (2026-09-04). The damping's own input is the restart DETECTOR, and the detector
+    # requires the new rate to clear half the peak: `lr > 1.5 * lr_prev and lr > 0.5 * peak` in
+    # src/opt/api.py::maybe_step. A damped wrap peaks at lr x (min_frac + (1 - min_frac) x
+    # restart_amp), so at the shipped lr_min_frac=0.05 the bar is cleared only while restart_amp
+    # stays above (0.5 - 0.05) / 0.95 = 0.4737 -- and restart_amp is only ever multiplied INSIDE a
+    # detected restart, so once a wrap falls under the bar the amplitude is frozen for the rest of
+    # the run. Over 4000 windows with seven fitted cycles, six real wraps and a losing Reading on
+    # every step: damp=0.9 gives 6 detected and 5 damped; damp=0.5 (SHIPPED) gives 3 and 2, latching
+    # at 0.25; damp=0.4 gives 2 and 1; damp=0.2 gives 2 and 1. THE LEVER IS INVERTED IN ITS OWN
+    # STRENGTH PARAMETER -- the harder an operator damps, the fewer times the damping can be applied
+    # -- and the shipped lr_decay=1.0 envelope does the same thing independently, its multiplier
+    # passing 0.5 at about 52% of the run. The SWING is genuinely annealed off in two or three, so
+    # the promise above holds in effect; what does not hold is that the mechanism keeps judging.
+    # THE REPAIR CHANGES WHAT A RESTART MEANS -- count wraps from the cycle index rather than from
+    # the rate ratio, or floor the detector's bar on restart_amp -- and it changes what gets damped,
+    # so it is the owner's ruling and P4 has not taken it. What P4 did take: the report can no longer
+    # be misread. src/opt/api.py::counters prints opt.restart.wraps (the structural count) beside
+    # opt.restart.detected (what the ratio saw) and opt.restart.below_bar (jumps the second condition
+    # rejected), and the opt.lr.restarts gate says in its own reason that a gap between them is the
+    # instrument going blind rather than the schedule settling.
     # NEVER FIRED IN ANY SHIPPED ARM, AND THAT IS THE PROTECTED CASE, not evidence against it:
     # LR_RESTART_DAMP= appears 0 times in longrun.sh, and it is unreachable on a single-cycle schedule BY
     # ARITHMETIC (`_ci > 0`, :4812) -- every recorded result came from one. The owner's ruling is explicit

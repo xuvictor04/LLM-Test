@@ -111,12 +111,33 @@ class Process:
     TF32 anyway from its own default. `amp_state` carries the third state: "declined" is bf16 asked
     for on a device that has no autocast for it, which is legal, inert, and must be readable.
 
-    `torch_seed` is the seed torch's PROCESS-GLOBAL default generator IS ACTUALLY RUNNING ON, read
-    back out of torch after it was written, and it is here for the same reason `tf32_applied` is:
-    both are process-wide state this function mutates, and a mutation nobody can read back is
-    indistinguishable from one that never happened. It is what makes seeding that generator a
-    DECLARED setting rather than a silent global side effect -- process_setup names it on its own
-    DID IT FIRE line, and a reader checks it against torch.initial_seed() directly.
+    `torch_seed` is the seed torch's PROCESS-GLOBAL default generator WAS RUNNING ON WHEN THIS
+    RECORD WAS MADE, read back out of torch after it was written, and it is here for the same reason
+    `tf32_applied` is: both are process-wide state this function mutates, and a mutation nobody can
+    read back is indistinguishable from one that never happened.
+
+    IT MAKES SEEDING DECLARABLE, NOT YET DECLARED, AND THE DIFFERENCE IS MEASURED (2026-09-04). An
+    earlier wording of this paragraph said the field "is what makes seeding that generator a DECLARED
+    setting rather than a silent global side effect". A field is a PLACE TO PUT a declaration; the
+    declaration happens when something says it out loud, and nothing in this tree does yet.
+    `grep -rn torch_seed src/ tests/ docs/ tools/` returns hits ONLY inside this file, plus one prose
+    line in .rework/DECISIONS.md -- no check, no banner, no other package reads it. ITS TWO SIBLINGS
+    ON THIS RECORD STAND IN EXACTLY THE SAME PLACE, which is what keeps this a narrowing and not a
+    hole: the same grep for `tf32_applied` and for `amp_state` outside this file returns NOTHING. So
+    it is the P5 reporting layer not existing yet, uniformly, and not something peculiar to the seed
+    -- and it becomes a real defect the day a banner prints tf32_applied and amp_state and leaves
+    torch_seed out.
+
+    AND BEING A SNAPSHOT OF THE WRITE, IT CAN GO STALE WITH NOTHING NOTICING. process_setup()
+    followed by a later torch.manual_seed(999) leaves this field reporting the derived seed while
+    torch.initial_seed() reports 999: no gate fires, no warning prints, nothing raises. That is the
+    CORRECT semantics for a record of what was WRITTEN -- a property that re-read torch on every
+    access would always agree with reality, but would report a number THIS FUNCTION NEVER SET and
+    attribute a later write to it, which is a different lie in the same family as the tf32 knob that
+    reported the request instead of the write -- and it is why process_setup's DID IT FIRE line
+    states the comparison as something A READER DOES rather than as something this field guarantees. Whoever reads it checks it against
+    torch.initial_seed() AT THE MOMENT OF READING, and a disagreement means something reseeded the
+    global after this function ran.
     """
     device: str
     autocast: object
@@ -226,14 +247,53 @@ def process_setup(run: Config):
     edit this package has no standing to make.
 
     WHAT IT DOES NOT BUY, SAID PLAINLY: REPRODUCIBILITY IS NOT ISOLATION. nn.Dropout still draws
-    from one shared stream, so torch DRAW ORDER remains a channel between packages that no wire
-    declares -- a lever that changes how many masks LM draws still shifts every mask drawn after it,
-    which is the exact confound src/spine/rng.py's module docstring exists to remove for the streams
-    it does cover. Seeding gives every run at one seed the same sequence; it does not give each
-    package its own. Closing that needs generator-aware dropout replacing both nn.Dropout and
+    from one shared stream, so torch DRAW ORDER is a channel that no wire declares -- a lever that
+    changes how many masks LM draws shifts every draw taken FROM THE GLOBAL after it, which is the
+    exact confound src/spine/rng.py's module docstring exists to remove for the streams it does
+    cover. Seeding gives every run at one seed the same sequence; it does not give each package its
+    own. Closing that needs generator-aware dropout replacing both nn.Dropout and
     nn.TransformerEncoderLayer's internals, which is LM's arithmetic to change and is not written.
-    Named here so a reader of the L3 sweep knows which channel the per-subsystem register does not
-    cover, rather than inferring from its silence that there is none.
+
+    HOW BIG THAT CHANNEL ACTUALLY IS, MEASURED RATHER THAN ASSERTED, BECAUSE THE FIRST STATEMENT OF
+    IT OVERREACHED (2026-09-04). This paragraph, and .rework/DECISIONS.md D12 with it, first said
+    that adding a package which draws from the global, or reordering two that do, "still moves the
+    numbers of every package downstream of it". At HEAD that is WIDER THAN THE TREE, and both halves
+    of it were checked by running them rather than by reasoning about them.
+
+    THE BUILD-TIME HALF IS INERT. Injecting 1 or 3 extra GLOBAL draws (torch.rand(n), no
+    `generator=`) immediately after src/lm/api.py::build_model returns -- exactly what n extra
+    dropout masks would consume -- leaves ALL 363 values a compose() builds byte-identical (digest
+    34acff0aeb14dd4b in all three runs) while moving LM.encode's output every time
+    (26905f117c4d32e7 -> 773820fb538ba090 -> 0b850362297af161). The real-lever form agrees: LM_LAYERS
+    2 vs 4, which changes how many draws nn.TransformerEncoderLayer's constructors take from the
+    global by a large amount, moves NO value outside LM. The only non-LM keys that differ are
+    geometry.layers, geometry.param_estimate and the manifest row for lm.layers -- the lever's OWN
+    DECLARED value, not drift. The reason is structural rather than luck: every package that
+    constructs an nn.Module then overwrites every parameter FROM ITS OWN NAMED STREAM --
+    src/lm/api.py::build_model's named_parameters loop, src/sig/api.py::_Encoder,
+    src/fabric/api.py::build's pop.modules loop, src/world/api.py::build's encoder/world_proj/qproj
+    loop. A constructor's global draws are consumed and then thrown away.
+
+    THE RUNTIME HALF IS SINGLE-ENDED. Every explicit RNG-consuming torch call in src/ passes
+    `generator=` a named stream -- twelve of them, across src/fabric/api.py, src/sig/api.py,
+    src/world/api.py and src/lm/api.py -- and TOK's segmentation dropout draws from its own Rng
+    (`stream.random()` in src/tok/api.py::_segment), not from torch at all. The only implicit
+    consumers left are nn.Dropout and nn.TransformerEncoderLayer's internals, and both are
+    constructed ONLY in src/lm/api.py. So at HEAD LM IS THE ONLY PACKAGE THAT DRAWS FROM THE GLOBAL
+    GENERATOR AT RUNTIME, and the channel has one end: exhibiting it at all needs a probe on the far
+    side. With the global reset to a fixed position before the forward, LM_LAYERS 2 vs 4 at
+    LM_DROPOUT=0.2 moves a downstream nn.Linear(4, 4) (weights digest 5f87be0f2321e508 vs
+    36dc18c1f2e82308) and the torch.rand(3) after it ([0.18013722, 0.73333818, 0.01200253] vs
+    [0.62094098, 0.40641177, 0.740619]); the LM_DROPOUT=0.0 CONTROL makes the same two depths
+    IDENTICAL (31a48739b3d15e14, [0.41499043, 0.43999398, 0.09452492]), so what moved is the dropout
+    draw COUNT and nothing else about depth.
+
+    SO THE HONEST SENTENCE IS: the channel is REAL and LIVE, and today it has EXACTLY ONE DRAWER. It
+    ARMS -- and the wide claim above becomes true -- the moment a SECOND package draws from the
+    global at runtime, or any package is constructed LAZILY, after a forward has already run. Named
+    here so a reader of the L3 sweep knows which channel the per-subsystem register does not cover
+    AND how large it is, rather than inferring from its silence that there is none, or from its first
+    statement that it is bigger than it is.
 
     "torch.global" IS A DERIVATION LABEL, NOT A MINTED STREAM, and this sentence exists because the
     opposite mistake has already been made once in this tree (a docstring naming rng.issued()["lm"]
@@ -246,15 +306,25 @@ def process_setup(run: Config):
     Process.torch_seed, read back out of torch.
 
     LEVERS READ: device, tf32, amp, seed (new on 2026-09-03; the process-global torch generator is
-                 seeded from it through spine/rng.py::derive_seed, and the three paragraphs above
-                 say why this function and not a package is the site)
+                 seeded from it through spine/rng.py::derive_seed, and the WHY THIS FUNCTION OWNS IT
+                 paragraph above says why this function and not a package is the site. A COUNT OF
+                 PARAGRAPHS IS NOT A CITATION: this line said "the three paragraphs above" and the
+                 2026-09-04 narrowing grew one of the three into five, which is the prose form of the
+                 stale line number O12 exists to refuse)
     WIRES READ: none
     DID IT FIRE: Process.tf32_applied, Process.amp_state, Process.torch_seed -- the last one read
-                 back with torch.initial_seed() AFTER the write, so it is what torch is running on
-                 and not what this function asked for. It equals derive_seed("torch.global", seed)
-                 on every process at that RUN_SEED and differs at a different one. Two runs that
-                 report the SAME torch_seed and still disagree on LM.encode have some OTHER
-                 non-determinism, and this field is what lets a reader rule this one out.
+                 back with torch.initial_seed() AFTER the write, so it is what torch WAS running on
+                 when this function returned and not what the function asked for. It equals
+                 derive_seed("torch.global", seed) on every process at that RUN_SEED and differs at
+                 a different one. Two runs that report the SAME torch_seed and still disagree on
+                 LM.encode have some OTHER non-determinism, and this field is what lets a reader
+                 rule this one out. ALL THREE ARE DECLARED AND, AT HEAD, UNREAD: nothing in src/,
+                 tests/ or docs/ consumes any of them, so they are a surface P5's banner has still
+                 to turn into a reading -- the Process docstring above measures that and says what
+                 would make it a defect. And each is a SNAPSHOT: reseeding, or writing the tf32
+                 attributes, after this call leaves the record saying what was true then, which is
+                 why the comparison against torch.initial_seed() is an act a reader performs and not
+                 a property the field keeps.
     """
     run = run.owned_by("RUN")
     device = str(run.device)
