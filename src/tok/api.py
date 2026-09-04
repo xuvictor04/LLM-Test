@@ -127,9 +127,28 @@ class Vocabulary:
         self.dropout_rng = None
         # THE DID-IT-FIRE CHANNEL (graft G4), same shape as CAP.Valve.counters/.gates and
         # FAB.Population.counters/.gates: a flat name->value dict for counts, a tuple of spine.gate
-        # .Gate objects for three-state predicates. Empty here and populated by build_vocabulary at
-        # each of its return points, never appended to piecemeal, so a reader of `vocab.gates` after
-        # a build sees the whole declared surface for that call in one place.
+        # .Gate objects for three-state predicates. Both start empty here.
+        # THE TWO FIELDS ARE FILLED DIFFERENTLY, AND THIS COMMENT USED TO SAY OTHERWISE (r3 finding
+        # against tok/api.py::Vocabulary.__init__): it claimed `counters` was "populated by
+        # build_vocabulary at each of its return points, never appended to piecemeal", and BOTH of
+        # that field's writers contradict it -- _replay_merges writes tok.load_reconciled from
+        # inside the replay, not at a return point, and tokenize() increments its rows one call at a
+        # time. The sentence was true of `gates` and had been carried over onto the field beside it.
+        #   `gates` IS whole-surface and per-call: build_vocabulary ASSIGNS the tuple at each of its
+        #   three return points and never appends, so a reader of `vocab.gates` after a build sees
+        #   the whole declared surface for that call in one place.
+        #   `counters` IS CUMULATIVE OVER THE LIFE OF THE VOCABULARY and IS appended to piecemeal,
+        #   on purpose: the build seeds tok.build_pass/build_mint/build_converged on the arm that
+        #   runs the loop, _replay_merges writes tok.load_reconciled(_detail) on the arm that
+        #   replays, and then tokenize() adds to tok.segment, tok.retok, tok.retok_noop,
+        #   tok.byte_fallback and tok.dropout_skip on EVERY call thereafter. There is no return
+        #   point at which a total could be assigned, because the total is the point of the row.
+        #   ABSENT AND PRESENT-AND-0 THEREFORE MEAN DIFFERENT THINGS in this dict, which is the
+        #   three-state discipline spine/gate.py states for predicates applied to counts: a key is
+        #   present-and-0 when its mechanism ran and did not fire, and ABSENT when the mechanism was
+        #   unreachable on the arm this vocabulary took. _replay_merges' own docstring says it first
+        #   for tok.load_reconciled ("present and possibly 0 whenever recon is given, absent when it
+        #   is not"), and the build and dropout rows follow it.
         self.counters = {}
         self.gates = ()
         # THE RE-SEGMENTATION NO-OP CACHE (round1 tok/api.py::build_vocabulary/420, re-filed at :462). One slot,
@@ -138,8 +157,11 @@ class Vocabulary:
         # retokenization -- a growing cache of every held-out probe this run ever segmented would
         # be an unbounded leak for a check whose entire job is to catch the one specific pattern
         # measured at 2.189 b/B and 68 points of word quality: the SAME data re-segmented from the
-        # SAME start while nothing minted in between. (data, start, len(data), stamp, Segmentation);
-        # None until the first call.
+        # SAME start while nothing minted in between.
+        # (data, start, len(data), stamp, Segmentation, drawn_with_dropout); None until the first
+        # call. The last field is a BOOL and not a nicety: an entry produced under BPE-dropout is a
+        # legitimate stamp for the next call's comparison and an ILLEGITIMATE answer to return to a
+        # deterministic one, and tokenize()'s skip test reads it for exactly that.
         self._retok_cache = None
 
     def size(self):
@@ -259,22 +281,34 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     stripped) but drops a name followed by bare prose, which is the whole shape.
 
     NOTHING FAILED WHILE IT WAS BROKEN, WHICH IS THE HAZARD AND NOT THE DEFENCE. K4 aggregates per
-    PACKAGE, and tok/api.py::tokenize's clean "LEVERS READ: mode, dropout" credited `dropout` for
-    all of TOK, so the harvest looked complete while THIS entry point's declaration was invisible.
-    Delete or reword that one sibling line and TOK_DROPOUT becomes a lever K4 reports as having no
-    reader anywhere -- for a knob whose value this function passes to _segment on every counting
-    pass. A lever silently losing its credit is the untrippable-guard family: the check keeps
-    reporting a verdict it can no longer see the evidence for.
+    PACKAGE, and tok/api.py::tokenize's clean sibling line -- "LEVERS READ: mode, dropout" while this
+    block was broken, "LEVERS READ: dropout" since its own `mode` was found to have no reader either
+    -- credited `dropout` for all of TOK, so the harvest looked complete while THIS entry point's
+    declaration was invisible. Delete or reword that one sibling line and TOK_DROPOUT becomes a lever
+    K4 reports as having no reader anywhere -- for a knob whose value this function passes to
+    _segment on every counting pass. A lever silently losing its credit is the untrippable-guard
+    family: the check keeps reporting a verdict it can no longer see the evidence for.
 
     LEVERS READ: mode, seed_vocab, build_passes, build_bytes, min_pair, max_bytes, dropout
     WIRES READ: d_vocab_ceiling, d_vocab_read_path
-    DID IT FIRE: tok.build_pass, tok.build_mint, tok.build_converged, tok.load_reconciled,
+    DID IT FIRE: tok.build_pass, tok.build_mint, tok.build_converged (all three PRESENT ONLY ON THE
+                 FRESH-BUILD ARM -- absent on mode="bytes" and on the replay arm, where the build
+                 loop is unreachable and a 0 would be a false reading rather than a small one),
+                 tok.load_reconciled, tok.load_reconciled_detail (the disagreeing lines themselves,
+                 written by _replay_merges beside the count and present only when at least one field
+                 disagreed; declared here because the reverse direction of this row is a check too --
+                 a counter written by a body and named in no declaration is as invisible as a
+                 declaration nothing writes),
                  Gate tok.build_passes_advice (fires on mode="fixed" with the two numbers;
                  "unreachable (mode != fixed)" otherwise -- never silence),
                  tok.v0 -- the ACHIEVED size at the start of training, recorded once and NEVER
                  computed by subtracting seed_vocab, which is what the old DID IT FIRE row did and
                  why it over-reported mints on any corpus that converged below target
-                 (self_organize.py:1274-1281)
+                 (self_organize.py:1274-1281). IT LIVES ON THE FIELD `vocab.v0` AND NOT IN
+                 `vocab.counters`, said here so a reader of the counters dict does not report it
+                 missing: it is the one row of this block that is a STATE the rest of the run reads
+                 back, not a tally, and copying it into counters would be a second home for a number
+                 that already has one.
     """
     tok = tok.owned_by("TOK")
     mode = str(tok.mode)
@@ -390,9 +424,25 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     vocab.dropout_rng = _rng.rng_for("tok.dropout.mint", seed)
     stream = vocab.dropout_rng if float(tok.dropout) > 0 else None
 
+    # THE BUILD LOOP'S OWN DID IT FIRE, SEEDED HERE AND ONLY ON THE ARM THAT RUNS THE LOOP (r3
+    # finding: all three of these were declared by the docstring above and written by NO body
+    # anywhere, so every one of them read armed-but-0 forever -- indistinguishable from a build that
+    # ran and minted nothing, which is the exact reading tok.v0's own row exists to make impossible).
+    # PRESENT-AND-0 AND ABSENT MEAN DIFFERENT THINGS, the convention _replay_merges already states
+    # for tok.load_reconciled: seeded to 0 here, so a zero on this arm means "the loop ran and did
+    # not fire", while on mode="bytes" and on the replay arm -- both of which return above, before
+    # this point -- the keys stay ABSENT, because there the loop is UNREACHABLE and a zero would be
+    # a false reading of a mechanism that could not run.
+    vocab.counters["tok.build_pass"] = 0
+    vocab.counters["tok.build_mint"] = 0
+    vocab.counters["tok.build_converged"] = 0
     for _ in range(passes):
         if vocab.size() >= target:
             break
+        # COUNTED AFTER THE TARGET TEST, so tok.build_pass is passes EXECUTED and not passes
+        # scheduled: a pass that finds the target already reached does no tally and no mint, and
+        # counting it would put work in the ledger that the corpus never paid for.
+        vocab.counters["tok.build_pass"] += 1
         ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
         tally = collections.Counter()
         for a, b in zip(ids, ids[1:]):
@@ -403,7 +453,14 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
                 break
             if vocab._add(vocab.id2bytes[a] + vocab.id2bytes[b], prov="build", pair=(a, b)) is not None:
                 minted += 1
+        vocab.counters["tok.build_mint"] += minted
         if minted == 0:
+            # CONVERGED MEANS THE CORPUS RAN OUT OF PAIRS, and it is NOT the size >= target break
+            # above. Setting it there too would say a build that reached its target had nothing left
+            # to mint, which is the opposite claim and the one that matters for reading v0: a run
+            # that converged below target is exactly the case the old subtract-seed_vocab row
+            # over-reported (self_organize.py:1274-1281).
+            vocab.counters["tok.build_converged"] = 1
             break                    # a pass that mints nothing will mint nothing next time either
 
     if mode == "fixed":
@@ -528,7 +585,7 @@ def _replay_merges(vocab, path, *, recon=None):
     return vocab
 
 
-def _segment(vocab, data, *, dropout=0.0, stream=None, start=0):
+def _segment(vocab, data, *, dropout=0.0, stream=None, start=0, counts=None):
     """Greedy longest match from `start`. Returns (ids, byte_pos).
 
     LONGEST MATCH, NOT A MERGE REPLAY, and the difference is that this one function serves the
@@ -539,6 +596,14 @@ def _segment(vocab, data, *, dropout=0.0, stream=None, start=0):
     `mlbf[b]` bounds the probe per FIRST BYTE. A global maxlen would probe every length from the
     longest token in the table downward at every position, so one 16-byte token would make every
     position cost sixteen dict lookups whether or not any 16-byte token starts with that byte.
+
+    `counts`, WHEN GIVEN, IS THE CALLER'S DID IT FIRE ACCUMULATOR AND NOT THIS FUNCTION'S: a
+    {"skip", "byte"} dict this loop adds to, defaulting to None because the two counters it feeds --
+    tok.dropout_skip and tok.byte_fallback -- are declared by tokenize() and by nothing else. THAT IS
+    WHY IT IS AN ARGUMENT rather than a write straight to `vocab.counters`: build_vocabulary calls
+    this function on every counting pass and again for the final bytes_per_token measurement, and
+    folding those in would make the two rows an operator reads a sum over the BUILD SAMPLE and the
+    RUN STREAM, under a name that names only one of them. The three build call sites pass nothing.
     """
     ids, pos = [], []
     n, i = len(data), start
@@ -555,6 +620,8 @@ def _segment(vocab, data, *, dropout=0.0, stream=None, start=0):
             # `dropout`, falling back toward the raw byte, which is always in the table. Used for
             # the TRAINING stream and never for held-out text, generation or the final segmentation.
             if dropout > 0.0 and stream is not None and stream.random() < dropout:
+                if counts is not None:
+                    counts["skip"] += 1
                 continue
             ids.append(j)
             pos.append(i)
@@ -562,9 +629,15 @@ def _segment(vocab, data, *, dropout=0.0, stream=None, start=0):
             took = L
             break
         if not took:
+            # THE BYTE FALLBACK, AND EVERY 1-BYTE TOKEN COMES THROUGH HERE: the match loop above is
+            # `range(hi, 1, -1)` and never considers L=1, so this branch is the whole population of
+            # tok.byte_fallback and a caller cannot re-derive the number from `ids` without
+            # re-stating that rule in a second place.
             ids.append(b0)
             pos.append(i)
             i += 1
+            if counts is not None:
+                counts["byte"] += 1
     return ids, pos
 
 
@@ -612,11 +685,28 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
          measured value and so follow correctly; whoever reads a width that changed with no SIG
          lever set should look here first.
 
-    LEVERS READ: mode, dropout
+    `mode` IS NOT READ HERE AND THE LINE BELOW NO LONGER CLAIMS IT IS (r3 finding,
+    tok/api.py::tokenize). Established by AST rather than by eye: the only attribute this body takes
+    off `tok` is `dropout`. The LINE was the wrong half of the pair and not the body, and the reason
+    is this package's own one-declaration rule -- what this function emits is a function of the
+    Vocabulary IT IS HANDED plus that one lever, and mode's effect is already FROZEN INTO that
+    vocabulary by build_vocabulary (mode="bytes" returns a table with no merges, so the match loop in
+    _segment has nothing to take; mode="fixed" closes `ceiling`). Re-reading `mode` here would be a
+    second declaration of a decision another entry point already made, and it would let a "bytes"
+    Config handed to an "online" vocabulary make the mode win over the table that is actually there.
+    THE COST OF THE STALE LINE WAS NOT COSMETIC: K4 credits a lever the moment ANY stub in the
+    package names it, so a declaration with no read makes K4 report a reader that does not exist --
+    the untrippable-guard family, 60 of the survey's 475 records. TOK_MODE loses nothing by the
+    correction: build_vocabulary names it AND demonstrably reads it (`mode = str(tok.mode)`), and
+    on_window names it for the body P4 will write.
+
+    LEVERS READ: dropout
     WIRES READ: none
     DID IT FIRE: tok.segment, tok.retok, tok.retok_noop (reported SEPARATELY so a frozen run's 39
                  no-op re-tokenizations read as skipped rather than as activity), tok.dropout_skip
-                 (unreachable at dropout=0.0, the default), tok.byte_fallback
+                 (ABSENT, not 0, at dropout=0.0, the default -- the branch is unreachable there and a
+                 zero printed for a branch that cannot be taken is the collapse Gate exists to
+                 refuse), tok.byte_fallback
     """
     tok = tok.owned_by("TOK")
     drop = float(tok.dropout) if regularize else 0.0
@@ -647,7 +737,7 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     stamp = (vocab.size(), len(vocab.seq2id))
     cache = vocab._retok_cache
     is_retok = cache is not None and cache[0] is data and cache[1] == start and cache[2] == len(data)
-    if is_retok and drop <= 0.0 and cache[3] == stamp:
+    if is_retok and drop <= 0.0 and cache[3] == stamp and not cache[5]:
         # THE SKIP TEST IS DISABLED WHENEVER dropout > 0 (the docstring's own words), because a
         # regularized call is no longer a deterministic function of the vocabulary alone -- it also
         # depends on the draw from `stream`, so returning the cached Segmentation here would freeze
@@ -656,6 +746,19 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
         # because the two arms agree at TOK_DROPOUT=0 (the shipped default) and the guard should
         # track the ACTUAL draw, not the caller's intent, in case a future caller ever regularizes
         # at dropout=0.
+        # AND `not cache[5]`: THE TEST IS ALSO DISABLED WHEN THE CACHED ANSWER ITSELF CAME FROM A
+        # DRAW (r3 finding, tok/api.py::tokenize). Both halves of the guard used to look only at
+        # THIS call, so a deterministic call landing on a regularized cache entry was served the
+        # regularized Segmentation -- exactly the case this docstring rules out ("never for held-out
+        # text, generation, or the final segmentation, which must be deterministic"), and it was
+        # counted as tok.retok_noop, a row whose whole meaning is "the rebuild would have been
+        # byte-identical". Measured on the training text at TOK_DROPOUT=0.3: the deterministic call
+        # came back with the previous call's 165 ids where a real deterministic segmentation of the
+        # same bytes against the same table is 150 -- 15 tokens of BPE-dropout noise in the final
+        # segmentation, under a counter saying nothing had changed, which is the FALSE EQUATION
+        # spine/gate.py refuses in its own domain. At the shipped TOK_DROPOUT=0.0 nothing moves:
+        # cache[5] is False on every entry, and the cached and freshly built segmentations were
+        # verified identical.
         vocab.counters["tok.retok_noop"] = vocab.counters.get("tok.retok_noop", 0) + 1
         return cache[4]
     if is_retok:
@@ -666,7 +769,22 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
         vocab.counters["tok.retok"] = vocab.counters.get("tok.retok", 0) + 1
     vocab.counters["tok.segment"] = vocab.counters.get("tok.segment", 0) + 1
 
-    ids, byte_pos = _segment(vocab, data, dropout=drop, stream=stream, start=start)
+    # THE TWO COUNTERS THIS ENTRY POINT DECLARES AND NOTHING WROTE (r3 finding: both read
+    # armed-but-0 forever, and byte_fallback in particular is the row that says whether the
+    # vocabulary is being used at all). `counts` is passed from HERE and from nowhere else, so the
+    # numbers are the run stream's segmentations and not the build sample's -- see _segment.
+    counts = {"skip": 0, "byte": 0}
+    ids, byte_pos = _segment(vocab, data, dropout=drop, stream=stream, start=start, counts=counts)
+    vocab.counters["tok.byte_fallback"] = (vocab.counters.get("tok.byte_fallback", 0)
+                                           + counts["byte"])
+    if drop > 0.0:
+        # ABSENT, NOT ZERO, WHENEVER THE DRAW DID NOT HAPPEN. The docstring's word for the
+        # dropout=0.0 default is "unreachable", and this file's convention (_replay_merges on
+        # tok.load_reconciled, the build loop on tok.build_pass) is that an unreachable mechanism
+        # leaves its key ABSENT while an armed one that did not fire prints 0. Keyed on `drop`, the
+        # ACTUAL draw, and not on `regularize`, for the same reason the skip test above is.
+        vocab.counters["tok.dropout_skip"] = (vocab.counters.get("tok.dropout_skip", 0)
+                                              + counts["skip"])
 
     # THE LABEL PER TOKEN, carried from the per-byte labels DATA produced. A token spans bytes and
     # therefore could span a splice seam; it takes the label of its FIRST byte, which is the one
@@ -679,8 +797,11 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
                        bytes_per_token=_derive.bytes_per_token(len(data) - start, len(ids)))
     # CACHED FOR THE NEXT CALL'S COMPARISON, ALWAYS -- including the dropout>0 arm, so that a
     # subsequent deterministic call (dropout back at 0, or the final pre-eval segmentation) has a
-    # real stamp to compare against rather than one left over from two calls ago.
-    vocab._retok_cache = (data, start, len(data), stamp, seg)
+    # real stamp to compare against rather than one left over from two calls ago. THE LAST FIELD IS
+    # WHETHER THIS ANSWER CAME FROM A DRAW, and it is what keeps that always-cache honest: the entry
+    # is then usable as a STAMP by the next call and unusable as an ANSWER, which is the distinction
+    # the five-field tuple could not express.
+    vocab._retok_cache = (data, start, len(data), stamp, seg, drop > 0.0)
     return seg
 
 

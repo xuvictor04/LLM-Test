@@ -58,6 +58,18 @@ class Clock:
     implicit `__dict__` is gone, so a value object can no longer be given an undeclared attribute by
     anyone who happens to have one in hand.
 
+    WHAT WENT WITH THE `__dict__`, AND IT IS NOT ONLY THE UNDECLARED ATTRIBUTE. `__slots__ = ()` on
+    the six kinds removed the implicit `__weakref__` slot along with the implicit `__dict__`, so a
+    Clock IS NO LONGER WEAK-REFERENCEABLE: `weakref.ref(Windows(1))` raised nothing before this
+    change and now raises "TypeError: cannot create weak reference to 'Windows' object". NOTHING IN
+    THE TREE NEEDS ONE -- the only weakref in src/ is data/api.py::_REPLAY's `weakref.ref(areas,
+    ...)`, over an Areas and not a Clock -- so this is recorded rather than repaired, because
+    restoring the slot to satisfy no caller is the undeclared affordance this whole docstring is
+    about, wearing the other sign. A caller that ever needs one adds `"__weakref__"` to the
+    `__slots__` below, which costs one pointer per instance and is a decision somebody makes on
+    purpose. _verify_gate_channel does NOT check this: there is nothing to check until something
+    depends on it.
+
     WHAT THIS DOES NOT FIX, said here so it is not discovered: the slot is UNSET on a fresh instance
     and every operation returns a fresh instance, so `period - Windows(1)`, `Windows(period)` and
     `period + Windows(0)` all come back with no gates -- exactly as they did when the carrier was a
@@ -80,11 +92,37 @@ class Clock:
             n = n.n
         self.n = int(n)
 
+    # -- EVERY NEW KIND IS CHECKED AT THE MOMENT IT IS CREATED -------------------------------------
+    def __init_subclass__(cls, **kw):
+        """Run the gate-channel check on a new Clock kind as its `class` statement executes.
+
+        THE GUARD USED TO WALK A HAND-WRITTEN LIST, so it stopped covering the tree the moment
+        anyone added a kind. `_verify_gate_channel` iterated `CLOCK_KINDS + (Clock,)` -- the six
+        names somebody remembered to list -- and a SEVENTH kind written without `__slots__ = ()`
+        got the implicit `__dict__` back, accepted any attribute at all, and imported green. That
+        is the same edit by the same reader the check exists to catch, one step earlier, and a
+        check that silently stops covering new cases is worse than no check because the green
+        import is read as evidence.
+
+        A HOOK AND NOT A LONGER LIST: this fires for every subclass of Clock, in any module, at
+        any time, and it cannot be forgotten by the person adding the kind because they do not have
+        to remember it. See _verify_kind for what is checked and why each arm is refused.
+        """
+        super().__init_subclass__(**kw)
+        _verify_kind(cls)
+
     # -- construction and display ----------------------------------------------------------------
     def __repr__(self): return f"{type(self).__name__}({self.n})"
     def __str__(self): return f"{self.n} {self.KIND}"
     def __int__(self): return self.n
-    def __index__(self): return self.n            # so range(), slicing and % work
+    # __index__ FEEDS operator.index, WHICH IS range(), slicing, list indexing and hex/oct/bin --
+    # AND NOT `%`, WHICH THIS COMMENT CLAIMED UNTIL 2026-09-04. `%` needs __mod__/__rmod__ and
+    # nothing here defines them, in either direction and on every revision this file has ever had:
+    # `Windows(7) % 3` and `7 % Windows(3)` are both TypeError, as are `//` and `*`. Their absence
+    # is the mechanism, not an omission -- a cadence written `step % period` is exactly the
+    # cross-kind arithmetic spine/derive.py::flush_period_windows exists to replace with a named
+    # conversion, and a reader who believes the modulo works is a reader about to write it.
+    def __index__(self): return self.n
     def __hash__(self): return hash((type(self).__name__, self.n))
     def __bool__(self): return self.n != 0
 
@@ -128,6 +166,81 @@ class Clock:
         if per <= 0:
             raise UnitError(f"convert() rate must be positive, got {per!r}")
         return to(int(self.n / per))
+
+
+def _verify_kind(kind):
+    """Refuse a Clock kind that cannot carry `.gates`, or that can carry anything, or that is unlisted.
+
+    CALLED FROM Clock.__init_subclass__, so it runs at CLASS CREATION for every kind in this file
+    and for any kind added later anywhere else. _verify_gate_channel calls it again over every kind
+    that exists at import, so removing the hook would not silently disarm the six.
+
+    FOUR ARMS, EACH ONE A DEFECT SOMEBODY WOULD OTHERWISE SHIP GREEN:
+
+      no `__slots__` of its own   the implicit `__dict__` comes back, `.gates` works again BY
+                                  ACCIDENT rather than by the declaration on Clock, and any
+                                  undeclared attribute can be hung on a value object.
+      `__slots__` that shadows    a kind re-declaring "n" or "gates" gets a SECOND slot descriptor
+                                  hiding the base's, which is the case the first refusal's message
+                                  has always named ("do not add a __slots__ of its own to a Clock
+                                  kind that shadows it") and which nothing detected until now.
+      `.gates` unassignable       the D14 channel is gone; ckpt/api.py::save_period's gate is lost
+                                  with no error at the producer and no line in the report.
+      not in CLOCK_KINDS          the kind exists and the tree cannot name it. CLOCK_KINDS is a
+                                  REGISTRY and not a convenience list: spine/wire.py::_known_units
+                                  builds the legal wire-unit vocabulary from it, so a kind missing
+                                  from it cannot be a wire's unit, and tests/test_ownership.py's
+                                  O11 carries the same six names. A kind declared outside this
+                                  module cannot be registered at all, which is why the message
+                                  says to declare it here: one place, like every other declaration
+                                  in the spine.
+
+    The registry arm is SKIPPED while this module is still executing -- CLOCK_KINDS does not exist
+    until below the six -- and _verify_gate_channel makes it up at the bottom of the file, so a
+    seventh kind declared here and left out of the tuple still fails the import loudly.
+    """
+    own = kind.__dict__.get("__slots__", None)
+    if own is None:
+        raise RuntimeError(
+            f"spine.units.{kind.__name__} is a Clock kind with no `__slots__` of its own, so its "
+            f"instances carry an implicit __dict__ and `.gates` would work by ACCIDENT again -- "
+            f"the state this module was in until 2026-09-04, when that omission was the only "
+            f"reason ckpt/api.py::save_period's gate attachment landed anywhere. Every kind "
+            f"declares `__slots__ = ()`; the channel is declared once, on Clock.")
+    own = (own,) if isinstance(own, str) else tuple(own)
+    shadow = sorted(set(own) & set(Clock.__slots__))
+    if shadow:
+        raise RuntimeError(
+            f"spine.units.{kind.__name__} declares {shadow} in its own __slots__, which SHADOWS "
+            f"the slot of the same name on spine/units.py::Clock. A shadowing slot is a second "
+            f"descriptor over a second cell: the base's is still there, still allocated, and no "
+            f"longer reachable through this kind. `gates` is the DID IT FIRE channel and `n` is "
+            f"the count; both belong to Clock and neither is a kind's to re-declare.")
+    probe = kind(1)
+    try:
+        probe.gates = ()
+    except AttributeError:
+        raise RuntimeError(
+            f"spine.units.{kind.__name__} can no longer carry `.gates`. That attribute is the "
+            f"DID IT FIRE channel decision D14 shipped CKPT.save_period on -- it returns a "
+            f"units.Windows with `period.gates = (Gate('ckpt.periodic_armed', ...),)` -- and "
+            f"without it that gate is lost with no error at the producer and no line in the "
+            f"report. Restore 'gates' to spine/units.py::Clock's __slots__.") from None
+    if hasattr(probe, "__dict__"):
+        raise RuntimeError(
+            f"spine.units.{kind.__name__} instances carry a __dict__, so `.gates` is once more an "
+            f"ACCIDENT rather than the declared slot on spine/units.py::Clock, and any undeclared "
+            f"attribute can be hung on a value object. Give it `__slots__ = ()` -- and if it "
+            f"already has one, an ancestor between it and Clock does not.")
+    registry = globals().get("CLOCK_KINDS")
+    if registry is not None and kind not in registry:
+        raise RuntimeError(
+            f"spine.units.{kind.__name__} is a Clock kind that is not in CLOCK_KINDS. That tuple "
+            f"is the registry, not a convenience list: spine/wire.py::_known_units builds the "
+            f"legal set of wire units from it, so a kind absent from it cannot be named as a "
+            f"unit by any coupling, and nothing that walks the kinds can see it. Declare the kind "
+            f"in spine/units.py beside the other six and add it to CLOCK_KINDS in the same edit; "
+            f"a kind declared in another module cannot be registered and must move here.")
 
 
 class Steps(Clock):
@@ -213,26 +326,53 @@ def _verify_gate_channel():
     `__slots__ = ()` puts the implicit `__dict__` back, and the channel would then work again by
     accident -- the same undeclared affordance, silently restored, and any attribute at all could be
     hung on a value object. Both are refused here, by name.
+
+    AND IT NO LONGER WALKS A HAND-WRITTEN LIST, WHICH IS THE THIRD WAY IT WENT WRONG. This loop read
+    `CLOCK_KINDS + (Clock,)` -- the six names somebody remembered to write down -- so a SEVENTH kind
+    added without `__slots__ = ()` escaped both refusals and imported green, with `.gates` working
+    by accident on it and any undeclared attribute accepted. Demonstrated on a scratch copy of this
+    module before the repair: a seventh kind took `n.anything = 1` and the import stayed silent.
+    Two changes close it and they are deliberately not the same mechanism. Clock.__init_subclass__
+    checks EVERY new kind as its class statement runs, wherever it is written, so nothing has to be
+    remembered; and this function now enumerates `Clock.__subclasses__()` transitively rather than
+    the tuple, so it also refuses a kind that exists but was left OUT of CLOCK_KINDS -- the registry
+    spine/wire.py::_known_units builds the legal wire-unit vocabulary from, where an unlisted kind
+    is invisible rather than wrong. The tuple is checked in the other direction too: an entry in it
+    that is not a Clock kind would break `k.KIND` in that same reader.
     """
-    for kind in CLOCK_KINDS + (Clock,):
-        probe = kind(1)
-        try:
-            probe.gates = ()
-        except AttributeError:
+    probe = Clock(1)
+    try:
+        probe.gates = ()
+    except AttributeError:
+        raise RuntimeError(
+            "spine.units.Clock can no longer carry `.gates`. That attribute is the DID IT FIRE "
+            "channel decision D14 shipped CKPT.save_period on -- it returns a units.Windows with "
+            "`period.gates = (Gate('ckpt.periodic_armed', ...),)` -- and without it that gate is "
+            "lost with no error at the producer and no line in the report. Restore 'gates' to "
+            "spine/units.py::Clock's __slots__.") from None
+    if hasattr(probe, "__dict__"):
+        raise RuntimeError(
+            "spine.units.Clock instances carry a __dict__ again, so `.gates` is once more an "
+            "ACCIDENT rather than a declared slot, and any undeclared attribute can be hung on a "
+            "value object. Restore `__slots__ = (\"n\", \"gates\")` on Clock itself.")
+
+    for kind in CLOCK_KINDS:
+        if not (isinstance(kind, type) and issubclass(kind, Clock) and kind is not Clock):
             raise RuntimeError(
-                f"spine.units.{kind.__name__} can no longer carry `.gates`. That attribute is the "
-                f"DID IT FIRE channel decision D14 shipped CKPT.save_period on -- it returns a "
-                f"units.Windows with `period.gates = (Gate('ckpt.periodic_armed', ...),)` -- and "
-                f"without it that gate is lost with no error at the producer and no line in the "
-                f"report. Restore 'gates' to spine/units.py::Clock's __slots__; do not add a "
-                f"__slots__ of its own to a Clock kind that shadows it.") from None
-        if hasattr(probe, "__dict__"):
-            raise RuntimeError(
-                f"spine.units.{kind.__name__} instances carry a __dict__ again, so `.gates` is once "
-                f"more an ACCIDENT rather than the declared slot on spine/units.py::Clock, and any "
-                f"undeclared attribute can be hung on a value object. This is the state the tree "
-                f"was in until 2026-09-04, when the omission was the only reason CKPT.save_period "
-                f"worked. Give every kind in CLOCK_KINDS `__slots__ = ()` back.")
+                f"spine.units.CLOCK_KINDS contains {kind!r}, which is not a Clock kind. That tuple "
+                f"is read as a registry of kinds -- spine/wire.py::_known_units takes `k.KIND` off "
+                f"every entry to build the legal wire-unit vocabulary -- so a non-kind in it is an "
+                f"AttributeError in another package's import, arriving nowhere near this file.")
+
+    # EVERY KIND THAT EXISTS, not the six that are listed: the listing is what this arm checks.
+    seen, stack = [], [Clock]
+    while stack:
+        for sub in stack.pop().__subclasses__():
+            if sub not in seen:
+                seen.append(sub)
+                stack.append(sub)
+    for kind in seen:
+        _verify_kind(kind)
 
 
 _verify_gate_channel()

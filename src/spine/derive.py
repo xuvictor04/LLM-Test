@@ -39,7 +39,7 @@ because the table is the only evidence of what the old system actually did. Wher
 reached into the environment from inside its body, the parameter arrives as an argument instead; that is
 the only intended behavioural difference, and it is noted on the function.
 """
-from .units import Backwards, Clock, Flushes, Steps, UnitError, Windows
+from .units import Backwards, Clock, Epochs, Flushes, Steps, UnitError, Windows
 
 
 # === capacity pressure ===========================================================================
@@ -224,6 +224,12 @@ def flush_period(period_steps, batch_w):
         raise UnitError(f"flush_period: period_steps must be Steps, got "
                         f"{type(period_steps).__name__}. A cadence is written in steps; if this value "
                         f"is already in flushes it has been converted twice.")
+    if isinstance(batch_w, Clock):
+        raise UnitError(f"flush_period: batch_w={batch_w!r} is a Clock. This argument is a RATE -- "
+                        f"windows per flush -- and a rate is a ratio of two kinds, not a count of "
+                        f"one. See opt_steps_from_backwards for why every conversion here refuses "
+                        f"it: `int()` on a Clock succeeds silently, so the rate is the one argument "
+                        f"a foreign kind can enter through. Pass the bare number.")
     w = int(batch_w)
     if w < 1:
         raise UnitError(f"flush_period: batch_w={batch_w!r} -- a flush covers at least one window.")
@@ -274,6 +280,11 @@ def flush_period_windows(period_windows, batch_windows):
                         f"{type(period_windows).__name__}. This cadence is compared against `step`, and "
                         f"`step` advances once per window (`i += WIN; step += 1`); if the value is "
                         f"already in flushes it has been converted twice.")
+    if isinstance(batch_windows, Clock):
+        raise UnitError(f"flush_period_windows: batch_windows={batch_windows!r} is a Clock. This "
+                        f"argument is a RATE -- windows per flush -- and a rate is a ratio of two "
+                        f"kinds, not a count of one; `int()` on a Clock succeeds silently. Pass the "
+                        f"bare number. See opt_steps_from_backwards.")
     w = int(batch_windows)
     if w < 1:
         raise UnitError(f"flush_period_windows: batch_windows={batch_windows!r} -- a flush covers at "
@@ -281,6 +292,81 @@ def flush_period_windows(period_windows, batch_windows):
     period = period_windows.convert(Flushes, per=w)
     return Flushes(1) if period.n < 1 else period
 
+
+
+def run_windows_from_epochs(n_epochs, windows_in_epoch):
+    """A run's length in EPOCHS, expressed in the WINDOWS `step` counts.
+
+    UNIT IN: n_epochs = Epochs, windows_in_epoch = windows per epoch (count).
+    UNIT OUT: Windows.
+
+    THE LAST UNNAMED CROSS-KIND CONVERSION IN THE TREE, AND IT WAS IN THE COMPOSITION ROOT.
+    spine/compose.py::_run_windows resolved the run's length as
+
+        return units.Windows(_windows_in_epoch(sysm) * int(sysm.configs["RUN"].epochs))
+
+    -- windows-per-epoch times a count of EPOCHS, multiplied inline on bare ints and wrapped in the
+    answer's kind at the end, which is the shape units.py::Clock.convert refuses ("There is no
+    implicit path between kinds ... call the named function in spine.derive that already knows the
+    rate, so the conversion exists in one place with a name") and the shape
+    tests/test_ownership.py::check_o11_no_unnamed_clock_arithmetic exists to forbid. The number was
+    right at every configuration, exactly as opt_steps_from_windows' was, and that is the point of
+    the rule rather than an argument against it.
+
+    WHY O11 DID NOT CATCH IT, WHICH IS WORTH MORE THAN THE DEFECT. Three independent reasons, any
+    one of which is enough: the check drops `src/spine/` twice (its `_PKG_DIRS` subtracts "spine"
+    and its module loop skips `src/spine/`, on the ground that derive IS the named conversion and
+    must do the arithmetic); its AST half matches an operand that is an ATTRIBUTE whose name is one
+    of the OWNING package's clock levers, and both operands there are Calls; and `epochs` is RUN's
+    lever, while the file doing the arithmetic belongs to a package with no levers.py at all. The
+    exemption is the deliberate one -- this file must multiply and divide -- but it exempts the
+    composition root along with the conversions, and the root is the one other place in the tree
+    that legitimately holds two packages' clocks at once. Q: whether O11's skip should be narrowed
+    from `src/spine/` to `src/spine/derive.py`. That is the ownership pass's call, not this file's.
+
+    EPOCHS -> WINDOWS AND NOT EPOCHS -> STEPS, though the horizon eventually wants Steps. Two
+    boundaries separate an epoch from an optimizer step and they are crossed by two different
+    rates: this one is windows per epoch, MEASURED on the segmentation that exists
+    (len(Segmentation.ids) // LM.ctx, spine/compose.py::_windows_in_epoch), and the next is
+    windows per optimizer step, which is opt_steps_from_windows' divisor. Folding them into one
+    call would put a measured quantity and a configured one under one rate, which is how
+    `STREAM_LEN // WIN` came to divide a BYTE budget by a TOKEN window and overstate the step count
+    by the whole compression ratio.
+
+    NO FLOOR, AND THAT IS THE SAME RULING opt_steps_from_backwards MAKES rather than the one
+    opt_steps_from_windows makes. `windows_in_epoch` is already floored at one by its own producer,
+    so the only way to reach zero here is RUN_EPOCHS=0 -- which train/api.py::startup_refusals
+    REFUSES with a sentence and deliberately does not clamp, "because a clamp makes the banner
+    print a number the run did not use". A floor here would restore exactly that clamp one file
+    away from the refusal, and it would be invisible: the run would report one epoch's worth of
+    windows for a run configured to make no passes. Downstream nothing divides by this value:
+    opt_steps_from_windows floors ITS answer at one Step, so the zero horizon that would divide by
+    zero in n_cycles is already refused where it matters.
+
+    REFUSES A Clock AS THE RATE, like every conversion in this file: `windows_in_epoch` is a RATIO
+    of two kinds and not a count of one, and `int()` on a Clock succeeds silently. See
+    opt_steps_from_backwards for the measurement that argument opened.
+    """
+    if type(n_epochs) is not Epochs:
+        raise UnitError(f"run_windows_from_epochs: n_epochs must be Epochs, got "
+                        f"{type(n_epochs).__name__}. An epoch is a pass over the stream, not a "
+                        f"count of anything the loop compares against -- units.py::Epochs exists "
+                        f"so that `epochs >= some_step_threshold` raises, which is the comparison "
+                        f"that made EPOCHS set the run length AND the cosine horizon at once.")
+    if isinstance(windows_in_epoch, Clock):
+        raise UnitError(f"run_windows_from_epochs: windows_in_epoch={windows_in_epoch!r} is a "
+                        f"Clock. This argument is a RATE -- windows per epoch -- and a rate is a "
+                        f"ratio of two kinds, not a count of one. `int()` on a Clock succeeds, so "
+                        f"the divisor is the one argument a foreign kind can enter a conversion "
+                        f"through. Pass the bare number.")
+    w = int(windows_in_epoch)
+    if w < 1:
+        raise UnitError(f"run_windows_from_epochs: windows_in_epoch={windows_in_epoch!r} -- an "
+                        f"epoch covers at least one window. spine/compose.py::_windows_in_epoch "
+                        f"floors it at 1 for the same reason: an epoch of zero windows is a "
+                        f"segmentation shorter than one context, which is a data failure and not "
+                        f"a run length.")
+    return Windows(n_epochs.n * w)
 
 
 def cadences_that_cannot_fire(run_windows, periods):
@@ -384,6 +470,12 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
         raise UnitError(f"opt_steps_from_windows: run_windows must be Windows, got "
                         f"{type(run_windows).__name__}. The run's length is counted in the clock "
                         f"`step` advances, and a Steps value here has already been converted once.")
+    if isinstance(effective_batch_windows, Clock):
+        raise UnitError(f"opt_steps_from_windows: effective_batch_windows="
+                        f"{effective_batch_windows!r} is a Clock. This argument is a RATE -- "
+                        f"batch_windows x accum, windows per optimizer step -- and a rate is a "
+                        f"ratio of two kinds, not a count of one; `int()` on a Clock succeeds "
+                        f"silently. Pass the bare number. See opt_steps_from_backwards.")
     w = int(effective_batch_windows)
     if w < 1:
         raise UnitError(f"opt_steps_from_windows: effective_batch_windows={effective_batch_windows!r} "
@@ -446,6 +538,30 @@ def opt_steps_from_backwards(n_backward, accum):
     that with both numbers and the boundary they were measured from, which is a better sentence
     than any this function could raise.
 
+    AND THE BODY FLOORED INSTEAD, IN THE SAME PARAGRAPH THAT ADMITS THE NEGATIVE (corrected
+    2026-09-04). `//` truncates only for operands of one sign; on a negative it FLOORS, which
+    rounds away from zero. The two differ on exactly the counts this function says it accepts:
+    opt_steps_from_backwards(Backwards(-1), 4) answered Steps(-1) -- one whole optimizer step of
+    deficit -- where a single backward pass is short of the boundary and no step's worth of passes
+    is missing at all. TRUNCATION IS THE CORRECT ONE and the docstring was the correct half, for
+    the reason stated in the sentence above it: a partial step is not a step, in either direction.
+    Floor made the deficit side round a partial step UP in magnitude, which is precisely the "step
+    that has not been taken" this function refuses to report, and it is the number
+    opt/api.py::counters prints into the P3-H29 message when the invariant breaks on a resume.
+    Positive counts are unaffected -- `//` and truncation agree for n >= 0 -- so no live run's
+    number moves: the only reachable negative is the resume subtraction named above.
+
+    REFUSES A Clock AS ITS DIVISOR (added 2026-09-04), and that hole is worth naming because it is
+    the general one. Every conversion in this file refuses a foreign kind at the CLOCK end and
+    every one of them then wrote `int(rate)` at the other, where units.Clock's own __int__ and
+    __index__ make the read succeed: opt_steps_from_backwards(Backwards(52), Windows(4)) returned
+    Steps(13), so a Windows crossed a function whose first act is to refuse a Windows. The divisor
+    is a RATE -- a ratio of two kinds -- and no count of one kind is ever the right value for it,
+    which is why the repair is a refusal and not a conversion. The same three lines are now in
+    flush_period, flush_period_windows, opt_steps_from_windows, run_windows_from_epochs and
+    accum_due, written out at each rather than folded into a helper for the reason pin_tick gives
+    about its own two type tests.
+
     REFUSES ANYTHING BUT A Backwards AT ONE END, exactly as accum_due does and for the same
     measurement: the old gate counted the WINDOW counter and accumulated nothing, 55 optimizer
     steps where 13 were due. REFUSES A DIVISOR BELOW 1 at the other, as flush_period,
@@ -462,13 +578,31 @@ def opt_steps_from_backwards(n_backward, accum):
                         f"{type(n_backward).__name__}. Accumulation counts BACKWARD PASSES -- a "
                         f"window counter measured 55 optimizer steps where 13 were due, and a "
                         f"Steps value here is the answer being fed back in as the question.")
+    if isinstance(accum, Clock):
+        raise UnitError(f"opt_steps_from_backwards: accum={accum!r} is a Clock. This divisor is a "
+                        f"RATE -- backward passes per optimizer step -- and a rate is a RATIO of "
+                        f"two kinds, not a count of one, so no Clock can be the right value for it. "
+                        f"It is refused rather than read because `int()` on a Clock SUCCEEDS: "
+                        f"units.Clock declares __int__ and __index__, so `int(Windows(4))` is 4 and "
+                        f"this function would have answered Steps(13) for "
+                        f"opt_steps_from_backwards(Backwards(52), Windows(4)) -- the kind refused "
+                        f"at the other end, entering through the one argument that had none. Pass "
+                        f"the bare number.")
     k = int(accum)
     if k < 1:
         raise UnitError(f"opt_steps_from_backwards: accum={accum!r} -- an optimizer step covers at "
                         f"least one backward pass. This divisor is accum ALONE and never "
                         f"batch_windows x accum: that product spans two boundaries and belongs to "
                         f"opt_steps_from_windows, which starts a window lower.")
-    return Steps(n_backward.n // k)
+    # TRUNCATION, WRITTEN OUT, BECAUSE `//` IS NOT IT ON THE NEGATIVE COUNTS THIS FUNCTION ADMITS.
+    # `-1 // 4` is -1 and `int(-1 / 4)` is 0: floor rounds AWAY from zero on a negative operand, so
+    # a single backward pass short of the resume boundary reported a WHOLE optimizer step of
+    # deficit at accum=4, which is the "step that has not been taken" the docstring above refuses
+    # in the same paragraph that admits the negative. Float division is not used for it -- `int(n /
+    # k)` loses exactness above 2**53 and a backward count is unbounded -- so the sign is handled
+    # by hand and the arithmetic stays integer.
+    n = n_backward.n
+    return Steps(n // k if n >= 0 else -((-n) // k))
 
 
 def accum_due(n_backward, accum):
@@ -494,6 +628,13 @@ def accum_due(n_backward, accum):
         raise UnitError(f"accum_due: n_backward must be Backwards, got {type(n_backward).__name__}. "
                         f"Accumulation counts backward passes -- a window counter measured 55 steps "
                         f"where 13 were due.")
+    if isinstance(accum, Clock):
+        raise UnitError(f"accum_due: accum={accum!r} is a Clock. This is a RATE -- backward passes "
+                        f"per optimizer step -- and a rate is a ratio of two kinds, not a count of "
+                        f"one; `int()` on a Clock succeeds silently, so it is refused here as it is "
+                        f"in opt_steps_from_backwards. THE max(1, ...) BELOW IS UNTOUCHED and is "
+                        f"still the shipped read-site clamp: this refusal is about the KIND, which "
+                        f"no clamp can repair, and not about the value.")
     n = int(n_backward)
     k = max(1, int(accum))
     return n > 0 and n % k == 0

@@ -517,16 +517,32 @@ def _var_cov(z):
     Written here rather than imported from world_model.py, which is the frozen old tree's own copy:
     O10 confines this package's imports to the spine's permitted set plus torch, and a package that
     reaches outside src/ for a loss term has a dependency `grep -rn d_` cannot index.
+
+    n=1 IS NOT A HYPOTHETICAL AND IT USED TO POISON THE WHOLE RUN. `torch.var(dim=0)` is UNBIASED --
+    it divides by n-1 -- so at one live expert the variance line returned NaN, one line ABOVE a
+    guard written for the covariance division and placed below it. Measured before the repair, at
+    FAB_N0=1 with the pool full: aux_loss NaN at step 0, six of the twenty FAB tensors NaN after
+    that update and ALL 28 LM tensors plus all 20 FAB tensors NaN by step 1 -- one undefined
+    variance killing every parameter in the model, and `emb_var` cannot switch it off because
+    NaN * 0 is NaN. The guard now stands ABOVE the arithmetic it guards and the n=1 branch uses the
+    BIASED estimator, which is the mean squared deviation from the mean and is defined at n=1: the
+    term is HALVED exactly as this function's contract says -- covariance 0, variance evaluated --
+    and one embedding's spread is 0, so the hinge reads its maximum 1 - sqrt(1e-4) = 0.99 with a
+    gradient of exactly zero, because there is nothing a single point can do about its own spread.
+    That is a finite reading of a real quantity, where the NaN was a reading of nothing.
     """
     z = z - z.mean(0)
-    std = torch.sqrt(z.var(0) + 1e-4)
-    var_loss = F.relu(1.0 - std).mean()
     n, d = z.shape
     if n < 2:
-        # ONE EXPERT HAS NO COVARIANCE, and (z.T @ z)/(n-1) would divide by zero. The variance half
-        # still means something, so the term is not skipped -- it is halved, and the report says so
-        # through fab.ident_refreshed rather than through a silent NaN.
-        return var_loss, z.new_zeros(())
+        # ONE EXPERT HAS NEITHER A COVARIANCE NOR AN UNBIASED VARIANCE. (z.T @ z)/(n-1) would divide
+        # by zero and so does torch's own var(), which is why this guard is ABOVE both. The mean of
+        # the squared ALREADY-CENTRED z is the biased estimator, spelled out rather than passed as a
+        # flag, so the n>=2 line below stays the unbiased one it has always been and the two
+        # estimators cannot be confused for one another by a later reader.
+        std = torch.sqrt((z ** 2).mean(0) + 1e-4)
+        return F.relu(1.0 - std).mean(), z.new_zeros(())
+    std = torch.sqrt(z.var(0) + 1e-4)
+    var_loss = F.relu(1.0 - std).mean()
     cov = (z.t() @ z) / (n - 1)
     off = cov - torch.diag_embed(torch.diagonal(cov))
     return var_loss, (off ** 2).sum() / d
@@ -554,7 +570,7 @@ def _decay_to_floor(step_n, warm_n, floor):
     return max(floor, 1.0 - step_n / max(1, warm_n))
 
 
-def _identities(pop, n, step_n, emb_every_n):
+def _identities(pop, n, step_n, emb_every_n, *, write=True):
     """(K, refreshed) -- the n live experts' routing keys, EMBEDDED FROM THEIR OWN WEIGHTS.
 
     THIS IS THE ONLY GRADIENT CHANNEL THAT REACHES EVERY EXPERT. Routing computes chain_k of n, so
@@ -569,16 +585,36 @@ def _identities(pop, n, step_n, emb_every_n):
     the previous backward already freed that graph -- returning the live tensors is "Trying to
     backward through the graph a second time", which never fired in the old tree only because the
     society path called this without a step at all.
+
+    A COUNTERFACTUAL READS THIS CACHE AND MUST NOT WRITE IT (`write=False`), WHICH IS NOT TIDINESS.
+    The leave-one-out walk in fabric/api.py::contribution runs under no_grad, so the keys it computes
+    carry NO GRAPH -- and the write it used to perform stamped them into `ident_graph` under the
+    counterfactual's own step. The next TRAINING pass at that step then took the first branch above,
+    was handed a graphless tensor, and the routing term dropped out of the backward: the one gradient
+    channel that reaches every live expert, switched off for a window by a measurement, with every
+    counter and every gate still reading exactly as before.
+    MEASURED at the shipped emb_every=1, two training passes at windows 5 and 6: the pass at window 6
+    reads grad|A|max 4.6525653e-2 and grad|B|max 5.6747589e-2. Insert ONE eight-candidate no_grad
+    leave-one-out walk at window 6 between them and the same pass reads grad|A|max EXACTLY 0.0 and
+    grad|B|max 2.6601586e-2 -- all of A's gradient and half of B's, deleted by a diagnostic. With
+    `write=False` the two cases are bit-identical. The cheaper half is the same defect one size down:
+    the middle branch clears `ident_graph`, so a counterfactual could force the next real pass to
+    re-embed the whole population. Read-only walks now take neither.
     """
     if (pop.ident_step is not None and pop.ident_step == step_n and pop.ident_live == n
             and pop.ident_graph is not None):
         return pop.ident_graph, False
     if (pop.ident is not None and pop.ident_live == n and pop.ident_step is not None
             and step_n - pop.ident_step < emb_every_n):
-        pop.ident_graph = None                  # release the old graph; it can never be handed back
+        if write:
+            pop.ident_graph = None              # release the old graph; it can never be handed back
         return pop.ident, False
     weights = torch.cat([pop.A[:n].reshape(n, -1), pop.B[:n].reshape(n, -1)], -1)
     keys = pop.modules["eemb"](weights)
+    if not write:
+        # THE KEYS ARE HANDED BACK AND NOTHING IS REMEMBERED. `refreshed` is False because no cache
+        # was refreshed; the counter that reads it is a statement about the population's own clock.
+        return keys, False
     pop.ident_graph = keys
     pop.ident, pop.ident_live, pop.ident_step = keys.detach(), n, step_n
     return keys, True
@@ -943,10 +979,27 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     EXACTLY 0.0 at weight_decay=0.
     WHY dL/dA IS NONZERO AT STEP 0 EVEN THOUGH B IS ZERO, because that is the trap: through the
     mixture alone it would be zero (dL/dA = grad_out @ B^T). It is not zero because A reaches the
-    loss by three other routes this body builds -- eemb's identity channel (every live expert's
-    adapter is embedded into the routing keys, so routing gradient reaches ALL n of them, not just
-    the chain_k computed), the load-balance term, and the ae round trip. dL/dB through the mixture is
-    nonzero from the first step because it is (hA)^T @ grad_out, which does not contain B.
+    loss by TWO routes this body builds, and the count was wrong here until it was ablated.
+      1. eemb's IDENTITY CHANNEL. Every live expert's adapter is embedded into the routing keys, so
+         the routing distribution is a function of ALL n adapters and not just the chain_k computed
+         -- and everything downstream of that distribution carries gradient back through it: the
+         load-balance term, the ponder charge, the div_w distinctness weighting, the mixture weights
+         and the vote weights. THOSE ARE CONSUMERS OF THIS ROUTE, NOT ROUTES OF THEIR OWN, which is
+         the correction: an earlier version of this paragraph named the load-balance term as a third
+         independent path. MEASURED, at the widths named above, step 0, OPT_WEIGHT_DECAY=0: with
+         FAB_ROUTE_LEARN=0 and FAB_AE_W=0 -- FAB_BALANCE and FAB_DIV_W left at their shipped
+         defaults -- grad|A|max is EXACTLY 0.0, so neither term reaches A once the identity channel
+         is removed. With route_learn on and ae off it is 1.514e-2; take balance out as well and it
+         falls to 4.342e-3; take div_w out too and 1.284e-8 is all that is left, which is the VOTE's
+         own weights -- FAB_HOP_VOTE=0 on top of that leaves 1.682e-10, the float rounding in the
+         mixture's weight normalisation and nothing else. Adding FAB_PONDER=0 changes nothing at
+         all (1.284e-8 again), because the depth charge is annealed and its scale at window 0 is
+         exactly zero, so `ponder` buys A no gradient on the step this paragraph is about.
+      2. THE ae ROUND TRIP, which reaches A and B without passing through their product at all. On
+         its own -- FAB_ROUTE_LEARN=0, ae at its default -- it carries grad|A|max 1.515e-3.
+    dL/dB through the mixture is nonzero from the first step because it is (hA)^T @ grad_out, which
+    does not contain B: at FAB_ROUTE_LEARN=0 with FAB_AE_W=0, where grad|A| is exactly 0.0,
+    grad|B|max is still 4.400e-3.
 
     LEVERS READ: on, norm_only, society, hop_vote, hop_sup, hops, depth0, halt, halt_max, alpha,
                  ponder, ponder_warm, route_region_w, route_learn, route_t, cent_topk, cent_ema,
@@ -954,7 +1007,19 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  dom_min, div_w, ind_k, ind_w, dk, rank, emb_hid, emb_var, emb_every, ae_w, spawn,
                  spawn_mult, spawn_floor
     WIRES READ: none
-    DID IT FIRE: fab.route_calls, fab.hops_taken, fab.halt_mass_train (TRAINING passes only -- the
+    DID IT FIRE, ALL 24 KEYS THIS BODY WRITES -- counted against the body in BOTH directions on
+    2026-09-04 and found four short, which is why the last four lines exist. A key written and not
+    declared is a number in the report that the contract does not admit to producing; a key declared
+    and not written is the opposite and there are none (all 24 below are written, and 19 of them are
+    SEEDED to 0 before any branch decides, so absent never masquerades as zero). The count is stated
+    because the previous one was wrong: this body writes 24 keys, not nineteen, and it declared 14
+    distinct Gates and not thirteen when that count was taken -- 15 now, fab.halt_spent_on_base
+    being the one added with this reconciliation.
+    A LEAVE-ONE-OUT PASS (`hold_out` set) WRITES NONE OF THEM except fab.holdout_applied, which
+    exists to count leave-one-out passes. It used to write fab.route_calls and fab.hops_taken like
+    any other pass, so eight candidates on one window read 9 route calls and 27 hops taken for a
+    walk that took 3 -- a counterfactual moving the instrument it is measured by.
+                 fab.route_calls, fab.hops_taken, fab.halt_mass_train (TRAINING passes only -- the
                  old EMA averaged eval passes in and moved when nothing but HOLDOUT_N changed),
                  fab.halt_clamped, fab.explored_rows, fab.explore_distinct_targets,
                  fab.discovered + fab.discover_targets (DISTINCT recipients; 1 is H14, where
@@ -964,7 +1029,20 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  term is multiplying a zero again), fab.div_applied, fab.ind_applied,
                  fab.hopsup_applied, fab.ident_refreshed, fab.holdout_applied, fab.spawned,
                  fab.spawn_declined with fab.spawn_gap and fab.spawn_typ recorded AS A PAIR (the
-                 old report printed the gap with no scale to compare it to, ISSUES P1-L29)
+                 old report printed the gap with no scale to compare it to, ISSUES P1-L29),
+                 fab.forward_identity (the FAB_ON=0 arm's own count -- the identity forward is a
+                 pass this package RAN, and a report that shows no route_calls and no reason is a
+                 report of a package that was never called),
+                 fab.norm_only_passes (the FAB_NORM_ONLY=1 control arm, counted for the same reason
+                 and kept separate from fab.forward_identity because the two arms answer different
+                 questions: what the EXPERTS bought, against what the PACKAGE bought),
+                 fab.ident_trained (the ae round trip's own count, which is NOT fab.ident_refreshed:
+                 the round trip trains on every learning pass while the identity cache refreshes on
+                 the emb_every cadence, and tying the two is the defect that left the embedder
+                 collapsed -- so the two counters are the falsifier for that being retied),
+                 fab.halt_spent_on_base (the society arm only, and ONLY when halt mass was actually
+                 spent: at FAB_HALT=0 the blend is the identity on the vote, and counting that as a
+                 spend was a wrong measurement wearing a counter's name)
     """
     fab = fab.owned_by("FAB")
     # THE INCOMING CLOCK IS PUT THROUGH units.Windows, exactly as sig/api.py::cadence_due does with
@@ -1112,9 +1190,11 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  "fab.explore_distinct_targets", "fab.discovered", "fab.discover_targets",
                  "fab.banned_experts", "fab.ec_applied", "fab.balance_nonzero", "fab.div_applied",
                  "fab.ind_applied", "fab.hopsup_applied", "fab.ident_refreshed",
-                 "fab.ident_trained", "fab.holdout_applied", "fab.spawned", "fab.spawn_declined"):
+                 "fab.ident_trained", "fab.holdout_applied", "fab.spawned", "fab.spawn_declined",
+                 "fab.halt_spent_on_base"):
         counters.setdefault(_key, 0)
-    _bump(counters, "fab.route_calls")
+    if solo:
+        _bump(counters, "fab.route_calls")
     # DEPTH. society PINS THE WALK AT ONE HOP and keeps per-expert logits, which is what makes
     # leave-one-out a reweighted sum rather than a re-walk -- it is the same forward pass with a
     # different depth and a different return, NOT a second path. The old tree had two, and
@@ -1129,7 +1209,11 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                               "to extend." if depth0 == 0 else
                               "FAB_DEPTH0 >= FAB_HOPS: the chain already starts at the budget.")))
 
-    keys, refreshed = (_identities(pop, n, step_n, emb_every_n) if route_learn else (None, False))
+    # `write=solo`: A COUNTERFACTUAL MAY READ THE IDENTITY CACHE AND MAY NOT WRITE IT. See
+    # fabric/api.py::_identities for what a no_grad write into `ident_graph` costs the next real
+    # pass -- it is the same sentence as the counters below, one level down in the same body.
+    keys, refreshed = (_identities(pop, n, step_n, emb_every_n, write=solo) if route_learn
+                       else (None, False))
     if refreshed:
         _bump(counters, "fab.ident_refreshed")
     ban, ban_limit, ban_reason = _breadth_ban(pop, n, domain_id, live_domains, dom_frac, dom_min)
@@ -1199,7 +1283,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         # at the level of a single expert. What it does mean is that dL/dA through THIS term alone is
         # zero on the first step (dL/dA = grad_out @ B^T), which is exactly the trap INV-R2-1 records:
         # a probe reaching A only through A @ B measures zero and reads it as an answer. The other
-        # routes -- eemb's identity channel, the balance term, the ae round trip -- do not vanish.
+        # two routes -- eemb's identity channel and the ae round trip -- do not vanish, and they are
+        # TWO and not three: the balance term reaches A only THROUGH the identity channel, measured
+        # at exactly 0.0 with FAB_ROUTE_LEARN=0 and FAB_BALANCE at its default. See this function's
+        # docstring for the whole ablation.
         out = h.unsqueeze(1) + torch.einsum(
             "bklr,bkrd->bkld", torch.einsum("bld,bkdr->bklr", h, pop.A[idx]), pop.B[idx])
         cw = val / val.sum(-1, keepdim=True).clamp_min(_FLOOR)
@@ -1255,19 +1342,30 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         h = pop.modules["norm"](h + alive[:, None, None] * (alpha * (mixture - h)))
         hops_taken += 1
 
-    _bump(counters, "fab.hops_taken", hops_taken)
-    if halt_on:
-        _bump(counters, "fab.halt_clamped", halt_clamped)
-    if explored_rows:
-        _bump(counters, "fab.explored_rows", explored_rows)
-    counters["fab.explore_distinct_targets"] = len(pop.marks.get("explore", ()))
-    if discovered:
-        _bump(counters, "fab.discovered", discovered)
-    counters["fab.discover_targets"] = len(pop.marks.get("discover", ()))
-    if banned_seen:
-        _bump(counters, "fab.banned_experts", banned_seen)
-    if ec_any:
-        _bump(counters, "fab.ec_applied")
+    # A COUNTERFACTUAL WALK MOVES NO COUNT. It used to move two of the most-read ones: with eight
+    # leave-one-out candidates on one window, fab.route_calls read 9 for a single routed window and
+    # fab.hops_taken read 27 for three hops taken -- so every per-pass rate computed from either
+    # (halt mass per call, hops per call, bans per pass) was divided by a denominator the measurement
+    # itself had inflated. That is the instrument moving because it was read, which is the defect
+    # class this project exists to kill, and it stood two lines under this body's own sentence that a
+    # counterfactual "mutates NOTHING and learns NOTHING". The ONE key a counterfactual may touch is
+    # fab.holdout_applied, which exists to count counterfactuals: it is not a reading of the routed
+    # walk, it is the number of times the walk was interrogated. The seeding loop above stays on both
+    # paths because setdefault can create a key at zero and can never move one.
+    if solo:
+        _bump(counters, "fab.hops_taken", hops_taken)
+        if halt_on:
+            _bump(counters, "fab.halt_clamped", halt_clamped)
+        if explored_rows:
+            _bump(counters, "fab.explored_rows", explored_rows)
+        counters["fab.explore_distinct_targets"] = len(pop.marks.get("explore", ()))
+        if discovered:
+            _bump(counters, "fab.discovered", discovered)
+        counters["fab.discover_targets"] = len(pop.marks.get("discover", ()))
+        if banned_seen:
+            _bump(counters, "fab.banned_experts", banned_seen)
+        if ec_any:
+            _bump(counters, "fab.ec_applied")
     if hold_out is not None:
         _bump(counters, "fab.holdout_applied")
 
@@ -1281,10 +1379,23 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # (self_organize.py:4035-4043). Without this the society arm computes a halt mass and throws it
     # away, which is what the old grounded router did before halt became a real operator.
     logits_out = None
+    spent_on_base = 0
     if society and head is not None and last_hop_lg is not None and entry_halt is not None:
         held = entry_halt[:, None, None]
         logits_out = (1.0 - held) * last_hop_lg + held * head(h0)
-        _bump(counters, "fab.halt_spent_on_base")
+        # THE COUNTER SAYS MASS WAS SPENT, SO IT MAY NOT COUNT A BLEND THAT SPENT NONE. At
+        # FAB_HALT=0 the halt column is PINNED at a constant and fabric/api.py::_halt_logit's
+        # caller sets ph to zeros, so `held` is exactly 0, this line is the identity
+        # `logits_out = last_hop_lg`, and the counter still read one spend per society pass. A name
+        # that says "halt mass was spent on the base representation" over a pass where the halt
+        # operator is switched off is the wrong-measurement family inside a counter name -- the same
+        # shape as reporting a cull on a population that cannot be culled. The ARITHMETIC is
+        # unchanged and stays unconditional: at held=0 the blend is a no-op and computing it is what
+        # keeps the two arms one code path. Only the claim is now conditional on the operator being
+        # on AND on some row actually halting, and `fab.halt_mass_train` carries how much.
+        spent_on_base = 1 if (halt_on and float(entry_halt.detach().max()) > 0.0) else 0
+        if spent_on_base and solo:
+            _bump(counters, "fab.halt_spent_on_base")
     elif hop_vote and vote is not None:
         logits_out = vote
     if learn:
@@ -1310,7 +1421,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # BAL_WARM were read, printed and reasoned about for the whole life of the old tree while
     # multiplying a freshly allocated zero. Recorded on training passes only, because under
     # torch.no_grad() every tensor here legitimately has no graph.
-    if balance_w > 0.0 and training:
+    if balance_w > 0.0 and training and solo:
         live_term = (bal.grad_fn is not None) and float(bal.detach()) != 0.0
         _bump(counters, "fab.balance_nonzero", 1 if live_term else 0)
     div_applied = 0
@@ -1330,7 +1441,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
             ce = F.cross_entropy(per_expert[:, j].reshape(-1, vocab), targets.reshape(-1))
             aux = aux + ind_w * share * ce
             ind_applied = 1
-        if ind_applied:
+        if ind_applied and solo:
             _bump(counters, "fab.ind_applied")
     hopsup_applied = 0
     if hop_sup_w > 0.0 and targets is not None and len(hop_logits) > 1:
@@ -1340,7 +1451,8 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
             sup = ce if sup is None else sup + ce
         aux = aux + hop_sup_w * (sup / max(1, len(hop_logits) - 1))
         hopsup_applied = 1
-        _bump(counters, "fab.hopsup_applied")
+        if solo:
+            _bump(counters, "fab.hopsup_applied")
     ident_term = 0
     if spawn_on and ae_w > 0.0 and learn:
         # THE ROUND TRIP TRAINS EVERY STEP, not on the embed cadence. The cadence exists because
@@ -1373,16 +1485,27 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                               "n_live is 1: one expert has no share to be under." if n <= 1 else
                               "every `use` is 0: FAB.observe is the only writer of the utilization "
                               "table and it is a stub, so the deficit is identically zero.")))
+    # THE SWAP NEEDS TWO COMPUTED SLOTS AND THE GATE HAD NOT SAID SO. fabric/api.py::_explore_swap
+    # refuses at `k >= 2` because the swap gives away the LOWEST-RANKED of the computed experts, and
+    # k here is max(1, min(chain_k, n)) -- so at FAB_CHAIN_K=1 there is no lowest-ranked slot to
+    # give away and exploration CANNOT fire at any FAB_EXPLORE. Without this clause the gate read
+    # "armed, did not fire (0 row(s) swapped ... vs explore=0.15)" at chain_k=1, which is the
+    # untrippable-guard class printed as a measurement.
+    _k_live = max(1, min(chain_k, n))
+    _explore_ok = bool(explore > 0.0 and learn and _k_live >= 2 and n > _k_live)
     gates.append(Gate("fab.explore", explored_rows > 0,
                       value=f"{explored_rows} row(s) swapped, "
                             f"{len(pop.marks.get('explore', ()))} distinct cold target(s)",
-                      threshold=f"explore={explore}",
-                      reachable=bool(explore > 0.0 and learn and n > max(1, min(chain_k, n))),
-                      reason="" if (explore > 0.0 and learn and n > max(1, min(chain_k, n))) else
+                      threshold=f"explore={explore}, computed={_k_live} of n_live={n}",
+                      reachable=_explore_ok,
+                      reason="" if _explore_ok else
                              ("FAB_EXPLORE=0: nothing stands between the utilization cull and a "
                               "self-fulfilling ranking." if explore <= 0.0 else
                               "training passes only, and this was an eval or a counterfactual"
                               if not learn else
+                              f"FAB_CHAIN_K={chain_k} computes {_k_live} expert per hop: the swap "
+                              f"gives away the lowest-ranked computed slot and there is no second "
+                              f"slot to rank it against." if _k_live < 2 else
                               f"n_live={n} does not exceed chain_k, so every expert is already "
                               f"computed and there is no cold set to swap one in from.")))
     gates.append(Gate("fab.discover", discovered > 0,
@@ -1415,14 +1538,28 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                       value=f"limit={ban_limit} of live_domains={int(live_domains)}",
                       threshold=f"dom_frac={dom_frac}, dom_min={dom_min}",
                       reachable=not ban_reason, reason=ban_reason))
+    # DEEP SUPERVISION NEEDS A HOP THAT IS NOT THE LAST ONE, AND THE GATE HAD NOT SAID SO. The body
+    # scores `hop_logits[:-1]` -- the last hop IS the main loss and double-counting it is not
+    # supervision -- so at depth 1 there is nothing to score and hop_sup CANNOT fire at any
+    # FAB_HOP_SUP. Depth is 1 whenever FAB_SOCIETY=1 pins it there, and also whenever FAB_HOPS,
+    # FAB_DEPTH0 or the 2 + n_live//2 ramp resolve to one hop. Without this clause the gate read
+    # "armed, did not fire (hop_sup=0.3 vs 1 hop logits collected)" on the society arm -- a
+    # mechanism that cannot fire, reported as one that ran and found nothing.
+    _sup_ok = bool(hop_sup_w > 0.0 and targets is not None and head is not None
+                   and len(hop_logits) > 1)
+    _why_depth = ("FAB_SOCIETY=1 pins the walk at one hop" if society else
+                  f"FAB_HOPS={hops}, FAB_DEPTH0={depth0}, n_live={n}")
     gates.append(Gate("fab.hop_sup", bool(hopsup_applied), value=f"hop_sup={hop_sup_w}",
-                      threshold=f"{len(hop_logits)} hop logits collected",
-                      reachable=bool(hop_sup_w > 0.0 and targets is not None and head is not None),
-                      reason="" if (hop_sup_w > 0.0 and targets is not None and head is not None)
+                      threshold=f"{len(hop_logits)} hop logits collected over depth={depth}",
+                      reachable=_sup_ok,
+                      reason="" if _sup_ok
                              else ("FAB_HOP_SUP=0" if hop_sup_w <= 0.0 else
                                    "no targets were supplied, so a per-hop cross-entropy has "
                                    "nothing to score against" if targets is None else
-                                   "no head was supplied, so no hop can produce logits")))
+                                   "no head was supplied, so no hop can produce logits"
+                                   if head is None else
+                                   f"depth={depth} ({_why_depth}): the last hop IS the main loss, "
+                                   f"so a walk of one hop has no earlier hop to supervise.")))
     gates.append(Gate("fab.independence", bool(ind_applied), value=f"ind_w={ind_w}, ind_k={ind_k}",
                       threshold="society=True and targets supplied",
                       reachable=bool(society and ind_w > 0.0 and targets is not None
@@ -1435,14 +1572,24 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                               "FAB_IND_W=0" if ind_w <= 0.0 else
                               "no head was supplied, so no expert can produce a prediction of its "
                               "own" if head is None else "no targets were supplied")))
+    # THE ROUND TRIP IS A TRAINING-ONLY TERM AND THE GATE HAD NOT SAID SO. The body's condition is
+    # `spawn_on and ae_w > 0.0 and learn`, and `learn` is `training and solo`: an eval pass builds no
+    # loss and a leave-one-out counterfactual adds no loss term, so on either of those the round trip
+    # CANNOT fire. Without this clause the gate read "armed, did not fire (ae_w=0.5, emb_var=1.0 vs
+    # spawn=True, training=False)" on every eval pass -- and the threshold it printed named the one
+    # condition that was false as though it were satisfied. fab.explore and fab.discover already
+    # draw exactly this distinction; this gate was the one that did not.
+    _ae_ok = bool(spawn_on and ae_w > 0.0 and learn)
     gates.append(Gate("fab.identity_round_trip", bool(ident_term),
-                      value=f"ae_w={ae_w}, emb_var={emb_var}",
-                      threshold=f"spawn={spawn_on}, training={training}",
-                      reachable=bool(spawn_on and ae_w > 0.0),
-                      reason="" if (spawn_on and ae_w > 0.0) else
+                      value=f"ae_w={ae_w}, emb_var={emb_var}, "
+                            f"{min(n, 256) if ident_term else 0} embedding(s) scored",
+                      threshold=f"spawn={spawn_on}, training={training}, counterfactual={not solo}",
+                      reachable=_ae_ok,
+                      reason="" if _ae_ok else
                              ("FAB_SPAWN=0 also switches off the identity autoencoder: edec exists "
                               "only to specify a newborn, so nothing would read what it learned."
-                              if not spawn_on else "FAB_AE_W=0")))
+                              if not spawn_on else "FAB_AE_W=0" if ae_w <= 0.0 else
+                              "training passes only, and this was an eval or a counterfactual")))
     gates.append(Gate("fab.halt", halt_on, value=f"mean halted mass "
                                                   f"{round(float((1.0 - alive).mean().detach()), 4)}",
                       threshold=f"halt_max={halt_max}",
@@ -1450,6 +1597,25 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                              "FAB_HALT=0: the halt logit is PINNED at a constant rather than "
                              "derived, so halt_key and halt_b receive no gradient and the walk "
                              "always runs its full depth."))
+    # THE COUNTER fab.halt_spent_on_base NOW HAS A GATE, because a cumulative 0 says neither "the
+    # society arm ran and no row halted" nor "there is no society arm on this configuration". The
+    # spend exists ONLY on the society arm: the looped walk spends halt mass on the hop that stopped,
+    # which the accumulation above already did, so on that arm this mechanism is not off, it is
+    # absent.
+    _base_ok = bool(society and head is not None and halt_on)
+    gates.append(Gate("fab.halt_spent_on_base", bool(spent_on_base),
+                      value=f"max entry halt "
+                            f"{0.0 if entry_halt is None else round(float(entry_halt.detach().max()), 4)}",
+                      threshold=f"society={society}, halt={halt_on}",
+                      reachable=_base_ok,
+                      reason="" if _base_ok else
+                             ("FAB_SOCIETY=0: the looped walk spends halt mass on the hop that "
+                              "stopped, so there is no leftover mass for the base representation "
+                              "to complete." if not society else
+                              "no head was supplied, so there is nothing to decode the base "
+                              "representation with" if head is None else
+                              "FAB_HALT=0: the halt column is pinned at a constant and no mass "
+                              "halts, so the blend is the identity on the vote.")))
     gates.append(Gate("fab.forward.routed", True, value=f"{hops_taken} hop(s) over {n} experts",
                       threshold=f"depth={depth}"))
 

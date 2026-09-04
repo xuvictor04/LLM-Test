@@ -237,7 +237,7 @@ def save_period(ckpt: Config):
     # is spelled as a WORD, tests/test_contract.py's K13 reads digits, and K13's own output lists
     # "a number written in words" under NOT SEARCHED FOR -- so no check in the suite can see a
     # miscount written this way, and only a reader can. A period accessor is one
-    # construction over one declared lever, and its whole job is that Cadences.due REFUSES a
+    # construction over its declared levers, and its whole job is that Cadences.due REFUSES a
     # bare int while Config hands one back for all 35 levers that declare a Clock unit
     # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable

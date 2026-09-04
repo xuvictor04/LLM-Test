@@ -1311,13 +1311,26 @@ LOOP_ORDER = (
 # place orphans go to be forgotten -- an orphan with paperwork is still an orphan, and the check
 # says so.
 #
-# IT IS NO LONGER ONLY EVAL, AND THAT IS THE POINT OF THE `produces` COLUMN. The seven EVAL entries
-# were deferred for a stated reason -- an argument with no producer -- while seven rows elsewhere in
-# the tables named calls with exactly the same gap. EVAL.curve_probe and EVAL.holdout_probe had
-# BYTE-IDENTICAL signatures and got opposite verdicts. The column made every one of them decidable,
-# and the seven below are the ones where nothing in the frozen entry-point set supplies a required
-# argument and no join in this file honestly can. Each names what would close it. NONE of them is
-# deferred for being late, and none is deferred because a body is missing: the whole tree is stubs.
+# IT IS NO LONGER ONLY EVAL, AND THAT IS THE POINT OF THE `produces` COLUMN. EIGHT EVAL entries sit
+# below, each deferred for a stated reason -- an argument with no producer -- and when the column was
+# added it found seven rows ELSEWHERE in the tables naming calls with exactly the same gap:
+# EVAL.curve_probe, MEM.read, MEM.blend, MEM.judge, FAB.contribution, CAP.observe and WORLD.manage.
+# EVAL.curve_probe and EVAL.holdout_probe had BYTE-IDENTICAL signatures and got opposite verdicts.
+# The column made every one of them decidable, and those seven are the ones where nothing in the
+# frozen entry-point set supplies a required argument and no join in this file honestly can. Each
+# names what would close it. NONE of the seven is deferred for being late, and none is deferred
+# because a body is missing: the whole tree is stubs.
+#
+# THE COUNT ABOVE SAID SEVEN EVAL ENTRIES UNTIL 2026-09-04, AND THERE HAVE BEEN EIGHT SINCE THE
+# COMMIT THAT WROTE THE SENTENCE: EVAL.curve_probe moved into this table from a row in the very edit
+# that added this paragraph, and the count was taken before it landed. The table now holds
+# twenty-three entries and they divide the way the two sentences above do rather than by package.
+# FIFTEEN are deferred because a required argument has no producer: the eight EVAL entries, the six
+# non-EVAL rows named above, and CKPT.Retention.consider, whose `curve_bpb` is the output of a
+# deferred entry point. EIGHT are deferred because the CALLER is missing while every argument is one
+# the caller already holds: FAB.Population's two accessors, four of Vocabulary's five, and RUN.Timing's
+# two. The miscount is not cosmetic -- this table's whole claim is that every orphan is enumerated,
+# and an enumeration whose own total is wrong is one no reader re-checks.
 #
 # WHAT THIS COSTS, SAID PLAINLY, because a deferral that hides its cost is the shape it replaces:
 # with these seven unrowed the run has no capacity valve (nothing lifts a cap), no WORLD growth, no
@@ -1327,10 +1340,15 @@ LOOP_ORDER = (
 # arguments nothing supplies. The deferral does not remove a mechanism, it stops the tables claiming
 # one, and it names the producer each mechanism is waiting on.
 DEFERRED_ENTRY_POINTS = {
-    # THE FIVE Vocabulary ACCESSORS. They arrived with the record in P4's TOK slice, one increment
-    # before the rows that call them, for the same reason RUN.Timing's two did: TOK.build_vocabulary
-    # has to RETURN a Vocabulary, and the contract's RECORD TYPES block names these five as that
-    # object's surface. They are accessors on a record other packages receive as an argument and
+    # THE TWO Population ACCESSORS AND FOUR OF Vocabulary'S FIVE. They arrived with their records in
+    # P4's FAB and TOK slices, one increment before the rows that call them, for the same reason
+    # RUN.Timing's two did: TOK.build_vocabulary has to RETURN a Vocabulary and FAB.build a
+    # Population, and the contract's RECORD TYPES block names these accessors as those objects'
+    # surface. (IT SAID "THE FIVE Vocabulary ACCESSORS" UNTIL 2026-09-04, when it was true of the
+    # block it headed: the contract names five -- decode, blen, size, live_size, at_cap -- and all
+    # five were here. TOK.Vocabulary.size LEFT, correctly, when the `vocab` row named it as
+    # live_vocab, which is the STALE half of K6's two-way read doing its job; the two FAB.Population
+    # entries then arrived above the comment. Four of the five, plus two that are not Vocabulary's.) They are accessors on a record other packages receive as an argument and
     # call methods on -- which the contract states is not an import -- so their callers are LM's
     # embedding rows, TOK's own minting rows and EVAL's decode, none of which have bodies yet. Every
     # one of them takes only `self` (or an id), so there is no argument without a producer: what is
@@ -2255,9 +2273,34 @@ def _run_windows(sysm):
     the reason K7 exists. ISSUES P1-H51 is the general case: all 35 Clock-unit levers resolve to bare
     ints and the typing is real only where derive or assemble puts it back, which for this quantity
     is here, at the one place it is computed.
+
+    THE MULTIPLICATION IS EPOCHS -> WINDOWS AND IT WAS WRITTEN INLINE UNTIL 2026-09-04. The body
+    read `units.Windows(_windows_in_epoch(sysm) * int(sysm.configs["RUN"].epochs))` -- a
+    windows-per-epoch rate times a count of EPOCHS, on bare ints, with the answer's kind put on at
+    the end. That is a cross-kind conversion written at its call site, which units.py::Clock.convert
+    refuses in as many words and which check_o11_no_unnamed_clock_arithmetic exists to forbid; the
+    number was right at every configuration, which is the point of the rule and not an argument
+    against it. It is now spine/derive.py::run_windows_from_epochs, which refuses anything but an
+    Epochs at the count end and any Clock at the rate end, and the kind is put on HERE -- at the
+    call, where P1-H51 says it has to be, because RUN.epochs resolves to a bare int like all 35
+    Clock-unit levers.
+
+    WHY O11 DID NOT SEE IT, WHICH MATTERS MORE THAN THE LINE DID. Three independent reasons, each
+    sufficient on its own: the check drops `src/spine/` twice over (its `_PKG_DIRS` subtracts
+    "spine", and its module loop skips any file under `src/spine/` on the stated ground that derive
+    IS the named conversion and must do the arithmetic); its AST half only flags an operand that is
+    an ATTRIBUTE named after one of the OWNING package's clock levers, and both operands here are
+    Calls; and `epochs` is RUN's lever while this file belongs to a package that has no levers.py
+    at all, so the per-package clock set for "spine" is empty. The exemption is deliberate and
+    correct for derive.py. What it also exempts is the COMPOSITION ROOT -- the one other place in
+    the tree that legitimately holds two packages' clocks at once, and therefore the one other
+    place this defect can live. Narrowing the skip from `src/spine/` to `src/spine/derive.py` is
+    the ownership pass's call; this file cannot make it, and says so rather than leaving the gap
+    unrecorded.
     """
-    from spine import units
-    return units.Windows(_windows_in_epoch(sysm) * int(sysm.configs["RUN"].epochs))
+    from spine import derive, units
+    return derive.run_windows_from_epochs(units.Epochs(sysm.configs["RUN"].epochs),
+                                          _windows_in_epoch(sysm))
 
 
 def _windows_in_epoch(sysm):

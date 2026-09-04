@@ -2183,9 +2183,17 @@ one of them would:
    backwards). A row would print an edge the run does not make, which is exactly the failure
    `spine/assemble.py` names: *"the printed graph shows an edge that was never made… and the sweep
    reads as passing because nothing moved."*
-4. **Budget.** 19 of 25 wires, 23 declared couplings. This would spend one of the last lines on the
+4. **Budget.** 19 of 25 wires, 23 declared couplings. This would spend a line on the
    least reachable case. *(Ledger unchanged by this ruling: still **19 of 25**, **23 couplings**,
    and `NOT_WIRES` is now **7 entries** — Q-OPT-1 added one in the same round.)*
+   *(This point read **"one of the last lines"** until 2026-09-04. The three numbers beside it were
+   and are correct, so this is not the `eval/api.py` miscount — but the phrase carries the same
+   belief the miscount did, and **six of the twenty-five remain**, which is not "the last". Corrected
+   because this ruling is one of the ones later readers cite when weighing a wire against an
+   argument, and the reason it gives should not be scarcity it does not have. **The ruling itself is
+   untouched: it rests on points 1–3, and point 4 was never the one carrying it** — `affects()` sees
+   no cadence reach for any gate, so a single WORLD row would make the graph look more complete than
+   it is, and that is true at any budget.)*
 
 **What the entry buys is the honest statement of a bigger gap: `affects()` does not see cadence
 reach for ANY gate.** `DOM.manage_every` already gates `MEM.census`, `DOM.manage`, `DOM.census`
@@ -3203,8 +3211,25 @@ and `K1` stays green in both directions.
 *(a) Widen the signature — taken.* Costs one `def` line, one line in §7, and one row in the order
 tables when P5/P6 land them. *(b) Spend a wire.* **It was never available for `step`:** a
 `Coupling.compute` receives only frozen `Config`s and a `Config` freezes when `build()` returns, so
-a per-window counter is refused on exactly the ground `NOT_WIRES` already refuses `d_curve_bpb` and
-`d_shift_at`. For `verify_mode` a wire **was** mechanically available — `MEM.verify` is a frozen
+a per-window counter is refused on exactly the ground **§0's "Candidates examined and refused as
+wires" table** already refuses `d_curve_bpb` and `d_shift_at` on — that table's preamble states
+this ground verbatim, and both rows are there for it (`d_curve_bpb` is a held-out **measurement**
+produced thousands of windows into the run; `d_shift_at` is an optimizer step index, runtime state).
+***This sentence cited `NOT_WIRES` until 2026-09-04 and that was false in both directions.***
+`spine/assemble.py::NOT_WIRES` holds **seven** rows — `RUN.seed`, `RUN.epochs → OPT.d_lr_horizon`,
+`SIG.d_signature_width_bytes`, `EVAL.gist`, the run length in windows, `MEM.cap`,
+`FAB.manage_every → WORLD.d_manage_period_windows` — and neither candidate is among them. The two
+tables are genuinely different and **this document already draws the distinction the sentence
+erased**: §0's own rows mark which of *their* entries are additionally in `NOT_WIRES`
+(*"already refused in `assemble.NOT_WIRES`"*, *"`d_seed` is refused by name in `NOT_WIRES`"*), which
+would be noise if membership were universal. **The ruling does not rest on the citation and is not
+weakened by correcting it:** the ground is a property of `Coupling.compute`, held down by
+`tests/test_couplings.py`'s C2 (*"every reach past the declared sources is REFUSED at
+construction"*), not by which table records it. Only the *place* was wrong. No check catches this
+class — `tests/test_ownership.py::check_o12_citations_name_symbols` checks citation **form** and
+says in its own docstring that a citation *"naming a symbol that exists and is the wrong one"* is
+beyond it. Corrected in all three sites that carried it: here, `src/eval/api.py::<module>` and
+`src/eval/api.py::curve_probe`. For `verify_mode` a wire **was** mechanically available — `MEM.verify` is a frozen
 lever — and it lost on its merits: **EVAL declares no wires and receives none**, which is a design
 statement (*"everything that measures the run and nothing that changes it"*) rather than an
 accident, and a value consumed to render a **Gate** never reaches a mechanism. The precedent runs
@@ -3219,9 +3244,29 @@ the L1 shape this whole spine removes. *(e) Delete the field and the Gate* — r
 one option that is not on the table: it trades a recorded gap for a silently missing reading.
 
 **Price, stated because the earlier brief got it wrong.** The wire ledger stands at **19 of 25**
-budgeted, so **six edges remain** — the *"two left"* carried in `eval/api.py` until today counted
-declared couplings as wires, which they are not; four of the twenty-three are intra-package.
-**Nothing here spends one.**
+budgeted, so **six edges remain** — the *"two left"* counted declared couplings as wires, which they
+are not; four of the twenty-three are intra-package, and an intra-package coupling books no edge,
+which is exactly the four the two numbers differ by. **Nothing here spends one.**
+
+***That correction named `eval/api.py` as the carrier when there were four, and the count of
+carriers is the part that matters*** — a miscount surviving in three more files is the same miscount.
+Found and corrected 2026-09-04:
+
+| carrier | what it said | status |
+|---|---|---|
+| `src/eval/api.py::<module>` | *"two left"* | corrected 2026-09-04 (the original find) |
+| `src/capacity/levers.py::CAPLevers` | *"has room for two more edges in total — so acting on the sentence would fail at `build()` with an over-budget refusal"* | **corrected 2026-09-04.** Both halves were wrong: adding the four couplings it discusses takes the ledger 19 → 23 of the 25 and `build()` does **not** refuse it |
+| `src/eval/levers.py::<module>` | *"`WIRE_BUDGET` leaves room for two more edges in the whole tree"* | **still standing** — outside the owner's line; the exact replacement is filed in that owner's report |
+| §Q-WORLD-6 point 4, this document | *"This would spend one of the last lines"* | numbers beside it were right (19 of 25, 23 couplings); the **rhetoric** implied near-exhaustion and is dated below |
+
+**Why this is not bookkeeping.** *At least two agents declined to widen a signature partly because
+they believed the wire alternative was nearly exhausted.* A budget number that is wrong in the
+**scarce** direction does not merely misinform — it silently biases every design choice that weighs a
+wire against an argument, and it does so in the direction of the choice nobody has to justify.
+`tests/test_couplings.py`'s C4 and `spine/assemble.py::render` print the live figures; **any prose
+copy is one that can go stale in silence**, which is the rule §0 already states about these same four
+numbers and which four files broke anyway. The count is not searched for by `K13` — its own output
+says *"NOT SEARCHED FOR: a number written in words"*, and *"two"* is a word in every carrier.
 
 **Why this is a second reopening of EVAL's surface, and why it is not the one Q-MEM-10 refused.**
 `Q-EVAL-10` closed by saying `Q-MEM-10`'s ruling *"deliberately left room for exactly one, and this

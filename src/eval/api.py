@@ -63,7 +63,21 @@ ruling and the alternatives; what follows is what the two `def` lines now say an
     it and EVAL owns no clock, so the field could not be filled by the function that returns it.
     curve_probe now takes `step`, and A WIRE WAS NEVER AVAILABLE HERE: a Coupling.compute receives
     only frozen Configs and Config freezes when build() returns, so a per-window counter is refused
-    on the same ground as d_curve_bpb and d_shift_at already are in spine/assemble.py::NOT_WIRES.
+    on the same ground as d_curve_bpb and d_shift_at already are in docs/04_CONTRACT.md section 0's
+    "Candidates examined and refused as wires" table, whose preamble states that ground in exactly
+    those words. NOT THE SAME TABLE AS spine/assemble.py::NOT_WIRES, and this sentence named that
+    one until 2026-09-04: NOT_WIRES holds SEVEN rows -- RUN.seed, RUN.epochs -> OPT.d_lr_horizon,
+    SIG.d_signature_width_bytes, EVAL.gist, the run length in windows, MEM.cap, and
+    FAB.manage_every -> WORLD.d_manage_period_windows -- and neither d_curve_bpb nor d_shift_at is
+    among them. The two tables are different and the document's own rows distinguish them (its
+    SIG.d_signature_width_bytes row says "already refused in assemble.NOT_WIRES", which would be
+    noise if every row were). THE RULING IS UNCHANGED AND DOES NOT REST ON THE CITATION: the ground
+    is a property of Coupling.compute, tests/test_couplings.py::C2 is what holds it, and both of
+    those rows are refused on it -- d_curve_bpb because a held-out measurement is produced thousands
+    of windows into the run, d_shift_at because an optimizer step index is runtime state. Only the
+    place they are written down was wrong. tests/test_ownership.py::check_o12_citations_name_symbols
+    says in its own docstring that it cannot catch this -- "a citation naming a symbol that exists
+    and is the wrong one ... no check reaches it" -- so the correction is the only thing that does.
   * `verification_fit`'s DID IT FIRE declares a Gate on `verify != "off"` -- MEM's lever -- and the
     signature was `(ev, *, store_copy, rng)`, which had no such parameter. MEM's Store carries no
     verify field either (its __slots__ are the entry arrays, the block partition and the census,
@@ -156,8 +170,12 @@ def curve_probe(ev: Config, *, units_by_domain, logits_fn, step, rng):
     it: EVAL owns no clock, `units_by_domain` carries material rather than position, and a probe
     that stamped its own reading from a counter it invented would be a second source of truth for
     RUN.RunClock. A WIRE COULD NOT HAVE CARRIED IT: spine/assemble.py::COUPLINGS computes from
-    FROZEN Configs and a window counter is runtime state, which is the ground NOT_WIRES already
-    refuses d_curve_bpb and d_shift_at on. The composition root passes RunClock's window index when
+    FROZEN Configs and a window counter is runtime state, which is the ground docs/04_CONTRACT.md
+    section 0's "Candidates examined and refused as wires" table already refuses d_curve_bpb and
+    d_shift_at on -- NOT spine/assemble.py::NOT_WIRES, which this sentence named until 2026-09-04
+    and which contains neither of them (see this module's docstring for the seven rows it does
+    hold). The ground itself is unaffected, and it is the module docstring's, not a borrowed one.
+    The composition root passes RunClock's window index when
     P5 writes the row; the value is RUN's, and it is stamped, never derived here.
 
     LEVERS READ: windows

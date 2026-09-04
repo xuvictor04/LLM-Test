@@ -155,10 +155,23 @@ TOK.d_cap_lift_period -- source them from a prefix named TRAIN. Checked against 
 all four CAP destinations are declared, both cap-lift rows source ("OPT.batch_windows", "CAP.pin_windows")
 under this package's own prefix, and spine/assemble.py::_check_endpoints itself records TRAIN as a
 corrected name. The cost of leaving it standing is not cosmetic: it tells whoever ports the valve to ADD
-four couplings that already exist, and the wire budget in spine/wire.py::WIRE_BUDGET has room for two
-more edges in total -- so acting on the sentence would fail at build() with an over-budget refusal, on
-work that was already done. A file that reports an absence for something present corrupts the ledger in
+four couplings that already exist -- work that was already done, spending four of the SIX edges the
+budget still has (19 cross-package wires of WIRE_BUDGET=25; see the correction below) on rows that are
+already in the table. A file that reports an absence for something present corrupts the ledger in
 exactly the direction that is hardest to notice, because nobody greps to confirm a "not there yet".
+
+AND THE BUDGET CLAUSE ABOVE WAS ITSELF A MISCOUNT, CORRECTED 2026-09-04 -- it read "has room for two
+more edges in total -- so acting on the sentence would fail at build() with an over-budget refusal".
+Both halves were wrong. Measured by running tests/test_couplings.py today: 23 DECLARED COUPLINGS, of
+which 19 are cross-package WIRES against WIRE_BUDGET=25 and 4 are intra-package, so SIX edges remain,
+not two. The miscount came from counting declared couplings as wires; an intra-package coupling books
+no edge, which is why the two numbers differ by exactly four. The consequence clause fell with it:
+adding four couplings takes the ledger 19 -> 23 of the 25 and build() does NOT refuse it. THIS IS NOT A
+HARMLESS ARITHMETIC SLIP. The sentence was load-bearing in the wrong direction -- at least two agents
+declined to widen a signature partly because they believed the wire alternative was nearly exhausted,
+which is a design decision taken on a number that was never true. The live figures are printed by
+tests/test_couplings.py's C4 and embedded by spine/assemble.py::render, so a prose copy is one that
+can go stale in silence; this one had, in more than one file at once.
 
 O4 IS GREEN FOR A REAL REASON NOW, WHICH IT WAS NOT WHEN THAT PARAGRAPH WAS WRITTEN. It reports twenty-
 three declared destinations, zero declared-but-unread and zero deferred; CAP contributes four of the
