@@ -382,3 +382,89 @@ anyone: neither appears in any findings file and neither had an entry in `.rewor
 That pass found six further defects, among them a mutable default shared across every `Valve` in the
 process and a sentinel collision in which an explicitly-set `CAP_FAB_START=0` resolves a soft expert
 cap of zero.
+
+---
+
+## D16 · 2026-09-04 · An overshooting lift is soft-clamped at the ceiling, not refused
+
+> "let's soft clamp if a ceiling is overshot, until it goes down."
+
+**Ruling: clamp.** A soft cap set just under the hard ceiling makes the FIRST earned lift overshoot,
+and nothing in the tree said whether `CAP.observe` refuses that lift or clamps it. Two independent
+agents found the gap while driving other work and both declined to close it, correctly — it is a
+question about what the valve is *for*, not a bug with an obvious repair.
+
+**Why clamp is the right answer, stated so it can be overturned on evidence.** A refusal WASTES THE
+EVIDENCE. The valve exists to lift a cap when the population has earned it; a run that earns a lift
+and is told "no, that would overshoot" has paid for the observation and received nothing, and the
+next evaluation starts from the same place. Clamping spends the evidence on the largest lift
+available — which at the ceiling is the distance remaining — and leaves the cap where the operator
+set the hard limit. The module's founding sentence is that a ceiling is *"raised, by a little, NEVER
+lowered"*; clamping honours it and refusing does not engage with it at all.
+
+**THE CLAMP IS A THIRD READING AND MUST NOT COLLAPSE INTO THE OTHER TWO.** This valve's whole
+recorded history is mechanisms that fired or did not fire without saying which, so a clamped lift —
+neither a clean fire nor a refusal — needs its own counter and its own Gate arm. There are now FOUR
+states the ledger must distinguish, and three of them are already occupied by different mechanisms:
+
+| state | meaning | already owned by |
+|---|---|---|
+| no lift earned | the condition was evaluated and not met | the armed-but-0 arm |
+| lift earned, applied in full | the ordinary case | fired |
+| lift earned, CLAMPED at the ceiling | **this ruling** | new |
+| no lift can ever be earned | `CAP_TARGETS` excludes the arm | UNREACHABLE, per D15 |
+
+and two further not-moving cases must not be mistaken for a clamp: a lift refused by name as
+`dead_rows_unmasked` when `LM_MASK_DEAD_ROWS` is off, and `derive.lift_to` returning the cap
+unchanged when both its terms round to zero — the case `capacity/levers.py` already records as the
+reason `lift_min` exists.
+
+**ON "UNTIL IT GOES DOWN", WHICH CARRIES REAL INTERPRETIVE LATITUDE.** Two readings are available:
+the clamp is a STATE, pinned at the ceiling and released when demand falls; or the clamp is a
+per-lift arithmetic operation with no state, and the phrase merely describes what a later evaluation
+asking for less will do. The implementing agent was instructed to establish which the mechanism can
+actually support — whether `Valve` persists anything across flushes — to take that one, to record
+which reading it took *in the docstring*, and to report whether the other reading behaves
+differently and how the owner would tell. A ruling implemented under an unstated interpretation is
+how a decision quietly becomes something else, and this project has the receipts.
+
+---
+
+## D17 · 2026-09-04 · A negative period is refused, and the refusal is switchable
+
+> "On the periods, let's refuse for now. If it has a bad effect, we can turn off the refusal."
+
+**Ruling: refuse.** `CKPT.save_period` was given a refusal for a negative `CKPT_EVERY` after its Gate
+was found printing `CKPT_EVERY=0` beside a rendered value that was not 0 — the false-equation class.
+That made CKPT the second package raising the spine's `LeverError` from a body, `CAP` being the first
+(for a negative `CAP_LIFT`, on the ground that a mechanism running backwards on the evidence it
+should run forwards is a defect arriving through a lever *value* rather than a guard). The open
+question was whether the other four period accessors — `EVAL.curve_period`, `DOM.manage_period`,
+`FAB.manage_period`, `MEM.rekey_period` — should do the same. They should.
+
+**THE SECOND SENTENCE IS AS BINDING AS THE FIRST.** *"If it has a bad effect, we can turn off the
+refusal"* means the refusal must be turn-off-able **without editing code**. That is this tree's
+standing rule, set in D4: a mechanism kept for future use is kept WITH A SWITCH, not as a code path
+that rots. A refusal that can only be withdrawn by reverting a commit fails the instruction.
+
+The implementing agent was asked to weigh three carriers under D11 and to recommend rather than
+assume:
+
+- **one RUN-owned switch read by all five accessors** — but a lever crossing a package boundary is a
+  WIRE, and five wires is unaffordable against the six edges remaining of `WIRE_BUDGET=25`, so this
+  only survives if the accessors can reach it without spending one;
+- **one lever per owning package** — no wire, but five declarations and five census rows;
+- **no lever**, on the reading that the owner would revert rather than flip a switch — which is the
+  reading D4 exists to rule out.
+
+It was instructed that if a wire is genuinely required it must **report** rather than spend one.
+
+**WHAT MUST BE CHECKED BEFORE EACH REFUSAL LANDS.** For several of these levers a period of **0** is
+a legitimate sentinel meaning *"never"* or *"every window"*, and refusing negatives must not disturb
+it. Each accessor is to state what 0 means for its own lever, what a negative does today, and what
+the refusal changes — and where an accessor already refuses, or structurally cannot receive a
+negative, to say so rather than invent work.
+
+**This ruling is explicitly provisional.** "For now" is recorded. The refusal is expected to be
+revisited if it turns out to forbid a configuration someone wants, and the switch exists so that
+revisiting it costs an environment variable rather than a commit.
