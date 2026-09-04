@@ -524,12 +524,39 @@ layer says nothing about reserving *expert* slots), and it is evaluated **last, 
 would answer every call on an unmasked run and the histogram would never learn whether that arm ever
 pinned and stalled, which is the very collapse this closed set exists to end. Last, it counts
 exactly the lifts that were *earned and then declined for dishonesty*. **It is deliberately not a
-startup refusal:** that would make `CAP_TARGETS=vocab` unrunnable at the shipped
-`LM_MASK_DEAD_ROWS=False`, and `spine/assemble.py`'s `CAP.d_mask_dead_rows` row names that stricter
-repair as **the owner's to ask for** — *"a valve that refused to lift the vocabulary at all while the
-mask is off would need no flag"*. The flag is frozen onto the `Valve` at `new_valve` as
-`counters["cap.mask_dead_rows"]`, the way the two hard ceilings are, so `observe` keeps reading no
-wires of its own.
+startup refusal, and the ground for that is narrower than this paragraph said until 2026-09-04.** It
+read that a startup refusal *"would make `CAP_TARGETS=vocab` unrunnable at the shipped
+`LM_MASK_DEAD_ROWS=False`"*, which reads as though the valve **works** on that configuration. It does
+not: no vocabulary lift can happen there under either design — this block reason refuses every one,
+and `new_valve`'s `cap.valve` now reports that arm **UNREACHABLE** for exactly it. **The lifting
+capability is absent either way**, so it is not what separates the two designs. What separates them
+is what the operator gets instead: a startup refusal ends the process and produces **no measurement
+at all**, while this refuses the *lift* and lets the *run* proceed — it trains, the expert arm still
+works at `targets=both`, and the histogram carries a **count** of the lifts that were earned and then
+declined, which is a number no other line in the run produces. `spine/assemble.py`'s
+`CAP.d_mask_dead_rows` row still names the stricter repair as **the owner's to ask for**; what it no
+longer says is that the stricter repair would need no wire. It carried *"a valve that refused to lift
+the vocabulary at all while the mask is off would need no flag"* until 2026-09-04 and now answers its
+own sentence — ***"IT WOULD: a valve that refuses ON A CONDITION must READ that condition to know
+when to refuse"*** — so quoting the retracted half here, as this paragraph did, cited the one sentence
+a future reader would use to delete the wire the refusal rests on. The flag is frozen onto the `Valve`
+at `new_valve` as `counters["cap.mask_dead_rows"]`, the way the two hard ceilings are, so `observe`
+keeps reading no wires of its own.
+**`new_valve` refuses two lever values at startup, added 2026-09-04: `CAP_LIFT < 0` and
+`CAP_LIFT_MIN < 0`.** `derive.lift_to` is `cap + max(int(floor), int(frac × cap))`, so with **both**
+negative the max is negative and an *earned* lift **shrinks** the cap — `lift_to(12, -0.5, -100) = 6`
+— against this package's founding sentence, *"raised, by a little, never lowered"*. Before the
+refusal, `build()` accepted `CAP_LIFT=-0.5` without a word and `cap.valve` printed *"one lift → 6"*
+beside *"ONE EARNED LIFT DOES NOT MOVE IT"* on one line. **It removes no configuration:** with the
+floor at or above 0 a negative `CAP_LIFT` is arithmetically identical to `CAP_LIFT=0` (a flat
+`+CAP_LIFT_MIN` lift, which is legal), and with the fraction at or above 0 a negative `CAP_LIFT_MIN`
+is identical to `CAP_LIFT_MIN=0`. **`CAP_LIFT > 1` is deliberately *not* refused** — `U.FRACTION`'s
+unit string is a label the census renders and not a bound (`spine/lever.py::Lever` carries `choices`
+and no numeric range), and a lift of 2.0 is a large lift, not a lowering one. It lives in `new_valve`
+rather than in `startup_refusals` because that entry point is declared for refusals that need **two**
+packages' numbers, is a stub today, and runs *after* the valve row — a Gate reason would render
+first. `src/lm/api.py::resolve` is the precedent and states the general ground: the refusals are in a
+body *"because a Lever has no range facility and `choices=` enumerates rather than bounds"*.
 `Caps.headroom(n)` exists so the negative clamp (C30) **cannot be written** at a call site.
 The pin clocks are **now checkpointed**, which is half the M38 fix; the other half is that RUN seeds
 the valve's last-called index at the **resumed** step.
@@ -3248,24 +3275,38 @@ budgeted, so **six edges remain** — the *"two left"* counted declared coupling
 are not; four of the twenty-three are intra-package, and an intra-package coupling books no edge,
 which is exactly the four the two numbers differ by. **Nothing here spends one.**
 
-***That correction named `eval/api.py` as the carrier when there were four, and the count of
-carriers is the part that matters*** — a miscount surviving in three more files is the same miscount.
-Found and corrected 2026-09-04:
+***That correction named `eval/api.py` as the carrier when there were five, and the count of
+carriers is the part that matters*** — a miscount surviving in four more files is the same miscount.
+Found 2026-09-04; four of the five are corrected, and the fifth is outside this owner's line and is
+named as such, with its owner, in the table:
 
 | carrier | what it said | status |
 |---|---|---|
 | `src/eval/api.py::<module>` | *"two left"* | corrected 2026-09-04 (the original find) |
 | `src/capacity/levers.py::CAPLevers` | *"has room for two more edges in total — so acting on the sentence would fail at `build()` with an over-budget refusal"* | **corrected 2026-09-04.** Both halves were wrong: adding the four couplings it discusses takes the ledger 19 → 23 of the 25 and `build()` does **not** refuse it |
-| `src/eval/levers.py::<module>` | *"`WIRE_BUDGET` leaves room for two more edges in the whole tree"* | **still standing** — outside the owner's line; the exact replacement is filed in that owner's report |
-| §Q-WORLD-6 point 4, this document | *"This would spend one of the last lines"* | numbers beside it were right (19 of 25, 23 couplings); the **rhetoric** implied near-exhaustion and is dated below |
+| `src/eval/levers.py::<module>` | *"`WIRE_BUDGET` leaves room for two more edges in the whole tree"* | **corrected 2026-09-04 by that file's owner**, after being filed here as residue. It now reads *"so SIX edges remain in the whole tree"* and carries its own note — *"an earlier revision of this sentence said 'two more edges'; that was a miscount and it travelled — do not propagate it"*. **This row said "still standing" until 2026-09-04**, which was true when written and false by the time anyone read it: a status is a copy of a fact and rots exactly the way a count does |
+| §Q-WORLD-6 point 4, this document | *"This would spend one of the last lines"* | the numbers beside it are right against the live ledger — **19 of 25** wires and **23 couplings** — so it is the **rhetoric** alone that implied near-exhaustion; corrected and dated below. *(Stated in the present tense here on purpose: as a past-tense aside these two numbers were `K13`-skipped, and inserting the row below this one moved them out of the window in which `K13` recognised them at all — a claim that stops being read is the failure this table is about, one level down.)* |
+| `src/spine/assemble.py` — the `WORLD.d_manage_period_windows` `NOT_WIRES` row | *"It would also spend one of the last coupling lines on a `WORLD.manage` that is itself deferred today"* | **still standing, and it is the worst-placed of the five** — present tense, about the same Q-WORLD-6 ruling as the row above, and `tools/render_wiring.py` copies it verbatim into `docs/03_WIRING.md`, so this carrier is mechanically kept in sync into a second file while the corrected copies are not. Outside this owner's line; the exact find/replace is filed in this round's `x_capacity` report |
 
-**Why this is not bookkeeping.** *At least two agents declined to widen a signature partly because
-they believed the wire alternative was nearly exhausted.* A budget number that is wrong in the
-**scarce** direction does not merely misinform — it silently biases every design choice that weighs a
-wire against an argument, and it does so in the direction of the choice nobody has to justify.
+**Why this is not bookkeeping.** A budget number that is wrong in the **scarce** direction does not
+merely misinform — it silently biases every choice that weighs a wire against a widened signature,
+and it biases it **toward the signature**, the option nobody has to justify at `build()`. *This
+paragraph gave a different reason until 2026-09-04, and the reason was unsupported and backwards:*
+it read ***"at least two agents declined to widen a signature partly because they believed the wire
+alternative was nearly exhausted."*** Nothing in `src/`, `docs/`, `tools/` or `.rework/` records any
+agent taking that decision — the only two occurrences of the sentence were this one and its copy in
+`src/capacity/levers.py::CAPLevers` — and a budget believed nearly exhausted is an argument **for**
+widening a signature and against spending a wire, so it cannot be why one was declined. It also
+contradicted the next clause of its own sentence. **The bias is recorded in the sentences themselves
+rather than in anybody's stated motive**, which is what the table above is for: `capacity/levers.py`
+told a porter that four couplings which *already exist* would be refused at `build()`; §Q-WORLD-6
+point 4 called a legal row *"one of the last lines"*; `src/eval/levers.py` told a reader that only
+two edges were left in the whole tree; and `src/spine/assemble.py`'s `NOT_WIRES` row still argues
+against a row on its price. Four of the five carriers argue **against a wire because of what it
+costs**, and the cost was wrong by a factor of three.
 `tests/test_couplings.py`'s C4 and `spine/assemble.py::render` print the live figures; **any prose
 copy is one that can go stale in silence**, which is the rule §0 already states about these same four
-numbers and which four files broke anyway. The count is not searched for by `K13` — its own output
+numbers and which five files broke anyway. The count is not searched for by `K13` — its own output
 says *"NOT SEARCHED FOR: a number written in words"*, and *"two"* is a word in every carrier.
 
 **Why this is a second reopening of EVAL's surface, and why it is not the one Q-MEM-10 refused.**

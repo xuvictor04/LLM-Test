@@ -92,16 +92,19 @@ class Population:
     not touch 2048 of 2048 experts.
     """
 
-    # THE LAST FIVE ARE THE RE-EARNED STATE fabric/api.py::state_dict ALREADY NAMES ("Re-earned
-    # rather than restored: the identity cache, halt_ema, the routing-mix samples"). They are slots
-    # rather than ad-hoc attributes because __slots__ is closed: `pop._kc = ...` raises
-    # AttributeError, so a cache invented at the point of use would be a crash on the first routed
-    # window rather than a design. ident/ident_step/ident_live are the emb_every cache the old tree
-    # carried as _kc/_kstep/_kn (self_organize.py:1938-1953); halt_ema is its _mass_ema.
+    # THE LAST SEVEN ARE RE-EARNED STATE, NEVER CHECKPOINTED -- fabric/api.py::state_dict names
+    # them as "the identity cache, halt_ema, the routing-mix samples", plus `learn_window` which
+    # that sentence now names too. They are slots rather than ad-hoc attributes because __slots__ is
+    # closed: `pop._kc = ...` raises AttributeError, so a cache invented at the point of use would
+    # be a crash on the first routed window rather than a design. ident/ident_step/ident_live are
+    # the emb_every cache the old tree carried as _kc/_kstep/_kn (self_organize.py:1938-1953);
+    # halt_ema is its _mass_ema; `learn_window` is the window index of the last gradient-carrying
+    # training pass, which fabric/api.py::forward compares against to refuse a second one.
     __slots__ = ("A", "B", "cent", "n_live", "cap", "depth_now", "born", "use", "uage", "dom_of",
                  "ef", "es", "comp", "contrib", "births", "rescued", "parent", "mutscale",
                  "modules", "counters", "rng", "on", "hop_arm", "gates", "halt_b",
-                 "ident", "ident_live", "ident_step", "ident_graph", "halt_ema", "marks")
+                 "ident", "ident_live", "ident_step", "ident_graph", "halt_ema", "marks",
+                 "learn_window")
 
     def __init__(self, *, cap, n0, d_model, rank, signature_dim, device, rng, on, hop_arm,
                 depth_now):
@@ -163,6 +166,11 @@ class Population:
         self.ident_step = None
         self.ident_graph = None
         self.halt_ema = None
+        # THE WINDOW OF THE LAST GRADIENT-CARRYING TRAINING PASS, and None until there is one. Read
+        # only by fabric/api.py::forward's one-pass-per-window refusal; re-earned like the identity
+        # cache, because a resumed run's first routed pass is at a window no pass in this process
+        # has seen and carrying the number across a restart could only produce a false refusal.
+        self.learn_window = None
         # DISTINCT-RECIPIENT SETS, WHICH A COUNTER CANNOT HOLD. `fab.discover_targets` and
         # `fab.explore_distinct_targets` are counts of DISTINCT experts, and 1 is H14 -- discovery's
         # `min(range(N), key=use)` returns the FIRST minimum and discovery never credits use, so
@@ -579,28 +587,57 @@ def _identities(pop, n, step_n, emb_every_n, *, write=True):
     cost saving -- it throttles the one channel the rest of the population ever sees.
 
     TWO KINDS OF REUSE, AND CONFLATING THEM WAS THE OLD TREE'S BUG (self_organize.py:1932-1946).
-    SAME WINDOW: hand back the LIVE tensors, because `forward` reads identities more than once per
-    window (the entry router, then every hop) and two consumers on two graphs means the second one
-    silently trains nothing. LATER WINDOW, inside the cadence: hand back a DETACHED copy, because
-    the previous backward already freed that graph -- returning the live tensors is "Trying to
-    backward through the graph a second time", which never fired in the old tree only because the
-    society path called this without a step at all.
+    SAME WINDOW: hand back the LIVE tensors, so two reads of one window's identities are two
+    consumers of ONE graph and not one consumer of a graph nobody backwards. WHO ACTUALLY REACHES
+    THAT BRANCH, stated from the body rather than from the intent: `forward` calls this ONCE per
+    call and passes the keys to every hop, so the only way in is a SECOND call at the same window
+    index -- and a second GRADIENT-CARRYING pass at one window is refused by name in
+    fabric/api.py::forward, for the reasons written there. What legitimately reaches it is a
+    no_grad reader -- an eval pass, or a leave-one-out candidate at the window a training pass just
+    embedded: it cannot backward, so sharing the live tensors costs it nothing and saves the whole
+    re-embedding. LATER WINDOW, inside the cadence: hand back a DETACHED copy, because the previous
+    backward already freed that graph -- returning the live tensors is "Trying to backward through
+    the graph a second time", which never fired in the old tree only because the society path
+    called this without a step at all.
 
-    A COUNTERFACTUAL READS THIS CACHE AND MUST NOT WRITE IT (`write=False`), WHICH IS NOT TIDINESS.
-    The leave-one-out walk in fabric/api.py::contribution runs under no_grad, so the keys it computes
-    carry NO GRAPH -- and the write it used to perform stamped them into `ident_graph` under the
-    counterfactual's own step. The next TRAINING pass at that step then took the first branch above,
-    was handed a graphless tensor, and the routing term dropped out of the backward: the one gradient
-    channel that reaches every live expert, switched off for a window by a measurement, with every
-    counter and every gate still reading exactly as before.
-    MEASURED at the shipped emb_every=1, two training passes at windows 5 and 6: the pass at window 6
-    reads grad|A|max 4.6525653e-2 and grad|B|max 5.6747589e-2. Insert ONE eight-candidate no_grad
-    leave-one-out walk at window 6 between them and the same pass reads grad|A|max EXACTLY 0.0 and
-    grad|B|max 2.6601586e-2 -- all of A's gradient and half of B's, deleted by a diagnostic. With
-    `write=False` the two cases are bit-identical. The cheaper half is the same defect one size down:
-    the middle branch clears `ident_graph`, so a counterfactual could force the next real pass to
-    re-embed the whole population. Read-only walks now take neither.
+    A PASS THAT CANNOT CARRY A GRAPH MAY READ THIS CACHE AND MAY NOT WRITE IT, WHATEVER THE CALLER
+    SAID -- WHICH IS ENFORCED HERE, ON THE FIRST LINE OF THE BODY, AND NOT AT THE CALL SITE. The
+    call site is not the only door: `write` used to be handed `solo` (`hold_out is None`), which
+    shuts out the leave-one-out counterfactual and leaves an ORDINARY no_grad EVAL pass -- which is
+    not a counterfactual and passes solo=True -- wide open. Same defect, one door over. Under
+    torch.no_grad() the keys computed below carry NO GRAPH, and the write stamps them into
+    `ident_graph` under the reading pass's own step; the next TRAINING pass at that step takes the
+    first branch above, is handed a graphless tensor, and the routing term drops out of the
+    backward: the one gradient channel that reaches every live expert, switched off for a window by
+    a pass that was only looking, with every counter and every gate reading exactly as before --
+    `fab.ident_refreshed` is the same number either way, so the ledger cannot see it and only a
+    gradient measurement can.
+    MEASURED at FAB_N0=8, FAB_SLOTS=16, FAB_RANK=4, FAB_DK=8, d_model=32, sig_d=64, B=4, L=6 and
+    FAB_EMB_EVERY=1 (shipped): training passes at windows 5 and 6, with ONE no_grad eval pass at
+    window 6 inserted between them. AT TWO ARMS, BECAUSE EITHER ONE ALONE IS THE WRONG MEASUREMENT
+    QUOTED WITHOUT ITS CONFIGURATION:
+      * at the SHIPPED FAB_SPAWN=1 and FAB_AE_W=0.5, the window-6 pass goes from grad|A|max
+        1.7764444e-2 to 3.1788775e-3 and grad|B|max 1.8207863e-2 to 3.5802322e-3 -- 82% of A's
+        gradient. What survives is the ae round trip, A's OTHER route (fabric/api.py::forward's
+        ablation paragraph).
+      * at FAB_SPAWN=0, or at FAB_AE_W=0, or at both -- EITHER lever removes that route, because
+        the round trip is gated on `spawn_on and ae_w > 0.0 and learn` in fabric/api.py::forward
+        -- it goes from
+        grad|A|max 1.6913850e-2 to EXACTLY 0.0 (grad|B|max 1.7490769e-2 -> 7.3022917e-8), the same
+        three readings at all three of those arms: ALL of A's gradient.
+    With the guard below, both arms are bit-identical to the same pair of passes with no eval
+    inserted. The cheaper half is the same defect one size down -- the middle branch clears
+    `ident_graph`, so a read-only pass could force the next real pass to re-embed the whole
+    population -- and ONE guard covers both, because it disarms `write` for the whole body rather
+    than at each write site in it.
     """
+    # THE GUARD IS THE CLASS, NOT THE INSTANCE: not "a counterfactual may not write" and not "an
+    # eval pass may not write", but "a pass with no graph to give may not write", which is the
+    # property that made both of those unsafe and is true of every caller that will ever exist.
+    # torch.is_grad_enabled() is False under no_grad AND under inference_mode, and it is the exact
+    # question -- `keys.grad_fn is None` would also refuse a legitimate grad-enabled pass whose
+    # parameters are all frozen, where caching is harmless and re-embedding every window is not.
+    write = bool(write) and torch.is_grad_enabled()
     if (pop.ident_step is not None and pop.ident_step == step_n and pop.ident_live == n
             and pop.ident_graph is not None):
         return pop.ident_graph, False
@@ -1007,7 +1044,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  dom_min, div_w, ind_k, ind_w, dk, rank, emb_hid, emb_var, emb_every, ae_w, spawn,
                  spawn_mult, spawn_floor
     WIRES READ: none
-    DID IT FIRE, ALL 24 KEYS THIS BODY WRITES -- counted against the body in BOTH directions on
+    DID IT FIRE: ALL 24 KEYS THIS BODY WRITES -- counted against the body in BOTH directions on
     2026-09-04 and found four short, which is why the last four lines exist. A key written and not
     declared is a number in the report that the contract does not admit to producing; a key declared
     and not written is the opposite and there are none (all 24 below are written, and 19 of them are
@@ -1055,7 +1092,23 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     step = U.Windows(step_windows)
     step_n = int(step)
     counters, gates = pop.counters, []
-    zero = h.new_zeros(())
+    # EXACTLY 0.0, ON h'S GRAPH. FabricOut.aux_loss's frozen docstring requires "ONE scalar with a
+    # graph -- never a float and never a freshly allocated zero", and `h.new_zeros(())` is precisely
+    # the freshly allocated zero it names: the two switched-off arms below returned one as their
+    # WHOLE aux_loss, in the one field C2 is the record of. The composition root SUMS this into the
+    # objective it backwards (spine/compose.py's OPT.scaled_backward row: "LM.lm_loss's mean +
+    # LM.anchor_term's already-weighted term + FabricOut.aux_loss + WORLD's loss"), so a graphless
+    # summand is not an error at either end -- backward() walks past it and the run reports
+    # normally,
+    # which is the whole C2 failure mode and the reason the record type forbids it by name.
+    # `h[:0].sum()` is the sum of NO elements: exactly zero for every h, INCLUDING a non-finite one
+    # (`h.sum() * 0.0` would be nan and would blame FAB for the LM's blow-up), differentiable, with
+    # a gradient that is identically zero. It does not invent a term -- the FAB-side terms on those
+    # two arms are ABSENT and their gates say so -- it makes the record's guarantee true, so a
+    # caller may add and backward it without a special case. Under no_grad it has no graph, like
+    # every other tensor here, which is why the C2 alarm below tests grad_fn on training passes
+    # only.
+    zero = h[:0].sum()
 
     on, norm_only = bool(fab.on), bool(fab.norm_only)
     if not on:
@@ -1126,6 +1179,43 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     if n < 1:
         raise ValueError("FAB.forward: n_live is 0. An empty population is not a routing outcome; "
                          "fabric/api.py::build founds n0 experts and nothing may reduce it to none.")
+
+    # ONE GRADIENT-CARRYING TRAINING PASS PER WINDOW, AND THE SECOND IS REFUSED BY NAME. This is a
+    # CALLER ERROR and not a cache defect, and the tree's own clock is what decides that:
+    # train/api.py::RunClock.advance advances `step` ONE WINDOW at a time and reports `flush_due`,
+    # the flush body is what calls this entry point, and spine/compose.py's row for it passes
+    # `step_windows=clock.step` -- so the index has moved before the next routed pass. Gradient
+    # accumulation is spelled in this tree as MORE BACKWARDS OVER MORE WINDOWS
+    # (opt/api.py::scaled_backward counts Backwards and scales by accum;
+    # spine/derive.py::opt_steps_from_windows: "effective_batch_windows is batch_windows x accum:
+    # windows per FLUSH times flushes per optimizer STEP"), never as two passes at one index.
+    # WHAT THE SECOND PASS ACTUALLY DID BEFORE THIS REFUSAL, measured at FAB_N0=8/SLOTS=16/RANK=4/
+    # DK=8: at FAB_ROUTE_LEARN=1 (shipped) it raised torch's "Trying to backward through the graph
+    # a second time" out of fabric/api.py::_identities' same-window branch -- a bare error naming no
+    # lever, no clock and no caller -- and at FAB_ROUTE_LEARN=0 it raised NOTHING and silently
+    # applied one window's ponder anneal, balance anneal, spawn test, centroid EMA and halt EMA
+    # twice. Refusing at only the first of those would be a guard that exists at one lever value and
+    # vanishes at another, which is the shape this package's own history is made of; the refusal is
+    # therefore on the clock, where the error is, and not on the cache, where it happened to show.
+    # A no_grad EVAL pass and a leave-one-out counterfactual at the same window are LEGAL and
+    # untouched -- they are exactly what `learn` excludes.
+    if learn and torch.is_grad_enabled():
+        if pop.learn_window == step_n:
+            raise ValueError(
+                f"FAB.forward: a SECOND gradient-carrying training pass at step_windows={step_n}. "
+                f"The window clock advances once per window (train/api.py::RunClock.advance) and "
+                f"this entry point is called once per flush with step_windows=clock.step, so one "
+                f"window index is one routed training pass. At FAB_ROUTE_LEARN=1 the two passes "
+                f"share this population's identity graph and the second backward raises torch's "
+                f"'Trying to backward through the graph a second time' naming no lever and no "
+                f"clock; at EVERY value of it the two would apply this window's ponder anneal, "
+                f"balance anneal, spawn test and halt EMA twice. Accumulate over "
+                f"MORE WINDOWS -- OPT_ACCUM x batch_windows, "
+                f"spine/derive.py::opt_steps_from_windows "
+                f"-- rather than over one window twice. An eval pass (training=False) or a "
+                f"leave-one-out pass (hold_out=...) at this window is legal and is not what this "
+                f"refuses.")
+        pop.learn_window = step_n
 
     # SPAWN RUNS FIRST, BEFORE ANY GRAPH EXISTS -- see fabric/api.py::_spawn_check for why that is
     # forced and not preferred. It is also why `spawn` is read here rather than only in grow_check:
@@ -1209,10 +1299,16 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                               "to extend." if depth0 == 0 else
                               "FAB_DEPTH0 >= FAB_HOPS: the chain already starts at the budget.")))
 
-    # `write=solo`: A COUNTERFACTUAL MAY READ THE IDENTITY CACHE AND MAY NOT WRITE IT. See
-    # fabric/api.py::_identities for what a no_grad write into `ident_graph` costs the next real
-    # pass -- it is the same sentence as the counters below, one level down in the same body.
-    keys, refreshed = (_identities(pop, n, step_n, emb_every_n, write=solo) if route_learn
+    # `write=learn`: ONLY A PASS THAT LEARNS MAY WRITE THE IDENTITY CACHE. This was `write=solo`,
+    # which is `hold_out is None` and therefore TRUE of an ordinary eval pass -- so the door that
+    # was shut on the leave-one-out counterfactual stood open for every no_grad instrument, and one
+    # eval pass at the shipped FAB_EMB_EVERY=1 took the next training pass's grad|A|max to 0.0.
+    # The load-bearing repair is in fabric/api.py::_identities, which now disarms `write` for ANY
+    # pass that cannot carry a graph whatever this line says; `learn` is this call site stating the
+    # same rule in the vocabulary the rest of this body uses (_ground_update, _explore_swap,
+    # _spawn_check and the halt EMA are all gated on it), so a grad-enabled instrument that forgot
+    # its no_grad is refused the cache as well.
+    keys, refreshed = (_identities(pop, n, step_n, emb_every_n, write=learn) if route_learn
                        else (None, False))
     if refreshed:
         _bump(counters, "fab.ident_refreshed")
@@ -2129,7 +2225,10 @@ def state_dict(fab: Config, pop):
     old remove() renumbered ten of them and left `parent` and `mutscale` stale after the first cull
     (L28), which is also why fab.distinct_parents can be trusted as a D7 reading.
 
-    Re-earned rather than restored: the identity cache, halt_ema, the routing-mix samples.
+    Re-earned rather than restored: the identity cache, halt_ema, the routing-mix samples, and
+    `learn_window` -- the window index of the last gradient-carrying training pass, which is a
+    statement about THIS PROCESS's clock and would only ever produce a false refusal if a
+    resume restored it.
 
     LEVERS READ: none
     WIRES READ: none

@@ -167,11 +167,24 @@ which 19 are cross-package WIRES against WIRE_BUDGET=25 and 4 are intra-package,
 not two. The miscount came from counting declared couplings as wires; an intra-package coupling books
 no edge, which is why the two numbers differ by exactly four. The consequence clause fell with it:
 adding four couplings takes the ledger 19 -> 23 of the 25 and build() does NOT refuse it. THIS IS NOT A
-HARMLESS ARITHMETIC SLIP. The sentence was load-bearing in the wrong direction -- at least two agents
-declined to widen a signature partly because they believed the wire alternative was nearly exhausted,
-which is a design decision taken on a number that was never true. The live figures are printed by
-tests/test_couplings.py's C4 and embedded by spine/assemble.py::render, so a prose copy is one that
-can go stale in silence; this one had, in more than one file at once.
+HARMLESS ARITHMETIC SLIP, AND THE REASON GIVEN HERE UNTIL 2026-09-04 WAS ITSELF WRONG: it read "at least
+two agents declined to widen a signature partly because they believed the wire alternative was nearly
+exhausted". Nothing in src/, docs/, tools/ or .rework/ says any agent took that decision, and it points
+the wrong way -- a budget believed nearly exhausted is an argument AGAINST spending a wire, i.e. FOR
+widening a signature, so it cannot be why one was declined. WHAT IS SUPPORTED, in the sentences
+themselves rather than in anybody's stated motive: a number wrong in the SCARCE direction biases every
+choice that weighs a wire against a widened signature, and it biases it toward the signature, which is
+the option nobody has to justify at build(). The tree carries the bias in four places at once -- this
+file told a porter that four couplings which ALREADY EXIST would be refused at build();
+docs/04_CONTRACT.md's Q-WORLD-6 point 4 called a legal row "one of the last lines";
+src/eval/levers.py::<module> told a reader that WIRE_BUDGET left "room for two more edges in the whole
+tree" (its owner corrected it on the same date, and it now reads "so SIX edges remain in the whole
+tree"); and src/spine/assemble.py's WORLD.d_manage_period_windows NOT_WIRES row still says, present
+tense, that a row there would "spend one of the last coupling lines" -- which tools/render_wiring.py
+copies verbatim into docs/03_WIRING.md, so that one carrier is kept in sync into a second file while
+the corrected ones are not. Every one of the four argues against a wire on its price. The live figures are printed by tests/test_couplings.py's C4 and embedded
+by spine/assemble.py::render, so a prose copy is one that can go stale in silence; this one had, in more
+than one file at once.
 
 O4 IS GREEN FOR A REAL REASON NOW, WHICH IT WAS NOT WHEN THAT PARAGRAPH WAS WRITTEN. It reports twenty-
 three declared destinations, zero declared-but-unread and zero deferred; CAP contributes four of the
@@ -342,9 +355,26 @@ class CAPLevers(LeverSet):
     # argument the owner forbade for drops, so the case has to be arithmetic instead. It is: below cap
     # 100 the fraction does not merely inch, it FREEZES. At cap 12, int(0.08 x 12) = int(0.96) = 0, so
     # without the floor `lift_to` returns 12 and the cap can never move again, on any evidence, forever.
-    # That is reachable in the first place this rebuild runs -- the 200-step empty-environment CPU run
-    # with a tiny fabric -- so the arithmetic-inert case is not hypothetical here even though it never
-    # fired on GPU. UNITS: U.SLOTS rather than U.EXPERTS because the same floor is applied to the
+    # IT IS REACHABLE FROM THE ENVIRONMENT AND IT IS NOT WHERE THE DEFAULTS SIT, and the difference is
+    # written out because this comment claimed the second until 2026-09-04: it read "reachable in the
+    # first place this rebuild runs -- the 200-step empty-environment CPU run with a tiny fabric".
+    # MEASURED, by building CAP against an empty environment: targets resolves to "off", fab_start is
+    # the sentinel 0 which resolves cap_experts to the hard ceiling 4096 (not 12), and lift_min is 8 --
+    # so no arm is armed, no cap is 12, and even at cap 12 the floor moves it (lift_to(12, 0.08, 8) =
+    # 20). Reaching the inert case takes three deliberate settings: CAP_TARGETS=experts, a small
+    # CAP_FAB_START (or a small FAB_SLOTS), and CAP_LIFT_MIN=0. That is still the case for the floor --
+    # an operator can type it, and capacity/api.py::new_valve's cap.valve now reports it UNREACHABLE
+    # with the arithmetic printed -- but a knob an operator can reach is not the run that launches, and
+    # a printed gate reason quoted the stronger claim, which is where it was caught.
+    # NEGATIVE VALUES OF EITHER OF THESE TWO ARE REFUSED AT STARTUP, by name, in
+    # capacity/api.py::new_valve. `lift_to` is `cap + max(int(floor), int(frac x cap))`, so with BOTH
+    # negative the max is negative and an EARNED lift SHRINKS the cap -- lift_to(12, -0.5, -100) = 6 --
+    # against this package's founding sentence, "raised, by a little, never lowered". Neither negative
+    # buys anything a legal value does not: with lift_min >= 0 a negative lift is exactly lift=0, and
+    # with lift >= 0 a negative lift_min is exactly lift_min=0. CAP_LIFT ABOVE 1 IS NOT REFUSED and
+    # that is deliberate -- U.FRACTION's unit string is a label the census renders and not a bound
+    # (spine/lever.py::Lever carries choices and no numeric range), and a lift of 2.0 still RAISES.
+    # UNITS: U.SLOTS rather than U.EXPERTS because the same floor is applied to the
     # vocabulary lift as well (:7434), where the rows are tokens; SLOTS is the one word true of both.
 
     # ==============================================================================================

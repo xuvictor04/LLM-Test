@@ -138,8 +138,9 @@ class Vocabulary:
         #   three return points and never appends, so a reader of `vocab.gates` after a build sees
         #   the whole declared surface for that call in one place.
         #   `counters` IS CUMULATIVE OVER THE LIFE OF THE VOCABULARY and IS appended to piecemeal,
-        #   on purpose: the build seeds tok.build_pass/build_mint/build_converged on the arm that
-        #   runs the loop, _replay_merges writes tok.load_reconciled(_detail) on the arm that
+        #   on purpose: the build seeds tok.build_pass/build_mint/build_converged/build_refused on
+        #   the arm that runs the loop, _replay_merges writes tok.load_reconciled(_detail) on the
+        #   arm that
         #   replays, and then tokenize() adds to tok.segment, tok.retok, tok.retok_noop,
         #   tok.byte_fallback and tok.dropout_skip on EVERY call thereafter. There is no return
         #   point at which a total could be assigned, because the total is the point of the row.
@@ -158,10 +159,35 @@ class Vocabulary:
         # be an unbounded leak for a check whose entire job is to catch the one specific pattern
         # measured at 2.189 b/B and 68 points of word quality: the SAME data re-segmented from the
         # SAME start while nothing minted in between.
-        # (data, start, len(data), stamp, Segmentation, drawn_with_dropout); None until the first
-        # call. The last field is a BOOL and not a nicety: an entry produced under BPE-dropout is a
-        # legitimate stamp for the next call's comparison and an ILLEGITIMATE answer to return to a
-        # deterministic one, and tokenize()'s skip test reads it for exactly that.
+        # (data, start, len(data), stamp, Segmentation, drawn_with_dropout, labels); None until
+        # the first call. The last two fields are not niceties: an entry produced under BPE-dropout
+        # is a legitimate stamp for the next call's comparison and an ILLEGITIMATE answer to return
+        # to a deterministic one, and an entry produced from one `labels` vector is an illegitimate
+        # answer to a call that passed a different one. tokenize()'s skip test reads both for
+        # exactly that.
+        # EVERY INPUT THE CACHED ANSWER DEPENDS ON, AND WHICH FIELD COVERS IT -- written out here
+        # because two of the seven were found one at a time by two separate readers, and the third
+        # reader should not have to hunt for a fourth (r3 found `drawn_with_dropout`, r4 found
+        # `labels`). tokenize's signature is (tok, vocab, data, labels, *, start, regularize, seed):
+        #   data       -> cache[0] BY IDENTITY plus cache[2] len(data). Identity, not equality, is
+        #                 deliberate: it is O(1) and it is what the composition root does (it
+        #                 re-tokenizes its own live stream buffer). An in-place mutation of `data`
+        #                 that preserves its length defeats it, and that is the accepted price.
+        #   start      -> cache[1].
+        #   labels     -> cache[6], BY IDENTITY, on the same terms as `data` and for the same
+        #                 reason: the root hands the same list object back on a re-tokenization of
+        #                 its own stream, so the skip still fires where it was measured.
+        #   regularize -> cache[5] for the entry, and the caller's own `drop <= 0.0` for this call.
+        #                 Both halves are needed: one keeps a drawn answer from being served to a
+        #                 deterministic caller, the other keeps any cached answer from freezing a
+        #                 draw the regularizer is supposed to make afresh.
+        #   tok        -> only tok.dropout is read, and it reaches the test through `drop` above.
+        #   seed       -> NOT COVERED AND DOES NOT NEED TO BE: tokenize's body never reads it (see
+        #                 that function's own note on the parameter). It selects nothing, so it
+        #                 cannot make a cached answer wrong.
+        #   vocab      -> cache[3], the stamp, over the TWO structures _segment consults: seq2id
+        #                 (through size() and len(seq2id)) and `retired` (len). See tokenize's
+        #                 paragraph for the one match-table change this stamp still cannot see.
         self._retok_cache = None
 
     def size(self):
@@ -291,9 +317,15 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
 
     LEVERS READ: mode, seed_vocab, build_passes, build_bytes, min_pair, max_bytes, dropout
     WIRES READ: d_vocab_ceiling, d_vocab_read_path
-    DID IT FIRE: tok.build_pass, tok.build_mint, tok.build_converged (all three PRESENT ONLY ON THE
-                 FRESH-BUILD ARM -- absent on mode="bytes" and on the replay arm, where the build
-                 loop is unreachable and a 0 would be a false reading rather than a small one),
+    DID IT FIRE: tok.build_pass, tok.build_mint, tok.build_converged, tok.build_refused (all four
+                 PRESENT ONLY ON THE FRESH-BUILD ARM -- absent on mode="bytes" and on the replay
+                 arm, where the build
+                 loop is unreachable and a 0 would be a false reading rather than a small one.
+                 tok.build_refused is candidates at or above min_pair that `_add` REFUSED -- for
+                 max_bytes, for already existing, or at the cap -- and it exists because
+                 tok.build_converged names a CAUSE and only one of the two ways a pass can mint
+                 nothing is that cause: a stall on refusals leaves the tally full, so converged
+                 stays 0 and this row carries the number instead),
                  tok.load_reconciled, tok.load_reconciled_detail (the disagreeing lines themselves,
                  written by _replay_merges beside the count and present only when at least one field
                  disagreed; declared here because the reverse direction of this row is a check too --
@@ -368,8 +400,9 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
             # with no refusal at all -- the restored embedding table would then be indexed by a
             # vocabulary the checkpoint never saw. Falling through here ALSO used to crash a step
             # later and for an unrelated-looking reason: `vocab.dropout_rng` is minted,
-            # unconditionally, three lines above, and the fresh-build arm mints the very same name
-            # again at "tok.dropout.mint" once execution reached it -- spine/rng.py's
+            # unconditionally, at the TOP OF THIS BRANCH -- three statements up, immediately
+            # under the "MINTED ON THIS BRANCH TOO" comment -- and the fresh-build arm mints the
+            # very same name again at "tok.dropout.mint" once execution reached it -- spine/rng.py's
             # two-call-sites-one-sequence guard then raised RngError from inside build_vocabulary,
             # which is the correct guard firing on the wrong root cause. Both symptoms were one
             # defect: a missing d_vocab_read_path treated as "nothing was asked for" instead of
@@ -391,9 +424,12 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         # not). tokenize()'s own docstring is unconditional: "bytes_per_token IS MEASURED WITH
         # DROPOUT APPLIED" -- it does not carve out an exception for a resumed vocabulary, and
         # derive.signature_width_bytes and data_plan's splice_window read whatever this call
-        # returns regardless of which arm produced it. `stream` reuses the dropout_rng minted three
-        # lines above (not a second mint -- see P1-H56 and the crash that a second mint caused on
-        # this exact branch before that fix).
+        # returns regardless of which arm produced it. `stream` reuses the dropout_rng minted AT THE
+        # TOP OF THIS BRANCH, before `recon` and before the missing-parent refusal -- more than
+        # forty lines up, not three, and this sentence said "three lines above" until it was
+        # recounted (r4; measured 389 -> 432 on the tree that recount was made against). Reusing
+        # it is not a second mint -- see P1-H56 and the crash that a second mint caused on this exact
+        # branch before that fix.
         stream = vocab.dropout_rng if float(tok.dropout) > 0 else None
         ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
         vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
@@ -436,6 +472,7 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     vocab.counters["tok.build_pass"] = 0
     vocab.counters["tok.build_mint"] = 0
     vocab.counters["tok.build_converged"] = 0
+    vocab.counters["tok.build_refused"] = 0
     for _ in range(passes):
         if vocab.size() >= target:
             break
@@ -448,19 +485,46 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         for a, b in zip(ids, ids[1:]):
             tally[(a, b)] += 1
         minted = 0
+        refused = 0
         for (a, b), n in tally.most_common():
             if n < int(tok.min_pair) or vocab.size() >= target:
                 break
             if vocab._add(vocab.id2bytes[a] + vocab.id2bytes[b], prov="build", pair=(a, b)) is not None:
                 minted += 1
+            else:
+                # REFUSED, NOT ABSENT, AND THE TWO ARE COUNTED APART (r4 finding against this
+                # block, which r3 wrote). `_add` returns None for len(seq) > max_bytes, for a
+                # sequence already in seq2id, and at min(soft_cap, ceiling) -- and NONE of those
+                # three is "the corpus ran out of pairs". Without this tally a pass that refused
+                # every candidate above min_pair is indistinguishable from a pass that found none,
+                # and tok.build_converged below then prints a cause it cannot establish.
+                refused += 1
         vocab.counters["tok.build_mint"] += minted
+        vocab.counters["tok.build_refused"] += refused
         if minted == 0:
             # CONVERGED MEANS THE CORPUS RAN OUT OF PAIRS, and it is NOT the size >= target break
             # above. Setting it there too would say a build that reached its target had nothing left
             # to mint, which is the opposite claim and the one that matters for reading v0: a run
             # that converged below target is exactly the case the old subtract-seed_vocab row
             # over-reported (self_organize.py:1274-1281).
-            vocab.counters["tok.build_converged"] = 1
+            # NOR IS IT THE REFUSAL STALL, WHICH IS WHY `refused` GATES THIS ROW (r4 finding
+            # against the row r3 added here). `minted == 0` cannot come from the target break --
+            # size only moves when `_add` succeeds, and the outer loop already tested size >= target
+            # before entering -- so it means either (a) the first candidate fell below min_pair, the
+            # convergence this row claims, or (b) every candidate above min_pair was REFUSED. On (b)
+            # the tally is still full and the corpus is not exhausted:
+            # tok/levers.py::TOKLevers.max_bytes has the configuration on record ("max_tok=6
+            # vmax=4000 -> stalled at 658/4000 with 1866
+            # pairs still above min_pair (83.5% dead)", tokenizer.py:318-324), and at TOK_MAX_BYTES=6
+            # with TOK_SEED_VOCAB=2000 this loop stalls at 464/2000 with nine pairs still at or above
+            # min_pair, the top of them eight bytes long and refused for LENGTH ALONE. Writing 1 there
+            # is a false equation printed under a counter, which is worse than printing nothing --
+            # so the stall is reported by tok.build_refused instead, and the cause this row names is
+            # left unclaimed rather than misclaimed. The BREAK is unchanged on both arms and is not a
+            # narrowing of behaviour: nothing minted means the next pass re-segments identically,
+            # tallies identically, and refuses or falls short identically.
+            if refused == 0:
+                vocab.counters["tok.build_converged"] = 1
             break                    # a pass that mints nothing will mint nothing next time either
 
     if mode == "fixed":
@@ -655,8 +719,11 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     A RE-SEGMENTATION WHOSE MATCH TABLE HAS NOT MOVED since the last one is REFUSED here and
     counted as tok.retok_noop, not performed: the rebuild is byte-identical but the side effects
     are not, and the measured cost of not refusing was 2.189 b/B and 68 points of word quality
-    (23 retoks, 22 adding zero tokens). The invariant stamped is (size, len(seq2id)) and NOT size
-    alone, because retire() changes the match table without changing vocab_size.
+    (23 retoks, 22 adding zero tokens). The invariant stamped is (size, len(seq2id), len(retired))
+    and NOT size alone, because retire() changes the match table without changing vocab_size. THE
+    ANSWER IS ALSO KEYED ON `labels`, which is an argument of this function and not a property of
+    the vocabulary at all -- see the body, and see Vocabulary.__init__ for the full list of what the
+    cache entry covers and what it does not.
 
     regularize=True applies tok.dropout (skip an available merge with that probability, falling
     back toward the raw byte, which is always in the vocabulary); it is used for the TRAINING
@@ -684,6 +751,18 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
          data_plan's splice_window threshold both move with a TOK regularizer. Both take the
          measured value and so follow correctly; whoever reads a width that changed with no SIG
          lever set should look here first.
+
+    `seed` IS ACCEPTED AND DELIBERATELY NOT READ, and the frozen signature keeps it (r4, found by
+    reading this function end to end). The one live call site passes `seed=int(run.seed)`
+    (spine/compose.py's tok_api.tokenize(..., regularize=True, seed=int(run.seed))), and a reader who
+    assumes it seeds the regularizer would have the mechanism backwards: BPE-dropout draws from
+    `vocab.dropout_rng`, the ONE stream build_vocabulary minted at "tok.dropout.mint" FROM RUN.seed,
+    and it has to CONTINUE across calls (P1-H56, the paragraph on the stream below). Anything this
+    call did with a per-call `seed` would be that restart. It is kept because a Vocabulary is not the
+    only thing a future caller may want reproducible -- the held-out encode and generation callers
+    P4 owes may need a stream of their own -- and dropping a parameter from a frozen surface is a
+    signature change. Recorded here so the next reader does not file it as a dead argument or, worse,
+    wire it into the draw.
 
     `mode` IS NOT READ HERE AND THE LINE BELOW NO LONGER CLAIMS IT IS (r3 finding,
     tok/api.py::tokenize). Established by AST rather than by eye: the only attribute this body takes
@@ -731,13 +810,34 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     # `data` is the SAME OBJECT (not merely equal content -- identity is O(1) and is what the
     # composition root actually does: it re-tokenizes its own live stream buffer, it does not build
     # a new bytes object with the same content) at the SAME start. THE INVARIANT IS (size,
-    # len(seq2id)), NOT size ALONE, because retire() pops a sequence from the match table -- taking
-    # segmentation down a different path -- without moving vocab.size(); a stamp of size alone would
-    # call a retire-only change a no-op and skip a rebuild the match table actually needs.
-    stamp = (vocab.size(), len(vocab.seq2id))
+    # len(seq2id), len(retired)), NOT size ALONE, because retire() pops a sequence from the match
+    # table -- taking segmentation down a different path -- without moving vocab.size(); a stamp of
+    # size alone would call a retire-only change a no-op and skip a rebuild the match table
+    # actually needs.
+    # THE THIRD TERM IS LATENT TODAY AND IS WRITTEN DOWN AS LATENT (r4 finding, and it is recorded
+    # rather than inflated). _segment consults TWO structures, `s2i.get(...)` and `if j is None or
+    # j in retired: continue`, so a stamp over seq2id alone is a stamp over PART of the match table.
+    # It cannot go stale in this tree yet: `Vocabulary` has no retire() method, nothing anywhere
+    # writes `vocab.retired`, and the body that would (judge_probation) is `raise
+    # NotImplementedError` -- so len(retired) is 0 on every reachable configuration and this term
+    # changes no value today. It closes ONE of the two shapes that defeat the pair once those bodies
+    # land: a retire that adds to `retired` WITHOUT popping seq2id, which moves neither of the other
+    # two terms.
+    # IT DOES NOT CLOSE THE SECOND SHAPE, AND SAYING SO IS THE POINT OF THIS PARAGRAPH. Under the
+    # retirement this package already describes -- judge_probation's "the bytes are popped from the
+    # match table", plus the addition to `retired` that Vocabulary.live_size's own subtraction
+    # requires -- a retire of one id paired with a REINSTATEMENT of a different retired id in the
+    # same flush
+    # (mint_burst's docstring makes reinstatement a real operation: "put the old id back in the
+    # match table, mint nothing") moves len(seq2id) by -1 then +1 AND len(retired) by +1 then -1,
+    # both to a net zero, while the match table has genuinely changed. No count of the two sets can
+    # see that; only a monotone revision number bumped by every match-table mutation can, and there
+    # is nothing to bump it in yet. Recorded in this file rather than left for a fifth reader to
+    # rediscover as a fresh defect against the same cache.
+    stamp = (vocab.size(), len(vocab.seq2id), len(vocab.retired))
     cache = vocab._retok_cache
     is_retok = cache is not None and cache[0] is data and cache[1] == start and cache[2] == len(data)
-    if is_retok and drop <= 0.0 and cache[3] == stamp and not cache[5]:
+    if is_retok and drop <= 0.0 and cache[3] == stamp and not cache[5] and cache[6] is labels:
         # THE SKIP TEST IS DISABLED WHENEVER dropout > 0 (the docstring's own words), because a
         # regularized call is no longer a deterministic function of the vocabulary alone -- it also
         # depends on the draw from `stream`, so returning the cached Segmentation here would freeze
@@ -759,6 +859,26 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
         # spine/gate.py refuses in its own domain. At the shipped TOK_DROPOUT=0.0 nothing moves:
         # cache[5] is False on every entry, and the cached and freshly built segmentations were
         # verified identical.
+        # AND `cache[6] is labels`: THE SAME CACHE SERVED A STALE ANSWER IN A SECOND ARM, AND IT IS
+        # NOT A DROPOUT ARM AT ALL (r4 finding, tok/api.py::tokenize). `labels` is an ARGUMENT of
+        # this function and was in none of the six fields, so a later call on the same bytes object
+        # with a DIFFERENT labels vector -- the None -> not-None direction included -- was handed the
+        # earlier call's `out_labels` and counted as tok.retok_noop, a row whose whole meaning is
+        # "the rebuild would have been byte-identical". It IS identical in `ids` and `byte_pos` and
+        # is NOT in `labels`. Measured on the committed tree at the shipped TOK_DROPOUT=0.0, one
+        # Vocabulary, three calls on the same bytes object: tokenize(...) then
+        # tokenize(..., labels=[0]*n) then tokenize(..., labels=[7]*n) returned the SAME object all
+        # three times with .labels None, under tok.retok_noop 2. This function's own docstring makes
+        # that channel load-bearing -- "it takes the label of its FIRST byte ... so a per-area score
+        # and a byte offset always agree" -- and the one live call site (spine/compose.py's
+        # tok_api.tokenize(tok, sysm.vocab, sysm.stream.bytes, sysm.stream.labels, ...)) does pass
+        # them, so a wrong hit substitutes the per-area channel DOM and EVAL read.
+        # NOT REACHABLE IN TODAY'S PIPELINE, STATED SO THE LEDGER IS NOT OVER-READ, and the same
+        # narrowing applies to the dropout half above: there is exactly ONE live tokenize call site
+        # in the tree, so neither the mixed regularized/deterministic sequence nor the mixed-labels
+        # sequence can arise in the run as it stands. Both are defects in a FROZEN PUBLIC SURFACE
+        # whose docstring promises to serve the held-out encode and the final segmentation, and
+        # those callers are P4's; neither was corrupting a run today.
         vocab.counters["tok.retok_noop"] = vocab.counters.get("tok.retok_noop", 0) + 1
         return cache[4]
     if is_retok:
@@ -801,7 +921,7 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     # WHETHER THIS ANSWER CAME FROM A DRAW, and it is what keeps that always-cache honest: the entry
     # is then usable as a STAMP by the next call and unusable as an ANSWER, which is the distinction
     # the five-field tuple could not express.
-    vocab._retok_cache = (data, start, len(data), stamp, seg, drop > 0.0)
+    vocab._retok_cache = (data, start, len(data), stamp, seg, drop > 0.0, labels)
     return seg
 
 

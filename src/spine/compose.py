@@ -664,9 +664,13 @@ ASSEMBLY_ORDER = (
                                               "new_cadences took no periods at all until 2026-08-30 "
                                               "while its docstring said every period is an "
                                               "argument; the CALL SITE was still passing none until "
-                                              "this edit, which is a TypeError the moment "
-                                              "RUN.process_setup gets a body -- a defect hidden "
+                                              "this edit, which would have been a TypeError on the "
+                                              "first compose() to reach this row -- a defect hidden "
                                               "behind an earlier stub, this file's oldest shape. "
+                                              "THE EARLIER STUB IS CAP.startup_refusals AT ROW 29, "
+                                              "AND THIS ROW NAMED RUN.process_setup UNTIL "
+                                              "2026-09-04: process_setup is row 1 and has had a "
+                                              "body since P4 wrote it, so it shields nothing. "
                                               "'curve' STAYS IN THE MAPPING while EVAL.curve_probe "
                                               "is deferred, so the ledger reads a declared key with "
                                               "checks == 0: DECLARED AND NEVER ASKED, which is a "
@@ -2163,7 +2167,11 @@ def compose(environ=None, *, restored=None):
 
     # THE PERIODS ARE ARGUMENTS AND THE CALL WAS NOT PASSING ANY. new_cadences(run: Config, *,
     # periods) is keyword-only with no default (train/api.py::new_cadences), so this line was a TypeError on
-    # every compose() -- unreachable only because RUN.process_setup raises several rows earlier.
+    # every compose() -- unreachable only because capacity/api.py::startup_refusals raises at row 29
+    # of ASSEMBLY_ORDER's 39 and this is row 35. RUN.process_setup, which this comment named as the
+    # blocker until 2026-09-04, is row 1 and HAS A BODY: train/api.py::process_setup returns a
+    # Process and stops nothing. Measured by running compose.compose(environ={}) and reading where
+    # the traceback ends.
     # The signature was fixed on 2026-08-30 and the call site was not, which is the same shape
     # capacity/api.py::<module> records for derive.pin_tick: a file asserting a repair as done with the
     # call the repair requires never written. Each period comes from the package that DECLARES its
@@ -2305,8 +2313,17 @@ def _run_windows(sysm):
     derive.cadences_that_cannot_fire raises UnitError on a non-Windows at both ends (derive.py::cadences_that_cannot_fire)
     and derive.opt_steps_from_windows does the same (derive.py::opt_steps_from_windows), so RUN.cadence_audit would
     have raised on its first call and OPT.build on its first horizon -- unreachable today only
-    because RUN.process_setup raises several rows earlier, which is this file's oldest shape and
-    the reason K7 exists. ISSUES P1-H51 is the general case: all 35 Clock-unit levers resolve to bare
+    because capacity/api.py::startup_refusals raises at row 29 of ASSEMBLY_ORDER's 39, ONE row
+    before OPT.build and SEVEN before RUN.cadence_audit, which is this file's oldest shape and the
+    reason K7 exists. THE BLOCKER NAMED HERE UNTIL 2026-09-04 WAS RUN.process_setup, AND THAT WAS
+    FALSE: process_setup is row 1 and it HAS A BODY -- train/api.py::process_setup returns a
+    Process -- so it stops nothing. It was the true blocker when the sentence was first written
+    and stopped being one when P4 wrote the body; an unreachable arm whose stated reason names a
+    mechanism that no longer holds is a false equation, which this file rates worse than printing
+    nothing. Measured, not inferred: `compose.compose(environ={})` raises NotImplementedError from
+    compose.py's `refuse` stage into capacity/api.py::startup_refusals, and docs/04_CONTRACT.md
+    says the same in as many words ("halts on the 29th of the 39 rows in ASSEMBLY_ORDER, at
+    CAP.startup_refusals"). ISSUES P1-H51 is the general case: all 35 Clock-unit levers resolve to bare
     ints and the typing is real only where derive or assemble puts it back, which for this quantity
     is here, at the one place it is computed.
 
@@ -2330,9 +2347,32 @@ def _run_windows(sysm):
     at all, so the per-package clock set for "spine" is empty. The exemption is deliberate and
     correct for derive.py. What it also exempts is the COMPOSITION ROOT -- the one other place in
     the tree that legitimately holds two packages' clocks at once, and therefore the one other
-    place this defect can live. Narrowing the skip from `src/spine/` to `src/spine/derive.py` is
-    the ownership pass's call; this file cannot make it, and says so rather than leaving the gap
-    unrecorded.
+    place this defect can live.
+
+    NARROWING THE SKIP DOES NOT CLOSE IT, AND THIS PARAGRAPH SAID IT WOULD UNTIL 2026-09-04. The
+    sentence here was "Narrowing the skip from `src/spine/` to `src/spine/derive.py` is the
+    ownership pass's call", which records a remedy that has since been MEASURED NOT TO WORK. On a
+    scratch copy of the tree with the skip narrowed to derive.py alone and the inline multiply put
+    back into this function, tests/test_ownership.py reports "PASS O11". Each of the three reasons
+    above has to be answered separately, and narrowing answers only the first: four lines below the
+    skip the loop reads `mine = clocks.get(pkg, set())` and then `if not mine: continue`, and for
+    pkg "spine" that set is empty because no src/spine/levers.py exists (thirteen packages declare
+    one; this is not among them), so the file is dropped a second time. Give "spine" the UNION of
+    every package's clock levers and the file is finally examined -- and O11 still does not report
+    this line, because its AST half tests each operand for being an Attribute and both of these are
+    Calls, while its textual half matches `name //`, `name %` or `name *` where the name is a bare
+    identifier and the token before the `*` here is a `)`.
+
+    SO THE COMPOSITION ROOT NEEDS THREE CHANGES, NOT ONE, AND THE THIRD IS THE LOAD-BEARING ONE:
+    the operand test must look for a clock-lever Attribute ANYWHERE IN THE OPERAND SUBTREE, not
+    only at its root, so that `int(sysm.configs["RUN"].epochs)` counts as an `epochs` operand.
+    Measured with all three on a scratch copy: with the inline multiply restored O11 FAILS naming
+    this exact line, and with the tree as it stands it PASSES. A fourth thing comes with them --
+    the narrowed skip must still exempt spine/assemble.py, whose COUPLINGS `compute` lambdas scale
+    and combine clock levers BY DESIGN (that is what a declared coupling is); without that
+    exemption the same three changes report four findings there, every one of them a correctly
+    declared wire. All of this is the ownership pass's call and this file cannot make it -- but
+    what it records now is what was measured, not a remedy nobody ran.
     """
     from spine import derive, units
     return derive.run_windows_from_epochs(units.Epochs(sysm.configs["RUN"].epochs),
@@ -2430,9 +2470,14 @@ def _geometry_manifest(sysm):
         # 'mask_dead_rows','new_row_init','vocab_slots','width'] -- there is no `depth`, and
         # Config.__getattr__ RAISES on an undeclared name rather than returning a default. So the
         # first draft of this line killed every compose() at the gate stage, and the reason nothing
-        # caught it is the reason it is worth this comment: RUN.process_setup raises
+        # caught it is the reason it is worth this comment: RUN.process_setup RAISED
         # NotImplementedError several rows EARLIER, so the crash was unreachable and K2 -- "the
         # composition root imports and fails only at a stub" -- passed on a tree that could not run.
+        # Past tense on purpose, and it is the whole point of the comment: process_setup has had a
+        # body since P4 wrote one, so NOTHING SHIELDS THIS LINE ANY MORE. _geometry_manifest is
+        # reached on every compose() today -- measured by running compose.compose(environ={}), which
+        # builds all 21 manifest entries and only then stops at CAP.startup_refusals, row 29 of
+        # ASSEMBLY_ORDER's 39. An `lm.depth` written here now would kill the root at once.
         # A defect hidden behind an earlier stub is this project's oldest shape. K7 below is the
         # general form of the check that would have caught it at author time.
         "lm.layers":    (int(lm.layers), "EXACT", "LM_LAYERS", "the layer stack"),
@@ -2594,16 +2639,30 @@ def _signature_units(sysm, sig):
 # FAB.forward and so needs the flush's own novelty, live_domains and training); an `improving` EMA
 # pair (FAB already keeps one and a second would be two mechanisms deciding the same question); an
 # `owners` rule beyond the one the old tree used; a `plateau` boolean (WORLD holds that state).
-# FOUR ABSENCES, AND THEY ARE WHAT THE SEVEN NON-EVAL DEFERRALS ARE WAITING ON -- each of those is
-# filed in DEFERRED_ENTRY_POINTS with what would close it. THIS LINE READ "Those are the seven
-# deferrals" until 2026-09-04, which called a list of FOUR things seven and made the list read as an
-# enumeration OF the deferrals instead of the joins they wait on. The deferrals are ENTRY POINTS and
-# the preamble to that table names them: EVAL.curve_probe, MEM.read, MEM.blend, MEM.judge,
-# FAB.contribution, CAP.observe and WORLD.manage. `owners` is not one of them and is not even the
-# same kind of absence: the RULE is declared -- argmax over FabricOut.weights modulo
-# MEM.d_owner_blocks, on MEM.write's ROW_ARGUMENTS_ELSEWHERE entry, with P4 writing the tensor
-# operation because nothing in src/ imports torch -- so what is declined here is inventing a BETTER
-# rule, not supplying a missing one. The other three genuinely have no producer anywhere.
+# FOUR ABSENCES, AND EACH IS ONE PRODUCER SOME DEFERRAL WAITS ON RATHER THAN THE SET ANY OF THEM
+# WAITS ON. THIS LINE READ "Those are the seven deferrals" until 2026-09-04, which called a list of
+# FOUR things seven and made the list read as an enumeration OF the deferrals instead of the joins
+# they wait on. The replacement written the same day said "THEY ARE WHAT THE SEVEN NON-EVAL
+# DEFERRALS ARE WAITING ON", and that was false twice, so it is corrected here rather than left to
+# be found. FIRST, THE SEVEN ARE NOT NON-EVAL. They are EVAL.curve_probe, MEM.read, MEM.blend,
+# MEM.judge, FAB.contribution, CAP.observe and WORLD.manage -- SIX non-EVAL and ONE EVAL, which is
+# the split the DEFERRED_ENTRY_POINTS preamble states in as many words ("the eight EVAL entries, the
+# six non-EVAL rows named above, and CKPT.Retention.consider"). One file saying two things about one
+# set is the failure the OPT.load_state ordering row was rewritten to end, reappearing 1200 lines
+# below it in the same sweep. SECOND, THESE FOUR ARE NOT WHAT THOSE SEVEN ARE WAITING ON, and the
+# table says so entry by entry: EVAL.curve_probe waits on `units_by_domain` as well as a logits_fn,
+# MEM.read on `queries`, MEM.judge on `scorer(ctx) -> logits`, MEM.blend on MEM.read's `retrieval`
+# and on the probabilities-against-logits join (Q-MEM-10), FAB.contribution on `targets`,
+# `candidates` AND `baseline_logits_fn`, CAP.observe on `elapsed_windows` and `observations` as well
+# as `improving`, and WORLD.manage on `add_param_group` -- which has no row to hand it over -- as
+# well as `plateau`. THREE of these four bear on a deferral at all: logits_fn on EVAL.curve_probe
+# (and, in the same shape, on MEM.judge's scorer and FAB's baseline_logits_fn), `improving` on
+# CAP.observe, `plateau` on WORLD.manage. THE FOURTH BEARS ON NONE OF THEM. `owners` is not one of
+# the seven and is not even the same kind of absence: the RULE is declared -- argmax over
+# FabricOut.weights modulo MEM.d_owner_blocks, on MEM.write's ROW_ARGUMENTS_ELSEWHERE entry, with P4
+# writing the tensor operation because nothing in src/ imports torch -- and MEM.write is not in
+# DEFERRED_ENTRY_POINTS at all, so what is declined here is inventing a BETTER rule, not supplying a
+# missing one. The other three genuinely have no producer anywhere.
 #
 # THE logits_fn IS STILL NOT FORMABLE, BUT ITS SHAPE AND ITS OWNER ARE NOW RULED (Q-MEM-10, RESOLVED
 # 2026-09-02 (a)). When the missing data exist it is written HERE, once, as

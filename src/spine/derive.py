@@ -321,8 +321,25 @@ def run_windows_from_epochs(n_epochs, windows_in_epoch):
     lever, while the file doing the arithmetic belongs to a package with no levers.py at all. The
     exemption is the deliberate one -- this file must multiply and divide -- but it exempts the
     composition root along with the conversions, and the root is the one other place in the tree
-    that legitimately holds two packages' clocks at once. Q: whether O11's skip should be narrowed
-    from `src/spine/` to `src/spine/derive.py`. That is the ownership pass's call, not this file's.
+    that legitimately holds two packages' clocks at once.
+
+    THE Q RECORDED HERE UNTIL 2026-09-04 WAS "whether O11's skip should be narrowed from
+    `src/spine/` to `src/spine/derive.py`", AND THE ANSWER IS NOW MEASURED: narrowing it is
+    NECESSARY AND NOT SUFFICIENT, so a reader who makes that one edit and sees green will believe a
+    hole is closed that is not. On a scratch tree with the skip narrowed to this file alone and the
+    inline multiply put back into spine/compose.py::_run_windows, tests/test_ownership.py reports
+    "PASS O11" -- four lines under the skip the loop reads `mine = clocks.get(pkg, set())` and then
+    `if not mine: continue`, and src/spine has no levers.py, so the composition root is dropped a
+    second time. Two further changes are needed: a clock set for "spine" (the union of every
+    package's, the root being the one file that holds them all at once), and an operand test that
+    finds a clock-lever Attribute ANYWHERE IN THE OPERAND SUBTREE rather than only at its root,
+    because both operands of that multiply are Calls and the textual half wants a bare identifier
+    immediately before the operator. The narrowed skip must also keep exempting
+    spine/assemble.py, whose COUPLINGS computes scale clock levers by design. Measured both ways on
+    the scratch tree: with the three changes O11 FAILS naming the inline multiply and PASSES on the
+    tree as it stands. spine/compose.py::_run_windows carries the same finding from the other end.
+    It is still the ownership pass's call and not this file's; what is no longer recorded here is a
+    remedy nobody ran.
 
     EPOCHS -> WINDOWS AND NOT EPOCHS -> STEPS, though the horizon eventually wants Steps. Two
     boundaries separate an epoch from an optimizer step and they are crossed by two different
@@ -532,24 +549,54 @@ def opt_steps_from_backwards(n_backward, accum):
     into a guard that fires on the empty case.
 
     TRUNCATES, like every conversion in this file: the backward passes accumulated since the last
-    step are not yet a step, and rounding them up would report a step that has not been taken. A
-    NEGATIVE count is not refused here, and that is deliberate -- the only way to produce one is the
-    caller's own resume subtraction (`n_backward - backward_at_load`), and its invariant reports
-    that with both numbers and the boundary they were measured from, which is a better sentence
-    than any this function could raise.
+    step are not yet a step, and rounding them up would report a step that has not been taken. THAT
+    RULE ONLY EVER HAD A NON-NEGATIVE DOMAIN and until 2026-09-04 this function did not say so. A
+    Backwards is a count of events that HAPPENED; -3 backward passes have not happened, and there
+    is no honest number of optimizer steps to answer for them.
 
-    AND THE BODY FLOORED INSTEAD, IN THE SAME PARAGRAPH THAT ADMITS THE NEGATIVE (corrected
-    2026-09-04). `//` truncates only for operands of one sign; on a negative it FLOORS, which
-    rounds away from zero. The two differ on exactly the counts this function says it accepts:
-    opt_steps_from_backwards(Backwards(-1), 4) answered Steps(-1) -- one whole optimizer step of
-    deficit -- where a single backward pass is short of the boundary and no step's worth of passes
-    is missing at all. TRUNCATION IS THE CORRECT ONE and the docstring was the correct half, for
-    the reason stated in the sentence above it: a partial step is not a step, in either direction.
-    Floor made the deficit side round a partial step UP in magnitude, which is precisely the "step
-    that has not been taken" this function refuses to report, and it is the number
-    opt/api.py::counters prints into the P3-H29 message when the invariant breaks on a resume.
-    Positive counts are unaffected -- `//` and truncation agree for n >= 0 -- so no live run's
-    number moves: the only reachable negative is the resume subtraction named above.
+    A NEGATIVE COUNT IS NOW REFUSED, AND THE ROUNDING REPAIR IS WHY (2026-09-04, twice in one day).
+    The paragraph above used to end: "A NEGATIVE count is not refused here, and that is deliberate
+    -- the only way to produce one is the caller's own resume subtraction (`n_backward -
+    backward_at_load`), and its invariant reports that with both numbers and the boundary they were
+    measured from, which is a better sentence than any this function could raise." THE PREMISE OF
+    THAT SENTENCE WAS MEASURED AND IT IS FALSE. The body then read `n // k`, which FLOORS on a
+    negative operand, and floor(n/k) is at most -1 for EVERY n < 0: so every negative delta came
+    back non-zero, opt/api.py::counters compared it against a `taken` of Steps(0) and raised. The
+    detection the docstring credited to the caller was a SIDE EFFECT OF THE ROUNDING THE SAME
+    DOCSTRING CALLED WRONG. Correcting the rounding to truncation -- correct AS ROUNDING, for the
+    reason in the sentence above, a partial step is not a step in either direction -- turned every
+    deficit of 1 to k-1 backward passes into Steps(0) against Steps(0) and counters() said NOTHING.
+    Measured at accum=4, n in (-9,-8,-5,-4,-3,-2,-1) answered (-3,-2,-2,-1,-1,-1,-1) under floor
+    and (-2,-2,-1,-1,0,0,0) under truncation: the three states -1, -2, -3 stopped raising, and at
+    accum=8 that silent window is seven wide. n_backward going BACKWARDS across a resume was
+    checked by that accident and by nothing else in the tree.
+
+    SO THE REPAIR IS TO THE DOMAIN AND NOT TO THE ROUNDING, WHICH IS HOW BOTH HOLD AT ONCE. The
+    negative side is refused outright at EVERY magnitude, and that is WIDER than floor's accident
+    rather than equal to it: floor was detected through a COMPARISON, `due != taken`, so a resume
+    that lost 4 backward passes AND one optimizer step at accum=4 gave due=Steps(-1) against
+    taken=Steps(-1) and compared equal, while a refusal fires on the count itself and cannot be
+    cancelled by a second regression on the other side. The accepted domain is
+    n >= 0, where `//` IS truncation, so the body and this docstring cannot disagree again and the
+    hand-written sign split that the rounding repair introduced is gone with the branch it served.
+    Positive counts are untouched: at accum=4, 0,1,3 -> 0; 4,7 -> 1; 8 -> 2; 52 -> 13. No live
+    run's number moves.
+
+    THE REFUSAL IS REACHABLE, AND IT IS NOT A GUESS ABOUT THE CALLER. opt/api.py::load_state stamps
+    `opt.ckpt.backward_at_load = int(st.n_backward)` AFTER the restore, so the base equals the live
+    counter at the boundary; opt/api.py::scaled_backward is the only writer afterwards and it only
+    adds `U.Backwards(1)`. `st.n_backward - U.Backwards(base_bwd)` in opt/api.py::counters is
+    therefore non-negative in every sound process, and a negative one is a defect with no second
+    reading -- which is exactly what makes refusing it a DETECTION and not a narrowing.
+
+    WHAT THE REFUSAL COSTS, SAID RATHER THAN LEFT TO BE FOUND. At a deficit of k or more, counters()
+    used to reach its own ValueError and print base_bwd, base_step and both live counters; it now
+    stops one line earlier, in this function, which does not hold those numbers. The message below
+    names the two counter keys instead so the reader can fetch them. The sentence WITH the numbers
+    in it belongs beside base_bwd in opt/api.py::counters -- `if int(st.n_backward) < base_bwd:`
+    raising before the conversion is called -- and it is filed for OPT rather than written here,
+    because this file owns the conversion and not the resume. Until it lands the fault is caught
+    here and named correctly; it is the reporting, not the detection, that is still owed.
 
     REFUSES A Clock AS ITS DIVISOR (added 2026-09-04), and that hole is worth naming because it is
     the general one. Every conversion in this file refuses a foreign kind at the CLOCK end and
@@ -594,15 +641,29 @@ def opt_steps_from_backwards(n_backward, accum):
                         f"least one backward pass. This divisor is accum ALONE and never "
                         f"batch_windows x accum: that product spans two boundaries and belongs to "
                         f"opt_steps_from_windows, which starts a window lower.")
-    # TRUNCATION, WRITTEN OUT, BECAUSE `//` IS NOT IT ON THE NEGATIVE COUNTS THIS FUNCTION ADMITS.
-    # `-1 // 4` is -1 and `int(-1 / 4)` is 0: floor rounds AWAY from zero on a negative operand, so
-    # a single backward pass short of the resume boundary reported a WHOLE optimizer step of
-    # deficit at accum=4, which is the "step that has not been taken" the docstring above refuses
-    # in the same paragraph that admits the negative. Float division is not used for it -- `int(n /
-    # k)` loses exactness above 2**53 and a backward count is unbounded -- so the sign is handled
-    # by hand and the arithmetic stays integer.
+    # THE NEGATIVE SIDE IS REFUSED, NOT ROUNDED, and it sits AFTER the divisor checks on purpose:
+    # this message names accum, and a caller who got both wrong should hear about the rate first,
+    # because a bad rate makes every answer wrong rather than one.
     n = n_backward.n
-    return Steps(n // k if n >= 0 else -((-n) // k))
+    if n < 0:
+        raise UnitError(f"opt_steps_from_backwards: n_backward={n_backward!r} is negative. A "
+                        f"Backwards counts backward passes that HAPPENED, so there is no number of "
+                        f"optimizer steps to answer for a negative one. The only route here is "
+                        f"opt/api.py::counters' resume subtraction `st.n_backward - "
+                        f"U.Backwards(base_bwd)`, whose base is stamped FROM st.n_backward by "
+                        f"opt/api.py::load_state AFTER the restore, and opt/api.py::scaled_backward "
+                        f"only ever adds one -- so this says the backward counter went BACKWARDS "
+                        f"across a resume by {-n} pass(es), measured at accum={k}. The four numbers "
+                        f"are opt.ckpt.backward_at_load and opt.ckpt.step_at_load against "
+                        f"opt.backward and opt.step. This was caught until 2026-09-04 only as a "
+                        f"side effect of `//` flooring a partial step up into a whole one, which "
+                        f"missed every deficit smaller than accum; it is checked here now.")
+    # `//` IS TRUNCATION ON THE DOMAIN THIS FUNCTION ACCEPTS. The refusal above leaves n >= 0, where
+    # floor and truncation are one operation, so the docstring's TRUNCATES and this line agree by
+    # construction and not by a hand-written sign split -- the split that briefly stood here was
+    # correct arithmetic over a domain that should never have been admitted. Integer `//` and not
+    # `int(n / k)`: float division loses exactness above 2**53 and a backward count is unbounded.
+    return Steps(n // k)
 
 
 def accum_due(n_backward, accum):

@@ -63,7 +63,7 @@ reader can already open, and the Valve line then omitted two of its own declared
 """
 import dataclasses
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine import units as U
 from spine import derive
 from spine.gate import Gate
@@ -158,11 +158,25 @@ def new_valve(cap: Config, *, restored=None):
     the M38 family again, and an unwritten key convention between a live body and a stub is exactly
     where it comes back.
 
+    REFUSES AT STARTUP, BY LEVER NAME, WITH BOTH NUMBERS IN THE MESSAGE. Two values are refused and
+    EITHER ONE ALONE is enough: CAP_LIFT < 0, and CAP_LIFT_MIN < 0. Only the two TOGETHER lower a
+    cap; each on its own is a second, out-of-range spelling of a legal value that already exists
+    (see the body), so refusing both is what makes the legal domain the one the unit declares.
+    This module's founding sentence is that a ceiling may be "raised, by a little, never lowered",
+    and derive.lift_to is `int(cap) + max(int(floor), int(frac * cap))` -- so with
+    BOTH of them negative the max is negative and an EARNED lift SHRINKS the cap. Reproduced before
+    the refusal existed: CAP_TARGETS=experts CAP_FAB_START=12 CAP_LIFT=-0.5 CAP_LIFT_MIN=-100 gave
+    derive.lift_to(12, -0.5, -100) = 6, and cap.valve rendered "one lift -> 6" beside the words
+    "ONE EARNED LIFT DOES NOT MOVE IT" on the same printed line. The body below says why this is a
+    refusal rather than a sentence in a Gate, why it removes no configuration, and why only the
+    NEGATIVE half is refused.
+
     LEVERS READ: targets, fab_start, vocab_start, lift, lift_min
-                 (the last two are read ONLY to answer cap.valve's question, through the same
-                 derive.lift_to observe applies: a lift that returns the cap unchanged is an arm
+                 (the last two are read for two things and neither takes a lift: the startup
+                 refusal above, and cap.valve's question, answered through the same
+                 derive.lift_to observe applies -- a lift that returns the cap unchanged is an arm
                  that cannot move, and asking that here costs nothing observe does not already do.
-                 No lift is taken at build; observe remains the only caller that lifts.)
+                 observe remains the only caller that lifts.)
     WIRES READ: d_expert_slots, d_vocab_slots, d_mask_dead_rows, d_operating_population
                 (the cull's settling point. Read HERE, and not only in startup_refusals,
                 because cap.valve cannot say whether the expert arm can pin without it --
@@ -212,6 +226,60 @@ def new_valve(cap: Config, *, restored=None):
     hard_vocab = int(cap.d_vocab_slots)
     mask_dead = bool(cap.d_mask_dead_rows)
     targets = str(cap.targets)
+
+    # A LIFT THAT LOWERS THE CAP IS REFUSED HERE, BEFORE ANY OTHER NUMBER IS DERIVED. The valve's
+    # founding sentence is a ceiling "raised, by a little, never lowered", and spine/derive.py::
+    # lift_to is `int(cap) + max(int(floor), int(frac * cap))`: with CAP_LIFT < 0 AND
+    # CAP_LIFT_MIN < 0 both terms are negative, the max is negative, and an EARNED lift SHRINKS the
+    # cap. Measured before this refusal existed, at CAP_TARGETS=experts CAP_FAB_START=12
+    # CAP_LIFT=-0.5 CAP_LIFT_MIN=-100: derive.lift_to(12, -0.5, -100) = 6, and cap.valve printed
+    # "one lift -> 6" in its arithmetic beside "ONE EARNED LIFT DOES NOT MOVE IT" in its reason, on
+    # one line, for a lift that halved the cap.
+    #
+    # WHY REFUSED RATHER THAN DESCRIBED, which is the question the Gate below cannot answer. A Gate
+    # reason is a REPORT and the mechanism still runs: describing it buys the operator a sentence
+    # while every earned lift spends the run's evidence shrinking the thing the evidence says to
+    # grow. That is the C30 inversion -- a clamp that goes the wrong way with nothing in the log --
+    # arriving through a lever VALUE instead of through a guard, and this package's own
+    # startup_refusals clause (1) already refuses the other spelling of it (a soft cap at or below
+    # zero). A valve that lowers on evidence it should raise is not a configuration of this
+    # mechanism; it is a different mechanism wearing its name.
+    #
+    # IT REMOVES NO CONFIGURATION, WHICH IS WHY IT IS NOT A DROP. With CAP_LIFT_MIN >= 0 a negative
+    # CAP_LIFT is arithmetically IDENTICAL to CAP_LIFT=0 -- max(floor, negative) is the floor -- and
+    # CAP_LIFT=0 is in range, legal, and spells a flat +CAP_LIFT_MIN lift; a negative CAP_LIFT_MIN
+    # with CAP_LIFT >= 0 is likewise identical to CAP_LIFT_MIN=0. So each half of what is refused is
+    # either a second spelling of something already legal or the inversion above. Nothing an
+    # operator can ask for is lost, and both legal spellings are named in the message.
+    #
+    # ONLY THE NEGATIVE HALF IS REFUSED, AND CAP_LIFT > 1 IS DELIBERATELY LEFT LEGAL. U.FRACTION's
+    # unit string is a LABEL the census renders, not a bound -- src/sig/levers.py::SIGLevers says
+    # exactly that of its own share ("spine/lever.py::Lever carries choices and no numeric range, so
+    # units.FRACTION here is a label"), and src/tok/levers.py::TOKLevers keeps a U.FRACTION lever
+    # where "a reader who takes 'fraction 0..1' as a bound on legal values will be surprised by 2.0,
+    # which is legal". A lift of 2.0 is a large lift and still RAISES the cap, so it does not touch
+    # the invariant this refusal holds. Refusing it would be this file deciding a range question the
+    # tree has twice decided the other way.
+    #
+    # WHY HERE AND NOT IN startup_refusals. That entry point is declared for refusals that need TWO
+    # packages' numbers -- it takes live_experts and reads d_operating_population -- and it is a
+    # stub, so a clause added there would refuse nothing today; it also runs AFTER this row in
+    # spine/compose.py::ASSEMBLY_ORDER, so the Gate would render its reason first. This is a range
+    # check over CAP's own two levers, at the first place either is read. src/lm/api.py::resolve is
+    # the precedent and states the general ground in its own words: the refusals are in a body
+    # "because a Lever has no range facility and `choices=` enumerates rather than bounds".
+    if float(cap.lift) < 0 or int(cap.lift_min) < 0:
+        raise LeverError(
+            f"CAP_LIFT={cap.lift} / CAP_LIFT_MIN={cap.lift_min}: a lift may raise this ceiling and "
+            f"may leave it where it is, and may never lower it. derive.lift_to(cap, frac, floor) is "
+            f"cap + max(int(floor), int(frac x cap)), so a negative CAP_LIFT together with a "
+            f"negative CAP_LIFT_MIN returns LESS than the cap it was handed -- "
+            f"derive.lift_to(12, -0.5, -100) = 6 -- and the valve would spend earned evidence "
+            f"shrinking the capacity that evidence says to grow. Neither negative buys anything "
+            f"a legal value does not: with a floor at or above 0 a negative CAP_LIFT is exactly "
+            f"CAP_LIFT=0 (a flat +CAP_LIFT_MIN lift), and with a fraction at or above 0 a negative "
+            f"CAP_LIFT_MIN is exactly CAP_LIFT_MIN=0. CAP_LIFT above 1 is NOT refused: it is a "
+            f"large lift, not a lowering one.")
 
     def _resolve(given, asked, hard, what):
         """Where a starting cap comes from, in the order the four branches below decide it.
@@ -366,9 +434,15 @@ def new_valve(cap: Config, *, restored=None):
     #                   Reachable today: CAP_FAB_START=-5 resolves a soft expert cap of -5, and the
     #                   declared catcher -- startup_refusals clause (1), "a soft cap below the
     #                   population" -- is a stub, so no other line in the run says so.
-    #   cap >= ceiling  NO ROOM TO EARN. derive.lift_to returns `cap + max(floor, frac*cap)`, which
-    #                   from a cap at or above the hard ceiling lands above it and is refused as
-    #                   at_hard_ceiling. THIS IS THE SHIPPED DEFAULT: both starts are the sentinel,
+    #   cap >= ceiling  NO ROOM TO EARN: the cap is ALREADY at or above the hard ceiling, which is
+    #                   the condition observe refuses by name as at_hard_ceiling. This clause said
+    #                   until 2026-09-04 that "derive.lift_to ... from a cap at or above the hard
+    #                   ceiling lands above it", which is false at a small ceiling: at FAB_SLOTS=10
+    #                   with CAP_LIFT_MIN=0, derive.lift_to(10, 0.08, 0) = 10 + max(0, int(0.8)) =
+    #                   10, which lands ON the ceiling and not above it. The ground is the CAP, not
+    #                   the lift: from a cap at or above the ceiling one earned lift either lands
+    #                   above it or does not move it at all, and neither is room to earn.
+    #                   THIS IS THE SHIPPED DEFAULT: both starts are the sentinel,
     #                   the sentinel resolves to the hard ceiling, and the lever's own help text
     #                   spells out what that means -- "0 means start at the hard ceiling, i.e. no
     #                   room to earn". Turning CAP_TARGETS on is NOT enough to arm anything.
@@ -387,12 +461,15 @@ def new_valve(cap: Config, *, restored=None):
     #                   the valve can earn a lift on every flush forever and nothing moves. Not
     #                   hypothetical and not a knob nobody sets: capacity/levers.py::CAPLevers is
     #                   where the case is written down -- "at cap 12, int(0.08 x 12) = int(0.96) =
-    #                   0, so without the floor lift_to returns 12 and the cap can never move
-    #                   again, on any evidence, forever ... reachable in the first place this
-    #                   rebuild runs". CAP_LIFT_MIN=0 with CAP_FAB_START=12 is exactly that
-    #                   configuration, and it printed FIRED. This one is CAP's OWN arithmetic on
-    #                   CAP's OWN two levers -- no wire, no other package -- which is what makes
-    #                   its absence the plainest of the five.
+    #                   0, so without the floor `lift_to` returns 12 and the cap can never move
+    #                   again, on any evidence, forever". CAP_LIFT_MIN=0 with CAP_FAB_START=12 is
+    #                   exactly that configuration, and it printed FIRED. IT IS THREE ENVIRONMENT
+    #                   SETTINGS AWAY AND IT IS NOT WHERE THE DEFAULTS SIT -- CAP_TARGETS=experts, a
+    #                   small CAP_FAB_START (or a small FAB_SLOTS), and CAP_LIFT_MIN=0 -- which is
+    #                   the honest form of a claim this file and levers.py both made as "reachable
+    #                   in the run this rebuild launches with" until 2026-09-04. This one is CAP's
+    #                   OWN arithmetic on CAP's OWN two levers -- no wire, no other package --
+    #                   which is what makes its absence the plainest of the five.
     #   mask off        (vocabulary only) THE HONESTY PRECONDITION, and it is the one this gate was
     #                   still getting wrong on 2026-09-04 after the sibling gate was repaired under
     #                   D15. When the vocabulary arm is armed and counters["cap.mask_dead_rows"] is
@@ -467,8 +544,10 @@ def new_valve(cap: Config, *, restored=None):
         elif ce >= hard_experts:
             dead.append(f"the expert arm's soft cap is {ce} against a hard ceiling of "
                         f"{hard_experts} (CAP_FAB_START={cap.fab_start}, {oe}), so there is no "
-                        f"room to earn: every lift derive.lift_to computes lands above the ceiling "
-                        f"and is refused as at_hard_ceiling")
+                        f"room to earn: the cap is ALREADY at or above the ceiling, which observe "
+                        f"refuses by name as at_hard_ceiling, and one earned lift takes it to "
+                        f"{derive.lift_to(ce, cap.lift, cap.lift_min)}, which is not below the "
+                        f"ceiling either")
         elif ce > operating:
             dead.append(f"the expert arm's soft cap is {ce} against a cull settling point of "
                         f"{operating} (CAP_FAB_START={cap.fab_start}, {oe}; "
@@ -477,11 +556,13 @@ def new_valve(cap: Config, *, restored=None):
         else:
             dead.append(f"the expert arm's soft cap is {ce} and ONE EARNED LIFT DOES NOT MOVE IT: "
                         f"derive.lift_to({ce}, CAP_LIFT={cap.lift}, CAP_LIFT_MIN={cap.lift_min}) "
-                        f"= {derive.lift_to(ce, cap.lift, cap.lift_min)}, because int({cap.lift} x "
-                        f"{ce}) truncates to zero and the floor does not make it up, so the cap "
-                        f"can never move again on any evidence (capacity/levers.py::CAPLevers "
-                        f"records this as the reason lift_min exists, and reachable in the "
-                        f"200-step CPU run this rebuild launches with)")
+                        f"= {derive.lift_to(ce, cap.lift, cap.lift_min)}, because the lift is "
+                        f"max(int(CAP_LIFT_MIN), int(CAP_LIFT x cap)) = "
+                        f"max({int(cap.lift_min)}, {int(float(cap.lift) * ce)}) = "
+                        f"{max(int(cap.lift_min), int(float(cap.lift) * ce))}, so the cap can never "
+                        f"move again on any evidence (capacity/levers.py::CAPLevers records this as "
+                        f"the reason lift_min exists; it takes CAP_LIFT_MIN=0 and a small cap to "
+                        f"reach, and is not where the shipped defaults sit)")
     if vocab_armed and not vocab_room:
         if cv <= 0:
             dead.append(f"the vocabulary arm's soft cap is {cv} (CAP_VOCAB_START="
@@ -490,8 +571,10 @@ def new_valve(cap: Config, *, restored=None):
         elif cv >= hard_vocab:
             dead.append(f"the vocabulary arm's soft cap is {cv} against a hard ceiling of "
                         f"{hard_vocab} (CAP_VOCAB_START={cap.vocab_start}, {ov}), so there is no "
-                        f"room to earn: every lift lands above the ceiling and is refused as "
-                        f"at_hard_ceiling")
+                        f"room to earn: the cap is ALREADY at or above the ceiling, which observe "
+                        f"refuses by name as at_hard_ceiling, and one earned lift takes it to "
+                        f"{derive.lift_to(cv, cap.lift, cap.lift_min)}, which is not below the "
+                        f"ceiling either")
         elif not mask_dead:
             dead.append(f"the vocabulary arm has room to earn ({cv} against a hard ceiling of "
                         f"{hard_vocab}) and LM_MASK_DEAD_ROWS={mask_dead}, so observe refuses "
@@ -502,8 +585,10 @@ def new_valve(cap: Config, *, restored=None):
             dead.append(f"the vocabulary arm's soft cap is {cv} and ONE EARNED LIFT DOES NOT MOVE "
                         f"IT: derive.lift_to({cv}, CAP_LIFT={cap.lift}, "
                         f"CAP_LIFT_MIN={cap.lift_min}) = "
-                        f"{derive.lift_to(cv, cap.lift, cap.lift_min)}, so the cap can never move "
-                        f"again on any evidence")
+                        f"{derive.lift_to(cv, cap.lift, cap.lift_min)}, because the lift is "
+                        f"max({int(cap.lift_min)}, {int(float(cap.lift) * cv)}) = "
+                        f"{max(int(cap.lift_min), int(float(cap.lift) * cv))}, so the cap can never "
+                        f"move again on any evidence")
 
     if targets == "off":
         valve_gate = Gate(
@@ -571,8 +656,14 @@ def observe(cap: Config, valve, *, elapsed_windows, live_experts, live_vocab, im
     The lift is derive.lift_to(cap, cap.lift, cap.lift_min), the shipped module-level arithmetic
     covered by cap_test.py's known-answer table; it replays sched_ctl's five real lifts
     3000 -> 3240 -> 3499 -> 3778 -> 4080 -> 4406. lift_min is not decoration: at cap 12,
-    int(0.08*12) = 0 and without the floor the cap can never move again on any evidence --
-    reachable in the 200-step empty-environment CPU run this rebuild launches with.
+    int(0.08*12) = 0 and without the floor the cap can never move again on any evidence -- a case
+    THREE ENVIRONMENT SETTINGS AWAY (CAP_TARGETS=experts, a small CAP_FAB_START or FAB_SLOTS, and
+    CAP_LIFT_MIN=0), NOT one the shipped defaults are in. This sentence said "reachable in the
+    200-step empty-environment CPU run this rebuild launches with" until 2026-09-04; measured by
+    building CAP against an empty environment, that run has targets='off', cap_experts resolved
+    from the sentinel to the hard ceiling 4096, and lift_min=8, so no arm is armed, no cap is 12,
+    and the floor moves the cap anyway (derive.lift_to(12, 0.08, 8) = 20). A printed gate reason
+    quoted it, which is a higher bar than a docstring, and that is where it was caught.
 
     LEVERS READ: targets, lift, lift_min, pin_windows, stall_band
     WIRES READ: none (the two hard ceilings AND the honesty precondition were both frozen onto the

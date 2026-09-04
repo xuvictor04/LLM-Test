@@ -193,24 +193,31 @@ def save_period(ckpt: Config):
     `.n` off the object they are handed) and whoever writes Cadences.due must not normalise its
     argument.
 
-    (2) THE ATTACHMENT ITSELF WORKS BY AN OMISSION, NOT BY A DECLARED AFFORDANCE.
-    spine/units.py::Clock declares `__slots__ = ('n',)`; spine/units.py::Windows and its five kinds
-    declare a docstring and a KIND and NO `__slots__` OF THEIR OWN, so every subclass instance
-    carries an implicit `__dict__` and `period.gates = (gate,)` lands in it. Measured:
-    `'__slots__' in units.Windows.__dict__` is False, and after the assignment `period.__dict__`
-    is `{'gates': (...)}`. Adding `__slots__ = ()` to those six subclasses -- the ordinary tidy-up
-    for a subclass of a slotted class, and a plausible future edit by someone who has never read
-    this line -- turns this function's last-but-one statement into an AttributeError, and does the
-    same to the four sibling producers named above. What is NOT at risk was checked rather than
-    assumed: with the tuple attached, `int`/`__index__`/`bool`/`str`/`repr` are unchanged, `hash`
+    (2) THE ATTACHMENT IS A DECLARED AFFORDANCE, AND IT USED TO WORK BY AN OMISSION (corrected
+    against spine/units.py as it now stands; every measurement in the description this replaces is
+    now false, and it was already false at the commit that edited the comment eighteen lines below
+    it). It landed in an implicit `__dict__`: Clock declared `__slots__ = ('n',)` and the six kinds
+    declared none of their own, so `'__slots__' in units.Windows.__dict__` was False and
+    `period.__dict__` came back `{'gates': (...)}`. The hazard that description named -- adding
+    `__slots__ = ()` to the six kinds, the ordinary tidy-up for a subclass of a slotted class --
+    HAS SINCE BEEN TAKEN, and taken safely: `gates` moved onto spine/units.py::Clock's own
+    `__slots__ = ('n', 'gates')`, every kind now carries `__slots__ = ()`, `period.__dict__` now
+    RAISES AttributeError, and spine/units.py::_verify_gate_channel runs at import and refuses a
+    Clock kind that cannot carry `.gates`, that carries a `__dict__`, or that shadows the slot --
+    naming this function's gate while it does it. So this statement is protected by a check rather
+    than by a reader, and the four sibling producers named above are unaffected either way. What is
+    NOT at risk was checked rather than assumed: with the tuple attached, `int`/`__index__`/`bool`/`str`/`repr` are unchanged, `hash`
     is still `hash((kind name, n))` so a gated Windows hashes and compares equal to a bare one,
     and units.py's one reason for existing is intact -- `Steps(1) >= period` still raises UnitError
     and `period == 0` still raises rather than silently comparing.
 
     (3) NOTHING RENDERS IT YET, so the condition this Gate states reaches an OBJECT GRAPH and not
     an operator. `grep -rn "[.]line()" src/` returns exactly one call site, in opt/api.py, over
-    OPT's own local list; `grep -rn "[.]gates" src/` finds five producers and NO consumer, compose
-    included. The path from here to a printed line exists -- spine/compose.py holds the same
+    OPT's own local list; `grep -rn "[.]gates" src/` finds SIX producing sites -- the five named
+    above plus this function's own -- and NO consumer, compose included. (Six and not five: the
+    paragraph above counts the packages that ALREADY produced one before this ruling, and re-using
+    that number for the grep would be the off-by-one this file's other count paragraph is about.)
+    The path from here to a printed line exists -- spine/compose.py holds the same
     `periods` mapping it passes to RUN.new_cadences and RUN.cadence_audit -- but both of those are
     still `raise NotImplementedError` stubs, so the round-1 complaint that "the condition is stated
     nowhere" is answered in the graph and NOT YET in any output. That is the universal P3 state
@@ -237,9 +244,18 @@ def save_period(ckpt: Config):
     # is spelled as a WORD, tests/test_contract.py's K13 reads digits, and K13's own output lists
     # "a number written in words" under NOT SEARCHED FOR -- so no check in the suite can see a
     # miscount written this way, and only a reader can. A period accessor is one
-    # construction over its declared levers, and its whole job is that Cadences.due REFUSES a
-    # bare int while Config hands one back for all 35 levers that declare a Clock unit
-    # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
+    # construction over its declared levers -- "its declared levers" and NOT "one declared lever",
+    # because THIS accessor reads TWO: `every` here and `dir` through saving_on below, which the
+    # LEVERS READ line already states. THE SIBLING COPY OF THIS SENTENCE IN eval/api.py::curve_period
+    # STILL READS "one declared lever" AND NAMES CKPT.save_period in the sentence above it, so as it
+    # stands eval asserts of this function exactly the thing this comment corrected; that file is
+    # not this package's to edit and the correction is REFERRED, not dropped. Nothing in the suite
+    # fails either way -- K13 reads digits and this is a word -- so a reader is the only check, which
+    # is why the referral is written here rather than left in an audit report.
+    # THE ACCESSOR'S WHOLE JOB is that Cadences.due REFUSES a bare int while Config hands one back
+    # for all 35 levers that declare a Clock unit (ISSUES P1-H51; recounted r4 -- exactly 35 Lever
+    # declarations across the registry carry a unit that is in spine/units.py::CLOCK_KINDS).
+    # Leaving it a stub kept spine.compose._periods -- and therefore
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
     every = int(ckpt.every)
