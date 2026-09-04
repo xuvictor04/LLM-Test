@@ -22,6 +22,13 @@ declared wire that arrives nowhere (the mirror of the 60 untrippable guards).
     K5  every d_ field the coupling ledger declares is read by a stub IN ITS OWN PACKAGE, and no
         stub reads a d_ field no coupling declares.
 
+    K15 a Gate's `reason` is the sentence an operator acts on -- it names a lever, spells its
+        value, and says what that value made impossible -- and nothing has ever read one. It must
+        name a lever that EXISTS, a value that lever CAN HOLD, a rendered value that is that
+        lever's own, and no impossibility on a Gate the source declares reachable. The three
+        things it refuses to check, and the twenty-five-commit sweep behind each refusal, are in
+        its own block.
+
 WHAT IT DOES NOT PROVE, and the list matters more than the checks. It says nothing about whether a
 body, once written, does what its docstring says; nothing about whether the DID IT FIRE counter a
 docstring names is ever incremented; and nothing about whether the levers a stub CLAIMS to read are
@@ -792,6 +799,113 @@ DATA: data_plan(dat: Config, *, areas)
 The ledger stands at 1 of 4.
 """
 
+# --- K15 fixtures. Every case carries a whole <pkg>/api.py, because the check reads Gate calls in
+# --- the function that computes them: a fragment would have no enclosing scope and rule 3 traces
+# --- through exactly that scope. `_K15_API` is the template and each case replaces one gate.
+
+_K15_LEVERS = '''\
+"""A stand-in package levers module, with one lever that declares choices."""
+
+
+class Lever:
+    def __init__(self, default, help, unit=None, choices=None):
+        pass
+
+
+class LeverSet:
+    pass
+
+
+class DATALevers(LeverSet):
+    PREFIX = "DATA"
+    source = Lever("synthetic", "which corpus path", None, ("synthetic", "corpus"))
+    stream_bytes = Lever(4000000, "bytes drawn per epoch", None)
+'''
+
+_K15_API = '''\
+"""A stand-in api module whose entry point builds gates."""
+from spine.gate import Gate
+from spine.lever import Config
+
+
+def open_areas(dat: Config, *, seed: int):
+    """Open every area.
+
+    LEVERS READ: source, stream_bytes
+    WIRES READ: none
+    DID IT FIRE: data.area_open
+    """
+    dat = dat.owned_by("DATA")
+    src, n = str(dat.source), int(dat.stream_bytes)
+    return [
+        Gate("data.area_open", n > 0, n, "> 0", reachable=False,
+             reason="DATA_STREAM_BYTES=0: nothing is drawn, so no area can open at all."),
+        Gate("data.source", src == "synthetic", src, "synthetic",
+             reason=f"DATA_SOURCE={src}: the corpus path this run drew from."),
+        __GATE__,
+    ]
+'''
+
+
+def _k15_api(gate):
+    """The template with its one variable gate substituted, so each case differs by one Gate."""
+    return _K15_API.replace("__GATE__", gate.strip())
+
+
+# The control gate: a reachable gate whose reason carries ordinary English negation. "cannot be a
+# redraw" and "no epoch can precede it" are remarks about the MECHANISM, not about this gate's
+# reachability, and rule 4 must admit them -- the broad version of rule 4 reported four sentences of
+# exactly this shape at every commit in the tree's history and never once a true instance.
+_K15_GATE_OK = '''
+        Gate("data.redraw", False, 0, 1,
+             reason=f"DATA_STREAM_BYTES={n}: epoch 0 reads armed-and-did-not-fire rather than "
+                    f"unreachable, because a FIRST draw cannot be a redraw and no epoch can "
+                    f"precede it.")
+'''
+
+_K15_GATE_UNDECLARED = '''
+        Gate("data.redraw", False, 0, 1,
+             reason="DATA_STREAM_BYTE=0: the tokenizer minted nothing.")
+'''
+
+_K15_GATE_BAD_LITERAL = '''
+        Gate("data.redraw", False, 0, 1,
+             reason="DATA_STREAM_BYTES=lots: the epoch drew more than the cap.")
+'''
+
+_K15_GATE_BAD_CHOICE = '''
+        Gate("data.redraw", False, 0, 1,
+             reason="DATA_SOURCE=corpuz: the corpus path this run drew from.")
+'''
+
+# RULE 3. The sentence names the byte budget and renders the corpus path. Both locals are real and
+# both are read off this package's own Config, which is what makes it the shape that survives every
+# other check in this file.
+_K15_GATE_WRONG_RENDER = '''
+        Gate("data.redraw", False, 0, 1,
+             reason=f"DATA_STREAM_BYTES={src}: the epoch drew that many bytes.")
+'''
+
+# THE ABSTENTION. `seed` is a parameter: its value was chosen in another file, so the check cannot
+# say whether it is the byte budget and does not pretend to.
+_K15_GATE_FROM_PARAM = '''
+        Gate("data.redraw", False, 0, 1,
+             reason=f"DATA_STREAM_BYTES={seed}: the epoch drew that many bytes.")
+'''
+
+_K15_GATE_IMPOSSIBLE = '''
+        Gate("data.redraw", False, 0, 1,
+             reason="DATA_STREAM_BYTES=0: the redraw is structurally unreachable on this run.")
+'''
+
+# THE SAME SENTENCE ON THE ARM IT BELONGS TO. Rule 4 is about the CONTRADICTION and not about the
+# words, so the identical reason under reachable=False is exactly right and must be admitted.
+_K15_GATE_IMPOSSIBLE_OK = '''
+        Gate("data.redraw", False, 0, 1, reachable=False,
+             reason="DATA_STREAM_BYTES=0: the redraw is structurally unreachable on this run.")
+'''
+
+
 _BASE_TREE = {
     "src/spine/lever.py": _GOOD_LEVER_PY,
     "src/spine/assemble.py": _GOOD_ASSEMBLE,
@@ -808,7 +922,7 @@ _CASES = (
         "K1": (False, None), "K2": (False, None), "K3": (False, None),
         "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None),
         "K8": (False, None), "K9": (False, None), "K10": (False, None), "K11": (False, None),
-        "K12": (False, None), "K13": (False, None)}),
+        "K12": (False, None), "K13": (False, None), "K15": (False, None)}),
 
     ("K13: the population collapsed below the declared floor",
      {}, {"K13floor": (True, "POPULATION COLLAPSED")}),
@@ -1141,6 +1255,41 @@ def _periods(sysm):
      {"src/data/api.py": _GOOD_API.replace("WIRES READ: d_expert_slots",
                                            "WIRES READ: d_expert_slots, d_window")},
      {"K5": (True, "d_window")}),
+
+    # ---- K15. The control tree declares no Gate at all, so K15 passes it VACUOUSLY and says so;
+    # ---- these cases give it a population. Each replaces ONE gate in a three-gate entry point, so
+    # ---- the two around it stay correct and a case that fails can only be failing on the one.
+    ("K15: a correct gate set, negation and all -- the ADMIT side rule 4 needs",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _k15_api(_K15_GATE_OK)},
+     {"K15": (False, None)}),
+
+    ("K15: a reason naming a lever no package declares",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _k15_api(_K15_GATE_UNDECLARED)},
+     {"K15": (True, "DATA_STREAM_BYTE")}),
+
+    ("K15: a reason spelling a value the lever's declared type cannot hold",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _k15_api(_K15_GATE_BAD_LITERAL)},
+     {"K15": (True, "'lots'")}),
+
+    ("K15: a reason spelling a value outside the lever's declared choices",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _k15_api(_K15_GATE_BAD_CHOICE)},
+     {"K15": (True, "declared choices")}),
+
+    ("K15: a reason naming one lever and rendering another quantity",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _k15_api(_K15_GATE_WRONG_RENDER)},
+     {"K15": (True, "never reads 'stream_bytes'")}),
+
+    ("K15: the same shape rendered from a PARAMETER is ABSTAINED on, not guessed at",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _k15_api(_K15_GATE_FROM_PARAM)},
+     {"K15": (False, None)}),
+
+    ("K15: a reason asserting impossibility on a gate built reachable",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _k15_api(_K15_GATE_IMPOSSIBLE)},
+     {"K15": (True, "structurally unreachable")}),
+
+    ("K15: the identical reason on the reachable=False arm is ADMITTED",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _k15_api(_K15_GATE_IMPOSSIBLE_OK)},
+     {"K15": (False, None)}),
 )
 
 _BY_TAG = {
@@ -1164,6 +1313,7 @@ _BY_TAG = {
         os.path.join(d, "src"), os.path.join(d, "docs", "04_CONTRACT.md"), floor=1),
     "K13floor": lambda d: check_k13_counts_and_absence_claims(
         os.path.join(d, "src"), os.path.join(d, "docs", "04_CONTRACT.md"), floor=999),
+    "K15": lambda d: check_k15_gate_reasons_are_self_consistent(os.path.join(d, "src")),
 }
 
 
@@ -3031,6 +3181,438 @@ def _entry_docstrings(src_dir=SRC):
     return out
 
 
+# ==================================================================================================
+# K15 -- a Gate's printed reason does not contradict the Gate it is printed on
+# ==================================================================================================
+#
+# THE CLASS, AND WHY A CHECK RATHER THAN ANOTHER SWEEP. A Gate's `reason` is the sentence an operator
+# acts on: it names a lever, spells its value, and says what that value made impossible. Four review
+# rounds have now found reasons whose arithmetic does not describe the comparison made -- including
+# reasons written by the round that was repairing the previous round's false equations. The invariant
+# Gate whose stated job is proving ISSUES P3-H29 dead printed "FIRED (16 backward // 4 vs 10)" on
+# every resumed run, and 16 // 4 is 4. Fixing those one at a time while new ones are written at the
+# same rate is not convergence; this check takes the part of the class that a static reader can be
+# RIGHT about, and says exactly which part that is.
+#
+# WHAT IT CHECKS -- four rules, each of which is a statement the source text alone settles:
+#   1. every `PREFIX_NAME=` a reason spells is a DECLARED lever. An operator sent to a knob that does
+#      not exist has been sent nowhere, and the name is generated (spine/lever.py::Lever.env_name_for
+#      is `f"{prefix}_{self.name.upper()}"`) so there is exactly one right spelling.
+#   2. a LITERAL value spelled beside that name is one the lever can hold: among its `choices` where
+#      it declares them, and otherwise of its declared default's type. `SIG_MODE=off` on a lever
+#      whose choices are learned/bigram describes a run that cannot be configured.
+#   3. a RENDERED value -- `PREFIX_NAME={expr}` in an f-string -- is the named lever's own value.
+#      This is shape (c) of the observed defect, "an equation whose two sides are rendered from
+#      different quantities than the comparison performed", in the one form a static reader can
+#      settle: the expression is traced back through the enclosing function's assignments, and it
+#      must reach a read of that lever's field (or, on a receiving package, its `d_` wire spelling).
+#   4. a reason may not assert IMPOSSIBILITY on a Gate the source declares REACHABLE. `Gate.line`
+#      prints "armed, did not fire" -- the measurement words -- for `fired=False, reachable=True`,
+#      so a reason saying the condition cannot be met is one line making both statements.
+#
+# WHAT IT DOES NOT CHECK, AND THE MEASUREMENT BEHIND EACH REFUSAL. These are not modesty; each one
+# was tried against the tree and against twenty-five commits of its history, and dropped on evidence:
+#
+#   RULE 4 IS NARROW ON PURPOSE, AND THE BROAD VERSION IS REFUTED. The obvious rule -- scan a
+#   reachable Gate's reason for "cannot", "never", "no ... can", "unreachable" -- was run over
+#   twenty-five commits. It reported the SAME FOUR SITES at every one of them, all four correct
+#   prose: a reason explaining why epoch 0 is "armed-and-did-not-fire rather than unreachable", one
+#   saying a counter is "rendered here, never computed here", one arguing the state is "an UNMET
+#   CONDITION and not an unreachable one", and one saying "no lift can have happened yet" about
+#   lifts rather than about its own gate. It caught ZERO true instances, because the true ones were
+#   `reachable=<expression>` and no static reader can evaluate those. What rule 4 uses instead is a
+#   closed list of phrases that can only be about the gate carrying them, and that list was
+#   calibrated the only honest way: across the same twenty-five commits it fires on THREE of them,
+#   e4c5e4b through 694f156, on `Gate("opt.lr.sched", ..., reachable=True, reason="OPT_LR_SCHED=none:
+#   warmup, wavelength, floor, restarts, damping, envelope and re-warm are ALL structurally
+#   unreachable ...")` -- the exact instance spine/opt/api.py's own repair comment describes as "one
+#   line making both statements" -- and on nothing else, ever.
+#
+#   IT CANNOT SEE A `reachable=` EXPRESSION. Fourteen of this tree's Gates compute reachability from
+#   the configuration. Their reasons are outside all four rules, they are counted and printed as
+#   such, and they are where the class actually lives -- which is why the runtime DID IT FIRE sweep
+#   is not replaced by this.
+#
+#   IT CANNOT CHECK THE ARITHMETIC IN A REASON. "16 backward // 4 vs 10" is four runtime quantities;
+#   nothing in the source says what they were. Rule 3 reaches the neighbouring case -- a rendered
+#   value that is not the lever the same sentence names -- and stops there. Extending it to `value=`
+#   and `threshold=` was tried and abandoned: those two are routinely rendered from a DERIVED
+#   quantity on purpose (`f"balance={balance_w} x warm={round(bal_scale, 4)}"`), so the rule would
+#   have fired on correct gates, and this repository has sixty untrippable guards on record and must
+#   not gain a check that gets weakened the first time it is wrong.
+#
+#   IT ABSTAINS WHEN A TRACE LEAVES THE FUNCTION. Rule 3 follows local assignments only. When the
+#   rendered value comes from a parameter -- `LM_ARCH={str(lm_kind)}` in memory/api.py, where the
+#   composition root passes MEM's wire in -- the provenance is in another file and the rule says so
+#   by not firing. Two of this tree's forty-eight rendered values are in that state.
+
+_K15_ENV = re.compile(r"\b([A-Z][A-Z0-9]*)_([A-Z0-9_]+)\s*=")
+# The value token immediately after `PREFIX_NAME=`: a number, a quoted string, or a bare word. Kept
+# deliberately short -- a reason writes "at FAB_N0=8/SLOTS=16", and the claim being checked is about
+# the 8 and not about the rest of the sentence.
+_K15_VALUE = re.compile(r"([-+]?\d[\w.]*|'[^']*'|\"[^\"]*\"|[A-Za-z][\w.\-]*)")
+# Rule 4's closed list. Every phrase here is a statement about the mechanism the reason belongs to;
+# none of them can be read as a remark about a neighbouring gate, which is what the four false
+# positives of the broad version all were. Adding to this list means re-running the history sweep.
+_K15_IMPOSSIBLE = re.compile(
+    r"\b(structurally unreachable|cannot be reached|cannot fire|can never fire|could never fire|"
+    r"never fires|cannot be met|can never be met|cannot be satisfied|no configuration can|"
+    r"this gate cannot)\b", re.I)
+
+_K15_GATE_FIELDS = ("name", "fired", "value", "threshold", "reachable", "reason")
+
+
+def _k15_lever_specs(src_dir=SRC):
+    """{"PFX_FIELD": (prefix, field, default, choices)} for every declared lever, plus findings.
+
+    A SECOND READER OF THE SAME FILES, AND CROSS-CHECKED AGAINST THE FIRST. declared_levers() above
+    answers "which fields does this package declare", which is all K4 needs; this needs the DEFAULT
+    and the CHOICES as well, because rule 2 is a statement about what a lever can hold. Two readers
+    of one declaration is exactly the shape this file's own header calls out, so the two are
+    compared and a disagreement is reported as a finding rather than resolved silently.
+    """
+    out, findings = {}, []
+    for pfx, d in sorted(PKG_DIR.items()):
+        path = os.path.join(src_dir, d, "levers.py")
+        if not os.path.isfile(path):
+            continue
+        tree = _k13_parse(path)
+        if tree is None:
+            continue
+        for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+            prefix = None
+            for stmt in cls.body:
+                if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                        and getattr(stmt.targets[0], "id", None) == "PREFIX"
+                        and isinstance(stmt.value, ast.Constant)):
+                    prefix = stmt.value.value
+            if not isinstance(prefix, str):
+                continue
+            for stmt in cls.body:
+                if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                        and isinstance(stmt.targets[0], ast.Name)
+                        and isinstance(stmt.value, ast.Call)
+                        and getattr(stmt.value.func, "id", None) == "Lever"):
+                    continue
+                field = stmt.targets[0].id
+                call = stmt.value
+                default = call.args[0].value if (call.args and isinstance(call.args[0], ast.Constant)) \
+                    else None
+                # Lever(default, help, unit=U.COUNT, choices=None) -- positional or keyword.
+                ch = None
+                for kw in call.keywords:
+                    if kw.arg == "choices":
+                        ch = kw.value
+                if ch is None and len(call.args) >= 4:
+                    ch = call.args[3]
+                choices = None
+                if isinstance(ch, (ast.Tuple, ast.List)):
+                    choices = [c.value for c in ch.elts if isinstance(c, ast.Constant)]
+                out[f"{prefix}_{field.upper()}"] = (prefix, field, default, choices)
+    # The cross-check. Same files, different reader, one answer required.
+    other, _ = declared_levers(src_dir)
+    mine = {}
+    for env, (prefix, field, _d, _c) in out.items():
+        mine.setdefault(prefix, set()).add(field)
+    for prefix in sorted(set(mine) | set(other)):
+        diff = mine.get(prefix, set()) ^ other.get(prefix, set())
+        if diff:
+            findings.append(
+                f"src/{PKG_DIR.get(prefix, prefix.lower())}/levers.py  the two readers of this file "
+                f"disagree about which fields are levers: {sorted(diff)}. One declaration with two "
+                f"answers is what both of them exist to refuse -- fix the readers, not the report.")
+    return out, findings
+
+
+def _k15_fragments(node):
+    """A reason expression as INDEPENDENT token sequences of ("s", text) and ("h", expr).
+
+    Independent, because a `"" if x else f"..."` has two arms and a name spelled at the end of one
+    must never be paired with a hole opening the other. Same for the arguments of a helper call --
+    opt/api.py wraps several reasons in `_stale_note(st, "counter", f"...")` and each argument is
+    its own sentence.
+    """
+    if isinstance(node, ast.Constant):
+        return [[("s", node.value)]] if isinstance(node.value, str) else []
+    if isinstance(node, ast.JoinedStr):
+        seq = []
+        for v in node.values:
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                seq.append(("s", v.value))
+            elif isinstance(v, ast.FormattedValue):
+                seq.append(("h", v.value))
+        return [seq] if seq else []
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _k15_fragments(node.left), _k15_fragments(node.right)
+        if not left:
+            return right
+        if not right:
+            return left
+        return left[:-1] + [left[-1] + right[0]] + right[1:]
+    if isinstance(node, ast.IfExp):
+        return _k15_fragments(node.body) + _k15_fragments(node.orelse)
+    if isinstance(node, ast.Call):
+        out = []
+        for a in list(node.args) + [k.value for k in node.keywords]:
+            out += _k15_fragments(a)
+        return out
+    return []
+
+
+def _k15_reason_text(node):
+    """Every static character of a reason, holes elided. Rule 4 reads this and nothing else."""
+    return " ".join(t for seq in _k15_fragments(node) for kind, t in seq if kind == "s")
+
+
+def _k15_assignments(fn):
+    """({name: [value exprs]}, {names whose provenance leaves this function}) for one function.
+
+    TUPLE UNPACKING IS THE COMMON CASE HERE AND THE FIRST VERSION DROPPED IT. fabric/api.py binds
+    `balance_w, bal_floor, bal_warm_n = float(fab.balance), float(fab.bal_floor), int(fab.bal_warm)`
+    on one line; a reader that only understood `name = value` reported FAB_BALANCE={balance_w} as a
+    value rendered from something other than FAB_BALANCE, which is a false finding about the one
+    gate in that file that is right.
+    """
+    assigns, opaque = {}, set()
+    if fn is None:
+        return assigns, opaque
+    a = fn.args
+    for arg in list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs):
+        opaque.add(arg.arg)                      # a parameter's value was chosen by a caller
+    if a.vararg:
+        opaque.add(a.vararg.arg)
+    if a.kwarg:
+        opaque.add(a.kwarg.arg)
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    assigns.setdefault(t.id, []).append(n.value)
+                elif isinstance(t, (ast.Tuple, ast.List)):
+                    elts = list(t.elts)
+                    vals = list(n.value.elts) if isinstance(n.value, (ast.Tuple, ast.List)) \
+                        and len(n.value.elts) == len(elts) else None
+                    for i, e in enumerate(elts):
+                        if isinstance(e, ast.Name):
+                            assigns.setdefault(e.id, []).append(vals[i] if vals else n.value)
+        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
+            assigns.setdefault(n.target.id, []).append(n.value)
+        elif isinstance(n, (ast.For, ast.AsyncFor)):
+            for t in ast.walk(n.target):
+                if isinstance(t, ast.Name):
+                    opaque.add(t.id)             # a loop variable is not traceable to a declaration
+    return assigns, opaque
+
+
+def _k15_trace(expr, assigns, opaque):
+    """(names reachable from `expr`, whether the trace left this function).
+
+    Follows every Name back through the function's own assignments and collects the attribute names
+    it passes through, so `int(cap.d_mask_dead_rows)` yields `d_mask_dead_rows`. Returns `leaked`
+    when it reaches a parameter or a name it cannot account for, which is the signal to ABSTAIN --
+    the rule fires only when the whole provenance is visible in one function.
+    """
+    def _names(node):
+        out = set()
+        for n in ast.walk(node):
+            if isinstance(n, ast.Name):
+                out.add(n.id)
+            elif isinstance(n, ast.Attribute):
+                out.add(n.attr)
+        return out
+
+    seen, stack, found, leaked = set(), list(_names(expr)), set(), False
+    while stack:
+        nm = stack.pop()
+        if nm in seen:
+            continue
+        seen.add(nm)
+        found.add(nm)
+        if nm in assigns:
+            for v in assigns[nm]:
+                stack.extend(_names(v))
+        elif nm in opaque:
+            leaked = True
+    return found, leaked
+
+
+def check_k15_gate_reasons_are_self_consistent(src_dir=SRC):
+    """K15 -- a Gate's reason names a lever that exists, a value that lever can hold, a rendered
+    value that is that lever's, and no impossibility on a Gate the source declares reachable.
+
+    THE DEFECT. `spine/gate.py::Gate` exists because 57 of the survey's 475 records are mechanisms
+    that were armed and inert while the report said nothing, and 60 more are guards whose condition
+    could not be satisfied at all -- two different bugs needing two different words. The `reason`
+    string is where those words are chosen, and it is prose: nothing has ever read it. Every review
+    round has found reasons whose printed arithmetic does not describe the comparison actually made,
+    including reasons written by the round that was fixing the previous round's false equations.
+
+    WHAT THIS PROVES AND WHAT IT DOES NOT is written out at length in the block above this function,
+    including the measurements behind each thing it refuses to check. The short version: it settles
+    the four claims a reason makes that the SOURCE TEXT alone can settle, and it counts and prints
+    the reasons it could not reach, so the size of what is left is on the report instead of in a
+    docstring.
+
+    IT IS NOT A REPLACEMENT FOR READING THE REPORT. Fourteen of this tree's Gates compute
+    reachability from the configuration and are outside every rule here; the arithmetic inside a
+    reason is runtime and is outside all of them too. This check makes the CHEAP contradictions
+    impossible to ship, which is the half that was being re-found by hand every round.
+    """
+    specs, findings = _k15_lever_specs(src_dir)
+    prefixes = set(PKG_DIR)
+    gates = examined_names = literals = holes = 0
+    abstained_holes = dynamic_reachable = 0
+
+    for d in sorted(os.listdir(src_dir)):
+        pkg_dir = os.path.join(src_dir, d)
+        if not os.path.isdir(pkg_dir):
+            continue
+        for fn_name in sorted(os.listdir(pkg_dir)):
+            if not fn_name.endswith(".py"):
+                continue
+            path = os.path.join(pkg_dir, fn_name)
+            rel = os.path.relpath(path, os.path.dirname(src_dir))
+            if rel.replace(os.sep, "/").endswith("src/spine/gate.py"):
+                continue                          # the record's own declaration and its examples
+            tree = _k13_parse(path)
+            if tree is None:
+                continue
+            enclosing = {}
+            for f in [n for n in ast.walk(tree)
+                      if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+                for n in ast.walk(f):
+                    enclosing.setdefault(n, f)
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call)
+                        and (getattr(node.func, "id", None) == "Gate"
+                             or getattr(node.func, "attr", None) == "Gate")):
+                    continue
+                gates += 1
+                args = dict(zip(_K15_GATE_FIELDS, node.args))
+                args.update({k.arg: k.value for k in node.keywords if k.arg})
+                reason = args.get("reason")
+                gate_name = args["name"].value if isinstance(args.get("name"), ast.Constant) \
+                    else "<computed>"
+                where = f"{rel}:{node.lineno}  Gate {gate_name!r}"
+                reach = args.get("reachable")
+                static_reachable = reach is None or (isinstance(reach, ast.Constant)
+                                                     and reach.value is True)
+                if reach is not None and not isinstance(reach, ast.Constant):
+                    dynamic_reachable += 1
+                if reason is None:
+                    continue
+
+                # ---- rule 4: impossibility asserted on a statically reachable gate ---------------
+                if static_reachable:
+                    m = _K15_IMPOSSIBLE.search(_k15_reason_text(reason))
+                    if m:
+                        findings.append(
+                            f"{where} is built reachable and its reason says {m.group(0)!r}. "
+                            f"spine/gate.py::Gate.line prints 'FIRED' or 'armed, did not fire' for "
+                            f"a reachable gate -- the words reserved for a mechanism that RAN -- so "
+                            f"this one line says the condition was tested and says it cannot be "
+                            f"met. If the mechanism really cannot fire here, pass reachable=False; "
+                            f"if it ran and was not satisfied, the reason must not say otherwise.")
+
+                # ---- rules 1-3: the lever names, values and rendered quantities ------------------
+                fn = enclosing.get(node)
+                assigns, opaque = _k15_assignments(fn)
+                for seq in _k15_fragments(reason):
+                    for i, (kind, text) in enumerate(seq):
+                        if kind != "s":
+                            continue
+                        for m in _K15_ENV.finditer(text):
+                            prefix, tail = m.group(1), m.group(2)
+                            if prefix not in prefixes:
+                                continue          # not a name claiming to be this tree's lever
+                            env = f"{prefix}_{tail}"
+                            examined_names += 1
+                            spec = specs.get(env)
+                            if spec is None:
+                                findings.append(
+                                    f"{where} names {env} and no package declares it. An operator "
+                                    f"reading this line is sent to a knob that does not exist; "
+                                    f"env names are GENERATED as PREFIX_FIELD, so there is exactly "
+                                    f"one right spelling and this is not it.")
+                                continue
+                            _pfx, field, default, choices = spec
+                            rest = text[m.end():]
+                            # `.strip()` and not `not rest`: an f-string may be written
+                            # `f"{env}= {value}"`, and reading the space as "no rendered value here"
+                            # would drop the site silently rather than check it.
+                            if not rest.strip() and i + 1 < len(seq) and seq[i + 1][0] == "h":
+                                holes += 1
+                                names, leaked = _k15_trace(seq[i + 1][1], assigns, opaque)
+                                if field in names or f"d_{field}" in names:
+                                    continue
+                                if leaked or not names:
+                                    abstained_holes += 1
+                                    continue
+                                findings.append(
+                                    f"{where} prints '{env}=' beside "
+                                    f"{ast.unparse(seq[i + 1][1])!r}, which is computed here and "
+                                    f"never reads {field!r}. The sentence names one lever and "
+                                    f"renders another quantity, which is the shape of every false "
+                                    f"equation this check exists for -- render the lever the "
+                                    f"sentence names, or name the quantity it renders.")
+                                continue
+                            v = _K15_VALUE.match(rest.lstrip())
+                            if not v:
+                                continue
+                            tok = v.group(1).rstrip(".,;:").strip("'\"")
+                            value, err = _k15_coerce(tok, default)
+                            if err is None and choices is None and isinstance(default, (bool, str)):
+                                continue          # nothing textual to check -- see _k15_coerce
+                            literals += 1
+                            if err is not None:
+                                findings.append(
+                                    f"{where} says {env}={tok!r}, and {err}. The configuration this "
+                                    f"line describes cannot be set, so whatever it reports beside "
+                                    f"it was measured under some other one.")
+                            elif choices is not None and value not in choices:
+                                findings.append(
+                                    f"{where} says {env}={tok!r} and that lever's declared choices "
+                                    f"are {choices!r}. The line describes a run nobody can "
+                                    f"configure, so whatever it reports beside it was measured "
+                                    f"under some other setting.")
+
+    detail = (f"{gates} Gate construction(s) read across src/; {examined_names} lever name(s) "
+              f"spelled in a reason, of which {literals} carry a literal value and {holes} a "
+              f"rendered one; {abstained_holes} rendered value(s) ABSTAINED on because the trace "
+              f"left the function; {dynamic_reachable} Gate(s) whose reachability is computed and "
+              f"whose reason rule 4 therefore cannot judge")
+    return _report("K15", "a Gate's reason names a lever that exists, a value it can hold, and no "
+                          "impossibility on a reachable gate", not findings, detail, findings,
+                   vacuous=not gates)
+
+
+def _k15_coerce(tok, default):
+    """(value, error) for a token spelled in a reason, by the SAME rule the runtime uses.
+
+    A MIRROR OF spine/lever.py::Lever.coerce AND NOT A SECOND OPINION ABOUT WHAT A LEVER ACCEPTS.
+    The first version hand-rolled the type test and reported OPT_LR_RESTARTS='off' as a value that
+    lever cannot hold -- three times, in three correct gates. It can: coerce's bool branch is
+    `str(raw).strip().lower() not in ("0", "", "off", "no", "none", "false")`, so 'off' is how a
+    FLAG is spelled off and the reasons were right. That is what a second idea of one rule costs.
+
+    Because coerce's bool branch cannot raise, a bool lever constrains NOTHING textually and the
+    caller skips it; a str lever with no choices is the same. What is left is a number that is not
+    a number, and a value outside a declared choices tuple -- checked by the caller against the
+    coerced value, exactly as coerce checks it.
+    """
+    try:
+        if isinstance(default, bool):
+            return str(tok).strip().lower() not in ("0", "", "off", "no", "none", "false"), None
+        if isinstance(default, int):
+            return int(float(tok)), None
+        if isinstance(default, float):
+            return float(tok), None
+        return str(tok), None
+    except (TypeError, ValueError):
+        return None, (f"spine/lever.py::Lever.coerce would refuse that at startup -- the declared "
+                      f"default is {default!r}, so the value is read as a {type(default).__name__}")
+
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
@@ -3046,6 +3628,7 @@ CHECKS = (
     check_k12_deferral_reasons_are_complete,
     check_k13_counts_and_absence_claims,
     check_k14_rows_honour_stated_refusals,
+    check_k15_gate_reasons_are_self_consistent,
 )
 
 

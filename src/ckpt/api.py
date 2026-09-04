@@ -27,7 +27,7 @@ import os
 
 import torch
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine.gate import Gate
 from spine import units as U
 
@@ -158,7 +158,11 @@ def save_period(ckpt: Config):
     reads "the ckpt gate cannot fire" and raises CKPT_EVERY still saves nothing. Collapsing
     armed-but-zero into unreachable is exactly what spine/gate.py::Gate exists to refuse, so the
     three arms are spelled here: UNREACHABLE when saving is off at all, armed-and-not-fired at
-    every == 0 with the final-plus-SIGUSR1 sentence as its reason, FIRED otherwise.
+    every == 0 with the final-plus-SIGUSR1 sentence as its reason, FIRED at every > 0. THAT
+    ENUMERATION IS EXHAUSTIVE ONLY BECAUSE OF THE FOURTH OUTCOME, WHICH IS NOT A GATE STATE: since
+    2026-09-04 a NEGATIVE `every` never reaches any of the three, because the body refuses it by
+    name before the period is constructed. The argument, the alternatives and what the refusal
+    deliberately does not rule for the other four period accessors are in the body, at the guard.
 
     WHY IT RIDES ON THE RETURNED Windows RATHER THAN CHANGING THE SHAPE OR MINTING AN ACCESSOR.
     Three alternatives, each priced by running it rather than by preference:
@@ -230,9 +234,11 @@ def save_period(ckpt: Config):
                  period CARRIES (not yet renders -- see cost 3) ckpt.periodic_armed, which is the
                  :5619-5621 warning replaced by a gate with its own condition -- dir set and
                  every == 0 is armed-and-not-fired with "the only saves are the final one plus
-                 SIGUSR1" as its reason, and dir off is UNREACHABLE instead of a zero the ledger
-                 cannot explain. The word an operator sees is owed by RUN.cadence_audit, which is
-                 a stub; until it has a body this Gate is readable only from the returned object
+                 SIGUSR1" as its reason (the reason PRINTS the value rather than naming 0, and the
+                 refusal in the body is what makes 0 the only value that can reach that arm), and
+                 dir off is UNREACHABLE instead of a zero the ledger cannot explain. The word an
+                 operator sees is owed by RUN.cadence_audit, which is a stub; until it has a body
+                 this Gate is readable only from the returned object
     """
     ckpt = ckpt.owned_by("CKPT")
     # NOT A STUB, AND THE FOUR SIBLINGS ARE NOT EITHER -- EVAL.curve_period, DOM.manage_period,
@@ -259,6 +265,57 @@ def save_period(ckpt: Config):
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
     every = int(ckpt.every)
+    # A NEGATIVE SAVE PERIOD IS REFUSED HERE, AT THE ONLY PLACE `every` IS READ (added 2026-09-04).
+    # WHAT IT IS: not a slower save and not a second spelling of "off". RUN.Cadences.due states its
+    # own contract in this tree -- "True at most once per `period` WINDOWS elapsed since this key
+    # last fired", ELAPSED-SINCE-LAST-FIRE and not modulo -- so the comparison a body writing to
+    # that contract makes is `step - _fired["ckpt"] >= period.n`. At every=-5 that is true on the
+    # FIRST window and on every window after it: a negative CKPT_EVERY is the MAXIMUM-frequency
+    # save, a checkpoint written every window, and not the absence of one. The mechanism runs
+    # backwards, which is the C30 inversion arriving through a lever VALUE, and it is the same
+    # ruling capacity/api.py::new_valve made on 2026-09-04 for a negative CAP_LIFT/CAP_LIFT_MIN.
+    #
+    # WHAT WAS THERE BEFORE, AND WHY IT WAS NOT A MEASUREMENT. The gate below printed
+    # "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0 with CKPT_DIR set: the only saves this run
+    # makes are the FINAL one and any SIGUSR1" -- a reason naming a value the operator did not set,
+    # beside a printed value that contradicts it in the same sentence, on every CKPT_EVERY < 0
+    # (measured at -5 and -1). That sentence was ALSO an unverified claim about a body that does
+    # not exist: NOTHING in this tree disables periodic saving at a non-positive period.
+    # Cadences.due is `raise NotImplementedError`, and the one live reader of a non-positive period
+    # -- spine/derive.py::cadences_that_cannot_fire -- only REPORTS it, as ("ckpt", -5, 0). So the
+    # old arm asserted a behaviour no code implements while the only stated semantics in the tree
+    # give the opposite one. Printing the value instead of asserting it (done below) fixes the
+    # false equation; it does not fix the hazard, which is that the body P4 writes to that contract
+    # checkpoints every window on a typed minus sign, silently, with this Gate saying saving is off.
+    #
+    # IT REMOVES NO CONFIGURATION. "Never save periodically" is CKPT_EVERY=0 -- in range, the
+    # declared default, and the meaning the lever's own help text gives it ("0 disables periodic
+    # saving, leaving the final save and SIGUSR1"). "Save as often as possible" is CKPT_EVERY=1.
+    # The negative range spells neither, and the help text spells no meaning for it at all.
+    #
+    # REFUSED EVEN WHEN CKPT_DIR IS OFF, deliberately: this is a range check over CKPT's own lever,
+    # not a statement about whether the run persists anything, and a value that names no mechanism
+    # should not be silently accepted because a second lever happens to make it moot. That is the
+    # same placement capacity's refusal takes (it precedes the CAP_TARGETS=off branch).
+    #
+    # WHAT THIS DOES NOT RULE. The other four period accessors -- EVAL.curve_period,
+    # DOM.manage_period, FAB.manage_period, MEM.rekey_period -- each still end in a bare
+    # `return U.Windows(int(<its own lever>))` and refuse nothing, and spine/derive.py::
+    # cadences_that_cannot_fire treats "zero or less" as ONE sentinel for every package at once.
+    # Whether that spine-wide convention should become a refusal for all five is an OWNER question
+    # and is filed as one; this clause decides CKPT's own lever, at the first place it is read,
+    # and nothing else.
+    if every < 0:
+        raise LeverError(
+            f"CKPT_EVERY={every}: a save period is a count of windows ELAPSED since the last save "
+            f"and may not run backwards. RUN.Cadences.due fires when `step - last_fired >= "
+            f"period`, so a negative period is true on the first window and on every window after "
+            f"it -- {every} does not mean 'save less often' or 'do not save', it means a "
+            f"checkpoint written EVERY window, which is the opposite of what this gate reported "
+            f"for it. Neither meaning is lost: CKPT_EVERY=0 is the declared default and disables "
+            f"periodic saving (the final save and SIGUSR1 remain), and CKPT_EVERY=1 saves on every "
+            f"window. CKPT_DIR is not consulted here: this refuses an out-of-range value for "
+            f"CKPT's own lever, whether or not a second lever makes it moot.")
     period = U.Windows(every)
     # ONE PREDICATE, NOT A SECOND COPY OF THE SIX SPELLINGS OF OFF. saving_on is this package's own
     # answer to "is this run persisting anything", and re-typing its test here is the defect that
@@ -272,11 +329,20 @@ def save_period(ckpt: Config):
     elif every > 0:
         gate = Gate("ckpt.periodic_armed", True, every, 1)
     else:
+        # THE VALUE IS PRINTED, NOT ASSUMED, AND THAT IS THE WHOLE EDIT HERE. This reason was the
+        # literal string "CKPT_EVERY=0 with CKPT_DIR set: ..." until 2026-09-04, so at any
+        # CKPT_EVERY below zero the gate rendered "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0
+        # ..." -- a reason naming a value the operator did not set, beside a printed value that
+        # contradicts it, in one sentence. Measured at -5 and at -1 before the change. The
+        # refusal above now takes every negative, so 0 is the only value that reaches this arm and
+        # the old literal would be true again; it is an f-string anyway, because a sentence that
+        # is true only because of a guard somewhere else is a sentence that goes false the day the
+        # guard moves, and nothing in tests/ renders a CKPT Gate to notice.
         gate = Gate("ckpt.periodic_armed", False, every, 1,
-                    reason="CKPT_EVERY=0 with CKPT_DIR set: the only saves this run makes are the "
-                           "FINAL one and any SIGUSR1. A legitimate configuration, and one the "
-                           "report must SAY -- without this line it is indistinguishable from a "
-                           "run that is not saving at all.")
+                    reason=f"CKPT_EVERY={every} with CKPT_DIR set: the only saves this run makes "
+                           f"are the FINAL one and any SIGUSR1. A legitimate configuration, and "
+                           f"one the report must SAY -- without this line it is indistinguishable "
+                           f"from a run that is not saving at all.")
     period.gates = (gate,)
     return period
 

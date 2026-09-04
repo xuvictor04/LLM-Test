@@ -174,16 +174,27 @@ the wrong way -- a budget believed nearly exhausted is an argument AGAINST spend
 widening a signature, so it cannot be why one was declined. WHAT IS SUPPORTED, in the sentences
 themselves rather than in anybody's stated motive: a number wrong in the SCARCE direction biases every
 choice that weighs a wire against a widened signature, and it biases it toward the signature, which is
-the option nobody has to justify at build(). The tree carries the bias in four places at once -- this
-file told a porter that four couplings which ALREADY EXIST would be refused at build();
-docs/04_CONTRACT.md's Q-WORLD-6 point 4 called a legal row "one of the last lines";
-src/eval/levers.py::<module> told a reader that WIRE_BUDGET left "room for two more edges in the whole
-tree" (its owner corrected it on the same date, and it now reads "so SIX edges remain in the whole
-tree"); and src/spine/assemble.py's WORLD.d_manage_period_windows NOT_WIRES row still says, present
-tense, that a row there would "spend one of the last coupling lines" -- which tools/render_wiring.py
-copies verbatim into docs/03_WIRING.md, so that one carrier is kept in sync into a second file while
-the corrected ones are not. Every one of the four argues against a wire on its price. The live figures are printed by tests/test_couplings.py's C4 and embedded
-by spine/assemble.py::render, so a prose copy is one that can go stale in silence; this one had, in more
+the option nobody has to justify at build(). THE BIAS WAS CARRIED IN FIVE PLACES AT ONCE AND ALL FIVE
+ARE NOW CORRECTED. src/eval/api.py::<module> said "two left" (the original find); this file told a
+porter that four couplings which ALREADY EXIST would be refused at build(); docs/04_CONTRACT.md's
+Q-WORLD-6 point 4 called a legal row "one of the last lines"; src/eval/levers.py::<module> told a
+reader that WIRE_BUDGET left "room for two more edges in the whole tree", and now reads "so SIX edges
+remain in the whole tree"; and src/spine/assemble.py's WORLD.d_manage_period_windows NOT_WIRES row
+said a row there would "spend one of the last coupling lines" -- the one carrier of the five that
+tools/render_wiring.py republishes VERBATIM into docs/03_WIRING.md, so that miscount was being
+published rather than merely written. THAT FIFTH ONE IS CORRECTED TOO, and the correction is now the
+sentence render_wiring.py publishes: read on the tree today, spine/assemble.py's row says a row there
+"would also spend one of the six cross-package edges that remain on a WORLD.manage that is itself
+deferred today", and docs/03_WIRING.md:188 carries the same words.
+THIS PARAGRAPH SAID THAT ROW "still says, present tense" UNTIL 2026-09-04, AND IT WAS FALSE WITHIN THE
+HOUR IT WAS WRITTEN: the report filing it as outstanding is timestamped 18:47 and the carrier was
+corrected by its own owner shortly afterwards, so the sentence describing the residue outlived the
+residue. A STATUS IS A COPY OF A FACT AND ROTS EXACTLY THE WAY A COUNT DOES -- which is this
+paragraph's own subject, one level up -- and no check in the suite can see either kind: K13 reads
+DIGITS, and neither "last" nor "still" is a number. That property is what let the count survive five
+files, and it is what let the status rot go unnoticed too. Every one of the five argued against a
+wire on its price. The live figures are printed by tests/test_couplings.py's C4 and embedded by
+spine/assemble.py::render, so a prose copy is one that can go stale in silence; this one had, in more
 than one file at once.
 
 O4 IS GREEN FOR A REAL REASON NOW, WHICH IT WAS NOT WHEN THAT PARAGRAPH WAS WRITTEN. It reports twenty-

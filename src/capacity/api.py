@@ -159,17 +159,24 @@ def new_valve(cap: Config, *, restored=None):
     where it comes back.
 
     REFUSES AT STARTUP, BY LEVER NAME, WITH BOTH NUMBERS IN THE MESSAGE. Two values are refused and
-    EITHER ONE ALONE is enough: CAP_LIFT < 0, and CAP_LIFT_MIN < 0. Only the two TOGETHER lower a
-    cap; each on its own is a second, out-of-range spelling of a legal value that already exists
-    (see the body), so refusing both is what makes the legal domain the one the unit declares.
-    This module's founding sentence is that a ceiling may be "raised, by a little, never lowered",
-    and derive.lift_to is `int(cap) + max(int(floor), int(frac * cap))` -- so with
-    BOTH of them negative the max is negative and an EARNED lift SHRINKS the cap. Reproduced before
-    the refusal existed: CAP_TARGETS=experts CAP_FAB_START=12 CAP_LIFT=-0.5 CAP_LIFT_MIN=-100 gave
-    derive.lift_to(12, -0.5, -100) = 6, and cap.valve rendered "one lift -> 6" beside the words
-    "ONE EARNED LIFT DOES NOT MOVE IT" on the same printed line. The body below says why this is a
-    refusal rather than a sentence in a Gate, why it removes no configuration, and why only the
-    NEGATIVE half is refused.
+    EITHER ONE ALONE is enough: CAP_LIFT < 0, and CAP_LIFT_MIN < 0. EITHER NEGATIVE CAN LOWER A CAP,
+    so the `or` in the guard is required rather than belt-and-braces -- and this paragraph said the
+    opposite ("only the two TOGETHER lower a cap; each on its own is a second spelling of a legal
+    value") until 2026-09-04. This module's founding sentence is that a ceiling may be "raised, by a
+    little, never lowered", and derive.lift_to is `int(cap) + max(int(floor), int(frac * cap))`.
+    THE SIGN OF THE PROPORTIONAL TERM IS THE SIGN OF frac TIMES THE SIGN OF cap, AND THE CAP CAN BE
+    NEGATIVE HERE -- new_valve's own five-ways-an-arm-is-dead comment says so ("CAP_FAB_START=-5
+    resolves a soft expert cap of -5"), which is what makes the two-negatives statement a false
+    universal rather than a rounding of the truth. Both routes, each with its measurement:
+      BOTH NEGATIVE, at a cap above zero, the max is negative and an EARNED lift SHRINKS the cap.
+      Reproduced before the refusal existed: CAP_TARGETS=experts CAP_FAB_START=12 CAP_LIFT=-0.5
+      CAP_LIFT_MIN=-100 gave derive.lift_to(12, -0.5, -100) = 6, and cap.valve rendered
+      "one lift -> 6" beside the words "ONE EARNED LIFT DOES NOT MOVE IT" on one printed line.
+      CAP_LIFT_MIN ALONE NEGATIVE, at a cap BELOW zero, is enough on its own: the proportional term
+      is negative there for a NON-negative CAP_LIFT, so the floor can be the max and still be below
+      zero -- derive.lift_to(-100, 0.5, -1) = -101 against derive.lift_to(-100, 0.5, 0) = -100.
+    The body below says why this is a refusal rather than a sentence in a Gate, exactly which
+    configurations it removes and which it does not, and why only the NEGATIVE half is refused.
 
     LEVERS READ: targets, fab_start, vocab_start, lift, lift_min
                  (the last two are read for two things and neither takes a lift: the startup
@@ -227,14 +234,22 @@ def new_valve(cap: Config, *, restored=None):
     mask_dead = bool(cap.d_mask_dead_rows)
     targets = str(cap.targets)
 
-    # A LIFT THAT LOWERS THE CAP IS REFUSED HERE, BEFORE ANY OTHER NUMBER IS DERIVED. The valve's
-    # founding sentence is a ceiling "raised, by a little, never lowered", and spine/derive.py::
-    # lift_to is `int(cap) + max(int(floor), int(frac * cap))`: with CAP_LIFT < 0 AND
-    # CAP_LIFT_MIN < 0 both terms are negative, the max is negative, and an EARNED lift SHRINKS the
-    # cap. Measured before this refusal existed, at CAP_TARGETS=experts CAP_FAB_START=12
-    # CAP_LIFT=-0.5 CAP_LIFT_MIN=-100: derive.lift_to(12, -0.5, -100) = 6, and cap.valve printed
-    # "one lift -> 6" in its arithmetic beside "ONE EARNED LIFT DOES NOT MOVE IT" in its reason, on
-    # one line, for a lift that halved the cap.
+    # A LIFT THAT LOWERS THE CAP IS REFUSED HERE, BEFORE ANY CAP IS RESOLVED AND BEFORE EITHER GATE
+    # IS BUILT. That is the property this argument needs, and it is what this line now claims: it
+    # said "BEFORE ANY OTHER NUMBER IS DERIVED" until 2026-09-04 and four values are derived above
+    # it -- hard_experts, hard_vocab, mask_dead and targets, three of them off wires -- which is the
+    # kind of absolute a later reader relies on when deciding where a second refusal may go.
+    # The valve's founding sentence is a ceiling "raised, by a little, never lowered", and
+    # spine/derive.py::lift_to is `int(cap) + max(int(floor), int(frac * cap))`. AT A CAP ABOVE
+    # ZERO, with CAP_LIFT < 0 AND CAP_LIFT_MIN < 0, both terms are negative, the max is negative,
+    # and an EARNED lift SHRINKS the cap. Measured before this refusal existed, at
+    # CAP_TARGETS=experts CAP_FAB_START=12 CAP_LIFT=-0.5 CAP_LIFT_MIN=-100:
+    # derive.lift_to(12, -0.5, -100) = 6, and cap.valve printed "one lift -> 6" in its arithmetic
+    # beside "ONE EARNED LIFT DOES NOT MOVE IT" in its reason, on one line, for a lift that halved
+    # the cap. THE "BOTH" IS THE SUFFICIENT CASE AT A POSITIVE CAP AND NOT THE ONLY ONE ANYWHERE:
+    # the proportional term takes the sign of frac TIMES the sign of cap, so at a cap below zero --
+    # which CAP_FAB_START=-5 reaches -- a negative CAP_LIFT_MIN ALONE lowers it,
+    # derive.lift_to(-100, 0.5, -1) = -101. Both routes are why the guard is an `or`.
     #
     # WHY REFUSED RATHER THAN DESCRIBED, which is the question the Gate below cannot answer. A Gate
     # reason is a REPORT and the mechanism still runs: describing it buys the operator a sentence
@@ -245,20 +260,35 @@ def new_valve(cap: Config, *, restored=None):
     # zero). A valve that lowers on evidence it should raise is not a configuration of this
     # mechanism; it is a different mechanism wearing its name.
     #
-    # IT REMOVES NO CONFIGURATION, WHICH IS WHY IT IS NOT A DROP. With CAP_LIFT_MIN >= 0 a negative
-    # CAP_LIFT is arithmetically IDENTICAL to CAP_LIFT=0 -- max(floor, negative) is the floor -- and
-    # CAP_LIFT=0 is in range, legal, and spells a flat +CAP_LIFT_MIN lift; a negative CAP_LIFT_MIN
-    # with CAP_LIFT >= 0 is likewise identical to CAP_LIFT_MIN=0. So each half of what is refused is
-    # either a second spelling of something already legal or the inversion above. Nothing an
-    # operator can ask for is lost, and both legal spellings are named in the message.
+    # WHAT IT REMOVES, STATED WITH ITS BOUND RATHER THAN AS A UNIVERSAL (corrected 2026-09-04; the
+    # sentence here read "IT REMOVES NO CONFIGURATION" and justified it with two claims that are
+    # false below zero). AT A CAP AT OR ABOVE ZERO both halves really are second spellings: with
+    # CAP_LIFT_MIN >= 0 a negative CAP_LIFT is arithmetically IDENTICAL to CAP_LIFT=0, because
+    # int(frac x cap) <= 0 there and max(floor, negative) is the floor, and CAP_LIFT=0 is in range,
+    # legal, and spells a flat +CAP_LIFT_MIN lift; with CAP_LIFT >= 0 a negative CAP_LIFT_MIN is
+    # likewise identical to CAP_LIFT_MIN=0, because int(frac x cap) >= 0 there and is the max
+    # either way. So on every cap this valve is supposed to have, nothing an operator can ask for
+    # is lost, and both legal spellings are named in the message.
+    # BELOW ZERO NEITHER IDENTITY HOLDS, AND THAT IS THE SECOND REASON TO REFUSE RATHER THAN AN
+    # EXCEPTION TO THE FIRST. The proportional term flips sign with the cap, so at cap=-100:
+    # derive.lift_to(-100, -0.5, 8) = -50 while derive.lift_to(-100, 0, 8) = -92 (a negative
+    # CAP_LIFT is NOT CAP_LIFT=0 there), and derive.lift_to(-100, 0.5, -1) = -101 while
+    # derive.lift_to(-100, 0.5, 0) = -100 (a negative CAP_LIFT_MIN is NOT CAP_LIFT_MIN=0 there,
+    # and it LOWERS the cap on its own). What is removed at a negative cap is therefore a real
+    # behaviour and not a duplicate -- and it is the behaviour this guard exists to refuse, since
+    # a cap below zero is already a dead arm (the growth clamp goes negative on the first flush,
+    # C30) and the only thing a negative lever adds there is a second way to move it wrongly.
     #
     # ONLY THE NEGATIVE HALF IS REFUSED, AND CAP_LIFT > 1 IS DELIBERATELY LEFT LEGAL. U.FRACTION's
     # unit string is a LABEL the census renders, not a bound -- src/sig/levers.py::SIGLevers says
     # exactly that of its own share ("spine/lever.py::Lever carries choices and no numeric range, so
     # units.FRACTION here is a label"), and src/tok/levers.py::TOKLevers keeps a U.FRACTION lever
     # where "a reader who takes 'fraction 0..1' as a bound on legal values will be surprised by 2.0,
-    # which is legal". A lift of 2.0 is a large lift and still RAISES the cap, so it does not touch
-    # the invariant this refusal holds. Refusing it would be this file deciding a range question the
+    # which is legal". A lift of 2.0 is a large lift and NEVER a lowering one, which is the property
+    # the invariant needs: above zero it raises the cap, and below zero int(2.0 x cap) is more
+    # negative than any floor at or above 0, so the max IS the floor and the cap raises or stands
+    # still -- derive.lift_to(-100, 2.0, 8) = -92, derive.lift_to(-100, 2.0, 0) = -100. So it does
+    # not touch the invariant this refusal holds. Refusing it would be this file deciding a range question the
     # tree has twice decided the other way.
     #
     # WHY HERE AND NOT IN startup_refusals. That entry point is declared for refusals that need TWO
@@ -267,19 +297,45 @@ def new_valve(cap: Config, *, restored=None):
     # spine/compose.py::ASSEMBLY_ORDER, so the Gate would render its reason first. This is a range
     # check over CAP's own two levers, at the first place either is read. src/lm/api.py::resolve is
     # the precedent and states the general ground in its own words: the refusals are in a body
-    # "because a Lever has no range facility and `choices=` enumerates rather than bounds".
+    # because "a Lever has no range facility and `choices=` enumerates rather than bounds, so these
+    # cannot be declarations" (the word "because" was INSIDE the quotation marks until 2026-09-04
+    # and appears nowhere in src/lm/api.py::resolve; the citation was sound and the quotation of it
+    # was not, which is a claim about wording and so is worth the same care as a claim about a
+    # number).
     if float(cap.lift) < 0 or int(cap.lift_min) < 0:
+        # THE LAST CLAUSE IS ABOUT THE VALUES THE OPERATOR ACTUALLY SET, and it exists because the
+        # two worked equations below are NOT: they are the two regimes, labelled as such, and at
+        # CAP_LIFT=-0.5 with the shipped CAP_LIFT_MIN=8 neither of them is an equation about either
+        # of the operator's numbers. A refusal that prints only somebody else's arithmetic is the
+        # same defect as a Gate that does, one register down. Each branch is the identity proved in
+        # the "WHAT IT REMOVES" comment above and holds only at a cap at or above zero, which is
+        # why every branch says so.
+        if float(cap.lift) < 0 and int(cap.lift_min) < 0:
+            yours = ("BOTH of your values are negative, so no legal pair reproduces this "
+                    "configuration: what it does -- lower the cap on earned evidence -- is the one "
+                    "thing this valve may never do, at any cap.")
+        elif float(cap.lift) < 0:
+            yours = (f"FOR THE VALUES YOU SET: CAP_LIFT_MIN={cap.lift_min} is at or above 0, so at "
+                    f"any cap at or above zero CAP_LIFT={cap.lift} is arithmetically CAP_LIFT=0 -- "
+                    f"set that, and the lift stays the flat +{int(cap.lift_min)} the floor spells.")
+        else:
+            yours = (f"FOR THE VALUES YOU SET: CAP_LIFT={cap.lift} is at or above 0, so at any cap "
+                    f"at or above zero CAP_LIFT_MIN={cap.lift_min} is arithmetically "
+                    f"CAP_LIFT_MIN=0 -- set that.")
         raise LeverError(
             f"CAP_LIFT={cap.lift} / CAP_LIFT_MIN={cap.lift_min}: a lift may raise this ceiling and "
             f"may leave it where it is, and may never lower it. derive.lift_to(cap, frac, floor) is "
-            f"cap + max(int(floor), int(frac x cap)), so a negative CAP_LIFT together with a "
-            f"negative CAP_LIFT_MIN returns LESS than the cap it was handed -- "
-            f"derive.lift_to(12, -0.5, -100) = 6 -- and the valve would spend earned evidence "
-            f"shrinking the capacity that evidence says to grow. Neither negative buys anything "
-            f"a legal value does not: with a floor at or above 0 a negative CAP_LIFT is exactly "
-            f"CAP_LIFT=0 (a flat +CAP_LIFT_MIN lift), and with a fraction at or above 0 a negative "
-            f"CAP_LIFT_MIN is exactly CAP_LIFT_MIN=0. CAP_LIFT above 1 is NOT refused: it is a "
-            f"large lift, not a lowering one.")
+            f"cap + max(int(floor), int(frac x cap)), so a negative value of EITHER lever can "
+            f"return LESS than the cap it was handed and the valve would spend earned evidence "
+            f"shrinking the capacity that evidence says to grow: derive.lift_to(12, -0.5, -100) = "
+            f"6 with both negative at a cap above zero, and derive.lift_to(-100, 0.5, -1) = -101 "
+            f"with the floor alone negative at a cap below zero, which CAP_FAB_START=-5 reaches. "
+            f"AT A CAP AT OR ABOVE ZERO neither negative buys anything a legal value does not: "
+            f"with a floor at or above 0 a negative CAP_LIFT is exactly CAP_LIFT=0 (a flat "
+            f"+CAP_LIFT_MIN lift), and with a fraction at or above 0 a negative CAP_LIFT_MIN is "
+            f"exactly CAP_LIFT_MIN=0; BELOW zero neither identity holds, which is the second "
+            f"reason both are refused rather than the exception to the first. CAP_LIFT above 1 is "
+            f"NOT refused: it is a large lift, not a lowering one. {yours}")
 
     def _resolve(given, asked, hard, what):
         """Where a starting cap comes from, in the order the four branches below decide it.
@@ -465,7 +521,12 @@ def new_valve(cap: Config, *, restored=None):
     #                   again, on any evidence, forever". CAP_LIFT_MIN=0 with CAP_FAB_START=12 is
     #                   exactly that configuration, and it printed FIRED. IT IS THREE ENVIRONMENT
     #                   SETTINGS AWAY AND IT IS NOT WHERE THE DEFAULTS SIT -- CAP_TARGETS=experts, a
-    #                   small CAP_FAB_START (or a small FAB_SLOTS), and CAP_LIFT_MIN=0 -- which is
+    #                   small CAP_FAB_START (or a small FAB_SLOTS), and CAP_LIFT_MIN=0. THE SMALL
+    #                   CAP IS SUFFICIENT, NOT NECESSARY, and the gate's own sentence said "a small
+    #                   cap" as though it were necessary until 2026-09-04: the clause is reached
+    #                   whenever int(CAP_LIFT x cap) is 0, and at the legal CAP_LIFT=0 that is EVERY
+    #                   cap -- rendered at CAP_FAB_START=1000, where the old parenthetical printed
+    #                   "a small cap" beside a printed cap of 1000. THE THREE-SETTINGS SENTENCE is
     #                   the honest form of a claim this file and levers.py both made as "reachable
     #                   in the run this rebuild launches with" until 2026-09-04. This one is CAP's
     #                   OWN arithmetic on CAP's OWN two levers -- no wire, no other package --
@@ -561,8 +622,9 @@ def new_valve(cap: Config, *, restored=None):
                         f"max({int(cap.lift_min)}, {int(float(cap.lift) * ce)}) = "
                         f"{max(int(cap.lift_min), int(float(cap.lift) * ce))}, so the cap can never "
                         f"move again on any evidence (capacity/levers.py::CAPLevers records this as "
-                        f"the reason lift_min exists; it takes CAP_LIFT_MIN=0 and a small cap to "
-                        f"reach, and is not where the shipped defaults sit)")
+                        f"the reason lift_min exists; it takes CAP_LIFT_MIN=0 together with a lift "
+                        f"that rounds to zero AT THIS CAP, and is not where the shipped defaults "
+                        f"sit)")
     if vocab_armed and not vocab_room:
         if cv <= 0:
             dead.append(f"the vocabulary arm's soft cap is {cv} (CAP_VOCAB_START="

@@ -667,10 +667,17 @@ ASSEMBLY_ORDER = (
                                               "this edit, which would have been a TypeError on the "
                                               "first compose() to reach this row -- a defect hidden "
                                               "behind an earlier stub, this file's oldest shape. "
-                                              "THE EARLIER STUB IS CAP.startup_refusals AT ROW 29, "
-                                              "AND THIS ROW NAMED RUN.process_setup UNTIL "
-                                              "2026-09-04: process_setup is row 1 and has had a "
-                                              "body since P4 wrote it, so it shields nothing. "
+                                              "THERE ARE THREE EARLIER STUBS AND NOT ONE: "
+                                              "CAP.startup_refusals at row 29, RUN.new_clock at "
+                                              "row 32 and RUN.RunClock.begin_epoch at row 33, each "
+                                              "raising NotImplementedError before this row 35 is "
+                                              "reached -- measured by stubbing them one at a time "
+                                              "and re-running compose() in a fresh process. This "
+                                              "row named RUN.process_setup until 2026-09-04 and "
+                                              "then CAP.startup_refusals alone: process_setup is "
+                                              "row 1 and has had a body since P4 wrote it, so it "
+                                              "shields nothing, and CAP is the FIRST of the three "
+                                              "rather than the reason. "
                                               "'curve' STAYS IN THE MAPPING while EVAL.curve_probe "
                                               "is deferred, so the ledger reads a declared key with "
                                               "checks == 0: DECLARED AND NEVER ASKED, which is a "
@@ -2167,11 +2174,22 @@ def compose(environ=None, *, restored=None):
 
     # THE PERIODS ARE ARGUMENTS AND THE CALL WAS NOT PASSING ANY. new_cadences(run: Config, *,
     # periods) is keyword-only with no default (train/api.py::new_cadences), so this line was a TypeError on
-    # every compose() -- unreachable only because capacity/api.py::startup_refusals raises at row 29
-    # of ASSEMBLY_ORDER's 39 and this is row 35. RUN.process_setup, which this comment named as the
-    # blocker until 2026-09-04, is row 1 and HAS A BODY: train/api.py::process_setup returns a
-    # Process and stops nothing. Measured by running compose.compose(environ={}) and reading where
-    # the traceback ends.
+    # every compose() -- unreachable behind THREE stubs and not one. This is row 35 of
+    # ASSEMBLY_ORDER's 39, and rows 29, 32 and 33 each raise NotImplementedError before it:
+    # capacity/api.py::startup_refusals, train/api.py::new_clock and
+    # train/api.py::RunClock.begin_epoch. Row 29 is the FIRST of the three and not the reason, so
+    # repairing CAP alone does not bring this line into reach -- the run then stops earlier, at
+    # this file's `clock` stage. Measured one stub at a time by re-running
+    # compose.compose(environ={}) in a fresh process and reading where the traceback ends:
+    # unpatched -> `refuse`, row 29; startup_refusals returning [] -> `clock`, row 32; new_clock
+    # also handing back a bare RunClock -> `epoch0`, row 33; the clock stubbed whole -> here.
+    # Rows 30, 31 and 34 (OPT.build, OPT.load_state, SIG.warm_up) have bodies and pass through.
+    # THIS BLOCKER HAS NOW BEEN NAMED WRONG TWICE, THE SAME WAY BOTH TIMES: one mechanism, stated
+    # as the reason, that had stopped being sufficient. Until 2026-09-04 the comment read
+    # RUN.process_setup, which is row 1 and HAS A BODY (train/api.py::process_setup returns a
+    # Process and stops nothing); the repair then wrote CAP.startup_refusals ALONE, which raises
+    # but is not exclusive. An unreachable arm has to name every blocker, because naming one is a
+    # claim the next reader disproves by repairing it.
     # The signature was fixed on 2026-08-30 and the call site was not, which is the same shape
     # capacity/api.py::<module> records for derive.pin_tick: a file asserting a repair as done with the
     # call the repair requires never written. Each period comes from the package that DECLARES its
@@ -2312,12 +2330,27 @@ def _run_windows(sysm):
     IT RETURNS units.Windows AND USED TO RETURN A BARE INT, which both of its consumers refuse.
     derive.cadences_that_cannot_fire raises UnitError on a non-Windows at both ends (derive.py::cadences_that_cannot_fire)
     and derive.opt_steps_from_windows does the same (derive.py::opt_steps_from_windows), so RUN.cadence_audit would
-    have raised on its first call and OPT.build on its first horizon -- unreachable today only
-    because capacity/api.py::startup_refusals raises at row 29 of ASSEMBLY_ORDER's 39, ONE row
-    before OPT.build and SEVEN before RUN.cadence_audit, which is this file's oldest shape and the
-    reason K7 exists. THE BLOCKER NAMED HERE UNTIL 2026-09-04 WAS RUN.process_setup, AND THAT WAS
-    FALSE: process_setup is row 1 and it HAS A BODY -- train/api.py::process_setup returns a
-    Process -- so it stops nothing. It was the true blocker when the sentence was first written
+    have raised on its first call and OPT.build on its first horizon. THE TWO CONSUMERS ARE
+    UNREACHABLE FOR DIFFERENT REASONS, AND SAYING SO IS THE WHOLE VALUE OF THE SENTENCE. OPT.build
+    is row 30 of ASSEMBLY_ORDER's 39 and capacity/api.py::startup_refusals at row 29 is its ONLY
+    blocker: make startup_refusals return an empty list and compose() runs straight through
+    OPT.build and OPT.load_state -- this function is CALLED there, at the `optimizer` stage -- and
+    stops at row 32. RUN.cadence_audit is row 36 and has FOUR blockers above it, not one: row 29,
+    then train/api.py::new_clock at row 32, train/api.py::RunClock.begin_epoch at row 33 and
+    train/api.py::new_cadences at row 35, each raising NotImplementedError in its turn. So
+    "unreachable today only because CAP.startup_refusals", which stood in this paragraph until
+    2026-09-04, was true of one consumer and false of the other, and a reader who repaired CAP
+    expecting the audit's UnitError to surface would not have seen it. MEASURED ONE STUB AT A TIME,
+    by re-running compose.compose(environ={}) in a fresh process and reading where the traceback
+    ends: unpatched it stops at the `refuse` stage, row 29; with startup_refusals returning [] at
+    `clock`, row 32; with new_clock also handing back a bare RunClock at `epoch0`, row 33; with the
+    clock stubbed whole at `cadence`, row 35; and with new_cadences returning a mapping at `audit`,
+    row 36, which is this function's second call site and the audit's first. Rows 31 and 34
+    (OPT.load_state, SIG.warm_up) have bodies and pass through. A stack of stubs is this file's
+    oldest shape and the reason K7 exists; what it costs is that "unreachable" needs the whole list
+    to stay true, and one name is the answer a repair disproves. THE BLOCKER NAMED HERE UNTIL
+    2026-09-04 WAS RUN.process_setup, AND THAT WAS FALSE: process_setup is row 1 and it HAS A BODY
+    -- train/api.py::process_setup returns a Process -- so it stops nothing. It was the true blocker when the sentence was first written
     and stopped being one when P4 wrote the body; an unreachable arm whose stated reason names a
     mechanism that no longer holds is a false equation, which this file rates worse than printing
     nothing. Measured, not inferred: `compose.compose(environ={})` raises NotImplementedError from

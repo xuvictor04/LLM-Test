@@ -72,7 +72,7 @@ ruling and the alternatives; what follows is what the two `def` lines now say an
     among them. The two tables are different and the document's own rows distinguish them (its
     SIG.d_signature_width_bytes row says "already refused in assemble.NOT_WIRES", which would be
     noise if every row were). THE RULING IS UNCHANGED AND DOES NOT REST ON THE CITATION: the ground
-    is a property of Coupling.compute, tests/test_couplings.py::C2 is what holds it, and both of
+    is a property of Coupling.compute, tests/test_couplings.py::check_c2_escapes_refused is what holds it, and both of
     those rows are refused on it -- d_curve_bpb because a held-out measurement is produced thousands
     of windows into the run, d_shift_at because an optimizer step index is runtime state. Only the
     place they are written down was wrong. tests/test_ownership.py::check_o12_citations_name_symbols

@@ -33,7 +33,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine import derive as _derive
 from spine.gate import Gate, NotBuilt
 from spine.init import is_scale as _is_scale
@@ -229,6 +229,16 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     kept for future use is kept with a switch, and a drop here would make the port a census
     amendment later. The refusal is what makes "declared but not built" loud instead of silent.
 
+    ELEVEN MAGNITUDE LEVERS ARE RANGE-CHECKED HERE AND A NEGATIVE ONE IS REFUSED, WHICH IS THE ONLY
+    REASON THIS FUNCTION READS THEM -- their behaviour is entirely `forward`'s. They split two ways
+    and the body records the measurement for each: FAB_BALANCE, FAB_PONDER and FAB_EMB_VAR multiply
+    their loss terms UNGUARDED, so a negative one applies the term with its sign reversed and the
+    objective pays for expert collapse, for deeper walks and for a collapsed identity space
+    respectively; the other eight are guarded at `> 0.0`, so a negative is bit-identical to 0.0 in
+    aux, in every counter and in every gate, and its whole effect is that the gate prints
+    "ec_w=-1.0" one line above "FAB_EC_W=0". Neither is a configuration of this package. The
+    precedent and the ground are src/capacity/api.py::new_valve's refusal of a negative CAP_LIFT.
+
     THE DEPTH0 SENTINEL IS RESOLVED HERE, THE WAY LM.resolve RESOLVES LM_LAYERS==0. depth0 is
     POPULATION STATE (Population.depth_now) that only maybe_deepen ever advances past its start --
     the curriculum's own docstring on `manage` step 6 gates the staged-depth advance on
@@ -301,7 +311,8 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     the prior carries the name the contract gives it. The parameter count is unchanged.
 
     LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode,
-                 depth0, hops
+                 depth0, hops, balance, ponder, emb_var, ec_w, explore, discover, div_w, hop_sup,
+                 ind_w, ae_w, dom_frac
     WIRES READ: d_operating_population
     DID IT FIRE: fab.built, fab.n0, fab.cap, fab.operating_population (from
                  derive.operating_population, printed BESIDE the cull gate so the setpoint and the
@@ -330,6 +341,96 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
             f"current state in the query. The 'transition' arm is the learned successor walk and "
             f"needs the R matrix, the per-expert SRC marks and the `ctrl` summary, none of which "
             f"exist in this tree. Refused rather than silently running soc.")
+
+    # ELEVEN MAGNITUDE LEVERS MAY NOT BE NEGATIVE, AND THE REFUSAL IS AT STARTUP FOR THE REASON
+    # src/capacity/api.py::new_valve gives for CAP_LIFT, in its own words about its own lever: "A
+    # valve that lowers on evidence it should raise is not a configuration of this mechanism; it is
+    # a different mechanism wearing its name." Read here as: a mechanism running backwards on the
+    # evidence it should run forwards is a defect arriving through a lever VALUE rather than through
+    # a guard, and a guard is not what catches it -- a refusal is. Each of
+    # these eleven is a WEIGHT ON AN ADDITIVE TERM OF THE OBJECTIVE or a RATE/SHARE, declared in
+    # fabric/levers.py as the size of a pressure; there is no reading of any of them under which a
+    # negative number is that pressure. Decided per lever and measured per lever, not as a blanket
+    # -- the eleven split into TWO groups that fail in two different ways, and both were measured on
+    # one routed pass at FAB_N0=8/SLOTS=16/RANK=4/DK=8/SOCIETY=1/HOPS=3/DEPTH0=3/CHAIN_K=2 against
+    # the same pass at the same lever set to exactly 0.0:
+    #
+    # (1) THE TERM IS APPLIED AND ITS SIGN REVERSES -- the objective pays for the opposite of what
+    #     the lever's own sentence says it buys. `aux = aux + balance_w * bal_scale * bal`,
+    #     `aux = aux + ponder_w * ponder_scale * (depth_acc / ...)` and _ae_loss's
+    #     `+ emb_var * (var + cov)` are all UNGUARDED multiplications:
+    #       FAB_BALANCE=-1.0  aux 0.9000001 vs 1.9836745 at 0.0 -- routing mass pushed INWARD,
+    #                         paying the population to collapse onto one expert, which is the exact
+    #                         inverse of "every expert keeps accruing use-age instead of a few
+    #                         absorbing all traffic" and is hostile to goal B at its root.
+    #       FAB_PONDER=-1.0   aux 1.9941328 vs 1.9945074 at 0.0 -- the charge on routed depth
+    #                         becomes a SUBSIDY on routed depth: the chain is paid to take hops it
+    #                         does not need -- fabric/levers.py::FABLevers declares `ponder` a
+    #                         "Charge on routed depth", and this is that sentence read backwards.
+    #       FAB_EMB_VAR=-1.0  aux 1.0422100 vs 1.5183606 at 0.0 -- the anti-collapse term becomes a
+    #                         PRO-collapse term, and a collapsed identity space is the measured
+    #                         failure fabric/api.py::_var_cov exists for (nearest-neighbour distance
+    #                         0.000, spawn firing on every query).
+    #     FAB_BALANCE is the worst of the three because its GATE also misreported it: on a separate
+    #     six-lever sweep at the shipped FAB_SOCIETY=0 (all six of the reasons in group (2) set
+    #     negative at once), fab.balance printed fired=False beside a reason that asserted
+    #     "FAB_BALANCE=0: no load-balance pressure" -- the reason text hardcoded the 0 rather than
+    #     printing the value it read -- while the pass returned a NEGATIVE total aux, -1.0836706,
+    #     all of it the reversed balance term since the other five in that sweep are inert; and
+    #     `if balance_w > 0.0` held fab.balance_nonzero -- THE C2 ALARM -- at 0, which is the
+    #     reading that means "the term is multiplying a zero". A reversed term reported as an
+    #     absent one is the wrong-measurement family with the loss itself as the subject.
+    #
+    # (2) THE TERM IS GUARDED AT `> 0.0` AND A NEGATIVE IS EXACTLY "OFF" -- aux, every counter and
+    #     every gate bit-identical to the same run at 0.0 for all eight of FAB_EC_W, FAB_EXPLORE,
+    #     FAB_DISCOVER, FAB_DIV_W, FAB_HOP_SUP, FAB_IND_W, FAB_AE_W and FAB_DOM_FRAC. Nothing runs
+    #     backwards, so the defect is entirely in the REPORT: each gate prints the operator's own
+    #     negative in its `value` and then a reason asserting the value is 0 one line below it --
+    #     "ec_w=-1.0" over "FAB_EC_W=0: allocation by loss pressure only". REFUSING rather than
+    #     widening the eight reasons, for the reason capacity gives in the same place: it REMOVES NO
+    #     CONFIGURATION, because a negative here is bit-identical to a 0 that is already legal and
+    #     already spells the same thing, so nothing an operator can ask for is lost; and it makes the
+    #     false reason impossible to produce instead of correct once. The reasons are ALSO widened
+    #     to print the value they read (see the gates in `forward`), so neither half depends on the
+    #     other being right.
+    #
+    # WHAT IS NOT REFUSED, AND WHY THE RULE IS NOT "FRACTION MEANS 0..1". U.FRACTION is a LABEL the
+    # census renders and not a bound -- src/sig/levers.py and src/tok/levers.py both say so of their
+    # own shares, and capacity leaves CAP_LIFT > 1 legal on exactly that ground. Nothing here refuses
+    # a value ABOVE any of these; FAB_BALANCE=5.0 is a large pressure and still the pressure the
+    # lever names. Nor does this touch the levers whose negative side is a different question --
+    # FAB_ALPHA, FAB_ROUTE_T, FAB_HALT_MAX, FAB_BAL_FLOOR, FAB_SPAWN_FLOOR, FAB_ROUTE_REGION_W,
+    # FAB_MUT, FAB_PRESSURE -- because that is a range ruling this body has not measured and a guard
+    # invented for a value nobody has shown to be wrong is the untrippable-guard class one level up.
+    _applied = (("FAB_BALANCE", float(fab.balance)), ("FAB_PONDER", float(fab.ponder)),
+                ("FAB_EMB_VAR", float(fab.emb_var)))
+    _gated_off = (("FAB_EC_W", float(fab.ec_w)), ("FAB_EXPLORE", float(fab.explore)),
+                  ("FAB_DISCOVER", float(fab.discover)), ("FAB_DIV_W", float(fab.div_w)),
+                  ("FAB_HOP_SUP", float(fab.hop_sup)), ("FAB_IND_W", float(fab.ind_w)),
+                  ("FAB_AE_W", float(fab.ae_w)), ("FAB_DOM_FRAC", float(fab.dom_frac)))
+    _rev = [f"{k}={v}" for k, v in _applied if v < 0.0]
+    _off = [f"{k}={v}" for k, v in _gated_off if v < 0.0]
+    if _rev or _off:
+        raise LeverError(
+            f"FAB: negative magnitude lever(s) {', '.join(_rev + _off)}. Every one of these is a "
+            f"weight on an additive term of the objective or a rate, and a negative value is never "
+            f"the pressure the lever names. "
+            + (f"REVERSED AND APPLIED: {', '.join(_rev)} -- FAB_BALANCE, FAB_PONDER and FAB_EMB_VAR "
+               f"multiply their terms UNGUARDED, so a negative one pays the objective for the "
+               f"opposite of what it buys (measured at FAB_BALANCE=-1.0: aux 0.9000001 against "
+               f"1.9836745 at 0.0, routing mass pushed inward, while the fab.balance gate read "
+               f"'no load-balance pressure' and the C2 alarm fab.balance_nonzero stayed at 0). "
+               if _rev else "")
+            + (f"SWITCHED OFF AND MISREPORTED: {', '.join(_off)} -- these eight are guarded at "
+               f"`> 0.0`, so a negative is bit-identical to 0.0 in aux, in every counter and in "
+               f"every gate, and the only thing it changes is that the gate prints the negative in "
+               f"its value beside a reason asserting the value is 0. " if _off else "")
+            + f"Set the lever to 0.0 to switch the mechanism off -- that is what a negative already "
+              f"does on the eight and what a negative does NOT do on the three -- or to a positive "
+              f"magnitude to run it. Refused here, at startup, rather than described by a Gate, "
+              f"because a Gate reason is a report and the mechanism still runs: "
+              f"src/capacity/api.py::new_valve makes the same ruling for CAP_LIFT and states "
+              f"the ground.")
 
     n0, slots = int(fab.n0), int(fab.slots)
     cap = max(n0, slots)
@@ -612,24 +713,51 @@ def _identities(pop, n, step_n, emb_every_n, *, write=True):
     a pass that was only looking, with every counter and every gate reading exactly as before --
     `fab.ident_refreshed` is the same number either way, so the ledger cannot see it and only a
     gradient measurement can.
-    MEASURED at FAB_N0=8, FAB_SLOTS=16, FAB_RANK=4, FAB_DK=8, d_model=32, sig_d=64, B=4, L=6 and
-    FAB_EMB_EVERY=1 (shipped): training passes at windows 5 and 6, with ONE no_grad eval pass at
-    window 6 inserted between them. AT TWO ARMS, BECAUSE EITHER ONE ALONE IS THE WRONG MEASUREMENT
-    QUOTED WITHOUT ITS CONFIGURATION:
+    MEASURED ON THE UNGUARDED BODY -- the `write` line below removed and the call site back at
+    `write=solo` -- at FAB_N0=8, FAB_SLOTS=16, FAB_RANK=4, FAB_DK=8, d_model=32, sig_d=64, B=4,
+    L=6 and FAB_EMB_EVERY=1 (shipped): training passes at windows 5 and 6, with ONE no_grad eval
+    pass at window 6 inserted between them.
+    AND UNDER A NAMED OBJECTIVE, WHICH IS THE ONE VARIABLE THESE FOUR NUMBERS TURN ON AND THE ONE
+    THIS PARAGRAPH USED TO OMIT. A gradient is a gradient OF something; two backwards from two
+    losses are two measurements, and the grad|B| pair quoted here before was taken under the
+    second of these while a reader would take it for the first:
+      (a) THE COMPOSED OBJECTIVE, which is what the composition root backwards -- spine/compose.py's
+          OPT.scaled_backward row, "LM.lm_loss's mean + LM.anchor_term's already-weighted term +
+          FabricOut.aux_loss + WORLD's loss" -- here a cross-entropy over head(hidden) PLUS
+          FabricOut.aux_loss;
+      (b) FabricOut.aux_loss ALONE: a probe with no cross-entropy in it, which is not a pass this
+          tree ever runs.
+    AT TWO ARMS, BECAUSE EITHER ONE ALONE IS THE WRONG MEASUREMENT QUOTED WITHOUT ITS CONFIGURATION:
       * at the SHIPPED FAB_SPAWN=1 and FAB_AE_W=0.5, the window-6 pass goes from grad|A|max
-        1.7764444e-2 to 3.1788775e-3 and grad|B|max 1.8207863e-2 to 3.5802322e-3 -- 82% of A's
-        gradient. What survives is the ae round trip, A's OTHER route (fabric/api.py::forward's
-        ablation paragraph).
+        2.8533114e-2 to 3.1788775e-3 -- 88.9% of A's gradient on this input draw -- and it reads
+        the SAME under (a) and under (b), because A's surviving route is the ae round trip and the
+        round trip lives inside aux_loss, which both objectives contain. What survives is that
+        round trip, A's OTHER route (fabric/api.py::forward's ablation paragraph). grad|B|max does
+        NOT agree between the two: 3.3949580e-2 -> 1.3011797e-2 under (a) (B KEEPS 38% of its
+        gradient) against 3.3045854e-2 -> 3.5802231e-3 under (b).
       * at FAB_SPAWN=0, or at FAB_AE_W=0, or at both -- EITHER lever removes that route, because
         the round trip is gated on `spawn_on and ae_w > 0.0 and learn` in fabric/api.py::forward
-        -- it goes from
-        grad|A|max 1.6913850e-2 to EXACTLY 0.0 (grad|B|max 1.7490769e-2 -> 7.3022917e-8), the same
-        three readings at all three of those arms: ALL of A's gradient.
+        -- grad|A|max goes from 2.7976248e-2 to EXACTLY 0.0, one reading at all three of those
+        arms and under both objectives: ALL of A's gradient. grad|B|max splits again:
+        3.3121154e-2 -> 1.3159202e-2 under (a) against 3.3161595e-2 -> 1.3570179e-11 under (b).
+    WHY B SPLITS WHERE A DOES NOT, so the split is a fact about the design and not about the
+    harness: B reaches the loss through the MIXTURE as (hA)^T grad_out, a route that does not pass
+    through the identity channel and that the cross-entropy keeps whatever happens to the cache --
+    fabric/api.py::build draws A uniform and zero-inits only B, so it is dL/dA through the mixture
+    that is zero at step 0, not dL/dB. Under (b) there is no cross-entropy at all, so aux_loss's own
+    identity-channel route is the ONLY one B has and it vanishes with A's. "grad|B| goes to zero"
+    is therefore true of the probe and FALSE of a training pass in the composed run.
+    THE TWO PERCENTAGES ARE PROPERTIES OF THIS INPUT DRAW and are printed as the ratio of the two
+    numbers beside them, not as constants of the design; what is falsifiable at any draw is that A's
+    poisoned reading is EXACTLY 0.0 on all three ae-off arms and a small nonzero residue on the
+    shipped one, and that B's is neither under (a).
     With the guard below, both arms are bit-identical to the same pair of passes with no eval
-    inserted. The cheaper half is the same defect one size down -- the middle branch clears
-    `ident_graph`, so a read-only pass could force the next real pass to re-embed the whole
-    population -- and ONE guard covers both, because it disarms `write` for the whole body rather
-    than at each write site in it.
+    inserted -- re-measured on THIS body under (a): shipped 2.8533114e-2 / 3.3949580e-2 and ae-off
+    2.7976248e-2 / 3.3121154e-2, with and without the inserted eval pass, and `ident_graph` still
+    carrying a grad_fn after it. The cheaper half is the same defect one size down -- the middle
+    branch clears `ident_graph`, so a read-only pass could force the next real pass to re-embed
+    the whole population -- and ONE guard covers both, because it disarms `write` for the whole
+    body rather than at each write site in it.
     """
     # THE GUARD IS THE CLASS, NOT THE INSTANCE: not "a counterfactual may not write" and not "an
     # eval pass may not write", but "a pass with no graph to give may not write", which is the
@@ -816,7 +944,7 @@ def _breadth_ban(pop, n, domain_id, live_domains, dom_frac, dom_min):
     share.
     """
     if dom_frac <= 0.0:
-        return None, 0, "FAB_DOM_FRAC=0: the breadth cap is switched off."
+        return None, 0, f"FAB_DOM_FRAC={dom_frac}: the breadth cap is switched off."
     limit = max(int(dom_min), int(dom_frac * max(1, int(live_domains))))
     affiliated = sum(1 for e in range(n) if pop.dom_of[e])
     if affiliated == 0:
@@ -1199,6 +1327,16 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # therefore on the clock, where the error is, and not on the cache, where it happened to show.
     # A no_grad EVAL pass and a leave-one-out counterfactual at the same window are LEGAL and
     # untouched -- they are exactly what `learn` excludes.
+    # THE GUARD IS BROADER THAN THE MEASUREMENT ABOVE, AND THAT IS STATED RATHER THAN LEFT TO BE
+    # DISCOVERED: it is on `learn and torch.is_grad_enabled()`, not on having BACKWARDED, so TWO
+    # grad-enabled training forwards at one window with NO backward between them are refused too --
+    # measured "NO ERROR" before this refusal and ValueError after it, at FAB_ROUTE_LEARN=1 and at
+    # FAB_ROUTE_LEARN=0 alike. That is inside the sentence this raises ("a SECOND gradient-carrying
+    # training pass") and it is deliberate -- the second forward applies this window's ponder anneal,
+    # balance anneal, spawn test and halt EMA a second time whether or not anyone backwards it --
+    # but it is wider than the double-backward the paragraph above justified it with, and a reason
+    # that names only the narrower case would be the printed-claim-outside-its-measurement defect
+    # this file is otherwise busy removing.
     if learn and torch.is_grad_enabled():
         if pop.learn_window == step_n:
             raise ValueError(
@@ -1324,6 +1462,24 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     h0 = h                       # the base representation HALT mass buys on the society arm
     alive = torch.ones(h.size(0), device=h.device, dtype=h.dtype)
     depth_acc, bal_acc, div_acc = zero, zero, None
+    # THE C2 ALARM'S SUBJECT IS RECORDED WHERE THE TERM IS BUILT, NOT READ OFF THE ACCUMULATOR.
+    # `bal_acc` is seeded from `zero`, and `zero` is `h[:0].sum()` -- a tensor that CARRIES h's
+    # graph, deliberately, so the two switched-off arms above can return a differentiable aux_loss.
+    # An accumulator seeded from it has a grad_fn whatever its terms are, so the alarm's own test,
+    # `bal.grad_fn is not None`, was TRUE BY CONSTRUCTION on every training pass from the moment
+    # `zero` stopped being a freshly allocated one. MEASURED at FAB_ROUTE_LEARN=0 + FAB_HALT=0,
+    # where the entry logits are the region cosine over the DETACHED signature against `cent` (not
+    # a Parameter) and the halt column is pinned, so `w` reaches nothing: FAB_BALANCE 0.01 and 5.0
+    # both move aux (0.4953668 and 5.9921689) and neither moves one gradient -- autograd.grad of
+    # aux over A, B, halt_b, every module and head parameter and h has absmax-sum
+    # 0.014852798765332409 at FAB_BALANCE 0, 0.01 AND 5.0 -- while fab.balance_nonzero read 1. That
+    # is the C2 failure mode itself, reported clean by the alarm that exists to name it.
+    # SEEDING THE ACCUMULATOR GRAPHLESS AGAIN WOULD FIX THE READING AND KEEP THE FRAGILITY: the
+    # detector would still be measuring a line two hundred lines away rather than its own subject,
+    # and the next edit to `zero` would silently disarm it again. `bal_graph` is that subject --
+    # the graph of the balance term ITSELF, `w.size(1) * (w.mean(0) ** 2).sum()`, taken at the one
+    # place it is built. It is a bool and not a tensor, so it adds nothing to the objective.
+    bal_graph = False
     mass_acc, vote, last_vote, per_expert = None, None, None, None
     entry_halt, last_hop_lg = None, None
     last_idx = last_w = None
@@ -1358,7 +1514,9 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         # routing distribution, not a freshly allocated zero, so FAB_BALANCE, BAL_FLOOR and BAL_WARM
         # scale something that can move. The old soc loop returned `h.new_zeros(())` as its fourth
         # element (self_organize.py:2694) and the training loop multiplied it at :7031.
-        bal_acc = bal_acc + w.size(1) * (w.mean(0) ** 2).sum()
+        bal_term = w.size(1) * (w.mean(0) ** 2).sum()
+        bal_graph = bal_graph or (bal_term.grad_fn is not None)
+        bal_acc = bal_acc + bal_term
         if learn:
             got, slot = _ground_update(pop, signature, w, n, cent_topk, cent_ema, discover)
             if got:
@@ -1517,8 +1675,14 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # BAL_WARM were read, printed and reasoned about for the whole life of the old tree while
     # multiplying a freshly allocated zero. Recorded on training passes only, because under
     # torch.no_grad() every tensor here legitimately has no graph.
+    # THE GRAPH IT TESTS IS `bal_graph`, TAKEN AT THE ACCUMULATION SITE, and not `bal.grad_fn`.
+    # `bal` descends from `zero`, which carries h's graph by design, so `bal.grad_fn is not None`
+    # answers a question about the SEED and reads TRUE on a pass where the term reaches nothing --
+    # see the comment at `bal_graph`'s declaration for the configuration and the gradient that
+    # proves it dead there. The alarm's subject is the balance term, so the alarm reads the balance
+    # term. The VALUE half stays on `bal` because that is the number the objective multiplies.
     if balance_w > 0.0 and training and solo:
-        live_term = (bal.grad_fn is not None) and float(bal.detach()) != 0.0
+        live_term = bal_graph and float(bal.detach()) != 0.0
         _bump(counters, "fab.balance_nonzero", 1 if live_term else 0)
     div_applied = 0
     if div_acc is not None and div_w > 0.0:
@@ -1564,8 +1728,12 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                       value=f"balance={balance_w} x warm={round(bal_scale, 4)}",
                       threshold="> 0",
                       reason="" if balance_w > 0.0 else
-                             "FAB_BALANCE=0: no load-balance pressure. This is 'off', not C2 -- the "
-                             "C2 alarm is fab.balance_nonzero reading 0 while this is above zero."))
+                             f"FAB_BALANCE={balance_w}: no load-balance pressure. This is 'off', "
+                             f"not C2 -- the C2 alarm is fab.balance_nonzero reading 0 while this "
+                             f"is above zero. The value is PRINTED rather than asserted to be 0, "
+                             f"and a negative one cannot reach here at all: fabric/api.py::build "
+                             f"refuses it at startup, because at balance_w<0 this term was still "
+                             f"APPLIED, with its sign reversed, under this same reason."))
     # THE DEFICIT BONUS IS ARMED ON A TABLE NOTHING WRITES YET, and that is a third state. `use` is
     # credited by fabric/api.py::observe and by nothing else, so until that entry point has a body
     # every expert's utilization is 0, the fair share is 0, and there is no deficit to score -- which
@@ -1576,7 +1744,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                       threshold=f"sum(use)={_use_total}",
                       reachable=bool(ec_w > 0.0 and n > 1 and _use_total > 0),
                       reason="" if (ec_w > 0.0 and n > 1 and _use_total > 0) else
-                             ("FAB_EC_W=0: allocation by loss pressure (`balance`) only."
+                             (f"FAB_EC_W={ec_w}: allocation by loss pressure (`balance`) only."
                               if ec_w <= 0.0 else
                               "n_live is 1: one expert has no share to be under." if n <= 1 else
                               "every `use` is 0: FAB.observe is the only writer of the utilization "
@@ -1595,8 +1763,8 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                       threshold=f"explore={explore}, computed={_k_live} of n_live={n}",
                       reachable=_explore_ok,
                       reason="" if _explore_ok else
-                             ("FAB_EXPLORE=0: nothing stands between the utilization cull and a "
-                              "self-fulfilling ranking." if explore <= 0.0 else
+                             (f"FAB_EXPLORE={explore}: nothing stands between the utilization "
+                              f"cull and a self-fulfilling ranking." if explore <= 0.0 else
                               "training passes only, and this was an eval or a counterfactual"
                               if not learn else
                               f"FAB_CHAIN_K={chain_k} computes {_k_live} expert per hop: the swap "
@@ -1610,15 +1778,15 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                       threshold=f"cosine distance > {discover}",
                       reachable=bool(discover > 0.0 and learn and n > 1),
                       reason="" if (discover > 0.0 and learn and n > 1) else
-                             ("FAB_DISCOVER=0: material nothing owns is absorbed by the nearest "
-                              "incumbent." if discover <= 0.0 else
+                             (f"FAB_DISCOVER={discover}: material nothing owns is absorbed by the "
+                              f"nearest incumbent." if discover <= 0.0 else
                               "training passes only" if not learn else
                               "n_live=1: there is no least-used expert to hand it to.")))
     gates.append(Gate("fab.distinctness", bool(div_applied), value=f"div_w={div_w}",
                       threshold=f"chain_k={chain_k} >= 2, n_live={n}",
                       reachable=bool(div_w > 0.0 and min(chain_k, n) >= 2 and solo),
                       reason="" if (div_w > 0.0 and min(chain_k, n) >= 2 and solo) else
-                             ("FAB_DIV_W=0: nothing pays two co-routed experts for producing "
+                             (f"FAB_DIV_W={div_w}: nothing pays two co-routed experts for producing "
                               "different outputs, which is one of the two things the fabric is FOR."
                               if div_w <= 0.0 else
                               "a counterfactual walk adds no loss term" if not solo else
@@ -1649,7 +1817,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                       threshold=f"{len(hop_logits)} hop logits collected over depth={depth}",
                       reachable=_sup_ok,
                       reason="" if _sup_ok
-                             else ("FAB_HOP_SUP=0" if hop_sup_w <= 0.0 else
+                             else (f"FAB_HOP_SUP={hop_sup_w}" if hop_sup_w <= 0.0 else
                                    "no targets were supplied, so a per-hop cross-entropy has "
                                    "nothing to score against" if targets is None else
                                    "no head was supplied, so no hop can produce logits"
@@ -1665,7 +1833,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                              ("FAB_SOCIETY=0: per-expert logits are not retained on the looped arm, "
                               "so 'solve it alone' has no per-expert prediction to score"
                               if not society else
-                              "FAB_IND_W=0" if ind_w <= 0.0 else
+                              f"FAB_IND_W={ind_w}" if ind_w <= 0.0 else
                               "no head was supplied, so no expert can produce a prediction of its "
                               "own" if head is None else "no targets were supplied")))
     # THE ROUND TRIP IS A TRAINING-ONLY TERM AND THE GATE HAD NOT SAID SO. The body's condition is
@@ -1684,7 +1852,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                       reason="" if _ae_ok else
                              ("FAB_SPAWN=0 also switches off the identity autoencoder: edec exists "
                               "only to specify a newborn, so nothing would read what it learned."
-                              if not spawn_on else "FAB_AE_W=0" if ae_w <= 0.0 else
+                              if not spawn_on else f"FAB_AE_W={ae_w}" if ae_w <= 0.0 else
                               "training passes only, and this was an eval or a counterfactual")))
     gates.append(Gate("fab.halt", halt_on, value=f"mean halted mass "
                                                   f"{round(float((1.0 - alive).mean().detach()), 4)}",

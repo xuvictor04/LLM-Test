@@ -185,9 +185,19 @@ class Vocabulary:
         #   seed       -> NOT COVERED AND DOES NOT NEED TO BE: tokenize's body never reads it (see
         #                 that function's own note on the parameter). It selects nothing, so it
         #                 cannot make a cached answer wrong.
-        #   vocab      -> cache[3], the stamp, over the TWO structures _segment consults: seq2id
-        #                 (through size() and len(seq2id)) and `retired` (len). See tokenize's
-        #                 paragraph for the one match-table change this stamp still cannot see.
+        #   vocab      -> cache[3], the stamp, over the THREE structures _segment consults --
+        #                 seq2id (through size() and len(seq2id)), `retired` (len), and `mlbf`,
+        #                 the per-first-byte max length that decides which lengths are probed at
+        #                 all. THIS PARAGRAPH SAID TWO UNTIL 2026-09-04 and _segment reads all
+        #                 three (`s2i, mlbf, retired = ...`, then `hi = min(mlbf[b0], n - i)`).
+        #                 mlbf needs no term of its own TODAY because it is written only inside
+        #                 Vocabulary._add, which always appends to id2bytes first and so always
+        #                 moves size() -- so the first stamp term already catches every change to
+        #                 it. That implication is written down rather than left to be re-derived:
+        #                 a future reinstatement that puts a sequence back into the match table
+        #                 WITHOUT going through _add breaks it, and needs the revision counter
+        #                 tokenize's own paragraph already asks for. See that paragraph for the one
+        #                 match-table change this stamp still cannot see.
         self._retok_cache = None
 
     def size(self):
@@ -369,7 +379,7 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         # file did not import spine.gate at all, so the declared "unreachable (mode != fixed)" state
         # was never actually printed anywhere -- it was simply absent, which is the armed-but-inert
         # collapse this record type exists to refuse). mode="bytes" never reads build_passes, so
-        # there is no achieved-vs-historical pair to show; value stays None rather than a number that
+        # there is no requested-vs-historical pair to show; value stays None rather than a number that
         # was never resolved.
         vocab.gates = (Gate("tok.build_passes_advice", False, None, 8, reachable=False,
                              reason="mode != fixed"),)
@@ -427,21 +437,26 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         # returns regardless of which arm produced it. `stream` reuses the dropout_rng minted AT THE
         # TOP OF THIS BRANCH, before `recon` and before the missing-parent refusal -- more than
         # forty lines up, not three, and this sentence said "three lines above" until it was
-        # recounted (r4; measured 389 -> 432 on the tree that recount was made against). Reusing
+        # recounted (r4). THE DIGITS THAT RECOUNT RECORDED ARE GONE ON PURPOSE: it wrote "measured
+        # 389 -> 432" and the tree it shipped in gave 389 -> 433, so the recorded pair did not match
+        # the file it was recorded in -- a line number is exactly the thing that rots between a
+        # recount and the commit that carries it. The ANCHORS do not rot and are what a reader can
+        # check: the mint is the first statement of this branch, immediately under the "MINTED ON
+        # THIS BRANCH TOO" comment, and this is its first use. Reusing
         # it is not a second mint -- see P1-H56 and the crash that a second mint caused on this exact
         # branch before that fix.
         stream = vocab.dropout_rng if float(tok.dropout) > 0 else None
         ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
         vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
         # THE GATE, EVEN THOUGH NO BUILD PASS RAN HERE. build_passes_advice's predicate is about a
-        # FRESH build reaching mode="fixed" at some achieved pass count against the historical 8;
+        # FRESH build reaching mode="fixed" at some REQUESTED pass count against the historical 8;
         # a replay never calls the build loop at all; on the offline analogue of the round1 fix that
         # left mode-out arms silent, staying silent here instead of naming the reason would be the
         # same collapse under a different cause. Reachable=False regardless of mode, because the
         # thing the gate reports on (a pass count) was never resolved on this branch.
         vocab.gates = (Gate("tok.build_passes_advice", False, None, 8, reachable=False,
                              reason="resumed via d_vocab_read_path: no build pass ran on this "
-                                    "branch, so there is no achieved pass count to compare"),)
+                                    "branch, so no pass count was resolved to compare"),)
         return vocab
 
     target = min(int(tok.seed_vocab), vocab._cap())
@@ -511,7 +526,16 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
             # against the row r3 added here). `minted == 0` cannot come from the target break --
             # size only moves when `_add` succeeds, and the outer loop already tested size >= target
             # before entering -- so it means either (a) the first candidate fell below min_pair, the
-            # convergence this row claims, or (b) every candidate above min_pair was REFUSED. On (b)
+            # convergence this row claims, (b) every candidate above min_pair was REFUSED, or
+            # (c) THE TALLY WAS EMPTY -- a build sample with no adjacent pair at all, so the inner
+            # loop never ran a single comparison. (c) was missing from this enumeration until
+            # 2026-09-04, when it was written as "exactly TWO reachable causes"; it is reachable at
+            # TOK_BUILD_BYTES=1, measured: {tok.build_pass: 1, tok.build_mint: 0,
+            # tok.build_converged: 1, tok.build_refused: 0} over a one-byte sample that segments to
+            # one token and yields no pair. Setting the row THERE is defensible for a third reason
+            # again -- a corpus with no adjacent pairs has none to run out of -- so this narrows
+            # the enumeration and not the gate. Below it, at TOK_BUILD_BYTES=0, the row is not
+            # reached at all: spine/derive.py::bytes_per_token raises on n_tokens=0 first. On (b)
             # the tally is still full and the corpus is not exhausted:
             # tok/levers.py::TOKLevers.max_bytes has the configuration on record ("max_tok=6
             # vmax=4000 -> stalled at 658/4000 with 1866
@@ -555,12 +579,36 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     # THE DECLARED GATE (Q-TOK-9). Round1 and r2 both filed this as absent because the module did
     # not even import spine.gate -- the three-state surface the docstring promises was not merely
     # unfired, it did not exist. `fired` is "does this arm need the advisory", which is exactly
-    # mode == "fixed"; the achieved `passes` and the historical 8 travel as value/threshold so the
+    # mode == "fixed"; the REQUESTED `passes` and the historical 8 travel as value/threshold so the
     # arithmetic is checkable rather than asserted, per Gate's own contract (spine/gate.py).
+    # "REQUESTED" AND NOT "ACHIEVED", WHICH IS WHAT THIS LINE SAID UNTIL 2026-09-04. `passes` is
+    # `int(tok.build_passes)` -- the loop's BUDGET -- and the loop breaks the moment a pass mints
+    # nothing, so the two are different numbers on any corpus that converges early: measured at
+    # TOK_MODE=fixed TOK_BUILD_PASSES=8 on a small build sample, the gate printed (8 vs 8) while
+    # tok.build_pass was 3. The achieved count already has a surface of its own -- tok.build_pass,
+    # seeded above -- and naming it here would have been a second, wrong source of truth for it.
     vocab.gates = (
         (Gate("tok.build_passes_advice", True, passes, 8,
-              reason="the offline build historically used 8 -- set TOK_BUILD_PASSES=8 to reproduce "
-                     "it; a mode=\"fixed\" run at this value is not that build of record")
+              # THE REASON FOLLOWS THE VALUE IT IS PRINTED BESIDE (r5 finding, measured). One
+              # sentence served both branches and at TOK_BUILD_PASSES=8 -- the ONE value it advises
+              # -- it printed "FIRED (8 vs 8) -- ... set TOK_BUILD_PASSES=8 to reproduce it; a
+              # mode="fixed" run at this value is not that build of record": the operator is told
+              # to set what is already set, and told the run is not the build of record at the one
+              # pass count that matches it. Both clauses false, on the same line as the arithmetic
+              # that refutes them. The round that rewrote this paragraph rendered .line() on the
+              # fixed arm at the default 2 only ("FIRED (2 vs 8)"), so this arm was never printed.
+              # `fired` is UNCHANGED and stays arm-membership (mode == "fixed") -- the advisory row
+              # is owed on this arm whatever the pass count is, which is what FIRED means here; it
+              # is the REASON, and only the reason, that now branches.
+              reason=("TOK_BUILD_PASSES=8: the pass BUDGET matches the offline build of record, "
+                      "which also used 8. It is the REQUESTED count that matches and not the "
+                      "achieved one -- the loop breaks as soon as a pass mints nothing, so how "
+                      "many passes actually ran is tok.build_pass in the counters (3 of the 8 "
+                      "requested, measured on a small build sample), and this line claims a "
+                      "budget, not that the same work was done") if passes == 8 else
+                     (f"the offline build historically used 8 and this run requests {passes} -- "
+                      f"set TOK_BUILD_PASSES=8 to reproduce it; a mode=\"fixed\" run at {passes} "
+                      f"requested passes is not that build of record"))
          if mode == "fixed" else
          Gate("tok.build_passes_advice", False, passes, 8, reachable=False, reason="mode != fixed")),
     )
@@ -815,8 +863,18 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     # size alone would call a retire-only change a no-op and skip a rebuild the match table
     # actually needs.
     # THE THIRD TERM IS LATENT TODAY AND IS WRITTEN DOWN AS LATENT (r4 finding, and it is recorded
-    # rather than inflated). _segment consults TWO structures, `s2i.get(...)` and `if j is None or
-    # j in retired: continue`, so a stamp over seq2id alone is a stamp over PART of the match table.
+    # rather than inflated). _segment consults THREE structures -- `s2i.get(...)`, `if j is None or
+    # j in retired: continue`, and `hi = min(mlbf[b0], n - i)`, which decides which lengths are
+    # probed at that position at all -- so a stamp over seq2id alone is a stamp over PART of the
+    # match table. THIS SENTENCE SAID TWO UNTIL 2026-09-04, in both of its copies, and it is the
+    # paragraph offered as the exhaustive input list, so the undercount was in the one place
+    # written to stop a fourth reader having to find the next one. mlbf IS COVERED, TRANSITIVELY
+    # AND ONLY TRANSITIVELY: it is written at exactly one site, inside Vocabulary._add, which
+    # appends to id2bytes before it touches mlbf and therefore always moves vocab.size() -- so the
+    # first stamp term catches it and a fourth term would be inert today. The implication is stated
+    # because it is what a reinstatement breaks: putting a sequence back into seq2id without going
+    # through _add moves neither size() nor mlbf's writer, and that is the same shape as the
+    # retire+reinstate pair the next paragraph says no count of the two sets can see.
     # It cannot go stale in this tree yet: `Vocabulary` has no retire() method, nothing anywhere
     # writes `vocab.retired`, and the body that would (judge_probation) is `raise
     # NotImplementedError` -- so len(retired) is 0 on every reachable configuration and this term
@@ -881,11 +939,52 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
         # those callers are P4's; neither was corrupting a run today.
         vocab.counters["tok.retok_noop"] = vocab.counters.get("tok.retok_noop", 0) + 1
         return cache[4]
+    if is_retok and drop <= 0.0 and cache[3] == stamp and not cache[5]:
+        # THE LABEL CHANNEL IS REBUILT; THE SEGMENTATION IS NOT (r5 finding, and it is the SECOND
+        # half of the r4 repair rather than a retreat from it). Reaching here means every term of
+        # the skip test above held EXCEPT `cache[6] is labels`: same bytes object, same start, same
+        # length, same match-table stamp, no draw on either side -- and a DIFFERENT `labels`
+        # argument. Under exactly those conditions _segment is a deterministic function of the
+        # match table and the bytes, so the ids and the byte offsets it would produce are provably
+        # the ones already in the cache, and the ONLY field that can differ is the per-token label
+        # channel, which is derived from THIS call's argument through the cached byte_pos by the
+        # same expression the fresh path uses forty lines below.
+        # WHY IT IS WORTH A BRANCH. The r4 repair was correct and is untouched -- a call with a new
+        # `labels` object must NOT be served the previous call's out_labels -- but it bought that
+        # correctness by sending every such call down the full rebuild and counting it as
+        # tok.retok, "activity". Measured on the committed tree at TOK_DROPOUT=0.0, two calls with
+        # EQUAL BUT DISTINCT label lists over one bytes object: 'ids identical: True | byte_pos
+        # identical: True | labels identical: True | same object: False' under {tok.segment: 2,
+        # tok.retok: 1} -- a rebuild that was byte-identical in every field of the returned record,
+        # reported as work performed. That defeats this function's own DID IT FIRE promise ("a
+        # frozen run's 39 no-op re-tokenizations read as skipped rather than as activity") for any
+        # caller that hands over a freshly built per-byte label list, which is what a fresh
+        # DATA.draw_stream produces every epoch. The channel is rebuilt; nothing is re-measured.
+        # tok.segment and tok.byte_fallback are NOT incremented here, for the same reason the skip
+        # above does not increment them: no segmentation ran, and adding this text's byte fallbacks
+        # to the row a second time would inflate a count of what the vocabulary did with the stream.
+        prev = cache[4]
+        out = None if labels is None else [labels[q] for q in prev.byte_pos]
+        seg = Segmentation(ids=prev.ids, byte_pos=prev.byte_pos, labels=out,
+                           bytes_per_token=prev.bytes_per_token)
+        vocab.counters["tok.retok_noop"] = vocab.counters.get("tok.retok_noop", 0) + 1
+        vocab._retok_cache = (data, start, len(data), stamp, seg, False, labels)
+        return seg
     if is_retok:
-        # A REAL RE-SEGMENTATION: the match table moved since the cached call (or dropout forced a
-        # fresh draw), so the rebuild is not byte-identical and is counted as activity rather than
-        # folded into tok.segment, which is why the docstring reports the two SEPARATELY -- a frozen
-        # run's no-op retoks must read as skipped, not as work performed.
+        # A REAL RE-SEGMENTATION, AND THERE ARE THREE ROUTES INTO THIS BRANCH, NOT TWO. The comment
+        # here named "the match table moved since the cached call (or dropout forced a fresh draw)"
+        # until 2026-09-04, and under the r4 labels repair a THIRD route reached it -- a different
+        # `labels` object -- on which the match table had not moved, dropout was 0.0, and the
+        # rebuild was byte-identical in every field. That route now takes the label-channel branch
+        # above and is counted as a no-op, so what is left here is exactly:
+        #   (1) the match-table stamp moved, so the rebuild really can differ in ids and byte_pos;
+        #   (2) THIS call draws (drop > 0.0), so a fresh BPE-dropout mask must be drawn and the
+        #       answer is not a function of the vocabulary alone;
+        #   (3) the CACHED answer came from a draw (cache[5]) and this call is deterministic, so
+        #       the entry is usable as a stamp and unusable as an answer.
+        # Counted as activity rather than folded into tok.segment, which is why the docstring
+        # reports the two SEPARATELY -- a frozen run's no-op retoks must read as skipped, not as
+        # work performed.
         vocab.counters["tok.retok"] = vocab.counters.get("tok.retok", 0) + 1
     vocab.counters["tok.segment"] = vocab.counters.get("tok.segment", 0) + 1
 

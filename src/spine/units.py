@@ -24,6 +24,12 @@ Anything else -- bytes per token, bits per byte, fractions -- carries its unit a
 by the known-answer tables in `tests/test_derive.py`, not by the type system.
 """
 
+# The ONE import in this module, and it is here for Clock.convert. A clock quantity is a count of
+# events divided by an exactly known rate, so the answer is an exact rational truncated to an
+# integer; `fractions.Fraction` is how that is spelled without a float in the middle. See
+# Clock.convert for the measurement that put it here.
+from fractions import Fraction
+
 
 class UnitError(TypeError):
     """Raised when two different clock kinds meet in one comparison or one sum."""
@@ -160,12 +166,79 @@ class Clock:
         There is no implicit path between kinds. A caller that wants steps from flushes must say
         `Flushes(250).convert(Steps, per=1/batch_w)` -- or, better, call the named function in
         spine.derive that already knows the rate, so the conversion exists in one place with a name.
+
+        WHO CALLS IT, because "the ONE legal way to cross kinds" reads like a wide surface and it is
+        not one. TWO call sites in the whole repository, both inside the file the sentence above
+        sends the reader to: spine/derive.py::flush_period and spine/derive.py::flush_period_windows,
+        each passing an integer windows-per-flush. derive's other three conversions --
+        spine/derive.py::opt_steps_from_windows, spine/derive.py::opt_steps_from_backwards and
+        spine/derive.py::run_windows_from_epochs -- do their own arithmetic on the bare counts and
+        never arrive here: the first two divide with `//`, and the third MULTIPLIES
+        (`Windows(n_epochs.n * w)`), which is why "the one legal way to cross kinds" is a claim
+        about where a conversion is NAMED and not about where the operator is written. So this
+        method is the DECLARED path and derive is its only traveller; a
+        package body that called it directly would be the conversion written at its call site that
+        tests/test_ownership.py::check_o11_no_unnamed_clock_arithmetic exists to forbid, one method
+        call further along. That is worth knowing before editing this line: nothing outside derive
+        moves when it changes, and there is no third caller to check.
+
+        THE ARITHMETIC IS EXACT, AND IT WAS FLOAT UNTIL 2026-09-04 -- the operation the neighbour
+        this docstring points at refuses BY NAME. The body was `to(int(self.n / per))`. The closing
+        comment of spine/derive.py::opt_steps_from_backwards rejects `int(n / k)` in favour of
+        integer `//` on the ground that float division loses exactness above 2**53 and a backward
+        count is unbounded -- and two of derive's five conversions were performing that very
+        division, through this line, precisely BECAUSE they delegate here instead of dividing
+        themselves. One module of the spine performed the operation its neighbour exists to forbid.
+
+        FLOAT DIVISION IS NEVER THE RIGHT ANSWER FOR A CLOCK QUANTITY, and the reason is worse than
+        lost precision. Measured on the tree before this repair:
+        `derive.flush_period(Steps(2**53 + 1), 1)` answered 9007199254740992 where the exact answer
+        is 9007199254740993, and `derive.flush_period(Steps(2**53 + 3), 2)` answered
+        4503599627370498 where the exact answer is 4503599627370497 -- ONE FLUSH LARGER than the
+        true period. A float quotient does not merely lose digits, it can round UP, and a period
+        that rounds up FIRES LATE, which is the direction both callers' own docstrings single out
+        as the one they refuse to bias toward. No live configuration carries a cadence anywhere
+        near 2**53 (the ones that exist are in the tens of thousands), so no shipped number moved;
+        that is the same standing this file gives every other rule it states -- an inline cross-kind
+        division is a defect even when its number is right at the defaults.
+
+        REFUSED THE WAY derive REFUSES IT, WITHOUT NARROWING THE RATE, which is why this is a
+        Fraction and not a `//`. `per` is allowed to be fractional -- `per=1/batch_w` three
+        paragraphs up is the documented spelling of flushes -> steps -- so integer floor division
+        alone cannot serve: the divisor is not always an integer. Fraction divides exactly at every
+        magnitude and for every rate, and `int()` on a Fraction TRUNCATES TOWARD ZERO, which is the
+        rounding both callers already attribute to this method ("TRUNCATES rather than rounds (via
+        Clock.convert)"). So truncation is preserved at every input, negatives included, and the
+        only answers that move are the ones float was getting wrong.
+
+        WHAT A Fraction CANNOT FIX, said here so that this paragraph is not read as covering it:
+        `per=1/3` is ALREADY inexact before it arrives, because the caller computed a float.
+        `Fraction(0.3333333333333333)` is exact over the float that was passed, not over one third.
+        A caller whose rate is not a binary fraction should build `Fraction(1, 3)` itself and pass
+        that; then nothing between the count and the answer rounds until the final `int()`. Both of
+        today's callers pass an integer, where the question does not arise.
         """
         if not (isinstance(to, type) and issubclass(to, Clock)):
             raise UnitError(f"convert() target must be a Clock kind, got {to!r}")
         if per <= 0:
             raise UnitError(f"convert() rate must be positive, got {per!r}")
-        return to(int(self.n / per))
+        try:
+            rate = Fraction(per)
+        except (TypeError, ValueError, OverflowError):
+            # nan and inf REACH THIS LINE, which is why the arm is a refusal and not a comment: `per
+            # <= 0` is False for both, and the old float body answered nan with a ValueError from
+            # int() and inf with a silent zero -- a period of zero being the armed-and-inert class
+            # spine/derive.py::flush_period floors at one flush to avoid.
+            raise UnitError(
+                f"convert() rate must have an exact value, got {per!r}. `per` is how many "
+                f"{type(self).__name__} make one {to.__name__}, and this conversion is done in "
+                f"exact rational arithmetic rather than in float. A value fractions.Fraction "
+                f"cannot take is one with no exact value to divide by. Pass an int, or a "
+                f"fractions.Fraction for a rate below one.") from None
+        # EXACT RATIONAL DIVISION, TRUNCATED ONCE AT THE END. `int()` on a Fraction truncates
+        # toward zero, which is the rounding this method's two callers document as theirs. Nothing
+        # here is a float, so nothing here rounds before this line.
+        return to(int(Fraction(self.n, 1) / rate))
 
 
 def _verify_kind(kind):

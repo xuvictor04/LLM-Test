@@ -53,6 +53,12 @@ WHY EACH CHECK EXISTS -- the defect, not the rule:
       name. It is also the only form of coupling in this list that AST can see at all, which is why it is
       here despite being the weakest of the five.
   O6  a coupling with no stated reason is indistinguishable from a coupling nobody noticed.
+  O13 a citation is a CLAIM about another file and nothing had ever opened one. One hand sweep of
+      spine/compose.py and spine/assemble.py found twenty-five false citations; O12 checks the FORM
+      and, in src/, that the symbol exists. O13 opens the file the citation names -- docs/ included,
+      by exact path, to the end of a dotted name -- and, where a sentence is attributed in as many
+      words, looks for that sentence inside the symbol. It would have caught NONE of those
+      twenty-five, which is measured rather than supposed and is the first line of its own block.
   O7  pin_tick counted FLUSHES against a threshold declared in STEPS: GROW_CAP_EVERY=20000 silently
       demanded 320,000 real steps at BATCH_W=16, the population sat pinned for 43,645 steps while the
       clock read 2,650, and the report printed "reached the cap but never held it long enough" -- a true
@@ -94,6 +100,20 @@ ENV_READER = os.path.join("src", "spine", "lever.py")
 WIRING_FILE = os.path.join("src", "spine", "assemble.py")
 
 MAX_SHOWN = 25          # per check; the full count is always printed, only the listing is capped
+
+# THE FROZEN OLD TREE. These files are not edited -- they are the evidence -- so a citation into one
+# of them may carry a LINE NUMBER and stays true. O12 exempts the `file.py:NNNN` form on this tuple
+# and O13 reuses the same tuple for the `file.py::symbol` form, because two lists of the frozen files
+# would be one fact with two answers, which is the shape both checks exist to refuse.
+FROZEN_OLD_TREE = ("self_organize.py", "memory.py", "tokenizer.py", "vocab.py", "datastream.py",
+                   "world_model.py", "holdout.py", "prompt.py", "runs.py")
+
+# THE CITATION FORM, shared by O12 (which checks it is used at all) and O13 (which opens what it
+# names). `::` AND NOT A SPACE: the first version matched `file.py <word>`, which is ordinary English
+# -- it reported "units.py is", "spine/derive.py still" and "capacity/levers.py and" as citations to
+# symbols that do not exist. A citation needs a separator prose cannot produce by accident, and `::`
+# is greppable besides: `grep -rn "\.py::" src/ docs/` enumerates every one.
+_CITE_SYM = re.compile(r"\b((?:[\w./]+/)?[\w_]+\.py)::([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*|<module>)")
 
 
 # ==================================================================================================
@@ -1808,16 +1828,12 @@ def check_o12_citations_name_symbols(mods):
     sentence around it. A wrong line number shows a reader nothing.
 
     WHAT IT CANNOT CATCH: a citation naming a symbol that exists and is the wrong one. That is a
-    semantic error, no different from any wrong sentence, and no check reaches it.
+    semantic error, no different from any wrong sentence, and no check reaches it. O13 below opens
+    every citation this check only pattern-matches, and its own docstring says how far that gets.
     """
-    FROZEN = ("self_organize.py", "memory.py", "tokenizer.py", "vocab.py", "datastream.py",
-              "world_model.py", "holdout.py", "prompt.py", "runs.py")
+    FROZEN = FROZEN_OLD_TREE
     _LINE = re.compile(r"\b((?:[\w./]+/)?[\w_]+\.py):(\d+)")
-    # `::` AND NOT A SPACE. The first version matched `file.py <word>`, which is ordinary English --
-    # it reported "units.py is", "spine/derive.py still" and "capacity/levers.py and" as citations to
-    # symbols that do not exist. A citation needs a separator prose cannot produce by accident, and
-    # `::` is greppable besides: `grep -rn "\.py::" src/` enumerates every one.
-    _SYM = re.compile(r"\b((?:[\w./]+/)?[\w_]+\.py)::([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*|<module>)")
+    _SYM = _CITE_SYM
 
     # Every symbol each of our files defines, from the modules already parsed for this pass.
     defined, by_base = {}, {}
@@ -1869,6 +1885,321 @@ def check_o12_citations_name_symbols(mods):
 
 
 
+# ==================================================================================================
+# O13 -- a citation is OPENED: the file it names is read and the symbol it names is found inside it
+# ==================================================================================================
+#
+# WHY THIS IS A SECOND CHECK AND NOT A WIDENING OF O12. O12's population is `mods` -- src/**/*.py --
+# and its question is "is this citation a symbol rather than a line number". O13's population is
+# every citation this repository WRITES, docs/ included, and its question is "does the file this
+# citation names contain the thing the sentence attributes to it". They fail on different trees:
+# docs/03_WIRING.md carries citations O12 has never opened, and the quotation half below fails on a
+# tree where every cited symbol exists. Merging them would have made one check with two populations
+# and two vacuity numbers, which is how a green tick ends up covering an empty set.
+#
+# CANNOT CATCH -- and the first entry is the one that matters, because it is MEASURED and not
+# supposed:
+#   * A CITATION NAMING A SYMBOL THAT EXISTS AND IS THE WRONG ONE. On 2026-09-04 one hand sweep of
+#     spine/compose.py and spine/assemble.py found twenty-five false citations, and the commit that
+#     repaired them records that TWENTY-THREE of the twenty-five named a symbol that exists. Both
+#     halves of this check were run against the tree at that commit's parent, before the repair, and
+#     reported exactly what they report on the tree today: one existence finding and no quotation
+#     findings. So this check does NOT close that sweep's class, and saying it does would be the
+#     same kind of claim the sweep was cleaning up. It closes the mechanical residue underneath it:
+#     a symbol that is not there at all, a path that resolves to a different file, a dotted tail
+#     that was never defined, and a sentence put in a symbol's mouth in the one grammatical form
+#     that can be read without guessing.
+#   * A PARAPHRASE. The quotation half compares text. "declares the size of the embedder's input"
+#     beside a symbol that says "the width the embedder reads" is a true citation to this check and
+#     a false one to a reader, and nothing here can tell them apart.
+#   * A CITATION TO A FUNCTION-LOCAL VARIABLE. `domains/api.py::observe.dom` names a name bound
+#     inside a function body; spine/compose.py's own header calls that a defect ("a LOCAL VARIABLE,
+#     which O12's AST walk admits as a symbol because it collects Assign targets"). This check
+#     ADMITS them, deliberately, and PRINTS how many it admitted. It admits them because one of the
+#     four in the tree today sits inside the sentence that ENUMERATES the twenty corrected
+#     citations, so the rule would fire on prose whose entire subject is that the citation was
+#     wrong -- and a check that fires on a correct sentence is the one outcome this file's own
+#     history says gets a check switched off. The count is printed so the number is in front of a
+#     reader instead of buried in this comment.
+#   * THE FROZEN OLD TREE, which is exempt for the reason O12 states: those files are not edited, so
+#     a pointer into them stays true. The exemption is FROZEN_OLD_TREE and O12's own "not one of
+#     ours, nothing to say about it" rule, reused rather than restated.
+#   * CITATIONS WRITTEN IN tests/. Citations INTO tests/ are resolved -- this check opens those
+#     files -- but tests/ is not scanned for citations of its own, because src/ and docs/ are what
+#     the packages ship and what an outside reader follows.
+
+# The attribution verbs, closed on purpose. A connective this list does not contain means the check
+# ABSTAINS rather than guesses -- and abstaining is right, because the shape twelve of the twenty
+# citations corrected in spine/compose.py on 2026-09-04 actually had was "A for B's <quote>", where
+# the quotation belongs to B and the citation names A. "for" is not on this list and must not be.
+_O13_VERBS = (
+    "says so in as many words", "says in as many words", "says exactly", "says only", "says today",
+    "already says", "says so", "says", "said so", "said", "reads", "records", "declares", "states",
+    "calls it", "calls this", "spells it", "spells", "names", "puts it", "word for word",
+)
+_O13_GAP = re.compile(r"^`?[\s,(\-]*(?:" + "|".join(v.replace(" ", r"\s+") for v in _O13_VERBS)
+                      + r")?[\s,:\-]*$", re.I)
+_O13_QUOTE = re.compile(r'"([^"]{12,300})"')
+# CODE PUNCTUATION DISQUALIFIES A SPAN, and this is a narrowing with a measured reason. A span
+# carrying brackets or an `=` is a RECONSTRUCTION of a construction rather than a quotation of it:
+# spine/assemble.py's Coupling rows are written over five lines with other arguments interleaved, so
+# a CORRECT citation of one fails a substring test. Two of the three sites the first version of this
+# rule flagged were exactly that, and both of those two were correct citations.
+_O13_CODEISH = re.compile(r"[()=\[\]{}]|::")
+# How far past the citation the opening quote may sit, and how much text the quotation may span. The
+# first is small because it is the whole of the "immediately followed by" rule; the second is large
+# because a quoted sentence in this tree routinely runs past a hundred characters, and a window that
+# ended before the CLOSING quote made the rule silently examine nothing.
+_O13_GAP_MAX = 40
+_O13_QUOTE_WINDOW = 420
+
+
+def _o13_norm(text):
+    """Casefold and reduce every run of non-alphanumerics to one space.
+
+    The quotation and the source almost never agree on punctuation: src/data/levers.py writes
+    `There is no literal string that means "the added area alone" independent of how many areas`
+    and src/data/api.py quotes it without the inner quotes and without the capital. Comparing raw
+    text reported both of this tree's true quotations as false -- a check crying wolf on the whole
+    of its own population.
+    """
+    return re.sub(r"\s+", " ", re.sub(r"[^0-9a-z_]+", " ", text.casefold())).strip()
+
+
+def _o13_flat(lines):
+    """The file as ONE line of prose: comment markers stripped, adjacent string literals joined.
+
+    A quotation in this tree wraps -- it is written inside a docstring, or across two adjacent
+    `"..."` fragments of one concatenated string -- so a line-by-line scan sees an opening quote
+    with no closing one and gives up. Joining first is what makes the rule apply to the sentences it
+    was written for. The cost is that a quotation finding names the FILE and the citation rather
+    than a line number, which is the right trade in a file where the sentence spans four lines.
+    """
+    out = []
+    for ln in lines:
+        t = ln.strip()
+        if t.startswith("#"):
+            t = t[1:].strip()
+        out.append(t)
+    text = " ".join(out)
+    text = re.sub(r'"\s+"', " ", text)          # the seam between two concatenated fragments
+    return re.sub(r"\s+", " ", text)
+
+
+def _o13_index(rel, tree, lines, defined, toplevel, segments):
+    """Record what one parsed file defines: every symbol, the module-or-class subset, and the text.
+
+    `defined` is O12's set -- names bound anywhere, function bodies included -- and is what the
+    existence half tests against. `toplevel` drops the names bound inside a function body, and is
+    used ONLY for the admitted-locals count. Two sets rather than one because the check's answer and
+    the check's disclosure are different questions and must not share a number.
+    """
+    names, tops = set(), set()
+    segs = {"<module>": "\n".join(lines)}
+
+    def _walk(nodes, prefix="", in_func=False):
+        for n in nodes:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(prefix + n.name)
+                if not in_func:
+                    tops.add(prefix + n.name)
+                segs.setdefault(prefix + n.name, "\n".join(lines[n.lineno - 1:n.end_lineno]))
+                # A class body is still a namespace inside a function; a function body is not one
+                # outside it. `in_func` therefore latches on a def and passes through a class.
+                _walk(n.body, prefix + n.name + ".",
+                      in_func or isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+            elif isinstance(n, ast.Assign):
+                for t in n.targets:
+                    if isinstance(t, ast.Name):
+                        names.add(prefix + t.id)
+                        if not in_func:
+                            tops.add(prefix + t.id)
+                        segs.setdefault(prefix + t.id, "\n".join(lines[n.lineno - 1:n.end_lineno]))
+            elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+                names.add(prefix + n.target.id)
+                if not in_func:
+                    tops.add(prefix + n.target.id)
+                segs.setdefault(prefix + n.target.id, "\n".join(lines[n.lineno - 1:n.end_lineno]))
+            elif isinstance(n, (ast.If, ast.Try, ast.For, ast.While, ast.With)):
+                # A definition under `if TYPE_CHECKING:`, or in a try/except import fallback, is
+                # still a definition. Walking only the outermost body would make those citations
+                # read as false ones.
+                _walk(n.body, prefix, in_func)
+                _walk(getattr(n, "orelse", []) or [], prefix, in_func)
+                for h in getattr(n, "handlers", []) or []:
+                    _walk(h.body, prefix, in_func)
+
+    _walk(tree.body)
+    defined[rel], toplevel[rel], segments[rel] = names, tops, segs
+
+
+def check_o13_citations_resolve(mods):
+    """O13 -- every citation names a file this tree contains and a symbol that file defines.
+
+    THE DEFECT, AND IT IS THE ONE O12 SAYS IT CANNOT REACH. O12 checks the FORM of a citation and,
+    for src/, that the cited symbol exists. Three ways a citation stays checkable-and-unchecked
+    survive that: it never opens docs/, where 03_WIRING.md and 04_CONTRACT.md carry dozens of
+    citations; it resolves the cited path by BASENAME, so `spine/derive.py::x` is satisfied by any
+    file in the tree called derive.py; and it accepts a dotted citation when only its HEAD exists,
+    so `lever.py::Lever.coerce` passes on a file that declares `Lever` and no `coerce`. Each one is
+    a citation that a check has looked at and not read.
+
+    WHAT IT DOES, in two halves that fail independently:
+
+      EXISTENCE. Every `path/file.py::symbol` in src/ and docs/ is resolved by PATH -- an exact
+      match on the tail of a repository-relative path, so a citation carrying directories selects
+      one file and no other -- against every .py in src/ and tests/. The FULL dotted symbol must
+      then be present in that file. A citation into the frozen old tree, or into any file outside
+      the rebuild, is counted and left alone: that is FROZEN_OLD_TREE's rule and O12's, not a
+      second one invented here.
+
+      QUOTATION. A citation followed, with nothing between it but an attribution verb from a closed
+      list, by a double-quoted span of at least four words carrying no code punctuation, is a claim
+      that the cited symbol CONTAINS that span. The span is looked for in that symbol's own source
+      text, compared after casefolding and flattening punctuation. Every clause in that sentence is
+      a narrowing and every narrowing has a measured reason in the block above this function; the
+      one that does the most work is the closed verb list, because "A for B's <quote>" is the shape
+      the real defect had and "for" is not an attribution verb.
+
+    THE HONEST LIMIT, first rather than last: neither half would have caught any of the twenty-five
+    false citations found by hand on 2026-09-04. That is measured against the tree as it stood
+    before that repair, not assumed. Twenty-three of those named a symbol that exists, which is
+    semantics; this check makes the MECHANICAL half impossible to get wrong again, in the two places
+    -- docs/, and a dotted tail -- where it was still possible, and prints what it admitted.
+    """
+    if not mods:
+        return _report("O13", "citations open: the cited file contains the cited symbol", True,
+                       "0 parsed file(s), so nothing cites anything", [], vacuous=True)
+    # The tree root, recovered from any module: `rel` is `path` relative to the PARENT of src/ (see
+    # load()), so stripping it off leaves the directory src/, docs/ and tests/ all live under.
+    # Recovered rather than taken from the module-level ROOT so that this check follows load() onto
+    # a synthetic tree, which is what its self-test cases need.
+    m0 = mods[0]
+    root = os.path.abspath(m0.path)[:-len(m0.rel)].rstrip(os.sep) or ROOT
+
+    defined, toplevel, segments = {}, {}, {}
+    for m in mods:
+        _o13_index(m.rel, m.tree, m.lines, defined, toplevel, segments)
+
+    # tests/ is a citation TARGET and not a citation source. src/ points into it by name.
+    findings = []
+    for dirpath, dirnames, filenames in os.walk(os.path.join(root, "tests")):
+        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        for fn in sorted(filenames):
+            if not fn.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, fn)
+            rel = os.path.relpath(path, root)
+            with open(path, "r", encoding="utf-8") as fh:
+                text = fh.read()
+            try:
+                _o13_index(rel, ast.parse(text, filename=rel), text.splitlines(),
+                           defined, toplevel, segments)
+            except SyntaxError as e:
+                # Not skipped, for load()'s reason: a file that does not parse is the one most
+                # likely to be the target of a citation that has gone stale.
+                findings.append(f"{rel}:{e.lineno}  does not parse, so every citation into it is "
+                                f"unresolvable: {e.msg}")
+
+    def _resolve(cited):
+        """Every indexed file whose repository-relative path ENDS with the cited path.
+
+        `spine/derive.py` selects src/spine/derive.py and nothing else; a bare `derive.py` selects
+        the same file only because no other file in the tree is called that. A basename that
+        matched several files would return several, and the citation is then satisfied if ANY of
+        them defines the symbol -- reported as the set, so a reader sees the ambiguity rather than
+        a silent pick.
+        """
+        c = cited.lstrip("./")
+        return [r for r in defined if r == c or r.endswith("/" + c)]
+
+    sources = [(m.rel, m.lines) for m in mods]
+    for dirpath, dirnames, filenames in os.walk(os.path.join(root, "docs")):
+        dirnames[:] = sorted(dirnames)
+        for fn in sorted(filenames):
+            if not fn.endswith(".md"):
+                continue
+            path = os.path.join(dirpath, fn)
+            with open(path, "r", encoding="utf-8") as fh:
+                sources.append((os.path.relpath(path, root), fh.read().splitlines()))
+
+    opened = outside = admitted_locals = quoted_pairs = 0
+    for rel, lines in sources:
+        for i, line in enumerate(lines, 1):
+            for cited, sym in _CITE_SYM.findall(line):
+                hits = _resolve(cited)
+                if not hits:
+                    # O12's rule, verbatim: a file this rebuild does not contain is the frozen old
+                    # tree or something outside it, and a pointer into a file nobody edits stays
+                    # true. Counted so the exemption is visible rather than silent.
+                    outside += 1
+                    continue
+                opened += 1
+                if sym == "<module>":
+                    continue                       # module level: the file is the location
+                if not any(sym in defined[h] for h in hits):
+                    findings.append(
+                        f"{rel}:{i}  cites '{cited}::{sym}' and {', '.join(sorted(hits))} defines "
+                        f"no symbol of that name. A citation is a claim about another file; this "
+                        f"one names a file that exists and a thing inside it that does not, so a "
+                        f"reader who follows it arrives nowhere. Name a def, a class or a "
+                        f"module-level assignment that is really there.")
+                elif not any(sym in toplevel[h] for h in hits):
+                    admitted_locals += 1
+
+        # The quotation half runs over the file flattened to one line -- see _o13_flat.
+        flat = _o13_flat(lines)
+        for m in _CITE_SYM.finditer(flat):
+            cited, sym = m.group(1), m.group(2)
+            hits = _resolve(cited)
+            if not hits or sym == "<module>":
+                continue
+            tail = flat[m.end():m.end() + _O13_QUOTE_WINDOW]
+            q = _O13_QUOTE.search(tail)
+            if not q or q.start() > _O13_GAP_MAX:
+                continue
+            gap = tail[:q.start()]
+            if not _O13_GAP.match(gap) or not re.search(r"[A-Za-z:]", gap):
+                continue                           # no attribution verb, or a connective this
+                                                   # check does not claim to understand
+            quoted = q.group(1)
+            if _O13_CODEISH.search(quoted) or len(quoted.split()) < 4:
+                continue
+            segs = [segments[h][sym] for h in hits if sym in segments[h]]
+            if not segs:
+                continue
+            quoted_pairs += 1
+            if any(_o13_norm(quoted) in _o13_norm(s) for s in segs):
+                continue
+            # WHICH SYMBOL DOES CARRY IT. This is the whole value of the finding: the observed
+            # defect is not a sentence nobody wrote, it is a sentence written in the symbol NEXT
+            # DOOR -- "sig/api.py::warm_up for state_dict's SIDECAR", twelve times in one file. So
+            # the finding names the neighbour when it can find one, and says plainly that it could
+            # not when it cannot. Reported per SYMBOL and not per file, because "it is in that file
+            # somewhere" is the same non-answer a line number gives.
+            where = sorted({f"{h}::{other}"
+                            for h in hits
+                            for other, seg in segments[h].items()
+                            if other not in (sym, "<module>")
+                            and _o13_norm(quoted) in _o13_norm(seg)},
+                           key=lambda w: (len(w), w))
+            elsewhere = (f" It IS in {where[0]} -- the file is right and the symbol is not, which "
+                         f"is this defect's usual shape." if where else
+                         f" No other symbol in {', '.join(sorted(hits))} carries it either.")
+            findings.append(
+                f"{rel}  cites '{cited}::{sym}' and attributes to it, in as many words: "
+                f"\"{quoted[:110]}\". {sym} does not contain it.{elsewhere}")
+
+    detail = (f"{opened} citation(s) opened against {len(defined)} indexed file(s) in src/ and "
+              f"tests/, from {len(sources)} file(s) in src/ and docs/; {quoted_pairs} of those "
+              f"attribute a quoted sentence and had it looked for inside the cited symbol; "
+              f"{outside} into the frozen old tree or outside the rebuild, left alone; "
+              f"{admitted_locals} naming a function-local, ADMITTED and counted (see the CANNOT "
+              f"CATCH block above this check)")
+    return _report("O13", "citations open: the cited file contains the cited symbol", not findings,
+                   detail, findings, vacuous=not opened)
+
+
 # --- O10 fixtures. The check had no self-test cases until the route it was written to close was
 # --- reopened by src/spine/compose.py and a reviewer walked through it with every check green.
 
@@ -1899,6 +2230,107 @@ def manage(fab: Config):
     fab = fab.owned_by("FAB")
     return cull_gate_open(fab.n0, fab.slots, fab.pressure), U.Windows(1)
 """
+
+# --- O13 fixtures. The check opens the cited file, so every case here has to carry BOTH ends: the
+# --- sentence that cites, and the file it cites into. `memory/helpers.py` exists only for that.
+
+_O13_CITED_FILE = """\
+\"\"\"A stand-in module holding one sentence, so a citation into it can be checked.\"\"\"
+
+
+def budget():
+    \"\"\"The quota is resolved once and frozen.\"\"\"
+    return 1
+
+
+def other():
+    \"\"\"A different sentence entirely.\"\"\"
+    return 2
+"""
+
+_O13_BAD_SYMBOL = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"The freeze is spine/lever.py::Confg's business and not this function's.\"\"\"
+    return mem.quota
+"""
+
+# THE HOLE O12 LEAVES ON A DOTTED CITATION: it accepts the citation when only the HEAD resolves, so
+# a file declaring `Config` and no `owned_bye` satisfies `Config.owned_bye`. Both tags are asserted
+# on this tree -- O12 green, O13 red -- because the case is worth nothing unless it shows the delta.
+_O13_BAD_TAIL = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"Asserted through spine/lever.py::Config.owned_bye at the read site.\"\"\"
+    return mem.owned_by("MEM").quota
+"""
+
+_O13_GOOD_TAIL = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"Asserted through spine/lever.py::Config.owned_by at the read site.\"\"\"
+    return mem.owned_by("MEM").quota
+"""
+
+_O13_QUOTE_TRUE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::budget says "The quota is resolved once and frozen", and it does.\"\"\"
+    return mem.quota
+"""
+
+_O13_QUOTE_FALSE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::other says "The quota is resolved once and frozen", and it does not.\"\"\"
+    return mem.quota
+"""
+
+# THE ABSTENTION, WHICH IS THE HALF THAT KEEPS THE RULE HONEST. "A for B's <quote>" attributes the
+# sentence to B, and the citation names A on purpose -- this is the exact shape twelve of the twenty
+# citations corrected in spine/compose.py on 2026-09-04 had. The check must NOT fire on it, because
+# it has not been told which symbol the sentence belongs to and guessing is how a check earns the
+# reputation that gets it deleted.
+_O13_QUOTE_UNATTRIBUTED = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"See memory/helpers.py::other for budget's "The quota is resolved once and frozen".\"\"\"
+    return mem.quota
+"""
+
+# THE FROZEN OLD TREE, in both citation forms, in one file. Neither is a finding: the rebuild does
+# not contain those files and does not edit them.
+_O13_FROZEN = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"The evidence is self_organize.py:6796 and self_organize.py::_cull, neither of which moves.\"\"\"
+    return mem.quota
+"""
+
+_O13_DOC_BAD = """# wiring
+
+The freeze is `spine/lever.py::Confg`'s business, says the document nobody parses.
+"""
+
+_O13_DOC_GOOD = """# wiring
+
+The freeze is `spine/lever.py::Config`'s business, and that symbol is really there.
+"""
+
 
 _CROSS_PACKAGE = """\
 from fabric import state
@@ -2007,6 +2439,45 @@ _CASES = (
     ("O10: a dynamic import, which leaves no import statement to resolve",
      {"src/memory/store.py": _DYNAMIC_IMPORT},
      {"O10": (1, "dynamic import")}),
+
+    # ---- O13. THE CHECK OPENS THE FILE, so each case carries both ends. Three of them assert O12
+    # ---- as well, on the same tree: a check whose whole claim is that it reaches further than
+    # ---- another one has to be watched reaching further, or the claim is prose.
+    ("O13: a cited symbol that the cited file does not define",
+     {"src/memory/store.py": _O13_BAD_SYMBOL},
+     {"O13": (1, "Confg")}),
+
+    ("O13: a dotted citation whose HEAD resolves and whose TAIL does not -- O12 passes this",
+     {"src/memory/store.py": _O13_BAD_TAIL},
+     {"O12": (0, None), "O13": (1, "owned_bye")}),
+
+    ("O13: the same citation spelled correctly is ADMITTED",
+     {"src/memory/store.py": _O13_GOOD_TAIL},
+     {"O12": (0, None), "O13": (0, None)}),
+
+    ("O13: a false citation in docs/, which O12 never opens",
+     {"docs/03_WIRING.md": _O13_DOC_BAD},
+     {"O12": (0, None), "O13": (1, "Confg")}),
+
+    ("O13: a true citation in docs/ is ADMITTED -- the docs scan is not a blanket failure",
+     {"docs/03_WIRING.md": _O13_DOC_GOOD},
+     {"O13": (0, None)}),
+
+    ("O13: a sentence attributed to a symbol that does not contain it, with the symbol that does",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_FALSE},
+     {"O13": (1, "memory/helpers.py::budget")}),
+
+    ("O13: the same sentence attributed to the symbol that DOES contain it is ADMITTED",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_TRUE},
+     {"O13": (0, None)}),
+
+    ("O13: 'A for B's <quote>' -- the shape the real defect had -- is ABSTAINED on, not guessed at",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_UNATTRIBUTED},
+     {"O13": (0, None)}),
+
+    ("O13: both citation forms into the frozen old tree are ADMITTED",
+     {"src/memory/store.py": _O13_FROZEN},
+     {"O12": (0, None), "O13": (0, None)}),
 )
 
 _BY_TAG = {
@@ -2016,6 +2487,7 @@ _BY_TAG = {
     "O10": check_o10_no_backdoor_imports,
     "O11": check_o11_no_unnamed_clock_arithmetic,
     "O12": check_o12_citations_name_symbols,
+    "O13": check_o13_citations_resolve,
 }
 
 
@@ -2090,6 +2562,7 @@ CHECKS = (
     check_o10_no_backdoor_imports,
     check_o11_no_unnamed_clock_arithmetic,
     check_o12_citations_name_symbols,
+    check_o13_citations_resolve,
 )
 
 

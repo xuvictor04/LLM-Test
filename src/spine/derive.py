@@ -218,7 +218,12 @@ def flush_period(period_steps, batch_w):
 
     TRUNCATES rather than rounds (via Clock.convert). A period that truncates fires marginally EARLY; a
     period that rounds up fires late. The defect being repaired was a clock running 16x slow, and biasing
-    the repair toward late would be repeating it in miniature.
+    the repair toward late would be repeating it in miniature. That claim rests on the divide being
+    EXACT, and until 2026-09-04 it was not: units.py::Clock.convert divided in float, so
+    flush_period(Steps(2**53 + 3), 2) came back ONE FLUSH LARGER than the true period -- rounded UP,
+    the direction this paragraph refuses. It divides in fractions.Fraction now and truncates once at
+    the end; see units.py::Clock.convert, which this function and flush_period_windows are the only
+    two callers of.
     """
     if type(period_steps) is not Steps:
         raise UnitError(f"flush_period: period_steps must be Steps, got "
@@ -274,6 +279,9 @@ def flush_period_windows(period_windows, batch_windows):
     TRUNCATES rather than rounds, and floors at one flush, for the reasons `flush_period` gives: a period
     that rounds up fires late, and the defect being repaired was a clock running 16x slow; a period of
     zero is either `n % 0` or a mechanism that is switched on and never runs (57 armed-but-inert records).
+    The truncation is EXACT at every magnitude as of 2026-09-04 -- units.py::Clock.convert divided in
+    float until then, which could round a period UP -- and this function and `flush_period` are that
+    method's only two callers in the tree.
     """
     if type(period_windows) is not Windows:
         raise UnitError(f"flush_period_windows: period_windows must be Windows, got "
@@ -592,7 +600,9 @@ def opt_steps_from_backwards(n_backward, accum):
     WHAT THE REFUSAL COSTS, SAID RATHER THAN LEFT TO BE FOUND. At a deficit of k or more, counters()
     used to reach its own ValueError and print base_bwd, base_step and both live counters; it now
     stops one line earlier, in this function, which does not hold those numbers. The message below
-    names the two counter keys instead so the reader can fetch them. The sentence WITH the numbers
+    names the FOUR counter keys instead so the reader can fetch them -- opt.ckpt.backward_at_load
+    and opt.ckpt.step_at_load against opt.backward and opt.step, two bases and two live counters,
+    which is what it takes to read the fault. The sentence WITH the numbers
     in it belongs beside base_bwd in opt/api.py::counters -- `if int(st.n_backward) < base_bwd:`
     raising before the conversion is called -- and it is filed for OPT rather than written here,
     because this file owns the conversion and not the resume. Until it lands the fault is caught
@@ -655,9 +665,14 @@ def opt_steps_from_backwards(n_backward, accum):
                         f"only ever adds one -- so this says the backward counter went BACKWARDS "
                         f"across a resume by {-n} pass(es), measured at accum={k}. The four numbers "
                         f"are opt.ckpt.backward_at_load and opt.ckpt.step_at_load against "
-                        f"opt.backward and opt.step. This was caught until 2026-09-04 only as a "
-                        f"side effect of `//` flooring a partial step up into a whole one, which "
-                        f"missed every deficit smaller than accum; it is checked here now.")
+                        f"opt.backward and opt.step. Until 2026-09-04 this was caught only as a "
+                        f"SIDE EFFECT of `//` flooring: floor(n/k) is at most -1 for every n < 0, "
+                        f"so no deficit came back as zero and opt/api.py::counters raised on the "
+                        f"comparison. Being a comparison is what made it weak -- a resume that "
+                        f"lost accum backward passes AND one optimizer step gave due == taken and "
+                        f"cancelled it -- and the same-day repair from flooring to TRUNCATION then "
+                        f"removed even that, answering Steps(0) for every deficit smaller than "
+                        f"accum. It is checked here now, on the count itself, at every magnitude.")
     # `//` IS TRUNCATION ON THE DOMAIN THIS FUNCTION ACCEPTS. The refusal above leaves n >= 0, where
     # floor and truncation are one operation, so the docstring's TRUNCATES and this line agree by
     # construction and not by a hand-written sign split -- the split that briefly stood here was
