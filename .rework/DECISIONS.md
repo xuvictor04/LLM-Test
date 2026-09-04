@@ -259,9 +259,37 @@ stays callable twice in one process — which `rng_for` would not be. Nobody sho
 **WHAT THIS DOES NOT BUY, stated because a determinism claim that overreaches is worse than none.**
 Seeding gives every run at one seed the same sequence. It does NOT give each package an independent
 one: every consumer that cannot take a `generator=` still draws from one shared stream, so torch
-DRAW ORDER remains a channel between packages that no wire covers. Adding a package that draws from
-the global, or reordering two that do, still moves the numbers of every package downstream of it.
-That is a real remaining coupling and it is recorded here rather than papered over.
+DRAW ORDER remains a channel between packages that no wire covers. That is a real remaining coupling
+and it is recorded here rather than papered over.
+
+**NARROWED 2026-09-04, because the sentence above was wider than the tree.** As first written this
+paragraph continued: *"Adding a package that draws from the global, or reordering two that do, still
+moves the numbers of every package downstream of it."* An independent verifier measured both halves
+of that instead of reasoning about it, and only one half holds. Overstating a limitation is the same
+failure as overstating a guarantee, so the measured version replaces it:
+
+- **The build-time half is NOT true of this tree today.** Inserting 1 or 3 extra global draws between
+  `LM.build_model`'s return and the rest of `compose()` — exactly what n extra dropout masks would do
+  — leaves all 363 built values byte-identical (digest `34acff0aeb14dd4b` in all three runs) while
+  moving `LM.encode` (`26905f11…` → `773820fb…` → `0b850362…`). On a real lever, `LM_LAYERS` 2 vs 4
+  moves NOTHING outside LM: zero non-LM keys differ. The reason is structural — every package that
+  constructs an `nn.Module` then OVERWRITES every parameter from its OWN named stream
+  (`lm/api.py::build_model`'s `named_parameters` loop, `sig/api.py::_Encoder.__init__`,
+  `fabric/api.py::build`'s `pop.modules` loop, `world/api.py::build`'s three loops).
+- **The runtime half is SINGLE-ENDED.** An exhaustive grep for every RNG-consuming torch call in
+  `src/` (`rand`, `randn`, `randint`, `randperm`, `multinomial`, `bernoulli`, `normal`, `poisson`,
+  the `*_like` family, `nn.init.*`, the in-place samplers, functional dropout) returns exactly three
+  hits, all in `src/sig/api.py` and all passing `generator=`. The only implicit consumers left are
+  `nn.Dropout` and `nn.TransformerEncoderLayer`'s internals — so **LM is the only package that draws
+  from the global generator at runtime**, which is why the demonstration below needs a bare probe as
+  its downstream consumer rather than another package.
+
+**The channel is real, and it is exhibited rather than asserted.** At `LM_DROPOUT=0.2`, `LM_LAYERS` 2
+vs 4 moves a downstream consumer's draws (`5f87be0f…` vs `36dc18c1…`, next `torch.rand(3)`
+`[0.180, 0.733, 0.012]` vs `[0.621, 0.406, 0.741]`); **the control is what makes it a measurement** —
+the same two depths at `LM_DROPOUT=0.0` give identical downstream values. So the honest statement is
+that the coupling ARMS the moment a SECOND package draws from the global at runtime, or a package is
+built lazily after a forward. Today neither is the case.
 
 **Verified, by the supervisor, after the agent's own verifier was killed by the session limit.** Two
 fresh processes at `RUN_SEED=0, LM_DROPOUT=0.2` now report identical `torch.initial_seed()`
