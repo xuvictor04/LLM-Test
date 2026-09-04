@@ -18,6 +18,22 @@ declared with a signature has a named reader for its levers, so `EVAL_GEN_TEMP` 
 consumer is written down rather than one of the 57 armed-but-inert records. What P6 owns is the
 BODY, not the interface.
 
+THE EIGHT STUB MARKERS BELOW SAY P5/P6 WHILE THE OTHER TWELVE PACKAGES SAY P4, AND THEY STAY THAT
+WAY. RE-CHECKED 2026-09-04 AND THE RULING STILL HOLDS: .rework/ISSUES.md P2-H11 rules that the
+PHASES renumber and the markers do not, that eval's markers move WITH the renumbering, and that the
+renumbering is deliberately NOT YET APPLIED because it touches every row below P2 while the phase
+in flight is P4 under the split numbering. Counted rather than assumed: three stub markers here
+name phase P5 -- curve_probe, holdout_probe, null_excess -- and five name P6 -- generate, coherence,
+verdicts, wrongness_probe, verification_fit -- against the P4 marker the other twelve api.py files
+carry, and docs/04_CONTRACT.md's EVAL section attributes the SAME P5/P6 phases to these same entry
+points. (The phase names are spelled without their parenthesised package here ON PURPOSE: the
+obvious way to check this paragraph is `grep -c` for the marker string, and a marker quoted inside
+the count that describes it is a claim that corrupts its own measurement -- which is this file's
+subject, one level up.) So rewriting these eight to P4 would apply half of a deferred renumbering and put this
+file at odds with the document that declares it. THIS PARAGRAPH EXISTS SO THE NEXT READER DOES NOT
+"FIX" IT EITHER: the open item is the renumbering, and it belongs to whoever applies PLAN.md
+section 5's amendment, not to this package.
+
 TWO RULES EVERY FUNCTION BELOW OBEYS, both from the survey:
   G7  an instrument may not leave the model in a different mode than it found it, and may not move
       an RNG stream. Every probe runs under spine.rng.frozen_rng and draws from its own named
@@ -38,26 +54,32 @@ TWO RULES EVERY FUNCTION BELOW OBEYS, both from the survey:
       softmax -> blend -> log is the ungated mix recomputed at a consumer site, i.e. C8 (prompt.py)
       and C9 (cl_bench.py) rebuilt inside the instrument line.
 
-TWO DECLARED OUTPUTS HAVE NO CHANNEL IN THE FROZEN SIGNATURE THAT MUST PRODUCE THEM, RECORDED HERE
-RATHER THAN QUIETLY DROPPED (found 2026-09-03, and neither is closed):
-  * `CurveReading.step` below is returned by curve_probe, whose signature is
-    `(ev, *, units_by_domain, logits_fn, rng)`. `step` is RUN's window counter; no argument carries
-    it and EVAL owns no clock, so the field cannot be filled by the function that returns it.
-  * `verification_fit`'s DID IT FIRE declares a Gate on `verify != "off"` and says it is "rendered
-    from the value the composition root passed" -- and the signature is
-    `(ev, *, store_copy, rng)`, which has no such parameter. MEM's Store carries no verify field
-    either (its __slots__ are the entry arrays, the partition and the census), so the value cannot
-    be recovered from `store_copy`, and reading MEM's Config here is exactly what owned_by refuses.
-BOTH ARE SIGNATURE QUESTIONS AND NEITHER IS EVAL'S ALONE TO SETTLE, which is why they are written
-down instead of patched: docs/04_CONTRACT.md declares these signatures and tests/test_contract.py's
-K1 compares the two directions, so widening one here without the document is a failing suite and a
-second source of truth. The two repairs, with their costs: a keyword argument (`step=`, and a
-`verify_mode=` or the value on MEM's Store) costs one edit in the document and one in the
-composition root's row, and is the smaller change; a wire (EVAL.d_verify_mode <- MEM.verify) costs
-one of the two edges spine/wire.py::WIRE_BUDGET has left in the whole tree and buys nothing the
-argument does not, because this value is consumed by an instrument and never by a mechanism. THE
-GATE AND THE FIELD STAY DECLARED. Deleting either to make this file self-consistent would trade a
-recorded gap for a silently missing reading, which is the trade this package exists to refuse.
+TWO DECLARED OUTPUTS HAD NO CHANNEL IN THE FROZEN SIGNATURE THAT MUST PRODUCE THEM (found
+2026-09-03, referred twice for want of an agent owning both sides). BOTH ARE CLOSED, 2026-09-04, BY
+WIDENING THE SIGNATURE ON BOTH SIDES AT ONCE -- docs/04_CONTRACT.md's Q-EVAL-11 carries the full
+ruling and the alternatives; what follows is what the two `def` lines now say and why:
+  * `CurveReading.step` is returned by curve_probe, whose signature was
+    `(ev, *, units_by_domain, logits_fn, rng)`. `step` is RUN's window counter; no argument carried
+    it and EVAL owns no clock, so the field could not be filled by the function that returns it.
+    curve_probe now takes `step`, and A WIRE WAS NEVER AVAILABLE HERE: a Coupling.compute receives
+    only frozen Configs and Config freezes when build() returns, so a per-window counter is refused
+    on the same ground as d_curve_bpb and d_shift_at already are in spine/assemble.py::NOT_WIRES.
+  * `verification_fit`'s DID IT FIRE declares a Gate on `verify != "off"` -- MEM's lever -- and the
+    signature was `(ev, *, store_copy, rng)`, which had no such parameter. MEM's Store carries no
+    verify field either (its __slots__ are the entry arrays, the block partition and the census,
+    re-checked 2026-09-04 against memory/api.py::Store), so the value could not be recovered from
+    `store_copy`, and reading MEM's Config here is exactly what owned_by refuses. verification_fit
+    now takes `verify_mode`, which the composition root reads off MEM's frozen Config -- the same
+    idiom the root already uses for `vocab_slots=LM.vocab_slots` and `lm_kind=LM.arch` into
+    MEM.open_store, and for `sig_dim=SIG.d` into DOM.open_partition.
+THE WIRE WAS THE OTHER CANDIDATE FOR THE SECOND ONE AND IT LOST ON ITS MERITS, not on its price.
+EVAL DECLARES NO WIRES AND RECEIVES NONE, and that is a design statement rather than an accident:
+this package measures the run and changes nothing in it, so a value it consumes to RENDER A GATE
+never reaches a mechanism. The ledger has room -- 19 cross-package wires against a budget of 25, so
+six edges remain, and the "two left" this paragraph carried until 2026-09-04 was a miscount of
+couplings as wires -- and the argument is still the wrong thing to spend one on. THE GATE AND THE
+FIELD STAYED DECLARED THROUGHOUT. Deleting either to make this file self-consistent would have
+traded a recorded gap for a silently missing reading, which is the trade this package refuses.
 
 RECORD TYPES RETURNED (P4/P5 define them):
   CurveReading   per_domain_bpb, mean_bpb, windows_drawn, units_drawn (the total this probe spent:
@@ -107,7 +129,7 @@ def curve_period(ev: Config):
     return U.Windows(int(ev.curve_every))
 
 
-def curve_probe(ev: Config, *, units_by_domain, logits_fn, rng):
+def curve_probe(ev: Config, *, units_by_domain, logits_fn, step, rng):
     """One learning-curve probe. Returns CurveReading.
 
     THE SAMPLE SIZE IS ev.windows AND NOT A HARDCODED 16 (Q-EVAL-5, RESOLVED 2026-09-02 -- read the
@@ -127,6 +149,16 @@ def curve_probe(ev: Config, *, units_by_domain, logits_fn, rng):
     can reproduce -- the failure P9 exists to prevent -- so the entry reads "4x on runs long enough
     to probe; does not exist at the shipped defaults". If the C11 run-length ruling raises
     stream_bytes or epochs, this question should be re-read, not carried.
+
+    `step` IS RUN'S WINDOW COUNTER AND IT ARRIVES AS AN ARGUMENT, ADDED 2026-09-04 (Q-EVAL-11).
+    CurveReading carries `step` -- it is what makes a curve a curve, and what CKPT's Retention
+    compares one reading against another by -- and until this edit the signature had no channel for
+    it: EVAL owns no clock, `units_by_domain` carries material rather than position, and a probe
+    that stamped its own reading from a counter it invented would be a second source of truth for
+    RUN.RunClock. A WIRE COULD NOT HAVE CARRIED IT: spine/assemble.py::COUPLINGS computes from
+    FROZEN Configs and a window counter is runtime state, which is the ground NOT_WIRES already
+    refuses d_curve_bpb and d_shift_at on. The composition root passes RunClock's window index when
+    P5 writes the row; the value is RUN's, and it is stamped, never derived here.
 
     LEVERS READ: windows
     WIRES READ: none
@@ -343,7 +375,7 @@ def wrongness_probe(ev: Config, *, store_copy, scorer, rng):
         "docs/04_CONTRACT.md, section EVAL.")
 
 
-def verification_fit(ev: Config, *, store_copy, rng):
+def verification_fit(ev: Config, *, store_copy, verify_mode, rng):
     """Fit the Reconstructor POST HOC on a SETTLED store and report its precision.
 
     The joint in-loop fit trained against a churning, re-tokenized, re-keyed store -- its targets
@@ -352,16 +384,29 @@ def verification_fit(ev: Config, *, store_copy, rng):
     and no flushes in it. THIS IS THE ONE PLACE IN THIS FILE WHERE units.Steps IS LITERALLY WHAT IS
     COUNTED, and it must never be compared against curve_every.
 
+    `verify_mode` IS MEM'S `verify` LEVER, ARRIVING AS AN ARGUMENT, ADDED 2026-09-04 (Q-EVAL-11).
+    It exists for the Gate below and for nothing else: the post-hoc fit is a reading ABOUT the
+    judge the run actually used, and at MEM_VERIFY=off the run judged nothing, so the precision
+    this function reports is the precision of a mechanism no run consulted. That has to be on the
+    line, not inferred by whoever reads it. It is an ARGUMENT and not a wire: EVAL declares no
+    wires and receives none, a value consumed to render a Gate never reaches a mechanism, and the
+    composition root already passes another package's frozen lever this way for
+    MEM.open_store(vocab_slots=LM.vocab_slots, lm_kind=LM.arch) and
+    DOM.open_partition(sig_dim=SIG.d). IT MAY NOT BE RECOVERED FROM `store_copy`: memory/api.py::
+    Store's __slots__ are the entry arrays, the block partition and the census, with no verify
+    field -- and inferring the mode from whether Store.recon or Store.selfcon holds values would
+    read a configuration off the data, which is the shape this whole file exists to refuse.
+
     LEVERS READ: verify_fit_steps
     WIRES READ: none
-    DID IT FIRE: the fit's step count, its precision, and the Gate on `verify != "off"` -- which is
-                 MEM's lever, so the gate is rendered from the value the composition root passed
-                 rather than from a read of MEM's Config. THE ROOT HAS NOWHERE TO PASS IT TODAY:
-                 this signature takes only store_copy and rng, and MEM's Store carries no verify
-                 field, so the Gate is declared and unbuildable until the signature gains a channel.
-                 See the module docstring for the two candidate repairs and what each costs. The
-                 Gate stays declared: an instrument that silently omits a reading because its input
-                 was never wired is the armed-and-inert failure with the evidence removed.
+    DID IT FIRE: the fit's step count, its precision, and the Gate on `verify_mode != "off"` --
+                 which is MEM's lever, so the gate is rendered from the value the composition root
+                 passed rather than from a read of MEM's Config, which owned_by refuses. THE GATE
+                 IS BUILDABLE AS OF 2026-09-04: it was declared against a signature with no channel
+                 for its input from 2026-09-03, recorded rather than deleted, and the channel is
+                 now the `verify_mode` parameter above. The Gate stays declared either way: an
+                 instrument that silently omits a reading because its input was never wired is the
+                 armed-and-inert failure with the evidence removed.
     """
     ev = ev.owned_by("EVAL")
     raise NotImplementedError(

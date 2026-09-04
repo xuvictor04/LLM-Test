@@ -235,15 +235,38 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     seed <- RUN.seed; soft_cap <- CAP.
     RETURNS: Vocabulary.
 
+    cand_window, mint_pmin and mint_novel are NOT read here (round1 + r2 finding,
+    tok/api.py::build_vocabulary): the build pass below selects purely by tally.most_common() and
+    tok.min_pair; the candidate window, the novelty re-rank and the p(b|a) floor are mint_burst's
+    selection rules (see its own LEVERS READ line), applied during ONLINE minting, not during the
+    seed build. Declaring them here said these three knobs were read by a call that never touches
+    them -- the ISSUES P1-M80/L20 shape ("NOTHING READ THESE") applied to this package's OWN
+    contract line rather than to an operator's environment -- and it silently widened the L3
+    isolation sweep's precomputed affects() set for this entry point to cover a coupling that
+    cannot exist here.
+
+    THAT NOTE SITS ABOVE THE BLOCK AND MUST STAY ABOVE IT, and this sentence is why. It used to be
+    written as comment lines DIRECTLY UNDER the LEVERS READ line, and in that position it did not
+    merely annotate the block -- it ATE THE LAST ITEM ON IT. The block is terminated by the next
+    `LEVERS READ:`/`WIRES READ:`/`DID IT FIRE:` header (tests/test_contract.py::stub_reads), so
+    every one of those nine lines was INSIDE the lever list; the harvester then splits on commas at
+    paren depth 0 and keeps only items that are bare identifiers
+    (tests/test_contract.py::_split_items), so the first comma of the note fused with the name
+    before it and produced the item "dropout\\n# cand_window", which is not an identifier and was
+    DROPPED. Measured by running the real parser over this very block: KEPT mode, seed_vocab,
+    build_passes, build_bytes, min_pair, max_bytes -- six of the seven -- and DROPPED `dropout`
+    plus four prose fragments. The parser keeps a name with a PARENTHETICAL after it (the note is
+    stripped) but drops a name followed by bare prose, which is the whole shape.
+
+    NOTHING FAILED WHILE IT WAS BROKEN, WHICH IS THE HAZARD AND NOT THE DEFENCE. K4 aggregates per
+    PACKAGE, and tok/api.py::tokenize's clean "LEVERS READ: mode, dropout" credited `dropout` for
+    all of TOK, so the harvest looked complete while THIS entry point's declaration was invisible.
+    Delete or reword that one sibling line and TOK_DROPOUT becomes a lever K4 reports as having no
+    reader anywhere -- for a knob whose value this function passes to _segment on every counting
+    pass. A lever silently losing its credit is the untrippable-guard family: the check keeps
+    reporting a verdict it can no longer see the evidence for.
+
     LEVERS READ: mode, seed_vocab, build_passes, build_bytes, min_pair, max_bytes, dropout
-    # cand_window, mint_pmin and mint_novel are NOT read here (round1 + r2 finding, tok/api.py::build_vocabulary):
-    # the build pass below selects purely by tally.most_common() and tok.min_pair; the candidate
-    # window, the novelty re-rank and the p(b|a) floor are mint_burst's selection rules (see its own
-    # LEVERS READ line), applied during ONLINE minting, not during the seed build. Declaring them
-    # here said these three knobs were read by a call that never touches them -- the ISSUES
-    # P1-M80/L20 shape ("NOTHING READ THESE") applied to this package's OWN contract line rather
-    # than to an operator's environment -- and it silently widened the L3 isolation sweep's
-    # precomputed affects() set for this entry point to cover a coupling that cannot exist here.
     WIRES READ: d_vocab_ceiling, d_vocab_read_path
     DID IT FIRE: tok.build_pass, tok.build_mint, tok.build_converged, tok.load_reconciled,
                  Gate tok.build_passes_advice (fires on mode="fixed" with the two numbers;

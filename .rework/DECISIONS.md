@@ -314,11 +314,22 @@ Re-reading the call sites splits the four cleanly, so no single answer covers th
 
 - `norm`, `nov_proj`, `halt_b` are read on the walk **this tree ports**, so `FAB.build` now builds
   them, to the old tree's own constructors.
-- `q_entry`'s only three readers all belong to arms this rebuild has **explicitly dropped**. It is
+- `q_entry`'s readers all belong to arms this rebuild has **explicitly dropped**. It is
   therefore dropped from `state_dict`'s list, exactly as `ctrl` was, with the reason recorded —
   which **reverses** that docstring's own earlier ruling that "q_entry and nov_proj stay, because
   both walks use them". Half of that sentence survives; half does not, and the reversal is written
   down rather than quietly applied.
+
+**CORRECTED 2026-09-04 — the count in this ruling was wrong, though the ruling was not.** This entry
+said "only three readers", and the `fabric+ckpt` repair agent measured **six** by AST; the
+`FAB.forward` author independently found the same six plus a seventh consumer that reads the name
+rather than the attribute, and the verifier established that this seventh is already cited at HEAD
+inside `FAB.state_dict`'s own docstring as the "audit loop". So **seven** consumers, not three.
+
+**None of them changes the verdict** — every one still belongs to a dropped arm, which is the fact
+the ruling turns on — but the number was carried into a decision entry from a filing rather than
+measured, and a decision that cites a count it did not check is the thing D11 exists to stop. The
+count is corrected here rather than in place, so the error and its correction are both legible.
 
 The rejected alternative was raising `NotBuilt` at the point of use for names P4 has not reached.
 It loses because these names are not deferred mechanisms — three are needed by a walk that exists,

@@ -228,7 +228,15 @@ def save_period(ckpt: Config):
                  a stub; until it has a body this Gate is readable only from the returned object
     """
     ckpt = ckpt.owned_by("CKPT")
-    # NOT A STUB, AND THE THREE SIBLINGS ARE NOT EITHER. A period accessor is one
+    # NOT A STUB, AND THE FOUR SIBLINGS ARE NOT EITHER -- EVAL.curve_period, DOM.manage_period,
+    # FAB.manage_period and MEM.rekey_period, each verified stub-free by reading it: every one of
+    # the four ends in a bare `return U.Windows(int(<its own lever>))` and raises nothing. This
+    # comment said THREE, which is the same off-by-one docs/04_CONTRACT.md corrected in its own
+    # sentence about these five accessors on 2026-09-03 and eval/api.py::curve_period corrected in
+    # its copy of this comment, and it survived here for the reason that document gave: the number
+    # is spelled as a WORD, tests/test_contract.py's K13 reads digits, and K13's own output lists
+    # "a number written in words" under NOT SEARCHED FOR -- so no check in the suite can see a
+    # miscount written this way, and only a reader can. A period accessor is one
     # construction over one declared lever, and its whole job is that Cadences.due REFUSES a
     # bare int while Config hands one back for all 35 levers that declare a Clock unit
     # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
@@ -425,7 +433,7 @@ def check_geometry(ckpt: Config, snapshot, geometry):
     is driven off the manifest's KEY SET rather than off truthiness, so `if recorded and recorded
     != live` -- the untrippable-guard shape -- is not writable here.
 
-    LEVERS READ: none -- this is mechanism
+    LEVERS READ: none (this is mechanism)
     WIRES READ: none
     DID IT FIRE: GeometryReport lists every field checked, its rule, and BOTH values. A field
                  present in the checkpoint and ABSENT from `geometry` is reported as UNCHECKED,

@@ -906,9 +906,16 @@ COUPLINGS = [
         why="The valve lifts a SOFT cap toward a HARD one, and the hard one is the preallocated expert "
             "slot pool: A, B and cent are allocated to FAB.slots rows and growth only advances n_live, "
             "so a soft cap above the pool is a cap that can never be reached and a lift past it is "
-            "arithmetic on capacity that does not exist. capacity/levers.py::<module> names this exact field "
-            "as what CAP_FAB_START's 0 sentinel resolves to and :123 records that it is absent from this "
-            "table. The sentinel is why it must be a wire and not a literal: `fab_start = 0` means START "
+            "arithmetic on capacity that does not exist. capacity/levers.py::CAPLevers.fab_start names this "
+            "exact field as what CAP_FAB_START's 0 sentinel resolves to, and capacity/levers.py::<module> "
+            "now records that ALL FOUR CAP wires exist in this table and names the reader of each. THIS ROW "
+            "ASSERTED THE OPPOSITE UNTIL 2026-09-04: it said that file recorded the row as ABSENT from this "
+            "table, and carried the claim as a bare LINE NUMBER into a file this tree still edits -- which "
+            "pointed at a blank line even in the revision where the sentence around it was true, so O12 is "
+            "making its own case here. The levers file corrected its own side first and this one stayed "
+            "stale, which is the direction that costs: an absence asserted about a row that is declared "
+            "tells the next porter to ADD four couplings the table already has. "
+            "The sentinel is why it must be a wire and not a literal: `fab_start = 0` means START "
             "AT THE HARD CEILING, and lever.py refuses a default computed from another lever, so 0 has "
             "no meaning until this row supplies the number it stands for.",),
     Coupling(
@@ -923,8 +930,11 @@ COUPLINGS = [
             "vocabulary cap above emb.weight's row count reserves ids the model has no row for, which is "
             "the failure C31 records from the other end -- `grew 2048 -> 2048 (+0)` on the first "
             "continual-learning run, a second language spelled entirely with the first one's merges. "
-            "capacity/levers.py::<module> and :244 both name d_vocab_slots as the wire this package expects "
-            "and state that TOK holds no ceiling of its own to give.",),
+            "capacity/levers.py::<module> and capacity/levers.py::CAPLevers.vocab_start both name "
+            "d_vocab_slots as the wire this package expects, and the second says in as many words that "
+            "TOK holds no ceiling of its own to give -- the census called the fallback VMAX and a wire "
+            "from TOK, and VMAX moved to LM. A wire declared against the wrong package fails at build() "
+            "and reads like a missing lever.",),
     Coupling(
         src="LM.mask_dead_rows",
         dst="CAP.d_mask_dead_rows",

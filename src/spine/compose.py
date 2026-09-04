@@ -163,8 +163,9 @@ RNG_SUBSYSTEMS = ("lm", "sig", "fabric", "memory", "domains", "world", "tok.drop
 # The four-column shape claimed a standard it could not check. This file's own header said a row is
 # "what it receives", and the deferral written for EVAL.holdout_probe stated the rule outright --
 # "the root has no join that produces that pair; writing a row now would name a call whose arguments
-# nothing supplies" -- and then EVAL.curve_probe, whose signature is BYTE-IDENTICAL to
-# holdout_probe's, carried a row whose entire prose was `Cadences.due('curve', ...)`, naming neither
+# nothing supplies" -- and then EVAL.curve_probe, whose signature was then BYTE-IDENTICAL to
+# holdout_probe's (it gained `step` on 2026-09-04 under Q-EVAL-11, which changes nothing about
+# this argument), carried a row whose entire prose was `Cadences.due('curve', ...)`, naming neither
 # argument, with no producer anywhere. The same gap earned a deferral in one place and a row in the
 # other, and the header cited the rowed one as proof the standard was about arguments rather than
 # phase.
@@ -592,7 +593,18 @@ ASSEMBLY_ORDER = (
                                               "cadence. Its verdict 'collapsing' is a RUN-LEVEL "
                                               "FAILURE, not a warning, and NO signature in the tree "
                                               "takes that verdict -- it is a WarmupReport the root "
-                                              "must act on itself. opt is "
+                                              "must act on itself. THE RETURN IS BOUND: this row "
+                                              "yields no argument any later row consumes, so it "
+                                              "carries no produces column, and the record lands on "
+                                              "System.warmup instead. A 'collapsing' verdict also "
+                                              "puts a line on System.warnings, and that line SAYS "
+                                              "it is a carrier rather than a classification: what "
+                                              "acting on the verdict IS -- refuse the run, or run "
+                                              "it and mark the report -- is stated by neither "
+                                              "sig/api.py::warm_up nor the contract, and is not "
+                                              "decided at this call site. Until 2026-09-04 the "
+                                              "call was a bare expression statement and this "
+                                              "sentence stood over a discarded value. opt is "
                                               "sysm.optimizer.encoder -- the AdamW over "
                                               "param_groups['encoder'], NOT the whole OptState, "
                                               "which is what crossed until 2026-09-02 because "
@@ -1301,7 +1313,7 @@ LOOP_ORDER = (
 #
 # IT IS NO LONGER ONLY EVAL, AND THAT IS THE POINT OF THE `produces` COLUMN. The seven EVAL entries
 # were deferred for a stated reason -- an argument with no producer -- while seven rows elsewhere in
-# the tables named calls with exactly the same gap. EVAL.curve_probe and EVAL.holdout_probe have
+# the tables named calls with exactly the same gap. EVAL.curve_probe and EVAL.holdout_probe had
 # BYTE-IDENTICAL signatures and got opposite verdicts. The column made every one of them decidable,
 # and the seven below are the ones where nothing in the frozen entry-point set supplies a required
 # argument and no join in this file honestly can. Each names what would close it. NONE of them is
@@ -1451,7 +1463,11 @@ DEFERRED_ENTRY_POINTS = {
     "EVAL.verification_fit":
         "P6 (eval). Post hoc, on a `store_copy` MEM's surface does not produce -- see wrongness_probe "
         "above -- with an inner loop in genuine units.Steps that must never be compared against "
-        "curve_every. Same missing copy, same phase.",
+        "curve_every. Same missing copy, same phase. `verify_mode` is NOT part of the gap "
+        "(Q-EVAL-11, 2026-09-04): it is MEM.verify, a frozen lever the root already holds, and the "
+        "row will spell it verify_mode=MEM.verify the way the store row above spells "
+        "vocab_slots=LM.vocab_slots. It is named here because a deferred entry point has no row "
+        "for K12 to read a producer off, not because nothing produces it.",
     "MEM.read":
         "P5 (eval/report). Nothing produces `queries`. The R row that called it named none of "
         "them, and the probe contexts it would key on are the same held-out material "
@@ -1765,6 +1781,15 @@ class System:
                  # and which nothing held before, so MEM's byte offsets indexed a stream no
                  # attribute on this record named.
                  "resume_src", "manifest", "saving", "stream", "segmentation", "base_params",
+                 # `warmup` is SIG.warm_up's WarmupReport, bound here because NO SIGNATURE IN
+                 # THE TREE TAKES IT: sig/api.py::WarmupReport says "'collapsing' is a RUN-LEVEL
+                 # FAILURE and NO signature in this tree takes it as an argument: this record is
+                 # what the composition root has to act on itself". It is therefore not a
+                 # `produces` column -- no later row consumes it -- and it is not a value that
+                 # crosses a boundary the tables cannot express either. It is a RESULT THE ROOT
+                 # OWNS, and before it had a name here the call was a bare expression statement
+                 # and the verdict was computed and dropped on the floor.
+                 "warmup",
                  # THE FOUR VALUES THAT CROSS A BOUNDARY THE ORDER TABLES CANNOT EXPRESS, each
                  # named by the row that consumes it. `produces` reads FORWARDS -- an argument is
                  # supplied by an EARLIER row -- so a value produced at A and consumed at B, or
@@ -2043,10 +2068,44 @@ def compose(environ=None, *, restored=None):
     # guessing a field name, and naming the two fields in opt/api.py's RECORD TYPES block is what
     # closed it -- K11 resolves a `produces` token against that block, so `encoder` is checkable
     # provenance rather than a comment.
+    # AND THE REPORT IS BOUND, because until 2026-09-04 this call was a BARE EXPRESSION
+    # STATEMENT and the WarmupReport it returns went on the floor. sig/api.py::WarmupReport
+    # says it in as many words -- "'collapsing' is a RUN-LEVEL FAILURE and NO signature in
+    # this tree takes it as an argument: this record is what the composition root has to act
+    # on itself" -- and the row for this stage in ASSEMBLY_ORDER repeated the sentence while
+    # the code below it discarded the value. The point was moot only while the verdict could
+    # not be produced: src/sig/api.py::_stop_verdict held the ABSOLUTE collapse arm behind
+    # `len(curve) < 2`, and at the shipped SIG_WARMUP / SIG_WARMUP_PROBE_EVERY a fully
+    # collapsed encoder returned "budget". That arm now takes a one-point curve, so the
+    # run-level failure is reachable and the root was the only reader that could see it.
     sysm.stage = "warmup"
-    sig_api.warm_up(sig, sysm.sig, stream=_signature_stream(sysm, sig),
-                    seen_units=_signature_units(sysm, sig),
-                    opt=sysm.optimizer.encoder)
+    sysm.warmup = sig_api.warm_up(sig, sysm.sig, stream=_signature_stream(sysm, sig),
+                                  seen_units=_signature_units(sysm, sig),
+                                  opt=sysm.optimizer.encoder)
+    # WHAT THE ROOT DOES WITH IT, AND WHAT IT DELIBERATELY DOES NOT DO. Neither
+    # sig/api.py::warm_up nor docs/04_CONTRACT.md's SIG section says what "act on it" MEANS:
+    # both say the verdict is a run-level failure and stop there. So the report is CARRIED to
+    # a place a reader has -- System.warmup for the record itself, System.warnings for the
+    # sentence -- and the policy is NOT invented here. Appending to System.refusals would
+    # make a collapsed encoder abort the run, and raising would kill the run before the
+    # report that carries the numbers is printed; both are rulings, and an unruled one taken
+    # silently at a call site is how a policy gets into this tree without anybody choosing
+    # it. The warning SAYS SO in the line the operator reads, so "the root acted" cannot be
+    # read off a warnings entry that only forwards the verdict.
+    if sysm.warmup is not None and sysm.warmup.verdict == "collapsing":
+        sysm.warnings.append(
+            f"RUN-LEVEL FAILURE, not a warning: SIG.warm_up returned verdict='collapsing' "
+            f"-- the encoder's separation fell to {sysm.warmup.separation_final!r} from a "
+            f"peak of {sysm.warmup.separation_peak!r} over {sysm.warmup.steps} optimizer "
+            f"step(s) and {sysm.warmup.probes} probe(s). Every window of this run is routed "
+            f"through that encoder, so SHIFT_DIST, the boundary count and the domain count "
+            f"downstream of it are measurements of a collapsed space and not of the corpus "
+            f"-- which is the failure sig/api.py::WarmupReport records from the other end "
+            f"(0.16 -> 0.05 read as a converged plateau, 0 boundaries, 1 domain, and every "
+            f"downstream line still printed). THIS ENTRY IS A CARRIER AND NOT A POLICY: the "
+            f"root does not refuse the run here, because neither sig/api.py::warm_up nor the "
+            f"contract says what acting on this verdict is, and the report is on "
+            f"System.warmup for whoever rules on it.")
 
     # THE PERIODS ARE ARGUMENTS AND THE CALL WAS NOT PASSING ANY. new_cadences(run: Config, *,
     # periods) is keyword-only with no default (train/api.py::new_clock), so this line was a TypeError on

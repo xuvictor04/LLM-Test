@@ -39,7 +39,14 @@ the count is checkable from the suite rather than from here.)*
 
 **Executable today.** `python3 -c "import sys;sys.path.insert(0,'src');from spine.compose import
 compose; compose(environ={})"` runs the composition root against the stubs and stops at the first
-unimplemented one with `NotImplementedError: RUN.process_setup: P4 (train) fills this in`.
+unimplemented one with `NotImplementedError: CAP.startup_refusals: P4 (capacity) fills this in` —
+the **29th** of the 39 rows in `ASSEMBLY_ORDER`. *(This sentence named `RUN.process_setup` until
+2026-09-04, and had been wrong since that entry point got a body: the root now reaches past the
+resume, the corpus, the vocabulary, the model, the fabric, the store, the partition and
+`CAP.new_valve` before it halts. Three further copies of the same stale claim — §3.8, §5's
+`Q-DERIVE-1`, and `capacity/api.py::<module>` — were corrected in the same edit. A claim about where
+the root stops is a copy of a fact and rots the way a count does; **K13 could not see any of the
+four**, because what rots here is a symbol name and K13 reads digits.)*
 
 ---
 
@@ -505,8 +512,24 @@ The earned-capacity valve. **One valve, one owner, one clock.**
 **FAB receives an integer ceiling per flush; TOK receives an event.** No period crosses either
 boundary.
 `Decision.block_reason` comes from a closed set — `targets_off | not_pinned | warmup | blackout |
-not_stalled | threshold | at_hard_ceiling` — because *"0 lifts" alone cannot distinguish "never
-full" from "never plateaued", and those have completely different fixes.*
+not_stalled | threshold | at_hard_ceiling | dead_rows_unmasked` — because *"0 lifts" alone cannot
+distinguish "never full" from "never plateaued", and those have completely different fixes.*
+**`dead_rows_unmasked` is new on 2026-09-04 and it is the refusal this package had owed since the
+honesty precondition was declared.** `d_mask_dead_rows` bought a *report line* and nothing else: the
+vocabulary arm could be armed, the mask off, the precondition tested and not met — and the lift
+happened anyway, with `new_valve`'s `cap.vocab_arm_honest` Gate saying in its own printed reason
+that nothing in the tree refused it. It bites on the **vocabulary arm only** (an unmasked output
+layer says nothing about reserving *expert* slots), and it is evaluated **last, after
+`at_hard_ceiling`** — placed first, with the other configuration-shaped reason `targets_off`, it
+would answer every call on an unmasked run and the histogram would never learn whether that arm ever
+pinned and stalled, which is the very collapse this closed set exists to end. Last, it counts
+exactly the lifts that were *earned and then declined for dishonesty*. **It is deliberately not a
+startup refusal:** that would make `CAP_TARGETS=vocab` unrunnable at the shipped
+`LM_MASK_DEAD_ROWS=False`, and `spine/assemble.py`'s `CAP.d_mask_dead_rows` row names that stricter
+repair as **the owner's to ask for** — *"a valve that refused to lift the vocabulary at all while the
+mask is off would need no flag"*. The flag is frozen onto the `Valve` at `new_valve` as
+`counters["cap.mask_dead_rows"]`, the way the two hard ceilings are, so `observe` keeps reading no
+wires of its own.
 `Caps.headroom(n)` exists so the negative clamp (C30) **cannot be written** at a call site.
 The pin clocks are **now checkpointed**, which is half the M38 fix; the other half is that RUN seeds
 the valve's last-called index at the **resumed** step.
@@ -546,10 +569,22 @@ move an RNG stream) and the one-logits-path rule (`logits_fn` is passed in, neve
 `null_excess` **refuses `null_draws < 2` at construction**: at 0 it is a `ZeroDivisionError` that
 takes the rest of the report with it, and at 1 the sd is exactly 0.0 so the 2σ test becomes a rubber
 stamp.
-**Where they are called (§3):** `curve_period` and `curve_probe` have `A` rows. The other **seven**
-are the whole of `compose.DEFERRED_ENTRY_POINTS`, each with the phase and the argument that has no
-producer — not "a later phase", which by itself is no reason at all, since `curve_probe` is P5 and
-has a row.
+**Where they are called (§3):** `curve_period` alone has an `A` row. The other **eight** are all
+deferred, each with the phase and the argument that has no producer — not "a later phase", which by
+itself is no reason at all. *(This paragraph said `curve_probe` "has a row" and that the deferrals
+were **seven** and "the whole of `compose.DEFERRED_ENTRY_POINTS`". Both were true when written and
+neither is now: §3.6 moved `curve_probe` into the deferrals — that move is the finding the `produces`
+column was written to expose — and the table grew past EVAL, so EVAL's eight are now eight of
+twenty-three. Corrected 2026-09-04. The numbers here are words, which is why `K13` could not see
+them.)*
+
+**Two declared outputs had no channel in the signature that must produce them, and both closed on
+2026-09-04 — `Q-EVAL-11`.** `curve_probe` gained `step` (RUN's window counter, which `CurveReading`
+carries and no argument supplied) and `verification_fit` gained `verify_mode` (`MEM.verify`, which
+its declared Gate reads and no argument supplied). Both are **arguments the composition root
+passes**, both were referred twice for want of an agent owning the document and the tree at once,
+and **EVAL still declares no wires and receives none** — see the ruling for why a wire was not
+available for the first and was refused on its merits for the second.
 
 ---
 
@@ -578,8 +613,9 @@ and that is a statement rather than a default.
 **Why the column exists.** The four-column shape claimed a standard it could not check. The header
 said a row is *"what it receives"*, and the deferral written for `EVAL.holdout_probe` stated the
 rule outright — *"the root has no join that produces that pair; writing a row now would name a call
-whose arguments nothing supplies"* — and then `EVAL.curve_probe`, whose signature is
-**byte-identical** to `holdout_probe`'s (`ev: Config, *, units_by_domain, logits_fn, rng`), carried
+whose arguments nothing supplies"* — and then `EVAL.curve_probe`, whose signature was then
+**byte-identical** to `holdout_probe`'s (`ev: Config, *, units_by_domain, logits_fn, rng` — it gained
+`step` on 2026-09-04 under `Q-EVAL-11`, which changes nothing about this argument), carried
 a row whose entire prose was `Cadences.due('curve', EVAL.curve_period(ev), clock)`: neither argument
 named, no producer anywhere. The same gap earned a deferral in one place and a row in the other, and
 the header cited the rowed one as proof the standard was about arguments rather than phase.
@@ -808,14 +844,14 @@ the whole tree is stubs.
 
 | entry | phase | why there is no row |
 |---|---|---|
-| `EVAL.curve_probe` | P5 | **New.** Byte-identical signature to `holdout_probe`, same gap, and now the same verdict. Nothing produces `units_by_domain` (Areas carries names/bodies/holdout/holdout_bytes/cursors, `DOM.census` returns sizes and radii, `Segmentation` carries ids/byte_pos/labels/bytes_per_token — there is no per-domain window supplier), and nothing produces `logits_fn`. |
+| `EVAL.curve_probe` | P5 | **New.** Byte-identical signature to `holdout_probe` until `step` landed (**Q-EVAL-11**, 2026-09-04), same gap, and the same verdict. Nothing produces `units_by_domain` (Areas carries names/bodies/holdout/holdout_bytes/cursors, `DOM.census` returns sizes and radii, `Segmentation` carries ids/byte_pos/labels/bytes_per_token — there is no per-domain window supplier), and nothing produces `logits_fn`. **`step` is not part of the gap**: it is RUN's window counter off `RunClock`, which the root holds when the P5 row lands, and `K12` already counts it as produced. |
 | `EVAL.holdout_probe` | P5 | Needs `units_by_domain` drawn in **byte** coordinates from `Areas.holdout` together with a `logits_fn`, and the root has no join producing that pair. |
 | `EVAL.null_excess` | P5 | **Reason corrected.** It said `real` and `permute` come from "the verdict machinery, which is P6's" — but `EVAL.verdicts` takes `domain_sizes`, `silhouettes`, `affiliation`, `coherence_reading` and is this function's **consumer**, not its producer. `real` is the measured statistic under test and `permute` the label-permuting redraw of it, so the candidates are the silhouette and affiliation statistics — which have **no producer in the tree**, the very gap `verdicts` is deferred for — and nothing returns a permutation callable. **Neither exists.** |
 | `EVAL.generate` | P6 | `prompts_by_domain` has **no producer** among the entry points (§7 holds the count); `logits_fn` is the same missing join. |
 | `EVAL.coherence` | P6 | **Reason corrected, and the parameter is gone.** It said "nothing in the tree returns a `Sample`" — `EVAL.generate` does. Two arguments have no producer and both are named: `logits_fn`, and `units_by_domain`, the same per-domain supplier `curve_probe` and `holdout_probe` wait on. `encode` is **not** a gap — `_sig_encode_fn` already forms it for `DOM.rekey`. The `sample` parameter was resolved away on 2026-09-02: **Q-EVAL-10**. |
 | `EVAL.verdicts` | P6 | Three of four arguments — `silhouettes`, `affiliation`, `coherence_reading` — have no producer; the fourth, `domain_sizes`, comes from `DOM.census`, which stage `R` already collects. |
 | `EVAL.wrongness_probe` | P6 | Takes a **copy** of the store so the instrument cannot edit what it measures; MEM's surface produces no copy, and adding one is a signature change. Its `scorer` is the same missing logits callable as `MEM.judge`'s **and takes the same arity, `scorer(ctx, src) -> logits`** (Q-MEM-8/Q-MEM-10, 2026-09-02). |
-| `EVAL.verification_fit` | P6 | Same missing copy; its inner loop is genuine `units.Steps` and must never be compared against `curve_every`. |
+| `EVAL.verification_fit` | P6 | Same missing copy; its inner loop is genuine `units.Steps` and must never be compared against `curve_every`. **`verify_mode` landed 2026-09-04 (Q-EVAL-11) and is not part of the gap**: it is `MEM.verify`, a frozen lever the root holds, passed the way `vocab_slots=LM.vocab_slots` and `lm_kind=LM.arch` already are into `MEM.open_store`. `K12` computes "produced" from the order tables' prose and a deferred entry point has no row, so **until `compose.DEFERRED_ENTRY_POINTS` names it, K12 reads `verify_mode` as a second gap** — the residue is one clause and it is recorded below in §5. |
 | `MEM.read` | P5 | **New.** Nothing produces `queries`. The deleted `R` row named none of them, and the probe contexts it would key on are the same held-out material `holdout_probe`'s `units_by_domain` needs — one missing join, and deferring only one of the two was the inconsistency. **Deferred as a ROW, reached in-package:** Q-MEM-9 (RESOLVED (a)) makes `MEM.maintain`'s job 1 *this call*, with `queries` maintain encoded itself. K6 is satisfied by the absence of a row, not the absence of a call, so this deferral is current and not stale. |
 | `MEM.blend` | P5 | **New.** `retrieval` comes from `MEM.read`; `model_probs` are **probabilities** while every scoring hook takes a `logits_fn` (Q-MEM-10, RESOLVED (a) 2026-09-02: the join is a composition-root closure, `_logits_fn(sysm, *, use_memory)`, and **no signature moves on either side** — but the `logits_fn` still has no producer, so this deferral stands) — which the deleted row's own prose conceded while being written anyway. `model_probs` is also the first positional after the Config, which K10 drops as "the package's own live object" — it is not (MEM's is `store`), so the check is structurally blind here and the deferral is the only record. |
 | `MEM.judge` | P4/P5 | **New.** `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). That callable does not exist, and scoring a **stored** ctx needs a signature — the domain id is `Store.src`, so only the *declared shape* was missing, and it is now two arguments (Q-MEM-8). **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:350-352` itself names as the inert state. |
@@ -845,7 +881,7 @@ tables claiming one, and it names the producer each is waiting on.
   blackout. No FAB entry point accepted it: `manage`, `observe` and `grow_check` took `step_windows`
   and losses, not a shift event, so the valve half had a route (`CAP.observe`'s `blackout`) and the
   fabric half did not. **Q-FAB-6 is RESOLVED**: `FAB.grow_check` gained `shift_at=None`, typed
-  `units.Windows` — a **frozen-signature move**, made now because 84 of the 132 entry points are stubs
+  `units.Windows` — a **frozen-signature move**, made now because 83 of the 132 entry points are stubs
   and the same change after P4 writes the WATCH→BURST→RECOVER machine is a body rewrite. It went on
   `grow_check` and **not** on `manage` as the question proposed, because in the old tree the blackout
   gates **growth**: `note_shift` sets `blackout` at `:2948` and two of its three consumers are
@@ -895,9 +931,14 @@ tables claiming one, and it names the producer each is waiting on.
 ### 3.8 What writing the column found in the root itself
 
 Six defects in `spine/compose.py` that the column exposed and that are repaired here. None of them
-is a signature change; all are unreachable today because `RUN.process_setup` raises several rows
-earlier, which is the shape this file's own header calls *"a defect hidden behind an earlier stub,
-this project's oldest"*.
+is a signature change, and none is reached by the stub-only `compose(environ={})` above: it halts on
+the **29th** of the 39 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, and the rows carrying
+these six either sit past that point or are on the resume path an empty environment never takes.
+That is the shape this file's own header calls *"a defect hidden behind an earlier stub, this
+project's oldest"*. *(This paragraph said `RUN.process_setup` "raises several rows earlier" until
+2026-09-04. It was true when written and had not been for some time — `RUN.process_setup` is the
+first row and has had a body since **D12**. The shape is unchanged; only the name of the stub these
+defects hide behind has moved.)*
 
 1. **`new_cadences` was called with no `periods`.** `new_cadences(run: Config, *, periods)` is
    keyword-only with no default, the ASSEMBLY row describes the five-key mapping in detail, and the
@@ -1204,7 +1245,12 @@ proposed here. A P4 implementer following the CAP contract writes
 `pin_tick(held_windows, pinned, elapsed_windows)`, gets `UnitError` on the first flush, and is left
 with `int(held) >= cap.pin_windows` as the only form that runs — which `capacity/levers.py:107` names
 as *"the original defect again"*. A reviewer found it by reading both surfaces; nothing executed,
-because `compose()` stops at `RUN.process_setup` long before the valve.
+because `compose()` **then** stopped at `RUN.process_setup`, long before the valve. *(That is no
+longer where it stops, and this sentence said it was until 2026-09-04: `compose(environ={})` now
+halts on the 29th of the 39 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, which is **past**
+`CAP.new_valve` — so the valve is built on every `compose()` today and both its Gates are readable
+without writing a line. The reading that found this one still had to be done by hand; what has
+changed is that the next one of its kind need not be.)*
 
 **Which side was wrong is not a preference.** `spine/units.py` defines `Steps` as *"Optimizer steps.
 What the LR schedule's horizon is denominated in, **and nothing else**"* and `Windows` as *"Stream
@@ -2251,7 +2297,10 @@ Two things that follow and are already recorded: `curve_probe` is **deferred** t
 `best_bpb` has no producer either. **What changed in the tree:** `CurveReading` now carries
 `units_drawn` — the total the probe spent (windows × `LM.ctx`) — so the sample size is a knob whose
 cost is *visible* as well as raisable and lowerable. That asymmetry is what `EVAL_N` failed. No
-signature moves and no lever default changes.
+signature moves and no lever default changes. *(That clause is about **this** ruling and stays true
+of it. `curve_probe`'s signature did move later, on 2026-09-04 under **Q-EVAL-11**, on unrelated
+grounds — `step`, which `CurveReading` already declared. The sample size, `ev.windows`, is
+untouched.)*
 
 ### Q-EVAL-9 — does `holdout_windows` stay at 32? — **RESOLVED 2026-09-02: 32 STAYS, AND THE PAIRING IS PINNED — WHICH IS WHAT EARNS IT**
 `research_continual_memory.md:743-745` warns that the 2σ rule at n=32 will report "HELD (inside the
@@ -2320,7 +2369,7 @@ left standing as an intention.** The manifest's *defining* property is that it e
 first allocation** — that is what lets the gate refuse in seconds instead of after a warm GPU. A
 package's `geometry()` can only be called after that package has built something. So the eight or
 eleven new functions would either (i) take a `Config` and no object, at which point each one is a
-lever read the root already does — eight new entry points on a surface where 84 of 132 are already
+lever read the root already does — eight new entry points on a surface where 83 of 132 are already
 stubs, for zero new information — or (ii) need a built object, and then they cannot be called at the
 gate at all. And in either case the **EXACT / MAY_WIDEN rule migrates into the package**, while
 `ckpt/api.py` says in as many words that **RULES ARE THE OWNER'S**: a package would be grading the
@@ -2627,7 +2676,11 @@ MOVES ON EITHER SIDE.** `MEM.blend` keeps `model_probs` as probabilities; `EVAL`
 The join is
 composition-root work, which is what the composition root is for. (`coherence` was reopened later the
 same day by **Q-EVAL-10**, on its own grounds and not for the blend: `sample` → `units_by_domain` +
-`encode`. `logits_fn` is untouched there, so this ruling still holds in both directions.)
+`encode`. `logits_fn` is untouched there, so this ruling still holds in both directions. `curve_probe`
+and `verification_fit` were reopened on 2026-09-04 by **Q-EVAL-11**, on their own grounds again —
+`step` is a stamp and `verify_mode` a Gate input, neither is a scoring hook, `logits_fn` is untouched
+on every EVAL signature and no body gains arithmetic, so what (c) was refused for does not arrive
+through them either.)
 
 **Why (c) is refused.** It moves four frozen EVAL `def`s **and** then requires each of the four
 bodies to implement `softmax → blend → log` for itself — four copies of the mix **inside the
@@ -2763,7 +2816,7 @@ row immediately before `TOK.judge_probation`**. `docs/04_CONTRACT.md`'s §0 refu
 `d_residual_ratio` moved in the same edit, because it named the old route and two frozen documents
 naming two different producers is the defect this ruling repairs.
 
-**Why now rather than "when the surface opens": the surface is open.** 84 of 132 entry points are
+**Why now rather than "when the surface opens": the surface is open.** 83 of 132 entry points are
 stubs and LM's bodies are unwritten, so this cost one stub, one §7 line and one row. After P4 it costs
 a coordinated edit across ten independent agents. And it is **not new machinery** — `LM.anchor_term`
 already computes ‖delta‖/‖composite‖ every flush; what was missing was an entry point that *returns*
@@ -2976,7 +3029,7 @@ named, and the reason CAP mints no blackout-window lever of its own. A sentence 
 the consumers was one sentence away from justifying a second, independent blackout in CAP.
 
 **⚠ THE SIGNATURE:** `FAB.grow_check(fab, pop, *, flush_loss, step_windows, soft_cap,
-memory_pressure, signature, shift_at=None)`. Made **now** because 84 of the 132 entry points are stubs
+memory_pressure, signature, shift_at=None)`. Made **now** because 83 of the 132 entry points are stubs
 and the same change after P4 has written the WATCH→BURST→RECOVER machine is a body rewrite. The
 ```contract block, the `compose.py` row and `System.__slots__` moved in the same edit.
 
@@ -3123,6 +3176,79 @@ named in its deferral reason (K12 reads that in both directions).
 **a report field, not a silent choice** — the strict arm needs ≥ 2 labelled buckets in
 `units_by_domain`, and the self-referential fallback must be printed as the weaker claim, the way the
 old file printed it.
+
+### Q-EVAL-11 — `CurveReading.step` and `verification_fit`'s Gate read values the frozen signatures lack a channel for — **RESOLVED 2026-09-04: BOTH SIGNATURES WIDEN, AND EVAL STILL RECEIVES NO WIRES**
+`eval/api.py::<module>` recorded two declared outputs that the functions declaring them could not
+produce, found 2026-09-03 and **referred twice** because closing either needs this document and the
+tree changed together and no agent owned both:
+
+* **`CurveReading.step`.** `curve_probe(ev, *, units_by_domain, logits_fn, rng)` returns a
+  `CurveReading` whose declared fields include `step` — RUN's window counter, which is what makes a
+  curve a curve and what `CKPT.Retention.consider` orders one reading against another by. No
+  argument carried it, EVAL owns no clock, and `units_by_domain` carries material rather than
+  position.
+* **`verification_fit`'s Gate.** Its `DID IT FIRE` declares a Gate on `verify != "off"` — `MEM`'s
+  lever — *"rendered from the value the composition root passed"*, against
+  `verification_fit(ev, *, store_copy, rng)`, which had no such parameter. Re-checked against
+  `memory/api.py::Store` on 2026-09-04: its `__slots__` are the entry arrays, the block partition
+  and the census, with **no** `verify` field, so `store_copy` cannot carry it either, and reading
+  MEM's `Config` inside EVAL is what `owned_by` refuses.
+
+**RULING: `curve_probe(ev, *, units_by_domain, logits_fn, step, rng)` and
+`verification_fit(ev, *, store_copy, verify_mode, rng)`.** Both values arrive as **arguments the
+composition root passes**, both signature lines move here and in `src/eval/api.py` in the same edit,
+and `K1` stays green in both directions.
+
+**The alternatives, and what separates them.**
+*(a) Widen the signature — taken.* Costs one `def` line, one line in §7, and one row in the order
+tables when P5/P6 land them. *(b) Spend a wire.* **It was never available for `step`:** a
+`Coupling.compute` receives only frozen `Config`s and a `Config` freezes when `build()` returns, so
+a per-window counter is refused on exactly the ground `NOT_WIRES` already refuses `d_curve_bpb` and
+`d_shift_at`. For `verify_mode` a wire **was** mechanically available — `MEM.verify` is a frozen
+lever — and it lost on its merits: **EVAL declares no wires and receives none**, which is a design
+statement (*"everything that measures the run and nothing that changes it"*) rather than an
+accident, and a value consumed to render a **Gate** never reaches a mechanism. The precedent runs
+the same way: the root already passes another package's frozen lever as a named argument —
+`MEM.open_store(vocab_slots=LM.vocab_slots, lm_kind=LM.arch)`,
+`DOM.open_partition(sig_dim=SIG.d, …)`. *(c) Recover the mode from `store_copy`* — refused: the
+field does not exist, and inferring it from whether `Store.recon` or `Store.selfcon` holds values
+reads a **configuration off the data**, which is the shape the instrument line exists to refuse.
+*(d) Mint an `EVAL_VERIFY_MODE` lever* — refused: it would be a second declaration of `MEM.verify`,
+and a run with `MEM_VERIFY=off` and `EVAL_VERIFY_MODE=selfcon` would print a Gate that lies. That is
+the L1 shape this whole spine removes. *(e) Delete the field and the Gate* — refused, and it is the
+one option that is not on the table: it trades a recorded gap for a silently missing reading.
+
+**Price, stated because the earlier brief got it wrong.** The wire ledger stands at **19 of 25**
+budgeted, so **six edges remain** — the *"two left"* carried in `eval/api.py` until today counted
+declared couplings as wires, which they are not; four of the twenty-three are intra-package.
+**Nothing here spends one.**
+
+**Why this is a second reopening of EVAL's surface, and why it is not the one Q-MEM-10 refused.**
+`Q-EVAL-10` closed by saying `Q-MEM-10`'s ruling *"deliberately left room for exactly one, and this
+is it"*. What `Q-MEM-10` refused is **option (c) of that question** — adding `blend_fn` to four
+scoring entry points, which puts `softmax → blend → log` inside four instrument bodies (C8/C9
+rebuilt in the instrument line). Neither parameter here is a scoring hook: `step` is a stamp and
+`verify_mode` is a Gate input, `logits_fn` is untouched on every EVAL signature, and no body gains
+arithmetic. `Q-MEM-10`'s ruling holds in both directions and is not reopened.
+
+**What would change the answer.** If `RUN` ever hands instruments a `RunClock` rather than a bare
+index, `step` should ride on that record instead of as a scalar — one object, not one argument per
+field. And if a **second** EVAL entry point turns out to need `MEM.verify`, the argument stops being
+cheaper than the wire: two call sites passing one frozen lever is the shape the nine promotions in
+§0 were made from, and `EVAL.d_verify_mode` should then be declared against the six remaining edges.
+
+**What did NOT change.** No lever moved, no default moved, no census row, no wire, no record type.
+`LEVERS READ` is unchanged on both functions (`windows`; `verify_fit_steps`). Both stay **deferred** —
+`units_by_domain` and `logits_fn` still have no producer, and neither does the `store_copy`.
+
+**Residue owed outside this edit, and the check it holds down.** `K12` computes "produced" from the
+order tables' prose, and a deferred entry point has no row, so it reads `verify_mode` as a second
+argument with no producer and requires the deferral reason to name it. The reason lives in
+`spine/compose.py`, which this edit does not own. **`DEFERRED_ENTRY_POINTS["EVAL.verification_fit"]`
+must gain a clause naming `verify_mode` and saying it is *not* a gap** — the root reads it off MEM's
+frozen `Config`, the way `MEM.open_store`'s row already spells `vocab_slots=LM.vocab_slots` — and
+`K12` fails on that one entry until it lands. `step` needs no such clause: `K12` already counts it
+as produced.
 
 ### Q-MEM-11 — `MEM.census` and `DOM.census` return record types neither file declares — **RESOLVED 2026-09-02: (a), WITH THE PRODUCER'S OWN SPELLINGS**
 `memory/api.py:14-19` declares `Store`, `WriteReceipt`, `Retrieval` and nothing for `census`, whose
@@ -3394,14 +3520,14 @@ DOM: census(dom: Config, part)
 DOM: state_dict(dom: Config, part)
 DOM: manage_period(dom: Config)
 EVAL: curve_period(ev: Config)
-EVAL: curve_probe(ev: Config, *, units_by_domain, logits_fn, rng)
+EVAL: curve_probe(ev: Config, *, units_by_domain, logits_fn, step, rng)
 EVAL: holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng)
 EVAL: null_excess(ev: Config, *, real, permute, rng)
 EVAL: generate(ev: Config, *, logits_fn, prompts_by_domain, rng)
 EVAL: coherence(ev: Config, *, logits_fn, units_by_domain, encode, rng)
 EVAL: verdicts(ev: Config, *, domain_sizes, silhouettes, affiliation, coherence_reading)
 EVAL: wrongness_probe(ev: Config, *, store_copy, scorer, rng)
-EVAL: verification_fit(ev: Config, *, store_copy, rng)
+EVAL: verification_fit(ev: Config, *, store_copy, verify_mode, rng)
 FAB: build(fab: Config, *, d_model, signature_dim, device, generator)
 FAB: Population.n(self)
 FAB: Population.parameters(self)

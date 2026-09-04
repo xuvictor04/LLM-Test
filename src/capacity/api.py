@@ -29,8 +29,16 @@ refused by the type system rather than by discipline.
     implementer following this contract would have written pin_tick(held_windows, pinned,
     elapsed_windows) and got UnitError on the first flush -- with `int(held) >= cap.pin_windows`,
     the original defect restored at the comparison, as the only form that ran. Nothing executed to
-    reveal it, because compose() stops at RUN.process_setup long before the valve; a reviewer found
-    it by reading the two surfaces against each other. The repair is applied now: derive.pin_tick
+    reveal it, because compose() THEN stopped at RUN.process_setup, long before the valve; a
+    reviewer found it by reading the two surfaces against each other.
+    THAT IS NO LONGER WHERE IT STOPS, AND THIS SENTENCE SAID IT WAS UNTIL 2026-09-04. Re-measured
+    by running it: RUN.process_setup has a body, and `compose(environ={})` now halts on the 29th of
+    the 39 rows in spine/compose.py::ASSEMBLY_ORDER, at CAP.startup_refusals -- which is PAST the
+    valve's own row, so new_valve IS built on every compose() today and both its Gates are readable
+    without writing a line. Three more copies of the same stale claim were corrected in
+    docs/04_CONTRACT.md in the same edit; a claim about where the root stops is a copy of a fact and
+    rots exactly the way a count does, and the reason it survived four places is that the count
+    checks read digits and this one is a symbol name. The repair is applied now: derive.pin_tick
     accumulates Windows and raises on Steps, Flushes and Backwards, and the 32 captured oracle cases
     replay unchanged because they record raw ints and never saw the kind.
 
@@ -161,8 +169,11 @@ def new_valve(cap: Config, *, restored=None):
                      sentinel) -> hard ceiling <n>", "checkpoint (lifted to <n>)", and
                      "sentinel 0 -> hard ceiling <n>". A cap that came from the wrong place is
                      visible because the four are spelled differently.
-                 (2) Valve.counters -- cap.targets, the two caps, the two hard ceilings and the two
-                     origins, which is the pairing (1) leaves to the reader.
+                 (2) Valve.counters -- cap.targets, the two caps, the two hard ceilings, the two
+                     origins (which is the pairing (1) leaves to the reader) and cap.mask_dead_rows,
+                     the honesty precondition, added 2026-09-04 because observe's new
+                     `dead_rows_unmasked` block reason must read it per flush and observe reads no
+                     wires of its own.
                  (3) Valve.gates -- cap.valve and cap.vocab_arm_honest. They are the reason this
                      entry point builds Gates at all, and leaving them out of this line made the one
                      that was WRONG invisible to every reader of the contract.
@@ -247,6 +258,14 @@ def new_valve(cap: Config, *, restored=None):
         "cap.cap_experts": ce, "cap.cap_vocab": cv,
         "cap.hard_experts": hard_experts, "cap.hard_vocab": hard_vocab,
         "cap.origin_experts": oe, "cap.origin_vocab": ov,
+        # FROZEN ONTO THE VALVE HERE, THE WAY THE TWO HARD CEILINGS ARE, AND FOR THE SAME REASON.
+        # CAP.observe declares "WIRES READ: none" and means it: everything the per-flush decision
+        # needs off another package is read ONCE, at build, and carried on the record. The honesty
+        # precondition became a per-flush input on 2026-09-04 when observe's closed set gained
+        # `dead_rows_unmasked`, so the flag has to travel the same way -- and it lands in the
+        # declared ledger rather than as a new Valve field, because counters is where new_valve
+        # already parks what observe must read back and CAP.counters already reports it.
+        "cap.mask_dead_rows": mask_dead,
     }
     # THE HONESTY PRECONDITION ON THE VOCABULARY ARM, and it is LM's flag, not a lever here.
     # Lifting the vocabulary while dead rows are unmasked reserves ids that sit in the softmax
@@ -290,13 +309,19 @@ def new_valve(cap: Config, *, restored=None):
         #     THING THIS GATE IS ABOUT -- setting it is the whole repair -- so by this file's own
         #     test the condition is UNMET, not INAPPLICABLE. spine/gate.py::Gate.line prints the
         #     reason on every arm on purpose, so nothing is lost by saying so on the middle one.
-        # (b) THE MECHANISM STILL RUNS. observe's block reasons are a CLOSED set -- targets_off |
-        #     not_pinned | warmup | blackout | not_stalled | threshold | at_hard_ceiling -- with no
-        #     entry for unmasked dead rows, and neither startup_refusals clause covers it either.
-        #     So nothing in this tree refuses the dishonest lift: the run makes it. Printing
+        # (b) THE MECHANISM STILL RUNS, AND SINCE 2026-09-04 IT IS ALSO REFUSED BY NAME. Printing
         #     UNREACHABLE put the vocabulary arm among the mechanisms that were INERT this run
-        #     while the arm was live and lifting, which is the reading spine/gate.py exists to
-        #     refuse, arriving from the opposite direction to the one D15 fixed.
+        #     while the arm was live, which is the reading spine/gate.py exists to refuse, arriving
+        #     from the opposite direction to the one D15 fixed. This comment read "observe's block
+        #     reasons are a CLOSED set ... with no entry for unmasked dead rows, and neither
+        #     startup_refusals clause covers it either. So nothing in this tree refuses the
+        #     dishonest lift: the run makes it." The first half is now false and the correction is
+        #     the point: capacity/api.py::observe's closed set gained `dead_rows_unmasked`,
+        #     evaluated LAST so the arm still records whether it ever pinned and stalled. THE STATE
+        #     OF THIS GATE DOES NOT CHANGE FOR THAT. It is still the middle one -- armed, tested,
+        #     not met -- because the arm IS armed and the precondition IS the thing that failed;
+        #     what changed is the consequence, and the consequence belongs in the histogram rather
+        #     than on this line, or the two become copies of each other.
         vocab_arm = Gate(
             "cap.vocab_arm_honest", False, mask_dead, True,
             reason="LM_MASK_DEAD_ROWS=0: the vocabulary arm IS armed, so this precondition was "
@@ -304,10 +329,13 @@ def new_valve(cap: Config, *, restored=None):
                    "softmax denominator, and what the run measures is the reservation and not the "
                    "valve. An UNMET CONDITION and not an unreachable one: setting "
                    "LM_MASK_DEAD_ROWS=1 on this configuration changes the thing this gate is "
-                   "about, so an operator sent to set it is sent somewhere useful. NOTHING "
-                   "REFUSES THE LIFT -- observe's block-reason set has no entry for unmasked dead "
-                   "rows and neither startup_refusals clause covers it -- so the run lifts anyway "
-                   "and this line is the only place that says the lift was dishonest.")
+                   "about, so an operator sent to set it is sent somewhere useful. THE LIFT IS "
+                   "REFUSED, NOT MERELY REPORTED: observe's block-reason set carries "
+                   "`dead_rows_unmasked`, evaluated after every other condition, so an earned "
+                   "vocabulary lift on an unmasked output layer is declined and counted in "
+                   "CAP.counters' block-reason histogram rather than taken. This line says the "
+                   "precondition was not met; that histogram says how many lifts it cost. Neither "
+                   "is a copy of the other.")
     # WHERE A LIFT CAN ACTUALLY GO, ARM BY ARM. This gate read `Gate("cap.valve", targets != "off",
     # targets, "off")` until 2026-09-04, so its `fired` value and its reachability were the SAME
     # predicate and the only thing it could say on the six armed corners was FIRED -- meaning "the
@@ -453,14 +481,44 @@ def observe(cap: Config, valve, *, elapsed_windows, live_experts, live_vocab, im
     reachable in the 200-step empty-environment CPU run this rebuild launches with.
 
     LEVERS READ: targets, lift, lift_min, pin_windows, stall_band
-    WIRES READ: none (the ceilings were frozen onto the Valve at new_valve)
+    WIRES READ: none (the two hard ceilings AND the honesty precondition were both frozen onto the
+                Valve at new_valve -- counters["cap.hard_experts"], counters["cap.hard_vocab"] and,
+                since 2026-09-04, counters["cap.mask_dead_rows"]. Everything this per-flush decision
+                needs from another package is read ONCE, at build, which is what keeps this line
+                `none` while the closed set below grew a reason that reads LM's flag.)
     DID IT FIRE: Decision carries, on EVERY call: checks (the stall test RAN -- distinct from it
                  passing), pinned_experts/pinned_vocab, held_experts/held_vocab (Windows),
                  improving, and a BLOCK REASON from a closed set: targets_off | not_pinned |
                  warmup(observations/1000) | blackout | not_stalled(|improving|/band) |
-                 threshold(held/pin_windows) | at_hard_ceiling. This is the direct repair for the
-                 recorded failure at :7372-7380: "0 lifts" ALONE CANNOT DISTINGUISH "never full"
-                 FROM "never plateaued", and those have completely different fixes.
+                 threshold(held/pin_windows) | at_hard_ceiling | dead_rows_unmasked(the vocabulary
+                 arm only). This is the direct repair for the recorded failure at :7372-7380:
+                 "0 lifts" ALONE CANNOT DISTINGUISH "never full" FROM "never plateaued", and those
+                 have completely different fixes.
+
+    `dead_rows_unmasked` IS NEW ON 2026-09-04 AND IT IS THE REFUSAL THIS PACKAGE HAS OWED SINCE THE
+    HONESTY PRECONDITION WAS DECLARED. Until it existed, new_valve's cap.vocab_arm_honest Gate said
+    in its own printed reason that NOTHING in this tree refused a vocabulary lift into unmasked dead
+    rows -- the arm was armed, the precondition was tested and not met, and the run lifted anyway,
+    so a report line was the entire consequence. It bites when the VOCABULARY arm is armed
+    (targets in vocab|both), counters["cap.mask_dead_rows"] is False, and every other
+    condition has passed: the lift that would have happened does not, and the histogram counts it.
+      IT IS EVALUATED LAST, AFTER at_hard_ceiling, AND THE ORDER IS THE POINT. Placed first -- with
+      targets_off, which it resembles, being knowable at startup -- it would answer every call on
+      an unmasked run and the histogram would never learn whether that arm EVER pinned and stalled,
+      which is the exact "0 lifts cannot distinguish never full from never plateaued" collapse this
+      closed set was written to end. Placed last it counts precisely the lifts that were earned and
+      then refused for dishonesty, which is a number no other line in the run carries.
+      IT IS THE VOCABULARY ARM'S ALONE, and at targets=both the expert arm is untouched: an
+      unmasked output layer says nothing about reserving EXPERT slots. Decision carries ONE
+      block_reason and that is not new -- at_hard_ceiling is already per-arm -- so P4 must not let a
+      blocked vocabulary arm read as a valve that did nothing; the per-arm truth is CAP.counters'
+      lifts_experts and lifts_vocab, which is where every arm-level count belongs.
+      IT IS NOT A STARTUP REFUSAL, DELIBERATELY. Refusing the whole run at startup would remove a
+      configuration that runs today -- CAP_TARGETS=vocab with the shipped LM_MASK_DEAD_ROWS=False --
+      and spine/assemble.py's CAP.d_mask_dead_rows row names exactly that stricter repair as the
+      OWNER's to ask for ("a valve that refused to lift the vocabulary at all while the mask is off
+      would need no flag"). Blocking the lift per flush, by name, in the histogram, refuses the
+      dishonest measurement without refusing the run and without taking that decision.
     """
     cap = cap.owned_by("CAP")
     raise NotImplementedError(

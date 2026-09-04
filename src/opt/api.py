@@ -1301,22 +1301,29 @@ def counters(opt: Config, st):
     happened. What it gives up: a parent that miscounted is not re-caught here. The parent's own
     counters() call is where that reading belongs.
 
-    THIS COMPARISON IS STILL AN UNNAMED Backwards-to-Steps CONVERSION AND P4 COULD NOT REMOVE IT.
-    `due_steps = (n_bwd - base_bwd) // divisor` divides a BACKWARD-PASS count by backward-passes-per-
-    optimizer-step, which IS a Steps count, and compares it against a Steps count -- both operands
-    deliberately unwrapped to bare ints first, so units.Clock.__floordiv__ (absent) and Clock.__eq__
-    (which raises across kinds) never see them. That is the shape
-    tests/test_ownership.py::check_o11_no_unnamed_clock_arithmetic exists for, and O11 cannot see it
-    because its AST half matches only `opt.<clock_lever>` attribute operands and both of these are
-    locals. THE NUMBER IS RIGHT at every setting driven (ACCUM=1: 1000 backward to 1000 steps;
-    ACCUM=4: 62 backward to 15 steps, 52 to 13), which is precisely why it is written down rather
-    than dismissed. THERE IS NO FUNCTION TO CALL: spine/derive.py has accum_due(Backwards, accum) ->
-    bool and no Backwards-to-Steps COUNT conversion (its clock functions are flush_period,
-    flush_period_windows, cadences_that_cannot_fire, opt_steps_from_windows, accum_due, pin_tick).
-    The repair is a new named function there returning units.Steps, so this becomes Steps against
-    Steps and raises on its own if either side is ever the wrong kind. It is NOT a wire and costs
-    nothing from the budget. This package may not edit spine/derive.py, so it is reported here and
-    in .rework/audits/repair_opt.json rather than written.
+    THE COMPARISON IS NOW Steps AGAINST Steps, THROUGH A NAMED CONVERSION, AND IT WAS AN UNNAMED
+    ONE UNTIL 2026-09-04. It was written `due_steps = (n_bwd - base_bwd) // divisor` against
+    `n_step - base_step`, on operands deliberately unwrapped to bare ints first, so units.Clock saw
+    neither side: a backward-pass count divided by backward-passes-per-optimizer-step, compared
+    against an optimizer-step count, with no kind anywhere in it. That is the shape
+    tests/test_ownership.py::check_o11_no_unnamed_clock_arithmetic exists for, and O11 could not see
+    it because its AST half matches only `opt.<clock_lever>` attribute operands and both of those
+    were locals. THE NUMBER WAS RIGHT at every setting driven (accum=1: 1000 backward passes, 1000
+    steps; accum=4: 62 backward passes, 15 steps, and 52 backward passes, 13 steps), which is
+    precisely why it was written down rather than dismissed -- an inline cross-kind division is a
+    defect even when it computes the right number, because it is a conversion nobody can audit.
+    The function is spine/derive.py::opt_steps_from_backwards, which refuses anything but a
+    Backwards at one end and a divisor below 1 at the other and returns units.Steps, so both sides
+    of this comparison now carry their kind and units.Clock raises on its own if either is ever the
+    wrong one. It is NOT a wire and costs nothing from the budget.
+
+    ITS DIVISOR IS accum ALONE AND NOT THE EFFECTIVE BATCH, which is the way this repair breaks
+    while looking correct. spine/derive.py::opt_steps_from_windows divides by
+    `d_effective_batch_windows` because it starts at the WINDOW, two boundaries below an optimizer
+    step; this starts at the BACKWARD PASS, one boundary below, because a backward pass is one
+    flush. Passing the two-boundary divisor here would divide 62 backward passes by 64 at the
+    heavy-run command and report 0 steps due against 15 taken -- a correct run raising the P3-H29
+    message, which is a worse failure than the unnamed division it replaced.
 
     The report prints backward, step, accum, batch_windows and
     d_effective_batch_windows TOGETHER, so the batch size a run TRAINED at is a printed number
@@ -1433,8 +1440,17 @@ def counters(opt: Config, st):
     # parent's own counters() call is where that reading belongs, and it makes it.
     base_bwd = int(st.counters.get("opt.ckpt.backward_at_load", 0) or 0)
     base_step = int(st.counters.get("opt.ckpt.step_at_load", 0) or 0)
-    due_steps = (n_bwd - base_bwd) // divisor
-    if due_steps != n_step - base_step:
+    # BOTH SIDES CARRY THEIR KIND, AND THE CONVERSION BETWEEN THEM HAS A NAME. The two
+    # subtractions are within one kind each (Backwards from Backwards, Steps from Steps), which
+    # units.Clock permits and which is what makes "since the last resume" expressible at all;
+    # spine/derive.py::opt_steps_from_backwards is the one boundary crossed, and `!=` between two
+    # units.Steps raises UnitError of its own accord if either side ever arrives in another kind.
+    # The divisor is accum, NOT d_effective_batch_windows: that product spans the window boundary
+    # as well and belongs to the horizon, which build() resolves with opt_steps_from_windows.
+    due = derive.opt_steps_from_backwards(st.n_backward - U.Backwards(base_bwd), divisor)
+    taken = st.opt_step - U.Steps(base_step)
+    due_steps = int(due)
+    if due != taken:
         since = ("" if not (base_bwd or base_step) else
                  f" Measured since the last resume, which restored backward={base_bwd} and "
                  f"step={base_step}: {n_bwd - base_bwd} backward pass(es) and "

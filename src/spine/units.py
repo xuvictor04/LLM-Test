@@ -35,9 +35,42 @@ class Clock:
     Deliberately NOT an int subclass. `class Steps(int)` would let `Steps(4000) >= 250` succeed silently,
     which is the exact failure this exists to stop -- a threshold that came from somewhere else, in
     somebody else's unit, comparing fine.
+
+    `gates` IS A DECLARED SLOT AND NOT AN OMISSION, which is what this docstring exists to say. A
+    period accessor returns a Clock and carries its own DID IT FIRE record on it as a tuple of
+    spine.gate.Gate -- decision D14 shipped `ckpt/api.py::save_period` on exactly that convention, and
+    it is the ONE producer in the tree that attaches to a Clock (the other five attach to their own
+    package record: FAB's Population, MEM's Store and TOK's Vocabulary all name `gates` in their OWN
+    `__slots__`, and CAP's Valve and SIG's SigState carry their own `__dict__`; none of the five is a
+    Clock subclass and none of them can be reached from this file). It USED TO WORK BY ACCIDENT: this
+    class declared `__slots__ = ("n",)`, the six kinds below declared none of their own, and the
+    implicit `__dict__` every subclass instance therefore carried was the only reason
+    `period.gates = (gate,)` landed anywhere. That is the shape this project refuses everywhere else --
+    a mechanism working because of what nobody wrote -- and it had the ordinary tidy-up as its
+    trigger: adding `__slots__ = ()` to the six kinds, a plausible edit by anyone who has never read
+    D14, turned save_period's last-but-one statement into `AttributeError: 'Windows' object has no
+    attribute 'gates'`, measured on a scratch tree.
+
+    SO THE AFFORDANCE IS NAMED AND THE TIDY-UP IS ALREADY DONE: `gates` is declared HERE, once, in the
+    class the convention belongs to, and the six kinds carry `__slots__ = ()` so that the edit that
+    used to break them is the state they ship in. Two things follow, and both are checked below by
+    _verify_gate_channel: a Clock still accepts `.gates`, and a Clock accepts NOTHING ELSE -- the
+    implicit `__dict__` is gone, so a value object can no longer be given an undeclared attribute by
+    anyone who happens to have one in hand.
+
+    WHAT THIS DOES NOT FIX, said here so it is not discovered: the slot is UNSET on a fresh instance
+    and every operation returns a fresh instance, so `period - Windows(1)`, `Windows(period)` and
+    `period + Windows(0)` all come back with no gates -- exactly as they did when the carrier was a
+    `__dict__`. A reader must use `getattr(clock, "gates", ())` and a caller must not re-wrap a period
+    it was handed. Declaring the slot makes the channel legal and findable; it does not make a value
+    object carry state through its own arithmetic, and it should not.
     """
 
-    __slots__ = ("n",)
+    # ("n", "gates"): the count, and the DID IT FIRE channel the docstring above declares. It is on
+    # the BASE and not repeated on the six kinds because the convention is the Clock's, not any one
+    # kind's -- today only Windows carries a gate, but every period accessor in the tree returns a
+    # Clock and any of them may.
+    __slots__ = ("n", "gates")
     KIND = "clock"
 
     def __init__(self, n=0):
@@ -99,34 +132,40 @@ class Clock:
 
 class Steps(Clock):
     """Optimizer steps. What the LR schedule's horizon is denominated in, and nothing else."""
+    __slots__ = ()
     KIND = "steps"
 
 
 class Flushes(Clock):
     """Batch flushes. The loop body runs once per flush; `step` advances per WINDOW. These are not the
     same number and treating them as one is the project's single most repeated defect."""
+    __slots__ = ()
     KIND = "flushes"
 
 
 class Windows(Clock):
     """Stream windows. What `step` counts, and what the router selects per."""
+    __slots__ = ()
     KIND = "windows"
 
 
 class Backwards(Clock):
     """Backward passes. What gradient accumulation must count, since ACCUM gating on a window counter
     accumulates nothing -- measured 55 optimizer steps where 13 were due."""
+    __slots__ = ()
     KIND = "backward passes"
 
 
 class Epochs(Clock):
     """Passes over the stream. Never a schedule horizon: EPOCHS setting both run length and the cosine
     horizon means two runs differing only in EPOCHS are two different learning-rate experiments."""
+    __slots__ = ()
     KIND = "epochs"
 
 
 class Selections(Clock):
     """Times an expert was chosen. The utilization clock, distinct from wall-clock age."""
+    __slots__ = ()
     KIND = "selections"
 
 
@@ -150,3 +189,50 @@ NAME = "name"
 FLAG = "on/off"
 
 CLOCK_KINDS = (Steps, Flushes, Windows, Backwards, Epochs, Selections)
+
+
+# ---- the gate channel is CHECKED, not merely declared -------------------------------------------
+def _verify_gate_channel():
+    """Refuse to import if a Clock can no longer carry its DID IT FIRE record, or can carry anything.
+
+    THIS RUNS AT IMPORT AND IT IS NOT DECORATION. The `.gates` attachment used to work because the
+    six kinds above declared no `__slots__` of their own, so every instance carried an implicit
+    `__dict__` -- and the ordinary tidy-up that removes it (`__slots__ = ()` on a subclass of a
+    slotted class) turned `ckpt/api.py::save_period`'s gate attachment into an AttributeError with
+    nothing anywhere saying so. That was a silent break of a DID IT FIRE surface, which is the class
+    of defect the whole gate record exists to refuse; a report that loses a gate and prints the rest
+    is exactly the "armed, did not fire" that was never measured.
+
+    An import-time check and not a test, for one reason: this file is imported by every package and
+    by every tool, so the failure arrives at whoever made the edit, on the next thing they run,
+    naming D14 and the producer. A test in tests/** would be the right shape too, and this does not
+    replace it -- but tests can be run selectively and an import cannot be skipped.
+
+    IT CHECKS BOTH DIRECTIONS, because the affordance is now a declaration and a declaration has two
+    ways to go wrong. Removing `gates` from Clock.__slots__ breaks the producer. Deleting a kind's
+    `__slots__ = ()` puts the implicit `__dict__` back, and the channel would then work again by
+    accident -- the same undeclared affordance, silently restored, and any attribute at all could be
+    hung on a value object. Both are refused here, by name.
+    """
+    for kind in CLOCK_KINDS + (Clock,):
+        probe = kind(1)
+        try:
+            probe.gates = ()
+        except AttributeError:
+            raise RuntimeError(
+                f"spine.units.{kind.__name__} can no longer carry `.gates`. That attribute is the "
+                f"DID IT FIRE channel decision D14 shipped CKPT.save_period on -- it returns a "
+                f"units.Windows with `period.gates = (Gate('ckpt.periodic_armed', ...),)` -- and "
+                f"without it that gate is lost with no error at the producer and no line in the "
+                f"report. Restore 'gates' to spine/units.py::Clock's __slots__; do not add a "
+                f"__slots__ of its own to a Clock kind that shadows it.") from None
+        if hasattr(probe, "__dict__"):
+            raise RuntimeError(
+                f"spine.units.{kind.__name__} instances carry a __dict__ again, so `.gates` is once "
+                f"more an ACCIDENT rather than the declared slot on spine/units.py::Clock, and any "
+                f"undeclared attribute can be hung on a value object. This is the state the tree "
+                f"was in until 2026-09-04, when the omission was the only reason CKPT.save_period "
+                f"worked. Give every kind in CLOCK_KINDS `__slots__ = ()` back.")
+
+
+_verify_gate_channel()

@@ -393,6 +393,84 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
     return Steps(1) if n < 1 else Steps(n)
 
 
+def opt_steps_from_backwards(n_backward, accum):
+    """A count of BACKWARD PASSES, expressed in the OPTIMIZER STEPS they were due to produce.
+
+    UNIT IN: n_backward = Backwards, accum = backward passes per optimizer step (count).
+    UNIT OUT: Steps.
+
+    THE CONVERSION THE ACCUMULATION INVARIANT WAS WRITING BY HAND. opt/api.py::counters proves
+    ISSUES P3-H29 dead with one comparison -- backward over accum against the optimizer-step
+    counter -- and it wrote that comparison as
+
+        due_steps = (n_bwd - base_bwd) // divisor
+        if due_steps != n_step - base_step:
+
+    on operands deliberately unwrapped to bare ints first, so units.Clock saw neither side. A
+    backward-pass count divided by backward-passes-per-optimizer-step IS a Steps count, compared
+    against a Steps count, with no kind anywhere in it: the exact shape
+    tests/test_ownership.py::check_o11_no_unnamed_clock_arithmetic exists to forbid, inside the
+    function whose own docstring calls that comparison "the one invariant that proves the
+    accumulation defect is dead". O11 could not see it -- its AST half matches `opt.<clock_lever>`
+    attribute operands and both of those are locals -- and THE NUMBER WAS RIGHT at every setting
+    anyone drove (accum=1: 1000 backward passes, 1000 steps; accum=4: 52 backward passes, 13
+    steps). An inline cross-kind division is a defect even when its number is right, which is the
+    whole of units.py::Clock.convert's rule: "There is no implicit path between kinds ... call the
+    named function in spine.derive that already knows the rate, so the conversion exists in one
+    place with a name."
+
+    ONE BOUNDARY, NOT TWO, AND THAT IS WHY THIS IS NOT opt_steps_from_windows. Three clocks sit
+    under an optimizer step and there are two boundaries between them: batch_windows is WINDOWS PER
+    FLUSH, and accum is backward passes -- one per flush -- PER OPTIMIZER STEP.
+    opt_steps_from_windows starts at the window, two boundaries below the step, so its divisor is
+    the PRODUCT of both (`effective_batch_windows = batch_windows x accum`). This one starts at the
+    backward pass, ONE boundary below the step, so its divisor is `accum` alone. Handing this
+    function the two-boundary divisor is the likeliest way to break the invariant while appearing
+    to repair it: at the heavy-run command's batch_windows=16 accum=4 it divides 62 backward passes
+    by 64 and reports 0 steps due against the 15 that were taken, so a CORRECT run raises the
+    P3-H29 message and the reader is sent after a defect that did not happen.
+
+    IT DOES NOT FLOOR AT ONE, AND opt_steps_from_windows DOES. The difference is HORIZON against
+    COUNT and it is not a style choice. A horizon of zero divides by zero in n_cycles and ends the
+    schedule before the run, so it is floored; a count of steps due is a MEASUREMENT of what has
+    happened, and zero backward passes have produced exactly zero optimizer steps. That is the true
+    reading at the first call of every run and the reading the invariant is checked against most
+    often -- a floor of one here would make counters() raise "1 optimizer step was due and 0 were
+    taken" on a state where nothing has run yet, which is the untrippable-guard family inverted
+    into a guard that fires on the empty case.
+
+    TRUNCATES, like every conversion in this file: the backward passes accumulated since the last
+    step are not yet a step, and rounding them up would report a step that has not been taken. A
+    NEGATIVE count is not refused here, and that is deliberate -- the only way to produce one is the
+    caller's own resume subtraction (`n_backward - backward_at_load`), and its invariant reports
+    that with both numbers and the boundary they were measured from, which is a better sentence
+    than any this function could raise.
+
+    REFUSES ANYTHING BUT A Backwards AT ONE END, exactly as accum_due does and for the same
+    measurement: the old gate counted the WINDOW counter and accumulated nothing, 55 optimizer
+    steps where 13 were due. REFUSES A DIVISOR BELOW 1 at the other, as flush_period,
+    flush_period_windows and opt_steps_from_windows do. accum_due keeps a SILENT `max(1, ...)` on
+    the same lever instead, and the asymmetry is recorded rather than tidied away: that clamp
+    reproduces the shipped read-site `max(1, _i("ACCUM", 1))` (self_organize.py:4198), which
+    opt/levers.py::OPTLevers names as the one surviving guard that "still hides a typo". This is a
+    CONVERSION and not a gate, so it refuses like the other three; and opt/api.py::build refuses
+    OPT_ACCUM below 1 at startup, so no live run can reach either behaviour with a divisor the
+    other would have handled differently.
+    """
+    if type(n_backward) is not Backwards:
+        raise UnitError(f"opt_steps_from_backwards: n_backward must be Backwards, got "
+                        f"{type(n_backward).__name__}. Accumulation counts BACKWARD PASSES -- a "
+                        f"window counter measured 55 optimizer steps where 13 were due, and a "
+                        f"Steps value here is the answer being fed back in as the question.")
+    k = int(accum)
+    if k < 1:
+        raise UnitError(f"opt_steps_from_backwards: accum={accum!r} -- an optimizer step covers at "
+                        f"least one backward pass. This divisor is accum ALONE and never "
+                        f"batch_windows x accum: that product spans two boundaries and belongs to "
+                        f"opt_steps_from_windows, which starts a window lower.")
+    return Steps(n_backward.n // k)
+
+
 def accum_due(n_backward, accum):
     """Is an optimizer step due, given how many BACKWARD PASSES have accumulated?
 
