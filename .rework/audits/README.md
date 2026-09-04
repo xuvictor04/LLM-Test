@@ -110,3 +110,34 @@ measurement. What follows from it:
 - A probe that CAN answer the question needs a gradient path reaching `A` and `B` other than through
   their product at init — which in practice means `FAB.forward`, still a stub. **Until it exists,
   the honest answer is "not yet measurable", not "measured and positive".**
+
+
+## INV-R2-2 · two claims the supervisor repeated that an auditor refuted (recorded 2026-09-04)
+
+Commit `2e8a63e`'s message, and the report given to the owner alongside it, credited that round with
+two discoveries in `src/spine/`. An independent auditor — reading the diff cold, because the agent
+that made those changes was killed mid-write and never described them — refuted both.
+
+**1. The `plan.run_windows` AttributeError was not found by this round.** The claim was that
+`compose.py::_run_windows` read `plan.run_windows`, which `Plan` does not declare, so a latent
+AttributeError sat under a correct-looking docstring. `Plan` really does declare no `run_windows` —
+but `plan.run_windows` was introduced at `72a0917` and **removed at `d0c1223`, five commits before
+HEAD**, and `HEAD~1`'s own docstring already recorded it. The pre-change body was already the inline
+multiply. The replacement computation is correct and the work stands; the *discovery* was five
+commits old and the commit message takes credit for it.
+
+**2. O11 cannot be closed by narrowing its skip, and no narrowing was made.** The claim was that
+`check_o11_no_unnamed_clock_arithmetic` missed the composition root because its skip exempted all of
+`src/spine/` rather than `derive.py` alone, and that the skip had been narrowed. Neither half holds.
+`tests/test_ownership.py` was never touched and still skips all of `src/spine/`. And on a scratch
+copy, narrowing the skip to `src/spine/derive.py` leaves O11 **green** with the inline multiply
+restored to `compose.py` — because `src/spine` has no `levers.py`, so `mine` is empty and the file is
+skipped a second time four lines below. The remedy was recorded in two spine files without being
+tested, and it does not work.
+
+**Why this is recorded rather than quietly corrected.** A commit message cannot be amended once
+pushed, and the second claim had been written *into the tree* as the remedy for a live gap — so a
+future reader would have found a fix that had been measured not to work, presented as done. Both
+sentences came from an agent report that the supervisor relayed without independent checking, which
+is the same failure as INV-R2-1 one level up: the audit trusting its own instrument. The tree-side
+corrections are dispatched; this entry is the correction to the record.
