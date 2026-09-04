@@ -117,13 +117,14 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
     had not happened to be re-entered twice since the resume. Same word, opposite consequence; the
     difference is which side of the comparison the reset lands on.
 
-    LEVERS READ: none directly -- see d_expert_slots under WIRES READ. `enabled` and `reservoir`
-                 are consumed by observe (this package's own next entry point, still a stub) and
-                 `prior_blend` by state_dict/prior/census (also stubs), each of which already
-                 names it in its own LEVERS READ line; this line used to list all three as if this
-                 function's body read them, and it never has -- DOM_ENABLED=0 builds the identical
-                 live Partition DOM_ENABLED=1 does, which is correct for THIS entry point (an empty
-                 partition either way costs nothing to allocate) but was not what the claim said.
+    LEVERS READ: none (nothing off `dom` directly -- see d_expert_slots under WIRES READ.
+                 `enabled` and `reservoir` are consumed by observe, this package's own next entry
+                 point and still a stub, and `prior_blend` by state_dict/prior/census, also stubs,
+                 each of which already names it in its own LEVERS READ line; this line used to list
+                 all three as if this function's body read them, and it never has -- DOM_ENABLED=0
+                 builds the identical live Partition DOM_ENABLED=1 does, which is correct for THIS
+                 entry point, an empty partition either way costing nothing to allocate, but was
+                 not what the claim said)
     WIRES READ: d_expert_slots
     DID IT FIRE: part.n_opened, part.n_restored_domains
     """
@@ -281,7 +282,7 @@ def note_competence(dom: Config, part, *, did, bits):
     -- rare-and-stale is exactly what a NICHE domain looks like from a utilization-only vantage
     point, and it is also what a DEAD one looks like.
 
-    LEVERS READ: none -- this is state maintenance whose rate arrives as a wire
+    LEVERS READ: none (this is state maintenance whose rate arrives as a wire, d_comp_ema below)
     WIRES READ: d_comp_ema
     DID IT FIRE: part.n_competence_updates; comp_glob is None until the first one lands, which is
                  the state in which competence protection cannot fire, and the Gate says so
@@ -424,7 +425,7 @@ def state_dict(dom: Config, part):
     HISTORY the relative shift test calibrates on. The four capitalised ones are the omissions that
     each disarmed a live mechanism at the run boundary (M51).
 
-    LEVERS READ: none. Pure read of `part`.
+    LEVERS READ: none (a pure read of `part`)
     WIRES READ: none
     DID IT FIRE: part.n_state_dicts
     """

@@ -638,7 +638,7 @@ def state_dict(mem: Config, store):
     Blocks are stored WITH their block index; open_store(restored=...) places rows back by block
     and refuses a geometry change rather than truncating in save order.
 
-    LEVERS READ: none. It is a pure read of `store`.
+    LEVERS READ: none (a pure read of `store`)
     WIRES READ: none
     DID IT FIRE: store.n_state_dicts
     """

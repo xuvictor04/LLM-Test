@@ -639,7 +639,18 @@ def build(opt: Config, *, param_groups, run_windows):
                  lr_decay, lr_min_frac, accum, batch_windows, grad_clip
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: opt.build.calls (exactly 1), opt.build.wavelength_from_sentinel,
-                 opt.build.warmup_clamped (with both numbers), opt.build.cycles_fitted (n_cycles --
+                 opt.build.warmup_clamped with opt.build.warmup_asked and opt.build.warmup (the two
+                 numbers the clamp is between -- named as KEYS here as of 2026-09-04, because
+                 "with both numbers" described them without spelling either, and counters() reads
+                 opt.build.warmup_asked by name),
+                 opt.build.run_steps and opt.build.wavelength (the resolved horizon, ALSO WRITTEN
+                 BY THIS FUNCTION AND MISSING FROM THIS ENUMERATION until 2026-09-04. They are the
+                 build-time record of what opt_steps_from_windows and the 0 sentinel produced, they
+                 survive into the returned ledger through `ledger = dict(st.counters)`, and they are
+                 NOT the same reading as the report's own horizon line, which prints
+                 st.horizon.run_steps and st.horizon.wavelength -- an unannounced integer in a dict
+                 is exactly what opt.build.group_overlap was called out for two entries below),
+                 opt.build.cycles_fitted (n_cycles --
                  "armed" for a restart means > 1, NOT lr_restarts == 1),
                  opt.build.params.base and opt.build.params.encoder (the two numbers that make a
                  group arriving EMPTY visible, argued for in this docstring and MISSING FROM THIS
@@ -1066,9 +1077,13 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                  opt.lr.envelope_applied (the n_cycles > 1 gate, the old _nenv) and
                  opt.lr.floor_applied (the lr_min_frac clamp actually biting -- the floor had
                  neither a counter nor a Gate in any configuration, so "the schedule never returned
-                 zero" was unattested in the ledger). ALL FIVE MOVED HERE FROM lr_at, which is
+                 zero" was unattested in the ledger). THE FIRST FOUR MOVED HERE FROM lr_at, which is
                  documented pure and documented as probeable and was inflating them from every
-                 probe,
+                 probe; opt.lr.floor_applied IS NEW AND WAS NEVER IN lr_at -- this line said "ALL
+                 FIVE MOVED HERE" until 2026-09-04, which is two repairs landing in parallel and
+                 being enumerated as one. There was nothing to move: the floor had no counter
+                 anywhere in the tree, which is the sentence in this same entry and in counters()'s
+                 own docstring, and a counter that never existed cannot have been probed,
                  opt.restart.wraps (cycle-index advances -- the STRUCTURAL restart count, which is
                  not opt.restart.detected and diverges from it exactly when the damping or the
                  envelope has lowered a wrap under the detector's own bar),
@@ -1331,8 +1346,14 @@ def counters(opt: Config, st):
     fetch_big.py names ACCUM=4 in its recommended heavy-run command and bench_gpu.sh ships ACCUM=2.
 
     Gates rendered with their own arithmetic (G4): lr_sched, lr_warmup, lr_min_frac (the floor),
-    lr_restarts (n_cycles > 1, NOT the flag), weight_decay > 0, lr_decay > 0 and n_cycles > 1,
-    lr_shift_warm > 0 and a shift_at ever supplied, and opt.ckpt.horizon_changed.
+    lr_restarts (n_cycles > 1, NOT the flag), lr_restart_damp (< 1.0 on a losing cycle -- ADDED TO
+    THIS ENUMERATION 2026-09-04, when its live arm was found not to read the `< 1.0` its own
+    unreachable arms already print), weight_decay > 0, grad_clip > 0 (twice: opt.build.grad_clip for
+    the setting and opt.clip.applied for the steps that hit it), lr_decay > 0 and n_cycles > 1,
+    lr_shift_warm > 0 and a shift_at ever supplied, and opt.ckpt.horizon_changed. Three more Gates
+    are not lever-gated and are argued for elsewhere: opt.accum.invariant (the paragraph above),
+    opt.grad_norm (the RENDERS paragraph below) and opt.encoder_steps_here (maybe_step's Q-OPT-6
+    tripwire, read backwards -- 0 is the passing state). FOURTEEN in all, counted from the tree.
 
     EVERY ONE OF THEM TESTS `sched` FIRST, and until 2026-09-04 not one of them did. _schedule's
     first statement returns the peak flat at OPT_LR_SCHED=none, so the warmup, the wavelength, the
@@ -1342,6 +1363,31 @@ def counters(opt: Config, st):
     -- the words spine/gate.py::Gate reserves for a mechanism that RAN -- for three mechanisms with
     no code path, in the same report whose opt.lr.sched line asserted in writing that all of them
     were structurally unreachable. That is the arm the whole schedule hypothesis is tested on.
+
+    TESTING `sched` FIRST IS NECESSARY AND IS NOT SUFFICIENT, AND TWO GATES NEEDED THE SECOND HALF
+    (2026-09-04). Both printed "armed, did not fire" on a configuration where the mechanism ran and
+    COULD NOT fire, which is the same collapse one lever down from the ablation.
+      * opt.lr.min_frac. The clamp is the last act of _schedule and every term above it is already
+        written above the floor -- the cosine bottoms exactly AT min_frac and the damping is
+        `min_frac + (cyc - min_frac) * amp` -- so only the two MULTIPLIED modifiers, the envelope
+        and the shift re-warm, can dive under it. The gate's reason said exactly that in prose while
+        its reachability read only sched and min_frac, so THE SHIPPED DEFAULTS printed it armed:
+        measured over the whole 1000-step horizon and 200 steps past it, floor_applied=0 with
+        opt.lr.decay and opt.lr.shift_warm both printed UNREACHABLE in the same report.
+      * opt.lr.restart_damp. maybe_step clause 4 is gated on `lr_restart_damp < 1.0`, and every
+        unreachable arm of this gate already spells "< 1.0" into its own threshold, but the live arm
+        did not read it: at OPT_LR_RESTART_DAMP=1.0 over 200 steps at OPT_LR_WAVELENGTH=20 with a
+        losing Reading on every step -- 8 wraps, 4 detected restarts, 200 Readings -- the gate read
+        "armed, did not fire (0 vs damp=1.0, refused_n1=0, no_reading=0, readings=200)", where the
+        two companion zeroes are zero for the same reason the first one is.
+
+    THE opt.accum.invariant GATE PRINTS THE COMPARISON ACTUALLY MADE, AND UNTIL 2026-09-04 IT
+    PRINTED A FALSE EQUATION ON EVERY RESUMED RUN. The invariant is measured since the last resume;
+    the Gate was built from the UNBASED counters, so a parent at OPT_ACCUM=1 with backward=8 step=8,
+    resumed at OPT_ACCUM=4 and driven 8 more backward passes, printed "FIRED (16 backward // 4 vs
+    10) -- backward // accum == step". 16 // 4 is 4. It is rendered from `due` and `taken`, the two
+    sides of the `!=` itself; the run totals stay on the opt.backward=/opt.step= report line, where
+    they are two numbers rather than an equation.
 
     THE WARMUP AND THE FLOOR HAD NO GATE AT ALL, in any configuration, and the warmup is
     structurally unreachable on every run of 19 or fewer optimizer steps because build() clamps it
@@ -1487,6 +1533,17 @@ def counters(opt: Config, st):
     ckpt_loaded = int(st.counters["opt.ckpt.loaded"])
     horizon_changed = int(st.counters["opt.ckpt.horizon_changed"])
 
+    # THE TWO MULTIPLIED MODIFIERS, NAMED ONCE, BECAUSE THE FLOOR GATE'S REACHABILITY IS THEIRS.
+    # `floored` in _schedule is `cyc < min_frac` evaluated AFTER every other term, and every other
+    # term is written so that it cannot go below min_frac: the cosine bottoms exactly AT it and the
+    # damping is `min_frac + (cyc - min_frac) * amp`. Only the envelope and the shift re-warm
+    # MULTIPLY the floored cycle, so they are the only two conditions under which the clamp can
+    # bite -- which is what the floor gate's own reason has always said in prose while its
+    # reachability predicate did not read them.
+    envelope_live = decay > 0.0 and n_cycles > 1 and int(st.horizon.run_steps) > warmup_n
+    rewarm_live = shift_warm > 0 and notifications > 0
+    floor_reachable = sched_live and min_frac > 0.0 and (envelope_live or rewarm_live)
+
     # THE ONE SENTENCE EVERY DOWNSTREAM GATE NEEDS AT THE ABLATION, and the reason they all need it:
     # _schedule's FIRST statement is `if sched == "none": return float(lr), (...)`, so the warmup,
     # the wavelength, the floor, the restart wrap, the damping, the envelope and the shift re-warm
@@ -1521,8 +1578,29 @@ def counters(opt: Config, st):
     ledger["opt.horizon.cycle_steps"] = cycle_steps
 
     gates = [
-        Gate("opt.accum.invariant", True, f"{n_bwd} backward // {divisor}", n_step,
-             reason="backward // accum == step -- the one statement that proves ISSUES P3-H29 dead"),
+        # THE PRINTED ARITHMETIC IS THE COMPARISON ACTUALLY MADE, AND UNTIL 2026-09-04 IT WAS NOT.
+        # The invariant is measured SINCE THE LAST RESUME -- that is what base_bwd and base_step are
+        # for, and it is the repair that stopped a blessed resume at a changed OPT_ACCUM from raising
+        # P3-H29 -- while this Gate was built from the UNBASED counters. Measured: a parent at
+        # OPT_ACCUM=1 with backward=8 step=8, resumed at OPT_ACCUM=4 and driven 8 more backward
+        # passes, reaches backward=16 step=10, counters() correctly returns, and the line read
+        # "Gate opt.accum.invariant: FIRED (16 backward // 4 vs 10) -- backward // accum == step".
+        # 16 // 4 is 4. The gate asserted an equation its own printed numbers refuted, under the word
+        # FIRED, in the one line whose stated job is proving P3-H29 dead -- and a reader chasing an
+        # accumulation defect on a resumed run has nothing else to go on. `due` and `taken` ARE the
+        # two sides of the `!=` three lines up, so the gate now renders those; the unbased pair is
+        # still printed, correctly, on the opt.backward=/opt.step= report line above.
+        Gate("opt.accum.invariant", True,
+             f"{n_bwd - base_bwd} backward // {divisor}", int(taken),
+             reason=("backward // accum == step -- the one statement that proves ISSUES P3-H29 dead"
+                     if not (base_bwd or base_step) else
+                     f"backward // accum == step -- the one statement that proves ISSUES P3-H29 "
+                     f"dead, MEASURED SINCE THE LAST RESUME, which restored backward={base_bwd} and "
+                     f"step={base_step}. The numbers above are this process's own "
+                     f"({n_bwd - base_bwd} backward pass(es) against {int(taken)} step(s)); the "
+                     f"run totals are opt.backward={n_bwd} and opt.step={n_step} on the report line "
+                     f"above, and OPT_ACCUM may legitimately have changed at the boundary, so those "
+                     f"two are NOT the pair this equation holds between.")),
         # reachable=sched_live AND NOT reachable=True. It was hard-coded True, so the ablation
         # printed "armed, did not fire (none vs cosine)" -- the measurement words -- followed by its
         # own reason asserting unreachability. One line making both statements. The two gates
@@ -1562,16 +1640,46 @@ def counters(opt: Config, st):
         # OPT_LR_SCHED=none the floor is bypassed with nothing saying so. opt.lr.floor_applied
         # counts the steps where the clamp actually BIT, i.e. where the composition of the cycle
         # with the envelope or the re-warm had dived under the floor and this line pulled it back.
-        Gate("opt.lr.min_frac", sched_live and min_frac > 0.0
-             and st.counters["opt.lr.floor_applied"] > 0,
+        #
+        # AND IT NEEDS A COMPOSED MODIFIER TO EXIST, WHICH THE SHIPPED DEFAULTS DO NOT PROVIDE
+        # (2026-09-04). The clamp is the last act of _schedule and every term above it is ALREADY
+        # floored: the cosine bottoms AT min_frac (cos(pi * 1.0) is exactly -1.0, so `cyc < min_frac`
+        # is False, not True), and the damping is written `min_frac + (cyc - min_frac) * amp`, which
+        # cannot go below it either. The only two terms that MULTIPLY a floored cycle -- the envelope
+        # and the shift re-warm -- are the only two ways the composition can dive under, which is
+        # what this gate's own reason says. At the shipped defaults BOTH are off: n_cycles resolves
+        # to 1 from the 0 sentinel so the envelope is gated out, and lr_shift_warm is 0. The gate
+        # was reachable=(sched_live and min_frac > 0) regardless, so a default run printed
+        # "Gate opt.lr.min_frac: armed, did not fire (0 vs min_frac=0.05 ...)" -- the words
+        # spine/gate.py::Gate reserves for a mechanism that RAN and was not satisfied -- two lines
+        # above "Gate opt.lr.decay: UNREACHABLE" and "Gate opt.lr.shift_warm: UNREACHABLE", the two
+        # mechanisms its own reason names as the only routes to firing. Measured over the whole
+        # 1000-step horizon at pure shipped defaults and 200 steps past it: floor_applied = 0,
+        # envelope_applied = 0, shift_warm_applied = 0. lr_min_frac is a GOAL B lever and this is the
+        # line that reports it, so "armed and inert" against "no composed modifier exists on this
+        # configuration" is exactly the distinction that must not collapse here.
+        Gate("opt.lr.min_frac", floor_reachable and st.counters["opt.lr.floor_applied"] > 0,
              st.counters["opt.lr.floor_applied"],
              f"min_frac={min_frac} clamping a composed modifier",
-             reachable=sched_live and min_frac > 0.0,
+             reachable=floor_reachable,
              reason=(sched_off if not sched_live else
                      "OPT_LR_MIN_FRAC=0.0: the clamp is max(0.0, cyc) over a cosine that is already "
                      "non-negative, so no step can be raised by it and the schedule HAS no floor -- "
                      "which is the setting lr_min_frac's goal-B argument exists to warn about."
                      if min_frac <= 0.0 else
+                     _stale_note(
+                         st, "opt.lr.floor_applied",
+                         f"OPT_LR_MIN_FRAC={min_frac} IS the floor and the cosine bottoms AT it, "
+                         f"never under it -- and so does the damping, which is written above the "
+                         f"floor by construction. Only a MULTIPLIED modifier can dive under, and "
+                         f"neither exists here: the envelope needs OPT_LR_DECAY > 0 with more than "
+                         f"one cycle fitted (OPT_LR_DECAY={decay}, {n_cycles} cycle(s) fitted over "
+                         f"{int(st.horizon.run_steps)} steps against a warmup of {warmup_n}), and "
+                         f"the re-warm needs OPT_LR_SHIFT_WARM > 0 with a shift_at supplied "
+                         f"(OPT_LR_SHIFT_WARM={shift_warm}, {notifications} notification(s)). So no "
+                         f"step of THIS run CAN need pulling back. The floor is still in force and "
+                         f"still reached; it is never breached.")
+                     if not floor_reachable else
                      "armed and no step needed pulling back: each modifier is individually floored, "
                      "and this counts only the steps where their COMPOSITION dived under the floor "
                      "(the envelope past its last peak, or a re-warm landing mid-anneal)")),
@@ -1687,6 +1795,31 @@ def counters(opt: Config, st):
                               f"the damping is gated on cycle_index > 0 and only "
                               f"{n_cycles} cycle(s) fit this run, so OPT_LR_RESTART_DAMP={damp} "
                               f"is off BY ARITHMETIC rather than armed and inert.")))
+    elif damp >= 1.0:
+        # THE LEVER AT ITS IDENTITY VALUE, WHICH EVERY UNREACHABLE ARM ABOVE ALREADY SPELLS INTO ITS
+        # OWN THRESHOLD ("< 1.0 on a losing cycle") AND WHICH THIS BRANCH DID NOT READ UNTIL
+        # 2026-09-04. maybe_step clause 4 is `if not paid and float(opt.lr_restart_damp) < 1.0`, so
+        # at OPT_LR_RESTART_DAMP=1.0 no losing cycle can ever damp and no seed count can ever be
+        # refused -- and this gate's else arm was reachable=True, so a multi-cycle run at damp=1.0
+        # printed "armed, did not fire (0 vs damp=1.0, refused_n1=0, no_reading=0, readings=200)".
+        # MEASURED, over 200 optimizer steps at OPT_LR_WAVELENGTH=20 with a losing Reading (9.0,
+        # seed_count 3) on every step: 8 wraps, 4 detected restarts, 200 readings, damped=0. The
+        # mechanism ran on four genuine losing restarts and could not fire on any of them, and the
+        # three numbers the gate prints beside the 0 say nothing about why -- refused_n1 and
+        # no_reading are 0 precisely BECAUSE the multiplier is the identity. build() refuses damp
+        # above 1.0 outright, so 1.0 is the whole of this arm.
+        gates.append(Gate("opt.lr.restart_damp", False, damp, "< 1.0 on a losing cycle",
+                          reachable=False,
+                          reason=_stale_note(
+                              st, "opt.restart.damped",
+                              f"OPT_LR_RESTART_DAMP={damp} is the IDENTITY multiplier and clause 4 "
+                              f"of maybe_step is gated on `lr_restart_damp < 1.0`, so a losing "
+                              f"cycle cannot be damped however many arrive: "
+                              f"{detected} detected restart(s) and {readings} Reading(s) on this "
+                              f"run reached that gate and none of them could pass it. The PLAN 3.8 "
+                              f"seed-count refusal sits INSIDE the same branch, so "
+                              f"opt.restart.damp_refused_n1 cannot move either -- its 0 is this "
+                              f"lever's value, not a verdict on any Reading's seed count.")))
     elif readings == 0:
         # THE SENTENCE IS TRUE NOW AND WAS NOT BEFORE. opt.restart.readings counted Readings
         # CONSUMED by a detected restart, so it read 0 on every run where no restart had yet fired

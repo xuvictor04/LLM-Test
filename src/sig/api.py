@@ -226,8 +226,9 @@ def encode(sig: Config, st, windows):
     Runs under no_grad and never touches the optimizer, so an instrument calling it cannot move the
     encoder (the G7 digest holds across it).
 
-    LEVERS READ: none directly -- everything comes off SigState (st.mode, st.d, st.width_units,
-                 st.encoder), which build() froze from mode, d and bigram_dim once
+    LEVERS READ: none (nothing off `sig` directly -- everything comes off SigState: st.mode,
+                 st.d, st.width_units, st.encoder, which build() froze from mode, d and bigram_dim
+                 once)
     WIRES READ: none
     DID IT FIRE: sig.encode_calls, sig.encode_windows, and sig.encode_width_seen asserted equal to
                  st.width_units on EVERY call -- a nonzero sig.encode_width_mismatch is the C4

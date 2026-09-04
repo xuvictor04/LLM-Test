@@ -121,8 +121,14 @@ the table on 2026-09-03: no Coupling there names EVAL as src or dst; the one EVA
 The count said FOUR while the list below carried five wires in four bullets -- the outgoing bullet is two
 couplings into two packages, not one -- so the outgoing pair is split out here and the number now matches
 what a reader can count. They are listed so the port has the list rather than rediscovering it, and the
-budget matters: spine/wire.py::WIRE_BUDGET leaves room for two more edges in the whole tree, so wiring
-even the two outgoing rows is a budget decision somebody has to take deliberately, not a tidy-up:
+budget matters: spine/assemble.py::COUPLINGS declares 23 couplings -- 19 cross-package wires, i.e. 19 of
+25 of the ledger spine/wire.py::WIRE_BUDGET fixes, plus 4 intra-package ones that book no edge -- so SIX
+edges remain in the whole tree. Every number in that clause is one tests/test_couplings.py's C4 prints and
+tests/test_contract.py's K13 re-checks against the table, so this sentence cannot go stale in silence the
+way its predecessor did. An earlier revision of this sentence said "two more
+edges"; that was a miscount and it travelled -- do not propagate it. Six is still a budget the five rows
+below would spend most of, so wiring even the two outgoing ones is a decision somebody has to take
+deliberately, not a tidy-up:
     incoming  d_prior_blend    DOM.prior_blend, so the domain-prior probe scores the same blend weight
                                training accumulated (census: domains/DOM_PRIOR)
     incoming  the held-out size resolved by DATA.val_cap, so a Sample can state how many bytes it

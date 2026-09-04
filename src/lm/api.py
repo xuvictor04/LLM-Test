@@ -370,9 +370,9 @@ def build_model(lm: Config, geom, *, device, seed):
     RECEIVES: device <- RUN.device, seed <- RUN.seed, geom <- resolve().
     RETURNS: nn.Module.
 
-    LEVERS READ: none directly -- everything comes off `geom`, which is why resolve() is a separate
-                 entry point: the refusals happen before allocation and the banner prints the same
-                 object the constructor consumed.
+    LEVERS READ: none (nothing off `lm` directly -- everything comes off `geom`, which is why
+                 resolve() is a separate entry point: the refusals happen before allocation and the
+                 banner prints the same object the constructor consumed)
     WIRES READ: none (through geom)
     DID IT FIRE: lm.build.arm_gru / lm.build.arm_transformer (exactly one is 1),
                  lm.build.compose_on, lm.build.heads_used (0 on gru -- the armed-but-inert
@@ -504,13 +504,13 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
     PROBE=0 split at the second logged step (6.1199 vs 6.1125) and never rejoined. A timing probe
     decided the run.
 
-    LEVERS READ: ctx -- ONLY on the pos-overflow refusal path, to print LM_CTX beside the actual
-                 window length in the raised message. Every other line in this function reads
-                 nothing off `lm` directly: the shapes and arm come off `model`/`model.geom`, which
-                 is why WIRES READ carries d_pos_max instead of a second read of `ctx` for the
-                 boundary check itself -- resolve() already asserts ctx == d_pos_max's source, so a
-                 second lever read here would be a second declaration of the one number it checks
-                 against.
+    LEVERS READ: ctx (ONLY on the pos-overflow refusal path, to print LM_CTX beside the actual
+                 window length in the raised message -- the read is the `int(lm.ctx)` in the raised
+                 message below. Every other line in this function reads nothing off `lm` directly:
+                 the shapes and arm come off `model`/`model.geom`, which is why WIRES READ carries
+                 d_pos_max instead of a second read of `ctx` for the boundary check itself --
+                 resolve() already asserts ctx == d_pos_max's source, so a second lever read here
+                 would be a second declaration of the one number it checks against)
     WIRES READ: d_pos_max
     DID IT FIRE: lm.encode.calls, lm.encode.key_path_truncated (n_layers actually reduced the
                  stack), lm.encode.pos_overflow_refused (MUST BE 0 -- a nonzero value is the 512
@@ -662,15 +662,19 @@ def decode(lm: Config, model, h, *, live_vocab, retired_ids):
     the refusal being invisible to a check is what let them. tests/test_contract.py's K14 reads this
     sentence now.
 
-    LEVERS READ: mask_dead_rows -- NOT `vocab_slots` or `compose`, which the body takes off
-                 `logits.shape[-1]` (already resolved when the table/head was built) and
-                 `model.compose` (the module's own flag, set once in the constructor) rather than
-                 re-reading either off the Config, for the same reason `dropout` is not re-read
-                 below: a second read here would be a second declaration of a number that already
-                 has an owner. NOT `dropout` either -- the readout dropout is the nn.Dropout MODULE
-                 build_model constructed from geom; this function applies it, it does not re-read
-                 the probability. A second read here would be a second declaration of one number,
-                 which is what L1 exists to stop.
+    LEVERS READ: mask_dead_rows (NOT `vocab_slots` or `compose`, which the body takes off
+                 `logits.shape[-1]`, already resolved when the table/head was built, and
+                 `model.compose`, the module's own flag set once in the constructor, rather than
+                 re-reading either off the Config. NOT `dropout` either: the readout dropout is the
+                 nn.Dropout MODULE build_model constructed from geom; this function applies it, it
+                 does not re-read the probability. A second read of any of the three here would be
+                 a second declaration of a number that already has an owner, which is what L1
+                 exists to stop. Those negatives sit INSIDE this parenthesis rather than after a
+                 dash because tests/test_contract.py::_split_items cuts this line at top-level
+                 commas and keeps an item only when it is a bare identifier: unparenthesised prose
+                 swallows the name standing in front of it, and that is how `mask_dead_rows` came
+                 to be dropped from its own declaration while counters() -- a stub that has never
+                 read it -- carried the package's only surviving K4 credit for it)
     WIRES READ: none
     DID IT FIRE: lm.decode.calls, lm.mask.applied, lm.mask.rows_masked (the count, so the dead
                  fraction is a number the report prints rather than infers), lm.mask.armed_no_rows

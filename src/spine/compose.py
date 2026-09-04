@@ -232,6 +232,28 @@ RNG_SUBSYSTEMS = ("lm", "sig", "fabric", "memory", "domains", "world", "tok.drop
 #      else. A third table would be invisible to
 #      the one check that exists because these rows were missing, so its rows would still report as
 #      orphans. A level with a table of its own that no check can see is still an orphan.
+#
+# EVERY CITATION IN THIS FILE WAS RE-RESOLVED AGAINST THE TREE ON 2026-09-04 AND TWENTY OF THEM
+# NAMED THE WRONG SYMBOL. tests/test_ownership.py's O12 checks that a cited symbol EXISTS, and its
+# own docstring states what it cannot reach -- "a citation naming a symbol that exists and is the
+# wrong one" -- which is precisely the residue the line-number-to-symbol conversion left behind: a
+# line number that had already gone stale converts to a CONFIDENTLY WRONG symbol, and every check
+# stays green. What the twenty were: ckpt/api.py::install_save_signal for resume_source's "ONE
+# SPELLING OF UNSET"; ckpt/api.py::check_geometry for new_retention's inert_reason; sig/api.py::
+# warm_up, twice, for state_dict's SIDECAR; sig/api.py::train_step for warm_up's own "before the
+# main loop"; data/api.py::open_areas for draw_stream's "dat.resample is read HERE"; data/api.py::
+# data_plan for stream_state's "RETURNS: dict"; fabric/api.py::build for forward's live_domains;
+# fabric/api.py::observe for contribution's baseline_logits_fn; fabric/api.py::manage for
+# grow_check's two-sided stall test; lm/api.py::encode twice and lm/api.py::<module> once, all
+# three for lm_loss; opt/api.py::scaled_backward for maybe_step's best_bpb Reading;
+# opt/api.py::<module> for Horizon's "resolved ONCE at build()"; domains/api.py::manage for
+# on_retokenize's signature; domains/api.py::observe.dom -- a LOCAL VARIABLE, which O12's AST walk
+# admits as a symbol because it collects Assign targets -- for rekey's `encode`; world/api.py::
+# manage for state_dict's plateau pair; train/api.py::new_clock for new_cadences' keyword-only
+# `periods`; and train/api.py::<module> for bench_summary's throughput number. NONE of them was
+# red. THE RULE THIS LEAVES, because no check can be made to carry it: when a citation is written
+# or moved, OPEN THE CITED SYMBOL AND FIND THE SENTENCE IN IT. A citation is a claim about another
+# file, and a claim nobody re-reads is how this file came to describe a mechanism that had moved.
 # ==================================================================================================
 
 ASSEMBLY_ORDER = (
@@ -256,7 +278,7 @@ ASSEMBLY_ORDER = (
 
     # -- THE RESUME PATH. It is READ here and APPLIED at the `restore` rows below, each of which
     # sits immediately after its own package's constructor because it takes the live object.
-    ("resume",    "CKPT",  "resume_source",   "() -- ONE spelling of unset (ckpt/api.py::install_save_signal); it "
+    ("resume",    "CKPT",  "resume_source",   "() -- ONE spelling of unset (ckpt/api.py::resume_source); it "
                                               "must precede load, and load must precede every "
                                               "constructor that takes restored=, which is why the "
                                               "whole resume is read before the first refusal"),
@@ -489,7 +511,7 @@ ASSEMBLY_ORDER = (
                                               "MAY_WIDEN, rank and dk "
                                               "EXACT. SAME DISARMED REFUSAL AS SIG'S, and worse by "
                                               "one step: FAB.state_dict does not even CLAIM to emit "
-                                              "a sidecar the way sig/api.py::warm_up does, so this "
+                                              "a sidecar the way sig/api.py::state_dict does, so this "
                                               "row refuses on a value with no declared origin at "
                                               "either end. Q-CKPT-2)"),
     ("world",     "WORLD", "build",           "(d_model=LM.width, device, ctx_tokens=LM.ctx, rng)"),
@@ -501,11 +523,25 @@ ASSEMBLY_ORDER = (
                                               "lets OPT be built with the SAME group structure, and "
                                               "without it OPT's param_group_shape refusal fires on "
                                               "every resume of a run that ever grew (:4580-4599). "
-                                              "That refusal is itself written against a field "
-                                              "OPT.state_dict never says it writes -- opt/api.py::maybe_step "
-                                              "against :273-276, and OptState declares no such "
-                                              "field -- so the ordering constraint this row exists "
-                                              "for currently protects a guard that cannot fire"),
+                                              "THAT REFUSAL IS LIVE, AND THIS ROW SAID THE OPPOSITE "
+                                              "UNTIL 2026-09-04. It read: the refusal 'is itself "
+                                              "written against a field OPT.state_dict never says it "
+                                              "writes ... so the ordering constraint this row exists "
+                                              "for currently protects a guard that cannot fire'. All "
+                                              "three halves of that are now false in the tree: "
+                                              "opt/api.py::state_dict enumerates param_group_shape "
+                                              "and says why ('A refusal armed against a value nothing "
+                                              "writes is untrippable'), OptState declares the field, "
+                                              "and opt/api.py::load_state refuses on it. The "
+                                              "OPT.load_state row below already carried that "
+                                              "correction (Q-OPT-4, 2026-09-02) while this one did "
+                                              "not, so ONE TABLE SAID BOTH THINGS AT ONCE about one "
+                                              "guard -- which is worse than either statement alone, "
+                                              "because a reader who finds the contradiction cannot "
+                                              "tell which row was re-read. The ordering constraint is "
+                                              "unaffected either way and is why the row is here: it "
+                                              "protects a guard that CAN fire, which is a stronger "
+                                              "reason for the ordering, not a weaker one"),
     ("store",     "MEM",   "open_store",      "(key_dim=LM.width, vocab_slots=LM.vocab_slots, "
                                               "device, rng, lm_kind=LM.arch, restored)"),
     ("partition", "DOM",   "open_partition",  "(sig_dim=SIG.d, vocab_slots=LM.vocab_slots, device, "
@@ -586,7 +622,7 @@ ASSEMBLY_ORDER = (
     ("warmup",    "SIG",   "warm_up",         "(stream=the epoch-0 unit stream in SIG's alphabet, "
                                               "seen_units=the WHOLE stream through "
                                               "_signature_units, opt=OPT's ENCODER optimizer) -- "
-                                              "pre-loop by definition (sig/api.py::train_step) and "
+                                              "pre-loop by definition (sig/api.py::warm_up) and "
                                               "therefore after BOTH the stream rows and the "
                                               "optimizer row; its budget is units.Steps on its own "
                                               "local counter and is never compared to a Windows "
@@ -657,7 +693,7 @@ ASSEMBLY_ORDER = (
     ("persist",   "CKPT",  "saving_on",       "() -- recorded ONCE on the System and consulted by "
                                               "every save site; it must precede new_retention, whose "
                                               "inert_reason is populated when best_keep > 0 AND "
-                                              "SAVING IS OFF (ckpt/api.py::check_geometry). Re-typing the "
+                                              "SAVING IS OFF (ckpt/api.py::new_retention). Re-typing the "
                                               "six-spelling test at a call site is the defect that "
                                               "wrote a directory literally named `0`"),
     ("retention", "CKPT",  "new_retention",   "(restored=Snapshot.best_state)"),
@@ -707,7 +743,7 @@ ASSEMBLY_ORDER = (
 LOOP_ORDER = (
     ("E", "DATA",  "draw_stream",     "(areas, plan, epoch=clock.epoch, seed=RUN.seed) -- THE FIRST "
                                       "STATEMENT OF EVERY EPOCH, called UNCONDITIONALLY: dat.resample "
-                                      "is read INSIDE (data/api.py::open_areas), so 'every epoch is a "
+                                      "is read INSIDE (data/api.py::draw_stream), so 'every epoch is a "
                                       "byte-identical replay' is a state this package REPORTS rather "
                                       "than a branch the caller takes. The root also stamps "
                                       "clock.opt_steps here as the shift_at that OPT.maybe_step's B "
@@ -781,7 +817,7 @@ LOOP_ORDER = (
                                       "live_sources, which replaces the attribute reach at :6699",
                                       "live_sources -- the `live` list under "
                                       "MEM.apply_domain_plan's spelling; live_domains = n_live -- "
-                                      "under FAB.forward's, which fabric/api.py::build is explicit is "
+                                      "under FAB.forward's, which fabric/api.py::forward is explicit is "
                                       "RUNTIME STATE and an argument rather than the "
                                       "d_live_domains wire. Same staleness as the row above: a B "
                                       "row takes live_domains every flush and this one runs on a "
@@ -941,7 +977,7 @@ LOOP_ORDER = (
                                       "bits = per_window -- the same return in bits per byte, "
                                       "DOM.note_competence's spelling. FOUR SPELLINGS OF LM.lm_loss'S TWO "
                                       "RETURNS, which are a bare tuple with no record type to "
-                                      "anchor them (lm/api.py::encode); mean, the other one, is "
+                                      "anchor them (lm/api.py::lm_loss); mean, the other one, is "
                                       "the first summand of the composed objective "
                                       "OPT.scaled_backward takes"),
     ("B", "FAB",   "forward",         "head=LM.decode as a plain callable -- not an import, and "
@@ -989,7 +1025,7 @@ LOOP_ORDER = (
                                       "total is the COMPOSED objective and has no single producer "
                                       "by design: it is LM.lm_loss's mean + LM.anchor_term's "
                                       "already-weighted term + FabricOut.aux_loss + WORLD's loss, "
-                                      "four rows above this one. lm/api.py::encode forbids LM "
+                                      "four rows above this one. lm/api.py::lm_loss forbids LM "
                                       "composing it, so the sum is THIS FILE'S and the row names "
                                       "the summands rather than a producer that must not exist"),
     ("B", "RUN",   "RunClock.note_backward", "derive.accum_due on a Backwards clock"),
@@ -1000,7 +1036,7 @@ LOOP_ORDER = (
                                       "row of its own. best_bpb HAS NO PRODUCER: it wants a Reading "
                                       "carrying (value, seed_count) and the only candidate, "
                                       "EVAL.curve_probe, is deferred -- and CurveReading carries no "
-                                      "seed_count either (eval/api.py::<module> against opt/api.py::scaled_backward), "
+                                      "seed_count either (eval/api.py::<module> against opt/api.py::maybe_step), "
                                       "so opt.restart.damped and opt.restart.damp_refused_n1 are "
                                       "UNREACHABLE, not zero. It is a defaulted argument, which is "
                                       "the only reason a check does not say so",
@@ -1078,7 +1114,7 @@ LOOP_ORDER = (
                                       "THE DISTRIBUTION NAMES MORE DESTINATIONS THAN EXIST: MEM "
                                       "takes it as maintain(resegment=...) and "
                                       "DOM.on_retokenize(dom, part) TAKES NO EVENT PARAMETER AT ALL "
-                                      "(domains/api.py::manage), while SIG and FAB have no retokenize "
+                                      "(domains/api.py::on_retokenize), while SIG and FAB have no retokenize "
                                       "entry point in their frozen surfaces. The event itself is a "
                                       "record type tok/api.py::<module> declares and no entry point's "
                                       "docstring returns. THE ROOT ALSO STAMPS "
@@ -1167,7 +1203,7 @@ LOOP_ORDER = (
                                       "which a resume re-reads the head of every area under "
                                       "seg_contig and trains a second time on the parent's material",
                                       "payload['DATA'] -- and its KEY SPELLINGS ARE NOWHERE "
-                                      "DECLARED (data/api.py::data_plan says 'dict' and lists the contents "
+                                      "DECLARED (data/api.py::stream_state says 'dict' and lists the contents "
                                       "in prose), so the round trip through DATA.restore_stream_"
                                       "state is unverifiable by inspection"),
     ("C", "TOK",   "vocab_state",     "(vocab) -- retirements and probation, which "
@@ -1176,7 +1212,7 @@ LOOP_ORDER = (
                                       "CAUSED by a key the file never had"),
     ("C", "LM",    "state_dict",      "(model, geom)", "payload['LM']"),
     ("C", "SIG",   "state_dict",      "(st) -- and the sidecar the restore row "
-                                      "above compares against, which sig/api.py::warm_up says this "
+                                      "above compares against, which sig/api.py::state_dict says this "
                                       "call emits: width_units, alphabet_size, space, d and mode",
                                       "payload['SIG'], and the 'SIG' slice of the recorded manifest "
                                       "-- WHICH NO ROW CURRENTLY WRITES INTO THE SNAPSHOT"),
@@ -1544,7 +1580,7 @@ DEFERRED_ENTRY_POINTS = {
         "which lives in Population's use/uage books; no entry point exports it and O10 forbids the "
         "root reaching into `pop`, so either FAB adds an accessor or `candidates` gains a "
         "documented default of 'all past-grace'. `baseline_logits_fn` is the same missing callable "
-        "as EVAL's, and fabric/api.py::observe makes it load-bearing rather than convenient: the "
+        "as EVAL's, and fabric/api.py::contribution makes it load-bearing rather than convenient: the "
         "whole C3/H11 repair is that the baseline must come from THE SAME CALLABLE that produced "
         "`baseline_loss`, and a row that named a call whose baseline came from somewhere else would "
         "rebuild the offset that set contrib's SIGN. Under Q-MEM-10 (a) there will be TWO closures, "
@@ -1559,7 +1595,7 @@ DEFERRED_ENTRY_POINTS = {
         "and typing it was the repair settled on 2026-08-30. "
         "`improving` and `observations` have no producer either. improving is "
         "(slow - fast)/|slow| off the growth controller's two EMAs, which live INSIDE FAB "
-        "(fabric/api.py::manage runs the same two-sided test) and are on no returned record: "
+        "(fabric/api.py::grow_check runs the same two-sided test) and are on no returned record: "
         "GrowReport carries asks, deliveries and decline reasons, not the reading. observations is "
         "the valve-evaluation count the old tree read as `fabgrow.n`, and capacity/api.py::observe "
         "ties it to a hardcoded 0.998 EMA rate the caller cannot see. The root must not maintain a "
@@ -1578,7 +1614,7 @@ DEFERRED_ENTRY_POINTS = {
         "THE TWO EMAs, so this entry point stays deferred; until then CAP.caps returns the "
         "STARTING ceilings and every block reason in the histogram reads unreachable.",
     "WORLD.manage":
-        "P4 (world + opt). `plateau` contradicts the package's own state_dict: world/api.py::manage "
+        "P4 (world + opt). `plateau` contradicts the package's own state_dict: world/api.py::state_dict "
         "says the loop-side plateau state (_wl_ema, _wl_lastgrow) MOVES INSIDE THIS PACKAGE and "
         "travels in the checkpoint, while manage takes the boolean as a required argument -- if the "
         "state is inside, the boolean is computed inside, and both sentences cannot hold. Nothing "
@@ -2126,7 +2162,7 @@ def compose(environ=None, *, restored=None):
             f"System.warmup for whoever rules on it.")
 
     # THE PERIODS ARE ARGUMENTS AND THE CALL WAS NOT PASSING ANY. new_cadences(run: Config, *,
-    # periods) is keyword-only with no default (train/api.py::new_clock), so this line was a TypeError on
+    # periods) is keyword-only with no default (train/api.py::new_cadences), so this line was a TypeError on
     # every compose() -- unreachable only because RUN.process_setup raises several rows earlier.
     # The signature was fixed on 2026-08-30 and the call site was not, which is the same shape
     # capacity/api.py::<module> records for derive.pin_tick: a file asserting a repair as done with the
@@ -2261,7 +2297,7 @@ def _run_windows(sysm):
     `segment` rows in ASSEMBLY_ORDER produce the Segmentation this now measures.
 
     THE PROJECTION IS STILL A DIFFERENT NUMBER, AND NOTHING RECONCILES THEM. This is the horizon,
-    resolved ONCE at OPT.build (opt/api.py::<module>) from epoch 0's length; RunClock.begin_epoch
+    resolved ONCE at OPT.build (opt/api.py::Horizon) from epoch 0's length; RunClock.begin_epoch
     re-measures every epoch, and minting shortens every later one. Both are Windows so nothing
     raises. See Q-OPT-5.
 
@@ -2558,7 +2594,16 @@ def _signature_units(sysm, sig):
 # FAB.forward and so needs the flush's own novelty, live_domains and training); an `improving` EMA
 # pair (FAB already keeps one and a second would be two mechanisms deciding the same question); an
 # `owners` rule beyond the one the old tree used; a `plateau` boolean (WORLD holds that state).
-# Those are the seven deferrals, and each is filed with what would close it.
+# FOUR ABSENCES, AND THEY ARE WHAT THE SEVEN NON-EVAL DEFERRALS ARE WAITING ON -- each of those is
+# filed in DEFERRED_ENTRY_POINTS with what would close it. THIS LINE READ "Those are the seven
+# deferrals" until 2026-09-04, which called a list of FOUR things seven and made the list read as an
+# enumeration OF the deferrals instead of the joins they wait on. The deferrals are ENTRY POINTS and
+# the preamble to that table names them: EVAL.curve_probe, MEM.read, MEM.blend, MEM.judge,
+# FAB.contribution, CAP.observe and WORLD.manage. `owners` is not one of them and is not even the
+# same kind of absence: the RULE is declared -- argmax over FabricOut.weights modulo
+# MEM.d_owner_blocks, on MEM.write's ROW_ARGUMENTS_ELSEWHERE entry, with P4 writing the tensor
+# operation because nothing in src/ imports torch -- so what is declined here is inventing a BETTER
+# rule, not supplying a missing one. The other three genuinely have no producer anywhere.
 #
 # THE logits_fn IS STILL NOT FORMABLE, BUT ITS SHAPE AND ITS OWNER ARE NOW RULED (Q-MEM-10, RESOLVED
 # 2026-09-02 (a)). When the missing data exist it is written HERE, once, as
@@ -2601,7 +2646,7 @@ def _flush_bounds(sysm, at_window):
     """The bounds of one FLUSH's windows: [(start, stop)] x OPT.batch_windows.
 
     `x` is Segmentation.ids at these bounds, `y` is the same cut shifted ONE TOKEN -- next-token
-    targets, which is what LM.lm_loss is (lm/api.py::<module>). MEM.write's `contexts` is the same `x`
+    targets, which is what LM.lm_loss is (lm/api.py::lm_loss). MEM.write's `contexts` is the same `x`
     (MEM narrows it to key_win itself; that lever is in its own LEVERS READ list) and its `tokens`
     is `y`; `positions` is Segmentation.byte_pos at the same bounds and is TRUE BYTE OFFSETS, which
     memory/api.py::write requires against a 200+ byte drift.
@@ -2685,7 +2730,7 @@ def _head(sysm):
 def _sig_encode_fn(sysm):
     """SIG.encode bound to the SigState: DOM.rekey's `encode`.
 
-    domains/api.py::observe.dom says in as many words that `encode` is SIG.encode passed in. The rekey MUST
+    domains/api.py::rekey says in as many words that `encode` is SIG.encode passed in. The rekey MUST
     use the same callable the live path used or the partition drifts into two signature spaces that
     do not compare.
 
@@ -2760,7 +2805,7 @@ def _n_params(sysm):
 
     _base_parameters is the 'base' group alone; SIG's encoder is a second group and summing only
     the first undercounts by the whole encoder -- which is the same shape as the throughput number
-    train/api.py::<module> records as wrong because it was sourced from the wrong place.
+    train/api.py::bench_summary records as wrong because it was sourced from the wrong place.
     """
     sig = sysm.configs["SIG"]
     total = 0

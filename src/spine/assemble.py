@@ -668,6 +668,25 @@ def _view(coupling, configs):
 # IRREDUCIBLE means the two ends are one quantity named twice: no interface design separates them, and a
 # project claiming they are independent is lying about its own arithmetic. It is a claim about the world.
 # Everything else here is a coupling this design CHOSE, which means a later design can un-choose it.
+#
+# A `why` IS A CLAIM ABOUT ANOTHER FILE AND EVERY ONE OF THEM WAS RE-OPENED ON 2026-09-04. Five rows
+# carried a citation that was false, and not one of them was red. (A sixth row was wrong about
+# something else -- CAP.d_mask_dead_rows described one consumer of a wire that now has three, and
+# its "Reducible" sentence argued for deleting the wire on a premise that does not hold. That one
+# was filed by the capacity owner rather than found here, and is corrected in the same edit.)
+# THREE OF THE FIVE NAMED A SYMBOL THAT EXISTS AND IS THE WRONG ONE, which
+# tests/test_ownership.py's O12 says in its own docstring it cannot reach: FAB.d_cap_lift_period sent
+# a reader to CAPLevers.lift_min for a rename that is written at CAPLevers.pin_windows, and both
+# competence rows sent one to FABLevers.manage_every -- the manage cadence -- for a sentence that is
+# written under comp_ema/comp_protect. All three are the residue of converting a STALE LINE NUMBER
+# into a symbol: the conversion picks whatever contains that line today, so it produces a confident
+# wrong answer rather than a visible gap. TWO MORE RESOLVED TO THE RIGHT SYMBOL AND ATTRIBUTED A
+# SENTENCE NO LONGER IN IT: SIG.d_idle_cadence quoted sig/levers.py's PROPOSAL in the present tense
+# after that file had been rewritten to record the LANDING (by the same commit that declared the
+# row), and TOK.d_vocab_ceiling said two levers files "both record it as the outstanding repair"
+# when one of them now records it as done and says so about this very pointer. Nothing checks either
+# kind. THE RULE: writing or moving a citation means OPENING THE CITED SYMBOL AND FINDING THE
+# SENTENCE. O12 proves the symbol exists; only a reader proves it says what the row says it says.
 # ==================================================================================================
 
 # ---- the pure helpers a compute may call -----------------------------------------------------------
@@ -796,8 +815,13 @@ COUPLINGS = [
             "enough' -- a true sentence about a false clock. A second gate one layer up then compared "
             "fabgrow.n (calls) to the same threshold and lifted nothing for a further whole round, the "
             "first fault masking the second. The knob is now CAP.pin_windows (census GROW_CAP_EVERY -> "
-            "CAP_PIN_STEPS, re-typed and re-named to CAP_PIN_WINDOWS at capacity/levers.py::CAPLevers.lift_min because "
-            "the counter it is compared against is `step`). THE VALVE PORT IS NOW SETTLED, and this row is "
+            "CAP_PIN_STEPS, re-typed and re-named to CAP_PIN_WINDOWS at "
+            "capacity/levers.py::CAPLevers.pin_windows, because the counter it is compared against is "
+            "`step`; that declaration carries the whole change in two lines -- 'CENSUS NAME: "
+            "CAP_PIN_STEPS, unit Steps. DECLARED HERE AS CAP_PIN_WINDOWS, unit U.Windows' -- and "
+            "capacity/levers.py::<module> carries the argument for it under DEFECT 2. THIS ROW "
+            "NAMED CAPLevers.lift_min until 2026-09-04, a lever that exists and is the floor on one "
+            "lift: the citation resolved, O12 passed, and it sent a reader to the wrong knob). THE VALVE PORT IS NOW SETTLED, and this row is "
             "no longer the valve's comparison. derive.pin_tick accumulates WINDOWS as of 2026-08-30 -- "
             "repair (a), because units.py reserves Steps for the LR horizon and nothing else while the "
             "clock accumulates deltas of `step`, which counts windows. So the valve compares a Windows "
@@ -837,8 +861,17 @@ COUPLINGS = [
             "where dead rows scale with VMAX and quietly take probability mass. DIRECTION CORRECTED HERE: "
             "this row read `src='TOK.vmax', dst='LM.d_softmax_width'`, and TOK has no lever called vmax "
             "-- the census gives VMAX to LM as LM_VOCAB_SLOTS and says in as many words that 'TOK "
-            "receives it as the wire d_vocab_ceiling' (CENSUS.md:323), which is what lm/levers.py::<module> "
-            "and tok/levers.py::<module> both record as the outstanding repair. Left as it was, importing the "
+            "receives it as the wire d_vocab_ceiling' (CENSUS.md:323). THE TWO LEVERS FILES NO "
+            "LONGER AGREE ABOUT THIS, AND THIS SENTENCE SAID THEY DID until 2026-09-04, when it "
+            "read that lm/levers.py::<module> 'and tok/levers.py::<module> both record it as the "
+            "outstanding repair'. Only one still does. lm/levers.py::<module> records it as DONE -- "
+            "conflict (a), 'WHAT IS TRUE NOW: the edge runs the other way' -- and says in as many "
+            "words that a reader following the old pointer 'arrives at a paragraph calling settled "
+            "work outstanding'. tok/levers.py::<module> is the half that is still outstanding: its "
+            "vmax paragraph reads 'build() will raise LeverError at startup the moment both LM and "
+            "TOK are registered', present tense, of a row that has been declared here since. That "
+            "correction is TOK's to make; this row cites what each file says today rather than what "
+            "both said once. Left as the direction was, importing the "
             "real packages made build() raise 'TOKLevers has no lever vmax' -- the mechanism working, on "
             "a row that named an owner nobody had."),
 
@@ -952,10 +985,27 @@ COUPLINGS = [
             "8192 reserved against 2048 minted the run measures 6144 dead rows rather than the mechanism "
             "(capacity/levers.py::CAPLevers, and the measurement at self_organize.py:3971-3979: 86.7% dead "
             "width scored 4.746 unmasked against 6.100 masked at the loss only). CAP does not get to "
-            "decide this -- it is the model's output layer -- so it arrives as a wire and the valve "
-            "reports the vocabulary arm as dishonest rather than silently lifting into unmasked rows. "
-            "Reducible: a valve that refused to lift the vocabulary at all while the mask is off would "
-            "need no flag, and that is the stricter repair if the owner wants it.",),
+            "decide this -- it is the model's output layer -- so it arrives as a wire. THREE CONSUMERS, "
+            "NOT ONE, as of 2026-09-04, and a reader deciding whether this wire earns its place needs "
+            "all three: capacity/api.py::new_valve builds cap.vocab_arm_honest, which REPORTS the "
+            "precondition in its own middle state (armed, tested, not met); capacity/api.py::observe "
+            "REFUSES every earned vocabulary lift by name as `dead_rows_unmasked`, per flush and "
+            "unconditionally, so the lift is declined rather than merely noted; and "
+            "capacity/api.py::new_valve also keys cap.valve's VOCABULARY-ARM REACHABILITY on it, so a "
+            "valve that cannot lift no longer prints FIRED. THIS ROW SAID, UNTIL THAT DATE, that the "
+            "wire bought the valve 'reports the vocabulary arm as dishonest rather than silently "
+            "lifting into unmasked rows' -- true of the first consumer and of no other, and written "
+            "when it was the only one. THE STRICTER REPAIR IS STILL THE OWNER'S TO ASK FOR -- refuse "
+            "the vocabulary arm outright, at startup, instead of per flush -- and this row said of it, "
+            "until the same date, that 'a valve that refused to lift the vocabulary at all while the "
+            "mask is off would need no flag'. IT WOULD: a valve that refuses ON A CONDITION must READ "
+            "that condition to know when to refuse, so the stricter repair moves the read from "
+            "per-flush to startup and does not remove it. That sentence, left standing, is the one a "
+            "future reader would cite to DELETE this wire, and deleting it would break the refusal it "
+            "was cited to justify. irreducible stays False for the reason this file gives the flag above: "
+            "IRREDUCIBLE means the two ends are one quantity named twice, and LM's output-layer mask "
+            "and CAP's honesty precondition are not -- this is a coupling the design CHOSE and a later "
+            "design may un-choose. It is not False because the read could go away.",),
     Coupling(
         src=("SIG.train_every", "SIG.train_every_idle"),
         dst="SIG.d_idle_cadence",
@@ -965,11 +1015,18 @@ COUPLINGS = [
         why="THE RELATION THAT WAS RECORDED AS RELOCATED AND NEVER LANDED (ISSUES P1-H53). The old "
             "declaration was `_i(\"ENC_EVERY_IDLE\", max(ENC_EVERY * 6, 12))` -- a default read from "
             "another lever, which spine/lever.py refuses by construction. The census's repair was not "
-            "to delete the relation but to MOVE it, and sig/levers.py::SIGLevers says so in as many "
-            "words: 'the census proposes SIG.d_idle_cadence = max(train_every*6, train_every_idle) "
-            "declared in spine/assemble.py, so the relation prints in the coupling graph instead of "
-            "hiding inside a default' -- and then, in its own words, 'it is simply not declared "
-            "yet.' It was not, for six commits. So train_every_idle sat at a literal 12 with NO "
+            "to delete the relation but to MOVE it. sig/levers.py::SIGLevers SAID SO IN AS MANY "
+            "WORDS UNTIL THE COMMIT THAT DECLARED THIS ROW: 'the census proposes SIG.d_idle_cadence "
+            "= max(train_every*6, train_every_idle) declared in spine/assemble.py, so the relation "
+            "prints in the coupling graph instead of hiding inside a default' -- and then, in its "
+            "own words, 'it is simply not declared yet.' It was not, for six commits. THAT FILE NOW "
+            "RECORDS THE LANDING RATHER THAN THE PROPOSAL, and this row was still quoting the "
+            "proposal in the PRESENT TENSE until 2026-09-04: sig/levers.py::SIGLevers says today "
+            "that the relation 'IS DECLARED in spine/assemble.py as of 2026-08-30, and sig/api.py's "
+            "cadence_due reads it', and keeps the old sentence only as a quotation of what it used "
+            "to say. Both quotations above are therefore HISTORY, and are marked as such rather "
+            "than left reading as live evidence from a file that no longer contains them. So "
+            "train_every_idle sat at a literal 12 with NO "
             "connection to train_every: change the dense cadence and the idle cadence did not "
             "follow, silently. The literal is defensible alone -- at the shipped train_every=1, "
             "max(1*6, 12) = 12, so no recorded result moves -- which is exactly what let it survive. "
@@ -1010,8 +1067,10 @@ COUPLINGS = [
             "at it and the domain manager smooths per-domain competence at it, and two rates would make "
             "'this domain is better than the population' a comparison between two differently smoothed "
             "series. FAB owns the number because the fabric's cull and spare rules are where it was "
-            "first needed (fabric/levers.py::FABLevers.manage_every says so and names both this field and d_comp_protect as "
-            "what DOM receives). The old tree had DOM reach for FAB's value directly -- "
+            "first needed (fabric/levers.py::FABLevers.comp_ema says so, in the comment its declaration "
+            "shares with comp_protect, and names both this field and d_comp_protect as what DOM "
+            "receives -- this row said FABLevers.manage_every until 2026-09-04, which is the manage "
+            "CADENCE and says nothing about either). The old tree had DOM reach for FAB's value directly -- "
             "self_organize.py:6720 reads the population baseline off the fabric object -- which is a "
             "coupling with no wire and nothing in affects(). Reducible: domains could legitimately "
             "smooth on their own clock; what they may not do is smooth on a DIFFERENT one silently while "
@@ -1029,7 +1088,9 @@ COUPLINGS = [
             "deleted 200,000 memory entries under a phased schedule, which is catastrophic forgetting "
             "performed by the manager rather than suffered by the model. Wired rather than passed so "
             "that a run cannot have the brake on for experts and off for domains without anybody saying "
-            "so; fabric/levers.py::FABLevers.manage_every names this field as the receiving spelling.",),
+            "so; fabric/levers.py::FABLevers.comp_protect names this field as the receiving spelling, in the "
+            "comment its declaration shares with comp_ema. Cited as FABLevers.manage_every until "
+            "2026-09-04 -- an existing symbol, the wrong one, and O12 cannot tell those apart.",),
 
     # --- the optimizer's two rate endpoints -> the fabric's per-expert envelope ---------------------
     Coupling(
