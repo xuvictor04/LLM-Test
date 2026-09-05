@@ -138,8 +138,9 @@ of them is read by a body or a stub in capacity/api.py:
                                                      means the same. capacity/api.py::new_valve.
     d_mask_dead_rows       <- LM.mask_dead_rows      the honesty precondition on lifting the vocabulary
                                                      (below). capacity/api.py::new_valve.
-    d_operating_population <- FAB.pressure x FAB.slots, through the SAME spine/derive.py::
-                                                     operating_population call the fabric's own row
+    d_operating_population <- FAB.pressure x FAB.slots, through the SAME
+                                                     spine/derive.py::operating_population call the
+                                                     fabric's own row
                                                      uses. The soft cap must sit at or below the cull's
                                                      settling point or the population never pins.
                                                      Read by capacity/api.py::startup_refusals.
@@ -174,12 +175,24 @@ wires and the budget, not the remainder -- so it is written as a word on purpose
 same clause from two numbers that ARE checked, and it moves only if one of them does.
 AND THE SHAPES ARE THE REPAIR, NOT A FLOURISH, BECAUSE THIS FILE IS WHERE THE OLD ONES FAILED.
 Measured with K13's own scanner over this file: ONE numeric claim examined before this rewrite and
-five after. The paragraph asserted four live figures inside a check's own population and the check
+SEVEN after -- the five in the clause above, plus the two that the sentence below adds by QUOTING
+the pattern spellings, which K13 cannot tell from an assertion. IT SAID "five" UNTIL 2026-09-05, AND
+FIVE IS THE TRUE FIGURE FOR A DIFFERENT FILE: the same scanner examines exactly 5 claims in
+src/spine/assemble.py, and that file's own row says so. The number was copied from the sibling
+instead of measured here -- a count in prose that is a copy of a fact, in the paragraph written to
+end that. The paragraph asserted four live figures inside a check's own population and the check
 could see one of them -- `19 are cross-package WIRES` is not the `19 cross-package wires` the
 pattern list spells, `4 are intra-package` is not `4 intra-package`, and `WIRE_BUDGET=25` is not the
 `<n> of <m>` shape the budget pattern wants -- so the miscount this paragraph exists to correct
-could have come back in three of its four numbers with the suite green. src/eval/levers.py::
-EVALLevers writes the same clause in the same shapes for the same reason, and this follows it.
+could have come back in three of its four numbers with the suite green.
+src/eval/levers.py::EVALLevers writes the same clause in the same shapes for the same reason, and
+this follows it. NOTE THE SECOND-ORDER COST, because it is the price of the shapes and it is what
+takes the count from five to seven: the sentence above QUOTES the cross-package-wire spelling and
+the intra-package one as examples, and K13 cannot tell a quoted spelling from an assertion, so both
+now sit in its population as live claims. The day the wire count moves, this file reports a K13
+finding against a sentence that is describing a regex rather than counting anything -- and the
+finding will be correct about the digits and wrong about the sentence. THIS PARAGRAPH DELIBERATELY
+DOES NOT RESPELL THEM, which is why it costs no third and fourth copy.
 The miscount came from counting declared couplings as wires; an intra-package coupling books
 no edge, which is why the two numbers differ by exactly four. The consequence clause fell with it:
 adding four couplings takes the ledger 19 -> 23 of the 25 and build() does NOT refuse it. THIS IS NOT A

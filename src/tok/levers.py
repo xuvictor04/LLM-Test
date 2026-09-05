@@ -163,10 +163,23 @@ if someone can see that it was looked for.
 
 WHAT IS DELIBERATELY ABSENT. Values this package uses that it does not own, and must not declare --
 lever.py refuses a d_-named lever precisely so a declaration cannot shadow the wire that writes it:
-    d_cap_lift_period   Flushes, from TRAIN.batch_w x TRAIN.grow_cap_every   (assemble.py, declared)
+    d_cap_lift_period   Flushes: CAP.pin_windows DIVIDED by OPT.batch_windows, through
+                        spine/derive.py::flush_period_windows                (assemble.py, declared)
     d_vocab_path        the tokenizer json's path, owned by CKPT             (census promote-to-wire)
     d_residual_ratio    ||delta||/||composite|| from LM                      (NOT A WIRE, AND IT
                                                                              CANNOT BE -- see below)
+THE FIRST ROW READ "Flushes, from TRAIN.batch_w x TRAIN.grow_cap_every" UNTIL 2026-09-06 -- forty lines
+below the paragraph in this same docstring that retracts exactly that reading, which is the shape
+conflict (b) is about. Three things were wrong with it and each alone is a defect by this tree's rules.
+THERE IS NO PACKAGE `TRAIN` and this file is not it either: src/train/levers.py::<module> carries that
+heading by name, and the string r["TRAIN"] does not occur in spine/assemble.py at all. THE FIELD NAMES
+ARE POST-CENSUS: the row's src is ("OPT.batch_windows", "CAP.pin_windows"), the renames being
+TRAIN.batch_w -> OPT.batch_windows and TRAIN.grow_cap_every -> CAP.pin_windows, both recorded in
+opt/levers.py::<module>. AND THE OPERATION IS A DIVISION, not a product: a Windows period divided by a
+batch width gives Flushes, which is what spine/derive.py::flush_period_windows computes. At the shipped
+OPT_BATCH_WINDOWS=1 the retracted formula lands on the right number anyway -- 20000 flushes -- and that
+is precisely the case this tree calls a defect: a `*` or a `//` written across kinds is wrong even when
+it agrees with the named conversion at the defaults.
 THE THIRD IS NOT A MISSING WIRE AND THIS PARAGRAPH SAID IT WAS UNTIL 2026-09-03 (Q-TOK-11, RESOLVED
 2026-09-02). TOK_PROBATION_MIN's census reason states that the ratio "arrives as the wire
 d_residual_ratio from LM", and three statements in this file repeated it and told the next author to
@@ -404,12 +417,17 @@ class TOKLevers(LeverSet):
     # abort the entire grow burst: measured "max_tok=6 vmax=4000 -> stalled at 658/4000 with 1866 pairs
     # still above min_pair (83.5% dead)" (tokenizer.py:318-324). A ceiling that stops a burst instead of
     # skipping a candidate turns a length preference into a vocabulary cap nobody asked for.
-    # IT CARRIES AN UNDECLARED WIRE THAT MUST BECOME A DECLARED ONE. ByteComposer hardcodes maxb=16
+    # IT CARRIED AN UNDECLARED WIRE AND THE WIRE IS NOW DECLARED. ByteComposer hardcodes maxb=16
     # (:1441) and does not follow this knob, so any value above 16 silently truncates the composer's view
     # of a token to its first 16 bytes while the tokenizer happily emits the whole thing -- two
-    # components disagreeing about what a token IS, with no error. The rebuild sends this to LM as
-    # d_max_token_bytes and LM sizes its byte and position tables from it; that Coupling is not in
-    # assemble.COUPLINGS yet, and until it is, this default agreeing with that hardcode is luck.
+    # components disagreeing about what a token IS, with no error. THE WIRE THAT REPLACES THE LUCK IS
+    # DECLARED: spine/assemble.py::COUPLINGS carries src="TOK.max_bytes", dst="LM.d_max_token_bytes",
+    # irreducible, computing int(r["TOK"].max_bytes), and LM sizes its byte and position tables from it.
+    # THIS COMMENT SAID THE COUPLING WAS "not in assemble.COUPLINGS yet" UNTIL 2026-09-06, and that row's
+    # own `why` cites this file for exactly that sentence -- so the spine's pointer was true only while
+    # this half was false, and a P4 author reading here was being sent to declare a wire that exists.
+    # Correcting this half makes that pointer stale in its turn; it is filed with an exact replacement,
+    # because a mutual pair of stale sentences reads as consistent to every mechanical rule in the tree.
 
     cand_window = Lever(1024, "How many candidates deep the mint ranking is materialized, so a "
                               "re-ranker has something to choose from.", U.COUNT)

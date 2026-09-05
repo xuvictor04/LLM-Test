@@ -1930,8 +1930,9 @@ def counters(opt: Config, st):
         gates.append(Gate("opt.lr.shift_warm", False, shift_warm, "> 0", reachable=False,
                           reason=_stale_note(
                               st, "opt.lr.shift_warm_applied",
-                              "OPT_LR_SHIFT_WARM=0, the shipped default and the setting every "
-                              "recorded result was produced under.")))
+                              f"OPT_LR_SHIFT_WARM={shift_warm}, at or below the 0 that is "
+                              f"the shipped default and the setting every recorded result "
+                              f"was produced under.")))
     elif notifications == 0:
         gates.append(Gate("opt.lr.shift_warm", False, notifications, "a shift_at ever supplied",
                           reachable=False,

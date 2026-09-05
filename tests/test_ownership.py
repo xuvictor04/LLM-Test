@@ -1706,6 +1706,34 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
         own helpers is not seen here. That is a strictly smaller residue than the one it replaces --
         the whole of src/spine/ was exempt until 2026-09-04 -- and it is named here rather than
         discovered later.
+      * the same about src/spine/derive.py, and one further thing that has to be said in the same
+        breath -- see below.
+
+    THE derive.py HALF OF THE SKIP EXEMPTS NOTHING TODAY, AND THAT IS RECORDED HERE RATHER THAN
+    IMPLIED AWAY. The two names in the skip are not symmetric and the round that added assemble.py
+    reported them as though they were. MEASURED, on scratch copies outside the repository:
+      * with derive.py alone removed from the skip, O11 is PASS and reports ZERO findings -- on the
+        working tree (166 arithmetic sites against 151 with it, so derive.py contributes 15) and at
+        2e8a63e, e4c5e4b, 7e902ba, 694f156, a2ffc08, dd6a396, f11ae02 and 40d2446, whose finding
+        sets are identical with the skip and without it. All 33 self-test cases stay green too. It
+        has never suppressed a finding at any commit this project has.
+      * with assemble.py alone removed, O11 FAILS on a tree it must pass -- the case named below --
+        inside a COUPLINGS compute in src/spine/assemble.py. That half is load-bearing today.
+    WHY THE derive.py HALF STAYS ANYWAY, and it is a DECLARED POSITION rather than a measurement:
+    derive.py is the file whose whole job is the arithmetic this check forbids everywhere else, and
+    it is also the file that QUOTES the forbidden formulas to explain what it replaces.
+    src/spine/derive.py::run_windows_from_epochs carries the composition root's
+    `units.Windows(_windows_in_epoch(sysm) * int(sysm.configs["RUN"].epochs))` and
+    src/spine/derive.py::opt_steps_from_windows carries opt's
+    `run_steps = max(1, run_windows // d_effective_batch_windows)`, both as bare indented
+    specifications and neither in backticks. Those two escape the textual half only because the
+    character before the operator happens to be `)`; reflowing either one so a clock lever's name
+    sits against the operator would make O11 report derive.py's own explanation of O11, which is
+    the noise class the backtick rule two hundred lines below was written for. THE EXEMPTION IS NOW EXERCISED BY THE SELF-TEST rather than asserted: _CLOCK_DERIVE
+    carries exactly that shape, so "O11: the named conversion, derive's own arithmetic and a
+    coupling compute are ADMITTED" goes RED the moment derive.py leaves the skip, and "O11: the SAME
+    derive module under any other spine path is reported" goes RED the moment the skip widens to the
+    directory. An exemption nothing can trip is the same defect as a guard nothing can trip.
     """
     _PKG_DIRS = {m.rel.split("/")[1] for m in mods
                  if m.rel.startswith("src/") and m.rel.count("/") >= 2} - {"spine"}
@@ -1737,9 +1765,11 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
     for m in mods:
         if m.rel in (os.path.join("src", "spine", "derive.py"),
                      os.path.join("src", "spine", "assemble.py")):
-            # derive IS the named conversion and must do the arithmetic; assemble DECLARES the
-            # couplings, whose computes are checked one at a time by tests/test_couplings.py. Every
-            # OTHER file under src/spine/ is in the population -- see the composition-root paragraph.
+            # derive IS the named conversion and must do the arithmetic, and it QUOTES the inline
+            # formulas it replaces in its own docstrings; assemble DECLARES the couplings, whose
+            # computes are checked one at a time by tests/test_couplings.py. Every OTHER file under
+            # src/spine/ is in the population -- see the composition-root paragraph. THE TWO HALVES
+            # OF THIS SKIP ARE NOT EQUALLY EXERCISED and the docstring says which is which.
             continue
         pkg = m.rel.split("/")[1] if m.rel.startswith("src/") else ""
         mine = clocks.get(pkg, set())
@@ -1909,7 +1939,13 @@ from spine import units
 
 
 def run_windows_from_epochs(count, rate):
-    \"\"\"derive IS the named conversion: it must do the arithmetic.\"\"\"
+    \"\"\"derive IS the named conversion: it must do the arithmetic, and it QUOTES the
+    inline formula it replaces, the way this file's real docstrings do:
+
+        manage_every * rate
+
+    which is the shape units.py::Clock.convert refuses everywhere else.
+    \"\"\"
     return units.Windows(int(rate) * int(count))
 """
 
@@ -2650,6 +2686,10 @@ _CASES = (
      {"src/fabric/levers.py": _CLOCK_LEVERS, "src/spine/compose.py": _CLOCK_ROOT_NAMED,
       "src/spine/derive.py": _CLOCK_DERIVE, "src/spine/assemble.py": _CLOCK_ASSEMBLE},
      {"O11": (0, None)}),
+
+    ("O11: the SAME derive module under any other spine path is reported",
+     {"src/fabric/levers.py": _CLOCK_LEVERS, "src/spine/compose.py": _CLOCK_DERIVE},
+     {"O11": (1, "in a SPECIFICATION")}),
 
     # ---- O10. THE FIRST OF THESE IS A REGRESSION TEST FOR A LIVE DEFEAT, not a hypothetical. O10
     # ---- shipped asking `if "assemble" in tail or "registry" in tail`; P3 wrote src/spine/compose.py

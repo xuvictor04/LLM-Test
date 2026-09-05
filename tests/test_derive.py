@@ -148,6 +148,17 @@ def smoke():
     for win in (1, 64, 256, 1024):
         for bpt in (0.5, 1.0, 1.9, 2.4, 3.9):
             assert derive.signature_width_bytes(win, bpt) >= win
+    # A STRIDE BELOW ONE IS REFUSED, NOT ANSWERED, and this arm had no test: deleted, on a copy of
+    # this tree, signature_width_bytes(0, 2.4) returns 0 -- a zero-byte signature window, which is
+    # the 1-byte defect this function replaces with the last byte taken away. It is a ValueError and
+    # not a UnitError because these two arguments are token and byte COUNTS and carry no Clock kind;
+    # bytes_per_token's zero-token refusal beside it is a ValueError for the same reason.
+    for bad in (0, -1, -256):
+        try:
+            derive.signature_width_bytes(bad, 2.4)
+            raise AssertionError(f"a stride below one token was accepted: {bad!r}")
+        except ValueError:
+            pass
 
     # flush_period: GROW_CAP_EVERY=20000 steps at BATCH_W=16 is 1250 flushes. The shipped code compared a
     # flush count against 20000 directly, so the valve needed 320,000 real steps to fire.
@@ -159,6 +170,17 @@ def smoke():
             derive.flush_period(bad, 16); raise AssertionError(f"bare/foreign clock accepted: {bad!r}")
         except UnitError:
             pass
+    # A RATE BELOW ONE IS REFUSED BY flush_period ITSELF and not left to the conversion below it,
+    # and the message is asserted because that is the only thing that distinguishes the two: deleted,
+    # the call falls through to units.py::Clock.convert, whose own `per <= 0` arm answers "convert()
+    # rate must be positive" -- a refusal, so the suite stayed green, but from a function that does
+    # not know what batch_w is and cannot say a flush covers at least one window.
+    for bad in (0, -1, -16):
+        try:
+            derive.flush_period(Steps(20000), bad)
+            raise AssertionError(f"flush_period accepted a rate below one: {bad!r}")
+        except UnitError as e:
+            assert "at least one window" in str(e), (bad, str(e))
 
     # flush_period_windows: THE SAME DIVISION, THE OTHER KIND, AND THE PAIR IS THE POINT. MANAGE_EVERY
     # and the capacity valve's pin threshold are compared against `step`, and `step` advances once per
@@ -175,6 +197,12 @@ def smoke():
             raise AssertionError(f"bare/foreign clock accepted as a window cadence: {bad!r}")
         except UnitError:
             pass
+    for bad in (0, -1, -16):                       # its own arm, for flush_period's reason above
+        try:
+            derive.flush_period_windows(Windows(20000), bad)
+            raise AssertionError(f"flush_period_windows accepted a rate below one: {bad!r}")
+        except UnitError as e:
+            assert "at least one window" in str(e), (bad, str(e))
 
     # --- units.py::Clock.convert, THE DECLARED PATH BETWEEN KINDS, AND THE TWO CALLERS ABOVE AT THE
     # ONE PLACE THEY DISAGREE WITH THE BODY THEY USED TO HAVE. The method divided in FLOAT until
@@ -336,6 +364,32 @@ def smoke():
         except UnitError:
             pass
 
+    # A NEGATIVE COUNT IS REFUSED AT ALL FOUR SIBLINGS, not only at opt_steps_from_backwards, and
+    # nothing in this tree detected the difference until now. MEASURED: delete all four `n < 0` arms
+    # from spine/derive.py on a copy of this tree and derive (575 oracle cases, 0 mismatches),
+    # contract, census, assemble, couplings, ownership and fabric ALL STAY GREEN, while the four
+    # functions answer Flushes(1), Flushes(1), Steps(1) and Windows(-10) for counts of -1. So the
+    # one owner ruling implemented at the derive layer this round -- "let us refuse for now; if it
+    # has a bad effect we can turn off the refusal" -- could be turned off by accident and no check
+    # in the tree would say a word. run_windows_from_epochs' arm is the sharpest of the four: its
+    # own docstring records that RUN_EPOCHS=-1 built Windows(-634) and OPT's horizon then came out
+    # Steps(1), a one-optimizer-step LR schedule for a run configured to make minus one pass.
+    # Epochs(0) -> Windows(0) above is the NO-FLOOR property; this is the other side of it, and the
+    # message is asserted because "is negative" is the only text that says which arm answered --
+    # every other arm in these four functions refuses the RATE and names a type instead.
+    # opt_steps_from_windows is in this sweep AND in its own block above: there at the measured
+    # Windows(-634) that reached it, here at the magnitudes its three siblings share.
+    for fn, kind in ((derive.flush_period, Steps),
+                     (derive.flush_period_windows, Windows),
+                     (derive.opt_steps_from_windows, Windows),
+                     (derive.run_windows_from_epochs, Epochs)):
+        for n in (-1, -5, -1000):
+            try:
+                fn(kind(n), 16)
+                raise AssertionError(f"{fn.__name__} accepted a negative count: {n}")
+            except UnitError as e:
+                assert "is negative" in str(e), (fn.__name__, n, str(e))
+
     # opt_steps_from_backwards: ONE boundary, so the divisor is accum ALONE, and the body on the
     # accepted domain is `Steps(n // k)`. 52 = 4 x 13 exactly; 62 = 4 x 15 + 2, so 15; 3 = 4 x 0 + 3,
     # so a partial step is not a step; 1000 = 1 x 1000. The last row is the two-boundary divisor the
@@ -374,8 +428,8 @@ def smoke():
             try:
                 derive.opt_steps_from_backwards(Backwards(n), accum)
                 raise AssertionError(f"negative accepted: {n} at accum={accum}")
-            except UnitError:
-                pass
+            except UnitError as e:
+                assert "is negative" in str(e), (n, accum, str(e))
 
     # accum_due CLAMPS ITS RATE WHERE opt_steps_from_backwards REFUSES ONE, and that asymmetry is
     # deliberate -- accum_due's docstring keeps the shipped read-site `max(1, ...)`, and
@@ -394,6 +448,18 @@ def smoke():
     # Steps(13) until 2026-09-04 -- a Windows crossing a function whose first act is to refuse a
     # Windows. A rate is a RATIO of two kinds and no count of one kind is ever the right value for
     # it, so all five refuse all six kinds rather than converting.
+    # THE MESSAGE IS ASSERTED AND NOT ONLY THE EXCEPTION TYPE, and that is the whole difference
+    # between this block covering the Clock arm and merely appearing to. MEASURED on a copy of this
+    # tree: delete `if isinstance(accum, Clock)` from opt_steps_from_backwards and the sibling
+    # `type(accum) is not int` one line below refuses the same Windows(4) with the same UnitError,
+    # so a bare `except UnitError` left the suite at EXIT 0 with the arm gone. The same held at all
+    # five: every Clock arm here was passing a test it could be deleted without failing. The two
+    # arms are not interchangeable -- the Clock message names the reason a Clock is the ONE type
+    # that gets in (`int()` on a Clock SUCCEEDS, so Windows(4) came back Steps(13) from a function
+    # whose first act is to refuse a Windows), and the type message names a different one -- so the
+    # test has to say which refused. "is a Clock" appears in the Clock arm of all six and in no
+    # type arm, whose text is "is a {type(...).__name__}" and reads "is a Windows" once the Clock
+    # arm is gone.
     for fn, clk in ((derive.flush_period, Steps(20000)),
                     (derive.flush_period_windows, Windows(20000)),
                     (derive.opt_steps_from_windows, Windows(1024)),
@@ -403,13 +469,46 @@ def smoke():
             try:
                 fn(clk, rate)
                 raise AssertionError(f"{fn.__name__} accepted {rate!r} as its rate")
-            except UnitError:
-                pass
-    try:
-        derive.run_windows_from_epochs(Epochs(3), Windows(4))
-        raise AssertionError("run_windows_from_epochs accepted a Clock rate")
-    except UnitError:
-        pass
+            except UnitError as e:
+                assert "is a Clock" in str(e), (fn.__name__, repr(rate), str(e))
+    for rate in (Windows(4), Steps(4), Flushes(4), Backwards(4), Epochs(4)):
+        try:
+            derive.run_windows_from_epochs(Epochs(3), rate)
+            raise AssertionError(f"run_windows_from_epochs accepted {rate!r} as a Clock rate")
+        except UnitError as e:
+            assert "is a Clock" in str(e), (repr(rate), str(e))
+
+    # AND THE OTHER HALF OF THE SAME HOLE: A RATE THAT IS NOT AN int AT ALL. The Clock refusal above
+    # is only half of it -- `int()` admits every type it admits -- so each of the six also type-tests
+    # its rate exactly. NOTHING IN THIS FILE REACHED THOSE SIX ARMS UNTIL NOW, and a sweep of every
+    # `if <test>: raise` in spine/derive.py on a copy of this tree measured what their absence buys:
+    #   flush_period(Steps(20000), 16.0)              -> Flushes(1250)   a WRONG ANSWER, not a refusal
+    #   flush_period_windows(Windows(20000), 16.0)    -> Flushes(1250)
+    #   opt_steps_from_windows(Windows(1024), 64.0)   -> Steps(16)
+    #   accum_due(Backwards(52), '4')                 -> True
+    #   run_windows_from_epochs(Epochs(3), '10')      -> TypeError, out of the family's own exception
+    #   opt_steps_from_backwards(Backwards(52), '4')  -> TypeError, likewise
+    # -- the exact five behaviours the type arms were landed to stop, all six arms deletable with
+    # the whole suite green. A str is the sharp one: it never went through spine/lever.py::
+    # Lever.coerce, which resolves an int lever as int(float(raw)) and cannot hand a str to
+    # anything, so a str here says the value did not come from a lever at all. `True` is refused
+    # because bool is an int subclass and `type(x) is not int` catches it where `isinstance` would
+    # not -- a bool rate is a rate of one and flush_period(Steps(20000), True) answered
+    # Flushes(20000). nan and inf are here because they are the two that used to leave through
+    # ValueError and OverflowError out of int() rather than through UnitError, which is the same
+    # escape units.py::Clock.convert closed on 2026-09-04.
+    for fn, clk in ((derive.flush_period, Steps(20000)),
+                    (derive.flush_period_windows, Windows(20000)),
+                    (derive.opt_steps_from_windows, Windows(1024)),
+                    (derive.opt_steps_from_backwards, Backwards(52)),
+                    (derive.accum_due, Backwards(52)),
+                    (derive.run_windows_from_epochs, Epochs(3))):
+        for rate in (16.0, 4.9, "4", "10", True, False, None, float("nan"), float("inf")):
+            try:
+                fn(clk, rate)
+                raise AssertionError(f"{fn.__name__} accepted {rate!r} as its rate")
+            except UnitError as e:
+                assert "is a Clock" not in str(e), (fn.__name__, repr(rate), str(e))
     # NEIGHBOURS, so the refusals above cannot be a blanket one: the bare-int rate still works, and
     # each of the four answers is the arithmetic named beside it.
     assert derive.flush_period(Steps(20000), 16) == Flushes(1250)           # 20000 = 16 x 1250
@@ -447,17 +546,22 @@ def smoke():
     assert derive.pin_tick(Windows(2650), True, Windows(16)) == Windows(2666)
     assert type(derive.pin_tick(2650, True, 16)) is Windows        # bare ints coerce IN, Windows comes OUT
     assert derive.pin_tick(Windows(8), False, Windows(16)) == Windows(0)   # clamped, still carrying kind
+    # THE MESSAGE NAMES THE ARGUMENT, and without that these two loops test one arm twice. pin_tick
+    # coerces both arguments with `Windows(v)` a few lines further down, and Windows(Flushes(2650))
+    # raises "cannot build Windows from Flushes" on its own -- so with either type arm deleted the
+    # refusal still arrives, from the constructor, which knows nothing about which argument it was
+    # building and cannot say that a Flushes here is the 16x defect itself.
     for bad in (Flushes(2650), Steps(2650), Backwards(2650)):
         try:
             derive.pin_tick(bad, True, Windows(16))
             raise AssertionError(f"foreign clock accepted as held: {bad!r}")
-        except UnitError:
-            pass
+        except UnitError as e:
+            assert "held must be Windows" in str(e), (bad, str(e))
         try:
             derive.pin_tick(Windows(2650), True, bad)
             raise AssertionError(f"foreign clock accepted as dstep: {bad!r}")
-        except UnitError:
-            pass
+        except UnitError as e:
+            assert "dstep must be Windows" in str(e), (bad, str(e))
     # The kind has to survive OUT of the function, because the comparison -- not the accumulation -- is
     # where the 16x error actually landed. A Windows answer measures against CAP.pin_windows and REFUSES
     # the same threshold expressed in flushes, which is the failure the shipped code never got.
@@ -471,31 +575,120 @@ def smoke():
         except UnitError:
             pass
 
-    # --- opt_steps_from_windows: the last unnamed cross-kind conversion in the tree, now named.
-    # NO ORACLE ROW, and for the same reason as cadences_that_cannot_fire: the old tree resolved the
-    # horizon by reading ANOTHER KNOB (`if LR_STEPS: return LR_STEPS`, else project through
-    # LR_EPOCHS), so there is no captured table for this shape -- what was captured is the defect.
-    # The rule is written here instead, and the numbers are the ones that matter.
-    assert derive.opt_steps_from_windows(Windows(1024), 1) == Steps(1024)     # defaults: they coincide
+    # --- opt_steps_from_windows: the last unnamed cross-kind conversion in the tree, now named, and
+    # --- THE ONE THE LR HORIZON IS BUILT FROM -- opt/api.py::build calls it on every compose().
+    #
+    # AN ORACLE ROW FOR THIS FUNCTION IS IMPOSSIBLE, AND THAT IS A FINDING RATHER THAN AN EXCUSE.
+    # An oracle in this tree means values CAPTURED from the frozen old tree, and `.rework/
+    # capture_oracle.py`'s `lift()` takes the source text of a MODULE-LEVEL function out of
+    # self_organize.py at rm-predict aee4a52. Three facts settle it, each checked against that file
+    # rather than recalled:
+    #   * aee4a52:self_organize.py has 48 module-level functions and none of them converts a window
+    #     count into optimizer steps; `lift("opt_steps_from_windows")` raises KeyError.
+    #   * the old tree's LR horizon is `_lr_total`, a CLOSURE at self_organize.py:6367 nested inside
+    #     main(), so `lift` cannot reach it either -- and it is a different computation, not a
+    #     renamed one: `if LR_STEPS: return LR_STEPS` else project LR_EPOCHS through a per-epoch
+    #     length re-estimated every step (self_organize.py:6338 `_project`). It divides nothing by
+    #     windows-per-optimizer-step.
+    #   * the divisor this function takes did not exist there to be divided by. The product
+    #     `BATCH_W * ACCUM` appears NOWHERE in those 9,859 lines; BATCH_W and ACCUM are read at
+    #     :4193 and :4198 and never multiplied.
+    # So there is no behaviour to capture and no table to replay -- what the old tree holds is the
+    # defect (a horizon in the wrong kind), not an answer. THE ARTEFACT THAT IS POSSIBLE IS A
+    # HAND-DERIVED CASE BLOCK, and this is it. Every expected value below is stated as integer
+    # arithmetic beside it and NONE was obtained by running the function and recording what came
+    # back; a recording is a snapshot, and a snapshot of a wrong answer is a wrong expectation that
+    # everything downstream then believes.
+    #
+    # THE RULE, once, so the rows read as arithmetic: the answer is `run_windows // w` truncated,
+    # floored at Steps(1), where w = effective_batch_windows = batch_windows x accum.
+    #
+    # (1) THE DEFAULTS, where the two counters coincide and the function looks like an identity --
+    # which is exactly why the inline `run_windows // d_effective_batch_windows` sat unnoticed.
+    assert derive.opt_steps_from_windows(Windows(1024), 1) == Steps(1024)     # 1024 = 1 x 1024
     assert type(derive.opt_steps_from_windows(Windows(1024), 1)) is Steps
-    # 64x is not academic: it is fetch_big.py's OWN recommended heavy-run command,
-    # WIN=256 BATCH_W=16 ACCUM=4, so effective_batch_windows = 16 x 4. A horizon taken in the wrong
-    # kind there puts every learning-rate result under a schedule 64 times longer than its label.
-    assert derive.opt_steps_from_windows(Windows(1024), 64) == Steps(16)
-    assert derive.opt_steps_from_windows(Windows(10), 64) == Steps(1)        # floored, never zero
-    for bad in (Steps(1024), Flushes(1024), Backwards(1024), 1024):
+    # (2) THE HEAVY-RUN DIVISOR. 64x is not academic: it is fetch_big.py's OWN recommended heavy-run
+    # command, WIN=256 BATCH_W=16 ACCUM=4, so effective_batch_windows = 16 x 4 = 64. A horizon taken
+    # in the wrong kind there puts every learning-rate result under a schedule 64 times longer than
+    # its label.
+    assert derive.opt_steps_from_windows(Windows(1024), 4) == Steps(256)     # 1024 = 4 x 256
+    assert derive.opt_steps_from_windows(Windows(1024), 16) == Steps(64)     # 1024 = 16 x 64
+    assert derive.opt_steps_from_windows(Windows(1024), 64) == Steps(16)     # 1024 = 64 x 16
+    # (3) TRUNCATION, AT THE BOUNDARY AND NOT IN THE MIDDLE OF A DECADE, because the direction is
+    # the whole ruling: a horizon that rounds UP ends the cosine after the run. 1087 = 64 x 16 + 63,
+    # so sixty-three windows of a seventeenth optimizer step are not a seventeenth optimizer step;
+    # 1088 = 64 x 17 exactly and the answer moves by one.
+    assert derive.opt_steps_from_windows(Windows(1087), 64) == Steps(16)
+    assert derive.opt_steps_from_windows(Windows(1088), 64) == Steps(17)
+    # (4) THE FLOOR, AND THE TWO ROADS TO Steps(1) THAT MEET AT ONE POINT. 63 = 64 x 0 + 63 truncates
+    # to zero and is floored up; 64 = 64 x 1 is a true one; 128 = 64 x 2 is the first answer the
+    # floor is not involved in. The pair 63/64 is what makes the floor visible: the same Steps(1)
+    # comes back for a run that earns no optimizer step and for a run that earns exactly one, and
+    # nothing downstream can tell them apart -- which is the price of the floor and is paid because
+    # a horizon of zero divides by zero in n_cycles.
+    assert derive.opt_steps_from_windows(Windows(63), 64) == Steps(1)        # floored, never zero
+    assert derive.opt_steps_from_windows(Windows(64), 64) == Steps(1)        # 64 = 64 x 1, no floor
+    assert derive.opt_steps_from_windows(Windows(128), 64) == Steps(2)       # 128 = 64 x 2
+    assert derive.opt_steps_from_windows(Windows(10), 64) == Steps(1)        # 10 = 64 x 0 + 10
+    # (5) THE ZERO IS FLOORED AND THE NEGATIVE IS REFUSED, and the function's docstring calls those
+    # two rulings and not one. Windows(0) -> Steps(1) is the floor above; Windows(-634) was the
+    # MEASURED value RUN_EPOCHS=-1 produced through spine/compose.py::_run_windows, and it came back
+    # Steps(1) too -- the same answer for a run that is not short but is not a run.
+    assert derive.opt_steps_from_windows(Windows(0), 64) == Steps(1)
+    for n in (-1, -63, -64, -634, -1000):
+        try:
+            derive.opt_steps_from_windows(Windows(n), 64)
+            raise AssertionError(f"opt_steps_from_windows accepted a negative run length: {n}")
+        except UnitError as e:
+            assert "is negative" in str(e), (n, str(e))
+    # (6) EXACT ABOVE 2**53, WHICH IS THE PROPERTY `//` HAS AND `int(n / w)` DOES NOT. This function
+    # divides with integer `//` in its own body where flush_period delegates to
+    # units.py::Clock.convert and its Fraction -- two different roads -- so the same five counts are
+    # pinned here as there, and both roads must land on the same integers or one of them is doing
+    # float division somewhere. The counts are the ones the convert block derives: a float64 carries
+    # a 53-bit significand, so every odd integer in [2**53, 2**54) sits halfway between neighbours
+    # and ties to the EVEN one, which is why the error goes DOWN at some counts and UP at others.
+    #   2**53+1 = 9007199254740993, w=1: itself.
+    #   2**53+3 = 9007199254740995 = 2 x 4503599627370497 + 1, w=2: 4503599627370497.
+    #   2**53+7 = 9007199254740999 = 4 x 2251799813685249 + 3, w=4: 2251799813685249.
+    #   2**54+2 = 18014398509481986 = 2 x 9007199254740993,    w=1: itself; w=2: 9007199254740993.
+    # A HORIZON ROUNDED UP HERE IS THE DIRECTION THIS FUNCTION REFUSES BY NAME, and two of the five
+    # rows round up under float. No shipped run reaches these magnitudes; that is the standing this
+    # file gives every other rule in the spine, not an argument against pinning it.
+    for n, w, want in ((2**53 + 1, 1, 9007199254740993),
+                       (2**53 + 3, 2, 4503599627370497),
+                       (2**53 + 7, 4, 2251799813685249),
+                       (2**54 + 2, 1, 18014398509481986),
+                       (2**54 + 2, 2, 9007199254740993)):
+        assert type(derive.opt_steps_from_windows(Windows(n), w)) is Steps, (n, w)
+        assert derive.opt_steps_from_windows(Windows(n), w) == Steps(want), ("osfw", n, w)
+        # THE TWO ROADS AGREE, stated as an agreement rather than as the same number written twice:
+        # the convert block above pins flush_period at these same five counts, and this says the
+        # `//` here and the Fraction there land on one integer. It is a claim neither assertion on
+        # its own makes, and it is the one that breaks if either road quietly goes back to float.
+        assert int(derive.opt_steps_from_windows(Windows(n), w)) == \
+            int(derive.flush_period(Steps(n), w)), ("the two roads disagree", n, w)
+        # And the case still discriminates: if this ever stops holding it has been softened into one
+        # float gets right, and the rows above would be green while proving nothing.
+        assert int(n / w) != want, ("case no longer discriminates float from exact", n, w)
+    # (7) THE COUNT END REFUSES EVERY OTHER KIND, including the bare int the inline version took.
+    for bad in (Steps(1024), Flushes(1024), Backwards(1024), Epochs(1024), 1024, True, 1024.0, None):
         try:
             derive.opt_steps_from_windows(bad, 4)
             raise AssertionError(f"opt_steps_from_windows accepted {bad!r} as a window count")
         except UnitError:
             pass
-    try:
-        derive.opt_steps_from_windows(Windows(1024), 0)
-        raise AssertionError("a zero divisor was accepted; n_cycles would divide by zero")
-    except UnitError:
-        pass
-    # The answer is STEPS, so it refuses the two kinds it would otherwise be confused with -- which
-    # is the entire reason the function exists rather than the division that was there before.
+    # (8) THE DIVISOR END. Below one is refused rather than clamped -- w=0 would divide by zero and
+    # w<0 would answer a negative horizon -- and the message is asserted so the arm is named: a bare
+    # `except UnitError` here cannot tell this arm from the type arm one line above it.
+    for bad in (0, -1, -64):
+        try:
+            derive.opt_steps_from_windows(Windows(1024), bad)
+            raise AssertionError(f"a divisor below one was accepted: {bad!r}; n_cycles divides by it")
+        except UnitError as e:
+            assert "at least one window" in str(e), (bad, str(e))
+    # (9) THE ANSWER IS STEPS, so it refuses the two kinds it would otherwise be confused with --
+    # which is the entire reason the function exists rather than the division that was there before.
     for wrong in (Windows(16), Flushes(16)):
         try:
             _ = derive.opt_steps_from_windows(Windows(1024), 64) >= wrong

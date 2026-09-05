@@ -621,6 +621,26 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
     answer for a zero-window run and for a 63-window run at the heavy-run command's divisor of 64.
     The count end refuses the negative now; the zero is still floored, and this docstring is where
     that difference is stated.
+
+    AND WHERE THAT ARM STANDS TODAY, NAMED RATHER THAN ASSUMED, WHICH IS WHAT ITS FOUR SIBLINGS
+    ALREADY DO. It is UNREACHABLE through the composition root, by TWO independent blocks, and the
+    sentence that said "measured from RUN_EPOCHS=-1, which reaches here" was written for a tree one
+    commit old. (1) The only producer of the Windows this function is handed on the root path is
+    spine/compose.py::_run_windows, which is `run_windows_from_epochs(Epochs(RUN.epochs),
+    _windows_in_epoch(sysm))` -- and that function, two hundred lines up THIS FILE and landed in the
+    same commit, now refuses a negative n_epochs itself. MEASURED, with capacity/api.py::startup_refusals
+    stubbed to [] so the walk gets past the P4 blocker: compose(RUN_EPOCHS=-1) now ends in
+    run_windows_from_epochs, at the `n_epochs.n < 0` arm, and never reaches this one; before
+    2026-09-05 it reached here as Windows(-634) and this function answered Steps(1). (2) Unstubbed,
+    capacity/api.py::startup_refusals is ASSEMBLY_ORDER row 29 and raises NotImplementedError one
+    row before OPT.build at row 30, which is where opt/api.py::build makes this file's only
+    executable call to this function -- so even the first block is not the one a run meets first.
+    WHAT WOULD MAKE IT REACHABLE, stated so it is not guessed at: a caller that hands OPT.build a
+    run_windows it did not get from _run_windows, or the removal of run_windows_from_epochs'
+    negative arm, or a second producer of the horizon's window count. IT IS KEPT AND NOT DELETED:
+    this is the arm for the count, at the count, and the sibling that currently shadows it is
+    refusing a DIFFERENT quantity (epochs, not windows) one kind boundary away -- a caller who
+    computes windows another way gets no refusal from it at all.
     """
     if type(run_windows) is not Windows:
         raise UnitError(f"opt_steps_from_windows: run_windows must be Windows, got "
@@ -648,8 +668,13 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
                         f"length is a count of windows the stream will yield, and a negative one "
                         f"is not a short run, it is not a run. The floor below answered Steps(1) "
                         f"for it -- the SAME answer it gives a zero-window run -- so a horizon of "
-                        f"one optimizer step was reported for a negative run length: measured from "
-                        f"RUN_EPOCHS=-1, which reaches here as Windows(-634) through "
+                        f"one optimizer step was reported for a negative run length: measured "
+                        f"from RUN_EPOCHS=-1, which REACHED here as Windows(-634) through "
+                        f"spine/compose.py::_run_windows until 2026-09-05 and does not any more -- "
+                        f"run_windows_from_epochs refuses that Epochs(-1) one function earlier in "
+                        f"this same file, so on the tree as it stands this arm has NO route from "
+                        f"the composition root and fires only for a caller that hands "
+                        f"opt/api.py::build a window count it did not get from "
                         f"spine/compose.py::_run_windows. The zero is floored and the negative is "
                         f"refused, and those are two rulings, not one.")
     n = run_windows.n // w

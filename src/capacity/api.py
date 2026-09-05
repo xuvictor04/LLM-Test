@@ -34,8 +34,11 @@ refused by the type system rather than by discipline.
     THAT IS NO LONGER WHERE IT STOPS, AND THIS SENTENCE SAID IT WAS UNTIL 2026-09-04. Re-measured
     by running it: RUN.process_setup has a body, and `compose(environ={})` now halts on the 29th of
     the 39 rows in spine/compose.py::ASSEMBLY_ORDER, at CAP.startup_refusals -- which is PAST the
-    valve's own row, so new_valve IS built on every compose() today and both its Gates are readable
-    without writing a line. Three more copies of the same stale claim were corrected in
+    valve's own row, so new_valve IS built on every compose() today and all THREE of its Gates are
+    readable without writing a line -- THREE, corrected 2026-09-05: this said "both its Gates" from
+    the edit that added cap.clamp, a count-in-prose falsified in the file that respells "EIGHT keys
+    to TEN" twice for exactly this reason and that no check catches, because K13 reads digits and
+    "both" is a word. Three more copies of the same stale claim were corrected in
     docs/04_CONTRACT.md in the same edit; a claim about where the root stops is a copy of a fact and
     rots exactly the way a count does, and the reason it survived four places is that the count
     checks read digits and this one is a symbol name. The repair is applied now: derive.pin_tick
@@ -88,8 +91,18 @@ def _clamped_lift(cap_value, hard, frac, floor):
     the two readings that were open, and how an owner would tell them apart in a report are written
     out in capacity/api.py::observe, which is the entry point the ruling governs.
 
-    ONE SPELLING, BECAUSE TWO WOULD BE TWO ANSWERS. observe applies this, cap.valve prints what
-    this returns, and cap.clamp counts what this dropped. new_valve's `_lift_moves` already makes
+    ONE SPELLING, BECAUSE TWO WOULD BE TWO ANSWERS. observe is where this WILL be applied, cap.valve
+    prints what this returns, and cap.clamp counts what this dropped. THE FIRST OF THOSE THREE IS A
+    CONTRACT AND NOT A DESCRIPTION OF THE TREE, and this line said it in the present tense until
+    2026-09-05: capacity/api.py::observe is `raise NotImplementedError` today, so nothing in a run
+    applies this function, cap.lifts_clamped_experts and cap.lifts_clamped_vocab are seeded at 0 and
+    never incremented, and Decision.clamped is never set by any code that exists. EVERY EXECUTING
+    CALLER IS INSIDE new_valve -- `_lift_moves`, `_one_lift`, and the mask-and-inert test on the
+    vocabulary arm -- i.e. the startup Gate lines, which is the correct state for a frozen-contract
+    package and is exactly why the sentence has to be written as an obligation on P4 rather than as
+    a report. A reader who takes "observe applies this" for a measurement concludes that the valve
+    clamps in a run; it does not yet.
+    new_valve's `_lift_moves` already makes
     the argument for calling the shipped function rather than restating its arithmetic -- "a
     reimplementation of the comparison here could disagree with the lift the valve actually takes,
     and then this gate and the mechanism would be two sources of truth" -- and a clamp written
@@ -111,17 +124,110 @@ def _clamped_lift(cap_value, hard, frac, floor):
     return max(int(cap_value), min(derive.lift_to(cap_value, frac, floor), int(hard)))
 
 
-def _clamp_gate(arith, lifts, clamped, *, dead_reason=None):
+_CLAMP_BLOCKED_KINDS = ("unarmed", "nonpositive", "never_pins", "at_ceiling",
+                        "refused_unmasked", "inert")
+
+
+def _clamp_blocked_clause(arm, kind, f):
+    """ONE ARM, ONE SENTENCE, IN THE CLAMP'S OWN WORDS. Returns a str.
+
+    `kind` is one of the closed set capacity/api.py::_CLAMP_BLOCKED_KINDS, and an unknown one raises
+    rather than printing a blank clause -- a gate that silently says nothing about an arm is the
+    absent-versus-inert confusion this whole surface exists to refuse.
+
+    THIS FUNCTION EXISTS BECAUSE THE PREVIOUS VERSION OF cap.clamp BORROWED cap.valve's SENTENCES
+    AND PRINTED A CONTRADICTION WITH THEM. The unreachable arm opened "no lift can be earned at all
+    on this configuration" and then spliced in the `dead` clauses new_valve writes for cap.valve --
+    two of which say the opposite in the same breath: "the vocabulary arm has room to earn (1000
+    against a hard ceiling of 4096) ... so observe refuses every lift it earns by name as
+    dead_rows_unmasked", and "the expert arm's soft cap is 12 and ONE EARNED LIFT DOES NOT MOVE IT".
+    A sentence saying nothing can be earned followed by a clause saying what IS earned and then
+    refused. Measured on a 25,344-cell sweep of the lever space: 3,464 cells printed one.
+
+    THE REPAIR IS A DISTINCTION AND NOT A REWORDING, because the two gates are not asking the same
+    question. THERE IS MORE THAN ONE REASON A LIFT DOES NOT MOVE A CAP and the borrowed prose
+    collapsed them into one sentence; .rework/DECISIONS.md D16 names two of them itself -- a lift
+    refused as dead_rows_unmasked, and derive.lift_to returning the cap unchanged -- and says they
+    "must not be mistaken for a clamp". A clamp needs three things IN ORDER -- a lift EARNED, that
+    lift APPLIED rather than refused, and its unclamped arithmetic ABOVE the hard ceiling -- and
+    each `kind` below is the first of the three to fail:
+      unarmed          CAP_TARGETS does not arm the arm. Nothing is EARNED. (D16's UNREACHABLE row,
+                       and D15's ground.)
+      nonpositive      the soft cap is at or below zero, where this valve reports the arm dead
+                       before any lift is considered. Nothing is EARNED.
+      never_pins       the soft cap is above the cull's settling point, so the population never
+                       reaches it and never pins. Nothing is EARNED.
+      at_ceiling       the cap is already at or above the hard ceiling: lifts are EARNED and observe
+                       REFUSES each by name as at_hard_ceiling before computing one.
+      refused_unmasked LM_MASK_DEAD_ROWS is off: lifts are EARNED and observe REFUSES each by name
+                       as dead_rows_unmasked. `inert_too` records whether the MASK IS THE ONLY thing
+                       in the way -- this branch is tested before the no-move one, so an arm can be
+                       both, and a reader told only about the mask is told to set a lever that does
+                       not change the answer.
+      inert            derive.lift_to returns the cap unchanged: lifts are EARNED and APPLIED, and
+                       move nothing, so they never approach a ceiling to be held at.
+    THE TWO GATES SHARE A COMPUTED VALUE AND NOT A SENTENCE. new_valve builds these records in the
+    same branches that build cap.valve's prose, off the same facts, so the two lines cannot disagree
+    about the configuration -- and each writes its own words about it, because they are reporting
+    different events. Sharing the sentence is how the contradiction got in.
+
+    `f` is the branch's numbers, keyed by name; every key a kind reads is written by new_valve in
+    the same statement that appends the record.
+    """
+    if kind == "unarmed":
+        return (f"({arm}) NOT ARMED, so NO LIFT IS EVER EARNED on it: CAP_TARGETS="
+                f"{f['targets']} does not arm this arm, and a clamp is a property of a lift")
+    if kind == "nonpositive":
+        return (f"({arm}) NO LIFT IS EVER EARNED: the soft cap is {f['cap']} ({f['lever']}="
+                f"{f['given']}), at or below zero, which this valve reports dead before any lift "
+                f"is considered -- a cap there makes the clamp that reads it negative (C30)")
+    if kind == "never_pins":
+        return (f"({arm}) NO LIFT IS EVER EARNED: the soft cap of {f['cap']} sits above the cull's "
+                f"settling point of {f['operating']}, so the population never reaches it, never "
+                f"pins, and the pin clock never accumulates")
+    if kind == "at_ceiling":
+        return (f"({arm}) EARNED AND REFUSED, WHICH IS NOT CLAMPED: the cap of {f['cap']} is "
+                f"already at or above its hard ceiling of {f['hard']}, so observe refuses by name "
+                f"as at_hard_ceiling BEFORE any lift is computed. A refused lift is never applied "
+                f"and so can never be held at a ceiling, and a clamp raises a cap only from BELOW "
+                f"one -- from {f['cap']} it would be a lowering, which this valve may never do")
+    if kind == "refused_unmasked":
+        return (f"({arm}) EARNED AND REFUSED, WHICH IS NOT CLAMPED: the cap of {f['cap']} is below "
+                f"its hard ceiling of {f['hard']}, so lifts ARE earned here, and "
+                f"LM_MASK_DEAD_ROWS={f['mask']} makes observe refuse every one of them by name as "
+                f"dead_rows_unmasked. Those refusals are the block-reason histogram's number and "
+                f"cap.vocab_arm_honest's line; a lift that is never applied cannot be held"
+                + (f". THE MASK IS NOT THE ONLY THING IN THE WAY HERE: derive.lift_to({f['cap']}, "
+                   f"CAP_LIFT={f['lift']}, CAP_LIFT_MIN={f['lift_min']}) = {f['cap']}, so even with "
+                   f"LM_MASK_DEAD_ROWS=1 the applied lift would move nothing and still reach no "
+                   f"ceiling" if f.get("inert_too") else ""))
+    if kind == "inert":
+        return (f"({arm}) EARNED AND APPLIED AND MOVES NOTHING, WHICH IS NOT CLAMPED: the cap of "
+                f"{f['cap']} is below its hard ceiling of {f['hard']}, so an earned lift IS "
+                f"applied -- and derive.lift_to({f['cap']}, CAP_LIFT={f['lift']}, CAP_LIFT_MIN="
+                f"{f['lift_min']}) = {f['cap']} returns it unchanged, so the applied cap never "
+                f"approaches the ceiling and there is nothing for the clamp to hold")
+    raise ValueError(f"cap.clamp: unknown blocked-kind {kind!r}; the closed set is "
+                     f"{_CLAMP_BLOCKED_KINDS}")
+
+
+def _clamp_gate(arith, lifts, clamped, *, dead_facts=None):
     """The clamp's DID IT FIRE reading. Returns one spine/gate.py::Gate named cap.clamp.
 
     FOUR STATES OUT OF A RECORD THAT HAS THREE VERDICTS, AND THE FOURTH IS CARRIED IN THE NUMBERS
     RATHER THAN BY COLLAPSING TWO WORDS INTO ONE. A clamped lift is neither a clean fire nor a
     refusal, and this valve's whole history is mechanisms that fired or did not without saying
     which, so the four have to stay four:
-      UNREACHABLE                  no lift can be earned at all on this configuration -- a clamp is
-                                   a property of a lift, so where no lift can happen the question
-                                   is INAPPLICABLE and not merely unmet. `dead_reason` says which
-                                   lever and which value made it so.
+      UNREACHABLE                  no lift can be HELD AT A HARD CEILING on this configuration --
+                                   a clamp is a property of an APPLIED lift that overshoots, so
+                                   where that cannot happen the question is INAPPLICABLE and not
+                                   merely unmet. THIS IS NOT "no lift can be earned": some of the
+                                   ways an arm arrives here EARN lifts and lose them later, and one
+                                   of those EARNS AND APPLIES them. `dead_facts` says, per arm,
+                                   which of the clamp's three preconditions failed first and on
+                                   which lever and value, and the sentence is written by
+                                   capacity/api.py::_clamp_blocked_clause -- by this gate, about
+                                   this gate's event, and never borrowed from another one.
       armed, 0 clamped of 0 lifts  no lift was earned. The mechanism was live and the condition was
                                    not met, which is a MEASUREMENT and the state spine/gate.py
                                    exists to keep separate from the one above.
@@ -141,6 +247,16 @@ def _clamp_gate(arith, lifts, clamped, *, dead_reason=None):
     -- the state D16 calls new -- and the ordinary applied-in-full lift is the `0 clamped of N`
     reading here. Reading D16's "fired" onto this gate's verdict would say a clamped lift is an
     ordinary one, which is the collapse the ruling was written to prevent.
+    ITS UNREACHABLE ROW DOES NOT TRANSFER EITHER, AND THAT IS THE ERROR THIS GATE SHIPPED WITH.
+    D16's fourth row is "no lift can ever be earned | CAP_TARGETS excludes the arm", which is the
+    ground for the LIFT gate's unreachability. This gate borrowed the words as well as the verdict
+    and printed them on configurations where CAP_TARGETS arms the arm and lifts ARE earned -- and
+    then, in the same sentence, printed cap.valve's clause saying so. The verdict transfers, because
+    where no lift is earned none can be clamped; the WORDS do not, because the converse is false:
+    a clamp is also impossible on an arm whose earned lifts are refused, and on one whose applied
+    lifts move nothing. D16 names both of those in its own next paragraph as cases that "must not be
+    mistaken for a clamp" -- reporting them AS "no lift can be earned" is that mistake in the other
+    direction. capacity/api.py::_clamp_blocked_clause holds those grounds apart.
 
     IT IS BUILT TWICE FROM ONE FUNCTION. capacity/api.py::new_valve calls it at startup, where
     `lifts` and `clamped` are 0 by construction -- the gate is built before the first flush -- so
@@ -157,14 +273,32 @@ def _clamp_gate(arith, lifts, clamped, *, dead_reason=None):
     """
     value = f"{clamped} clamped of {lifts} lift(s) taken"
     need = "0 clamped -- every earned lift applied in full"
-    if dead_reason is not None:
+    blocked = "; ".join(_clamp_blocked_clause(*rec) for rec in (dead_facts or ()))
+    if dead_facts and not lifts and not clamped:
         return Gate(
             "cap.clamp", False, value, need, reachable=False,
-            reason=f"no lift can be earned at all on this configuration, so no lift can be held at "
-                   f"a ceiling either: {dead_reason}. Reported unreachable rather than as 0 clamped "
-                   f"lifts, which would read as a valve that lifted freely and was never held -- "
-                   f"the same confusion between an inert mechanism and an absent one that cap.valve "
-                   f"is unreachable here to avoid.")
+            reason=f"NO LIFT CAN BE HELD AT A HARD CEILING on this configuration, which is the only "
+                   f"event this gate counts. A clamp needs three things IN ORDER -- a lift EARNED, "
+                   f"that lift APPLIED rather than refused, and its unclamped arithmetic ABOVE the "
+                   f"hard ceiling -- and on every arm here one of the three fails first: {blocked}. "
+                   f"THIS LINE SAYS NOTHING ABOUT WHETHER A LIFT IS EARNED and must not be read as "
+                   f"saying so: an arm's earned lifts can be refused by name, and an applied lift "
+                   f"can move nothing, and either of those reaches this verdict with lifts having "
+                   f"been earned all along -- the clauses above say which case each arm is in. What "
+                   f"became of an EARNED lift is cap.valve's line and the block-reason histogram's "
+                   f"number; what became of an APPLIED one that overshot is this line's, and there "
+                   f"are none here. Reported unreachable rather than as 0 clamped lifts, which "
+                   f"would read as a valve that lifted freely and was never held -- the same "
+                   f"confusion between an inert mechanism and an absent one that cap.valve is "
+                   f"unreachable here to avoid.")
+    if dead_facts:
+        falsified = (f" THE STARTUP ANALYSIS SAID NO LIFT COULD BE HELD AT A CEILING HERE AND THE "
+                     f"LEDGER DISAGREES, so this line reports the LEDGER and not the analysis: "
+                     f"{blocked}. Two report lines disagreeing about what the valve did is the "
+                     f"shape this gate exists to refuse, and a run is the authority over a reading "
+                     f"taken at startup.")
+    else:
+        falsified = ""
     if clamped:
         return Gate(
             "cap.clamp", True, value, need,
@@ -173,13 +307,13 @@ def _clamp_gate(arith, lifts, clamped, *, dead_reason=None):
                    f"owner's ruling of 2026-09-04 (\"let's soft clamp if a ceiling is overshot, "
                    f"until it goes down\"). A clamped lift is counted in lifts_experts / "
                    f"lifts_vocab as well, because the cap did move; it is NOT in the block-reason "
-                   f"histogram, because nothing was refused. Arithmetic: {arith}.")
+                   f"histogram, because nothing was refused. Arithmetic: {arith}.{falsified}")
     if lifts:
         return Gate(
             "cap.clamp", False, value, need,
             reason=f"{lifts} earned lift(s) and every one was applied IN FULL -- no lift reached "
                    f"the hard ceiling, so the clamp was live and never had to hold anything. "
-                   f"Arithmetic: {arith}.")
+                   f"Arithmetic: {arith}.{falsified}")
     return Gate(
         "cap.clamp", False, value, need,
         reason=f"NO LIFT WAS EARNED, so there was nothing to clamp. An armed arm has room and the "
@@ -338,12 +472,19 @@ def new_valve(cap: Config, *, restored=None):
                      which is one more than spine/gate.py::Gate has verdicts -- so the fourth is
                      carried where Gate.line already prints numbers, in `value`, and not by
                      collapsing two of the three into one word:
-                       UNREACHABLE                     no lift can be earned at all on this
-                                                       configuration (the same five-ways-dead
-                                                       analysis cap.valve does, and the same
-                                                       `dead` sentences; a clamp is a property of
-                                                       a lift, so where no lift can happen the
-                                                       question is INAPPLICABLE, not unmet)
+                       UNREACHABLE                     no lift can be HELD AT A HARD CEILING on
+                                                       this configuration (the same analysis
+                                                       cap.valve does, and NOT the same sentences:
+                                                       the `dead` prose spliced in here until
+                                                       2026-09-05 opened "no lift can be earned at
+                                                       all" and then carried cap.valve's own
+                                                       clauses saying which lifts ARE earned and
+                                                       then refused. The two gates now share the
+                                                       FACTS -- `dead_facts`, per arm -- and each
+                                                       writes its own sentence; a clamp is a
+                                                       property of an APPLIED lift that overshoots,
+                                                       so where that cannot happen the question is
+                                                       INAPPLICABLE, not unmet)
                        armed, 0 clamped of 0 lifts     no lift was earned yet -- and this is the
                                                        only reachable reading a gate BUILT AT
                                                        STARTUP can have, for the same reason
@@ -788,12 +929,29 @@ def new_valve(cap: Config, *, restored=None):
             "-- on the vocabulary arm -- an output layer whose dead rows are masked")
 
     dead = []
+    # THE SECOND LIST IS THE CLAMP'S, AND IT IS A COMPUTED VALUE RATHER THAN A SENTENCE. cap.clamp
+    # needs the SAME analysis of why an arm is dead and a DIFFERENT sentence about it -- it reports
+    # what became of the lifts that were applied, not whether one can be earned -- so it gets the
+    # facts and writes its own words in capacity/api.py::_clamp_blocked_clause. Splicing `dead` into
+    # it is what printed "no lift can be earned at all on this configuration" beside "so observe
+    # refuses every lift it earns" on 3,464 of 25,344 swept cells. Two gates may share a fact; they
+    # may not share a sentence, because the sentence is the part that is about the event.
+    # THE UNARMED ARMS ARE IN THIS LIST AND NOT IN `dead`, which is the one structural difference:
+    # cap.valve's prose speaks only of arms CAP_TARGETS armed, but an unarmed arm is a perfectly
+    # good reason no lift of its can ever be clamped, and leaving it out would let the clamp gate
+    # go unreachable with nothing said about half the valve.
+    dead_facts = []
+    if not expert_armed:
+        dead_facts.append(("expert", "unarmed", {"targets": targets}))
     if expert_armed and not expert_room:
         if ce <= 0:
+            dead_facts.append(("expert", "nonpositive",
+                               {"cap": ce, "lever": "CAP_FAB_START", "given": cap.fab_start}))
             dead.append(f"the expert arm's soft cap is {ce} (CAP_FAB_START={cap.fab_start}, {oe}), "
                         f"and a cap at or below zero makes the growth clamp negative on the first "
                         f"flush, freezing fabric growth for the whole run (C30)")
         elif ce >= hard_experts:
+            dead_facts.append(("expert", "at_ceiling", {"cap": ce, "hard": hard_experts}))
             dead.append(f"the expert arm's soft cap is {ce} against a hard ceiling of "
                         f"{hard_experts} (CAP_FAB_START={cap.fab_start}, {oe}), so there is no "
                         f"room to earn: the cap is ALREADY at or above the ceiling, which observe "
@@ -805,11 +963,14 @@ def new_valve(cap: Config, *, restored=None):
                         f"{derive.lift_to(ce, cap.lift, cap.lift_min)} is not below the ceiling "
                         f"either, and is never applied here")
         elif ce > operating:
+            dead_facts.append(("expert", "never_pins", {"cap": ce, "operating": operating}))
             dead.append(f"the expert arm's soft cap is {ce} against a cull settling point of "
                         f"{operating} (CAP_FAB_START={cap.fab_start}, {oe}; "
                         f"d_operating_population = FAB_PRESSURE x FAB_SLOTS), so the population "
                         f"never reaches it, never pins, and the pin clock never accumulates")
         else:
+            dead_facts.append(("expert", "inert", {"cap": ce, "hard": hard_experts,
+                                                   "lift": cap.lift, "lift_min": cap.lift_min}))
             dead.append(f"the expert arm's soft cap is {ce} and ONE EARNED LIFT DOES NOT MOVE IT: "
                         f"derive.lift_to({ce}, CAP_LIFT={cap.lift}, CAP_LIFT_MIN={cap.lift_min}) "
                         f"= {derive.lift_to(ce, cap.lift, cap.lift_min)}, because the lift is "
@@ -820,12 +981,17 @@ def new_valve(cap: Config, *, restored=None):
                         f"the reason lift_min exists; it takes CAP_LIFT_MIN=0 together with a lift "
                         f"that rounds to zero AT THIS CAP, and is not where the shipped defaults "
                         f"sit)")
+    if not vocab_armed:
+        dead_facts.append(("vocabulary", "unarmed", {"targets": targets}))
     if vocab_armed and not vocab_room:
         if cv <= 0:
+            dead_facts.append(("vocabulary", "nonpositive",
+                               {"cap": cv, "lever": "CAP_VOCAB_START", "given": cap.vocab_start}))
             dead.append(f"the vocabulary arm's soft cap is {cv} (CAP_VOCAB_START="
                         f"{cap.vocab_start}, {ov}), and a mint ceiling at or below zero refuses "
                         f"every mint while the clamp that reads it goes negative (C30)")
         elif cv >= hard_vocab:
+            dead_facts.append(("vocabulary", "at_ceiling", {"cap": cv, "hard": hard_vocab}))
             dead.append(f"the vocabulary arm's soft cap is {cv} against a hard ceiling of "
                         f"{hard_vocab} (CAP_VOCAB_START={cap.vocab_start}, {ov}), so there is no "
                         f"room to earn: the cap is ALREADY at or above the ceiling, which observe "
@@ -837,12 +1003,39 @@ def new_valve(cap: Config, *, restored=None):
                         f"{derive.lift_to(cv, cap.lift, cap.lift_min)} is not below the ceiling "
                         f"either, and is never applied here")
         elif not mask_dead:
-            dead.append(f"the vocabulary arm has room to earn ({cv} against a hard ceiling of "
-                        f"{hard_vocab}) and LM_MASK_DEAD_ROWS={mask_dead}, so observe refuses "
-                        f"every lift it earns by name as dead_rows_unmasked -- the honesty "
-                        f"precondition on this arm, tested and not met, reported on the next line "
-                        f"by cap.vocab_arm_honest")
+            # THE MASK IS NOT ALWAYS THE ONLY THING IN THE WAY, AND THIS CLAUSE SAID IT WAS. This
+            # branch is tested BEFORE the no-move branch below, so an arm that is unmasked AND has
+            # an inert lift arrives here and used to be called an arm that "has room to earn". The
+            # operator is then sent to set LM_MASK_DEAD_ROWS=1, which by cap.vocab_arm_honest's own
+            # criterion must "change the thing this gate is about" -- and on those configurations it
+            # does not: with the mask on the arm is still dead, one branch further down. The
+            # ordering stays (dead_rows_unmasked is the refusal observe actually raises); what
+            # changes is that the second obstacle is now named instead of hidden behind the first.
+            inert_too = _clamped_lift(cv, hard_vocab, cap.lift, cap.lift_min) == cv
+            dead_facts.append(("vocabulary", "refused_unmasked",
+                               {"cap": cv, "hard": hard_vocab, "mask": mask_dead,
+                                "lift": cap.lift, "lift_min": cap.lift_min,
+                                "inert_too": inert_too}))
+            if inert_too:
+                dead.append(f"the vocabulary arm's soft cap is {cv} against a hard ceiling of "
+                            f"{hard_vocab} and LM_MASK_DEAD_ROWS={mask_dead}, so observe refuses "
+                            f"every lift it earns by name as dead_rows_unmasked -- the honesty "
+                            f"precondition on this arm, tested and not met, reported on the next "
+                            f"line by cap.vocab_arm_honest. AND THE MASK IS NOT THE ONLY THING IN "
+                            f"THE WAY: setting LM_MASK_DEAD_ROWS=1 would not arm this arm either, "
+                            f"because one earned lift does not move this cap -- "
+                            f"derive.lift_to({cv}, CAP_LIFT={cap.lift}, "
+                            f"CAP_LIFT_MIN={cap.lift_min}) = {cv} -- so the lever this clause "
+                            f"names is not on its own a lever that changes the answer")
+            else:
+                dead.append(f"the vocabulary arm has room to earn ({cv} against a hard ceiling of "
+                            f"{hard_vocab}) and LM_MASK_DEAD_ROWS={mask_dead}, so observe refuses "
+                            f"every lift it earns by name as dead_rows_unmasked -- the honesty "
+                            f"precondition on this arm, tested and not met, reported on the next "
+                            f"line by cap.vocab_arm_honest")
         else:
+            dead_facts.append(("vocabulary", "inert", {"cap": cv, "hard": hard_vocab,
+                                                       "lift": cap.lift, "lift_min": cap.lift_min}))
             dead.append(f"the vocabulary arm's soft cap is {cv} and ONE EARNED LIFT DOES NOT MOVE "
                         f"IT: derive.lift_to({cv}, CAP_LIFT={cap.lift}, "
                         f"CAP_LIFT_MIN={cap.lift_min}) = "
@@ -875,17 +1068,26 @@ def new_valve(cap: Config, *, restored=None):
                    f"printed for a mechanism that cannot move, on every corner but `off`.")
     # THE CLAMP'S OWN READING, BUILT FROM THE SAME FACTS AND ANSWERING A DIFFERENT QUESTION.
     # cap.valve asks "can a lift happen at all"; cap.clamp asks "what happened to the lifts that
-    # did". They share a reachability precondition on purpose -- where no lift can be earned, no
+    # did". They share the reachability PREDICATE on purpose -- where no lift can be applied, no
     # lift can be clamped -- and sharing it is what keeps the two lines from disagreeing about
     # whether this valve is alive, which is the argument the startup_refusals paragraph above makes
-    # for sharing the settling-point wire. THE COUNTS ARE ZERO HERE BY CONSTRUCTION, not by
-    # measurement: this gate is built before the first flush, exactly as cap.valve is, so the
-    # startup line is the "no lift was earned" state and CAP.counters is where the other two
-    # reachable states are printed from the live ledger.
+    # for sharing the settling-point wire.
+    # THEY SHARE THE PREDICATE AND THE FACTS, AND THEY DO NOT SHARE A SENTENCE. This call passed
+    # `dead_reason="; ".join(dead)` until 2026-09-05 -- cap.valve's OWN prose, spliced into a gate
+    # whose unreachable arm then opened "no lift can be earned at all on this configuration". Two of
+    # cap.valve's dead clauses say the opposite of that opening, and on 3,464 of 25,344 swept
+    # configurations the two arrived in one printed sentence: "... no lift can be EARNED at all
+    # ...: the vocabulary arm has room to earn (1000 against a hard ceiling of 4096) and
+    # LM_MASK_DEAD_ROWS=False, so observe refuses every lift IT EARNS by name as
+    # dead_rows_unmasked". That is the false-equation class arriving inside the gate that was added
+    # to end it. `dead_facts` is the repair: the same branches above record WHICH of the clamp's
+    # three preconditions failed, as a computed value, and capacity/api.py::_clamp_blocked_clause
+    # writes the clamp's own sentence about it. Borrowed prose is how the contradiction got in.
+    # THE COUNTS ARE ZERO HERE BY CONSTRUCTION, not by measurement: this gate is built before the
+    # first flush, exactly as cap.valve is, so the startup line is the "no lift was earned" state
+    # and CAP.counters is where the other two reachable states are printed from the live ledger.
     clamp = _clamp_gate(arith, 0, 0,
-                        dead_reason=None if (expert_room or vocab_room)
-                        else ("CAP_TARGETS=off: the valve is disabled and both caps sit at their "
-                              "hard ceilings" if targets == "off" else "; ".join(dead)))
+                        dead_facts=None if (expert_room or vocab_room) else tuple(dead_facts))
     valve.gates = (valve_gate, vocab_arm, clamp)
     return valve
 
@@ -927,8 +1129,9 @@ def observe(cap: Config, valve, *, elapsed_windows, live_experts, live_vocab, im
                in 19 lifts that way. This is a CAP-SIDE CONDITION and there is deliberately no
                lever to switch it off.
 
-    The lift is capacity/api.py::_clamped_lift(cap, hard, cap.lift, cap.lift_min) -- spine/derive.py
-    ::lift_to, the shipped module-level arithmetic covered by cap_test.py's known-answer table, held
+    The lift is capacity/api.py::_clamped_lift(cap, hard, cap.lift, cap.lift_min) --
+    spine/derive.py::lift_to, the shipped module-level arithmetic covered by cap_test.py's
+    known-answer table, held
     at the hard ceiling under the owner's clamp ruling below. Unclamped it replays sched_ctl's five
     real lifts
     3000 -> 3240 -> 3499 -> 3778 -> 4080 -> 4406. lift_min is not decoration: at cap 12,
@@ -1211,6 +1414,13 @@ def counters(cap: Config, valve):
     the two readings that matter after a run -- every earned lift applied IN FULL, and M of N lifts
     CLAMPED at the ceiling -- are reachable only from here. The gate is built by the same function
     at both sites so the two lines cannot disagree about what the valve did.
+    AND IT MUST RECOMPUTE `arith` FROM THE CURRENT CAPS BEFORE PASSING IT. new_valve's `arith` is a
+    statement about the STARTING caps -- "experts 3/ceiling 10/settles 5/one lift -> 10, CLAMPED at
+    the ceiling from 11" -- and passing that string through to an end-of-run FIRED line prints a
+    true-at-startup equation as a statement about a run whose cap has been 10 for most of its
+    length. That is the false-equation shape this package has paid for six times, and the only
+    reason it is an obligation here rather than a defect is that this entry point is still a stub.
+    The caps are on the Valve; the two hard ceilings are in the ledger this call already reads.
 
     LEVERS READ: targets, lift, lift_min, pin_windows, stall_band, fab_start, vocab_start
     WIRES READ: none

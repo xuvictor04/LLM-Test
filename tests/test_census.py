@@ -561,6 +561,34 @@ def selftest():
             saved8[("fabric", "FAB_NMAX")], where="spine/assemble.py, the FAB row")
         case("N8 does not fire on a `where` that names no line", False,
              check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        # THE ESCAPE THE ABSTENTION ARM OPENED, measured before it was closed: a trailing prose
+        # clause on a line-form `where` parses to zero spans, and until the broken/prose split
+        # landed it was counted as prose and never opened. It is a NATURAL edit -- the citation is
+        # still right and someone added a note to it -- which is what made it worth closing.
+        DEPARTURES[("fabric", "FAB_NMAX")] = dict(
+            saved8[("fabric", "FAB_NMAX")],
+            where="src/fabric/levers.py:296-307, and the note below it")
+        case("N8 catches a `where` that names a file and then no readable line", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        # AND THE SAME EDIT ON EVERY LINE-FORM ENTRY, which is the version that mattered: it drove
+        # the examined population to zero and N8 PASSED, printing "(VACUOUS: 0 examined)". Both arms
+        # fire here -- six broken pointers and an empty population -- and either alone is enough.
+        for _k, _d in list(DEPARTURES.items()):
+            if _where_spans(_d.get("where") or "")[1]:
+                DEPARTURES[_k] = dict(_d, where=_d["where"] + ", and the note below it")
+        case("N8 fails rather than passing vacuous when the whole table stops citing lines", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        # THE OTHER ROUTE TO AN EMPTY POPULATION: the line indices simply deleted, leaving pointers
+        # that are legitimately prose one at a time and collectively no check at all.
+        for _k, _d in list(DEPARTURES.items()):
+            _p, _sp = _where_spans(_d.get("where") or "")
+            if _sp:
+                DEPARTURES[_k] = dict(_d, where=_p + ", the declaration")
+        case("N8 fails when every `where` has been reduced to prose", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
     finally:
         DEPARTURES.clear(); DEPARTURES.update(saved8)
 
@@ -793,9 +821,19 @@ def _where_spans(where):
 
     The line form is `PATH:N[-M][, :N[-M]]*`. An entry that points at prose instead --
     `spine/assemble.py, DOM row` -- names no line, so it cannot drift and there is nothing here to
-    check; it comes back with no spans and N8 counts it rather than reporting it. Anything that
-    starts like the line form and then does not parse comes back with no spans too: guessing at a
-    half-understood pointer is how a check invents a finding.
+    check; it comes back with ("", []) and N8 counts it rather than reporting it.
+
+    THE TWO EMPTY ANSWERS ARE DIFFERENT AND THE PATH IS WHAT TELLS THEM APART, which is the whole
+    reason this returns a pair rather than a list. `("", [])` is prose: no colon in the first part,
+    nothing was ever pointed at. `("src/fabric/levers.py", [])` is a BROKEN POINTER: the entry says
+    it is naming lines in a file and then does not parse. Guessing at a half-understood pointer is
+    how a check invents a finding, so nothing is guessed here -- but the two cases are handed back
+    distinguishable, because N8 reports the second and abstains on the first. Before that split, a
+    trailing prose clause on a line-form `where` -- `src/fabric/levers.py:296-307, and the note
+    below it`, a natural edit -- parsed to zero spans, was counted as prose and was never opened;
+    put on all six line-form entries it drove N8's examined population to zero and the check PASSED,
+    printing "0 line span(s) opened across 0 departure(s); 9 point at prose". A data table is not
+    allowed to switch a check off.
     """
     parts = [p.strip() for p in str(where).split(",")]
     if ":" not in parts[0]:
@@ -843,12 +881,18 @@ def check_n8_departure_arguments_still_there(rows, env_names, wire_dsts):
     the argument is the one part of an entry that nothing has ever followed -- and three of the nine
     were pointing at unrelated levers when this check was written (the block above measures each).
 
-    THREE THINGS ARE CHECKED, two of them mechanical and one a heuristic that says so:
+    FIVE THINGS ARE CHECKED, four of them mechanical and one a heuristic that says so:
+      * a `where` that names a file and then no readable line is a BROKEN pointer and is reported;
+        only a `where` with no colon in its first part is prose and abstained on;
       * the cited file exists;
       * every span lies inside it, so a range that ran off the end of a shrinking file is a finding
         rather than a silently empty read;
       * the span's text MENTIONS the departure -- its census name, its landing name, or either with
-        the package prefix stripped, case-insensitively.
+        the package prefix stripped, case-insensitively;
+      * and at least one entry in the table carries a line index at all, so the check cannot be
+        switched off by editing the table it reads. The last two arms are the ones the sentence
+        below about `where` never having been followed applies to twice over: an unopened pointer
+        and an unopenable one look the same in a PASS line.
 
     WHAT THE THIRD ARM CANNOT CATCH, said here rather than discovered later. It is a substring test
     over prose. A span that has slid a few lines WITHIN the paragraph that argues the departure
@@ -867,6 +911,15 @@ def check_n8_departure_arguments_still_there(rows, env_names, wire_dsts):
     for (fam, old), dep in sorted(DEPARTURES.items()):
         path, spans = _where_spans(dep.get("where") or "")
         if not spans:
+            if path:
+                findings.append(
+                    f"{fam}/{old}: `where` is {dep.get('where')!r}, which names a file and then no "
+                    f"line this can read. An unparseable pointer is a BROKEN pointer, not a prose "
+                    f"one: it claims to point at lines, so it is reported rather than abstained on "
+                    f"-- otherwise a trailing clause on the end of a citation silently moves it out "
+                    f"of the population this check opens. The form is PATH:N[-M][, :N[-M]]*, and a "
+                    f"`where` that means to argue in prose must carry no colon in its first part.")
+                continue
             prose += 1
             continue
         full = os.path.join(ROOT, path)
@@ -896,6 +949,20 @@ def check_n8_departure_arguments_still_there(rows, env_names, wire_dsts):
                     f"{sorted(toks)}. A line index into a file that is still being edited drifts, "
                     f"and this one has: it now points at other levers' text. Find the argument and "
                     f"re-cite it -- first line there is {lines[a - 1].strip()[:60]!r}")
+    # AND THE POPULATION ITSELF IS A FINDING WHEN IT IS EMPTY. Everywhere else in this file
+    # `vacuous` is an ANNOTATION on a PASS, and that is right for a check whose population is a
+    # measured property of the tree -- N1 examining no knobs means the census is empty. N8's
+    # population is a property of a HAND-WRITTEN TABLE in this file instead, so an empty one means
+    # the pointer discipline was abandoned rather than satisfied, and the check would print PASS
+    # while opening nothing. The arm above stops the accidental route (a clause appended to a
+    # citation); this stops the deliberate one (line indices deleted from every entry).
+    if DEPARTURES and not opened:
+        findings.append(
+            f"not one of the {len(DEPARTURES)} declared departure(s) carries a line index, so this "
+            f"check opened nothing. `where` is the only pointer to a departure's ARGUMENT, and N3 "
+            f"-- the only other check that reads this table -- proves a departure still departs and "
+            f"still lands without ever opening it. A table with no line form in it therefore leaves "
+            f"the argument for every departure uncheckable. At least one entry must cite lines.")
     detail = (f"{opened} line span(s) opened across {len(DEPARTURES) - prose} departure(s); {prose} "
               f"point at prose and carry no line index to drift")
     return _report("N8", "every departure's `where` opens on lines that still argue it",

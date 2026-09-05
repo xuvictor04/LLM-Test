@@ -66,9 +66,9 @@ one that can go stale in silence — this one had.)*
 
 | new row | src | why it is a wire and not an argument |
 |---|---|---|
-| `LM.d_max_token_bytes` | `TOK.max_bytes` | `ByteComposer.__init__(s, d, maxb=16)` at `:1441` is constructed as `ByteComposer(d)` at `:1549` so the default always wins, and `:1487` truncates. With `MAX_TOK > 16` two long tokens sharing their first 16 bytes get **identical composites** — the composer's whole property, inverted, silently (ISSUES P1-M21). `lm/levers.py:165` names the field; `tok/levers.py:337` records the row as missing. The defaults agreeing today is luck. |
-| `CAP.d_expert_slots` | `FAB.slots` | `CAP_FAB_START = 0` is a **sentinel meaning "start at the hard ceiling"**, and `lever.py` refuses a default computed from another lever — so 0 stood for a number nothing supplied. `capacity/levers.py:119`, and `:123` says in as many words that the row is absent. |
-| `CAP.d_vocab_slots` | `LM.vocab_slots` | The same sentinel on the other target. `capacity/levers.py:244` records that TOK holds no ceiling of its own to give. |
+| `LM.d_max_token_bytes` | `TOK.max_bytes` | `ByteComposer.__init__(s, d, maxb=16)` at `:1441` is constructed as `ByteComposer(d)` at `:1549` so the default always wins, and `:1487` truncates. With `MAX_TOK > 16` two long tokens sharing their first 16 bytes get **identical composites** — the composer's whole property, inverted, silently (ISSUES P1-M21). `lm/levers.py::<module>` names `d_max_token_bytes` as an incoming value it expects. `tok/levers.py::TOKLevers` recorded this coupling as *not in* `spine/assemble.py::COUPLINGS` until 2026-09-06 — it has been a row since, so the luck the defaults were running on has been replaced by the wire, and that comment now says so. |
+| `CAP.d_expert_slots` | `FAB.slots` | `CAP_FAB_START = 0` is a **sentinel meaning "start at the hard ceiling"**, and `lever.py` refuses a default computed from another lever — so 0 stood for a number nothing supplied. `capacity/levers.py::<module>` records the row as declared and read by `capacity/api.py::new_valve`; it said the opposite — that CAP had no wires at all — for several commits, and the correction is dated in the file. |
+| `CAP.d_vocab_slots` | `LM.vocab_slots` | The same sentinel on the other target. `capacity/levers.py::CAPLevers` records that TOK holds no ceiling of its own to give — the census moved `VMAX` to LM as `LM_VOCAB_SLOTS` — so the wire is `d_vocab_slots` from LM and a row declared against TOK would fail at `build()` and read like a missing lever. |
 | `CAP.d_mask_dead_rows` | `LM.mask_dead_rows` | The honesty precondition on the vocabulary arm: 8192 reserved against 2048 minted is 6144 rows in the softmax denominator indexing nothing, so the run measures the reservation and not the mechanism. LM owns the output layer; CAP does not get to decide this. |
 | `CAP.d_operating_population` | `FAB.pressure × FAB.slots` | The irreducible coupling the valve must **declare rather than remove**: a soft cap above the cull's settling point never pins, so the pin clock never accumulates and the valve is dead while looking armed. A second landing of the identical `derive.operating_population` call, so the fabric's setpoint and the valve's refusal cannot disagree. |
 | `DOM.d_comp_ema` | `FAB.comp_ema` | One smoothing rate for two populations, or "this domain beats the population" is a comparison between two differently smoothed series. `fabric/levers.py:693` names both this and the next; `self_organize.py:6720` is the direct attribute reach it replaces. |
@@ -544,28 +544,60 @@ at `new_valve` as `counters["cap.mask_dead_rows"]`, the way the two hard ceiling
 keeps reading no wires of its own.
 **`new_valve` refuses two lever values at startup, added 2026-09-04: `CAP_LIFT < 0` and
 `CAP_LIFT_MIN < 0`, and either one alone trips the refusal.** `derive.lift_to` is
-`cap + max(int(floor), int(frac × cap))`, and **the proportional term takes the sign of the fraction
-times the sign of the cap**, so a lift that *lowers* has two routes and only one of them needs both
-levers. **Both negative, at a cap above zero:** the max is negative and an *earned* lift **shrinks**
-the cap — `lift_to(12, -0.5, -100) = 6`. **`CAP_LIFT_MIN` negative alone, at a cap below zero**,
-which `CAP_FAB_START=-5` reaches: `lift_to(-100, 0.5, -1) = -101` against
-`lift_to(-100, 0.5, 0) = -100`. Both are against this package's founding sentence, *"raised, by a
-little, never lowered"*, and the second is why the guard is an `or` rather than an `and`. *(This
-paragraph said until 2026-09-05 that only the two **together** lower a cap — the false universal
-`capacity/api.py` and `capacity/levers.py` have each corrected in their own copy, this document
-being the third carrier and the last.)* A negative `CAP_LIFT` **alone** never lowers a cap, which is
-arithmetic and not a sample — with the floor at or above 0 the `max` is at or above 0 at every cap —
-so that half of the refusal rests on the second ground below. Before the refusal, `compose()`
+`cap + max(int(floor), int(frac × cap))`, so everything a lift does to a cap is decided by that one
+`max`, and **a `max` is negative only when BOTH of its operands are.** That is the whole rule, and it
+is arithmetic rather than a sample: **a lift lowers a cap exactly when `int(CAP_LIFT_MIN) < 0` AND
+`int(CAP_LIFT × cap) < 0`.** Two consequences follow with no sweep behind them. `CAP_LIFT_MIN < 0` is
+**necessary** for every lowering there is, so a negative `CAP_LIFT` **alone** never lowers a cap —
+at any cap, above zero, at zero or below it — and that half of the refusal rests on the second ground
+below rather than on this one. And the proportional operand goes negative only when the fraction and
+the cap carry **opposite signs** *and* `int()` does not truncate their product to zero, which is why
+the guard is an `or` and not an `and`: `CAP_LIFT_MIN < 0` reaches a lowering with a **non-negative**
+`CAP_LIFT`, at any cap far enough below zero to survive the truncation.
+**Compute those two operands; do not read a regime label off this page.** Two earlier generations of
+this paragraph named regimes instead. The first said only the two **together** lower a cap; the
+second replaced that with three narrower labels — *"Both negative, at a cap above zero"* **shrinks**,
+*"`CAP_LIFT_MIN` negative alone, at a cap below zero"* lowers, and *"Below zero neither identity
+holds"* — and each of the three was refuted at a cap inside the regime it named, the last of them at
+`CAP_FAB_START=-5`, the one below-zero cap that same paragraph offered as reachable. Worked pairs,
+run rather than reasoned about:
+`lift_to(12, -0.5, -100) = 6` lowers while `lift_to(1, -0.5, -100) = 1` does not, both with **both**
+levers negative; `lift_to(-5, 0.5, -1) = -6` lowers against `lift_to(-5, 0.5, 0) = -5` while
+`lift_to(-12, 0.08, -1) = -12` does not, both with the **floor alone** negative below zero. The
+second pair is reachable — `new_valve` resolves `CAP_FAB_START=-5` to `cap_experts = -5` with
+`origin[0] = "operator (fab_start=-5)"` — and a lowering is against this package's founding sentence,
+*"raised, by a little, never lowered"*. *(This paragraph said until 2026-09-05 that only the two
+**together** lower a cap; from 2026-09-05 to 2026-09-06 it replaced that false universal with three
+narrower false ones. `capacity/api.py` and `capacity/levers.py` still carry the second shape in their
+own copies and are filed with exact replacements.)* Before the refusal, `compose()`
 carried `CAP_LIFT=-0.5` as far as `new_valve` without a word and `cap.valve` printed
 *"one lift → 6"* beside *"ONE EARNED LIFT DOES NOT MOVE IT"* on one line; **`build()` carries it
 still**, because the refusal is in the body of `new_valve` and not in the Lever machinery —
 `assemble.build(environ={"CAP_LIFT": "-0.5"})` returns a frozen `Config` with `lift = -0.5`, and it
-is `compose()`, one row later, that raises. **At a cap at or above zero it removes no
-configuration:** with the floor at or above 0 a negative `CAP_LIFT` is arithmetically identical to
-`CAP_LIFT=0` (a flat `+CAP_LIFT_MIN` lift, which is legal), and with the fraction at or above 0 a
-negative `CAP_LIFT_MIN` is identical to `CAP_LIFT_MIN=0`. **Below zero neither identity holds** —
-`lift_to(-100, -0.5, 8) = -50` against `lift_to(-100, 0, 8) = -92`, and the pair already given —
-which is the **second** reason both are refused rather than an exception to the first.
+is `compose()`, one row later, that raises. **THE SECOND GROUND is the same `max` read the other
+way**: each negative is a redundant spelling of a legal value for exactly as long as the `max` picks
+the operand it would have picked at the zeroed lever. With `CAP_LIFT_MIN` at or above 0 a negative
+`CAP_LIFT` is arithmetically `CAP_LIFT=0` while `int(CAP_LIFT × cap) ≤ CAP_LIFT_MIN`; with `CAP_LIFT`
+at or above 0 a negative `CAP_LIFT_MIN` is arithmetically `CAP_LIFT_MIN=0` while
+`int(CAP_LIFT × cap) ≥ 0`. **At a cap at or above zero both conditions hold automatically, so there
+the two identities are unconditional.** Below zero they are a computation, and **neither is empty
+there**. Take the shipped `CAP_LIFT_MIN=8` against `CAP_LIFT=-0.5`, and the shipped `CAP_LIFT=0.08`
+against `CAP_LIFT_MIN=-1`, at the reachable `cap = -5`:
+`lift_to(-5, -0.5, 8) = 3 = lift_to(-5, 0, 8)` and `lift_to(-5, 0.08, -1) = -5 = lift_to(-5, 0.08, 0)`
+— **both identities hold at the cap this document names as reachable.** At *those two lever pairs*
+the first identity first fails at `cap = -18` (`lift_to(-18, -0.5, 8) = -9` against
+`lift_to(-18, 0, 8) = -10`) and the second at `cap = -13` (`-14` against `-13`); both boundaries move
+with the levers, which is the reason they are computed here and not quoted as a rule.
+`lift_to(-100, -0.5, 8) = -50` against `lift_to(-100, 0, 8) = -92` — the pair this paragraph used to
+print as if it were the whole of below-zero — is far past both.
+**Where each identity stops holding, the two levers part company**, and this is the join the three
+regime labels kept getting wrong. Where a negative `CAP_LIFT_MIN`'s identity breaks, the lowering has
+already begun: that *is* the first ground, so nothing is left over. Where a negative `CAP_LIFT`'s
+identity breaks, no lowering is possible — the floor is at or above 0, so the `max` is too — and what
+is left over is a **lift that grows with how far below zero the cap sits** (`+50` at `cap = -100`
+against the flat `+8` a legal value gives), which is not a lowering and is not a second spelling of
+anything declared either. So both are refused: one because it can lower, the other because it is
+redundant where it is legal and undeclared where it is not.
 **`CAP_LIFT > 1` is deliberately *not* refused** — `U.FRACTION`'s unit string is a label the census
 renders and not a bound (`spine/lever.py::Lever` carries `choices` and no numeric range), and a lift
 of 2.0 is a large lift, not a lowering one. It lives in `new_valve`
@@ -583,8 +615,14 @@ earned lift overshoot: `lift_to(4095, 0.08, 8) = 4422` against a ceiling of 4096
 of which a refusal would strand below its ceiling and refuse every lift forever, spending the
 evidence that earned the lift on nothing. The lift is **taken** and held at the ceiling by
 `capacity/api.py::_clamped_lift`, whose `max` is there because `min(lift_to(…), hard)` from a cap
-*above* the ceiling would **lower** it — reachable at `CAP_FAB_START=5000` against
-`FAB_SLOTS=4096` — and lowering is the one thing this valve may never do. **`at_hard_ceiling` is
+*above* the ceiling would **lower** it, and lowering is the one thing this valve may never do.
+**The STATE is reachable and the CALL is not, and the guard is written for the second:**
+`CAP_FAB_START=5000` against `FAB_SLOTS=4096` really does resolve `cap_experts = 5000` above its own
+hard ceiling, but `observe` never hands that cap to `_clamped_lift`, because `at_hard_ceiling`
+refuses `cap >= hard` before any lift is computed. `_clamped_lift`'s own docstring says exactly that
+and keeps the guard anyway, on the ground that the refusal is a **caller's discipline** and this is
+where the arithmetic lives; a reader who takes "reachable" for "this lowering can happen" has read
+the state and not the call. **`at_hard_ceiling` is
 unchanged**: it tests `cap >= hard` **before** the lift is computed, so the closed set above does not
 grow and the clamp bites **once per arm** — full lifts, then one clamped lift, then `at_hard_ceiling`
 on every flush after it. **Of the two readings of *"until it goes down"*, `capacity/api.py::observe`
@@ -889,12 +927,27 @@ the `units.Windows` is constructed, so nothing is derived from the bad number. *
 untouched by all five** — zero means something different for each of these levers and only some of
 those meanings are declared, so the ruling stops at the sign. The switch is `REFUSE_NEGATIVE_PERIOD`,
 a module constant in each owning `api.py`, with **no environment name**, no census row and nothing
-for the planned `docs/04_LEVERS.md` to render: D17's second sentence (*"if it has a bad effect, we
-can turn off the refusal"*) requires that withdrawing the refusal not be a revert, which is D4's rule
-that a mechanism kept for future use is kept with a switch. What the shape costs is that flipping it
-is a **code edit** and not a shell variable; the argument for paying that rather than minting five
-levers or spending five of the six remaining edges is written once, at
-`ckpt/api.py::REFUSE_NEGATIVE_PERIOD`, and the four siblings point at it rather than restating it.
+for the planned `docs/04_LEVERS.md` to render. **D17 asks for more than this shape gives, and the gap
+is recorded here rather than closed.** Its second sentence (*"if it has a bad effect, we can turn off
+the refusal"*) is read in `.rework/DECISIONS.md` as meaning the refusal must be turn-off-able
+**without editing code**, and D17 closes by saying the switch exists so that revisiting the ruling
+costs an environment variable rather than a commit. Flipping `REFUSE_NEGATIVE_PERIOD` costs a **code
+edit in five files** — less than a revert, and more than an environment variable. So the answer to
+*"is the refusal turn-off-able without editing code"* is **no**, and this sentence said otherwise
+until 2026-09-06 by paraphrasing the requirement down to *"not a revert"*, which is the half the
+shipped shape happens to meet. What the shape does buy against D4 — a mechanism kept for future use
+is kept **with a switch**, not as a code path that rots — is that OFF is a first-class named state
+instead of a deleted branch; what it still owes the owner is a way to reach that state from a shell.
+The argument for paying a code edit rather than minting five levers or spending five of the six
+remaining edges is written once, at
+`ckpt/api.py::REFUSE_NEGATIVE_PERIOD`, and the four siblings point at it rather than restating it;
+that file states the same cost plainly and does not soften it. **The choice this leaves open is the
+owner's**, because D17 instructed the implementing agent to REPORT rather than spend a wire, and the
+report is the one `ckpt/api.py` writes: it checked the wire-free routes one at a time and each is
+closed by a green check — O1 on `os.environ`, O8 on `from_env`, O10 on imports, and
+`Config.owned_by` at the read site — so either a code edit is accepted, or five per-package levers
+are minted, or O10's allowlist gains a spine module, which is an edit to `tests/`. It is not settled
+here, and it must not be settled by a paraphrase.
 **`FAB.manage_period`'s guard is the second line and not the first:** `FAB_MANAGE_EVERY` is also the
 source of the declared coupling `OPT.batch_windows → FAB.d_manage_period`, and since 2026-09-05
 `spine/derive.py::flush_period_windows` raises a `UnitError` on a negative there — at **build**,
@@ -1777,9 +1830,18 @@ surviving **non-row** spellings of `TOK.vmax` in `spine/assemble.py` named one b
 docstring's list of names that do not exist, and `spine/assemble.py::_Fields`'s undeclared-read
 example, which that paragraph had attributed to `Coupling.__init__`, a symbol that exists and has
 never held it. Conflict **(b)** of the same block was stale the same way and went with it: the
-`Windows → Flushes` conversion it says does not exist is `spine/derive.py::flush_period_windows`, and
-the row it describes has taken `("OPT.batch_windows", "CAP.pin_windows")` through that function since
-`pin_windows` was re-typed. **Two carriers now point the wrong way and neither is in this owner's
+`Windows → Flushes` conversion it recorded as not existing is `spine/derive.py::flush_period_windows`,
+and the row it describes has taken `("OPT.batch_windows", "CAP.pin_windows")` through that function
+since `pin_windows` was re-typed. **That repair left its own summary table asserting the retracted
+reading, forty lines below itself, for a further day:** the same docstring's WHAT IS DELIBERATELY
+ABSENT block sourced `d_cap_lift_period` *"from TRAIN.batch_w x TRAIN.grow_cap_every"* — a package
+that does not exist, two field names the census renamed, and a **product** where the declared row
+divides — and produced the right number anyway at the shipped `OPT_BATCH_WINDOWS=1`. Corrected
+2026-09-06, with the retraction kept beside it. **A paragraph repaired while its own summary table
+keeps the retracted reading is the shape conflict (b) is about**, and it is the same failure as the
+CAP paragraph above, where one false universal was replaced by three narrower false ones: a
+correction scoped to the sentence that was reported rather than to the class it belongs to.
+**Two carriers now point the wrong way and neither is in this owner's
 line:** `spine/assemble.py`'s `TOK.d_vocab_ceiling` row still calls `tok/levers.py::<module>` *"the
 half that is still outstanding"* — and `tools/render_wiring.py` republishes that reason into
 `docs/03_WIRING.md`, so the stale carrier is once again the auto-rendered one — while
@@ -1800,8 +1862,21 @@ and one stale sentence was corrected.** The position is already written in three
 advances it"*; `lr_at(opt, st, opt_step)` takes that counter and is declared PURE; and
 `derive.opt_steps_from_windows` exists, refuses a non-`Windows` at one end and a divisor below 1 at
 the other — and, since 2026-09-05, a **negative** window count and a divisor that is not an `int` —
-and is covered by the oracle table (575 cases, 0 mismatches, run; the two newest refusals have no
-oracle row yet, which is filed rather than assumed). The alternatives are
+and **has no oracle row at all**. The frozen replay is `.rework/oracle/`, and it is eight tables —
+`_phases`, `blowup_stale`, `bwt_of`, `cull_gate_open`, `curve_verdict`, `forgetting_of`, `lift_to`,
+`pin_tick` — of which none is this function; the *575 cases, 0 mismatches* that
+`tests/test_derive.py` prints are those eight replayed, and they contain no case of it. What covers
+this function instead is a block of **hand-derived known answers** in `tests/test_derive.py::smoke`,
+which gives the reason there rather than leaving the absence to be read as an oversight: an oracle in
+this tree means values CAPTURED from the frozen old tree by `.rework/capture_oracle.py`, which lifts
+**module-level functions** out of `self_organize.py`, and the old tree resolved its LR horizon
+somewhere else entirely — in a closure inside `main()`, by a different computation, with the divisor
+this function takes never formed at all. So the row is not merely absent, it is **impossible**: there
+is no behaviour of this shape to capture. Hand-derived answers are a weaker artefact than a frozen
+table and are named as the weaker one here. *(This clause claimed
+oracle coverage until 2026-09-06. The claim was inherited, and the parenthetical added on 2026-09-05
+— that only "the two newest refusals have no oracle row yet" — entrenched it by implying the rest of
+the function had one.)* The alternatives are
 not close: indexing by windows makes `units.Steps` — the one type in the system that exists for this
 quantity — false, and leaves `opt_steps_from_windows` with no caller; indexing by flushes makes
 `accum` change the batch without changing the horizon, a 4× mislabelled schedule at `ACCUM=4`.

@@ -921,6 +921,42 @@ _K15_GATE_DYN_IMPOSSIBLE_OK = '''
                      "DATA_STREAM_BYTES=0: this gate cannot fire on this run."))
 '''
 
+# THE SAME PAIR THROUGH A `bool(...)` WRAPPER, which is how four of src/fabric/api.py's Gates are
+# actually written. `bool(X)` and `if X:` are the same truthiness test, so the source settles which
+# arm prints here exactly as it does above; a comparison that will not read the wrapper off drops
+# the four live Gates and reports nothing in their place.
+_K15_GATE_BOOL_IMPOSSIBLE = '''
+        Gate("data.redraw", False, 0, 1, reachable=bool(n > 0),
+             reason=("DATA_STREAM_BYTES=0: this gate cannot fire on this run."
+                     if n > 0 else ""))
+'''
+
+_K15_GATE_BOOL_IMPOSSIBLE_OK = '''
+        Gate("data.redraw", False, 0, 1, reachable=bool(n > 0),
+             reason=("" if n > 0 else
+                     "DATA_STREAM_BYTES=0: this gate cannot fire on this run."))
+'''
+
+# THE NEGATED FORM, which is the half that breaks if the wrapper is stripped in one place and not
+# the other: the arm is selected by comparing the reason's test against `not {reach}`, so `reach`
+# must already be normalised when that string is built. The sentence prints when `not (n > 0)` is
+# FALSE -- that is, on exactly the runs the gate is reachable -- so this one is a finding.
+_K15_GATE_BOOL_NEG_IMPOSSIBLE = '''
+        Gate("data.redraw", False, 0, 1, reachable=bool(n > 0),
+             reason=("" if not (n > 0) else
+                     "DATA_STREAM_BYTES=0: this gate cannot fire on this run."))
+'''
+
+# THE NEIGHBOUR THAT MUST STAY OUTSIDE. Same wrapper, but the reason branches on a DIFFERENT
+# expression -- `src`, not `n > 0`. Normalising the wrapper may not turn into deciding that two
+# different conditions are one; this is src/opt/api.py's `floor_reachable` against
+# `not sched_live` in miniature, and it is ABSTAINED on rather than judged.
+_K15_GATE_BOOL_SECOND_NAME = '''
+        Gate("data.redraw", False, 0, 1, reachable=bool(n > 0),
+             reason=("DATA_STREAM_BYTES=0: this gate cannot fire on this run."
+                     if src else ""))
+'''
+
 # RULE 5. The gate PRINTS `n`, which is DATA_STREAM_BYTES, on the `else` of an ordering test on that
 # same lever -- so every value at or below zero reaches this arm while the sentence names one of
 # them. This is the shape of ckpt.periodic_armed's "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0".
@@ -971,6 +1007,57 @@ def open_areas(dat: Config, *, seed: int):
     else:
         gate = Gate("data.area_open", False, n, 1, reachable=False,
                     reason="a negative budget is refused before this runs.")
+    return [gate]
+"""
+
+# THE BODY ARM OF AN ORDERING TEST, WHICH IS THE SAME PROGRAM AS THE ELSE ARM ABOVE. `if n <= 0:`
+# admits every value at or below zero in its BODY exactly as `if n > 0: ... else:` does in its else,
+# and src/opt/api.py writes the first spelling. Until 2026-09-05 rule 5 saw only the second, so this
+# tree -- the historical ckpt defect, transliterated and nothing else changed -- PASSED.
+_K15_API_BODY_ARM = """\
+\"\"\"A stand-in api module that builds one gate on the BODY of an ordering test.\"\"\"
+from spine.gate import Gate
+from spine.lever import Config
+
+
+def open_areas(dat: Config, *, seed: int):
+    \"\"\"Open every area.
+
+    LEVERS READ: source, stream_bytes
+    WIRES READ: none
+    DID IT FIRE: data.area_open
+    \"\"\"
+    dat = dat.owned_by("DATA")
+    n = int(dat.stream_bytes)
+    if n <= 0:
+        __GATE__
+    else:
+        gate = Gate("data.area_open", True, n, 1)
+    return [gate]
+"""
+
+# THE ADMIT SIDE OF THE WIDENING, and it is what keeps it from becoming "any literal on any body
+# arm". An EQUALITY test pins the lever to one value in its body, so the sentence and the printed
+# number cannot disagree -- the same construct, one operator apart, and it must stay green.
+_K15_API_BODY_PINNED = """\
+\"\"\"A stand-in api module that builds one gate on the BODY of an equality test.\"\"\"
+from spine.gate import Gate
+from spine.lever import Config
+
+
+def open_areas(dat: Config, *, seed: int):
+    \"\"\"Open every area.
+
+    LEVERS READ: source, stream_bytes
+    WIRES READ: none
+    DID IT FIRE: data.area_open
+    \"\"\"
+    dat = dat.owned_by("DATA")
+    n = int(dat.stream_bytes)
+    if n == 0:
+        __GATE__
+    else:
+        gate = Gate("data.area_open", True, n, 1)
     return [gate]
 """
 
@@ -1388,6 +1475,30 @@ def _periods(sysm):
       "src/data/api.py": _k15_api(_K15_GATE_DYN_IMPOSSIBLE_OK)},
      {"K15": (False, None)}),
 
+    # ---- THE `bool(...)` WRAPPER. Four of src/fabric/api.py's Gates are written this way and the
+    # ---- version that shipped on 2026-09-04 judged none of them. The first three pin the
+    # ---- normalisation in both directions; the fourth pins that it is normalisation and not
+    # ---- inference -- a wrapper around one expression may not be matched to a different one.
+    ("K15: the impossibility on the printing arm of a bool()-wrapped reachable expression",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_api(_K15_GATE_BOOL_IMPOSSIBLE)},
+     {"K15": (True, "reachable exactly when")}),
+
+    ("K15: the same sentence on the other arm of a bool()-wrapped expression is ADMITTED",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_api(_K15_GATE_BOOL_IMPOSSIBLE_OK)},
+     {"K15": (False, None)}),
+
+    ("K15: a bool()-wrapped expression whose reason branches on its NEGATION",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_api(_K15_GATE_BOOL_NEG_IMPOSSIBLE)},
+     {"K15": (True, "reachable exactly when")}),
+
+    ("K15: a bool()-wrapped expression against a reason branching on a SECOND NAME is ABSTAINED on",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_api(_K15_GATE_BOOL_SECOND_NAME)},
+     {"K15": (False, None)}),
+
     # ---- RULE 5. ckpt.periodic_armed's shape: the gate prints the lever and the reason spells one
     # ---- value of it, on a branch that admits every value at or below zero.
     ("K15: a literal spelled for the lever the gate prints, on a range-admitting branch",
@@ -1403,6 +1514,26 @@ def _periods(sysm):
     ("K15: the same literal is ADMITTED where the branch PINS the lever to it",
      {"src/data/levers.py": _K15_LEVERS,
       "src/data/api.py": _k15_branched(_K15_API_THREE_WAY, _K15_BRANCHED_LITERAL)},
+     {"K15": (False, None)}),
+
+    # ---- THE BODY ARM. `if n <= 0: <gate>` is the same program as `if n > 0: ... else: <gate>`,
+    # ---- and rule 5 saw only the second until 2026-09-05 -- so the defect it was written for
+    # ---- could be transliterated straight past it, and a live instance of exactly that shape was
+    # ---- standing in src/opt/api.py the whole time. The third case is the operator that makes the
+    # ---- literal legitimate, so the widening cannot be read as "any literal on any body arm".
+    ("K15: the same literal on the BODY arm of an ordering test -- the transliterated defect",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_branched(_K15_API_BODY_ARM, _K15_BRANCHED_LITERAL)},
+     {"K15": (True, "admits a RANGE")}),
+
+    ("K15: the body-arm gate RENDERING the value it prints is ADMITTED",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_branched(_K15_API_BODY_ARM, _K15_BRANCHED_RENDERED)},
+     {"K15": (False, None)}),
+
+    ("K15: the same literal on the BODY arm of an EQUALITY test is ADMITTED -- it pins the lever",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_branched(_K15_API_BODY_PINNED, _K15_BRANCHED_LITERAL)},
      {"K15": (False, None)}),
 )
 
@@ -3357,9 +3488,18 @@ def _entry_docstrings(src_dir=SRC):
 #   reaches, are both on this check's report line. What makes the rest decidable is that
 #   `Gate.line` prints the reason on BOTH arms, so a reason that branches on the SAME expression
 #   `reachable=` was given has one arm that prints on a reachable run, and rule 4 applies to that
-#   arm alone (_k15_live_reason). A reason branching on a SECOND NAME for the same condition
-#   (`floor_reachable` against `not sched_live`) is left alone: deciding those are the same
-#   condition is inference, and this file has a measurement for what inference costs.
+#   arm alone (_k15_live_reason). ONE NORMALISATION IS PERFORMED AND IT IS NOT INFERENCE: a
+#   `reachable=bool(EXPR)` is read as `reachable=EXPR`, because `bool(X)` and `if X:` are the same
+#   truthiness test. Four of this tree's computed-reachability Gates are written that way
+#   (src/fabric/api.py's fab.expert_choice, fab.discover, fab.distinctness and fab.independence,
+#   each `reachable=bool(EXPR)` against `reason=(A if EXPR else B)` with EXPR textually identical),
+#   and the version of this file that shipped on 2026-09-04 dropped all four while its own prose
+#   said the whole residue was "a second name for the same condition" -- true of two of the six and
+#   false of four. What is left outside after the normalisation is a reason branching on a genuinely
+#   DIFFERENT expression: a second name (`floor_reachable` against `not sched_live`), or a WEAKER
+#   one (`not sched_live` against `reachable=sched_live and warmup_n > 1`). Those are left alone:
+#   deciding two different expressions are one condition is inference, and this file has a
+#   measurement for what inference costs.
 #
 #   RULE 4's DYNAMIC HALF HAS NO HISTORICAL TRUE POSITIVE AND IS SHIPPED ANYWAY, WHICH NEEDS SAYING.
 #   Run over 37 trees -- every commit from 1348da6 to HEAD plus the working tree -- the arm-selecting
@@ -3390,18 +3530,28 @@ def _entry_docstrings(src_dir=SRC):
 #   Nothing can catch that -- K13's population is docs/04_CONTRACT.md plus src/**/*.py, so tests/ is
 #   never scanned, and its own output line says "NOT SEARCHED FOR: a number written in words".
 #
-#   RULE 5 IS CALIBRATED THE SAME WAY RULE 4 WAS, AND THE BROAD VERSION IS REFUTED BY MEASUREMENT.
-#   The obvious rule -- any literal spelled for the lever the Gate prints -- was run over the same
-#   37 trees and reports up to 15 sites at once, every one of them correct prose: a reason may
-#   legitimately spell the literal that DEFINES its own arm (`if targets == "off":` beside
-#   "CAP_TARGETS=off"). What ships instead fires only where the branch admits a RANGE of that
-#   lever's values -- the gate sits on the negative arm of an ordering test on the same lever, so
-#   more than one value reaches it -- and only for a NUMERIC literal the branch does not pin. Over
-#   those 37 trees that rule fires exactly once per tree at e4c5e4b through 1e8cc54 (ten commits),
-#   naming src/ckpt/api.py's `ckpt.periodic_armed` -- one of the three false gate equations
-#   repaired by hand on 2026-09-04, and one every check in this file was green on -- and ZERO times
-#   at dd6a396, HEAD and the working tree, all of which carry the repair. No other site fires at
-#   any commit.
+#   RULE 5 IS CALIBRATED THE SAME WAY RULE 4 WAS, AND THE BROAD VERSION IS REFUTED BY MEASUREMENT
+#   -- BUT NOT BY THE MEASUREMENT THIS BLOCK USED TO QUOTE. The obvious rule is: any literal
+#   spelled for the lever the Gate prints. This block said it "reports up to 15 sites at once,
+#   every one of them correct prose". Both halves are wrong, and re-measuring is what found the
+#   defect below. Built from the shipped code by dropping the `ranged` requirement, the numeric
+#   filter and the `pinned` skip, and run over 2e8a63e, e4c5e4b, 7e902ba, 694f156, a2ffc08,
+#   dd6a396, f11ae02, 40d2446 and the working tree, the broad rule reports at most SIX sites (six
+#   at 2e8a63e, e4c5e4b, 7e902ba, 694f156 and a2ffc08; four at dd6a396, f11ae02, 40d2446 and the
+#   working tree) -- and on the working tree three of the four are correct prose (cap.valve on
+#   `if targets == "off"` beside "CAP_TARGETS=off", cap.vocab_arm_honest twice on `elif mask_dead:`
+#   where `mask_dead = bool(cap.d_mask_dead_rows)` pins it) while THE FOURTH IS A REAL DEFECT. So
+#   the broad rule's noise was never the only thing the narrowing removed.
+#
+#   What ships fires only where the branch admits a RANGE of that lever's values -- the Gate sits
+#   on EITHER arm of an ordering test on the same lever, so more than one value reaches it -- and
+#   only for a NUMERIC literal the branch does not pin. The `else`-only version of that was itself
+#   a narrowing, and it cost a live instance: over the nine trees above the widened rule reports
+#   src/ckpt/api.py's `ckpt.periodic_armed` at 2e8a63e, e4c5e4b, 7e902ba, 694f156 and a2ffc08 (the
+#   false equation repaired by hand at dd6a396, and one every check in this file was green on) and
+#   src/opt/api.py's `opt.lr.shift_warm` at EVERY ONE of the nine, and NO OTHER SITE at any of
+#   them. cap.vocab_arm_honest -- the nearest correct-prose neighbour, and the one the broad rule
+#   reports twice -- stays out because `elif mask_dead:` carries no Compare at all.
 
 _K15_ENV = re.compile(r"\b([A-Z][A-Z0-9]*)_([A-Z0-9_]+)\s*=")
 # The value token immediately after `PREFIX_NAME=`: a number, a quoted string, or a bare word. Kept
@@ -3613,6 +3763,14 @@ def _k15_live_reason(reason, reach):
       * a reason with no conditional in it at all -> the whole reason, which prints on both arms and
         therefore on the reachable one.
 
+    A `bool(...)` WRAPPER AROUND THE REACHABLE EXPRESSION IS READ OFF FIRST, and that is the one
+    normalisation this function performs. Four of this tree's Gates -- src/fabric/api.py's
+    fab.expert_choice, fab.discover, fab.distinctness and fab.independence -- write
+    `reachable=bool(EXPR)` against `reason=(A if EXPR else B)` with EXPR textually identical, and
+    a comparison that refuses to see through the wrapper drops all four. Measured: coverage on this
+    tree goes from 9 of 15 computed-reachability Gates to 13, rule 4's dynamic half still reports
+    ZERO findings at every commit swept, and the count is on the check's report line either way.
+
     Anything else -- a branch keyed on a second name for the same condition, a nested conditional --
     returns None and the gate stays outside rule 4, counted and printed as such. The comparison is
     deliberately textual and deliberately not clever: `floor_reachable` and `not sched_live` may
@@ -3622,6 +3780,22 @@ def _k15_live_reason(reason, reach):
     if reason is None or reach is None:
         return None
     if isinstance(reason, ast.IfExp):
+        # `bool(X)` AND `if X:` ARE THE SAME TRUTHINESS TEST, so a Gate written
+        # `reachable=bool(EXPR)` against `reason=(A if EXPR else B)` has told the source text which
+        # arm prints on a reachable run just as plainly as one written `reachable=EXPR`. Reading
+        # the wrapper off is normalisation and not inference -- the two expressions are compared
+        # textually afterwards exactly as before, so nothing else is decided here. THE UNWRAPPING
+        # IS DELIBERATELY THE NARROWEST ONE THAT IS TRUE BY LANGUAGE RULE: only a call of the bare
+        # name `bool` with exactly one positional argument and no keywords, because that is the
+        # only call whose result IS the truthiness of its argument. It is not applied to a
+        # sub-expression of a larger reachable expression either, since `bool(X) and Y` is not X.
+        # NOT SELF-TESTED, and said here rather than left to be discovered: the cases below pin
+        # the normalisation and the abstention on a second name, but no case pins the `bool`-only
+        # restriction, because every fixture for it would have to branch a reason on a
+        # non-boolean expression and would be modelling code this tree does not write.
+        if (isinstance(reach, ast.Call) and getattr(reach.func, "id", "") == "bool"
+                and len(reach.args) == 1 and not reach.keywords):
+            reach = reach.args[0]
         r, t = ast.unparse(reach), ast.unparse(reason.test)
         arm = (reason.body if t == r else
                reason.orelse if t in (f"not {r}", f"not ({r})") else None)
@@ -3658,6 +3832,16 @@ def _k15_branch_admits_a_range(fn, node, field, assigns, opaque):
     forces it and the sentence is safe. `elif every > 0: ... else:` does NOT -- the else arm admits
     every value at or below zero -- and that is the shape the false equation had.
 
+    BOTH ARMS OF AN ORDERING TEST ADMIT A RANGE, AND THE FIRST VERSION OF THIS HELPER ONLY LOOKED AT
+    THE ELSE. That narrowing had two costs, both measured rather than argued. It missed a LIVE
+    instance of the class: src/opt/api.py builds Gate("opt.lr.shift_warm", ..., value=shift_warm,
+    reachable=False, reason="OPT_LR_SHIFT_WARM=0, ...") on the body of `elif shift_warm <= 0:`,
+    where `shift_warm = int(opt.lr_shift_warm)` carries no clamp and no refusal, so at
+    OPT_LR_SHIFT_WARM=-3 the rendered line reads "UNREACHABLE (-3 vs > 0) -- OPT_LR_SHIFT_WARM=0"
+    -- two numbers for one lever in one sentence, which is exactly ckpt.periodic_armed's defect.
+    And it made the repaired defect REWRITABLE past the rule: `elif every > 0: ... else: <gate>`
+    and `elif every <= 0: <gate> ... else:` are the same program, and only the first was seen.
+
     Only the enclosing `if` statements that TEST THE SAME LEVER count, resolved through the
     function's own assignments by _k15_trace, so `every > 0` counts for the field `every` and
     `not saving_on(ckpt)` does not.
@@ -3675,7 +3859,14 @@ def _k15_branch_admits_a_range(fn, node, field, assigns, opaque):
             continue
         for cmp_node in [c for c in ast.walk(iff.test) if isinstance(c, ast.Compare)]:
             for op, comparand in zip(cmp_node.ops, cmp_node.comparators):
-                if isinstance(op, _K15_ORDER_OPS) and in_else:
+                if isinstance(op, _K15_ORDER_OPS):
+                    # EITHER ARM OF AN ORDERING TEST ADMITS A RANGE, and requiring the `else` was
+                    # a narrowing that let a live instance of this exact class through. `elif
+                    # shift_warm <= 0:` with the Gate in the BODY is the same program as `elif
+                    # shift_warm > 0: ... else:` with it in the else -- every value at or below
+                    # zero reaches it either way -- and src/opt/api.py writes the first spelling.
+                    # `if not (in_body or in_else): continue` above already guarantees the Gate is
+                    # inside one of the two arms, so no third case is being admitted here.
                     ranged = True
                 if isinstance(op, ast.Eq) and in_body and isinstance(comparand, ast.Constant):
                     pinned.add(str(comparand.value))
@@ -3797,6 +3988,9 @@ def check_k15_gate_reasons_are_self_consistent(src_dir=SRC):
                 # printed value and the named value contradicting each other in one sentence. The
                 # rule fires only where the printed value IS that lever and the branch admits a
                 # RANGE of its values, which is what makes the spelled literal a guess.
+                # AND THE SAME SHAPE ON THE BODY ARM IS THE SAME DEFECT: `elif shift_warm <= 0:`
+                # with the Gate inside it admits every value at or below zero exactly as the else
+                # of `elif shift_warm > 0:` would. See _k15_branch_admits_a_range.
                 field = _k15_value_field(args.get("value"), assigns, opaque, by_field)
                 if field is not None and not any(isinstance(n, ast.IfExp)
                                                  for n in ast.walk(reason)):
@@ -3832,8 +4026,9 @@ def check_k15_gate_reasons_are_self_consistent(src_dir=SRC):
                                         f"Gate.line renders the live value beside the reason, so "
                                         f"every other value reaching this arm produces one "
                                         f"sentence naming two different numbers for one lever. "
-                                        f"Render it -- f\"{env}={{{field}}}\" -- instead of "
-                                        f"spelling it.")
+                                        f"Render it -- "
+                                        f"f\"{env}={{{ast.unparse(args['value'])}}}\" -- instead "
+                                        f"of spelling it.")
 
                 # ---- rules 1-3: the lever names, values and rendered quantities ------------------
                 for seq in _k15_fragments(reason):

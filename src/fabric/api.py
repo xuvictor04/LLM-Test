@@ -46,7 +46,15 @@ from spine import units as U
 
 REFUSE_NEGATIVE_PERIOD = True
 """Whether manage_period refuses a negative FAB_MANAGE_EVERY. True is the shipped state; False lets
-the value through to units.Windows exactly as it did before 2026-09-04.
+the value through to units.Windows exactly as it did before 2026-09-04 -- AT THIS ACCESSOR, which
+since 2026-09-05 is no longer the same thing as through the composition root. A negative
+FAB_MANAGE_EVERY is now refused earlier, by spine/derive.py::flush_period_windows inside the
+FAB.d_manage_period coupling compute, so `assemble.build` raises UnitError with this constant in
+EITHER position and the OFF configuration is unreachable that way. Measured, not assumed: with this
+set False, build(environ={'FAB_MANAGE_EVERY': '-5'}) still raises. The switch still binds for a
+caller that reaches manage_period with a Config built off that coupling path; the fuller statement
+of where the arm stands, and of what would make it fire through the root again, is in
+manage_period's own body beside the guard.
 
 THE RULING (owner, 2026-09-04): "On the periods, let's refuse for now. If it has a bad effect, we
 can turn off the refusal." The first sentence is the guard in manage_period; this name is the
@@ -2493,8 +2501,9 @@ def manage_period(fab: Config):
     # is a range check over FAB's own lever at its first read, and FAB declares no refusal entry
     # point for it to live in.
     #
-    # WHAT A NEGATIVE ACTUALLY DOES TODAY, MEASURED RATHER THAN ASSUMED. `assemble.build` accepts
-    # FAB_MANAGE_EVERY=-5 and freezes it; this accessor returned Windows(-5); and
+    # WHAT A NEGATIVE DID UNTIL 2026-09-05, MEASURED RATHER THAN ASSUMED, AND STATED IN THE PAST
+    # TENSE BECAUSE THAT IS WHERE IT BELONGS. `assemble.build` ACCEPTED FAB_MANAGE_EVERY=-5 and
+    # froze it; this accessor then returned Windows(-5); and
     # spine/derive.py::cadences_that_cannot_fire then reported ("fab.manage", -5, 0) -- the SAME
     # shape of line it prints for a period of zero. Meanwhile RUN.Cadences.due states its contract
     # as "True at most once per `period` WINDOWS elapsed since this key last fired", so a body
@@ -2503,18 +2512,59 @@ def manage_period(fab: Config):
     # and the staged-depth check on EVERY window, reported by the one live reader as a gate that
     # cannot fire. That is the same false equation ckpt/api.py::save_period was repaired for.
     #
-    # THE THIRD READING IS THE REASON THIS ONE MATTERS MORE THAN ITS SIBLINGS, and it is measured
+    # THE THIRD READING IS THE REASON THIS ONE MATTERED MORE THAN ITS SIBLINGS, and it is measured
     # rather than feared. This field is ALSO the source of the FAB.d_manage_period wire, which
-    # spine/assemble.py computes with spine/derive.py::flush_period_windows -- and that function
-    # FLOORS AT ONE FLUSH. So at FAB_MANAGE_EVERY=-5 the tree carried three answers for one number
-    # at once, checked by running assemble.build on 2026-09-04: the wire resolved to Flushes(1),
-    # i.e. "manage on every flush"; this accessor returned Windows(-5); and
+    # spine/assemble.py computes with spine/derive.py::flush_period_windows -- and until 2026-09-05
+    # that function FLOORED AT ONE FLUSH. So at FAB_MANAGE_EVERY=-5 the tree carried three answers
+    # for one number at once, checked by running assemble.build on 2026-09-04: the wire resolved to
+    # Flushes(1), i.e. "manage on every flush"; this accessor returned Windows(-5); and
     # cadences_that_cannot_fire reported ("fab.manage", -5, 0), i.e. "this gate cannot fire". The
     # ledger and the audit printed opposite sentences about the same lever in the same run.
-    # THIS GUARD DOES NOT STAND BETWEEN THE LEVER AND THAT COUPLING and is not claimed to: a wire is
-    # computed from the frozen Config before any accessor runs, so the floored Flushes(1) still
-    # exists in the ledger. What it does is stop the run at the cadence stage rather than let it
-    # proceed with one number wearing three meanings.
+    # THIS GUARD NEVER STOOD BETWEEN THE LEVER AND THAT COUPLING and was never claimed to: a wire is
+    # computed from the frozen Config before any accessor runs, so the floored Flushes(1) reached
+    # the ledger whatever this accessor did afterwards.
+    #
+    # WHICH MAKES THIS ARM UNREACHABLE THROUGH THE COMPOSITION ROOT TODAY, AND THE OWNING FILE IS
+    # WHERE THAT HAS TO BE WRITTEN DOWN. spine/derive.py::flush_period_windows now REFUSES a
+    # negative period_windows instead of flooring it, and the FAB.d_manage_period row of
+    # spine/assemble.py::COUPLINGS calls it inside that row's `compute` -- so FAB_MANAGE_EVERY=-5 is
+    # refused during spine/assemble.py::build, at the coupling stage, BEFORE any Config is frozen
+    # and long before any accessor runs. MEASURED, three ways, on the tree as it stands rather than
+    # relayed: `assemble.build(environ={'FAB_MANAGE_EVERY': '-5'})` raises units.UnitError out of
+    # spine/derive.py::flush_period_windows, through that row's `compute` in
+    # spine/assemble.py::COUPLINGS, called from spine/assemble.py::build, and never returns a
+    # Config; `spine/compose.py::compose` with the same environment ends in the same place, where
+    # DOM, EVAL, MEM and CKPT at -5 all end at capacity/api.py::startup_refusals instead; and
+    # `assemble.build(environ={'FAB_MANAGE_EVERY': '-5'}, couplings=[])` -- the coupling table
+    # emptied, which is the only way left to get a frozen Config carrying the value -- reaches this
+    # guard and raises the LeverError below. The fabric suite's F8 check
+    # (tests/test_fabric.py::check_f8_manage_period_kind_and_refusal) reports the same thing in its
+    # detail line every run, and docs/04_CONTRACT.md records it; this comment is the third of the
+    # three and was the last to say so.
+    #
+    # AND THE SWITCH IS INERT HERE IN BOTH POSITIONS, WHICH IS THE HALF THAT IS NOT ABOUT PROSE.
+    # Setting REFUSE_NEGATIVE_PERIOD = False and rebuilding still raises UnitError from the
+    # assembly, so the owner's second sentence -- "if it has a bad effect, we can turn off the
+    # refusal" -- cannot be exercised for FAB_MANAGE_EVERY by flipping FAB's switch alone. Turning
+    # this refusal off for real means the derive arm too, and that one has no switch. The four
+    # sibling accessors do not share this: their levers have no coupling row that converts them.
+    #
+    # IT IS KEPT RATHER THAN DELETED AS DEAD, AND THE REASON IS NOT POLITENESS. The assembly's
+    # refusal is a property of the COUPLING TABLE -- it exists because FAB_MANAGE_EVERY happens to
+    # be the source of a d_ wire whose compute is a conversion that refuses negatives. Delete that
+    # row, change its compute, or add a caller that builds FAB's Config another way, and the lever
+    # is unguarded again with nothing saying so. This guard is the range check FAB owes its OWN
+    # lever at its own first read, and it is the one that names FAB_MANAGE_EVERY and the value in
+    # FAB's own words. WHAT WOULD MAKE IT FIRE AGAIN, named rather than left to be found: the
+    # FAB.d_manage_period row leaving spine/assemble.py::COUPLINGS, its compute moving off
+    # spine/derive.py::flush_period_windows, that function's `period_windows.n < 0` arm being
+    # removed, or any caller reaching this accessor without the coupling table -- which is exactly
+    # what the `couplings=[]` measurement above does. AND THE FIRST OF THOSE WAS MEASURED, not
+    # imagined: on a scratch copy of the whole tree with the four negative-count arms deleted from
+    # spine/derive.py, `assemble.build` accepted FAB_MANAGE_EVERY=-5 again and THIS guard caught it
+    # -- the fabric suite stayed green and its F8 detail line changed by itself from "the refusal
+    # came from the assembly" to "the refusal came from FAB.manage_period". That is what a second
+    # line is for, and it is why this one is not dead code.
     #
     # ZERO IS NOT TOUCHED, AND WHAT ZERO MEANS HERE IS NOT DECIDED BY THIS GUARD. Unlike CKPT.every
     # (0 disables periodic saving, in the lever's own help text) and MEM.rekey_every (0 DISARMS, in
@@ -2529,7 +2579,10 @@ def manage_period(fab: Config):
     if REFUSE_NEGATIVE_PERIOD and every < 0:
         raise LeverError(
             f"FAB_MANAGE_EVERY={every}: a management cadence is a count of windows ELAPSED since "
-            f"the last pass and may not run backwards. RUN.Cadences.due fires when "
+            f"the last pass and may not run backwards. RUN.Cadences.due DECLARES its contract as "
+            f"'True at most once per `period` WINDOWS elapsed since this key last fired' -- its "
+            f"body is still a P4 stub, so this is a statement about the contract and not about "
+            f"running code -- and a body written to that contract compares "
             f"`step - last_fired >= period`, so a negative period is true on the first window and "
             f"on every window after it -- {every} does not mean 'manage less often' or 'do not "
             f"manage', it means the cull, the spares, replication and the staged-depth check on "
