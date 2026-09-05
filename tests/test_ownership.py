@@ -1712,11 +1712,15 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
     THE derive.py HALF OF THE SKIP EXEMPTS NOTHING TODAY, AND THAT IS RECORDED HERE RATHER THAN
     IMPLIED AWAY. The two names in the skip are not symmetric and the round that added assemble.py
     reported them as though they were. MEASURED, on scratch copies outside the repository:
-      * with derive.py alone removed from the skip, O11 is PASS and reports ZERO findings -- on the
-        working tree (166 arithmetic sites against 151 with it, so derive.py contributes 15) and at
-        2e8a63e, e4c5e4b, 7e902ba, 694f156, a2ffc08, dd6a396, f11ae02 and 40d2446, whose finding
-        sets are identical with the skip and without it. All 33 self-test cases stay green too. It
-        has never suppressed a finding at any commit this project has.
+      * with derive.py alone removed from the skip THE FINDING SET DOES NOT MOVE ANYWHERE, which is
+        the claim, and "PASS with zero findings" is NOT -- three of the commits below fail with or
+        without it. On the working tree O11 is PASS with zero findings either way (166 arithmetic
+        sites against 151 with it, so derive.py contributes 15). Swept over 2e8a63e, e4c5e4b,
+        7e902ba, 694f156, a2ffc08, dd6a396, f11ae02, 40d2446, de76093, d57bdc0 and 6237858 the
+        findings are identical with the skip and without it at every one: PASS with zero at eight of
+        the eleven, and the SAME single composition-root finding (src/spine/compose.py:2201) at
+        e4c5e4b, 7e902ba and 694f156 in both configurations. All 33 self-test cases stay green too.
+        It has never suppressed a finding at any commit this project has.
       * with assemble.py alone removed, O11 FAILS on a tree it must pass -- the case named below --
         inside a COUPLINGS compute in src/spine/assemble.py. That half is load-bearing today.
     WHY THE derive.py HALF STAYS ANYWAY, and it is a DECLARED POSITION rather than a measurement:
@@ -1726,10 +1730,16 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
     `units.Windows(_windows_in_epoch(sysm) * int(sysm.configs["RUN"].epochs))` and
     src/spine/derive.py::opt_steps_from_windows carries opt's
     `run_steps = max(1, run_windows // d_effective_batch_windows)`, both as bare indented
-    specifications and neither in backticks. Those two escape the textual half only because the
-    character before the operator happens to be `)`; reflowing either one so a clock lever's name
-    sits against the operator would make O11 report derive.py's own explanation of O11, which is
-    the noise class the backtick rule two hundred lines below was written for. THE EXEMPTION IS NOW EXERCISED BY THE SELF-TEST rather than asserted: _CLOCK_DERIVE
+    specifications and neither in backticks. Those two escape the textual half only because NEITHER
+    PUTS A DECLARED CLOCK-LEVER NAME IMMEDIATELY BEFORE ITS OPERATOR -- `_TXT` captures `name OP` and
+    reports only `if nm in mine`, the first formula has `)` in that position and the second the bare
+    parameter name `run_windows`, which no package declares -- and NOT because of any reflow.
+    Line-breaking either formula at its operator leaves O11 PASS at 166 sites, measured on a scratch
+    copy with derive.py out of the skip. What trips it is a SPECIFICATION that spells a lever name
+    against the operator: rewriting the first to `units.Windows(epochs * windows_in_epoch)` takes the
+    same copy to 167 sites and ONE finding, on src/spine/derive.py itself, which is the noise class
+    the backtick rule two hundred lines below was written for.
+    THE EXEMPTION IS NOW EXERCISED BY THE SELF-TEST rather than asserted: _CLOCK_DERIVE
     carries exactly that shape, so "O11: the named conversion, derive's own arithmetic and a
     coupling compute are ADMITTED" goes RED the moment derive.py leaves the skip, and "O11: the SAME
     derive module under any other spine path is reported" goes RED the moment the skip widens to the
@@ -2076,9 +2086,13 @@ def check_o12_citations_name_symbols(mods):
 #   * A CITATION NAMING A SYMBOL THAT EXISTS AND IS THE WRONG ONE. On 2026-09-04 one hand sweep of
 #     spine/compose.py and spine/assemble.py found twenty-five false citations, and the commit that
 #     repaired them records that TWENTY-THREE of the twenty-five named a symbol that exists. Both
-#     halves of this check were run against the tree at that commit's parent, before the repair, and
-#     reported exactly what they report on the tree today: one existence finding and no quotation
-#     findings. So this check does NOT close that sweep's class, and saying it does would be the
+#     halves of this check, INCLUDING the 2026-09-05 widening of the quotation half, were run
+#     against the tree at that commit's parent (2e8a63e): ONE existence finding -- src/eval/api.py's
+#     `tests/test_couplings.py::C2` -- and ZERO quotation findings, against three quotations
+#     examined. On the tree today the numbers are the other way round, zero existence findings and
+#     three quotation findings, and those three are one false attribution the widening reached
+#     rather than any of the twenty-five. So this check does NOT close that sweep's class, and
+#     saying it does would be the
 #     same kind of claim the sweep was cleaning up. It closes the mechanical residue underneath it:
 #     a symbol that is not there at all, a path that resolves to a different file, a dotted tail
 #     that was never defined, and a sentence put in a symbol's mouth in the one grammatical form
@@ -2113,18 +2127,44 @@ _O13_VERBS = (
 )
 _O13_GAP = re.compile(r"^`?[\s,(\-]*(?:" + "|".join(v.replace(" ", r"\s+") for v in _O13_VERBS)
                       + r")?[\s,:\-]*$", re.I)
-_O13_QUOTE = re.compile(r'"([^"]{12,300})"')
+# A CLAUSE THAT ENDS IN AN ATTRIBUTION VERB, as well as one that is nothing but a verb. `_O13_GAP`
+# above matches the WHOLE gap, so it admits "X says 'quote'" and drops "X is the half that is still
+# outstanding: its vmax paragraph reads 'quote'" -- 62 characters, an attribution in every sense,
+# and dropped twice over (for its length and for its words). This is the end-anchored form and the
+# gap test takes EITHER. `\b` in front, because without it any word ENDING in a verb -- "essays",
+# "displays" -- would close the clause.
+_O13_GAP_END = re.compile(r"\b(?:" + "|".join(v.replace(" ", r"\s+") for v in _O13_VERBS)
+                          + r")[\s,:\-]*$", re.I)
+# A SPAN MAY BE SINGLE-QUOTED, and until 2026-09-05 it could not be. This tree writes a quotation
+# inside a docstring with single quotes as often as not -- the attribution this check now reports in
+# src/spine/assemble.py is one -- and a rule that reads only the double-quoted half is a rule that
+# examines whichever half of its population happens to have been typed the other way. THE
+# APOSTROPHE WORRY IS REAL AND IS ANSWERED BY THE GAP RULE, not by the quote pattern: an apostrophe
+# inside a word is preceded by a word character, so the gap ending at it ends in that word and not
+# in an attribution verb, and the span is never opened. Planted and measured: a docstring reading
+# "spine/lever.py::Config says the tokenizer's job is not the composer's" is NOT examined, before or
+# after this change.
+_O13_QUOTE = re.compile(r'"([^"]{12,300})"' + "|" + r"'([^']{12,300})'")
 # CODE PUNCTUATION DISQUALIFIES A SPAN, and this is a narrowing with a measured reason. A span
 # carrying brackets or an `=` is a RECONSTRUCTION of a construction rather than a quotation of it:
 # spine/assemble.py's Coupling rows are written over five lines with other arguments interleaved, so
 # a CORRECT citation of one fails a substring test. Two of the three sites the first version of this
 # rule flagged were exactly that, and both of those two were correct citations.
-_O13_CODEISH = re.compile(r"[()=\[\]{}]|::")
+# A PAREN PAIR IS NOT BY ITSELF A RECONSTRUCTION, and treating it as one dropped thirteen words of
+# ordinary English -- "build() will raise LeverError at startup the moment both LM and TOK are
+# registered" -- which is a sentence about a mechanism and not a spelling of one. Parens leave the
+# class and buy a longer minimum instead: eight words rather than four, which no Coupling row
+# reconstruction in this tree reaches.
+_O13_CODEISH = re.compile(r"[=\[\]{}]|::")
+_O13_PAREN_MIN_WORDS = 8
 # How far past the citation the opening quote may sit, and how much text the quotation may span. The
-# first is small because it is the whole of the "immediately followed by" rule; the second is large
+# first was 40 while the gap had to be nothing but a verb; an attributing CLAUSE is longer than that
+# by construction, and 120 is the measured width of the longest one in this tree. A gap may not
+# cross a sentence boundary -- a `. ` in it means the quotation is being introduced by a different
+# sentence from the citation, and this check does not claim to follow that. The second is large
 # because a quoted sentence in this tree routinely runs past a hundred characters, and a window that
 # ended before the CLOSING quote made the rule silently examine nothing.
-_O13_GAP_MAX = 40
+_O13_GAP_MAX = 120
 _O13_QUOTE_WINDOW = 420
 
 
@@ -2234,13 +2274,40 @@ def check_o13_citations_resolve(mods):
       the three real exemptions (compare.py::main twice and verification.py::Reconstructor.__init__,
       root-level files this rebuild does not index) are unmoved.
 
-      QUOTATION. A citation followed, with nothing between it but an attribution verb from a closed
-      list, by a double-quoted span of at least four words carrying no code punctuation, is a claim
-      that the cited symbol CONTAINS that span. The span is looked for in that symbol's own source
-      text, compared after casefolding and flattening punctuation. Every clause in that sentence is
-      a narrowing and every narrowing has a measured reason in the block above this function; the
-      one that does the most work is the closed verb list, because "A for B's <quote>" is the shape
-      the real defect had and "for" is not an attribution verb.
+      QUOTATION. A citation followed, within one sentence, by a clause that is an attribution verb
+      from a closed list or ENDS in one, and then a quoted span of at least four words carrying no
+      code punctuation, is a claim that the cited symbol CONTAINS that span. The span is looked for
+      in that symbol's own source text, compared after casefolding and flattening punctuation. Every
+      clause in that sentence is a narrowing and every narrowing has a measured reason in the block
+      above this function; the one that does the most work is the closed verb list, because
+      "A for B's <quote>" is the shape the real defect had and "for" is not an attribution verb.
+
+      FOUR EXEMPTIONS CAME OFF THAT HALF ON 2026-09-05, and each of them had been hiding the SAME
+      live defect, which is the finding: a check with four independent silent exemptions has a
+      residue no single measurement of it will show. The span may be SINGLE-quoted (this tree writes
+      a quotation either way, and the attribution reported below is single-quoted); the gap may be a
+      CLAUSE that ends in a verb, inside 120 characters rather than 40, so long as it does not cross
+      a sentence boundary; a PAREN PAIR no longer disqualifies a span, which instead has to run to
+      eight words rather than four; and `::<module>` is resolved against the cited FILE, because a
+      module's segment is its file. MEASURED, on the working tree: the examined set goes from 3
+      citations to 7 -- a true SUPERSET, every one of the three still examined -- and the findings
+      from 0 to 3, all three of them one false attribution (src/spine/assemble.py's TOK.vmax
+      paragraph plus the two lines docs/03_WIRING.md generates from it).
+
+      THE GAP TEST TAKES EITHER FORM, AND THAT IS NOT BELT AND BRACES. The proposal this widening
+      came from used the end-anchored form ALONE, and that RETIRES a citation this check examines
+      today: src/fabric/api.py cites spine/derive.py::opt_steps_from_windows across the gap ": ",
+      which the whole-gap `_O13_GAP` admits (the verb in it is optional) and no verb-end test can.
+      Measured both ways before choosing: end-anchored alone examines 6 and drops that one; either
+      form examines 7 and drops none. A widening that retires a member of its own examined set is a
+      narrowing wearing the wrong name, and the count going UP is exactly what hides it.
+
+      THE APOSTROPHE, since single-quoted spans invite the question. An apostrophe inside a word is
+      preceded by a word character, so the gap that would end at it ends in that word and not in an
+      attribution verb, and no span is opened. Planted and measured rather than argued: a docstring
+      reading "spine/lever.py::Config says the tokenizer's job is not the composer's" is not
+      examined, before the change or after it, and the self-test case named for it goes RED the
+      moment the gap test is loosened to "a verb appears somewhere in the gap".
 
     THE HONEST LIMIT, first rather than last: neither half would have caught any of the twenty-five
     false citations found by hand on 2026-09-04. That is measured against the tree as it stood
@@ -2373,18 +2440,34 @@ def check_o13_citations_resolve(mods):
         for m in _CITE_SYM.finditer(flat):
             cited, sym = m.group(1), m.group(2)
             hits = _resolve(cited)
-            if not hits or sym == "<module>":
+            # `<module>` IS A SEGMENT LIKE ANY OTHER HERE, and skipping it was a whole exemption
+            # nothing named: a module's segment is its file, which _o13_index already records, so
+            # "file.py::<module> says '...'" is exactly as checkable as a citation of a function in
+            # it. The existence half above still skips it, and must -- there the symbol is the
+            # location and there is nothing to look up.
+            if not hits:
                 continue
             tail = flat[m.end():m.end() + _O13_QUOTE_WINDOW]
             q = _O13_QUOTE.search(tail)
             if not q or q.start() > _O13_GAP_MAX:
                 continue
             gap = tail[:q.start()]
-            if not _O13_GAP.match(gap) or not re.search(r"[A-Za-z:]", gap):
+            if ". " in gap:
+                continue                           # the quotation belongs to a later sentence
+            if not ((_O13_GAP_END.search(gap) or _O13_GAP.match(gap))
+                    and re.search(r"[A-Za-z:]", gap)):
                 continue                           # no attribution verb, or a connective this
                                                    # check does not claim to understand
-            quoted = q.group(1)
+            # BOTH GAP FORMS, AND THE SECOND ONE IS NOT REDUNDANT. `_O13_GAP` makes the verb
+            # OPTIONAL, so a bare connective -- src/fabric/api.py cites
+            # spine/derive.py::opt_steps_from_windows across the gap ": " -- satisfies it and does
+            # not end in a verb. Taking only the end-anchored form RETIRES that citation, which is
+            # a live detection this check has today; a widening that drops a member of its own
+            # examined set is a narrowing wearing the wrong name.
+            quoted = q.group(1) if q.group(1) is not None else q.group(2)
             if _O13_CODEISH.search(quoted) or len(quoted.split()) < 4:
+                continue
+            if "(" in quoted and len(quoted.split()) < _O13_PAREN_MIN_WORDS:
                 continue
             segs = [segments[h][sym] for h in hits if sym in segments[h]]
             if not segs:
@@ -2531,6 +2614,129 @@ def prune(mem: Config):
     \"\"\"See memory/helpers.py::other for budget's "The quota is resolved once and frozen".\"\"\"
     return mem.quota
 """
+
+# ---- O13's QUOTATION HALF, WIDENED ON 2026-09-05. Four exemptions came off at once -- the span had
+# ---- to be double-quoted, the gap had to be nothing but a verb inside 40 characters, a paren pair
+# ---- disqualified the span, and `<module>` was skipped -- and each one is pinned below in both
+# ---- directions, because a widening with no admit case is a check on its way to crying wolf.
+
+# SINGLE-QUOTED. This tree writes a quotation with single quotes as often as double, and the live
+# finding this widening produces is one of them.
+_O13_QUOTE_SINGLE_FALSE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::other says 'The quota is resolved once and frozen', and it does not.\"\"\"
+    return mem.quota
+"""
+
+_O13_QUOTE_SINGLE_TRUE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::budget says 'The quota is resolved once and frozen', and it does.\"\"\"
+    return mem.quota
+"""
+
+# AN APOSTROPHE IS NOT AN OPENING QUOTE, and the gap rule is what says so rather than the pattern:
+# the character before `quota's` apostrophe is a word character, so the gap ends in a word and not
+# in an attribution verb. This case is green before the widening and after it, and goes RED the
+# moment anyone loosens the gap test into "a verb appears somewhere in the gap".
+_O13_QUOTE_APOSTROPHE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::budget says the quota's value is not the store's business.\"\"\"
+    return mem.quota
+"""
+
+# AN ATTRIBUTING CLAUSE, not a bare verb: 64 characters, and dropped twice over before the widening
+# -- for its length against the old 40, and for being more than a verb.
+_O13_QUOTE_CLAUSE_FALSE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::other is the half still outstanding: its quota paragraph reads
+    "The quota is recomputed on every window", present tense, of a thing settled since.
+    \"\"\"
+    return mem.quota
+"""
+
+# THE BARE CONNECTIVE, which is the clause a widening to "a gap ENDING in a verb" silently retires:
+# src/fabric/api.py cites spine/derive.py::opt_steps_from_windows across exactly this gap today.
+# Take only the end-anchored form and this case goes green -- a member of the examined set dropped
+# by the change that was supposed to grow it.
+_O13_QUOTE_BARE_GAP_FALSE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::other: "The quota is recomputed on every window".\"\"\"
+    return mem.quota
+"""
+
+# A GAP MAY NOT CROSS A SENTENCE BOUNDARY. The clause that introduces the quotation is a different
+# sentence from the citation, so which symbol it attributes to is not settled by the source text.
+_O13_QUOTE_TWO_SENTENCES = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::other is discussed below. The paragraph reads
+    "The quota is recomputed on every window", which is worth knowing.
+    \"\"\"
+    return mem.quota
+"""
+
+# A PAREN PAIR IS NOT A RECONSTRUCTION AT ELEVEN WORDS. This is the shape the live finding has --
+# "build() will raise LeverError at startup the moment both LM and TOK are registered" -- and the
+# old rule dropped it for one paren pair.
+_O13_QUOTE_PAREN_FALSE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::other says
+    "budget() will raise LeverError at startup the moment both stores are registered".
+    \"\"\"
+    return mem.quota
+"""
+
+# AND UNDER EIGHT WORDS IT STILL IS ONE. `budget() resolves the quota once` is a spelling of a
+# construction rather than a sentence about one, and the substring test has no business on it.
+_O13_QUOTE_PAREN_SHORT = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::other says "budget() resolves the quota once".\"\"\"
+    return mem.quota
+"""
+
+# `<module>` IS A SEGMENT. The file is the location, so the file's own text is what the attribution
+# is checked against -- 15 of this tree's nearby-quotation citations were dropped by that one line.
+_O13_QUOTE_MODULE_FALSE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::<module> says "The quota is recomputed on every window".\"\"\"
+    return mem.quota
+"""
+
+_O13_QUOTE_MODULE_TRUE = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"memory/helpers.py::<module> says "A stand-in module holding one sentence".\"\"\"
+    return mem.quota
+"""
+
 
 # THE FROZEN OLD TREE, in both citation forms, in one file. Neither is a finding: the rebuild does
 # not contain those files and does not edit them.
@@ -2774,6 +2980,47 @@ _CASES = (
     ("O13: a citation whose BASENAME resolves elsewhere -- O12 passes this, O13 opens the path",
      {"src/memory/lever.py": _O13_DECOY_TARGET, "src/memory/store.py": _O13_DECOY_CITE},
      {"O12": (0, None), "O13": (1, "only_here")}),
+
+    # ---- THE 2026-09-05 WIDENING, one case per exemption removed and an admit beside each.
+    ("O13: a SINGLE-quoted sentence attributed to a symbol that does not contain it",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_SINGLE_FALSE},
+     {"O13": (1, "memory/helpers.py::budget")}),
+
+    ("O13: the same single-quoted sentence attributed to the symbol that DOES contain it",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_SINGLE_TRUE},
+     {"O13": (0, None)}),
+
+    ("O13: an APOSTROPHE does not open a quotation -- the gap rule is what says so",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_APOSTROPHE},
+     {"O13": (0, None)}),
+
+    ("O13: an attributing CLAUSE ending in a verb, which the bare-verb gap dropped twice over",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_CLAUSE_FALSE},
+     {"O13": (1, "recomputed on every window")}),
+
+    ("O13: a BARE CONNECTIVE gap is still an attribution -- the clause a verb-end rule retires",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_BARE_GAP_FALSE},
+     {"O13": (1, "recomputed on every window")}),
+
+    ("O13: a gap that crosses a SENTENCE boundary is ABSTAINED on",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_TWO_SENTENCES},
+     {"O13": (0, None)}),
+
+    ("O13: a paren pair does not make eleven words of English a reconstruction",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_PAREN_FALSE},
+     {"O13": (1, "LeverError")}),
+
+    ("O13: under eight words a paren span IS a reconstruction and is ABSTAINED on",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_PAREN_SHORT},
+     {"O13": (0, None)}),
+
+    ("O13: a sentence attributed to ::<module> that the FILE does not contain",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_MODULE_FALSE},
+     {"O13": (1, "recomputed on every window")}),
+
+    ("O13: the same ::<module> attribution the file DOES carry is ADMITTED",
+     {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_MODULE_TRUE},
+     {"O13": (0, None)}),
 )
 
 _BY_TAG = {

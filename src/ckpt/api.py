@@ -241,13 +241,17 @@ def save_period(ckpt: Config):
     three arms are spelled here: UNREACHABLE when saving is off at all, armed-and-not-fired at
     every == 0 with the final-plus-SIGUSR1 sentence as its reason, FIRED at every > 0. THAT
     ENUMERATION IS EXHAUSTIVE ONLY BECAUSE OF THE FOURTH OUTCOME, WHICH IS NOT A GATE STATE: since
-    2026-09-04 a NEGATIVE `every` never reaches any of the three, because the body refuses it by
-    name before the period is constructed. The argument and the alternatives are in the body, at the
-    guard. TWO THINGS ABOUT THAT SENTENCE ARE NEWER THAN THE SENTENCE AND ARE SAID HERE RATHER THAN
-    FOUND. It is now conditional on REFUSE_NEGATIVE_PERIOD at the top of this file -- the owner's
+    2026-09-04 a NEGATIVE `every` reaches none of the three AT THE SHIPPED SETTING OF THE SWITCH
+    BELOW, because the body refuses it by name before the period is constructed. The argument and
+    the alternatives are in the body, at the guard. TWO THINGS ABOUT THAT SENTENCE ARE NEWER THAN
+    THE SENTENCE AND ARE SAID HERE RATHER THAN FOUND. It is now conditional on REFUSE_NEGATIVE_PERIOD at the top of this file -- the owner's
     ruling of 2026-09-04 requires the refusal to be turn-off-able, and with it False a negative
-    reaches the third arm again and that arm prints the value it was given, which is why the reason
-    is an f-string. And it is no longer a statement about this accessor alone: the same ruling put
+    reaches the armed-and-not-fired state again -- through a FOURTH construction of the same gate,
+    added 2026-09-05, because the two configurations are not one sentence: the `every == 0` arm
+    says the only saves are the final one and any SIGUSR1, and a negative under RUN.Cadences.due's
+    declared contract saves EVERY window, which is what the refusal below says a negative means.
+    Both arms render the value rather than spelling it, which is why both reasons are f-strings.
+    And it is no longer a statement about this accessor alone: the same ruling put
     the same guard, under the same switch, in eval/api.py::curve_period, domains/api.py::manage_period,
     fabric/api.py::manage_period and memory/api.py::rekey_period, so the clause in the body that used
     to say this refusal rules nothing for the other four has been replaced by what the owner ruled.
@@ -324,9 +328,10 @@ def save_period(ckpt: Config):
                  every == 0 is armed-and-not-fired with "the only saves are the final one plus
                  SIGUSR1" as its reason (the reason PRINTS the value rather than naming 0, and the
                  refusal in the body is what makes 0 the only value that can reach that arm WHILE
-                 REFUSE_NEGATIVE_PERIOD IS TRUE -- with the owner's switch off a negative reaches it
-                 too, which is exactly why the reason is an f-string and not the literal it used
-                 to be), and
+                 REFUSE_NEGATIVE_PERIOD IS TRUE); with the owner's switch off a negative is
+                 armed-and-not-fired too, on its OWN arm and with its own reason, which says a
+                 negative period saves EVERY window rather than none -- the three GATE STATES are
+                 still three, and it is the fourth CONSTRUCTION that keeps the sentence honest; and
                  dir off is UNREACHABLE instead of a zero the ledger cannot explain. The word an
                  operator sees is owed by RUN.cadence_audit, which is a stub; until it has a body
                  this Gate is readable only from the returned object
@@ -406,11 +411,15 @@ def save_period(ckpt: Config):
     if REFUSE_NEGATIVE_PERIOD and every < 0:
         raise LeverError(
             f"CKPT_EVERY={every}: a save period is a count of windows ELAPSED since the last save "
-            f"and may not run backwards. RUN.Cadences.due fires when `step - last_fired >= "
+            f"and may not run backwards. RUN.Cadences.due DECLARES its contract as 'True at "
+            f"most once per `period` WINDOWS elapsed since this key last fired' -- its body is "
+            f"still a P4 stub, so this is a statement about the contract and not about running "
+            f"code -- and a body written to that contract compares `step - last_fired >= "
             f"period`, so a negative period is true on the first window and on every window after "
             f"it -- {every} does not mean 'save less often' or 'do not save', it means a "
             f"checkpoint written EVERY window, which is the opposite of what this gate reported "
-            f"for it. Neither meaning is lost: CKPT_EVERY=0 is the declared default and disables "
+            f"for it until 2026-09-05. Neither meaning is lost: CKPT_EVERY=0 is the declared "
+            f"default and disables "
             f"periodic saving (the final save and SIGUSR1 remain), and CKPT_EVERY=1 saves on every "
             f"window. CKPT_DIR is not consulted here: this refuses an out-of-range value for "
             f"CKPT's own lever, whether or not a second lever makes it moot.")
@@ -426,28 +435,54 @@ def save_period(ckpt: Config):
                            f"CKPT_EVERY and change nothing observable.")
     elif every > 0:
         gate = Gate("ckpt.periodic_armed", True, every, 1)
-    else:
-        # THE VALUE IS PRINTED, NOT ASSUMED, AND THAT IS THE WHOLE EDIT HERE. This reason was the
-        # literal string "CKPT_EVERY=0 with CKPT_DIR set: ..." until 2026-09-04, so at any
+    elif every == 0:
+        # THE VALUE IS PRINTED, NOT ASSUMED, AND ZERO NOW HAS THIS ARM TO ITSELF. This reason was
+        # the literal string "CKPT_EVERY=0 with CKPT_DIR set: ..." until 2026-09-04, so at any
         # CKPT_EVERY below zero the gate rendered "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0
         # ..." -- a reason naming a value the operator did not set, beside a printed value that
-        # contradicts it, in one sentence. Measured at -5 and at -1 before the change. The
-        # refusal above takes every negative WHILE REFUSE_NEGATIVE_PERIOD IS TRUE, so at the
-        # shipped setting 0 is the only value that reaches this arm and the old literal would be
-        # true again; it is an f-string anyway, because a sentence that is true only because of a
-        # guard somewhere else is a sentence that goes false the day the guard moves, and nothing
-        # in tests/ renders a CKPT Gate to notice. THAT DAY ARRIVED IN THE SAME EDIT THAT MADE THE
-        # GUARD SWITCHABLE, AND THE F-STRING IS WHY NOTHING BROKE: with the switch set False, this
-        # arm renders "armed, did not fire (-5 vs 1) -- CKPT_EVERY=-5 with CKPT_DIR set: ..." --
-        # measured at -1, -5 and -1000 on 2026-09-04 -- so the printed value and the named value
-        # agree at every value that can reach here, in both positions of the switch. Under the
-        # literal this line used to carry, turning the refusal off would have restored the exact
-        # false equation the refusal was written to end.
+        # contradicts it, in one sentence. Measured at -5 and at -1 before the change. Rendering
+        # the value instead of spelling it fixed the EQUATION and left the SENTENCE wrong, which is
+        # what this split repairs: with the value rendered, `else` still handed one claim to two
+        # configurations that mean opposite things -- "the only saves are the FINAL one and any
+        # SIGUSR1" is true of 0 and false of every negative, which the REFUSE_NEGATIVE_PERIOD
+        # guard earlier in this same function says in as many words ("a checkpoint written EVERY
+        # window"). MEASURED BEFORE THE SPLIT, with
+        # REFUSE_NEGATIVE_PERIOD set False and CKPT_DIR=runs/x: at -5 and at -1 this arm rendered
+        # "armed, did not fire (-5 vs 1) -- CKPT_EVERY=-5 with CKPT_DIR set: the only saves this
+        # run makes are the FINAL one and any SIGUSR1", i.e. the printed value and the named value
+        # agreed and the CLAIM ABOUT THE MECHANISM was the opposite of this file's own reading of a
+        # negative period. The negative has its own arm below; this one is now pinned to the single
+        # value it describes, and it stays an f-string so the printed number cannot drift from the
+        # named one.
         gate = Gate("ckpt.periodic_armed", False, every, 1,
-                    reason=f"CKPT_EVERY={every} with CKPT_DIR set: the only saves this run makes "
-                           f"are the FINAL one and any SIGUSR1. A legitimate configuration, and "
-                           f"one the report must SAY -- without this line it is indistinguishable "
+                    reason=f"CKPT_EVERY={every} with CKPT_DIR set: 0 is this lever's declared "
+                           f"disable-periodic-saving state, so the only saves this run makes are "
+                           f"the FINAL one and any SIGUSR1. A legitimate configuration, and one "
+                           f"the report must SAY -- without this line it is indistinguishable "
                            f"from a run that is not saving at all.")
+    else:
+        # THE NEGATIVE ARM, AND IT IS REACHABLE -- WHICH WAS ESTABLISHED BY RENDERING IT RATHER
+        # THAN BY READING THE GUARD. The refusal above takes every negative WHILE
+        # REFUSE_NEGATIVE_PERIOD IS TRUE, so at the shipped setting nothing reaches here; but that
+        # constant is a DECLARED first-class configuration (see its own docstring at the top of
+        # this file, and .rework/DECISIONS.md D4), not a dead branch, and with it set False
+        # `assemble.build(environ={'CKPT_EVERY': '-5', 'CKPT_DIR': 'runs/x'})` reaches this arm --
+        # measured at -5 and at -1, both rendering "armed, did not fire". So this is NOT an
+        # UNREACHABLE arm and must not be spelled as one: `reachable=False` here would report a
+        # mechanism the operator can still configure as one no configuration reaches.
+        gate = Gate("ckpt.periodic_armed", False, every, 1,
+                    reason=f"CKPT_EVERY={every} with CKPT_DIR set, and this arm is reached ONLY "
+                           f"with ckpt/api.py::REFUSE_NEGATIVE_PERIOD set False: a negative is NOT "
+                           f"the disable state and this run is not saving less often than a "
+                           f"positive one. RUN.Cadences.due DECLARES its contract as 'True at most "
+                           f"once per `period` WINDOWS elapsed since this key last fired' -- its "
+                           f"body is still a P4 stub, so this is a statement about the contract "
+                           f"and not about running code -- and a body written to that contract "
+                           f"compares `step - last_fired >= {every}`, which is true on the FIRST "
+                           f"window and on every window after it: a checkpoint EVERY window, the "
+                           f"opposite of what the zero arm one step above prints. The refusal this "
+                           f"switch turns off says the same thing, and the two readings may not "
+                           f"share one sentence.")
     period.gates = (gate,)
     return period
 

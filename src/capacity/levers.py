@@ -276,7 +276,7 @@ class CAPLevers(LeverSet):
     # test (:7366) and the report (:9571), while the starting expert cap it nominally governed was read
     # UNGATED at :5209 and fed the growth clamp `_nb = min(_nb, _cap_fab[0] - fab.n())` at :7444 whatever
     # it said. So GROW_CAP_FAB=0 read as "the expert valve is off" while still freezing fabric growth at
-    # GROW_CAP_FAB0 -- an off-switch that does not switch the mechanism off (ISSUES.md:1464). One
+    # GROW_CAP_FAB0 -- an off-switch that does not switch the mechanism off (ISSUES P3-C30). One
     # choices-valued lever makes `off` mean one thing at both targets and leaves no second boolean to
     # contradict it.
     # A NOTE THE PORT MUST NOT LOSE: the ungated read at :5209 is the reason this cannot be a pure
@@ -317,7 +317,7 @@ class CAPLevers(LeverSet):
     #   (1) THE CLAMP GOES NEGATIVE. `_nb = min(_nb, _cap_fab[0] - fab.n())` (:7444) is negative the
     #       moment the population exceeds the soft cap, which freezes growth for the entire run with
     #       nothing in the log saying so -- the trigger counts still increment and the pin counter reads
-    #       exactly as it would on a population legitimately at its cap (C30, ISSUES.md:1464).
+    #       exactly as it would on a population legitimately at its cap (ISSUES P3-C30).
     #       Unreachable on a fresh run; entirely reachable on a resume, where the population comes from
     #       the checkpoint: 523 experts against a gc arm's 160 is -363.
     #   (2) THE LIFTED CAP IS EARNED STATE, NOT A KNOB. `_cap_fab` was rebuilt from the environment on
@@ -471,7 +471,11 @@ class CAPLevers(LeverSet):
     # ONE DEFECT STILL LIVE, TO PORT A FIX FOR RATHER THAN TO REDISCOVER: on a resume `_pin_prev = [0]`
     # (:5252) while `_dstep = step - _pin_prev[0]` (:7368), so the first flush computes dstep = N and a
     # population sitting at its cap on that flush banks N windows it never spent pinned -- 20,000 is
-    # satisfied instantly and the first lift of the session is unearned (M38, ISSUES.md:417).
+    # satisfied instantly and the first lift of the session is unearned (ISSUES P1-M38 -- CITED BY
+    # ID, NOT BY LINE, 2026-09-05: this was ISSUES.md:417, and the ledger's headers have moved twice
+    # under it -- +88 when the drift was first measured on 2026-09-03, +136 when re-measured today,
+    # where :417 is P1-M4 and the P1-M38 header is at :553. The bare "M38" went with the line for a
+    # second reason: P3-M38 is a different defect, about mask_dead missing retired token ids.)
 
     stall_band = Lever(0.002, "Half-width of the band around zero improvement inside which the loss "
                               "counts as stalled and a lift is authorised.", U.FRACTION)
@@ -481,13 +485,13 @@ class CAPLevers(LeverSet):
     # therefore fired hardest exactly when the run was degrading worst, and said so in its own log line:
     # "the loss has stalled (improving -0.1937 < 0.002)" is a 19% degradation authorising capacity.
     # Three of the five expert lifts in the 0.75 GB run went to a run that was getting worse (C5,
-    # ISSUES.md:1365). The test is now `abs(improving) < band` at :7411, and the old name
+    # ISSUES P3-C5). The test is now `abs(improving) < band` at :7411, and the old name
     # (GROW_CAP_PLATEAU) described the one-sided threshold accurately enough that keeping it would invite
     # the one-sided test back the next time somebody reads the name instead of the code.
     # A STALL IS FLAT: not improving, and not falling apart either. Capacity is the answer to the first
     # and never to the second -- a degrading run is what REGRESSION growth is for, and that path has its
     # own cooldown and blackout precisely so the two are not confused.
     # CARRY-FORWARD, AND IT IS NOT THIS PACKAGE'S TO FIX: `PlateauGrowth.step` still holds the unfixed
-    # one-sided version of the identical test (M36, ISSUES.md:409, self_organize.py:3013) -- a rising
+    # one-sided version of the identical test (ISSUES P1-M36, self_organize.py:3013) -- a rising
     # loss satisfies the stall condition and grows an expert. That is FAB's mechanism and FAB's row; it
     # must not be ported as it stands, and the fix is already written here.

@@ -448,6 +448,23 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                   ("FAB_DISCOVER", float(fab.discover)), ("FAB_DIV_W", float(fab.div_w)),
                   ("FAB_HOP_SUP", float(fab.hop_sup)), ("FAB_IND_W", float(fab.ind_w)),
                   ("FAB_AE_W", float(fab.ae_w)), ("FAB_DOM_FRAC", float(fab.dom_frac)))
+    # `v < 0.0` AND NOT A SIGN TEST, AND A CHECK NOW DEPENDS ON THAT. -0.0 is not less than 0.0, so
+    # NEGATIVE ZERO is admitted here, and it is off exactly as +0.0 is off -- MEASURED on all eleven
+    # at once, one forward and one backward each: aux_loss 0.0 both ways, the composed loss
+    # 2.4948575496673584 both ways, and the sum of |grad|max over both adapter banks, the halt prior,
+    # every shared module, the head and the incoming representation 0.7345285937190056 both ways,
+    # bit for bit. That makes {+0.0, -0.0} the ENTIRE reachable domain of the nine `<= 0.0` gate
+    # branches below.
+    # tests/test_fabric.py::check_f7_gate_reasons_print_what_they_read is built on precisely that: it
+    # sweeps all nine levers at both zeros because two distinct readings are what make a hardcoded
+    # constant in a reason detectable at all, and one reading would leave it green over the defect it
+    # exists for. THE TWO DECISIONS ARE COUPLED AND THIS IS THE SENTENCE THAT SAYS SO. Tightening this
+    # to `v < 0.0 or math.copysign(1.0, v) < 0` is a defensible ruling -- an operator can only have
+    # typed -0.0 by accident -- but it takes F7's second reading away, and F7 will FAIL on its own
+    # coverage census when it does, loudly and correctly, naming all nine gates. Whoever makes that
+    # ruling owes F7 a different second value, and there is no third one in this domain to reach for.
+    # Neither this body nor that check may decide it alone; it is filed in .rework/audits/j_fabric.json
+    # as a question for the owner rather than settled here.
     _rev = [f"{k}={v}" for k, v in _applied if v < 0.0]
     _off = [f"{k}={v}" for k, v in _gated_off if v < 0.0]
     if _rev or _off:
@@ -606,12 +623,50 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # identity, so reporting it as FIRED (which the first version did, because the arithmetic is
     # still true) claims a mechanism ran that could not have.
     cull_open = _derive.cull_gate_open(n0, slots, float(fab.pressure))
+    # THE PAIR THIS GATE PRINTS IS ONE OF ITS TWO CLAUSES, AND FOR SIX ROUNDS IT WAS THE WHOLE LINE.
+    # spine/gate.py::Gate.line renders a verdict word, `(value vs threshold)` and -- only when a
+    # reason is set -- the reason; with no reason the pair IS the entire arithmetic the reader is
+    # invited to do. spine/derive.py::cull_gate_open is TWO clauses, a floor on the live population
+    # and an occupancy test, and the pair below renders the occupancy one alone, so at FAB_N0=2
+    # FAB_SLOTS=2 FAB_PRESSURE=0.45 this line read
+    #     Gate fab.cull_gate: armed, did not fire (2/2=1.000 vs 0.45)
+    # -- a value that meets its own printed threshold, beside the words reserved for a condition that
+    # WAS tested and was not met, and a reader who does the arithmetic the line invites gets the
+    # opposite answer from the line. TWO things put it in that state and both are computed here
+    # rather than assumed: the FLOOR, which the pair never shows at all, and the ROUNDING of the
+    # occupancy to three places, which can put the printed digits on the other side of the setpoint
+    # from the ratio actually compared (measured: FAB_N0=4499 FAB_SLOTS=10000 at FAB_PRESSURE=0.45
+    # prints 0.450 and did not fire). The floor is named first because naming it settles the line on
+    # its own -- on the arms where both apply, "the floor alone shuts this gate" is what the reader
+    # needs and the third decimal is not.
+    #
+    # THE RATIO IS SPELLED TWICE ON PURPOSE, here and in the `value=` f-string below, and hoisting it
+    # into one local would be a NARROWING. K16 in tests/test_contract.py -- the check named
+    # tests/test_contract.py::check_k16_verdicts_follow_their_printed_pair -- matches the printed
+    # field against the verdict's clause as UNPARSED SOURCE, so a `value=` that reads a local no
+    # longer renders `n0 / max(1, slots)`, and this Gate, the one site that check examines in this
+    # file, would drop out of its examined set and into its descriptive count. The duplication is
+    # load-bearing; the comparison below is not the render.
+    _press = float(fab.pressure)
+    _occ = n0 / max(1, slots)
+    _occ_shown = float(f"{_occ:.3f}")            # the digits the pair prints, which is what is read
     pop.gates = (
         Gate("fab.on", on, on, True,
              reason="" if on else "FAB_ON=0: the forward is the identity, so every gate below this "
                                   "one reports UNREACHABLE rather than 'armed but 0'."),
         Gate("fab.cull_gate", cull_open,
-             f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure))
+             f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure),
+             reason=(f"n_live={n0} is at or below the FLOOR OF TWO that "
+                     f"spine/derive.py::cull_gate_open applies BEFORE the occupancy test and "
+                     f"separately from it -- culling a population of two can empty it -- so that "
+                     f"clause alone shuts this gate, whatever the occupancy printed beside this "
+                     f"verdict reads. The pair on this line is the occupancy test and only it."
+                     if not cull_open and n0 <= 2 else
+                     f"the occupancy printed beside this verdict is ROUNDED to three places, and "
+                     f"the ratio spine/derive.py::cull_gate_open compared against the FAB_PRESSURE "
+                     f"setpoint is {_occ!r} -- which falls on the other side of that setpoint from "
+                     f"the digits shown."
+                     if (_occ >= _press) != (_occ_shown >= _press) else ""))
         if on else
         Gate("fab.cull_gate", False,
              f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure), reachable=False,
@@ -1771,9 +1826,13 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                              f"FAB_BALANCE={balance_w}: no load-balance pressure. This is 'off', "
                              f"not C2 -- the C2 alarm is fab.balance_nonzero reading 0 while this "
                              f"is above zero. The value is PRINTED rather than asserted to be 0, "
-                             f"and a negative one cannot reach here at all: fabric/api.py::build "
-                             f"refuses it at startup, because at balance_w<0 this term was still "
-                             f"APPLIED, with its sign reversed, under this same reason."))
+                             f"and a value BELOW zero does not reach here: fabric/api.py::build "
+                             f"refuses at `v < 0.0`, because at balance_w < 0 this term was still "
+                             f"APPLIED, with its sign reversed, under this same reason. NEGATIVE "
+                             f"ZERO is the one value carrying a minus sign that survives that "
+                             f"test -- -0.0 is not less than 0.0 -- and `balance_w > 0.0`, the "
+                             f"verdict above, is False for it exactly as it is for +0.0, which is "
+                             f"why the equation opening this sentence may print a minus sign."))
     # THE DEFICIT BONUS IS ARMED ON A TABLE NOTHING WRITES YET, and that is a third state. `use` is
     # credited by fabric/api.py::observe and by nothing else, so until that entry point has a body
     # every expert's utilization is 0, the fair share is 0, and there is no deficit to score -- which

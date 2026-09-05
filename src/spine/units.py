@@ -168,8 +168,8 @@ class Clock:
         spine.derive that already knows the rate, so the conversion exists in one place with a name.
 
         WHO CALLS IT, because "the ONE legal way to cross kinds" reads like a wide surface and it is
-        not one. TWO call sites in the whole repository, both inside the file the sentence above
-        sends the reader to: spine/derive.py::flush_period and spine/derive.py::flush_period_windows,
+        not one. TWO call sites in src/, both inside the file the sentence above sends the reader
+        to: spine/derive.py::flush_period and spine/derive.py::flush_period_windows,
         each passing an integer windows-per-flush. derive's other three conversions --
         spine/derive.py::opt_steps_from_windows, spine/derive.py::opt_steps_from_backwards and
         spine/derive.py::run_windows_from_epochs -- do their own arithmetic on the bare counts and
@@ -179,8 +179,13 @@ class Clock:
         method is the DECLARED path and derive is its only traveller; a
         package body that called it directly would be the conversion written at its call site that
         tests/test_ownership.py::check_o11_no_unnamed_clock_arithmetic exists to forbid, one method
-        call further along. That is worth knowing before editing this line: nothing outside derive
-        moves when it changes, and there is no third caller to check.
+        call further along. That is worth knowing before editing this line: nothing in src/ outside
+        derive moves when it changes, and there is no third caller in src/ to check. "IN src/" AND
+        NOT "IN THE REPOSITORY", which this sentence and the one opening the paragraph both used to
+        say: tests/test_derive.py::smoke calls this method twelve times as of 2026-09-05, and it is
+        the only caller anywhere outside src/ -- counted by AST over every .py in the tree, and the
+        count is dated because that file is not this one's to hold still -- so an edit here moves
+        that file even though it moves no package, and the exactness rulings below are held there.
 
         THE ARITHMETIC IS EXACT, AND IT WAS FLOAT UNTIL 2026-09-04 -- the operation the neighbour
         this docstring points at refuses BY NAME. The body was `to(int(self.n / per))`. The closing

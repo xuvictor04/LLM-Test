@@ -616,13 +616,21 @@ of which a refusal would strand below its ceiling and refuse every lift forever,
 evidence that earned the lift on nothing. The lift is **taken** and held at the ceiling by
 `capacity/api.py::_clamped_lift`, whose `max` is there because `min(lift_to(…), hard)` from a cap
 *above* the ceiling would **lower** it, and lowering is the one thing this valve may never do.
-**The STATE is reachable and the CALL is not, and the guard is written for the second:**
-`CAP_FAB_START=5000` against `FAB_SLOTS=4096` really does resolve `cap_experts = 5000` above its own
-hard ceiling, but `observe` never hands that cap to `_clamped_lift`, because `at_hard_ceiling`
-refuses `cap >= hard` before any lift is computed. `_clamped_lift`'s own docstring says exactly that
-and keeps the guard anyway, on the ground that the refusal is a **caller's discipline** and this is
-where the arithmetic lives; a reader who takes "reachable" for "this lowering can happen" has read
-the state and not the call. **`at_hard_ceiling` is
+**The state and the call are BOTH reachable, and the guard runs today:** `CAP_FAB_START=5000`
+against `FAB_SLOTS=4096` resolves `cap_experts = 5000` above its own hard ceiling, and
+`capacity/api.py::new_valve` hands exactly that cap to `_clamped_lift` at startup — its local
+`_one_lift` computes `_clamped_lift(5000, 4096, 0.08, 8)` on the line *before* it tests
+`c >= hard`, and the call returns 5000 where a bare `min` would return 4096. **Two things about
+that call are still unreached, and this paragraph said the call itself was, until 2026-09-05.** The
+first is the value: `_one_lift` discards `got` on the `c >= hard` branch and prints the
+`at_hard_ceiling` refusal instead, so the `max` changes no printed number *on that branch* — it
+keeps the function's own invariant, that the return is never below `cap_value`. The second is
+`observe`'s call, which is unreached twice over: `at_hard_ceiling` refuses `cap >= hard` before any
+lift is computed, and `capacity/api.py::observe` is `raise NotImplementedError` today, which is why
+`_clamped_lift`'s docstring names `_lift_moves`, `_one_lift` and the mask-and-inert test as every
+executing caller. The guard is kept on the ground its docstring gives — the refusal is a **caller's
+discipline** and this is where the arithmetic lives — and a reader who takes it for decoration has
+read `observe`'s contract and not `new_valve`'s code. **`at_hard_ceiling` is
 unchanged**: it tests `cap >= hard` **before** the lift is computed, so the closed set above does not
 grow and the clamp bites **once per arm** — full lifts, then one clamped lift, then `at_hard_ceiling`
 on every flush after it. **Of the two readings of *"until it goes down"*, `capacity/api.py::observe`
@@ -635,10 +643,21 @@ absent from the block-reason histogram and carries numbers of its own — `Decis
 one flush, and `counters["cap.lifts_clamped_experts"]` / `counters["cap.lifts_clamped_vocab"]` for
 the run, seeded at 0 by `new_valve` the way the two hard ceilings and `cap.mask_dead_rows` are, which
 takes that ledger from eight keys to ten. Its DID IT FIRE surface is a **third** Gate, `cap.clamp`,
-built by `capacity/api.py::_clamp_gate`, with four readings: UNREACHABLE (no lift can be earned at
-all), *"0 clamped of 0 lifts"* (none was earned), *"0 clamped of N lifts"* (every earned lift applied
-in full) and FIRED, *"M clamped of N lifts"*. **P4 must call it and increment the two counters**;
-until it does, a real run can only reach the first two readings.
+built by `capacity/api.py::_clamp_gate`, with four readings: UNREACHABLE (no lift can be **held at
+a hard ceiling** — which is *not* "no lift can be earned": an arm whose earned lifts are refused by
+name, and one whose applied lifts move nothing, both reach this verdict with lifts earned all along),
+*"0 clamped of 0 lifts"* (none was earned), *"0 clamped of N lifts"* (every earned lift applied in
+full) and FIRED, *"M clamped of N lifts"*. **This paragraph read "UNREACHABLE (no lift can be earned
+at all)" until 2026-09-05**, which was the gate's own wording until the round before, when it was
+retired from `src/` as a self-contradiction: the reason printed that sentence beside its own clause
+saying lifts *are* earned here. After that repair this document was the tree's last present-tense
+carrier of the retired sentence, and a P4 author would have implemented it from here. Which of the clamp's three
+preconditions failed first is carried per arm as `dead_facts` and written by
+`capacity/api.py::_clamp_blocked_clause`, whose closed set has **six** grounds; the gate reports
+UNREACHABLE on all six, which is **five more than `D16` ruled on** and is flagged for the owner as
+`Q-CAP-1`. `clamped > lifts` is refused rather than printed: a clamped lift is a lift *taken*, so
+the inequality is not a ledger this gate can read. **P4 must call it and increment the two
+counters**; until it does, a real run can only reach the first two readings.
 The pin clocks are **now checkpointed**, which is half the M38 fix; the other half is that RUN seeds
 the valve's last-called index at the **resumed** step.
 
@@ -1384,6 +1403,48 @@ are settled. `pin_tick`'s own point, *do not convert the threshold*, does not re
 survives their deletion; that is stated there too, so the atomic edit this section specifies does not
 have to re-derive which half of the message is load-bearing.
 
+### Q-CAP-1 — `cap.clamp` reports UNREACHABLE on six grounds and `D16` ruled on one of them — **OPEN 2026-09-05: AN EXTENSION OF THE RULING, FLAGGED RATHER THAN TAKEN AS READ**
+
+*The framing, and it is a question about scope rather than about a defect.* `.rework/DECISIONS.md`
+`D16` gives the valve's state table exactly one UNREACHABLE row, on one ground: *"no lift can ever be
+earned | `CAP_TARGETS` excludes the arm | UNREACHABLE, per D15"*. Its next paragraph names two
+further cases — a lift refused as `dead_rows_unmasked`, and `derive.lift_to` returning the cap
+unchanged — as things that *"must not be mistaken for a clamp"*, and stops there: it does not say
+what verdict `cap.clamp` should carry on them.
+
+*What the implementation does, measured rather than described.* `capacity/api.py::_clamp_gate`
+reports UNREACHABLE on **all six** grounds in `capacity/api.py::_CLAMP_BLOCKED_KINDS`. Swept over
+25,344 configurations (`CAP_TARGETS` × `CAP_FAB_START` × `CAP_VOCAB_START` × `CAP_LIFT` ×
+`CAP_LIFT_MIN` × `LM_MASK_DEAD_ROWS` × `FAB_SLOTS` = 4 × 11 × 8 × 4 × 3 × 2 × 3), a fresh
+`assemble.build` per cell: **19,574 UNREACHABLE, 5,770 reachable**, and the 39,148 per-arm grounds
+printed on those unreachable cells divide `unarmed` 22,247, `at_ceiling` 9,243, `refused_unmasked`
+2,732, `nonpositive` 2,395, `never_pins` 1,372, `inert` 1,159. So **22,247 of 39,148 arm-grounds are
+`D16`'s own row**; 2,395 + 1,372 more reach the *state* that row names — no lift can ever be earned —
+through a cause the ruling does not mention; and **13,134 do not reach it at all**, because there
+lifts ARE earned and are then refused by name or applied to no effect.
+
+*Why the extension is probably right.* `D16`'s verdict transfers on its own logic — where no lift is
+earned, none can be clamped — but the verdict this gate carries is about the CLAMP, not the lift. A
+clamp needs an applied lift that overshoots a hard ceiling, and on all six grounds no such lift can
+exist, so the question is INAPPLICABLE rather than merely unmet, which is what UNREACHABLE means
+under `D15`. Reporting *"0 clamped of 0 lifts"* on those 13,134 arm-grounds instead would read as a
+clamp that was live and never had to hold anything — the inert-versus-absent confusion this package
+exists to refuse.
+
+*Why it is still the owner's.* An implementation that widens a ruling's population by a factor of
+about two, on grounds the ruling explicitly set aside as *"must not be mistaken for a clamp"*, is
+making a decision and not reading one. `capacity/api.py::_clamp_gate`'s docstring argued the case
+inside itself until 2026-09-05, which is how an inference becomes indistinguishable from a ruling;
+it now states the argument and says plainly that the owner has not ruled.
+
+**What the owner has to decide.** (a) CONFIRM the extension: UNREACHABLE wherever no lift can be
+HELD AT A HARD CEILING, whatever the ground, and `D16`'s table gains a row saying so. (b) SPLIT the
+verdict: UNREACHABLE only where no lift can be EARNED (26,014 of the 39,148 arm-grounds) and
+armed-but-0 where lifts are earned and lost (13,134), which buys a sharper reading of the word and
+pays for it with a *"0 clamped of 0 lifts"* line on configurations where no clamp is possible.
+**The recommendation is (a)**, and nothing in the tree fails either way: no check compares a Gate's
+verdict against `.rework/DECISIONS.md`, which is why this is a question and not a finding.
+
 ### Q-DERIVE-1 — re-type `derive.pin_tick` from `Steps` to `Windows`? — **RESOLVED 2026-08-30, repair (a) adopted**
 
 It was re-typed. `derive.pin_tick` now accumulates `Windows` and raises on `Steps`, `Flushes` or
@@ -1476,16 +1537,40 @@ the desynchronised-`DN` defect; line 1421 is **L15**, an `LR_DECAY` default in a
 has held three different defects across three commits. The drift is mechanical and measurable:
 `.rework/ISSUES.md` grew from 1983 to 2270 lines and **every defect header moved down by 88 lines**,
 every `[so-config/facts]` entry by **90**. The proof is not the arithmetic but the three citations in
-`src/` that name a defect ID *beside* the line number — `capacity/levers.py:346` (`M38`, cited 417),
-`capacity/levers.py:363` (`M36`, cited 409), `tok/levers.py:367` (`M23`, cited 357). In all three the
-`+88` line owns that ID and the raw line owns a different one, with **no counter-example**; six more
-were confirmed by matching the citing sentence against the defect body (`M65`, `M77`, `M24`, `L69`,
-`M20`, `C19`).
+`src/` that name a defect ID *beside* the line number. **All three legs of that proof were wrong by
+2026-09-05, and none of them survives as a live citation.** Two stood in `src/capacity/levers.py` —
+`capacity/levers.py::CAPLevers` citing `ISSUES.md:417` for `M38`, and `capacity/levers.py::<module>`
+citing `ISSUES.md:409` for `M36` — and both were converted to IDs that day (`ISSUES P1-M38`,
+`ISSUES P1-M36`), which closes the class in `src/capacity/`; three more line citations in that
+package went with them (`ISSUES P3-C30` twice and `ISSUES P3-C5`), each confirmed against the
+defect's own text. Six other citations had already been confirmed the same way, by matching the
+citing sentence against the defect body (`M65`, `M77`, `M24`, `L69`, `M20`, `C19`).
+**The third leg had been dead since `0e056e7`** — `src/tok/levers.py` citing `ISSUES.md:357` for
+`M23` — because that commit converted that file's citations to IDs. `357` appears nowhere in
+`src/tok/levers.py`, which is exactly what the next paragraph says was done to `src/tok/`: this
+sentence offered as live evidence a citation the sentence after it reports as converted away.
+Both survivors were also cited *here* by line — `capacity/levers.py:346` and `:363` — and both of
+those had rotted too: the sentences had moved out from under them inside `src/`, which is why this
+paragraph names them by symbol and gives no line number of its own.
+**AND THE `+88` HAD ITSELF DRIFTED, WHICH IS THIS PARAGRAPH'S OWN ARGUMENT ARRIVING ON THIS
+PARAGRAPH.** The offset was measured on 2026-09-03. Re-measured 2026-09-05, before the conversion:
+`.rework/ISSUES.md` is 2327 lines, `P1-M38`'s header sat at `:553` and `P1-M36`'s at `:545` —
+**+136 on both**, not +88 — and `417 + 88 = 505` landed on `P1-M26`, a third defect again. `:417`
+itself is `P1-M4` and `:409` is `P1-M2`. The sentence that read *"the `+88` line owns that ID"* was
+true when written and false within two days. **The bare ID was ambiguous as well**, which is the
+second reason the line went: `P3-M38` and `P3-M36` are different defects from `P1-M38` and `P1-M36`,
+so `(M38, ISSUES.md:417)` named neither one thing nor the other once the line stopped resolving.
 
 **Repaired in `src/data/` and `src/tok/` only: 17 citations, converted to the defect's ID
 (`ISSUES P1-M77`), which does not move.** The `[so-config/facts]` entries have no ID and are now cited by
-their opening words. **50 line citations remain in the other twelve packages and are all wrong by the
-same 88/90.** They are not silently rebased here: a blind `+88` is the wrong repair — the two offsets
+their opening words. **39 `:<line>` references into `.rework/ISSUES.md` are left in `src/` — counted 2026-09-05
+after `src/capacity/` was converted, as every `:NNN` ref attached to an `ISSUES` mention, spread over
+ten directories (`capacity`, `ckpt`, `data`, `domains`, `eval`, `fabric`, `memory`, `sig`, `spine`,
+`world`) — and no single offset rebases them.** Two of the 39 are not live citations at all but the
+quotations inside `src/data/api.py`'s and `src/capacity/levers.py`'s own cited-by-ID-not-by-line
+records; the rest are, including several appended to an ID that already resolves without them. The
+"50 … in the other twelve packages, all wrong by the same 88/90" this sentence carried until
+2026-09-05 was a count, a package total and an offset that had all moved underneath it. They are not silently rebased here: a blind `+88` is the wrong repair — the two offsets
 differ, so it would land some citations one entry off — and each replacement has to be confirmed
 against the defect's text, which is the slice owner's read to make. Whoever touches a package next
 should convert its citations rather than add another line number.

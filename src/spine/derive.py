@@ -63,7 +63,13 @@ def cull_gate_open(n_live, slots, pressure):
 
     Reproduces oracle cull_gate_open exactly, including `max(1, slots)`: the guard against slots=0 is part
     of the shipped answer, not a tidy-up. At slots=0 the ratio is n_live/1, which is >= any pressure <= 1
-    for any live population, so the gate stands OPEN on a fabric with no slots -- preserved because the
+    for every n_live >= 1, so the PRESSURE CLAUSE is satisfied on a fabric with no slots -- and the FLOOR
+    is the OTHER clause and still shuts the gate, which is the distinction the paragraph above exists to
+    hold. This sentence used to end "so the gate stands OPEN on a fabric with no slots", which is the
+    paragraph above's own two-clauses-read-as-one error, committed here. WHAT IS TRUE, MEASURED at
+    slots=0 across pressure 0.00, 0.01, 0.25, 0.50, 0.75 and 1.00: n_live 0, 1 and 2 answer False at each
+    of those six, and n_live 3, 4, 10 and 2048 answer True at each. A fabric with no slots therefore leaves
+    the gate OPEN from three experts up and SHUT at or below the floor of two -- preserved because the
     table says so, and flagged here because it is surprising.
     """
     return not (n_live <= 2 or (n_live / max(1, slots)) < pressure)
@@ -662,7 +668,16 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
     if w < 1:
         raise UnitError(f"opt_steps_from_windows: effective_batch_windows={effective_batch_windows!r} "
                         f"-- an optimizer step covers at least one window. It is batch_windows x "
-                        f"accum, and both are floored at 1 by their own declarations.")
+                        f"accum, and NEITHER of those is floored at its own declaration: "
+                        f"spine/lever.py::Lever carries a default, a help string, a unit and "
+                        f"choices and no bound -- opt/levers.py::<module> says so in as many "
+                        f"words and then spells out what each of these two does at zero -- so "
+                        f"OPT_BATCH_WINDOWS=0 and OPT_ACCUM=0 both freeze as 0 on a Config built "
+                        f"with the coupling table empty, measured. The floor that keeps THIS "
+                        f"argument at or above one is spine/assemble.py::COUPLINGS' compute for "
+                        f"OPT.d_effective_batch_windows -- `max(1, int(r[\"OPT\"].batch_windows)) "
+                        f"* max(1, int(r[\"OPT\"].accum))` -- so a value below one arriving here "
+                        f"did not come through that coupling.")
     if run_windows.n < 0:
         raise UnitError(f"opt_steps_from_windows: run_windows={run_windows!r} is negative. A run's "
                         f"length is a count of windows the stream will yield, and a negative one "
@@ -671,11 +686,16 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
                         f"one optimizer step was reported for a negative run length: measured "
                         f"from RUN_EPOCHS=-1, which REACHED here as Windows(-634) through "
                         f"spine/compose.py::_run_windows until 2026-09-05 and does not any more -- "
-                        f"run_windows_from_epochs refuses that Epochs(-1) one function earlier in "
-                        f"this same file, so on the tree as it stands this arm has NO route from "
-                        f"the composition root and fires only for a caller that hands "
-                        f"opt/api.py::build a window count it did not get from "
-                        f"spine/compose.py::_run_windows. The zero is floored and the negative is "
+                        f"run_windows_from_epochs refuses that Epochs(-1) TWO functions earlier "
+                        f"in this same file, so on the tree as it stands this arm has NO route "
+                        f"from the composition root -- which is not the same as saying it never "
+                        f"fires. It fires for tests/test_derive.py::smoke, which hands it a "
+                        f"negative window count directly; and inside src/ the only executable "
+                        f"call to this function is opt/api.py::build's, so a run reaches this "
+                        f"refusal only through a caller that hands opt/api.py::build a "
+                        f"run_windows it did not get from spine/compose.py::_run_windows -- that "
+                        f"producer cannot make one, because it floors windows_in_epoch at 1 and "
+                        f"refuses a negative n_epochs. The zero is floored and the negative is "
                         f"refused, and those are two rulings, not one.")
     n = run_windows.n // w
     # `< 1` CAN NOW ONLY SEE 0, for the reason flush_period's closing comment gives: the refusal

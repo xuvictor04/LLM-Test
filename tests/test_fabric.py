@@ -2,25 +2,36 @@
 
     python3 tests/test_fabric.py          # PASS/FAIL per check with counts; non-zero exit on any FAIL
 
-WHY THIS FILE EXISTS. Every other file in tests/ is a STATIC check: tests/test_ownership.py walks src/
-with `ast` and does not execute it, tests/test_census.py and tests/test_contract.py read the tree and
-compare it against itself, tests/test_derive.py replays a captured table through pure functions. None of
-them calls FAB.forward or FAB.build -- and the gap is wider than that, measured rather than grepped:
+WHY THIS FILE EXISTS. Every other file in tests/ checks src/ without ever entering a PACKAGE:
+tests/test_ownership.py walks src/ with `ast` and does not execute it, tests/test_census.py and
+tests/test_contract.py read the tree and compare it against itself, tests/test_derive.py replays a
+captured table through pure functions, tests/test_couplings.py runs each declared coupling's `compute`
+and tests/test_determinism.py replays spine/rng.py and spine/derive.py in fresh subprocesses -- the last
+two do EXECUTE code, and an earlier draft of this line called them all static. None of them calls
+FAB.forward or FAB.build -- and the gap is wider than that, measured rather than grepped:
 running each of the SEVEN pre-existing files under runpy leaves `"fabric.api" in sys.modules` FALSE for
 every one, so no test had ever imported FAB's entry points, let alone called one. THE PACKAGE ITSELF IS
 imported, and an earlier draft of this paragraph said otherwise: the same measurement leaves `fabric`
-AND `fabric.levers` in sys.modules after tests/test_assemble.py, tests/test_census.py,
-tests/test_contract.py and tests/test_ownership.py, because assemble.build imports every package's
-levers module through the registry.
+AND `fabric.levers` in sys.modules after FIVE of the seven -- tests/test_assemble.py,
+tests/test_census.py, tests/test_contract.py, tests/test_couplings.py and tests/test_ownership.py --
+because assemble.build imports every package's levers module through the registry. The two that leave
+nothing are tests/test_derive.py and tests/test_determinism.py. This one sentence has now carried a
+wrong count in three consecutive rounds (two files, then four, and it is five), so it is written with
+the measurement beside it: `runpy.run_path` each of the seven and read sys.modules after.
 It is `fabric.api` that nothing reached, which is the claim that matters and the one that stands.
-(grep alone is misleading here: tests/ carries 17 `from fabric...` lines outside this file -- ownership
-12, couplings 2, contract 1 -- and every one of them is inside a triple-quoted source fixture the AST
-checks parse, or a comment. The count is eight files in tests/ counting this one, seven without it;
-tests/test_determinism.py is one of the seven and an earlier draft of this paragraph omitted it.) Meanwhile fabric/api.py has taken the most behaviourally delicate
-repairs in the project, and until this file every one of them was protected by nothing -- a static check
-cannot see a NaN, cannot see a gradient that went to zero, and cannot see a counter that reads 1 over a
-term that reaches no parameter. tests/test_couplings.py is the precedent for a file in this directory
-that RUNS things; this is the second, and it runs torch.
+(grep alone is misleading here: tests/ carries 15 `from fabric...` lines outside this file -- ownership
+12, couplings 2, contract 1, and 12+2+1 is 15. It was published as 17 one round ago; 17 is the total
+WITH this file's own 2. Every one of the 15 is inside a triple-quoted source fixture the AST checks
+parse, or a comment. The count is eight files in tests/ counting this one, seven without it;
+tests/test_determinism.py is one of the seven and an earlier draft of this paragraph omitted it.)
+Meanwhile fabric/api.py has taken the most behaviourally delicate repairs in the project, and until this
+file every one of them was protected by nothing -- a static check cannot see a NaN, cannot see a
+gradient that went to zero, and cannot see a counter that reads 1 over a term that reaches no parameter.
+WHAT IS ACTUALLY UNIQUE ABOUT THIS FILE IS NARROWER THAN "the only one here that RUNS things", and it is
+the measured form: no src/<pkg>/api.py module is in sys.modules after ANY of the seven, so this is the
+only file in tests/ that enters a package entry point at all. It is not the only one that executes src/
+-- test_couplings and test_determinism do -- and not the only one that imports torch, which
+test_determinism also does, lazily, inside its activation probe.
 
 WHAT IT COVERS AND WHAT IS LEFT. FAB has eleven public entry points and eight of them still raise
 NotImplementedError (`grep -n "raise NotImplementedError" src/fabric/api.py` -> 8 sites: observe,
@@ -28,7 +39,7 @@ contribution, manage, grow_check, own_lr_scale, counters, state_dict, load_state
 bodies are `build`, `forward` and `manage_period`, and all three are exercised here -- so this file is
 not a sample of FAB's behaviour, it is all of the behaviour FAB currently has.
 
-THE EIGHT REPAIRS EACH CHECK STANDS OVER, and what each one cost when it was absent (the measurements
+THE NINE REPAIRS EACH CHECK STANDS OVER, and what each one cost when it was absent (the measurements
 are in .rework/audits/r_fabric.json, x_fabric.json, y_fabric.json and z_fabric.json, taken at wider
 widths than these; the reproductions below are re-taken here at the smallest widths that still exercise
 the mechanism, and every number this file asserts on is either analytic or a comparison between two
@@ -69,6 +80,15 @@ runs):
       read under the switch src/fabric/api.py::REFUSE_NEGATIVE_PERIOD (.rework/DECISIONS.md D4).
       Nothing had called manage_period at all, and no check held either refusal, or the switch's OFF
       position, to meaning anything.
+  F9  src/fabric/api.py's fab.cull_gate printed a VERDICT WORD AND A PAIR OF NUMBERS THAT DISAGREE in
+      one rendered line, and shipped that way for six rounds because nothing compared a verdict against
+      its own arithmetic. spine/derive.py::cull_gate_open is two clauses -- a floor on the live
+      population and an occupancy test -- and the pair printed the second one alone, so at FAB_N0=2
+      FAB_SLOTS=2 FAB_PRESSURE=0.45 the line read "armed, did not fire (2/2=1.000 vs 0.45)": a value
+      meeting its own printed threshold beside the words reserved for a condition that WAS tested and
+      was not met. A second, narrower shape does the same thing with no floor involved -- the ratio is
+      rounded to three places for printing, so at FAB_N0=4 FAB_SLOTS=6 FAB_PRESSURE=0.6667 the digits
+      shown (0.667) sit on the other side of the setpoint from the ratio compared (0.6666...).
 
 EVERY CHECK WAS SEEN TO FAIL. A test never seen to fail is not known to test anything, and the survey of
 the old tree counted 60 guards whose condition could not be satisfied. Each check here was run against a
@@ -76,8 +96,10 @@ scratch mirror of src/ OUTSIDE this repository with its own repair reverted -- t
 the arithmetic, `write=learn` back to `write=solo` with the class guard deleted, the alarm back on
 `bal.grad_fn`, the LeverError block deleted, `h[:0].sum()` back to `h.new_zeros(())`, the learn_window
 refusal deleted, one reason's equation re-hardcoded -- and each one FAILED there, on its own check and
-on no other, and passes here. TWELVE mirrors over the eight repairs, because two of the eight are not
-one line in one file:
+on no other, and passes here. FIFTEEN mirrors over the nine repairs -- 12 over the first eight, because
+two of those eight are not one line in one file, and 3 for F9, because the reason it stands over has two
+arms and each was reverted alone as well as together; 12 + 3 = 15. The breakdown is written beside the
+total because a breakdown reading 12+2+1 was published as 17 in this file one round ago:
   * THE IDENTITY CACHE HAS TWO DOORS, shut in different rounds, and they were reverted separately:
     `write=solo` reopens the eval door and trips F2's inserted-eval half, `write=True` reopens the
     leave-one-out door too and trips its inserted-counterfactual half. One revert would have left the
@@ -88,6 +110,13 @@ one line in one file:
     D4's OFF honoured), and derive off with the switch off and FAB's guard ignoring it (FAIL). Two
     pass and two fail, each for its own reason, which is what makes the check a statement about the
     path rather than about one line.
+  * F9'S REASON HAS TWO ARMS -- the floor and the rounded render -- and three mirrors, because one
+    revert would have left the other arm unproved: the reason deleted outright (F9 FAILS on all four
+    contradicting rows, and on no other check), the floor arm alone kept (FAILS on the two ROUNDING
+    rows only), and the rounding arm alone kept (FAILS on the two FLOOR rows only). Its census was
+    proved from the other side, in this file rather than in src/: dropping the contradicting rows from
+    CULL_ROWS FAILS on "no row in this sweep produced a line whose pair disagrees with its own
+    verdict", and dropping the agreeing rows FAILS on the converse.
 THE MOST USEFUL RESULT OF DOING THIS WAS A TEST OF MINE THAT DID NOT FAIL. F7's first version compared
 the printed number to the Config numerically; F4 refuses every negative, so 0.0 is the only value those
 nine branches can now be entered at, and the mirror with `FAB_EC_W=0` re-hardcoded passed it -- exit 0,
@@ -289,7 +318,13 @@ def absmax_sum(loss, params):
 _NUMBER = re.compile(r"(?<![\w.])(-?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)(?![\w.])")
 
 
-def _names_lever_and_value(message, lever_name, value, gap=4):
+# A sentence boundary, and a token shaped like any lever name. Both are used to bound the span
+# between a lever name and the number it is claimed to have read -- see _names_lever_and_value.
+_SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
+_ANY_LEVER_NAME = re.compile(r"\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b")
+
+
+def _names_lever_and_value(message, lever_name, value):
     """Does this message name the lever AS THE THING IT READ THIS VALUE FROM -- or somewhere else?
 
     THE DISTINCTION IS NOT PEDANTRY, IT IS THE ONLY THING THAT MAKES THE ASSERTION TRIPPABLE. Two
@@ -302,17 +337,43 @@ def _names_lever_and_value(message, lever_name, value, gap=4):
     refusal read, and .rework/audits/g_fab-tests.json proved both cases by stripping the readings
     out and watching the assertions stay green.
 
-    SO THE TEST IS ADJACENCY, AND DIRECTED. The name must appear BEFORE the value it read, within
-    `gap` characters of it -- "FAB_X=-0.5", "FAB_X: -0.5", "FAB_X is -0.5" all pass, and it is not a
-    spelling rule about `=`. What it rejects is the value quoted somewhere else ("REVERSED AND
-    APPLIED: -0.5 -- FAB_BALANCE, FAB_PONDER and ..." reads name AFTER value, out of a list that
-    names all three whichever one was read) and the name quoted beside a DIFFERENT value (-1.0,
-    -500), which is what the two paragraphs above actually do.
+    IT IS NOT A CHARACTER GAP ANY MORE, AND THAT WAS THE SAME DEFECT ONE LEVEL DOWN. The first
+    trippable version required the name to end within FOUR characters of the value, which is a
+    SPELLING rule wearing a consistency rule's name -- exactly what this file indicted in F7's second
+    version and then committed here. .rework/audits/i_fab-tests.json measured the cost: of six
+    rewordings of build's generated list, every one of them correct, five passed and
+    "FAB_BALANCE was read as -0.5" turned F4 RED on all eleven rows, because 13 > 4. The boundary was
+    arbitrary in a way the docstring did not admit -- "the operator set FAB_BALANCE to -0.5" passed
+    at exactly 4.
+
+    THE RULE IS NOW A STATEMENT ABOUT THE SENTENCE INSTEAD, and it is three clauses, each of which
+    rejects one of the shapes actually in this tree:
+      1. the value must be the FIRST standalone number after the name. "FAB_MANAGE_EVERY=-500 built
+         ..." names the lever beside -500, so at a read of -5 it is prose, whatever else the
+         paragraph goes on to say.
+      2. no SENTENCE BOUNDARY between them. A name in one sentence and a number in the next are two
+         statements, not a reading.
+      3. no OTHER lever name between them. That is what rejects the value-quoted-elsewhere shape --
+         "REVERSED AND APPLIED: -0.5 -- FAB_BALANCE, FAB_PONDER and FAB_EMB_VAR multiply their terms
+         UNGUARDED" -- where the name is read out of a fixed list that names all three whichever one
+         was refused; FAB_PONDER stands between FAB_BALANCE and any later number.
+    Directedness is kept: the number must come AFTER the name. Every one of the six rewordings now
+    passes, and both prose shapes are still rejected -- measured, not argued, and the six rows are in
+    the audit file .rework/audits/j_fabric.json.
     """
-    val = [m.start() for m in _NUMBER.finditer(message) if m.group(1) == str(value)]
-    return any(0 <= b - (a + len(lever_name)) <= gap
-               for a in (m.start() for m in re.finditer(re.escape(lever_name), message))
-               for b in val)
+    numbers = [(m.start(), m.group(1)) for m in _NUMBER.finditer(message)]
+    for m in re.finditer(re.escape(lever_name), message):
+        after = m.end()
+        nxt = next(((pos, tok) for pos, tok in numbers if pos >= after), None)
+        if nxt is None or nxt[1] != str(value):
+            continue                          # clause 1: the name is beside some OTHER number
+        span = message[after:nxt[0]]
+        if _SENTENCE_END.search(span):
+            continue                          # clause 2
+        if _ANY_LEVER_NAME.search(span):
+            continue                          # clause 3
+        return True
+    return False
 
 
 # ==================================================================================================
@@ -958,13 +1019,25 @@ def check_f6_one_learning_pass_per_window():
 # F7 -- a Gate reason may not print an equation it did not read
 # ==================================================================================================
 
+# {gate name: (the lever its reason opens with, WHICH of the two arithmetic fields renders that lever)}.
 # The nine reasons z_fabric.json found asserting "FAB_<LEVER>=0" over an operator's own negative. They
 # are listed so this check cannot go vacuous: if a refactor stops these gates printing their equations,
 # the check FAILS rather than passing over an empty set.
+# THE SECOND HALF IS NOT BOOKKEEPING, IT IS THE HALF THAT MAKES THE ARITHMETIC CROSS-CHECK BITE. The
+# check used to search `f"{gate.value} {gate.threshold}"` as ONE bag of numbers and ask whether ANY of
+# them read the same, so a literal in one field was excused by a correct reading in the other:
+# hardcoding fab.expert_choice's value to the string 'ec_w=-0.0' -- a real defect of exactly the class
+# F7 exists for -- left the suite at 8 checks, 0 failing, because the threshold's own 'sum(use)=0.0'
+# supplied a numerically matching token on the +0.0 arm. Naming the field is a SECOND declaration of
+# something the source already says, and that is deliberate: if a gate moves its lever from `value` to
+# `threshold` this check FAILS and says so, which is the same contract the coverage census below runs
+# on -- 'has either regressed or moved without this list being updated'.
 EQUATION_GATES = {
-    "fab.balance": "FAB_BALANCE", "fab.expert_choice": "FAB_EC_W", "fab.explore": "FAB_EXPLORE",
-    "fab.discover": "FAB_DISCOVER", "fab.distinctness": "FAB_DIV_W", "fab.breadth_cap": "FAB_DOM_FRAC",
-    "fab.hop_sup": "FAB_HOP_SUP", "fab.independence": "FAB_IND_W", "fab.identity_round_trip": "FAB_AE_W",
+    "fab.balance": ("FAB_BALANCE", "value"), "fab.expert_choice": ("FAB_EC_W", "value"),
+    "fab.explore": ("FAB_EXPLORE", "threshold"), "fab.discover": ("FAB_DISCOVER", "threshold"),
+    "fab.distinctness": ("FAB_DIV_W", "value"), "fab.breadth_cap": ("FAB_DOM_FRAC", "threshold"),
+    "fab.hop_sup": ("FAB_HOP_SUP", "value"), "fab.independence": ("FAB_IND_W", "value"),
+    "fab.identity_round_trip": ("FAB_AE_W", "value"),
 }
 
 # A reason's LEADING equation is the reading that justifies the gate's verdict; anything later in the
@@ -1028,9 +1101,13 @@ def check_f7_gate_reasons_print_what_they_read():
     CORRECT reason merely reformatted to `{ec_w:g}` was FAILED. Undersensitive to the defect,
     oversensitive to a reformat: a spelling test wearing a consistency test's name.
 
-    THE REPAIR IS TO WIDEN THE DOMAIN, NOT TO TIGHTEN THE STRING. `fabric/api.py::build` refuses a
-    magnitude lever at `v < 0.0`, and -0.0 IS NOT LESS THAN 0.0 -- so FAB_<LEVER>=-0.0 assembles, the
-    frozen Config really holds -0.0 (checked here, per field, before anything is compared), and the
+    THE REPAIR IS TO WIDEN THE DOMAIN, NOT TO TIGHTEN THE STRING, AND IT COUPLES THIS CHECK TO A
+    REFUSAL IN ANOTHER FILE -- which is now written down at BOTH ends, beside `v < 0.0` in
+    fabric/api.py::build as well as here, because a check that depends on a value continuing to be
+    admitted and says so in only one of the two files is a trap for whoever tightens the other.
+    `fabric/api.py::build` refuses a magnitude lever at `v < 0.0`, and -0.0 IS NOT LESS THAN 0.0 --
+    so FAB_<LEVER>=-0.0 assembles, the frozen Config really holds -0.0 (checked here, per field,
+    before anything is compared), and the
     `<= 0.0` branch really is entered with a NEGATIVE ZERO to print. That makes the reachable domain
     of all nine branches EXACTLY TWO VALUES, +0.0 and -0.0, and both are swept. Any constant typed
     into any of the nine reasons is therefore wrong on at least one of those two arms, whichever
@@ -1038,7 +1115,10 @@ def check_f7_gate_reasons_print_what_they_read():
     _reads_the_same exists. The arithmetic cross-check is KEPT, because it is the only thing holding
     the gate's own `value`/`threshold` fields to the same standard, but it now compares NUMBERS with
     that same signed-zero rule instead of searching for a text token: a reformatted field passes, and
-    a hardcoded one fails, because nothing else in a Gate's arithmetic prints a negative zero.
+    a hardcoded one fails, because nothing else in a Gate's arithmetic prints a negative zero. IT IS
+    THE ONE FIELD THAT RENDERS THE LEVER AND NOT BOTH, which is what stops a literal in one field
+    being excused by a correct reading in the other -- see the table above; that hole was live and is
+    reproduced in this file's revert set.
 
     WHAT IT DOES NOT CATCH, PRINTED IN ITS OWN DETAIL LINE RATHER THAN LEFT TO THIS DOCSTRING. The
     argument above is a property of the SWEEP, not of the parser: a constant is only detectable where
@@ -1089,12 +1169,22 @@ def check_f7_gate_reasons_print_what_they_read():
             examined += 1
             env_name, printed, field = "FAB_" + m.group(1), m.group(2), m.group(1).lower()
             covered.add((gate.name, env_name))
-            if not hasattr(fab, field):
+            try:
+                actual = getattr(fab, field)
+            except LeverError:
+                # NOT `if not hasattr(fab, field)`, WHICH IS THE UNTRIPPABLE-GUARD CLASS THIS FILE
+                # INDICTS 60 INSTANCES OF, COMMITTED INSIDE THE CHECK. spine/lever.py::Config's
+                # __getattr__ raises LeverError for a name its owner never declared, LeverError is
+                # NOT a subclass of AttributeError (measured: issubclass(LeverError, AttributeError)
+                # is False), and hasattr() catches only AttributeError -- so the test PROPAGATED the
+                # error instead of ever being True. Planting FAB_HOP_SUPX= in one gate's reason on a
+                # mirror killed the whole run with a traceback: F7 never reported, F8 never ran, and
+                # there was no "=== N checks, M failing ===" line at all. The designed finding below
+                # could not be reached from any tree.
                 findings.append(f"gate {gate.name} prints {env_name}={printed} and the FAB Config has "
                                 f"no field {field!r}. The equation names a lever this package does not "
                                 f"own or that does not exist.")
                 continue
-            actual = getattr(fab, field)
             readings.setdefault((gate.name, env_name), set()).add(_reading_key(actual))
             if not _reads_the_same(printed, actual):
                 findings.append(f"gate {gate.name} on arm {env or 'shipped'} prints "
@@ -1103,27 +1193,40 @@ def check_f7_gate_reasons_print_what_they_read():
                                 f"reader who checks it is checking nothing. (-0.0 and 0.0 are two "
                                 f"different readings here and are reported as such: that is what "
                                 f"makes a hardcoded zero visible at all.)")
-            if EQUATION_GATES.get(gate.name) == env_name:
-                # The gate's own arithmetic, which the repair never touched, carries the same number.
-                arithmetic = f"{gate.value} {gate.threshold}"
+            spec = EQUATION_GATES.get(gate.name)
+            if spec is not None and spec[0] == env_name:
+                # THE ONE FIELD THAT RENDERS THIS LEVER, not both of them bagged together -- see the
+                # comment on EQUATION_GATES. The gate's own arithmetic, which the repair never
+                # touched, carries the same number in that field.
+                where = spec[1]
+                arithmetic = str(getattr(gate, where))
                 if not any(_reads_the_same(printed, t) for t in _NUMBER.findall(arithmetic)):
                     findings.append(
                         f"gate {gate.name} on arm {env or 'shipped'} prints '{env_name}={printed}' in "
                         f"its reason and no number equal to it -- compared numerically, with the sign "
-                        f"of a zero kept -- anywhere in the arithmetic it printed beside it "
-                        f"('{gate.value}' / '{gate.threshold}'). The two are the same lever read at "
-                        f"the same instant, so a disagreement means one of them is a literal -- which "
-                        f"is the defect exactly: 'ec_w=-1.0' printed one line above 'FAB_EC_W=0'.")
+                        f"of a zero kept -- in the arithmetic field that renders that lever, its "
+                        f"{where}= ('{arithmetic}'). The two are the same lever read at the same "
+                        f"instant, so a disagreement means one of them is a literal -- which is the "
+                        f"defect exactly: 'ec_w=-1.0' printed one line above 'FAB_EC_W=0'. (The other "
+                        f"field is NOT searched: it used to be, and a literal in one field was then "
+                        f"excused by a correct reading in the other.)")
 
-    for gate_name, env_name in sorted(EQUATION_GATES.items()):
+    for gate_name, (env_name, _rendered_in) in sorted(EQUATION_GATES.items()):
+        # `.get`, AND ON BOTH READS. `covered` is added to BEFORE the equation is resolved against the
+        # Config and `readings` only after it, so a pair recorded as covered whose field does not
+        # exist reaches this loop with no reading at all -- and a subscript here raised KeyError from
+        # inside the finding this branch exists to print. Reproduced on a mirror: with one gate's
+        # reason printing FAB_HOP_SUPX= and this table naming the same pair, the run died at
+        # `sorted(readings[...])` with no "=== N checks ===" line.
+        seen = readings.get((gate_name, env_name), set())
         if (gate_name, env_name) not in covered:
             findings.append(f"gate {gate_name} never printed a leading '{env_name}=<value>' equation on "
                             f"any of the {len(arms)} arms swept. It is one of the nine that asserted a "
                             f"hardcoded 0, so a reason that no longer prints its reading has either "
                             f"regressed or moved without this list being updated.")
-        elif len(readings[(gate_name, env_name)]) < 2:
+        elif len(seen) < 2:
             findings.append(f"gate {gate_name} printed '{env_name}=<value>' on {len(arms)} arm(s) but "
-                            f"at ONE reading only ({sorted(readings[(gate_name, env_name)])}). A "
+                            f"at ONE reading only ({sorted(seen)}). A "
                             f"constant typed into that reason is then numerically indistinguishable "
                             f"from a correct read on every arm swept, and this check would be green "
                             f"over the exact defect it exists for. The sweep must read {env_name} at "
@@ -1131,11 +1234,13 @@ def check_f7_gate_reasons_print_what_they_read():
                             f"leaves reachable for a `<= 0.0` branch, and the last two arms are them.")
 
     unpinned = sorted(f"{g}/{e}" for (g, e), v in readings.items()
-                      if len(v) < 2 and EQUATION_GATES.get(g) != e)
+                      if len(v) < 2 and (g not in EQUATION_GATES or EQUATION_GATES[g][0] != e))
     detail = (f"{examined} leading equation(s) parsed from gate reasons over {len(arms)} configuration(s), "
               f"each compared against the frozen Config field its environment name resolves to and, for "
-              f"the {len(EQUATION_GATES)} repaired reasons, against the arithmetic their own Gate "
-              f"printed -- both comparisons NUMERIC and both treating -0.0 and 0.0 as two readings; "
+              f"the {len(EQUATION_GATES)} repaired reasons, against the ONE arithmetic field of "
+              f"their own Gate that renders that lever (its value= or its threshold=, per the table, "
+              f"never the two searched as one bag) -- both comparisons NUMERIC and both treating "
+              f"-0.0 and 0.0 as two readings; "
               f"{len(covered)} distinct (gate, lever) pair(s), and all {len(EQUATION_GATES)} of the "
               f"repaired reasons required to appear AND required to be read at two distinct values, so "
               f"no constant satisfies both arms\n      WHAT THIS CANNOT CATCH, said here rather than "
@@ -1230,6 +1335,14 @@ def check_f8_manage_period_kind_and_refusal():
     does, and spine/derive.py::flush_period_windows does not, because a generic conversion is not handed
     the name of the lever whose wire it is computing. That is a real gap and it is filed as one; it is
     not a thing this check can assert into existence from another package.
+    AND (b) IS ASSERTED ONLY WHERE THE PROMISE EXISTS, which the first version of it got wrong in a way
+    that made a DECLARED-LEGAL configuration un-green. FAB's refusal is the only satisfier of (b) on
+    this path, so with REFUSE_NEGATIVE_PERIOD off -- where D4 says FAB must not refuse at all -- (b)
+    could not be met by any behaviour FAB is permitted to have, and flipping the switch and changing
+    nothing else turned this check RED on (b) alone. In the OFF position (b) is now REPORTED on the
+    detail line and not asserted, while (a), the kind, the Windows(every) contract and "the value never
+    reaches a reader" all still bind. Measured both ways: with the switch ON and FAB's refusal reworded
+    so it no longer names the lever beside the value it read, this check still FAILS.
 
     THE ONE THING THAT WOULD FAIL IT is the value arriving at a reader. If assembly accepts a
     negative and manage_period hands back a period, then either FAB's switch is on and its refusal
@@ -1315,7 +1428,21 @@ def check_f8_manage_period_kind_and_refusal():
         joint[(layer, every)] = _names_lever_and_value(message, "FAB_MANAGE_EVERY", every)
     named = sorted({lay for (lay, _e), ok in joint.items() if ok})
     prose = sorted({lay for (lay, _e), ok in joint.items() if not ok})
-    if joint and not named:
+    # ASSERTED WHERE THE PROMISE EXISTS, REPORTED WHERE IT DOES NOT. FAB.manage_period is the only
+    # layer on this path that names the lever beside the value it read, and with REFUSE_NEGATIVE_PERIOD
+    # OFF it does not refuse at all -- by design: .rework/DECISIONS.md D4 makes OFF the pre-refusal
+    # behaviour exactly, and the pre-refusal behaviour named nothing because there was no refusal. So
+    # the unconditional form reported a DECLARED-LEGAL configuration as a defect, in a message that is
+    # true but is a statement about spine/derive.py's wording rather than about anything the operator
+    # did or FAB failed to do: flipping the switch and changing nothing else turned this check RED
+    # (measured -- exit 1, "=== 8 checks, 1 failing ===", this finding the only one).
+    # THIS IS NOT THE ASSERTION GOING AWAY. In the shipped position it is unchanged and is the thing
+    # that fails if FAB's refusal stops naming both; in the OFF position the naming gap belongs to
+    # spine/derive.py::flush_period_windows, is FAB's to report and not FAB's to fix, and is printed
+    # on the detail line either way. What the OFF position still asserts is one door up: that FAB did
+    # not refuse (the `layer == "FAB.manage_period" and not switch` finding above) and that it handed
+    # back Windows(every).
+    if switch and joint and not named:
         findings.append(f"no refusal on this path names FAB_MANAGE_EVERY beside the value it read. "
                         f"The layers that refused were {prose} and each of them names the lever, if "
                         f"at all, somewhere other than beside the number -- which is prose, not a "
@@ -1336,9 +1463,169 @@ def check_f8_manage_period_kind_and_refusal():
               + (("; " + "; ".join(f"{lay} does NOT -- it names the value it read but the lever only "
                                    f"as prose elsewhere in the message (a generic conversion cannot "
                                    f"know whose lever it was handed), so THAT half is reported here "
-                                   f"and not claimed" for lay in prose)) if prose else ""))
+                                   f"and not claimed" for lay in prose)) if prose else "")
+              + ("" if switch else
+                 "\n      REFUSE_NEGATIVE_PERIOD IS OFF, so the joint-naming assertion is REPORTED "
+                 "above and not asserted: D4 makes OFF the pre-refusal behaviour, in which FAB does "
+                 "not refuse and therefore names nothing, and the only refusal left is the "
+                 "assembly's, whose wording is spine/derive.py's to fix and not FAB's. What is still "
+                 "asserted in this position is that FAB did NOT refuse and returned Windows(every)"))
     return _report("F8", "a negative management cadence never reaches a reader, and the report says "
                          "which layer stopped it",
+                   not findings, detail, findings, vacuous=not examined)
+
+
+# ==================================================================================================
+# F9 -- a rendered Gate line may not contradict the arithmetic it prints
+# ==================================================================================================
+
+# {gate name: the relation that OPENS it, over the pair it prints as (value vs threshold)}.
+# ONE MEMBER, AND THE TABLE IS THE WHOLE OF WHAT MAKES THIS CHECK SOUND. spine/gate.py::Gate.line
+# prints NO OPERATOR, so a rendered pair cannot say on its own whether a gate is a `>=` or a `<` --
+# tests/test_contract.py::check_k16_verdicts_follow_their_printed_pair refuses to guess it and says so
+# in its own report line, and a rule reading "fired implies value >= threshold" over every Gate in the
+# tree would call correct `<` and `!=` gates defects. What this file has that a static reader does not
+# is an AUTHOR: fab.cull_gate's pair is the occupancy against FAB_PRESSURE and
+# spine/derive.py::cull_gate_open opens at `not (ratio < pressure)`, so `>=` is the relation and it is
+# written down here rather than inferred. Most FAB gates are NOT in this table and must not be: their
+# pair is DESCRIPTIVE -- fab.explore prints "0 row(s) swapped ... vs explore=0.15, computed=4 of
+# n_live=4" -- and inviting arithmetic is exactly what those pairs do not do. The count of gates seen
+# and skipped is on the report line, so the size of what is not judged is visible rather than implied.
+ARITHMETIC_GATES = {"fab.cull_gate": ">="}
+
+# (FAB_N0, FAB_SLOTS, FAB_PRESSURE, why this row is here). The last two are the ROUNDING shape, which
+# needs no floor at all: `.3f` of the ratio can land on the other side of the setpoint from the ratio
+# itself, in both directions, and both are reachable from the lever space at these widths.
+CULL_ROWS = (
+    (2, 2, 0.45,   "floor shuts it while the printed occupancy 1.000 meets the printed 0.45"),
+    (2, 4, 0.45,   "floor shuts it while the printed occupancy 0.500 meets the printed 0.45"),
+    (2, 100, 0.45, "floor AND occupancy both shut it, and the printed pair agrees with the verdict"),
+    (3, 4, 0.45,   "above the floor and over the setpoint: FIRED, and the pair says so"),
+    (5, 8, 0.45,   "above the floor and over the setpoint at the base widths"),
+    (4, 6, 0.6667, "ROUNDING: shut at ratio 0.6666..., and the printed 0.667 meets the printed 0.6667"),
+    (5, 6, 0.8333, "ROUNDING: FIRED at ratio 0.8333..., and the printed 0.833 is under 0.8333"),
+)
+
+
+def _rendered_pair(gate):
+    """The two numbers a READER takes off the rendered line, or None if the pair is not two numbers.
+
+    The value field is a rendering of a quantity -- "2/2=1.000" -- and what the reader compares is
+    what is rendered, so the number after the LAST `=` is taken and the working before it is not.
+    A field that carries no number at all is not an arithmetic and this check leaves it alone.
+    """
+    shown = str(gate.value)
+    shown = shown.rsplit("=", 1)[-1] if "=" in shown else shown
+    try:
+        return float(shown), float(gate.threshold)
+    except (TypeError, ValueError):
+        return None
+
+
+def check_f9_rendered_gate_lines_agree_with_their_own_arithmetic():
+    """A Gate line that prints a verdict word beside a pair of numbers may not have them disagree.
+
+    THE DEFECT THIS STANDS OVER, and it shipped for six rounds in the file this check covers.
+    spine/gate.py::Gate says `value` and `threshold` are printed so the reader can do the arithmetic
+    themselves, and spine/gate.py::Gate.line prints the verdict word, that pair, and -- only when a
+    reason is set -- the reason. src/fabric/api.py's fab.cull_gate had no reason, and its verdict is
+    spine/derive.py::cull_gate_open, which is TWO clauses: a FLOOR on the live population and the
+    occupancy test. The pair renders the occupancy test alone, so at FAB_N0=2 FAB_SLOTS=2
+    FAB_PRESSURE=0.45 the line read
+
+        Gate fab.cull_gate: armed, did not fire (2/2=1.000 vs 0.45)
+
+    -- 1.000 meets 0.45, beside the words reserved for a condition that ran and was not met. A reader
+    who does the arithmetic the line invites gets the opposite answer from the line.
+
+    IT IS TWO SHAPES AND NOT ONE, which is why this sweeps rather than plants a single case. The floor
+    is one; the other needs no floor and no second clause at all -- the occupancy is printed through
+    `.3f`, and a rounded ratio can land on the other side of the setpoint from the ratio actually
+    compared, in EITHER direction. Both are in CULL_ROWS above, both were measured on the lever space
+    before they were written down, and the FIRED direction (5/6 at FAB_PRESSURE=0.8333, printed 0.833)
+    is the one no floor argument reaches.
+
+    WHAT IS ASSERTED. For every gate in ARITHMETIC_GATES, on every row: read the rendered line, take
+    the pair off it, apply the relation the table declares, and compare that answer with the verdict
+    word the same line prints. WHERE THEY DISAGREE THE LINE MUST CARRY A REASON -- that is the whole
+    rule, and it is the runtime half of K16 --
+    tests/test_contract.py::check_k16_verdicts_follow_their_printed_pair -- which reads the SOURCE
+    and therefore sees the floor clause but cannot see a rounded render at all. A reason is NOT
+    required where the pair justifies the verdict; a caveat there is legitimate and
+    spine/gate.py::Gate.line says so.
+
+    WHAT IS NOT ASSERTED, said here and printed in the detail line rather than left to a docstring:
+    whether the reason NAMES the clause that actually decided. That is prose, this check does not read
+    it, and a reason saying anything at all exempts the line here -- the same limit K16 states for the
+    same reason. Nor is the DIRECTION of any gate outside ARITHMETIC_GATES judged; the pair of every
+    other FAB gate is descriptive and is counted, not read.
+
+    THE CENSUS IS PART OF THE ASSERTION. The sweep must produce BOTH kinds of row -- at least one
+    where the pair contradicts the verdict and at least one where it does not -- or the check is
+    reporting on a population that cannot show the defect, which is this suite's own most repeated
+    finding about other people's checks.
+    """
+    findings, examined = [], 0
+    contradicting, agreeing, descriptive = 0, 0, 0
+
+    for n0, slots, pressure, why in CULL_ROWS:
+        c = cfg(FAB_N0=n0, FAB_SLOTS=slots, FAB_PRESSURE=pressure)
+        pop = population(c)
+        for gate in pop.gates:
+            relation = ARITHMETIC_GATES.get(gate.name)
+            if relation is None:
+                descriptive += 1
+                continue
+            line = gate.line()
+            head = line.split(": ", 1)[1]
+            if head.startswith("UNREACHABLE"):
+                # THE THIRD STATE IS NOT THIS CHECK'S SUBJECT: spine/gate.py::Gate refuses to be
+                # built unreachable without a reason, so that arm already carries one by construction.
+                continue
+            pair = _rendered_pair(gate)
+            if pair is None:
+                descriptive += 1
+                continue
+            examined += 1
+            value_n, threshold_n = pair
+            pair_says_open = value_n >= threshold_n if relation == ">=" else value_n > threshold_n
+            fired_printed = head.startswith("FIRED")
+            if pair_says_open == fired_printed:
+                agreeing += 1
+                continue
+            contradicting += 1
+            if not (gate.reason and gate.reason in line):
+                findings.append(
+                    f"FAB_N0={n0} FAB_SLOTS={slots} FAB_PRESSURE={pressure} ({why}): the line reads "
+                    f"{line!r}. The pair on it is {value_n} {relation} {threshold_n}, which is "
+                    f"{pair_says_open}, and the verdict word printed beside it says fired="
+                    f"{fired_printed}. Nothing else is on the line, so a reader who does the "
+                    f"arithmetic spine/gate.py::Gate invites them to do gets the opposite answer "
+                    f"from the gate. Name the clause that actually decided in a `reason` on the arm "
+                    f"it decides -- or, if the mechanism could not run here, in `reachable=`.")
+
+    if not contradicting:
+        findings.append(f"no row in this sweep produced a line whose pair disagrees with its own "
+                        f"verdict, so the rule was never exercised: {len(CULL_ROWS)} row(s) all "
+                        f"agreed. A check that examined only the easy half of its population is "
+                        f"green over the defect it exists for -- the sweep must keep at least one "
+                        f"configuration in each state, and CULL_ROWS names why each row is there.")
+    if not agreeing:
+        findings.append(f"every row in this sweep contradicted itself, which means the sweep is not "
+                        f"distinguishing anything: a rule that fires on the whole population says "
+                        f"nothing about any member of it.")
+
+    detail = (f"{examined} rendered line(s) read over {len(CULL_ROWS)} configuration(s) for the "
+              f"{len(ARITHMETIC_GATES)} gate(s) whose printed pair IS an arithmetic the reader is "
+              f"invited to do ({', '.join(f'{g} opens at {r}' for g, r in sorted(ARITHMETIC_GATES.items()))}); "
+              f"{contradicting} line(s) where the pair disagrees with the verdict word and each one "
+              f"required to carry a reason, {agreeing} where it agrees and none required to; "
+              f"{descriptive} gate line(s) seen and NOT judged because their pair is descriptive "
+              f"rather than a comparison\n      WHAT THIS CANNOT CATCH: whether an exempting reason "
+              f"actually names the clause that decided -- the reason is prose and is not read here -- "
+              f"and the direction of any gate not in the table above, which spine/gate.py::Gate.line "
+              f"prints no operator for and which this file declares rather than infers")
+    return _report("F9", "no rendered gate line prints a verdict its own numbers contradict",
                    not findings, detail, findings, vacuous=not examined)
 
 
@@ -1355,6 +1642,7 @@ CHECKS = (
     check_f6_one_learning_pass_per_window,
     check_f7_gate_reasons_print_what_they_read,
     check_f8_manage_period_kind_and_refusal,
+    check_f9_rendered_gate_lines_agree_with_their_own_arithmetic,
 )
 
 

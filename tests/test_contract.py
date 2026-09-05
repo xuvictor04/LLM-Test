@@ -28,6 +28,14 @@ declared wire that arrives nowhere (the mirror of the 60 untrippable guards).
         lever's own, and no impossibility on a Gate the source declares reachable. The three
         things it refuses to check, and the twenty-five-commit sweep behind each refusal, are in
         its own block.
+    K16 the OTHER half of the same printed line, which K15 cannot see because every K15 rule reads
+        the reason TEXT: a Gate whose printed `(value vs threshold)` IS one clause of the verdict
+        that decided it may not turn on a clause that pair does not show, unless a reason says so.
+        src/fabric/api.py's fab.cull_gate printed "armed, did not fire (2/2=1.000 vs 0.45)" for
+        eight archived commits with no reason at all -- a value meeting its own threshold beside the
+        words for a condition that was tested and not met -- and nothing in this tree read a verdict
+        word against the arithmetic printed beside it. What it does NOT judge, starting with the
+        DIRECTION of the comparison, is in its own block and on its own report line.
 
 WHAT IT DOES NOT PROVE, and the list matters more than the checks. It says nothing about whether a
 body, once written, does what its docstring says; nothing about whether the DID IT FIRE counter a
@@ -57,7 +65,9 @@ that cannot fail. K13 goes one step further and FAILS when it finds nothing to c
 claims found" and "no claims wrong" print the same way.
 """
 import ast
+import builtins
 import contextlib
+import copy
 import io
 import json
 import os
@@ -957,6 +967,23 @@ _K15_GATE_BOOL_SECOND_NAME = '''
                      if src else ""))
 '''
 
+# THE SAME WRAPPER ON BOTH SIDES, which is the shape the one-sided unwrap retired. A reason may
+# carry the very wrapper the gate was written with, and `reachable=bool(n > 0)` against
+# `reason=(A if bool(n > 0) else B)` says which arm prints on a reachable run exactly as plainly as
+# the unwrapped spelling does. Both of these PASSED K15 -- a tree it must fail -- for as long as the
+# wrapper was read off `reachable=` alone.
+_K15_GATE_BOOL_BOTH_IMPOSSIBLE = '''
+        Gate("data.redraw", False, 0, 1, reachable=bool(n > 0),
+             reason=("DATA_STREAM_BYTES=0: this gate cannot fire on this run."
+                     if bool(n > 0) else ""))
+'''
+
+_K15_GATE_BOOL_BOTH_NEG = '''
+        Gate("data.redraw", False, 0, 1, reachable=bool(n > 0),
+             reason=("" if not bool(n > 0) else
+                     "DATA_STREAM_BYTES=0: this gate cannot fire on this run."))
+'''
+
 # RULE 5. The gate PRINTS `n`, which is DATA_STREAM_BYTES, on the `else` of an ordering test on that
 # same lever -- so every value at or below zero reaches this arm while the sentence names one of
 # them. This is the shape of ckpt.periodic_armed's "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0".
@@ -1037,8 +1064,13 @@ def open_areas(dat: Config, *, seed: int):
 """
 
 # THE ADMIT SIDE OF THE WIDENING, and it is what keeps it from becoming "any literal on any body
-# arm". An EQUALITY test pins the lever to one value in its body, so the sentence and the printed
-# number cannot disagree -- the same construct, one operator apart, and it must stay green.
+# arm" -- the same construct as _K15_API_BODY_ARM, one operator apart, and it must stay green. WHAT
+# MAKES IT GREEN IS NOT `pinned`, and the sentence that said so was naming the wrong mechanism: with
+# `if n == 0:` and no ordering test on that lever anywhere in the function, `ranged` never becomes
+# True, rule 5's population for this tree is ZERO and the literal is never examined at all. The
+# `pinned` path is exercised by _K15_API_THREE_WAY above, whose population is 2. Both cases are
+# needed and neither replaces the other: this one pins that an equality body arm is not a range,
+# that one pins that a literal the branch pins is admitted.
 _K15_API_BODY_PINNED = """\
 \"\"\"A stand-in api module that builds one gate on the BODY of an equality test.\"\"\"
 from spine.gate import Gate
@@ -1061,6 +1093,38 @@ def open_areas(dat: Config, *, seed: int):
     return [gate]
 """
 
+# RULE 5's REMEDY, ON A VALUE NO f-STRING CAN QUOTE. The remedy echoes the Gate's `value=` inside an
+# f-string, and this value carries BOTH quote characters once `ast.unparse` has rendered it --
+# tally["what's seen"] -- so neither outer quote closes and the suggestion has to be said in words.
+# It takes an APOSTROPHE INSIDE A STRING LITERAL to get there: unparse normalises to single quotes,
+# so the subscript this was first reported against -- st.counters["opt.x"] -- comes back
+# single-quoted and needs nothing. NO GATE IN src/ PRINTS SUCH A VALUE: all four in rule 5's live
+# population pass a bare local name, so this fixture is the only thing that has ever taken the
+# branch, and without it the guard would be one more of the sixty this repository has on record.
+_K15_API_SUBSCRIPT = """\
+\"\"\"A stand-in api module whose gate prints a SUBSCRIPTED value.\"\"\"
+from spine.gate import Gate
+from spine.lever import Config
+
+
+def open_areas(dat: Config, *, seed: int):
+    \"\"\"Open every area.
+
+    LEVERS READ: source, stream_bytes
+    WIRES READ: none
+    DID IT FIRE: data.area_open
+    \"\"\"
+    dat = dat.owned_by("DATA")
+    n = int(dat.stream_bytes)
+    tally = {"what's seen": [0]}
+    if n <= 0:
+        gate = Gate("data.area_open", False, tally["what's seen"][n], 1,
+                    reason="DATA_STREAM_BYTES=0: nothing is drawn, so no area opens.")
+    else:
+        gate = Gate("data.area_open", True, n, 1)
+    return [gate]
+"""
+
 _K15_BRANCHED_LITERAL = '''
         gate = Gate("data.area_open", False, n, 1,
                     reason="DATA_STREAM_BYTES=0: nothing is drawn, so no area opens.")
@@ -1075,6 +1139,129 @@ _K15_BRANCHED_RENDERED = '''
 def _k15_branched(template, gate):
     """`template` with its one variable gate substituted, indentation preserved."""
     return template.replace("__GATE__", gate.strip())
+
+
+# --- K16 fixtures. Each case carries BOTH the stand-in src/spine/derive.py and the whole api.py
+# --- that calls it, because the check unfolds a verdict computed by a named derivation and a
+# --- fragment would have neither the derivation to unfold nor the scope to trace `n` through.
+# --- `_K16_DERIVE` declares one TWO-clause conversion and one single-clause one, and the difference
+# --- between the tree that must fail and the tree that must pass is which of the two is called.
+
+_K16_DERIVE = '''\
+"""A stand-in spine.derive: the named conversions a package's verdict may be computed by."""
+
+
+def draw_gate_open(n_live, slots, pressure):
+    """TWO clauses, and the floor is a separate one from the pressure test."""
+    return not (n_live <= 2 or (n_live / max(1, slots)) < pressure)
+
+
+def pressure_only(n_live, slots, pressure):
+    """ONE clause: the pressure test and nothing else."""
+    return (n_live / max(1, slots)) >= pressure
+'''
+
+_K16_API = '''\
+"""A stand-in api module whose entry point builds one gate from a named derivation."""
+from spine.gate import Gate
+from spine.lever import Config
+from spine import derive as _derive
+
+
+def open_areas(dat: Config, *, seed: int):
+    """Open every area.
+
+    LEVERS READ: source, stream_bytes
+    WIRES READ: none
+    DID IT FIRE: data.area_open
+    """
+    dat = dat.owned_by("DATA")
+    n, slots, pressure = int(dat.stream_bytes), 8, 0.45
+    __GATE__
+    return [gate]
+'''
+
+# THE BRANCH THAT HOLDS THE OTHER CLAUSE TRUE, AND THE ONE THAT HOLDS IT FALSE. Same test, same
+# gate, and the whole difference is which arm it sits on: on the BODY the floor cannot be what shut
+# the gate, so the verdict really is the pair; on the ELSE the floor is pinned FALSE, which is how a
+# conjunction goes constantly false while the pair it prints goes on meeting its own threshold.
+_K16_API_BODY = _K16_API.replace("    __GATE__\n",
+                                 "    if n > 2:\n        __GATE__\n"
+                                 "    else:\n        gate = None\n")
+_K16_API_ELSE = _K16_API.replace("    __GATE__\n",
+                                 "    if n > 2:\n        gate = None\n"
+                                 "    else:\n        __GATE__\n")
+
+# THE DEFECT, in the shape src/fabric/api.py's fab.cull_gate has it: the pair is the pressure test,
+# the floor decides too, and nothing on the line says so.
+_K16_GATE_HIDDEN = '''
+    gate = Gate("data.area_open", _derive.draw_gate_open(n, slots, pressure),
+                f"{n}/{slots}={n / max(1, slots):.3f}", pressure)
+'''
+
+# THE REPAIR THE FINDING NAMES: the clause the pair cannot show is said in a reason. K16 requires a
+# reason here and does not read it -- that limit is on the check's own report line.
+_K16_GATE_REASONED = '''
+    gate = Gate("data.area_open", _derive.draw_gate_open(n, slots, pressure),
+                f"{n}/{slots}={n / max(1, slots):.3f}", pressure,
+                reason="" if n > 2 else "n is at draw_gate_open's FLOOR of two, which is a "
+                                        "separate clause from the pressure test printed above.")
+'''
+
+# THE ADMIT THAT STOPS THIS BECOMING "any derived verdict needs a reason": one clause, the pair is
+# that clause, nothing is hidden and nothing is reported.
+_K16_GATE_ONE_CLAUSE = '''
+    gate = Gate("data.area_open", _derive.pressure_only(n, slots, pressure),
+                f"{n}/{slots}={n / max(1, slots):.3f}", pressure)
+'''
+
+# THE THIRD STATE ALREADY REPORTS IT. The floor is this gate's REACHABILITY, so Gate.line prints
+# UNREACHABLE with the reason that arm requires, and on the reachable arm the verdict really is the
+# pair. The reason is EMPTY on the arm that prints when `n > 2` holds -- _k15_live_reason reads
+# which arm that is -- so the reason exemption cannot be what makes this case green. Subtracting a
+# clause named by `reachable=` is, and deleting that subtraction turns this case red.
+_K16_GATE_ON_REACHABLE = '''
+    gate = Gate("data.area_open", _derive.draw_gate_open(n, slots, pressure),
+                f"{n}/{slots}={n / max(1, slots):.3f}", pressure, reachable=n > 2,
+                reason="" if n > 2 else "n <= 2 is draw_gate_open's floor: culling from a "
+                                        "population of two can empty it, so nothing can fire.")
+'''
+
+# THE REASON THAT SAYS NOTHING WHERE THE VERDICT IS PRINTED. This gate's `reachable=` names a
+# condition the verdict does not contain, and its reason is EMPTY on the arm that prints when that
+# condition holds -- so on every reachable run the line carries the verdict word, the pair, and
+# nothing else, with the floor still hidden. _k15_live_reason is what reads which arm prints; treat
+# any IfExp reason as a reason and this gate is exempted on the arms where it is silent.
+_K16_GATE_REASON_ON_THE_OTHER_ARM = '''
+    gate = Gate("data.area_open", _derive.draw_gate_open(n, slots, pressure),
+                f"{n}/{slots}={n / max(1, slots):.3f}", pressure, reachable=slots > 0,
+                reason="" if slots > 0 else "there are no slots at all, so nothing can be culled.")
+'''
+
+# THE ABSTENTION, WRITTEN AS A CASE so it cannot be quietly widened into "any two-clause verdict".
+# The same two-clause verdict against a DESCRIPTIVE pair -- a count against a slot total -- renders
+# neither clause, so the line invites no arithmetic and this rule says nothing about it.
+_K16_GATE_DESCRIPTIVE = '''
+    gate = Gate("data.area_open", _derive.draw_gate_open(n, slots, pressure), n, slots)
+'''
+
+
+def _k16_tree(template, gate):
+    """The overlay for one K16 case: the stand-in derivation, and the api.py that calls it.
+
+    The gate block is RE-INDENTED to its marker's own column, so ONE gate fixture serves the flat
+    template and both branched ones. A fixture that only fitted one of them would make the body-arm
+    and else-arm cases differ by more than the arm, which is the only thing they may differ by.
+    """
+    for line in template.splitlines():
+        if line.strip() != "__GATE__":
+            continue
+        pad = line[:len(line) - len(line.lstrip())]
+        body = "\n".join(pad + ln[4:] if ln.strip() else ln
+                         for ln in gate.strip("\n").splitlines())
+        return {"src/spine/derive.py": _K16_DERIVE,
+                "src/data/api.py": template.replace(line, body)}
+    raise AssertionError("the K16 template carries no __GATE__ marker")
 
 
 _BASE_TREE = {
@@ -1093,7 +1280,8 @@ _CASES = (
         "K1": (False, None), "K2": (False, None), "K3": (False, None),
         "K4": (False, None), "K5": (False, None), "K6": (False, None), "K7": (False, None),
         "K8": (False, None), "K9": (False, None), "K10": (False, None), "K11": (False, None),
-        "K12": (False, None), "K13": (False, None), "K15": (False, None)}),
+        "K12": (False, None), "K13": (False, None), "K15": (False, None),
+        "K16": (False, None)}),
 
     ("K13: the population collapsed below the declared floor",
      {}, {"K13floor": (True, "POPULATION COLLAPSED")}),
@@ -1499,6 +1687,16 @@ def _periods(sysm):
       "src/data/api.py": _k15_api(_K15_GATE_BOOL_SECOND_NAME)},
      {"K15": (False, None)}),
 
+    ("K15: the SAME bool() wrapper on both sides -- judged before the unwrap existed, and after it",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_api(_K15_GATE_BOOL_BOTH_IMPOSSIBLE)},
+     {"K15": (True, "reachable exactly when")}),
+
+    ("K15: the wrapper on both sides with the reason branching on its NEGATION",
+     {"src/data/levers.py": _K15_LEVERS,
+      "src/data/api.py": _k15_api(_K15_GATE_BOOL_BOTH_NEG)},
+     {"K15": (True, "reachable exactly when")}),
+
     # ---- RULE 5. ckpt.periodic_armed's shape: the gate prints the lever and the reason spells one
     # ---- value of it, on a branch that admits every value at or below zero.
     ("K15: a literal spelled for the lever the gate prints, on a range-admitting branch",
@@ -1531,10 +1729,54 @@ def _periods(sysm):
       "src/data/api.py": _k15_branched(_K15_API_BODY_ARM, _K15_BRANCHED_RENDERED)},
      {"K15": (False, None)}),
 
-    ("K15: the same literal on the BODY arm of an EQUALITY test is ADMITTED -- it pins the lever",
+    ("K15: the same literal on the BODY arm of an EQUALITY test is ADMITTED -- no ordering test on "
+     "that lever encloses it, so rule 5 never examines the literal",
      {"src/data/levers.py": _K15_LEVERS,
       "src/data/api.py": _k15_branched(_K15_API_BODY_PINNED, _K15_BRANCHED_LITERAL)},
      {"K15": (False, None)}),
+
+    ("K15: rule 5 names the expression in words where no f-string it could write is well-formed",
+     {"src/data/levers.py": _K15_LEVERS, "src/data/api.py": _K15_API_SUBSCRIPT},
+     {"K15": (True, "Render the expression this Gate already passes")}),
+
+    # ---- K16. The one class K15 cannot see: a verdict word and a pair of numbers that disagree,
+    # ---- with no reason on the line for either of them to be read against. Every case below is the
+    # ---- SAME two-clause derivation and the SAME printed pair; what changes is where the clause the
+    # ---- pair does not show is settled -- nowhere, in a reason, in `reachable=`, or by the branch.
+    ("K16: a verdict that turns on a clause its printed pair does not show -- fab.cull_gate's shape",
+     _k16_tree(_K16_API, _K16_GATE_HIDDEN),
+     {"K16": (True, "decides it too")}),
+
+    ("K16: the same gate with that clause named in a reason is ADMITTED -- it is the pair or the "
+     "reason, and this is the reason",
+     _k16_tree(_K16_API, _K16_GATE_REASONED),
+     {"K16": (False, None)}),
+
+    ("K16: a SINGLE-clause verdict whose pair is that clause is ADMITTED -- the rule is about the "
+     "hidden clause, not about being derived",
+     _k16_tree(_K16_API, _K16_GATE_ONE_CLAUSE),
+     {"K16": (False, None)}),
+
+    ("K16: the hidden clause carried by reachable=, where the third state already reports it",
+     _k16_tree(_K16_API, _K16_GATE_ON_REACHABLE),
+     {"K16": (False, None)}),
+
+    ("K16: the same gate on the BODY of a branch that holds the other clause TRUE is ADMITTED",
+     _k16_tree(_K16_API_BODY, _K16_GATE_HIDDEN),
+     {"K16": (False, None)}),
+
+    ("K16: the same gate on the ELSE of that same branch is still reported -- the else pins the "
+     "clause FALSE, which is the defect and not an exemption",
+     _k16_tree(_K16_API_ELSE, _K16_GATE_HIDDEN),
+     {"K16": (True, "decides it too")}),
+
+    ("K16: a reason that is EMPTY on the arm the verdict prints on does not exempt the gate",
+     _k16_tree(_K16_API, _K16_GATE_REASON_ON_THE_OTHER_ARM),
+     {"K16": (True, "decides it too")}),
+
+    ("K16: the same verdict printed against a DESCRIPTIVE pair is ABSTAINED on, not guessed at",
+     _k16_tree(_K16_API, _K16_GATE_DESCRIPTIVE),
+     {"K16": (False, None)}),
 )
 
 _BY_TAG = {
@@ -1559,6 +1801,7 @@ _BY_TAG = {
     "K13floor": lambda d: check_k13_counts_and_absence_claims(
         os.path.join(d, "src"), os.path.join(d, "docs", "04_CONTRACT.md"), floor=999),
     "K15": lambda d: check_k15_gate_reasons_are_self_consistent(os.path.join(d, "src")),
+    "K16": lambda d: check_k16_verdicts_follow_their_printed_pair(os.path.join(d, "src")),
 }
 
 
@@ -3494,8 +3737,11 @@ def _entry_docstrings(src_dir=SRC):
 #   (src/fabric/api.py's fab.expert_choice, fab.discover, fab.distinctness and fab.independence,
 #   each `reachable=bool(EXPR)` against `reason=(A if EXPR else B)` with EXPR textually identical),
 #   and the version of this file that shipped on 2026-09-04 dropped all four while its own prose
-#   said the whole residue was "a second name for the same condition" -- true of two of the six and
-#   false of four. What is left outside after the normalisation is a reason branching on a genuinely
+#   said the whole residue was "a second name for the same condition" -- exactly true of ONE of the
+#   six (opt.lr.min_frac, `reachable=floor_reachable` against `not sched_live`), false of the four
+#   fabric Gates, and of the sixth (opt.lr.warmup) true only if a strictly WEAKER condition counts
+#   as a second name for the same one, which the next sentence says it does not.
+#   What is left outside after the normalisation is a reason branching on a genuinely
 #   DIFFERENT expression: a second name (`floor_reachable` against `not sched_live`), or a WEAKER
 #   one (`not sched_live` against `reachable=sched_live and warmup_n > 1`). Those are left alone:
 #   deciding two different expressions are one condition is inference, and this file has a
@@ -3763,13 +4009,16 @@ def _k15_live_reason(reason, reach):
       * a reason with no conditional in it at all -> the whole reason, which prints on both arms and
         therefore on the reachable one.
 
-    A `bool(...)` WRAPPER AROUND THE REACHABLE EXPRESSION IS READ OFF FIRST, and that is the one
-    normalisation this function performs. Four of this tree's Gates -- src/fabric/api.py's
-    fab.expert_choice, fab.discover, fab.distinctness and fab.independence -- write
-    `reachable=bool(EXPR)` against `reason=(A if EXPR else B)` with EXPR textually identical, and
-    a comparison that refuses to see through the wrapper drops all four. Measured: coverage on this
-    tree goes from 9 of 15 computed-reachability Gates to 13, rule 4's dynamic half still reports
-    ZERO findings at every commit swept, and the count is on the check's report line either way.
+    A `bool(...)` WRAPPER IS READ OFF BOTH SIDES FIRST, and that is the one normalisation this
+    function performs. Four of this tree's Gates -- src/fabric/api.py's fab.expert_choice,
+    fab.discover, fab.distinctness and fab.independence -- write `reachable=bool(EXPR)` against
+    `reason=(A if EXPR else B)` with EXPR textually identical, and a comparison that refuses to see
+    through the wrapper drops all four. Measured: coverage on this tree goes from 9 of 15
+    computed-reachability Gates to 13, rule 4's dynamic half still reports ZERO findings at every
+    commit swept, and the count is on the check's report line either way. BOTH SIDES, because a
+    reason may carry the same wrapper the gate was written with; stripping it from `reachable=`
+    alone made `reason=(A if bool(EXPR) else B)` stop matching and quietly retired a shape rule 4
+    judged before the wrapper was understood at all.
 
     Anything else -- a branch keyed on a second name for the same condition, a nested conditional --
     returns None and the gate stays outside rule 4, counted and printed as such. The comparison is
@@ -3783,20 +4032,40 @@ def _k15_live_reason(reason, reach):
         # `bool(X)` AND `if X:` ARE THE SAME TRUTHINESS TEST, so a Gate written
         # `reachable=bool(EXPR)` against `reason=(A if EXPR else B)` has told the source text which
         # arm prints on a reachable run just as plainly as one written `reachable=EXPR`. Reading
-        # the wrapper off is normalisation and not inference -- the two expressions are compared
-        # textually afterwards exactly as before, so nothing else is decided here. THE UNWRAPPING
-        # IS DELIBERATELY THE NARROWEST ONE THAT IS TRUE BY LANGUAGE RULE: only a call of the bare
-        # name `bool` with exactly one positional argument and no keywords, because that is the
-        # only call whose result IS the truthiness of its argument. It is not applied to a
-        # sub-expression of a larger reachable expression either, since `bool(X) and Y` is not X.
+        # the wrapper off is normalisation and not inference. THE UNWRAPPING IS DELIBERATELY THE
+        # NARROWEST ONE THAT IS TRUE BY LANGUAGE RULE: only a call of the bare name `bool` with
+        # exactly one positional argument and no keywords, because that is the only call whose
+        # result IS the truthiness of its argument. It is not applied to a sub-expression of a
+        # larger reachable expression either, since `bool(X) and Y` is not X.
+        # IT IS APPLIED TO BOTH SIDES, AND THE ONE-SIDED VERSION WAS A SILENT NARROWING. The first
+        # version read the wrapper off `reachable=` and then compared the result against
+        # `ast.unparse(reason.test)` UNCHANGED, so the moment a reason branched on the SAME
+        # `bool(EXPR)` the gate was written with -- `reachable=bool(n > 0)` against
+        # `reason=(A if bool(n > 0) else B)` -- the two spellings no longer matched and the gate
+        # dropped out of rule 4 entirely. That is a detection the check had BEFORE the unwrap
+        # existed, retired by the change that was widening it; the two cases named for it below
+        # both PASSED a tree they must fail until this was two-sided. The `not` form is normalised
+        # with it, because `not bool(X)` is `not X` by the same rule and the negated arm is
+        # selected by string comparison against `not {r}`.
         # NOT SELF-TESTED, and said here rather than left to be discovered: the cases below pin
-        # the normalisation and the abstention on a second name, but no case pins the `bool`-only
-        # restriction, because every fixture for it would have to branch a reason on a
+        # the normalisation on both sides and the abstention on a second name, but no case pins the
+        # `bool`-only restriction, because every fixture for it would have to branch a reason on a
         # non-boolean expression and would be modelling code this tree does not write.
-        if (isinstance(reach, ast.Call) and getattr(reach.func, "id", "") == "bool"
-                and len(reach.args) == 1 and not reach.keywords):
-            reach = reach.args[0]
-        r, t = ast.unparse(reach), ast.unparse(reason.test)
+        def _unbool(node):
+            if (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "bool"
+                    and len(node.args) == 1 and not node.keywords):
+                return node.args[0]
+            return node
+
+        def _norm(node):
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+                inner = _unbool(node.operand)
+                if inner is not node.operand:
+                    return ast.UnaryOp(op=ast.Not(), operand=inner)
+            return _unbool(node)
+
+        reach = _norm(reach)
+        r, t = ast.unparse(reach), ast.unparse(_norm(reason.test))
         arm = (reason.body if t == r else
                reason.orelse if t in (f"not {r}", f"not ({r})") else None)
         if arm is None or any(isinstance(n, ast.IfExp) for n in ast.walk(arm)):
@@ -4019,6 +4288,30 @@ def check_k15_gate_reasons_are_self_consistent(src_dir=SRC):
                                         continue          # a numeric lever's value, or nothing
                                     if tok in pinned:
                                         continue
+                                    # THE SUGGESTED REPAIR ECHOES THE GATE'S OWN `value=`, and it
+                                    # is echoed rather than described because the Config FIELD name
+                                    # is not always in scope at the Gate -- at src/opt/api.py the
+                                    # local is `shift_warm` while the field is `lr_shift_warm`, so
+                                    # naming the field suggested something that does not exist
+                                    # there. A SUGGESTION IS A THING A READER PASTES, so it has to
+                                    # be well-formed, and the hazard is NARROWER than it was
+                                    # reported to be: `ast.unparse` normalises string literals to
+                                    # single quotes, so the subscript this was filed against --
+                                    # st.counters["opt.x"] -- comes back as st.counters['opt.x']
+                                    # and sits inside f"..." perfectly well. A DOUBLE QUOTE appears
+                                    # in unparse's output only when the literal itself contains an
+                                    # APOSTROPHE, and then the value carries BOTH quote characters
+                                    # and no single-line f-string this check could write around it
+                                    # is well-formed on any Python before 3.12 -- so the echo is
+                                    # dropped there and the expression named instead. No Gate in
+                                    # src/ prints such a value today; the branch has a self-test
+                                    # case and no live site.
+                                    rendered = ast.unparse(args["value"])
+                                    remedy = (
+                                        f'Render it -- f"{env}={{{rendered}}}" -- instead of '
+                                        f'spelling it.' if '"' not in rendered else
+                                        f"Render the expression this Gate already passes as its "
+                                        f"value= -- {rendered} -- instead of spelling the number.")
                                     findings.append(
                                         f"{where} prints {field!r} as its value and its reason "
                                         f"spells {env}={tok} as a literal, on a branch that admits "
@@ -4026,9 +4319,7 @@ def check_k15_gate_reasons_are_self_consistent(src_dir=SRC):
                                         f"Gate.line renders the live value beside the reason, so "
                                         f"every other value reaching this arm produces one "
                                         f"sentence naming two different numbers for one lever. "
-                                        f"Render it -- "
-                                        f"f\"{env}={{{ast.unparse(args['value'])}}}\" -- instead "
-                                        f"of spelling it.")
+                                        + remedy)
 
                 # ---- rules 1-3: the lever names, values and rendered quantities ------------------
                 for seq in _k15_fragments(reason):
@@ -4131,6 +4422,424 @@ def _k15_coerce(tok, default):
                       f"default is {default!r}, so the value is read as a {type(default).__name__}")
 
 
+# ==================================================================================================
+# K16 -- a Gate's verdict word may not be contradicted by the pair of numbers printed beside it
+# ==================================================================================================
+#
+# THE GAP, AND IT IS NOT K15's. Every rule in K15 reads the reason TEXT. `spine/gate.py::Gate.line`
+# renders three things -- a verdict word, `(value vs threshold)`, and the reason when one is set --
+# and until this check nothing in the tree read the first against the second. That is what let
+# src/fabric/api.py's `Gate("fab.cull_gate", ...)` stand through eight archived commits printing
+#
+#     Gate fab.cull_gate: armed, did not fire (2/2=1.000 vs 0.45)
+#
+# at FAB_N0=2 FAB_SLOTS=2 -- a value that meets its own printed threshold, beside the words reserved
+# for a condition that WAS tested and was not met. The gate carries no reason at all, so all five of
+# K15's rules pass over it in silence, and so does tests/test_fabric.py, which has no case below the
+# floor. The verdict is `spine/derive.py::cull_gate_open`, which is TWO clauses -- a floor
+# `n_live <= 2` and a pressure test -- and the pair prints the second one only. A reader who does the
+# arithmetic the line invites gets the opposite answer from the line.
+#
+# WHAT THIS CHECKS -- ONE RULE, and it is the largest one that can be made sound here. A Gate is
+# examined only when BOTH of these hold, which is what keeps it from crying wolf:
+#   * its verdict is RECOVERABLE as a boolean expression over comparisons -- `fired=` is a Compare, or
+#     a local name assigned exactly once in the same function, or a `bool(...)` of either, or a call
+#     to a src/spine/derive.py function that is one `return` over its own parameters, which is
+#     unfolded by substituting the arguments. Each of those four is an identity, not an inference.
+#   * its printed pair IS one of that expression's comparison clauses: `value=` renders the clause's
+#     left operand and `threshold=` its right, allowing an f-string hole and a numeric-formatting
+#     wrapper (`round`, `int`, `float`, `abs`) on either side. This is the "the reader is invited to
+#     do this arithmetic" test, and it is the whole difference between fab.cull_gate and the many
+#     gates whose pair is DESCRIPTIVE -- data.area_open prints "(n_open vs n_entries)", three opened
+#     of twelve, which is not a comparison at all and which this rule must never touch.
+# On that population the rule is: if the verdict turns on MORE clauses than the pair prints, the Gate
+# must carry a reason. It is the pair or it is the reason -- with neither, the line asserts a verdict
+# whose arithmetic is not on it, and the reader is invited to derive the opposite.
+#
+# A CLAUSE THAT IS SETTLED SOMEWHERE THE READER CAN SEE IT IS NOT HIDDEN, and two places count. A
+# clause also named by `reachable=` is reported by the third state -- Gate.line prints UNREACHABLE
+# and the reason it requires -- so it is subtracted. So is a clause the enclosing `if` or ternary
+# holds TRUE over the Gate, because on that arm the verdict really is the pair. Only the body arm:
+# the `else` of `if C:` pins C FALSE, which is how a conjunction becomes constantly false while its
+# printed pair goes on meeting its threshold, and that is the defect and not an exemption. Operands
+# are matched unordered, so `reachable=n > 2` settles the clause `n <= 2`.
+#
+# WHAT IT LEAVES OUT. Measured over the Gate constructions in src/ at 6237858 -- 113 of them then,
+# and the check's own report line prints the count on whatever tree it is run against:
+#   * THE DIRECTION OF THE COMPARISON IS NOT JUDGED, and cannot be. Gate.line prints no operator, so
+#     "FIRED (0.500 vs 0.45)" says nothing about whether the gate is a `>=` or a `<`. 25 of the
+#     resolved verdicts are `>`, 2 `==`, 2 `is not`, 1 `<`, 1 `!=` -- and a rule reading "fired
+#     implies value >= threshold" would call the `<` and the `!=` defects. It is not that rule.
+#   * A THRESHOLD THAT SPELLS ITS OWN OPERATOR IS STILL PROSE HERE. 25 thresholds are a bare string
+#     and 23 an f-string -- '> 0.0', '< 1.0 on a losing cycle', 'a checkpoint loaded' --
+#     and some of them do carry the relation. Reading it was tried and refused: src/fabric/api.py's
+#     fab.discover is `discovered > 0` against threshold `f"cosine distance > {discover}"`, where the
+#     `>` in the text is about a DIFFERENT quantity than the one the verdict compares, so an
+#     operator-matching rule reports a correct gate. That is the shape of every check this file has
+#     had to un-widen.
+#   * A CLAUSE NOT WRITTEN AS A COMPARISON IS INVISIBLE. `a > 0 and helper(b)` counts as one clause,
+#     so the rule under-reports rather than guesses; the count of predicates that mix one in is on
+#     the report line.
+#   * WHETHER AN EXEMPTING REASON ACTUALLY NAMES THE MISSING CLAUSE. The reason is prose and this
+#     check does not read it -- K15 is the file's one reader of reason text and it reads it for other
+#     claims. A reason that says nothing about the hidden clause exempts the Gate here. That is
+#     stated on the report line too, so the exemption cannot be mistaken for a judgement.
+#
+# CALIBRATED OVER THE HISTORY, the way K15's rules 4 and 5 were, and the sweep is the whole of it
+# rather than a sample: every commit in this repository that carries a src/ directory -- 73 of them,
+# a47c569 through 6237858 -- plus the working tree. THE RULE REPORTS ONE SITE, EVER. It is
+# src/fabric/api.py's fab.cull_gate, at all 34 trees since d8afb7b wrote it and at none before,
+# because before that the file had no such gate. There is NO OTHER FINDING at any tree in the
+# sweep: 39 trees report nothing (37 declare no Gate at all; f046b25 and 38a5d7e declare four and
+# examine three, and all three are correct). The examined population grows 3 -> 4 -> 5 -> 6 -> 8 as
+# the packages are written, and is 8 at each of the eight archived commits named in this round's
+# brief -- 2e8a63e, a2ffc08, dd6a396, f11ae02, 40d2446, de76093, d57bdc0, 6237858 -- one true
+# instance and zero false alarms at every one.
+#
+# THE NEAREST NEIGHBOUR IT LEAVES ALONE, and it is the reason both exemptions exist: src/opt/api.py's
+# opt.lr.warmup, whose verdict is THREE clauses -- `sched_live and warmup_n > 1 and
+# st.counters["opt.lr.in_warmup"] > 0`. It is outside this rule three times over: its pair is a
+# counter against a descriptive f-string and renders no clause at all, two of the three clauses are
+# its own `reachable=`, and it carries a reason. Any one of those alone would keep it out.
+
+_K16_UNWRAP = ("round", "int", "float", "abs")
+_K16_BUILTINS = frozenset(dir(builtins))
+
+
+class _K16Substitute(ast.NodeTransformer):
+    """Parameter name -> the argument expression the call passed for it.
+
+    ONE PASS, so the substitution is simultaneous: NodeTransformer does not re-visit what
+    `visit_Name` returns, and `cull_gate_open(n0, slots, pressure)` binding a parameter named `slots`
+    to an argument named `slots` must not then re-substitute inside its own replacement.
+    """
+
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    def visit_Name(self, node):
+        return self.mapping.get(node.id, node)
+
+
+def _k16_named_predicates(src_dir=SRC):
+    """{name: (params, return expr)} for the src/spine/derive.py functions this rule may unfold.
+
+    ONLY derive.py, and only the functions that are ONE `return` over nothing but their own
+    parameters and the builtins. That is not a stylistic preference: unfolding a call is sound only
+    when the substituted body means the same thing in the caller's scope, and a body that reads a
+    module-level name of its own does not. src/spine/units.py::Clock.convert's rule says every
+    cross-kind conversion is a NAMED function in derive, so this is also exactly where a package's
+    verdict is expected to come from -- fab.cull_gate's does.
+    """
+    out = {}
+    tree = _k13_parse(os.path.join(src_dir, "spine", "derive.py"))
+    if tree is None:
+        return out
+    for fn in [n for n in tree.body if isinstance(n, ast.FunctionDef)]:
+        a = fn.args
+        if a.vararg or a.kwarg or a.kwonlyargs or a.posonlyargs or a.defaults:
+            continue
+        rets = [n for n in ast.walk(fn) if isinstance(n, ast.Return)]
+        if len(rets) != 1 or rets[0].value is None or fn.body[-1] is not rets[0]:
+            continue
+        params = [x.arg for x in a.args]
+        free = {n.id for n in ast.walk(rets[0].value) if isinstance(n, ast.Name)}
+        if not free <= (set(params) | _K16_BUILTINS):
+            continue
+        out[fn.name] = (params, rets[0].value)
+    return out
+
+
+def _k16_derive_aliases(tree):
+    """The local names bound to spine.derive in one module, so `_derive.f(...)` is known to be its.
+
+    Read per file rather than guessed, because the tree spells it both ways -- `from spine import
+    derive` in capacity and opt, `from spine import derive as _derive` in data, fabric and tok -- and
+    a rule that unfolded any `<anything>.cull_gate_open(...)` would be unfolding a method it has
+    never seen. `import spine.derive` is NOT recognised; nothing writes it, and the check abstains on
+    what it does not recognise rather than assuming.
+    """
+    names = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module == "spine":
+            for a in n.names:
+                if a.name == "derive":
+                    names.add(a.asname or a.name)
+    return names
+
+
+def _k16_deciding_predicate(expr, assigns, named, aliases, depth=0):
+    """`fired=` unfolded into the boolean expression that decides the verdict.
+
+    Three unfoldings, each an identity rather than an inference: a local name assigned EXACTLY ONCE
+    in this function is that expression (more than once and the value is ambiguous, so it stops); a
+    `bool(X)` is the truthiness of X, which is the same normalisation _k15_live_reason performs on
+    `reachable=` and for the same reason; and a call to one of the derive functions above is its
+    return with the arguments substituted for the parameters. Anything else is returned as it stands.
+    """
+    if expr is None or depth > 4:
+        return expr
+    if isinstance(expr, ast.Name) and len(assigns.get(expr.id, ())) == 1:
+        return _k16_deciding_predicate(assigns[expr.id][0], assigns, named, aliases, depth + 1)
+    if isinstance(expr, ast.Call) and not expr.keywords:
+        if getattr(expr.func, "id", None) == "bool" and len(expr.args) == 1:
+            return _k16_deciding_predicate(expr.args[0], assigns, named, aliases, depth + 1)
+        fname = None
+        if isinstance(expr.func, ast.Name):
+            fname = expr.func.id
+        elif isinstance(expr.func, ast.Attribute) and getattr(expr.func.value, "id", None) in aliases:
+            fname = expr.func.attr
+        spec = named.get(fname)
+        if spec is not None and len(expr.args) == len(spec[0]):
+            body = _K16Substitute(dict(zip(spec[0], expr.args))).visit(copy.deepcopy(spec[1]))
+            return _k16_deciding_predicate(body, assigns, named, aliases, depth + 1)
+    return expr
+
+
+def _k16_clauses(expr):
+    """(the comparison clauses of a boolean expression, how many operands are not comparisons).
+
+    A STRUCTURED DESCENT AND NOT A WALK. `and`, `or` and `not` are followed; everything else is one
+    opaque operand, counted and not opened. Walking instead would collect the `c > d` out of
+    `a > (b if c > d else e)` and call it a clause of the verdict, which it is not. The cost is that
+    a truthiness operand -- `a > 0 and helper(b)` -- hides a condition from this rule, so it
+    UNDER-reports; the count of predicates carrying one is on the check's report line.
+    """
+    if expr is None:
+        return [], 0
+    if isinstance(expr, ast.Compare):
+        return [expr], 0
+    if isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.Not):
+        return _k16_clauses(expr.operand)
+    if isinstance(expr, ast.BoolOp):
+        out, opaque = [], 0
+        for v in expr.values:
+            c, o = _k16_clauses(v)
+            out += c
+            opaque += o
+        return out, opaque
+    return [], 1
+
+
+def _k16_prints_no_pair(value, threshold):
+    """Gate.line's OWN test for `nums`, not a second idea of it: BOTH halves None and no pair prints.
+
+    A Gate written `Gate("x", False, None, None)` passes two Constant nodes rather than omitting two
+    keywords, and Gate.line tests the VALUE (`if self.value is None and self.threshold is None`) and
+    not the keyword -- so an absence test on the keyword alone counted zero of the gates that print
+    no pair, on a tree where sixteen pass a bare None for one half of it.
+    """
+    def _none(f):
+        return f is None or (isinstance(f, ast.Constant) and f.value is None)
+    return _none(value) and _none(threshold)
+
+
+def _k16_prints_no_reason(reason):
+    """Gate.line prints ` -- {reason}` only `if self.reason`, so an empty one adds nothing to the line.
+
+    `reason=""` is how fab.on and every branched reason in this tree spell "nothing to add on this
+    arm", and a gate whose reason is empty where the verdict is printed is a gate carrying a pair and
+    a verdict word and NOTHING else -- which is the state this check is about. Blank-but-not-empty
+    counts as empty here for the same reason K6 refuses a deferral whose reason is three spaces.
+    """
+    return reason is None or (isinstance(reason, ast.Constant) and not str(reason.value).strip())
+
+
+def _k16_unwrap(expr):
+    """`round(x, 4)`, `int(x)`, `float(x)`, `abs(x)` -> x. A rendering of a quantity IS the quantity.
+
+    Deliberately only these four and only at the root: src/data/api.py prints
+    `round(max(vals), 4)` for a gate whose verdict compares `max(vals)`, and refusing to see through
+    the rounding would drop the site while claiming the pair renders nothing.
+    """
+    while (isinstance(expr, ast.Call) and getattr(expr.func, "id", None) in _K16_UNWRAP
+           and expr.args):
+        expr = expr.args[0]
+    return expr
+
+
+def _k16_renders(field, operand):
+    """Does a printed field render this operand of a comparison? Textual, and deliberately not clever.
+
+    The comparison is between UNPARSED source, exactly as _k15_live_reason compares its two arms:
+    two spellings of one quantity are two spellings, and a rule that decides they are the same
+    quantity has started inferring. An f-string counts when one of its HOLES is that operand --
+    fab.cull_gate prints `f"{n0}/{slots}={n0 / max(1, slots):.3f}"`, whose third hole is the ratio
+    the verdict compares.
+    """
+    if field is None or operand is None:
+        return False
+    want = ast.unparse(_k16_unwrap(operand))
+    if ast.unparse(_k16_unwrap(field)) == want:
+        return True
+    if isinstance(field, ast.JoinedStr):
+        for v in field.values:
+            if isinstance(v, ast.FormattedValue) and ast.unparse(_k16_unwrap(v.value)) == want:
+                return True
+    return False
+
+
+def _k16_operands(clause):
+    """A comparison's two operands as an UNORDERED key, so a clause and its negation are one clause.
+
+    `reachable=n > 2` settles the verdict's `n <= 2` -- the reader is told which side of two the
+    population is on, and told it by the UNREACHABLE arm. Keying on the operator instead would leave
+    that clause counted as hidden and report a Gate whose third state already says it.
+    """
+    return frozenset((ast.unparse(_k16_unwrap(clause.left)),
+                      ast.unparse(_k16_unwrap(clause.comparators[0]))))
+
+
+def _k16_settled_elsewhere(fn, node, reach):
+    """The clause keys a reader can already see: `reachable=`, and any enclosing branch that pins one.
+
+    ONLY THE BODY ARM OF A BRANCH, and the asymmetry is the point. `if C:` holds C true over the
+    Gate, so on that arm the verdict really is the pair and nothing is hidden. The `else` holds C
+    FALSE, which is how a conjunction becomes constantly false while the pair it prints goes on
+    meeting its own threshold -- that is the defect this rule exists for, not an exemption from it.
+    """
+    settled = {_k16_operands(c) for c in _k16_clauses(reach)[0]}
+    if fn is None:
+        return settled
+    for br in [n for n in ast.walk(fn) if isinstance(n, (ast.If, ast.IfExp))]:
+        body = br.body if isinstance(br, ast.IfExp) else br.body
+        subs = ast.walk(body) if isinstance(br, ast.IfExp) \
+            else (sub for st in br.body for sub in ast.walk(st))
+        if any(node is sub for sub in subs):
+            settled |= {_k16_operands(c) for c in _k16_clauses(br.test)[0]}
+    return settled
+
+
+def check_k16_verdicts_follow_their_printed_pair(src_dir=SRC):
+    """K16 -- a Gate whose printed (value vs threshold) IS one clause of its verdict may not turn on
+    clauses that pair does not print, unless a reason says so.
+
+    THE DEFECT. spine/gate.py::Gate.line puts a verdict word and a pair of numbers on one line and
+    invites the reader to check one against the other -- "`value` and `threshold` are printed so the
+    reader can do the arithmetic themselves. A gate that reports a verdict without the numbers behind
+    it is a claim, and this project has paid for those." Nothing had ever read the two against each
+    other, and src/fabric/api.py's fab.cull_gate printed "armed, did not fire (2/2=1.000 vs 0.45)"
+    through eight archived commits: the value meets the threshold and the words say the condition was
+    tested and not met. The clause that actually shut it -- cull_gate_open's floor of two live
+    experts -- is nowhere on the line.
+
+    WHAT IT PROVES AND WHAT IT DOES NOT is written out in the block above this function, with the
+    census behind each refusal. The short version: it settles the one claim the SOURCE TEXT alone
+    settles about the arithmetic -- that the verdict turns on nothing the pair does not show -- and
+    it prints the size of every population it did not judge, so the residue is on the report rather
+    than in a docstring.
+
+    IT IS NOT A DIRECTION CHECK. `Gate.line` prints no operator, so a pair alone cannot say whether
+    a gate is `>=` or `<`, and this rule never claims it can. Reading the operator out of a threshold
+    that spells one was tried and refused; the block above names the gate that refutes it.
+    """
+    named = _k16_named_predicates(src_dir)
+    gates = no_pair = unresolved = descriptive = examined = reasoned = mixed = 0
+    findings = []
+
+    for d in sorted(os.listdir(src_dir)):
+        pkg_dir = os.path.join(src_dir, d)
+        if not os.path.isdir(pkg_dir):
+            continue
+        for fn_name in sorted(os.listdir(pkg_dir)):
+            if not fn_name.endswith(".py"):
+                continue
+            path = os.path.join(pkg_dir, fn_name)
+            rel = os.path.relpath(path, os.path.dirname(src_dir))
+            if rel.replace(os.sep, "/").endswith("src/spine/gate.py"):
+                continue                          # the record's own declaration and its examples
+            tree = _k13_parse(path)
+            if tree is None:
+                continue
+            aliases = _k16_derive_aliases(tree)
+            enclosing = {}
+            for f in [n for n in ast.walk(tree)
+                      if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+                for n in ast.walk(f):
+                    enclosing.setdefault(n, f)
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call)
+                        and (getattr(node.func, "id", None) == "Gate"
+                             or getattr(node.func, "attr", None) == "Gate")):
+                    continue
+                gates += 1
+                args = dict(zip(_K15_GATE_FIELDS, node.args))
+                args.update({k.arg: k.value for k in node.keywords if k.arg})
+                gate_name = args["name"].value if isinstance(args.get("name"), ast.Constant) \
+                    else "<computed>"
+                where = f"{rel}:{node.lineno}  Gate {gate_name!r}"
+                value, threshold = args.get("value"), args.get("threshold")
+                # MIRRORING Gate.line's OWN TEST and not a second idea of it: `nums` is empty when
+                # BOTH are None, and `Gate("x", False, None, None)` passes them as Constants rather
+                # than omitting them, so an absence test on the keyword alone counted zero of the
+                # gates that print no pair.
+                if _k16_prints_no_pair(value, threshold):
+                    no_pair += 1                  # Gate.line prints no pair at all -- nothing to read
+                    continue
+                fn = enclosing.get(node)
+                assigns, _opaque = _k15_assignments(fn)
+                pred = _k16_deciding_predicate(args.get("fired"), assigns, named, aliases)
+                clauses, opaque = _k16_clauses(pred)
+                if not clauses:
+                    unresolved += 1
+                    continue
+                reach = _k16_deciding_predicate(args.get("reachable"), assigns, named, aliases) \
+                    if args.get("reachable") is not None else None
+                settled = _k16_settled_elsewhere(fn, node, reach)
+                live = [c for c in clauses if _k16_operands(c) not in settled]
+                shown = [c for c in live
+                         if _k16_renders(value, c.left) and _k16_renders(threshold, c.comparators[0])]
+                if len(shown) != 1:
+                    descriptive += 1              # the pair is not the arithmetic; see the block above
+                    continue
+                examined += 1
+                if opaque:
+                    mixed += 1
+                hidden = [c for c in live if c is not shown[0]]
+                if not hidden:
+                    continue
+                reason = args.get("reason")
+                if isinstance(reason, ast.IfExp) and args.get("reachable") is not None:
+                    # THE ARM THAT PRINTS WHEN THE GATE IS REACHABLE, read by rule 4's own reader
+                    # rather than by a second one. A reason that is EMPTY on that arm explains
+                    # nothing where the verdict word is printed, so it may not exempt the gate;
+                    # _k15_live_reason returns None where the source does not settle which arm
+                    # prints, and there the whole reason stands and the gate is exempt.
+                    live_reason = _k15_live_reason(reason, args.get("reachable"))
+                    if live_reason is not None:
+                        reason = live_reason
+                if not _k16_prints_no_reason(reason):
+                    reasoned += 1
+                    continue
+                findings.append(
+                    f"{where} prints ({ast.unparse(value)} vs {ast.unparse(threshold)}), which is "
+                    f"the clause `{ast.unparse(shown[0])}` of the verdict it renders -- but the "
+                    f"verdict is `{ast.unparse(pred)}`, and "
+                    f"{', '.join('`' + ast.unparse(c) + '`' for c in hidden)} decides it too, on "
+                    f"nothing the pair shows. spine/gate.py::Gate.line prints the verdict word, this "
+                    f"pair and nothing else when there is no reason, so on every configuration where "
+                    f"the other clause is what shut the gate the line reads 'armed, did not fire' "
+                    f"beside a value that meets its own threshold, and a reader who does the "
+                    f"arithmetic gets the opposite answer. Name the other clause in a `reason` on the "
+                    f"arm it decides, or move it to `reachable=` if it makes the gate unreachable.")
+
+    detail = (f"{gates} Gate construction(s) read across src/; {no_pair} print no (value vs "
+              f"threshold) pair; {unresolved} whose verdict does not resolve to any comparison (a "
+              f"literal True/False, a truthiness test, a call this reader may not open); "
+              f"{descriptive} whose pair renders no clause of their own verdict and is therefore "
+              f"DESCRIPTIVE rather than an arithmetic -- data.area_open prints n_open against "
+              f"n_entries, three opened of twelve -- and is left alone; {examined} EXAMINED, of "
+              f"which {reasoned} turn on a clause the pair does not print and are exempt because "
+              f"they carry a reason. NOT JUDGED, and none of these is a pass: the DIRECTION of the "
+              f"comparison (Gate.line prints no operator, so '(0.500 vs 0.45)' cannot say >= from "
+              f"<); a threshold that spells its own relation in prose; a clause not written as a "
+              f"comparison ({mixed} examined verdict(s) mix one in, and it is invisible here); and "
+              f"whether an exempting reason NAMES the clause its pair omits -- the reason is prose "
+              f"and this check does not read it")
+    return _report("K16", "a Gate that prints one clause of its verdict as (value vs threshold) "
+                          "turns on no clause that pair does not show", not findings, detail,
+                   findings, vacuous=not examined)
+
 CHECKS = (
     check_k1_signatures,
     check_k2_compose,
@@ -4147,6 +4856,7 @@ CHECKS = (
     check_k13_counts_and_absence_claims,
     check_k14_rows_honour_stated_refusals,
     check_k15_gate_reasons_are_self_consistent,
+    check_k16_verdicts_follow_their_printed_pair,
 )
 
 

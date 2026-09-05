@@ -867,11 +867,12 @@ COUPLINGS = [
             "outstanding repair'. Only one still does. lm/levers.py::<module> records it as DONE -- "
             "conflict (a), 'WHAT IS TRUE NOW: the edge runs the other way' -- and says in as many "
             "words that a reader following the old pointer 'arrives at a paragraph calling settled "
-            "work outstanding'. tok/levers.py::<module> is the half that is still outstanding: its "
-            "vmax paragraph reads 'build() will raise LeverError at startup the moment both LM and "
-            "TOK are registered', present tense, of a row that has been declared here since. That "
-            "correction is TOK's to make; this row cites what each file says today rather than what "
-            "both said once. Left as the direction was, importing the "
+            "work outstanding'. tok/levers.py::<module> has since made the same correction, and "
+            "the sentence quoted here was not carried across: its vmax paragraph now reads "
+            "'build() raised LeverError at startup the moment both LM and TOK were registered', "
+            "past tense, and says in as many words that no row in this file names TOK.vmax. This "
+            "row cites what each file says today rather than what either said once. Left as the "
+            "direction was, importing the "
             "real packages made build() raise 'TOKLevers has no lever vmax' -- the mechanism working, on "
             "a row that named an owner nobody had."),
 

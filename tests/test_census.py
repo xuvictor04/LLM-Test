@@ -466,6 +466,18 @@ def selftest():
         with contextlib.redirect_stdout(io.StringIO()):
             return check(*a)
 
+    def printed(check, *a):
+        """What a check PRINTED, for the one property of N8 that is not carried by a return code.
+
+        `opened` never changes a verdict -- it is the population the detail line reports and the
+        number the empty-population arm keys off -- so a case that reads only rc cannot see it
+        being counted wrong, which is how it stood miscounted from the day N8 was written.
+        """
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            check(*a)
+        return buf.getvalue()
+
     def case(name, expect_fail, check, *a):
         rc = run(check, *a)
         cases.append(name)
@@ -589,6 +601,62 @@ def selftest():
                 DEPARTURES[_k] = dict(_d, where=_p + ", the declaration")
         case("N8 fails when every `where` has been reduced to prose", True,
              check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        # THE SAME ESCAPE WRITTEN THE OTHER WAY ROUND, which stood open after the trailing-clause
+        # repair landed: a clause placed BEFORE the path. The citation is still correct and someone
+        # annotated it -- the identical natural edit -- and because only `parts[0]` was tested for a
+        # colon it came back as prose and was never opened. Measured before the repair: this one
+        # entry took N8 from 10 spans across 6 departures to 9 across 5, and it PASSED.
+        DEPARTURES[("fabric", "FAB_NMAX")] = dict(
+            saved8[("fabric", "FAB_NMAX")], where="see the note, src/fabric/levers.py:296-307")
+        case("N8 catches a clause placed BEFORE the citation, not only after it", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        # AND THE TWO ROADS THAT DO NOT INVOLVE A CLAUSE AT ALL: the key deleted, and the key left
+        # empty. Both printed the same PASS line as the clause form, and both are a SMALLER edit
+        # than breaking a citation -- which is what makes them the more likely ones.
+        _no_where = dict(saved8[("fabric", "FAB_NMAX")])
+        _no_where.pop("where")
+        DEPARTURES[("fabric", "FAB_NMAX")] = _no_where
+        case("N8 catches a departure whose `where` key has been deleted", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        DEPARTURES[("fabric", "FAB_NMAX")] = dict(saved8[("fabric", "FAB_NMAX")], where="")
+        case("N8 catches a departure whose `where` is empty", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        # THE DECLARED TRADE-OFF, PINNED AS A DECISION RATHER THAN LEFT TO BE REDISCOVERED AS A
+        # FALSE POSITIVE. A `where` that argues in prose but happens to carry a colon --
+        # `spine/assemble.py: the DOM row`, the same pointer as the live entry with a colon instead
+        # of a comma -- is reported as a broken pointer. No live entry has that shape and
+        # _where_spans states the rule, and the alternative (accepting a colon followed by prose)
+        # re-admits `src/fabric/levers.py:296-307, and the note below it` by the same test, which
+        # is the escape the repair closed. So this case exists to say the strictness is chosen.
+        DEPARTURES[("domains", "MAX_DOMAINS")] = dict(
+            saved8[("domains", "MAX_DOMAINS")], where="spine/assemble.py: the DOM row")
+        case("N8 reports a prose `where` written with a colon, by declared rule", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        # AND THE ACCOUNTING, WHICH IS NOT A VERDICT AND THEREFORE NEEDS A CASE OF ITS OWN. Every
+        # case above reads only the return code; `opened` moves no return code, so it sat counting
+        # spans ATTEMPTED rather than read from the day N8 was written -- printing "10 line span(s)
+        # opened" on the same screen as a finding saying one of them is outside a file of 876
+        # lines. The verdict was right and the population was not, and the empty-population arm
+        # keys off exactly that number: with every span in the table moved off the end, an attempts
+        # counter reads 10 and that arm stays silent while nothing at all has been read.
+        _clean = printed(check_n8_departure_arguments_still_there, rows, env, dsts)
+        cases.append("N8's detail line reports 10 spans opened on the untouched table")
+        if "10 line span(s) opened across 6 departure(s)" not in _clean:
+            bad.append("N8's detail line reports 10 spans opened on the untouched table: got "
+                       f"{_clean.strip().splitlines()[-1].strip()!r}")
+        DEPARTURES[("fabric", "FAB_NMAX")] = dict(
+            saved8[("fabric", "FAB_NMAX")], where="src/fabric/levers.py:99000-99001")
+        _off = printed(check_n8_departure_arguments_still_there, rows, env, dsts)
+        cases.append("N8 counts spans it read, not spans it attempted")
+        if "9 line span(s) opened" not in _off:
+            bad.append("N8 counts spans it read, not spans it attempted: one of the ten spans is "
+                       "off the end of its file and was never read, so the detail line must say 9; "
+                       f"got {[l.strip() for l in _off.splitlines() if 'line span(s)' in l]!r}")
     finally:
         DEPARTURES.clear(); DEPARTURES.update(saved8)
 
@@ -824,20 +892,37 @@ def _where_spans(where):
     check; it comes back with ("", []) and N8 counts it rather than reporting it.
 
     THE TWO EMPTY ANSWERS ARE DIFFERENT AND THE PATH IS WHAT TELLS THEM APART, which is the whole
-    reason this returns a pair rather than a list. `("", [])` is prose: no colon in the first part,
-    nothing was ever pointed at. `("src/fabric/levers.py", [])` is a BROKEN POINTER: the entry says
-    it is naming lines in a file and then does not parse. Guessing at a half-understood pointer is
-    how a check invents a finding, so nothing is guessed here -- but the two cases are handed back
-    distinguishable, because N8 reports the second and abstains on the first. Before that split, a
-    trailing prose clause on a line-form `where` -- `src/fabric/levers.py:296-307, and the note
-    below it`, a natural edit -- parsed to zero spans, was counted as prose and was never opened;
-    put on all six line-form entries it drove N8's examined population to zero and the check PASSED,
-    printing "0 line span(s) opened across 0 departure(s); 9 point at prose". A data table is not
-    allowed to switch a check off.
+    reason this returns a pair rather than a list. `("", [])` is prose: NO PART of the entry carries
+    a colon, so nothing was ever pointed at. `("src/fabric/levers.py", [])` is a BROKEN POINTER: the
+    entry says it is naming lines in a file and then does not parse. Guessing at a half-understood
+    pointer is how a check invents a finding, so nothing is guessed here -- but the two cases are
+    handed back distinguishable, because N8 reports the second and abstains on the first. Before
+    that split, a trailing prose clause on a line-form `where` -- `src/fabric/levers.py:296-307, and
+    the note below it`, a natural edit -- parsed to zero spans, was counted as prose and was never
+    opened; put on all six line-form entries it drove N8's examined population to zero and the check
+    PASSED, printing "0 line span(s) opened across 0 departure(s); 9 point at prose". A data table is
+    not allowed to switch a check off.
+
+    A COLON ANYWHERE IN THE ENTRY MEANS IT MEANT TO CITE LINES, AND TESTING ONLY `parts[0]` LEFT THE
+    MIRROR IMAGE OF THAT ESCAPE OPEN. This function used to ask `if ":" not in parts[0]`, so a clause
+    placed BEFORE the path rather than after it -- `see the note, src/fabric/levers.py:296-307`, the
+    same natural edit written the other way round -- came back `("", [])`, was counted as prose and
+    was never opened, and N8 printed PASS. Measured on the tree before this repair: that one entry
+    took N8 from "10 line span(s) opened across 6 departure(s); 3 point at prose" to "9 ... across 5
+    ... 4 point at prose", rc=0. The empty-population arm bounded the damage at five of six entries
+    and no further, so the escape was survivable one entry at a time and only one entry at a time,
+    which is the shape a table edit actually takes. The test is now over EVERY comma-separated part,
+    and the path reported for such an entry is taken from the first part that does carry a colon.
     """
     parts = [p.strip() for p in str(where).split(",")]
-    if ":" not in parts[0]:
+    cited = [p for p in parts if ":" in p]
+    if not cited:
         return "", []
+    if ":" not in parts[0]:
+        # THE CLAUSE-BEFORE-THE-PATH FORM. It cited lines and then buried the citation behind
+        # prose, so it is a broken pointer and not an abstention; the path is recovered from the
+        # first part that has a colon so N8's finding can name the file the entry meant.
+        return cited[0].rsplit(":", 1)[0], []
     path, first = parts[0].rsplit(":", 1)
     spans = []
     for piece in [first] + parts[1:]:
@@ -881,9 +966,12 @@ def check_n8_departure_arguments_still_there(rows, env_names, wire_dsts):
     the argument is the one part of an entry that nothing has ever followed -- and three of the nine
     were pointing at unrelated levers when this check was written (the block above measures each).
 
-    FIVE THINGS ARE CHECKED, four of them mechanical and one a heuristic that says so:
+    SIX THINGS ARE CHECKED, five of them mechanical and one a heuristic that says so:
+      * an entry with no `where` at all, or an empty one, is reported -- a departure whose argument
+        has no pointer is the third road to the same silent removal, and deleting a key is a
+        smaller edit than breaking a citation;
       * a `where` that names a file and then no readable line is a BROKEN pointer and is reported;
-        only a `where` with no colon in its first part is prose and abstained on;
+        only a `where` with NO COLON IN ANY of its comma-separated parts is prose and abstained on;
       * the cited file exists;
       * every span lies inside it, so a range that ran off the end of a shrinking file is a finding
         rather than a silently empty read;
@@ -893,6 +981,17 @@ def check_n8_departure_arguments_still_there(rows, env_names, wire_dsts):
         switched off by editing the table it reads. The last two arms are the ones the sentence
         below about `where` never having been followed applies to twice over: an unopened pointer
         and an unopenable one look the same in a PASS line.
+
+    `opened` COUNTS SPANS THIS CHECK ACTUALLY READ, NOT SPANS IT ATTEMPTED, and that distinction is
+    load-bearing rather than cosmetic because the empty-population arm keys off this number. The
+    counter used to be incremented at the top of the span loop, above the range test, so a span
+    that ran off the end of its file was counted as opened while nothing was read from it: with one
+    entry pointed at `src/fabric/levers.py:99000-99001` the check printed "10 line span(s) opened"
+    on the same screen as the finding saying that span is outside a file of 876 lines. Nine spans
+    were read. The verdict was right and the accounting was not -- and if every span in the table
+    were moved off the end at once, `opened` would have read 10 with nothing read at all and the
+    empty-population arm would have stayed silent while the per-span findings carried the failure
+    alone. It is incremented on the path that reaches the text instead.
 
     WHAT THE THIRD ARM CANNOT CATCH, said here rather than discovered later. It is a substring test
     over prose. A span that has slid a few lines WITHIN the paragraph that argues the departure
@@ -909,7 +1008,15 @@ def check_n8_departure_arguments_still_there(rows, env_names, wire_dsts):
     """
     findings, opened, prose = [], 0, 0
     for (fam, old), dep in sorted(DEPARTURES.items()):
-        path, spans = _where_spans(dep.get("where") or "")
+        raw = str(dep.get("where") or "").strip()
+        if not raw:
+            findings.append(
+                f"{fam}/{old}: has no `where` at all, so its argument has no pointer. Deleting the "
+                f"key, or emptying it, removes this entry from the population N8 opens by an edit "
+                f"smaller than breaking a citation -- and N3, the only other check that reads this "
+                f"table, never opens `where` either. Every departure cites where it is argued.")
+            continue
+        path, spans = _where_spans(raw)
         if not spans:
             if path:
                 findings.append(
@@ -936,12 +1043,14 @@ def check_n8_departure_arguments_still_there(rows, env_names, wire_dsts):
                             f"be checked and this entry needs one written out.")
             continue
         for a, b in spans:
-            opened += 1
             if a < 1 or b < a or b > len(lines):
                 findings.append(f"{fam}/{old}: `where` names {path}:{a}-{b} and that file has "
                                 f"{len(lines)} line(s). The span is outside it, so the citation "
                                 f"reads as empty rather than wrong.")
                 continue
+            # COUNTED HERE AND NOT AT THE TOP OF THE LOOP: `opened` means a span whose text this
+            # check read, which is what the empty-population arm below has to be able to trust.
+            opened += 1
             text = "\n".join(lines[a - 1:b]).lower()
             if not any(t in text for t in toks):
                 findings.append(

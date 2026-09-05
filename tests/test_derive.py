@@ -131,6 +131,22 @@ def smoke():
                 assert not derive.cull_gate_open(n - 1, slots, p), ("gate open below setpoint", p, slots, n)
     assert derive.operating_population(0.45, 4096) == 1844        # 1843/4096 = 0.4499 is BELOW 0.45
     assert derive.operating_population(0.5, 4096) == 2048         # exact product, no ULP creep upward
+    # THE CAP, WHICH IS THE ONE BRANCH THE SWEEP ABOVE CANNOT REACH: it runs pressure at 1.0 and
+    # below, so `min(n_slots, n)` is never the binding term and deleting it changed nothing any
+    # test in this tree could see. The function's own docstring declares the branch and names its
+    # trigger -- "Never above the hard slot count. Reachable whenever pressure > 1" -- and with the
+    # min() removed operating_population(1.5, 4096) answers 6144, a population 2048 experts above a
+    # PREALLOCATED ceiling whose whole meaning (fabric/levers.py::FABLevers, `slots`) is that
+    # growth never reallocates. HAND-DERIVED: 1.5 x 4096 = 6144 exactly, so the ceiling arm does
+    # not fire and max(3, 6144) is 6144; the cap is the only thing that makes the answer 4096.
+    assert derive.operating_population(1.5, 4096) == 4096
+    assert derive.operating_population(2.0, 100) == 100
+    assert derive.operating_population(1.0, 4096) == 4096      # the boundary: nothing to cap yet
+    # AND BELOW THE FLOOR THE SLOT COUNT WINS, the other end of the same line and also outside the
+    # sweep, which runs slots >= 4. The floor of three does not invent capacity: 0.45 x 2 = 0.9
+    # rounds up to 1, `max(3, ...)` lifts that to 3, and the answer is still 2 because two slots is
+    # all there is.
+    assert derive.operating_population(0.45, 2) == 2
 
     # bytes_per_token is MEASURED. 614 bytes over 256 tokens is 2.4 b/tok, the last run's figure.
     assert derive.bytes_per_token(614, 256) == 614 / 256
@@ -430,6 +446,77 @@ def smoke():
                 raise AssertionError(f"negative accepted: {n} at accum={accum}")
             except UnitError as e:
                 assert "is negative" in str(e), (n, accum, str(e))
+    # EXACT ABOVE 2**53, WHICH IS THE PROPERTY `//` HAS AND `int(n / k)` DOES NOT. This function's
+    # own closing comment rejects that substitution BY NAME -- "Integer `//` and not `int(n / k)`:
+    # float division loses exactness above 2**53 and a backward count is unbounded" -- and NOTHING
+    # held it: making the substitution and running every test file in this tree left all seven
+    # green. tests/test_derive.py pins the same five counts for flush_period, flush_period_windows
+    # and opt_steps_from_windows and pinned only 0, 3, 52, 62 and 1000 here -- five counts in the
+    # tens and hundreds -- so the rule was quoted as an authority by three neighbours while the
+    # function it was written in was the one left unguarded.
+    #
+    # HAND-DERIVED, NOT AN ORACLE ROW, and the reason is mechanical rather than a judgement: there
+    # is no equivalent at aee4a52 to capture. `.rework/capture_oracle.py`'s lift() walks the
+    # module-level FunctionDefs of self_organize.py (48 of them at that commit) and raises KeyError
+    # for `opt_steps_from_backwards`, exactly as it does for opt_steps_from_windows and
+    # cadences_that_cannot_fire; only pin_tick, of the functions this block and the two below
+    # touch, is there to lift. So every `want` below is integer arithmetic written out here, and
+    # the last assertion in the loop re-runs the REJECTED body to prove the row still
+    # discriminates.
+    #
+    # WHERE THE BOUNDARY IS, because "above 2**53" is a claim and this block is what holds it. On
+    # the domain this function ACCEPTS -- the arms above leave n >= 0 and k an int >= 1 --
+    # `int(n / k)` and `n // k` agree at every n <= 2**53 and first disagree at n = 2**53 + 1.
+    # Both halves were measured rather than assumed. (i) Every n <= 2**53 is exactly representable,
+    # so nothing rounds on the way in, and round-to-nearest is monotone: n/k >= q and q is itself
+    # representable, so the quotient can never round DOWN past q. It can only round UP to q + 1,
+    # which needs (q + 1) - n/k = (k - n mod k)/k to be within half an ulp of q + 1 -- and at
+    # n <= 2**53 that forces k - (n mod k) == 1 and n >= 2**53 - 1. Two counts survive, and at each
+    # only the k dividing n + 1 can qualify: 54 divisors for 2**53 - 1 and 8 for 2**53 + 1, all 62
+    # enumerated and none disagreeing, with no k in 1..99999 disagreeing at either count either.
+    # (ii) At n = 2**53 + 1 the count itself is no longer representable, and k = 1 diverges.
+    #
+    # THE OTHER HALF OF THE SUBSTITUTION'S DAMAGE IS UNREACHABLE HERE, AND IT IS SAID SO IT IS NOT
+    # LOOKED FOR: `//` FLOORS and `int()` TRUNCATES, so the two also differ at every negative
+    # operand -- but the `is negative` loop directly above refuses n < 0 at every magnitude and the
+    # `k < 1` arm refuses the divisor, so no negative reaches the division. The large-integer half
+    # is the whole of what a test at this function can see, which is why it is the whole of this
+    # block.
+    #
+    #   2**53+1 = 9007199254740993, accum=1: itself. float(n) ties DOWN to 2**53, so the rejected
+    #     body answers 9007199254740992 -- one optimizer step SHORT.
+    #   2**53+3 = 9007199254740995 = 2 x 4503599627370497 + 1, accum=2: 4503599627370497. float(n)
+    #     ties UP to 9007199254740996 and half of that is 4503599627370498 -- one step LONG.
+    #   2**53+7 = 9007199254740999 = 4 x 2251799813685249 + 3, accum=4: 2251799813685249. float(n)
+    #     ties UP to 9007199254741000 and a quarter of that is 2251799813685250. Long again, at a
+    #     third rate.
+    #   2**54+2 = 18014398509481986, accum=1: itself; accum=2: 9007199254740993 exactly, no
+    #     remainder. Above 2**54 the representable step is 4, so float(n) ties DOWN to
+    #     2**54 = 18014398509481984 -- two steps short at accum=1 and one short at accum=2. The
+    #     same count under two rates, so the row is not a property of accum.
+    #
+    # BOTH DIRECTIONS ARE DAMAGE AND NEITHER IS THE SAFE ONE, which is why short and long rows are
+    # both here: opt/api.py::counters proves the accumulation defect dead by COMPARING due against
+    # taken, so a `due` that is one short and a `due` that is one long each make that comparison
+    # lie -- one inventing a fault on a sound run, the other hiding a real one.
+    for n, k, want in ((2**53 + 1, 1, 9007199254740993),
+                       (2**53 + 3, 2, 4503599627370497),
+                       (2**53 + 7, 4, 2251799813685249),
+                       (2**54 + 2, 1, 18014398509481986),
+                       (2**54 + 2, 2, 9007199254740993)):
+        assert type(derive.opt_steps_from_backwards(Backwards(n), k)) is Steps, (n, k)
+        assert derive.opt_steps_from_backwards(Backwards(n), k) == Steps(want), ("osfb", n, k)
+        # And the case still discriminates: if this ever stops holding it has been softened into
+        # one float gets right, and the rows above would be green while proving nothing.
+        assert int(n / k) != want, ("case no longer discriminates float from exact", n, k)
+    # THE BOUNDARY ITSELF, both sides of it, so "above 2**53" is pinned as a LOCATION and not only
+    # as a direction. 2**53 is the last count at which the rejected body is still right and
+    # 2**53 + 1 is the first at which it is not; the second line is what fails under the
+    # substitution and the first is what stops the claim being widened into "float is always
+    # wrong", which would be its own false rule.
+    assert derive.opt_steps_from_backwards(Backwards(2**53), 1) == Steps(2**53)
+    assert int(2**53 / 1) == 2**53                       # not yet crossed: float is still exact
+    assert int((2**53 + 1) / 1) == 2**53                 # crossed: one short of 2**53 + 1
 
     # accum_due CLAMPS ITS RATE WHERE opt_steps_from_backwards REFUSES ONE, and that asymmetry is
     # deliberate -- accum_due's docstring keeps the shipped read-site `max(1, ...)`, and
@@ -546,6 +633,36 @@ def smoke():
     assert derive.pin_tick(Windows(2650), True, Windows(16)) == Windows(2666)
     assert type(derive.pin_tick(2650, True, 16)) is Windows        # bare ints coerce IN, Windows comes OUT
     assert derive.pin_tick(Windows(8), False, Windows(16)) == Windows(0)   # clamped, still carrying kind
+    # A NEGATIVE DELTA IS CLAMPED TO ZERO, NOT APPLIED, AND THESE ARE ORACLE ROWS. The expected
+    # values below were captured from the FROZEN OLD TREE at aee4a52 by the machinery
+    # .rework/capture_oracle.py uses -- lift pin_tick's SOURCE TEXT out of self_organize.py by AST,
+    # exec it, call it -- rather than written by hand or read off this implementation. The shipped
+    # body is two lines, `dstep = max(0, int(dstep))` and `return (int(held) + dstep) if pinned
+    # else max(0, int(held) - dstep)`, so the clamp is the OLD tree's decision and this tree only
+    # re-typed it; `held` comes back unchanged at every negative delta, on BOTH branches.
+    #
+    # THEY ARE NOT IN .rework/oracle/pin_tick.json AND THAT IS THE WHOLE PROBLEM: that capture grid
+    # runs dstep over {0, 1, 16, 100} and never a negative, and no line of smoke() passed one
+    # either, so `dstep = max(Windows(0), Windows(dstep))` had NO detector anywhere in the tree.
+    # Measured with the clamp deleted: all 32 captured cases still replay and all seven test files
+    # stay green, while pin_tick(Windows(2650), True, Windows(-16)) answers Windows(2634) -- a
+    # clock that only ever ACCUMULATES time at the cap, running BACKWARDS -- pin_tick(Windows(2650),
+    # True, Windows(-2650)) answers Windows(0), the valve's whole accumulated pin time erased, and
+    # pin_tick(Windows(2650), True, Windows(-3000)) answers Windows(-350), a pinned-at-the-cap
+    # clock holding a negative number of windows. On the UNPINNED branch the same deletion turns
+    # the decay into GROWTH: Windows(2650) at Windows(-16) answers Windows(2666), the number this
+    # function's own docstring uses as its example of the flagship defect.
+    #
+    # 43645 IS IN THE GRID ON PURPOSE: it is the real tick count from the lr_pilot rehearsal that
+    # this whole function exists to record, so the row says the clamp holds at the magnitude the
+    # measurement was taken at and not only at a toy one.
+    for _held, _want in ((2650, 2650), (8, 8), (0, 0), (43645, 43645)):
+        for _d in (-1, -16, -2650, -3000):
+            assert derive.pin_tick(Windows(_held), True, Windows(_d)) == Windows(_want), \
+                ("pinned", _held, _d)
+            assert derive.pin_tick(Windows(_held), False, Windows(_d)) == Windows(_want), \
+                ("unpinned", _held, _d)
+            assert type(derive.pin_tick(Windows(_held), True, Windows(_d))) is Windows, (_held, _d)
     # THE MESSAGE NAMES THE ARGUMENT, and without that these two loops test one arm twice. pin_tick
     # coerces both arguments with `Windows(v)` a few lines further down, and Windows(Flushes(2650))
     # raises "cannot build Windows from Flushes" on its own -- so with either type arm deleted the
@@ -723,6 +840,43 @@ def smoke():
     # the real resolved defaults.
     assert derive.cadences_that_cannot_fire(Windows(60000), {"ckpt": Windows(0)}) == [("ckpt", 0, 0)]
     assert derive.cadences_that_cannot_fire(Windows(10), {"ckpt": Windows(0)}) == [("ckpt", 0, 0)]
+    # A NEGATIVE PERIOD IS THE SAME SENTINEL AND IS REPORTED THE SAME WAY, and NOTHING held this.
+    # Narrowing the arm from `period.n <= 0` to `period.n == 0` leaves all seven test files green
+    # while the gate stops being reported AT ALL -- not as unfireable, not as fireable, absent from
+    # the list -- which is exactly the disappearance the comment above that arm records as having
+    # already happened once, for the zero. The zero was pinned two lines up and the negative was
+    # not, so a rule was narrowed past the class it was written for with nothing to say so.
+    #
+    # HAND-DERIVED, NOT AN ORACLE ROW: this audit has no equivalent at aee4a52 to capture -- which
+    # is precisely why ten over-long cadence defaults could sit there for the project's whole life
+    # unread -- so the expected value is the arm's own declared shape, `(key, period.n, 0)`, with
+    # run_windows reported as 0 to say "this is not a length comparison".
+    #
+    # IT IS REACHABLE, BY TWO ROADS RATHER THAN ONE. Five accessors -- ckpt/api.py::save_period,
+    # eval/api.py::curve_period, domains/api.py::manage_period, fabric/api.py::manage_period and
+    # memory/api.py::rekey_period -- refuse a negative only while their own REFUSE_NEGATIVE_PERIOD
+    # is True, an owner switch whose whole point is that it can be turned back off (the ruling is
+    # written out at ckpt/api.py::REFUSE_NEGATIVE_PERIOD). With any one of the five off, a negative
+    # period reaches this function. And all five ALREADY describe what it does when it gets there:
+    # each of the five records the measurement at -5 in its own comment -- ("ckpt", -5, 0),
+    # ("curve", -5, 0), ("dom.manage", -5, 0), ("fab.manage", -5, 0), ("dom.rekey", -5, 0) -- and
+    # THREE of the five, domains/api.py, eval/api.py and fabric/api.py, repeat it inside the
+    # refusal message the operator actually sees, as "spine/derive.py::cadences_that_cannot_fire
+    # reports the same value as a gate that cannot fire". Under the narrowing every one of those
+    # eight sentences becomes false at once, across five packages, and no check says a word.
+    assert derive.cadences_that_cannot_fire(Windows(1000), {"g": Windows(-500)}) == [("g", -500, 0)]
+    assert derive.cadences_that_cannot_fire(Windows(10), {"g": Windows(-1)}) == [("g", -1, 0)]
+    # -5 is the value all five of those accessors were MEASURED at, and fabric/api.py quotes this
+    # exact line back: `cadences_that_cannot_fire reported ("fab.manage", -5, 0)`.
+    assert derive.cadences_that_cannot_fire(Windows(506), {"fab.manage": Windows(-5)}) == \
+        [("fab.manage", -5, 0)]
+    # AND THE SORT PUTS IT LAST RATHER THAN DROPPING IT. The key is (-period, key), so a negative
+    # period sorts after every positive one AND after the zero; a report that lost it would look
+    # like a report that simply ended. Both sentinels and a real over-long cadence in one call is
+    # the shape an audit actually prints, and it is the case a `== 0` narrowing silently halves.
+    assert derive.cadences_that_cannot_fire(
+        Windows(200), {"a": Windows(2000), "b": Windows(0), "c": Windows(-500)}) == \
+        [("a", 2000, 200), ("b", 0, 0), ("c", -500, 0)]
     # STRICT AT THE BOUNDARY: a period equal to the run length is reported, because a gate fires on
     # elapsed-since-last-fire and one exactly-equal period has a single chance, at the final window.
     assert derive.cadences_that_cannot_fire(Windows(500), {"x": Windows(500)}) == [("x", 500, 500)]
@@ -733,6 +887,61 @@ def smoke():
             raise AssertionError("a foreign clock kind was accepted by cadences_that_cannot_fire")
         except UnitError:
             pass
+
+    # --- THE BOUNDARY VALUES THE CAPTURED GRIDS STEP OVER, AS ORACLE ROWS ------------------------
+    # Four of the eight tables sweep a grid that never lands ON the threshold their function
+    # compares against, so the decision AT equality is replayed by nothing. Found by extending this
+    # round's own method past the `if <test>: raise` shape: mutating spine/derive.py's non-raise
+    # bodies one AST node at a time (comparison-operator swaps, `//` -> `int(/)`, and max()/min()
+    # clamp deletions) and re-running this file leaves 18 of 40 such mutations alive, and SEVEN of
+    # those eighteen are the boundaries below. The other eleven are equivalent on a differential
+    # probe -- `signature_width_bytes`' two max() clamps each mask the other, `flush_period`'s
+    # `< 1` and `<= 1` both floor a period of one to one flush, and so on.
+    #
+    # EVERY EXPECTED VALUE IN THIS BLOCK IS AN ORACLE ROW, captured from the frozen old tree at
+    # aee4a52 by the machinery .rework/capture_oracle.py uses for the eight tables -- lift the
+    # function's SOURCE TEXT out of self_organize.py by AST, exec it with that module's upper-case
+    # constants in scope, call it -- rather than read off this implementation. All four functions
+    # here have a shipped ancestor, so a hand-derived value would have been the weaker artefact.
+    # THE OLD TREE AND THIS ONE AGREE AT EVERY ROW BELOW, which is what makes them a pin on a
+    # decision rather than a repair to one.
+    #
+    # cull_gate_open at slots = 0. The captured grid runs cap in {4, 1024, 4096, 8192}, so
+    # `max(1, slots)` -- the only thing between this gate and a ZeroDivisionError -- deletes with
+    # every test file in this tree green. ORACLE at aee4a52: the answer is False at or below the
+    # floor and True above it, at EVERY pressure, because `n_live <= 2` decides first and the
+    # occupancy ratio never gets a vote; the shipped line is
+    # `not (n_live <= 2 or (n_live / max(1, cap)) < pressure)`.
+    for _n, _want in ((0, False), (1, False), (2, False), (3, True), (10, True), (2090, True)):
+        for _p in (0.0, 0.45, 1.0):
+            assert derive.cull_gate_open(_n, 0, _p) is _want, ("cull_gate_open at slots=0", _n, _p)
+    #
+    # curve_verdict ON its three thresholds. The captured grid runs tok_rise in {0.0, 0.1, 1.0} and
+    # the threshold is 0.05, so all four of this cascade's `tok_rise > tok_rise_thresh` /
+    # `rise_since_min <= flat` decisions were unpinned AT equality and each of the four operators
+    # could be loosened or tightened by one with the suite green. The rows are chosen one per
+    # surviving mutation, and each is an ORACLE row: at aee4a52 the thresholds are the module
+    # constants CURVE_TOK_RISE = 0.05, CURVE_FLAT = 0.05, CURVE_RISE_BLEWUP = 0.5, which this
+    # tree carries as the defaults tok_rise_thresh, flat and rise_blewup.
+    assert derive.curve_verdict(None, None, 0.05) == "none"        # `>` at the early return
+    assert derive.curve_verdict(-1.0, -0.5, 0.05) == "recovering"  # `>` at the vocab arm
+    assert derive.curve_verdict(0.05, -0.5, 0.1) == "vocab"        # `<=` at the flat arm
+    assert derive.curve_verdict(-1.0, 0.5, 0.05) == "none"         # `>` at the tail return
+    #
+    # blowup_stale AT its staleness threshold. The captured grid runs since_best in {0, 100, 10000}
+    # and the threshold is 80, so `since_best < stale` could become `<= stale` unseen -- which is
+    # the alarm declining to fire on the first probe that has actually gone stale, in the function
+    # whose whole history is a threshold wrong in both directions.
+    assert derive.blowup_stale((3.0, 4.82, 2.95), 1.9, 80) is True    # exactly stale: it fires
+    assert derive.blowup_stale((3.0, 4.82, 2.95), 1.9, 79) is False   # one probe short: it does not
+    #
+    # phase_schedule at n_phases = 1. The captured grid runs p in {None, 2, 4, 8}, so `max(1, p - 1)`
+    # -- the divisor of the window slide -- deletes with the suite green and a single-phase schedule
+    # becomes a ZeroDivisionError. A one-phase run is the degenerate continual-learning schedule and
+    # the old tree answered it rather than raising.
+    assert derive.phase_schedule(5, 1) == [[0, 1, 2]]
+    assert derive.phase_schedule(2, 1) == [[0]]
+    assert derive.phase_schedule(5, 1, 2) == [[0, 1]]
 
     # The remaining five are covered by their tables; call each once so an import-time or signature
     # breakage cannot hide behind a table that is only read when the file is run.
