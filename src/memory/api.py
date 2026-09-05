@@ -33,9 +33,41 @@ RECORD TYPES RETURNED (P4 defines them):
 """
 import torch
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine.gate import Gate
 from spine import units as U
+
+
+# ==================================================================================================
+# THE SWITCH ON THE NEGATIVE-PERIOD REFUSAL
+# ==================================================================================================
+
+REFUSE_NEGATIVE_PERIOD = True
+"""Whether rekey_period refuses a negative MEM_REKEY_EVERY. True is the shipped state; False lets
+the value through to units.Windows exactly as it did before 2026-09-04.
+
+THE RULING (owner, 2026-09-04): "On the periods, let's refuse for now. If it has a bad effect, we
+can turn off the refusal." The first sentence is the guard in rekey_period; this name is the second,
+which binds just as hard -- .rework/DECISIONS.md D4 rules that a thing kept for later is kept WITH A
+SWITCH rather than as a code path that rots, and OFF is what is being kept.
+
+THE ALTERNATIVES, THEIR PRICES AND THE MEASUREMENT THAT WOULD SETTLE THE CHOICE ARE WRITTEN OUT
+ONCE, AT ckpt/api.py::REFUSE_NEGATIVE_PERIOD, and are not restated here: CKPT is where this question
+was opened and where the first of the five refusals shipped. WHAT IS THIS FILE'S OWN, and the reason
+the name is spelled here rather than imported: tests/test_ownership.py::check_o10_no_backdoor_imports
+forbids MEM to import ckpt, so the five switches are five per-package policies that happen to share
+a default, each governing only its own package's lever. This one governs MEM_REKEY_EVERY and nothing
+else, and turning it off here leaves the other four refusing.
+
+IT IS NOT THE OFF SWITCH FOR THE REKEY. That is MEM_REKEY_EVERY=0, which maintain declares as DISARM
+and which this constant does not touch in either position; nor does it touch MEM_KEY_SRC, the other
+condition maintain puts the amortized re-encode behind.
+
+THE COST, SO IT IS NOT DISCOVERED: turning it off is a CODE EDIT. There is no
+MEM_REFUSE_NEGATIVE_PERIOD, no census row and no row in the generated lever document -- deliberately,
+because a lever per package would be five environment names for one decision and would make "some
+accessors refuse and some do not" a reachable configuration.
+"""
 
 
 class StoreError(ValueError):
@@ -666,4 +698,51 @@ def rekey_period(mem: Config):
     DID IT FIRE: no counter of its own -- Cadences.ledger()['dom.rekey'] is the surface.
     """
     mem = mem.owned_by("MEM")
-    return U.Windows(int(mem.rekey_every))
+    every = int(mem.rekey_every)
+    # A NEGATIVE REKEY CADENCE IS REFUSED HERE, AT THE FIRST PLACE `rekey_every` IS READ (added
+    # 2026-09-04 under the owner's ruling; the switch and the alternatives are at
+    # REFUSE_NEGATIVE_PERIOD at the top of this file). FIRST and not ONLY: maintain reads the same
+    # field for its own internal amortized re-encode, and this accessor is called at the `cadence`
+    # row of spine/compose.py::ASSEMBLY_ORDER while maintain is a LOOP_ORDER row, so the refusal
+    # still fires before any number is derived from the bad value anywhere in this package. That is
+    # the placement rule capacity/api.py::new_valve took from lm/api.py::resolve, applied here
+    # rather than copied: a range check over MEM's own lever at its first read, and MEM declares no
+    # refusal entry point for it to live in.
+    #
+    # THE SECOND READER IS ALSO WHY THIS ONE IS THE WORST OF THE FIVE TO LEAVE UNREFUSED, and this
+    # is a split a reader can check in this file rather than a hazard imagined for it. maintain
+    # arms the re-encode on `rekey_every > 0`, so a negative reads as DISARMED there; the spine's
+    # dom.rekey gate goes through RUN.Cadences.due, whose contract is "True at most once per
+    # `period` WINDOWS elapsed since this key last fired", so at -5 it is true on the FIRST window
+    # and on every window after. ONE LEVER, TWO MECHANISMS, and at a negative value they disagree
+    # about which one is running -- the store quietly stops tracking the model while the event is
+    # delivered to DOM every window. docs/04_CONTRACT.md already names this field as driving two
+    # mechanisms and two gates; a value that makes the two mean opposite things is exactly what a
+    # range check at the first read is for.
+    #
+    # WHAT A NEGATIVE ACTUALLY DOES TODAY, MEASURED RATHER THAN ASSUMED. `assemble.build` accepts
+    # MEM_REKEY_EVERY=-5 and freezes it; this accessor returned Windows(-5); and
+    # spine/derive.py::cadences_that_cannot_fire then reported ("dom.rekey", -5, 0) -- the same
+    # shape of line it prints for the value the store treats as DISARM.
+    #
+    # ZERO IS NOT TOUCHED AND ITS DECLARED MEANING IS PRESERVED EXACTLY. maintain declares
+    # `rekey_every == 0` as DISARM, behind a guard, and records why: the old tree documented 0 as
+    # the off switch and then divided by it, an untrippable guard whose escape hatch was a
+    # ZeroDivisionError. The test below is strictly `< 0`, so that off switch is untouched -- which
+    # is the point, because the negative range is the one that has no declared meaning at all.
+    #
+    # IT REMOVES NO CONFIGURATION. "Never re-encode" is MEM_REKEY_EVERY=0 and "re-encode as often as
+    # possible" is MEM_REKEY_EVERY=1; the negative range spells neither.
+    if REFUSE_NEGATIVE_PERIOD and every < 0:
+        raise LeverError(
+            f"MEM_REKEY_EVERY={every}: a rekey period is a count of windows ELAPSED since the last "
+            f"pass and may not run backwards. It drives TWO mechanisms and at a negative value they "
+            f"disagree: MEM.maintain arms its amortized re-encode on `rekey_every > 0`, so {every} "
+            f"reads there as DISARMED, while the spine's dom.rekey gate goes through "
+            f"RUN.Cadences.due, which fires when `step - last_fired >= period` and so is true on "
+            f"the first window and on every window after it. The store would stop tracking the "
+            f"model while the event fired every window. Neither meaning is lost: MEM_REKEY_EVERY=0 "
+            f"is the declared DISARM and MEM_REKEY_EVERY=1 re-encodes the whole readable store "
+            f"every window. MEM_KEY_SRC is not consulted here: this refuses an out-of-range value "
+            f"for MEM's own lever, whether or not a second lever makes it moot.")
+    return U.Windows(every)

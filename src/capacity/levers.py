@@ -162,9 +162,25 @@ exactly the direction that is hardest to notice, because nobody greps to confirm
 
 AND THE BUDGET CLAUSE ABOVE WAS ITSELF A MISCOUNT, CORRECTED 2026-09-04 -- it read "has room for two
 more edges in total -- so acting on the sentence would fail at build() with an over-budget refusal".
-Both halves were wrong. Measured by running tests/test_couplings.py today: 23 DECLARED COUPLINGS, of
-which 19 are cross-package WIRES against WIRE_BUDGET=25 and 4 are intra-package, so SIX edges remain,
-not two. The miscount came from counting declared couplings as wires; an intra-package coupling books
+Both halves were wrong. THE LIVE FIGURES, WRITTEN IN THE SHAPES A CHECK CAN READ AND MEASURED BY
+RUNNING tests/test_couplings.py: spine/assemble.py::COUPLINGS declares 23 couplings -- 19
+cross-package wires, i.e. 19 of 25 of the ledger spine/wire.py::WIRE_BUDGET fixes, plus 4
+intra-package ones that book no edge -- so SIX edges remain in the whole tree, not two. Every digit
+in that clause is one tests/test_couplings.py's C4 prints and one
+tests/test_contract.py::check_k13_counts_and_absence_claims re-checks against the table: five
+matches over four distinct numbers, the 19 being read twice, once as a cross-package count and once
+as the spent half of the budget pair. The SIX is the one figure with no key of its own -- K13 counts
+wires and the budget, not the remainder -- so it is written as a word on purpose, derived in the
+same clause from two numbers that ARE checked, and it moves only if one of them does.
+AND THE SHAPES ARE THE REPAIR, NOT A FLOURISH, BECAUSE THIS FILE IS WHERE THE OLD ONES FAILED.
+Measured with K13's own scanner over this file: ONE numeric claim examined before this rewrite and
+five after. The paragraph asserted four live figures inside a check's own population and the check
+could see one of them -- `19 are cross-package WIRES` is not the `19 cross-package wires` the
+pattern list spells, `4 are intra-package` is not `4 intra-package`, and `WIRE_BUDGET=25` is not the
+`<n> of <m>` shape the budget pattern wants -- so the miscount this paragraph exists to correct
+could have come back in three of its four numbers with the suite green. src/eval/levers.py::
+EVALLevers writes the same clause in the same shapes for the same reason, and this follows it.
+The miscount came from counting declared couplings as wires; an intra-package coupling books
 no edge, which is why the two numbers differ by exactly four. The consequence clause fell with it:
 adding four couplings takes the ledger 19 -> 23 of the 25 and build() does NOT refuse it. THIS IS NOT A
 HARMLESS ARITHMETIC SLIP, AND THE REASON GIVEN HERE UNTIL 2026-09-04 WAS ITSELF WRONG: it read "at least
@@ -353,6 +369,16 @@ class CAPLevers(LeverSet):
     # int(frac * cap))` (self_organize.py:742-745), already isolated at module level and covered by
     # cap_test.py's known-answer tests, so it ports as shipped code rather than as a re-derivation --
     # and it replays: 3000 -> 3240 -> 3499 -> 3778 -> 4080 -> 4406 are sched_ctl's five real lifts.
+    # WHAT ONE LIFT ACTUALLY APPLIES IS lift_to HELD AT THE HARD CEILING, since .rework/DECISIONS.md
+    # D16. A soft cap set just under its ceiling makes the FIRST earned lift overshoot -- at
+    # CAP_FAB_START=4095 against FAB_SLOTS=4096, lift_to(4095, 0.08, 8) = 4422 -- and the owner ruled
+    # "let's soft clamp if a ceiling is overshot, until it goes down": the lift is TAKEN and the
+    # result held at 4096 rather than refused, so the evidence that earned it is spent instead of
+    # wasted. capacity/api.py::_clamped_lift is the one spelling of that, capacity/api.py::observe
+    # records which reading of "until it goes down" it implements and why, and the clamp is counted
+    # separately from a full lift because a lift held at the ceiling is neither a clean fire nor a
+    # refusal. THIS LEVER IS UNCHANGED BY THE RULING: the fraction is still the whole lift the valve
+    # ASKS for, and the ceiling decides only how much of it lands.
     # ONE CORRECTION TO THE CENSUS REASON, WHICH IS ABOUT THE COUNT AND NOT THE NUMBER: it says 0.08
     # "takes eleven lifts to double". Replaying lift_to with truncation, it is TEN at every starting cap
     # the arms actually used -- 160 -> 336, 256 -> 545, 640 -> 1377, 1024 -> 2205, 2048 -> 4412,
@@ -380,11 +406,25 @@ class CAPLevers(LeverSet):
     # NEGATIVE VALUES OF EITHER OF THESE TWO ARE REFUSED AT STARTUP, by name, in
     # capacity/api.py::new_valve. `lift_to` is `cap + max(int(floor), int(frac x cap))`, so with BOTH
     # negative the max is negative and an EARNED lift SHRINKS the cap -- lift_to(12, -0.5, -100) = 6 --
-    # against this package's founding sentence, "raised, by a little, never lowered". Neither negative
-    # buys anything a legal value does not: with lift_min >= 0 a negative lift is exactly lift=0, and
-    # with lift >= 0 a negative lift_min is exactly lift_min=0. CAP_LIFT ABOVE 1 IS NOT REFUSED and
-    # that is deliberate -- U.FRACTION's unit string is a label the census renders and not a bound
-    # (spine/lever.py::Lever carries choices and no numeric range), and a lift of 2.0 still RAISES.
+    # against this package's founding sentence, "raised, by a little, never lowered".
+    # EVERY IDENTITY BELOW CARRIES ITS REGIME, AND THIS COMMENT ASSERTED ALL THREE AS UNIVERSALS
+    # UNTIL 2026-09-04 -- the same false universals capacity/api.py corrected in its own copy while
+    # this carrier kept them. THE SIGN OF int(frac x cap) IS THE SIGN OF frac TIMES THE SIGN OF cap,
+    # and a NEGATIVE cap is reachable from the environment: CAP_FAB_START=-5 resolves a soft expert
+    # cap of -5. So, measured:
+    #   AT A CAP AT OR ABOVE ZERO neither negative buys anything a legal value does not -- with
+    #   lift_min >= 0 a negative lift is exactly lift=0, and with lift >= 0 a negative lift_min is
+    #   exactly lift_min=0.
+    #   BELOW ZERO NEITHER IDENTITY HOLDS, which is the SECOND reason both are refused rather than an
+    #   exception to the first: lift_to(-100, -0.5, 8) = -50 against lift_to(-100, 0, 8) = -92, and
+    #   lift_to(-100, 0.5, -1) = -101 against lift_to(-100, 0.5, 0) = -100 -- a negative lift_min
+    #   ALONE lowering a cap, which is why the guard is an `or` and not an `and`.
+    # CAP_LIFT ABOVE 1 IS NOT REFUSED and that is deliberate -- U.FRACTION's unit string is a label
+    # the census renders and not a bound (spine/lever.py::Lever carries choices and no numeric
+    # range), and a lift of 2.0 is a large lift and NEVER a lowering one, which is the property the
+    # invariant needs. It does not always RAISE, and this comment said it did: at a cap below zero
+    # int(2.0 x cap) is more negative than any floor at or above 0, so the max IS the floor and the
+    # cap stands still -- lift_to(-100, 2.0, 0) = -100, lift_to(-100, 2.0, 8) = -92.
     # UNITS: U.SLOTS rather than U.EXPERTS because the same floor is applied to the
     # vocabulary lift as well (:7434), where the rows are tokens; SLOTS is the one word true of both.
 

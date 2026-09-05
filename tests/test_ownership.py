@@ -951,8 +951,8 @@ def check_o6_wires_have_reasons(mods):
 #     making it visible needs type inference over arbitrary Python -- which the design review rejected as
 #     "a type-inference engine with no type system underneath it", defeated by one assignment.
 #   * `clock.n >= 250`, which unwraps the clock and compares bare ints. That is sometimes exactly right
-#     (spine/derive.py:234 does it deliberately, inside the function that owns the conversion) and
-#     sometimes the bug itself. Nothing static separates the two.
+#     (src/spine/derive.py::flush_period does it deliberately, inside the function that owns the
+#     conversion) and sometimes the bug itself. Nothing static separates the two.
 #   * `Steps(4000) >= Steps(250)` where the 250 came from a lever denominated in flushes. The types agree
 #     and the number is foreign. That is a wrong-measurement defect, and the known-answer tables in
 #     tests/test_derive.py are what catch it.
@@ -1597,6 +1597,24 @@ def check_o10_no_backdoor_imports(mods):
                    f"{n_out} module(s) outside src/spine/ examined", findings, vacuous=not n_out)
 
 
+def _o11_owner(owners, pkg, name):
+    """Which package DECLARES this clock lever, for the finding line.
+
+    `pkg` is the directory the offending file sits in, and everywhere but src/spine/ that is also
+    the directory whose levers.py declares the lever, because `mine` is that package's own set. For
+    a file under src/spine/ it is not: the composition root is examined against the UNION of every
+    package's clock levers, so `spine.epochs` would name a lever src/spine declares nothing of --
+    src/train/levers.py declares it, under PREFIX "RUN". The label is the DIRECTORY and not the
+    PREFIX, which is what the rest of this check prints and what a reader needs to open the right
+    levers.py; a finding that misnames it sends them to the wrong file, which is the defect O12 and
+    O13 exist for one level up. Two packages declaring one field name would both be listed.
+    """
+    if pkg != "spine":
+        return f"{pkg}.{name}"
+    who = sorted(owners.get(name, ()))
+    return f"{'/'.join(who) or '?'}.{name}"
+
+
 # =====================================================================================================
 def check_o11_no_unnamed_clock_arithmetic(mods):
     """O11 -- a package body may not do arithmetic on a lever that declares a Clock unit.
@@ -1619,15 +1637,59 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
     (WIN=256 BATCH_W=16 ACCUM=4) the divisor is 64, and a horizon in the wrong kind puts every
     learning-rate result under a schedule 64 times longer than its label.
 
-    THE RULE IS units.py:86's, APPLIED: "There is no implicit path between kinds ... call the named
-    function in spine.derive that already knows the rate, so the conversion exists in one place with
-    a name." A division written at its call site is a conversion nobody can audit, and every
-    historical instance of this project's most repeated defect is one of those.
+    THE RULE IS src/spine/units.py::Clock.convert's, APPLIED: "There is no implicit path between
+    kinds ... call the named function in spine.derive that already knows the rate, so the conversion
+    exists in one place with a name." A division written at its call site is a conversion nobody
+    can audit, and every historical instance of this project's most repeated defect is one of those.
 
     MEASURED BEFORE ADOPTING, as O10 was: after the opt repair there are ZERO such sites across all
     thirteen packages, so the strongest form of the rule costs nothing today. It is added while it is
     green precisely because it cannot then go red silently -- and P4, which writes the bodies, is
     where every one of these would otherwise appear.
+
+    THE COMPOSITION ROOT IS IN THE POPULATION AS OF 2026-09-04, AND WAS NOT BEFORE. This check
+    shipped skipping every file under src/spine/ on the stated ground that derive IS the named
+    conversion and must do the arithmetic. That ground covers derive.py. It does not cover
+    src/spine/compose.py, which is the ONE OTHER place in the tree that legitimately holds two
+    packages' clocks at once and is therefore the one other place this defect can live -- and it is
+    where the tree's last unnamed cross-kind conversion was found, by hand, on 2026-09-04:
+    `units.Windows(_windows_in_epoch(sysm) * int(sysm.configs["RUN"].epochs))`, a windows-per-epoch
+    rate times a count of EPOCHS with the answer's kind put on at the end.
+
+    NARROWING THE SKIP DOES NOT CLOSE IT, and a previous round recorded that narrowing as the
+    remedy without running it -- which is why .rework/audits/README.md's INV-R2-2 exists. Three
+    independent reasons drop the file, each sufficient on its own, so the remedy is three changes:
+      1. the skip exempts src/spine/derive.py and src/spine/assemble.py BY NAME rather than the
+         whole directory. assemble.py is not optional and not a convenience: its COUPLINGS `compute`
+         lambdas scale and combine clock levers BY DESIGN -- that is what a declared coupling IS --
+         and what a compute may name is checked, per coupling, by
+         tests/test_couplings.py::check_c1_legitimate_admitted and
+         tests/test_couplings.py::check_c4_table_resolves. Without the exemption these same three
+         changes report FOUR findings in that one file, every one of them a correctly declared
+         wire: three operands inside two `compute` lambdas (SIG.d_idle_cadence's, and
+         OPT.d_effective_batch_windows', which multiplies two clock levers together) plus the `why`
+         string of the first, which quotes the formula that lambda computes.
+      2. `mine` for a src/spine/ file is the UNION of every package's clock levers. The per-package
+         set is keyed on the directory name, src/spine declares no levers.py (thirteen packages do;
+         this is not among them), so `mine` came back empty and the file was dropped a SECOND time
+         four lines below the skip. This is the half the recorded remedy missed.
+      3. the load-bearing one: an operand counts if a clock-lever Attribute appears ANYWHERE IN ITS
+         SUBTREE, not only at its root. Both operands of the line above are Calls and the `epochs`
+         Attribute is inside one of them, while the textual half wants a bare identifier before the
+         operator and finds `)`. Changes 1 and 2 without it leave compose.py silent.
+    MEASURED AS A LADDER, on scratch copies outside the repository, with that exact line restored
+    to src/spine/compose.py::_run_windows and one change added at a time:
+      * the skip narrowed to derive.py alone -- the remedy a previous round recorded -- PASS, 144
+        sites. The gap is exactly where it was.
+      * plus the union: FAIL, 157 sites, ONE finding, and it is src/spine/assemble.py's `why`
+        string, not compose.py.
+      * plus the subtree operand, with assemble.py still in the population: FAIL, 157 sites, FIVE
+        findings -- the four correctly declared couplings above, and compose.py.
+      * all three, assemble.py exempt: FAIL, 152 sites, ONE finding, src/spine/compose.py, and
+        nothing else.
+      * all three against the tree as it stands: PASS, 151 sites, with no other check moved.
+    The self-test case "O11: the composition root" pins it, and each of the three changes was
+    reverted alone to watch that case go from red to green-that-must-be-red.
 
     WHAT IT CANNOT CATCH, and the second one is why H51 is still open:
       * arithmetic on a Clock-unit value that arrives as a plain ARGUMENT rather than as a lever
@@ -1639,12 +1701,17 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
         declare a Clock unit (ISSUES P1-H51), so the kind is metadata at the read site. Enforced between
         packages, advisory within one. This check is the within-one half, done by AST because the
         type system cannot do it.
+      * arithmetic anywhere in src/spine/assemble.py, including outside a COUPLINGS compute. The
+        exemption is by FILE and not by expression, so a conversion hand-written in assemble.py's
+        own helpers is not seen here. That is a strictly smaller residue than the one it replaces --
+        the whole of src/spine/ was exempt until 2026-09-04 -- and it is named here rather than
+        discovered later.
     """
     _PKG_DIRS = {m.rel.split("/")[1] for m in mods
                  if m.rel.startswith("src/") and m.rel.count("/") >= 2} - {"spine"}
     # The clock-unit levers of each package, from the DECLARATIONS in that package's levers.py --
     # read here rather than imported, so this pass stays "parse, never execute" like the rest.
-    clocks, findings = {}, []
+    clocks, owners, findings = {}, {}, []
     _KINDS = ("Steps", "Flushes", "Windows", "Backwards", "Epochs", "Selections")
     for m in mods:
         if not m.rel.endswith("levers.py"):
@@ -1661,16 +1728,26 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
                       a.id if isinstance(a, ast.Name) else "")
                 if nm in _KINDS:
                     clocks.setdefault(pkg, set()).add(node.targets[0].id)
+                    owners.setdefault(node.targets[0].id, set()).add(pkg)
     n_clocks = sum(len(v) for v in clocks.values())
 
     _OPS = (ast.FloorDiv, ast.Mult, ast.Mod, ast.Div, ast.Pow)
     _TXT = re.compile(r"\b([a-z_][a-z_0-9]*)\s*(//|%|\*(?!\*))\s*")
     examined = 0
     for m in mods:
-        if m.rel.startswith("src/spine/"):
-            continue                      # derive IS the named conversion; it must do the arithmetic
+        if m.rel in (os.path.join("src", "spine", "derive.py"),
+                     os.path.join("src", "spine", "assemble.py")):
+            # derive IS the named conversion and must do the arithmetic; assemble DECLARES the
+            # couplings, whose computes are checked one at a time by tests/test_couplings.py. Every
+            # OTHER file under src/spine/ is in the population -- see the composition-root paragraph.
+            continue
         pkg = m.rel.split("/")[1] if m.rel.startswith("src/") else ""
         mine = clocks.get(pkg, set())
+        if m.rel.startswith("src/spine/"):
+            # THE COMPOSITION ROOT HOLDS EVERY PACKAGE'S CLOCKS AT ONCE and owns no levers.py, so
+            # the per-package set is empty and the file would be skipped a second time, one line
+            # below. It is the union or it is nothing.
+            mine = set().union(*clocks.values()) if clocks else set()
         if not mine:
             continue
 
@@ -1680,13 +1757,17 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
                 continue
             examined += 1
             for side in (node.left, node.right):
-                nm = side.attr if isinstance(side, ast.Attribute) else ""
-                if nm in mine:
+                # ANYWHERE IN THE OPERAND SUBTREE, not only at its root: the composition root's
+                # conversion read `_windows_in_epoch(sysm) * int(sysm.configs["RUN"].epochs)`, whose
+                # operands are both Calls with the Attribute buried inside one of them.
+                names = {n.attr for n in ast.walk(side) if isinstance(n, ast.Attribute)}
+                for nm in sorted(names & mine):
                     findings.append(
-                        f"{m.rel}:{node.lineno}  {pkg}.{nm} declares a Clock unit and is an operand "
-                        f"of {type(node.op).__name__} in CODE. A cross-kind conversion written at "
-                        f"its call site is one nobody can audit -- units.py:86 requires it to be a "
-                        f"named function in spine.derive.  {m.line(node.lineno)}")
+                        f"{m.rel}:{node.lineno}  {_o11_owner(owners, pkg, nm)} declares a Clock "
+                        f"unit and is an operand of {type(node.op).__name__} in CODE. A cross-kind "
+                        f"conversion written at its call site is one nobody can audit -- "
+                        f"src/spine/units.py::Clock.convert requires it to be a named function in "
+                        f"spine.derive.  {m.line(node.lineno)}")
 
         # (b) THE DOCSTRING SPECIFICATIONS, WHICH AT THIS PHASE ARE THE CODE. Every entry point is a
         # stub that raises NotImplementedError, so the (a) half above examines ZERO expressions and
@@ -1741,7 +1822,8 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
                 if nm in mine:
                     examined += 1
                     findings.append(
-                        f"{m.rel}:{i}  {pkg}.{nm} declares a Clock unit and is divided or scaled by "
+                        f"{m.rel}:{i}  {_o11_owner(owners, pkg, nm)} declares a Clock unit and is "
+                        f"divided or scaled by "
                         f"'{op}' in a SPECIFICATION. Every body here is still a stub, so this "
                         f"docstring is what P4 will implement -- name the conversion in "
                         f"spine.derive and write that call instead.  {line.strip()[:70]}")
@@ -1784,6 +1866,62 @@ def flush_gate(fab: Config, batch_w):
     conversion derive.flush_period_windows exists to name.
     \"\"\"
     raise NotImplementedError("x")
+"""
+
+# THE COMPOSITION ROOT, which is not derive.py and is not a package either. Both operands of the
+# multiply are CALLS and the clock Attribute is buried inside one of them -- the exact shape found by
+# hand in src/spine/compose.py::_run_windows on 2026-09-04, and the shape that survives a skip
+# narrowed only to derive.py, because src/spine declares no levers.py and its clock set is empty.
+_CLOCK_ROOT_CODE = """\
+from spine import units
+
+
+def _run_windows(sysm):
+    \"\"\"The run length in WINDOWS. The composition root holds every package's clocks at once.\"\"\"
+    return units.Windows(_windows_in_epoch(sysm) * int(sysm.configs["FAB"].manage_every))
+
+
+def _windows_in_epoch(sysm):
+    return 1
+"""
+
+# THE ADMIT SIDE, and it carries all three exemptions at once: the composition root reaching the
+# same quantity through the NAMED conversion, derive.py doing the arithmetic itself because that is
+# what derive is for, and assemble.py's COUPLINGS compute scaling a clock lever because that is what
+# a declared coupling is. Without this tree the three changes above would be indistinguishable from
+# a rule that simply reports src/spine/.
+_CLOCK_ROOT_NAMED = """\
+from spine import derive, units
+
+
+def _run_windows(sysm):
+    \"\"\"The same quantity, through the function that knows the rate and has a name.\"\"\"
+    return derive.run_windows_from_epochs(units.Epochs(sysm.configs["FAB"].manage_every),
+                                          _windows_in_epoch(sysm))
+
+
+def _windows_in_epoch(sysm):
+    return 1
+"""
+
+_CLOCK_DERIVE = """\
+from spine import units
+
+
+def run_windows_from_epochs(count, rate):
+    \"\"\"derive IS the named conversion: it must do the arithmetic.\"\"\"
+    return units.Windows(int(rate) * int(count))
+"""
+
+_CLOCK_ASSEMBLE = """\
+COUPLINGS = (
+    dict(src="FAB.manage_every", dst="MEM.d_manage_period", compute=lambda r: max(
+        1, int(r["FAB"].manage_every)) * 6),
+)
+
+
+def build():
+    return {}
 """
 
 _CLOCK_LEVERS = """\
@@ -2051,7 +2189,14 @@ def check_o13_citations_resolve(mods):
       one file and no other -- against every .py in src/ and tests/. The FULL dotted symbol must
       then be present in that file. A citation into the frozen old tree, or into any file outside
       the rebuild, is counted and left alone: that is FROZEN_OLD_TREE's rule and O12's, not a
-      second one invented here.
+      second one invented here. THAT EXEMPTION NOW HAS A FLOOR, and until 2026-09-04 it did not:
+      the path has to name a file this repository actually has. Without it a mistyped directory
+      (`ckpt/derive.py::pin_tick`) and a misspelled filename (`src/spine/derve.py::pin_tick`) were
+      both exempt, because "resolves to no indexed file" and "points outside the rebuild" were one
+      branch -- so the check closed a path resolving to the WRONG file and left open a path
+      resolving to NO file. Both were planted and both passed before the floor; both fail now, and
+      the three real exemptions (compare.py::main twice and verification.py::Reconstructor.__init__,
+      root-level files this rebuild does not index) are unmoved.
 
       QUOTATION. A citation followed, with nothing between it but an attribution verb from a closed
       list, by a double-quoted span of at least four words carrying no code punctuation, is a claim
@@ -2113,6 +2258,34 @@ def check_o13_citations_resolve(mods):
         c = cited.lstrip("./")
         return [r for r in defined if r == c or r.endswith("/" + c)]
 
+    repo_paths = []
+
+    def _exists_anywhere(cited):
+        """Does ANY file in this repository have a path ending in the cited one?
+
+        THE EXEMPTION THIS CLOSES. A citation whose path resolves to no indexed file was counted
+        into `outside` -- "the frozen old tree or outside the rebuild" -- and never opened, so a
+        MISTYPED DIRECTORY and a MISSPELLED FILENAME were both silently exempt: `ckpt/derive.py::
+        pin_tick` and `src/spine/derve.py::pin_tick` both passed, with `opened` unchanged and only
+        the exempt count moving, and nothing asserts that count. A wrong directory is the same
+        defect as a wrong symbol, and it is the one this check's own docstring promises to close.
+
+        The index is the whole repository and not just src/ and tests/, because the legitimate
+        exemptions really are elsewhere: `compare.py::main` and `verification.py::Reconstructor
+        .__init__` name root-level files this rebuild does not index and does not edit. Built once,
+        on the first unresolved citation, and skipped entirely on a tree that has none. runs/ is
+        excluded on the standing instruction that it is never touched, and .git for its size.
+        """
+        if not repo_paths:
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames
+                               if d not in (".git", "runs", "__pycache__")]
+                for fn in filenames:
+                    rel = os.path.relpath(os.path.join(dirpath, fn), root)
+                    repo_paths.append(rel.replace(os.sep, "/"))
+        c = cited.lstrip("./")
+        return any(r == c or r.endswith("/" + c) for r in repo_paths)
+
     sources = [(m.rel, m.lines) for m in mods]
     for dirpath, dirnames, filenames in os.walk(os.path.join(root, "docs")):
         dirnames[:] = sorted(dirnames)
@@ -2131,7 +2304,19 @@ def check_o13_citations_resolve(mods):
                 if not hits:
                     # O12's rule, verbatim: a file this rebuild does not contain is the frozen old
                     # tree or something outside it, and a pointer into a file nobody edits stays
-                    # true. Counted so the exemption is visible rather than silent.
+                    # true. Counted so the exemption is visible rather than silent -- and granted
+                    # only to a path that NAMES A FILE THIS REPOSITORY REALLY HAS, or a frozen
+                    # old-tree name, which the synthetic self-test trees do not carry.
+                    if (os.path.basename(cited) not in FROZEN_OLD_TREE
+                            and not _exists_anywhere(cited)):
+                        findings.append(
+                            f"{rel}:{i}  cites '{cited}::{sym}' and no file in this repository has "
+                            f"that path. A citation is a claim about another file; a path that "
+                            f"names no file is one a reader cannot follow at all, and it was "
+                            f"exempted here until 2026-09-04 only because the frozen-old-tree rule "
+                            f"cannot tell a pointer outside the rebuild from a typo. Name a real "
+                            f"path.")
+                        continue
                     outside += 1
                     continue
                 opened += 1
@@ -2193,7 +2378,8 @@ def check_o13_citations_resolve(mods):
     detail = (f"{opened} citation(s) opened against {len(defined)} indexed file(s) in src/ and "
               f"tests/, from {len(sources)} file(s) in src/ and docs/; {quoted_pairs} of those "
               f"attribute a quoted sentence and had it looked for inside the cited symbol; "
-              f"{outside} into the frozen old tree or outside the rebuild, left alone; "
+              f"{outside} into the frozen old tree or outside the rebuild, left alone and each "
+              f"of them a path this repository really has; "
               f"{admitted_locals} naming a function-local, ADMITTED and counted (see the CANNOT "
               f"CATCH block above this check)")
     return _report("O13", "citations open: the cited file contains the cited symbol", not findings,
@@ -2321,6 +2507,47 @@ def prune(mem: Config):
     return mem.quota
 """
 
+# THE PATH THAT NAMES NO FILE. O12 says nothing about it either -- its `by_base` has no entry for
+# `derve.py`, so the citation is skipped there -- which is why both tags are asserted on this tree.
+_O13_NO_SUCH_PATH = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"The freeze is spine/derve.py::Config's business, one letter from a file that exists.\"\"\"
+    return mem.quota
+"""
+
+_O13_REAL_PATH = """\
+from spine.lever import Config
+
+
+def prune(mem: Config):
+    \"\"\"The freeze is spine/lever.py::Config's business, and that path is really there.\"\"\"
+    return mem.quota
+"""
+
+# PATH EXACTNESS, which is the second of O13's four stated advances over O12 and had no executable
+# witness: replacing _resolve's body with O12's basename rule left the whole ownership pass green.
+# The decoy is a second file with a name another package already uses.
+_O13_DECOY_TARGET = """\
+\"\"\"A second file whose NAME another package already uses.\"\"\"
+
+
+def only_here():
+    return 1
+"""
+
+_O13_DECOY_CITE = """\
+from spine.lever import Config
+
+
+def peek(mem: Config):
+    \"\"\"spine/lever.py::only_here is the resolver -- a citation whose BASENAME resolves somewhere
+    else in the tree and whose PATH resolves to a file that does not define it.\"\"\"
+    return mem.owned_by("MEM").quota
+"""
+
 _O13_DOC_BAD = """# wiring
 
 The freeze is `spine/lever.py::Confg`'s business, says the document nobody parses.
@@ -2410,6 +2637,20 @@ _CASES = (
      {"src/fabric/levers.py": _CLOCK_LEVERS, "src/fabric/gate.py": _CLOCK_ARITH_QUOTED},
      {"O11": (0, None)}),
 
+    # THE COMPOSITION ROOT. This check skipped the whole of src/spine/ until 2026-09-04 and a
+    # previous round recorded "narrow the skip to derive.py" as the remedy WITHOUT RUNNING IT; the
+    # narrowing leaves this tree green, because src/spine has no levers.py and the second drop is
+    # four lines below the skip. The case fails on all three of the changes that close it: remove
+    # the union and `mine` is empty; remove the subtree walk and both operands read as Calls.
+    ("O11: the composition root, with the clock Attribute buried inside a Call operand",
+     {"src/fabric/levers.py": _CLOCK_LEVERS, "src/spine/compose.py": _CLOCK_ROOT_CODE},
+     {"O11": (1, "fabric.manage_every")}),
+
+    ("O11: the named conversion, derive's own arithmetic and a coupling compute are ADMITTED",
+     {"src/fabric/levers.py": _CLOCK_LEVERS, "src/spine/compose.py": _CLOCK_ROOT_NAMED,
+      "src/spine/derive.py": _CLOCK_DERIVE, "src/spine/assemble.py": _CLOCK_ASSEMBLE},
+     {"O11": (0, None)}),
+
     # ---- O10. THE FIRST OF THESE IS A REGRESSION TEST FOR A LIVE DEFEAT, not a hypothetical. O10
     # ---- shipped asking `if "assemble" in tail or "registry" in tail`; P3 wrote src/spine/compose.py
     # ---- with `from spine.assemble import build, render  # noqa: F401 -- render is re-exported`, and
@@ -2478,6 +2719,21 @@ _CASES = (
     ("O13: both citation forms into the frozen old tree are ADMITTED",
      {"src/memory/store.py": _O13_FROZEN},
      {"O12": (0, None), "O13": (0, None)}),
+
+    ("O13: a path that names NO file in the repository -- silently exempt until 2026-09-04",
+     {"src/memory/store.py": _O13_NO_SUCH_PATH},
+     {"O12": (0, None), "O13": (1, "no file in this repository")}),
+
+    ("O13: the same sentence with the path spelled right is ADMITTED",
+     {"src/memory/store.py": _O13_REAL_PATH},
+     {"O12": (0, None), "O13": (0, None)}),
+
+    # THE PATH IS RESOLVED BY PATH AND NOT BY BASENAME, which O13's docstring claims and nothing
+    # executed. O12 goes green here because it resolves `lever.py` to every file of that name and
+    # src/memory/lever.py defines the symbol; O13 opens src/spine/lever.py, which does not.
+    ("O13: a citation whose BASENAME resolves elsewhere -- O12 passes this, O13 opens the path",
+     {"src/memory/lever.py": _O13_DECOY_TARGET, "src/memory/store.py": _O13_DECOY_CITE},
+     {"O12": (0, None), "O13": (1, "only_here")}),
 )
 
 _BY_TAG = {

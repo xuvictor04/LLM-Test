@@ -45,6 +45,87 @@ from spine import units as U
 _OFF = ("0", "", "off", "no", "none", "false")
 
 
+# ==================================================================================================
+# THE SWITCH ON THE NEGATIVE-PERIOD REFUSAL -- THE OWNER'S SECOND SENTENCE, MADE REAL
+# ==================================================================================================
+
+REFUSE_NEGATIVE_PERIOD = True
+"""Whether save_period refuses a negative CKPT_EVERY. True is the shipped state; False lets the
+value through to units.Windows exactly as it did before 2026-09-04.
+
+THE RULING THIS IMPLEMENTS, VERBATIM (owner, 2026-09-04): "On the periods, let's refuse for now. If
+it has a bad effect, we can turn off the refusal." THE SECOND SENTENCE BINDS AS HARD AS THE FIRST.
+The first is why the guard in save_period exists and why the four siblings the ruling was asked
+about now carry the same one -- eval/api.py::curve_period, domains/api.py::manage_period,
+fabric/api.py::manage_period and memory/api.py::rekey_period, each with a constant of this same
+name at the top of its own file. The second is why this name exists at all: OFF is the state being
+kept for later, and .rework/DECISIONS.md D4 rules that a thing kept for later is kept WITH A SWITCH
+rather than as a code path that rots -- OFF as a first-class configuration.
+
+WHAT IT IS NOT, so that no reader generalises it into a convention. It is NOT a precedent that a
+range refusal gets a switch, and the tree it lands in is emphatic about that: lm/api.py::resolve,
+opt/api.py::build and capacity/api.py::new_valve all refuse out-of-range lever values with no switch
+of any kind, and none of them grows one from this. This switch exists because the owner asked for
+THIS refusal to be turn-off-able, by name, in the same breath as ordering it -- and it is the only
+one in the tree that was asked for.
+
+WHERE THE FIVE REFUSALS ARE REACHABLE FROM TODAY, because "it refuses at startup" would be a claim
+about a path that does not run yet. spine/compose.py::compose halts at CAP.startup_refusals, which
+is row 29 of the 39 in spine/compose.py::ASSEMBLY_ORDER, while all five accessors are called at the
+`cadence` row further down -- measured by running compose(environ={'DOM_MANAGE_EVERY': '-5'}) and the
+four siblings' equivalents in fresh processes on 2026-09-04, every one of which ended at
+CAP.startup_refusals and never reached an accessor. So the refusals are live for anything that calls
+an accessor (spine/compose.py::_periods, a probe, a test) and become live for the composition root
+on the day CAP.startup_refusals gets a body. That is the standing this accessor's own refusal has
+had since it shipped; the four siblings inherit it rather than introduce it.
+
+THREE SHAPES WERE WEIGHED AND TWO LOST, priced against what the tree actually has rather than
+against preference.
+
+  (a) ONE PROCESS-WIDE SWITCH OWNED BY RUN, read by all five accessors. REFUSED, AND NOT ON TASTE.
+      A value one package owns and another reads is a WIRE -- a d_ field on the RECEIVING Config,
+      declared in spine/assemble.py -- so this is five wires, one per receiving package, against the
+      six edges that remain of spine/wire.py::WIRE_BUDGET. The wire-free routes were checked one at
+      a time rather than assumed, and every one is closed by a check that is green today: a package
+      may not name os.environ (tests/test_ownership.py::check_o1_one_env_reader), may not call
+      from_env (check_o8_from_env_only_in_wiring_file), may not import another package or any spine
+      module outside {lever, units, derive, rng, wire, gate, init}
+      (check_o10_no_backdoor_imports), and spine/lever.py::Config.owned_by refuses a foreign Config
+      at the read site. A new spine module holding one flag would be refused by O10 until somebody
+      widened that allowlist, which is an edit to tests/ rather than to any package here.
+
+  (b) ONE LEVER PER OWNING PACKAGE. No wire, and it is the D4-faithful shape -- D4's own subject,
+      the world model, got a real lever (WORLD_ENABLED, src/world/levers.py). It loses on price and
+      on what the price buys: five new environment names, five census rows and five rows in the
+      generated lever document, for a policy that is ONE decision; and five INDEPENDENT switches
+      make "three accessors refuse and two do not" a reachable configuration of one convention,
+      which is the many-spellings-of-one-thing this whole spine exists to end. It is also the worse
+      instrument for the measurement that would settle the question: spine/lever.py latches the
+      assembly after one build, so a lever-shaped switch needs a fresh process per arm, while this
+      constant can be set both ways inside one.
+
+  (c) NO SWITCH AT ALL, on the reading that "we can turn off the refusal" means the owner would
+      revert the change. REFUSED on the owner's own words and on D4, and the practical half is (b)'s
+      last clause: with no named switch, "does the refusal have a bad effect" cannot be answered by
+      running one configuration twice.
+
+WHAT THE CHOSEN SHAPE COSTS, STATED RATHER THAN DISCOVERED. Turning it off is a CODE EDIT and not an
+environment variable: there is no CKPT_REFUSE_NEGATIVE_PERIOD, this constant takes no census row and
+no row in the generated lever document, and an operator holding only a shell cannot reach it. And
+the name is spelled five times, once per owning package, because O10 forbids the four siblings to
+import this one -- they are five per-package policies that happen to share a default, each governing
+only its own package's lever, not one number stored in five places.
+
+WHAT WOULD CHANGE THE ANSWER, since a recommendation that cannot name its own falsifier is not
+finished (.rework/DECISIONS.md D11). If any configuration this project actually runs ever sets one of
+the five periods negative ON PURPOSE, this stops being a guard against a typo and becomes a lever,
+and (b) is then right. Measured across the repository on 2026-09-04 and the answer was none: no
+script, sweep or recorded run sets any of EVAL_CURVE_EVERY, DOM_MANAGE_EVERY, FAB_MANAGE_EVERY,
+MEM_REKEY_EVERY or CKPT_EVERY below zero, so the refusal is inert in every configuration that exists
+and its OFF state has no user today but the person who ordered it.
+"""
+
+
 @dataclasses.dataclass(frozen=True)
 class Snapshot:
     """One checkpoint as read from disk. `payload` is OPAQUE to this package.
@@ -161,8 +242,15 @@ def save_period(ckpt: Config):
     every == 0 with the final-plus-SIGUSR1 sentence as its reason, FIRED at every > 0. THAT
     ENUMERATION IS EXHAUSTIVE ONLY BECAUSE OF THE FOURTH OUTCOME, WHICH IS NOT A GATE STATE: since
     2026-09-04 a NEGATIVE `every` never reaches any of the three, because the body refuses it by
-    name before the period is constructed. The argument, the alternatives and what the refusal
-    deliberately does not rule for the other four period accessors are in the body, at the guard.
+    name before the period is constructed. The argument and the alternatives are in the body, at the
+    guard. TWO THINGS ABOUT THAT SENTENCE ARE NEWER THAN THE SENTENCE AND ARE SAID HERE RATHER THAN
+    FOUND. It is now conditional on REFUSE_NEGATIVE_PERIOD at the top of this file -- the owner's
+    ruling of 2026-09-04 requires the refusal to be turn-off-able, and with it False a negative
+    reaches the third arm again and that arm prints the value it was given, which is why the reason
+    is an f-string. And it is no longer a statement about this accessor alone: the same ruling put
+    the same guard, under the same switch, in eval/api.py::curve_period, domains/api.py::manage_period,
+    fabric/api.py::manage_period and memory/api.py::rekey_period, so the clause in the body that used
+    to say this refusal rules nothing for the other four has been replaced by what the owner ruled.
 
     WHY IT RIDES ON THE RETURNED Windows RATHER THAN CHANGING THE SHAPE OR MINTING AN ACCESSOR.
     Three alternatives, each priced by running it rather than by preference:
@@ -235,15 +323,17 @@ def save_period(ckpt: Config):
                  :5619-5621 warning replaced by a gate with its own condition -- dir set and
                  every == 0 is armed-and-not-fired with "the only saves are the final one plus
                  SIGUSR1" as its reason (the reason PRINTS the value rather than naming 0, and the
-                 refusal in the body is what makes 0 the only value that can reach that arm), and
+                 refusal in the body is what makes 0 the only value that can reach that arm WHILE
+                 REFUSE_NEGATIVE_PERIOD IS TRUE -- with the owner's switch off a negative reaches it
+                 too, which is exactly why the reason is an f-string and not the literal it used
+                 to be), and
                  dir off is UNREACHABLE instead of a zero the ledger cannot explain. The word an
                  operator sees is owed by RUN.cadence_audit, which is a stub; until it has a body
                  this Gate is readable only from the returned object
     """
     ckpt = ckpt.owned_by("CKPT")
     # NOT A STUB, AND THE FOUR SIBLINGS ARE NOT EITHER -- EVAL.curve_period, DOM.manage_period,
-    # FAB.manage_period and MEM.rekey_period, each verified stub-free by reading it: every one of
-    # the four ends in a bare `return U.Windows(int(<its own lever>))` and raises nothing. This
+    # FAB.manage_period and MEM.rekey_period, each verified stub-free by reading it. This
     # comment said THREE, which is the same off-by-one docs/04_CONTRACT.md corrected in its own
     # sentence about these five accessors on 2026-09-03 and eval/api.py::curve_period corrected in
     # its copy of this comment, and it survived here for the reason that document gave: the number
@@ -252,12 +342,15 @@ def save_period(ckpt: Config):
     # miscount written this way, and only a reader can. A period accessor is one
     # construction over its declared levers -- "its declared levers" and NOT "one declared lever",
     # because THIS accessor reads TWO: `every` here and `dir` through saving_on below, which the
-    # LEVERS READ line already states. THE SIBLING COPY OF THIS SENTENCE IN eval/api.py::curve_period
-    # STILL READS "one declared lever" AND NAMES CKPT.save_period in the sentence above it, so as it
-    # stands eval asserts of this function exactly the thing this comment corrected; that file is
-    # not this package's to edit and the correction is REFERRED, not dropped. Nothing in the suite
-    # fails either way -- K13 reads digits and this is a word -- so a reader is the only check, which
-    # is why the referral is written here rather than left in an audit report.
+    # LEVERS READ line already states.
+    # WHAT THIS COMMENT SAID ABOUT THE FOUR AND NO LONGER SAYS, because it stopped being true on
+    # 2026-09-04 and a stale claim about a neighbour is the defect this file keeps correcting: it
+    # read "every one of the four ends in a bare `return U.Windows(int(<its own lever>))` and raises
+    # nothing", and all four now carry the same negative-period refusal this one does, under the
+    # owner's ruling recorded at REFUSE_NEGATIVE_PERIOD above. The REFERRAL that stood here in the
+    # same breath -- that eval/api.py::curve_period still read "one declared lever" and named this
+    # function while doing it -- is DISCHARGED in the same edit and is not merely dropped: that
+    # sentence now reads "its declared levers" and states which two THIS accessor reads.
     # THE ACCESSOR'S WHOLE JOB is that Cadences.due REFUSES a bare int while Config hands one back
     # for all 35 levers that declare a Clock unit (ISSUES P1-H51; recounted r4 -- exactly 35 Lever
     # declarations across the registry carry a unit that is in spine/units.py::CLOCK_KINDS).
@@ -298,14 +391,19 @@ def save_period(ckpt: Config):
     # should not be silently accepted because a second lever happens to make it moot. That is the
     # same placement capacity's refusal takes (it precedes the CAP_TARGETS=off branch).
     #
-    # WHAT THIS DOES NOT RULE. The other four period accessors -- EVAL.curve_period,
-    # DOM.manage_period, FAB.manage_period, MEM.rekey_period -- each still end in a bare
-    # `return U.Windows(int(<its own lever>))` and refuse nothing, and spine/derive.py::
-    # cadences_that_cannot_fire treats "zero or less" as ONE sentinel for every package at once.
-    # Whether that spine-wide convention should become a refusal for all five is an OWNER question
-    # and is filed as one; this clause decides CKPT's own lever, at the first place it is read,
-    # and nothing else.
-    if every < 0:
+    # WHAT THIS RULED, AND WHAT THE OWNER RULED AFTER IT (2026-09-04). This clause used to end
+    # "whether that spine-wide convention should become a refusal for all five is an OWNER question
+    # and is filed as one". It was filed, and the answer is YES: the other four period accessors --
+    # EVAL.curve_period, DOM.manage_period, FAB.manage_period, MEM.rekey_period -- now each refuse a
+    # negative value of their own lever at their own first read, in the same shape and with the same
+    # switch. What remains unruled, and is NOT settled by any of the five, is the OTHER end:
+    # spine/derive.py::cadences_that_cannot_fire still treats "zero or less" as ONE sentinel for
+    # every package at once, while zero means something different in each -- disabled periodic
+    # saving here, DISARM in memory/api.py::maintain, an unimplemented port requirement in
+    # src/domains/levers.py, and nothing declared at all for EVAL and FAB. Refusing the negatives
+    # narrows that reader's input to values whose meaning each package has actually written down;
+    # it does not make the four zeros mean one thing.
+    if REFUSE_NEGATIVE_PERIOD and every < 0:
         raise LeverError(
             f"CKPT_EVERY={every}: a save period is a count of windows ELAPSED since the last save "
             f"and may not run backwards. RUN.Cadences.due fires when `step - last_fired >= "
@@ -334,10 +432,17 @@ def save_period(ckpt: Config):
         # CKPT_EVERY below zero the gate rendered "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0
         # ..." -- a reason naming a value the operator did not set, beside a printed value that
         # contradicts it, in one sentence. Measured at -5 and at -1 before the change. The
-        # refusal above now takes every negative, so 0 is the only value that reaches this arm and
-        # the old literal would be true again; it is an f-string anyway, because a sentence that
-        # is true only because of a guard somewhere else is a sentence that goes false the day the
-        # guard moves, and nothing in tests/ renders a CKPT Gate to notice.
+        # refusal above takes every negative WHILE REFUSE_NEGATIVE_PERIOD IS TRUE, so at the
+        # shipped setting 0 is the only value that reaches this arm and the old literal would be
+        # true again; it is an f-string anyway, because a sentence that is true only because of a
+        # guard somewhere else is a sentence that goes false the day the guard moves, and nothing
+        # in tests/ renders a CKPT Gate to notice. THAT DAY ARRIVED IN THE SAME EDIT THAT MADE THE
+        # GUARD SWITCHABLE, AND THE F-STRING IS WHY NOTHING BROKE: with the switch set False, this
+        # arm renders "armed, did not fire (-5 vs 1) -- CKPT_EVERY=-5 with CKPT_DIR set: ..." --
+        # measured at -1, -5 and -1000 on 2026-09-04 -- so the printed value and the named value
+        # agree at every value that can reach here, in both positions of the switch. Under the
+        # literal this line used to carry, turning the refusal off would have restored the exact
+        # false equation the refusal was written to end.
         gate = Gate("ckpt.periodic_armed", False, every, 1,
                     reason=f"CKPT_EVERY={every} with CKPT_DIR set: the only saves this run makes "
                            f"are the FINAL one and any SIGUSR1. A legitimate configuration, and "

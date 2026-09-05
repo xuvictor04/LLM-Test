@@ -224,6 +224,15 @@ def flush_period(period_steps, batch_w):
     the direction this paragraph refuses. It divides in fractions.Fraction now and truncates once at
     the end; see units.py::Clock.convert, which this function and flush_period_windows are the only
     two callers of.
+
+    REFUSES A NEGATIVE CADENCE AND A NON-int RATE (2026-09-05), which is the family's shape and was
+    this function's exception to it. A negative period is not a short period: the floor below --
+    written for a cadence that TRUNCATED to zero -- answered Flushes(1) for it, the tightest cadence
+    that exists. flush_period_windows carries that measurement because it is the one of the pair
+    spine/assemble.py::COUPLINGS calls; this one has no row in the table today, so the arm is
+    UNREACHABLE from the composition root and reachable from any direct caller. The rate end is
+    type-tested for the reason opt_steps_from_backwards sets out: `int()` is what let the foreign
+    kinds in.
     """
     if type(period_steps) is not Steps:
         raise UnitError(f"flush_period: period_steps must be Steps, got "
@@ -235,13 +244,36 @@ def flush_period(period_steps, batch_w):
                         f"one. See opt_steps_from_backwards for why every conversion here refuses "
                         f"it: `int()` on a Clock succeeds silently, so the rate is the one argument "
                         f"a foreign kind can enter through. Pass the bare number.")
-    w = int(batch_w)
+    if type(batch_w) is not int:
+        raise UnitError(f"flush_period: batch_w={batch_w!r} is a {type(batch_w).__name__}. This "
+                        f"argument is a RATE and every rate in this file is a COUNT of one kind per "
+                        f"another, so it is an int and nothing else. It is TYPE-TESTED rather than "
+                        f"read through `int()`, because `int()` is what let the foreign kinds in at "
+                        f"this end: it took 16.9 as 16 and '16' as 16 and answered Flushes(1250) for "
+                        f"both. See opt_steps_from_backwards for the whole measurement.")
+    w = batch_w
     if w < 1:
         raise UnitError(f"flush_period: batch_w={batch_w!r} -- a flush covers at least one window.")
+    # THE NEGATIVE SIDE IS REFUSED, NOT FLOORED, and it sits AFTER the rate checks for the reason
+    # opt_steps_from_backwards gives about its own order: a caller who got both wrong should hear
+    # about the rate first, because a bad rate makes every answer wrong rather than one.
+    if period_steps.n < 0:
+        raise UnitError(f"flush_period: period_steps={period_steps!r} is negative. A cadence is a "
+                        f"count of steps BETWEEN two firings, so a negative one has no reading -- "
+                        f"and the floor below would not have said so: it would have answered "
+                        f"Flushes(1), the TIGHTEST cadence that exists, for a number nobody could "
+                        f"have meant. That floor is for a period that TRUNCATED to zero and nothing "
+                        f"else. flush_period_windows carries the measurement, because it is the one "
+                        f"of the two that spine/assemble.py::COUPLINGS calls.")
     period = period_steps.convert(Flushes, per=w)
     # A PERIOD OF ZERO IS NEVER THE ANSWER. It is either `n % 0` -- a crash -- or, on the guard forms
     # that test `period and n % period == 0`, a mechanism that is switched on and never runs, which is
     # the armed-but-inert class (57 records). One flush is the smallest cadence that exists.
+    # THE TEST STAYS `< 1` AND CAN NOW ONLY SEE 0. The refusals above leave the count non-negative
+    # and the rate at or above one, so `period.n` cannot be negative here; the clause fires on a
+    # true zero -- a cadence shorter than one flush -- which is the only case the paragraph above
+    # ever argued for. It was `< 1` when it also had to swallow negatives, and that is exactly how
+    # it came to answer the tightest cadence in the system for a lever set below zero.
     return Flushes(1) if period.n < 1 else period
 
 
@@ -282,6 +314,23 @@ def flush_period_windows(period_windows, batch_windows):
     The truncation is EXACT at every magnitude as of 2026-09-04 -- units.py::Clock.convert divided in
     float until then, which could round a period UP -- and this function and `flush_period` are that
     method's only two callers in the tree.
+
+    AND THE FLOOR MET A NEGATIVE UNTIL 2026-09-05, WHICH IS NOT WHAT IT WAS FOR. `Flushes(1) if
+    period.n < 1` was written for a cadence shorter than one flush; handed a negative it answered
+    the same Flushes(1), the TIGHTEST cadence in the system, for a number nobody could have meant.
+    THIS ONE WAS LIVE, at build time, through the declared table: FAB_MANAGE_EVERY=-500 built
+    FAB.d_manage_period=Flushes(1) and CAP_PIN_WINDOWS=-20000 built FAB.d_cap_lift_period and
+    TOK.d_cap_lift_period=Flushes(1), so the management pass and the capacity valve would have run
+    every flush of the run. Nothing in the suite tested that value at the time;
+    tests/test_fabric.py::check_f8_manage_period_kind_and_refusal, added this round, now stands
+    over exactly this path and REPORTS which layer refused -- it names the assembly, which is this
+    function inside the FAB.d_manage_period coupling. Nothing upstream
+    refuses it -- spine/lever.py::Lever carries a default, a help string, a unit and choices and no
+    bound, and spine/lever.py::Lever.coerce resolves an int lever as int(float(raw)), which accepts
+    a negative -- and the RATE end of this same function had refused its half of the same shape all
+    along: OPT_BATCH_WINDOWS=0 and =-4 both raise UnitError out of spine/assemble.py::build. One
+    nonsense number stopped the build; the other became the fastest cadence in the system. Both
+    stop it now.
     """
     if type(period_windows) is not Windows:
         raise UnitError(f"flush_period_windows: period_windows must be Windows, got "
@@ -293,11 +342,34 @@ def flush_period_windows(period_windows, batch_windows):
                         f"argument is a RATE -- windows per flush -- and a rate is a ratio of two "
                         f"kinds, not a count of one; `int()` on a Clock succeeds silently. Pass the "
                         f"bare number. See opt_steps_from_backwards.")
-    w = int(batch_windows)
+    if type(batch_windows) is not int:
+        raise UnitError(f"flush_period_windows: batch_windows={batch_windows!r} is a "
+                        f"{type(batch_windows).__name__}. This argument is a RATE and a rate here is "
+                        f"a COUNT -- windows per flush -- so it is an int and nothing else; `int()` "
+                        f"read a float, a str and a bool alike and this function answered all three. "
+                        f"See opt_steps_from_backwards.")
+    w = batch_windows
     if w < 1:
         raise UnitError(f"flush_period_windows: batch_windows={batch_windows!r} -- a flush covers at "
                         f"least one window.")
+    if period_windows.n < 0:
+        raise UnitError(f"flush_period_windows: period_windows={period_windows!r} is negative. A "
+                        f"cadence is a count of windows BETWEEN two firings and a negative one has "
+                        f"no reading. Until 2026-09-05 the floor below answered Flushes(1) for it -- "
+                        f"the TIGHTEST cadence that exists -- at BUILD time and through the declared "
+                        f"table: FAB_MANAGE_EVERY=-500 built FAB.d_manage_period=Flushes(1), and "
+                        f"CAP_PIN_WINDOWS=-20000 built FAB.d_cap_lift_period and "
+                        f"TOK.d_cap_lift_period=Flushes(1), so the management pass and the capacity "
+                        f"valve would have run every flush of the run. Nothing upstream refuses it: "
+                        f"spine/lever.py::Lever carries a default, a help string, a unit and choices "
+                        f"and no bound, and spine/lever.py::Lever.coerce resolves an int lever as "
+                        f"int(float(raw)), which accepts a negative. The rate end of this same "
+                        f"function already refused its half -- OPT_BATCH_WINDOWS=0 and =-4 both "
+                        f"raise out of spine/assemble.py::build today -- so one nonsense number "
+                        f"stopped the build while the other became the fastest cadence in the system.")
     period = period_windows.convert(Flushes, per=w)
+    # `< 1` AND NOT `== 0`, and after the refusal above it can only ever be 0: see flush_period's
+    # closing comment, which this function's floor is the same floor as.
     return Flushes(1) if period.n < 1 else period
 
 
@@ -364,9 +436,37 @@ def run_windows_from_epochs(n_epochs, windows_in_epoch):
     REFUSES with a sentence and deliberately does not clamp, "because a clamp makes the banner
     print a number the run did not use". A floor here would restore exactly that clamp one file
     away from the refusal, and it would be invisible: the run would report one epoch's worth of
-    windows for a run configured to make no passes. Downstream nothing divides by this value:
-    opt_steps_from_windows floors ITS answer at one Step, so the zero horizon that would divide by
-    zero in n_cycles is already refused where it matters.
+    windows for a run configured to make no passes.
+
+    AND THE CLAMP IS RESTORED FURTHER DOWN THIS FILE, WHICH THIS PARAGRAPH USED TO CALL A REFUSAL.
+    It ended "the zero horizon that would divide by zero in n_cycles is already refused where it
+    matters" until 2026-09-05. opt_steps_from_windows does not refuse a zero: it FLOORS its answer
+    at one Step, two functions below the paragraph above arguing that a floor is not a refusal --
+    and this tree holds those two words apart on purpose, train/api.py::startup_refusals refusing
+    RUN_EPOCHS=0 rather than clamping it to 1 and saying so in the refusal string it returns.
+    MEASURED end to end, with
+    capacity/api.py::startup_refusals stubbed to [] so the walk gets past the P4 blocker:
+    RUN_EPOCHS=1 -> Windows(634) -> Steps(634); RUN_EPOCHS=0 -> Windows(0) -> Steps(1). So the
+    honest statement is that the zero horizon cannot divide by zero in n_cycles BECAUSE a floor
+    one function away turns it into a one-step schedule, and a run configured to make no passes
+    reaches OPT as a run of one optimizer step. This function keeps its half of that: it reports
+    the zero it was handed.
+
+    A NEGATIVE COUNT IS REFUSED (2026-09-05), AND A REFUSAL IS NOT THE FLOOR THIS PARAGRAPH
+    REJECTS. Minus one pass over the stream has not happened, so there is no number of windows to
+    answer for it -- the ruling opt_steps_from_backwards makes at its own count end, for a count of
+    events that did not occur. Epochs(0) still answers Windows(0). THIS IS NOT DEFENCE IN DEPTH
+    BEHIND AN UPSTREAM THAT ALREADY REFUSES, and the measurement is what says so:
+    train/api.py::startup_refusals tests `epochs < 1`, so it does append a refusal string for a
+    negative, but that string is RETURNED -- nothing in src/ raises on System.refusals, and
+    spine/compose.py::compose collects it and keeps building. With CAP's stub returning [],
+    RUN_EPOCHS=-1 built Windows(-634) here and OPT's horizon came out Steps(1): a
+    one-optimizer-step LR schedule for a run configured to make minus one pass, with the refusal
+    sitting unread in the same System. WHERE THE ARM STANDS TODAY, NAMED RATHER THAN ASSUMED: the
+    first call is spine/compose.py::_run_windows inside the OPT.build row, and
+    capacity/api.py::startup_refusals raises NotImplementedError one row earlier, so on the tree as
+    it stands this refusal is UNREACHABLE through the composition root and reachable from any
+    direct caller.
 
     REFUSES A Clock AS THE RATE, like every conversion in this file: `windows_in_epoch` is a RATIO
     of two kinds and not a count of one, and `int()` on a Clock succeeds silently. See
@@ -384,13 +484,35 @@ def run_windows_from_epochs(n_epochs, windows_in_epoch):
                         f"ratio of two kinds, not a count of one. `int()` on a Clock succeeds, so "
                         f"the divisor is the one argument a foreign kind can enter a conversion "
                         f"through. Pass the bare number.")
-    w = int(windows_in_epoch)
+    if type(windows_in_epoch) is not int:
+        raise UnitError(f"run_windows_from_epochs: windows_in_epoch={windows_in_epoch!r} is a "
+                        f"{type(windows_in_epoch).__name__}. This argument is a RATE and a rate "
+                        f"here is a COUNT -- windows per epoch -- so it is an int and nothing "
+                        f"else. `int()` accepted '10' and answered Windows(30) for a value that "
+                        f"never went through spine/lever.py::Lever.coerce. See "
+                        f"opt_steps_from_backwards.")
+    w = windows_in_epoch
     if w < 1:
         raise UnitError(f"run_windows_from_epochs: windows_in_epoch={windows_in_epoch!r} -- an "
                         f"epoch covers at least one window. spine/compose.py::_windows_in_epoch "
                         f"floors it at 1 for the same reason: an epoch of zero windows is a "
                         f"segmentation shorter than one context, which is a data failure and not "
                         f"a run length.")
+    if n_epochs.n < 0:
+        raise UnitError(f"run_windows_from_epochs: n_epochs={n_epochs!r} is negative. An Epochs "
+                        f"counts passes over the stream and minus one pass has not happened, so "
+                        f"there is no number of windows to answer for it -- the ruling "
+                        f"opt_steps_from_backwards makes at its own count end, and NOT a floor: "
+                        f"Epochs(0) still answers Windows(0), which is the property this function "
+                        f"exists to keep. THIS IS NOT DEFENCE IN DEPTH. train/api.py::"
+                        f"startup_refusals does test epochs < 1, so it appends a refusal string "
+                        f"for a negative -- but the string is RETURNED, nothing in src/ raises on "
+                        f"System.refusals, and spine/compose.py::compose collects it and keeps "
+                        f"building: with capacity/api.py::startup_refusals stubbed to [] so the "
+                        f"walk gets past the P4 blocker, RUN_EPOCHS=-1 built Windows(-634) here "
+                        f"and OPT's horizon came out Steps(1), a one-optimizer-step LR schedule "
+                        f"for a run configured to make minus one pass, with the refusal sitting "
+                        f"unread in the same System.")
     return Windows(n_epochs.n * w)
 
 
@@ -490,6 +612,15 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
 
     TRUNCATES and floors at one, for flush_period's reasons: a horizon that rounds up ends the
     schedule after the run, and a horizon of zero is a division by zero in n_cycles.
+
+    THE FLOOR KEEPS THE ZERO AND NO LONGER SEES A NEGATIVE (2026-09-05), and those are two rulings
+    rather than one. Windows(0) -> Steps(1) is the floor the line above argues for. Windows(-634)
+    -> Steps(1) was the SAME answer for a length that is not a short run but not a run at all --
+    measured, from RUN_EPOCHS=-1 arriving through spine/compose.py::_run_windows -- so a
+    one-optimizer-step horizon was the reported answer for a negative run length, which is also the
+    answer for a zero-window run and for a 63-window run at the heavy-run command's divisor of 64.
+    The count end refuses the negative now; the zero is still floored, and this docstring is where
+    that difference is stated.
     """
     if type(run_windows) is not Windows:
         raise UnitError(f"opt_steps_from_windows: run_windows must be Windows, got "
@@ -501,12 +632,30 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
                         f"batch_windows x accum, windows per optimizer step -- and a rate is a "
                         f"ratio of two kinds, not a count of one; `int()` on a Clock succeeds "
                         f"silently. Pass the bare number. See opt_steps_from_backwards.")
-    w = int(effective_batch_windows)
+    if type(effective_batch_windows) is not int:
+        raise UnitError(f"opt_steps_from_windows: effective_batch_windows="
+                        f"{effective_batch_windows!r} is a "
+                        f"{type(effective_batch_windows).__name__}. This argument is a RATE and a "
+                        f"rate here is a COUNT -- batch_windows x accum, windows per optimizer "
+                        f"step -- so it is an int and nothing else. See opt_steps_from_backwards.")
+    w = effective_batch_windows
     if w < 1:
         raise UnitError(f"opt_steps_from_windows: effective_batch_windows={effective_batch_windows!r} "
                         f"-- an optimizer step covers at least one window. It is batch_windows x "
                         f"accum, and both are floored at 1 by their own declarations.")
+    if run_windows.n < 0:
+        raise UnitError(f"opt_steps_from_windows: run_windows={run_windows!r} is negative. A run's "
+                        f"length is a count of windows the stream will yield, and a negative one "
+                        f"is not a short run, it is not a run. The floor below answered Steps(1) "
+                        f"for it -- the SAME answer it gives a zero-window run -- so a horizon of "
+                        f"one optimizer step was reported for a negative run length: measured from "
+                        f"RUN_EPOCHS=-1, which reaches here as Windows(-634) through "
+                        f"spine/compose.py::_run_windows. The zero is floored and the negative is "
+                        f"refused, and those are two rulings, not one.")
     n = run_windows.n // w
+    # `< 1` CAN NOW ONLY SEE 0, for the reason flush_period's closing comment gives: the refusal
+    # above leaves the count non-negative and the rate at or above one. The floor that remains is
+    # the one this docstring argues for -- a horizon of zero divides by zero in n_cycles.
     return Steps(1) if n < 1 else Steps(n)
 
 
@@ -590,6 +739,18 @@ def opt_steps_from_backwards(n_backward, accum):
     Positive counts are untouched: at accum=4, 0,1,3 -> 0; 4,7 -> 1; 8 -> 2; 52 -> 13. No live
     run's number moves.
 
+    AND THE NEGATIVE REFUSAL IS NOW THE FAMILY'S, NOT THIS FUNCTION'S ALONE (2026-09-05). It stood
+    here and nowhere else for a day, and the other four conversions answered a negative count two
+    other ways: run_windows_from_epochs PASSED IT THROUGH (Epochs(-1) x 10 -> Windows(-10)),
+    while flush_period, flush_period_windows and opt_steps_from_windows FLOORED it at one -- the
+    tightest cadence and the shortest horizon that exist, which is the armed-but-inert class
+    inverted into fires-every-flush. Two of those were LIVE at build time through
+    spine/assemble.py::COUPLINGS: FAB_MANAGE_EVERY=-500 built FAB.d_manage_period=Flushes(1), and
+    CAP_PIN_WINDOWS=-20000 built FAB.d_cap_lift_period and TOK.d_cap_lift_period=Flushes(1). All
+    four refuse now, and the GATE does not: accum_due answers False for a negative count, which is
+    the same conversion/gate split this docstring already draws at the rate end and which
+    tests/test_derive.py::smoke pins.
+
     THE REFUSAL IS REACHABLE, AND IT IS NOT A GUESS ABOUT THE CALLER. opt/api.py::load_state stamps
     `opt.ckpt.backward_at_load = int(st.n_backward)` AFTER the restore, so the base equals the live
     counter at the boundary; opt/api.py::scaled_backward is the only writer afterwards and it only
@@ -597,16 +758,25 @@ def opt_steps_from_backwards(n_backward, accum):
     therefore non-negative in every sound process, and a negative one is a defect with no second
     reading -- which is exactly what makes refusing it a DETECTION and not a narrowing.
 
-    WHAT THE REFUSAL COSTS, SAID RATHER THAN LEFT TO BE FOUND. At a deficit of k or more, counters()
-    used to reach its own ValueError and print base_bwd, base_step and both live counters; it now
-    stops one line earlier, in this function, which does not hold those numbers. The message below
-    names the FOUR counter keys instead so the reader can fetch them -- opt.ckpt.backward_at_load
+    WHAT THE REFUSAL COST FOR ONE DAY, AND HOW IT WAS PAID. At a deficit of k or more, counters()
+    used to reach its own ValueError and print base_bwd, base_step and both live counters; from
+    2026-09-04 it stopped one line earlier, in this function, which does not hold those numbers.
+    The message below names the FOUR counter keys instead so the reader can fetch them -- opt.ckpt.backward_at_load
     and opt.ckpt.step_at_load against opt.backward and opt.step, two bases and two live counters,
     which is what it takes to read the fault. The sentence WITH the numbers
     in it belongs beside base_bwd in opt/api.py::counters -- `if int(st.n_backward) < base_bwd:`
-    raising before the conversion is called -- and it is filed for OPT rather than written here,
-    because this file owns the conversion and not the resume. Until it lands the fault is caught
-    here and named correctly; it is the reporting, not the detection, that is still owed.
+    raising before the conversion is called -- because this file owns the conversion and not the
+    resume. IT IS THERE AS OF 2026-09-05: opt/api.py::counters tests `int(st.n_backward) <
+    base_bwd` and raises with all four numbers before this function is reached, so the caller that
+    HAS the bases reports them. AND THAT MAKES THE ARM BELOW UNREACHABLE FROM src/ TODAY, WHICH IS
+    SAID HERE RATHER THAN LEFT TO BE FOUND: opt/api.py::counters holds the ONLY call to this
+    function in the tree, so with its guard one line earlier the refusal below now fires for
+    tests/test_derive.py::smoke and for a caller nobody has written yet. It is kept, and not as
+    politeness: this is the DETECTION, at the count, where no second regression can cancel it, and
+    it is the half that does not depend on a caller having stamped a base. The other half is the
+    REPORTING, which needs two bases this file has never been handed. A conversion that answers a
+    number for a count of events that did not happen is the defect; that it is currently shadowed
+    by a better message is a property of one caller, not of the rule.
 
     REFUSES A Clock AS ITS DIVISOR (added 2026-09-04), and that hole is worth naming because it is
     the general one. Every conversion in this file refuses a foreign kind at the CLOCK end and
@@ -614,21 +784,43 @@ def opt_steps_from_backwards(n_backward, accum):
     __index__ make the read succeed: opt_steps_from_backwards(Backwards(52), Windows(4)) returned
     Steps(13), so a Windows crossed a function whose first act is to refuse a Windows. The divisor
     is a RATE -- a ratio of two kinds -- and no count of one kind is ever the right value for it,
-    which is why the repair is a refusal and not a conversion. The same three lines are now in
+    which is why the repair is a refusal and not a conversion. The same lines are now in
     flush_period, flush_period_windows, opt_steps_from_windows, run_windows_from_epochs and
     accum_due, written out at each rather than folded into a helper for the reason pin_tick gives
     about its own two type tests.
 
+    AND THE Clock REFUSAL WAS HALF OF THAT HOLE (2026-09-05). `int(rate)` admits everything int()
+    admits, not only a Clock, so the same argument that refuses a Windows here refuses these too:
+    flush_period(Steps(20000), 16.9) answered Flushes(1250) for a rate 6% off; this function
+    answered Steps(13) for accum=4.9 and for accum='4'; run_windows_from_epochs(Epochs(3), '10')
+    answered Windows(30) for a value that never went through spine/lever.py::Lever.coerce, which
+    resolves an int lever as int(float(raw)) and cannot hand a str to anything; and a bool arrived
+    as a rate of one, so flush_period(Steps(20000), True) answered Flushes(20000). Worst at the
+    ends: nan and inf left through ValueError and OverflowError out of int() itself, so two rate
+    values escaped this family's own exception type -- the same two values, at the same argument,
+    that units.py::Clock.convert stopped letting past on 2026-09-04. THE FIX IS THE SHAPE THE CLOCK
+    END HAS ALWAYS HAD: `type(rate) is not int`, an exact type test, which also refuses a bool
+    because bool is an int subclass and the clock end refuses True by the same construction. IT
+    DOES NOT NARROW units.py::Clock.convert, whose `per` is the GENERAL rate and stays fractional
+    (tests/test_derive.py::smoke pins Flushes(250).convert(Steps, per=Fraction(1, 16)) as
+    Steps(4000)); every rate in THIS file is declared a count in its own UNIT IN line and arrives
+    from an int Lever.
+
     REFUSES ANYTHING BUT A Backwards AT ONE END, exactly as accum_due does and for the same
     measurement: the old gate counted the WINDOW counter and accumulated nothing, 55 optimizer
     steps where 13 were due. REFUSES A DIVISOR BELOW 1 at the other, as flush_period,
-    flush_period_windows and opt_steps_from_windows do. accum_due keeps a SILENT `max(1, ...)` on
-    the same lever instead, and the asymmetry is recorded rather than tidied away: that clamp
+    flush_period_windows, opt_steps_from_windows and run_windows_from_epochs all do -- FOUR, not
+    the three this sentence named until 2026-09-05; run_windows_from_epochs has refused a rate
+    below one since it was written and was left out of the list. accum_due keeps a `max(1, ...)`
+    on the same lever instead, and the asymmetry is recorded rather than tidied away: that clamp
     reproduces the shipped read-site `max(1, _i("ACCUM", 1))` (self_organize.py:4198), which
-    opt/levers.py::OPTLevers names as the one surviving guard that "still hides a typo". This is a
-    CONVERSION and not a gate, so it refuses like the other three; and opt/api.py::build refuses
-    OPT_ACCUM below 1 at startup, so no live run can reach either behaviour with a divisor the
-    other would have handled differently.
+    opt/levers.py::OPTLevers names as the one surviving guard that "still hides a typo". It was
+    SILENT in the sense that mattered -- argued for HERE and in accum_due's own refusal message,
+    and nowhere in accum_due's docstring, which is where a reader of accum_due looks -- and that is
+    repaired at accum_due as of 2026-09-05 rather than by moving the clamp. This is a CONVERSION
+    and not a gate, so it refuses like the other four; and opt/api.py::build refuses OPT_ACCUM
+    below 1 at startup, so no live run can reach either behaviour with a divisor the other would
+    have handled differently.
     """
     if type(n_backward) is not Backwards:
         raise UnitError(f"opt_steps_from_backwards: n_backward must be Backwards, got "
@@ -645,7 +837,16 @@ def opt_steps_from_backwards(n_backward, accum):
                         f"opt_steps_from_backwards(Backwards(52), Windows(4)) -- the kind refused "
                         f"at the other end, entering through the one argument that had none. Pass "
                         f"the bare number.")
-    k = int(accum)
+    if type(accum) is not int:
+        raise UnitError(f"opt_steps_from_backwards: accum={accum!r} is a {type(accum).__name__}. "
+                        f"This divisor is a RATE and a rate here is a COUNT -- backward passes per "
+                        f"optimizer step -- so it is an int and nothing else. The Clock refusal "
+                        f"above was HALF the hole: `int()` admits every type it admits, so 4.9 came "
+                        f"back Steps(13) for a rate that is not a rate, '4' came back Steps(13) for "
+                        f"a value that never went through spine/lever.py::Lever.coerce, and nan and "
+                        f"inf left the family through ValueError and OverflowError rather than "
+                        f"UnitError. The clock end has always been type-tested; this end is now too.")
+    k = accum
     if k < 1:
         raise UnitError(f"opt_steps_from_backwards: accum={accum!r} -- an optimizer step covers at "
                         f"least one backward pass. This divisor is accum ALONE and never "
@@ -699,6 +900,29 @@ def accum_due(n_backward, accum):
 
     n_backward = 0 is NOT due: no backward pass has happened, so there is nothing to step on. Stepping at
     zero is how a run takes an optimizer step on an empty gradient before its first batch.
+
+    THE RATE IS CLAMPED HERE AND REFUSED IN opt_steps_from_backwards, AND THAT ASYMMETRY IS
+    DELIBERATE -- STATED HERE FROM 2026-09-05, having lived only in the other function's docstring
+    and in this one's own refusal message, which is not where a reader of accum_due looks.
+    `k = max(1, int(accum))` below reproduces the shipped read-site `max(1, _i("ACCUM", 1))`
+    (self_organize.py:4198), which opt/levers.py::OPTLevers names as the one surviving guard that
+    still hides a typo. opt_steps_from_backwards is a CONVERSION and refuses a rate below one; this
+    is a GATE and answers one. Neither reading is silent any more: opt/api.py::build refuses
+    OPT_ACCUM below 1 at startup with its own sentence, so no live run reaches either behaviour,
+    and tests/test_derive.py::smoke pins all three answers -- accum_due(Backwards(52), 0) is True,
+    accum_due(Backwards(52), -4) is True, accum_due(Backwards(-4), 4) is False -- so the difference
+    is a decision on the record rather than one nobody noticed. THE CLAMP IS ABOUT THE VALUE AND
+    NOT THE KIND, which is why two refusals sit above it: a Clock rate, and any rate that is not an
+    int. No clamp can repair a kind.
+
+    A NEGATIVE COUNT IS ANSWERED, NOT REFUSED, AND THAT IS THE OTHER HALF OF THE SAME SPLIT. `n > 0`
+    is False at Backwards(-4), so this gate says no step is due where opt_steps_from_backwards
+    raises. A gate is asked a yes/no question about the state it is handed, and "no step is due" is
+    a true answer for a state that cannot have accumulated one; a conversion is asked for a NUMBER,
+    and there is no honest number of optimizer steps for minus four backward passes. All FIVE
+    conversions in this file refuse a negative count as of 2026-09-05 -- flush_period,
+    flush_period_windows, run_windows_from_epochs, opt_steps_from_windows and
+    opt_steps_from_backwards; this gate is the one that does not, on purpose.
     """
     if type(n_backward) is not Backwards:
         raise UnitError(f"accum_due: n_backward must be Backwards, got {type(n_backward).__name__}. "
@@ -711,6 +935,13 @@ def accum_due(n_backward, accum):
                         f"in opt_steps_from_backwards. THE max(1, ...) BELOW IS UNTOUCHED and is "
                         f"still the shipped read-site clamp: this refusal is about the KIND, which "
                         f"no clamp can repair, and not about the value.")
+    if type(accum) is not int:
+        raise UnitError(f"accum_due: accum={accum!r} is a {type(accum).__name__}. This is a RATE "
+                        f"and a rate here is a COUNT -- backward passes per optimizer step -- so "
+                        f"it is an int and nothing else. THE max(1, ...) BELOW IS UNTOUCHED BY "
+                        f"THIS TOO: a clamp is about the VALUE and this is about the TYPE, and "
+                        f"`int()` read 4.9 and '4' as 4 and this gate answered True for both. See "
+                        f"opt_steps_from_backwards.")
     n = int(n_backward)
     k = max(1, int(accum))
     return n > 0 and n % k == 0

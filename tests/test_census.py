@@ -29,7 +29,9 @@ cannot accumulate entries that once meant something.
 
 Writing the reasons here rather than pointing at the package docstrings would duplicate them, and a
 reason written twice can disagree with itself -- the SIG_WIN defect at the level of prose. Each entry
-carries the file and line where the argument actually lives.
+carries the file and line where the argument actually lives, and N8 OPENS THAT POINTER: it was written
+once and the files it indexes kept being edited, so three of the nine had drifted onto other levers'
+text while every check here stayed green.
 
 WHAT THIS FILE CANNOT CATCH:
   * whether the census itself is right. It was written by reading self_organize.py, and a knob it
@@ -79,11 +81,12 @@ def _report(tag, title, ok, detail, findings, vacuous=False):
 #
 # Keyed by (family, old_name) -- the census row's own identity, which does not move when the tree
 # renames things. `lands` is what the tree actually built: an environment name, a "PKG.d_field" wire, or
-# None for "deliberately nothing". `where` is the file and line carrying the argument.
+# None for "deliberately nothing". `where` is the file and line carrying the argument -- a citation
+# like any other, opened by N8, because a line index into a file that is still being edited drifts.
 
 DEPARTURES = {
     ("fabric", "FAB_NMAX"): dict(
-        census="FAB_NMAX", lands="FAB_SLOTS", where="src/fabric/levers.py:269-281",
+        census="FAB_NMAX", lands="FAB_SLOTS", where="src/fabric/levers.py:296-307",
         why="The field is `slots`, so the generated environment name is FAB_SLOTS. Not cosmetic and not "
             "reversible by preference: spine/assemble.py reads r['FAB'].slots in five couplings, "
             "spine/derive.py's cull_gate_open and operating_population are both written against that "
@@ -112,25 +115,25 @@ DEPARTURES = {
             "three-valued enum with one unreachable value is an armed-but-inert branch by construction, "
             "so the boolean stands until a row exists that needs the third."),
     ("fabric", "ROUTE_LEARN"): dict(
-        census="FAB_ROUTE_IDENT_W", lands="FAB_ROUTE_LEARN", where="src/fabric/levers.py:68-74, :325",
+        census="FAB_ROUTE_IDENT_W", lands="FAB_ROUTE_LEARN", where="src/fabric/levers.py:68-74, :344-352",
         why="The census merges the flag into a WEIGHT, which is the better design and needs the "
             "identity term's scale to be a real number somewhere in the mechanism. It is not, yet: the "
             "term is added or not added. Shipping FAB_ROUTE_IDENT_W now would be a lever whose "
             "intermediate values do nothing -- a knob that reads continuous and behaves boolean, which "
             "is the wrong-measurement family."),
     ("misc", "WRONG_SWEEP"): dict(
-        census="MEM_SWEEP", lands="MEM_WRONG_SWEEP", where="src/memory/levers.py:27, :62-63, :412",
+        census="MEM_SWEEP", lands="MEM_WRONG_SWEEP", where="src/memory/levers.py:27, :63-68, :437-449",
         why="The census's MEM_SWEEP is a POLICY knob folding several wrong-entry behaviours together. "
             "The fold's other inputs were dropped (WRONG_MARGIN, WRONG_MIN_N, WRONG_THRESH), so what is "
             "left to merge is one flag, and a policy enum with one input is that flag under a name that "
-            "claims more. memory/levers.py:62-63 is the record that the policy knob was intended."),
+            "claims more. memory/levers.py:67-68 is the record that the policy knob was intended."),
     ("domains", "MAX_DOMAINS"): dict(
         census="FAB.d_expert_slots", lands="DOM.d_expert_slots", where="spine/assemble.py, DOM row",
         why="The census row's new_owner FIELD says FAB and its own REASON text says the opposite -- 'it "
             "lands on DOM as d_expert_slots and on MEM as d_src_hint' (CENSUS.md:208). The reason is "
             "right and the field is a slip: FAB is the SOURCE (it owns `slots`); a wire whose src and "
             "dst were both FAB would book no edge and constrain nothing. The tree follows the reason, "
-            "and lands the second half on MEM as d_source_slots -- named for what memory/levers.py:69 "
+            "and lands the second half on MEM as d_source_slots -- named for what memory/levers.py:74 "
             "declares it expects, not the reason's d_src_hint."),
     ("tokenizer", "TOKENIZER_PATH"): dict(
         census="CKPT.d_vocab_path", lands="TOK.d_vocab_save_path + TOK.d_vocab_read_path",
@@ -527,6 +530,40 @@ def selftest():
          check_n6_row_identity_is_unique, _dup, env, dsts)
     case("N6 passes on the real census", False, check_n6_row_identity_is_unique, rows, env, dsts)
 
+    # --- N8: the drift this check was written for, replayed. `where` is only ever read by a human
+    # --- following it, so every case here is a pointer that still parses and no longer points.
+    saved8 = dict(DEPARTURES)
+    try:
+        case("N8 passes on the real tree", False,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        # THE ACTUAL DEFECT, at the actual value it had: :269-281 was the `slots` declaration and its
+        # rename note when this table was written, and 27 lines of growth above it turned the same
+        # span into `ponder`, `ponder_warm` and a section header.
+        DEPARTURES[("fabric", "FAB_NMAX")] = dict(
+            saved8[("fabric", "FAB_NMAX")], where="src/fabric/levers.py:269-281")
+        case("N8 catches a `where` that has drifted onto another lever", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        DEPARTURES[("fabric", "FAB_NMAX")] = dict(
+            saved8[("fabric", "FAB_NMAX")], where="src/fabric/no_such_file.py:1-3")
+        case("N8 catches a `where` naming a file the tree does not have", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        DEPARTURES[("fabric", "FAB_NMAX")] = dict(
+            saved8[("fabric", "FAB_NMAX")], where="src/fabric/levers.py:99000-99010")
+        case("N8 catches a span that runs off the end of the file", True,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+        # AND THE ABSTENTION ARM, which is the one that makes the three above worth something: a
+        # `where` with no line index in it must PASS rather than be guessed at, or the check would
+        # report the three prose entries every run and be switched off.
+        DEPARTURES[("fabric", "FAB_NMAX")] = dict(
+            saved8[("fabric", "FAB_NMAX")], where="spine/assemble.py, the FAB row")
+        case("N8 does not fire on a `where` that names no line", False,
+             check_n8_departure_arguments_still_there, rows, env, dsts)
+    finally:
+        DEPARTURES.clear(); DEPARTURES.update(saved8)
+
     # --- N5: the mitigation actually failing, in a temp tree, in both of its two forms. ---
     tmp = tempfile.mkdtemp(prefix="n5probe-")
     try:
@@ -714,6 +751,156 @@ def check_n7_issue_citations_resolve(rows, env_names, wire_dsts):
                    findings, vacuous=(cited == 0 or not defined))
 
 
+
+# ==================================================================================================
+# N8 -- a departure's `where` is a citation, and a line index into a file that MOVES
+# ==================================================================================================
+#
+# MEASURED, WHICH IS WHY THIS EXISTS, and it is the same finding N7 makes one field over. Every
+# `where` above was CORRECT when it was written at af4cd06 and four of the nine have since drifted,
+# because the files they index kept being edited above the cited line:
+#
+#   fabric/FAB_NMAX     :269-281  was the `slots` declaration and its rename note. src/fabric/
+#                                 levers.py grew 27 lines above it, so the span now covers `ponder`,
+#                                 `ponder_warm` and a section header -- three levers with nothing to
+#                                 do with FAB_NMAX, reading as though they were the argument.
+#   fabric/ROUTE_LEARN  :325      was the `route_learn` declaration; the same 27 lines moved it to
+#                                 :352, and :325 is now inside `grow`'s comment.
+#   misc/WRONG_SWEEP    :412      was `wrong_sweep = Lever(`; it is now :437, and :412 sits inside
+#                                 the `verify` lever's help text.
+#   misc/WRONG_SWEEP    :62-63    was DEFECT 3's last two lines and now covers the blank line above
+#                                 that paragraph and its first. The only one of the four still
+#                                 landing on the right paragraph, and so the only one this check
+#                                 would NOT have caught -- widened to :63-68, the whole argument.
+#
+# So three of nine pointed a reader at an unrelated lever, under a table whose own docstring says
+# "each entry carries the file and line where the argument actually lives", and every check in this
+# file was green throughout. That is the prose-that-lies-under-a-green-check shape, in the field
+# whose entire job is to be followed.
+#
+# WHY NOT SIMPLY DROP THE NUMBERS, which is what N7 rules for ISSUES.md citations. Because the
+# argument for a departure lives in a COMMENT under a declaration, and a comment has no symbol to
+# name -- `src/fabric/levers.py::FABLevers.slots` would resolve, but the rename note is the six
+# lines below it and O12's citation form cannot reach them. The line span is the only pointer that
+# reaches the actual text, so it is kept and CHECKED instead of being replaced by a weaker one that
+# needs no checking. A symbol-form `where` is filed as a design question, not decided here.
+
+_WHERE_SPAN = re.compile(r"^:?(\d+)(?:-(\d+))?$")
+
+
+def _where_spans(where):
+    """Parse a `where` into (path, [(first_line, last_line), ...]). No line index parses to no spans.
+
+    The line form is `PATH:N[-M][, :N[-M]]*`. An entry that points at prose instead --
+    `spine/assemble.py, DOM row` -- names no line, so it cannot drift and there is nothing here to
+    check; it comes back with no spans and N8 counts it rather than reporting it. Anything that
+    starts like the line form and then does not parse comes back with no spans too: guessing at a
+    half-understood pointer is how a check invents a finding.
+    """
+    parts = [p.strip() for p in str(where).split(",")]
+    if ":" not in parts[0]:
+        return "", []
+    path, first = parts[0].rsplit(":", 1)
+    spans = []
+    for piece in [first] + parts[1:]:
+        m = _WHERE_SPAN.match(piece.strip())
+        if not m:
+            return path, []
+        a = int(m.group(1))
+        spans.append((a, int(m.group(2) or a)))
+    return path, spans
+
+
+def _where_tokens(old, dep):
+    """The names a departure's own argument must mention: its census identity and what it landed.
+
+    A landing name is ALSO offered with its package prefix stripped, because a levers.py declares the
+    FIELD (`slots`, `norm_only`, `wrong_sweep`) while this table records the environment name the
+    spine generates from it (FAB_SLOTS, FAB_NORM_ONLY, MEM_WRONG_SWEEP). Comparison is
+    case-insensitive for the same reason: `wrong_sweep` in the declaration is WRONG_SWEEP here.
+
+    SIX CHARACTERS IS THE FLOOR AND IT IS NOT ARBITRARY. Stripping the prefix off FAB_MODE leaves
+    `mode` and off CKPT.d_vocab_path leaves `ckpt`, and a four-letter token matches somewhere in any
+    page of this project's prose -- a check that accepts `mode` accepts every span in fabric/
+    levers.py and is worth nothing. The floor costs `nmax` and `slots` off FAB_NMAX/FAB_SLOTS, and
+    that entry is still covered because its span carries the full FAB_NMAX.
+    """
+    toks = set()
+    for raw in (old, dep.get("census") or "", dep.get("lands") or ""):
+        for piece in re.split(r"[+.\s]+", raw):
+            piece = piece.strip()
+            if len(piece) >= 6:
+                toks.add(piece.lower())
+            if "_" in piece and len(piece.split("_", 1)[1]) >= 6:
+                toks.add(piece.split("_", 1)[1].lower())
+    return toks
+
+
+def check_n8_departure_arguments_still_there(rows, env_names, wire_dsts):
+    """N8 -- every departure's `where` opens, and the lines it names still discuss that departure.
+
+    N3 proves a departure still DEPARTS and still LANDS. It does not open `where`, so the pointer to
+    the argument is the one part of an entry that nothing has ever followed -- and three of the nine
+    were pointing at unrelated levers when this check was written (the block above measures each).
+
+    THREE THINGS ARE CHECKED, two of them mechanical and one a heuristic that says so:
+      * the cited file exists;
+      * every span lies inside it, so a range that ran off the end of a shrinking file is a finding
+        rather than a silently empty read;
+      * the span's text MENTIONS the departure -- its census name, its landing name, or either with
+        the package prefix stripped, case-insensitively.
+
+    WHAT THE THIRD ARM CANNOT CATCH, said here rather than discovered later. It is a substring test
+    over prose. A span that has slid a few lines WITHIN the paragraph that argues the departure
+    still mentions it and passes -- WRONG_SWEEP's `:62-63` had drifted from the end of DEFECT 3 to
+    its beginning and this check would have called it fine. It catches the span that has left the
+    argument altogether, which is what the other three had done. It also cannot tell a mention from
+    an argument: a lever's declaration that merely names FAB_NMAX in passing would satisfy it.
+
+    A `where` THAT NAMES NO LINE IS NOT A FAILURE. Three entries point at prose --
+    `spine/assemble.py, DOM row`, `spine/assemble.py, 'considered and rejected'` twice -- and a pointer
+    with no line index cannot drift. They are counted in the detail line so the population this
+    check actually opened is visible next to the population it skipped, which is the rule _report
+    exists for.
+    """
+    findings, opened, prose = [], 0, 0
+    for (fam, old), dep in sorted(DEPARTURES.items()):
+        path, spans = _where_spans(dep.get("where") or "")
+        if not spans:
+            prose += 1
+            continue
+        full = os.path.join(ROOT, path)
+        try:
+            lines = io.open(full, encoding="utf-8").read().splitlines()
+        except OSError:
+            findings.append(f"{fam}/{old}: `where` names {path}, which this tree does not contain, "
+                            f"so the argument for this departure cannot be read at all.")
+            continue
+        toks = _where_tokens(old, dep)
+        if not toks:
+            findings.append(f"{fam}/{old}: no name of six characters or more to look for -- census "
+                            f"{dep.get('census')!r}, lands {dep.get('lands')!r} -- so `where` cannot "
+                            f"be checked and this entry needs one written out.")
+            continue
+        for a, b in spans:
+            opened += 1
+            if a < 1 or b < a or b > len(lines):
+                findings.append(f"{fam}/{old}: `where` names {path}:{a}-{b} and that file has "
+                                f"{len(lines)} line(s). The span is outside it, so the citation "
+                                f"reads as empty rather than wrong.")
+                continue
+            text = "\n".join(lines[a - 1:b]).lower()
+            if not any(t in text for t in toks):
+                findings.append(
+                    f"{fam}/{old}: `where` names {path}:{a}-{b}, and those lines mention none of "
+                    f"{sorted(toks)}. A line index into a file that is still being edited drifts, "
+                    f"and this one has: it now points at other levers' text. Find the argument and "
+                    f"re-cite it -- first line there is {lines[a - 1].strip()[:60]!r}")
+    detail = (f"{opened} line span(s) opened across {len(DEPARTURES) - prose} departure(s); {prose} "
+              f"point at prose and carry no line index to drift")
+    return _report("N8", "every departure's `where` opens on lines that still argue it",
+                   not findings, detail, findings, vacuous=(opened == 0))
+
 def _issues_line_count():
     try:
         return sum(1 for _ in io.open(ISSUES_MD, encoding="utf-8"))
@@ -740,6 +927,7 @@ CHECKS = (
     check_n5_the_shadowed_names_still_resolve_to_src,
     check_n6_row_identity_is_unique,
     check_n7_issue_citations_resolve,
+    check_n8_departure_arguments_still_there,
 )
 
 

@@ -40,6 +40,38 @@ from spine.init import is_scale as _is_scale
 from spine import units as U
 
 
+# ==================================================================================================
+# THE SWITCH ON THE NEGATIVE-PERIOD REFUSAL
+# ==================================================================================================
+
+REFUSE_NEGATIVE_PERIOD = True
+"""Whether manage_period refuses a negative FAB_MANAGE_EVERY. True is the shipped state; False lets
+the value through to units.Windows exactly as it did before 2026-09-04.
+
+THE RULING (owner, 2026-09-04): "On the periods, let's refuse for now. If it has a bad effect, we
+can turn off the refusal." The first sentence is the guard in manage_period; this name is the
+second, which binds just as hard -- .rework/DECISIONS.md D4 rules that a thing kept for later is
+kept WITH A SWITCH rather than as a code path that rots, and OFF is what is being kept.
+
+THE ALTERNATIVES, THEIR PRICES AND THE MEASUREMENT THAT WOULD SETTLE THE CHOICE ARE WRITTEN OUT
+ONCE, AT ckpt/api.py::REFUSE_NEGATIVE_PERIOD, and are not restated here: CKPT is where this question
+was opened and where the first of the five refusals shipped. WHAT IS THIS FILE'S OWN, and the reason
+the name is spelled here rather than imported: tests/test_ownership.py::check_o10_no_backdoor_imports
+forbids FAB to import ckpt, so the five switches are five per-package policies that happen to share
+a default, each governing only its own package's lever. This one governs FAB_MANAGE_EVERY and
+nothing else, and turning it off here leaves the other four refusing.
+
+IT IS NOT THE OFF SWITCH FOR THE FABRIC OR FOR ITS MANAGEMENT PASS. FAB_ON removes the fabric from
+the forward path and FAB_GROW freezes the population; this constant touches neither, and it does not
+touch FAB_MANAGE_EVERY=0 in either position.
+
+THE COST, SO IT IS NOT DISCOVERED: turning it off is a CODE EDIT. There is no
+FAB_REFUSE_NEGATIVE_PERIOD, no census row and no row in the generated lever document -- deliberately,
+because a lever per package would be five environment names for one decision and would make "some
+accessors refuse and some do not" a reachable configuration.
+"""
+
+
 @dataclasses.dataclass(frozen=True)
 class FabricOut:
     """What ONE routed forward pass produced. The field list is the module docstring's, verbatim.
@@ -2452,4 +2484,60 @@ def manage_period(fab: Config):
                  is the point of routing every gate through one primitive.
     """
     fab = fab.owned_by("FAB")
-    return U.Windows(int(fab.manage_every))
+    every = int(fab.manage_every)
+    # A NEGATIVE MANAGEMENT CADENCE IS REFUSED HERE, AT THE ONLY PLACE `manage_every` IS READ IN
+    # THIS PACKAGE (added 2026-09-04 under the owner's ruling; the switch and the alternatives are
+    # at REFUSE_NEGATIVE_PERIOD at the top of this file). It fires BEFORE the Windows is constructed,
+    # so no other number is derived from the bad value -- the placement rule
+    # capacity/api.py::new_valve took from lm/api.py::resolve, applied here rather than copied: this
+    # is a range check over FAB's own lever at its first read, and FAB declares no refusal entry
+    # point for it to live in.
+    #
+    # WHAT A NEGATIVE ACTUALLY DOES TODAY, MEASURED RATHER THAN ASSUMED. `assemble.build` accepts
+    # FAB_MANAGE_EVERY=-5 and freezes it; this accessor returned Windows(-5); and
+    # spine/derive.py::cadences_that_cannot_fire then reported ("fab.manage", -5, 0) -- the SAME
+    # shape of line it prints for a period of zero. Meanwhile RUN.Cadences.due states its contract
+    # as "True at most once per `period` WINDOWS elapsed since this key last fired", so a body
+    # written to it compares `step - last_fired >= period.n`, which at -5 is true on the FIRST
+    # window and every window after. A negative here is therefore the cull, the spares, replication
+    # and the staged-depth check on EVERY window, reported by the one live reader as a gate that
+    # cannot fire. That is the same false equation ckpt/api.py::save_period was repaired for.
+    #
+    # THE THIRD READING IS THE REASON THIS ONE MATTERS MORE THAN ITS SIBLINGS, and it is measured
+    # rather than feared. This field is ALSO the source of the FAB.d_manage_period wire, which
+    # spine/assemble.py computes with spine/derive.py::flush_period_windows -- and that function
+    # FLOORS AT ONE FLUSH. So at FAB_MANAGE_EVERY=-5 the tree carried three answers for one number
+    # at once, checked by running assemble.build on 2026-09-04: the wire resolved to Flushes(1),
+    # i.e. "manage on every flush"; this accessor returned Windows(-5); and
+    # cadences_that_cannot_fire reported ("fab.manage", -5, 0), i.e. "this gate cannot fire". The
+    # ledger and the audit printed opposite sentences about the same lever in the same run.
+    # THIS GUARD DOES NOT STAND BETWEEN THE LEVER AND THAT COUPLING and is not claimed to: a wire is
+    # computed from the frozen Config before any accessor runs, so the floored Flushes(1) still
+    # exists in the ledger. What it does is stop the run at the cadence stage rather than let it
+    # proceed with one number wearing three meanings.
+    #
+    # ZERO IS NOT TOUCHED, AND WHAT ZERO MEANS HERE IS NOT DECIDED BY THIS GUARD. Unlike CKPT.every
+    # (0 disables periodic saving, in the lever's own help text) and MEM.rekey_every (0 DISARMS, in
+    # memory/api.py::maintain), FAB_MANAGE_EVERY=0 has NO declared meaning in src/fabric/levers.py or
+    # in this file, and there is no `manage` flag here either -- DOM has one and FAB does not, which
+    # is the asymmetry the two files' split left behind. The test below is strictly
+    # `< 0`, so whatever the tree eventually rules 0 to mean, it still reaches the same readers it
+    # reaches today.
+    #
+    # IT REMOVES NO CONFIGURATION. FAB_MANAGE_EVERY=1 is the every-window pass and is in range; the
+    # negative range spells nothing this lever's help text gives a meaning to.
+    if REFUSE_NEGATIVE_PERIOD and every < 0:
+        raise LeverError(
+            f"FAB_MANAGE_EVERY={every}: a management cadence is a count of windows ELAPSED since "
+            f"the last pass and may not run backwards. RUN.Cadences.due fires when "
+            f"`step - last_fired >= period`, so a negative period is true on the first window and "
+            f"on every window after it -- {every} does not mean 'manage less often' or 'do not "
+            f"manage', it means the cull, the spares, replication and the staged-depth check on "
+            f"EVERY window, while spine/derive.py::cadences_that_cannot_fire reports the same value "
+            f"as a gate that cannot fire. FAB_MANAGE_EVERY=1 is the every-window pass and is in "
+            f"range. This lever declares no meaning for 0 either, and 0 is deliberately left alone "
+            f"by this refusal rather than folded into it. No second lever is consulted here: "
+            f"FAB_ON removes the fabric from the forward path and FAB_GROW freezes the population, "
+            f"and neither is an off switch for the management pass -- this refuses an out-of-range "
+            f"value for FAB's own cadence lever, whether or not another lever makes it moot.")
+    return U.Windows(every)

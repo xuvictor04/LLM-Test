@@ -116,7 +116,8 @@ def smoke():
     thing that does. Each one checks the PROPERTY the function exists to guarantee, not a spot value --
     a spot value would have passed for the one-byte signature width too.
     """
-    from spine.units import Backwards, Flushes, Steps, UnitError, Windows
+    from fractions import Fraction
+    from spine.units import Backwards, Epochs, Flushes, Steps, UnitError, Windows
 
     # operating_population is the setpoint the cull gate settles at, so the two must agree by
     # construction. This is the assertion that would have caught FAB_N0=2048 vs FAB_NMAX=4096 parking
@@ -175,6 +176,128 @@ def smoke():
         except UnitError:
             pass
 
+    # --- units.py::Clock.convert, THE DECLARED PATH BETWEEN KINDS, AND THE TWO CALLERS ABOVE AT THE
+    # ONE PLACE THEY DISAGREE WITH THE BODY THEY USED TO HAVE. The method divided in FLOAT until
+    # 2026-09-04 -- `to(int(self.n / per))` -- and now divides in fractions.Fraction and truncates
+    # once at the end. spine/derive.py::flush_period and spine/derive.py::flush_period_windows are
+    # its only two callers in src/, so two of derive's five cross-kind conversions were performing
+    # in float the operation spine/derive.py::opt_steps_from_backwards refuses BY NAME in its
+    # closing comment ("Integer `//` and not `int(n / k)`: float division loses exactness above
+    # 2**53 and a backward count is unbounded") -- and they were performing it BECAUSE they delegate
+    # here rather than dividing themselves, which is the one way a module can break its own rule
+    # while every line it owns still obeys it.
+    #
+    # A TABLE OF INPUTS WHERE FLOAT AND EXACT DIVISION AGREE WOULD TEST NOTHING HERE -- the
+    # disagreement is the entire reason the body changed -- so every count below is chosen to make
+    # them disagree, and the last assertion in the loop re-runs the OLD body to prove the case still
+    # discriminates. The expected answers are hand arithmetic on the integers and not a recording of
+    # what the function returned.
+    #
+    # THE MECHANISM, so the five rows read as arithmetic rather than as magic numbers. A float64
+    # carries a 53-bit significand, so the representable integers step by 2 above 2**53 and by 4
+    # above 2**54; every ODD integer in [2**53, 2**54) therefore sits exactly halfway between two
+    # neighbours and float() resolves that tie to the EVEN one -- which is why the error goes DOWN
+    # for some counts and UP for others rather than always toward zero.
+    #
+    #   n = 2**53+1 = 9007199254740993, per = 1
+    #       exact 9007199254740993; float(n) ties DOWN to 2**53, so the old body answered
+    #       9007199254740992 -- one flush short.
+    #   n = 2**53+3 = 9007199254740995, per = 2
+    #       9007199254740995 = 2 x 4503599627370497 + 1, so the truncated answer is 4503599627370497;
+    #       float(n) ties UP to 9007199254740996 and half of that is 4503599627370498 -- ONE FLUSH
+    #       LARGER than the true period. A period that rounds up FIRES LATE, the one direction both
+    #       callers' docstrings say they refuse to bias toward. These two rows are the measurements
+    #       units.py::Clock.convert quotes for itself.
+    #   n = 2**53+7 = 9007199254740999, per = 4
+    #       = 4 x 2251799813685249 + 3, so 2251799813685249; float(n) ties UP to 9007199254741000 and
+    #       a quarter of that is 2251799813685250. Late again, at a third rate.
+    #   n = 2**54+2 = 18014398509481986, per = 1 and per = 2
+    #       above 2**54 the step is 4, so float(n) ties DOWN to 2**54 = 18014398509481984: the per=1
+    #       answer was TWO short, and the per=2 answer -- 9007199254740993 exactly, no remainder --
+    #       was one short. The same count under two rates, so the row is not a property of `per`.
+    #
+    # NO LIVE CONFIGURATION IS ANYWHERE NEAR THESE MAGNITUDES (the shipped cadences are in the tens
+    # of thousands, so no shipped number moved), and that is the standing this file gives every
+    # other rule in the spine rather than an argument against the repair: an inline cross-kind
+    # division is a defect even when its number is right at the defaults.
+    for n, per, want in ((2**53 + 1, 1, 9007199254740993),
+                         (2**53 + 3, 2, 4503599627370497),
+                         (2**53 + 7, 4, 2251799813685249),
+                         (2**54 + 2, 1, 18014398509481986),
+                         (2**54 + 2, 2, 9007199254740993)):
+        assert type(derive.flush_period(Steps(n), per)) is Flushes, (n, per)
+        assert derive.flush_period(Steps(n), per) == Flushes(want), ("flush_period", n, per)
+        assert derive.flush_period_windows(Windows(n), per) == Flushes(want), ("fpw", n, per)
+        # The old body, re-run. If this ever stops holding, the case has been softened into one
+        # float gets right, and the table above would be green while proving nothing.
+        assert int(n / per) != want, ("case no longer discriminates float from exact", n, per)
+
+    # convert ITSELF, which nothing in this file had ever called even though units.py calls it "the
+    # ONE legal way to cross kinds". The answer wears the TARGET kind, and 20000 / 16 = 1250.
+    assert type(Steps(20000).convert(Flushes, per=16)) is Flushes
+    assert Steps(20000).convert(Flushes, per=16) == Flushes(1250)
+    # TRUNCATES TOWARD ZERO AT BOTH SIGNS, which is what `int()` on a Fraction does and what the
+    # method promises ("truncation is preserved at every input, negatives included"). 7/2 = 3.5 -> 3
+    # and -7/2 = -3.5 -> -3, where FLOOR would answer -4. Neither caller can reach the negative side
+    # -- both floor their result at one flush -- so this is convert's own contract and nothing
+    # else's, and it is the half of "exact" that a Fraction changes without changing the rounding.
+    assert Steps(7).convert(Flushes, per=2) == Flushes(3)
+    assert Steps(-7).convert(Flushes, per=2) == Flushes(-3)
+    assert -7 // 2 == -4                       # floor's answer, so the contrast is in the file
+    # A RATE BELOW ONE IS THE DOCUMENTED FLUSHES -> STEPS SPELLING (`per=1/batch_w`), and it is why
+    # the body cannot be an integer `//`: the divisor is not always an integer. 1/16 is a binary
+    # fraction, so the float literal and the exact rational are the SAME number here and both give
+    # 250 / (1/16) = 4000.
+    assert Flushes(250).convert(Steps, per=Fraction(1, 16)) == Steps(4000)
+    assert Flushes(250).convert(Steps, per=1 / 16) == Steps(4000)
+    # AND THIS IS WHAT A Fraction CANNOT FIX, which the method says in as many words: a rate that is
+    # not a binary fraction is ALREADY inexact when it arrives. The literal 0.2 is exactly
+    # 3602879701896397 / 2**54, which is LARGER than one fifth (3602879701896397 x 5 =
+    # 18014398509481985, one more than 2**54), so 10 / 0.2 comes to just under 50 and truncates to
+    # 49 -- while the rate the caller meant, Fraction(1, 5), gives exactly 50. BOTH are asserted
+    # because the repair made the division exact over the rate it was HANDED, not over the rate the
+    # caller had in mind, and a test carrying only the second number would claim the wrong thing.
+    assert Steps(10).convert(Flushes, per=0.2) == Flushes(49)
+    assert Steps(10).convert(Flushes, per=Fraction(1, 5)) == Flushes(50)
+    # THE TARGET MUST BE A KIND AND NOT AN INSTANCE OF ONE. `period.convert(Flushes(1), ...)` is the
+    # plausible slip, and without this arm it would be a TypeError from calling an instance.
+    for bad_to in (int, float, None, "Flushes", Flushes(1)):
+        try:
+            Steps(10).convert(bad_to, per=2)
+            raise AssertionError(f"convert accepted {bad_to!r} as a target kind")
+        except UnitError:
+            pass
+    # A RATE OF ZERO OR BELOW, refused before anything divides.
+    for bad in (0, -1, -0.5, float("-inf")):
+        try:
+            Steps(10).convert(Flushes, per=bad)
+            raise AssertionError(f"convert accepted a rate of {bad!r}")
+        except UnitError as e:
+            assert "must be positive" in str(e), (bad, str(e))
+    # nan AND inf REACH PAST THAT GUARD, which is the distinction the method draws and which a test
+    # asserting only UnitError cannot see: both comparisons below are False, so the exact-value arm
+    # is the one that fires, and the old float body answered nan with a ValueError out of int() and
+    # inf with a SILENT ZERO -- a period of zero being the armed-and-inert class flush_period floors
+    # at one flush to avoid. The message is asserted for the reason bwt_of's is: it is the only
+    # thing that says WHICH arm refused.
+    assert (float("nan") <= 0) is False and (float("inf") <= 0) is False
+    for bad in (float("nan"), float("inf")):
+        try:
+            Steps(10).convert(Flushes, per=bad)
+            raise AssertionError(f"convert accepted a rate of {bad!r}")
+        except UnitError as e:
+            assert "exact value" in str(e), (bad, str(e))
+    # AND A Clock IS NOT A RATE HERE EITHER, though the refusal arrives by a different road than the
+    # five named ones in derive: `per <= 0` compares a Clock against an int and units.Clock.__le__
+    # raises on a cross-kind comparison, so convert refuses one line before any arm of its own. The
+    # road matters because it is the one arm here that no line of convert's body spells out.
+    for bad in (Windows(4), Steps(4), Flushes(4)):
+        try:
+            Steps(10).convert(Flushes, per=bad)
+            raise AssertionError(f"convert accepted {bad!r} as a rate")
+        except UnitError:
+            pass
+
     # accum_due counts BACKWARD PASSES. At ACCUM=4 exactly a quarter of them are due; the window counter
     # that produced 55 steps where 13 were due cannot even be passed in.
     assert sum(derive.accum_due(Backwards(n), 4) for n in range(1, 53)) == 13
@@ -185,6 +308,114 @@ def smoke():
             derive.accum_due(bad, 4); raise AssertionError(f"non-Backwards accepted: {bad!r}")
         except UnitError:
             pass
+
+    # run_windows_from_epochs: EPOCHS x windows-per-epoch, the conversion spine/compose.py's
+    # _run_windows wrote inline as `units.Windows(_windows_in_epoch(sysm) * int(...epochs))`. The
+    # body is `Windows(n_epochs.n * w)`, so the answers below are one multiplication each: 3 x 10 =
+    # 30, 1 x 937 = 937, 0 x 10 = 0, 1 x 1 = 1.
+    # NO FLOOR is the property, and it is the ruling opt_steps_from_backwards makes rather than the
+    # one opt_steps_from_windows makes: RUN_EPOCHS=0 is refused with a sentence by
+    # train/api.py::startup_refusals and deliberately not clamped, so clamping it here would restore
+    # that clamp one file away from the refusal and report one epoch's worth of windows for a run
+    # configured to make no passes.
+    assert derive.run_windows_from_epochs(Epochs(3), 10) == Windows(30)
+    assert type(derive.run_windows_from_epochs(Epochs(1), 937)) is Windows
+    assert derive.run_windows_from_epochs(Epochs(1), 937) == Windows(937)
+    assert derive.run_windows_from_epochs(Epochs(0), 10) == Windows(0)
+    assert derive.run_windows_from_epochs(Epochs(1), 1) == Windows(1)
+    for bad in (3, Windows(3), Steps(3), Flushes(3), Backwards(3), True, 3.0, None):
+        try:
+            derive.run_windows_from_epochs(bad, 10)
+            raise AssertionError(f"non-Epochs accepted: {bad!r}")
+        except UnitError:
+            pass
+    for bad in (0, -1):
+        try:
+            derive.run_windows_from_epochs(Epochs(3), bad)
+            raise AssertionError(f"rate below 1 accepted: {bad!r}")
+        except UnitError:
+            pass
+
+    # opt_steps_from_backwards: ONE boundary, so the divisor is accum ALONE, and the body on the
+    # accepted domain is `Steps(n // k)`. 52 = 4 x 13 exactly; 62 = 4 x 15 + 2, so 15; 3 = 4 x 0 + 3,
+    # so a partial step is not a step; 1000 = 1 x 1000. The last row is the two-boundary divisor the
+    # function's own docstring names as the likeliest way to break the accumulation invariant while
+    # appearing to repair it: 62 = 64 x 0 + 62, so it reports 0 steps due against the 15 that were
+    # taken on fetch_big.py's heavy-run command, and a CORRECT run raises the P3-H29 message.
+    assert derive.opt_steps_from_backwards(Backwards(52), 4) == Steps(13)
+    assert derive.opt_steps_from_backwards(Backwards(62), 4) == Steps(15)
+    assert derive.opt_steps_from_backwards(Backwards(0), 4) == Steps(0)     # no floor at one
+    assert derive.opt_steps_from_backwards(Backwards(3), 4) == Steps(0)     # a partial step is not a step
+    assert derive.opt_steps_from_backwards(Backwards(1000), 1) == Steps(1000)
+    assert derive.opt_steps_from_backwards(Backwards(62), 64) == Steps(0)   # the two-boundary divisor
+    for bad in (52, Steps(52), Windows(52), Flushes(52), Epochs(52), True, 52.0, None):
+        try:
+            derive.opt_steps_from_backwards(bad, 4)
+            raise AssertionError(f"non-Backwards accepted: {bad!r}")
+        except UnitError:
+            pass
+    # THE DIVISOR END OF THE SAME FUNCTION: accum below one is REFUSED here where accum_due CLAMPS
+    # it, and the two are deliberately different -- see the accum_due assertions below.
+    for bad in (0, -1):
+        try:
+            derive.opt_steps_from_backwards(Backwards(52), bad)
+            raise AssertionError(f"accum below 1 accepted: {bad!r}")
+        except UnitError:
+            pass
+    # A NEGATIVE COUNT IS REFUSED AT EVERY MAGNITUDE. The only route here is opt/api.py::counters'
+    # resume subtraction, whose base is stamped FROM st.n_backward, so a negative says the backward
+    # counter went BACKWARDS across a resume. It used to be caught only as a SIDE EFFECT of `//`
+    # flooring a partial step up -- floor(n/k) is at most -1 for every n < 0 -- and the same-day
+    # correction to truncation removed even that: at accum=4 the deltas -1, -2, -3 came back
+    # Steps(0) against a `taken` of Steps(0) and counters() said nothing. The magnitudes below span
+    # each accum's silent window and one past it.
+    for accum in (1, 2, 4, 8):
+        for n in (-1, -2, -3, -4, -5, -8, -9):
+            try:
+                derive.opt_steps_from_backwards(Backwards(n), accum)
+                raise AssertionError(f"negative accepted: {n} at accum={accum}")
+            except UnitError:
+                pass
+
+    # accum_due CLAMPS ITS RATE WHERE opt_steps_from_backwards REFUSES ONE, and that asymmetry is
+    # deliberate -- accum_due's docstring keeps the shipped read-site `max(1, ...)`, and
+    # opt_steps_from_backwards' says so in as many words at the end of its own refusal paragraph.
+    # So `k = max(1, int(accum))` makes both rates below 1 into 1, and `n > 0 and n % 1 == 0` is
+    # True for 52. Pinned so the difference is a decision on the record rather than one nobody
+    # noticed. The third row is the count end: `n > 0` is False at -4, so a negative is not due --
+    # answered rather than refused, which is the other half of the same asymmetry.
+    assert derive.accum_due(Backwards(52), 0) is True
+    assert derive.accum_due(Backwards(52), -4) is True
+    assert derive.accum_due(Backwards(-4), 4) is False
+
+    # THE RATE END, ALL FIVE CONVERSIONS AT ONCE. units.Clock declares __int__ and __index__, so
+    # `int(Windows(4))` is 4 and every conversion that wrote `int(rate)` admitted at its divisor the
+    # kind it refuses at its clock: opt_steps_from_backwards(Backwards(52), Windows(4)) answered
+    # Steps(13) until 2026-09-04 -- a Windows crossing a function whose first act is to refuse a
+    # Windows. A rate is a RATIO of two kinds and no count of one kind is ever the right value for
+    # it, so all five refuse all six kinds rather than converting.
+    for fn, clk in ((derive.flush_period, Steps(20000)),
+                    (derive.flush_period_windows, Windows(20000)),
+                    (derive.opt_steps_from_windows, Windows(1024)),
+                    (derive.opt_steps_from_backwards, Backwards(52)),
+                    (derive.accum_due, Backwards(52))):
+        for rate in (Windows(4), Steps(4), Flushes(4), Backwards(4), Epochs(4)):
+            try:
+                fn(clk, rate)
+                raise AssertionError(f"{fn.__name__} accepted {rate!r} as its rate")
+            except UnitError:
+                pass
+    try:
+        derive.run_windows_from_epochs(Epochs(3), Windows(4))
+        raise AssertionError("run_windows_from_epochs accepted a Clock rate")
+    except UnitError:
+        pass
+    # NEIGHBOURS, so the refusals above cannot be a blanket one: the bare-int rate still works, and
+    # each of the four answers is the arithmetic named beside it.
+    assert derive.flush_period(Steps(20000), 16) == Flushes(1250)           # 20000 = 16 x 1250
+    assert derive.flush_period_windows(Windows(20000), 16) == Flushes(1250)
+    assert derive.opt_steps_from_windows(Windows(1024), 64) == Steps(16)    # 1024 = 64 x 16
+    assert derive.accum_due(Backwards(52), 4) is True                       # 52 = 4 x 13, remainder 0
 
     # pin_tick: THE ONE FUNCTION HERE WHOSE ORACLE TABLE CANNOT SEE ITS OWN DEFECT, so these assertions
     # are not a supplement to pin_tick.json -- they are the entire coverage of its units. The captured

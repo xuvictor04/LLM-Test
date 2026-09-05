@@ -103,8 +103,36 @@ RECORD TYPES RETURNED (P4/P5 define them):
   NullReading    real, null_mean, null_sd, draws, verdict_allowed
   Sample         the measured population, its SIZE, and the rule that drew it
 """
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine import units as U
+
+
+# ==================================================================================================
+# THE SWITCH ON THE NEGATIVE-PERIOD REFUSAL
+# ==================================================================================================
+
+REFUSE_NEGATIVE_PERIOD = True
+"""Whether curve_period refuses a negative EVAL_CURVE_EVERY. True is the shipped state; False lets
+the value through to units.Windows exactly as it did before 2026-09-04.
+
+THE RULING (owner, 2026-09-04): "On the periods, let's refuse for now. If it has a bad effect, we
+can turn off the refusal." The first sentence is the guard in curve_period; this name is the second,
+which binds just as hard -- .rework/DECISIONS.md D4 rules that a thing kept for later is kept WITH A
+SWITCH rather than as a code path that rots, and OFF is what is being kept.
+
+THE ALTERNATIVES, THEIR PRICES AND THE MEASUREMENT THAT WOULD SETTLE THE CHOICE ARE WRITTEN OUT
+ONCE, AT ckpt/api.py::REFUSE_NEGATIVE_PERIOD, and are not restated here: CKPT is where this question
+was opened and where the first of the five refusals shipped. WHAT IS THIS FILE'S OWN, and the reason
+the name is spelled here rather than imported: tests/test_ownership.py::check_o10_no_backdoor_imports
+forbids EVAL to import ckpt, so the five switches are five per-package policies that happen to share
+a default, each governing only its own package's lever. This one governs EVAL_CURVE_EVERY and
+nothing else, and turning it off here leaves the other four refusing.
+
+THE COST, SO IT IS NOT DISCOVERED: turning it off is a CODE EDIT. There is no
+EVAL_REFUSE_NEGATIVE_PERIOD, no census row and no row in the generated lever document -- deliberately,
+because a lever per package would be five environment names for one decision and would make "some
+accessors refuse and some do not" a reachable configuration.
+"""
 
 
 def curve_period(ev: Config):
@@ -134,13 +162,59 @@ def curve_period(ev: Config):
     # is the same off-by-one docs/04_CONTRACT.md corrected in its own sentence about these five
     # accessors on 2026-09-03, one row over and for the same reason it gave: the number is spelled
     # as a WORD and tests/test_contract.py's K13 reads digits, so nothing in the tree could see it.
-    # A period accessor is one
-    # construction over one declared lever, and its whole job is that Cadences.due REFUSES a
+    # A period accessor is one construction over ITS DECLARED LEVERS, and this sentence read "one
+    # declared lever" until 2026-09-04 while naming ckpt/api.py::save_period four lines above --
+    # which is a claim about a NEIGHBOUR that the neighbour had already corrected of itself, in its
+    # own copy of this comment. That round could not repair this file and wrote the correction down
+    # as a REFERRAL instead, which is why the wrong sentence outlived the thing it was wrong about.
+    # It is corrected now, in the file it was wrong in: save_period reads TWO,
+    # `every` and `dir` through ckpt/api.py::saving_on, and says so on its own LEVERS READ line.
+    # THIS accessor really does read one, `curve_every`, which is what its LEVERS READ line above
+    # says -- the correction is to the general sentence, not to this function's count.
+    # Its whole job is that Cadences.due REFUSES a
     # bare int while Config hands one back for all 35 levers that declare a Clock unit
     # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
-    return U.Windows(int(ev.curve_every))
+    every = int(ev.curve_every)
+    # A NEGATIVE CURVE PERIOD IS REFUSED HERE, AT THE ONLY PLACE `curve_every` IS READ (added
+    # 2026-09-04 under the owner's ruling; the switch and the alternatives are at
+    # REFUSE_NEGATIVE_PERIOD above). It fires BEFORE the Windows is constructed, so no other number
+    # is derived from the bad value -- the placement rule capacity/api.py::new_valve took from
+    # lm/api.py::resolve, applied here rather than copied: this is a range check over EVAL's own
+    # lever at its first read, and EVAL declares no refusal entry point for it to live in.
+    #
+    # WHAT A NEGATIVE ACTUALLY DOES TODAY, MEASURED RATHER THAN ASSUMED. `assemble.build` accepts
+    # EVAL_CURVE_EVERY=-5 and freezes it; this accessor returned Windows(-5); and
+    # spine/derive.py::cadences_that_cannot_fire then reported ("curve", -5, 0) -- the SAME shape of
+    # line it prints for a period of zero, whose meaning is a per-package sentinel. Meanwhile
+    # RUN.Cadences.due states its own contract as "True at most once per `period` WINDOWS elapsed
+    # since this key last fired", so a body written to that contract compares `step - last_fired >=
+    # period.n`, which at -5 is true on the FIRST window and on every window after it. A negative
+    # here is therefore the MAXIMUM-frequency probe -- a full curve probe every window, across every
+    # domain -- reported by the one live reader as though the gate could not fire. That is the same
+    # false equation ckpt/api.py::save_period was repaired for, one accessor over.
+    #
+    # ZERO IS NOT TOUCHED, AND WHAT ZERO MEANS HERE IS NOT DECIDED BY THIS GUARD. Unlike CKPT.every
+    # (0 disables periodic saving, in the lever's own help text) and MEM.rekey_every (0 DISARMS, in
+    # memory/api.py::maintain), EVAL_CURVE_EVERY=0 has NO declared meaning in src/eval/levers.py or
+    # in this file. The test below is strictly `< 0`, so whatever the tree eventually rules 0 to
+    # mean, it still reaches the same readers it reaches today.
+    #
+    # IT REMOVES NO CONFIGURATION. EVAL_CURVE_EVERY=1 is the every-window probe and is in range; the
+    # negative range spells nothing the help text gives a meaning to.
+    if REFUSE_NEGATIVE_PERIOD and every < 0:
+        raise LeverError(
+            f"EVAL_CURVE_EVERY={every}: a learning-curve period is a count of windows ELAPSED "
+            f"since the last probe and may not run backwards. RUN.Cadences.due fires when "
+            f"`step - last_fired >= period`, so a negative period is true on the first window and "
+            f"on every window after it -- {every} does not mean 'probe less often' or 'do not "
+            f"probe', it means a full curve probe over every domain EVERY window, while "
+            f"spine/derive.py::cadences_that_cannot_fire reports the same value as a gate that "
+            f"cannot fire. EVAL_CURVE_EVERY=1 is the every-window probe and is in range. This "
+            f"lever declares no meaning for 0 either, and 0 is deliberately left alone by this "
+            f"refusal rather than folded into it.")
+    return U.Windows(every)
 
 
 def curve_probe(ev: Config, *, units_by_domain, logits_fn, step, rng):

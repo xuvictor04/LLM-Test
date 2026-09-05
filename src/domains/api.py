@@ -34,8 +34,40 @@ RECORD TYPES RETURNED (P4 defines them):
 """
 import torch
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine import units as U
+
+
+# ==================================================================================================
+# THE SWITCH ON THE NEGATIVE-PERIOD REFUSAL
+# ==================================================================================================
+
+REFUSE_NEGATIVE_PERIOD = True
+"""Whether manage_period refuses a negative DOM_MANAGE_EVERY. True is the shipped state; False lets
+the value through to units.Windows exactly as it did before 2026-09-04.
+
+THE RULING (owner, 2026-09-04): "On the periods, let's refuse for now. If it has a bad effect, we
+can turn off the refusal." The first sentence is the guard in manage_period; this name is the
+second, which binds just as hard -- .rework/DECISIONS.md D4 rules that a thing kept for later is
+kept WITH A SWITCH rather than as a code path that rots, and OFF is what is being kept.
+
+THE ALTERNATIVES, THEIR PRICES AND THE MEASUREMENT THAT WOULD SETTLE THE CHOICE ARE WRITTEN OUT
+ONCE, AT ckpt/api.py::REFUSE_NEGATIVE_PERIOD, and are not restated here: CKPT is where this question
+was opened and where the first of the five refusals shipped. WHAT IS THIS FILE'S OWN, and the reason
+the name is spelled here rather than imported: tests/test_ownership.py::check_o10_no_backdoor_imports
+forbids DOM to import ckpt, so the five switches are five per-package policies that happen to share
+a default, each governing only its own package's lever. This one governs DOM_MANAGE_EVERY and
+nothing else, and turning it off here leaves the other four refusing.
+
+IT IS NOT THE OFF SWITCH FOR DOMAIN MANAGEMENT AND MUST NOT BE READ AS ONE. That is the `manage`
+flag in src/domains/levers.py, which exists precisely so the off-state is not spelled as a cadence
+of zero -- and this constant does not touch it, or DOM_MANAGE_EVERY=0, in either position.
+
+THE COST, SO IT IS NOT DISCOVERED: turning it off is a CODE EDIT. There is no
+DOM_REFUSE_NEGATIVE_PERIOD, no census row and no row in the generated lever document -- deliberately,
+because a lever per package would be five environment names for one decision and would make "some
+accessors refuse and some do not" a reachable configuration.
+"""
 
 
 class Partition:
@@ -441,9 +473,18 @@ def manage_period(dom: Config):
     WHY THIS EXISTS RATHER THAN THE ROOT PASSING cfg.manage_every. Cadences.due states that its
     period "MUST be units.Windows. An int raises; a Flushes raises." -- and Config hands back a bare
     int for all 35 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
-    `Cadences.due('dom.manage', FAB.manage_every, clock)` was passing an int into a function whose
+    `Cadences.due('dom.manage', DOM.manage_every, clock)` was passing an int into a function whose
     contract refuses one. EVAL and CKPT already had typed accessors (curve_period, save_period);
     FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.
+    THAT ROW NAMED `FAB.manage_every` IN THIS DOCSTRING UNTIL 2026-09-04, WHICH IS THE WRONG PACKAGE
+    AND IS A DEFECT AND NOT A TYPO: the 'dom.manage' gate takes DOM's own field, FAB's field of the
+    identical name drives the SEPARATE 'fab.manage' gate, and the two were SPLIT apart precisely
+    because sharing one cadence meant domain merge/cull/fold ran zero times in a default-length run
+    (src/domains/levers.py records the arithmetic). The sentence was a copy of the FAB sibling's,
+    where the same words are correct -- fabric/api.py::manage_period still carries them -- so a
+    reader checking this docstring against that one would have found them agreeing and both
+    describing FAB. tests/test_contract.py::check_k9_cadence_periods_are_typed reads the ROWS in
+    spine/compose.py, not this prose, so nothing in the suite could see it.
 
     THE WRAP BELONGS HERE AND NOT AT THE CALL SITE because this is where the kind is DECLARED.
     domains/levers.py types manage_every Windows; a root that wrote Windows(dom.manage_every)
@@ -461,4 +502,43 @@ def manage_period(dom: Config):
                  is the point of routing every gate through one primitive.
     """
     dom = dom.owned_by("DOM")
-    return U.Windows(int(dom.manage_every))
+    every = int(dom.manage_every)
+    # A NEGATIVE MANAGEMENT CADENCE IS REFUSED HERE, AT THE ONLY PLACE `manage_every` IS READ (added
+    # 2026-09-04 under the owner's ruling; the switch and the alternatives are at
+    # REFUSE_NEGATIVE_PERIOD above). It fires BEFORE the Windows is constructed, so no other number
+    # is derived from the bad value -- the placement rule capacity/api.py::new_valve took from
+    # lm/api.py::resolve, applied here rather than copied: this is a range check over DOM's own
+    # lever at its first read, and DOM declares no refusal entry point for it to live in.
+    #
+    # WHAT A NEGATIVE ACTUALLY DOES TODAY, MEASURED RATHER THAN ASSUMED. `assemble.build` accepts
+    # DOM_MANAGE_EVERY=-5 and freezes it; this accessor returned Windows(-5); and
+    # spine/derive.py::cadences_that_cannot_fire then reported ("dom.manage", -5, 0) -- the SAME
+    # shape of line it prints for a period of zero. Meanwhile RUN.Cadences.due states its contract
+    # as "True at most once per `period` WINDOWS elapsed since this key last fired", so a body
+    # written to it compares `step - last_fired >= period.n`, which at -5 is true on the FIRST
+    # window and every window after. A negative here is therefore merge-then-cull-then-fold on EVERY
+    # window -- the maximum-frequency consolidation pass, reported by the one live reader as a gate
+    # that cannot fire. That is the same false equation ckpt/api.py::save_period was repaired for.
+    #
+    # ZERO IS NOT TOUCHED, AND THE OFF-STATE IS NOT THIS LEVER. src/domains/levers.py carries a
+    # PORT REQUIREMENT that 0 must mean NEVER behind a guard at the read site, and it is not
+    # implemented anywhere yet; the same file refuses outright to let 0 be read as the off-state,
+    # because the declared way to switch this package's management off is the `manage` flag. The
+    # test below is strictly `< 0`, so neither the unimplemented port requirement nor the flag
+    # moves, and this guard settles no part of what 0 will mean.
+    #
+    # IT REMOVES NO CONFIGURATION. DOM_MANAGE_EVERY=1 is the every-window pass and is in range; the
+    # negative range spells nothing this lever's help text gives a meaning to.
+    if REFUSE_NEGATIVE_PERIOD and every < 0:
+        raise LeverError(
+            f"DOM_MANAGE_EVERY={every}: a management cadence is a count of windows ELAPSED since "
+            f"the last pass and may not run backwards. RUN.Cadences.due fires when "
+            f"`step - last_fired >= period`, so a negative period is true on the first window and "
+            f"on every window after it -- {every} does not mean 'manage less often' or 'do not "
+            f"manage', it means merge, cull and fold on EVERY window, while "
+            f"spine/derive.py::cadences_that_cannot_fire reports the same value as a gate that "
+            f"cannot fire. Neither meaning an operator might have wanted is lost: DOM_MANAGE=0 is "
+            f"the declared off-state for this package's management and DOM_MANAGE_EVERY=1 is the "
+            f"every-window pass. DOM_MANAGE is not consulted here: this refuses an out-of-range "
+            f"value for DOM's own cadence lever, whether or not a second lever makes it moot.")
+    return U.Windows(every)

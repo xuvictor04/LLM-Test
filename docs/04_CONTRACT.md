@@ -543,21 +543,64 @@ a future reader would use to delete the wire the refusal rests on. The flag is f
 at `new_valve` as `counters["cap.mask_dead_rows"]`, the way the two hard ceilings are, so `observe`
 keeps reading no wires of its own.
 **`new_valve` refuses two lever values at startup, added 2026-09-04: `CAP_LIFT < 0` and
-`CAP_LIFT_MIN < 0`.** `derive.lift_to` is `cap + max(int(floor), int(frac × cap))`, so with **both**
-negative the max is negative and an *earned* lift **shrinks** the cap — `lift_to(12, -0.5, -100) = 6`
-— against this package's founding sentence, *"raised, by a little, never lowered"*. Before the
-refusal, `build()` accepted `CAP_LIFT=-0.5` without a word and `cap.valve` printed *"one lift → 6"*
-beside *"ONE EARNED LIFT DOES NOT MOVE IT"* on one line. **It removes no configuration:** with the
-floor at or above 0 a negative `CAP_LIFT` is arithmetically identical to `CAP_LIFT=0` (a flat
-`+CAP_LIFT_MIN` lift, which is legal), and with the fraction at or above 0 a negative `CAP_LIFT_MIN`
-is identical to `CAP_LIFT_MIN=0`. **`CAP_LIFT > 1` is deliberately *not* refused** — `U.FRACTION`'s
-unit string is a label the census renders and not a bound (`spine/lever.py::Lever` carries `choices`
-and no numeric range), and a lift of 2.0 is a large lift, not a lowering one. It lives in `new_valve`
+`CAP_LIFT_MIN < 0`, and either one alone trips the refusal.** `derive.lift_to` is
+`cap + max(int(floor), int(frac × cap))`, and **the proportional term takes the sign of the fraction
+times the sign of the cap**, so a lift that *lowers* has two routes and only one of them needs both
+levers. **Both negative, at a cap above zero:** the max is negative and an *earned* lift **shrinks**
+the cap — `lift_to(12, -0.5, -100) = 6`. **`CAP_LIFT_MIN` negative alone, at a cap below zero**,
+which `CAP_FAB_START=-5` reaches: `lift_to(-100, 0.5, -1) = -101` against
+`lift_to(-100, 0.5, 0) = -100`. Both are against this package's founding sentence, *"raised, by a
+little, never lowered"*, and the second is why the guard is an `or` rather than an `and`. *(This
+paragraph said until 2026-09-05 that only the two **together** lower a cap — the false universal
+`capacity/api.py` and `capacity/levers.py` have each corrected in their own copy, this document
+being the third carrier and the last.)* A negative `CAP_LIFT` **alone** never lowers a cap, which is
+arithmetic and not a sample — with the floor at or above 0 the `max` is at or above 0 at every cap —
+so that half of the refusal rests on the second ground below. Before the refusal, `compose()`
+carried `CAP_LIFT=-0.5` as far as `new_valve` without a word and `cap.valve` printed
+*"one lift → 6"* beside *"ONE EARNED LIFT DOES NOT MOVE IT"* on one line; **`build()` carries it
+still**, because the refusal is in the body of `new_valve` and not in the Lever machinery —
+`assemble.build(environ={"CAP_LIFT": "-0.5"})` returns a frozen `Config` with `lift = -0.5`, and it
+is `compose()`, one row later, that raises. **At a cap at or above zero it removes no
+configuration:** with the floor at or above 0 a negative `CAP_LIFT` is arithmetically identical to
+`CAP_LIFT=0` (a flat `+CAP_LIFT_MIN` lift, which is legal), and with the fraction at or above 0 a
+negative `CAP_LIFT_MIN` is identical to `CAP_LIFT_MIN=0`. **Below zero neither identity holds** —
+`lift_to(-100, -0.5, 8) = -50` against `lift_to(-100, 0, 8) = -92`, and the pair already given —
+which is the **second** reason both are refused rather than an exception to the first.
+**`CAP_LIFT > 1` is deliberately *not* refused** — `U.FRACTION`'s unit string is a label the census
+renders and not a bound (`spine/lever.py::Lever` carries `choices` and no numeric range), and a lift
+of 2.0 is a large lift, not a lowering one. It lives in `new_valve`
 rather than in `startup_refusals` because that entry point is declared for refusals that need **two**
 packages' numbers, is a stub today, and runs *after* the valve row — a Gate reason would render
 first. `src/lm/api.py::resolve` is the precedent and states the general ground: the refusals are in a
-body *"because a Lever has no range facility and `choices=` enumerates rather than bounds"*.
+body because *"a Lever has no range facility and `choices=` enumerates rather than bounds, so these
+cannot be declarations"*.
 `Caps.headroom(n)` exists so the negative clamp (C30) **cannot be written** at a call site.
+
+**An overshooting lift is CLAMPED at the hard ceiling, not refused — the owner's ruling of
+2026-09-04, `.rework/DECISIONS.md` D16.** A soft cap set just under its ceiling makes the **first**
+earned lift overshoot: `lift_to(4095, 0.08, 8) = 4422` against a ceiling of 4096, and at the shipped
+`CAP_LIFT=0.08` / `CAP_LIFT_MIN=8` every start from 3794 to 4095 is such a cap — 302 of them, each
+of which a refusal would strand below its ceiling and refuse every lift forever, spending the
+evidence that earned the lift on nothing. The lift is **taken** and held at the ceiling by
+`capacity/api.py::_clamped_lift`, whose `max` is there because `min(lift_to(…), hard)` from a cap
+*above* the ceiling would **lower** it — reachable at `CAP_FAB_START=5000` against
+`FAB_SLOTS=4096` — and lowering is the one thing this valve may never do. **`at_hard_ceiling` is
+unchanged**: it tests `cap >= hard` **before** the lift is computed, so the closed set above does not
+grow and the clamp bites **once per arm** — full lifts, then one clamped lift, then `at_hard_ceiling`
+on every flush after it. **Of the two readings of *"until it goes down"*, `capacity/api.py::observe`
+takes the STATELESS one** — per-lift arithmetic, not a state pinned at the ceiling and released when
+demand falls — and its docstring records why: a cap may never be lowered, `CAP.state`'s payload
+carries no clamp flag, and no demand *level* reaches that call. It also records how an owner would
+tell the readings apart from a report alone: under the stateless one a cap never prints smaller than
+it printed on an earlier flush. **A clamped lift is neither a clean fire nor a refusal**, so it is
+absent from the block-reason histogram and carries numbers of its own — `Decision.clamped` for the
+one flush, and `counters["cap.lifts_clamped_experts"]` / `counters["cap.lifts_clamped_vocab"]` for
+the run, seeded at 0 by `new_valve` the way the two hard ceilings and `cap.mask_dead_rows` are, which
+takes that ledger from eight keys to ten. Its DID IT FIRE surface is a **third** Gate, `cap.clamp`,
+built by `capacity/api.py::_clamp_gate`, with four readings: UNREACHABLE (no lift can be earned at
+all), *"0 clamped of 0 lifts"* (none was earned), *"0 clamped of N lifts"* (every earned lift applied
+in full) and FIRED, *"M clamped of N lifts"*. **P4 must call it and increment the two counters**;
+until it does, a real run can only reach the first two readings.
 The pin clocks are **now checkpointed**, which is half the M38 fix; the other half is that RUN seeds
 the valve's last-called index at the **resumed** step.
 
@@ -837,6 +880,35 @@ nobody can read** — so each names its own surface instead:
 against a Windows `now` internally; that is the second gate on one lever"). The rows now say it too,
 so a reader counting gates from the code and a reader counting them from this table get the same
 answer: **five ledger keys, three unledgered comparisons, each with a named counter.**
+
+**All five accessors now REFUSE a negative period, and the refusal is switchable — the owner's
+ruling of 2026-09-04, `.rework/DECISIONS.md` D17.** `EVAL.curve_period`, `DOM.manage_period`,
+`FAB.manage_period`, `MEM.rekey_period` and `CKPT.save_period` each raise the spine's `LeverError` on
+a negative value of **their own** lever, naming the lever and the value, and each fires **before**
+the `units.Windows` is constructed, so nothing is derived from the bad number. **A period of 0 is
+untouched by all five** — zero means something different for each of these levers and only some of
+those meanings are declared, so the ruling stops at the sign. The switch is `REFUSE_NEGATIVE_PERIOD`,
+a module constant in each owning `api.py`, with **no environment name**, no census row and nothing
+for the planned `docs/04_LEVERS.md` to render: D17's second sentence (*"if it has a bad effect, we
+can turn off the refusal"*) requires that withdrawing the refusal not be a revert, which is D4's rule
+that a mechanism kept for future use is kept with a switch. What the shape costs is that flipping it
+is a **code edit** and not a shell variable; the argument for paying that rather than minting five
+levers or spending five of the six remaining edges is written once, at
+`ckpt/api.py::REFUSE_NEGATIVE_PERIOD`, and the four siblings point at it rather than restating it.
+**`FAB.manage_period`'s guard is the second line and not the first:** `FAB_MANAGE_EVERY` is also the
+source of the declared coupling `OPT.batch_windows → FAB.d_manage_period`, and since 2026-09-05
+`spine/derive.py::flush_period_windows` raises a `UnitError` on a negative there — at **build**,
+before any accessor is called — where it used to floor the value to `Flushes(1)`, the tightest
+cadence in the system. FAB's own guard is unreachable through `assemble.build` because of it, and
+kept for the caller that builds a `Config` any other way, which is D4's rule and not an oversight.
+**What the ruling does NOT reach, said so this is not read as covering every cadence in the tree.**
+The sixth entry in `compose.py`'s `_periods` is `RUN.PROGRESS_WINDOWS`, a module constant rather than
+a lever, so no environment value can make it negative. Of the three **unledgered** comparisons in the
+table above, MEM's probe and MEM's internal rekey read `probe_every` and `rekey_every` inside
+`MEM.maintain`, which is a stub — there is nothing to guard yet, and when P4 writes it the guard
+belongs at the first read of the lever under that package's own `REFUSE_NEGATIVE_PERIOD`, which is
+already declared — while `SIG.cadence_due` **is written**, reads `train_every`, `train_every_idle`
+and `dense_window`, and carries no such refusal. Whether it should is SIG's to answer.
 
 **One gate, one ask.** `Cadences.due` *records* the fire and returns True, so asking a second time
 under the same key **consumes** the event — that is how a shared `_due` key made minting never fire
@@ -1676,9 +1748,12 @@ The row now says so, and points at `opt.shift.notifications`, which is the count
 **THE IDENTICAL DEFECT IN `src/lm/levers.py`, FOUND BY LOOKING FOR IT, AND REPAIRED IN THE SAME EDIT.**
 LM's header carries a `TWO CONFLICTS WITH THE SPINE` block of the same shape, and **both were settled
 in `spine/assemble.py` and still read as open** — with an extra turn of the screw: `assemble.py`'s own
-`TOK.d_vocab_ceiling` row cites *"lm/levers.py:127-141 and tok/levers.py:87"* as the two files that
-*"record it as the outstanding repair"*, so the pointer from the file that made the repair led to a
-paragraph calling it outstanding. **(a)** said `assemble.py` declares
+`TOK.d_vocab_ceiling` row **then** cited *"lm/levers.py:127-141 and tok/levers.py:87"* as the two
+files that *"record it as the outstanding repair"*, so the pointer from the file that made the repair
+led to a paragraph calling it outstanding. *(That row has been rewritten twice since: it now cites
+both files by SYMBOL rather than by line and retracts the "both record it" clause by name, so neither
+line citation quoted here is in `src/` any more. This sentence was in the present tense until
+2026-09-05 and quoting it that way was a claim about a file that had moved.)* **(a)** said `assemble.py` declares
 `Coupling(src="TOK.vmax", dst="LM.d_softmax_width", …)` and that importing the real packages *"today
 raises `TOKLevers has no lever 'vmax'`"* — the edge was reversed to `LM.vocab_slots →
 TOK.d_vocab_ceiling`, `LM.d_softmax_width` does not exist anywhere in `src/`, and `assemble.build({})`
@@ -1690,11 +1765,27 @@ table said *"six of those nine are not in `spine/assemble.COUPLINGS` today"*; al
 (`live_vocab`, `retired_ids`, `device`, `residual_ratio`, `sig_emb`), and **one** (`d_softmax_width`)
 no longer exists because its edge was reversed.
 
-**What I did not repair, named precisely so it is a one-line fix and not a rediscovery:**
-`src/tok/levers.py:87` carries the mirror of LM's conflict (a) — *"assemble.py:723-725 declares
-`Coupling(src="TOK.vmax", dst="LM.d_softmax_width", …`"* — and is stale for the same reason. It is the
-data-tok slice's file and that slice had already finished; `assemble.py`'s row names both files
-together, so whoever touches TOK next should take it with this one.
+**What that edit did not repair, and what closed it on 2026-09-05.** `src/tok/levers.py::<module>`
+carried the mirror of LM's conflict (a) — a `TOK.vmax` → `LM.d_softmax_width` `Coupling` described in
+the **present tense**, together with the `build()` failure it predicts — and was left for whoever
+touched TOK next, because `assemble.py`'s row named both files together. **That is a live false
+attribution and not a stale aside:** `assemble.py::COUPLINGS` exists, so the citation *opens* and
+every mechanical check passes while what it is said to declare has not been in the file since the
+census was applied. It is now written in the AS RECORDED / WHAT IS TRUE NOW shape
+`src/lm/levers.py::<module>` uses, with the reversal, the absent `LM.d_softmax_width`, and the two
+surviving **non-row** spellings of `TOK.vmax` in `spine/assemble.py` named one by one — the module
+docstring's list of names that do not exist, and `spine/assemble.py::_Fields`'s undeclared-read
+example, which that paragraph had attributed to `Coupling.__init__`, a symbol that exists and has
+never held it. Conflict **(b)** of the same block was stale the same way and went with it: the
+`Windows → Flushes` conversion it says does not exist is `spine/derive.py::flush_period_windows`, and
+the row it describes has taken `("OPT.batch_windows", "CAP.pin_windows")` through that function since
+`pin_windows` was re-typed. **Two carriers now point the wrong way and neither is in this owner's
+line:** `spine/assemble.py`'s `TOK.d_vocab_ceiling` row still calls `tok/levers.py::<module>` *"the
+half that is still outstanding"* — and `tools/render_wiring.py` republishes that reason into
+`docs/03_WIRING.md`, so the stale carrier is once again the auto-rendered one — while
+`src/memory/levers.py::<module>` still records of the same conversion that *"there is today no legal
+conversion from a Windows-typed cadence to the flush clock"*. Both are filed with exact
+replacements.
 
 ### Q-OPT-2 — the LR schedule indexed by optimizer steps — **RESOLVED 2026-09-02: (a) CONFIRMED, NOT CHOSEN — THE TREE HAD ALREADY ADOPTED IT IN THREE UNIT-ENFORCED PLACES. NOTHING IN `src/` CHANGED; ONE STALE SENTENCE AND THE P9 ENTRY DID**
 At the shipped defaults (`batch_windows=1`, `accum=1`) the new counter and the old one are
@@ -1708,7 +1799,9 @@ and one stale sentence was corrected.** The position is already written in three
 `maybe_step` step 1 advances `st.opt_step` (`units.Steps`) and is declared *"the ONLY thing that
 advances it"*; `lr_at(opt, st, opt_step)` takes that counter and is declared PURE; and
 `derive.opt_steps_from_windows` exists, refuses a non-`Windows` at one end and a divisor below 1 at
-the other, and is covered by the oracle table (575 cases, 0 mismatches, run). The alternatives are
+the other — and, since 2026-09-05, a **negative** window count and a divisor that is not an `int` —
+and is covered by the oracle table (575 cases, 0 mismatches, run; the two newest refusals have no
+oracle row yet, which is filed rather than assumed). The alternatives are
 not close: indexing by windows makes `units.Steps` — the one type in the system that exists for this
 quantity — false, and leaves `opt_steps_from_windows` with no caller; indexing by flushes makes
 `accum` change the batch without changing the horizon, a 4× mislabelled schedule at `ACCUM=4`.
@@ -3277,8 +3370,8 @@ which is exactly the four the two numbers differ by. **Nothing here spends one.*
 
 ***That correction named `eval/api.py` as the carrier when there were five, and the count of
 carriers is the part that matters*** — a miscount surviving in four more files is the same miscount.
-Found 2026-09-04; four of the five are corrected, and the fifth is outside this owner's line and is
-named as such, with its owner, in the table:
+Found 2026-09-04; all five are corrected — the fifth landed last, by that file's owner, and is
+dated in the table:
 
 | carrier | what it said | status |
 |---|---|---|
@@ -3286,7 +3379,7 @@ named as such, with its owner, in the table:
 | `src/capacity/levers.py::CAPLevers` | *"has room for two more edges in total — so acting on the sentence would fail at `build()` with an over-budget refusal"* | **corrected 2026-09-04.** Both halves were wrong: adding the four couplings it discusses takes the ledger 19 → 23 of the 25 and `build()` does **not** refuse it |
 | `src/eval/levers.py::<module>` | *"`WIRE_BUDGET` leaves room for two more edges in the whole tree"* | **corrected 2026-09-04 by that file's owner**, after being filed here as residue. It now reads *"so SIX edges remain in the whole tree"* and carries its own note — *"an earlier revision of this sentence said 'two more edges'; that was a miscount and it travelled — do not propagate it"*. **This row said "still standing" until 2026-09-04**, which was true when written and false by the time anyone read it: a status is a copy of a fact and rots exactly the way a count does |
 | §Q-WORLD-6 point 4, this document | *"This would spend one of the last lines"* | the numbers beside it are right against the live ledger — **19 of 25** wires and **23 couplings** — so it is the **rhetoric** alone that implied near-exhaustion; corrected and dated below. *(Stated in the present tense here on purpose: as a past-tense aside these two numbers were `K13`-skipped, and inserting the row below this one moved them out of the window in which `K13` recognised them at all — a claim that stops being read is the failure this table is about, one level down.)* |
-| `src/spine/assemble.py` — the `WORLD.d_manage_period_windows` `NOT_WIRES` row | *"It would also spend one of the last coupling lines on a `WORLD.manage` that is itself deferred today"* | **still standing, and it is the worst-placed of the five** — present tense, about the same Q-WORLD-6 ruling as the row above, and `tools/render_wiring.py` copies it verbatim into `docs/03_WIRING.md`, so this carrier is mechanically kept in sync into a second file while the corrected copies are not. Outside this owner's line; the exact find/replace is filed in this round's `x_capacity` report |
+| `src/spine/assemble.py` — the `WORLD.d_manage_period_windows` `NOT_WIRES` row | *"It would also spend one of the last coupling lines on a `WORLD.manage` that is itself deferred today"* | **corrected 2026-09-04 by that file's owner — in the *same commit* that added this row**, so the status recorded here was false in the commit that wrote it and there is no tree a reader could have checked out in which it was true. It now reads *"It would also spend one of the six cross-package edges that remain on a `WORLD.manage` that is itself deferred today"*, and `tools/render_wiring.py` has carried that correction into `docs/03_WIRING.md`. This was the one carrier of the five that is **auto-rendered**, so the miscount was being *published* rather than merely written — and so is the repair. The sentence was rewritten once more the same day to put its four live figures in the shapes `K13` can read, two of them having been spelled as words. The row above says a status is a copy of a fact and rots exactly the way a count does; this row is that sentence proved on itself |
 
 **Why this is not bookkeeping.** A budget number that is wrong in the **scarce** direction does not
 merely misinform — it silently biases every choice that weighs a wire against a widened signature,
@@ -3301,9 +3394,10 @@ contradicted the next clause of its own sentence. **The bias is recorded in the 
 rather than in anybody's stated motive**, which is what the table above is for: `capacity/levers.py`
 told a porter that four couplings which *already exist* would be refused at `build()`; §Q-WORLD-6
 point 4 called a legal row *"one of the last lines"*; `src/eval/levers.py` told a reader that only
-two edges were left in the whole tree; and `src/spine/assemble.py`'s `NOT_WIRES` row still argues
-against a row on its price. Four of the five carriers argue **against a wire because of what it
-costs**, and the cost was wrong by a factor of three.
+two edges were left in the whole tree; and `src/spine/assemble.py`'s `NOT_WIRES` row argued
+against a row on its price. Four of the five carriers argued **against a wire because of what it
+costs**, and the cost was wrong by a factor of three. Both verbs are past because none of the five
+says it now — all five carry the live figure, the last of them since 2026-09-04.
 `tests/test_couplings.py`'s C4 and `spine/assemble.py::render` print the live figures; **any prose
 copy is one that can go stale in silence**, which is the rule §0 already states about these same four
 numbers and which five files broke anyway. The count is not searched for by `K13` — its own output

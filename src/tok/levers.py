@@ -80,33 +80,75 @@ if someone can see that it was looked for.
   says steps, which at BATCH_W=16 is a 16x error in the same family as pin_tick, so it is
   `probation_deadline` here and the old spelling does not survive.
 
-    THE CONFLICT WITH THE SPINE, STATED RATHER THAN RESOLVED. Two of them, both real, both in
-    spine/assemble.py, and neither is settled here because picking a side in a declaration file is how a
-    knob acquires two meanings.
+    THE CONFLICTS WITH THE SPINE, RECORDED WHEN THIS FILE WAS WRITTEN AND BOTH SETTLED SINCE, IN THE
+    SPINE. Two of them, both real, both in spine/assemble.py, and neither was settled here, because
+    picking a side in a declaration file is how a knob acquires two meanings; each was then decided in
+    spine/assemble.py, which is where a wiring decision belongs. BOTH ARE KEPT WITH THEIR OUTCOMES, read
+    off the tree on 2026-09-05 -- lm/levers.py::<module> keeps its half of (a) the same way and for the
+    same reason: a conflict deleted the moment it is settled takes its argument with it, and the next
+    reader re-opens it.
 
-    (a) OWNERSHIP OF VMAX. assemble.py::COUPLINGS declares `Coupling(src="TOK.vmax", dst="LM.d_softmax_width",
-    compute=lambda r: int(r["TOK"].vmax))` -- it reads `vmax` off THIS package's Config. The census gives
-    VMAX to LM as LM_VOCAB_SLOTS (verdict rename, default 4096, unit slots, family `tokenizer`), so under
-    the census there is no `TOK.vmax` to read and build() will raise LeverError at startup the moment both
-    LM and TOK are registered. This file follows the census and does NOT declare `vmax`; declaring it to
-    keep assemble quiet would put the softmax width in two packages at once, which is the failure the
-    ownership spine exists to prevent, and the coupling's own `why` argues for LM's side ("emb.weight and
-    head.weight have exactly this many rows... one number named twice"). The repair is one line in
-    assemble.py -- src/compute read from LM -- and it is assemble's to make, not this file's. Note the
-    same spelling appears in assemble.py::Coupling.__init__ inside a docstring example; that one is prose and harmless.
+    (a) OWNERSHIP OF VMAX -- SETTLED IN LM'S FAVOUR, AND THE EDGE WAS REVERSED. AS RECORDED WHEN THIS
+    FILE WAS WRITTEN: assemble.py::COUPLINGS carried a row reading `src='TOK.vmax'`,
+    `dst='LM.d_softmax_width'`, computing `int(r['TOK'].vmax)` -- it read `vmax` off THIS package's
+    Config. The census gives VMAX to LM as LM_VOCAB_SLOTS (verdict rename, default 4096, unit slots,
+    family `tokenizer`), so under the census there was no `TOK.vmax` to read and build() raised
+    LeverError at startup the moment both LM and TOK were registered. This file follows the census and
+    does NOT declare `vmax`; declaring it to keep assemble quiet would put the softmax width in two
+    packages at once, which is the failure the ownership spine exists to prevent, and the coupling's own
+    `why` argued for LM's side ("emb.weight and head.weight have exactly this many rows... one number
+    named twice"). The repair was one line in assemble.py -- the src and the compute read from LM -- and
+    it was assemble's to make, not this file's.
+    WHAT IS TRUE NOW: THE EDGE RUNS THE OTHER WAY. The row is `src='LM.vocab_slots'`,
+    `dst='TOK.d_vocab_ceiling'`, its `why` says "DIRECTION CORRECTED HERE" in as many words, and this
+    package RECEIVES the width as the wire `d_vocab_ceiling` declared below. No row in
+    assemble.py::COUPLINGS names TOK.vmax and no LM.d_softmax_width field exists anywhere in src/;
+    assemble.build({}) does not raise, and the startup failure this paragraph predicted is now reachable
+    only by asking a Config for a lever nobody declares (`TOKLevers has no lever 'vmax'`).
+    THIS PARAGRAPH DESCRIBED THE REMOVED ROW IN THE PRESENT TENSE UNTIL 2026-09-05, AND IT IS A LIVE
+    FALSE ATTRIBUTION RATHER THAN A STALE ASIDE. assemble.py::COUPLINGS exists, so the citation opens
+    and every mechanical check passes, while the construction attributed to it has not been in that file
+    since the census was applied on 2026-08-29 -- and the correction that replaced it lives in the
+    replacement row's own `why`, in the spine's file, which nothing carries back to this one.
+    spine/assemble.py's d_vocab_ceiling row named this paragraph as the last
+    carrier of the old reading ("tok/levers.py::<module> is the half that is still outstanding"), which
+    is as far as a correction written in one file can reach into another.
+    THE SAME SPELLING SURVIVES TWICE MORE IN spine/assemble.py AND NEITHER IS A ROW: its module
+    docstring lists `TOK.vmax` among the names that DO NOT EXIST, and assemble.py::_Fields uses
+    `cfgs["TOK"].vmax` in a docstring example of an UNDECLARED read. This sentence named
+    assemble.py::Coupling.__init__ as the carrier of that example until 2026-09-05, and that symbol has
+    never contained the string: it is the wrong-symbol citation that
+    tests/test_ownership.py::check_o13_citations_resolve names in its own CANNOT CATCH block, written
+    by the same hand and in the same paragraph as the attribution above it.
 
-    (b) TWO CLOCK KINDS ARRIVE AT ONE PACKAGE. assemble.py::COUPLINGS wires `TOK.d_cap_lift_period` as a
-    FLUSHES clock, derived by `derive.flush_period(Steps(r["TRAIN"].grow_cap_every), r["TRAIN"].batch_w)`
-    -- correctly, since the capacity valve's own knob is typed Steps (census: GROW_CAP_EVERY ->
-    CAP.CAP_PIN_STEPS, unit Steps). So this package will hold four Windows cadences of its own and one
-    Flushes period from the valve, and units.Clock refuses every comparison and every sum between them --
-    including `==`. There is today NO legal conversion in either direction: derive.flush_period accepts
-    Steps and nothing else (derive.py::flush_period), and spine.derive has no Windows->Flushes function at all.
-    Whoever ports the vocabulary cap must therefore either add that named conversion to spine.derive or
-    change what the valve hands over; doing it inline at the comparison is the pin_tick defect again, and
-    the refusal that will be raised is the mechanism working, not a bug in this file. MEM's levers.py
-    records the identical unresolved question for FAB.manage_every, which suggests it is one decision the
-    tree owes rather than three.
+    (b) TWO CLOCK KINDS ARRIVE AT ONE PACKAGE -- SETTLED IN THE SPINE, BY A NAMED CONVERSION. AS
+    RECORDED: assemble.py::COUPLINGS wires `TOK.d_cap_lift_period` as a FLUSHES clock, while this
+    package declares four cadences of its own U.Windows (`grow_every`, `retok_every`, `freeze_at`,
+    `probation_deadline`), and units.Clock refuses every comparison and every sum between the two kinds
+    -- including `==`, which raises "Windows against Flushes -- if this conversion is real, name it in
+    spine.derive and call it". The conversion did not exist in either direction: derive.flush_period
+    accepts Steps and nothing else (spine/derive.py::flush_period), so a Windows-typed cadence had no
+    legal route to the flush clock, and whoever ported the vocabulary cap would have had to add the
+    named conversion or change what the valve hands over. Doing it inline at the comparison is the
+    pin_tick defect again, and the refusal raised is the mechanism working, not a bug in this file.
+    WHAT IS TRUE NOW: THE CONVERSION IS NAMED AND THIS ROW CALLS IT. The function
+    spine/derive.py::flush_period_windows takes a Windows period and a batch width and returns Flushes,
+    and it lives BESIDE flush_period rather than inside it -- "a conversion has to name BOTH ends or it
+    is not a conversion, it is a division" -- so widening flush_period to accept either kind, which
+    would have deleted its Steps refusal, was refused as the cheaper-looking repair. The row now
+    computes derive.flush_period_windows(Windows(r["CAP"].pin_windows), r["OPT"].batch_windows) from
+    src ("OPT.batch_windows", "CAP.pin_windows"), and the valve's own knob is Windows at the other end
+    too: capacity/levers.py::CAPLevers re-typed the census's GROW_CAP_EVERY -> CAP_PIN_STEPS from Steps
+    to U.Windows under the name `pin_windows`. Neither the TRAIN prefix nor the Steps reading this
+    paragraph relied on survives at either end.
+    WHAT IS STILL OWED IS THE COMPARISON, NOT THE CONVERSION. This package holds four Windows cadences
+    and one Flushes period, and nothing here may compare them without a named function; that is a P4
+    obligation, not an open spine question. memory/levers.py::<module> still records the
+    PRE-CONVERSION version of this question for FAB.manage_every -- "there is today no legal conversion
+    from a Windows-typed cadence to the flush clock" -- and that sentence is false in this tree today.
+    It is MEM's to correct, not this file's -- which is the same rule that left (a) standing here for
+    the seven days between the spine settling it (2026-08-29) and this edit, and the cost of that rule
+    is exactly one round of somebody re-deriving a repair that had already been made.
 
   DEFECT 3 -- NO UNRESOLVED MERGE HERE, AND IT WAS CHECKED. Both merges name a target that has a row of
   its own in the same family: TOKENIZER -> TOK_MODE, which is TOK_ONLINE's row (verdict rename), and

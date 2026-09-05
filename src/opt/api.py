@@ -1340,6 +1340,19 @@ def counters(opt: Config, st):
     heavy-run command and report 0 steps due against 15 taken -- a correct run raising the P3-H29
     message, which is a worse failure than the unnamed division it replaced.
 
+    AND A BACKWARD COUNTER THAT WENT BACKWARDS IS REFUSED BEFORE THE CONVERSION, WITH THE FOUR
+    NUMBERS (2026-09-05). `st.n_backward - U.Backwards(base_bwd)` is negative only if the counter
+    fell across a resume, which load_state's stamping makes impossible in a sound process: it sets
+    opt.ckpt.backward_at_load FROM st.n_backward AFTER the restore, and scaled_backward only ever
+    adds one. spine/derive.py::opt_steps_from_backwards refuses that negative outright and names
+    the four counter keys, but it holds neither base and cannot print their values; the guard here
+    does, one line earlier. THE DETECTION IS NOT DUPLICATED, IT IS SPLIT ON PURPOSE: until
+    2026-09-04 the fault was caught only as a side effect of `//` flooring a negative to at most
+    -1, so `due != taken` fired -- a detection through a COMPARISON, which a simultaneous step
+    regression cancels exactly, and which the same-day correction to truncation then removed
+    altogether for every deficit smaller than accum. The count is now checked as a count, in both
+    files, and only this one has the numbers to print.
+
     The report prints backward, step, accum, batch_windows and
     d_effective_batch_windows TOGETHER, so the batch size a run TRAINED at is a printed number
     rather than a configured one -- ACCUM appeared in no print anywhere in the old tree, while
@@ -1493,6 +1506,27 @@ def counters(opt: Config, st):
     # units.Steps raises UnitError of its own accord if either side ever arrives in another kind.
     # The divisor is accum, NOT d_effective_batch_windows: that product spans the window boundary
     # as well and belongs to the horizon, which build() resolves with opt_steps_from_windows.
+    # THE BACKWARD COUNTER CANNOT GO BACKWARDS ACROSS A RESUME, AND THIS IS THE SENTENCE WITH THE
+    # NUMBERS IN IT. spine/derive.py::opt_steps_from_backwards refuses a negative count outright and
+    # explains itself, but it holds neither base, so its message can name the four counter keys and
+    # not their values. This raises one line earlier, where all four are in hand. Both are kept: the
+    # detection belongs at the count, where no second regression can cancel it, and the reporting
+    # belongs here, beside the two bases.
+    if int(st.n_backward) < base_bwd:
+        raise ValueError(
+            f"OPT.counters: the backward counter went BACKWARDS across a resume -- "
+            f"backward={n_bwd} against opt.ckpt.backward_at_load={base_bwd}, with step={n_step} "
+            f"against opt.ckpt.step_at_load={base_step}. load_state stamps the base FROM "
+            f"st.n_backward AFTER the restore and scaled_backward only ever adds U.Backwards(1), so "
+            f"a sound process cannot produce this. Until 2026-09-04 it was caught only as a SIDE "
+            f"EFFECT of `//` flooring: floor(n/k) is at most -1 for every n < 0, so no deficit came "
+            f"back as zero and the comparison below raised whenever the step side had not fallen by "
+            f"the same amount. Being a COMPARISON is what made it weak "
+            f"-- a resume that lost accum backward passes AND one optimizer step gave due == taken "
+            f"and cancelled it -- and the same-day repair from flooring to TRUNCATION then answered "
+            f"Steps(0) for every deficit smaller than accum and removed even that. It is checked on "
+            f"the count itself now, here and in spine/derive.py::opt_steps_from_backwards, and this "
+            f"is the one of the two that has the numbers.")
     due = derive.opt_steps_from_backwards(st.n_backward - U.Backwards(base_bwd), divisor)
     taken = st.opt_step - U.Steps(base_step)
     due_steps = int(due)
