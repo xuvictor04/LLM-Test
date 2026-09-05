@@ -465,6 +465,18 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # ruling owes F7 a different second value, and there is no third one in this domain to reach for.
     # Neither this body nor that check may decide it alone; it is filed in .rework/audits/j_fabric.json
     # as a question for the owner rather than settled here.
+    # NOT-A-NUMBER IS NOT A MAGNITUDE EITHER, AND `v < 0.0` IS FALSE FOR IT. Measured at the suite's own
+    # widths: FAB_BALANCE=nan assembles with no warning, FAB.build accepts it, aux_loss comes back nan
+    # and every gradient-carrying tensor on the population is non-finite -- while fab.balance prints
+    # "armed, did not fire (balance=nan x warm=0.9992 vs > 0) -- FAB_BALANCE=nan: no load-balance
+    # pressure", which is F1's defect and F7's defect in one rendered line. FAB_PONDER and FAB_EMB_VAR
+    # do the same; FAB_DOM_FRAC=nan does not reach a gate at all, it raises a bare ValueError from
+    # _breadth_ban. +inf is admitted too. -inf is caught only because it is negative.
+    _unreal = [f"{k}={v}" for k, v in _applied + _gated_off if v != v or v == float("inf")]
+    if _unreal:
+        raise LeverError(
+            f"FAB: magnitude lever(s) {', '.join(_unreal)} are not a magnitude. `v < 0.0` is False "
+            f"for a NaN and for +inf, so neither is caught by the refusal below.")
     _rev = [f"{k}={v}" for k, v in _applied if v < 0.0]
     _off = [f"{k}={v}" for k, v in _gated_off if v < 0.0]
     if _rev or _off:
@@ -655,7 +667,7 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
              reason="" if on else "FAB_ON=0: the forward is the identity, so every gate below this "
                                   "one reports UNREACHABLE rather than 'armed but 0'."),
         Gate("fab.cull_gate", cull_open,
-             f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure),
+             f"{n0}/{max(1, slots)}={n0 / max(1, slots):.3f}", float(fab.pressure),
              reason=(f"n_live={n0} is at or below the FLOOR OF TWO that "
                      f"spine/derive.py::cull_gate_open applies BEFORE the occupancy test and "
                      f"separately from it -- culling a population of two can empty it -- so that "
@@ -669,7 +681,7 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                      if (_occ >= _press) != (_occ_shown >= _press) else ""))
         if on else
         Gate("fab.cull_gate", False,
-             f"{n0}/{slots}={n0 / max(1, slots):.3f}", float(fab.pressure), reachable=False,
+             f"{n0}/{max(1, slots)}={n0 / max(1, slots):.3f}", float(fab.pressure), reachable=False,
              reason="FAB_ON=0: there is no population to cull. The occupancy arithmetic still "
                     "evaluates, and printing it as FIRED would claim a mechanism ran that the "
                     "switch above had already turned off."),
