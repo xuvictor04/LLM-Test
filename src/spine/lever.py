@@ -123,7 +123,15 @@ class Lever:
             elif isinstance(d, int):    v = int(float(raw))
             elif isinstance(d, float):  v = float(raw)
             else:                       v = str(raw)
-        except (TypeError, ValueError):
+        # OverflowError IS IN THIS TUPLE BECAUSE int(float('inf')) RAISES IT AND NOTHING ELSE DOES.
+        # `int(float(raw))` on line 123 resolves every int lever, and at 'inf' or '-inf' it raised an
+        # uncaught OverflowError -- a bare "cannot convert float infinity to integer" naming no lever,
+        # no value and no package -- while the SAME line at 'nan' raises ValueError, is caught here, and
+        # produces the correct refusal. 110 int levers x 2 values = 220 cells tree-wide read as a
+        # traceback instead of a refusal, and the 2026-09-05 lever-domain sweep found it as the largest
+        # REFUSED_BADLY block in all six of its per-package reports. This carries NO policy: it makes
+        # inf AGREE WITH nan rather than deciding anything new about either.
+        except (TypeError, ValueError, OverflowError):
             raise LeverError(f"{self.env_name_for(prefix)}={raw!r} is not a {type(d).__name__}")
         if self.choices is not None and v not in self.choices:
             raise LeverError(f"{self.env_name_for(prefix)}={v!r} must be one of {sorted(self.choices)}")

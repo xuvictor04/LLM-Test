@@ -1,0 +1,614 @@
+{
+ "owner": "opt, lm, train -- the numeric levers",
+ "summary": "SURFACE AND DENOMINATOR. Enumerated from each package's levers.py, a Lever whose default is an int or a float and not a bool: OPT 11 (lr, weight_decay, grad_clip, lr_warmup, lr_wavelength, lr_min_frac, lr_restart_damp, lr_decay, lr_shift_warm, batch_windows, accum), LM 8 (width, layers, heads, ctx, dropout, vocab_slots, anchor_w, anchor_uses), RUN/train 2 (epochs, seed). TWENTY-ONE numeric levers, not the estimated 21-ish-as-about-21 -- 21 exactly. Four values each (nan, inf, -inf, 0) = 84 CELLS, every one driven in a FRESH SUBPROCESS through a real spine.assemble.build(environ=...) and then through the package's live entry points: OPT.build -> OPT.lr_at over an 8-point step grid -> 6 x (scaled_backward, maybe_step with a (value, seed_count) Reading) -> OPT.counters; LM.resolve -> LM.build_model -> LM.encode -> LM.decode (and LM.anchor_term / LM.counters, which are P4 stubs); RUN.process_setup -> RUN.mode -> RUN.streams -> RUN.startup_refusals both ways on disk_stream. Every cell's output was captured; nothing here is inferred from reading.\n\nCOUNTS PER OUTCOME, ALL 84 CELLS:\n  REFUSED_BY_NAME      36\n  REFUSED_BADLY        26\n  ACCEPTED_HARMFUL      5\n  ACCEPTED_LEGITIMATE  11\n  ACCEPTED_INERT        0\n  UNREACHABLE_TODAY     6\n  CRASHED               0\n\nTHE FIVE HARMFUL CELLS, AND FOUR OF THEM ARE ONE DEFECT. OPT_LR=inf and OPT_WEIGHT_DECAY=inf each put NaN into EVERY parameter of the base group within two optimizer steps, with the whole ledger reporting a healthy run -- critical, and the same shape as FAB_BALANCE=nan one lever over. OPT_GRAD_CLIP=nan turns clipping silently off at a measured gradient norm of 8.0e6 AND makes src/opt/api.py::counters print the literal string 'off (0.0)' plus the sentence \"OPT_GRAD_CLIP=0.0 is OFF, which is the setting every recorded number in this project was measured under\" -- a report asserting a value the operator did not type. OPT_LR_RESTART_DAMP=nan kills this package's ONLY closed loop (the goal-B restart damping) while the gate prints the armed-but-did-not-fire verdict over 3 real losing restarts and 1000 readings. OPT_GRAD_CLIP=inf is the low one: a cap that cannot bite, reported as armed.\n\nTHE COMMON ROOT, WHICH IS WHAT THE RULING PHASE NEEDS. Every guard that failed is a ONE-SIDED ORDER COMPARISON -- `lr <= 0.0`, `weight_decay < 0.0`, `grad_clip < 0.0`, `damp > 1.0`, `damp < 0.0`, `anchor_uses <= 0`, `clip > 0.0`, `lr_restart_damp < 1.0` -- and NaN is ordered against nothing, so it passes all of them; +inf additionally passes every lower bound. Every guard that HELD against NaN has the inverted-chain form: `if not 0.0 <= min_frac < 1.0`, `if not 0.0 <= decay <= 1.0`, `if not 0.0 <= dropout < 1.0`. Three levers are safe today by grammar, not by intent. That distinction is the sweep's main structural result: a per-package repair means auditing every one-sided comparison in three files; a central rule in src/spine/lever.py::Lever.coerce covers all of them at the one place a string becomes a float.\n\nTHE SECOND ROOT, AND IT IS ALREADY CENTRAL. 24 of the 26 REFUSED_BADLY cells are ONE line: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`, and int(float('inf')) raises OverflowError, which is an ArithmeticError and escapes uncaught. Every int-defaulted lever in the tree -- all 12 on this surface, and by construction every int lever in the other ten packages -- answers +inf and -inf with a bare `OverflowError: cannot convert float infinity to integer` naming no lever, no environment variable and not even the sign. One line above it, 'nan' takes the ValueError branch and produces the tree's own idiom. Adding OverflowError to that except tuple is a one-token fix that converts 24 of these cells to REFUSED_BY_NAME with no policy decision at all, and it is independent of whatever the ruling phase decides about non-finite floats.\n\nWHAT THE REFUSALS GOT RIGHT, since the denominator matters both ways. 36 of 84 cells refused by name with the lever, the value and the reason, at the earliest layer that could see them: all eleven of src/opt/api.py::build's startup refusals fire correctly on -inf, six of LM.resolve's geometry refusals fire on 0, and the 12 'nan' cells on int levers are refused cleanly by src/spine/lever.py::Lever.coerce. -inf is caught far more often than nan or +inf for exactly the reason the brief names: it is caught INCIDENTALLY, because it happens to be negative, by guards written about sign.\n\nREACHABILITY, STATED PRECISELY. src/spine/compose.py::compose halts at src/capacity/api.py::startup_refusals -- row 29 of ASSEMBLY_ORDER's 39 -- verified by running it (NotImplementedError: \"CAP.startup_refusals: P4 (capacity) fills this in.\"). That is BEFORE the `optimizer` stage where src/spine/compose.py calls opt_api.build, so no OPT finding here is reachable through the root today. That is NOT the same as a latent hole: OPT.build, OPT.lr_at and OPT.maybe_step are fully implemented and were driven directly, and they arm the instant the CAP stub lands. The genuinely latent cases are the six UNREACHABLE_TODAY cells, where the CONSUMER itself is the stub: LM_ANCHOR_W (all four values -- src/lm/api.py::resolve does not read it at all, and its only readers src/lm/api.py::anchor_term and src/lm/api.py::counters both raise NotImplementedError) and LM_ANCHOR_USES at nan and inf (resolve's `<= 0` guard admits them; the horizon is read only by the anchor_term stub). RUN's findings are reachable through the root today -- process_setup and startup_refusals are rows 1 and 6.\n\nNO CELL CRASHED and no cell was ACCEPTED_INERT: every accepted value either damaged something, meant something declared, or could not reach its consumer.",
+ "levers_swept": 21,
+ "findings": [
+  {
+   "lever": "OPT_LR",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "src/opt/api.py::build guards the peak rate with `if lr <= 0.0: raise ValueError`. `inf <= 0.0` is False, so +inf walks through eleven refusals, is handed to BOTH AdamW instances as `lr=`, and is written into every param group on every step by src/opt/api.py::maybe_step clause 5. One optimizer step drives every parameter in the base group to -inf and the second to NaN. Nothing anywhere says a word: OPT.build returns a normal-looking Horizon(run_steps=1000, warmup=100, wavelength=1000, n_cycles=1), src/opt/api.py::counters returns a full ledger, and the only trace is opt.grad_norm.p50=inf / p99=nan buried among 40 counters. This is the FAB_BALANCE=nan shape one lever over: a magnitude guard written as `<= 0` that a non-finite value is not ordered against. NOTE ON REACH TODAY: src/spine/compose.py::compose halts at src/capacity/api.py::startup_refusals (row 29 of ASSEMBLY_ORDER's 39) before the `optimizer` stage, so the root cannot reach OPT.build yet -- but OPT.build and maybe_step are FULLY IMPLEMENTED, not stubs, and this fires the moment the CAP stub lands.",
+   "repro": "$ OPT_LR=inf python /tmp/sw/probe_lr.py OPT_LR inf\nresolved OPT_LR = inf\nOPT.build OK; horizon Horizon(run_steps=Steps(1000), warmup=Steps(100), wavelength=Steps(1000), n_cycles=1)\nAdamW base group lr/wd: inf 0.0\n  step1: lr=inf  p[0,0]=-inf  all_finite=False\n  step2: lr=inf  p[0,0]=nan   all_finite=False\n  step3: lr=inf  p[0,0]=nan   all_finite=False\nledger opt.grad_norm.p50 = inf  p99 = nan\nledger opt.step = 3  opt.lr.writes.base = 3\nFINAL: every base parameter finite?  False  sample: [nan, nan, nan, nan]"
+  },
+  {
+   "lever": "OPT_WEIGHT_DECAY",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "src/opt/api.py::build guards with `if weight_decay < 0.0`. `inf < 0.0` is False, so +inf is handed to both AdamW instances as `weight_decay=`. AdamW's decoupled decay multiplies each parameter by (1 - lr*wd) before the update, so the first step sends every base parameter to -inf and the second to NaN -- at a perfectly ordinary lr=2e-05 that the schedule and the whole ledger report as healthy. The refusal's own text ('is negative, which GROWS every parameter every step regardless of gradient') is about the sign; nothing bounds the magnitude. Same reach caveat as OPT_LR=inf: compose() halts at CAP.startup_refusals before the optimizer stage, so this is latent through the root and live at the package entry point.",
+   "repro": "$ OPT_WEIGHT_DECAY=inf python /tmp/sw/probe_lr.py OPT_WEIGHT_DECAY inf\nresolved OPT_WEIGHT_DECAY = inf\nOPT.build OK; horizon Horizon(run_steps=Steps(1000), warmup=Steps(100), wavelength=Steps(1000), n_cycles=1)\nAdamW base group lr/wd: 0.002 inf\n  step1: lr=2e-05  p[0,0]=-inf  all_finite=False\n  step2: lr=4e-05  p[0,0]=nan   all_finite=False\n  step3: lr=6e-05  p[0,0]=nan   all_finite=False\nFINAL: every base parameter finite?  False  sample: [nan, nan, nan, nan]"
+  },
+  {
+   "lever": "OPT_GRAD_CLIP",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "Two guards miss it and a third prints a value the operator never typed. src/opt/api.py::build refuses only `grad_clip < 0.0` (False for NaN). src/opt/api.py::maybe_step then gates the clip on `if clip > 0.0:` (also False for NaN), so gradient clipping is SILENTLY OFF at any gradient magnitude -- measured with grad norms of 8.0e6 and zero clip events. The damage is the report, and it is the exact FAB_BALANCE=nan shape: src/opt/api.py::counters builds Gate('opt.build.grad_clip', clip > 0.0, clip if clip > 0.0 else 'off (0.0)', ...), so the gate's VALUE renders as the literal string 'off (0.0)' and its reason is the hard-coded sentence \"OPT_GRAD_CLIP=0.0 is OFF, which is the setting every recorded number in this project was measured under (Q-OPT-3)\". An operator who typed nan reads a report asserting they typed 0.0 and that the run matches every historical baseline. The very next gate, opt.clip.applied, interpolates the real value and prints 'OPT_GRAD_CLIP=nan is OFF' -- so one line of the same ledger contradicts the other.",
+   "repro": "$ python /tmp/sw/probe_clip.py nan\nresolved OPT_GRAD_CLIP = nan\ngrad_norms measured: [8000000.0, 7999840.0, 7999520.0]\nopt.clip.applied counter = 0  opt.clip.armed_no_clip = 0\nGATE opt.build.grad_clip: fired=False value='off (0.0)' threshold='> 0.0' reachable=False\n   reason: OPT_GRAD_CLIP=0.0 is OFF, which is the setting every recorded number in this project was taken under (Q-OPT-3). ...\nGATE opt.clip.applied: fired=False value=0 threshold='n/a' reachable=False\n   reason: OPT_GRAD_CLIP=nan is OFF, so no step can clip. This is not 'armed and did not fire'.\n(control, same script at 1.0: opt.clip.applied counter = 3, gate value=1.0 fired=True)"
+  },
+  {
+   "lever": "OPT_GRAD_CLIP",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "low",
+   "detail": "Accepted (`inf < 0.0` is False), and the clip branch in src/opt/api.py::maybe_step DOES run -- but `norm > clip` is False for every finite norm, so the cap is structurally incapable of biting. src/opt/api.py::counters then reports it in the ARMED-BUT-0 state: Gate('opt.build.grad_clip') fires with value=inf and reachable=True, and Gate('opt.clip.applied') prints reachable=True with the reason \"armed and NOTHING exceeded the norm -- a different statement from grad_clip == 0\" -- on a run whose measured gradient norms were 8.0e6. That sentence is the tree's word for 'the mechanism ran and its condition was not met', and here the condition CANNOT be met. The tree's own DID IT FIRE rule has three states and requires UNREACHABLE to be named with the lever and value; this is the second state printed for the third. Low severity because the run is undamaged: an operator wanting no clipping already has the declared sentinel 0.0.",
+   "repro": "$ python /tmp/sw/probe_clip.py inf\nresolved OPT_GRAD_CLIP = inf\ngrad_norms measured: [8000000.0, 7999840.0, 7999520.0]\nopt.clip.applied counter = 0  opt.clip.armed_no_clip = 3\nGATE opt.build.grad_clip: fired=True value=inf threshold='> 0.0' reachable=True\n   reason: \nGATE opt.clip.applied: fired=False value=0 threshold='max-norm inf' reachable=True\n   reason: armed and NOTHING exceeded the norm -- a different statement from grad_clip == 0"
+  },
+  {
+   "lever": "OPT_LR_RESTART_DAMP",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "The two magnitude refusals in src/opt/api.py::build are `damp > 1.0` and `damp < 0.0`, and NaN is ordered against neither, so it is admitted while +inf and -inf are both refused by name from the same pair of lines. Downstream, clause 4 of src/opt/api.py::maybe_step is `if not paid and float(opt.lr_restart_damp) < 1.0:` -- also False for NaN -- so the ONE closed loop this package owns, the goal-B mechanism that shrinks a restart that failed to beat its inherited held-out, is silently dead. It takes none of the three declared exits: opt.restart.damped, opt.restart.damp_refused_n1 and opt.restart.no_reading all stay 0. Driven 1000 steps over a 4-cycle horizon with a LOSING Reading (value, seed_count) on every step: at the shipped damp=0.5 the mechanism fires twice and restart_amp lands at 0.25; at damp=nan, with the identical 3 wraps, 3 detected restarts and 1000 readings, it fires ZERO times and restart_amp stays 1.0 -- and src/opt/api.py::counters prints Gate 'opt.lr.restart_damp' with reachable=True, fired=False, i.e. the ARMED-BUT-DID-NOT-FIRE verdict, whose threshold field reads 'damp=nan, refused_n1=0, no_reading=0, readings=1000'. A reader concludes no cycle ever lost. Three did.",
+   "repro": "$ python /tmp/sw/probe_damp.py 0.5      # control\nresolved OPT_LR_RESTART_DAMP = 0.5\nhorizon: Horizon(run_steps=Steps(1000), warmup=Steps(100), wavelength=Steps(200), n_cycles=4)\n  opt.restart.wraps = 3 / detected = 3 / damped = 2 / damp_refused_n1 = 0 / no_reading = 0 / readings = 1000\n  st.restart_amp = 0.25\nGATE opt.lr.restart_damp: fired=True value=2 threshold='damp=0.5, refused_n1=0, no_reading=0, readings=1000' reachable=True\n\n$ python /tmp/sw/probe_damp.py nan\nresolved OPT_LR_RESTART_DAMP = nan\nhorizon: Horizon(run_steps=Steps(1000), warmup=Steps(100), wavelength=Steps(200), n_cycles=4)\n  opt.restart.wraps = 3 / detected = 3 / damped = 0 / damp_refused_n1 = 0 / no_reading = 0 / readings = 1000\n  st.restart_amp = 1.0\nGATE opt.lr.restart_damp: fired=False value=0 threshold='damp=nan, refused_n1=0, no_reading=0, readings=1000' reachable=True"
+  },
+  {
+   "lever": "OPT_LR",
+   "value": "nan",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "src/opt/api.py::build's own guard for this lever is an ORDER comparison (`lr <= 0.0` / `weight_decay < 0.0`) and NaN is ordered against nothing, so all eleven refusals in that function pass it through. The run is stopped only by accident, three frames down inside torch.optim.AdamW's constructor, with `ValueError: Invalid learning rate: nan` -- naming no lever, no environment variable and no package. The operator is shown a torch internals traceback for a knob they typed. It is also a defence this tree does not own: it holds because the installed torch happens to validate these two arguments, and the same NaN at OPT_GRAD_CLIP -- which torch never sees -- is admitted in full (see that finding). The tree's own idiom is a refusal that names itself, and one line above this the SAME function produces exactly that for -inf: `OPT_LR=-inf must be positive: ...`.",
+   "repro": "$ OPT_LR=nan python /tmp/sw/probe_lr.py OPT_LR nan\nresolved OPT_LR = nan\nTraceback (most recent call last):\n  File \"/home/user/LLM-Test/src/opt/api.py\", line 747, in build\n    base_opt = torch.optim.AdamW([{\"params\": ordered[0][1]}], lr=lr, weight_decay=weight_decay)\n  File \"/usr/local/lib/python3.11/dist-packages/torch/optim/adam.py, line 59, in __init__\n    raise ValueError(f\"Invalid learning rate: {lr}\")\nValueError: Invalid learning rate: nan"
+  },
+  {
+   "lever": "OPT_WEIGHT_DECAY",
+   "value": "nan",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "src/opt/api.py::build's own guard for this lever is an ORDER comparison (`lr <= 0.0` / `weight_decay < 0.0`) and NaN is ordered against nothing, so all eleven refusals in that function pass it through. The run is stopped only by accident, three frames down inside torch.optim.AdamW's constructor, with `ValueError: Invalid weight_decay value: nan` -- naming no lever, no environment variable and no package. The operator is shown a torch internals traceback for a knob they typed. It is also a defence this tree does not own: it holds because the installed torch happens to validate these two arguments, and the same NaN at OPT_GRAD_CLIP -- which torch never sees -- is admitted in full (see that finding). The tree's own idiom is a refusal that names itself, and one line above this the SAME function produces exactly that for -inf: `OPT_LR=-inf must be positive: ...`.",
+   "repro": "$ OPT_WEIGHT_DECAY=nan python /tmp/sw/probe_lr.py OPT_WEIGHT_DECAY nan\nresolved OPT_WEIGHT_DECAY = nan\nTraceback (most recent call last):\n  File \"/home/user/LLM-Test/src/opt/api.py\", line 747, in build\n    base_opt = torch.optim.AdamW([{\"params\": ordered[0][1]}], lr=lr, weight_decay=weight_decay)\n  File \"/usr/local/lib/python3.11/dist-packages/torch/optim/adam.py, line 67, in __init__\n    raise ValueError(f\"Invalid weight_decay value: {weight_decay}\")\nValueError: Invalid weight_decay value: nan"
+  },
+  {
+   "lever": "OPT_LR_WARMUP",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_LR_WARMUP=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_LR_WARMUP",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_LR_WARMUP=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_LR_WAVELENGTH",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_LR_WAVELENGTH=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_LR_WAVELENGTH",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_LR_WAVELENGTH=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_LR_SHIFT_WARM",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_LR_SHIFT_WARM=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_LR_SHIFT_WARM",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_LR_SHIFT_WARM=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_BATCH_WINDOWS",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_BATCH_WINDOWS=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_BATCH_WINDOWS",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_BATCH_WINDOWS=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_ACCUM",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_ACCUM=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "OPT_ACCUM",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ OPT_ACCUM=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_WIDTH",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_WIDTH=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_WIDTH",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_WIDTH=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_LAYERS",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_LAYERS=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_LAYERS",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_LAYERS=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_HEADS",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_HEADS=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_HEADS",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_HEADS=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_CTX",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_CTX=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_CTX",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_CTX=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_VOCAB_SLOTS",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_VOCAB_SLOTS=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_VOCAB_SLOTS",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ LM_VOCAB_SLOTS=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "RUN_EPOCHS",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ RUN_EPOCHS=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "RUN_EPOCHS",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ RUN_EPOCHS=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "RUN_SEED",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ RUN_SEED=inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "RUN_SEED",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "ONE central defect, 24 cells: src/spine/lever.py::Lever.coerce runs `v = int(float(raw))` under `except (TypeError, ValueError)`. int(float('inf')) raises OverflowError -- an ArithmeticError, not in that tuple -- so it escapes uncaught out of LeverSet.from_env and out of spine.assemble.build. The operator gets `OverflowError: cannot convert float infinity to integer`: no lever name, no environment-variable name, not even the sign (+inf and -inf print byte-identical messages). One line above, 'nan' takes the ValueError branch and gives the tree's own idiom. Reaches every int-defaulted Lever in the tree, not just these 12.",
+   "repro": "$ RUN_SEED=-inf python -c \"import sys,os; sys.path.insert(0,'src'); from spine import assemble; assemble.build(environ=dict(os.environ))\"\n  File \"/home/user/LLM-Test/src/spine/lever.py\", line 123, in coerce\n    elif isinstance(d, int):    v = int(float(raw))\nOverflowError: cannot convert float infinity to integer"
+  },
+  {
+   "lever": "LM_ANCHOR_W",
+   "value": "nan",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "Accepted by spine.assemble.build with no coercion complaint and no refusal anywhere: src/lm/api.py::resolve does not read anchor_w at all (its LEVERS READ line names arch, width, layers, heads, ctx, dropout, vocab_slots, compose, anchor_uses -- not anchor_w). The value survives frozen on the Config and travels unchecked through LM.build_model, LM.encode and LM.decode, all of which are live. Its ONLY two consumers are P4 stubs -- src/lm/api.py::anchor_term (\"MULTIPLIED BY anchor_w\") and src/lm/api.py::counters -- both of which raise NotImplementedError today. So a NaN or +/-inf anchor weight is a live NaN multiplier on a loss term the moment P4 (lm) lands, and today it is invisible rather than absent. This is the LATENT half of the FAB_BALANCE=nan case: there is no guard to miss it because there is no guard.",
+   "repro": "$ python /tmp/sw/probe_lm_anchor.py nan nan\nresolved LM_ANCHOR_W = nan  LM_ANCHOR_USES = nan\nLM.resolve OK -> gru 128 dropout 0.0\nbuild_model OK, all params finite: True\nencode OK, finite: True sum 5.071722030639648\ndecode OK, finite: True sum -0.6644530296325684\nanchor_term -> NotImplementedError: LM.anchor_term: P4 (lm) fills this in. The contract is frozen here; see docs/04_CONTRACT.md, section LM.\ncounters -> NotImplementedError: LM.counters: P4 (lm) fills this in. ..."
+  },
+  {
+   "lever": "LM_ANCHOR_W",
+   "value": "inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "Accepted by spine.assemble.build with no coercion complaint and no refusal anywhere: src/lm/api.py::resolve does not read anchor_w at all (its LEVERS READ line names arch, width, layers, heads, ctx, dropout, vocab_slots, compose, anchor_uses -- not anchor_w). The value survives frozen on the Config and travels unchecked through LM.build_model, LM.encode and LM.decode, all of which are live. Its ONLY two consumers are P4 stubs -- src/lm/api.py::anchor_term (\"MULTIPLIED BY anchor_w\") and src/lm/api.py::counters -- both of which raise NotImplementedError today. So a NaN or +/-inf anchor weight is a live NaN multiplier on a loss term the moment P4 (lm) lands, and today it is invisible rather than absent. This is the LATENT half of the FAB_BALANCE=nan case: there is no guard to miss it because there is no guard.",
+   "repro": "$ python /tmp/sw/probe_lm_anchor.py inf 400.0\nresolved LM_ANCHOR_W = inf  LM_ANCHOR_USES = 400.0\nLM.resolve OK -> gru 128 dropout 0.0\nbuild_model OK, all params finite: True\nencode OK, finite: True sum 5.071722030639648\ndecode OK, finite: True sum -0.6644530296325684\nanchor_term -> NotImplementedError: LM.anchor_term: P4 (lm) fills this in.\ncounters -> NotImplementedError: LM.counters: P4 (lm) fills this in."
+  },
+  {
+   "lever": "LM_ANCHOR_W",
+   "value": "-inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "Accepted by spine.assemble.build with no coercion complaint and no refusal anywhere: src/lm/api.py::resolve does not read anchor_w at all (its LEVERS READ line names arch, width, layers, heads, ctx, dropout, vocab_slots, compose, anchor_uses -- not anchor_w). The value survives frozen on the Config and travels unchecked through LM.build_model, LM.encode and LM.decode, all of which are live. Its ONLY two consumers are P4 stubs -- src/lm/api.py::anchor_term (\"MULTIPLIED BY anchor_w\") and src/lm/api.py::counters -- both of which raise NotImplementedError today. So a NaN or +/-inf anchor weight is a live NaN multiplier on a loss term the moment P4 (lm) lands, and today it is invisible rather than absent. This is the LATENT half of the FAB_BALANCE=nan case: there is no guard to miss it because there is no guard.",
+   "repro": "$ python /tmp/sw/probe_lm_anchor.py -inf 400.0\nresolved LM_ANCHOR_W = -inf  LM_ANCHOR_USES = 400.0\nLM.resolve OK -> gru 128 dropout 0.0\nbuild_model OK, all params finite: True\nencode OK, finite: True sum 5.071722030639648\ndecode OK, finite: True sum -0.6644530296325684\nanchor_term -> NotImplementedError: LM.anchor_term: P4 (lm) fills this in.\ncounters -> NotImplementedError: LM.counters: P4 (lm) fills this in."
+  },
+  {
+   "lever": "LM_ANCHOR_W",
+   "value": "0",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "Accepted by spine.assemble.build with no coercion complaint and no refusal anywhere: src/lm/api.py::resolve does not read anchor_w at all (its LEVERS READ line names arch, width, layers, heads, ctx, dropout, vocab_slots, compose, anchor_uses -- not anchor_w). The value survives frozen on the Config and travels unchecked through LM.build_model, LM.encode and LM.decode, all of which are live. Its ONLY two consumers are P4 stubs -- src/lm/api.py::anchor_term (\"MULTIPLIED BY anchor_w\") and src/lm/api.py::counters -- both of which raise NotImplementedError today. So a NaN or +/-inf anchor weight is a live NaN multiplier on a loss term the moment P4 (lm) lands, and today it is invisible rather than absent. This is the LATENT half of the FAB_BALANCE=nan case: there is no guard to miss it because there is no guard.",
+   "repro": "$ python /tmp/sw/probe_lm_anchor.py 0 400.0\nresolved LM_ANCHOR_W = 0  LM_ANCHOR_USES = 400.0\nLM.resolve OK -> gru 128 dropout 0.0\nbuild_model OK, all params finite: True\nencode OK, finite: True sum 5.071722030639648\ndecode OK, finite: True sum -0.6644530296325684\nanchor_term -> NotImplementedError: LM.anchor_term: P4 (lm) fills this in.\ncounters -> NotImplementedError: LM.counters: P4 (lm) fills this in."
+  },
+  {
+   "lever": "LM_ANCHOR_USES",
+   "value": "nan",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "src/lm/api.py::resolve DOES guard this lever -- `if float(lm.anchor_uses) <= 0:` -- and that guard catches 0 and -inf by name. It is an order comparison, so NaN slips through it exactly as `lr <= 0.0` lets NaN through in OPT; +inf slips through because it is genuinely above zero. Both then reach nothing: the release horizon is read only by src/lm/api.py::anchor_term, a P4 stub. At NaN the release test `seen < anchor_uses` would be False for every token -- every minted token released IMMEDIATELY, which is the exact opposite of the state the existing refusal calls 'hold every minted token at its composite forever'. At +inf it is that state literally, and the refusal that exists to prevent it does not fire. Latent, not absent: it arms when P4 (lm) fills anchor_term in.",
+   "repro": "$ python /tmp/sw/probe_lm_anchor.py 0.05 nan\nresolved LM_ANCHOR_W = 0.05  LM_ANCHOR_USES = nan\nLM.resolve OK -> gru 128 dropout 0.0        <-- the `<= 0` guard did not fire\nbuild_model OK, all params finite: True\nencode OK, finite: True sum 5.071722030639648\ndecode OK, finite: True sum -0.6644530296325684\nanchor_term -> NotImplementedError: LM.anchor_term: P4 (lm) fills this in.\n(control: LM_ANCHOR_USES=-inf and =0 are both refused by name at LM.resolve)"
+  },
+  {
+   "lever": "LM_ANCHOR_USES",
+   "value": "inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "src/lm/api.py::resolve DOES guard this lever -- `if float(lm.anchor_uses) <= 0:` -- and that guard catches 0 and -inf by name. It is an order comparison, so NaN slips through it exactly as `lr <= 0.0` lets NaN through in OPT; +inf slips through because it is genuinely above zero. Both then reach nothing: the release horizon is read only by src/lm/api.py::anchor_term, a P4 stub. At NaN the release test `seen < anchor_uses` would be False for every token -- every minted token released IMMEDIATELY, which is the exact opposite of the state the existing refusal calls 'hold every minted token at its composite forever'. At +inf it is that state literally, and the refusal that exists to prevent it does not fire. Latent, not absent: it arms when P4 (lm) fills anchor_term in.",
+   "repro": "$ python /tmp/sw/probe_lm_anchor.py 0.05 inf\nresolved LM_ANCHOR_W = 0.05  LM_ANCHOR_USES = inf\nLM.resolve OK -> gru 128 dropout 0.0        <-- the `<= 0` guard did not fire\nbuild_model OK, all params finite: True\nencode OK, finite: True sum 5.071722030639648\ndecode OK, finite: True sum -0.6644530296325684\nanchor_term -> NotImplementedError: LM.anchor_term: P4 (lm) fills this in.\n(control: LM_ANCHOR_USES=-inf and =0 are both refused by name at LM.resolve)"
+  },
+  {
+   "lever": "OPT_LR",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_LR=-inf -> ValueError: OPT_LR=-inf must be positive: every rate this system applies is this number times a multiplier in 0..1."
+  },
+  {
+   "lever": "OPT_LR",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_LR=0 -> ValueError: OPT_LR=0.0 must be positive: every rate this system applies is this number times a multiplier in 0..1."
+  },
+  {
+   "lever": "OPT_WEIGHT_DECAY",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_WEIGHT_DECAY=-inf -> ValueError: OPT_WEIGHT_DECAY=-inf is negative, which GROWS every parameter every step regardless of gradient."
+  },
+  {
+   "lever": "OPT_GRAD_CLIP",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_GRAD_CLIP=-inf -> ValueError: OPT_GRAD_CLIP=-inf is negative. 0.0 is OFF and is the shipped default; a negative max-norm is a typo that would clip every step to nothing."
+  },
+  {
+   "lever": "OPT_LR_WARMUP",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "OPT_LR_WARMUP=nan -> LeverError: OPT_LR_WARMUP='nan' is not a int"
+  },
+  {
+   "lever": "OPT_LR_WAVELENGTH",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "OPT_LR_WAVELENGTH=nan -> LeverError: OPT_LR_WAVELENGTH='nan' is not a int"
+  },
+  {
+   "lever": "OPT_LR_MIN_FRAC",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case. Worth noting for the ruling phase: this one catches NaN for a structural reason the other guards lack -- the test is written `if not 0.0 <= min_frac < 1.0`, and `not (False)` is True for NaN. The same INVERTED-CHAIN form saves OPT_LR_DECAY and LM_DROPOUT. Every lever refused badly or accepted harmfully in this sweep instead uses a one-sided `< 0.0` / `<= 0.0` / `> 1.0`, which NaN passes.",
+   "repro": "OPT_LR_MIN_FRAC=nan -> ValueError: OPT_LR_MIN_FRAC=nan is outside [0.0, 1.0). It is a fraction of peak and 1.0 would make the cosine a constant."
+  },
+  {
+   "lever": "OPT_LR_MIN_FRAC",
+   "value": "inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case. Worth noting for the ruling phase: this one catches NaN for a structural reason the other guards lack -- the test is written `if not 0.0 <= min_frac < 1.0`, and `not (False)` is True for NaN. The same INVERTED-CHAIN form saves OPT_LR_DECAY and LM_DROPOUT. Every lever refused badly or accepted harmfully in this sweep instead uses a one-sided `< 0.0` / `<= 0.0` / `> 1.0`, which NaN passes.",
+   "repro": "OPT_LR_MIN_FRAC=inf -> ValueError: OPT_LR_MIN_FRAC=inf is outside [0.0, 1.0). ..."
+  },
+  {
+   "lever": "OPT_LR_MIN_FRAC",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case. Worth noting for the ruling phase: this one catches NaN for a structural reason the other guards lack -- the test is written `if not 0.0 <= min_frac < 1.0`, and `not (False)` is True for NaN. The same INVERTED-CHAIN form saves OPT_LR_DECAY and LM_DROPOUT. Every lever refused badly or accepted harmfully in this sweep instead uses a one-sided `< 0.0` / `<= 0.0` / `> 1.0`, which NaN passes.",
+   "repro": "OPT_LR_MIN_FRAC=-inf -> ValueError: OPT_LR_MIN_FRAC=-inf is outside [0.0, 1.0). ..."
+  },
+  {
+   "lever": "OPT_LR_RESTART_DAMP",
+   "value": "inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_LR_RESTART_DAMP=inf -> ValueError: OPT_LR_RESTART_DAMP=inf is above 1.0, which INVERTS the mechanism. ..."
+  },
+  {
+   "lever": "OPT_LR_RESTART_DAMP",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_LR_RESTART_DAMP=-inf -> ValueError: OPT_LR_RESTART_DAMP=-inf is negative; a negative multiplier flips the sign of the restart swing."
+  },
+  {
+   "lever": "OPT_LR_DECAY",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_LR_DECAY=nan -> ValueError: OPT_LR_DECAY=nan is outside [0.0, 1.0]. ..."
+  },
+  {
+   "lever": "OPT_LR_DECAY",
+   "value": "inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_LR_DECAY=inf -> ValueError: OPT_LR_DECAY=inf is outside [0.0, 1.0]. ..."
+  },
+  {
+   "lever": "OPT_LR_DECAY",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_LR_DECAY=-inf -> ValueError: OPT_LR_DECAY=-inf is outside [0.0, 1.0]. ..."
+  },
+  {
+   "lever": "OPT_LR_SHIFT_WARM",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "OPT_LR_SHIFT_WARM=nan -> LeverError: OPT_LR_SHIFT_WARM='nan' is not a int"
+  },
+  {
+   "lever": "OPT_BATCH_WINDOWS",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "OPT_BATCH_WINDOWS=nan -> LeverError: OPT_BATCH_WINDOWS='nan' is not a int"
+  },
+  {
+   "lever": "OPT_BATCH_WINDOWS",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/derive.py::flush_period_windows, during spine.assemble.build, naming the lever and the value. The good case. Refused during spine.assemble.build itself, inside the d_effective_batch_windows coupling, before OPT.build is ever called. It names the field and the value but not the generated environment name OPT_BATCH_WINDOWS; src/opt/api.py::build's docstring declares this route deliberately ('batch_windows < 1 already raises UnitError in derive.flush_period_windows').",
+   "repro": "OPT_BATCH_WINDOWS=0 -> UnitError: flush_period_windows: batch_windows=0 -- a flush covers at least one window."
+  },
+  {
+   "lever": "OPT_ACCUM",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "OPT_ACCUM=nan -> LeverError: OPT_ACCUM='nan' is not a int"
+  },
+  {
+   "lever": "OPT_ACCUM",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/opt/api.py::build, naming the lever and the value. The good case.",
+   "repro": "OPT_ACCUM=0 -> ValueError: OPT_ACCUM=0 is below 1. derive.accum_due clamps it to 1 in SILENCE (`k = max(1, int(accum))`), which is where a typo hides ..."
+  },
+  {
+   "lever": "LM_WIDTH",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "LM_WIDTH=nan -> LeverError: LM_WIDTH='nan' is not a int"
+  },
+  {
+   "lever": "LM_WIDTH",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_WIDTH=0 -> GeometryError: LM.resolve refuses this geometry: - LM_WIDTH=0: the model has no hidden dimension."
+  },
+  {
+   "lever": "LM_LAYERS",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "LM_LAYERS=nan -> LeverError: LM_LAYERS='nan' is not a int"
+  },
+  {
+   "lever": "LM_HEADS",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "LM_HEADS=nan -> LeverError: LM_HEADS='nan' is not a int"
+  },
+  {
+   "lever": "LM_HEADS",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_HEADS=0 -> GeometryError: LM.resolve refuses this geometry: - LM_HEADS=0: at least one attention head is required."
+  },
+  {
+   "lever": "LM_CTX",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "LM_CTX=nan -> LeverError: LM_CTX='nan' is not a int"
+  },
+  {
+   "lever": "LM_CTX",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_CTX=0 -> GeometryError: LM.resolve refuses this geometry: - LM_CTX=0: a window of no tokens has nothing to predict."
+  },
+  {
+   "lever": "LM_DROPOUT",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_DROPOUT=nan -> GeometryError: LM.resolve refuses this geometry: - LM_DROPOUT=nan: must be in [0.0, 1.0). At 1.0 every activation is dropped and the loss is constant."
+  },
+  {
+   "lever": "LM_DROPOUT",
+   "value": "inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_DROPOUT=inf -> GeometryError: ... - LM_DROPOUT=inf: must be in [0.0, 1.0). ..."
+  },
+  {
+   "lever": "LM_DROPOUT",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_DROPOUT=-inf -> GeometryError: ... - LM_DROPOUT=-inf: must be in [0.0, 1.0). ..."
+  },
+  {
+   "lever": "LM_VOCAB_SLOTS",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "LM_VOCAB_SLOTS=nan -> LeverError: LM_VOCAB_SLOTS='nan' is not a int"
+  },
+  {
+   "lever": "LM_VOCAB_SLOTS",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_VOCAB_SLOTS=0 -> GeometryError: ... - LM_VOCAB_SLOTS=0: the embedding and output tables have no rows."
+  },
+  {
+   "lever": "LM_ANCHOR_USES",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_ANCHOR_USES=-inf -> GeometryError: ... - LM_ANCHOR_USES=-inf: there is no second release rule any more ... so 0 or less means 'hold every minted token at its composite forever', which no operator means to ask for."
+  },
+  {
+   "lever": "LM_ANCHOR_USES",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/lm/api.py::resolve, naming the lever and the value. The good case.",
+   "repro": "LM_ANCHOR_USES=0 -> GeometryError: ... - LM_ANCHOR_USES=0.0: there is no second release rule any more ..."
+  },
+  {
+   "lever": "RUN_EPOCHS",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "RUN_EPOCHS=nan -> LeverError: RUN_EPOCHS='nan' is not a int"
+  },
+  {
+   "lever": "RUN_EPOCHS",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/train/api.py::startup_refusals, naming the lever and the value. The good case.",
+   "repro": "RUN_EPOCHS=0 -> refusal string returned: \"RUN_EPOCHS=0: the loop would make no passes. Set it to 1 or more. This is refused rather than clamped to 1, because a clamp makes the banner print a number the run did not use.\""
+  },
+  {
+   "lever": "RUN_SEED",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "Refused at src/spine/lever.py::Lever.coerce, naming the lever and the value. The good case.",
+   "repro": "RUN_SEED=nan -> LeverError: RUN_SEED='nan' is not a int"
+  }
+ ],
+ "legitimate_specials": "OPT_WEIGHT_DECAY=0 -- weight decay OFF; the shipped default. Declared: src/opt/levers.py::OPTLevers weight_decay (\"AdamW decoupled weight decay, applied to the base optimizer and the encoder optimizer alike\") with default 0.0, and src/opt/api.py::build refuses only `weight_decay < 0.0`.\nOPT_GRAD_CLIP=0 -- clipping OFF, stated in the declaration itself. Declared: src/opt/levers.py::OPTLevers grad_clip (\"0.0 is OFF, which is what every recorded number in this project was measured under\"), and src/opt/api.py::counters gives it a dedicated UNREACHABLE gate arm: \"OPT_GRAD_CLIP=0.0 is OFF, so no step can clip. This is not 'armed and did not fire'.\"\nOPT_LR_WARMUP=0 -- NO warmup: the cosine spans the run from step 0. Declared: src/opt/api.py::_cycle_index (\"at a horizon whose warmup resolved to 0 -- which build() permits, since only a NEGATIVE lr_warmup is refused ... at warmup 0 there is no warmup, so the cosine spans the run from step 0\"), and src/opt/api.py::build refuses only `lr_warmup < 0`. VERIFIED: horizon came back Horizon(run_steps=Steps(1000), warmup=Steps(0), ...) and lr_at(1) = 0.00199999 (peak) instead of the 2e-05 first rung of the default ramp.\nOPT_LR_WAVELENGTH=0 -- THE SENTINEL: one wavelength spans the whole run. Declared verbatim in src/opt/levers.py::OPTLevers lr_wavelength (\"0 means one wavelength spans the whole run\") and resolved in exactly one visible place in src/opt/api.py::build (`wavelength = run_steps if from_sentinel else U.Steps(...)`), counted as opt.build.wavelength_from_sentinel. VERIFIED: identical rates to the default and opt.build.wavelength_from_sentinel = 1.\nOPT_LR_MIN_FRAC=0 -- the schedule HAS no floor and anneals to zero; a legal setting the report warns about rather than refuses. Declared: src/opt/api.py::build refuses only outside [0.0, 1.0), and src/opt/api.py::counters carries a dedicated arm, \"OPT_LR_MIN_FRAC=0.0: the clamp is max(0.0, cyc) over a cosine that is already non-negative, so no step can be raised by it and the schedule HAS no floor -- which is the setting lr_min_frac's goal-B argument exists to warn about.\" VERIFIED: lr_at(1000) = 0.0 against 0.0001 at the default.\nOPT_LR_RESTART_DAMP=0 -- the restart swing collapses to the floor on the first losing cycle and stays there. Declared by the refusal boundary in src/opt/api.py::build (`damp < 0.0` refused, 0.0 admitted) and by the arithmetic in src/opt/api.py::maybe_step clause 4 (`st.restart_amp *= float(opt.lr_restart_damp)`). VERIFIED at 4 cycles: 3 wraps, 2 detected (one fewer than at damp=0.5, because the collapsed amplitude blinds the detector -- the inversion src/opt/api.py::maybe_step's own docstring documents), 1 damped, restart_amp = 0.0.\nOPT_LR_DECAY=0 -- envelope OFF; restarts return to full peak. Declared verbatim in the refusal text in src/opt/api.py::build (\"0.0 restores the pre-2026-08-26 behaviour (restarts return to full peak) and 1.0 is the full envelope\"). VERIFIED: opt.lr.envelope_applied stayed 0 over 1000 driven steps.\nOPT_LR_SHIFT_WARM=0 -- the post-shift re-warm is OFF, and the tree insists this is a DIFFERENT statement from \"nobody is supplying shift_at\". Declared: src/opt/levers.py::OPTLevers lr_shift_warm block (\"`opt.shift.notifications` at 0 means NOBODY IS SUPPLYING shift_at, which is a different statement from lr_shift_warm == 0, and the report must make both\"), and src/opt/api.py::_schedule gates the re-warm on `bool(shift_warm)`.\nOPT_BATCH_WINDOWS=1 / OPT_ACCUM=1 are the shipped defaults; 0 is refused for both and is NOT a sentinel. Recorded here only so the ruling phase does not mistake them for one.\nLM_LAYERS=0 -- THE SENTINEL: take this arm's default depth (4 on transformer, 1 on gru). Declared in src/lm/api.py::resolve (\"the lever's 0 sentinel replaced by 4 on the transformer arm and 1 on the gru arm ... 0 layers is not a small model, it is a broken constructor\") and recorded on the geometry as layers_from_sentinel plus counter lm.resolve.layers_from_sentinel. VERIFIED: LMGeometry(... layers=1 ... layers_from_sentinel=True) and a working forward pass.\nLM_DROPOUT=0 -- dropout OFF; the shipped default. Declared: src/lm/api.py::resolve refuses only outside [0.0, 1.0), and src/train/api.py::process_setup's docstring treats LM_DROPOUT=0.0 as the determinism-clean case (\"the SAME pair of processes at LM_DROPOUT=0.0 agreed exactly\").\nRUN_SEED=0 -- the shipped root seed, a real value and not \"unset\". Declared: src/train/levers.py::RUNLevers seed, default 0, and src/spine/rng.py::derive_seed is blake2b of (seed, name) so 0 is an ordinary seed. VERIFIED: Process.torch_seed = 3734753547471956429 and named streams minted (memory seed=5876198497521010688, domains seed=905312284192048243).\nNOT A SENTINEL, stated so the ruling phase does not add one: RUN_EPOCHS=0 is REFUSED by name in src/train/api.py::startup_refusals, deliberately rather than clamped; OPT_LR=0 is refused by src/opt/api.py::build; LM_WIDTH/LM_HEADS/LM_CTX/LM_VOCAB_SLOTS=0 and LM_ANCHOR_USES=0 are all refused by name in src/lm/api.py::resolve.",
+ "unfinished": [
+  {
+   "title": "OPT.state_dict / OPT.load_state were not driven at non-finite values",
+   "reason": "scope and time",
+   "detail": "src/opt/api.py::state_dict and src/opt/api.py::load_state are live (not stubs) and carry the horizon, lr_prev, restart_amp and param_group_shape across a resume. This sweep drove build / lr_at / scaled_backward / maybe_step / counters only. Two specific things are unchecked: whether a NaN restart_amp (produced by OPT_LR_RESTART_DAMP=nan, though this sweep measured restart_amp staying at 1.0 because the multiply never runs) or an inf horizon survives a save/load round trip, and whether load_state's `opt.ckpt.horizon_changed` comparison behaves when either side is non-finite. Cheap to add: same harness, plus a state_dict/load_state pair."
+  },
+  {
+   "title": "Non-finite values were driven only as the four brief-mandated specials",
+   "reason": "brief scope",
+   "detail": "The brief fixed the value grid at nan / inf / -inf / 0. Two neighbouring values are not covered and are plausible operator typos on the same levers: a huge finite float (OPT_LR=1e30, which passes `lr <= 0.0` and every torch check and will overflow to inf inside the update rather than at the boundary), and a value string that float() accepts case-insensitively -- 'NaN', 'Infinity', '+inf', '1e400' -- of which the last silently becomes inf inside src/spine/lever.py::Lever.coerce before any guard sees it. If the ruling phase adds a central refusal, the string forms are where it has to bite, not the float forms."
+  },
+  {
+   "title": "The transformer arm of LM was not swept",
+   "reason": "scope",
+   "detail": "Every LM cell here ran on the shipped LM_ARCH=gru. src/lm/api.py::resolve's width-%-heads coupling and the pos_max/ctx assertion are transformer-arm code, and LM_HEADS is read ONLY on that arm (the declaration says so). The int levers are refused at coercion on both arms so the outcome cannot differ for inf/-inf/nan, but LM_HEADS=0 on the transformer arm reaches a second refusal (`width % heads`, which is a ZeroDivisionError risk if the ordering of the two `bad.append` blocks ever changed) that this sweep never exercised. Worth one extra column: 21 levers x 4 values x LM_ARCH=transformer for the 8 LM levers = 32 more cells."
+  },
+  {
+   "title": "lr_sched=none was not crossed with the numeric grid",
+   "reason": "scope",
+   "detail": "OPT's one-flag ablation OPT_LR_SCHED=none makes src/opt/api.py::_schedule return at its first statement, so warmup, wavelength, floor, damping, envelope and re-warm are all structurally unreachable and src/opt/api.py::counters has a separate UNREACHABLE arm for each. Whether those unreachable arms still render correctly with a NaN lever interpolated into their reason strings -- the same 'off (0.0)' failure found here at OPT_GRAD_CLIP=nan -- is unmeasured. Six gate reasons interpolate a float lever value directly."
+  }
+ ]
+}

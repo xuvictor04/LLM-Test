@@ -1,0 +1,1104 @@
+{
+ "owner": "sweep_sig-tok",
+ "summary": "SWEPT 32 NUMERIC LEVERS (SIG 16, TOK 16 -- enumerated from src/sig/levers.py::SIGLevers and src/tok/levers.py::TOKLevers as every Lever whose default is an int or float and not a bool; the other 4 of the 36 declared levers are the str levers SIG.mode, SIG.space, TOK.mode, TOK.probation_by) x 4 values {nan, inf, -inf, 0} = 128 CELLS, each in a fresh subprocess, each set as the generated PREFIX_FIELD environment variable through a real spine.assemble.build(dict(os.environ)) and then driven as far as the package goes today: SIG through build -> encode -> encoder_parameters -> cadence_due -> warm_up (800 real optimizer steps, checking every encoder tensor for finiteness before and after); TOK through build_vocabulary -> tokenize(regularize=True) -> tokenize(deterministic). COUNTS PER OUTCOME OVER THE 128: REFUSED_BADLY 50, REFUSED_BY_NAME 26, UNREACHABLE_TODAY 18, ACCEPTED_LEGITIMATE 16, ACCEPTED_HARMFUL 11, CRASHED 0. THE SHAPE OF IT IS A TYPE SPLIT, AND IT IS THE MOST USEFUL THING HERE. 21 of the 32 levers are int-typed, and Lever.coerce's `int(float(raw))` refuses nan on all 21 with the good LeverError naming the lever -- so not one of the 11 ACCEPTED_HARMFUL cells is on an int lever. All 11 are on the 11 float levers, where coerce hands nan/inf straight through to a package that has no isfinite check anywhere. THREE ARE CRITICAL AND ALL THREE ARE THE FAB_BALANCE=nan SHAPE EXACTLY: SIG_TEMP=nan, SIG_VAR_WEIGHT=inf and SIG_COV_WEIGHT=inf each leave EVERY encoder parameter non-finite after warm_up while WarmupReport returns verdict='budget' with separation=nan -- and in the SIG_TEMP case the refusal that would have caught it stands three lines up (`if temp <= 0.0`), false for NaN. Two more are high: SIG_D=0 gives every window a width-0 signature on both mode arms while the separation probe reads a perfect 1.0, and TOK_DROPOUT=inf silently makes bytes_per_token measure 1.0 instead of 4.0 -- the one estimator SIG's single window width and DATA's splice gate are computed from. THE 50 REFUSED_BADLY ARE ALMOST ALL ONE LINE: 42 of them are int-lever x {inf,-inf}, where int(float('inf')) raises OverflowError, which is NOT in Lever.coerce's `except (TypeError, ValueError)` -- so a value the spine's own single reader was written to type-check escapes it as a bare OverflowError naming nothing. That is one edit in src/spine/lever.py covering every int lever in the tree. FOR THE CENTRAL-VS-PER-PACKAGE RULING: 15 of the 16 legitimate cells are the value 0 and six of those are sentinels spelled out in the lever's own help string (TOK.freeze_at '0 means never freeze', TOK.retok_every, TOK.mint_pmin, TOK.mint_novel, TOK.probation_uses, SIG.warmup); a central refusal of 0 would break all of them. NOT ONE lever in either package declares any meaning for a non-finite value, so a central rule refusing nan/+inf/-inf in spine/lever.py::Lever.coerce would wrongly refuse ZERO cells in this surface while closing 46 of the 50 bad refusals and all 11 harmful ones.",
+ "levers_swept": 32,
+ "findings": [
+  {
+   "lever": "SIG.temp (SIG_TEMP)",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "The refusal that already stands at this exact site -- `if temp <= 0.0: raise ValueError(SIG_TEMP=...)` in src/sig/api.py::_contrastive_loss -- is FALSE FOR NaN, the same arithmetic that let FAB_BALANCE=nan through. logits = (za @ zp.t()) / nan is all-nan, cross_entropy returns nan, and one backward() puts nan in every encoder gradient. Measured at step 1: loss=nan, grads(sum_abs,finite)={'emb.weight':(nan,False), 'proj.weight':(nan,False),'proj.bias':(nan,False)}. After the full 800-step warm_up all three tensors are non-finite and WarmupReport comes back verdict='budget' steps=800 probes=1 peak=nan final=nan curve=[nan] -- the encoder handed to the loop is entirely nan, FAB routes on nan keys, DOM's boundary test compares nan, and nothing anywhere printed a word. sig.warmup_separation_final, which warm_up's own docstring names as 'the only surface that can show a collapse here', reads nan and _stop_verdict returns None for it.",
+   "repro": "SIG_TEMP=nan python drive.py SIG temp nan -> [sig.warm_up.report] OK: verdict='budget' steps=800 probes=1 peak=nan final=nan curve=[nan] / [sig.param.after] OK: emb.weight finite=False (also proj.weight, proj.bias). Step-1 dissection: /tmp/sigtok_sweep_5862/loss1.py SIG_TEMP nan. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.var_weight (SIG_VAR_WEIGHT)",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "src/sig/api.py::_var_cov guards the variance hinge with `if var_weight > 0.0`, which +inf passes. term = inf * clamp(1-std,min=0).mean() is inf, the loss is inf, and backward() through it produces nan gradients: measured at step 1, loss=inf, all three encoder tensors' grads (nan, finite=False). After the full warm_up every encoder parameter is non-finite and the report is verdict='budget' peak=nan final=nan curve=[nan]. There is no isfinite check anywhere in sig/api.py and none in the lever declaration; U.COUNT on the declaration is a label, not a bound (the lever's own comment says so).",
+   "repro": "python drive.py SIG var_weight inf -> [sig.warm_up.report] OK: verdict='budget' steps=800 probes=1 peak=nan final=nan curve=[nan]; [sig.param.after] emb.weight finite=False, proj.weight finite=False, proj.bias finite=False. Step-1: loss1.py SIG_VAR_WEIGHT inf -> loss=inf grads nan. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.cov_weight (SIG_COV_WEIGHT)",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "Identical mechanism to SIG_VAR_WEIGHT=inf one branch down in the same function: `if cov_weight > 0.0 and n > 1` admits +inf, cov_weight * off_diagonal.pow(2).sum()/d is inf, loss is inf, gradients are nan, and every encoder parameter is non-finite after warm_up while the report reads verdict='budget' peak=nan. Reported separately from var_weight because the two terms are weighted independently and a fix on one does not cover the other.",
+   "repro": "python drive.py SIG cov_weight inf -> [sig.warm_up.report] OK: verdict='budget' steps=800 probes=1 peak=nan final=nan curve=[nan]; [sig.param.after] all three finite=False. Step-1: loss1.py SIG_COV_WEIGHT inf -> loss=inf grads nan. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "all 21 int-typed levers of SIG and TOK",
+   "value": "inf and -inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "high",
+   "detail": "src/spine/lever.py::Lever.coerce does `v = int(float(raw))` for an int-defaulted lever inside `except (TypeError, ValueError)`. int(float('nan')) raises ValueError and is caught, producing the good refusal LeverError: SIG_D='nan' is not a int. int(float('inf')) raises OverflowError, which is an ArithmeticError and is NOT in that tuple -- so it escapes spine/lever.py as a bare `OverflowError: cannot convert float infinity to integer`, naming no lever, no value and no package, out of a stack frame the operator has never heard of. 42 of the 128 cells (every int lever x {inf,-inf}) end this way, plus 4 more where a float lever meets int()/round() downstream: 46 OverflowError cells in the sweep. This is ONE line in the ONE file the spine says is where an environment string becomes a typed value, and it covers every int lever in the tree, not only these 21.",
+   "repro": "python drive.py SIG d inf -> [assemble.build] RAISE: OverflowError: cannot convert float infinity to integer. Same for SIG_{BIGRAM_DIM,CONTRASTIVE_BATCH,FLOOR_KINDS,TRAIN_EVERY,TRAIN_EVERY_IDLE,DENSE_WINDOW,WARMUP,WARMUP_PROBE_EVERY} and TOK_{FREEZE_AT,RETOK_EVERY,GROW_EVERY,GROW_BURST,SEED_VOCAB,BUILD_PASSES,BUILD_BYTES,MIN_PAIR,MAX_BYTES,CAND_WINDOW,PROBATION_USES,PROBATION_DEADLINE} at inf and at -inf: `grep -l OverflowError /tmp/sigtok_sweep_5862/out/*` -> 46 files. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.d (SIG_D)",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "build() accepts d=0 on BOTH mode arms and encode() then returns well-formed (N, 0) 'unit vectors' for every window, forever, with no error: the signature space has no dimensions. This is exactly the failure build() already refuses one branch away -- SIG_MODE=bigram at width_units=1 is refused BY NAME because it 'returns a well-formed all-zero signature for every window, which collapses FAB's routing and DOM's boundary test with no error anywhere' -- reached through the other geometry lever instead. Worse, the instrument agrees it is healthy: the warm-up separation probe reads 1.0 (perfect separation) because every pairwise cosine over width-0 vectors is 0, so a run with no signature space at all reports the best separation number the probe can produce. d is also checkpoint geometry and FAB's routing key width.",
+   "repro": "python drive.py SIG d 0 -> [sig.encode.z] OK: shape=(4, 0) finite=True row0[:4]=[] ; [sig.warm_up.report] OK: verdict='budget' steps=800 probes=1 peak=1.0 final=1.0 curve=[1.0]. Bigram arm: SIG_MODE=bigram python drive.py SIG d 0 -> [sig.table] finite=True shape=(512, 0); [sig.encode.z] shape=(4, 0). harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "TOK.dropout (TOK_DROPOUT)",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "Every guard in the package is `dropout > 0.0`, which +inf passes, and the draw is `stream.random() < dropout` -- always true at inf. So every available merge is skipped on every counting segmentation. Two things follow and neither is reported: (1) the seed build mints 82 tokens instead of 181 with 82 refusals (tok.build_refused=82) and the vocabulary lands at 338 instead of 437; (2) bytes_per_token is MEASURED at 1.0 instead of 4.0. That number is the package's single estimator and it leaves TOK: derive.signature_width_bytes(LM.ctx, bytes_per_token) is SIG's ONE window width for the whole run, and DATA's splice gate reads it too -- so a TOK_DROPOUT typo silently makes the signature window four times too narrow, which is the C4/C5 family the whole of sig/api.py is built to prevent, arriving from the tokenizer. A probability lever has no upper bound check anywhere (nothing refuses 1.5 either).",
+   "repro": "python drive.py TOK dropout inf -> [tok.vocab] OK: size=338 live=338 v0=338 bytes_per_token=1.0 counters={'tok.build_pass':2,'tok.build_mint':82,'tok.build_converged':0,'tok.build_refused':82}; [tok.seg] n_ids=4000 bpt=1.0 tok.dropout_skip=3999. Baseline (python drive.py TOK dropout -): size=437 build_mint=181 bytes_per_token=4.0. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.contrastive_batch (SIG_CONTRASTIVE_BATCH)",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "warm_up runs its full 800 optimizer steps on an EMPTY batch. _draw_pairs returns (0,64)/(0,64), _contrastive_loss returns nan (cross_entropy over a 0x0 logit matrix), and the separation probe -- 2*0 = 0 encodings, an empty triu mean -- returns nan. The gradients happen to be finite zeros so the parameters survive, which is what makes it silent: WarmupReport comes back verdict='budget' steps=800 probes=1 peak=nan final=nan curve=[nan]. Both arms of the collapse verdict are nan comparisons and therefore False (_stop_verdict([nan], 0.015) -> None, verified), so the RUN-LEVEL FAILURE verdict that _stop_verdict's own docstring says must survive a one-point curve cannot be produced at all. B is also the collapse reference ln(B); at 0 that is ln(0).",
+   "repro": "python drive.py SIG contrastive_batch 0 -> [sig.warm_up.report] OK: verdict='budget' steps=800 probes=1 peak=nan final=nan curve=[nan]. Dissection /tmp/sigtok_sweep_5862/cb0.py -> pair shapes: (0, 64) (0, 64) / loss: nan / grads all finite 0.0 / separation probe: nan / sep<0.15 -> False / _stop_verdict([nan],0.015) -> None. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.temp (SIG_TEMP)",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "The refusal directly beside it catches 0 and every negative and misses +inf. At temp=inf every logit is exactly 0.0 (verified: `logits all zero: True, max|logit|: 0.0`), cross_entropy is exactly ln(48) = 3.8712007 -- which this lever's sibling comment calls 'the loss of a model that has learned nothing' -- and the InfoNCE gradient is exactly 0.0. The contrastive objective, which is the entire purpose of the package, is silently deleted; only the variance hinge trains. The report then looks BETTER than a working run: separation 1.007 against the 0.576 baseline, verdict 'budget', every parameter finite. Nothing distinguishes it from a healthy encoder.",
+   "repro": "python drive.py SIG temp inf -> [sig.warm_up.report] OK: verdict='budget' steps=800 probes=1 peak=1.0070816278457642 final=1.0070816278457642. Proof: /tmp/sigtok_sweep_5862/t_inf.py -> logits all zero: True | max|logit|: 0.0 / cross_entropy(logits) = 3.8712007999420166  ln(48) = 3.871201010907891 / InfoNCE-only grad sum_abs: 0.0. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.warmup_plateau_eps (SIG_WARMUP_PLATEAU_EPS)",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "The flatness test in _stop_verdict is `abs(sep - prev) <= eps * abs(prev)`; at eps=inf it is true for any pair of probes, so the warm-up stops at the FIRST moment two probes exist and returns verdict='plateau' -- the false-convergence stop that _stop_verdict's docstring says the whole function was rewritten to remove ('it reported a converged plateau and stopped; SHIFT_DIST then never fired, the run found 0 boundaries and 1 domain'). Gate sig.adaptive_stop prints fired=True with reason='' -- a positive verdict with no arithmetic behind it. Measured at step 400 of 800 with a curve that was still rising. NOTE: at the SHIPPED pair (SIG_WARMUP=800, SIG_WARMUP_PROBE_EVERY=500) only one probe lands and this lever is not consulted at all, so this cell was driven with SIG_WARMUP_PROBE_EVERY=200 -- stated because it is a two-lever configuration.",
+   "repro": "SIG_WARMUP_PROBE_EVERY=200 python drive.py SIG warmup_plateau_eps inf -> [sig.warm_up.report] OK: verdict='plateau' steps=400 probes=2 peak=0.49091047048568726 final=0.49091047048568726 curve=[0.4352187514305115, 0.49091047048568726]; [sig.warm_up.gate] Gate(name='sig.adaptive_stop', fired=True, value=200, threshold=800, reachable=True, reason=''). harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.warmup_plateau_eps (SIG_WARMUP_PLATEAU_EPS)",
+   "value": "nan and -inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "low",
+   "detail": "`abs(sep - prev) <= nan * abs(prev)` is False for every pair, and `<= -inf` likewise, so the plateau stop can NEVER fire at any curve -- and Gate sig.adaptive_stop prints reachable=True, fired=False, reason='' , which in this tree's own three-state vocabulary reads 'armed, did not fire'. It is the FAB_BALANCE=nan gate shape exactly: a mechanism that is structurally unreachable reported as one that had its chance and declined. The adaptive stop is a cost saving rather than a correctness mechanism, so the damage is bounded; the false gate verdict is the defect. Same two-lever caveat as the row above (driven at SIG_WARMUP_PROBE_EVERY=200; at the shipped 500 the lever is not consulted at all).",
+   "repro": "SIG_WARMUP_PROBE_EVERY=200 python drive.py SIG warmup_plateau_eps nan -> verdict='budget' steps=800 probes=4 curve=[0.4352187514305115, 0.49091047048568726, 0.48718026280403137, 0.43589335680007935]; gate Gate(name='sig.adaptive_stop', fired=False, value=200, threshold=800, reachable=True, reason=''). Identical output at -inf. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "TOK.max_bytes (TOK_MAX_BYTES)",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "Vocabulary._add refuses any sequence with `len(seq) > self.max_bytes`, so at 0 EVERY candidate merge is refused for length and the vocabulary is permanently the 256 bytes -- measured build_mint=0, build_refused=82, size=256. TOK's own ledger is honest about it (build_refused is exactly the row for a refusal stall), but the value also leaves the package: the IRREDUCIBLE coupling src='TOK.max_bytes' -> dst='LM.d_max_token_bytes' computes int(TOK.max_bytes) and LM.resolve accepts 0 without a word, returning LMGeometry(..., max_token_bytes=0). LM.resolve carries seven by-name refusals for its own levers (width<1, heads<1, ctx<1, vocab_slots<1, ...) and none for this wire, and lm/api.py says the composer's byte tables are sized to it. A cap that shrinks to zero, on both sides of a declared irreducible edge, with no refusal at either end.",
+   "repro": "python drive.py TOK max_bytes 0 -> [tok.vocab] OK: size=256 live=256 v0=256 max_bytes=0 bytes_per_token=1.0 counters={'tok.build_pass':1,'tok.build_mint':0,'tok.build_converged':0,'tok.build_refused':82}. Cross-package: /tmp/sigtok_sweep_5862/lm0.py -> LM.resolve OK -> LMGeometry(arch='gru', ..., max_token_bytes=0, ...). harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.warmup_min_frac (SIG_WARMUP_MIN_FRAC)",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "This is the one place in the surface where a correct by-name refusal EXISTS, is entered, and then dies formatting its own message. `if frac < 0.0` is True for -inf, so warm_up starts raising the ValueError that names SIG_WARMUP_MIN_FRAC and explains that a negative share is 'the guard removed rather than lowered' -- and the f-string interpolates `{int(frac * budget)}`, int(-inf), which raises OverflowError from inside the raise statement at src/sig/api.py:816. The operator gets `OverflowError: cannot convert float infinity to integer` instead of the paragraph written for them. The same expression is the landing site for nan and +inf one line below (floor = int(frac * budget)), which are the sibling REFUSED_BADLY cells.",
+   "repro": "/tmp/sigtok_sweep_5862/tb.py SIG_WARMUP_MIN_FRAC -inf -> Traceback ... File \"/home/user/LLM-Test/src/sig/api.py\", line 816, in warm_up / f\"cannot be negative. It would put the floor at {int(frac * budget)} step(s), which no \" / OverflowError: cannot convert float infinity to integer. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.warmup_min_frac (SIG_WARMUP_MIN_FRAC)",
+   "value": "nan and inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "low",
+   "detail": "`frac < 0.0` is False for nan and for +inf, so the by-name refusal is skipped and control reaches `floor = int(frac * budget)`: nan gives a bare `ValueError: cannot convert float NaN to integer`, +inf a bare `OverflowError`. Both come out of warm_up with no lever name, after build() has already succeeded and the encoder has been constructed -- late enough that the operator sees a torch-shaped stack rather than a startup refusal. Had nan slipped past int() the floor would have been non-comparable and `t >= floor` False forever.",
+   "repro": "python drive.py SIG warmup_min_frac nan -> [sig.warm_up] RAISE: ValueError: cannot convert float NaN to integer. python drive.py SIG warmup_min_frac inf -> [sig.warm_up] RAISE: OverflowError: cannot convert float infinity to integer. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.positive_radius_windows (SIG_POSITIVE_RADIUS_WINDOWS)",
+   "value": "nan, inf, -inf",
+   "outcome": "REFUSED_BADLY",
+   "severity": "low",
+   "detail": "sig/api.py::build computes positive_radius_units = round(float(sig.positive_radius_windows) * width) with no guard: nan gives a bare `ValueError: cannot convert float NaN to integer`, +/-inf a bare `OverflowError`, both from inside SigState construction, naming neither the lever nor the value. build() is the function that already carries two by-name refusals (width_units<1, and the bigram/width<2 zero-signature refusal), so the idiom is present in the same function and this quantity is not covered by it. At 0 the package does refuse by name -- _draw_pairs names SIG_POSITIVE_RADIUS_WINDOWS and the empty interval -- so the gap is specifically the non-finite values.",
+   "repro": "python drive.py SIG positive_radius_windows nan -> [sig.build] RAISE: ValueError: cannot convert float NaN to integer. python drive.py SIG positive_radius_windows inf (and -inf) -> [sig.build] RAISE: OverflowError: cannot convert float infinity to integer. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.bigram_dim (SIG_BIGRAM_DIM)",
+   "value": "0",
+   "outcome": "REFUSED_BADLY",
+   "severity": "medium",
+   "detail": "Inert on the shipped mode='learned' arm, where the lever is not read. On SIG_MODE='bigram' -- the only arm that reads it, and the arm the lever's own help text says it is 'inert unless' -- build() accepts it and returns a SigState holding an EMPTY (0, 64) projection table with no warning; the first encode() then raises `RuntimeError: ZeroDivisionError` from `% st.encoder.shape[0]`, naming no lever. build() is the function that already refuses the OTHER bigram degeneracy by name (width_units<2 at mode=bigram), so a reader of that refusal would reasonably conclude the arm's build-time geometry is checked. Every window of the run fails, so this is loud -- but it is loud in the wrong place and in the wrong words.",
+   "repro": "SIG_MODE=bigram python drive.py SIG bigram_dim 0 -> [sig.build] OK: SigState(encoder=tensor([], size=(0, 64)), ... mode='bigram' ...) / [sig.table] OK: finite=True shape=(0, 64) / [sig.encode] RAISE: RuntimeError: ZeroDivisionError. Control: SIG_MODE=bigram python drive.py SIG bigram_dim - -> [sig.table] shape=(512, 64), encode fine. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "TOK.build_bytes (TOK_BUILD_BYTES)",
+   "value": "0",
+   "outcome": "REFUSED_BADLY",
+   "severity": "low",
+   "detail": "The build sample is empty, _segment returns no ids, and the refusal comes from src/spine/derive.py::bytes_per_token as `ValueError: bytes_per_token: n_tokens=0 -- cannot measure compression over zero tokens. The caller has an empty segmentation, which is the defect.` It names n_tokens; the operator typed TOK_BUILD_BYTES. tok/api.py's own comment block already records this ('Below it, at TOK_BUILD_BYTES=0, the row is not reached at all: spine/derive.py::bytes_per_token raises on n_tokens=0 first'), so the behaviour is known and only the naming is missing.",
+   "repro": "python drive.py TOK build_bytes 0 -> [tok.build_vocabulary] RAISE: ValueError: bytes_per_token: n_tokens=0 -- cannot measure compression over zero tokens. The caller has an empty segmentation, which is the defect. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "21 int levers of SIG and TOK",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "THE GOOD CASE, recorded so the ruling phase can see what already works and does not re-implement it. int(float('nan')) raises ValueError, which IS in Lever.coerce's except tuple, so every int-typed lever in both packages refuses nan at startup with the lever's generated name and the raw value: LeverError: SIG_D='nan' is not a int. 21 of 21 int levers, no exceptions. The 11 float-typed levers have no such protection, and that asymmetry -- not the absence of any check -- is the shape of this surface's damage: every one of the 11 ACCEPTED_HARMFUL cells is on a float lever.",
+   "repro": "grep -h 'LeverError: ' /tmp/sigtok_sweep_5862/out/* -> 21 distinct lines, one per int lever: SIG_{D,BIGRAM_DIM,CONTRASTIVE_BATCH,FLOOR_KINDS,TRAIN_EVERY,TRAIN_EVERY_IDLE,DENSE_WINDOW,WARMUP,WARMUP_PROBE_EVERY} and TOK_{FREEZE_AT,RETOK_EVERY,GROW_EVERY,GROW_BURST,SEED_VOCAB,BUILD_PASSES,BUILD_BYTES,MIN_PAIR,MAX_BYTES,CAND_WINDOW,PROBATION_USES,PROBATION_DEADLINE} = 'nan' is not a int. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.temp=0/-inf, SIG.train_every=0, SIG.warmup_probe_every=0, SIG.positive_radius_windows=0",
+   "value": "0 and -inf",
+   "outcome": "REFUSED_BY_NAME",
+   "severity": "none",
+   "detail": "THE GOOD CASE, five more cells. Each raises a ValueError that names the generated environment variable, the value, and what the mechanism would have done: SIG_TEMP ('At zero it is a division by zero and below zero it INVERTS the objective'); SIG_TRAIN_EVERY ('a cadence of zero or less is a modulo by zero', with the d_idle_cadence arithmetic printed beside it); SIG_WARMUP_PROBE_EVERY ('the resolution of the only curve that can say whether the encoder separated or collapsed'); SIG_POSITIVE_RADIUS_WINDOWS ('That is an EMPTY interval, and the one thing this may not do is quietly widen it back'). These are the tree's idiom working, and they are the model any central rule must not displace.",
+   "repro": "python drive.py SIG temp 0 / SIG temp -inf / SIG train_every 0 / SIG warmup_probe_every 0 / SIG positive_radius_windows 0 -- see out/SIG_temp_0_pos.txt, out/SIG_temp_inf_neg.txt, out/SIG_train_every_0_pos.txt, out/SIG_warmup_probe_every_0_pos.txt, out/SIG_positive_radius_windows_0_pos.txt. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "SIG.prototype_frac (x3) and SIG.floor_kinds=0",
+   "value": "nan, inf, -inf, 0",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "Neither lever has any reader in live code: `grep 'sig.prototype_frac' src/sig/api.py` and the same for floor_kinds return 0 attribute reads; both are named only by src/sig/api.py::train_step, which is `raise NotImplementedError('SIG.train_step: P4 (sig) fills this in')`. They therefore pass through build/encode/cadence_due/warm_up untouched at every value -- 4 cells whose harmlessness is entirely a property of the stub. What arms when P4 lands: floor_kinds is the denominator of the declared InfoNCE floor ln(1 + (B-1)/K), so 0 is a ZeroDivisionError and nan/inf make the skip test a nan comparison that is False, i.e. a floor gate that never skips while sig.floor_skips reads a truthful-looking 0. prototype_frac at inf/nan would size the prototype slice of the batch. (prototype_frac=0 is the declared default and is listed under legitimate specials.)",
+   "repro": "python drive.py SIG prototype_frac nan|inf|-inf and SIG floor_kinds 0 -> all four complete the whole SIG pipeline with output byte-identical to the baseline: [sig.warm_up.report] OK: verdict='budget' steps=800 probes=1 peak=0.5757997035980225 final=0.5757997035980225. Reader check: grep -n 'sig\\.prototype_frac\\b' src/sig/api.py -> no attribute read; only the LEVERS READ prose on train_step. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "TOK.mint_pmin (x3), TOK.mint_novel (x3), TOK.cand_window=0, TOK.grow_burst=0",
+   "value": "nan, inf, -inf, 0",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "All four levers are read only by src/tok/api.py::mint_burst, which is `raise NotImplementedError`. build_vocabulary's docstring states outright that cand_window, mint_pmin and mint_novel are NOT read there ('the build pass below selects purely by tally.most_common() and tok.min_pair'), and the sweep confirms it: at every one of the eight values the built vocabulary is byte-identical to the baseline (437 ids, 181 mints, bytes_per_token 4.0). What arms when P4 lands: mint_pmin is a p(b|a) threshold, so nan makes every `p < mint_pmin` comparison False -- the quality gate silently fully open, on the lever whose file comment calls it 'THE PROJECT'S BEST-DOCUMENTED FAIL-OPEN LESSON'; mint_novel is an EXPONENT applied to a growth ratio, where inf/nan poison the ranking key; cand_window=0 is the window the docstring says is floored at 2 at the point of use. (mint_pmin=0 and mint_novel=0 are declared sentinels, listed under legitimate specials.)",
+   "repro": "python drive.py TOK mint_pmin nan|inf|-inf, TOK mint_novel nan|inf|-inf, TOK cand_window 0, TOK grow_burst 0 -> every cell: [tok.vocab] OK: size=437 live=437 v0=437 bytes_per_token=4.0 counters={'tok.build_pass': 2, 'tok.build_mint': 181, 'tok.build_converged': 0, 'tok.build_refused': 0}, identical to the unset baseline. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "TOK.probation_residual (x4), TOK.probation_deadline=0",
+   "value": "nan, inf, -inf, 0",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "Read only by src/tok/api.py::judge_probation, which is `raise NotImplementedError`; nothing in the tree writes vocab.retired today (tokenize's own comment says so: 'len(retired) is 0 on every reachable configuration'). Five cells that pass through build_vocabulary and tokenize with output identical to the baseline. What arms when P4 lands: judge_probation's declared rule is `keep iff earned AND residual_ratio[t] >= tok.probation_residual`, so probation_residual=nan makes that comparison False for every token and retires 100% of minted tokens -- popping them from the match table -- while +inf does the same and -inf keeps every token; probation_deadline=0 judges every token at the window it was born, before it can have been used.",
+   "repro": "python drive.py TOK probation_residual nan|inf|-inf|0 and TOK probation_deadline 0 -> every cell: [tok.vocab] OK: size=437 v0=437 bytes_per_token=4.0 counters={'tok.build_pass': 2, 'tok.build_mint': 181, ...} and [tok.seg] n_ids=1000 bpt=4.0, identical to baseline. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  },
+  {
+   "lever": "TOK.grow_every (TOK_GROW_EVERY)",
+   "value": "0",
+   "outcome": "UNREACHABLE_TODAY",
+   "severity": "low",
+   "detail": "Read only by src/tok/api.py::on_window (`raise NotImplementedError`); it appears nowhere else in src/ except prose. Passes through build_vocabulary and tokenize with no effect. What arms when P4 lands: on_window is described as 'THE ONLY PLACE THIS PACKAGE'S CLOCKS ARE COMPARED' and the cadence is a `_due` modulo, so 0 is a modulo-by-zero -- the same shape SIG.cadence_due already refuses by name for SIG_TRAIN_EVERY=0, in a package that has not written its half yet.",
+   "repro": "python drive.py TOK grow_every 0 -> [tok.vocab] OK: size=437 v0=437 bytes_per_token=4.0 counters={'tok.build_pass': 2, 'tok.build_mint': 181, 'tok.build_converged': 0, 'tok.build_refused': 0}, identical to baseline. grep -rn 'grow_every' src/ --include=*.py | grep -v levers.py -> only tok/api.py::on_window's LEVERS READ line and two prose mentions. harness: /tmp/sigtok_sweep_5862/drive.py PREFIX FIELD VALUE -- fresh process per cell; sets the generated env name, calls spine.assemble.build(dict(os.environ)), then for SIG: sig.api.build(width_units=64, alphabet_size=256, device='cpu', generator=rng_for('sig',1234)) -> encode(4x64 windows) -> encoder_parameters -> cadence_due -> warm_up(stream=6000 bytes, seen_units=6000, opt=AdamW(encoder_parameters)); for TOK: tok.api.build_vocabulary(area_heads={'a','b'} ~8.8kB, seed=1234, soft_cap=None) -> tokenize(regularize=True) -> tokenize(regularize=False). 128 cells under /tmp/sigtok_sweep_5862/out/."
+  }
+ ],
+ "legitimate_specials": "SIG.dense_window=0 -- the dense arm is entered while windows_since_boundary is BELOW it, so 0 means 'no window is ever in the dense phase; the gate is stuck on the throttled arm'. Declared and PRINTED as an unreachable Gate arm with its own arithmetic in src/sig/api.py::cadence_due (\"SIG_DENSE_WINDOW=0: ... no window count is below 0 ... SIG_TRAIN_EVERY=1 cannot be reached.\"). Verified: out/SIG_dense_window_0_pos.txt.\nSIG.warmup=0 -- 'no pre-loop budget; the encoder is handed to the loop at its random initialisation, which is a real configuration'. Declared as a named unreachable arm of Gate sig.adaptive_stop in src/sig/api.py::warm_up. Verified: verdict='budget' steps=0 probes=0 curve=[].\nSIG.warmup_min_frac=0.0 -- bottom of the declared 0..1 FRACTION interval: no floor, the stop is eligible from the earliest probe. Boundary is declared at src/sig/api.py::warm_up's `frac < 0.0` refusal, which admits exactly 0.0. WORTH THE RULING PHASE'S ATTENTION: the reason that refusal gives for rejecting a negative share ('no step count is below it, so the stop is eligible from the first probe onward -- the guard removed rather than lowered') is equally true at exactly 0.0, which is admitted.\nSIG.warmup_plateau_eps=0.0 -- the strictest flatness test: only two exactly equal probes count as a plateau. Coherent reading of 'relative gain below which the curve is declared flat'; implied by the declaration rather than spelled out. Verified at SIG_WARMUP_PROBE_EVERY=200: verdict='budget', stop never fires.\nSIG.var_weight=0.0 -- the variance hinge off. Implied by the declaration ('Weight on the variance hinge'); its sibling cov_weight declares 0.0 as off in as many words. Verified: verdict='collapsing' at separation 0.0239 -- the collapse alarm still fires correctly, which is what makes this a legitimate arm rather than a silent one.\nSIG.cov_weight=0.0 -- DECLARED off, and the shipped default: sig/levers.py::SIGLevers.cov_weight, 'OFF BY DEFAULT BECAUSE NOBODY HAS SWEPT IT, NOT BECAUSE IT WAS TRIED AND FAILED'.\nSIG.prototype_frac=0.0 -- DECLARED off, and the shipped default: sig/levers.py::SIGLevers.prototype_frac, 'OFF BY DEFAULT FOR A STATED HAZARD, NOT BY NEGLECT' (the assembler's partition would train the encoder that produces the partition).\nTOK.freeze_at=0 -- DECLARED sentinel IN THE HELP TEXT ITSELF: tok/levers.py::TOKLevers.freeze_at, '0 means never freeze', with a comment paragraph ('0 IS STILL A SENTINEL AND THE CENSUS ASKED FOR THAT TO END') explaining why choices= cannot express it and why the sentinel stands.\nTOK.retok_every=0 -- DECLARED sentinel IN THE HELP TEXT: tok/levers.py::TOKLevers.retok_every, '0 leaves already-emitted ids alone forever'. It is also the arm carrying the project's largest recorded effect (2.175 b/B and 94% real words at 0, against 4.364 and 26% at 3000), so a refusal here would refuse the better configuration.\nTOK.mint_pmin=0.0 -- DECLARED sentinel IN THE HELP TEXT: tok/levers.py::TOKLevers.mint_pmin, '0 mints on frequency alone'. Shipped default.\nTOK.mint_novel=0.0 -- DECLARED sentinel IN THE HELP TEXT: tok/levers.py::TOKLevers.mint_novel, '0 reproduces plain most-frequent minting'. Shipped default.\nTOK.probation_uses=0 -- DECLARED off: tok/levers.py::TOKLevers.probation_uses comment, 'THE DEFAULT 0 MEANS OFF, which is what every recorded run outside those arms used'. Shipped default.\nTOK.dropout=0.0 -- the regularizer off; shipped default, and tok/levers.py::TOKLevers.dropout says 'the default is 0.0 so it has never run'. Verified: build and both tokenize calls identical to the unset baseline.\nTOK.seed_vocab=0 -- target 0: no seed build runs, v0 stays 256, bytes_per_token is measured at 1.0 which is CORRECT for the byte segmentation that results. Coherent and correctly instrumented; implied by build_vocabulary's `target = min(int(tok.seed_vocab), vocab._cap())` rather than declared in the help text.\nTOK.build_passes=0 -- no tally-and-mint pass runs; tok.build_pass is present-and-0 (the loop's arm was entered and seeded), which is the file's own convention for 'ran and did not fire'. Coherent; implied by `for _ in range(passes)` rather than declared.\nTOK.min_pair=0 -- no frequency floor: every counted pair is a candidate. Coherent reading of 'How many times an adjacent pair must have been counted before it is a candidate at all'; the build here is identical to the default because the seed_vocab target binds first.\nNOTE FOR THE RULING PHASE: 16 of 128 cells are legitimate and 15 of the 16 are the value 0 -- a central refusal of 0 in spine/lever.py would break 15 working mechanisms in these two packages alone, six of them spelled out in the lever's own help string. A central refusal of NON-FINITE values only (nan, +inf, -inf) would break NONE of them: no lever in either package declares any meaning for a non-finite value, and the one lever whose comment explicitly warns that values outside its unit label are legal (TOK.mint_novel, 'a reader who takes fraction 0..1 as a bound on legal values will be surprised by 2.0, which is legal') is talking about 2.0, not about inf.",
+ "unfinished": [
+  {
+   "title": "TOK.freeze_at, retok_every, grow_every, grow_burst, cand_window, mint_pmin, mint_novel, probation_uses, probation_deadline, probation_residual could not be driven to a consumer",
+   "reason": "Every one of these ten TOK levers is read only by on_window, mint_burst or judge_probation, all three of which are `raise NotImplementedError` P4 stubs. build_vocabulary and tokenize -- the two live entry points -- do not read them (build_vocabulary's docstring says so explicitly for three of them).",
+   "detail": "So 22 of the 64 TOK cells are UNREACHABLE_TODAY or a declared sentinel that nothing consumes. Their non-finite behaviour is LATENT, not absent: the arithmetic each one lands in is named in the stub's own docstring (a _due modulo for grow_every, ln-free threshold comparisons for mint_pmin and probation_residual, an exponent for mint_novel), and each is a nan-comparison-is-False or modulo-by-zero the moment a body is written. Re-run this sweep against TOK after P4 (tok) lands."
+  },
+  {
+   "title": "SIG.train_step is a stub, so prototype_frac, floor_kinds and the InfoNCE floor gate were never exercised",
+   "reason": "src/sig/api.py::train_step raises NotImplementedError, and it is the only reader of sig.prototype_frac and sig.floor_kinds and the only site of the declared `loss <= ln(1+(B-1)/floor_kinds)` skip gate.",
+   "detail": "warm_up shares the objective (_contrastive_loss/_var_cov) and that is where the three critical nan/inf findings were taken, so the loss path IS covered. What is not covered is the floor gate, the prototype arm and the sig.floor_skips / sig.prototype_pairs counters -- floor_kinds=0 is a latent ZeroDivisionError in the floor expression and floor_kinds at a non-finite value would make the skip test a False nan comparison."
+  },
+  {
+   "title": "Only the counting/segmentation half of TOK's dropout path could be measured for the bytes_per_token consequence",
+   "reason": "The claim that TOK_DROPOUT=inf mis-measures SIG's one window width was established from the number TOK returns (bytes_per_token 1.0 against a true 4.0) plus the declared consumer chain, not by running derive.signature_width_bytes and sig.build end to end through spine/compose.py.",
+   "detail": "compose() halts at CAP.startup_refusals (row 29 of ASSEMBLY_ORDER's 39), so the root path from TOK's measured bytes_per_token into SIG.build's width_units could not be driven in one process. derive.signature_width_bytes(win_tokens, bytes_per_token) = max(w, int(w * max(1.0, bpt))) is arithmetic, so the four-fold narrowing follows, but it is a derivation from a measured input rather than an end-to-end observation."
+  },
+  {
+   "title": "Values were driven one lever at a time, except two rows that say so",
+   "reason": "The sweep's unit is (lever, value) with everything else at its default, which is how an operator sets one knob. Two levers are unreachable at the shipped defaults and needed a second variable to reach their consumer at all.",
+   "detail": "SIG.warmup_plateau_eps needed SIG_WARMUP_PROBE_EVERY=200 (at the shipped 500 against SIG_WARMUP=800 exactly one probe lands and the flatness test is never evaluated -- so at defaults all four eps values are inert). SIG.bigram_dim needed SIG_MODE=bigram (its help text says it is 'inert unless mode=bigram'). Both findings state the extra variable. No other cell used more than one environment variable. Interaction pairs beyond these two -- e.g. a non-finite lever on the SIG_SPACE=tokens arm, or TOK_MODE=fixed/bytes -- were not swept."
+  }
+ ],
+ "cells": [
+  {
+   "lever": "SIG.d",
+   "env": "SIG_D",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_D='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.bigram_dim",
+   "env": "SIG_BIGRAM_DIM",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_BIGRAM_DIM='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.contrastive_batch",
+   "env": "SIG_CONTRASTIVE_BATCH",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_CONTRASTIVE_BATCH='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.floor_kinds",
+   "env": "SIG_FLOOR_KINDS",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_FLOOR_KINDS='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.train_every",
+   "env": "SIG_TRAIN_EVERY",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_TRAIN_EVERY='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.train_every_idle",
+   "env": "SIG_TRAIN_EVERY_IDLE",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_TRAIN_EVERY_IDLE='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.dense_window",
+   "env": "SIG_DENSE_WINDOW",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_DENSE_WINDOW='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.warmup",
+   "env": "SIG_WARMUP",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_WARMUP='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.warmup_probe_every",
+   "env": "SIG_WARMUP_PROBE_EVERY",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: SIG_WARMUP_PROBE_EVERY='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.freeze_at",
+   "env": "TOK_FREEZE_AT",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_FREEZE_AT='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.retok_every",
+   "env": "TOK_RETOK_EVERY",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_RETOK_EVERY='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.grow_every",
+   "env": "TOK_GROW_EVERY",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_GROW_EVERY='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.grow_burst",
+   "env": "TOK_GROW_BURST",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_GROW_BURST='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.seed_vocab",
+   "env": "TOK_SEED_VOCAB",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_SEED_VOCAB='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.build_passes",
+   "env": "TOK_BUILD_PASSES",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_BUILD_PASSES='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.build_bytes",
+   "env": "TOK_BUILD_BYTES",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_BUILD_BYTES='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.min_pair",
+   "env": "TOK_MIN_PAIR",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_MIN_PAIR='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.max_bytes",
+   "env": "TOK_MAX_BYTES",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_MAX_BYTES='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.cand_window",
+   "env": "TOK_CAND_WINDOW",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_CAND_WINDOW='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.probation_uses",
+   "env": "TOK_PROBATION_USES",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_PROBATION_USES='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "TOK.probation_deadline",
+   "env": "TOK_PROBATION_DEADLINE",
+   "value": "nan",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "LeverError: TOK_PROBATION_DEADLINE='nan' is not a int (spine/lever.py::Lever.coerce)"
+  },
+  {
+   "lever": "SIG.d",
+   "env": "SIG_D",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.d",
+   "env": "SIG_D",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.bigram_dim",
+   "env": "SIG_BIGRAM_DIM",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.bigram_dim",
+   "env": "SIG_BIGRAM_DIM",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.contrastive_batch",
+   "env": "SIG_CONTRASTIVE_BATCH",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.contrastive_batch",
+   "env": "SIG_CONTRASTIVE_BATCH",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.floor_kinds",
+   "env": "SIG_FLOOR_KINDS",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.floor_kinds",
+   "env": "SIG_FLOOR_KINDS",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.train_every",
+   "env": "SIG_TRAIN_EVERY",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.train_every",
+   "env": "SIG_TRAIN_EVERY",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.train_every_idle",
+   "env": "SIG_TRAIN_EVERY_IDLE",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.train_every_idle",
+   "env": "SIG_TRAIN_EVERY_IDLE",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.dense_window",
+   "env": "SIG_DENSE_WINDOW",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.dense_window",
+   "env": "SIG_DENSE_WINDOW",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.warmup",
+   "env": "SIG_WARMUP",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.warmup",
+   "env": "SIG_WARMUP",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.warmup_probe_every",
+   "env": "SIG_WARMUP_PROBE_EVERY",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.warmup_probe_every",
+   "env": "SIG_WARMUP_PROBE_EVERY",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.freeze_at",
+   "env": "TOK_FREEZE_AT",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.freeze_at",
+   "env": "TOK_FREEZE_AT",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.retok_every",
+   "env": "TOK_RETOK_EVERY",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.retok_every",
+   "env": "TOK_RETOK_EVERY",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.grow_every",
+   "env": "TOK_GROW_EVERY",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.grow_every",
+   "env": "TOK_GROW_EVERY",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.grow_burst",
+   "env": "TOK_GROW_BURST",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.grow_burst",
+   "env": "TOK_GROW_BURST",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.seed_vocab",
+   "env": "TOK_SEED_VOCAB",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.seed_vocab",
+   "env": "TOK_SEED_VOCAB",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.build_passes",
+   "env": "TOK_BUILD_PASSES",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.build_passes",
+   "env": "TOK_BUILD_PASSES",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.build_bytes",
+   "env": "TOK_BUILD_BYTES",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.build_bytes",
+   "env": "TOK_BUILD_BYTES",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.min_pair",
+   "env": "TOK_MIN_PAIR",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.min_pair",
+   "env": "TOK_MIN_PAIR",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.max_bytes",
+   "env": "TOK_MAX_BYTES",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.max_bytes",
+   "env": "TOK_MAX_BYTES",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.cand_window",
+   "env": "TOK_CAND_WINDOW",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.cand_window",
+   "env": "TOK_CAND_WINDOW",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.probation_uses",
+   "env": "TOK_PROBATION_USES",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.probation_uses",
+   "env": "TOK_PROBATION_USES",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.probation_deadline",
+   "env": "TOK_PROBATION_DEADLINE",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "TOK.probation_deadline",
+   "env": "TOK_PROBATION_DEADLINE",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError out of Lever.coerce; except clause catches only (TypeError, ValueError)"
+  },
+  {
+   "lever": "SIG.d",
+   "env": "SIG_D",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "encode() returns (N,0) unit vectors on both mode arms; separation probe reads 1.0"
+  },
+  {
+   "lever": "SIG.bigram_dim",
+   "env": "SIG_BIGRAM_DIM",
+   "value": "0",
+   "outcome": "REFUSED_BADLY",
+   "note": "inert on mode=learned; on its only consuming arm (SIG_MODE=bigram) build() accepts a (0,d) table and encode() raises RuntimeError: ZeroDivisionError"
+  },
+  {
+   "lever": "SIG.contrastive_batch",
+   "env": "SIG_CONTRASTIVE_BATCH",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "empty pair batch; loss=nan for 800 opt.steps; separation probe nan; _stop_verdict(nan) -> None so 'collapsing' cannot fire"
+  },
+  {
+   "lever": "SIG.floor_kinds",
+   "env": "SIG_FLOOR_KINDS",
+   "value": "0",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is sig/api.py::train_step, a P4 stub; latent ZeroDivisionError in ln(1+(B-1)/K)"
+  },
+  {
+   "lever": "SIG.train_every",
+   "env": "SIG_TRAIN_EVERY",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "cadence_due ValueError naming SIG_TRAIN_EVERY=0 and the wire arithmetic"
+  },
+  {
+   "lever": "SIG.train_every_idle",
+   "env": "SIG_TRAIN_EVERY_IDLE",
+   "value": "0",
+   "outcome": "ACCEPTED_INERT",
+   "note": "d_idle_cadence = max(train_every*6, 0) = 6; the wire floors it"
+  },
+  {
+   "lever": "SIG.dense_window",
+   "env": "SIG_DENSE_WINDOW",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared unreachable gate arm, printed with its own arithmetic"
+  },
+  {
+   "lever": "SIG.warmup",
+   "env": "SIG_WARMUP",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared arm: no pre-loop budget, Gate sig.adaptive_stop unreachable with the reason"
+  },
+  {
+   "lever": "SIG.warmup_probe_every",
+   "env": "SIG_WARMUP_PROBE_EVERY",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "warm_up ValueError naming SIG_WARMUP_PROBE_EVERY=0"
+  },
+  {
+   "lever": "TOK.freeze_at",
+   "env": "TOK_FREEZE_AT",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared sentinel '0 means never freeze'; consumer on_window is a P4 stub"
+  },
+  {
+   "lever": "TOK.retok_every",
+   "env": "TOK_RETOK_EVERY",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared sentinel '0 leaves already-emitted ids alone forever'; consumer on_window is a P4 stub"
+  },
+  {
+   "lever": "TOK.grow_every",
+   "env": "TOK_GROW_EVERY",
+   "value": "0",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is on_window (P4 stub); latent modulo-by-zero in the _due cadence"
+  },
+  {
+   "lever": "TOK.grow_burst",
+   "env": "TOK_GROW_BURST",
+   "value": "0",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is mint_burst (P4 stub); 0 would mean mint nothing"
+  },
+  {
+   "lever": "TOK.seed_vocab",
+   "env": "TOK_SEED_VOCAB",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "target 0: no seed build, v0=256, bytes_per_token measured 1.0 correctly"
+  },
+  {
+   "lever": "TOK.build_passes",
+   "env": "TOK_BUILD_PASSES",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "no build passes; tok.build_pass present-and-0, gate value=0 vs 8"
+  },
+  {
+   "lever": "TOK.build_bytes",
+   "env": "TOK_BUILD_BYTES",
+   "value": "0",
+   "outcome": "REFUSED_BADLY",
+   "note": "ValueError from spine/derive.py::bytes_per_token naming n_tokens=0, not TOK_BUILD_BYTES"
+  },
+  {
+   "lever": "TOK.min_pair",
+   "env": "TOK_MIN_PAIR",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "no frequency floor; build identical to default here (437 ids, 181 mints)"
+  },
+  {
+   "lever": "TOK.max_bytes",
+   "env": "TOK_MAX_BYTES",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "every merge refused forever (mint 0 / refused 82, vocab stuck at 256) and 0 wires into LM.d_max_token_bytes with no refusal at either end"
+  },
+  {
+   "lever": "TOK.cand_window",
+   "env": "TOK_CAND_WINDOW",
+   "value": "0",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is mint_burst (P4 stub), whose docstring floors it at 2 at the point of use"
+  },
+  {
+   "lever": "TOK.probation_uses",
+   "env": "TOK_PROBATION_USES",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared 'THE DEFAULT 0 MEANS OFF'; consumer judge_probation is a P4 stub"
+  },
+  {
+   "lever": "TOK.probation_deadline",
+   "env": "TOK_PROBATION_DEADLINE",
+   "value": "0",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is judge_probation (P4 stub); 0 would judge every token at birth"
+  },
+  {
+   "lever": "SIG.temp",
+   "env": "SIG_TEMP",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "loss nan at step 1, every encoder parameter non-finite after warm_up; the `temp <= 0.0` refusal is False for nan"
+  },
+  {
+   "lever": "SIG.temp",
+   "env": "SIG_TEMP",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "every logit exactly 0, cross_entropy = ln(48) = 3.8712 exactly, InfoNCE gradient exactly 0 -- the objective is silently deleted while separation reads 1.007 (better than the 0.576 baseline)"
+  },
+  {
+   "lever": "SIG.temp",
+   "env": "SIG_TEMP",
+   "value": "-inf",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "ValueError naming SIG_TEMP=-inf and what a negative divisor does"
+  },
+  {
+   "lever": "SIG.temp",
+   "env": "SIG_TEMP",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "ValueError naming SIG_TEMP=0.0"
+  },
+  {
+   "lever": "SIG.positive_radius_windows",
+   "env": "SIG_POSITIVE_RADIUS_WINDOWS",
+   "value": "nan",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare ValueError 'cannot convert float NaN to integer' from round() inside sig/api.py::build"
+  },
+  {
+   "lever": "SIG.positive_radius_windows",
+   "env": "SIG_POSITIVE_RADIUS_WINDOWS",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError from round(inf*width) inside sig/api.py::build"
+  },
+  {
+   "lever": "SIG.positive_radius_windows",
+   "env": "SIG_POSITIVE_RADIUS_WINDOWS",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError from round(-inf*width) inside sig/api.py::build"
+  },
+  {
+   "lever": "SIG.positive_radius_windows",
+   "env": "SIG_POSITIVE_RADIUS_WINDOWS",
+   "value": "0",
+   "outcome": "REFUSED_BY_NAME",
+   "note": "_draw_pairs ValueError naming SIG_POSITIVE_RADIUS_WINDOWS and the empty interval"
+  },
+  {
+   "lever": "SIG.prototype_frac",
+   "env": "SIG_PROTOTYPE_FRAC",
+   "value": "nan",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is train_step (P4 stub)"
+  },
+  {
+   "lever": "SIG.prototype_frac",
+   "env": "SIG_PROTOTYPE_FRAC",
+   "value": "inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is train_step (P4 stub)"
+  },
+  {
+   "lever": "SIG.prototype_frac",
+   "env": "SIG_PROTOTYPE_FRAC",
+   "value": "-inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is train_step (P4 stub)"
+  },
+  {
+   "lever": "SIG.prototype_frac",
+   "env": "SIG_PROTOTYPE_FRAC",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared default, 'OFF BY DEFAULT FOR A STATED HAZARD'"
+  },
+  {
+   "lever": "SIG.var_weight",
+   "env": "SIG_VAR_WEIGHT",
+   "value": "nan",
+   "outcome": "ACCEPTED_INERT",
+   "note": "`var_weight > 0.0` is False for nan; run bit-identical to var_weight=0.0 (curve 0.023936783894896507, verdict 'collapsing')"
+  },
+  {
+   "lever": "SIG.var_weight",
+   "env": "SIG_VAR_WEIGHT",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "loss=inf at step 1, grads nan, all three encoder tensors non-finite; warm_up returns verdict 'budget' with separation nan"
+  },
+  {
+   "lever": "SIG.var_weight",
+   "env": "SIG_VAR_WEIGHT",
+   "value": "-inf",
+   "outcome": "ACCEPTED_INERT",
+   "note": "guard is `> 0.0`; identical to 0.0"
+  },
+  {
+   "lever": "SIG.var_weight",
+   "env": "SIG_VAR_WEIGHT",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "weight off; the collapse verdict fired correctly"
+  },
+  {
+   "lever": "SIG.cov_weight",
+   "env": "SIG_COV_WEIGHT",
+   "value": "nan",
+   "outcome": "ACCEPTED_INERT",
+   "note": "guard is `> 0.0`; identical to the 0.0 default"
+  },
+  {
+   "lever": "SIG.cov_weight",
+   "env": "SIG_COV_WEIGHT",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "loss=inf at step 1, grads nan, all three encoder tensors non-finite; warm_up returns verdict 'budget' with separation nan"
+  },
+  {
+   "lever": "SIG.cov_weight",
+   "env": "SIG_COV_WEIGHT",
+   "value": "-inf",
+   "outcome": "ACCEPTED_INERT",
+   "note": "guard is `> 0.0`; identical to the 0.0 default"
+  },
+  {
+   "lever": "SIG.cov_weight",
+   "env": "SIG_COV_WEIGHT",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared default, 'OFF BY DEFAULT BECAUSE NOBODY HAS SWEPT IT'"
+  },
+  {
+   "lever": "SIG.warmup_min_frac",
+   "env": "SIG_WARMUP_MIN_FRAC",
+   "value": "nan",
+   "outcome": "REFUSED_BADLY",
+   "note": "`frac < 0.0` False for nan; bare ValueError at floor = int(frac*budget)"
+  },
+  {
+   "lever": "SIG.warmup_min_frac",
+   "env": "SIG_WARMUP_MIN_FRAC",
+   "value": "inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "bare OverflowError at floor = int(frac*budget)"
+  },
+  {
+   "lever": "SIG.warmup_min_frac",
+   "env": "SIG_WARMUP_MIN_FRAC",
+   "value": "-inf",
+   "outcome": "REFUSED_BADLY",
+   "note": "the by-name refusal IS entered and then dies formatting its own message: OverflowError at sig/api.py:816 inside `{int(frac * budget)}`"
+  },
+  {
+   "lever": "SIG.warmup_min_frac",
+   "env": "SIG_WARMUP_MIN_FRAC",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "bottom of the declared 0..1 interval: no floor; gate still prints its arithmetic"
+  },
+  {
+   "lever": "SIG.warmup_plateau_eps",
+   "env": "SIG_WARMUP_PLATEAU_EPS",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "flatness test `abs(d) <= nan*|prev|` is always False: the adaptive stop can never fire, while Gate sig.adaptive_stop prints reachable=True fired=False reason='' -- armed-and-declined for a mechanism that could not fire"
+  },
+  {
+   "lever": "SIG.warmup_plateau_eps",
+   "env": "SIG_WARMUP_PLATEAU_EPS",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "flatness test always True: verdict 'plateau' at the earliest eligible probe (step 400 of 800, 2 probes), gate fired=True -- the false-convergence stop this module was written to remove"
+  },
+  {
+   "lever": "SIG.warmup_plateau_eps",
+   "env": "SIG_WARMUP_PLATEAU_EPS",
+   "value": "-inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "same shape as nan: stop unreachable while the gate reports armed"
+  },
+  {
+   "lever": "SIG.warmup_plateau_eps",
+   "env": "SIG_WARMUP_PLATEAU_EPS",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "strictest reading: only an exactly flat curve stops"
+  },
+  {
+   "lever": "TOK.mint_pmin",
+   "env": "TOK_MINT_PMIN",
+   "value": "nan",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "not read by build_vocabulary (stated in its docstring); only reader is mint_burst (P4 stub)"
+  },
+  {
+   "lever": "TOK.mint_pmin",
+   "env": "TOK_MINT_PMIN",
+   "value": "inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is mint_burst (P4 stub)"
+  },
+  {
+   "lever": "TOK.mint_pmin",
+   "env": "TOK_MINT_PMIN",
+   "value": "-inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is mint_burst (P4 stub)"
+  },
+  {
+   "lever": "TOK.mint_pmin",
+   "env": "TOK_MINT_PMIN",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared sentinel '0 mints on frequency alone'"
+  },
+  {
+   "lever": "TOK.mint_novel",
+   "env": "TOK_MINT_NOVEL",
+   "value": "nan",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is mint_burst (P4 stub)"
+  },
+  {
+   "lever": "TOK.mint_novel",
+   "env": "TOK_MINT_NOVEL",
+   "value": "inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is mint_burst (P4 stub)"
+  },
+  {
+   "lever": "TOK.mint_novel",
+   "env": "TOK_MINT_NOVEL",
+   "value": "-inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is mint_burst (P4 stub)"
+  },
+  {
+   "lever": "TOK.mint_novel",
+   "env": "TOK_MINT_NOVEL",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared sentinel '0 reproduces plain most-frequent minting'"
+  },
+  {
+   "lever": "TOK.dropout",
+   "env": "TOK_DROPOUT",
+   "value": "nan",
+   "outcome": "ACCEPTED_INERT",
+   "note": "every guard is `drop > 0`; build and both tokenize calls bit-identical to 0.0 (437 ids, bpt 4.0)"
+  },
+  {
+   "lever": "TOK.dropout",
+   "env": "TOK_DROPOUT",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "note": "stream.random() < inf always true: every merge skipped, build mints 82 not 181 with 82 refusals, and bytes_per_token is MEASURED as 1.0 instead of 4.0 -- the single estimator SIG's width and DATA's splice gate are computed from"
+  },
+  {
+   "lever": "TOK.dropout",
+   "env": "TOK_DROPOUT",
+   "value": "-inf",
+   "outcome": "ACCEPTED_INERT",
+   "note": "guard is `> 0`; identical to 0.0"
+  },
+  {
+   "lever": "TOK.dropout",
+   "env": "TOK_DROPOUT",
+   "value": "0",
+   "outcome": "ACCEPTED_LEGITIMATE",
+   "note": "declared default, regularizer off"
+  },
+  {
+   "lever": "TOK.probation_residual",
+   "env": "TOK_PROBATION_RESIDUAL",
+   "value": "nan",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is judge_probation (P4 stub)"
+  },
+  {
+   "lever": "TOK.probation_residual",
+   "env": "TOK_PROBATION_RESIDUAL",
+   "value": "inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is judge_probation (P4 stub)"
+  },
+  {
+   "lever": "TOK.probation_residual",
+   "env": "TOK_PROBATION_RESIDUAL",
+   "value": "-inf",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is judge_probation (P4 stub)"
+  },
+  {
+   "lever": "TOK.probation_residual",
+   "env": "TOK_PROBATION_RESIDUAL",
+   "value": "0",
+   "outcome": "UNREACHABLE_TODAY",
+   "note": "only reader is judge_probation (P4 stub)"
+  }
+ ]
+}

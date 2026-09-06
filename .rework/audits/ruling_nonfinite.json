@@ -1,0 +1,336 @@
+{
+ "owner": "ruling phase \u2014 the non-finite / special-value refusal, architectural recommendation",
+ "summary": "RULING-PHASE RECOMMENDATION: WHERE THE NON-FINITE REFUSAL BELONGS.\nRead all six reports at .rework/audits/sweep_*.json (828 cells over the 207 numeric levers). Then\nran 40 further configurations of my own, because the six sweeps drove four values and the ruling\nturns on a value none of them drove. NOTHING IN THE REPOSITORY WAS EDITED; every measurement below\nis from /tmp/rule/ or from a patched COPY of the tree at /tmp/rule/tree.\n\n=====================================================================================\nRECOMMENDATION, IN ORDER OF WHAT I WOULD LAND\n=====================================================================================\n\nR0. LAND THE OverflowError TOKEN FIRST, AND DO NOT MAKE IT WAIT ON THE ARCHITECTURAL RULING.\n    src/spine/lever.py::Lever.coerce catches `(TypeError, ValueError)`. Adding OverflowError to that\n    tuple converts every int lever at +/-inf from a bare traceback to the tree's own refusal idiom.\n    MEASURED (patched copy, /tmp/rule/t1p.py): ZZ_N='inf' -> \"LeverError: ZZ_N='inf' is not a int\",\n    against \"OverflowError: cannot convert float infinity to integer\" on the real tree\n    (/tmp/rule/t1.py). It is 110 int levers x 2 values = 220 cells tree-wide; every one of the six\n    reports names it as its largest REFUSED_BADLY block. It carries NO policy content: nan already\n    takes the ValueError branch on the same line and produces the correct message, so this makes\n    inf agree with nan rather than deciding anything new. Land it alone.\n\nR1. ADOPT (a) AS THE FLOOR: one finiteness refusal in src/spine/lever.py::Lever.coerce, with a\n    per-Lever opt-out, behind ONE module constant `REFUSE_NON_FINITE = True`.\n\nR2. ADOPT (b) AS THE ANSWER, INCREMENTALLY AND NOT AS A BIG BANG: add `domain=(lo, hi)` to the\n    Lever declaration, in the shape `choices=` already has, and populate it lever by lever starting\n    with the twenty on the work list below. A lever with no `domain=` keeps exactly today's\n    behaviour plus R1's floor, so this is not a 207-declaration migration before anything ships.\n\nR3. REJECT (c) and (d) outright. Grounds below, both from this tree's own evidence.\n\n(a) AND (b) ARE NOT ALTERNATIVES AND THE SWEEP'S FRAMING OF THEM AS ALTERNATIVES IS THE ONE THING I\nWOULD CHANGE ABOUT THE BRIEF. (a) refuses a SPELLING. (b) refuses the CLASS. The measurement that\nseparates them is the one nobody had run, and I ran it.\n\n=====================================================================================\nTHE MEASUREMENT THAT DECIDES IT: A FINITE VALUE DOES THE SAME DAMAGE AS inf\n=====================================================================================\nFAB_ALPHA driven through the fabric sweep's own harness (/tmp/fabsweep/cell.py, unmodified, real\ntree, fresh subprocess per cell):\n\n    FAB_ALPHA=1e20   aux=0.5155787467956543  composed=2.7893991470336914  nonfinite grads 0/23\n    FAB_ALPHA=1e24   aux=0.5156660079956055  composed=2.765979766845703   nonfinite grads 0/23\n    FAB_ALPHA=1e26   aux=0.5150710344314575  composed=2.943258285522461   nonfinite grads 15/23\n    FAB_ALPHA=1e28   aux=nan                 composed=nan                 nonfinite grads 19/23\n    FAB_ALPHA=1e30   aux=nan                 composed=nan                 nonfinite grads 19/23\n    FAB_ALPHA=1e300  aux=nan                 composed=nan                 nonfinite grads 19/23\n    FAB_ALPHA=-1e300 aux=nan                 composed=nan                 nonfinite grads 19/23\n    FAB_ALPHA=nan    aux=nan                 composed=nan                 nonfinite grads 19/23   (the sweep's cell, reproduced)\n\n1e28 is BIT-FOR-BIT the harm the sweep filed as [critical] FAB_ALPHA=nan, and it is a finite number\na type check and a finiteness check both admit. 1e26 IS WORSE THAN EITHER: the loss still reads\n0.515 / 2.94 -- a perfectly ordinary pair of numbers a ledger would print without comment -- while\n15 of 23 gradient-carrying tensors are ALREADY non-finite. That is a partially-poisoned population\nreporting a healthy run, which is a strictly harder defect to see than a nan loss.\n\nThe same shape in OPT, through the opt sweep's own harness (/tmp/sw/cell.py, unmodified):\n\n    OPT_LR=1e30 -> spine.assemble.build OK; OPT.build OK, AdamW constructed with `lr: 1e+30`;\n                   OPT.lr_at over the 8-point grid returns [1e+28 ... 5e+28]; six maybe_step calls\n                   all report (True, ..., False, False); OPT.counters reports opt.step: 6,\n                   opt.backward: 6, no alarm anywhere -- and the harness's own parameter check\n                   reads  \"p_finite\": false, \"p_sample\": \"[nan, nan, nan]\".\n\nEvery one of opt/api.py::build's eleven startup refusals passes 1e30, exactly as they pass inf.\n\nCONSEQUENCE FOR THE RULING, STATED PLAINLY: a rule that refuses nan/inf and stops there closes the\nfour values the sweep happened to drive and leaves the mechanism open. That is not a hypothetical\nrisk -- IT IS THE EXACT FAILURE THIS RUN WAS CONVENED OVER. src/fabric/api.py::build already refuses\neleven magnitude levers at nan and +inf, and the comment immediately above that refusal enumerates\nwhat it declined to cover: \"Nor does this touch the levers whose negative side is a different\nquestion -- FAB_ALPHA, FAB_ROUTE_T, FAB_HALT_MAX, FAB_BAL_FLOOR, FAB_SPAWN_FLOOR,\nFAB_ROUTE_REGION_W, FAB_MUT, FAB_PRESSURE\". Five of those six carry the identical critical defect\ntoday. A refusal is only as good as the list its author thought of, and the author of the best one\nin this tree left the list short by five. (a) alone repeats that pattern one level up.\n\n=====================================================================================\nWHAT (a) COSTS: MEASURED, NOT ESTIMATED\n=====================================================================================\nI applied (a) to a full copy of the tree at /tmp/rule/tree -- ten lines in\nsrc/spine/lever.py::Lever.coerce: OverflowError added to the except tuple, plus a finiteness check\nraising LeverError with the generated env name and the raw string -- and ran the suite.\n\n    test_ownership   base exit=0   patched exit=0   BYTE-IDENTICAL output\n    test_census      base exit=0   patched exit=0   BYTE-IDENTICAL output\n    test_assemble    base exit=0   patched exit=0   BYTE-IDENTICAL output\n    test_couplings   base exit=0   patched exit=0   BYTE-IDENTICAL output\n    test_derive      base exit=0   patched exit=0   BYTE-IDENTICAL output\n    test_contract    base exit=0   patched exit=0   BYTE-IDENTICAL output\n    test_fabric      base exit=0   patched exit=0   BYTE-IDENTICAL output\n\nSeven of seven, byte for byte, against an unpatched copy of the same layout. And on the patched\ntree the headline cell becomes:\n\n    FAB_ALPHA=nan   -> stage=assemble  LeverError: FAB_ALPHA='nan' is not a finite number...\n    FAB_ALPHA=inf   -> stage=assemble  LeverError: FAB_ALPHA='inf' is not a finite number...\n    FAB_ALPHA=-inf  -> stage=assemble  LeverError: FAB_ALPHA='-inf' is not a finite number...\n    FAB_ALPHA=1e999 -> stage=assemble  LeverError: FAB_ALPHA='1e999' is not a finite number...\n\nTHREE INDEPENDENT MEASUREMENTS SAY (a) TAKES NOTHING AWAY:\n  1. ZERO of the 262 declared levers has a non-finite DEFAULT (/tmp/rule/t4.py, over every\n     registered LeverSet).\n  2. ZERO lever help strings declare a non-finite meaning. I scanned all 262 for\n     inf/infinit/nan/unbounded/\"no cap\"/\"no ceiling\"/\"no limit\"; the six hits are the substring\n     \"inf\" inside the word \"InfoNCE\" and \"grow unbounded\" in DOM.manage's prose. Nothing declares\n     +inf as \"no cap\".\n  3. ZERO of the 75 ACCEPTED_LEGITIMATE cells the six sweeps found is non-finite. All 75 are ZEROS\n     (fabric 25, opt-lm-train 11, sig-tok 16, domains-memory 9, world-cap-ckpt 8, eval-data 6).\n  4. ZERO configurations in the repository set any lever to a non-finite value: grepped every\n     PREFIX_FIELD=nan|inf|-inf|1e{3+ digits} across the tree excluding .git/runs/.rework, and the\n     only three hits are the prose of src/fabric/api.py's own comment about FAB_BALANCE=nan.\n\nSo (a)'s per-Lever opt-out has, today, no user. DECLARE IT ANYWAY -- it is the thing that makes the\nrule falsifiable rather than absolute, and the day a lever wants +inf to mean \"no cap\" the opt-out\nis the difference between one declaration and a revert.\n\n=====================================================================================\nWHY (b) IS THE ANSWER, AND WHAT IT REALLY COSTS\n=====================================================================================\n`choices=` IS THE PRECEDENT, AND THE MACHINERY GENERALISES FURTHER THAN THE BRIEF ASSUMED. I read\nit and drove it. It is an optional kwarg on Lever.__init__; it is validated AT DECLARATION TIME\nagainst the default (\"default {default!r} is not among choices\"); it is checked inside\nLever.coerce AFTER coercion; and it raises LeverError naming the generated env name and the value.\nThat is the exact shape a `domain=` needs, in the exact place, raising the exact idiom. It even\nworks on numeric levers today (MEASURED, /tmp/rule/t2.py):\n\n    YY_G float, choices=(0.0,0.5,1.0):  '7' -> \"LeverError: YY_G=7.0 must be one of [0.0, 0.5, 1.0]\"\n                                        'nan' -> \"LeverError: YY_G=nan must be one of [...]\"   (nan != nan)\n                                        'inf' -> \"LeverError: YY_G=inf must be one of [...]\"\n\nSo `choices=` ALREADY refuses non-finite floats on the 0 levers that carry it -- it is precedent\nAND working code. Its limit is that it ENUMERATES and cannot BOUND, which every affected file in\nthe tree already says in as many words.\n\nTHE PRICE OF (b), ITEMISED, BECAUSE IT IS NOT ZERO AND IT IS NOT THE 207 DECLARATIONS EITHER:\n  - Lever.__slots__ +1, Lever.__init__ +1 kwarg, one declaration-time check (default must satisfy\n    its own domain -- the mirror of the existing choices check), one check in coerce, and one field\n    on LeverView. LeverView has exactly ONE producer (spine/lever.py:346, Config.lever) and NO\n    consumer anywhere in src/, tests/ or tools/, so that field is free.\n  - NO census row, NO new environment name, NO generated-document row: a domain is an attribute of\n    a declaration that already exists, not a new knob. tests/test_census.py joins on lever NAMES\n    and reads no other Lever field (grepped: no .default, no .unit, no .choices, no ._levers).\n  - THE REAL COST IS PROSE, AND IT IS TEN CITATIONS. Ten places in seven files assert, as a\n    load-bearing premise, that a Lever HAS no range facility -- and several use it to justify why a\n    bound lives in a package body instead:\n        src/spine/derive.py:371, src/spine/derive.py:673, src/opt/api.py:688,\n        src/opt/levers.py:274, src/lm/api.py:205, src/lm/api.py:235,\n        src/capacity/api.py:661, src/capacity/api.py:677, src/sig/api.py:806,\n        src/train/levers.py:187\n    Two of those are inside RAISED ERROR MESSAGES an operator sees (spine/derive.py:371 and :673).\n    O13 will not catch these -- it checks that a cited path::symbol exists, not that a sentence\n    about it is still true -- so this is a hand sweep of seven files and it must be budgeted.\n    It is also, in my reading, a reason to do (b) rather than a reason not to: ten independent\n    authors each wrote \"the spine cannot express this, so I am doing it here\", which is the tree\n    telling you where the facility should have been.\n\n  - THE HAZARD (b) CARRIES, AND FAB NAMED IT BEFORE I DID: \"a guard invented for a value nobody has\n    shown to be wrong is the untrippable-guard class one level up\" (src/fabric/api.py::build). I\n    tested my own enthusiasm against it and it survived only partly. MEASURED: FAB_ALPHA=-1.0,\n    FAB_CENT_EMA=2.0, FAB_CENT_EMA=100.0 and FAB_HALT_MAX=1000.0 all run CLEAN on two passes --\n    aux 0.512/0.521/0.512/0.512, composed ~3.007, 0/23 non-finite. A `domain=(0.0, 1.0)` on\n    cent_ema would refuse a value this tree has not shown to be wrong. THAT IS WHY (b) IS\n    INCREMENTAL AND EVIDENCE-LED IN R2: populate `domain=` only where a measurement exists, and\n    leave it absent everywhere else, where R1's floor still stands.\n\n=====================================================================================\nWHY (c) LOSES\n=====================================================================================\nNot on taste, on this tree's record. FAB wrote the per-package refusal, at the right entry point,\nin the right idiom, with an argued comment -- and it is the ONLY package that did, and it missed\nfive of its own levers by name in a list it wrote itself. CAP wrote one too: new_valve's twenty-one\nline negative-lift refusal is `float(cap.lift) < 0`, false for nan and for +inf, so CAP_LIFT=nan\nwalks past it. SIG wrote one: `if temp <= 0.0`, three lines above the division, false for NaN. OPT\nwrote eleven: every one an order comparison, and NaN is ordered against nothing. The opt sweep\nfound the structural tell and it is the strongest single sentence in the six reports: every guard\nthat HELD against NaN has the inverted-chain form (`if not 0.0 <= x < 1.0`), and the three levers\nthat are safe today are safe BY GRAMMAR, NOT BY INTENT. 207 per-package refusals is not thirteen\nauthors implementing one policy; it is thirteen authors each rediscovering that `x < 0` is false\nfor NaN, at thirteen different times, some of them not yet.\n\n=====================================================================================\nWHY (d) LOSES, AND WHAT IT COSTS WHEN THE NEXT LEVER IS ADDED\n=====================================================================================\n(d)'s premise is that an operator typing `nan` gets what they asked for. Two measurements refute it.\n  1. THE OPERATOR DOES NOT HAVE TO TYPE nan. `1e999` parses to inf (MEASURED: float lever -> inf,\n     int lever -> the bare OverflowError). A number that looks like a big number is an infinity.\n  2. WHAT THEY GET IS NOT THEIR VALUE, IT IS A FALSE REPORT. This tree's DID IT FIRE contract has\n     three states, and NaN manufactures a fourth that renders as the second: a comparison that is\n     false for EVERY possible value printing \"armed, did not fire\". Reproduced on the real tree at\n     FAB_ALPHA=nan: aux nan, composed nan, 19/23 gradients non-finite, pop.cent permanently\n     poisoned -- beside \"Gate fab.halt: FIRED (mean halted mass nan vs halt_max=0.9)\" and thirteen\n     other gates reporting confidently over the poison. An operator asking for nan is not asking\n     for the instrument to lie about it.\nCOST WHEN THE NEXT LEVER IS ADDED: every new float lever ships with this hole, silently, and\nnothing in the declaration, the review or the suite tells its author. That is the cost the FAB\nrepair already paid once -- the defect did not close, it RELOCATED into the six levers the repair\nnamed as out of scope, and it took a new instrument to find it there.\n\n=====================================================================================\nDOES ZERO BELONG IN THE RULING? NO -- AND HERE IS WHAT PROTECTS THE ZEROS THAT ARE DEFECTS\n=====================================================================================\nNO CENTRAL RULE MAY TOUCH 0. 75 of the sweeps' 828 cells are ACCEPTED_LEGITIMATE and every single\none is a zero: \"0 means never freeze\" (TOK_FREEZE_AT), \"one wavelength spans the whole run\"\n(OPT_LR_WAVELENGTH), \"start at the hard ceiling\" (CAP_FAB_START, CAP_VOCAB_START), \"the full\nstack\" (MEM_KEY_DEPTH -- also the shipped default), \"0 derives it from the area count\"\n(DATA_PHASE_LIVE), \"no curriculum\" (FAB_DEPTH0), the declared DISARM (MEM_REKEY_EVERY), and the\neight FAB magnitude levers whose own build() says \"Set the lever to 0.0 to switch the mechanism\noff\". A central 0 refusal breaks all 75 and refuses the SHIPPED DEFAULT in at least three places.\n\nBUT ELEVEN OF THE THIRTY-FIVE HARMFUL FINDINGS ARE ZEROS, AND THEY ARE NOT A SEPARATE PROBLEM --\nTHEY ARE (b). Look at what they have in common: FAB_RANK, FAB_DK, FAB_EMB_HID, FAB_SLOTS,\nFAB_HOPS, SIG_D, SIG_CONTRASTIVE_BATCH, TOK_MAX_BYTES, MEM_QUOTA, MEM_OWNERS are WIDTHS AND COUNTS\n-- 0 means a tensor with no dimension, a vocabulary that cannot grow, a store with no rows -- and\nFAB_MANAGE_EVERY is a CADENCE. Not one is a magnitude with an \"off\" reading. `domain=(1, None)` on\na width says exactly that, in the declaration, checkable, once. Under (a) alone these eleven need\neleven hand-written per-package refusals in five packages, which is (c) arriving through the back\ndoor. THIS IS THE SECOND REASON (b) IS THE ANSWER AND (a) IS ONLY THE FLOOR: the zeros and the\ninfinities are one ruling under (b) and two unrelated work items under (a).\nONE ZERO IS NOT (b)'s AND MUST BE SAID: FAB_MANAGE_EVERY=0 also needs\nsrc/spine/derive.py::flush_period_windows to refuse `< 1` where it today refuses only `< 0` -- the\nfunction's own floor turns 0 into Flushes(1), the tightest cadence in the system, which is the\nidentical arithmetic it was repaired for at negatives on 2026-09-05.\n\n=====================================================================================\nTHE REFUSAL IDIOM\n=====================================================================================\nMatches, exactly and without a new idiom. The established form is `raise spine.lever.LeverError`\nnaming the lever and the value at the FIRST read before anything is derived. Lever.coerce IS the\nfirst read -- it is the function the tree's own O1 makes the only place an environment string\nbecomes a value -- and it already raises LeverError naming `env_name_for(prefix)` and the raw\nstring, twice, for the type failure and for choices. R1 and R2 both add a third clause to a\nfunction that already has two of exactly this shape. Nothing new is introduced and nothing moves.\nONE PLACE WHERE I WOULD DEPART FROM THE IDIOM AND SAY SO: the message should print the RAW STRING\nthe operator typed (`FAB_ALPHA='1e999'`), not the coerced value (`FAB_ALPHA=inf`), because the two\ndiffer here and the raw string is the thing the operator can search their shell history for.\n\n=====================================================================================\nD17: DOES THE SAME SWITCH RULE APPLY? ONE SWITCH, AND ONLY FOR (a)\n=====================================================================================\nThe tree has ALREADY RULED on this generalisation and it ruled against it. src/ckpt/api.py's\nREFUSE_NEGATIVE_PERIOD block says, in its own words: \"It is NOT a precedent that a range refusal\ngets a switch, and the tree it lands in is emphatic about that: lm/api.py::resolve,\nopt/api.py::build and capacity/api.py::new_valve all refuse out-of-range lever values with no\nswitch of any kind... This switch exists because the owner asked for THIS refusal to be\nturn-off-able, by name, in the same breath as ordering it -- and it is the only one in the tree\nthat was asked for.\" I take that at face value: D17 does not reach here on its own terms.\n\nI NONETHELESS RECOMMEND ONE SWITCH FOR R1 AND NOT FOR R2, on a ground D17 does not supply. D17's\nswitch is about a POLICY the owner might reverse. R1's switch is about BLAST RADIUS: it is the only\nchange in this tree's history that alters the meaning of 207 declarations in one commit, and if my\nfour measurements have missed a legitimate non-finite configuration, the operator who finds it is\nholding a shell and cannot proceed. R2 needs no switch because a `domain=` is per-declaration and\nits blast radius is one lever; deleting the kwarg is already the switch.\n\nTHE SHAPE, AND IT IS CHEAPER THAN D17's BY FOUR SPELLINGS: `REFUSE_NON_FINITE = True` as a module\nconstant in src/spine/lever.py. ONE spelling, not five. The five REFUSE_NEGATIVE_PERIOD constants\nare spelled five times only because O10 forbids the four sibling packages to import ckpt; spine\n.lever is in O10's allowlist (\"a package may import spine.{lever, units, derive, rng, wire}\"), so\none constant in the file that owns parsing is reachable from everywhere by construction. Same\ncosts as D17's, stated the same way: turning it off is a code edit and not an environment\nvariable, there is no SPINE_REFUSE_NON_FINITE, it takes no census row, and an operator holding only\na shell cannot reach it. The one gain over D17's shape is that \"does the refusal have a bad effect\"\ncan be answered by flipping one name in one file rather than five in five.\n\nWIRE_BUDGET: THIS COSTS ZERO EDGES, AND I CHECKED RATHER THAN ASSUMED. Neither R0, R1 nor R2\ncrosses a package boundary. A domain is an attribute of a declaration the owning package already\nholds; the check runs inside spine.lever, which every package already imports; and no package needs\nto read another's value to perform it. Six of twenty-five edges remain and this recommendation\nspends none of them.\n\n=====================================================================================\nIF THE OWNER WILL FUND ONLY ONE THING\n=====================================================================================\nR0. It is one token, it converts ~220 cells tree-wide from an anonymous traceback to the tree's own\nnamed refusal, and it decides nothing. R1 second: ten lines, seven test files byte-identical, 24 of\nthe 35 harmful findings closed. R2 is the one that actually ends the class, and it is also the one\nthat should not be rushed, because populating a domain without a measurement is the untrippable\nguard FAB warned about.\n\n=====================================================================================\nTHE MEASUREMENT THAT WOULD SETTLE IT (D11 requirement)\n=====================================================================================\n1. THE ONE I WOULD RUN FIRST, AND IT IS THE SAME HARNESS AT NEW VALUES. Re-drive all 97 float\n   levers at {1e26, 1e30, -1e30} and all 110 int levers at {1e15, -1e15} through the existing\n   per-package cells -- ~500 cells, one afternoon, the harnesses are still on disk at\n   /tmp/fabsweep/, /tmp/sw/, /tmp/sigtok_sweep_5862/ and the domains-memory scratch. I ran 8 of\n   those cells and 8 of 8 reproduced the inf harm exactly. IF THAT RATE HOLDS ACROSS THE 97, (a) is\n   proved to be a spelling fix and (b) becomes mandatory rather than recommended. IF IT DOES NOT --\n   if the large-finite harm is confined to a handful of residual/rate levers -- then (a) plus a\n   domain on those few is the whole job and R2 shrinks to a dozen declarations.\n2. THE FALSIFIER FOR (a), STILL OPEN BY CONSTRUCTION: a lever for which a non-finite value is the\n   natural spelling of a legitimate configuration. I looked for it four ways (defaults, help text,\n   the 75 declared specials, every configuration in the repository) and found none, which is why I\n   recommend (a) -- but \"none exists today\" is not \"none can exist\", and it is exactly why the\n   per-Lever opt-out ships with the rule rather than after it.\n3. THE FALSIFIER FOR (b), AND IT IS THE ONE THAT WOULD MAKE ME WITHDRAW R2: take the twenty levers\n   on the work list below, write a domain for each, and count how many have a bound this tree can\n   DEFEND FROM A MEASUREMENT rather than from taste. If it is 20 of 20, (b) generalises and the\n   remaining 187 follow as evidence arrives. If it is 6 of 20, then (b) delivers a facility that\n   187 levers carry as `domain=None`, the honest answer is (a) plus per-package refusals for the\n   eleven geometry zeros, and I would say so.\n4. AND THE CHEAP ONE THAT SHOULD RUN REGARDLESS: apply R1 to a branch and run\n   tests/test_determinism.py plus one real short training run. I ran the seven static/behavioural\n   suites and got byte-identical output; I did NOT run a training loop, and the composition root\n   halts at CAP.startup_refusals today so I could not have run one end to end.",
+ "levers_swept": 207,
+ "findings": [
+  {
+   "lever": "NEW IN THE RULING PHASE -- spine (Lever.coerce) / fabric / opt: LARGE FINITE MAGNITUDES",
+   "value": "1e26, 1e28, 1e30, 1e300, -1e300",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED -- NOT ON ANY SWEEP'S LIST, AND IT IS THE FACT THAT DECIDES THE ARCHITECTURAL QUESTION. A FINITE value reproduces the nan harm exactly, so a non-finite refusal closes the spelling and not the class. FAB_ALPHA on the fabric sweep's own harness: at 1e20 and 1e24 the run is clean (0/23 non-finite gradients); at 1e26 the loss STILL READS HEALTHY -- aux 0.5150710344314575, composed 2.943258285522461 -- while 15 of 23 gradient-carrying tensors are already non-finite; at 1e28, 1e30, 1e300 and -1e300 it is aux=nan, composed=nan, 19/23 non-finite, i.e. bit-for-bit the cell the fabric sweep filed as [critical] FAB_ALPHA=nan. OPT_LR=1e30 does the same in OPT: all eleven of opt/api.py::build's refusals pass it, AdamW is constructed with lr: 1e+30, six steps run, OPT.counters reports opt.step: 6 / opt.backward: 6 with no alarm, and the harness's own parameter check reads p_finite: false, p_sample: [nan, nan, nan]. The 1e26 cell is the worst of the set because a ledger printing 0.515 and 2.94 gives a reader nothing to look at. THE OWNER SHOULD NOTE: this is the finding that turns option (b) from 'most honest, most work' into the only option that closes the mechanism.",
+   "repro": "OMP_NUM_THREADS=1 python3 /tmp/rule/repro/cell_real.py FAB_ALPHA 1e26   (and 1e20 1e24 1e28 1e30 1e300 -1e300); cd /tmp/sw && OMP_NUM_THREADS=1 python3 cell.py OPT_LR 1e30 OPT"
+  },
+  {
+   "lever": "NEW IN THE RULING PHASE -- spine (src/spine/lever.py::Lever.coerce): NON-INTEGER ON AN INT LEVER TRUNCATES INTO A DECLARED SENTINEL",
+   "value": "0.4, 0.9, 0.6, 0.99 on int levers",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "DEFERRED -- ALSO NOT ON ANY SWEEP'S LIST. `v = int(float(raw))` truncates toward zero with no warning, so a fractional value an operator types to mean 'a very short cadence' or 'a very small start' lands on 0, and 0 is a DECLARED SENTINEL on several of these levers -- meaning the operator asking for the tightest setting receives the OFF switch. Measured through a real spine.assemble.build over a dict environment: MEM_REKEY_EVERY=0.4 -> cfg.rekey_every = 0 (the declared DISARM, 'the amortized re-encode is switched off'); CAP_FAB_START=0.9 -> 0 (the sentinel 'start at the hard ceiling'); TOK_FREEZE_AT=0.6 -> 0 ('never freeze'); OPT_LR_WAVELENGTH=0.99 -> 0 ('one wavelength spans the whole run'); LM_CTX=256.9 -> 256. AND THE REPORT DISAGREES WITH THE RUN: build() returns warnings == [] and Config.given() -- documented as 'what the environment actually supplied' and quoted by the report -- returns {'rekey_every': '0.4'} beside a mechanism running at 0. That is the false-equation class with a sentinel as the subject. The repair is at the same line as R0 and is one clause: refuse a raw string whose float value is not integral, by name, rather than truncating it.",
+   "repro": "OMP_NUM_THREADS=1 python3 /tmp/rule/t6.py ; OMP_NUM_THREADS=1 python3 /tmp/rule/t7.py ; python3 /tmp/rule/t5.py"
+  },
+  {
+   "lever": "fabric \u2014 FAB_ALPHA",
+   "value": "nan, inf, -inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Residual mixing coefficient of one fabric step, `h = norm(h + alive*(alpha*(mixture-h)))`, multiplied UNGUARDED in src/fabric/api.py::forward. NOT one of the eleven magnitude levers build() refuses -- build's own comment names FAB_ALPHA in the list it deliberately does not touch. One forward pass makes aux_loss nan, the composed objective nan, 17-19 of 23 gradient-carrying tensors non-finite, and writes NaN permanently into pop.cent so the population cannot be recovered by fixing the lever afterwards. Reproduced independently in this phase.",
+   "repro": "OMP_NUM_THREADS=1 python3 /tmp/rule/repro/cell_real.py FAB_ALPHA nan  -> stage=ok, aux_loss=nan, composed_loss=nan, n_nonfinite_grads=19/23, cent_finite2=false, and 'Gate fab.halt: FIRED (mean halted mass nan vs halt_max=0.9)'"
+  },
+  {
+   "lever": "fabric \u2014 FAB_CENT_EMA",
+   "value": "nan, inf, -inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The centroid EMA rate, multiplied unguarded in src/fabric/api.py::_ground_update and written back into pop.cent, the routing centroid BUFFER. All three values make pop.cent non-finite on the first pass; every routing logit is then nan, aux_loss nan, composed objective nan, 19/23 gradients non-finite. Gate fab.discover prints a confident verdict over it.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_CENT_EMA nan  (raw cell: /tmp/fabsweep/raw/FAB_CENT_EMA__nan.json)"
+  },
+  {
+   "lever": "fabric \u2014 FAB_ROUTE_REGION_W",
+   "value": "nan, inf, -inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Weight on the signature-region cosine term, multiplied unguarded in src/fabric/api.py::_entry_logits (`logits = region_w * (cos / temp)`). Named in build's 'what is NOT refused' list. Entry logits non-finite, softmax nan, nan reaches pop.cent through the grounded update: aux nan, objective nan, 19/23 gradients non-finite, cent poisoned.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_ROUTE_REGION_W nan"
+  },
+  {
+   "lever": "fabric \u2014 FAB_HALT_MAX",
+   "value": "nan, -inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The halt-mass ceiling reaches `ph = raw.clamp(max=halt_max)` in src/fabric/api.py::forward. clamp(max=nan) returns nan and clamp(max=-inf) returns -inf, so the halted mass -- which multiplies the residual and the per-hop vote -- becomes non-finite and takes aux, the objective, 19/23 gradients and pop.cent with it. Named in build's list of levers it declines to check.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_HALT_MAX nan"
+  },
+  {
+   "lever": "fabric \u2014 FAB_BAL_FLOOR",
+   "value": "nan, inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- src/fabric/api.py::_decay_to_floor returns `max(floor, 1.0 - step_n/max(1, warm_n))`. Python's max keeps its FIRST argument when the comparison is False and `x > nan` is always False, so max(nan, 0.9998) is nan. The balance scale is nan, `aux = aux + balance_w * bal_scale * bal` is nan, 17 of 23 gradients non-finite. At +inf the scale is inf and aux is inf with the same 17 non-finite.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_BAL_FLOOR nan"
+  },
+  {
+   "lever": "fabric \u2014 FAB_RANK",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Assembles with no warning; FAB.build allocates A as (cap, d_model, 0) and B as (cap, 0, d_model) -- every expert has ZERO parameters and dW = A@B is identically zero for the life of the run, a no-op population the optimizer still holds. The identity embedder's input is 2*d_model*rank = 0 numbers, so eemb(weights) is the same constant for every expert. aux_loss comes back nan. A ZERO, so R1 does NOT close it; this is (b)'s `domain=(1, None)` on a width, or a FAB refusal at build().",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_RANK 0"
+  },
+  {
+   "lever": "fabric \u2014 FAB_DK",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Width of the routing identity space. At 0 every per-expert key, the router's query and the halt key are zero-width: `keys @ q` sums over nothing, the spawn test reads gap=1.0 and typ=1.0 for every query on every pass -- the manufactured 'infinitely novel' reading _spawn_check's docstring exists to avoid -- and aux_loss comes back nan. A ZERO; not closed by R1.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_DK 0"
+  },
+  {
+   "lever": "memory \u2014 MEM_QUOTA",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Accepted by build AND by the real composition root; the whole editable store is allocated with ZERO rows. spine/assemble.py's d_capacity coupling computes _owner_blocks(FAB.slots, MEM.owners) * int(MEM.quota) = 64 * 0 = 0, and memory/api.py::open_store's own guard `if capacity != owners * quota` passes because 0 == 64 * 0 -- the guard that exists to stop 'one quantity, two answers' agrees with itself on nothing. A ZERO; not closed by R1.",
+   "repro": "domains-memory sweep cell MEM_QUOTA=0; harness /tmp/claude-0/.../scratchpad/sweep/cell.py MEM_QUOTA 0"
+  },
+  {
+   "lever": "fabric \u2014 FAB_EMB_HID",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The identity embedder's hidden width. At 0 eemb is Linear(2*d*r -> 0) then Linear(0 -> dk), so its output is a CONSTANT independent of the expert's weights: every expert embeds to one point. That is the collapsed identity space _var_cov and the emb_var term exist to detect, arriving as a geometry the operator typed. Takes sum|g|max from 1.22 to 127745. A ZERO; not closed by R1.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_EMB_HID 0"
+  },
+  {
+   "lever": "fabric \u2014 FAB_BAL_FLOOR",
+   "value": "-inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- LATE-ARRIVING AND INVISIBLE AT STEP 0, which is why a same-window sweep alone called it inert. max(-inf, 1 - step/bal_warm) is just `1 - step/bal_warm`, so with the floor removed the load-balance scale goes NEGATIVE once step exceeds bal_warm (4000 windows by default) and grows without bound. Measured at step_windows=100000: scale -24.0, aux_loss -0.196 against +0.497 -- the objective is PAID to collapse the population onto one expert, exactly the harm FAB_BALANCE<0 is refused for.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_BAL_FLOOR -inf  (and the step_windows=100000 probe, /tmp/fabsweep/probe3.py)"
+  },
+  {
+   "lever": "fabric \u2014 FAB_SPAWN_MULT",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- src/fabric/api.py::_spawn_check decides with `if gap < max(float(spawn_mult) * typ, float(spawn_floor))`. max(nan, 0.02) is nan (Python keeps the first argument because `0.02 > nan` is False) and `gap < nan` is False -- so the test SPAWNS UNCONDITIONALLY on every query for the life of the run, and spawn_floor, whose declared purpose is 'so a degenerate population cannot spawn on every query', is bypassed entirely. Measured n_live 6->8 in two passes.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_SPAWN_MULT nan"
+  },
+  {
+   "lever": "sig \u2014 SIG_TEMP",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The refusal that already stands at this exact site -- `if temp <= 0.0: raise ValueError(SIG_TEMP=...)` in src/sig/api.py::_contrastive_loss -- is FALSE FOR NaN, the same arithmetic that let FAB_BALANCE=nan through. logits = (za @ zp.t()) / nan is all-nan, cross_entropy returns nan, one backward() puts nan in every encoder gradient, and after warm_up every encoder parameter is non-finite while WarmupReport returns verdict='budget' with separation=nan.",
+   "repro": "sig-tok sweep cell SIG_TEMP=nan; transcripts /tmp/sigtok_sweep_5862/out/"
+  },
+  {
+   "lever": "sig \u2014 SIG_VAR_WEIGHT",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- src/sig/api.py::_var_cov guards the variance hinge with `if var_weight > 0.0`, which +inf passes. term = inf * clamp(1-std,min=0).mean() is inf, the loss is inf, and backward() through it produces nan gradients: at step 1, loss=inf, all three encoder tensors' grads nan. After warm_up every encoder parameter is non-finite and the report reads verdict='budget' peak=nan.",
+   "repro": "sig-tok sweep cell SIG_VAR_WEIGHT=inf"
+  },
+  {
+   "lever": "sig \u2014 SIG_COV_WEIGHT",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Identical mechanism one branch down in the same function: `if cov_weight > 0.0 and n > 1` admits +inf, cov_weight * off_diagonal.pow(2).sum()/d is inf, loss inf, gradients nan, every encoder parameter non-finite after warm_up, report verdict='budget' peak=nan. Filed separately because the two terms are weighted independently.",
+   "repro": "sig-tok sweep cell SIG_COV_WEIGHT=inf"
+  },
+  {
+   "lever": "opt \u2014 OPT_LR",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- src/opt/api.py::build guards the peak rate with `if lr <= 0.0`. `inf <= 0.0` is False, so +inf walks through eleven refusals, is handed to BOTH AdamW instances as lr=, and is written into every param group on every step by maybe_step clause 5. One optimizer step drives every parameter in the base group to -inf and the second to NaN, with the whole ledger reporting a healthy run. SEE ALSO the ruling-phase finding above: OPT_LR=1e30 does exactly this and is finite.",
+   "repro": "cd /tmp/sw && OMP_NUM_THREADS=1 python3 cell.py OPT_LR inf OPT  (and 1e30, verified in this phase: p_finite false, p_sample [nan, nan, nan])"
+  },
+  {
+   "lever": "opt \u2014 OPT_WEIGHT_DECAY",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "critical",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- src/opt/api.py::build guards with `if weight_decay < 0.0`. `inf < 0.0` is False, so +inf is handed to both AdamW instances. AdamW's decoupled decay multiplies each parameter by (1 - lr*wd) before the update, so the first step sends every base parameter to -inf and the second to NaN -- at a perfectly ordinary lr=2e-05 the schedule and the ledger report as healthy.",
+   "repro": "cd /tmp/sw && OMP_NUM_THREADS=1 python3 cell.py OPT_WEIGHT_DECAY inf OPT"
+  },
+  {
+   "lever": "sig \u2014 SIG_D",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- build() accepts d=0 on BOTH mode arms and encode() then returns well-formed (N, 0) 'unit vectors' for every window forever with no error: the signature space has no dimensions, while the separation probe reads a perfect 1.0. This is the failure build() already refuses one branch away -- SIG_MODE=bigram at width_units=1 is refused BY NAME on the ground that it 'returns a well-formed all-zero signature for every window, which collapses FAB's routing'. A ZERO; not closed by R1.",
+   "repro": "sig-tok sweep cell SIG_D=0"
+  },
+  {
+   "lever": "tok \u2014 TOK_DROPOUT",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "high",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Every guard in the package is `dropout > 0.0`, which +inf passes, and the draw is `stream.random() < dropout` -- always true at inf. Every available merge is skipped on every counting segmentation: the seed build mints 82 tokens instead of 181 (tok.build_refused=82) and the vocabulary lands at 338 instead of 437; and bytes_per_token measures 1.0 instead of 4.0 -- the one estimator SIG's single window width and DATA's splice gate are computed from.",
+   "repro": "sig-tok sweep cell TOK_DROPOUT=inf"
+  },
+  {
+   "lever": "opt \u2014 OPT_GRAD_CLIP",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Two guards miss it and a third prints a value the operator never typed. build refuses only `grad_clip < 0.0` (False for NaN); maybe_step gates the clip on `if clip > 0.0:` (also False), so clipping is SILENTLY OFF at any gradient magnitude -- measured with grad norms of 8.0e6 and zero clip events. src/opt/api.py::counters then prints the literal string 'off (0.0)' and the sentence 'OPT_GRAD_CLIP=0.0 is OFF, which is the setting every recorded number in this project was measured under' -- a report asserting a value the operator did not type.",
+   "repro": "cd /tmp/sw && OMP_NUM_THREADS=1 python3 probe_clip.py"
+  },
+  {
+   "lever": "opt \u2014 OPT_LR_RESTART_DAMP",
+   "value": "nan",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The two magnitude refusals in src/opt/api.py::build are `damp > 1.0` and `damp < 0.0`, and NaN is ordered against neither, so it is admitted while +inf and -inf are both refused by name from the same pair of lines. Downstream, maybe_step clause 4 is `if not paid and float(opt.lr_restart_damp) < 1.0:` -- also False -- so the ONE closed loop this package owns, the goal-B restart damping, is dead while the gate prints the armed-but-did-not-fire verdict over 3 real losing restarts and 1000 readings.",
+   "repro": "cd /tmp/sw && OMP_NUM_THREADS=1 python3 probe_damp.py"
+  },
+  {
+   "lever": "sig \u2014 SIG_TEMP",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The refusal directly beside it catches 0 and every negative and misses +inf. At temp=inf every logit is exactly 0.0 (verified: 'logits all zero: True | max|logit|: 0.0'), cross_entropy is exactly ln(48) = 3.8712007 -- which this lever's sibling comment calls 'the loss of a model that has learned nothing' -- and the InfoNCE gradient is exactly 0.0. The contrastive objective is structurally erased and nothing says so.",
+   "repro": "sig-tok sweep cell SIG_TEMP=inf"
+  },
+  {
+   "lever": "sig \u2014 SIG_WARMUP_PLATEAU_EPS",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The flatness test in _stop_verdict is `abs(sep - prev) <= eps * abs(prev)`; at eps=inf it is true for any pair of probes, so warm-up stops at the FIRST moment two probes exist and returns verdict='plateau' -- the false-convergence stop _stop_verdict's docstring says the function was rewritten to remove.",
+   "repro": "sig-tok sweep cell SIG_WARMUP_PLATEAU_EPS=inf"
+  },
+  {
+   "lever": "sig \u2014 SIG_CONTRASTIVE_BATCH",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- warm_up runs its full 800 optimizer steps on an EMPTY batch. _draw_pairs returns (0,64)/(0,64), _contrastive_loss returns nan (cross_entropy over a 0x0 logit matrix), and the separation probe -- 2*0 encodings, an empty triu mean -- returns nan. Gradients are finite zeros so the parameters survive, which is what makes it silent: WarmupReport comes back verdict='budget' steps=800. A ZERO; not closed by R1.",
+   "repro": "sig-tok sweep cell SIG_CONTRASTIVE_BATCH=0"
+  },
+  {
+   "lever": "tok \u2014 TOK_MAX_BYTES",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Vocabulary._add refuses any sequence with `len(seq) > self.max_bytes`, so at 0 EVERY candidate merge is refused for length and the vocabulary is permanently the 256 bytes -- measured build_mint=0, build_refused=82, size=256. TOK's ledger is honest about it, but the value also leaves the package through the IRREDUCIBLE coupling src='TOK.max_bytes'. A ZERO; not closed by R1.",
+   "repro": "sig-tok sweep cell TOK_MAX_BYTES=0"
+  },
+  {
+   "lever": "fabric \u2014 FAB_ROUTE_T",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- src/fabric/api.py::_entry_logits and ::_halt_logit both divide by `temp = max(1e-3, route_t)`. At +inf every routing logit and the halt logit become exactly 0.0, so the softmax over the population is UNIFORM: there is no routing decision left, the region cosine and the learned identity term are both erased, and Gate fab.route_learned still prints FIRED. Both project goals run through the mechanism that just stopped existing.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_ROUTE_T inf"
+  },
+  {
+   "lever": "fabric \u2014 FAB_SPAWN_FLOOR",
+   "value": "nan (and inf)",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The mirror of FAB_SPAWN_MULT=nan and quieter. max(spawn_mult*typ, nan) returns spawn_mult*typ, so the ABSOLUTE FLOOR IS SILENTLY DELETED while the gate prints 'floor=nan' as though it were in force. On a healthy population the relative term dominates and the cell is bit-identical to the baseline; the harm is exactly the case the lever exists for -- a collapsed identity space, where the relative term goes to zero and only the floor stands between the run and spawning on every query.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_SPAWN_FLOOR nan"
+  },
+  {
+   "lever": "fabric + spine/derive \u2014 FAB_MANAGE_EVERY",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The three-answers-for-one-number defect that fabric/api.py::manage_period and spine/derive.py::flush_period_windows were BOTH repaired for at NEGATIVE values, still live at zero. flush_period_windows refuses `period_windows.n < 0` and only that, so 0 falls through to the floor and FAB.d_manage_period resolves to Flushes(1) -- 'manage on EVERY flush', the tightest cadence in the system, for a number nobody could have meant. NEEDS BOTH: a FAB refusal and flush_period_windows refusing `< 1` where it today refuses `< 0`. A ZERO; not closed by R1.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_MANAGE_EVERY 0  -> manage_period resolved to the tightest cadence"
+  },
+  {
+   "lever": "memory \u2014 MEM_OWNERS",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Silently REWRITTEN to 1 by spine/assemble.py::_owner_blocks (`max(1, min(int(expert_slots), int(owner_buckets)))`), and the store's capacity falls from 8192 to 128 -- a 64x shrink -- with no refusal, no warning and no report line. The frozen Config still answers mem.owners == 0 while mem.d_owner_blocks == 1 and the built Store carries owners=1, so the printed configuration and the running one disagree. A ZERO; not closed by R1.",
+   "repro": "domains-memory sweep cell MEM_OWNERS=0"
+  },
+  {
+   "lever": "data \u2014 DATA_EXPOSURE_MAX, DATA_EXPOSURE_SKEW",
+   "value": "nan (2 cells)",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "medium",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- The FAB_BALANCE=nan shape in DATA, on the two guards standing closest to goal B. Both floats, so coerce admits nan without comment; src/data/api.py::data_plan then evaluates `max(vals) > float(dat.exposure_max)` and `skew > float(dat.exposure_skew)`, both False for EVERY possible value at a nan threshold, and hands the answer to spine/gate.py::Gate, which prints 'Gate data.exposure_max: armed, did not fire (0.75 vs nan)' -- reachable=True over a comparison nothing can satisfy. These are the two guards goal B's add-an-area experiment rests on.",
+   "repro": "eval-data sweep cells DATA_EXPOSURE_MAX=nan, DATA_EXPOSURE_SKEW=nan"
+  },
+  {
+   "lever": "fabric \u2014 FAB_HALT_MAX",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "low",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Bit-identical to the default on the measured pass, and that is the finding: the ceiling is silently REMOVED. fabric/levers.py::FABLevers.halt_max declares it 'A BARRIER, NOT A PREFERENCE ... at halt=1 the experts receive no gradient at all, and an expert that receives no gradient can never become worth routing to: an absorbing state.' At +inf raw.clamp(max=inf) is the identity.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_HALT_MAX inf"
+  },
+  {
+   "lever": "opt \u2014 OPT_GRAD_CLIP",
+   "value": "inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "low",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Accepted (`inf < 0.0` is False) and the clip branch in maybe_step DOES run -- but `norm > clip` is False for every finite norm, so the cap is structurally incapable of biting while Gate('opt.build.grad_clip') fires with value=inf reachable=True and Gate('opt.clip.applied') prints the armed-but-did-not-fire reason. A cap that cannot bite, reported as armed.",
+   "repro": "cd /tmp/sw && OMP_NUM_THREADS=1 python3 cell.py OPT_GRAD_CLIP inf OPT"
+  },
+  {
+   "lever": "sig \u2014 SIG_WARMUP_PLATEAU_EPS",
+   "value": "nan and -inf",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "low",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- `abs(sep - prev) <= nan * abs(prev)` is False for every pair, and `<= -inf` likewise, so the plateau stop can NEVER fire at any curve -- and Gate sig.adaptive_stop prints reachable=True, fired=False, reason='', which in this tree's own three-state vocabulary reads 'armed, did not fire'. The FAB_BALANCE=nan gate shape exactly: a structurally unreachable mechanism reported as one that simply did not trigger.",
+   "repro": "sig-tok sweep cells SIG_WARMUP_PLATEAU_EPS=nan and =-inf"
+  },
+  {
+   "lever": "data \u2014 DATA_EXPOSURE_MAX, DATA_EXPOSURE_SKEW",
+   "value": "inf (2 cells)",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "low",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- Same mechanism as the nan cells, one notch weaker: at threshold=inf no finite exposure can ever exceed it, so the gate is unreachable in fact and prints 'armed, did not fire (0.75 vs inf)'. It differs from nan in that 'inf means no cap' is a reading a person might intend -- but it is NOT declared anywhere: src/data/levers.py::DATALevers says only 'above which the data plan is flagged'.",
+   "repro": "eval-data sweep cells DATA_EXPOSURE_MAX=inf, DATA_EXPOSURE_SKEW=inf"
+  },
+  {
+   "lever": "fabric + spine/derive \u2014 FAB_SLOTS",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "low",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- cap = max(n0, slots) is the declared arithmetic, so slots=0 legitimately yields cap = n0 and FAB.build is right to accept it. What is not right is the setpoint it derives: spine/derive.py::operating_population carries `n = max(3, n)` -- its own docstring calls it 'the same floor as the gate's n_live <= 2' -- and then returns `min(n_slots, n) if n_slots >= 3 else n_slots`, which BYPASSES that floor. A ZERO; not closed by R1.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_SLOTS 0"
+  },
+  {
+   "lever": "fabric \u2014 FAB_HOPS",
+   "value": "0",
+   "outcome": "ACCEPTED_HARMFUL",
+   "severity": "low",
+   "detail": "DEFERRED (work list; approve independently of the architectural ruling) -- `depth = max(1, min(int(pop.depth_now), hops, 2 + n//2))` in src/fabric/api.py::forward, so a maximum hop budget of ZERO silently yields ONE hop -- a cap that does not cap. The gate then prints a reason that is false about the configuration it describes: 'FAB_DEPTH0 >= FAB_HOPS: the chain already starts at the budget', when the budget is 0, depth0 is 3, and the walk actually took 1. A ZERO; not closed by R1.",
+   "repro": "python3 /tmp/fabsweep/cell.py FAB_HOPS 0"
+  }
+ ],
+ "legitimate_specials": "THE DENOMINATOR, AND IT IS THE MOST DECISION-RELEVANT NUMBER IN THIS REPORT: 75 of the six sweeps'\n828 cells are ACCEPTED_LEGITIMATE, and EVERY ONE OF THEM IS A ZERO. Fabric 25, sig-tok 16\n(15 zeros + SIG_TEMP's high arm), opt-lm-train 11, domains-memory 9, world-cap-ckpt 8, eval-data 6.\nNOT ONE IS nan, +inf OR -inf.\n\nI checked that four independent ways rather than taking the six reports' word for it:\n  (1) NON-FINITE DEFAULTS over all 262 declared levers in all 13 registered LeverSets: ZERO.\n      Measured, /tmp/rule/t4.py.\n  (2) HELP TEXT declaring a non-finite meaning: ZERO. Scanned all 262 help strings for\n      inf / infinit / nan / unbounded / \"no cap\" / \"no ceiling\" / \"no limit\". Six hits, all\n      spurious: five are the substring \"inf\" inside \"InfoNCE\" (SIG.contrastive_batch,\n      SIG.positive_radius_windows, SIG.prototype_frac, SIG.floor_kinds) and one is DOM.manage's\n      \"lets it grow unbounded\", which describes the mechanism and not a value.\n  (3) CONFIGURATIONS IN THE REPOSITORY setting a lever non-finite: ZERO. Grepped every\n      PREFIX_FIELD=nan|inf|-inf|1e{3+ digits} across the tree excluding .git, runs/ and .rework/;\n      the only three hits are inside src/fabric/api.py's own comment ABOUT FAB_BALANCE=nan.\n  (4) THE SUITE under the rule: seven test files, byte-identical output patched vs unpatched.\n\nCONCLUSION FOR THE CENTRAL-VS-PER-PACKAGE QUESTION: a finiteness refusal in\nsrc/spine/lever.py::Lever.coerce would wrongly refuse ZERO of the 75, and the three cells the\nfabric report flagged as \"provably identical to an already-legal zero\"\n(FAB_ROUTE_T=nan/-inf, FAB_SPAWN_MULT=-inf, FAB_SPAWN_FLOOR=-inf) lose nothing an operator can\nstill ask for by typing 0. A rule refusing ZERO would break all 75 and would refuse the SHIPPED\nDEFAULT in at least three places (MEM_KEY_DEPTH=0 \"the full stack\", OPT_GRAD_CLIP=0.0 \"OFF, which\nis what every recorded number in this project was measured under\", FAB_HOP_SUP=0.0 and the other\nFAB magnitude levers whose build() prints \"Set the lever to 0.0 to switch the mechanism off\").\n\nTHE ONE LEGITIMATE SPECIAL THE RULING PHASE MUST NOT LOSE, carried forward from the domains-memory\nreport because it is the only case where refusing a value would destroy a DECLARED meaning:\nMEM_REKEY_EVERY=0 is the declared DISARM for ONE of its two readers (memory/api.py::maintain) while\nrekey_period returns Windows(0) into RUN.Cadences.due, which by its own contract fires every window\nat period 0. Two mechanisms, one number, opposite answers. That is a real defect and it is NOT a\nfiniteness question -- it belongs to whatever ruling settles cadence-zero alongside\nFAB_MANAGE_EVERY=0 and DOM_MANAGE_EVERY=0. Do not fold it into this one.",
+ "unfinished": [
+  {
+   "title": "LARGE FINITE VALUES: I drove 13 cells and they decide the ruling, but the class is not swept",
+   "reason": "Out of budget for this phase, and it is the highest-value next sweep by a wide margin.",
+   "detail": "I drove FAB_ALPHA at {1e4, 1e8, 1e12, 1e16, 1e20, 1e24, 1e26, 1e28, 1e30, 1e35, 1e300, -1e300} and OPT_LR at 1e30 -- 13 cells, and the harm at 1e26/1e28/1e30 is bit-for-bit the harm the sweeps filed at nan. That is ENOUGH to decide that a finiteness rule closes a spelling and not a class, and NOT ENOUGH to say which of the 97 float levers carry it or where each one's boundary sits. FAB_ALPHA's boundary lies between 1e24 (clean) and 1e26 (loss still reads healthy, 15/23 gradients already non-finite), which is an fp32 overflow boundary and will differ per lever, per width and per dtype. THE SWEEP THAT PAYS: all 97 floats at {1e26, 1e30, -1e30}, all 110 ints at {1e15, -1e15}, ~500 cells, through the harnesses still on disk at /tmp/fabsweep/, /tmp/sw/, /tmp/sigtok_sweep_5862/. Fresh subprocess per cell as before."
+  },
+  {
+   "title": "NEGATIVE FINITE VALUES on levers where negative is not yet refused",
+   "reason": "Partially probed; the four cells I ran were CLEAN, which is itself informative and is why I am not claiming this class.",
+   "detail": "WOULD PAY, but less than the large-finite sweep and for a different reason. MEASURED CLEAN on two passes: FAB_ALPHA=-1.0 (aux 0.5120277404785156, composed 3.006885528564453, 0/23 non-finite), FAB_CENT_EMA=2.0 (aux 0.5206043124198914), FAB_CENT_EMA=100.0 (aux 0.5122693777084351), FAB_HALT_MAX=1000.0 (aux 0.5120277404785156). So moderate out-of-range values do NOT blow up in two passes, and a `domain=` written on taste would refuse configurations this tree has not shown to be wrong -- the untrippable-guard class src/fabric/api.py::build names by hand. THE CATCH, AND IT IS WHY THIS STILL NEEDS DRIVING: two passes cannot see a divergent recursion. FAB_CENT_EMA=100.0 is an EMA rate a hundred times its own fixed point; the fabric sweep's FAB_BAL_FLOOR=-inf finding is precisely a harm that was BIT-IDENTICAL at step_windows=1 and catastrophic at 100000. Any negative/out-of-range sweep must drive step_windows out to at least the default warmup horizons or it will call the whole class inert, exactly as a same-window sweep did once already."
+  },
+  {
+   "title": "NON-INTEGER SPELLINGS on int levers: found, measured, NOT swept",
+   "reason": "Discovered in this phase while pricing the repair; five cells run, 110 int levers unswept.",
+   "detail": "Filed as a finding above. I drove 5 of the 110 int levers and 4 of the 5 landed on a DECLARED SENTINEL. The remaining 105 are unswept, and the question that decides how bad this is -- how many int levers have a declared meaning at 0 -- has a partial answer in the six reports (at least MEM_REKEY_EVERY, MEM_PROBE_EVERY, MEM_KEY_DEPTH, CAP_FAB_START, CAP_VOCAB_START, CKPT_EVERY, CKPT_BEST_KEEP, TOK_FREEZE_AT, TOK_RETOK_EVERY, TOK_PROBATION_USES, OPT_LR_WAVELENGTH, OPT_LR_WARMUP, LM_LAYERS, DATA_PHASE_LIVE, SIG_WARMUP, SIG_DENSE_WINDOW, FAB_DEPTH0) and no complete one. Cheap: 110 cells, no torch needed -- it is a coerce-and-read probe like /tmp/rule/t6.py."
+  },
+  {
+   "title": "THE EMPTY STRING: measured at the coercion layer, not driven through the packages",
+   "reason": "Cheap to check, and it came back mostly clean, so I did not spend the budget driving it further.",
+   "detail": "WOULD NOT PAY on the numeric levers. MEASURED (/tmp/rule/t5.py): '' and ' ' both raise the correct LeverError on an int lever and on a float lever -- 'QQ_N='' is not a int'. The one case worth a second look is elsewhere: on a BOOL lever '' resolves to False (that is the declared _OFF idiom, src/ckpt/api.py::_OFF and Lever.coerce), and on a STR lever '' resolves to '' and is then only checked if the lever carries choices=. So the empty string is a question about the 24 str levers and the 31 bool levers, not about the 207 this run is about. Also measured and clean: '0x10' and 'true' both refuse by name on numerics; '1_000' is accepted as 1000 by Python's own float parser, which is a curiosity rather than a defect."
+  },
+  {
+   "title": "I DID NOT RUN A TRAINING LOOP UNDER THE PROPOSED RULE",
+   "reason": "src/spine/compose.py::compose halts at CAP.startup_refusals (row 29 of 39) today, so there is no end-to-end run to make.",
+   "detail": "What I DID run under the patched copy: tests/test_ownership, test_census, test_assemble, test_couplings, test_derive, test_contract, test_fabric -- all seven exit 0 with output byte-identical to an unpatched copy of the same layout. What I did NOT run: tests/test_determinism.py, and any real optimization. The claim 'the rule takes nothing away' therefore rests on the static and behavioural suites plus four independent scans of the declarations, and NOT on a trained run. That is the residual risk in R1 and the reason R1 ships with a switch."
+  },
+  {
+   "title": "THE 133 UNREACHABLE_TODAY CELLS ARE NOT ON THE WORK LIST, AND SOMEONE SHOULD SAY WHEN THEY ARM",
+   "reason": "Out of scope for a work list of measured harms; in scope for the ruling, and this is the note that carries it.",
+   "detail": "Across the six sweeps roughly 288 cells are UNREACHABLE_TODAY because the CONSUMER is a P4/P5/P6 stub, not because anything refused: 33 FAB levers with no live reader, all 23 DOM+MEM floats, 14 of EVAL's 15 numeric levers, WORLD_COLLAPSE_W and WORLD_PREDICT_W, CAP_STALL_BAND, CKPT_BEST_KEEP_TOL, LM_ANCHOR_W. Every one resolves, freezes into the Config and reaches nothing -- and one already crosses a package boundary today (FAB_COMP_EMA=nan -> DOM.d_comp_ema=nan, no warning). THIS IS THE STRONGEST ARGUMENT FOR LANDING R1 NOW RATHER THAN AFTER P4: a rule at the parse layer covers a body that does not exist yet, and every per-package refusal must be written by the same author who writes the body -- which is the arrangement that produced the hole this run exists to close."
+  }
+ ]
+}
