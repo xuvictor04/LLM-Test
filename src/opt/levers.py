@@ -407,8 +407,16 @@ class OPTLevers(LeverSet):
     # (OPT.maybe_step, step 5, between the gradient's last use and the zero_grad), a stated default,
     # its own DID IT FIRE counters (opt.clip.applied against opt.clip.armed_no_clip -- clipping on
     # and NOTHING exceeded the norm is a different statement from clipping off, and the report must
-    # make both), a startup refusal on a negative max-norm, and a Gate on OPT.build that prints
-    # "off (0.0)" rather than omitting the line.
+    # make both), a startup refusal on a negative max-norm, a startup refusal on a NON-FINITE
+    # max-norm (added 2026-09-07 in src/opt/api.py::build; nan walked `grad_clip < 0.0` here and
+    # `clip > 0.0` in OPT.maybe_step, so clipping stopped SILENTLY at measured gradient norms of
+    # 8.0e6 -- every comparison with NaN is False, so a NaN threshold does not clip loudly, it stops
+    # clipping without a word. +inf walked both too and gave a cap structurally incapable of biting,
+    # printed as ARMED), and a Gate on OPT.build that prints "off (<the value>)" rather than
+    # omitting the line -- interpolated, because the literal "off (0.0)" it printed until 2026-09-07
+    # asserted a setting the operator had not typed on exactly the nan run.
+    # WHAT NONE OF THAT BOUNDS: OPT_GRAD_CLIP=1e30 is finite, is accepted, and is the same cap that
+    # cannot bite. The refusals close four values; a declared per-lever domain is the open question.
     # SCOPE IS THE BASE GROUP, FOR THE SAME REASON THE NORM MEASUREMENT IS. The encoder's gradients
     # at flush time are SIG's, produced on SIG's cadence and stepped by SIG (Q-OPT-6), so folding
     # them into one clipped norm would silently couple two schedules.

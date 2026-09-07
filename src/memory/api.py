@@ -169,18 +169,144 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
     it. `rng` is one spine.rng.Rng for the subsystem "memory"; every stochastic choice draws from
     it, never from the global torch stream.
 
-    LEVERS READ: quota, key_src, key_depth, owners (read by spine/assemble.py to COMPUTE
-                 d_capacity and d_owner_blocks -- not by this package's own code, which never
-                 reads it directly; see WIRES READ. The other ten of the fourteen this line used
-                 to claim -- key_win, evict, probation_frac, src_share, verify, recon_hid,
-                 recon_tok, topk, write_mode, write_gate -- are consumed by write/read/maintain/
-                 judge, each of which already names them in its own LEVERS READ line, and were
-                 never read by THIS entry point's body: trimmed rather than left as a claim this
-                 function's own code cannot back)
+    TWO LEVERS ARE REFUSED BELOW 1 BEFORE ANYTHING IS DERIVED FROM THEM HERE. MEM_QUOTA and
+    MEM_OWNERS are the store's only two degrees of freedom and neither declares a meaning for 0.
+    Unrefused, MEM_QUOTA=0 allocates the whole store with zero rows and MEM_OWNERS=0 is silently
+    folded to 1 by spine/assemble.py::_owner_blocks, taking capacity from 8192 to 128 with nothing
+    said. The refusal names the lever, the resolved integer and the raw string the environment
+    supplied; it is a range refusal and carries NO switch, following lm/api.py::resolve,
+    opt/api.py::build and capacity/api.py::new_valve. IT CLOSES ONE DIRECTION AND NOTHING MORE --
+    see the block itself for what it does not claim, and note that it does not touch MEM_KEY_DEPTH,
+    MEM_REKEY_EVERY, MEM_PROBE_EVERY, MEM_BLEND_MAX, MEM_SRC_SHARE or MEM_JUDGE_FRAC, six MEM levers
+    for which 0 IS a declared meaning and two of which are shipped defaults.
+
+    LEVERS READ: quota, owners, key_src, key_depth (owners is read HERE, at the refusal above the
+                 wires, AND by spine/assemble.py to compute d_capacity and d_owner_blocks -- this
+                 line used to say this package "never reads it directly", which was true until the
+                 refusal landed and is the sentence that had to change with it. The other ten of the
+                 fourteen this line once claimed -- key_win, evict, probation_frac, src_share,
+                 verify, recon_hid, recon_tok, topk, write_mode, write_gate -- are consumed by
+                 write/read/maintain/judge, each of which already names them in its own LEVERS READ
+                 line, and were never read by THIS entry point's body: trimmed rather than left as a
+                 claim this function's own code cannot back)
     WIRES READ: d_capacity, d_owner_blocks, d_source_slots
     DID IT FIRE: store.n_opened, store.n_restored_entries, store.n_restore_refused
     """
     mem = mem.owned_by("MEM")
+
+    # ==============================================================================================
+    # THE STORE'S TWO GEOMETRY LEVERS, REFUSED BELOW 1 AT MEM'S OWN FIRST READ
+    # ==============================================================================================
+    # WHAT IS REFUSED IS `< 1` ON TWO INT LEVERS AND NOTHING ELSE, AND THIS BODY DOES NOT CLAIM
+    # OTHERWISE. It closes a half-line on each of MEM_QUOTA and MEM_OWNERS. It says nothing about the
+    # other end: MEM_QUOTA=10**9 still asks Store.__init__ for 64 billion rows and the refusal here
+    # will not stop it, and no lever on this surface carries a declared upper bound. After this block
+    # neither lever is safe, bounded or validated; each is one direction less open. The general answer
+    # is a declared per-lever domain and it is the owner's open question, not this function's.
+    #
+    # IT IS NOT THE FIRST READ IN THE TREE AND SAYING SO IS PART OF THE REFUSAL. spine/assemble.py's
+    # MEM.d_capacity and MEM.d_owner_blocks couplings read both levers during spine/assemble.py::build,
+    # before any Config is frozen and long before this function runs, and they do not refuse -- they
+    # FOLD, through spine/assemble.py::_owner_blocks. This guard is the range check MEM owes its OWN
+    # two levers at its own first read, in MEM's words, and it is the same second line
+    # fabric/api.py::manage_period keeps for FAB_MANAGE_EVERY beside the assembly's arithmetic: a
+    # refusal that lives only in another package's coupling table is a refusal that disappears when
+    # that row is edited, with nothing saying so.
+    #
+    # WHY THE SPINE'S FOLD IS NOT THE PLACE TO FIX IT, measured rather than assumed:
+    # `max(1, min(int(expert_slots), int(owner_buckets)))` has a SECOND job. memory/levers.py::MEMLevers
+    # declares it -- "the d_owner_blocks fold already collapses to 1 block when FAB.slots is 0, so
+    # fabric-off degrades correctly with no second knob and no AND" -- so deleting the max(1, ...)
+    # there would take the fabric-off degradation with it. The rewrite of a MEM lever and the
+    # degradation of a FAB one share one expression, and only the lever half is wrong. So the refusal
+    # belongs on the lever, here.
+    #
+    # NO SWITCH, AND THAT IS DELIBERATE. ckpt/api.py::REFUSE_NEGATIVE_PERIOD says in its own words that
+    # a range refusal getting a switch "is NOT a precedent", and names lm/api.py::resolve,
+    # opt/api.py::build and capacity/api.py::new_valve as refusing out-of-range lever values with no
+    # switch of any kind. This is a range refusal on two counts and it follows those three. The
+    # switch this file DOES carry, REFUSE_NEGATIVE_PERIOD above, governs MEM_REKEY_EVERY and nothing
+    # else, and it does not reach here in either position.
+    #
+    # ZERO IS NOT A SENTINEL ON EITHER OF THESE TWO, AND IT IS ON FOUR OF THEIR NEIGHBOURS, WHICH IS
+    # WHY THIS IS TWO NAMES AND NOT A SWEEP OVER MEM'S INT LEVERS. MEM_KEY_DEPTH=0 is "the full stack"
+    # in its own help text AND is the shipped default; MEM_REKEY_EVERY=0 is the declared DISARM
+    # (memory/api.py::maintain, memory/api.py::rekey_period). MEM_PROBE_EVERY=0 disarms every
+    # retrieval-based rule and memory/levers.py::MEMLevers says "the report must say so";
+    # MEM_BLEND_MAX=0, MEM_SRC_SHARE=0 and MEM_JUDGE_FRAC=0 are three more declared arms, the last of
+    # them also a shipped default. A rule over 0 that did not read each declaration would refuse the
+    # configuration this tree ships. `quota` and `owners` declare no meaning for 0 at all: quota is
+    # "entries each owner block may hold" and owners is "how many eviction partitions the store is
+    # split into; 1 is the single global store".
+    #
+    # A NON-INTEGRAL VALUE ARRIVES HERE ALREADY TRUNCATED AND IS CAUGHT BY THE SAME TEST.
+    # spine/lever.py::Lever.coerce resolves an int lever as `int(float(raw))`, so MEM_QUOTA=0.4 is
+    # cfg.quota == 0 with build() returning no warning while Config.given() still reports '0.4'. That
+    # is one of the values this refusal names, and it names the RESOLVED integer beside the raw string
+    # so the two are visibly different.
+    _quota, _owners = int(mem.quota), int(mem.owners)
+    if _quota < 1 or _owners < 1:
+        _q_env, _o_env = mem.lever("quota").env_name, mem.lever("owners").env_name
+        _given = mem.given()
+        # THE WIRES ARE PRINTED AS THEY ACTUALLY ARRIVED ON THIS CONFIGURATION, not as the shipped
+        # defaults would have made them. The whole complaint on the owners arm is that the frozen
+        # Config and the running store disagree, and a message quoting the DEFAULT arithmetic
+        # instead of this run's would be the same class of claim one level up.
+        _cap_w, _blk_w = int(mem.d_capacity), int(mem.d_owner_blocks)
+        raise LeverError(
+            f"MEM: {_q_env}={_quota} and {_o_env}={_owners} -- "
+            + " AND ".join(
+                ([f"{_q_env}={_quota} is not a number of entries"] if _quota < 1 else [])
+                + ([f"{_o_env}={_owners} is not a number of partitions"] if _owners < 1 else []))
+            + ". These two are the store's ONLY two degrees of freedom -- capacity is derived from "
+              f"them and is not declared -- and this store is the component whose failure mode IS "
+              f"forgetting, so a geometry nobody can write into is goal B switched off by arithmetic. "
+            + (f"WHAT {_q_env} DOES BELOW 1 TODAY, AT THE VALUE {_quota} IS ON: at 0 the whole "
+               f"editable store is allocated with ZERO rows and NOTHING raises, warns or declares. "
+               f"On THIS configuration the wires arrived as MEM.d_capacity={_cap_w} over "
+               f"MEM.d_owner_blocks={_blk_w}; measured through spine.assemble.build at MEM_QUOTA=0 "
+               f"beside the shipped MEM_OWNERS=64 that is d_capacity 0 over 64 blocks, keys.shape "
+               f"(0, 128), and counters reading store.n_opened: 0 beside store.blocks: 64 -- "
+               f"sixty-four owner blocks that can hold nothing. The `capacity != owners * quota` "
+               f"guard immediately below this one exists to stop 'one quantity, two answers' after "
+               f"the 24x silent shrink recorded as E7.40 'with no line in any log'; at quota=0 it is "
+               f"SATISFIED BY AN IDENTITY (0 == 64 * 0) and the shrink is total rather than 24x. MEM "
+               f"declares no `enabled` lever, so 0 is an undeclared off switch for the whole "
+               f"mechanism, and Store._block_of is `int(row) // self.quota`, a division by it. Below "
+               f"0 there is no named refusal either: at MEM_QUOTA=-5 the wire is d_capacity=-320 and "
+               f"torch raises 'RuntimeError: zeros: Dimension size must be non-negative' from inside "
+               f"Store.__init__, naming no lever, no value and no package. MEM_QUOTA=1 is a "
+               f"one-entry block and is in range. " if _quota < 1 else "")
+            + (f"WHAT {_o_env} DOES BELOW 1 TODAY, AT THE VALUE {_owners} IS ON: it is SILENTLY "
+               f"REWRITTEN TO 1. "
+               f"spine/assemble.py::_owner_blocks folds it as `max(1, min(int(expert_slots), "
+               f"int(owner_buckets)))`, so the frozen Config answers mem.owners == {_owners} while "
+               f"MEM.d_owner_blocks == {_blk_w} and MEM.d_capacity == {_cap_w} -- measured at the "
+               f"shipped MEM_QUOTA=128 that is a store of 128 against 8192, a 64x shrink with no "
+               f"refusal, no warning and no report line, and "
+               f"the printed configuration and the running one disagreeing about the number that "
+               f"sets the store's size. That is the shape train/api.py::startup_refusals already "
+               f"refuses one package over for RUN_EPOCHS=0, on the ground that 'a coercion at read "
+               f"time that makes a printed number a lie' is a refusal and not a repair. IT REMOVES "
+               f"NO CONFIGURATION: memory/levers.py::MEMLevers declares owners=1 as 'the single "
+               f"global store', and MEM_OWNERS=0, MEM_OWNERS=-5 and MEM_OWNERS=1 were measured to "
+               f"open the BYTE-IDENTICAL store (capacity=128, quota=128, owners=1, blocks=1), so 1 "
+               f"already spells everything 0 could mean and spells it without the rewrite. " if _owners < 1 else "")
+            + f"REFUSED AT STARTUP AND NOT DESCRIBED BY A GATE, because a Gate reason is a report and "
+              f"the mechanism still runs: unrefused, this function returns a Store on BOTH values "
+              f"and prints 'Gate mem.key_depth: UNREACHABLE (0 vs 0)' beside it -- measured at "
+              f"MEM_QUOTA=0 over a store with no rows at all, and at MEM_OWNERS=0 over a store 64x "
+              f"smaller than the one the operator asked for. A confident verdict about a knob, over "
+              f"a geometry the report never mentions. WHAT THIS REFUSAL DOES NOT CLAIM: it closes "
+              f"`< 1` on two levers and leaves the mechanism open in the other direction -- neither "
+              f"lever declares an upper bound anywhere, so MEM_QUOTA=10**9 still asks "
+              f"Store.__init__ for 64 billion rows, and MEM_OWNERS above FAB_SLOTS still folds "
+              f"silently through the same min() this refusal does not touch. A declared per-lever "
+              f"domain is the general answer and it is open. WHAT THE ENVIRONMENT SUPPLIED, so a "
+              f"truncation is visible rather than inferred: "
+            + ", ".join(f"{k}={v!r}" for k, v in sorted(_given.items())
+                        if k in ("quota", "owners")) + ".")
+
     capacity = int(mem.d_capacity)                     # WIRES READ HERE -- the shape
     owners = int(mem.d_owner_blocks)
     source_slots = int(mem.d_source_slots)

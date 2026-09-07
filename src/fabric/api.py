@@ -28,6 +28,7 @@ RECORD TYPES RETURNED (P4 defines them):
   GrowReport     asked vs grown, per trigger; declined_cap, declined_newfrac, lineage counts
 """
 import dataclasses
+import math
 
 import torch
 from torch import nn
@@ -78,6 +79,87 @@ FAB_REFUSE_NEGATIVE_PERIOD, no census row and no row in the generated lever docu
 because a lever per package would be five environment names for one decision and would make "some
 accessors refuse and some do not" a reachable configuration.
 """
+
+
+# ==================================================================================================
+# WHAT A NON-FINITE FLOAT LEVER WAS MEASURED TO DO, PER LEVER
+# ==================================================================================================
+
+_NONFINITE_MEASURED = {
+    "FAB_ALPHA":
+        "the residual mixing coefficient of one fabric step, `h <- norm(h + alive*(alpha*(mixture - "
+        "h)))`, multiplied UNGUARDED in fabric/api.py::forward -- one pass takes aux_loss, the "
+        "composed objective and 19 of 23 gradient-carrying tensors non-finite, and writes NaN "
+        "PERMANENTLY into pop.cent through the grounded update in the same pass",
+    "FAB_CENT_EMA":
+        "the centroid EMA rate, multiplied unguarded in fabric/api.py::_ground_update and written "
+        "back into the routing centroid BUFFER pop.cent -- one pass, aux nan, composed nan, 19/23 "
+        "gradients non-finite, pop.cent PERMANENTLY non-finite, while the fab.discover gate reports "
+        "'armed, did not fire (0 handover(s))' for the pass that poisoned every centroid it touched",
+    "FAB_ROUTE_REGION_W":
+        "the weight on the signature-region cosine term in fabric/api.py::_entry_logits -- every "
+        "entry logit is non-finite, the softmax over them is nan, and the nan reaches pop.cent "
+        "through the grounded update: aux nan, composed nan, 19/23 gradients non-finite, pop.cent "
+        "PERMANENTLY non-finite",
+    "FAB_HALT_MAX":
+        "the halt-mass ceiling, reached as `ph = raw.clamp(max=halt_max)` in fabric/api.py::forward "
+        "-- clamp(max=nan) is nan and clamp(max=-inf) is -inf, so the halted mass that multiplies "
+        "the residual and the per-hop vote is non-finite: aux nan, composed nan, 19/23 gradients "
+        "non-finite, pop.cent PERMANENTLY non-finite. At +inf it is instead bit-identical to the "
+        "default on the measured pass and the CEILING IS SIMPLY GONE, which is the reading "
+        "fabric/levers.py::FABLevers gives halt_max: a barrier and not a preference, because an "
+        "expert that receives no gradient can never become worth routing to",
+    "FAB_BAL_FLOOR":
+        "the permanent floor under the load-balance pressure, reached as `max(floor, 1.0 - "
+        "step_n/max(1, warm_n))` in fabric/api.py::_decay_to_floor -- Python's max KEEPS ITS FIRST "
+        "ARGUMENT when the comparison is False and every comparison with NaN is False, so max(nan, "
+        "x) is nan: aux nan, composed nan, 17/23 gradients non-finite (pop.cent survives this one). "
+        "At +inf the scale is inf and aux is inf. At -inf the floor is DELETED and the defect is "
+        "LATE: bit-identical to the baseline at step_windows=1 and, at step_windows=100000 with "
+        "bal_warm at its default, the balance scale is -24.0 and aux_loss is NEGATIVE (-0.196 "
+        "against +0.497), i.e. the objective PAYS the population to collapse onto one expert -- "
+        "which is bit-for-bit the harm build() refuses FAB_BALANCE<0 for",
+    "FAB_SPAWN_MULT":
+        "the relative half of the spawn threshold, `if gap < max(spawn_mult*typ, spawn_floor)` in "
+        "fabric/api.py::_spawn_check -- max(nan, floor) is nan and `gap < nan` is False, so the test "
+        "SPAWNS UNCONDITIONALLY on every query and the absolute floor is bypassed entirely (measured "
+        "at these widths: two forward passes, two spawns, n_live 6 -> 8, fab.spawn_declined 0), "
+        "while the gate renders a threshold that was never used",
+    "FAB_SPAWN_FLOOR":
+        "the absolute half of the same threshold -- max(spawn_mult*typ, nan) returns spawn_mult*typ, "
+        "so the floor whose declared purpose is 'so a degenerate population cannot spawn on every "
+        "query' is SILENTLY DELETED while the gate prints 'floor=nan' as though it were in force; "
+        "at +inf the threshold is inf, spawn can never fire again, and the gate reports "
+        "'armed, did not fire' -- the armed-but-0 state standing in for UNREACHABLE",
+    "FAB_ROUTE_T":
+        "the one temperature for three operators, floored as `max(1e-3, route_t)` in "
+        "fabric/api.py::_entry_logits and ::_halt_logit. At +inf every routing logit and the halt "
+        "logit are exactly 0.0, so the population is routed UNIFORMLY -- there is no routing "
+        "decision left -- while Gate fab.route_learned still prints FIRED. At nan and -inf the same "
+        "max keeps 1e-3 and the pass is bit-identical to the already-legal FAB_ROUTE_T=0, so "
+        "refusing those two removes no configuration: 0 already spells it",
+    "FAB_PRESSURE":
+        "the occupancy setpoint. This lever does not reach here at nan or +/-inf: it is consumed "
+        "DURING spine/assemble.py::build by the FAB.d_operating_population coupling, which calls "
+        "spine/derive.py::operating_population, so the refusal that fires is that function's and it "
+        "names the quantity rather than this lever",
+}
+"""Per-lever, what a nan or an inf was MEASURED to do -- quoted into build()'s refusal for whichever
+levers the operator actually set. Nine entries against 43 float levers, and the gap is the honest
+part: the other 34 are refused on the same rule with no measurement of their own, because 23 of them
+have NO LIVE READER TODAY (FAB.manage, FAB.grow_check and FAB.own_lr_scale are P4 stubs, so the cull
+fraction, the mutation scale, the merge distance and the whole per-expert learning-rate envelope
+freeze a nan into the Config and arm the day a body is written -- one of them, FAB_COMP_EMA, already
+crosses a package boundary as DOM.d_comp_ema before this function runs) and the remaining eleven are
+the magnitude levers whose nan/+inf refusal build() already carried.
+
+WHAT THIS DOES NOT SAY, AND MUST NOT BE READ AS SAYING. Refusing nan/+inf/-inf closes FOUR VALUES
+PER LEVER AND LEAVES THE MECHANISM OPEN. A FINITE value does the same damage and worse: measured on
+this package's own sweep, FAB_ALPHA=1e26 gives aux=0.5150710 and composed=2.943258 -- an
+ordinary-looking loss pair no report would flag -- over a population whose gradient tensors are
+already 15/23 poisoned, while 1e28 and nan are indistinguishable from each other at 19/23. So no lever below is
+'safe', 'bounded' or 'validated' after this refusal; each is exactly four values less open than it
+was. A declared per-lever domain is the general answer and is the owner's open question."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -350,9 +432,40 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     shape this package's own history is made of. halt_key is therefore allocated `bias=False` and
     the prior carries the name the contract gives it. The parameter count is unchanged.
 
+    TWO REFUSALS WERE WIDENED HERE ON 2026-09-06, AND THE LIST OF LEVERS THIS FUNCTION DECLINES TO
+    CHECK IS NOW EMPTY. The first is the non-finite rule: it covered ELEVEN named magnitude levers at
+    nan and +inf, and the comment that added it LISTED THE SIX IT DECLINED TO CHECK -- FAB_ALPHA,
+    FAB_ROUTE_T, FAB_HALT_MAX, FAB_BAL_FLOOR, FAB_SPAWN_FLOOR, FAB_ROUTE_REGION_W. Five of those six
+    carried the identical defect (.rework/audits/sweep_fabric.json): one forward pass, aux_loss nan,
+    the composed objective nan, 17-19 of 23 gradient-carrying tensors non-finite, and for four of
+    them pop.cent PERMANENTLY non-finite -- a population that correcting the lever afterwards cannot
+    recover. The rule is now over EVERY float lever the package declares (43 of the 82), enumerated
+    from the declarations through spine/lever.py::Config.keys and ::Config.lever so no second list
+    exists to go stale, with the 26 int and 12 bool levers refused earlier by
+    spine/lever.py::Lever.coerce and the one str lever by its own `choices=`.
+    THE SECOND IS A FLOOR OF ONE ON SIX COUNTS -- FAB_N0, FAB_SLOTS, FAB_RANK, FAB_DK, FAB_EMB_HID
+    and FAB_HOPS -- and no finiteness rule could ever have reached it: all six are finite ints that
+    pass every type check, and FAB_RANK=0 builds experts with no parameters and a nan loss, FAB_DK=0
+    deletes routing identity and returns a nan loss, and FAB_EMB_HID=0 collapses every expert's
+    identity to one point SILENTLY, with a finite aux and every gate still printing FIRED. Each
+    refusal quotes its own measurement. NEITHER CLAIMS THE LEVER IS SAFE: between them they close
+    four values on 43 levers and one arm of six more, and a FINITE value does the same damage --
+    FAB_ALPHA=1e26 prints aux 0.5150710 and composed 2.943258, an ordinary-looking pair, over a
+    population already 15 of 23 gradient tensors poisoned. A declared per-lever domain is the general
+    answer and is the owner's open question.
+
     LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode,
                  depth0, hops, balance, ponder, emb_var, ec_w, explore, discover, div_w, hop_sup,
-                 ind_w, ae_w, dom_frac
+                 ind_w, ae_w, dom_frac,
+                 alpha, bal_floor, birth_jitter, cent_ema, comp_ema, cull_frac, depth_eps, err_fast,
+                 err_slow, fail_tol, halt_max, lr_amin, lr_boost, lr_cycle, lr_gamma, lr_maxr,
+                 merge_dist, mut, mut_big, mut_big_p, new_frac, parent_max, plateau, rescue,
+                 route_region_w, route_t, shift_tol, spawn_floor, spawn_mult, xover, z
+                 (the second block is every remaining FLOAT lever, read ONLY for the finiteness
+                 refusal above and for nothing else -- their behaviour is forward's, manage's or, for
+                 the 23 with no live reader yet, P4's. They are named here because this function does
+                 now read them, and a LEVERS READ line that omitted them would be the claim-without-a-
+                 read this block's own history is made of, in reverse)
     WIRES READ: d_operating_population
     DID IT FIRE: fab.built, fab.n0, fab.cap, fab.operating_population (from
                  derive.operating_population, printed BESIDE the cull gate so the setpoint and the
@@ -434,14 +547,116 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     #     to print the value they read (see the gates in `forward`), so neither half depends on the
     #     other being right.
     #
+    # ==============================================================================================
+    # EVERY FLOAT LEVER THIS PACKAGE DECLARES MUST BE FINITE, AND THE LIST OF THE ONES THIS FUNCTION
+    # DECLINES TO CHECK IS NOW EMPTY.
+    # ==============================================================================================
+    # THE PREVIOUS VERSION OF THIS REFUSAL LISTED THE LEVERS IT DID NOT CHECK, AND FIVE OF THE SIX ON
+    # THAT LIST CARRIED THE IDENTICAL DEFECT. The sentence that stood here read "Nor does this touch
+    # the levers whose negative side is a different question -- FAB_ALPHA, FAB_ROUTE_T, FAB_HALT_MAX,
+    # FAB_BAL_FLOOR, FAB_SPAWN_FLOOR, FAB_ROUTE_REGION_W, FAB_MUT, FAB_PRESSURE -- because that is a
+    # range ruling this body has not measured". The 2026-09-05 lever-domain sweep measured it
+    # (.rework/audits/sweep_fabric.json): FAB_ALPHA, FAB_CENT_EMA, FAB_ROUTE_REGION_W, FAB_HALT_MAX
+    # and FAB_BAL_FLOOR each take ONE forward pass to make aux_loss nan, the composed objective nan
+    # and 17-19 of 23 gradient-carrying tensors non-finite, and the first four write NaN PERMANENTLY
+    # into pop.cent -- so the population cannot be recovered by correcting the lever afterwards. The
+    # FAB_BALANCE=nan repair was therefore RELOCATED, NOT CLOSED, and the file said which levers it
+    # had relocated it past. That is the shape this block ends: the rule below is over EVERY float
+    # lever the package declares, enumerated from the declarations themselves through
+    # spine/lever.py::Config.keys and ::Config.lever, so a float lever added tomorrow is covered
+    # without anybody remembering this paragraph, and there is no second list to go stale.
+    #
+    # WHY "EVERY FLOAT" IS A PER-LEVER RULING AND NOT A BLANKET. It is per-lever because the sweep
+    # enumerated this package's declared sentinels and EVERY ONE OF THEM IS A ZERO, not an infinity:
+    # depth0=0 (no curriculum), dom_frac=0 (breadth cap off), ec_w/hop_sup/rescue=0 (off),
+    # route_region_w=0 (routes on predicted weights alone), and the guard-floored zeros of route_t,
+    # bal_warm, ponder_warm, emb_every, chain_k, ens_k and ind_k. No FAB lever uses +inf to mean "no
+    # cap"; the three that come closest -- halt_max, spawn_floor, spawn_mult -- all BREAK at inf
+    # rather than meaning anything by it, and _NONFINITE_MEASURED records how. The only values this
+    # takes away that are harmless today are FAB_ROUTE_T at nan and -inf, which are bit-identical to
+    # the already-legal FAB_ROUTE_T=0 (`max(1e-3, route_t)` keeps 1e-3 because `nan > 1e-3` is
+    # False), so nothing an operator can ask for is lost.
+    #
+    # WHAT IS REFUSED IS FOUR VALUES PER LEVER AND NOTHING MORE, AND THIS BODY DOES NOT CLAIM
+    # OTHERWISE. FAB_ALPHA=1e26 -- finite, ordinary-looking, a loss pair of 0.5150710 and 2.943258
+    # that no report would flag -- already leaves 15/23 gradient tensors non-finite, which is WORSE
+    # than +inf's honest nan. So after this block no lever below is safe, bounded or
+    # validated; each is four values less open. The general answer is a declared per-lever domain and
+    # it is the owner's open question, not this function's.
+    #
+    # THE INT LEVERS ARE NOT IN THIS SWEEP AND ARE NOT EXEMPT EITHER: spine/lever.py::Lever.coerce
+    # resolves an int lever as `int(float(raw))` and refuses nan (ValueError) and +/-inf
+    # (OverflowError) by the lever's own owned name before any Config exists, so a second check here
+    # would be an untrippable guard. Bools coerce every spelling and the one str lever (hop_mode)
+    # carries `choices=` plus the NotBuilt refusal above. That accounts for all 82 declarations:
+    # 43 float here, 26 int and 12 bool in coerce, 1 str in choices.
+    _nonfinite = []
+    for _field in fab.keys():
+        if _field.startswith("d_"):
+            continue                        # a wire is another package's number arriving, not a lever
+        _decl = fab.lever(_field)           # spine/lever.py::LeverView -- default, unit, OWNED env name
+        if not isinstance(_decl.default, float):
+            continue
+        _v = float(getattr(fab, _field))
+        if not math.isfinite(_v):
+            _nonfinite.append((_decl.env_name, _v))
+    if _nonfinite:
+        raise LeverError(
+            f"FAB: non-finite lever(s) "
+            f"{', '.join(f'{k}={v}' for k, v in _nonfinite)}. A nan or an infinity is not a "
+            f"magnitude, a rate, a share, a temperature, a threshold or a ceiling, and this package "
+            f"declares no float lever for which any of the three is a reading -- every declared "
+            f"sentinel in fabric/levers.py::FABLevers is a ZERO. WHAT EACH ONE WAS MEASURED TO DO: "
+            + " || ".join(f"{k}={v}: " + _NONFINITE_MEASURED.get(
+                k, "no live reader today -- FAB.manage, FAB.grow_check and FAB.own_lr_scale are P4 "
+                   "stubs, so this value freezes into the Config and arms the day a body is "
+                   "written, in the cull, the mutation scale or the per-expert learning rate")
+                for k, v in _nonfinite)
+            + ". REFUSED AT STARTUP AND NOT DESCRIBED BY A GATE, because a Gate reason is a report "
+              "and the mechanism still runs: at FAB_ALPHA=nan the fab.halt gate prints the verdict "
+              "FIRED over a mass it reads as nan, and at FAB_CENT_EMA=nan fab.discover prints "
+              "'armed, did not fire (0 handover(s))' for the pass that just poisoned every centroid "
+              "it touched. WHAT THIS REFUSAL DOES NOT CLAIM: it closes these four values and leaves "
+              "the mechanism open. FAB_ALPHA=1e26 is finite, prints an ordinary loss pair "
+              "(aux 0.5150710, composed 2.943258) and already leaves 15 of 23 gradient tensors "
+              "non-finite -- worse than +inf, which at least comes back nan. Set the lever to a "
+              "finite value; a declared per-lever domain is the general answer and is open.")
+
     # WHAT IS NOT REFUSED, AND WHY THE RULE IS NOT "FRACTION MEANS 0..1". U.FRACTION is a LABEL the
     # census renders and not a bound -- src/sig/levers.py and src/tok/levers.py both say so of their
     # own shares, and capacity leaves CAP_LIFT > 1 legal on exactly that ground. Nothing here refuses
     # a value ABOVE any of these; FAB_BALANCE=5.0 is a large pressure and still the pressure the
-    # lever names. Nor does this touch the levers whose negative side is a different question --
-    # FAB_ALPHA, FAB_ROUTE_T, FAB_HALT_MAX, FAB_BAL_FLOOR, FAB_SPAWN_FLOOR, FAB_ROUTE_REGION_W,
-    # FAB_MUT, FAB_PRESSURE -- because that is a range ruling this body has not measured and a guard
-    # invented for a value nobody has shown to be wrong is the untrippable-guard class one level up.
+    # lever names. NOR IS THE NEGATIVE SIDE OF EVERY FLOAT SETTLED HERE, and this is a NEGATIVE
+    # ruling and not a list of levers left unchecked -- the finiteness rule above covers all 43. The
+    # eleven below are refused negative because each is a weight on an additive term or a share and a
+    # negative one is measured to reverse or to misreport it.
+    # THE EIGHT THAT ARE NOT REFUSED NEGATIVE ARE NOW MEASURED, WHICH THEY WERE NOT WHEN THIS
+    # PARAGRAPH FIRST SAID SO, and the measurement is written down here rather than turned into a
+    # guard, because a refusal is a RULING and this round's was the finiteness one. Driven one at a
+    # time at FAB_N0=6 FAB_SLOTS=12 FAB_CHAIN_K=3 FAB_DEPTH0=3 FAB_HOPS=4 over two real forward
+    # passes, against a baseline of aux 0.5134152173995972 and sum|g|max 1.3968892609970744:
+    #   FAB_HALT_MAX=-0.9        `raw.clamp(max=-0.9)` makes the halted mass NEGATIVE, so
+    #                            `alive = alive * (1 - ph)` AMPLIFIES the residual instead of
+    #                            damping it: sum|g|max 2.5214699913394156, aux 0.5134174823760986.
+    #                            A ceiling that becomes a negative mass. The worst of the eight.
+    #   FAB_ROUTE_REGION_W=-1.0  the region term applied with its sign REVERSED -- routing scored
+    #                            toward the experts whose region is least like the material:
+    #                            aux 0.5095041990280151, sum|g|max 1.202592107085124.
+    #   FAB_BAL_FLOOR=-0.15      the bounded form of the -inf defect above, and equally LATE:
+    #                            bit-identical to the baseline at step_windows=1, and at
+    #                            step_windows=100000 aux 0.48843273520469666 against
+    #                            0.4970445930957794 -- the balance term with its sign reversed.
+    #   FAB_ALPHA=-0.5           the residual step runs BACKWARD, h moving away from the mixture:
+    #                            aux unchanged (it is not an aux term), sum|g|max 1.3063406257114876.
+    #   FAB_PRESSURE=-0.45       operating_population answers 3 -- its floor -- for a setpoint that
+    #                            has no reading, and cull_gate_open is then true at every occupancy.
+    #   FAB_ROUTE_T=-0.1, FAB_SPAWN_FLOOR=-0.02, FAB_MUT=-0.25   INERT: bit-identical to the baseline
+    #                            in aux, in sum|g|max and in every counter. The first two are floored
+    #                            by a `max` at their point of use and the third has no live reader.
+    # So four of the eight are the same reversed-term class the eleven are refused for and three are
+    # exactly "off", which is the same split the eleven have. Refusing them is a defensible next
+    # ruling and it is NOT taken here; what is not acceptable is the sentence that stood in this
+    # place claiming they were unmeasured, which is why the numbers are above it.
     _applied = (("FAB_BALANCE", float(fab.balance)), ("FAB_PONDER", float(fab.ponder)),
                 ("FAB_EMB_VAR", float(fab.emb_var)))
     _gated_off = (("FAB_EC_W", float(fab.ec_w)), ("FAB_EXPLORE", float(fab.explore)),
@@ -465,18 +680,18 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # ruling owes F7 a different second value, and there is no third one in this domain to reach for.
     # Neither this body nor that check may decide it alone; it is filed in .rework/audits/j_fabric.json
     # as a question for the owner rather than settled here.
-    # NOT-A-NUMBER IS NOT A MAGNITUDE EITHER, AND `v < 0.0` IS FALSE FOR IT. Measured at the suite's own
-    # widths: FAB_BALANCE=nan assembles with no warning, FAB.build accepts it, aux_loss comes back nan
-    # and every gradient-carrying tensor on the population is non-finite -- while fab.balance prints
+    # NOT-A-NUMBER IS NOT A MAGNITUDE EITHER, AND `v < 0.0` IS FALSE FOR IT -- which is why the eleven
+    # below are ALSO in the finiteness sweep above, and are now caught by it at all three spellings
+    # rather than at two. What that block replaced was a `v != v or v == float("inf")` over exactly
+    # these eleven names: it caught nan and +inf, left -inf to the `v < 0.0` arm below (which reported
+    # it as a negative magnitude rather than as an unreal one), and covered eleven of this package's
+    # forty-three float levers. Measured at the suite's own widths before the widening: FAB_BALANCE=nan
+    # assembled with no warning, FAB.build accepted it, aux_loss came back nan and every
+    # gradient-carrying tensor on the population was non-finite -- while fab.balance printed
     # "armed, did not fire (balance=nan x warm=0.9992 vs > 0) -- FAB_BALANCE=nan: no load-balance
     # pressure", which is F1's defect and F7's defect in one rendered line. FAB_PONDER and FAB_EMB_VAR
-    # do the same; FAB_DOM_FRAC=nan does not reach a gate at all, it raises a bare ValueError from
-    # _breadth_ban. +inf is admitted too. -inf is caught only because it is negative.
-    _unreal = [f"{k}={v}" for k, v in _applied + _gated_off if v != v or v == float("inf")]
-    if _unreal:
-        raise LeverError(
-            f"FAB: magnitude lever(s) {', '.join(_unreal)} are not a magnitude. `v < 0.0` is False "
-            f"for a NaN and for +inf, so neither is caught by the refusal below.")
+    # did the same; FAB_DOM_FRAC=nan did not reach a gate at all, it raised a bare ValueError from
+    # _breadth_ban.
     _rev = [f"{k}={v}" for k, v in _applied if v < 0.0]
     _off = [f"{k}={v}" for k, v in _gated_off if v < 0.0]
     if _rev or _off:
@@ -501,9 +716,93 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
               f"src/capacity/api.py::new_valve makes the same ruling for CAP_LIFT and states "
               f"the ground.")
 
+    # ==============================================================================================
+    # THE SIX COUNTS THAT MUST BE AT LEAST ONE, READ TOGETHER AND REFUSED BEFORE ANYTHING IS DERIVED
+    # FROM THEM. A FINITENESS RULE COULD NEVER HAVE CAUGHT THESE: all six are ints, all six are
+    # FINITE, and all six pass every type check spine/lever.py::Lever.coerce applies.
+    # ==============================================================================================
+    # Each was driven at 0 in a fresh subprocess through a real assembly, a real FAB.build and two
+    # real FAB.forward passes (.rework/audits/sweep_fabric.json), and the measurement is quoted in
+    # the refusal itself so the operator reads what their number did rather than a rule. The class is
+    # the one the whole sweep is about: a value that is legal to every guard between the environment
+    # and the mechanism, and that DELETES the mechanism.
+    #   FAB_RANK=0    experts with ZERO PARAMETERS -- A is (cap, d, 0), B is (cap, 0, d), dW = A@B is
+    #                 identically zero for the life of the run, the identity embedder's input is
+    #                 2*d*rank = 0 numbers so every expert embeds to one constant, _var_cov divides
+    #                 by a zero variance and aux_loss comes back nan. Measured here: A.shape
+    #                 [12, 16, 0], aux nan, composed nan, sum|g|max 27153.05 against 1.397.
+    #   FAB_DK=0      routing identity DELETED -- every per-expert key, the router's query and the
+    #                 halt key are zero-width, `keys @ q` is a sum over nothing, the spawn test reads
+    #                 the manufactured gap=1.0 typ=1.0 that _spawn_check's own docstring exists to
+    #                 avoid, and aux_loss comes back nan. Measured: aux nan, composed nan.
+    #   FAB_EMB_HID=0 every expert's identity COLLAPSED TO ONE POINT -- eemb is Linear(2*d*r -> 0)
+    #                 then Linear(0 -> dk), so its output does not depend on the expert's weights at
+    #                 all. That is precisely the collapse _var_cov and the emb_var term exist to
+    #                 detect, arriving as a geometry the operator typed. It is SILENT: aux stays
+    #                 finite (0.5549) and every gate still prints FIRED. Measured: sum|g|max
+    #                 18509.16 against 1.397, spawn gap and typ both the manufactured 1.0.
+    #   FAB_N0=0      a population of NOBODY. This function accepted it, allocated the full pool, the
+    #                 two adapter banks and seven shared modules, and the refusal arrived one entry
+    #                 point later as a bare ValueError out of FAB.forward on the first routed window.
+    #                 That message is a good one and it is kept -- nothing may reduce a live
+    #                 population to none -- but a startup value belongs to a startup refusal, and
+    #                 this function already reads n0 to compute cap.
+    #   FAB_HOPS=0    a hop budget of zero is A CAP THAT DOES NOT CAP: `depth = max(1, min(depth_now,
+    #                 hops, 2 + n//2))` in forward silently yields ONE hop, and the gate then prints
+    #                 a reason that is false about the configuration it describes -- "armed, did not
+    #                 fire (depth0=3 vs hops=0) -- FAB_DEPTH0 >= FAB_HOPS: the chain already starts
+    #                 at the budget", beside fab.forward.routed reporting the walk it actually took.
+    #                 Measured: 1 hop over 6 experts at depth=1.
+    #   FAB_SLOTS=0   `cap = max(n0, slots)` is the declared arithmetic and a cap of n0 is a fine
+    #                 answer, so this one is refused for the SETPOINT it derives and not for the
+    #                 pool: spine/derive.py::operating_population carries `n = max(3, n)` -- its own
+    #                 docstring calls it "the same floor as the gate's n_live <= 2" -- and then
+    #                 returns `min(n_slots, n) if n_slots >= 3 else n_slots`, so at slots<3 the floor
+    #                 is bypassed and at slots=0 the answer is 0. Measured: fab.cap 6 with
+    #                 fab.operating_population 0 and no warning, i.e. the utilization cull's setpoint
+    #                 is zero and the number the run reports as its own operating size is one the
+    #                 floor above it was written to make impossible. A NEGATIVE reaches the same
+    #                 place and is worse: operating_population(0.45, -5) returns -5. THAT FUNCTION IS
+    #                 RIGHT AT slots=2 and is pinned there by tests/test_derive.py
+    #                 (`operating_population(0.45, 2) == 2` -- "two slots is all there is"), so the
+    #                 refusal belongs to the lever's owner and not to the conversion.
+    # NOTHING AN OPERATOR CAN ASK FOR IS LOST, which is the same ground capacity gives for CAP_LIFT:
+    # 1 is legal for every one of the six and spells the smallest configuration each of them has --
+    # FAB_SLOTS=1 is the same `cap = max(n0, slots)` with a setpoint of 1 rather than 0.
     n0, slots = int(fab.n0), int(fab.slots)
+    rank, dk, hid = int(fab.rank), int(fab.dk), int(fab.emb_hid)
+    depth0, hops = int(fab.depth0), int(fab.hops)
+    _floor_one = (("FAB_N0", n0), ("FAB_SLOTS", slots), ("FAB_RANK", rank), ("FAB_DK", dk),
+                  ("FAB_EMB_HID", hid), ("FAB_HOPS", hops))
+    _below = [f"{k}={v}" for k, v in _floor_one if v < 1]
+    if _below:
+        raise LeverError(
+            f"FAB: geometry/count lever(s) {', '.join(_below)} below one. Each of these six is a "
+            f"COUNT the population is built out of -- founders, slots, the low-rank width, the "
+            f"routing identity width, the identity embedder's hidden width and the hop budget -- and "
+            f"a count below one is not a smaller configuration of this package, it is the mechanism "
+            f"removed while every type check still passes. MEASURED, one at a time, at FAB_N0=6 "
+            f"FAB_SLOTS=12 FAB_CHAIN_K=3 FAB_DEPTH0=3 FAB_HOPS=4 over two real forward passes "
+            f"against a baseline of aux 0.5134152173995972, composed 4.414819717407227 and "
+            f"sum|g|max 1.3968892609970744: FAB_RANK=0 -> every expert has zero parameters, A.shape "
+            f"[12, 16, 0], aux nan, sum|g|max 27153.05; FAB_DK=0 -> routing identity deleted, the "
+            f"spawn test reads the manufactured gap=1.0 typ=1.0, aux nan; FAB_EMB_HID=0 -> every "
+            f"expert's identity collapses to ONE POINT with aux still finite (0.5549) and every gate "
+            f"still printing FIRED, sum|g|max 18509.16; FAB_N0=0 -> a population of nobody, built in "
+            f"full here and refused one entry point later by FAB.forward on the first routed window; "
+            f"FAB_HOPS=0 -> a cap that does not cap, the walk takes 1 hop and the "
+            f"fab.depth_curriculum gate prints 'FAB_DEPTH0 >= FAB_HOPS: the chain already starts at "
+            f"the budget' over a budget of 0; FAB_SLOTS=0 -> fab.cap 6 beside "
+            f"fab.operating_population 0, the utilization cull's setpoint at zero because "
+            f"spine/derive.py::operating_population's floor of three is bypassed below three slots. "
+            f"This removes no configuration: 1 is legal for all six and is the smallest each of them "
+            f"has. It is NOT a range: nothing here bounds any of the six from above, and a finite "
+            f"value inside the range can still be wrong -- FAB_EMB_HID=0's collapse is a property of "
+            f"the identity space, not of the number, and a declared per-lever domain is the general "
+            f"answer and is open.")
+
     cap = max(n0, slots)
-    d_model, rank = int(d_model), int(fab.rank)
+    d_model = int(d_model)
     on = bool(fab.on)
     # THREE CONTROL ARMS, RECORDED AT THE ONE SITE THAT SEES THE CONFIG BEFORE ANY GATED BEHAVIOUR
     # RUNS. norm_only/grow/halt are consumed by forward/grow_check/counters (each already names the
@@ -524,7 +823,10 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # of the full budget and FAB_DEPTH0=3 also started at 1 and waited on manage_every=500 to climb
     # -- while fab.operating_population and the rest of the ledger kept printing the operator's
     # configured numbers as if depth_now had used them.
-    depth0, hops = int(fab.depth0), int(fab.hops)
+    # depth0 and hops are read with the other five counts at the refusal above -- the sentinel is
+    # resolved here, where its answer is USED, and read there, where a hop budget below one is
+    # refused before anything is derived from it. FAB_DEPTH0 is deliberately NOT one of the six:
+    # 0 is its DECLARED sentinel and this line is what honours it.
     depth_now = hops if depth0 == 0 else depth0
 
     pop = Population(cap=cap, n0=n0, d_model=d_model, rank=rank,
@@ -545,7 +847,7 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         pop.cent.uniform_(-0.1, 0.1, generator=gen)
         pop.cent.div_(pop.cent.norm(dim=-1, keepdim=True).clamp_min(1e-8))
 
-    dk, hid, sig_d = int(fab.dk), int(fab.emb_hid), int(signature_dim)
+    sig_d = int(signature_dim)          # dk and hid were read with the six counts, at their refusal
     # THE IDENTITY EMBEDDER'S INPUT IS THE EXPERT'S WHOLE ADAPTER, 2*d*r NUMBERS, NOT A SIGNATURE.
     # fabric/levers.py::FABLevers.rank says it in as many words -- "also ... the size of the
     # embedder's input (2*d*r)" -- and it is the premise of the entire identity design: routing
@@ -782,6 +1084,28 @@ def _decay_to_floor(step_n, warm_n, floor):
     zero leaves nothing pushing routing mass outward, and an expert the router has stopped choosing
     has no route back: no traffic -> no gradient -> no improvement -> still no traffic, and under the
     use clock it is frozen at its use-age so the cull cannot reach it either.
+
+    `max` IS NOT A GUARD AGAINST THE VALUES OF ITS OWN ARGUMENTS, AND FAB_BAL_FLOOR IS ONE OF FOUR
+    PLACES IN THIS FILE WHERE THAT MATTERED. Python's max returns its FIRST argument when the
+    comparison is False, and every comparison with NaN is False -- so `max(nan, 0.9998)` is nan, the
+    balance scale is nan, `aux + balance_w * bal_scale * bal` is nan and 17 of 23 gradient-carrying
+    tensors go non-finite, while the fab.balance gate prints FIRED and renders the poison as the
+    arithmetic that justified it ("balance=0.01 x warm=nan vs > 0"). At +inf the scale is inf. At
+    -inf the floor is simply GONE, and that one is LATE rather than immediate: `max(-inf, 1 -
+    step/warm)` is the second term, so the scale goes NEGATIVE the moment step passes bal_warm and
+    grows without bound -- measured at step_windows=100000 with bal_warm at its default, the scale is
+    -24.0 and aux_loss is -0.196 against +0.497 at the shipped floor, which is the objective PAYING
+    the population to collapse onto one expert. At step_windows=1 that cell is bit-identical to the
+    baseline in every field, so a same-window sweep would have called it inert.
+    ALL THREE ARE NOW REFUSED AT STARTUP by fabric/api.py::build's finiteness rule over every float
+    lever, which is where a value refusal belongs; this line is left as the arithmetic it is. The
+    other three sites of the same shape are the two `max(1e-3, route_t)` in fabric/api.py::_entry_logits
+    and fabric/api.py::_halt_logit, and the `max(spawn_mult*typ, spawn_floor)` in
+    fabric/api.py::_spawn_check. A full re-grep of this file found no fifth: every other max/min here
+    takes ints or counts, and an int lever cannot hold a nan (spine/lever.py::Lever.coerce).
+    WHAT IS STILL OPEN, AND THIS DOCSTRING DOES NOT CLAIM OTHERWISE: a FINITE negative floor reaches
+    this line unrefused and reverses the same term more slowly, and nothing here bounds `floor` from
+    either side.
     """
     return max(floor, 1.0 - step_n / max(1, warm_n))
 
@@ -941,6 +1265,20 @@ def _entry_logits(pop, *, query, signature, keys, n, region_w, route_learn, rout
     fabric/levers.py::FABLevers.route_t describable as one temperature for three operators -- the raw
     dot the old tree kept as an option let an expert with a large key norm win every input with any
     positive projection, regardless of its region (M29).
+
+    `max(1e-3, route_t)` FLOORS THE TEMPERATURE AND DOES NOT CAP IT, AND IT IS NOT A GUARD ON THE
+    LEVER'S VALUE. The floor is real and declared: FAB_ROUTE_T=0 is the sharpest temperature this
+    mechanism admits, and FAB_ROUTE_T=nan and =-inf are BIT-IDENTICAL to it (max keeps 1e-3 because
+    `nan > 1e-3` is False), measured at aux 0.5098478198051453 for all three. What the same
+    expression does NOT do is the other end: at FAB_ROUTE_T=+inf every routing logit here and the
+    halt logit in fabric/api.py::_halt_logit become exactly 0.0, so the softmax over the population
+    is UNIFORM -- the region cosine and the learned identity term are both erased and there is no
+    routing decision left -- while Gate fab.route_learned still prints "FIRED (route_learn=True vs
+    route_learn=True)". Measured: aux 0.4987463653087616 against 0.5134152173995972, halt mass
+    0.3703 against 0.0139, and both batch rows selecting identical experts. FAB_ROUTE_T is now
+    refused non-finite at startup by fabric/api.py::build; refusing nan and -inf costs nothing
+    because 0 already spells exactly what they did. A LARGE FINITE temperature does the same thing
+    more slowly and is not refused.
 
     Returns (logits, ec_applied, banned).
     """
@@ -1120,6 +1458,31 @@ def _spawn_check(pop, query, spawn_mult, spawn_floor, step_n):
     THE BOOKS ARE ALL CLEARED, INCLUDING ef/es. grow() cleared use/comp/contrib and not the error
     EMAs, so a newborn inherited a dead expert's error history and could be culled by the failure
     route for something it never did (L30).
+
+    NEITHER HALF OF `max(spawn_mult*typ, spawn_floor)` GUARDS THE OTHER, AND BOTH FAILED THE SAME
+    WAY. Python's max keeps its FIRST argument when the comparison is False and every comparison with
+    NaN is False, so:
+      FAB_SPAWN_MULT=nan  max(nan, floor) is nan, `gap < nan` is False, and the test SPAWNS
+                          UNCONDITIONALLY on every query for the life of the run -- the absolute
+                          floor whose declared purpose is "so a degenerate population cannot spawn on
+                          every query" bypassed entirely. Measured at FAB_N0=6/FAB_SLOTS=12: two
+                          forward passes, two spawns, n_live 6 -> 8, fab.spawn_declined 0, against 0
+                          spawns and 2 declines at the shipped 2.0. The gate then renders a threshold
+                          that was never used: "FIRED (gap=0.85165 vs max(nan*typ=0.71431,
+                          floor=0.02))" reads as though 0.71431 or 0.02 had governed the comparison.
+      FAB_SPAWN_FLOOR=nan max(spawn_mult*typ, nan) returns spawn_mult*typ, so the FLOOR IS SILENTLY
+                          DELETED while the gate prints "floor=nan" as though it were in force. On a
+                          healthy population nothing changes -- measured bit-identical to the
+                          baseline -- and the harm is exactly the case the lever exists for: once the
+                          identity space has collapsed, typ -> 0, the threshold goes to 0 and the
+                          population spawns on every query with nothing to stop it. At +inf the
+                          threshold is inf, spawn can never fire again, and the gate reports "armed,
+                          did not fire" -- the armed-but-0 state standing in for UNREACHABLE, which
+                          spine/gate.py exists to forbid.
+    BOTH ARE NOW REFUSED AT STARTUP by fabric/api.py::build's finiteness rule over every float lever.
+    That closes three values on each; it does not bound either lever, and a FINITE FAB_SPAWN_FLOOR
+    large enough (measured elsewhere in this tree at 1.5) still makes the test decline every query
+    without saying so.
     """
     n = pop.n_live
     if n >= pop.cap:

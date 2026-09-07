@@ -58,11 +58,61 @@ methods, which is not an import):
 """
 import collections
 import dataclasses
+import math
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine import derive as _derive
 from spine import rng as _rng
 from spine.gate import Gate
+
+
+# ==================================================================================================
+# WHAT EACH NON-FINITE FLOAT LEVER WAS MEASURED TO DO, quoted verbatim into build_vocabulary()'s
+# refusal so an operator reads what their number DID rather than a rule about numbers. Measured one
+# lever per fresh subprocess through a real spine.assemble.build(environ=...), a real
+# TOK.build_vocabulary over ~10 kB of two-area text, and then tokenize(regularize=True) twice and
+# tokenize(regularize=False) once. Keyed by the GENERATED env name, which is what the operator typed.
+# A float lever added to tok/levers.py with no entry here raises KeyError from build_vocabulary the
+# first time it is set non-finite -- deliberately, because a lever with no measurement has no
+# business quoting one.
+# ==================================================================================================
+_NONFINITE_MEASURED = {
+    "TOK_DROPOUT":
+        "a PROBABILITY, and every guard in this package is `dropout > 0.0` while the draw is "
+        "`stream.random() < dropout`. AT +inf EVERY DRAW IS A SKIP: measured tok.dropout_skip 3999 "
+        "over 4000 bytes, the seed build minting 143 tokens instead of 256 with tok.build_refused "
+        "143, the vocabulary landing at 399 instead of 512, and -- the number that leaves this "
+        "package -- bytes_per_token MEASURED AT 1.0 against 3.5925925925925926 at the default. That "
+        "single float is spine/derive.py::signature_width_bytes's input for SIG's ONE window width "
+        "for the whole run and DATA's splice gate reads it too, so a typo here silently makes the "
+        "signature window several times too narrow. IT ALSO UNDOES THE tok.dropout.mint REPAIR "
+        "THROUGH THE VALUE INSTEAD OF THROUGH THE STREAM: at +inf two successive "
+        "tokenize(regularize=True) calls returned the IDENTICAL 4000 ids, which is the exact "
+        "symptom -- 'BPE-dropout that returns the same answer on every call is not dropout, it is a "
+        "second deterministic segmentation' -- that the child stream exists to prevent, because a "
+        "skip probability of infinity is not random. AT nan THE COMPARISON NEVER FIRES: `nan > 0` "
+        "is False, so no stream is even attached, and build, both regularized calls and the "
+        "deterministic call were BIT-IDENTICAL to TOK_DROPOUT=0.0 (size 512, bytes_per_token "
+        "3.5925925925925926, tok.dropout_skip ABSENT from the ledger) -- and this file's own "
+        "convention is that an ABSENT counter means the branch is unreachable, so the report says "
+        "the regularizer is off on a run the operator switched on",
+    "TOK_MINT_PMIN":
+        "the pre-mint quality criterion, read by TOK.mint_burst, which raises NotImplementedError "
+        "today -- so a non-finite value here has NO live reader and is refused for what it freezes "
+        "into the Config rather than for a measured effect. It arms the day that body is written: "
+        "mint_burst re-ranks the candidate window by p(b|a) against this threshold, and both halves "
+        "of that comparison are the shape every guard in this sweep failed on",
+    "TOK_MINT_NOVEL":
+        "the novelty exponent, read by TOK.mint_burst, which raises NotImplementedError today -- "
+        "same standing as TOK_MINT_PMIN. Note that this lever's declaration says in as many words "
+        "that a value ABOVE its unit label is legal ('a reader who takes fraction 0..1 as a bound "
+        "on legal values will be surprised by 2.0, which is legal'); 2.0 is an exponent, and "
+        "infinity is not one",
+    "TOK_PROBATION_RESIDUAL":
+        "the residual-ratio threshold, read by TOK.judge_probation, which raises "
+        "NotImplementedError today -- same standing as TOK_MINT_PMIN. It is one side of a ratio "
+        "comparison, which is the family that goes silent rather than loud at nan",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -275,6 +325,34 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     A mode="fixed" run at 2 passes is NOT the offline build of record, and that belongs on P9's
     list of numbers that moved.
 
+    REFUSES AT STARTUP, AT THE FIRST READ, BEFORE THE Vocabulary IS CONSTRUCTED. This is TOK's
+    first entry point (row 11 of spine/compose.py::ASSEMBLY_ORDER), so it is the earliest place this
+    package's own code sees any of its numbers:
+      * ANY OF THIS PACKAGE'S FOUR FLOAT LEVERS NON-FINITE -- dropout, mint_pmin, mint_novel,
+        probation_residual -- enumerated through spine/lever.py::Config.keys and ::Config.lever
+        rather than by name. Measured at TOK_DROPOUT=inf: every available merge skipped, the
+        vocabulary 399 instead of 512 and bytes_per_token 1.0 instead of 3.59 -- the one estimator
+        that leaves this package, which spine/derive.py::signature_width_bytes turns into SIG's
+        single window width. At nan the comparison never fires and the run is BIT-IDENTICAL to
+        TOK_DROPOUT=0.0 while tok.dropout_skip is ABSENT, which this file's convention reads as
+        "unreachable" -- a report saying the regularizer is off on a run the operator switched on.
+      * TOK_DROPOUT OUTSIDE [0.0, 1.0], which finiteness cannot reach: 1.5 is finite and was
+        measured to do exactly what +inf does. The interval is the lever's DECLARED domain
+        (units.PROBABILITY, "Probability of skipping an available merge"), and 1.0 is inside it,
+        admitted, and does the same damage -- said in the refusal rather than quietly closed.
+      * TOK_MAX_BYTES BELOW 2, which no finiteness rule could ever have reached: it is a finite int
+        that passes every type check. A merge joins two units, so at 0 AND at 1 the `len(seq) >
+        max_bytes` test in Vocabulary._add refuses every candidate and the vocabulary stays at the
+        256 raw bytes (measured: tok.build_mint 0, tok.build_refused 143, bytes_per_token 1.0),
+        which is TOK_MODE=bytes reached by deleting the mint instead of by asking for it. 0 is NOT
+        a declared sentinel here and the declaration was read first: the five levers in
+        tok/levers.py::TOKLevers that DO carry a zero sentinel each spell it out in their own help
+        string, and this one spells out the opposite.
+    NONE OF THE THREE BOUNDS ANYTHING. They close four values on each of four float levers, the
+    finite values outside a declared probability interval, and two counts. TOK_DROPOUT=1.0 is still
+    the tokenizer switched off; nothing here caps max_bytes from above, and tok/levers.py records
+    that above 16 ByteComposer silently truncates its view of a token.
+
     Otherwise: tok.build_passes tally-and-mint passes over
     b"".join(h[:tok.build_bytes] for h in area_heads), breaking early when a pass mints nothing.
     The counting segmentation applies tok.dropout, drawing from rng_for("tok.dropout", seed) --
@@ -353,9 +431,160 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
                  that already has one.
     """
     tok = tok.owned_by("TOK")
+
+    # ==============================================================================================
+    # THE STARTUP REFUSALS, AT THE FIRST READ, BEFORE THE Vocabulary EXISTS. This is TOK's first
+    # entry point (row 11 of spine/compose.py::ASSEMBLY_ORDER) and therefore the earliest point at
+    # which this package's own code sees any of its numbers.
+    #
+    # (1) NON-FINITE, over every float lever this package declares -- enumerated through
+    #     spine/lever.py::Config.keys and ::Config.lever, so the OWNED env name in the message is
+    #     GENERATED and never typed, and a float lever added to tok/levers.py tomorrow is covered
+    #     with no second list to go stale. The precedent is src/fabric/api.py::build. THE OTHER
+    #     FOURTEEN DECLARATIONS ARE ACCOUNTED FOR AND NOT DECLINED: the twelve int levers are
+    #     refused at nan by `int(float(raw))`'s ValueError and at +/-inf by its OverflowError inside
+    #     spine/lever.py::Lever.coerce, under their own owned names, and the two str levers (mode,
+    #     probation_by) carry `choices=`. 4 + 12 + 2 = 18, the whole set.
+    # (2) TOK_DROPOUT OUTSIDE [0.0, 1.0], which (1) cannot reach: 1.5 is finite and was measured to
+    #     do EXACTLY what +inf does -- vocabulary 399, tok.build_refused 143, bytes_per_token 1.0,
+    #     tok.dropout_skip 3999 of 4000, and two successive regularized calls returning the
+    #     identical segmentation. This is a DECLARED domain and not an invented one: the lever's
+    #     unit is units.PROBABILITY and its help string is "Probability of skipping an available
+    #     merge", and a probability is not outside [0, 1]. It is written as an INVERTED CHAIN naming
+    #     both ends because that is the one guard grammar in this tree NaN does not walk through --
+    #     see the OPT sweep's structural result, where `not 0.0 <= x < 1.0` held against nan at
+    #     three levers and every one-sided `x < 0.0` did not.
+    # (3) TOK_MAX_BYTES BELOW 2. See its own block below; it is a COUNT, not a float, and no
+    #     finiteness rule could ever have reached it.
+    #
+    # WHAT THESE DO NOT CLAIM, AND NOTHING BELOW SAYS OTHERWISE. TOK_DROPOUT=1.0 IS STILL ADMITTED
+    # AND IS MEASURED TO DO THE SAME DAMAGE as 1.5 and as +inf: `stream.random()` draws from [0, 1),
+    # so at p=1.0 every draw skips, bytes_per_token collapses to 1.0 and the segmentation is
+    # deterministic again. It is admitted because 1.0 is a legally typed probability and the top of
+    # the lever's own declared interval, and refusing it would be a range ruling the declaration
+    # does not support -- but an operator who types 1.0 has switched the tokenizer off, not turned
+    # the regularizer up, and nothing here stops them. The three float levers other than dropout
+    # have NO declared interval at all and nothing here bounds any of them from either side.
+    # ==============================================================================================
+    _nonfinite = []
+    for _field in tok.keys():
+        if _field.startswith("d_"):
+            continue                        # a wire is another package's number arriving, not a lever
+        _decl = tok.lever(_field)           # spine/lever.py::LeverView -- default, unit, OWNED env name
+        if not isinstance(_decl.default, float):
+            continue
+        _v = float(getattr(tok, _field))
+        if not math.isfinite(_v):
+            _nonfinite.append((_decl.env_name, _v))
+    if _nonfinite:
+        raise LeverError(
+            f"TOK: non-finite lever(s) "
+            f"{', '.join(f'{k}={v}' for k, v in _nonfinite)}. A nan or an infinity is not a "
+            f"probability, an exponent or a ratio, and this package declares no float lever for "
+            f"which any of the three is a reading -- every declared sentinel in "
+            f"tok/levers.py::TOKLevers is a ZERO, and each of the four says so in its own help "
+            f"string or comment (TOK_MINT_PMIN '0 mints on frequency alone', TOK_MINT_NOVEL '0 "
+            f"reproduces plain most-frequent minting', TOK_DROPOUT 'the default is 0.0 so it has "
+            f"never run'). WHAT EACH ONE WAS MEASURED TO DO: "
+            + " || ".join(f"{k}={v}: " + _NONFINITE_MEASURED[k] for k, v in _nonfinite)
+            + ". REFUSED AT STARTUP AND NOT DESCRIBED BY A GATE, because a Gate reason is a report "
+              "and the mechanism still runs. WHAT THIS REFUSAL DOES NOT CLAIM: it closes four "
+              "values per lever and BOUNDS NOTHING. TOK_DROPOUT=1.5 is finite and was measured to "
+              "do exactly what +inf does; it is closed by the separate probability-interval "
+              "refusal on the next lines, and TOK_DROPOUT=1.0, which does the same damage again, "
+              "is admitted by both. A declared per-lever domain is the general answer and is open.")
+
+    _drop = float(tok.dropout)
+    if not 0.0 <= _drop <= 1.0:
+        raise LeverError(
+            f"TOK_DROPOUT={_drop!r} is outside [0.0, 1.0]. It is declared as units.PROBABILITY and "
+            f"as the 'Probability of skipping an available merge during a counting segmentation', "
+            f"and nothing in this package clamps it: every guard is `dropout > 0.0` and the draw is "
+            f"`stream.random() < dropout`, so ANY value at or above 1.0 skips EVERY available merge "
+            f"on EVERY counting segmentation. MEASURED at 1.5, against a TOK_DROPOUT=0.0 baseline "
+            f"of vocabulary 512 / tok.build_mint 256 / tok.build_refused 0 / bytes_per_token "
+            f"3.5925925925925926: vocabulary 399, tok.build_mint 143, tok.build_refused 143, "
+            f"bytes_per_token 1.0, tok.dropout_skip 3999 over 4000 bytes, and two successive "
+            f"tokenize(regularize=True) calls returning the IDENTICAL segmentation -- BPE-dropout "
+            f"that is not random, which is the symptom the tok.dropout.mint child stream exists to "
+            f"prevent, arriving through the VALUE instead of through the stream. bytes_per_token is "
+            f"the one estimator that leaves this package: spine/derive.py::signature_width_bytes "
+            f"takes it for SIG's single window width and DATA's splice gate reads it too. WHAT THIS "
+            f"REFUSAL DOES NOT CLAIM: 1.0 is INSIDE this interval, is admitted, and does the same "
+            f"thing -- `stream.random()` draws from [0.0, 1.0), so every draw is below 1.0. The "
+            f"interval is the lever's declared domain, not a safety bound.")
+
+    # ==============================================================================================
+    # TOK_MAX_BYTES BELOW 2 -- A CEILING SO LOW NO MERGE CAN EXIST UNDER IT.
+    #
+    # 0 IS NOT A SENTINEL HERE AND THE DECLARATION WAS READ BEFORE THIS WAS WRITTEN. Several levers
+    # in this tree use 0 to mean "no cap" and refusing one of those would break a working mechanism,
+    # so tok/levers.py::TOKLevers was checked lever by lever: freeze_at ('0 means never freeze'),
+    # retok_every ('0 leaves already-emitted ids alone forever'), mint_pmin ('0 mints on frequency
+    # alone'), mint_novel ('0 reproduces plain most-frequent minting') and probation_uses ('THE
+    # DEFAULT 0 MEANS OFF') each spell their zero out in their own help string or comment. max_bytes
+    # spells out the opposite: "The longest byte string a single token may stand for; a candidate
+    # merge longer than this is refused." Vocabulary._add implements exactly that as
+    # `len(seq) > self.max_bytes`, so 0 is not "no cap", it is a cap that refuses EVERYTHING.
+    #
+    # MEASURED, one value per fresh subprocess, over the same ~10 kB two-area sample, against the
+    # shipped 16 (size 512, tok.build_mint 256, tok.build_refused 0, bytes_per_token
+    # 3.5925925925925926):
+    #   TOK_MAX_BYTES=0   size 256, tok.build_mint 0, tok.build_refused 143, bytes_per_token 1.0
+    #   TOK_MAX_BYTES=1   size 256, tok.build_mint 0, tok.build_refused 143, bytes_per_token 1.0
+    #   TOK_MAX_BYTES=2   size 399, tok.build_mint 143, tok.build_refused 136, bytes_per_token 2.0
+    # 1 IS IN THE REFUSAL AND 0 IS NOT ALONE THERE because a merge joins two units, so the shortest
+    # sequence `_add` can ever be handed is two bytes long: at 1 the ceiling refuses every candidate
+    # exactly as it does at 0, and the two are one defect with two spellings. The vocabulary is
+    # permanently the 256 raw bytes and the run is a byte-level run -- which is a real configuration
+    # this package already has a DECLARED way to ask for, TOK_MODE=bytes, whose arm says so in
+    # writing and returns immediately with v0=256 and bytes_per_token=1.0. Reaching it by shrinking
+    # a length ceiling instead is the mechanism deleted while TOK_MODE still says "online" and the
+    # ledger still prints two build passes.
+    # NOTHING AN OPERATOR CAN ASK FOR IS LOST: 2 is legal and is the smallest vocabulary this
+    # package has that still mints anything.
+    # THE VALUE ALSO LEAVES THIS PACKAGE AND THAT HALF IS NOT CLOSED HERE. spine/assemble.py
+    # ::COUPLINGS carries src="TOK.max_bytes" -> dst="LM.d_max_token_bytes", irreducible, computing
+    # `int(r["TOK"].max_bytes)`, and LM sizes ByteComposer's byte-index and position tables from it.
+    # That coupling runs inside spine/assemble.py::build, before any Config is frozen, and
+    # src/lm/api.py::resolve is row 8 of ASSEMBLY_ORDER while this function is row 11 -- so LM has
+    # already returned an LMGeometry with max_token_bytes=0 by the time this refusal fires. The run
+    # still dies at startup with this message and nothing downstream consumes that geometry, but a
+    # caller driving LM.resolve ALONE is not covered from here, and src/lm/api.py is not this
+    # package's file to edit. Filed with the exact edit.
+    # IT FIRES ON ALL THREE ARMS, INCLUDING mode="bytes", WHERE max_bytes HAS NO LOCAL READER, and
+    # that is deliberate rather than an oversight of the early return below: the coupling above
+    # computes `int(r["TOK"].max_bytes)` unconditionally inside spine/assemble.py::build, so LM's
+    # byte tables are sized from this number on every arm this package has, including the one where
+    # no merge is ever attempted.
+    # WHAT THIS REFUSAL DOES NOT CLAIM: it closes 0 and 1 and bounds nothing from above.
+    # tok/levers.py::TOKLevers.max_bytes records the other end in its own comment -- above 16 the
+    # composer silently truncates its view of a token to the first 16 bytes -- and that end is the
+    # coupling's business, not a number this function may decide.
+    # ==============================================================================================
+    _max_bytes = int(tok.max_bytes)
+    if _max_bytes < 2:
+        raise LeverError(
+            f"TOK_MAX_BYTES={_max_bytes} is below 2. It is the longest byte string a single token "
+            f"may stand for and Vocabulary._add refuses a candidate with `len(seq) > "
+            f"self.max_bytes`; a merge joins two units, so the shortest sequence that can ever be "
+            f"offered is two bytes long and a ceiling below that refuses EVERY candidate. It is "
+            f"NOT a sentinel: freeze_at, retok_every, mint_pmin, mint_novel and probation_uses all "
+            f"declare their zero in their own help string, and this lever declares the opposite "
+            f"('a candidate merge longer than this is refused'). MEASURED over a two-area sample, "
+            f"against the shipped 16 (size 512, tok.build_mint 256, tok.build_refused 0, "
+            f"bytes_per_token 3.5925925925925926): at 0 and at 1 alike, size 256, tok.build_mint 0, "
+            f"tok.build_refused 143, bytes_per_token 1.0 -- the vocabulary permanently the 256 raw "
+            f"bytes, which is a byte-level run reached by deleting the mint instead of by asking "
+            f"for it, while TOK_MODE still reads 'online' and the ledger still prints two build "
+            f"passes. TOK_MODE=bytes is the declared way to ask for that run. At 2 the mechanism is "
+            f"back: size 399, tok.build_mint 143, bytes_per_token 2.0. Nothing an operator can ask "
+            f"for is lost -- 2 is legal and is the smallest vocabulary this package has that mints "
+            f"anything. This bounds nothing from above.")
+
     mode = str(tok.mode)
     vocab = Vocabulary(ceiling=int(tok.d_vocab_ceiling), soft_cap=soft_cap,
-                       max_bytes=int(tok.max_bytes))
+                       max_bytes=_max_bytes)
 
     # THE BUILD SAMPLE. build_bytes bounds the BUILD; DATA.corpus_cap already bounded what was
     # opened. Two genuinely different quantities, which is why both exist and neither is derived

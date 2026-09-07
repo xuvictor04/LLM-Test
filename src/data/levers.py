@@ -514,6 +514,20 @@ class DATALevers(LeverSet):
     # is 16 MB drawn from 7.6 MB of Python against 16 MB drawn from 57 MB of English. The added area is
     # seen 2.1x over while the original is 28% sampled, and "adding py cost eng X bits/byte" is then
     # confounded with "py was memorised and eng was skimmed" (ISSUES P3-H22, self_organize.py:5490-5496).
+    # nan AND +inf ARE REFUSED AT THE READ SITE, data/api.py::data_plan, together with exposure_skew
+    # below. Neither is a declared meaning here -- this help text says only "above which the data
+    # plan is flagged", and there is no inf branch in data/api.py. What they DID, measured before the
+    # refusal landed: `max(vals) > nan` is False for every possible exposure and no finite exposure
+    # exceeds +inf, so the gate could not fire and printed the middle state anyway --
+    # "Gate data.exposure_max: armed, did not fire (0.75 vs nan)" and "(0.75 vs inf)". A guard that
+    # cannot trip reads exactly like a healthy run, which is the sentence three lines above this one
+    # about the NP>1 defect, arriving a second time through the threshold instead of the guard.
+    # 0 AND -inf ARE NOT REFUSED and are not sentinels either: both make the gate FIRE on every plan
+    # -- measured, "FIRED (0.75 vs 0.0)" and "FIRED (0.75 vs -inf)" -- and both print the truth while
+    # doing it, so refusing them would remove a configuration that behaves and reports correctly.
+    # THE REFUSAL CLOSES TWO VALUES AND NOT THE CLASS: DATA_EXPOSURE_MAX=1e26 is finite, passes it,
+    # and is exactly as uncrossable as +inf while printing as an ordinary number. A declared
+    # per-lever domain is the general answer and it is the owner's open question.
 
     exposure_skew = Lever(3.0, "Max/min exposure ratio across areas above which the data plan is "
                                "flagged as imbalanced.", U.COUNT)
@@ -527,6 +541,15 @@ class DATALevers(LeverSet):
     # ITS NP>1 GUARD IS HONEST, unlike its sibling's: a max/min ratio over one area is undefined. L21's
     # inertness finding applies to exposure_max, not to this. Same Gate treatment though -- the report
     # must state the ratio it computed and the areas it compared, or "no warning" is unreadable.
+    # nan AND +inf ARE REFUSED AT data/api.py::data_plan, on the same reasoning as exposure_max above
+    # and with the same measurements: "Gate data.exposure_skew: armed, did not fire (3.0 vs nan)" and
+    # "(3.0 vs inf)" against "FIRED (3.0 vs 0.0)" and "FIRED (3.0 vs -inf)" at the two values left
+    # alone. THE DISTINCTION THIS LEVER MAKES THAT ITS SIBLING DOES NOT, and it is why the refusal is
+    # a refusal rather than a reachable=False: this gate ALREADY has a declared unreachable arm, at
+    # n_areas == 1, and that one is STRUCTURAL -- a max/min ratio over one area is undefined and no
+    # lever can change it. A threshold nothing can cross is an out-of-range value the operator typed,
+    # which is a different statement, and folding the two into one rendering would put a lever fault
+    # and a shape fact under the same word.
     # UNIT: a RATIO of two exposures, U.COUNT for the same reason as exposure_max.
 
     # ==============================================================================================

@@ -38,7 +38,101 @@ from torch import nn
 
 from spine import units as U
 from spine.gate import Gate
-from spine.lever import Config
+from spine.lever import Config, LeverError
+
+
+# ==================================================================================================
+# WHAT A NON-FINITE VALUE OF EACH FLOAT LEVER WAS MEASURED TO DO
+# ==================================================================================================
+#
+# One entry per float lever this package declares, in sig/levers.py::SIGLevers's own order. It is a
+# MODULE CONSTANT and not a sentence inside the refusal because the refusal renders only the levers
+# an operator actually set, and a reader wanting to know what the other six do should not have to
+# provoke them. Every string below is a MEASUREMENT taken through spine.assemble.build in a fresh
+# process at the widths sig/api.py's own harness uses (width_units=64, alphabet_size=256, a 6000-byte
+# stream, seen_units=6000, AdamW over encoder_parameters, the shipped SIG_WARMUP=800) -- not a
+# reading of the source.
+_NONFINITE_MEASURED = {
+    "SIG_TEMP":
+        "the divisor on the cosine logits, `logits = (za @ zp.t()) / temp` in "
+        "sig/api.py::_contrastive_loss. At nan the refusal three lines above it (`if temp <= 0.0`) is "
+        "FALSE, every logit is nan, cross_entropy is nan and ONE backward() puts nan in all three "
+        "encoder tensors: measured at step 1, loss=nan with emb.weight, proj.weight and proj.bias "
+        "grads all non-finite; after the full 800-step warm-up every encoder parameter is non-finite "
+        "and WarmupReport comes back verdict='budget' steps=800 probes=1 peak=nan final=nan "
+        "curve=[nan]. At +inf every logit is EXACTLY 0.0, the InfoNCE term is exactly "
+        "ln(48) = 3.8712007 -- which sig/levers.py::SIGLevers calls 'the loss of a model that has "
+        "learned nothing' -- its gradient is exactly 0.0, and the contrastive objective, which is the "
+        "whole purpose of this package, is deleted while only the variance hinge trains: the warm-up "
+        "then reports separation 0.9927 against 0.5238 at the default, i.e. BETTER than a working "
+        "encoder, with every parameter finite. AT -inf THIS CHECK NOW FIRES FIRST AND DISPLACES A "
+        "REFUSAL THAT WAS ALREADY CORRECT: sig/api.py::_contrastive_loss's `if temp <= 0.0` names "
+        "SIG_TEMP and explains that a negative divisor INVERTS the objective, and the sweep filed "
+        "SIG_TEMP=-inf as one of its five REFUSED_BY_NAME cells. It is displaced deliberately and "
+        "only in TIME -- that one fires at the first warm-up step, with an encoder built and an "
+        "optimizer over it, and this one fires before either exists -- and the inversion sentence "
+        "is carried here so nothing is lost with it. Every FINITE negative and 0 still reach that "
+        "refusal and it keeps its full force there",
+    "SIG_POSITIVE_RADIUS_WINDOWS":
+        "the multiplier that freezes positive_radius_units in build() below, "
+        "`round(float(sig.positive_radius_windows) * width)`. At nan that round() raises a bare "
+        "`ValueError: cannot convert float NaN to integer` and at +/-inf a bare OverflowError, both "
+        "from inside the SigState constructor at sig/api.py::build, naming neither the lever nor the "
+        "value -- in the one function that already carries two by-name refusals. At 0 the package "
+        "does refuse by name, in sig/api.py::_draw_pairs, so the gap was exactly the three "
+        "non-finite spellings",
+    "SIG_PROTOTYPE_FRAC":
+        "the share of the InfoNCE batch drawn from one domain's reservoir. NO LIVE READER TODAY: "
+        "sig/api.py::train_step is the only function that names it and it is a NotImplementedError "
+        "stub, so at every value this lever passes through build, encode, cadence_due and warm_up "
+        "untouched. It is refused here anyway, and the reason is the one this package states about "
+        "the same lever elsewhere -- the value FREEZES INTO THE CONFIG at startup and the report "
+        "prints it, so a nan sits in the run of record until the day the body lands and then sizes a "
+        "slice of the batch",
+    "SIG_VAR_WEIGHT":
+        "the weight on the variance hinge, guarded by `if var_weight > 0.0` in sig/api.py::_var_cov "
+        "-- which +inf PASSES. `inf * clamp(1-std, min=0).mean()` is inf, the loss is inf, and one "
+        "backward() through it produces nan in all three encoder tensors (measured at step 1: "
+        "loss=inf, grads non-finite). After the full warm-up every encoder parameter is non-finite "
+        "and the report reads verdict='budget' peak=nan final=nan curve=[nan]. At nan the same "
+        "`> 0.0` guard is FALSE, so the hinge is silently switched OFF and is bit-identical to the "
+        "declared SIG_VAR_WEIGHT=0.0 arm while the report prints nan as the weight that ran -- the "
+        "anti-collapse term this package's own header calls a certainty rather than a risk, absent, "
+        "with a number beside it. At -inf the guard is False too and the same off-and-misreported "
+        "shape stands",
+    "SIG_COV_WEIGHT":
+        "the weight on the covariance term of the same regulariser, one branch down in the same "
+        "function and guarded the same way (`if cov_weight > 0.0 and n > 1`). Identical arithmetic "
+        "and identical outcome: at +inf the term is inf, the loss is inf, the gradients are nan, "
+        "every encoder parameter is non-finite after warm_up and the report still reads "
+        "verdict='budget' peak=nan. Listed separately from var_weight because VICReg weights the two "
+        "terms independently and a fix on one does not cover the other",
+    "SIG_WARMUP_MIN_FRAC":
+        "the share of the budget that must be spent before the plateau stop may fire. This is the "
+        "one place in the surface where a correct by-name refusal EXISTS, is entered, and dies "
+        "formatting its own message: `frac < 0.0` is True for -inf, warm_up starts raising the "
+        "ValueError that names SIG_WARMUP_MIN_FRAC, and the f-string interpolates `int(frac * "
+        "budget)` = int(-inf), which raises `OverflowError: cannot convert float infinity to "
+        "integer` from inside the raise statement -- the operator gets the OverflowError instead of "
+        "the paragraph written for them. At nan and +inf `frac < 0.0` is False, the by-name refusal "
+        "is skipped entirely, and the same expression one line down (`floor = int(frac * budget)`) "
+        "raises a bare ValueError or OverflowError out of warm_up, after build() has succeeded and "
+        "the encoder has been constructed",
+    "SIG_WARMUP_PLATEAU_EPS":
+        "the ONLY threshold the adaptive warm-up stop has, tested in sig/api.py::_stop_verdict as "
+        "`abs(sep - prev) <= eps * abs(prev)`. THREE VALUES, THREE DIFFERENT WRONG ANSWERS. At +inf "
+        "the test is true for ANY pair of probes, so the warm-up stops at the first moment two "
+        "probes exist and returns verdict='plateau' -- the false-convergence stop _stop_verdict was "
+        "rewritten to remove -- while Gate sig.adaptive_stop prints fired=True with reason='' : "
+        "measured at SIG_WARMUP_PROBE_EVERY=200, stopped at step 400 of 800 on a RISING curve "
+        "[0.453574, 0.534715]. At nan every comparison is False and at -inf likewise, so the stop "
+        "can NEVER fire at any curve, and the gate prints reachable=True fired=False reason='' -- "
+        "which in this tree's own three-state vocabulary reads 'armed, did not fire' for a mechanism "
+        "that is structurally unreachable (measured at the same cadence: 4 probes, curve "
+        "[0.453574, 0.534715, 0.469582, 0.42657], stop never eligible). At the SHIPPED "
+        "SIG_WARMUP_PROBE_EVERY=500 against SIG_WARMUP=800 only one probe lands and this lever is "
+        "not consulted at all, which is why all three cells above are stated with their cadence",
+}
 
 
 class _Encoder(nn.Module):
@@ -139,15 +233,161 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
 
     positive_radius_units = round(sig.positive_radius_windows * width_units), frozen here.
 
+    THIS IS ALSO WHERE THIS PACKAGE'S LEVER DOMAIN IS REFUSED, AND THE REFUSAL IS NARROWER THAN IT
+    LOOKS. Three checks stand at the top of the body, all raising spine.lever.LeverError by the
+    lever's OWNED environment name: every float lever must be FINITE (unconditional); SIG_D must be
+    at least 1 (unconditional -- it is the width of the space every router reads); and, on the arm
+    that reads it and only there, SIG_CONTRASTIVE_BATCH >= 1 on 'learned' and SIG_BIGRAM_DIM >= 1 on
+    'bigram'. WHAT IS CLOSED AND WHAT IS NOT, stated here rather than left to be inferred: the
+    finiteness check closes THREE SPELLINGS of seven levers -- nan, +inf and -inf -- and closes
+    NOTHING ELSE. It does not bound any lever, it does not validate any lever, and it does not make
+    the mechanisms behind them safe. Measured in this package: SIG_TEMP=1e30 deletes the contrastive
+    objective exactly as +inf does, to the last bit of the loss (4.845168113708496), of the three
+    gradient sums and of the 800-step separation (0.9927038550376892); SIG_VAR_WEIGHT=1e38 leaves
+    every encoder parameter non-finite with the report reading verdict='budget' peak=nan, which is
+    bit-for-bit the critical the check was written for; and SIG_VAR_WEIGHT=1e30 prints an ordinary
+    loss and an ordinary separation over gradient sums of 5.3e31. All three are finite and all three
+    are admitted. A declared per-lever DOMAIN is the general answer to that and it is the owner's
+    open question (.rework/audits/ruling_nonfinite.json), not this function's to settle.
+    THE INT LEVERS ARE NOT IN THE FINITENESS SWEEP AND ARE NOT EXEMPT EITHER:
+    spine/lever.py::Lever.coerce resolves an int lever as `int(float(raw))`, which raises ValueError
+    at 'nan' and OverflowError at 'inf', and both are caught there and re-raised as a LeverError
+    naming the lever -- verified, SIG_D='inf' and SIG_D='nan' and SIG_CONTRASTIVE_BATCH='inf' all
+    fail inside spine.assemble.build before any Config exists. A second finiteness check here would
+    be an untrippable guard. That accounts for all 18 of this package's declarations: 7 float here,
+    9 int in coerce, 2 str (mode, space) in choices=.
+
     RETURNS: SigState.
 
-    LEVERS READ: mode, space, d, bigram_dim, positive_radius_windows
+    LEVERS READ: mode, space, d, bigram_dim, positive_radius_windows, contrastive_batch, temp,
+                 prototype_frac, var_weight, cov_weight, warmup_min_frac, warmup_plateau_eps
+                 -- the last seven are read for the DOMAIN REFUSAL above and for nothing else, and
+                 they are named here because a read this function makes must be visible to
+                 tests/test_contract.py::check_k4_levers_have_readers whatever its purpose. They
+                 are not consumed: the values
+                 that survive the refusal are used by sig/api.py::_contrastive_loss,
+                 sig/api.py::_var_cov, sig/api.py::_draw_pairs and sig/api.py::warm_up, whose own
+                 blocks declare them, and nothing here derives anything from them except
+                 positive_radius_windows.
     WIRES READ: none
     DID IT FIRE: sig.width_units and sig.alphabet_size as one-shot facts on the ledger, plus
                  sig.encoder_built (mode='learned') or sig.bigram_built (mode='bigram'). Any later
                  call that observes a width other than sig.width_units RAISES.
     """
     sig = sig.owned_by("SIG")
+
+    # ==============================================================================================
+    # THE LEVER DOMAIN REFUSALS, AT THIS PACKAGE'S FIRST ENTRY POINT AND BEFORE ITS FIRST DERIVATION
+    # ==============================================================================================
+    #
+    # WHY HERE AND NOT AT THE READER. The tree's refusal idiom is to raise spine.lever.LeverError
+    # naming the LEVER and the VALUE at the FIRST read, before anything is derived from it, and
+    # LeverError's own docstring says what that buys: "Always fatal, always at startup, never
+    # mid-run." SIG.build is the first SIG entry point the composition root calls
+    # (spine/compose.py's ASSEMBLY_ORDER row "signature"), so a refusal here is a startup failure;
+    # the same refusal at the reader is a failure in sig/api.py::warm_up, several thousand
+    # optimizer steps into a process that has already tokenized a corpus and built a model, and the
+    # operator sees a torch-shaped stack rather than a configuration message. That difference is
+    # measured, not asserted: SIG_WARMUP_MIN_FRAC=nan reached `floor = int(frac * budget)` inside
+    # warm_up and produced a bare "ValueError: cannot convert float NaN to integer" naming no lever,
+    # and SIG_WARMUP_MIN_FRAC=-inf entered the CORRECT by-name refusal and then raised OverflowError
+    # from inside its own f-string. Both are gone because neither value now reaches that function.
+    # THE PRICE, STATED RATHER THAN HIDDEN: build() now reads levers it does not use. That is a real
+    # cost -- sig/levers.py::SIGLevers spends a paragraph on why an EAGER read is not free ("a
+    # default that reads another knob is not a small sin here: it reads that knob EAGERLY, which is
+    # how MAX_DOMAINS = _i(...) put FAB_NMAX into the 'this run read it' audit on every run") -- and
+    # it is paid deliberately: what that paragraph refuses is a read that CHANGES a value, and these
+    # reads change nothing and produce no default. The reads are declared in this function's LEVERS
+    # READ block, which is what makes them visible to
+    # tests/test_contract.py::check_k4_levers_have_readers rather than hidden.
+    _nonfinite = []
+    for _field in sig.keys():
+        if _field.startswith("d_"):
+            continue                    # a wire is another package's number arriving, not a lever
+        _decl = sig.lever(_field)       # spine/lever.py::LeverView -- default, unit, OWNED env name
+        if not isinstance(_decl.default, float):
+            continue
+        _v = float(getattr(sig, _field))
+        if not math.isfinite(_v):
+            _nonfinite.append((_decl.env_name, _v))
+    if _nonfinite:
+        # UNCONDITIONAL, AND NOT GATED ON THE ARM THAT READS THE LEVER -- which is a departure from
+        # what this same file does one function down, so it is argued rather than assumed.
+        # sig/api.py::cadence_due declares SIG_TRAIN_EVERY, SIG_TRAIN_EVERY_IDLE and
+        # SIG_DENSE_WINDOW INERT under SIG_MODE='bigram' and states the rule as "a lever the report
+        # calls inert cannot also be the lever that stops the run" -- a rule about a LEGAL value on
+        # an arm that never reads it. SIG_TRAIN_EVERY=0 is a legal integer and the bigram arm never
+        # divides by it. A nan is not a legal value on any arm: it is not a magnitude, a share, a
+        # temperature or a tolerance, it freezes into the Config for the whole run, the report
+        # prints it as the number that ran, and the day the operator flips SIG_MODE to 'learned' it
+        # is the critical above. The count floors below ARE gated by arm, for exactly the reason
+        # cadence_due gives, and the two are different questions.
+        raise LeverError(
+            f"SIG: non-finite lever(s) {', '.join(f'{k}={v}' for k, v in _nonfinite)}. This package "
+            f"declares seven float levers and NONE of them gives a nan or an infinity a meaning: "
+            f"every declared sentinel in sig/levers.py::SIGLevers is a ZERO -- var_weight=0.0 and "
+            f"cov_weight=0.0 are the two halves of the anti-collapse regulariser off, "
+            f"prototype_frac=0.0 is the prototype arm off, warmup_min_frac=0.0 is no floor and "
+            f"warmup_plateau_eps=0.0 is the strictest flatness test there is. WHAT EACH ONE WAS "
+            f"MEASURED TO DO: "
+            + " || ".join(f"{k}={v}: " + _NONFINITE_MEASURED[k] for k, v in _nonfinite)
+            + ". REFUSED AT STARTUP AND NOT DESCRIBED BY A GATE, because a Gate reason is a REPORT "
+              "and the mechanism still runs: at SIG_TEMP=nan the sig.adaptive_stop gate rendered "
+              "its full unreachable-arm paragraph, correctly, over an encoder whose every parameter "
+              "was already nan, and WarmupReport returned verdict='budget' with separation nan. "
+              "WHAT THIS REFUSAL DOES NOT DO, AND IT MUST NOT BE READ AS MORE: it closes THREE "
+              "SPELLINGS (nan, +inf, -inf) on seven levers. It does NOT bound them, validate them "
+              "or make them safe, and the values that do the identical damage are ordinary finite "
+              "numbers this check admits. MEASURED IN THIS PACKAGE, at the widths above: "
+              "SIG_TEMP=1e30 gives the same all-zero logits as +inf, the same loss to the last bit "
+              "(4.845168113708496), the same gradient sums (emb 265.2186584472656, proj.weight "
+              "134.94387817382812, proj.bias 274.1432800292969) and the same 800-step separation to "
+              "the last bit (0.9927038550376892) -- the contrastive objective deleted at a number "
+              "no check here refuses. SIG_VAR_WEIGHT=1e38 is bit-for-bit the critical this refusal "
+              "was written for: verdict='budget' peak=nan final=nan curve=[nan] with all three "
+              "encoder tensors non-finite. And SIG_VAR_WEIGHT=1e30 is the WORSE shape -- a printable "
+              "loss (1.9479e29) and a printable separation (0.7904255390167236) over gradient sums "
+              "of 5.3e31, which is an ordinary-looking report over an encoder already off its "
+              "scale. A DECLARED PER-LEVER DOMAIN is the general answer and it is the owner's open "
+              "question (.rework/audits/ruling_nonfinite.json), not this function's to settle.")
+
+    # ---- THE ONE WIDTH OF THE SIGNATURE SPACE ----------------------------------------------------
+    # SIG_D=0 IS FAB_RANK=0 AND FAB_DK=0 REACHED THROUGH THE OTHER GEOMETRY LEVER, and this function
+    # already refuses that class one branch down: SIG_MODE=bigram at width_units=1 is refused BY NAME
+    # because it "returns a well-formed all-zero signature for every window, which collapses FAB's
+    # routing and DOM's boundary test with no error anywhere". A width of zero does the same thing
+    # through `d` and did it on BOTH arms. It is read before `width` because it is the lever, and the
+    # width is an argument.
+    d = int(sig.d)
+    if d < 1:
+        raise LeverError(
+            f"SIG_D={d}: a signature space of {d} dimension(s) is no signature space. This is the one "
+            f"width every router "
+            f"in the tree reads -- spine/compose.py hands it to FAB.build as signature_dim, DOM's "
+            f"centroids and boundary test are distances in it, and sig/api.py::state_dict records it "
+            f"as checkpoint geometry -- and a count below one is not a smaller signature space, it "
+            f"is the space removed while every type check still passes. MEASURED AT SIG_D=0, on both "
+            f"mode arms: build() returns a SigState whose learned encoder holds THREE PARAMETERS "
+            f"WITH ZERO ELEMENTS ((alphabet_size, 0), (0, 0), (0,) -- total numel 0), or on the "
+            f"bigram arm a (SIG_BIGRAM_DIM, 0) table; encode() then returns a well-formed (N, 0) "
+            f"'unit vector' for every window forever, with no error. AND THE INSTRUMENT AGREES IT IS "
+            f"HEALTHY, which is what makes it worse than a crash: `z @ z.t()` over width-0 rows is "
+            f"the all-zero matrix INCLUDING ITS DIAGONAL -- a window is not even similar to itself -- "
+            f"so sig/api.py::_separation returns mean(1 - 0) = EXACTLY 1.0, the best separation the "
+            f"probe can produce, and the full 800-step warm-up reports verdict='budget' peak=1.0 "
+            f"final=1.0 curve=[1.0] over a contrastive loss that was nan at every one of those 800 "
+            f"steps. The two guards that would have caught it both pass: _separation's own "
+            f"`z.shape[1] != d` check is 0 != 0, and every parameter is 'finite' because there are no "
+            f"numbers in it. IT INTERACTS WITH THE SLOT CEILING AND MAKES IT VACUOUS: "
+            f"spine/compose.py::_alphabet_size sizes this encoder's embedding at LM.vocab_slots "
+            f"rather than the live vocab_size so that a mid-run vocabulary widen does not change the "
+            f"encoder optimizer's moment shapes -- measured at SIG_SPACE=tokens, SIG_D=0 gives "
+            f"emb.weight (4096, 0) and FAB's routing key buffer pop.cent (4096, 0), so the moment "
+            f"shapes are indeed stable across a widen and stably EMPTY, and every warm encoder row "
+            f"sig/api.py::encoder_embedding hands LM.on_mint for a newly minted id is a row of no "
+            f"numbers. Nothing an operator can ask for is lost by this floor: SIG_D=1 is the "
+            f"narrowest signature space this package has and it still has one.")
+
     width = int(width_units)
     if width < 1:
         raise ValueError(
@@ -180,11 +420,75 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
             f"routing and DOM's boundary test with no error anywhere. Raise SIG_WIDTH_UNITS to at "
             f"least 2, or use SIG_MODE=learned, which has no width floor.")
     if mode == "learned":
-        encoder = _Encoder(int(alphabet_size), int(sig.d), gen, device=device)
+        # ---- THE CONTRASTIVE BATCH, REFUSED ON THE ARM THAT DRAWS IT AND NOWHERE ELSE ------------
+        # GATED BY ARM, WHICH THE NON-FINITE SWEEP ABOVE DELIBERATELY IS NOT. `contrastive_batch` is
+        # read by sig/api.py::warm_up's loop and by sig/api.py::train_step, both of which run only on
+        # this arm -- warm_up's whole loop sits inside `if mode == "learned"` and cadence_due returns
+        # False for 'bigram' before the modulo is ever evaluated -- so on the frozen-table arm B is
+        # inert in exactly the sense sig/api.py::cadence_due states for its own three levers: "a
+        # lever the report calls inert cannot also be the lever that stops the run." Zero is a legal
+        # integer that arm never reads. It is refused HERE rather than at warm_up's first read for
+        # the reason the block at the top of this function gives: this is the startup, and warm_up is
+        # 800 optimizer steps into a built process.
+        # WHAT B=0 WAS MEASURED TO DO, and it is silent rather than loud: warm_up runs its FULL 800
+        # optimizer steps on an EMPTY batch. _draw_pairs returns (0, 64) and (0, 64), the InfoNCE
+        # loss over a 0x0 logit matrix is nan, the gradients are FINITE ZEROS so the parameters
+        # survive intact, and the separation probe -- 2*0 = 0 encodings, the mean of an empty triu --
+        # is nan. The report is verdict='budget' steps=800 probes=1 peak=nan final=nan curve=[nan]:
+        # 800 steps that trained nothing, reported as a budget spent. BOTH ARMS OF THE COLLAPSE
+        # VERDICT ARE NaN COMPARISONS AND THEREFORE FALSE (verified: _stop_verdict([nan], 0.015)
+        # returns None, `nan < 0.15` is False, `nan < 0.7*nan` is False), so the RUN-LEVEL FAILURE
+        # verdict this module was rewritten to keep reachable on a one-point curve cannot be produced
+        # at all. B is also the collapse reference ln(B) that sig/levers.py::SIGLevers calls part of
+        # the diagnostic rather than a throughput setting; at 0 that reference is ln(0).
+        batch = int(sig.contrastive_batch)
+        if batch < 1:
+            raise LeverError(
+                f"SIG_CONTRASTIVE_BATCH={batch} on SIG_MODE='learned': the InfoNCE step has no "
+                f"anchor/positive pairs to draw, so there is no contrastive objective. This does "
+                f"not fail loudly -- measured at the shipped SIG_WARMUP=800, sig/api.py::warm_up "
+                f"runs all 800 optimizer steps on an EMPTY batch: _draw_pairs returns (0, "
+                f"width_units) twice, the loss over a 0x0 logit matrix is nan, the gradients are "
+                f"finite ZEROS so every parameter survives unchanged, the separation probe is the "
+                f"mean of an empty upper triangle and is nan, and WarmupReport comes back "
+                f"verdict='budget' steps=800 probes=1 peak=nan final=nan curve=[nan] -- a spent "
+                f"budget that trained nothing. Worse, every arm of the 'collapsing' verdict is then "
+                f"a nan comparison and therefore False (_stop_verdict([nan], "
+                f"{float(sig.warmup_plateau_eps)}) returns None), so the RUN-LEVEL FAILURE verdict "
+                f"sig/api.py::_stop_verdict was rewritten to keep reachable on a ONE-PROBE curve "
+                f"cannot be reached on any curve. B is also the collapse reference ln(B) and the "
+                f"K-floor ln(1 + (B-1)/SIG_FLOOR_KINDS), and at 0 the first of those is ln(0). "
+                f"SIG_CONTRASTIVE_BATCH=1 is the narrowest batch this objective has and is not "
+                f"refused -- it is one pair with no negatives, which is a different (and visible) "
+                f"complaint. This lever is INERT under SIG_MODE='bigram' and is NOT refused there.")
+        encoder = _Encoder(int(alphabet_size), d, gen, device=device)
     elif mode == "bigram":
         # THE FROZEN TABLE ARM. A random projection of bigram counts -- no parameters that train,
         # which is what makes it the control arm the learned encoder is read against.
-        table = torch.empty(int(sig.bigram_dim), int(sig.d), device=device)
+        # ---- ITS WIDTH, REFUSED ON THE ARM THAT ALLOCATES IT ------------------------------------
+        # THE SECOND HALF OF A REFUSAL THIS FUNCTION ALREADY MAKES. Four lines up, SIG_MODE=bigram
+        # at width_units=1 is refused BY NAME, and a reader of that refusal would reasonably conclude
+        # this arm's build-time geometry is checked. It was not: at SIG_BIGRAM_DIM=0 build() returns
+        # a SigState holding an EMPTY (0, SIG_D) table with no warning, and the FIRST encode() then
+        # dies inside the hash with `RuntimeError: ZeroDivisionError` from `% st.encoder.shape[0]`,
+        # naming no lever and no value. Every window of the run fails, so this one is loud -- but it
+        # is loud in the wrong place and in the wrong words, which is the same defect class as the
+        # zero signature, not a different one. Gated to this arm because the lever's own help text
+        # says it is "inert unless mode='bigram'" and cadence_due's rule applies: a lever the report
+        # calls inert cannot also be the lever that stops the run.
+        bigram_dim = int(sig.bigram_dim)
+        if bigram_dim < 1:
+            raise LeverError(
+                f"SIG_BIGRAM_DIM={bigram_dim} on SIG_MODE='bigram': the frozen hashed-bigram table "
+                f"is the modulus of the bigram hash and the row count of the projection it indexes, "
+                f"and a width below one is not a smaller control arm -- it is no table. Measured: "
+                f"build() accepts it today and returns a SigState holding an empty (0, SIG_D="
+                f"{d}) table, and the first sig/api.py::encode call raises `RuntimeError: "
+                f"ZeroDivisionError` from `(units[:, :-1] * 31 + units[:, 1:]) % st.encoder."
+                f"shape[0]` -- naming neither this lever nor its value, in a function whose sibling "
+                f"refusal four lines above names SIG_MODE=bigram and SIG_WIDTH_UNITS in full. This "
+                f"lever is INERT under SIG_MODE='learned' and is NOT refused there.")
+        table = torch.empty(bigram_dim, d, device=device)
         with torch.no_grad():
             table.uniform_(-0.1, 0.1, generator=gen)
         encoder = table
@@ -197,7 +501,7 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
         width_units=width,
         positive_radius_units=round(float(sig.positive_radius_windows) * width),
         alphabet_size=int(alphabet_size),
-        space=str(sig.space), mode=mode, d=int(sig.d),
+        space=str(sig.space), mode=mode, d=d,
         counters={"sig.width_units": width, "sig.alphabet_size": int(alphabet_size),
                   "sig.encoder_built": 1 if mode == "learned" else 0,
                   "sig.bigram_built": 1 if mode == "bigram" else 0,
@@ -811,6 +1115,18 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
         # no gate arm below says so -- every one of them reports a floor that is merely low. It is
         # refused here for the reason SIG_MODE=bigram at width_units=1 is refused in build(): the
         # failure is a mechanism quietly doing something other than what it is declared to do.
+        # THIS REFUSAL USED TO DIE FORMATTING ITS OWN MESSAGE, and the repair is not here. At
+        # SIG_WARMUP_MIN_FRAC=-inf the test below is True, this correct by-name refusal was ENTERED,
+        # and the f-string's `{int(frac * budget)}` -- int(-inf) -- raised `OverflowError: cannot
+        # convert float infinity to integer` from inside the raise statement: the operator got the
+        # OverflowError instead of the paragraph written for them. Its siblings nan and +inf made
+        # `frac < 0.0` False, skipped this refusal entirely, and hit `floor = int(frac * budget)` one
+        # line down with a bare ValueError / OverflowError naming no lever. All three are now refused
+        # by name in sig/api.py::build, at startup, before an encoder or an optimizer exists, so
+        # `frac` is FINITE by the time this line runs and `int(frac * budget)` cannot raise for a
+        # finite negative against a non-negative int budget. That is a fix in another function
+        # recorded at the site it repairs, because a reader arriving here to ask why the message
+        # renders now will not otherwise find it.
         raise ValueError(
             f"SIG_WARMUP_MIN_FRAC={frac}: the floor is a SHARE of SIG_WARMUP={budget} and a share "
             f"cannot be negative. It would put the floor at {int(frac * budget)} step(s), which no "

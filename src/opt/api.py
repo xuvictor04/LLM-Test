@@ -80,10 +80,72 @@ import math
 
 import torch
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine import derive
 from spine import units as U
 from spine.gate import Gate
+
+
+# ==================================================================================================
+# WHAT EACH NON-FINITE FLOAT LEVER WAS MEASURED TO DO, quoted verbatim into build()'s refusal so an
+# operator reads what their number DID rather than a rule about numbers. Every line is a measurement
+# taken one lever per fresh subprocess through a real spine.assemble.build(environ=...) followed by a
+# real OPT.build, three real maybe_step calls over a live parameter with a live gradient, and
+# OPT.counters; the damping line is 1000 steps over a four-cycle horizon with a losing Reading
+# (value, seed_count) on every step. Keyed by the GENERATED env name, which is what the operator
+# typed. A float lever added to opt/levers.py with no entry here raises KeyError from build() the
+# first time it is set non-finite -- deliberately, because a lever with no measurement has no
+# business quoting one.
+# ==================================================================================================
+_NONFINITE_MEASURED = {
+    "OPT_LR":
+        "the peak rate reaches BOTH AdamW instances as `lr=` and is rewritten into every param "
+        "group on every step by maybe_step clause 5. Measured at +inf: build returned an ordinary "
+        "Horizon(run_steps=Steps(1000), warmup=Steps(100), wavelength=Steps(1000), n_cycles=1), the "
+        "base group read lr=inf, and every base parameter was -inf after ONE step and stayed there, "
+        "with counters() reporting a full ledger and the only trace opt.grad_norm.p50/p99. At nan "
+        "the run died one layer LATER and named nobody: torch's own `ValueError: Invalid learning "
+        "rate: nan` out of the AdamW constructor, after this function had resolved and printed the "
+        "whole horizon. `lr <= 0.0` is False for both",
+    "OPT_WEIGHT_DECAY":
+        "decoupled decay multiplies every parameter by (1 - lr*wd) before the update, every step, "
+        "regardless of gradient. Measured at +inf: the base group read wd=inf at a perfectly "
+        "ordinary lr=2e-05 that the schedule and the whole ledger reported as healthy, and every "
+        "base parameter was -inf after ONE step. At nan, again torch's `Invalid weight_decay value: "
+        "nan`, naming no lever. `weight_decay < 0.0` is False for both, and its refusal text is "
+        "about the SIGN ('GROWS every parameter every step regardless of gradient') while nothing "
+        "bounded the magnitude",
+    "OPT_GRAD_CLIP":
+        "a safety mechanism that stops silently. maybe_step gates the clip on `if clip > 0.0:`, "
+        "which is False for nan, so at nan clipping is OFF at any gradient magnitude -- measured "
+        "with grad norms of 8000000.0 on all three steps, opt.clip.applied 0 and "
+        "opt.clip.armed_no_clip 0, against opt.clip.applied 3 at OPT_GRAD_CLIP=1.0 over the "
+        "identical gradients. At +inf the branch DOES run and `norm > clip` is False for every "
+        "finite norm, so the cap is structurally incapable of biting: opt.clip.armed_no_clip 3 and "
+        "Gate opt.clip.applied printing reachable=True with the reason 'armed and NOTHING exceeded "
+        "the norm', on a run whose norms were 8.0e6. That is the second of the three DID IT FIRE "
+        "states printed for the third",
+    "OPT_LR_RESTART_DAMP":
+        "this package's ONLY closed loop -- the goal-B mechanism that shrinks a restart which failed "
+        "to beat its inherited held-out. maybe_step clause 4 is `if not paid and "
+        "float(opt.lr_restart_damp) < 1.0:`, False for nan, so the loop is dead while both `damp > "
+        "1.0` and `damp < 0.0` admit it from adjacent lines that refuse +inf and -inf by name. "
+        "Measured over 1000 steps on a four-cycle horizon with a LOSING Reading on every step: at "
+        "the shipped 0.5, wraps 3 / detected 2 / damped 1 and restart_amp 0.5; at nan, the identical "
+        "wraps 3 / detected 2 / readings 1000 and damped 0, restart_amp still 1.0, with Gate "
+        "opt.lr.restart_damp printing fired=False reachable=True -- the ARMED-BUT-DID-NOT-FIRE "
+        "verdict over two real losing restarts",
+    "OPT_LR_MIN_FRAC":
+        "the schedule's floor as a fraction of peak. Already refused at nan, +inf and -inf by `not "
+        "0.0 <= min_frac < 1.0` three refusals below, which names BOTH ends of the interval and so "
+        "is one of the two guards in this function NaN does not walk through; it is in this block "
+        "for the same reason the other five are -- so the rule is over the declaration set and not "
+        "over a list of names that can go stale",
+    "OPT_LR_DECAY":
+        "the strength of the monotone envelope over successive restart peaks. Already refused at "
+        "nan, +inf and -inf by `not 0.0 <= decay <= 1.0` two refusals below, the second of the two "
+        "inverted chains; in this block for the same reason as lr_min_frac",
+}
 
 
 # ==================================================================================================
@@ -592,6 +654,15 @@ def build(opt: Config, *, param_groups, run_windows):
     throughout, which reads as the schedule hurting when it is the schedule never having run.
 
     REFUSES AT STARTUP, because every one of these was a clamp at the old read site:
+      * ANY OF THIS PACKAGE'S SIX FLOAT LEVERS NON-FINITE -- lr, weight_decay, grad_clip,
+        lr_min_frac, lr_restart_damp, lr_decay -- enumerated through spine/lever.py::Config.keys and
+        ::Config.lever rather than by name, so the env name in the message is generated and a float
+        lever added tomorrow is covered. This is FIRST because the eleven below cannot see what it
+        sees: nine of them are one-sided order comparisons and NaN is ordered against nothing, so it
+        was False for all nine while +inf additionally passed every lower bound. It closes FOUR
+        VALUES per lever and BOUNDS NOTHING -- OPT_LR=1e30 still builds, still steps, still reports a
+        healthy ledger, and leaves the base parameters at -5.999999901390138e+28. The body carries
+        the measurement for each of the six and the statement of what is left open.
       * lr_restart_damp > 1.0 -- NOTHING catches it today and it INVERTS the mechanism: the damping
         multiplies the restart amplitude CUMULATIVELY, so above 1.0 it AMPLIFIES every failed
         restart -- the ratchet the lever exists to stop, driven by the lever that stops it. The old
@@ -660,11 +731,88 @@ def build(opt: Config, *, param_groups, run_windows):
                  the parameter side rather than from the optimizer side. It was written by this
                  function and printed by counters() while being named in no docstring anywhere, so
                  a nonzero value was a number the report printed with no stated meaning),
-                 Gate opt.build.grad_clip -- "off (0.0)" or the resolved max-norm, printed either
-                 way, because "no clipping" is a run-level fact the report must state rather than
-                 leave to be inferred from a missing line
+                 Gate opt.build.grad_clip -- "off (<the resolved value>)" or the resolved
+                 max-norm, printed either way, because "no clipping" is a run-level fact the report
+                 must state rather than leave to be inferred from a missing line. THE VALUE IS
+                 INTERPOLATED AND NOT THE LITERAL "off (0.0)" IT WAS UNTIL 2026-09-07: at
+                 OPT_GRAD_CLIP=nan that literal made the gate assert a value the operator had not
+                 typed, one line above a second gate in the same ledger printing the real one
     """
     opt = opt.owned_by("OPT")
+
+    # ==============================================================================================
+    # THE TWELFTH REFUSAL, AND IT IS FIRST BECAUSE THE ELEVEN BELOW CANNOT SEE WHAT IT SEES.
+    #
+    # WHAT SHAPE THE ELEVEN HAVE, stated before the new one so a reader can check the claim. Nine of
+    # the eleven `raise` statements below are ONE-SIDED ORDER COMPARISONS -- `damp > 1.0`,
+    # `damp < 0.0`, `lr <= 0.0`, `weight_decay < 0.0`, `warmup_asked < 0`, `wavelength_asked < 0`,
+    # `n_accum < 1`, `n_batch_windows < 1`, `grad_clip < 0.0` -- each naming ONE side of a boundary.
+    # Two are INVERTED CHAINS naming an interval at both ends: `not 0.0 <= min_frac < 1.0` and
+    # `not 0.0 <= decay <= 1.0`. NaN is ordered against nothing, so it is False for every one of the
+    # nine and True for both of the two; +inf passes every lower bound. MEASURED, one lever per fresh
+    # subprocess through a real spine.assemble.build:
+    #   OPT_LR=inf              built, AdamW lr=inf, every base parameter -inf after ONE step
+    #   OPT_WEIGHT_DECAY=inf    built, AdamW wd=inf, every base parameter -inf after ONE step
+    #   OPT_GRAD_CLIP=nan       built, clipping silently OFF at measured grad norms of 8.0e6
+    #   OPT_GRAD_CLIP=inf       built, a cap structurally incapable of biting, reported ARMED
+    #   OPT_LR_RESTART_DAMP=nan built, this package's ONE closed loop silently dead
+    #   OPT_LR_DECAY / OPT_LR_MIN_FRAC at nan, inf and -inf   refused, by the two inverted chains
+    # So three float levers were bounded on both sides and three on one side only, and the two that
+    # held against NaN held BY GRAMMAR rather than by intent -- which is why this block is written
+    # over the DECLARATION SET and not over another hand-typed list of names.
+    #
+    # ENUMERATED THROUGH THE SPINE'S OWN INTROSPECTION (spine/lever.py::Config.keys and
+    # ::Config.lever), so the OWNED env name in the message is GENERATED, never typed, and a float
+    # lever added to opt/levers.py tomorrow is covered with no second list to go stale. The precedent
+    # is src/fabric/api.py::build, which made the same widening for the same measured reason.
+    # THE OTHER SEVEN DECLARATIONS ARE ACCOUNTED FOR AND NOT DECLINED: the five int levers
+    # (lr_warmup, lr_wavelength, lr_shift_warm, batch_windows, accum) are refused at nan by
+    # `int(float(raw))`'s ValueError and at +/-inf by its OverflowError inside
+    # spine/lever.py::Lever.coerce, under their own owned names; lr_restarts is a bool, which coerces
+    # every spelling; lr_sched is a str carrying `choices=`. 6 + 5 + 1 + 1 = 13, the whole set.
+    #
+    # WHAT THIS REFUSAL DOES NOT CLAIM, AND NOTHING BELOW SAYS OTHERWISE. It closes FOUR VALUES per
+    # float lever. It BOUNDS NOTHING and this package is not thereby validated, safe or ranged.
+    # MEASURED HERE, at values this block admits: OPT_LR=1e30 builds, AdamW takes lr=1e+30, lr_at
+    # returns an ordinary-looking grid, six maybe_step calls all report stepped=True with no alarm
+    # anywhere, and the base parameters read -5.999999901390138e+28 -- finite, so every isfinite
+    # check in the tree passes over a run that is already destroyed. OPT_WEIGHT_DECAY=1e30 reaches
+    # non-finite parameters on step 2 THROUGH a finite step 1 of -1.9999999124047052e+25. A declared
+    # per-lever domain is the general answer to that and it is the owner's open question, not this
+    # function's.
+    # ==============================================================================================
+    _nonfinite = []
+    for _field in opt.keys():
+        if _field.startswith("d_"):
+            continue                        # a wire is another package's number arriving, not a lever
+        _decl = opt.lever(_field)           # spine/lever.py::LeverView -- default, unit, OWNED env name
+        if not isinstance(_decl.default, float):
+            continue
+        _v = float(getattr(opt, _field))
+        if not math.isfinite(_v):
+            _nonfinite.append((_decl.env_name, _v))
+    if _nonfinite:
+        raise LeverError(
+            f"OPT: non-finite lever(s) "
+            f"{', '.join(f'{k}={v}' for k, v in _nonfinite)}. A nan or an infinity is not a rate, a "
+            f"decay, a max-norm, a floor or a multiplier, and this package declares no float lever "
+            f"for which any of the three is a reading -- every declared sentinel in "
+            f"opt/levers.py::OPTLevers is a ZERO (OPT_GRAD_CLIP=0.0 is OFF, OPT_WEIGHT_DECAY=0.0 is "
+            f"OFF, OPT_LR_MIN_FRAC=0.0 is a schedule with no floor, OPT_LR_DECAY=0.0 restores the "
+            f"pre-2026-08-26 restart peak). WHAT EACH ONE WAS MEASURED TO DO: "
+            + " || ".join(f"{k}={v}: " + _NONFINITE_MEASURED[k] for k, v in _nonfinite)
+            + ". REFUSED AT STARTUP AND NOT DESCRIBED BY A GATE, because a Gate reason is a report "
+              "and the mechanism still runs: at OPT_GRAD_CLIP=nan counters() printed Gate "
+              "opt.build.grad_clip with the value 'off (0.0)' and the sentence 'OPT_GRAD_CLIP=0.0 is "
+              "OFF, which is the setting every recorded number in this project was taken under' -- a "
+              "report asserting a value the operator did not type -- while the very next gate in the "
+              "same ledger printed 'OPT_GRAD_CLIP=nan is OFF'. WHAT THIS REFUSAL DOES NOT CLAIM: it "
+              "closes these four values and leaves the mechanism open. OPT_LR=1e30 is finite, builds, "
+              "steps six times reporting stepped=True with no alarm in the ledger, and leaves the "
+              "base parameters at -5.999999901390138e+28 -- a number every isfinite check in this "
+              "tree passes. Set the lever to a finite value; a declared per-lever domain is the "
+              "general answer and is open.")
+
     effective = opt.d_effective_batch_windows    # WIRE READ HERE -- the horizon's divisor
 
     # -- the startup refusals, in one place, because every one was a clamp at the old read site --
@@ -1718,12 +1866,24 @@ def counters(opt: Config, st):
                      "and this counts only the steps where their COMPOSITION dived under the floor "
                      "(the envelope past its last peak, or a re-warm landing mid-anneal)")),
 
-        Gate("opt.build.grad_clip", clip > 0.0, clip if clip > 0.0 else "off (0.0)", "> 0.0",
+        # THE VALUE IS INTERPOLATED AND THE REASON QUOTES THE SAME NUMBER, corrected 2026-09-07.
+        # Both used to be the LITERAL 0.0 -- `clip if clip > 0.0 else "off (0.0)"` beside a reason
+        # opening "OPT_GRAD_CLIP=0.0 is OFF". `clip > 0.0` is False for NaN as well as for zero, so
+        # at OPT_GRAD_CLIP=nan this gate rendered value='off (0.0)' and asserted, in words, that the
+        # operator had typed the one setting "every recorded number in this project was taken
+        # under" -- while the opt.clip.applied gate eleven lines below interpolated the real value
+        # and printed "OPT_GRAD_CLIP=nan is OFF". One ledger, two lines, contradicting each other
+        # about what the run was configured with. build() now refuses a non-finite grad_clip at
+        # startup so nan cannot reach here at all; the literal is removed as well because a report
+        # that hardcodes the value it claims to be reporting is the defect tests/test_contract.py
+        # ::K15 and ::K16 exist for, and a gate whose truth depends on nothing else being able to
+        # reach it is a guard standing on another guard.
+        Gate("opt.build.grad_clip", clip > 0.0, clip if clip > 0.0 else f"off ({clip})", "> 0.0",
              reachable=clip > 0.0,
              reason="" if clip > 0.0 else
-                    "OPT_GRAD_CLIP=0.0 is OFF, which is the setting every recorded number in this "
-                    "project was taken under (Q-OPT-3). 'No clipping' is a run-level fact the "
-                    "report states rather than leaving to be inferred from a missing line."),
+                    f"OPT_GRAD_CLIP={clip} is OFF, which is the setting every recorded number in "
+                    f"this project was taken under (Q-OPT-3). 'No clipping' is a run-level fact the "
+                    f"report states rather than leaving to be inferred from a missing line."),
     ]
 
     if clip > 0.0:

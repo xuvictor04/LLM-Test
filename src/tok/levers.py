@@ -428,6 +428,20 @@ class TOKLevers(LeverSet):
     # this half was false, and a P4 author reading here was being sent to declare a wire that exists.
     # Correcting this half makes that pointer stale in its turn; it is filed with an exact replacement,
     # because a mutual pair of stale sentences reads as consistent to every mechanical rule in the tree.
+    # BELOW 2 IS REFUSED AT STARTUP, added 2026-09-07 in src/tok/api.py::build_vocabulary, and ZERO IS
+    # NOT A SENTINEL HERE. The help string above is the whole declaration -- "a candidate merge longer
+    # than this is refused" -- and Vocabulary._add implements it as `len(seq) > self.max_bytes`, so 0
+    # is not the "no cap" that freeze_at, retok_every, mint_pmin, mint_novel and probation_uses each
+    # spell out for their own zero; it is a cap that refuses EVERYTHING. A merge joins two units, so
+    # the shortest sequence _add can ever be offered is two bytes and 1 does exactly what 0 does.
+    # MEASURED over a two-area ~10 kB sample against the shipped 16 (size 512, tok.build_mint 256,
+    # tok.build_refused 0, bytes_per_token 3.5925925925925926): at 0 AND at 1, size 256,
+    # tok.build_mint 0, tok.build_refused 143, bytes_per_token 1.0 -- the vocabulary permanently the
+    # 256 raw bytes, which is TOK_MODE=bytes reached by deleting the mint rather than by asking for
+    # it, with TOK_MODE still reading "online" and the ledger still printing two build passes. At 2
+    # the mechanism is back (size 399, mint 143, bytes_per_token 2.0), so nothing an operator can ask
+    # for is lost. It bounds NOTHING from above; the 16 the composer truncates at is the other end and
+    # it is the coupling's business, recorded in the paragraph above and not turned into a guard.
 
     cand_window = Lever(1024, "How many candidates deep the mint ranking is materialized, so a "
                               "re-ranker has something to choose from.", U.COUNT)
@@ -503,6 +517,29 @@ class TOKLevers(LeverSet):
     # spine/rng.py. Without that, G3's fingerprint diff reads this lever as a coupling into every other
     # package, and L3's isolation sweep -- whose only oracle is affects() -- reports a leak that is real
     # but not the one anybody is looking for.
+    # THE REPAIR LANDED AS THE CHILD STREAM tok.dropout.mint AND IT CAN BE UNDONE THROUGH THE VALUE.
+    # Added 2026-09-07: src/tok/api.py::build_vocabulary refuses this lever non-finite and outside
+    # [0.0, 1.0], because it is declared units.PROBABILITY and a probability is not outside [0, 1] --
+    # written as the inverted chain `not 0.0 <= drop <= 1.0`, which is the one guard grammar in this
+    # tree NaN does not walk through. MEASURED against a TOK_DROPOUT=0.0 baseline of size 512 /
+    # tok.build_mint 256 / tok.build_refused 0 / bytes_per_token 3.5925925925925926:
+    #   inf and 1.5   size 399, mint 143, refused 143, bytes_per_token 1.0, tok.dropout_skip 3999 of
+    #                 4000, and two successive tokenize(regularize=True) calls returning the IDENTICAL
+    #                 segmentation -- the P1-H56 symptom ("BPE-dropout that returns the same answer on
+    #                 every call is not dropout") returning through the VALUE rather than through the
+    #                 stream, because a skip probability at or above 1 is not random. THE STREAM AND
+    #                 ITS MINT SITE ARE UNTOUCHED by the refusals.
+    #   nan           `nan > 0` is False, so no stream is even attached and every number is BIT-
+    #                 IDENTICAL to 0.0 -- with tok.dropout_skip ABSENT, which tok/api.py::tokenize's
+    #                 own convention reads as "unreachable". The report then says the regularizer is
+    #                 off on a run the operator switched on.
+    #   0.3           the mechanism working: size 402, dropout_skip 737, two regularized calls
+    #                 DIFFERING (2280 ids then 2257) and the deterministic call a third answer (1911).
+    # WHAT IS NOT CLOSED, AND THE DEFAULT IS THE REASON THIS MATTERS. TOK_DROPOUT=1.0 IS ADMITTED AND
+    # WAS MEASURED TO DO EXACTLY WHAT inf DOES (size 399, bytes_per_token 1.0, dropout_skip 3999,
+    # identical segmentations): `stream.random()` draws from [0.0, 1.0), so every draw is below 1.0.
+    # 1.0 is a legally typed probability and the top of this lever's own declared interval, and
+    # refusing it would be a range ruling the declaration does not support -- so it stands, named.
 
     # ==============================================================================================
     # 4. PROBATION -- what happens to a token that did not earn its slot

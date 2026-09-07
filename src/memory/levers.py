@@ -123,6 +123,17 @@ class MEMLevers(LeverSet):
     # self_organize.py:4873, `quota=(MEM_QUOTA if MEM_PER_EXPERT else None)` -- one declared number that
     # meant a per-block budget on one path and NOTHING AT ALL on the other, so the same 128 sized the
     # store in one configuration and was silently discarded in the other.
+    # ZERO IS NOT A SENTINEL HERE AND IS NOW REFUSED, at memory/api.py::open_store, together with
+    # `owners` below and for one reason: capacity is DERIVED from these two, so a zero on either is
+    # not a setting of the store, it is the store. MEASURED before the refusal landed, through
+    # spine.assemble.build at the shipped defaults: MEM_QUOTA=0 gave MEM.d_capacity=0 over 64 owner
+    # blocks, keys.shape (0, 128), counters store.n_opened: 0 beside store.blocks: 64, and no
+    # refusal, no warning and no report line anywhere -- and open_store's own
+    # `capacity != owners * quota` guard, which exists because of E7.40's 24x silent shrink, passed
+    # on the identity 0 == 64 * 0. MEM declares no `enabled` lever, so 0 would be an undeclared off
+    # switch for the whole mechanism goal B rests on. MEM_QUOTA=1 is a one-entry block and is in
+    # range; below zero there was no named refusal either (MEM_QUOTA=-5 gave d_capacity=-320 and a
+    # bare torch RuntimeError from Store.__init__), so the refusal is written `< 1`.
 
     owners = Lever(
         64, "How many eviction partitions the store is split into; 1 is the single global store.", U.COUNT)
@@ -135,6 +146,21 @@ class MEMLevers(LeverSet):
     # "per-expert memory ON" on a SOCIETY=0 run where it had been off since step 0 (ISSUES.md:1505).
     # Both disappear with the boolean: the d_owner_blocks fold already collapses to 1 block when
     # FAB.slots is 0, so fabric-off degrades correctly with no second knob and no AND.
+    # ZERO IS NOT A SENTINEL HERE EITHER, AND WHAT IT DID WAS WORSE THAN AN ERROR: it was SILENTLY
+    # REWRITTEN TO 1. spine/assemble.py::_owner_blocks folds this lever as
+    # `max(1, min(int(expert_slots), int(owner_buckets)))`, so at MEM_OWNERS=0 the frozen Config
+    # still answered mem.owners == 0 while MEM.d_owner_blocks was 1 and MEM.d_capacity was 128
+    # against 8192 -- a 64x shrink, measured, with no refusal, no warning and no report line, so the
+    # printed configuration and the running one disagreed about the number that sets the store's
+    # size. That is the shape train/api.py::startup_refusals already refuses for RUN_EPOCHS=0.
+    # IT IS REFUSED AT memory/api.py::open_store AND NOT REPAIRED IN THE FOLD, and the distinction
+    # is the sentence two lines above this one: that same `max(1, ...)` is what makes FAB_SLOTS=0
+    # collapse to one block, which is the fabric-off degradation this file declares. One expression,
+    # two jobs, and only the lever half is wrong -- so the refusal goes on the lever.
+    # REFUSING 0 REMOVES NO CONFIGURATION: the help text above declares 1 as "the single global
+    # store", and MEM_OWNERS=0, MEM_OWNERS=-5 and MEM_OWNERS=1 were measured to open the
+    # byte-identical store (capacity=128, quota=128, owners=1, blocks=1). 1 already spells
+    # everything 0 could mean, and spells it without the rewrite.
     # WHAT THE MERGE DOES NOT FIX, carried forward as a port requirement: real blocks are
     # min(FAB.slots, owners), so at 4096 expert slots against 64 partitions THIRTY-TWO experts share each
     # block and "per-expert memory" was per-64-buckets memory. And H31 -- the per-owner write path

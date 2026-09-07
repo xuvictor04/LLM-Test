@@ -107,6 +107,7 @@ what they are a multiple OF. The rule applied is narrow on purpose: where the de
 census's label (every weight below at 0.0..1.0), the census's label is kept, because a weight that
 COULD exceed 1 is a judgement call and this file is not the place to relitigate it. units.py has no
 MULTIPLIER constant and adding one is a spine edit, not a fabric edit.
+
 """
 # ABSOLUTE, NOT `from ..spine.lever import ...`. The tree is imported with `src` itself on
 # sys.path -- tests/test_derive.py::<module> does it, and so does the verification command for this
@@ -874,3 +875,62 @@ class FABLevers(LeverSet):
     # (:7264-7280); it is the continuous counterpart of `rescue`. SIZING BUG TO CARRY A FIX FOR: the
     # budget was sized off n_live while the list was already filtered to past-grace experts, so at
     # 523 live / 84 eligible "the worst 2%" meant "all of them" (:7273-7281).
+
+
+# ==================================================================================================
+# A DECLARATION CARRIES NO DOMAIN, AND WHAT THAT COST WAS MEASURED ON 2026-09-05
+# ==================================================================================================
+# WRITTEN AT THE FOOT OF THE FILE AND NOT IN THE MODULE DOCSTRING, ON PURPOSE. The census departures
+# table in tests/test_census.py cites three of the arguments in this file BY LINE SPAN -- the rows
+# for FAB_NMAX, FAB_NORM_ONLY and ROUTE_LEARN -- and
+# tests/test_census.py::check_n8_departure_arguments_still_there opens each span and requires the
+# lever's own name to still be inside it. Adding this block at the top instead moved all three spans
+# off their arguments and failed that check: measured, not assumed. Appending leaves every span
+# above untouched. It is also the smaller half of this tree's own rule that a citation is a claim --
+# a line number is the one kind of citation that goes stale with nobody editing it, which is why
+# tests/test_ownership.py::check_o12_citations_name_symbols refuses one into a live file, and why an
+# earlier draft of this very paragraph was refused by it for spelling those three spans out.
+#
+# `Lever(default, help, unit, choices=...)` is the whole declaration surface: a literal, a sentence,
+# a label the census renders, and -- for the one str lever here -- a set of legal spellings. There is
+# no lo/hi, so the ONLY thing a number above is checked against is its TYPE. A lever-domain sweep
+# drove every numeric lever in this package at nan, inf, -inf and 0, one fresh subprocess per cell,
+# through a real assembly and two real forward passes (.rework/audits/sweep_fabric.json). What it
+# found, and where each answer now lives, so this file and src/fabric/api.py cannot drift on it:
+#
+#   NON-FINITE FLOATS. Five levers each took ONE forward pass to make aux_loss nan, the composed
+#   objective nan and most of the gradient-carrying tensors non-finite -- alpha, cent_ema,
+#   route_region_w, halt_max and bal_floor -- and four of those write NaN into the routing centroid
+#   BUFFER, so correcting the lever afterwards does not recover the population. Three more walk
+#   through a `max` rather than poisoning arithmetic: spawn_mult, spawn_floor and route_t, because
+#   Python's max keeps its FIRST argument when the comparison is False and every comparison with NaN
+#   is False. src/fabric/api.py::build now refuses EVERY float lever declared here at nan and at both
+#   infinities, and each of the three guard sites carries its own measurement in its own docstring
+#   (fabric/api.py::_decay_to_floor, fabric/api.py::_spawn_check, fabric/api.py::_entry_logits).
+#   ONE FLOAT LEVER IS REFUSED SOMEWHERE ELSE AND IT IS NOT AN EXCEPTION TO THE RULE: `pressure` is
+#   consumed by the FAB.d_operating_population coupling DURING spine/assemble.py::build, before any
+#   Config is frozen, so the refusal that fires is spine/derive.py::operating_population's -- which
+#   names the setpoint it was computing but cannot name this lever, because two packages' couplings
+#   reach that function.
+#
+#   ZEROS. Most zeros here are DECLARED sentinels and stay legal -- depth0=0 is no curriculum,
+#   dom_frac=0 switches the breadth cap off, ec_w/hop_sup/rescue=0 are off, route_region_w=0 routes
+#   on predicted weights alone, and route_t/bal_warm/ponder_warm/emb_every/chain_k/ens_k/ind_k are
+#   floored by a guard at their point of use. SIX ARE NOT, and no finiteness rule could ever have
+#   reached them because all six are finite ints that pass every type check: n0, slots, rank, dk,
+#   emb_hid and hops are COUNTS the population is built out of, and src/fabric/api.py::build now
+#   refuses each below one, quoting what it measured. rank=0 builds experts with no parameters and a
+#   nan loss; dk=0 deletes routing identity and returns a nan loss; emb_hid=0 collapses every
+#   expert's identity to one point SILENTLY, with a finite loss and every gate still printing FIRED.
+#
+#   WHAT IS STILL OPEN, AND NO SENTENCE HERE MAY BE READ AS SAYING OTHERWISE. Those refusals close
+#   four values on each float lever and one arm of six counts. They do NOT bound anything, and a
+#   FINITE value does the same damage: alpha=1e26 returns an ordinary-looking loss pair over a
+#   population whose gradients are already mostly poisoned, which is worse than an infinity because
+#   an infinity at least comes back nan. A declared per-lever domain -- lo/hi in the shape `choices=`
+#   already has -- is the general answer and is the owner's open question, not this file's.
+#   TWO KNOWN HOLES THIS ROUND DID NOT CLOSE, named rather than left for the next sweep to re-find:
+#   manage_every=0 (three live readers give three different answers for it, and the refusal that
+#   would end that is blocked by a check in a file FAB does not own -- see .rework/audits/wl_fabric.json)
+#   and dom_min=0, which removes the floor that stops the breadth cap banning every expert from
+#   every domain, and which is unreachable only because FAB.observe is still a stub.

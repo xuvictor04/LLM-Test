@@ -98,9 +98,39 @@ def operating_population(pressure, slots):
 
     The `max(3, ...)` is the same floor as the gate's `n_live <= 2`, restated here rather than shared,
     because a population of two does not become a population of two for a pressure reason.
+
+    A NON-FINITE `pressure` IS REFUSED HERE AND NOWHERE ELSE, AND THAT PLACEMENT IS FORCED. This is
+    the first thing FAB_PRESSURE reaches: the FAB.d_operating_population coupling calls it during
+    spine/assemble.py::build, so it runs BEFORE any Config is frozen and therefore before
+    src/fabric/api.py::build's own float-lever finiteness refusal -- the one that would name the
+    lever -- can see the value at all. Until 2026-09-06 the arithmetic below did the refusing by
+    accident: `int(exact)` raises a bare `ValueError: cannot convert float NaN to integer` at nan and
+    a bare `OverflowError: cannot convert float infinity to integer` at +/-inf, out of a derive
+    function, with no mention of a setpoint, of a coupling or of the fact that a fraction had been
+    typed as a non-number (measured: FAB_PRESSURE=nan/inf/-inf, stage spine.assemble.build, all
+    three). The refusal below says which quantity and what it was for.
+    WHAT IT STILL CANNOT SAY IS THE LEVER NAME, and that is a real gap rather than an oversight: a
+    conversion in the spine is handed a number, not the name of the lever whose wire it is computing,
+    and the identical gap is reported per layer by tests/test_fabric.py::check_f8_manage_period_kind_and_refusal
+    for flush_period_windows. Two callers reach this function with two different levers'
+    values -- FAB.d_operating_population and CAP.d_operating_population -- so a name written in here
+    would be wrong for one of them.
     """
+    p = float(pressure)
+    if p != p or p in (float("inf"), float("-inf")):
+        raise ValueError(
+            f"operating_population: pressure={pressure!r} is not a fraction. This is an occupancy "
+            f"SETPOINT -- the population the fabric equilibrates at, `pressure x slots` -- and a nan "
+            f"or an infinity is not an occupancy. It is refused here, in front of `int(exact)`, "
+            f"because that line answered nan with a bare 'cannot convert float NaN to integer' and "
+            f"+/-inf with a bare 'cannot convert float infinity to integer', neither of which names "
+            f"the quantity or says a setpoint was being computed. THE LEVER IS NOT NAMED and cannot "
+            f"be from here: two couplings reach this function with two different packages' values "
+            f"(FAB.d_operating_population from FAB_PRESSURE and FAB_SLOTS, CAP.d_operating_population "
+            f"from the same pair for the capacity valve), so the name belongs to the caller. If this "
+            f"arrived through spine/assemble.py::build at startup, the value typed was FAB_PRESSURE.")
     n_slots = int(slots)
-    exact = float(pressure) * n_slots
+    exact = p * n_slots
     # CEILING, because the gate opens at n_live/slots >= pressure, so the setpoint is the first INTEGER
     # population that satisfies it. The 1e-9 tolerance is not decoration: 0.45 * 4096 is not exactly
     # 1843.2 in IEEE754, and a product that lands one ULP above an integer would push this a whole expert

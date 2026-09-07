@@ -25,11 +25,12 @@ them as arguments, which is not an import and O10 does not refuse it):
           epoch, stream_id, draws, counters, gates
 """
 import dataclasses
+import math
 import os
 import re
 import weakref
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 from spine import rng as _rng
 from spine.gate import Gate
 
@@ -881,6 +882,15 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     seen 2.1x and the original is 28% sampled, and "adding py cost eng X bits/byte" is then
     confounded with "py was memorised and eng was skimmed" (ISSUES P3-H22).
 
+    TWO OF THE THREE GATES' BOUNDS ARE REFUSED AT nan AND AT +inf, BEFORE THE SCHEDULE IS PARSED.
+    At either value `max(vals) > bound` and `skew > bound` are False for every possible exposure, so
+    the gate CANNOT fire while spine/gate.py::Gate's default reachable=True renders it as the middle
+    state -- measured, "Gate data.exposure_max: armed, did not fire (0.75 vs nan)". That is the
+    three-state collapse spine/gate.py exists to refuse, on the two guards D8 made exact. 0 and -inf
+    are NOT refused: on both, the gate genuinely FIRES and the printed word is true. The refusal
+    closes two values per lever and claims nothing beyond them -- a finite bound no exposure can
+    reach (1e26) passes it and is exactly as uncrossable. See the block itself.
+
     THREE DECLARED GATES, each printing its own arithmetic so "did not fire" is distinguishable
     from "could not fire":
       data.exposure_max     max(exposure) > dat.exposure_max. COMPUTED AT ONE AREA TOO: both reads
@@ -913,6 +923,111 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                  Gate data.splice_window
     """
     dat = dat.owned_by("DATA")
+
+    # ==============================================================================================
+    # THE TWO EXPOSURE BOUNDS, REFUSED AT nan AND AT +inf, BEFORE THE SCHEDULE IS PARSED
+    # ==============================================================================================
+    # WHY THIS IS A REFUSAL AND NOT A GATE `reason`. Both bounds are read exactly once each, at the
+    # two Gate constructions below, as `max(vals) > float(dat.exposure_max)` and
+    # `skew > float(dat.exposure_skew)`. spine/gate.py::Gate's own docstring fixes what the three
+    # states mean: "fired=False, reachable=True means the mechanism ran and its condition was not met
+    # -- a measurement. reachable=False means the condition CANNOT be met on this configuration,
+    # which is not a measurement at all." At a nan bound EVERY comparison is False, for every
+    # possible exposure, and at a +inf bound no finite exposure can exceed it -- so on both values
+    # the gate CANNOT fire and the default reachable=True renders it as the middle state. MEASURED on
+    # this tree at the shipped DATA_AREAS="eng,py,num,c", before this refusal landed:
+    #     DATA_EXPOSURE_MAX=nan   -> Gate data.exposure_max: armed, did not fire (0.75 vs nan)
+    #     DATA_EXPOSURE_MAX=inf   -> Gate data.exposure_max: armed, did not fire (0.75 vs inf)
+    #     DATA_EXPOSURE_SKEW=nan  -> Gate data.exposure_skew: armed, did not fire (3.0 vs nan)
+    #     DATA_EXPOSURE_SKEW=inf  -> Gate data.exposure_skew: armed, did not fire (3.0 vs inf)
+    # Four confident verdicts over a guard that refused nothing and could refuse nothing. A `reason`
+    # would not fix it -- the caveat two paragraphs down already rides on `reason`, and it is a
+    # sentence beside a verdict that is still printed. Nor is reachable=False the honest repair: the
+    # skew gate's own unreachable arm at n_areas == 1 is STRUCTURAL (a max/min ratio over one area is
+    # undefined and no lever can change that), while this is an out-of-range value the operator
+    # typed, and this tree refuses those by name at the first read.
+    #
+    # AND THESE TWO GATES SPECIFICALLY, BECAUSE OF WHAT D8 BOUGHT. ISSUES P1-H58 is the record of
+    # these gates testing the SCHEDULED per-area split while the run trained on a random draw from
+    # it, deviating up to 47.9% per area over eight seeds. DATA_DRAW was minted to close that, and
+    # data/levers.py::DATALevers says why "planned" is the default in as many words: "It is the only
+    # value under which the startup gate is EXACT, and a startup gate is the only thing that can
+    # refuse a bad configuration BEFORE it spends the GPU time." A bound that no value can cross
+    # gives back exactly what D8 paid for -- the gate becomes untestable again, and this time the
+    # report says "armed" rather than carrying a caveat.
+    #
+    # WHAT IS NOT REFUSED, AND IT IS MEASURED RATHER THAN ASSUMED. -inf AND 0 ARE LEFT ALONE ON BOTH
+    # LEVERS. They are the "flag every plan" configuration, and on both the arithmetic and the
+    # printed word are true:
+    #     DATA_EXPOSURE_MAX=-inf  -> Gate data.exposure_max: FIRED (0.75 vs -inf)
+    #     DATA_EXPOSURE_MAX=0     -> Gate data.exposure_max: FIRED (0.75 vs 0.0)
+    #     DATA_EXPOSURE_SKEW=-inf -> Gate data.exposure_skew: FIRED (3.0 vs -inf)
+    #     DATA_EXPOSURE_SKEW=0    -> Gate data.exposure_skew: FIRED (3.0 vs 0.0)
+    # Neither 0 nor -inf is a DECLARED sentinel -- data/levers.py::DATALevers says only "above which
+    # the data plan is flagged" -- and this refusal does not mint one for them. It refuses the two
+    # values on which the gate prints a verdict its own arithmetic contradicts, and leaves the two on
+    # which it does not. Refusing -inf as well would remove a configuration that today behaves
+    # correctly and reports correctly, which is the untrippable-guard class inverted.
+    #
+    # NO SWITCH. ckpt/api.py::REFUSE_NEGATIVE_PERIOD states that a range refusal getting a switch "is
+    # NOT a precedent" and names lm/api.py::resolve, opt/api.py::build and capacity/api.py::new_valve
+    # as refusing out-of-range lever values with none. This is one of those.
+    #
+    # WHAT THIS REFUSAL DOES NOT CLAIM, AND THE MEASUREMENT THAT BOUNDS IT. It closes two values per
+    # lever. It does NOT make either bound safe, validated or in range: a FINITE value does the same
+    # damage. DATA_EXPOSURE_MAX=1e26 is finite, passes this check, and no exposure this package can
+    # compute will ever reach it, so the gate is exactly as unreachable as it is at +inf while the
+    # printed threshold looks like an ordinary number -- and the same measurement one package over is
+    # what the ruling turns on (FAB_ALPHA=1e26: aux 0.5150710, composed 2.943258, 15 of 23
+    # gradient-carrying tensors already non-finite, an ordinary-looking loss pair over a poisoned
+    # population, WORSE than +inf). A declared per-lever domain is the general answer to that and it
+    # is the owner's open question, not this function's. What is closed here is four cells.
+    #
+    # THE OTHER DATA FLOAT IS NOT IN THIS SWEEP AND IS NOT EXEMPT: DATA_HOLDOUT_FRAC at nan and at
+    # +/-inf raises out of data/api.py::open_areas -- `int(len(blob) * float(dat.holdout_frac))` --
+    # which runs BEFORE this function and refuses badly, with a bare ValueError/OverflowError naming
+    # no lever. That is a defect in open_areas and it is filed, not fixed here; putting a second
+    # check for it in data_plan would be an untrippable guard, because open_areas has already raised.
+    _bad = []
+    for _field in ("exposure_max", "exposure_skew"):
+        _v = float(getattr(dat, _field))
+        if math.isnan(_v) or _v == math.inf:
+            _bad.append((dat.lever(_field).env_name, _v))
+    if _bad:
+        raise LeverError(
+            f"DATA: unusable exposure bound(s) "
+            f"{', '.join(f'{k}={v}' for k, v in _bad)}. An exposure bound is the value a measured "
+            f"exposure is compared AGAINST, and neither a nan nor a positive infinity is a value any "
+            f"exposure can cross: `max(vals) > nan` and `skew > nan` are False for every possible "
+            f"reading, and no finite exposure exceeds +inf. The gate is therefore UNREACHABLE and "
+            f"spine/gate.py::Gate is handed the default reachable=True, so it prints the middle "
+            f"state -- measured on this tree at the shipped four areas: "
+            f"'Gate data.exposure_max: armed, did not fire (0.75 vs nan)' and "
+            f"'Gate data.exposure_skew: armed, did not fire (3.0 vs inf)'. That is a verdict its own "
+            f"arithmetic contradicts, in the one instrument that stands between goal B's "
+            f"add-an-area experiment and ISSUES P3-H22, where an added area seen 2.1x while the "
+            f"original was 28% sampled made 'adding py cost eng X b/B' indistinguishable from 'py "
+            f"was memorised and eng was skimmed'. THESE TWO GATES ARE ALSO WHAT DECISION D8 BOUGHT: "
+            f"DATA_DRAW defaults to 'planned' because, in data/levers.py::DATALevers's own words, "
+            f"that 'is the only value under which the startup gate is EXACT, and a startup gate is "
+            f"the only thing that can refuse a bad configuration BEFORE it spends the GPU time' -- a "
+            f"bound nothing can cross hands that back. NEITHER LEVER DECLARES A NON-FINITE MEANING: "
+            f"data/levers.py::DATALevers says only 'above which the data plan is flagged' for "
+            f"exposure_max and 'above which the data plan is flagged as imbalanced' for "
+            f"exposure_skew, and there is no inf branch anywhere in this file. WHAT IS STILL "
+            f"ACCEPTED, so the refusal is not read as wider than it is: 0 and -inf both make the "
+            f"gate FIRE on every plan, and both print the truth while doing it -- measured, "
+            f"'Gate data.exposure_max: FIRED (0.75 vs 0.0)' and 'FIRED (0.75 vs -inf)'. That "
+            f"configuration is left exactly as it was. WHAT THIS REFUSAL DOES NOT CLAIM: it closes "
+            f"two values per lever and leaves the bound otherwise unbounded. DATA_EXPOSURE_MAX=1e26 "
+            f"is finite, passes this check, and is just as uncrossable as +inf while printing as an "
+            f"ordinary number. A declared per-lever domain is the general answer and it is open. Set "
+            f"the lever to a finite bound the exposure can actually reach -- the shipped values are "
+            f"DATA_EXPOSURE_MAX=2.0 and DATA_EXPOSURE_SKEW=3.0 -- or to 0 to flag every plan. WHAT "
+            f"THE ENVIRONMENT SUPPLIED: "
+            + ", ".join(f"{k}={v!r}" for k, v in sorted(dat.given().items())
+                        if k in ("exposure_max", "exposure_skew")) + ".")
+
     from spine import derive as _derive
     names = list(areas.names)
     n_areas = len(names)

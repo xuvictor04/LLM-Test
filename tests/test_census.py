@@ -122,7 +122,7 @@ DEPARTURES = {
             "intermediate values do nothing -- a knob that reads continuous and behaves boolean, which "
             "is the wrong-measurement family."),
     ("misc", "WRONG_SWEEP"): dict(
-        census="MEM_SWEEP", lands="MEM_WRONG_SWEEP", where="src/memory/levers.py:27, :63-68, :437-449",
+        census="MEM_SWEEP", lands="MEM_WRONG_SWEEP", where="src/memory/levers.py:27, :63-68, :463-475",
         why="The census's MEM_SWEEP is a POLICY knob folding several wrong-entry behaviours together. "
             "The fold's other inputs were dropped (WRONG_MARGIN, WRONG_MIN_N, WRONG_THRESH), so what is "
             "left to merge is one flag, and a policy enum with one input is that flag under a name that "
