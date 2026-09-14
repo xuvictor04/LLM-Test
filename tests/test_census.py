@@ -33,6 +33,28 @@ carries the file and line where the argument actually lives, and N8 OPENS THAT P
 once and the files it indexes kept being edited, so three of the nine had drifted onto other levers'
 text while every check here stayed green.
 
+WHAT A `domain=` ON A DECLARATION DOES TO THIS FILE, WHICH IS NOTHING, AND THAT IS A MEASUREMENT
+RATHER THAN AN ASSUMPTION. `domain=(lo, hi)` landed on 33 levers on 2026-09-14. A census row has
+exactly nine fields and all 331 rows carry all nine -- old_name, old_default, verdict, new_owner,
+new_name, unit, purpose, reason, couples_with -- and not one of them is a range, a bound, an
+interval, a minimum or a maximum. The checks below read fewer than that: family, old_name, verdict,
+new_owner and new_name, plus the DEPARTURES table. `unit`, `purpose`, `reason`, `old_default` and
+`couples_with` are read by NO check in this file. A domain changes a lever's legal SET and changes
+neither its name, its owner, nor whether it exists, so no row must say anything new and no check
+here changes. All 33 were joined against the census on 2026-09-14: 33 of 33 have a row, 0 are
+unaccounted for.
+
+AND THE ONE THING A READER WILL WANT TO "FIX" HERE, WHICH MUST NOT BE FIXED. Five of the 33 --
+DOM_MERGE_DIST, DOM_SHIFT_DIST, DOM_SPAWN_DIST, FAB_DISCOVER, FAB_MERGE_DIST -- carry the census
+unit `fraction 0..1` and a declared domain of (0.0, 2.0), because every one of them is a COSINE
+DISTANCE between unit vectors and runs on [0, 2]. That is not a contradiction to repair in either
+direction. Narrowing the domain to 1.0 to match the label would refuse a pooled radius of 1.24 that
+this tree has MEASURED on this geometry; rewriting the label would overturn the three standing
+rulings that U.FRACTION is a LABEL the census renders and not a bound
+(src/fabric/api.py::build, src/tok/levers.py::TOKLevers, src/capacity/api.py::new_valve). A check
+comparing the unit column against the domain was considered here and REFUSED for that reason: its
+first finding would be a true reading called wrong.
+
 WHAT THIS FILE CANNOT CATCH:
   * whether the census itself is right. It was written by reading self_organize.py, and a knob it
     misread is misread here too. The `reason` prose on each census row is the evidence for that, and it
@@ -122,7 +144,7 @@ DEPARTURES = {
             "intermediate values do nothing -- a knob that reads continuous and behaves boolean, which "
             "is the wrong-measurement family."),
     ("misc", "WRONG_SWEEP"): dict(
-        census="MEM_SWEEP", lands="MEM_WRONG_SWEEP", where="src/memory/levers.py:27, :63-68, :463-475",
+        census="MEM_SWEEP", lands="MEM_WRONG_SWEEP", where="src/memory/levers.py:27, :63-68, :517-529",
         why="The census's MEM_SWEEP is a POLICY knob folding several wrong-entry behaviours together. "
             "The fold's other inputs were dropped (WRONG_MARGIN, WRONG_MIN_N, WRONG_THRESH), so what is "
             "left to merge is one flag, and a policy enum with one input is that flag under a name that "

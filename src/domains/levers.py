@@ -285,16 +285,29 @@ class DOMLevers(LeverSet):
     # the probe measured (:3465-3477). The mechanism was never tested; a guess at its parameters was.
 
     shift_dist = Lever(0.30, "Under shift_rule=constant, the adjacent-window cosine distance that "
-                             "counts as a candidate boundary.", U.FRACTION)
+                             "counts as a candidate boundary.", U.FRACTION,
+                       domain=(0.0, 2.0))
     # THE DEFAULT BOUNDARY RULE, AND THE WHOLE PARTITION STARTS HERE -- which is why its known weakness
     # is carried in this comment rather than fixed by deletion. The probe measured WITHIN-segment
     # adjacent distance running 0.044 -> 0.229 -> 0.317 -> 0.340 as the encoder trains, against this
     # CONSTANT 0.30, so boundary precision falls 0.92 at N=200 to 0.27 at N=16000: late in a run the
     # detector trips on ordinary within-segment variation. That is the same disease `spawn_dist` has,
     # and it is why `relative` exists.
+    # DOMAIN (0.0, 2.0) -- THE RANGE OF THE THING IT IS COMPARED AGAINST, WHICH IS NOT THE RANGE THE
+    # UNIT LABEL SUGGESTS. src/domains/api.py::observe trips this against an adjacent-window COSINE
+    # DISTANCE, 1 - cos(sig, run_sig) between two unit vectors, and that quantity runs to 2 and not
+    # to 1. This file already reads it that way at radius_cap, further down this group, where the
+    # pooled radius is recorded as observed at 1.24 of a maximum possible 2.0 -- a distance ABOVE 1.0, on
+    # this very geometry, which a hi of 1.0 would refuse. Writing 1.0 here because the unit column
+    # says FRACTION would refuse a reading the mechanism produces.
+    # BOTH ENDS ARE SETTINGS RATHER THAN TYPOS: at 0.0 every window is over threshold, and 2.0 is
+    # the distance no jump can exceed, which is the never-fires arm this group's section banner
+    # already calls a documented path to an inert partition.
+    # AND IT IS A BOUND ON THE SPELLING, NOT ON THE HARM. 0.30 is inside this domain and is the
+    # constant whose boundary precision the probe measured falling from 0.92 to 0.27.
 
     shift_q = Lever(0.50, "Under shift_rule=relative, the quantile of the last 512 adjacent distances "
-                          "used as the base.", U.FRACTION)
+                          "used as the base.", U.FRACTION, domain=(0.0, 1.0))
     shift_mult = Lever(1.5, "Under shift_rule=relative, trip when the jump exceeds this many times "
                             "the shift_q base.", U.COUNT)
     # UNIT: a MULTIPLE of the shift_q base, not a fraction (module header). BOTH COORDINATES ARE
@@ -307,6 +320,16 @@ class DOMLevers(LeverSet):
     # only when shift_rule=relative, which the choices lever now makes a declaration rather than a
     # reading exercise. (q50 x 1.5 also fails at N=16000, where AUC is 0.70 and no threshold does well
     # -- which is a reason not to over-train the encoder, not a reason to retune this.)
+    # DOMAIN (0.0, 1.0) ON shift_q, AND NONE ON shift_mult. shift_q is a QUANTILE POINT:
+    # src/domains/api.py::observe takes it over the last 512 adjacent distances, and a quantile is
+    # defined on [0, 1] -- 0.0 selects the smallest recent distance as the base and 1.0 the largest,
+    # and both are bases a calibration would choose. Outside it there is nothing to select: the old
+    # body indexed a sorted window at int(shift_q * len), where a NEGATIVE point addresses from the
+    # END: at a full 512-sample window shift_q=-0.1 resolves to v[-51], which is the 0.90 quantile
+    # -- a request for a low base silently answered with a high one -- and a point above one runs
+    # off the top and is clamped to the largest sample. shift_mult gets NO pair, deliberately: it is a MULTIPLE of whatever that base
+    # measures, nothing in the declaration states a ceiling for a multiple, and the probe table
+    # above is a calibration of two coordinates and not a range for either.
 
     sustain = Lever(2, "Consecutive over-threshold windows required before a boundary is declared; "
                        "the pending signatures are then averaged into the assign query.", U.Windows)
@@ -355,7 +378,8 @@ class DOMLevers(LeverSet):
     # not a proof, so it stays as a selectable arm.
 
     spawn_dist = Lever(0.35, "Cosine distance beyond which an assign query spawns a new domain instead "
-                             "of re-entering the nearest.", U.FRACTION)
+                             "of re-entering the nearest.", U.FRACTION,
+                       domain=(0.0, 2.0))
     # Census: NEW_DIST -> DOM_SPAWN_DIST. Renamed because NEW_DIST says nothing about which decision it
     # makes, and because the merge threshold had to stop deriving from it by a second route.
     # STILL LOAD-BEARING UNDER accept_rule=radius: it is the bootstrap threshold every domain uses
@@ -365,6 +389,14 @@ class DOMLevers(LeverSet):
     # between within- and between-domain distances for only a few hundred steps. At GH200 scale
     # within-domain cohesion of 0.61 (d = 0.39 > 0.35) made re-entry arithmetically forced to spawn:
     # 142 domains for 4 corpora, silhouette -0.22.
+    # DOMAIN (0.0, 2.0) -- the cosine-distance range, the same one shift_dist carries and for the
+    # same reason: src/domains/api.py::observe compares it against d(query, centroid) = 1 - cos on
+    # unit vectors. NOT (0.0, 1.0). The series in the paragraph above reaches .668 and the pooled
+    # radius on the same distances was measured at 1.24, so the interval above 1.0 holds readings
+    # this encoder actually produced. 0.0 spawns on every assign; 2.0 is the distance nothing can
+    # exceed, so it never spawns and every window re-enters the nearest domain.
+    # NEITHER END IS AN OPINION ABOUT THE SETTING: 0.35 sits inside this domain and is the constant
+    # the paragraph above records as arithmetically forced to spawn at GH200 scale.
 
     margin = Lever(0.75, "Under accept_rule=margin, re-identify when the nearest centroid is at most "
                          "this fraction of the runner-up's distance.", U.FRACTION)
@@ -374,12 +406,22 @@ class DOMLevers(LeverSet):
 
     radius_q = Lever(0.85, "Quantile of d(reservoir window, own centroid) that defines a domain's "
                            "acceptance radius, and of the pooled distances for domains with none yet.",
-                     U.FRACTION)
+                     U.FRACTION, domain=(0.0, 1.0))
     # ONE OF THE TWO NUMBERS DEFINING THE MEASURED RADIUS, and it is free: rekey has already encoded
     # the reservoir, so the distances exist before the quantile is taken (:3574-3575). Near-degenerate
     # with radius_mult -- both enlarge one scalar -- but not redundant: the quantile is BOUNDED by the
     # observed reservoir while the multiplier extrapolates past it, and the fold's pooled-radius guard
     # uses this quantile over ALL domains' distances.
+    # DOMAIN (0.0, 1.0) -- FROM THE OPERATION AND NOT FROM THE UNIT: it is the q of a quantile.
+    # src/domains/api.py::rekey takes it over one domain's reservoir distances and again over ALL
+    # domains' distances for the pooled radius, and off [0, 1] a quantile selects nothing. The old
+    # body handed it straight to torch.quantile, which refuses q=1.5 and q=-0.1 with a RuntimeError
+    # naming neither this lever nor its value -- the refusal exists, it just does not say whose
+    # fault it is, and that is what a declared pair changes. 0.0 is the nearest reservoir sample and
+    # 1.0 the furthest: the two ends of the measured spread, both selectable.
+    # THE PAIR SAYS NOTHING ABOUT THE RADIUS THIS PRODUCES. radius_mult multiplies the quantile
+    # afterwards and radius_cap is what bounds the product; a q inside [0, 1] can still hand a
+    # runaway radius to the guard.
 
     radius_mult = Lever(1.2, "Multiplier on the measured quantile that gives the acceptance radius.",
                         U.COUNT)
@@ -420,7 +462,8 @@ class DOMLevers(LeverSet):
     # ==============================================================================================
 
     merge_dist = Lever(0.28, "Cosine distance under which two domains are merged into one during a "
-                             "management pass.", U.FRACTION)
+                             "management pass.", U.FRACTION,
+                       domain=(0.0, 2.0))
     # Census: MANAGE_MERGE -> DOM_MERGE_DIST, absorbing MERGE_FRAC. Renamed out of the MANAGE_* family
     # it never belonged to. See DEFECT 3 in the header for why 0.8 does not survive in any form: this
     # 0.28 is the only route to the merge threshold, and `d_merge_dist` must not exist.
@@ -436,6 +479,16 @@ class DOMLevers(LeverSet):
     # consumed only by mem.src, the affiliation map and the report, so this number sets the GRANULARITY
     # OF FORGETTING (20 deletes of 1.6% at 25 domains, against one delete of 30% at 4) -- not
     # prediction quality.
+    # DOMAIN (0.0, 2.0) -- a cosine distance, bounded at the top of THAT range and not at 1.0.
+    # src/domains/api.py::manage collapses every pair under this number, so it is compared against
+    # 1 - cos between two centroids, which reaches 2 at antipodal and was measured at 1.24 on this
+    # population's own distances, at radius_cap in the group above. The sweep row at 0.80 is already most of the
+    # way up a [0, 1] reading and is not the extreme -- 2.0 is, and it collapses the population to
+    # one domain, which is the counterfeit-4 direction the table above prices. 0.0 merges only
+    # centroids that coincide exactly, i.e. the merge is off in everything but name.
+    # WHAT THE PAIR CANNOT SAY is the thing this comment is mostly about: the RELATION to
+    # spawn_dist. A merge threshold well under the creation threshold makes every pair in between
+    # permanent, and both endpoints of that mistake are inside both domains.
 
     # ==============================================================================================
     # 5. CULL -- THE LEVERS WITH THE SHARPEST CONTINUAL-LEARNING CONSEQUENCE
@@ -447,7 +500,8 @@ class DOMLevers(LeverSet):
     # ==============================================================================================
 
     cull_frac = Lever(0.10, "Per-pass cull budget: the bottom fraction of domains by decayed activity "
-                            "are considered.", U.FRACTION)
+                            "are considered.", U.FRACTION,
+                      domain=(0.0, 1.0))
     # THE FIX THAT MOTIVATED IT IS THE COMMENT. `max(1, int(0.10 * n))` made a FRACTION into a MINIMUM
     # of one for any population under ten, turning "cull at most a tenth" into "cull at least one,
     # every pass, forever". The run that added Python shows the ratchet landing three separate times on
@@ -460,6 +514,19 @@ class DOMLevers(LeverSet):
     # (:3648-3663). A population too small for a proportional cull is not culled proportionally; the
     # empty-cull and the merge still run, and both are lossless. THE FABRIC STILL CARRIES THE SAME
     # max(1, ...) ratchet (ISSUES P1-M31, :2263), so this lever's history is also the argument for FAB's.
+    # DOMAIN (0.0, 1.0) -- A SHARE OF THE LIVE POPULATION. src/domains/api.py::manage takes
+    # int(cull_frac * n) domains off the bottom of the activity order, so 1.0 considers the whole
+    # population and there is nothing above it to name: a fraction above one asks for more domains
+    # than exist and gets the same slice 1.0 gets.
+    # LO IS 0.0 AND I DID NOT CHOOSE THAT FROM THE UNIT -- an empty budget is a state manage()
+    # anticipates BY NAME, with its own counter n_cull_budget_zero in that function's DID IT FIRE
+    # list, and given that this lever's entire history is a max(1, ...) floor that ratcheted a
+    # population to one domain, a zero budget is the direction that loses nothing.
+    # THE NEGATIVE SIDE IS WHAT THIS PAIR ACTUALLY EARNS. The budget is a list slice, and
+    # int(-0.1 * n) is NEGATIVE, which Python reads from the other end: at n = 10 the budget slice
+    # becomes order[:-1], nine of the ten domains rather than one of them. A fraction below zero
+    # silently turns a tenth-of-the-population budget into all but the most active domain, which is
+    # the ratchet again with a minus sign in front of it.
 
     cull_act_min = Lever(15, "Cull threshold on a domain's DECAYED activity counter -- not a window "
                              "count, and never readable as one.", U.COUNT)
@@ -487,13 +554,23 @@ class DOMLevers(LeverSet):
     # positional argument in a manage() call.
 
     decay = Lever(0.9, "What each domain's activity counter keeps per management pass, so `act` "
-                       "measures RECENT use rather than cumulative use.", U.FRACTION)
+                       "measures RECENT use rather than cumulative use.", U.FRACTION,
+                  domain=(0.0, 1.0))
     # It replaced a cumulative `size` under which any domain that ever reached the minimum was
     # IMMORTAL, and it is the rule the expert router already uses -- one decay discipline for both
     # populations. THE COUPLING IS NAMED RATHER THAN DENIED: this decays per PASS, so the effective
     # half-life in windows is set by (manage_every x decay), and changing the cadence silently rescales
     # cull_act_min. It cannot be removed -- an activity counter has to be decayed on SOME clock -- so
     # PLAN section 4's rule applies: print it in the coupling graph as an irreducible pair.
+    # DOMAIN (0.0, 1.0) -- WHAT A RETENTION MULTIPLIER CAN BE, taken from what the reader does with
+    # it and not from the unit column. src/domains/api.py::manage multiplies `act` by this number
+    # once per pass, so it is the fraction of a counter that survives: 1.0 keeps all of it and is
+    # exactly the cumulative regime this comment opens with, under which a domain that ever reached the
+    # minimum was immortal -- a real arm, and refusing it would refuse the behaviour this lever
+    # replaced rather than the mistake. 0.0 keeps none of it and makes `act` the activity of the
+    # last pass alone.
+    # ABOVE 1.0 IT IS A GAIN AND NOT A DECAY: `act` compounds every pass, cull_act_min is never
+    # reached again, and the cull's activity conjunct is dead while every counter still prints.
 
     grace = Lever(500, "Minimum age in windows since birth before a domain may be culled, on both cull "
                        "paths.", U.Windows)
@@ -587,7 +664,7 @@ class DOMLevers(LeverSet):
 
     prior_blend = Lever(0.15, "Weight of the per-domain token histogram in the blended prediction; "
                               ">0 also switches on the per-window accumulation that feeds it.",
-                        U.FRACTION)
+                        U.FRACTION, domain=(0.0, 1.0))
     # Census: DOM_PRIOR -> DOM_PRIOR_BLEND, renamed to say it is a blend weight.
     # ONE FIELD DOING TWO JOBS, and the split is a port requirement rather than a preference: at
     # :6788-6791 this value is a training-side ACCOUNTING SWITCH (accumulate asm.tokc per window), and
@@ -600,9 +677,17 @@ class DOMLevers(LeverSet):
     # EVAL_WINDOWS) per domain, so at EVAL_WINDOWS=4 it collects 4 and produces NOTHING -- while the
     # histogram is still paid for on every window (:8172-8177). The report at least says so now.
     # 0.0 disables the accounting entirely and costs nothing, which is the honest off-switch.
+    # DOMAIN (0.0, 1.0) -- FROM THE MIXTURE, NOT FROM THE UNIT. The blend is convex --
+    # (1 - prior_blend) * p_model + prior_blend * p_prior -- so outside [0, 1] one of the two
+    # distributions enters with a NEGATIVE weight and what comes out is not a distribution: mass off
+    # the simplex, and an eval number computed from it is not a perplexity of anything. 0.0 is the
+    # off-switch the line above declares and src/domains/api.py::prior returns (None, 0.0) for, so
+    # lo must admit it; 1.0 is the histogram alone, which is the ablation the domain-prior table
+    # needs in order to mean anything.
 
     tokc_decay = Lever(0.5, "What a domain's token histogram keeps when the tokenizer re-segments; "
-                            "applied once per retok. 1.0 restores cumulative-forever.", U.FRACTION)
+                            "applied once per retok. 1.0 restores cumulative-forever.", U.FRACTION,
+                       domain=(0.0, 1.0))
     # Census: TOKC_DECAY -> DOM_TOKC_DECAY. Renamed into this namespace because TOKC_DECAY reads as a
     # tokenizer knob while sitting in the domains block -- the same drift that filed LOSS_MASK_DEAD
     # under `# tokenizer` inside the domains section.
@@ -615,3 +700,9 @@ class DOMLevers(LeverSet):
     # THE RETOK EVENT ARRIVES FROM TOK AS A SIGNAL, NOT AS A LEVER READ. This package must not read
     # RETOK_EVERY: the cadence is TOK's to own, and a second copy of it here is a second answer to
     # "when did the vocabulary change".
+    # DOMAIN (0.0, 1.0) -- `decay`'s argument on the other histogram: src/domains/api.py::on_retokenize
+    # multiplies every count by this number once per retok, so it is the share of the counts that
+    # survives. THE HI END IS DECLARED IN THE HELP STRING RATHER THAN CHOSEN HERE -- 1.0 restores
+    # cumulative-forever -- and 0.0 drops the pre-retok counts outright, which is the strict reading
+    # of the argument above that they are observations of a different distribution. Above 1.0 the
+    # counts would be AMPLIFIED at an event that supplies no new observations at all.

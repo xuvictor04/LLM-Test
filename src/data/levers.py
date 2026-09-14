@@ -418,7 +418,9 @@ class DATALevers(LeverSet):
     # THE FLOOR OF TWO IS A PORT REQUIREMENT THIS DECLARATION CANNOT ENFORCE. The shipped resolution is
     # `p = p or max(2, _i("PHASES", 4))` (:1343) and spine/derive.py::pin_tick says in as many words that
     # the floor "belongs on the lever declaration" -- but `choices=` enumerates a closed set and cannot
-    # express "any integer >= 2", and lever.py has no bounds parameter. So the guard lives at the read
+    # express "any integer >= 2". spine/lever.py::Lever's `domain=` CAN state exactly that, as
+    # (2, None) -- this declaration does not carry one because populating it was not this pass's
+    # list, and an unpopulated interval is not a check. So the guard lives at the read
     # site, and the reason it must exist is concrete: one phase cannot have anything fade, and `faded` is
     # computed off the last phase, so PHASES=1 makes the unlearn-a-faded-area test skip itself as
     # vacuous -- a test that reports passing because it had nothing to check.
@@ -457,7 +459,18 @@ class DATALevers(LeverSet):
     # ==============================================================================================
 
     holdout_frac = Lever(0.05, "Fraction of each area held out and never sampled into the training "
-                               "stream.", U.FRACTION)
+                               "stream.", U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) -- A FRACTION OF A BODY, SUBTRACTED FROM THAT SAME BODY.
+    # src/data/api.py::open_areas computes `int(len(blob) * float(dat.holdout_frac))` and trains on
+    # `len(blob) - n_hold`, so the number can only name bytes that exist: above 1.0 it asks for more
+    # held-out bytes than the area has, and below 0.0 it asks for a NEGATIVE block, which reached
+    # the 0-byte refusal with arithmetic that refusal's own message misreports -- measured at -0.5
+    # over a 2 MB area: "min(int(2000000 * -0.5), 4000000) == 0", where the min is -1000000. That
+    # route is closed HERE rather than there, and the message is left to its owner. 1.0 stays inside
+    # and is the whole area held out; open_areas then refuses THAT by the usable-bytes floor, with
+    # the area's own numbers. 0.0 is a legal spelling refused per area for a real source by the same
+    # function -- "raise DATA_HOLDOUT_FRAC or DATA_VAL_CAP" -- and inert on the synthetic arm, which
+    # holds nothing out.
     # Census: VAL_FRAC -> DATA_HOLDOUT_FRAC. Renamed to the word the report already prints: "VAL" appears
     # nowhere in the output this produces (G12). Read at :1165 and applied at :1167-1172.
     # THE DEFECT TO CARRY IS IN THE SPLIT, NOT THE FRACTION. The last 5% of a corpus is a SAMPLE only if

@@ -35,6 +35,8 @@ call `from_env` at all outside spine/assemble.py (O8) -- so a module cannot MINT
 HANDED one is a call the entry point makes on purpose, and `Config.owned_by(PREFIX)` is the assertion at
 the receiving end that turns a wrong-package hand-off into a startup failure instead of a wrong number.
 """
+import decimal as _decimal
+import math as _math
 import os
 from collections import namedtuple as _nt
 
@@ -45,12 +47,218 @@ class LeverError(Exception):
     """A declaration or resolution problem. Always fatal, always at startup, never mid-run."""
 
 
+# ==================================================================================================
+# THE TWO PARSE-LEVEL REFUSALS, AND THE SWITCH ON EACH
+# ==================================================================================================
+#
+# WHAT LIVES HERE AND WHAT DOES NOT. Both constants below govern a rule that is true of a whole
+# DECLARED TYPE and is therefore not a per-lever judgement: "a float lever does not resolve to a
+# non-finite number" and "an int lever resolves to the integer its string denotes". Neither states
+# anything about a particular mechanism, neither needs to know what the value is for, and neither can
+# be derived from a range. The per-lever judgement is `domain=` on the declaration, which carries no
+# switch of its own -- its blast radius is one lever and deleting the kwarg is the switch.
+#
+# WHY A MODULE CONSTANT AND NOT A LEVER, and this is the shape .rework/DECISIONS.md D17 settled on
+# for the five period refusals (src/ckpt/api.py::REFUSE_NEGATIVE_PERIOD and its four siblings). D17
+# ruled that a refusal kept "for now" is kept WITH A SWITCH rather than as a code path that rots, and
+# the shape it landed on after weighing three carriers is a module-level constant. Two of its reasons
+# are stronger here than they were there:
+#   * A LEVER CANNOT CARRY THIS. The lever system is the thing being switched -- these rules run
+#     inside Lever.coerce, before any Config exists -- so a lever-shaped switch is circular. The only
+#     environment-variable form available is a raw os.environ read inside coerce. That is LEGAL here
+#     (tests/test_ownership.py::check_o1_one_env_reader permits exactly this file to name the
+#     environment) and it is REFUSED anyway: it would be the tree's first environment name that is
+#     not a lever -- invisible to spine/registry.py, to tests/test_census.py, whose N1/N2 join on
+#     lever names, and to docs/04_LEVERS.md -- which is precisely the failure this module's own
+#     header exists to end ("tokenizer.py read TOK_MINT_PMIN and TOK_MINT_GATE_K straight from
+#     os.environ, invisible to the registry and to every audit built on it").
+#   * THE MEASUREMENT NEEDS BOTH ARMS IN ONE PROCESS. spine/lever.py latches the assembly after one
+#     build, so a lever-shaped switch needs a fresh process per arm; a constant is set both ways in
+#     one, which is what "does the refusal have a bad effect" has to be answered by running.
+#
+# WHAT THAT COSTS, STATED HERE RATHER THAN DISCOVERED. Turning either of these off is a CODE EDIT and
+# not an environment variable: there is no SPINE_REFUSE_* name, these constants take no census row and
+# no row in the generated lever document, and an operator holding only a shell cannot reach them.
+# docs/04_CONTRACT.md already records the same gap for the five period refusals in its own words.
+#
+# ONE CONSTANT EACH, NOT ONE FOR BOTH, and the reason is not symmetry. The two rules govern DISJOINT
+# populations -- 97 float levers and 110 int levers, measured, with no lever in both -- and answer
+# different questions. A single flag would mean that an operator turning off the rule that broke
+# their run also turns off a rule that had nothing to do with it, which is the "many spellings of one
+# thing" failure inverted: one spelling for two things.
+
+REFUSE_NON_FINITE_FLOAT = True
+"""Whether Lever.coerce refuses nan, inf and -inf on a FLOAT lever. True is the shipped state.
+
+WHAT IT GOVERNS, SCOPED EXACTLY AND MEASURED RATHER THAN ASSUMED. The 97 float levers and nothing
+else. The 110 int levers ALREADY refuse every non-finite spelling and did before this constant
+existed: `int(float(raw))` raises ValueError at 'nan' and OverflowError at 'inf'/'-inf'/'1e999', and
+both are in coerce's except tuple, so all of them come out as this module's own LeverError naming the
+lever. Driven across the live registry -- 110 int levers x {nan, NaN, inf, Inf, infinity, -inf,
++inf, 1e999, -1e999} = 990 cells, 0 accepted; the same 9 spellings across the 97 float levers = 873
+cells, ALL accepted before this rule. Every one of the 24 non-finite findings in the 2026-09-05
+lever-domain sweep is on a float lever, so the rule's reach and the defect's reach are the same set.
+
+WHY THE FIRST READ. A non-finite float does not raise anywhere downstream. It propagates through
+every arithmetic operation this tree performs and surfaces as a plausible number in a report -- the
+sweep's FAB_COMP_EMA=nan crosses a package boundary into DOM.d_comp_ema with no warning at all. So
+the refusal is placed where the string becomes a value, before anything is derived from it, which is
+this module's refusal idiom and not a new one.
+
+WHAT TURNING IT OFF COSTS. nan, inf and -inf resolve into frozen Configs again on all 97 float
+levers. What is then left standing is the five per-package by-name refusals that exist today
+(src/fabric/api.py::build, src/sig/api.py::build, src/opt/api.py::build,
+src/tok/api.py::build_vocabulary, src/data/api.py::data_plan), and they cover only the levers those
+bodies actually read: roughly 288 cells across the six sweep reports are UNREACHABLE_TODAY because the consumer is a P4/P5/P6 stub -- 33 FAB
+levers, all 23 DOM and MEM floats, 14 of EVAL's 15 -- and a body that does not exist cannot refuse
+anything. That is the cost, and it is the argument for the rule: a per-package refusal is written by
+the author who writes the body, and this one is written once, now.
+
+WHAT IT DOES NOT BUY, AND THE NUMBER IS NOT CLOSE. It refuses a SPELLING. It does not make any lever
+harmless and nothing in this file can: OPT_LR=1e6 is finite, passes this rule, runs five stages
+reporting OK and leaves every parameter at -3928; FAB_ALPHA=1e26 is finite, passes this rule, and
+leaves the loss reading 0.5150710 / 2.943258 with 15 of 23 gradients already non-finite. The
+finiteness boundary and the harm boundary are twenty-four orders of magnitude apart, measured. No
+ceiling chosen to stop nan is a ceiling that stops harm.
+
+WHAT WOULD CHANGE THE ANSWER. If any configuration this project runs ever sets a float lever
+non-finite ON PURPOSE. Scanned across the repository on 2026-09-14 and the answer is none: the three
+sites that spell a non-finite value beside a float lever's name (src/fabric/api.py FAB_ROUTE_T=+inf,
+src/sig/api.py SIG_TEMP=-inf and SIG_WARMUP_MIN_FRAC=-inf) are all PROSE describing the defect, not
+configuration. So the OFF state has no user today.
+"""
+
+REFUSE_INEXACT_INT = True
+"""Whether Lever.coerce refuses an INT lever whose string does not denote the integer it resolves to.
+
+THE ONE RULE, AND IT IS ABOUT THE VALUE AND NOT THE SPELLING: an int lever resolves to the integer
+its string denotes, or it is refused. `int(float(raw))` is two lossy steps and this refuses exactly
+when either one loses something. It closes two measured holes at that one line:
+
+    MEM_REKEY_EVERY=0.4  ->  0   TRUNCATION INTO A DECLARED SENTINEL. 0 is that lever's declared
+        DISARM in src/memory/api.py::maintain, so an operator asking for a fractional cadence
+        silently receives the OFF switch, with Config.given() still reporting '0.4' beside a
+        mechanism running at 0. No (lo, hi) pair reaches it: 0 is inside the domain of a cadence.
+    <any int lever>=1e26 ->  100000000000000004764729344   A 27-digit width accepted, and 4764729344
+        larger than the number typed. float cannot represent 10**26, so the value that runs is not
+        the value that was asked for, and given() reports the string that was.
+
+WHY "8.0" IS ACCEPTED AND "0.4" IS REFUSED, which is the choice this rule makes. The rule is
+LOSSLESSNESS, not notation. "8.0" is an integer written as a float and survives the conversion
+exactly, so it resolves to 8; "1e3" resolves to 1000; "1_000" and " 12 " resolve as float() already
+reads them. "0.4" does not survive -- 0 is not 0.4 -- and "1e26" does not survive either. The
+alternative rule considered was TEXTUAL: refuse any raw containing '.' or an exponent. It was
+refused for two reasons, both concrete. It would refuse "1e3" and "8.0", which denote integers
+exactly and which a harness writing str(x) from a computed value produces routinely; and it would
+still accept "1e26" on a 27-digit truncation, because that string is spelled like an integer to a
+textual rule and is not one to the parser. A rule that refuses correct values and admits the
+measured defect is the wrong rule.
+
+HOW EXACTNESS IS TESTED. `decimal.Decimal(raw) == int(float(raw))`. Decimal parses the same grammar
+float() does (whitespace, sign, underscores, exponents) and carries the exact decimal value, so the
+comparison is between what was typed and what will run. Where Decimal cannot parse a string float()
+accepted -- no such spelling is known -- the weaker test `float(raw) == int(float(raw))` stands in,
+which still catches the truncation class and not the 2**53 class.
+
+WHAT THIS BREAKS, AND IT IS A BEHAVIOUR CHANGE TO ALL 110 INT LEVERS. Any configuration that today
+sets an int lever to a fractional or an inexact-magnitude string stops building and says so by name,
+instead of running at the truncated number. Scanned across the repository on 2026-09-14 -- every
+assignment site of every int lever's env name in src/, tests/, tools/, docs/ and the root scripts,
+1093 sites in 78 files -- and exactly ONE is non-exact: `MEM_QUOTA=0.4`, in a comment in
+src/memory/api.py describing this very defect. No script, sweep, test or recorded configuration in
+this tree sets an int lever to a non-exact value, so nothing that runs today breaks. What DOES
+change for a reader is that the two sweep findings above are now refusals rather than results, and
+the prose that describes them as live is stale -- listed for their owners in this run's report.
+
+WHAT TURNING IT OFF COSTS. `int(float(raw))` truncates silently again, and the MEM_REKEY_EVERY class
+comes back: a fractional cadence lands on a lever's declared disarm with no warning and no record
+except the string in given(). Off is the pre-2026-09-14 behaviour exactly.
+"""
+
+
+def _domain_ends(domain, default):
+    """CHECK a `domain=` at DECLARATION time and return it as a tuple. Raises LeverError.
+
+    No env name is available here -- __init__ runs before __set_name__, so the lever does not yet
+    know its own field name, let alone its owner's prefix. `choices=` has the same constraint and
+    resolves it the same way: the declaration-time message quotes the DEFAULT and the declaration,
+    which is enough to find the line, and the resolution-time message quotes the generated env name.
+    """
+    if isinstance(default, bool) or not isinstance(default, (int, float)):
+        raise LeverError(
+            f"domain={domain!r} on a lever whose default is {default!r}: a domain is an ORDERING over "
+            f"numbers, and a {type(default).__name__} default has none that a pair of endpoints "
+            f"states. A str lever's legal set is `choices=`; a bool lever's coercion cannot fail.")
+    try:
+        lo, hi = domain
+    except (TypeError, ValueError):
+        raise LeverError(f"domain={domain!r} must be a (lo, hi) pair; either end may be None, "
+                         f"meaning unbounded on that side.")
+    if lo is None and hi is None:
+        raise LeverError("domain=(None, None) bounds nothing. Omit the kwarg: a declaration that "
+                         "says a lever has no bounds by WRITING a domain reads as a checked claim "
+                         "and is not one.")
+    want = float if isinstance(default, float) else int
+    for end, side in ((lo, "lo"), (hi, "hi")):
+        if end is None:
+            continue
+        if isinstance(end, bool) or not isinstance(end, (int, float)):
+            raise LeverError(f"domain {side}={end!r} is not a number. Use None for unbounded.")
+        # AN INT LEVER'S ENDS ARE INTS. coerce resolves an int lever to an int, so a float endpoint
+        # describes a boundary no resolved value can ever sit at and reads as though fractional
+        # values were in play on a lever that has none. The reverse is allowed: an int endpoint on a
+        # float lever compares exactly against a float and `domain=(0, 1)` on a rate is not a
+        # mistake, it is the same interval as (0.0, 1.0) with two fewer characters.
+        if want is int and not isinstance(end, int):
+            raise LeverError(
+                f"domain {side}={end!r} is a float on an INT lever (default {default!r}). An int "
+                f"lever resolves to an int, so a fractional endpoint bounds nothing that can occur "
+                f"and states a range the lever does not have. Write the int you mean.")
+        # A NON-FINITE ENDPOINT IS THE ONE WAY TO WRITE A DOMAIN THAT UNDOES THE RULE ABOVE IT:
+        # domain=(0.0, inf) admits +inf, because inf <= inf. Unbounded is spelled None, which is a
+        # sentence a reader can see; inf is the same sentence disguised as a bound. A nan endpoint is
+        # worse than either -- every comparison against it is False, so the lever refuses every value
+        # including its own default, and the declaration-time default check below would catch that
+        # one but only by accident.
+        if not _math.isfinite(end):
+            raise LeverError(
+                f"domain {side}={end!r} is not finite. An unbounded end is written None -- an "
+                f"infinite endpoint would ADMIT the infinity that "
+                f"spine/lever.py::REFUSE_NON_FINITE_FLOAT exists to refuse.")
+    if lo is not None and hi is not None and lo > hi:
+        raise LeverError(f"domain=({lo!r}, {hi!r}) is empty: lo is above hi, so no value is legal "
+                         f"and the lever cannot resolve even at its own default.")
+    if (lo is not None and not lo <= default) or (hi is not None and not default <= hi):
+        raise LeverError(
+            f"default {default!r} is outside its own domain {_domain_text((lo, hi))}. A default no "
+            f"environment can reproduce is the one configuration this tree cannot refuse at "
+            f"resolution time -- from_env never coerces it -- so it is refused at declaration.")
+    return (lo, hi)
+
+
+def _domain_text(domain):
+    """`[0.0, 1.0]` / `[1, unbounded]`, for a message a reader has to act on."""
+    lo, hi = domain
+    lo_s = "unbounded" if lo is None else repr(lo)
+    hi_s = "unbounded" if hi is None else repr(hi)
+    return f"[{lo_s}, {hi_s}]"
+
+
+def _denotes_exactly(raw, v):
+    """Does `raw` denote exactly the integer `v` that int(float(raw)) produced? See REFUSE_INEXACT_INT."""
+    try:
+        return _decimal.Decimal(str(raw).strip()) == v
+    except (ArithmeticError, ValueError, TypeError):
+        return float(raw) == v
+
+
 class Lever:
-    """One declared knob. Carries its default, its unit, its purpose, and nothing else."""
+    """One declared knob: its default, its unit, its purpose, and -- optionally -- the set of values
+    it will accept, as `choices=` (an enumeration) or `domain=` (an interval). Nothing else."""
 
-    __slots__ = ("default", "help", "unit", "choices", "name")
+    __slots__ = ("default", "help", "unit", "choices", "domain", "name")
 
-    def __init__(self, default, help, unit=U.COUNT, choices=None):
+    def __init__(self, default, help, unit=U.COUNT, choices=None, domain=None):
         # THE DEFAULT MUST BE A LITERAL, checked here at declaration time rather than by an AST rule that
         # can be defeated by a local alias. A computed default is how the old tree ended up with nine
         # knobs whose "default" was another knob -- MAX_DOMAINS = _i("MAX_DOMAINS", _i("FAB_NMAX", 4096))
@@ -59,9 +267,89 @@ class Lever:
             raise LeverError(f"default must be a literal, got {type(default).__name__}. "
                              f"A value derived from another lever is a WIRE, not a default -- "
                              f"declare it in spine.assemble so the coupling is visible.")
+        # THE ONE ROUTE AROUND THE FLOOR, CLOSED WHERE IT OPENS. REFUSE_NON_FINITE_FLOAT lives in
+        # coerce, and `from_env` does not call coerce when the environment does not name the lever --
+        # it uses the declared default directly. So a literal `Lever(float("inf"), ...)` would put a
+        # non-finite float into a frozen Config having passed no rule at all, and the four package
+        # loops that scan for one (fabric, sig, opt, tok) would then be the only readers standing.
+        # Measured across the live registry on 2026-09-14: 0 of the 97 float levers declares a
+        # non-finite default, so this refuses nothing that exists. It is the same rule as the floor,
+        # stated at the other door, and it answers to the same switch.
+        if (REFUSE_NON_FINITE_FLOAT and isinstance(default, float)
+                and not _math.isfinite(default)):
+            raise LeverError(
+                f"default {default!r} is not finite. A default is the one value from_env never "
+                f"coerces, so spine/lever.py::REFUSE_NON_FINITE_FLOAT cannot see it at resolution "
+                f"time and it would reach a frozen Config unexamined.")
         if choices is not None and default not in choices:
             raise LeverError(f"default {default!r} is not among choices {choices!r}")
-        self.default, self.help, self.unit, self.choices = default, help, unit, choices
+        # `domain=(lo, hi)` -- THE INTERVAL FORM, BUILT IN THE SHAPE `choices=` ALREADY HAS: an
+        # optional kwarg, checked HERE against the lever's own default, checked again in coerce AFTER
+        # coercion, refusing with a LeverError that names the generated env name and the value. The
+        # two compose rather than compete -- `choices=` enumerates, `domain=` bounds -- and a
+        # declaration carrying both must satisfy both, which is checked below so that a choice
+        # outside the domain cannot ship as an option nobody can select.
+        #
+        # EITHER END MAY BE None, MEANING UNBOUNDED ON THAT SIDE, AND hi=None IS THE COMMON CASE, NOT
+        # A CONVENIENCE. Counted over the 207 numeric levers in this tree: the HIGH end is obvious
+        # from the declaration on 44, is another lever or a wire on 15 (LM_CTX <= d_pos_max,
+        # WORLD_N0 <= WORLD_NMAX, MEM_KEY_DEPTH <= LM_LAYERS -- none expressible as a per-lever
+        # pair), is a policy this tree has explicitly declined to set on 16 (CAP_LIFT, SIG_TEMP,
+        # EVAL_GEN_TEMP, the four EMA rates), and IS NOT DERIVABLE AT ALL on 131 -- the harmful value
+        # is a floating-point dynamic-range or memory property of the mechanism, not of the
+        # declaration. Honestly populated, 163 of the 207 get no ceiling.
+        #
+        # SO READ THIS, AND DO NOT READ A DOMAIN AS A STATEMENT THAT THE LEVER IS HARMLESS AT EVERY
+        # VALUE IT ADMITS -- NOTHING IN THIS FILE STATES THAT. hi=None ADMITS +inf. Measured on a
+        # real numeric lever -- domain=(0.0, 1.0) refuses nan, inf, -inf and 1e26; domain=(0.0, None)
+        # refuses nan and -inf and PASSES inf and 1e26. ANY finite endpoint refuses nan for free (see
+        # the comparison form in coerce); only a finite HIGH end refuses +inf. That is why
+        # REFUSE_NON_FINITE_FLOAT above exists and why the two are COMPLEMENTS AND NOT ALTERNATIVES:
+        # `domain=` alone would leave +inf legal on the 53 open-topped float levers, which include
+        # OPT_LR, OPT_WEIGHT_DECAY, SIG_VAR_WEIGHT, SIG_COV_WEIGHT and FAB_ROUTE_T -- five of the
+        # sweep's own critical findings. Neither rule is a subset of the other.
+        #
+        # THE INTERVAL IS CLOSED AT BOTH ENDS, and that is a decision, justified from the 33 levers
+        # whose two ends are obvious today (.rework/audits/options_domain.json, option-(3) finding).
+        # Read what is in that list: probabilities (LM_DROPOUT, TOK_DROPOUT, MEM_WRITE_GATE,
+        # FAB_MUT_BIG_P), shares and quantiles (FAB_CULL_FRAC, DOM_RADIUS_Q, MEM_PROBATION_FRAC,
+        # DATA_HOLDOUT_FRAC), and three already refused at both ends by hand in src/opt/api.py::build
+        # (OPT_LR_DECAY, OPT_LR_MIN_FRAC, OPT_LR_RESTART_DAMP). On that population BOTH endpoints are
+        # legal values somebody configures: 0.0 is "never" on a probability and is a declared or
+        # measured-legitimate value on 46 of the 207; 1.0 is "always", and src/opt/api.py::build
+        # already accepts OPT_LR_DECAY=1.0 BY NAME. An exclusive end would REFUSE a value a shipped
+        # body accepts, which is the one direction of error that breaks a configuration that works.
+        # The two levers whose natural low end is NEGATIVE make the same point from the other side:
+        # EVAL_GENUINE_SIL is a silhouette in [-1, 1] and MEM_MATCH_FLOOR is a cosine similarity, and
+        # both endpoints are attainable readings.
+        #
+        # WHAT A DECLARATION NEEDING AN OPEN END DOES INSTEAD, because three exist and are measured
+        # in one function: src/opt/api.py::build refuses `lr <= 0.0` (open low), `not 0.0 <=
+        # min_frac < 1.0` (half-open) and `not 0.0 <= decay <= 1.0` (closed), and
+        # src/lm/api.py::resolve needs the half-open one again for LM_DROPOUT. It writes the CLOSED
+        # pair that
+        # CONTAINS its interval -- domain=(0.0, 1.0) for the half-open [0.0, 1.0) -- and keeps the
+        # strict clause at the read site. The declaration then under-refuses by exactly one endpoint
+        # and the body refuses that endpoint by name, holding the mechanism, in a message that can
+        # say why. It never over-refuses, which is the property that matters: a domain is the
+        # OUTERMOST interval the declaration alone can defend, not the tightest one the mechanism
+        # has. Nothing written that way blocks a later inclusivity field -- adding one would narrow
+        # what a declaration can say, and every closed pair written today would still mean what it
+        # says -- but a strict end is NOT expressible today and must not be faked by nudging an
+        # endpoint, because "greater than 0.0" and "at least 5e-324" are not the same sentence and
+        # only the mechanism knows which one it meant.
+        if domain is not None:
+            domain = _domain_ends(domain, default)
+            if choices is not None:
+                _out = [c for c in choices
+                        if (domain[0] is not None and not domain[0] <= c)
+                        or (domain[1] is not None and not c <= domain[1])]
+                if _out:
+                    raise LeverError(
+                        f"choices {_out!r} fall outside domain {_domain_text(domain)} on the same "
+                        f"declaration. A choice no value can reach is an option offered and refused.")
+        self.default, self.help, self.unit = default, help, unit
+        self.choices, self.domain = choices, domain
         self.name = None                                     # filled in by __set_name__
 
     def __set_name__(self, owner, name):
@@ -116,7 +404,19 @@ class Lever:
         object.__setattr__(self, k, v)
 
     def coerce(self, raw, prefix):
-        """Turn an environment string into the declared type, or fail by its OWNED name."""
+        """Turn an environment string into the declared type, or fail by its OWNED name.
+
+        FOUR REFUSALS, IN THE ORDER THE VALUE PASSES THEM, and every one of them raises LeverError
+        naming the GENERATED env name and the value, at the first read, before anything is derived:
+          1. it is not the declared type at all                       (this has always been here)
+          2. it is a non-finite float          REFUSE_NON_FINITE_FLOAT   -- 97 float levers
+          3. it is not the integer it denotes  REFUSE_INEXACT_INT        -- 110 int levers
+          4. it is outside `choices=` or outside `domain=`              -- per declaration
+        Nothing here is reached by a lever the environment did not name: from_env uses the declared
+        default directly when the name is absent, and the default is checked against `choices=` and
+        `domain=` at DECLARATION time, where a default no environment can reproduce is impossible to
+        ship rather than merely unlikely.
+        """
         d = self.default
         try:
             if isinstance(d, bool):     v = str(raw).strip().lower() not in ("0", "", "off", "no", "none", "false")
@@ -124,7 +424,7 @@ class Lever:
             elif isinstance(d, float):  v = float(raw)
             else:                       v = str(raw)
         # OverflowError IS IN THIS TUPLE BECAUSE int(float('inf')) RAISES IT AND NOTHING ELSE DOES.
-        # `int(float(raw))` on line 123 resolves every int lever, and at 'inf' or '-inf' it raised an
+        # The `int(float(raw))` branch above resolves every int lever, and at 'inf' or '-inf' it raised an
         # uncaught OverflowError -- a bare "cannot convert float infinity to integer" naming no lever,
         # no value and no package -- while the SAME line at 'nan' raises ValueError, is caught here, and
         # produces the correct refusal. 110 int levers x 2 values = 220 cells tree-wide read as a
@@ -133,8 +433,48 @@ class Lever:
         # inf AGREE WITH nan rather than deciding anything new about either.
         except (TypeError, ValueError, OverflowError):
             raise LeverError(f"{self.env_name_for(prefix)}={raw!r} is not a {type(d).__name__}")
+        # THE TWO PARSE-LEVEL RULES. `isinstance(d, bool)` is tested FIRST and skipped deliberately:
+        # bool is a subclass of int, so a FLAG would otherwise be tested for integrality, and the
+        # bool branch above cannot fail anyway -- every string is a legal spelling of on or off.
+        if isinstance(d, bool):
+            pass
+        elif isinstance(d, int):
+            if REFUSE_INEXACT_INT and not _denotes_exactly(raw, v):
+                raise LeverError(
+                    f"{self.env_name_for(prefix)}={raw!r} does not denote the integer it resolves "
+                    f"to ({v!r}). An int lever is read as int(float(raw)), which truncates toward "
+                    f"zero and cannot represent every integer above 2**53, so this value would run "
+                    f"as {v!r} while Config.given() reported {raw!r} beside it -- and where a "
+                    f"lever's 0 is a declared disarm, a fraction truncating to 0 turns a request "
+                    f"for the tightest setting into the OFF switch. An integer written as a float "
+                    f"('8.0', '1e3') resolves normally. To resolve this one anyway, set "
+                    f"spine/lever.py::REFUSE_INEXACT_INT = False and read what that costs, there.")
+        elif isinstance(d, float):
+            if REFUSE_NON_FINITE_FLOAT and not _math.isfinite(v):
+                raise LeverError(
+                    f"{self.env_name_for(prefix)}={raw!r} is not finite (it reads as {v!r}). A "
+                    f"non-finite float raises nowhere downstream -- it propagates through every "
+                    f"arithmetic this tree performs and arrives in a report as a plausible number, "
+                    f"or crosses a package boundary as a wire with no warning -- so it is refused "
+                    f"at the first read instead. This refusal is about the SPELLING and makes no "
+                    f"claim about any other value of this lever. To resolve it anyway, set "
+                    f"spine/lever.py::REFUSE_NON_FINITE_FLOAT = False and read what that costs, "
+                    f"there.")
         if self.choices is not None and v not in self.choices:
             raise LeverError(f"{self.env_name_for(prefix)}={v!r} must be one of {sorted(self.choices)}")
+        if self.domain is not None:
+            lo, hi = self.domain
+            # THE INVERTED-CHAIN FORM IS LOAD-BEARING AND IS NOT A STYLE CHOICE. Written `v < lo or
+            # v > hi`, every comparison against nan is False and a nan would PASS a domain it is
+            # plainly outside; written `not lo <= v`, the same comparison is False and `not` makes it
+            # a refusal. This is why any finite endpoint refuses nan for free, and it is the
+            # grammar the opt sweep found separating the guards that held against NaN from the ones
+            # that did not -- there, by accident, thirteen times. Here, on purpose, once.
+            if (lo is not None and not lo <= v) or (hi is not None and not v <= hi):
+                raise LeverError(
+                    f"{self.env_name_for(prefix)}={v!r} is outside its declared domain "
+                    f"{_domain_text(self.domain)} -- BOTH ENDS INCLUSIVE, and an end reading "
+                    f"'unbounded' states no bound at all on that side.")
         return v
 
 
@@ -351,13 +691,18 @@ class Config:
         """A READ-ONLY VIEW of a declaration. Never the declaration itself: handing that out let a caller
         rewrite the one declared default for the whole process."""
         lv = self._owner._levers[k]
-        return LeverView(k, lv.default, lv.help, lv.unit, lv.choices, lv.env_name_for(self.prefix))
+        return LeverView(k, lv.default, lv.help, lv.unit, lv.choices, lv.env_name_for(self.prefix),
+                         lv.domain)
 
     def __repr__(self):
         return f"<Config {self.prefix} {len(self._vals)} levers, {len(self._wired)} wired>"
 
 
-LeverView = _nt("LeverView", "name default help unit choices env_name")
+# `domain` IS APPENDED, NOT INSERTED, and the position is the whole point: a namedtuple is also a
+# tuple, so every existing reader -- `fab.lever(f).env_name` in five package bodies, and any unpack
+# written later -- keeps the field it was reading at the index it was reading. The field is the pair
+# as declared, or None, which is the same shape `choices` already has.
+LeverView = _nt("LeverView", "name default help unit choices env_name domain")
 
 
 def _config_attrs():

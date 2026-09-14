@@ -261,14 +261,18 @@ def flush_period(period_steps, batch_w):
     the end; see units.py::Clock.convert, which this function and flush_period_windows are the only
     two callers of.
 
-    REFUSES A NEGATIVE CADENCE AND A NON-int RATE (2026-09-05), which is the family's shape and was
-    this function's exception to it. A negative period is not a short period: the floor below --
-    written for a cadence that TRUNCATED to zero -- answered Flushes(1) for it, the tightest cadence
-    that exists. flush_period_windows carries that measurement because it is the one of the pair
-    spine/assemble.py::COUPLINGS calls; this one has no row in the table today, so the arm is
-    UNREACHABLE from the composition root and reachable from any direct caller. The rate end is
-    type-tested for the reason opt_steps_from_backwards sets out: `int()` is what let the foreign
-    kinds in.
+    REFUSES A CADENCE BELOW ONE AND A NON-int RATE, which is the family's shape and was this
+    function's exception to it. A negative period is not a short period, and neither is a zero one:
+    the floor below -- written for a cadence that TRUNCATED to zero -- answered Flushes(1) for both,
+    the tightest cadence that exists. The negative half landed 2026-09-05 and ZERO followed on
+    2026-09-14; flush_period_windows carries the measurement for both, because it is the one of the
+    pair spine/assemble.py::COUPLINGS calls and therefore the only one a lever can reach. This one
+    has no row in the table today, so the arm is UNREACHABLE from the composition root and reachable
+    from any direct caller -- and it moves WITH its pair rather than after it, because the two
+    differ only in the kind they accept and a cadence of zero refused in windows while floored in
+    steps is one question with two answers, which is the shape this module exists to remove. The
+    rate end is type-tested for the reason opt_steps_from_backwards sets out: `int()` is what let
+    the foreign kinds in.
     """
     if type(period_steps) is not Steps:
         raise UnitError(f"flush_period: period_steps must be Steps, got "
@@ -293,23 +297,34 @@ def flush_period(period_steps, batch_w):
     # THE NEGATIVE SIDE IS REFUSED, NOT FLOORED, and it sits AFTER the rate checks for the reason
     # opt_steps_from_backwards gives about its own order: a caller who got both wrong should hear
     # about the rate first, because a bad rate makes every answer wrong rather than one.
-    if period_steps.n < 0:
-        raise UnitError(f"flush_period: period_steps={period_steps!r} is negative. A cadence is a "
-                        f"count of steps BETWEEN two firings, so a negative one has no reading -- "
-                        f"and the floor below would not have said so: it would have answered "
-                        f"Flushes(1), the TIGHTEST cadence that exists, for a number nobody could "
-                        f"have meant. That floor is for a period that TRUNCATED to zero and nothing "
-                        f"else. flush_period_windows carries the measurement, because it is the one "
-                        f"of the two that spine/assemble.py::COUPLINGS calls.")
+    if period_steps.n < 1:
+        # THE MESSAGE NAMES WHICH SIDE OF ONE IT READ. "Below one" is two different mistakes wearing
+        # one phrase, and the word that tells them apart is the only text in this family that says
+        # which arm answered -- every other arm in these functions refuses the RATE and names a TYPE
+        # instead, so tests/test_derive.py::smoke asserts on it.
+        said = "is negative" if period_steps.n < 0 else "is zero"
+        raise UnitError(f"flush_period: period_steps={period_steps!r} {said}, and a cadence below "
+                        f"one has no reading either way. A cadence is a "
+                        f"count of steps BETWEEN two firings, so neither a negative one nor a zero "
+                        f"one is one -- and the floor below would not have said so: it would "
+                        f"have answered Flushes(1), the TIGHTEST cadence that exists, for a number "
+                        f"nobody could have meant by either. That floor is for a period that "
+                        f"TRUNCATED to zero and nothing else, and after this refusal that is the "
+                        f"only case it can see. flush_period_windows carries the measurement for "
+                        f"both halves, because it is the one of the two that "
+                        f"spine/assemble.py::COUPLINGS calls; this one moves with it rather than "
+                        f"leaving a cadence of zero legal in one kind and refused in the other.")
     period = period_steps.convert(Flushes, per=w)
     # A PERIOD OF ZERO IS NEVER THE ANSWER. It is either `n % 0` -- a crash -- or, on the guard forms
     # that test `period and n % period == 0`, a mechanism that is switched on and never runs, which is
     # the armed-but-inert class (57 records). One flush is the smallest cadence that exists.
-    # THE TEST STAYS `< 1` AND CAN NOW ONLY SEE 0. The refusals above leave the count non-negative
-    # and the rate at or above one, so `period.n` cannot be negative here; the clause fires on a
-    # true zero -- a cadence shorter than one flush -- which is the only case the paragraph above
-    # ever argued for. It was `< 1` when it also had to swallow negatives, and that is exactly how
-    # it came to answer the tightest cadence in the system for a lever set below zero.
+    # THE TEST STAYS `< 1` AND NOW SEES ONLY A TRUNCATION. The refusals above leave the count at or
+    # above one and the rate at or above one, so `period.n` is zero here only when a cadence SHORTER
+    # THAN ONE FLUSH was divided down to it -- Steps(8) at batch_w=16 -- which is the only case the
+    # paragraph above ever argued for. It was `< 1` while it also had to swallow negatives, and that
+    # is exactly how it came to answer the tightest cadence in the system for a lever set below
+    # zero; a zero INPUT reached this same line the same way until 2026-09-14, and a zero input is
+    # not a truncation either.
     return Flushes(1) if period.n < 1 else period
 
 
@@ -367,6 +382,46 @@ def flush_period_windows(period_windows, batch_windows):
     along: OPT_BATCH_WINDOWS=0 and =-4 both raise UnitError out of spine/assemble.py::build. One
     nonsense number stopped the build; the other became the fastest cadence in the system. Both
     stop it now.
+
+    AND ZERO FOLLOWED THE NEGATIVE ON 2026-09-14, ON A MEASUREMENT AND NOT ON SYMMETRY. Zero was
+    deliberately left on the floor by the 2026-09-05 repair, and the reason was a good one: no lever
+    reaching this function declared a meaning for it, and a conversion that quietly folds in an
+    undeclared value is deciding a range question its callers own. What settled it is that the tree
+    does not hold ONE reading of FAB_MANAGE_EVERY=0 to protect; it holds three at once, measured by
+    building this tree at that value --
+        wire FAB.d_manage_period            = Flushes(1)                   "manage on EVERY flush"
+        src/fabric/api.py::manage_period    = Windows(0)
+        cadences_that_cannot_fire           = [('fab.manage', 0, 0)]       "this gate cannot fire"
+    -- which is the SAME three-way split, reader for reader, that FAB_MANAGE_EVERY=-5 carried until
+    the negative was refused, and this function's floor is the first of the three answers in both
+    cases. A FOURTH reading is in the frozen source the cadence was lifted from: self_organize.py
+    reads the knob as `step % MANAGE_EVERY == 0` at :6716, :6764 and :6768 with no max(1, ...)
+    anywhere, so 0 there is `integer modulo by zero` on the first window and not an ablation. That
+    is not a new ruling: domains/levers.py::DOMLevers.manage_every already wrote it down for the
+    sibling lever this one was SPLIT FROM -- "DO NOT COLLAPSE THIS INTO manage_every=0 AS THE
+    OFF-STATE ... a ZeroDivisionError and not an ablation. An explicit flag is" -- and DOM then
+    DECLARED the sentinel and guarded it at its own read site (domains/api.py::manage, "manage_every
+    == 0 means NEVER, BEHIND A GUARD AT THIS READ SITE"). FAB declared nothing and has no `manage` flag: the
+    old tree's off switch for both passes was MANAGE (self_organize.py:954, "MANAGE=0 -> ABLATION:
+    no merge/cull"), a FLAG, and the split gave it to DOM alone. So 0 is not this lever's off state
+    in the source, in its declaration or in its package's API, and what it actually produced here
+    was the tightest cadence in the system.
+
+    WHAT THE ZERO REFUSAL COSTS, NAMED HERE RATHER THAN DISCOVERED, BECAUSE IT IS NOT ONLY FAB'S
+    LEVER. Three coupling rows reach this function and TWO of them carry CAP_PIN_WINDOWS
+    (FAB.d_cap_lift_period and TOK.d_cap_lift_period), so `< 1` refuses CAP_PIN_WINDOWS=0 as well --
+    and that lever is a THRESHOLD, not a cadence, in capacity/levers.py::CAPLevers.pin_windows's own
+    words ("IT IS A THRESHOLD, NOT A CADENCE, WHICH IS WHY `_EVERY` HAD TO GO"). Measured before the
+    change: CAP_PIN_WINDOWS=0 and =1 both built FAB.d_cap_lift_period = TOK.d_cap_lift_period =
+    Flushes(1), byte-identical, so nothing a report can distinguish is removed today, and the reader
+    that WOULD tell them apart is capacity/api.py::observe, a P4 stub that raises. CAP_PIN_WINDOWS=1
+    is in range and is one window of accumulated pin time away from what a 0 on a threshold reaches
+    for. WHAT IS NOT CLAIMED: that 0 is meaningless for a threshold. "No pin time required" is a
+    coherent thing to ask for and it is CAPACITY's to declare; this function declines to CONVERT a
+    period below one flush, which is a statement about this conversion and not a ruling on that
+    lever's domain. If capacity wants it back, the place is a declared sentinel at
+    capacity/levers.py::CAPLevers.pin_windows and an off-state that does not travel through a
+    windows-to-flushes cadence conversion -- and this arm is then the thing to revisit.
     """
     if type(period_windows) is not Windows:
         raise UnitError(f"flush_period_windows: period_windows must be Windows, got "
@@ -388,24 +443,60 @@ def flush_period_windows(period_windows, batch_windows):
     if w < 1:
         raise UnitError(f"flush_period_windows: batch_windows={batch_windows!r} -- a flush covers at "
                         f"least one window.")
-    if period_windows.n < 0:
-        raise UnitError(f"flush_period_windows: period_windows={period_windows!r} is negative. A "
-                        f"cadence is a count of windows BETWEEN two firings and a negative one has "
-                        f"no reading. Until 2026-09-05 the floor below answered Flushes(1) for it -- "
-                        f"the TIGHTEST cadence that exists -- at BUILD time and through the declared "
-                        f"table: FAB_MANAGE_EVERY=-500 built FAB.d_manage_period=Flushes(1), and "
-                        f"CAP_PIN_WINDOWS=-20000 built FAB.d_cap_lift_period and "
-                        f"TOK.d_cap_lift_period=Flushes(1), so the management pass and the capacity "
-                        f"valve would have run every flush of the run. Nothing upstream refuses it: "
-                        f"spine/lever.py::Lever carries a default, a help string, a unit and choices "
-                        f"and no bound, and spine/lever.py::Lever.coerce resolves an int lever as "
-                        f"int(float(raw)), which accepts a negative. The rate end of this same "
-                        f"function already refused its half -- OPT_BATCH_WINDOWS=0 and =-4 both "
-                        f"raise out of spine/assemble.py::build today -- so one nonsense number "
-                        f"stopped the build while the other became the fastest cadence in the system.")
+    if period_windows.n < 1:
+        # NAMES WHICH SIDE OF ONE IT READ, for the reason flush_period's own arm sets out: "below
+        # one" is two mistakes in one phrase, and this word is the only text that says which arm
+        # answered.
+        said = "is negative" if period_windows.n < 0 else "is zero"
+        raise UnitError(f"flush_period_windows: period_windows={period_windows!r} {said}, and a "
+                        f"cadence below one has no reading either way. A "
+                        f"cadence is a count of windows BETWEEN two firings, and neither a negative "
+                        f"one nor a zero one is one: the floor below answers Flushes(1) for "
+                        f"both -- the TIGHTEST cadence that exists -- which is the one answer nobody "
+                        f"could have meant by either. "
+                        f"ZERO IS THE HALF THIS ARM DID NOT CATCH UNTIL 2026-09-14, AND IT IS THE "
+                        f"ONE THAT CARRIED THREE ANSWERS AT ONCE: FAB_MANAGE_EVERY=0 built "
+                        f"FAB.d_manage_period=Flushes(1) here, i.e. manage on EVERY flush, while "
+                        f"src/fabric/api.py::manage_period returned Windows(0) and "
+                        f"spine/derive.py::cadences_that_cannot_fire reported ('fab.manage', 0, 0), "
+                        f"i.e. a gate that CANNOT FIRE -- two live readers, opposite sentences, one "
+                        f"lever, no warning. The frozen source reads the same knob as "
+                        f"`step % MANAGE_EVERY == 0` (self_organize.py:6716, :6764, :6768) with no "
+                        f"max(1, ...) guard, where 0 is an integer modulo by zero on the first "
+                        f"window and not an ablation; the old tree's off switch for that pass was "
+                        f"the FLAG MANAGE, which the package split gave to DOM alone. "
+                        f"THE NEGATIVE HALF IS THE SAME ARM AND IS KEPT: until 2026-09-05 the floor "
+                        f"answered Flushes(1) for a negative too, at BUILD time and through the "
+                        f"declared table -- FAB_MANAGE_EVERY=-500 built "
+                        f"FAB.d_manage_period=Flushes(1), and CAP_PIN_WINDOWS=-20000 built "
+                        f"FAB.d_cap_lift_period and TOK.d_cap_lift_period=Flushes(1), so the "
+                        f"management pass and the capacity valve would have run every flush of the "
+                        f"run. Nothing upstream refuses either: spine/lever.py::Lever carries a "
+                        f"default, a help string, a unit and choices and no bound, and "
+                        f"spine/lever.py::Lever.coerce resolves an int lever as int(float(raw)), "
+                        f"which accepts both. The rate end of this same function already refused its "
+                        f"half -- OPT_BATCH_WINDOWS=0 and =-4 both raise out of "
+                        f"spine/assemble.py::build today -- so one nonsense number stopped the build "
+                        f"while the other became the fastest cadence in the system. "
+                        f"WHOSE LEVER THIS WAS IS NOT SAID HERE AND CANNOT BE: three coupling rows "
+                        f"reach this conversion carrying two packages' values -- FAB.d_manage_period "
+                        f"from FAB_MANAGE_EVERY, and FAB.d_cap_lift_period and TOK.d_cap_lift_period "
+                        f"from CAP_PIN_WINDOWS -- so a lever name written in here would be wrong for "
+                        f"the others; that gap is the one operating_population states for itself and "
+                        f"tests/test_fabric.py::check_f8_manage_period_kind_and_refusal reports per "
+                        f"layer. THE NEIGHBOURS ARE IN RANGE: FAB_MANAGE_EVERY=1 is the every-window "
+                        f"management pass, and CAP_PIN_WINDOWS=1 is one window of accumulated pin "
+                        f"time, which is what a 0 written on a THRESHOLD is reaching for -- a "
+                        f"declared meaning for that 0 belongs at "
+                        f"capacity/levers.py::CAPLevers.pin_windows and not in this conversion.")
     period = period_windows.convert(Flushes, per=w)
-    # `< 1` AND NOT `== 0`, and after the refusal above it can only ever be 0: see flush_period's
-    # closing comment, which this function's floor is the same floor as.
+    # `< 1` AND NOT `== 0`, and after the refusal above it can only ever be 0 BY TRUNCATION -- a
+    # cadence SHORTER THAN ONE FLUSH, Windows(8) at batch_windows=16 -- which is the only case this
+    # floor was ever argued for. A zero INPUT reached this same line until 2026-09-14 and was not a
+    # truncation; see flush_period's closing comment, which this function's floor is the same floor
+    # as. THIS FLOOR IS ON THE RESULT AND IS UNTOUCHED BY THE REFUSAL ABOVE, which is checkable
+    # rather than asserted: tests/test_derive.py pins `flush_period_windows(Windows(8), 16) ==
+    # Flushes(1)`, and that is this line answering a truncation, not a zero lever.
     return Flushes(1) if period.n < 1 else period
 
 

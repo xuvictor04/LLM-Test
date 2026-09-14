@@ -178,9 +178,11 @@ class SIGLevers(LeverSet):
     `cov_weight` are two terms of one regulariser and reading either without the other tells you
     nothing about whether the encoder can collapse.
 
-    WHAT IS REFUSED, AND WHERE. spine/lever.py::Lever carries `choices` and no numeric range, so
-    every unit label below -- U.FRACTION, U.COUNT -- is a LABEL and not a constraint, and a reader
-    who takes "fraction 0..1" as a bound on legal values is reading a comment, not a check. The
+    WHAT IS REFUSED, AND WHERE. spine/lever.py::Lever carries `choices` and an optional `domain=`
+    interval, which exactly ONE lever below declares -- warmup_min_frac, for the reason written at
+    its own line. THE UNIT LABEL IS STILL NOT THAT BOUND: U.FRACTION and U.COUNT below remain
+    LABELS, and a reader who takes "fraction 0..1" as a bound on legal values is reading a comment,
+    not a check; where a bound exists it is the pair on the declaration and nothing else. The
     checks that do exist are declared in ONE place, sig/api.py::build, which is this package's first
     entry point on spine/compose.py's assembly path, and are recorded at the individual declarations
     below rather than restated in full at each one:
@@ -578,7 +580,16 @@ class SIGLevers(LeverSet):
     # ENC_WARMUP together, so neither result can be attributed to either change.
 
     warmup_min_frac = Lever(0.25, "Share of the warmup budget that must be spent before the plateau "
-                                  "test is allowed to stop it early.", U.FRACTION)
+                                  "test is allowed to stop it early.", U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) -- A SHARE OF A BUDGET, MULTIPLIED BY THAT BUDGET. sig/api.py::warm_up does
+    # `floor = int(frac * budget)` and then compares the floor against probe steps drawn from
+    # `range(probe_every, budget + 1, probe_every)`, so the ONLY steps this number can name lie in
+    # [0, budget] and a share above 1.0 names a step count the run never reaches. 0.0 is admitted --
+    # sig/api.py::build calls it "no floor" -- and the NEGATIVE end keeps its by-name refusal in
+    # sig/api.py::warm_up, which can say that a negative floor removes the guard rather than
+    # lowering it. THE TOP IS CLOSED AND THAT IS LOAD-BEARING, not a default: `int(frac * budget) >=
+    # budget` is reachable at frac == 1.0 and nowhere below it, and that is the one value that keeps
+    # warm_up's `floor >= budget` gate arm -- the untrippable-guard report -- reachable at all.
     # Census: ENC_WARMUP_MIN -> SIG_WARMUP_MIN_FRAC. Read at :5021 as
     # `_wfloor = min(ENC_WARMUP_MIN, ENC_WARMUP)` and tested at :5032.
     # THE MECHANISM KEEPS; THE ABSOLUTE UNIT DOES NOT, and this is the poster child for the
@@ -595,12 +606,16 @@ class SIGLevers(LeverSet):
     # unreachable arm for exactly the case it called impossible. A fraction AT OR ABOVE 1.0 puts the
     # floor at or past the budget and reproduces the untrippable guard -- 1.0 included, and it is a
     # legal reading of a lever declared over 0..1, so the boundary is worth stating exactly: the
-    # shape is impossible STRICTLY BELOW 1.0 and reported from 1.0 up. What the fraction bought is
-    # that no ordinary setting can reach it and that the shape is now printed with both numbers
-    # beside it instead of silently clamped. The other end is refused
-    # outright at the one site that multiplies: spine/lever.py::Lever carries choices and no numeric
-    # range, so units.FRACTION here is a label, and a NEGATIVE share would make a negative floor --
-    # not a lower guard but no guard, eligible from the first probe with no gate saying so. The
+    # shape is impossible STRICTLY BELOW 1.0 and reported AT 1.0, which the domain above keeps as a
+    # settable value and makes the LAST one -- measured, at SIG_WARMUP=20 / probe_every=5:
+    # frac=0.999 gives floor 19 with the gate reachable, frac=1.0 gives floor 20 and selects the
+    # `floor >= budget` arm. What the fraction bought is that no ordinary setting can reach that
+    # shape and that it is printed with both numbers beside it instead of silently clamped. The
+    # other end is refused TWICE now: the domain refuses every negative at the first read, and
+    # sig/api.py::warm_up keeps its own by-name refusal at the one site that multiplies, which is
+    # where the REASON lives -- a NEGATIVE share would make a negative floor, not a lower guard but
+    # no guard, eligible from the first probe with no gate saying so. units.FRACTION is still a
+    # label and is not what bounds this lever; the pair on the declaration is. The
     # run-time warning at :5046 and the min() clamp both disappear with the absolute unit. The
     # literal 0.25 is 200/800 -- the behaviour of record, not the shipped
     # 3000. NOTE ISSUES P2-M11: a doc prescription asserting the default is 3000 is itself wrong and is

@@ -392,7 +392,14 @@ class LMLevers(LeverSet):
     dropout = Lever(0.0, "Dropout probability, at three sites: the token embedding, between GRU layers "
                          "when depth is greater than one, and the READOUT in LM.decode before the head. "
                          "It does NOT reach LM.encode's return, which is the memory-key source and the "
-                         "fabric's input.", U.PROBABILITY)
+                         "fabric's input.", U.PROBABILITY, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) -- A BERNOULLI PARAMETER HANDED STRAIGHT TO torch. src/lm/api.py::_LM builds
+    # `nn.Dropout(geom.dropout)` and passes the same number to the GRU and to
+    # nn.TransformerEncoderLayer, each of which ZEROES each element independently with probability
+    # p: outside [0, 1] there is no such draw. 0.0 is the shipped default and is the whole
+    # reason the three sites are inert today. The top is closed because a declaration cannot say
+    # "strictly below" -- src/lm/api.py::resolve keeps `not 0.0 <= dropout < 1.0` and refuses 1.0 by
+    # name, where it can say that at 1.0 every activation is dropped and the loss is constant.
     # Census: DROPOUT -> LM_DROPOUT, verdict rename, default 0.0. Field corrected from `LM_DROPOUT` to
     # `dropout` (DEFECT 1).
     # MISFILED UNDER optim, AND UNDER L2 THAT WOULD HAVE BEEN A FOREIGN READ. It is not an optimizer

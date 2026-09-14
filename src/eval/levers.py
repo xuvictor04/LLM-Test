@@ -417,7 +417,15 @@ class EVALLevers(LeverSet):
 
     aff_min = Lever(
         0.10, "Minimum share of a domain's expert-usage mass at which an expert counts as SERVING it.",
-        U.FRACTION)
+        U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) -- A THRESHOLD ON A NORMALISED SHARE. The quantity it is compared against is
+    # one domain's usage mass divided by its own sum, so it lies in [0, 1] by construction: the
+    # predecessor's AFFILIATION section formed `_p = _v / _v.sum()` and tested `_p >= AFF_MIN`, and
+    # src/eval/api.py::verdicts inherits that input as `affiliation`. Both ends are the readable
+    # extremes rather than typos -- at 0.0 every expert with any mass at all SERVES the domain, and
+    # at 1.0 only an expert holding the whole of it does. Above 1.0 no share can clear the bar on
+    # any run, so every expert reads as serving none and the threshold has stopped being one; below
+    # 0.0 an expert with no mass serves, and "serving none" is the reading that becomes unreachable.
     # MOVED OFF FAB, and this is the clearest case in the file. Its only two reads are :8965 and :8986,
     # both inside the end-of-run AFFILIATION section; nothing in training touches it. Leaving it on FAB
     # would put a pure instrument knob in the Config a fabric function receives, which is how a mechanism

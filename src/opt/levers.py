@@ -271,19 +271,25 @@ it must carry its seed count, which is why `best_bpb` is documented as a Reading
 
 WHAT THIS FILE CANNOT EXPRESS, AND WHERE THE OLD GUARDS WENT. Every one of these levers was read in the
 old tree through a clamp at the read site -- `max(0, _i("LR_SHIFT_WARM", 0))`, `max(1, _i("BATCH_W", 1))`,
-`min(1.0, max(0.0, _f("LR_RESTART_DAMP", 0.5)))` -- and a Lever has no range facility at all: `choices=`
-enumerates, it does not bound. Three of those clamps survive elsewhere and one does not, which is worth
-knowing before somebody sweeps a value:
+`min(1.0, max(0.0, _f("LR_RESTART_DAMP", 0.5)))` -- and a Lever's `domain=` is a CLOSED interval that
+cannot state the open low end `lr <= 0.0` needs, while `choices=` enumerates rather than bounds. Three of
+those clamps survive elsewhere and one does not, which is worth knowing before somebody sweeps a value:
     batch_windows = 0   REFUSED, loudly. derive.flush_period raises UnitError ("a flush covers at least
                         one window", derive.py::flush_period).
     accum = 0           SILENTLY CLAMPED to 1 by derive.accum_due (`k = max(1, int(accum))`).
     lr_wavelength < 0   harmless only because the sentinel path treats anything falsy as "one wavelength
                         spans the run"; a negative is not falsy and has no meaning.
-    lr_restart_damp>1   NOTHING CATCHES IT, and it inverts the mechanism: the damping multiplies the
-                        restart amplitude cumulatively, so a value above 1.0 AMPLIFIES every failed
-                        restart instead of shrinking it -- the ratchet the lever exists to stop, driven
-                        by the lever that stops it. The old `min(1.0, ...)` at :4739 was the only thing
-                        standing there. Whoever writes the schedule owes a startup refusal, in one place.
+    lr_restart_damp>1   CAUGHT TWICE NOW, and the row stays because the reason is still the reason: the
+                        damping multiplies the restart amplitude cumulatively, so a value above 1.0
+                        READS AS a request to amplify every failed restart -- the ratchet the lever
+                        exists to stop, driven by the lever that stops it. The old `min(1.0, ...)` at
+                        :4739 was once the only thing standing there; src/opt/api.py::build refuses it
+                        at startup, and `domain=(0.0, 1.0)` on the declaration refuses it at the first
+                        read. WHAT IT WOULD HAVE DONE IS NOT THAT AMPLIFICATION EITHER, read at the
+                        site: src/opt/api.py::maybe_step guards its one `st.restart_amp *= ...` with
+                        `float(opt.lr_restart_damp) < 1.0`, so above 1.0 the loop never multiplies and
+                        the closed loop goes inert. The startup refusal's own message says AMPLIFIES;
+                        that wording is opt/api.py's to correct, not this file's.
 
 IMPORT STYLE, AND WHY IT DEPARTS FROM THE ASSIGNMENT'S SKETCH. `from ..spine.lever import ...` cannot
 work here: every entry point in this tree puts `src/` ITSELF on sys.path (tests/test_derive.py::<module>,
@@ -546,7 +552,18 @@ class OPTLevers(LeverSet):
     # lr_075_short, 90000 for lr_075_rst.
 
     lr_min_frac = Lever(0.05, "Floor of the cosine as a fraction of peak -- the schedule never returns "
-                              "zero.", U.FRACTION)
+                              "zero.", U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) -- FROM THE ARITHMETIC, NOT FROM THE UNIT LABEL. src/opt/api.py::_schedule
+    # writes `min_frac + (1.0 - min_frac) * <cosine in 0..1>`: the number IS the share of peak the
+    # curve bottoms at, so outside the unit interval `(1.0 - min_frac)` carries the wrong sign and
+    # the schedule stops annealing. Driven over a 200-step horizon at lr=2e-3, wavelength 50:
+    # min_frac=-0.5 reaches -7.8747e-04, a NEGATIVE learning rate, and min_frac=2.0 RISES to
+    # 7.9954e-03 -- four times peak, at the end, where the anneal belongs. 0.0 is admitted because
+    # it is a declared setting: src/opt/api.py::build names it "a schedule with no floor" in its own
+    # refusal text, and the same run ends at exactly 0.0. The top is closed because a declaration
+    # cannot say "strictly below", so this is the outermost interval defensible here and
+    # src/opt/api.py::build keeps `not 0.0 <= min_frac < 1.0` to refuse 1.0 by name -- measured
+    # constant at peak on all 190 post-warmup steps of that run, which is what its message says.
     # Census: LR_MIN_FRAC -> OPT_LR_MIN_FRAC, verdict keep, default 0.05 (CENSUS.md:390). Field corrected
     # from `OPT_LR_MIN_FRAC` to `lr_min_frac` (DEFECT 1).
     # ON GOAL B DIRECTLY, AND THE SOURCE STATES IT AT THE FUNCTION THAT USES IT (:4752): "this is a
@@ -613,7 +630,19 @@ class OPTLevers(LeverSet):
 
     lr_restart_damp = Lever(0.5, "Multiplier on the next restart's swing when the cycle that just ended "
                                  "failed to beat the best held-out it inherited; cumulative.",
-                            U.FRACTION)
+                            U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) -- A CUMULATIVE MULTIPLIER ON AN AMPLITUDE. src/opt/api.py::maybe_step runs
+    # `st.restart_amp *= float(opt.lr_restart_damp)` once per losing cycle, and `restart_amp` scales
+    # a swing that src/opt/api.py::_schedule reads as `min_frac + (cyc - min_frac) * restart_amp`,
+    # so only a ratio in 0..1 SHRINKS the swing this lever exists to shrink. Below 0.0 the product
+    # flips the swing's sign. Above 1.0 the number asks for an amplification the mechanism will not
+    # perform either: the one multiplication is guarded by `float(opt.lr_restart_damp) < 1.0`, so
+    # the request reads as the loop going dead rather than as the ratchet, and it is refused by name
+    # in src/opt/api.py::build before that can be mistaken for a schedule settling. THE INTERVAL IS
+    # CLOSED BECAUSE BOTH ENDS ARE SETTINGS AND IT BOUNDS THE SPELLING, NOT THE MECHANISM: 0.0
+    # collapses the swing onto the floor at the first loss, and 1.0 is the identity multiplier at
+    # which no losing cycle can ever damp, which src/opt/api.py::counters already prints as its own
+    # gate arm.
     # Census: LR_RESTART_DAMP -> OPT_LR_RESTART_DAMP, verdict keep, default 0.5 (CENSUS.md:392). Field
     # corrected from `OPT_LR_RESTART_DAMP` to `lr_restart_damp` (DEFECT 1).
     # THE ONLY CLOSED-LOOP ELEMENT IN THE ENTIRE SCHEDULE, and the defect it answers is measured rather
@@ -658,12 +687,26 @@ class OPTLevers(LeverSet):
     # crossing the instrument line BACKWARDS. It must arrive as the declared wire `d_best_bpb` from EVAL
     # (eval/levers.py::<module> already declares the outgoing half), and the Reading it comes from must carry
     # its seed count, because PLAN 3.8 forbids a verdict on n=1 and a damped restart IS a verdict.
-    # NO RANGE GUARD SURVIVES THE PORT. The old read was `min(1.0, max(0.0, _f(...)))` at :4739; a Lever
-    # has no bounds, so OPT_LR_RESTART_DAMP=1.5 now AMPLIFIES each failed restart cumulatively -- see the
-    # header's guard table.
+    # THE OLD CLAMP IS GONE AND WAS NOT REPLACED BY ONE. The old read was `min(1.0, max(0.0, _f(...)))`
+    # at :4739, which silently rewrote the operator's number; what stands in its place REFUSES instead --
+    # `domain=(0.0, 1.0)` above at the first read, and src/opt/api.py::build by name at startup. Between
+    # them, OPT_LR_RESTART_DAMP=1.5 no longer reaches the schedule at all. See the header's guard table
+    # for what it would have done if it had, which is not what that refusal's message says.
 
     lr_decay = Lever(1.0, "Strength of a monotone envelope over successive restart peaks, so each cycle "
-                          "keeps its own high phase while the ceiling comes down.", U.FRACTION)
+                          "keeps its own high phase while the ceiling comes down.", U.FRACTION,
+                     domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) -- THE MIXING WEIGHT OF A CONVEX BLEND. src/opt/api.py::_schedule writes
+    # `cyc * ((1.0 - decay) + decay * env)`, which interpolates between NO envelope at 0.0 and the
+    # FULL envelope at 1.0. Outside the interval the blend stops being one, and neither direction
+    # reports itself -- driven over 200 steps at lr=2e-3, wavelength 50, four cycles: at decay=-1.0
+    # the envelope is skipped entirely (`enveloped = decay > 0.0` in the same function), giving the
+    # step-for-step IDENTICAL curve to decay=0.0, so a negative asks for something and silently
+    # receives the pre-2026-08-26 behaviour; at decay=2.0 the weight drives the blend NEGATIVE and
+    # the floor clamp catches it, leaving 110 of 200 steps pinned at lr_min_frac against 45 at the
+    # shipped 1.0 -- an envelope that has degenerated into the floor. Both endpoints are settings
+    # src/opt/api.py::build names in its own refusal (0.0 restores the full-peak restart, 1.0 is
+    # this default), so an exclusive end would refuse a value a shipped body accepts BY NAME.
     # Census: LR_DECAY -> OPT_LR_DECAY, verdict keep, default 1.0 (CENSUS.md:389). Field corrected from
     # `OPT_LR_DECAY` to `lr_decay` (DEFECT 1).
     # ITS FAMILY TAG HAD ALREADY DRIFTED, which is the whole reason the ownership spine exists: _SPEC

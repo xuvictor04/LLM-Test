@@ -259,10 +259,10 @@ class FABLevers(LeverSet):
     halt = Lever(True, "HALT as a real operator on both paths: its mass says 'no expert is needed "
                        "here' and the caller spends that mass on model.head directly.", U.FLAG)
     halt_max = Lever(0.9, "Ceiling on halt mass, so at least 1-halt_max of the blend and its "
-                          "gradient always reaches the population.", U.FRACTION)
+                          "gradient always reaches the population.", U.FRACTION, domain=(0.0, 1.0))
     # A BARRIER, NOT A PREFERENCE (:1735-1738). At halt=1 the experts receive no gradient at all, and
     # an expert that receives no gradient can never become worth routing to: an absorbing state. This
-    # is the fabric's version of the trap that top-k exploration exists to avoid.
+    # is the fabric's version of the trap that top-k exploration exists to avoid. DOMAIN: AT THE FOOT.
 
     alpha = Lever(0.5, "Residual mixing coefficient of one fabric step: h <- norm(h + alpha*(mixture "
                        "- h)).", U.FRACTION)
@@ -309,7 +309,7 @@ class FABLevers(LeverSet):
 
     pressure = Lever(0.45, "Occupancy SETPOINT: below pressure x slots the utilization cull, the "
                            "utilization spare and `rescue` are all unreachable, so it chooses the "
-                           "operating population size.", U.FRACTION)
+                           "operating population size.", U.FRACTION, domain=(0.0, 1.0))
     # THE UNTRIPPABLE-GUARD CLASS (60 records) IN ITS MOST EXPENSIVE FORM, and the reason the default
     # is 0.45 and not the 0.75 the merged EXPERT_PRESSURE row carried: n0=2048 against slots=4096
     # parks occupancy at exactly 0.50, permanently below 0.75, so the gate could never open. Measured
@@ -317,7 +317,7 @@ class FABLevers(LeverSet):
     # mechanisms switched on. Measured the other way too: gate_press predicted 0.45 x 4096 = 1843
     # live and the run ended at 1838 (:201-208). MERGED IN: EXPERT_PRESSURE (0.75), the identical
     # gate on the legacy router -- `(1 - len(free)/cap) >= pressure_on` at :3087 -- whose 0.75 is
-    # deliberately NOT carried over, because carrying it would carry the untrippable guard.
+    # deliberately NOT carried over, because carrying it would carry the untrippable guard. DOMAIN: AT THE FOOT.
 
     grow = Lever(True, "Master switch for population growth: off freezes the population at n0 while "
                        "routing, selection, replication and the cull all still run.", U.FLAG)
@@ -372,7 +372,17 @@ class FABLevers(LeverSet):
     # slow-moving EMA (ISSUES P1-M35).
 
     discover = Lever(0.35, "Cosine distance beyond which a signature counts as material NOTHING owns "
-                           "and is handed to the least-used expert.", U.FRACTION)
+                           "and is handed to the least-used expert.", U.FRACTION, domain=(0.0, 2.0))
+    # DOMAIN (0.0, 2.0), AND THE 2.0 IS THE WHOLE POINT: THE CEILING IS NOT 1.0 AND U.FRACTION DID
+    # NOT DECIDE IT. fabric/api.py::_ground_update compares `1.0 - best` against this number, where
+    # `best` is the largest dot of a UNIT centroid row with a mean of unit signatures -- so what is
+    # compared is a cosine distance, and a cosine distance runs over [0, 2]. A hi of 1.0 would refuse
+    # 1.5, a threshold that mechanism can still evaluate and that only recruits on material pointing
+    # AWAY from every region. The low end is the declared off: the same function gates the whole
+    # branch on `discover > 0`. IT IS ALSO A SECOND ANSWER TO A QUESTION ALREADY RULED, AND THAT COST
+    # SOMETHING: fabric/api.py::build refuses this lever below zero too, and now cannot -- no
+    # environment reaches it, because a domain is checked at the first read. That arm is not deleted
+    # and still covers the other ten levers in its list; the cost is recorded at the foot.
     # MERGED IN: EXPERT_NEW_DIST (0.5), the same threshold on the legacy router, which MINTED a new
     # expert at `(1 - sims[j]) > new_dist` (:3051) where this one recruits the coldest existing node
     # (:2421-2424). One concept, two populations, only one of which runs; the 0.5 is not carried.
@@ -597,7 +607,11 @@ class FABLevers(LeverSet):
 
     new_frac = Lever(0.04, "The most of the population that may be newborn at once; growth takes "
                            "whatever is left of the budget rather than being refused outright.",
-                     U.FRACTION)
+                     U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0): a SHARE OF THE LIVE POPULATION. fabric/api.py::grow_check spends it as the
+    # newborn budget for one burst, so at 1.0 every live expert may be newborn at once and anything
+    # above names more newborns than there are members to count them against. 0.0 is NOT an off
+    # switch -- `grow` is -- it is one birth per burst, because the max(1, ...) below floors it.
     # The brake that keeps selection able to outpace growth, which is the premise of a selective
     # population. Two things belong in its port comment: max(1, ...) exists because int(0.10 * 3) is
     # 0 and a small founding population could otherwise never grow at all (measured: reached 7
@@ -616,7 +630,12 @@ class FABLevers(LeverSet):
     # unfocused.
 
     parent_max = Lever(0.20, "Maximum share of recent births any one parent may account for.",
-                       U.FRACTION)
+                       U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0): a SHARE OF THE birth_win RECORD, not of anything unbounded.
+    # fabric/api.py::grow_check refuses a parent that already holds parent_max of the last birth_win
+    # births, so 1.0 is the whole record -- the quota switched off -- and above it no share exists
+    # for the record to hold. 0.0 is the tightest quota the mechanism can state and is admitted
+    # rather than guessed away; what it does at 0.0 is a question for the body, not for this pair.
     birth_win = Lever(256, "Size of the sliding per-parent birth record that parent_max is measured "
                            "against.", U.COUNT)
     # Without a per-parent quota the fittest expert clones itself into the whole growth budget, which
@@ -630,7 +649,11 @@ class FABLevers(LeverSet):
     mut_big = Lever(6.0, "Size of the heavy-tail mutation, as a multiple of the ordinary mutation "
                          "scale.", U.COUNT)
     mut_big_p = Lever(0.1, "Probability that a birth takes the heavy-tail mutation instead of the "
-                           "ordinary one.", U.PROBABILITY)
+                           "ordinary one.", U.PROBABILITY, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) ON mut_big_p AND DELIBERATELY NOT ON mut_big BESIDE IT. This one is spent by
+    # fabric/api.py::grow_check as the CHANCE that one birth takes one branch rather than the other,
+    # and a chance outside [0, 1] names no draw: 0.0 is never, 1.0 is always. mut_big is a MULTIPLE
+    # of the mutation scale (module docstring, the five multipliers) and gets no ceiling from here.
     # mut is relative to the parent's std rather than absolute, so it means the same thing for a
     # well-trained parent and a fresh one -- the scale-free principle `z` and `spawn_mult` also use.
     # mut_big is a MULTIPLE (module docstring, the five multipliers), not a fraction; it is also the
@@ -639,7 +662,11 @@ class FABLevers(LeverSet):
     # carrying both would make "more exploration" ambiguous.
 
     xover = Lever(0.35, "Fraction of births assembled from several parents by taking whole rank "
-                        "slices from a second parent.", U.FRACTION)
+                        "slices from a second parent.", U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0): a RATE PER BIRTH -- fabric/api.py::grow_check assembles a birth from several
+    # parents at rate xover -- so 1.0 is every birth and above it names more crossovers than there
+    # are births to spend them on. 0.0 is no crossover, which is the arm that leaves `replicate`
+    # perturbation-only and is the counterfactual the recombination claim needs.
     # The only birth operator that RECOMBINES rather than perturbs. Rank slices are a meaningful unit
     # to exchange precisely because each is an independent low-rank direction, which is why this is
     # coupled to `rank` by construction rather than by accident.
@@ -711,7 +738,16 @@ class FABLevers(LeverSet):
     # against two clock kinds, which is the defect class the Clock types exist for.
 
     cull_frac = Lever(0.02, "Fraction of the ELIGIBLE (past-grace) set removed per manage pass, "
-                            "floored at one.", U.FRACTION)
+                            "floored at one.", U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0): the budget is int(cull_frac * len(eligible)) in fabric/api.py::manage -- a
+    # share of a FINITE SET -- so above 1.0 it names more experts than the eligible set holds. THE
+    # LOW END IS 0.0 AND NOT A FLOOR OF ONE, and the two readers disagree about which: the help
+    # string above says `floored at one`, while fabric/api.py::manage drops the max(1, ...) ratchet
+    # and records a zero budget under an open gate as a legitimate outcome. The pair takes the wider
+    # of the two, which is the only direction that cannot refuse a value a body accepts. The help
+    # string is NOT quietly rewritten to agree: manage raises NotImplementedError today, and a
+    # levers.py editing its own sentence to match a stub is the shape this file refuses one section
+    # above for manage_every.
     # MERGED IN: EXPERT_CULL_RANK (0.08), the identical rank-relative pressure-gated cull on the
     # legacy router (:3089). The 0.08 is not carried: 0.02 was set against the fabric's own use-age
     # grace and its measured occupancy. Read twice on purpose -- at :2263 for the cull and at :7280
@@ -790,7 +826,15 @@ class FABLevers(LeverSet):
     # leave that pair half-implemented.
 
     merge_dist = Lever(0.10, "Cosine distance under which two redundant experts are MERGED by "
-                             "averaging their adapters, instead of one being culled.", U.FRACTION)
+                             "averaging their adapters, instead of one being culled.",
+                       U.FRACTION, domain=(0.0, 2.0))
+    # DOMAIN (0.0, 2.0), THE SAME CEILING AS discover AND FOR THE SAME REASON RATHER THAN BY
+    # ANALOGY: the pairs fabric/api.py::manage tests are rows of pop.cent, and every site that reads
+    # or writes that buffer normalises it -- fabric/api.py::_entry_logits and
+    # fabric/api.py::_ground_update both take F.normalize of it -- so 1 - cos between two unit rows
+    # runs to 2 and a hi of 1.0 would refuse a distance the space can hold. 0.0 is the off spelling
+    # the DEFAULT NOTICE below is about: it is the value that notice says this default is NOT.
+    # U.FRACTION chose neither end.
     # CARRIED OVER ON A CONDITION, AND THE CONDITION IS NOW MET (Q-FAB-2, RESOLVED 2026-09-02).
     # This is the only merge-rather-than-kill mechanism in either expert population -- the legacy
     # router averaged the two adapters and summed their use, so "both experts' learning survives"
@@ -857,9 +901,18 @@ class FABLevers(LeverSet):
     # fast and one it calls rarely cycles slowly, so the population is never in phase.
 
     lr_gamma = Lever(0.5, "Per-cycle envelope decay: 0.5 is triangular2 exactly, 1.0 degenerates to "
-                          "plain triangular.", U.FRACTION)
+                          "plain triangular.", U.FRACTION, domain=(0.0, 1.0))
     lr_amin = Lever(0.15, "Floor under the decaying envelope, so a long-lived expert keeps a small "
-                          "permanent capacity to move.", U.FRACTION)
+                          "permanent capacity to move.", U.FRACTION, domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) ON BOTH, OUT OF ONE EXPRESSION. fabric/api.py::own_lr_scale raises lr_gamma
+    # to the completed-cycle count, floors that at lr_amin and multiplies the result into the peak
+    # amplitude. So gamma is a COMPOUNDING per-cycle multiplier whose top end the declaration above
+    # already names -- at 1.0 it stops decaying -- and above 1.0 it would GROW an expert's rate cycle
+    # after cycle instead of decaying it, which is the opposite of what the field is called. amin is
+    # a floor under that same envelope, whose value in the first cycle is exactly 1.0, so a floor
+    # above 1.0 is not a floor under anything. Each one's 0.0 is its own off: no floor at all for
+    # amin -- the state the comment below says the lever exists to prevent -- and, for gamma, the
+    # envelope collapsing onto amin after a single cycle.
     # Without a floor the envelope reaches zero and the only adaptation left in the population is
     # birth and death (:7241) -- which is the opposite of what a continual learner wants from its
     # oldest, most specialised experts. The report already knows how to say when the floor is doing
@@ -878,7 +931,7 @@ class FABLevers(LeverSet):
 
 
 # ==================================================================================================
-# A DECLARATION CARRIES NO DOMAIN, AND WHAT THAT COST WAS MEASURED ON 2026-09-05
+# ELEVEN DECLARATIONS CARRY A DOMAIN AND SEVENTY-ONE DO NOT, AND WHAT THAT COSTS WAS MEASURED
 # ==================================================================================================
 # WRITTEN AT THE FOOT OF THE FILE AND NOT IN THE MODULE DOCSTRING, ON PURPOSE. The census departures
 # table in tests/test_census.py cites three of the arguments in this file BY LINE SPAN -- the rows
@@ -891,9 +944,14 @@ class FABLevers(LeverSet):
 # tests/test_ownership.py::check_o12_citations_name_symbols refuses one into a live file, and why an
 # earlier draft of this very paragraph was refused by it for spelling those three spans out.
 #
-# `Lever(default, help, unit, choices=...)` is the whole declaration surface: a literal, a sentence,
-# a label the census renders, and -- for the one str lever here -- a set of legal spellings. There is
-# no lo/hi, so the ONLY thing a number above is checked against is its TYPE. A lever-domain sweep
+# AS RECORDED, UNTIL 2026-09-14: "`Lever(default, help, unit, choices=...)` is the whole
+# declaration surface ... There is no lo/hi, so the ONLY thing a number above is checked against is
+# its TYPE." WHAT IS TRUE NOW: spine/lever.py::Lever takes `domain=(lo, hi)` as well, checked at
+# declaration by spine/lever.py::_domain_ends and again after coercion in spine/lever.py::Lever.coerce
+# -- BOTH ENDS INCLUSIVE, either end may be None for unbounded -- and ELEVEN of this package's 82
+# declarations now carry one. The paragraph is kept rather than deleted because everything the sweep
+# below measured was measured against the tree it describes, and the block after it says which
+# eleven, on what argument, and what they still do not buy. A lever-domain sweep
 # drove every numeric lever in this package at nan, inf, -inf and 0, one fresh subprocess per cell,
 # through a real assembly and two real forward passes (.rework/audits/sweep_fabric.json). What it
 # found, and where each answer now lives, so this file and src/fabric/api.py cannot drift on it:
@@ -928,9 +986,118 @@ class FABLevers(LeverSet):
 #   FINITE value does the same damage: alpha=1e26 returns an ordinary-looking loss pair over a
 #   population whose gradients are already mostly poisoned, which is worse than an infinity because
 #   an infinity at least comes back nan. A declared per-lever domain -- lo/hi in the shape `choices=`
-#   already has -- is the general answer and is the owner's open question, not this file's.
+#   already has -- was named here as the general answer and as the owner's open question; the owner
+#   has since ruled, spine/lever.py carries `domain=`, and the block below populates the eleven
+#   declarations in this package whose two ends are readable off what their READER does with the
+#   number. It closes no part of the paragraph above: alpha=1e26 is still finite and still poisons
+#   fifteen gradient tensors of twenty-three, and alpha is not one of the eleven.
 #   TWO KNOWN HOLES THIS ROUND DID NOT CLOSE, named rather than left for the next sweep to re-find:
 #   manage_every=0 (three live readers give three different answers for it, and the refusal that
 #   would end that is blocked by a check in a file FAB does not own -- see .rework/audits/wl_fabric.json)
 #   and dom_min=0, which removes the floor that stops the breadth cap banning every expert from
 #   every domain, and which is unreachable only because FAB.observe is still a stub.
+
+
+# ==================================================================================================
+# THE ELEVEN DOMAINS: WHAT EACH PAIR IS AN ARGUMENT FOR, AND WHAT NONE OF THEM BUYS
+# ==================================================================================================
+# WHY THIS IS AT THE FOOT AND NOT ALL OF IT AT THE DECLARATIONS. Nine of the eleven carry their
+# argument at their own line, where it belongs. `halt_max` and `pressure` carry only the kwarg and
+# are argued here, for the reason the block above this one already records about itself: the census
+# departures table cites three arguments in this file BY LINE SPAN, two of those spans sit below the
+# halt_max declaration and one of those two sits below pressure as well, and a comment added at
+# either declaration moves them off the paragraphs they point at. That is not a guess -- it is what
+# tests/test_census.py::check_n8_departure_arguments_still_there is for, and the same table has
+# already been re-aimed once after this file grew 27 lines above a row. Appending costs a reader one
+# jump; adding lines up there costs a check its meaning. Re-aiming the table would be the better fix
+# and it is not this file's to make.
+#
+# THE ELEVEN, AND THE ONE THING THAT DID NOT DECIDE ANY OF THEM: U.FRACTION. Ten of the eleven are
+# labelled U.FRACTION and one U.PROBABILITY, and the label bounds nothing -- this file's own
+# src/fabric/api.py::build says so of its shares, and two sibling packages have ruled the same way.
+# Every pair below is read off what the CONSUMER does with the number, which is why two of them end
+# at 2.0 and not at 1.0:
+#
+#   (0.0, 1.0)  cull_frac   share of the eligible set        fabric/api.py::manage
+#   (0.0, 1.0)  halt_max    ceiling on a softmax column      fabric/api.py::forward
+#   (0.0, 1.0)  lr_amin     floor under a unit envelope      fabric/api.py::own_lr_scale
+#   (0.0, 1.0)  lr_gamma    per-cycle decay multiplier       fabric/api.py::own_lr_scale
+#   (0.0, 1.0)  mut_big_p   chance of one branch per birth   fabric/api.py::grow_check
+#   (0.0, 1.0)  new_frac    share of the live population     fabric/api.py::grow_check
+#   (0.0, 1.0)  parent_max  share of the birth_win record    fabric/api.py::grow_check
+#   (0.0, 1.0)  pressure    occupancy setpoint               spine/derive.py::operating_population
+#   (0.0, 1.0)  xover       rate per birth                   fabric/api.py::grow_check
+#   (0.0, 2.0)  discover    COSINE DISTANCE                  fabric/api.py::_ground_update
+#   (0.0, 2.0)  merge_dist  COSINE DISTANCE                  fabric/api.py::manage
+#
+# halt_max -- (0.0, 1.0). fabric/api.py::forward reads the halt column out of a SOFTMAX over the
+# entry logits and the halt logit, so the quantity being clamped is a probability and lives in
+# [0, 1]. Above 1.0 the clamp cannot bind on any input, which is the state 1.0 already spells, so
+# refusing it removes no configuration an operator can ask for -- the identical argument
+# src/fabric/api.py::build makes for FAB_ROUTE_T at nan and -inf. Below 0.0 is the measured harm and
+# it is the worst of the eight negatives that function chose not to refuse: at -0.9 the clamp makes
+# the halted mass NEGATIVE, so the residual is AMPLIFIED rather than damped and sum|g|max goes from
+# 1.3968892609970744 to 2.5214699913394156 over two forward passes. 0.0 is measured legitimate and
+# not a defect: no halt mass at all, the walk never stops early, every row clamped, everything
+# finite. WHAT THE PAIR DOES NOT DO, said here because the declaration's own comment is the reason
+# it matters: 1.0 IS INSIDE THIS DOMAIN and 1.0 is the absorbing state that comment is about -- a
+# ceiling of 1.0 permits the entire blend to halt, the experts receive no gradient, and an expert
+# that receives no gradient can never become worth routing to. The pair bounds the SPELLING of a
+# ceiling. It does not restore the barrier, and no reader may take it as having done so.
+#
+# pressure -- (0.0, 1.0). It is an OCCUPANCY setpoint and both of its readers say so in their own
+# units line: spine/derive.py::cull_gate_open compares n_live/max(1, slots) against it, and
+# spine/derive.py::operating_population multiplies it by the slot count to get the population the
+# fabric equilibrates at. An occupancy is a live count over a preallocated count, so a setpoint above
+# 1.0 asks the gate to open at an occupancy the pool cannot reach, and the second of those functions
+# states the property it holds only for 0 < pressure <= 1. 0.0 is measured legitimate -- the setpoint
+# floors to the same 3 the gate's own n_live <= 2 clause floors to, and the gate then stands open at
+# every occupancy -- so the low end is inclusive rather than the strict one that function's property
+# line uses. THE REFUSAL NOW ARRIVES EARLIER AND WITH A NAME. pressure is consumed DURING
+# spine/assemble.py::build by the FAB.d_operating_population coupling, which is why the paragraph
+# above records that a bad value is refused by spine/derive.py::operating_population, in a message
+# that names the setpoint and CANNOT name the lever, because two packages' couplings reach that
+# function. A domain is checked in spine/lever.py::Lever.coerce, which runs before any coupling, so
+# FAB_PRESSURE=2.0 and FAB_PRESSURE=-0.45 are now refused by their own generated environment name at
+# the first read. That does not make the derive-side refusal dead code: it is the only thing standing
+# between a non-finite or out-of-range number and the coupling for any caller that reaches
+# spine/derive.py::operating_population without passing through this declaration.
+#
+# WHAT ELEVEN PAIRS DO NOT BUY, AND THIS IS THE PART A READER MUST NOT SKIP. They bound a SPELLING,
+# not a harm. Every one of the eleven admits values that are ordinary to type and wrong for a run --
+# pressure=0.99 pins the population at the slot count, cull_frac=1.0 empties the eligible set every
+# pass, parent_max=0.0 is a quota no parent can satisfy, halt_max=1.0 is the absorbing state above.
+# Nothing here is safe, bounded or validated, and the general fact is measured elsewhere in this very
+# file: alpha=1e26 is finite, inside every rule this package has, and leaves fifteen of twenty-three
+# gradient tensors non-finite behind an ordinary-looking loss pair. What the eleven do buy is exact
+# and small: a value outside the interval is refused at the FIRST read, by the generated environment
+# name, before anything is derived from it -- and because the test is written as an inverted chain,
+# any finite endpoint refuses nan for free. Only the finite HIGH end refuses +inf; the 32 float
+# levers here that get no pair keep +inf legal at this layer and are answered by
+# spine/lever.py::REFUSE_NON_FINITE_FLOAT and by src/fabric/api.py::build instead. The floor and the
+# domain are complements, not alternatives.
+#
+# WHAT THE ELEVEN COST A GUARD THAT WAS ALREADY THERE -- STATED, NOT HIDDEN, AND NOTHING REMOVED.
+# ONE of the eleven overlaps a refusal this package already shipped: src/fabric/api.py::build refuses
+# eleven negative magnitude levers and FAB_DISCOVER is one of them. A domain is checked in
+# spine/lever.py::Lever.coerce, at the first read, so that arm can no longer fire for FAB_DISCOVER
+# from any environment -- the untrippable-guard class this tree names, arrived at deliberately this
+# time rather than discovered. It is NOT deleted and must not be: it still covers the other ten, and
+# it is still the only thing standing for any caller that reaches build() with a Config this
+# declaration did not produce. The same is true one layer out for `pressure` and
+# spine/derive.py::operating_population. tests/test_fabric.py::check_f4_negative_magnitude_levers_refused
+# is the check that noticed, which is the check working; its own repair is that owner's, and it is a
+# WIDENING -- record which layer answered -- and never a narrowing of the eleven it examines.
+# The other ten pairs duplicate no existing guard in this package.
+#
+# AND WHY ONLY ELEVEN, SO THE SILENCE OF THE OTHER SEVENTY-ONE IS NOT READ AS A VERDICT. A pair was
+# written only where BOTH ends fall out of what the reader does. It was NOT written for the levers
+# whose ceiling this tree has declined to set (the multipliers z, mut_big, spawn_mult, lr_maxr and
+# lr_boost; route_t, which is a temperature), nor for the ones whose ceiling is another lever or a
+# wire and cannot be a per-lever pair at all (n0 against slots, chain_k and ens_k against the live
+# population, depth0 against hops, cent_topk against the routed set), nor for the weights and
+# magnitudes whose harmful value is a property of the arithmetic rather than of the declaration --
+# alpha, balance, bal_floor, route_region_w, div_w, ind_w, ae_w, hop_sup, ec_w, explore, ponder,
+# emb_var, mut, spawn_floor, dom_frac, comp_protect and the error and tolerance family. Those are the
+# levers that carry the sweep's critical findings, and NOT ONE OF THEM IS IN THE TABLE ABOVE. An
+# absent pair here means the argument was not available, never that the lever was found harmless.

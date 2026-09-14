@@ -1252,6 +1252,700 @@ def check_o9_one_config_per_signature(mods):
 
 
 # ==================================================================================================
+# O14 -- every `domain=` endpoint is an ast.Constant
+# ==================================================================================================
+#
+# THIS IS O2'S RULE ONE FIELD OVER, and it is here for O2's reason rather than by analogy.
+# spine/lever.py::_domain_ends checks a `domain=` at DECLARATION time and refuses six shapes: a
+# non-numeric default, a pair that is not a pair, (None, None), a non-numeric end, a fractional end
+# on an int lever, a non-finite end, lo above hi, and a default outside its own pair. EVERY ONE OF
+# THOSE IS ALREADY UNTRIPPABLE FROM HERE, and that was measured rather than assumed -- each was
+# planted at the constructor on 2026-09-14 and each came back LeverError, and the out-of-domain
+# default was then planted in a copy of src/opt/levers.py (lr_decay, default 1.0, given
+# domain=(0.0, 0.5)) where `import spine.assemble` raised
+#     LeverError: default 1.0 is outside its own domain [0.0, 0.5].
+# A tree carrying one of those does not start, so a static restatement of it here could only ever
+# fire on a tree that tests/test_census.py and tests/test_assemble.py cannot even import. Writing
+# those checks is how this repository gets its 61st untrippable guard, and they are NOT written.
+#
+# WHAT IS LEFT IS EXACTLY THE HOLE O2 DESCRIBES FOR `default`, and _domain_ends cannot see it
+# because it tests a VALUE with isinstance and the value is a perfectly good number:
+#     _MAX = 0.75            ...     domain=(0.0, _MAX)          -> BUILT, endpoint 0.75
+#     domain=(0.0, float(FABLevers.slots.default))               -> BUILT, endpoint 4096.0
+# Both were driven against the real spine on 2026-09-14 and both were accepted. The first is a
+# SECOND HOME for the number -- editing `_MAX` changes what the lever refuses, with nothing at the
+# declaration to say so, which is the drift L1 exists to end. The second is worse and is the reason
+# this check is not cosmetic: it is a range endpoint read out of ANOTHER PACKAGE'S DECLARATION, with
+# no wire, no COUPLINGS row and nothing in affects() -- the DECLARATION half that
+# spine/lever.py::LeverSet.from_env's own docstring says nothing static or runtime in that file
+# reaches ("editing FAB's literal changes MEM's behaviour and affects() cannot see it"), arriving
+# through a kwarg that is one day old.
+#
+# CANNOT CATCH, and the list is O2's because the mechanism is O2's:
+#   * a Lever built through an alias or a factory, where there is no `Lever(` call to read.
+#   * a domain assembled dynamically -- `setattr(cls, n, Lever(d, ..., domain=TABLE[n]))`. The
+#     runtime shape checks in _domain_ends still apply; only the one-home guarantee is lost.
+#   * an endpoint that is a literal and WRONG. Nothing static knows that 1.0 was meant to be 2.0,
+#     and that is not hypothetical here: two owners independently found that a reflexive (0.0, 1.0)
+#     on a COSINE DISTANCE would have refused a 1.24 this tree has measured. Only reading the
+#     consumer settles that, which is what O15 does for the half of it that is written down.
+
+
+def _domain_arg(call):
+    """The `domain=` argument node of a Lever(...) call, or None. There is no positional form: the
+    signature is Lever(default, help, unit=..., choices=..., domain=...) and a positional fifth
+    argument would be `choices`, so matching only the keyword is matching the whole surface."""
+    for k in call.keywords:
+        if k.arg == "domain":
+            return k.value
+    return None
+
+
+def _domain_pair(node):
+    """(lo, hi) as AST nodes for a domain written as a visible pair, or None if it is not one."""
+    if isinstance(node, (ast.Tuple, ast.List)) and len(node.elts) == 2:
+        return node.elts[0], node.elts[1]
+    return None
+
+
+def _literal_end(node):
+    """A domain endpoint that is a literal: a Constant (including None), or a signed one."""
+    return _is_literal(node)
+
+
+def check_o14_domain_endpoints_are_literals(mods):
+    findings, decls, ends = [], 0, 0
+    for mod in mods:
+        for call in _calls_named(mod, "Lever"):
+            dom = _domain_arg(call)
+            if dom is None:
+                continue
+            decls += 1
+            pair = _domain_pair(dom)
+            if pair is None:
+                findings.append(_at(mod, dom,
+                                    f"domain= is not a visible (lo, hi) pair: {mod.line(dom.lineno)} -- "
+                                    f"spine/lever.py::_domain_ends will unpack whatever this evaluates "
+                                    f"to, so the interval a reader sees at the declaration and the one "
+                                    f"the lever refuses by are two different things. Write the pair."))
+                continue
+            for end, side in zip(pair, ("lo", "hi")):
+                ends += 1
+                if _literal_end(end):
+                    continue
+                findings.append(_at(mod, end,
+                                    f"domain {side} is not a literal: {mod.line(end.lineno)} -- an "
+                                    f"endpoint computed from a name is a SECOND HOME for the number "
+                                    f"that decides what this lever refuses, and _domain_ends cannot "
+                                    f"see it: it isinstance-tests the VALUE, so `domain=(0.0, _MAX)` "
+                                    f"and `domain=(0.0, float(FABLevers.slots.default))` are both "
+                                    f"accepted at declaration today. The second is a foreign "
+                                    f"package's declaration reached with no wire and nothing in "
+                                    f"affects() to print it. Write the number, or declare the "
+                                    f"coupling in spine.assemble."))
+    detail = (f"{decls} Lever(...) declaration(s) carry domain=, {ends} endpoint(s) examined, "
+              f"{len(findings)} not written as a literal")
+    return _report("O14", "every domain= endpoint is a literal", not findings, detail, findings,
+                   vacuous=not decls)
+
+
+# ==================================================================================================
+# O15 -- a declared domain and the read-site refusal over the same lever do not contradict, and do
+#        not silence, each other
+# ==================================================================================================
+#
+# WHY THIS IS THE ONE WORTH RUNNING. `domain=` is a refusal, and four packages wrote refusals for
+# the same levers BY HAND before the kwarg existed -- src/fabric/api.py::build, src/opt/api.py::build,
+# src/sig/api.py::warm_up, src/tok/api.py::build_vocabulary, src/lm/api.py::resolve. Two refusals
+# over one lever can disagree in two directions and only one of them is visible from either side
+# alone, so this check reads BOTH and compares the intervals:
+#
+#   OVER-REFUSAL. The body's own refusal pins BOTH ends of what it accepts, and the declared domain
+#     is NARROWER than that. A configuration the shipped body accepts then fails at startup. This is
+#     the direction that breaks a run that works, and it is the direction two owners came within one
+#     endpoint of committing this week from opposite ends of the tree: FAB_DISCOVER, FAB_MERGE_DIST,
+#     DOM_SHIFT_DIST, DOM_SPAWN_DIST and DOM_MERGE_DIST are all COSINE DISTANCES on [0, 2] carrying
+#     the U.FRACTION label, and a reflexive (0.0, 1.0) would have refused a pooled radius of 1.24
+#     that this tree has measured on this geometry.
+#
+#   PRE-EMPTION. The domain refuses everything the body's clause refuses, so that clause can never
+#     run again. It is then an untrippable guard -- this repository's most-recorded defect, 60 of the
+#     survey's 475 records -- and the cost is concrete rather than tidiness: the body's message is
+#     where the MEASUREMENT lives, and the declaration's is generic. Driven on 2026-09-14, one fresh
+#     process per cell, with the domain on and then neutralised in a scratch copy:
+#       OPT_LR_RESTART_DAMP=1.5   domain on  -> "OPT_LR_RESTART_DAMP=1.5 is outside its declared
+#                                               domain [0.0, 1.0] -- BOTH ENDS INCLUSIVE"
+#                                 domain off -> "OPT_LR_RESTART_DAMP=1.5 is above 1.0, which INVERTS
+#                                               the mechanism. The damping multiplies the restart
+#                                               amplitude CUMULATIVELY ..."
+#     A sentence an operator can act on, replaced by one they cannot, with nothing anywhere saying
+#     the trade was made. And a message nothing can print is prose that rots: that same OPT message
+#     is ALREADY false -- src/opt/api.py::maybe_step guards its one `st.restart_amp *= ...` with
+#     `float(opt.lr_restart_damp) < 1.0`, so above 1.0 the loop goes INERT and does not AMPLIFY.
+#
+# WHAT IT DOES NOT DO, said here because the two sentences next to each other are the point. It does
+# not decide whether a domain is RIGHT. It reads two refusals that are both already written down and
+# reports where they disagree; a lever with no read-site refusal is not examined at all, which is 26
+# of the 33 levers carrying a domain today. And it makes no claim about VALUES INSIDE either
+# interval. Every finding below leaves the mechanism exactly as open as it was: OPT_LR is not in this
+# population, carries no domain, and at 1e6 still runs five stages reporting OK with every parameter
+# at -3928.
+#
+# CALIBRATED OVER THE ARCHIVE, AND THE HONEST ANSWER IS THAT THE ARCHIVE CANNOT CALIBRATE THE
+# VERDICT. 77 of this repository's 196 commits carry src/. The extractor below was run over all 77:
+# 31 distinct refusal sites, 0 to 44 per tree, and EVERY ONE of the 31 was opened and read against
+# the first line of the refusal message it sits over -- all 31 pair with the lever their own message
+# names, and every extracted interval matches the interval the message states where the message
+# states one. Zero mis-extractions in 31 sites. The 21 site-instances that pair with more than one
+# lever are the three name/value TABLES in src/fabric/api.py, where one comprehension really does
+# refuse for six to eight levers at once. But `domain=` appears in NONE of the 77 trees -- it is one
+# day old and uncommitted -- so the two arms below had population 0 and 0 findings at every archived
+# commit, which is not evidence of a low false-alarm rate, it is evidence that history has nothing
+# to say. What stands in for it is the live drive above (8 verdicts, every one confirmed in both
+# directions by running it) and the planted cases at the bottom of this file, which include the
+# correct construct that most resembles a finding: a domain whose top end the body's own clause
+# still refuses BY NAME, which is the shape spine/lever.py::Lever's declaration comment prescribes
+# ("the declaration under-refuses by exactly one endpoint and the body refuses that endpoint by
+# name") and which must stay green. LM_DROPOUT and OPT_LR_MIN_FRAC are both that shape on the real
+# tree and both were driven: 1.0 resolves and then the body refuses it by name.
+#
+# WHY IT IS IN THIS FILE AND NOT IN tests/test_contract.py, since both were weighed. This check's
+# two inputs are a DECLARATION and an AST walk over src/, which is this file's stated subject and
+# this file's existing machinery -- `_leversets`, `_config_params`, `_owned_by_calls` and
+# `_calls_named` are all reused rather than rewritten, and O4's shape is the same one ("every
+# declared wire is read": a declaration checked against its consumers). test_contract.py's subject
+# is the DOCUMENT, the stubs and the composition root; its K1 compares the ```contract block against
+# `api_signatures`, which reads `src/<pkg>/api.py` for the thirteen packages in PKG_DIR, so
+# src/spine/lever.py is outside its population entirely and a new declaration field cannot reach it.
+# What the document DOES owe is the prose, and that is written: docs/04_CONTRACT.md 0.5.
+#
+# CANNOT CATCH:
+#   * a refusal this pass ABSTAINS on. 51 on the tree today, and the detail line prints the number:
+#     49 are an `if` whose test names a lever and is not a comparison of that lever against numeric
+#     literals -- `if _nonfinite:`, `if seg_min < 1 or seg_max < seg_min:`, `if
+#     REFUSE_NEGATIVE_PERIOD and every < 0:`, `if capacity != owners * quota:` -- and 2 are a table
+#     entry the comprehension's condition could not be read for. Every one is skipped and counted. Abstaining can only make this check report LESS. It is also why the over-refusal
+#     arm SETS ASIDE any lever with an abstained test: an unread clause could narrow what the body
+#     accepts, and claiming the body accepts a value it refuses is the one way this arm could invent
+#     a finding. 3 of the 5 levers in that population are set aside today for exactly that.
+#   * a refusal written anywhere but an `if` over a Config-annotated parameter with a literal
+#     `owned_by` -- a clamp, a torch constructor raising three frames down, a body that does not
+#     exist yet. Roughly 288 cells across the six sweep reports are UNREACHABLE_TODAY because the
+#     consumer is a P4/P5/P6 stub, and a body that does not exist cannot disagree with anything.
+#   * the direction that matters most and is not written down anywhere: a domain that admits a value
+#     the mechanism destroys. FAB_ALPHA=1e26 is finite, inside every rule in this file, and leaves
+#     15 of 23 gradients non-finite over a loss pair of 0.5150710 / 2.943258.
+#
+# EVERY MECHANISM BELOW IS SEEN TO FAIL, which is the claim k_k16.json caught K16 making falsely
+# ("SIX are pinned by NOTHING in all 77 cases"). Thirteen were deleted one at a time against the
+# whole file on 2026-09-14 and the self-test went RED on all thirteen: the raise requirement in
+# _o15_refuses, the Compare arm and the Not/complement arm of _o15_test_set, the abstention gate on
+# the over-refusal arm, the kill-on-rebind in _o15_bindings, the bool rejection in _o15_number, the
+# holder-reaches-a-raise test and the mislabelled-name abstention in the table shape, the env-name
+# pairing in shape one, the bounded-both-ends test, the ambiguous-owned_by abstention, and both of
+# O14's two tests. Four of them were pinned by nothing when the cases were first written -- the
+# raise requirement, the rebind, the bool and the table holder -- and the four cases at the bottom
+# of _CASES that say so exist because of that pass, not before it.
+
+_O15_NEG, _O15_POS = float("-inf"), float("inf")
+_O15_FULL = [(_O15_NEG, False, _O15_POS, False)]
+
+# A SET OF REALS AS A LIST OF (lo, lo_is_closed, hi, hi_is_closed), disjoint and ascending. The
+# closedness flags are carried rather than nudged because `> 0.0` and `>= 5e-324` are not the same
+# sentence -- spine/lever.py's declaration comment makes that ruling for the declaration and this
+# check has to be able to represent both sides of it to compare them.
+
+
+def _o15_norm(spans):
+    out = []
+    for lo, loc, hi, hic in sorted(spans, key=lambda s: (s[0], not s[1], s[2], s[3])):
+        if lo > hi or (lo == hi and not (loc and hic)):
+            continue                                              # empty
+        if out:
+            plo, ploc, phi, phic = out[-1]
+            if lo < phi or (lo == phi and (loc or phic)):         # overlapping or touching
+                if phi > hi:
+                    nhi, nhic = phi, phic
+                elif hi > phi:
+                    nhi, nhic = hi, hic
+                else:
+                    nhi, nhic = hi, (hic or phic)
+                out[-1] = (plo, ploc, nhi, nhic)
+                continue
+        out.append((lo, loc, hi, hic))
+    return out
+
+
+def _o15_complement(spans):
+    out, cur, curc = [], _O15_NEG, False
+    for lo, loc, hi, hic in _o15_norm(spans):
+        out.append((cur, curc, lo, not loc))
+        cur, curc = hi, not hic
+    out.append((cur, curc, _O15_POS, False))
+    return _o15_norm(out)
+
+
+def _o15_inter(a, b):
+    out = []
+    for al, alc, ah, ahc in a:
+        for bl, blc, bh, bhc in b:
+            lo, loc = (al, alc) if al > bl else (bl, blc) if bl > al else (al, alc and blc)
+            hi, hic = (ah, ahc) if ah < bh else (bh, bhc) if bh < ah else (ah, ahc and bhc)
+            out.append((lo, loc, hi, hic))
+    return _o15_norm(out)
+
+
+def _o15_union(a, b):
+    return _o15_norm(list(a) + list(b))
+
+
+def _o15_text(spans):
+    if not spans:
+        return "nothing"
+    def one(s):
+        lo, loc, hi, hic = s
+        return ("[" if loc else "(") + repr(lo) + ", " + repr(hi) + ("]" if hic else ")")
+    return " U ".join(one(s) for s in spans)
+
+
+_O15_CMP = {ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">=", ast.Eq: "==", ast.NotEq: "!="}
+_O15_FLIP = {"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!="}
+
+
+def _o15_number(node):
+    """A numeric literal, signed. Returns None for anything else -- including a bool, because
+    `if flag:` is not a bound and `True` comparing equal to 1 is the sort of accident that turns a
+    guard on a FLAG into an interval over a COUNT."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+            and not isinstance(node.value, bool):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        inner = _o15_number(node.operand)
+        if inner is None:
+            return None
+        return -inner if isinstance(node.op, ast.USub) else inner
+    return None
+
+
+def _o15_satisfies(op, c):
+    if op == "<":
+        return [(_O15_NEG, False, c, False)]
+    if op == "<=":
+        return [(_O15_NEG, False, c, True)]
+    if op == ">":
+        return [(c, False, _O15_POS, False)]
+    if op == ">=":
+        return [(c, True, _O15_POS, False)]
+    if op == "==":
+        return [(c, True, c, True)]
+    if op == "!=":
+        return [(_O15_NEG, False, c, False), (c, False, _O15_POS, False)]
+    return None
+
+
+def _o15_test_set(node, isvar):
+    """The set of values of the lever for which `node` is TRUE, or None meaning ABSTAIN.
+
+    None is returned for anything this grammar does not read exactly, and that is the whole
+    discipline of this function: a guard half-understood is a finding invented. `and`/`or`/`not` and
+    the CHAINED form are all read, because the chain is the grammar this tree's own opt sweep found
+    separating the guards that held against NaN from the ones that did not -- `not 0.0 <= x < 1.0`
+    is thirteen of this tree's refusals and reading it as two one-sided tests would get both ends
+    wrong."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        inner = _o15_test_set(node.operand, isvar)
+        return None if inner is None else _o15_complement(inner)
+    if isinstance(node, ast.BoolOp):
+        parts = [_o15_test_set(v, isvar) for v in node.values]
+        if any(p is None for p in parts):
+            return None
+        acc = parts[0]
+        for p in parts[1:]:
+            acc = _o15_union(acc, p) if isinstance(node.op, ast.Or) else _o15_inter(acc, p)
+        return acc
+    if isinstance(node, ast.Compare):
+        operands = [node.left] + list(node.comparators)
+        acc, seen = _O15_FULL, False
+        for i, o in enumerate(node.ops):
+            left, right = operands[i], operands[i + 1]
+            opn = _O15_CMP.get(type(o))
+            if opn is None:
+                return None
+            if isvar(left) and _o15_number(right) is not None:
+                part = _o15_satisfies(opn, _o15_number(right))
+            elif isvar(right) and _o15_number(left) is not None:
+                part = _o15_satisfies(_O15_FLIP[opn], _o15_number(left))
+            else:
+                return None
+            seen = True
+            acc = _o15_inter(acc, part)
+        return acc if seen else None
+    return None
+
+
+def _o15_read(node, params):
+    """`float(cfg.x)` / `int(cfg.x)` / `cfg.x` -> the field name, when cfg is a Config parameter."""
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ("float", "int") and len(node.args) == 1):
+        return _o15_read(node.args[0], params)
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in params:
+        return node.attr
+    return None
+
+
+def _o15_bindings(fnode, params):
+    """local name -> lever field, for `x = float(cfg.field)` and its tuple form.
+
+    A name bound MORE THAN ONCE, or bound to anything that is not a read of the same field, is
+    dropped entirely rather than resolved to its first binding: `frac = float(sig.warmup_min_frac)`
+    followed anywhere by `frac = 0.0` means the guard below is over a different number, and a check
+    that guesses which one is a check that reports the other."""
+    binds, killed = {}, set()
+    for n in ast.walk(fnode):
+        targets, value = None, None
+        if isinstance(n, ast.Assign):
+            targets, value = n.targets, n.value
+        elif isinstance(n, ast.AnnAssign):
+            targets, value = [n.target], n.value
+        elif isinstance(n, ast.AugAssign):
+            targets, value = [n.target], None
+        elif isinstance(n, ast.NamedExpr):
+            targets, value = [n.target], n.value
+        elif isinstance(n, (ast.For, ast.AsyncFor)):
+            targets, value = [n.target], None
+        elif isinstance(n, ast.withitem) and n.optional_vars is not None:
+            targets, value = [n.optional_vars], None
+        if targets is None:
+            continue
+        pairs = []
+        for t in targets:
+            if isinstance(t, ast.Name) and value is not None:
+                pairs.append((t.id, value))
+            elif isinstance(t, ast.Tuple) and isinstance(value, ast.Tuple) \
+                    and len(t.elts) == len(value.elts):
+                for tt, vv in zip(t.elts, value.elts):
+                    if isinstance(tt, ast.Name):
+                        pairs.append((tt.id, vv))
+                    else:
+                        killed.update(m.id for m in ast.walk(tt) if isinstance(m, ast.Name))
+            else:
+                killed.update(m.id for m in ast.walk(t) if isinstance(m, ast.Name))
+        for name, v in pairs:
+            field = _o15_read(v, params)
+            if field is None or (name in binds and binds[name] != field):
+                killed.add(name)
+            else:
+                binds[name] = field
+    return {k: v for k, v in binds.items() if k not in killed}
+
+
+def _o15_raise_names(fnode):
+    """Names that reach a raise: anything mentioned inside a `raise`, and anything an `if` whose body
+    raises tests. `bad.append(...)` under `if width < 1:` is a refusal exactly when `bad` is one of
+    these, which is how src/lm/api.py::resolve writes all seven of its refusals."""
+    names = set()
+    for n in ast.walk(fnode):
+        if isinstance(n, ast.Raise):
+            names.update(m.id for m in ast.walk(n) if isinstance(m, ast.Name))
+    for n in ast.walk(fnode):
+        if isinstance(n, ast.If) and any(isinstance(x, ast.Raise)
+                                         for st in n.body for x in ast.walk(st)):
+            names.update(m.id for m in ast.walk(n.test) if isinstance(m, ast.Name))
+    return names
+
+
+def _o15_refuses(ifnode, raise_names):
+    """Does this `if` BODY refuse, rather than merely branch?
+
+    REQUIRED, AND MEASURED. Without it the recogniser matched Gate arms: `elif every > 0:` in
+    src/ckpt/api.py, `elif damp >= 1.0:` and `if clip > 0.0:` in src/opt/api.py, `elif float(cap.lift)
+    < 0:` in src/capacity/api.py all test a lever against a literal and name that lever in the body,
+    and all four are REPORTS. Ten such arms on the 2026-09-14 tree; with this arm in place the
+    recogniser keeps 27 sites and all 27 raise."""
+    for st in ifnode.body:
+        for n in ast.walk(st):
+            if isinstance(n, ast.Raise):
+                return True
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "append" and isinstance(n.func.value, ast.Name)
+                    and n.func.value.id in raise_names):
+                return True
+    return False
+
+
+def _o15_strings(node):
+    """Every string constant under a node, including the literal halves of f-strings. This is how a
+    refusal says WHICH lever it refuses: every one in this tree names the GENERATED environment
+    name, which is the pairing this check is built on rather than on a guessed variable name."""
+    out = []
+    for n in ast.walk(node):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            out.append(n.value)
+        elif isinstance(n, ast.JoinedStr):
+            for v in n.values:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    out.append(v.value)
+    return " ".join(out)
+
+
+def _o15_config_params(fnode):
+    """(Config-annotated parameter names, the single literal owned_by prefix or None)."""
+    args = fnode.args
+    params = set()
+    for p in list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs):
+        ann, name = p.annotation, None
+        if isinstance(ann, ast.Name):
+            name = ann.id
+        elif isinstance(ann, ast.Attribute):
+            name = ann.attr
+        elif isinstance(ann, ast.Constant) and isinstance(ann.value, str):
+            name = ann.value.strip().strip("'\"").rpartition(".")[2].strip()
+        if name == CONFIG_CLASS:
+            params.add(p.arg)
+    prefixes = set()
+    for _, lit in _owned_by_calls(fnode):
+        if lit is None:
+            return params, None                 # a computed prefix is an ownership nothing can read
+        prefixes.add(lit)
+    return params, (next(iter(prefixes)) if len(prefixes) == 1 else None)
+
+
+def _o15_tables(fnode, params, binds):
+    """`T = (("FAB_DISCOVER", float(fab.discover)), ...)` -> {T: [(env name literal, field), ...]}.
+
+    THE SECOND SHAPE A REFUSAL IS WRITTEN IN, and leaving it out would make this check blind to the
+    largest package in the tree. src/fabric/api.py::build refuses eleven magnitude levers and six
+    count levers through three of these tables and a filtering comprehension, and FAB_DISCOVER --
+    the one instance tests/test_fabric.py::check_f4_negative_magnitude_levers_refused catches
+    behaviourally today -- is reachable no other way from here."""
+    out = {}
+    for n in ast.walk(fnode):
+        if not (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name) and isinstance(n.value, (ast.Tuple, ast.List))):
+            continue
+        pairs, ok = [], True
+        for e in n.value.elts:
+            if not (isinstance(e, (ast.Tuple, ast.List)) and len(e.elts) == 2
+                    and isinstance(e.elts[0], ast.Constant) and isinstance(e.elts[0].value, str)):
+                ok = False
+                break
+            field = _o15_read(e.elts[1], params)
+            if field is None and isinstance(e.elts[1], ast.Name):
+                field = binds.get(e.elts[1].id)
+            if field is None:
+                ok = False
+                break
+            pairs.append((e.elts[0].value, field))
+        if ok and pairs:
+            out[n.targets[0].id] = pairs
+    return out
+
+
+def _o15_refusal_sites(mods):
+    """{(PREFIX, field): [site, ...]}, plus the abstentions, read out of src/ by AST.
+
+    A site is (refused set, module, line). Two shapes are read and everything else abstains -- see
+    the two recognisers above and the CANNOT CATCH block."""
+    sites, abstained, stats = {}, {}, dict(functions=0, pattern1=0, pattern2=0, tables=0, mislabelled=0)
+    for mod in mods:
+        for fnode in ast.walk(mod.tree):
+            if not isinstance(fnode, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            params, prefix = _o15_config_params(fnode)
+            if not params or prefix is None:
+                continue
+            stats["functions"] += 1
+            binds = _o15_bindings(fnode, params)
+            raise_names = _o15_raise_names(fnode)
+
+            # -- shape one: `if <lever compared to literals>: raise ... "PREFIX_FIELD=..."` --------
+            for node in ast.walk(fnode):
+                if not isinstance(node, ast.If) or not _o15_refuses(node, raise_names):
+                    continue
+                said = _o15_strings(node)
+                candidates = set()
+                for local, field in binds.items():
+                    if f"{prefix}_{field.upper()}" in said:
+                        candidates.add((local, field))
+                for n in ast.walk(node.test):
+                    field = _o15_read(n, params)
+                    if field is not None and f"{prefix}_{field.upper()}" in said:
+                        candidates.add((None, field))
+                for local, field in sorted(candidates, key=lambda c: (c[1], c[0] or "")):
+                    def isvar(n, local=local, field=field):
+                        if local is not None and isinstance(n, ast.Name) and n.id == local:
+                            return True
+                        return _o15_read(n, params) == field
+                    refused = _o15_test_set(node.test, isvar)
+                    if refused is None:
+                        abstained.setdefault((prefix, field), []).append((mod, node.lineno))
+                        continue
+                    stats["pattern1"] += 1
+                    sites.setdefault((prefix, field), []).append((refused, mod, node.lineno))
+
+            # -- shape two: a name/value TABLE filtered by a comprehension whose result is raised --
+            tables = _o15_tables(fnode, params, binds)
+            stats["tables"] += len(tables)
+            for n in ast.walk(fnode):
+                if not isinstance(n, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+                    continue
+                if len(n.generators) != 1:
+                    continue
+                gen = n.generators[0]
+                if not (isinstance(gen.iter, ast.Name) and gen.iter.id in tables and gen.ifs):
+                    continue
+                if not (isinstance(gen.target, ast.Tuple) and len(gen.target.elts) == 2
+                        and all(isinstance(e, ast.Name) for e in gen.target.elts)):
+                    continue
+                holder = None
+                for p in ast.walk(fnode):
+                    if (isinstance(p, ast.Assign) and p.value is n and len(p.targets) == 1
+                            and isinstance(p.targets[0], ast.Name)):
+                        holder = p.targets[0].id
+                if holder is None or holder not in raise_names:
+                    continue
+                value_name = gen.target.elts[1].id
+                refused, ok = _O15_FULL, True
+                for cond in gen.ifs:
+                    part = _o15_test_set(
+                        cond, lambda x, v=value_name: isinstance(x, ast.Name) and x.id == v)
+                    if part is None:
+                        ok = False
+                        break
+                    refused = _o15_inter(refused, part)
+                for lit, field in tables[gen.iter.id]:
+                    if not ok:
+                        abstained.setdefault((prefix, field), []).append((mod, n.lineno))
+                        continue
+                    if lit != f"{prefix}_{field.upper()}":
+                        # THE TABLE SPELLS A NAME THE SPINE DOES NOT GENERATE. Not this check's
+                        # ruling to make, so the entry is abstained on and counted rather than
+                        # paired with a lever whose name it does not carry.
+                        stats["mislabelled"] += 1
+                        abstained.setdefault((prefix, field), []).append((mod, n.lineno))
+                        continue
+                    stats["pattern2"] += 1
+                    sites.setdefault((prefix, field), []).append((refused, mod, n.lineno))
+    return sites, abstained, stats
+
+
+def _o15_declared_domains(mods):
+    """{(PREFIX, field): ((lo, hi), mod, node)} for every lever whose domain is written as literals.
+
+    Read by AST rather than off the live registry so that this whole check can be pointed at a
+    synthetic tree, which is the only way its self-test can watch it fail. A non-literal endpoint is
+    O14's finding and is skipped here rather than reported twice."""
+    out, skipped = {}, 0
+    for mod, node, prefix in _leversets(mods).values():
+        if not isinstance(prefix, str):
+            continue
+        for stmt in node.body:
+            if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                    and isinstance(stmt.targets[0], ast.Name) and isinstance(stmt.value, ast.Call)):
+                continue
+            call = stmt.value
+            callee = call.func
+            if not ((isinstance(callee, ast.Name) and callee.id == "Lever")
+                    or (isinstance(callee, ast.Attribute) and callee.attr == "Lever")):
+                continue
+            dom = _domain_arg(call)
+            if dom is None:
+                continue
+            pair = _domain_pair(dom)
+            if pair is None or not all(_literal_end(e) for e in pair):
+                skipped += 1
+                continue
+            ends = []
+            for e in pair:
+                try:
+                    ends.append(ast.literal_eval(e))
+                except (ValueError, TypeError, SyntaxError):
+                    ends = None
+                    break
+            if ends is None or not all(v is None or isinstance(v, (int, float)) for v in ends):
+                skipped += 1
+                continue
+            out[(prefix, stmt.targets[0].id)] = (tuple(ends), mod, stmt)
+    return out, skipped
+
+
+def _o15_admits(domain):
+    lo, hi = domain
+    return [(_O15_NEG if lo is None else float(lo), lo is not None,
+             _O15_POS if hi is None else float(hi), hi is not None)]
+
+
+def _o15_pair_text(domain):
+    lo, hi = domain
+    return f"[{'unbounded' if lo is None else repr(lo)}, {'unbounded' if hi is None else repr(hi)}]"
+
+
+def check_o15_domain_agrees_with_read_site(mods):
+    domains, skipped = _o15_declared_domains(mods)
+    sites, abstained, stats = _o15_refusal_sites(mods)
+    findings = []
+    examined_levers = over_pop = set_aside = 0
+    examined_sites = 0
+
+    for key in sorted(domains):
+        domain, dmod, dstmt = domains[key]
+        here = sites.get(key)
+        if not here:
+            continue
+        examined_levers += 1
+        prefix, field = key
+        env = f"{prefix}_{field.upper()}"
+        admits = _o15_admits(domain)
+
+        # -- OVER-REFUSAL: the body pins both ends of what it accepts; the domain must contain it --
+        refused_all = []
+        for refused, _, _ in here:
+            refused_all = _o15_union(refused_all, refused)
+        body_admits = _o15_complement(refused_all)
+        bounded = bool(body_admits) and body_admits[0][0] > _O15_NEG and body_admits[-1][2] < _O15_POS
+        if bounded and key in abstained:
+            set_aside += 1
+        elif bounded:
+            over_pop += 1
+            lost = _o15_inter(body_admits, _o15_complement(admits))
+            if lost:
+                where = ", ".join(sorted({f"{m.rel}:{ln}" for _, m, ln in here}))
+                findings.append(_at(dmod, dstmt,
+                                    f"{env}: domain={_o15_pair_text(domain)} refuses "
+                                    f"{_o15_text(lost)}, which the refusal at {where} explicitly "
+                                    f"ACCEPTS -- that refusal pins both ends and admits "
+                                    f"{_o15_text(body_admits)}. The declaration is narrower than "
+                                    f"the shipped body, so a configuration that runs today stops "
+                                    f"building. Widen the pair to contain the body's interval."))
+
+        # -- PRE-EMPTION: a clause the domain has left nothing for -------------------------------
+        for refused, smod, line in here:
+            examined_sites += 1
+            live = _o15_inter(refused, admits)
+            if live:
+                continue
+            findings.append(
+                f"{smod.rel}:{line}  {env}: this refusal covers {_o15_text(refused)}; "
+                f"domain={_o15_pair_text(domain)} at {dmod.rel} admits only {_o15_text(admits)}, so "
+                f"NOTHING IS LEFT for it to refuse. The declaration raises first at every value "
+                f"that reaches it and this clause cannot run again. Retire it and carry its "
+                f"measurement to the declaration, or drop the domain and leave the ruling where it "
+                f"was argued -- not both, see the block above this check.")
+
+    n_abstained = sum(len(v) for v in abstained.values())
+    detail = (f"{len(domains)} lever(s) declare a literal domain, {examined_levers} of them have a "
+              f"read-site refusal this pass can read ({examined_sites} site(s) examined for "
+              f"pre-emption, {over_pop} lever(s) for over-refusal, {set_aside} set aside there "
+              f"because a refusal on the same lever was abstained on); {stats['pattern1']}+"
+              f"{stats['pattern2']} refusal site(s) read across {stats['functions']} owned function(s), "
+              f"{n_abstained} refusal test(s) naming a lever abstained on, {skipped} domain(s) skipped "
+              f"for a non-literal endpoint (O14)")
+    return _report("O15", "a declared domain does not contradict or silence the read-site refusal "
+                          "over the same lever", not findings, detail, findings,
+                   vacuous=not examined_levers)
+
+
+# ==================================================================================================
 # SELF-TEST -- every check below is run against a tree that CONTAINS the defect it looks for
 # ==================================================================================================
 #
@@ -2819,6 +3513,214 @@ def blocks(mem: Config):
     return importlib.import_module("fabric.levers").FABLevers._levers["slots"].default
 """
 
+# --- O14 and O15 fixtures. One `src/memory/store.py` per case: the lever set that declares the
+# --- domain, and in the same file the owned function that refuses at the read site. Both checks
+# --- read source text only, so one file carries a whole case, and _BASE_TREE supplies the rest.
+
+_O15_FILE = '''\
+from spine.lever import Config, Lever, LeverSet
+
+_CEILING = 1.0
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+    frac = Lever(%s, "share of the owner's block", %s)
+
+
+def prune(mem: Config):
+    mem = mem.owned_by("MEM")
+    frac = float(mem.frac)
+%s
+    return frac
+'''
+
+_O15_NOTHING = "    pass"
+
+# -- O14. The two endpoint spellings spine/lever.py::_domain_ends accepts and this check does not --
+_O14_COMPUTED = _O15_FILE % ("0.25", "domain=(0.0, _CEILING)", _O15_NOTHING)
+_O14_NOT_A_PAIR = _O15_FILE % ("0.25", "domain=_CEILING", _O15_NOTHING)
+_O14_LITERAL = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", _O15_NOTHING)
+_O14_OPEN_TOP = _O15_FILE % ("0.25", "domain=(0.0, None)", _O15_NOTHING)
+_O14_NEGATIVE_LOW = _O15_FILE % ("0.0", "domain=(-1.0, 1.0)", _O15_NOTHING)
+_O14_INT_ENDS = _O15_FILE % ("4", "domain=(1, 8)", _O15_NOTHING)
+_O14_FOREIGN = '''\
+from spine.lever import Config, Lever, LeverSet
+from fabric.levers import FabricLevers
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+    frac = Lever(0.25, "share", domain=(0.0, float(FabricLevers.slots.default)))
+'''
+
+# -- O15. The guards, and the declarations they are read against -----------------------------------
+_O15_ONE_SIDED = '''\
+    if frac < 0.0:
+        raise ValueError(f"MEM_FRAC={frac}: a share cannot be negative -- int(frac * block) then "
+                         f"slices from the far end and the owner is handed the rest of the store.")'''
+_O15_CLOSED = '''\
+    if not 0.0 <= frac <= 1.0:
+        raise ValueError(f"MEM_FRAC={frac}: a share of a block is in [0.0, 1.0].")'''
+_O15_HALF_OPEN = '''\
+    if not 0.0 <= frac < 1.0:
+        raise ValueError(f"MEM_FRAC={frac}: must be in [0.0, 1.0). At 1.0 the probation block IS "
+                         f"the owner's block and nothing is ever promoted out of it.")'''
+_O15_UNREADABLE = '''\
+    if frac < float(mem.quota):
+        raise ValueError(f"MEM_FRAC={frac}: below the quota.")'''
+_O15_GATE = '''\
+    if frac > 0.0:
+        gates.append(Gate("mem.frac.armed", True, frac, 0.0,
+                          reason=f"MEM_FRAC={frac} is the share in use."))'''
+_O15_GATE_BESIDE_A_RAISE = _O15_GATE + '''
+    if frac != frac:
+        raise ValueError(f"MEM_FRAC={frac} is not a number.")'''
+_O15_TABLE = '''\
+    _tbl = (("MEM_FRAC", frac),)
+    _bad = [f"{k}={v}" for k, v in _tbl if v < 0.0]
+    if _bad:
+        raise ValueError(f"MEM: negative share(s) {_bad}.")'''
+
+_O15_PREEMPTED_LOW = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", _O15_ONE_SIDED)
+_O15_PREEMPTED_BOTH = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", _O15_CLOSED)
+_O15_UNDER_REFUSES = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", _O15_HALF_OPEN)
+_O15_STILL_LIVE_LOW = _O15_FILE % ("0.25", "domain=(-1.0, 1.0)", _O15_ONE_SIDED)
+_O15_NO_DOMAIN = _O15_FILE % ("0.25", "U.FRACTION", _O15_ONE_SIDED)
+_O15_ABSTAINS = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", _O15_UNREADABLE)
+_O15_GATE_ONLY = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", _O15_GATE)
+_O15_GATE_AND_RAISE = _O15_FILE % ("0.25", "domain=(-1.0, 1.0)", _O15_GATE_BESIDE_A_RAISE)
+_O15_TABLE_PREEMPTED = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", _O15_TABLE)
+_O15_TABLE_LIVE = _O15_FILE % ("0.25", "domain=(-1.0, 1.0)", _O15_TABLE)
+# THE OVER-REFUSAL ARM ON ITS OWN. The declaration is WIDER than the body at the top (so the body's
+# clause is still live and the pre-emption arm stays silent) and NARROWER at the bottom (so the
+# declaration refuses [0.0, 0.5), which the body accepts by name). That separation is what makes
+# these two cases a test of the over-refusal arm rather than of the other one.
+_O15_OVER_REFUSES = _O15_FILE % ("0.75", "domain=(0.5, 2.0)", _O15_CLOSED)
+_O15_OVER_SET_ASIDE = _O15_FILE % ("0.75", "domain=(0.5, 2.0)", _O15_CLOSED + "\n" + _O15_UNREADABLE)
+# The guard is real and reads a lever's number, but it is in a function that holds no Config, so
+# nothing here knows whose lever it is and the pass abstains rather than guessing by variable name.
+_O15_UNOWNED = '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+    frac = Lever(0.25, "share of the owner's block", domain=(0.0, 1.0))
+
+
+def prune(mem: Config):
+    mem = mem.owned_by("MEM")
+    return mem.quota
+
+
+def _helper(frac):
+    if frac < 0.0:
+        raise ValueError(f"MEM_FRAC={frac}: a share cannot be negative.")
+'''
+
+
+# THE FOUR BELOW EXIST BECAUSE THE MECHANISM THEY PIN WAS PINNED BY NOTHING. Each was found by
+# deleting one line of O15 and watching the whole self-test stay green -- the shape k_k16.json
+# records for K16 ("SIX are pinned by NOTHING in all 77 cases") and O11's docstring rules on ("an
+# exemption nothing can trip is the same defect as a guard nothing can trip").
+#
+# A GATE ARM WHOSE THRESHOLD THE DOMAIN PRE-EMPTS. `_O15_GATE_ONLY` above does not pin the
+# raise-requirement, because its `> 0.0` leaves the domain plenty and no finding follows either way.
+# This one is `> 1.0` against domain=(0.0, 1.0), so if a branch that only REPORTS were read as a
+# refusal it would be reported as pre-empted. src/opt/api.py::counters (`elif damp >= 1.0:`) and
+# src/ckpt/api.py::save_period (`elif every > 0:`) are this shape on the real tree.
+_O15_GATE_PREEMPTED = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", '''\
+    if frac > 1.0:
+        gates.append(Gate("mem.frac.over", True, frac, 1.0,
+                          reason=f"MEM_FRAC={frac} is above one whole block."))''')
+
+# A LOCAL REBOUND AFTER THE READ. The guard is then over a CLAMPED number and not over the lever's
+# resolved value, so nothing here may claim the domain has taken it over.
+_O15_REBOUND = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", '''\
+    frac = min(1.0, frac)
+    if frac < 0.0:
+        raise ValueError(f"MEM_FRAC={frac}: a share cannot be negative.")''')
+
+# A BOOL LITERAL AS THE THRESHOLD. `isinstance(True, int)` is True in Python, so a bound reader that
+# does not say otherwise reads `> True` as `> 1.0` -- here that would turn an unreadable guard into
+# a pre-empted one against domain=(1.0, 5.0). A flag is not a bound; the pass abstains.
+_O15_BOOL_BOUND = _O15_FILE % ("2.0", "domain=(1.0, 5.0)", '''\
+    if frac < True:
+        raise ValueError(f"MEM_FRAC={frac}: below the flag.")''')
+
+# A NAME/VALUE TABLE FILTERED FOR A COUNTER RATHER THAN FOR A REFUSAL. The comprehension has the
+# same shape as src/fabric/api.py's three, and its result is never raised.
+_O15_TABLE_COUNTED = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", '''\
+    _tbl = (("MEM_FRAC", frac),)
+    _low = [f"{k}={v}" for k, v in _tbl if v < 0.0]
+    _bump("mem.frac.low", len(_low))''')
+
+
+# THE GUARD TESTS ONE LEVER AND THE MESSAGE NAMES ANOTHER. The pairing in shape one is the refusal
+# MESSAGE, not the variable name, and this case is what pins that: with the message ignored, `frac`
+# is in scope, its test reads exactly, and the site would be reported as MEM_FRAC pre-empted. It is
+# read as MEM_QUOTA's refusal instead, whose test this pass cannot read, so it abstains.
+_O15_NAMES_ANOTHER_LEVER = '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+    frac = Lever(0.25, "share of the owner's block", domain=(0.0, 1.0))
+
+
+def prune(mem: Config):
+    mem = mem.owned_by("MEM")
+    quota = int(mem.quota)
+    frac = float(mem.frac)
+    if frac < 0.0:
+        raise ValueError(f"MEM_QUOTA={quota}: the block this share is taken out of is not sized.")
+'''
+
+# A TABLE ENTRY WHOSE LITERAL IS NOT THE NAME THE SPINE GENERATES. Whether that is itself a defect is
+# not this check's ruling; what it must not do is pair the interval with a lever whose name the table
+# does not carry.
+_O15_TABLE_MISLABELLED = _O15_FILE % ("0.25", "domain=(0.0, 1.0)", '''\
+    _tbl = (("MEM_SHARE", frac),)
+    _bad = [f"{k}={v}" for k, v in _tbl if v < 0.0]
+    if _bad:
+        raise ValueError(f"MEM: negative share(s) {_bad}.")''')
+
+# TWO OWNERS IN ONE FUNCTION, which is what src/spine/assemble.py is allowed to be. Nothing here can
+# say whose lever a local holds, so the whole function is abstained on; attributing its guards to
+# whichever prefix sorts first would put FAB's interval on a MEM declaration or the reverse.
+_O15_TWO_OWNERS_LEVERS = '''\
+from spine.lever import Lever, LeverSet
+
+
+class FabricLevers(LeverSet):
+    PREFIX = "FAB"
+    slots = Lever(2048, "expert slots")
+    frac = Lever(0.25, "share of the population", domain=(0.0, 1.0))
+'''
+_O15_TWO_OWNERS = '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+
+
+def plan(fab: Config, mem: Config):
+    fab = fab.owned_by("FAB")
+    mem = mem.owned_by("MEM")
+    frac = float(fab.frac)
+    if frac < 0.0:
+        raise ValueError(f"FAB_FRAC={frac}: a share of the population cannot be negative.")
+    return frac * int(mem.quota)
+'''
+
 _CASES = (
     ("control: no bypass anywhere in the tree", {},
      {"O3": (0, None), "O8": (0, None), "O9": (0, None)}),
@@ -3021,6 +3923,121 @@ _CASES = (
     ("O13: the same ::<module> attribution the file DOES carry is ADMITTED",
      {"src/memory/helpers.py": _O13_CITED_FILE, "src/memory/store.py": _O13_QUOTE_MODULE_TRUE},
      {"O13": (0, None)}),
+
+    # ---- O14. A domain endpoint that is not a literal is a second home for the number, and
+    # ---- _domain_ends cannot see it: it isinstance-tests the value, which is a fine number.
+    ("O14: an endpoint computed from a module constant",
+     {"src/memory/store.py": _O14_COMPUTED},
+     {"O14": (1, "not a literal"), "O15": (0, None)}),
+
+    ("O14: an endpoint read off ANOTHER PACKAGE's lever default -- a range with no wire",
+     {"src/memory/store.py": _O14_FOREIGN},
+     {"O14": (1, "affects()"), "O15": (0, None)}),
+
+    ("O14: a domain= that is not a visible (lo, hi) pair at all",
+     {"src/memory/store.py": _O14_NOT_A_PAIR},
+     {"O14": (1, "visible (lo, hi) pair"), "O15": (0, None)}),
+
+    ("O14: two plain literal ends are ADMITTED",
+     {"src/memory/store.py": _O14_LITERAL}, {"O14": (0, None)}),
+
+    ("O14: hi=None -- the common case, 163 of 207 under an honest population -- is ADMITTED",
+     {"src/memory/store.py": _O14_OPEN_TOP}, {"O14": (0, None)}),
+
+    ("O14: a NEGATIVE low end is a literal like any other (EVAL_GENUINE_SIL, MEM_MATCH_FLOOR)",
+     {"src/memory/store.py": _O14_NEGATIVE_LOW}, {"O14": (0, None)}),
+
+    ("O14: int ends on an int lever are ADMITTED",
+     {"src/memory/store.py": _O14_INT_ENDS}, {"O14": (0, None)}),
+
+    # ---- O15, the pre-emption arm: a read-site clause the declaration has left nothing for.
+    ("O15: a one-sided read-site refusal the domain's LOW end has taken over",
+     {"src/memory/store.py": _O15_PREEMPTED_LOW},
+     {"O15": (1, "NOTHING IS LEFT")}),
+
+    ("O15: a two-sided read-site refusal transcribed EXACTLY into the pair -- OPT_LR_DECAY's shape",
+     {"src/memory/store.py": _O15_PREEMPTED_BOTH},
+     {"O15": (1, "NOTHING IS LEFT")}),
+
+    # ---- and the correct constructs that most resemble it, which must stay green.
+    ("O15: the shape spine/lever.py PRESCRIBES is ADMITTED -- the closed pair CONTAINS the body's "
+     "half-open interval and the body still refuses the top endpoint by name",
+     {"src/memory/store.py": _O15_UNDER_REFUSES},
+     {"O15": (0, None)}),
+
+    ("O15: a domain that reaches BELOW the body's clause leaves it live and is ADMITTED",
+     {"src/memory/store.py": _O15_STILL_LIVE_LOW},
+     {"O15": (0, None)}),
+
+    ("O15: a read-site refusal on a lever with NO domain is never a finding",
+     {"src/memory/store.py": _O15_NO_DOMAIN},
+     {"O15": (0, None)}),
+
+    ("O15: a guard this grammar cannot read is ABSTAINED on, not guessed at",
+     {"src/memory/store.py": _O15_ABSTAINS},
+     {"O15": (0, None)}),
+
+    ("O15: a GATE arm that names the lever and does not raise is not a refusal",
+     {"src/memory/store.py": _O15_GATE_ONLY},
+     {"O15": (0, None)}),
+
+    ("O15: the same gate arm in a function that DOES raise elsewhere is still not a refusal",
+     {"src/memory/store.py": _O15_GATE_AND_RAISE},
+     {"O15": (0, None)}),
+
+    ("O15: a refusal in a function holding no Config is ABSTAINED on -- nothing knows whose it is",
+     {"src/memory/store.py": _O15_UNOWNED},
+     {"O15": (0, None)}),
+
+    # ---- the name/value TABLE shape, which is the only way into src/fabric/api.py's eleven.
+    ("O15: a table-and-comprehension refusal the domain has taken over -- FAB_DISCOVER's shape",
+     {"src/memory/store.py": _O15_TABLE_PREEMPTED},
+     {"O15": (1, "NOTHING IS LEFT")}),
+
+    ("O15: the same table with a domain that leaves the comprehension live is ADMITTED",
+     {"src/memory/store.py": _O15_TABLE_LIVE},
+     {"O15": (0, None)}),
+
+    # ---- O15, the over-refusal arm, and the abstention gate that keeps it sound.
+    ("O15: a domain NARROWER at the bottom than a refusal that pins both ends -- the direction that "
+     "stops a configuration the shipped body accepts",
+     {"src/memory/store.py": _O15_OVER_REFUSES},
+     {"O15": (1, "explicitly ACCEPTS")}),
+
+    ("O15: the same tree with one unreadable guard on that lever SETS THE ARM ASIDE -- an unread "
+     "clause could narrow what the body accepts, and claiming otherwise is how this arm would "
+     "invent a finding",
+     {"src/memory/store.py": _O15_OVER_SET_ASIDE},
+     {"O15": (0, None)}),
+
+    ("O15: a GATE arm whose threshold the domain DOES pre-empt is still not a refusal -- the arm "
+     "that separates a branch which reports from one which refuses",
+     {"src/memory/store.py": _O15_GATE_PREEMPTED},
+     {"O15": (0, None)}),
+
+    ("O15: a local REBOUND after the read is dropped -- the guard is over a clamped number",
+     {"src/memory/store.py": _O15_REBOUND},
+     {"O15": (0, None)}),
+
+    ("O15: a bool literal is not a bound and is ABSTAINED on, not read as 1",
+     {"src/memory/store.py": _O15_BOOL_BOUND},
+     {"O15": (0, None)}),
+
+    ("O15: a name/value table filtered for a COUNTER, never raised, is not a refusal",
+     {"src/memory/store.py": _O15_TABLE_COUNTED},
+     {"O15": (0, None)}),
+
+    ("O15: a refusal whose MESSAGE names a different lever than its TEST reads is abstained on",
+     {"src/memory/store.py": _O15_NAMES_ANOTHER_LEVER},
+     {"O15": (0, None)}),
+
+    ("O15: a table entry spelling a name the spine does not generate is abstained on",
+     {"src/memory/store.py": _O15_TABLE_MISLABELLED},
+     {"O15": (0, None)}),
+
+    ("O15: a function holding TWO owners is abstained on -- nothing here can say whose local it is",
+     {"src/fabric/levers.py": _O15_TWO_OWNERS_LEVERS, "src/memory/store.py": _O15_TWO_OWNERS},
+     {"O15": (0, None)}),
 )
 
 _BY_TAG = {
@@ -3031,6 +4048,8 @@ _BY_TAG = {
     "O11": check_o11_no_unnamed_clock_arithmetic,
     "O12": check_o12_citations_name_symbols,
     "O13": check_o13_citations_resolve,
+    "O14": check_o14_domain_endpoints_are_literals,
+    "O15": check_o15_domain_agrees_with_read_site,
 }
 
 
@@ -3106,6 +4125,8 @@ CHECKS = (
     check_o11_no_unnamed_clock_arithmetic,
     check_o12_citations_name_symbols,
     check_o13_citations_resolve,
+    check_o14_domain_endpoints_are_literals,
+    check_o15_domain_agrees_with_read_site,
 )
 
 

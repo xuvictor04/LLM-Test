@@ -79,7 +79,10 @@ runs):
       to a reader -- once in spine/derive.py::flush_period_windows during assembly, once at FAB's own
       read under the switch src/fabric/api.py::REFUSE_NEGATIVE_PERIOD (.rework/DECISIONS.md D4).
       Nothing had called manage_period at all, and no check held either refusal, or the switch's OFF
-      position, to meaning anything.
+      position, to meaning anything. ZERO joined the assembly's half on 2026-09-14: it was carrying
+      three simultaneous answers -- Flushes(1) from the coupling, Windows(0) from the accessor and
+      "cannot fire" from spine/derive.py::cadences_that_cannot_fire -- with no declared meaning to
+      protect, and this check required Windows(0) of it until then.
   F9  src/fabric/api.py's fab.cull_gate printed a VERDICT WORD AND A PAIR OF NUMBERS THAT DISAGREE in
       one rendered line, and shipped that way for six rounds because nothing compared a verdict against
       its own arithmetic. spine/derive.py::cull_gate_open is two clauses -- a floor on the live
@@ -1349,13 +1352,48 @@ def check_f8_manage_period_kind_and_refusal():
     did not bind, or the switch is off and OFF must mean exactly the pre-refusal behaviour,
     Windows(-5) -- and anything else is a third answer for one number.
 
-    ZERO IS DELIBERATELY NOT TOUCHED by either refusal, and this check holds them to that: 0 must
-    assemble and return Windows(0). No meaning for 0 has been declared for this lever, and a guard
-    that quietly folded it in would be deciding a question nobody ruled on.
+    ZERO IS NOW REFUSED BY THE ASSEMBLY AND THIS CHECK HOLDS IT TO THAT, WHICH IS THE OPPOSITE OF
+    WHAT IT HELD UNTIL 2026-09-14 -- so the argument is rewritten and not flipped. The earlier
+    ruling here was that 0 must assemble and return Windows(0), on the ground that no meaning for 0
+    had been declared for this lever and a guard that quietly folded it in would be deciding a
+    question nobody ruled on. THE FIRST HALF OF THAT IS STILL TRUE AND IS NOW THE REASON FOR THE
+    REFUSAL RATHER THAN AGAINST IT. Nothing declares 0 here: fabric/levers.py::FABLevers.manage_every
+    gives it no meaning, src/fabric/api.py::manage_period gives it none, and FAB has no `manage`
+    flag -- DOM has one, and in the frozen tree the off switch for BOTH management passes was the
+    FLAG MANAGE ("MANAGE=0 -> ABLATION: no merge/cull", self_organize.py:954), which the package
+    split gave to DOM alone. The cadence itself is read there as `step % MANAGE_EVERY == 0` at
+    :6716, :6764 and :6768 with no max(1, ...) anywhere, so 0 is an integer modulo by zero on the
+    first window and not an ablation -- which is the ruling domains/levers.py::DOMLevers.manage_every
+    already wrote down, in those words, for the sibling lever this one was SPLIT FROM.
+
+    WHAT CHANGED IS THAT "NOBODY RULED ON IT" STOPPED BEING TRUE OF THE RUNNING TREE: three readers
+    were answering it at once, measured by building this tree at that value --
+        the FAB.d_manage_period coupling floored it to Flushes(1), manage on EVERY flush and the
+        tightest cadence the system has; FAB.manage_period returned Windows(0); and
+        spine/derive.py::cadences_that_cannot_fire reported ('fab.manage', 0, 0), a gate that
+        CANNOT FIRE.
+    That is the same three-way split, reader for reader, that FAB_MANAGE_EVERY=-5 carried until the
+    negative was refused on 2026-09-05. An undeclared value with three simultaneous answers is not
+    an open question being respected, it is the defect the refusal exists for. So
+    spine/derive.py::flush_period_windows refuses a period below one, and what this check requires
+    at 0 is the refusal and no longer Windows(0).
+
+    THE SECOND DOOR IS MEASURED AND REPORTED, NOT ASSERTED, AND THAT ASYMMETRY IS DELIBERATE. With
+    the coupling table emptied, 0 still reaches FAB's own guard -- which is `< 0`, not `< 1` -- and
+    comes back Windows(0). Widening that guard is FAB's edit in FAB's own file, and this file may
+    not assert a refusal another package has not written. Both doors are printed on the detail line
+    every run, so the day FAB widens it the report says so instead of a check going quietly greener.
+
+    AND THE ARM IS SHARED, WHICH IS ALSO MEASURED HERE RATHER THAN LEFT IN AN AUDIT FILE. Three
+    coupling rows reach spine/derive.py::flush_period_windows and two of them carry CAP_PIN_WINDOWS,
+    so the same `< 1` refuses CAP_PIN_WINDOWS=0 -- a THRESHOLD and not a cadence, in
+    capacity/levers.py::CAPLevers.pin_windows's own words. That is CAP's range question, not FAB's
+    to assert; it is driven once here and printed, so the collateral of the refusal this check
+    depends on is visible in the same report as the refusal.
     """
     findings, examined = [], 0
 
-    for every in (1, 500, 0):
+    for every in (1, 500):
         examined += 1
         got = FAB.manage_period(cfg(FAB_MANAGE_EVERY=every)["FAB"])
         if not isinstance(got, U.Windows):
@@ -1366,6 +1404,48 @@ def check_f8_manage_period_kind_and_refusal():
         elif int(got.n) != every:
             findings.append(f"FAB_MANAGE_EVERY={every}: manage_period returned {got!r}. It is a "
                             f"CONSTRUCTION and not a conversion -- nothing here may cross clock kinds.")
+
+    # ----------------------------------------------------------------------------------------------
+    # ZERO, AT BOTH DOORS. It used to be the third member of the loop above, required to come back
+    # Windows(0); the docstring says why it is a refusal now. THE NAMING HALF IS NOT ASSERTED HERE
+    # and the reason is the one this check makes elsewhere: the refusal's message is full of the
+    # digit 0 in prose about other levers, so `'0' in spoken` is untrippable -- it cannot tell a
+    # reading from a sentence, which is exactly the failure the negative half was rebuilt to avoid.
+    # What is asserted is the property: 0 does not reach a reader through the composition root.
+    # ----------------------------------------------------------------------------------------------
+    zero_lines = []
+    examined += 1
+    z_layer, _z_message, z_value = _period_refusal(0)
+    zero_lines.append(f"through the composition root: {z_layer or 'nobody'}")
+    if z_layer is None:
+        findings.append(
+            f"FAB_MANAGE_EVERY=0 reached a reader as {z_value!r} through the composition root. Zero "
+            f"carried THREE answers in this tree at once -- Flushes(1) from the FAB.d_manage_period "
+            f"coupling (manage on EVERY flush), Windows(0) from FAB.manage_period, and "
+            f"('fab.manage', 0, 0) from spine/derive.py::cadences_that_cannot_fire (a gate that "
+            f"cannot fire) -- while nothing declares a meaning for it: FAB has no `manage` flag, and "
+            f"the frozen source reads the knob as `step % MANAGE_EVERY == 0` with no max(1, ...), "
+            f"where 0 is an integer modulo by zero. spine/derive.py::flush_period_windows refuses a "
+            f"period below one so that an undeclared value with three readings cannot reach any of "
+            f"them, and this is that refusal not happening.")
+
+    examined += 1
+    z2_layer, _z2_message, z2_value = _period_refusal(0, couplings=[])
+    zero_lines.append("with the coupling table emptied: "
+                      + (z2_layer or f"nobody -- FAB's own guard is `< 0` and returned {z2_value!r}, "
+                                     f"which is FAB's to widen and is NOT asserted here"))
+
+    # THE COLLATERAL OF THE ARM THIS CHECK DEPENDS ON, DRIVEN RATHER THAN DESCRIBED. Two of the three
+    # coupling rows that reach spine/derive.py::flush_period_windows carry CAP_PIN_WINDOWS, so the
+    # `< 1` above is also a refusal of CAP_PIN_WINDOWS=0. Reported, not asserted: CAP's domain is
+    # CAP's, and this file's business is that the consequence is not invisible.
+    examined += 1
+    try:
+        _c = cfg(CAP_PIN_WINDOWS=0)
+        cap_zero = (f"NOT refused -- it built FAB.d_cap_lift_period="
+                    f"{_c['FAB'].d_cap_lift_period!r}")
+    except U.UnitError as exc:                    # noqa: BLE001 -- reported below, not swallowed
+        cap_zero = f"refused by the same arm ({str(exc).split('.')[0]})"
 
     switch = bool(FAB.REFUSE_NEGATIVE_PERIOD)
     verdicts, lines = {}, []
@@ -1453,8 +1533,11 @@ def check_f8_manage_period_kind_and_refusal():
         lay, _m, _v = verdicts[(where, every)]
         lines.append(f"{where}: {lay or 'nobody'}")
 
-    detail = (f"{examined} case(s): manage_period at FAB_MANAGE_EVERY 1, 500 and 0 required to return "
-              f"units.Windows carrying that number; and {list(NEGATIVE_CADENCES)} pushed at TWO doors "
+    detail = (f"{examined} case(s): manage_period at FAB_MANAGE_EVERY 1 and 500 required to return "
+              f"units.Windows carrying that number; 0 required to be REFUSED before it reaches any "
+              f"reader -- {'; '.join(zero_lines)}; the SAME arm driven on the other lever that "
+              f"reaches it, CAP_PIN_WINDOWS=0: {cap_zero} (reported, not asserted -- CAP's domain "
+              f"is CAP's); and {list(NEGATIVE_CADENCES)} pushed at TWO doors "
               f"-- {'; '.join(lines)} (REFUSE_NEGATIVE_PERIOD={switch}). The second door is what holds "
               f"D4's switch to meaning something: the assembly refuses first through the root, so "
               f"FAB's own guard and both positions of its switch are DEAD to a check that only tries "
@@ -1470,7 +1553,7 @@ def check_f8_manage_period_kind_and_refusal():
                  "not refuse and therefore names nothing, and the only refusal left is the "
                  "assembly's, whose wording is spine/derive.py's to fix and not FAB's. What is still "
                  "asserted in this position is that FAB did NOT refuse and returned Windows(every)"))
-    return _report("F8", "a negative management cadence never reaches a reader, and the report says "
+    return _report("F8", "a management cadence below one never reaches a reader, and the report says "
                          "which layer stopped it",
                    not findings, detail, findings, vacuous=not examined)
 

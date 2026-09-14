@@ -107,6 +107,204 @@ promote-to-wire that quietly became nothing is indistinguishable from one nobody
 
 ---
 
+## 0.5 What a lever DECLARATION can refuse, what it cannot, and the twenty-four orders of magnitude between them
+
+**Added 2026-09-14.** Until this date a lever declaration carried a default, a unit, a help string
+and an optional `choices=` enumeration, and nothing else — so every numeric refusal in this tree was
+written by hand in the body that read the number, by whoever wrote that body, at whatever time they
+got to it. Three mechanisms landed in `src/spine/lever.py` and they change what a declaration is
+able to say. This section is what they are, what turning each off costs, and — the part that matters
+more than the other two — **what none of them buys.**
+
+### The three mechanisms
+
+**`domain=(lo, hi)` on the declaration.** An optional keyword in the shape `choices=` already has:
+checked at declaration against the lever's own default, checked again in `Lever.coerce` after
+coercion, refusing with a `LeverError` that names the **generated** environment name and the value,
+at the first read, before anything is derived from it. **The interval is CLOSED at both ends** — a
+declaration needing an open end writes the closed pair that *contains* its interval and keeps the
+strict clause at the read site, so the declaration under-refuses by exactly one endpoint and never
+over-refuses. **Either end may be `None`, meaning unbounded on that side.** **Eight declaration
+shapes are refused outright**, and all eight were planted at the constructor on 2026-09-14 and all
+eight came back `LeverError`: a non-numeric default, a `domain=` that is not a pair, `(None, None)`,
+a fractional endpoint on an int lever, an `inf` endpoint, a `nan` endpoint, `lo > hi`, and a default
+outside its own pair. Four controls in the same run built: a closed pair, an open top, a negative
+low end, and int ends on an int lever. **A tree carrying one of the eight does not import** —
+`import spine.assemble` raises `LeverError: default 1.0 is outside its own domain [0.0, 0.5]`,
+measured with exactly that plant in a scratch copy of `src/opt/levers.py`, which is why none of the
+eight is restated as a check in `tests/`: a check for them could only ever fire on a tree that
+`tests/test_census.py` and `tests/test_assemble.py` cannot import in the first place.
+
+**Thirty-three levers carry one today, and they are exactly the thirty-three the research named.**
+The set declared in the tree and the "both ends obvious" set in `.rework/audits/options_domain.json`
+were compared name by name on 2026-09-14: 33 against 33, nothing in the report undeclared, nothing
+declared the report did not name. The other **174** of the 207 numeric levers carry no pair, and
+that is the honest state rather than an unfinished one — see the ceiling population below.
+
+**`spine/lever.py::REFUSE_NON_FINITE_FLOAT` — the floor.** `nan`, `inf` and `-inf` are refused on a
+**float** lever inside `Lever.coerce`. Its scope is the 97 float levers and nothing else: the 110
+int levers already refused every non-finite spelling before this constant existed, because
+`int(float(raw))` raises `ValueError` at `nan` and `OverflowError` at `inf`, and both are in
+`coerce`'s except tuple. The same rule is stated a second time at the *declaration*, because a
+literal `Lever(float("inf"), …)` default never passes through `coerce` at all.
+
+**`spine/lever.py::REFUSE_INEXACT_INT`.** An int lever resolves to the integer its string denotes,
+or it is refused. The rule is **losslessness, not notation**: `"8.0"` and `"1e3"` denote integers
+exactly and resolve normally; `"0.4"` does not, and `"1e26"` does not either — `float` cannot
+represent 10²⁶, so the value that would run is 100000000000000004764729344, a twenty-seven digit
+number 4764729344 larger than the one typed. The class it closes is worse than the arithmetic:
+`MEM_REKEY_EVERY=0.4` used to truncate to `0`, and `0` is that lever's **declared disarm**, so an
+operator asking for the tightest cadence silently received the off switch with `Config.given()` still
+reporting `'0.4'` beside a mechanism running at zero.
+
+### Both constants are SWITCHABLE, and the switch is a code edit
+
+This document already records, for `src/ckpt/api.py::REFUSE_NEGATIVE_PERIOD` and its four siblings,
+that a refusal kept behind a switch is kept honestly and that the switch is not reachable from a
+shell. **The same sentence is owed to these two and is written here.** There is no `SPINE_REFUSE_*`
+environment name. Neither constant takes a census row or a row in the generated lever document.
+**An operator holding only a shell cannot reach either one**: turning either off means editing
+`src/spine/lever.py` and rebuilding.
+
+That is deliberate and the alternative was refused for a reason, not left unconsidered. A
+lever-shaped switch is circular — these rules run *inside* `Lever.coerce`, before any `Config`
+exists — so the only environment form available is a raw `os.environ` read inside `coerce`. That
+read is legal in this one file and it is refused anyway: it would be the tree's first environment
+name that is not a lever, invisible to `spine/registry.py`, to `tests/test_census.py`, whose N1 and
+N2 join on lever names, and to `docs/04_LEVERS.md`. That is precisely the failure
+`src/spine/lever.py`'s own header exists to end.
+
+**What turning the floor off costs.** `nan`, `inf` and `-inf` resolve into frozen `Config`s again on
+all 97 float levers. What is then left standing is the five per-package by-name refusals that exist
+today — `src/fabric/api.py::build`, `src/sig/api.py::build`, `src/opt/api.py::build`,
+`src/tok/api.py::build_vocabulary` and `src/data/api.py::data_plan` — and they cover only the levers
+those bodies actually read. Roughly 288 cells across the six sweep reports are recorded
+`UNREACHABLE_TODAY` because the consumer is a P4/P5/P6 stub, and **a body that does not exist cannot
+refuse anything.** That is the cost and it is also the argument for the rule: a per-package refusal
+is written by whoever writes the body, whenever they get to it; this one is written once, now.
+
+**What turning `REFUSE_INEXACT_INT` off costs.** `int(float(raw))` truncates in silence again and
+the `MEM_REKEY_EVERY` class comes back: a fractional cadence lands on a lever's declared disarm with
+no warning and no record except the string in `given()`. Off is the pre-2026-09-14 behaviour exactly.
+
+### The floor and the domain are COMPLEMENTS, not alternatives
+
+A reader who has just been told there is a floor *and* a pair will reasonably assume one of them is
+redundant. Neither is. **Any finite endpoint refuses `nan` for free**, because the comparison in
+`coerce` is written as an inverted chain (`not lo <= v`) rather than as `v < lo` — every comparison
+against `nan` is False, and `not` turns that into a refusal rather than a pass. **Only a finite HIGH
+end refuses `+inf`.** Driven on one real float lever, the same five values, with the floor first on
+and then switched off in the same process so the pair's own contribution is isolated:
+
+| | `nan` | `inf` | `-inf` | `0` | `1e26` |
+|---|---|---|---|---|---|
+| floor ON, `domain=(0.0, 1.0)` | REFUSED | REFUSED | REFUSED | pass | REFUSED |
+| floor ON, `domain=(0.0, None)` | REFUSED | REFUSED | REFUSED | pass | pass |
+| **floor OFF**, `domain=(0.0, 1.0)` | REFUSED | REFUSED | REFUSED | pass | REFUSED |
+| **floor OFF**, `domain=(0.0, None)` | REFUSED | **pass** | REFUSED | pass | pass |
+| **floor OFF**, no domain | pass | pass | pass | pass | pass |
+
+Read the fourth row. An open-topped pair with the floor off admits `+inf`, and **an open top is the
+common case**: under an honest, evidence-led population `163 of the 207` numeric levers get no
+ceiling, 53 of them floats (`.rework/audits/options_domain.json`). So `domain=` alone would leave
+`+inf` legal on 53 float levers — including `OPT_LR`, `OPT_WEIGHT_DECAY`, `SIG_VAR_WEIGHT`,
+`SIG_COV_WEIGHT` and `FAB_ROUTE_T`, five of the sweep's own critical findings. Neither rule is a
+subset of the other.
+
+### WHAT NEITHER BUYS, AND THE NUMBER IS NOT CLOSE
+
+**Nothing in this section makes any lever safe, bounded or validated, and no docstring in
+`src/spine/lever.py` says it does.** A reader who comes away from the three mechanisms above
+believing the levers are now bounded has read this document exactly backwards, and the measurement
+that says so is the reason the section exists.
+
+**The finiteness boundary and the harm boundary are twenty-four orders of magnitude apart.** Driven
+end to end, five stages per row (`.rework/audits/options_domain.json`):
+
+```
+OPT_LR=1.0     five stages OK   p_finite=True    p_sample=[0.7911476492881775, ...]
+OPT_LR=100.0   five stages OK   p_finite=True    p_sample=[-0.07620048522949219, ...]
+OPT_LR=1e6     five stages OK   p_finite=True    p_sample=[-3928.56640625, ...]     <- model destroyed
+OPT_LR=1e20    five stages OK   p_finite=True    p_sample=[-3.933397707569234e+17, ...]
+OPT_LR=1e30    five stages OK   p_finite=FALSE   p_sample=[nan, nan, nan]
+```
+
+`OPT_LR=1e6` sits **twenty-four orders of magnitude below the first setting on that ladder at which
+this lever produces a non-finite parameter** (1e6 against 1e30), and fourteen below the largest
+setting that ladder still records as finite (1e6 against 1e20). It passes every rule described
+above, runs all five stages reporting OK, reports `p_finite=True`, and leaves every parameter at
+−3928. `FAB_ALPHA=1e26` is finite, passes every rule described above, prints an
+ordinary-looking loss pair — `aux 0.5150710`, `composed 2.943258` — and already leaves 15 of 23
+gradient-carrying tensors non-finite, which is **worse** than `+inf`, since `+inf` at least comes
+back `nan` where a report can see it. **No ceiling chosen to stop `nan` is a ceiling that stops
+harm.**
+
+And a ceiling mostly does not exist to choose. Of the 207 numeric levers, **131 have no derivable
+ceiling at all** — the harmful value is a floating-point dynamic-range or memory property of the
+mechanism and not of the declaration, so no honest reading of the declaration produces a number.
+A further group have a high end that is *another lever or a wire* (`LM_CTX ≤ d_pos_max`,
+`WORLD_N0 ≤ WORLD_NMAX`, `MEM_KEY_DEPTH ≤ LM_LAYERS`), which no per-lever pair can express, and a
+further group have a high end this tree has **explicitly declined to set** three separate times.
+*(The published breakdown of that population does not sum to its own total — one lever is
+unaccounted for between the parts and the whole — so the parts are described here and not quoted as
+figures; the two totals this document does quote, 131 and 163, are the ones the report states
+directly and both were used unchanged.)*
+
+**Three things a reader must not infer from a `domain=`.**
+
+1. **That the values inside it are safe.** They are not, and several of the thirty-three declarations
+   say so in as many words. Each of the five settings below was driven through the real
+   `spine.assemble.build` on 2026-09-14 in a fresh process and **every one resolved**:
+   `TOK_DROPOUT=1.0`, which builds a vocabulary while skipping every available merge;
+   `OPT_LR_RESTART_DAMP=1.0`, the identity at which no losing cycle can ever damp;
+   `FAB_HALT_MAX=1.0`, precisely the absorbing state its declaration's comment exists to warn about;
+   and `DOM_MERGE_DIST` at `0.12` and at `0.80`, the 8× fragmentation and the counterfeit-4 settings
+   (purity 0.71) this tree has already measured and recorded as wrong. A pair bounds a **spelling**.
+2. **That `U.FRACTION` means `(0.0, 1.0)`.** It does not, and this tree has ruled that way three
+   times — `src/fabric/api.py::build`, `src/tok/levers.py::TOKLevers` and
+   `src/capacity/api.py::new_valve` each say in their own words that the unit is a **label the
+   census renders and not a bound**. 75 levers carry `U.FRACTION` and 5 carry `U.PROBABILITY`, and
+   among them `OPT_GRAD_CLIP` is a gradient-**norm** threshold where 5.0 is ordinary, and `SIG_TEMP`
+   and `EVAL_GEN_TEMP` are temperatures. Five of the thirty-three pairs that landed carry the
+   `fraction 0..1` label and a declared domain of `(0.0, 2.0)` — `DOM_MERGE_DIST`, `DOM_SHIFT_DIST`,
+   `DOM_SPAWN_DIST`, `FAB_DISCOVER`, `FAB_MERGE_DIST` — because every one of them is a **cosine
+   distance** between unit vectors and runs on [0, 2]. A reflexive `(0.0, 1.0)` taken off the label
+   would have refused a pooled radius of 1.24 that this tree has measured on this geometry. Two
+   independent owners reached `(0.0, 2.0)` on their own levers without contact.
+3. **That `0` is out of bounds because it looks like a disarmed setting.** 46 of the 207 have a
+   declared or measured-legitimate zero (`.rework/audits/options_domain.json`, counted over all 207)
+   — "never", "every window", "no cap", "start at the hard ceiling", "disarm" — and **only 22 of the
+   207 mention their special value in the help string at all**, so the zero is learned from the
+   reader's body and not from the declaration, and a reflexive `lo=1` deletes a working mechanism.
+   Two levers have a genuinely **negative** natural low end:
+   `EVAL_GENUINE_SIL` is a silhouette in [−1, 1] and `MEM_MATCH_FLOOR` is a cosine similarity, so a
+   reflexive `lo=0.0` is simply wrong on both.
+
+### What the suite now checks about it, including the part that is RED
+
+`tests/test_ownership.py::check_o14_domain_endpoints_are_literals` requires every `domain=` endpoint
+to be a literal. `_domain_ends` cannot see this, because it `isinstance`-tests the **value** and a
+computed endpoint is a perfectly good number: `domain=(0.0, _CEILING)` and
+`domain=(0.0, float(FabricLevers.slots.default))` are both accepted at declaration today, and the
+second is a range endpoint read out of **another package's declaration** with no wire, no coupling
+row and nothing in `affects()` to print it.
+
+`tests/test_ownership.py::check_o15_domain_agrees_with_read_site` reads the hand-written refusals in
+the package bodies and compares their intervals with the declared pairs, in both directions — a
+declaration **narrower** than a refusal that pins both ends stops a configuration the shipped body
+accepts, and a declaration that covers everything a refusal refuses leaves that refusal unable to
+run again. **It is RED as of 2026-09-14 with six findings in four packages**, and that is the check
+working rather than the check being wrong: the pairs were written after the refusals, and
+`OPT_LR_DECAY`, `OPT_LR_RESTART_DAMP` (twice), `SIG_WARMUP_MIN_FRAC`, `TOK_DROPOUT` and
+`FAB_DISCOVER` now each have a by-name refusal the declaration reaches first. Every one was driven
+in both directions. `OPT_LR_RESTART_DAMP=1.5` with the pair in place raises *"is outside its
+declared domain [0.0, 1.0] — BOTH ENDS INCLUSIVE"*; with the pair neutralised it raises *"is above
+1.0, which INVERTS the mechanism…"* — a sentence carrying the measurement, replaced by one that does
+not, with nothing anywhere recording that the trade was made. `tests/test_fabric.py`'s F4 catches
+the `FAB_DISCOVER` instance behaviourally and is red for the same reason.
+
+---
+
 ## 1. Conflicts between the five specs, and how each was decided
 
 Every one was decided **from the source**, not by averaging.
@@ -205,7 +403,8 @@ this phase did not author is how a reason drifts from what it explained.
 
 `retok_every` is TOK's lever, but a retok invalidates `_VALT`/`_BL`, remaps `mem.ctx`, decays
 `asm.tokc`, clears `_sigq` and blacks out fabric growth (`:7766-7788`) — it reaches SIG, MEM, DOM
-and FAB. `domains/levers.py:615` already states the receiving end: **DOM must not read this cadence;
+and FAB. `src/domains/levers.py::DOMLevers.tokc_decay` already states the receiving end, in the
+comment under its declaration: **DOM must not read this cadence;
 the retok arrives as a SIGNAL.**
 
 **Decision.** `on_window` returns `Due.retok`; the composition root calls `tokenize`, receives the
@@ -599,13 +798,31 @@ against the flat `+8` a legal value gives), which is not a lowering and is not a
 anything declared either. So both are refused: one because it can lower, the other because it is
 redundant where it is legal and undeclared where it is not.
 **`CAP_LIFT > 1` is deliberately *not* refused** — `U.FRACTION`'s unit string is a label the census
-renders and not a bound (`spine/lever.py::Lever` carries `choices` and no numeric range), and a lift
+renders and not a bound (`spine/lever.py::Lever` carries `choices` and, since 2026-09-14, an
+optional `domain=(lo, hi)` — **CAP declares one on neither lever**; §0.5), and a lift
 of 2.0 is a large lift, not a lowering one. It lives in `new_valve`
 rather than in `startup_refusals` because that entry point is declared for refusals that need **two**
 packages' numbers, is a stub today, and runs *after* the valve row — a Gate reason would render
-first. `src/lm/api.py::resolve` is the precedent and states the general ground: the refusals are in a
-body because *"a Lever has no range facility and `choices=` enumerates rather than bounds, so these
-cannot be declarations"*.
+first. `src/lm/api.py::resolve` is the precedent, and **the general ground it states is now out of
+date in one half and still standing in the other.** That file says today, word for word, *"a Lever
+has no range facility and `choices=` enumerates rather than bounds, so these cannot be
+declarations"*. **The first clause stopped being true on 2026-09-14** — a Lever carries
+`domain=(lo, hi)` and LM declares one, on `LM_DROPOUT` (§0.5) — **and the conclusion it draws is now
+true of some of that function's refusals and not of others, which is a sharper statement than the
+one the sentence makes and points at work rather than closing it.** `resolve` refuses nine things.
+Two genuinely cannot be declarations at all: `LM_WIDTH` divisible by `LM_HEADS` is a coupling
+between two of this package's own levers, and `ctx > pos_max` compares a lever against an incoming
+wire, and no per-lever pair states either. One has a strictly open end (`LM_ANCHOR_USES > 0`) and a
+closed pair can only contain it. **The remaining counts — `LM_WIDTH`, `LM_HEADS`, `LM_CTX` and
+`LM_VOCAB_SLOTS` at `< 1`, and `LM_LAYERS` at `< 0` — are expressible as pairs and do not carry
+one**, and neither does `CAP_LIFT` at `< 0`. That is a per-lever ruling nobody has made, not a fact
+about the machinery, and this document does not make it here: §0.5's third caution is why —
+`LM_LAYERS=0` is a declared sentinel meaning "this arm's default", so the pair is `(0, None)` and
+not `(1, None)`, and getting that wrong deletes a working mechanism. The quotation is left exactly
+as `src/lm/api.py::resolve` carries it rather than
+silently modernised; the repair to that file belongs to its owner and is filed, and whoever makes it
+must requote here in the same commit or `tests/test_ownership.py::check_o13_citations_resolve` will
+say so.
 `Caps.headroom(n)` exists so the negative clamp (C30) **cannot be written** at a call site.
 
 **An overshooting lift is CLAMPED at the hard ceiling, not refused — the owner's ruling of

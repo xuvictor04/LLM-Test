@@ -503,7 +503,16 @@ class TOKLevers(LeverSet):
     # takes "fraction 0..1" as a bound on legal values will be surprised by 2.0, which is legal.
 
     dropout = Lever(0.0, "Probability of skipping an available merge during a counting segmentation, so "
-                         "byte-level material still reaches the tally.", U.PROBABILITY)
+                         "byte-level material still reaches the tally.", U.PROBABILITY,
+                    domain=(0.0, 1.0))
+    # DOMAIN (0.0, 1.0) -- IT IS COMPARED AGAINST A DRAW, NOT LABELLED. src/tok/api.py::_segment
+    # skips a merge on `stream.random() < dropout`, and `random()` returns [0.0, 1.0), so every
+    # value at or below 0.0 is "never skip" and every value at or above 1.0 is "skip every available
+    # merge on every counting segmentation". The pair is the interval the comparison can
+    # distinguish. 0.0 is the SHIPPED DEFAULT and means the regularizer is off; 1.0 stays inside,
+    # exactly as src/tok/api.py::build_vocabulary's `not 0.0 <= _drop <= 1.0` already admits it --
+    # and the note below this one measures 1.0 doing what +inf does, which is the whole of what this
+    # domain is: a bound on the SPELLING, with that damage inside it.
     # Census: TOK_DROPOUT -> TOK_DROPOUT, verdict keep. Field corrected (DEFECT 1) -- CENSUS.md:299 names
     # the target `TOK.TOK_DROPOUT`, which would have answered to TOK_TOK_DROPOUT.
     # THE NEVER-FIRED CASE, NOT THE SUPERFLUOUS CASE. BPE-dropout is a real regularizer; the default is

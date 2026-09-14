@@ -189,21 +189,43 @@ class MEMLevers(LeverSet):
 
     write_gate = Lever(
         0.3, "Fixed surprise threshold: store an item only when 1 - p_model(true token) is at least this.",
-        U.PROBABILITY)
+        U.PROBABILITY, domain=(0.0, 1.0))
     # A PROBABILITY, NOT A BARE FRACTION, and saying so is load-bearing rather than pedantic: surprise is
     # 1 - p_model, and at V=16384 an undertrained model puts it near 1.0 almost everywhere. That is why
     # the additive controller cannot hit its target -- it drives gate_theta into gate_ceil=0.95, the kept
     # fraction ran 1.00 / 0.93 / 0.80 against a requested 0.12, and the store filled by step ~831 instead
     # of ~6510. This is the rule in force on the shipped configuration (write_mode="fixed"), read at
     # self_organize.py:4868 and applied at memory.py:152.
+    # DOMAIN (0.0, 1.0) -- THE RANGE OF THE QUANTITY IT IS COMPARED AGAINST, which is the argument
+    # this comment already makes for the unit. src/memory/api.py::write gates a candidate row on
+    # surprise = 1 - p_model(true token); a probability complement cannot leave [0, 1], so a
+    # threshold outside that interval is not a tighter or a looser gate but a comparison against a
+    # reading that cannot occur -- above 1.0 nothing is ever stored, and below 0.0 everything is,
+    # which 0.0 already spells because the test is `>=`. Both ends are configurations: 0.0 is
+    # store-every-candidate and 1.0 keeps only a token the model gave no mass at all.
+    # IT IS A BOUND ON THE SPELLING AND NOT ON THE OUTCOME. 0.3 is inside this domain, and against
+    # the V=16384 distribution described above -- surprise near 1.0 almost everywhere -- it keeps
+    # nearly every candidate and fills the store early. That is the defect this comment records, and
+    # no pair of endpoints reaches it.
 
     write_target = Lever(
-        0.5, "Fraction of candidate writes the adaptive and quantile arms aim to keep.", U.FRACTION)
+        0.5, "Fraction of candidate writes the adaptive and quantile arms aim to keep.", U.FRACTION,
+        domain=(0.0, 1.0))
     # INERT UNDER write_mode="fixed" -- a real conditional, so under G4 it needs a declared Gate that
     # prints its own arithmetic rather than a bare DID IT FIRE zero. Used as the quantile point
     # (memory.py:141) and as the controller setpoint (:148). It is also an irreducible coupling worth
     # stating rather than pretending away: kept fraction x stream length against d_capacity is what sets
     # when the store saturates, and turnover is what erases a quiet domain -- goal B, directly.
+    # DOMAIN (0.0, 1.0) -- IT IS A FRACTION IN THE ARITHMETIC AND NOT ONLY IN THE UNIT COLUMN, and
+    # its two readers in src/memory/api.py::write fix the same interval from opposite directions. As
+    # the controller setpoint it is a share of the offered writes to keep, and the kept fraction it
+    # is compared against is n_writes_committed / n_writes_offered -- a ratio of two counters where
+    # the first counts a subset of the second, so it cannot leave [0, 1] and neither can a setpoint
+    # that means to be reachable. In the quantile arm the point actually taken is 1 - write_target,
+    # and a quantile point off [0, 1] selects nothing. 0.0 aims to keep nothing and 1.0 to keep
+    # everything; the old body arrived at the same interval by CLAMPING the quantile point into it
+    # at the call site, which turns an out-of-range request into a silent in-range one instead of
+    # telling the operator which lever was wrong.
 
     # ==============================================================================================
     # EVICT -- who dies when the store is full
@@ -225,12 +247,22 @@ class MEMLevers(LeverSet):
 
     use_decay = Lever(
         0.98, "Multiplier applied to every entry's retrieval count when the decay interval elapses.",
-        U.FRACTION)
+        U.FRACTION, domain=(0.0, 1.0))
     # The half of the eviction rule that makes `use` recency-weighted rather than a lifetime total, so an
     # early-run burst of retrievals cannot make an entry immortal (memory.py:495-496). Live only under
     # evict="usage" (memory.py:287 selects `use` there and `last` otherwise) -- another declared Gate
     # under G4. Inherits the same caveat: with reads confined to eval, `use` is 0 everywhere and the
     # whole rule degenerates to FIFO.
+    # DOMAIN (0.0, 1.0), AND THE HI END IS NOT A JUDGEMENT I MADE -- it is the guard the body this
+    # declaration already cites carries: the decay pass runs only while use_decay < 1.0. So 1.0 is
+    # the never-decay arm, and every value above it is that same arm spelled as a multiplier that
+    # never multiplies -- 1.5 and 1.0 do exactly the same nothing, and only one of the two spellings
+    # admits it. 0.0 zeroes every retrieval count at the interval, which is the extreme of recency
+    # this rule exists to provide.
+    # ABOVE 1.0 THE RULE RUNS BACKWARDS. `use` is the ranking key src/memory/api.py::write evicts on
+    # under evict="usage", and a factor above 1 compounds it, so an early-run burst of retrievals
+    # grows every interval instead of fading -- which is exactly the immortal entry the line above
+    # says this multiplier exists to prevent.
 
     use_decay_every = Lever(
         20000, "How many entries must be WRITTEN before the retrieval counters are decayed.", U.ENTRIES)
@@ -263,7 +295,7 @@ class MEMLevers(LeverSet):
 
     probation_frac = Lever(
         0.10, "Share of the store the never-retrieved region may occupy before eviction narrows to "
-              "probation's own oldest.", U.FRACTION)
+              "probation's own oldest.", U.FRACTION, domain=(0.0, 1.0))
     # THE SCAN RESISTANCE PLAIN LRU LACKS, and the mechanism that decides whether a flood of new material
     # eats itself or eats the working set -- goal B directly. Every write lands on probation
     # (memory.py:491) and only being RETRIEVED promotes it (:557-558); while the region is over this
@@ -286,10 +318,21 @@ class MEMLevers(LeverSet):
     # checkpoint, so every restored entry comes back prob=False and the region is off exactly when a new
     # area arrives (M66, ISSUES.md:473); and delete() does not clear the flag, so deactivated slots keep
     # inflating the census (L61).
+    # DOMAIN (0.0, 1.0) -- A SHARE OF A CONTAINER, so it cannot exceed the container. The comparison
+    # src/memory/api.py::write makes is the probation population against this share of the OWNER'S
+    # BLOCK, and the never-retrieved region is a SUBSET of that block: a share above 1.0 names a
+    # region larger than the thing it is a region of, and behaves identically to 1.0. Both ends are
+    # arms rather than accidents -- at 0.0 the region is over budget the moment it is non-empty, so
+    # eviction always narrows to probation; at 1.0 it never narrows and eviction falls through to
+    # whatever `evict` ranks on, which is the ablation the scan-resistance claim is scored against.
+    # THE PAIR DOES NOT MAKE THE NUMBER MEAN WHAT A READER EXPECTS. 0.10 is inside this domain and
+    # is 12.8 entries per block at the shipped d_owner_blocks=64, not 819 across the store; the
+    # per-block reading is a sentence in two files and not something a pair of endpoints states.
 
     pressure_thresh = Lever(
         0.80, "Threshold on pressure() -- the share of evictions destroying PROMOTED entries -- above "
-              "which the store is declared genuinely short of room.", U.FRACTION)
+              "which the store is declared genuinely short of room.", U.FRACTION,
+        domain=(0.0, 1.0))
     # RENAMED BECAUSE A FIELD CALLED `pressure` BESIDE A READING CALLED pressure() IS THE
     # WRONG-MEASUREMENT CLASS WAITING TO HAPPEN (98 of the survey's 475 records). The threshold must be
     # visibly the threshold. Kept because D3 retains the pressure-signal rule as a selectable arm and an
@@ -311,6 +354,17 @@ class MEMLevers(LeverSet):
     # THE COMPARISON AGAINST THIS NUMBER HAPPENS INSIDE MEM. Its only reader is MEM.census;
     # FAB.grow_check takes a `memory_pressure` ARGUMENT and reads no threshold, so what the root hands
     # the fabric must already be MEM's verdict or fab.grow_mem_eligible fires on every flush.
+    # DOMAIN (0.0, 1.0) -- THE COMPARAND IS A SHARE OF A PARTITION, and that is where both ends come
+    # from. src/memory/api.py::census forms pressure as main/(main + prob) over eviction BRANCHES,
+    # two counters that partition the evictions between them, so the reading lies in [0, 1] and a
+    # threshold outside it either can never be crossed or can never not be. Both endpoints are live
+    # readings and not edge cases: that same function records pinned-at-0 and pinned-at-1 as the two
+    # outcomes a fed probe could produce, so neither may be refused here.
+    # AND THIS IS THE LEVER THAT SHOWS WHAT A PAIR OF ENDPOINTS CANNOT DO. 0.80 is inside the domain
+    # and is exactly unreachable on this tree, because n_promoted is identically 0 and every
+    # eviction takes the probation branch. A domain refuses a spelling; it cannot tell a reader the
+    # signal cannot reach the number, which is why this comment asks for a Gate that prints its own
+    # arithmetic instead.
 
     # ==============================================================================================
     # KEYS -- what the store is indexed by, and how it tracks a model that moves
