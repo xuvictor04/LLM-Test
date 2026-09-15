@@ -502,6 +502,17 @@ def save_period(ckpt: Config):
     return period
 
 
+_SAVES = {"periodic": 0, "sigusr1": 0, "best": 0, "bestN": 0, "final": 0,
+          "best_keep_by_slot": 0, "refused_off": 0}
+"""The DID IT FIRE ledger for CKPT.save, SEEDED AT ZERO rather than created on first use.
+
+A counter that appears only once it is non-zero cannot be read as "armed and it did not happen",
+which is the distinction this package's whole reporting surface is built on. `refused_off` is the
+one that makes "0 saves" legible: without it, a run with CKPT_DIR=off and a run whose period never
+came due print the same nothing.
+"""
+
+
 def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
     """Write one checkpoint generation ATOMICALLY (.tmp + os.replace, one previous generation kept).
     Returns True iff a file was written -- the caller used to assume success and printed "saved to
@@ -530,9 +541,53 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
                  counters, because "0 saves" cannot distinguish "never due" from "saving is off"
     """
     ckpt = ckpt.owned_by("CKPT")
-    raise NotImplementedError(
-        "CKPT.save: P4 (ckpt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CKPT.")
+    if not saving_on(ckpt):
+        # SIX COUNTERS, BECAUSE "0 SAVES" CANNOT DISTINGUISH "NEVER DUE" FROM "SAVING IS OFF".
+        # This is the branch that makes the second one readable, and it returns False rather than
+        # raising: turning saving off is a legitimate thing to ask for.
+        _SAVES["refused_off"] = _SAVES.get("refused_off", 0) + 1
+        return False
+    if reason not in ("periodic", "sigusr1", "best", "bestN", "final"):
+        raise ValueError(
+            f"CKPT.save: reason={reason!r} is not one of the five recorded routes. The reason is "
+            f"RECORDED so the log can name the route that fired rather than describing the "
+            f"mechanism that did nothing.")
+
+    # THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT, WHICH IS P1-M46. `ck = ck + suffix` (:5335-5337)
+    # suffixed the checkpoint while TOK.save(_TOK_SAVE) (:5344-5348) ALWAYS wrote the BASE
+    # vocabulary path, so every later save overwrote the file a .bestN snapshot records as its own;
+    # by the end of a run a .best checkpoint's recorded merge count no longer matched the file it
+    # names, and resuming from it tripped the VOCABULARY MISMATCH refusal at :4380-4408. best_keep
+    # multiplies that n times over. The repair is that TOK.save_vocabulary takes THE SAME suffix
+    # this call takes; this function owns the checkpoint half of it and names the other half here
+    # so the two cannot drift apart again.
+    # A SNAPSHOT'S VOCABULARY IS PART OF THE SNAPSHOT BUT NOT PART OF `payload`: the merges live in
+    # the FILE at d_vocab_save_path and build_vocabulary REPLAYS them on a resume, while
+    # TOK.vocab_state carries "everything a resume needs THAT THE MERGE LIST ALONE DOES NOT CARRY".
+    d = str(ckpt.dir)
+    os.makedirs(d, exist_ok=True)
+    dst = os.path.join(d, "ckpt.pt" + (suffix or ""))
+    tmp = dst + ".tmp"
+    blob = {"payload": payload, "geometry": geometry,
+            "step": int(step), "epoch": int(epoch), "reason": reason}
+    # ATOMIC, AND ONE PREVIOUS GENERATION KEPT. A half-written checkpoint that replaces a good one
+    # is worse than no checkpoint: torch.save straight onto `dst` leaves exactly that on any
+    # interruption, and a run's whole history is in this one file.
+    torch.save(blob, tmp)
+    if os.path.exists(dst):
+        prev = dst + ".prev"
+        try:
+            os.replace(dst, prev)
+        except OSError:
+            # A FAILED ROTATION MUST NOT LOSE THE NEW GENERATION. The replace below still runs.
+            pass
+    os.replace(tmp, dst)
+    _SAVES[reason] = _SAVES.get(reason, 0) + 1
+    if reason == "bestN":
+        _SAVES["best_keep_by_slot"] = _SAVES.get("best_keep_by_slot", 0) + 1
+    # RETURNS True IFF A FILE WAS WRITTEN. The caller used to assume success and printed "saved to
+    # None.best".
+    return True
 
 
 class _SaveFlag:
@@ -787,6 +842,47 @@ def load(ckpt: Config):
                     step=step, epoch=epoch, best_state=best_state, resume=resume)
 
 
+@dataclasses.dataclass(frozen=True)
+class GeometryField:
+    """One geometry knob as the composition root resolved it: the value, the direction it may move,
+    the environment name to print, and why it is checked at all.
+
+    `rule` IS THE OWNER'S AND NOT THIS PACKAGE'S, because the direction differs per field --
+    MAY_WIDEN for FAB's slots and LM's vocab_slots (the tensors are preallocated and a smaller-cap
+    checkpoint IS a prefix, and refusing to widen would mean a resume can never add capacity for
+    the area it is adding, which is the whole exercise), EXACT for inner dimensions where no prefix
+    is valid. spine/compose.py::_geometry_manifest builds these as plain 4-tuples so the rule stays
+    with the root that knows it; this record is what they are read back as.
+    """
+    value: object
+    rule: str
+    env_name: str
+    why: str
+
+
+@dataclasses.dataclass(frozen=True)
+class GeometryReport:
+    """Every field the gate looked at, with its rule and BOTH values -- and the ones it could not.
+
+    `unchecked` IS THE H22 STATE MADE VISIBLE, and it is the reason this is a record rather than a
+    bool. :5365-5366 recorded six world fields and :4590 read exactly one, so five were carried in
+    every checkpoint and compared by nothing, and no line anywhere said so. A field present in the
+    checkpoint and ABSENT from the manifest is listed here by name.
+    """
+    checked: tuple
+    unchecked: tuple
+    widened: tuple
+
+
+class GeometryRefusal(ValueError):
+    """A checkpoint that cannot load into this run's shapes, raised BEFORE THE FIRST ALLOCATION.
+
+    Its own class because the caller must be able to tell it from a torch error: the whole point of
+    the gate is that "it can be failing on FAB_EMB_HID, SIG_D or D_MODEL and no prefix of it means
+    anything" (:4678-4684) becomes one sentence naming one knob and both numbers.
+    """
+
+
 def check_geometry(ckpt: Config, snapshot, geometry):
     """Refuse a checkpoint that cannot load into this run's shapes, NAMING THE KNOB. Raises
     GeometryRefusal; returns a GeometryReport when it passes.
@@ -823,9 +919,65 @@ def check_geometry(ckpt: Config, snapshot, geometry):
                  :4590 reads exactly one.
     """
     ckpt = ckpt.owned_by("CKPT")
-    raise NotImplementedError(
-        "CKPT.check_geometry: P4 (ckpt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CKPT.")
+    recorded = dict(getattr(snapshot, "geometry", None) or {})
+    checked, widened = [], []
+    # DRIVEN OFF THE MANIFEST'S KEY SET, NOT OFF TRUTHINESS, AND THAT IS THE SHAPE OF THE REPAIR.
+    # The fabric's three branches were each guarded on `_ck_cap and ...`, so a checkpoint with no
+    # "cap" slid through all three and reached load_state_dict as the five-shape dump this gate
+    # exists to replace (:4432-4441). Iterating the manifest makes `if recorded and recorded !=
+    # live` -- the untrippable-guard shape -- unwritable here: a field the manifest names and the
+    # checkpoint lacks is a REFUSAL, not a skip.
+    def _value_of(spec):
+        """The VALUE out of a manifest entry, whichever of the three shapes it arrived in.
+
+        BOTH SIDES GO THROUGH THIS, AND THE FIRST DRAFT ONLY PUT THE LIVE SIDE THROUGH IT. The
+        checkpoint stores the manifest as written -- 4-tuples -- so `recorded[field]` is
+        (value, rule, env_name, why) and not a bare number, and comparing that tuple against the
+        live scalar made EVERY field unequal: the gate refused LM_WIDTH for moving from 128 to 128.
+        Caught by driving a checkpoint the same run had just written, which is the only comparison
+        that could have caught it, since both sides are built from one manifest.
+        """
+        if isinstance(spec, GeometryField):
+            return spec.value
+        if isinstance(spec, tuple) and len(spec) == 4:
+            return spec[0]
+        return spec
+
+    for field, spec in (geometry or {}).items():
+        if isinstance(spec, GeometryField):
+            value, rule, env_name, why = spec.value, spec.rule, spec.env_name, spec.why
+        elif isinstance(spec, tuple) and len(spec) == 4:
+            value, rule, env_name, why = spec
+        else:
+            value, rule, env_name, why = spec, "EXACT", field, "no rule recorded"
+        if field not in recorded:
+            raise GeometryRefusal(
+                f"{env_name}: this run resolves {field}={value!r} and the checkpoint records no "
+                f"{field} at all. A missing field is refused rather than skipped -- a checkpoint "
+                f"with no entry used to slide past every guard that tested it for truthiness and "
+                f"arrive at load_state_dict as a shape dump naming nothing. ({why})")
+        was = _value_of(recorded[field])
+        if was == value:
+            checked.append((field, rule, was, value))
+            continue
+        if rule == "MAY_WIDEN" and isinstance(was, int) and isinstance(value, int) and was < value:
+            # THE PREFIX DIRECTION, AND IT IS THE ONE THAT MAKES GOAL B RUNNABLE. Refusing to widen
+            # would mean a resume can never add capacity for the area it is adding.
+            widened.append((field, rule, was, value))
+            checked.append((field, rule, was, value))
+            continue
+        raise GeometryRefusal(
+            f"{env_name}: the checkpoint was written at {field}={was!r} and this run resolves "
+            f"{value!r}. The rule for this field is {rule}"
+            + (", so it may grow but not shrink." if rule == "MAY_WIDEN" else
+               ", so it may not move at all -- it is an inner dimension and no prefix of it is "
+               "valid.")
+            + f" ({why}) Resume with the saved value, or start a new run.")
+    # A FIELD THE CHECKPOINT CARRIES AND THE MANIFEST DOES NOT NAME IS REPORTED, NOT IGNORED. That
+    # is H22 from the other end: six world fields were recorded and exactly one was read, and
+    # nothing said which five were along for the ride.
+    unchecked = tuple(sorted(set(recorded) - set(geometry or {})))
+    return GeometryReport(checked=tuple(checked), unchecked=unchecked, widened=tuple(widened))
 
 
 # ==================================================================================================

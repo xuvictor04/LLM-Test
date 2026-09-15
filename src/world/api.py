@@ -346,9 +346,37 @@ def geometry(world: Config, w):
                  directions, by WORLD.load_into (M43)
     """
     world = world.owned_by("WORLD")
-    raise NotImplementedError(
-        "WORLD.geometry: P4 (world) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section WORLD.")
+    # THE ONE geometry() IN THE TREE, AND IT IS ON THE SAVE SIDE ON PURPOSE. Every other field in
+    # the manifest is assembled by the composition root from frozen Configs BEFORE the first
+    # allocation, because that is when the geometry gate has to fire; this one needs a BUILT object,
+    # since what it contributes is the GROWN population count. CKPT.check_geometry records it and
+    # reports it UNCHECKED rather than comparing it, which is the honest placement.
+    #
+    # `n` IS THE ALLOCATED PREDICTOR COUNT -- len(preds), the ForwardModels that EXIST -- AND NEVER
+    # THE LIVE COUNT. M70 is the record of the two being confused: under slot reuse n() rises to
+    # nmax and stops, while `live` (the alive mask's sum) moves in BOTH directions as culls and
+    # reused-slot mints happen. n is what decides WHICH TENSORS EXIST in the checkpoint, so n is the
+    # geometry field; the live count is a ManageResult reading and a state_dict buffer, not a shape,
+    # and putting it here would make a resume refuse on a number that says nothing about extent.
+    #
+    # H22 IS WHY EVERY FIELD IS HERE AND NOT JUST `n`. lat, hid, n, nmax, route and feedback were
+    # all recorded into world_cfg at :5365-5366 and the resume read ONLY world_cfg["n"] (:4590), so
+    # changing any other across a resume died inside torch on a shape mismatch naming no knob --
+    # the exact failure the fabric's refusal exists to replace. Recording six and checking one is
+    # the state CKPT.check_geometry reports as UNCHECKED; naming them all here is what lets it.
+    return {
+        "world.lat": (int(w.lat), "EXACT", "WORLD_LAT", "the latent width every predictor maps into"),
+        "world.route_d": (int(w.keys.shape[1]), "EXACT", "WORLD_ROUTE_D",
+                          "the routing key width; qproj projects into it"),
+        "world.hid": (int(w.preds.shape[-1]), "EXACT", "WORLD_HID",
+                      "the predictor hidden width, an inner dimension with no valid prefix"),
+        "world.n": (int(w.preds.shape[0]), "MAY_WIDEN_AND_MAY_NARROW", "WORLD_N0",
+                    "the ALLOCATED predictor count, len(preds) -- never the live count (M70)"),
+        "world.nmax": (int(w.nmax), "MAY_WIDEN", "WORLD_NMAX",
+                       "the ceiling n may grow to; n <= nmax is an invariant under Q-WORLD-8 (b)"),
+        "world.feedback": (bool(w.feedback), "EXACT", "WORLD_FEEDBACK",
+                           "whether the forecast is fed back into the LM's hidden state"),
+    }
 
 
 def state_dict(world: Config, w):

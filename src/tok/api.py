@@ -58,7 +58,9 @@ methods, which is not an import):
 """
 import collections
 import dataclasses
+import json
 import math
+import os
 
 from spine.lever import Config, LeverError
 from spine import derive as _derive
@@ -1516,10 +1518,54 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
                  so rather than read 0)
     """
     tok = tok.owned_by("TOK")
-    _ = tok.d_vocab_save_path                            # WIRE READ HERE -- this run's own file
-    raise NotImplementedError(
-        "TOK.save_vocabulary: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    base = str(tok.d_vocab_save_path or "").strip()      # WIRE READ HERE -- this run's own file
+    if not base:
+        # SAVING IS OFF. Returns None rather than raising: an operator who did not ask for a
+        # tokenizer file is not making a mistake.
+        return None
+    # THE SUFFIX IS SPLICED IMMEDIATELY BEFORE THE ".dyntok.json" TAIL, AND THE GENERIC FORMS ARE
+    # REFUSED BY NAME IN THE DOCSTRING ABOVE. The tail has TWO dots, so os.path.splitext -- the
+    # obvious spelling, and the one written here first -- yields <base>.dyntok.best3.json while the
+    # read side looks for <base>.best3.dyntok.json, and the two never meet. Splicing before the LAST
+    # dot fails the same way. d_vocab_read_path is CKPT.resume + ".dyntok.json" and CKPT.resume
+    # names the snapshot being resumed FROM, suffix included, so with this splice the two sides meet
+    # exactly and the read side needs no edit at all.
+    # THE TAIL IS NAMED IN THREE PLACES AND THEY MOVE TOGETHER: the two couplings in
+    # spine/assemble.py, once per direction, and this splice.
+    tail = ".dyntok.json"
+    dst = (base[:-len(tail)] + (suffix or "") + tail) if base.endswith(tail) else base + (suffix or "")
+    # NEVER WRITES TO d_vocab_read_path: THAT FILE IS THE PARENT'S. A resume that overwrote the file
+    # it is reading from would destroy the only record of what the parent actually used, mid-run,
+    # and the corruption would surface as a vocabulary mismatch on the NEXT resume.
+    read_path = str(tok.d_vocab_read_path or "").strip()
+    if read_path and os.path.abspath(dst) == os.path.abspath(read_path):
+        raise LeverError(
+            f"TOK.save_vocabulary would write {dst!r}, which is d_vocab_read_path -- the file this "
+            f"run is RESUMING FROM. That file is the parent's record of what it actually used, and "
+            f"overwriting it mid-run destroys the only thing a later resume could check against.")
+    d = os.path.dirname(dst)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    blob = {
+        # THE MERGES, WHICH ARE THE FILE'S REASON TO EXIST. build_vocabulary REPLAYS them on a
+        # resume, which is why TOK.vocab_state carries "everything a resume needs THAT THE MERGE
+        # LIST ALONE DOES NOT CARRY" and explicitly not these.
+        "merges": [list(m) for m in vocab.merges],
+        # PLUS THE SETTINGS THIS RUN ACTUALLY USED, beside the snapshot that names them. What was
+        # USED rather than what was ASKED FOR is the difference between a file a later run can check
+        # against and one that merely agrees with the environment it was written in.
+        "v0": int(vocab.v0),
+        "maxlen": int(vocab.maxlen),
+        "max_bytes": int(vocab.max_bytes),
+        "ceiling": int(vocab.ceiling),
+        "bytes_per_token": float(vocab.bytes_per_token),
+    }
+    tmp = dst + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(blob, fh)
+    os.replace(tmp, dst)
+    vocab.counters["tok.vocab_saved"] = vocab.counters.get("tok.vocab_saved", 0) + 1
+    return dst
 
 
 def vocab_state(tok: Config, vocab):
