@@ -931,8 +931,25 @@ class Cadences:
         # windows the mint fired 999 times at BATCH_W=1 and ZERO times at BATCH_W in {2, 8, 15, 16,
         # 32}. CKPT_EVERY sat in that block, so a long run would never have checkpointed. The
         # subtraction is same-kind and Clock.__sub__ returns a Windows.
-        if now - self._seeded[key] >= period:
-            self._seeded[key] = now
+        elapsed = now - self._seeded[key]
+        if elapsed >= period:
+            # THE SEED ADVANCES BY WHOLE PERIODS, NOT TO `now`, AND THAT IS WHAT MAKES THE
+            # PHASE-INDEPENDENCE CLAIM ABOVE TRUE RATHER THAN NEARLY TRUE. `self._seeded[key] = now`
+            # DISCARDS THE REMAINDER at every fire, so a gate evaluated at the FLUSH TAIL -- where
+            # `now` moves in steps of batch_windows -- silently lengthens its own period to the next
+            # multiple of the stride. Measured over 20,000 windows at a declared period of 100,
+            # evaluated per flush: effective period 100.5 at batch_windows=1, 104.2 at 8, 128.2 at
+            # 32 and 129.0 at 64. A checkpoint cadence 28% slower than the number an operator set,
+            # with nothing saying so, is the same class of defect as the modulo form this primitive
+            # replaced -- smaller, and silent in the same way.
+            # THE FLOOR-DIVISION IS WHAT KEEPS IT FROM BURSTING. Advancing by a single period after
+            # a long gap would leave the seed far behind `now` and fire on several consecutive
+            # calls to catch up; advancing by as many whole periods as have elapsed lands the seed
+            # just behind `now`, so exactly one fire happens per call and the REMAINDER carries into
+            # the next interval. Evaluated per window the two spellings are identical, because
+            # `elapsed` is then exactly `period` and the multiplier is 1.
+            self._seeded[key] = self._seeded[key] + type(period)(
+                int(period) * (int(elapsed) // int(period)))
             self._fires[key] += 1
             self._last[key] = now
             return True

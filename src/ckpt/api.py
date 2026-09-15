@@ -267,7 +267,9 @@ def save_period(ckpt: Config):
     WHY IT RIDES ON THE RETURNED Windows RATHER THAN CHANGING THE SHAPE OR MINTING AN ACCESSOR.
     Three alternatives, each priced by running it rather than by preference:
       (a) return (Windows, Gate), or a small record. REFUSED: this value is read UNWRAPPED into the
-          `periods` mapping at two sites in spine/compose.py, which this package does not own, and
+          `periods` mapping in spine/compose.py, which this package does not own -- at ONE site
+          since 2026-09-15, spine/compose.py::_periods, because the cadence stage used to build a
+          second five-key mapping inline and now passes _periods(sysm) like the audit does -- and
           both train/api.py::Cadences.due and spine/derive.py::cadences_that_cannot_fire refuse
           anything whose type is not exactly Windows -- a SUBCLASS raises too, which was checked
           (`cadences_that_cannot_fire` on a Windows subclass raises UnitError).

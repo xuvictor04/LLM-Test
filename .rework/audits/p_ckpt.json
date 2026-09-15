@@ -1,0 +1,56 @@
+{
+  "phase": "p_ckpt",
+  "status": "DONE -- compose returns a System and the whole suite is green",
+  "sole_edit": "src/ckpt/api.py (+515/-14). git show HEAD:src/ckpt/api.py is byte-identical to my pre-edit backup, so this diff is the whole of this file's change.",
+  "wrote": [
+    "src/ckpt/api.py::install_save_signal",
+    "src/ckpt/api.py::_SaveFlag (private class: take(), _arrive(), .armed, .gates)",
+    "src/ckpt/api.py::BestAction (frozen dataclass: save_best, rotate_slot)",
+    "src/ckpt/api.py::new_retention",
+    "src/ckpt/api.py::Retention.__init__/consider/state/counters/_inert_reason"
+  ],
+  "compose": {
+    "before": "NotImplementedError at src/ckpt/api.py:682 new_retention (spine/compose.py:2227)",
+    "after": "RETURNS System assembled",
+    "command": "cd /tmp && PYTHONPATH=/home/user/LLM-Test/src python -c 'from spine.compose import compose; s=compose(environ={}); print(type(s).__name__, s.stage)'"
+  },
+  "measured": {
+    "retention_at_defaults": "counters {'probes_seen':0,'new_bests':0,'rotations':0,'slots_used':0,'inert_reason':\"no curve value has ever arrived: ...\"}; state {'best_bpb':None,'best_step':-1,'best_saved':False,'prev_probe':None,'ring':{'ordered':0,'slots':{}}}",
+    "save_flag": "_SaveFlag armed=True; gate line 'Gate ckpt.sigusr1_armed: FIRED (10 vs SIGUSR1)'; os.kill(pid,SIGUSR1) -> take() True then False, _received=1",
+    "rule": "CKPT_DIR=runs/x CKPT_BEST_KEEP=2 over curve [2.50,2.40,2.45,2.44,2.20,2.19,2.60,2.58] -> save_best T,T,F,F,T,T,F,F and rotate_slot None,1,None,2,1,2,None,None; counters probes_seen=8 new_bests=4 rotations=4 slots_used=2. 2.44 rotates without being a new best -- the 'descent into a good region' superset.",
+    "round_trip": "state() -> new_retention(restored=...) -> state() identical; the post-resume low lands in slot 1 continuing the ring's 'ordered' pointer rather than restarting it",
+    "inert": "CKPT_BEST_KEEP=2 with CKPT_DIR off: two probes, 2 new bests tracked, 0 rotations ORDERED, inert_reason carries both clauses",
+    "refusals": "best_keep<0, tol<0, tol>1 -> LeverError; bare int step -> UnitError; NaN and -inf curve_bpb -> ValueError; restored=str and restored missing keys -> ValueError",
+    "k1_public_flag": "spelling _SaveFlag as Flag: K1 finding 'CKPT: Flag.take(self)' undeclared, K6 second finding, entry points 132 -> 133. Restored to private."
+  },
+  "suite_after": {
+    "test_ownership": 0,
+    "test_census": 0,
+    "test_assemble": 0,
+    "test_couplings": 0,
+    "test_derive": 0,
+    "test_fabric": 0,
+    "test_contract": 1,
+    "test_contract_detail": "16 of 17 PASS. ONLY K2 fails, and for exactly one reason: 'compose() completed without raising'. K1/K6/K13 which were red at my baseline are now green (another agent's commit ede4086 at 12:49 fixed the RunClock.finished rename and the doc counts). K15/K16 read 117 Gate constructions, up from 114 -- my three ckpt.sigusr1_armed arms were EXAMINED, not skipped. K13 LIVE COUNTS stubs 73 -> 68, exactly my five entry points.",
+    "test_contract_reproducible": "Run against the COMMITTED tests/test_contract.py (git show HEAD:, executed from a temp tree symlinked at src/docs/.rework/self_organize.py) because the working copy of that file is being edited by another agent right now and currently raises TypeError at line 452 before reaching K2. Committed copy: 16 PASS, 1 FAIL -- K2, verdict NO_ERROR, 'compose() completed without raising'.",
+    "test_ownership_detail": "16 PASS, 0 FAIL, exit 0, with `import signal` in place."
+  },
+  "unfinished": [
+    "Retention cannot learn whether a save it ORDERED actually happened: CKPT.save returns True iff a file was written and no frozen entry point carries that answer back. best_saved and the ring therefore mean ORDERED, not ON DISK. Closing it needs a new entry point (Retention.note_saved), which is a contract edit. Recorded in new_retention's docstring as obligation (1).",
+    "The inert clause is pinned to best_keep > 0 because spine/compose.py spells the condition that way twice. At best_keep == 0 with CKPT_DIR off the single global .best is equally unsaveable and no clause says so. Recorded as obligation (2).",
+    "The ckpt.sigusr1_armed gate reaches an object graph and not an operator: grep finds no .gates consumer in src/, compose included. Same residue save_period's cost (3) records."
+  ],
+  "committed_as": "ecff8dd 'compose(environ={}) returns a System' -- the orchestrator committed my working tree; src/ckpt/api.py is 1234 lines and my bodies are intact.",
+  "suite_final": {
+    "measured_at": "after commits ecff8dd, b14e770, dbc0db6 (the last two are another agent's clock work)",
+    "test_ownership": 0,
+    "test_contract": 0,
+    "test_census": 0,
+    "test_assemble": 0,
+    "test_couplings": 0,
+    "test_derive": 0,
+    "test_fabric": 0,
+    "test_contract_detail": "17 PASS, 0 FAIL. K2 was repaired by another agent while I worked -- it now reads: \"verdict NO_ERROR -- it RETURNED a System. 39 entry point(s) named by ASSEMBLY_ORDER, of which 10 sit behind a resume guard and were NOT exercised by this fresh build (CAP.restore, CKPT.check_geometry, CKPT.load, DATA.restore_stream_state, FAB.load_state_dict, LM.load_state, OPT.load_state, SIG.load_state_dict, TOK.restore_vocab, WORLD.load_into); no other named entry point is still a NotImplementedError stub\". I did not touch tests/."
+  },
+  "k2_history": "At my baseline K2 FAILED the moment compose completed ('Every mechanism is a stub, so it cannot have'). I did not edit tests/; another agent rewrote that arm to ask whether compose was ENTITLED to finish, and it now passes. Both states measured."
+}

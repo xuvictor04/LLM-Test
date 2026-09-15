@@ -1,0 +1,89 @@
+{
+  "status": "complete",
+  "date": "2026-09-15",
+  "target": "src/train/api.py :: new_clock, RunClock.__init__/_finished/begin_epoch/advance/note_backward/counters",
+  "method": "read-only; all claims below were executed. Harnesses in /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/ (h1_conserve.py, h2_edges.py, h3_alias_resume.py, h4_resume_horizon.py, h5_diff.py, h6_cadence.py, h7_c3.py), all run as `cd /tmp && PYTHONPATH=/home/user/LLM-Test/src python <file>`.",
+  "headline": "The core loop arithmetic is CORRECT. 80,945 windows across 300 randomized trials matched an independent model on every Tick field and every counter, with zero mismatches. The defects found are at the edges: the record aliases the live counters, and the resume path restores step without restoring the epoch cursor or publishing a base.",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "medium",
+      "file": "src/train/api.py",
+      "line": 635,
+      "also": [673, 681],
+      "claim": "Tick and counters() hand out the LIVE counter objects, so `frozen=True` does not deliver the promise the FROZEN block at line 101-104 makes ('a caller that can write to one of these can move a counter'). units.Clock has no __setattr__ guard and `n` is writable; the dataclass only stops rebinding the FIELD.",
+      "failure": "t = clock.advance(); t.step.n = 999 -> clock.step becomes Windows(999) and the next advance returns Windows(1000). Worse, the Windows object a Tick hands out is the same object Cadences.due stores as its gate seed: forging a handed-out Tick's step makes the ckpt gate read 101 checks / 0 fires over 100 windows while clock.step is untouched -- the 'a long run would never have checkpointed' failure Cadences.due exists to end.",
+      "evidence": "h3_alias_resume.py A3: 't.step is c.step -> True' / 'after `t.step.n = 999`: c.step = 999 windows' / 'next advance continues from the forged value: 1000 windows'. A4: \"ct['opt_steps'] is c.opt_steps -> True\" then 'c.opt_steps = 4242 steps'. h7_c3.py: 'ckpt gate fired 0 times in 100 windows / ledger: {ckpt: (101, 0, None, Windows(5))} / clock.step: 102 windows (untouched)'.",
+      "fix_direction": "hand out copies: Tick(step=U.Windows(self.step), epoch=U.Epochs(self.epoch), ...) and the same in counters(). Clock.__init__ already accepts a same-kind Clock."
+    },
+    {
+      "id": "F2",
+      "severity": "medium",
+      "file": "src/train/api.py",
+      "line": 506,
+      "claim": "The resume restores `step` and `epoch` but not `_in_epoch`, and counters() publishes no resume base. On a mid-epoch resume the clock replays the WHOLE epoch (begin_epoch zeroes _in_epoch) while `step` keeps the windows already consumed from it, so those windows are counted twice in the run's window total -- and that total is then compared against a horizon that has no resume term (spine/compose.py::_run_windows = epochs x windows_in_epoch).",
+      "failure": "epochs=2, windows_in_epoch=20, batch_windows=4, accum=1. resume=(12,0): the clock runs 40 windows and reports step=52 against a 40-window horizon -> observed Steps(13) vs horizon Steps(10), residual +3. resume=(500,0): observed Steps(135) vs Steps(10), residual +125. The Q-OPT-5 residual counters() exists to feed is supposed to be <= 0 (under-anneal); the resume flips its sign, so a resumed run reports an OVER-anneal it did not have. Separately, at batch_windows=1 accum=1 `step` and `opt_steps` are equal by construction and a resumed clock reports 1010 vs 10.",
+      "evidence": "h4_resume_horizon.py F3: 'horizon ... : 10 steps' / 'resume=(12,0): windows actually run=40 counters={step:52,flushes:10,opt_steps:10,epoch:2} observed=13 steps residual observed-horizon=3 steps'. F3b: '{step:1010, flushes:10, backwards:10, opt_steps:10, epoch:1}'.",
+      "reachability": "wired: spine/compose.py:2116-2118 passes restored.step / restored.epoch, and ckpt Snapshot.step is a plain int. CKPT.save_period is a WINDOWS cadence (spine/compose.py::_periods), so snapshots land mid-epoch and resume_step is not generally a multiple of windows_in_epoch. resume=(0,0) gives residual 0, so a cold start is unaffected.",
+      "sibling": "opt/api.py:1748-1763 solved the same problem with backward_at_load/step_at_load bases so 'since the last resume' is expressible. RunClock.counters() has no equivalent."
+    },
+    {
+      "id": "F3",
+      "severity": "medium-low",
+      "file": "src/train/api.py",
+      "line": 632,
+      "claim": "windows_in_epoch is not re-armed to None on a roll, so the refusal at line 598 only ever protects the FIRST window of the run. A loop driver that skips the stage-E begin_epoch after a roll silently reuses the PREVIOUS epoch's length -- and begin_epoch's own docstring says the point is that 'a resampling stream is a different length each epoch'.",
+      "failure": "begin_epoch(4) once, then 12 advances with no further begin_epoch: no refusal, counters read {step:12, epoch:3} -- three epochs measured against a length that was declared for one of them.",
+      "evidence": "h2_edges.py H7: '12 advances, never re-declared the epoch length: {step:12, flushes:12, backwards:0, opt_steps:0, epoch:3, batch_len:0}'.",
+      "fix_direction": "add `self.windows_in_epoch = None` to the roll branch (line 632 area); the stage-E row already calls begin_epoch on every roll, so nothing correct breaks."
+    },
+    {
+      "id": "F4",
+      "severity": "low-medium",
+      "file": "src/train/api.py",
+      "line": 680,
+      "claim": "The counters() reading for the dropped partial batch is unreachable. Line 680 says 'a run that ends with batch_len > 0 ended mid-batch and those windows never reached a backward pass' -- but the roll zeroes batch_len (line 632) and a run ends BY rolling, so batch_len reads 0 on every normally-terminating run, including runs that dropped windows. Nothing counts the dropped windows.",
+      "failure": "batch_windows=3, one epoch of 10 windows: counters = {step:10, flushes:3, backwards:3, batch_len:0}. 10 - 3*3 = 1 window advanced, was charged to `step`, and never reached a backward pass; batch_len reads 0. At the heavy-run batch_windows=16 this is up to 15 windows per epoch.",
+      "evidence": "h2_edges.py H2b: 'counters: {step:10, flushes:3, ...} -> step=10 flushes=3 => 1 windows advanced that never reached a backward; batch_len reads 0'.",
+      "note": "the number IS derivable at the root (step - flushes*batch_windows), but RUN's declared DID IT FIRE surface names batch_len and batch_len cannot carry it."
+    },
+    {
+      "id": "F5",
+      "severity": "low",
+      "file": "src/train/api.py",
+      "line": 506,
+      "claim": "resume_step / resume_epoch accept a Clock of ANY kind: `int()` on a Clock succeeds silently, which is the exact sentence spine/derive.py uses to REFUSE a Clock in three places.",
+      "failure": "RunClock(..., resume_step=U.Steps(7)) -> step = Windows(7); RunClock(..., resume_epoch=U.Flushes(3)) -> epoch = Epochs(3). ckpt/api.py::Retention.consider refuses even a bare int for the same quantity ('a Flushes count arriving here would be off by the batch width with nothing to raise on it').",
+      "evidence": "h3_alias_resume.py R2: 'resume_step=Steps(7) ACCEPTED, step = 7 windows' / 'resume_epoch=Flushes(3) ACCEPTED, epoch = 3 epochs'. Also 'resume_step=-5 accepted, step = -5 windows'.",
+      "reachability": "no live producer crosses it today -- Snapshot.step/epoch are declared int (ckpt/api.py:154-155). This is a missing guard, not a live bug."
+    },
+    {
+      "id": "F6",
+      "severity": "low",
+      "file": "src/train/api.py",
+      "line": 522,
+      "claim": "A clock resumed at epoch >= epochs cannot be asked whether it is finished without first advancing a window: _finished is private and published only on a Tick, by design (the docstring argues the underscore at length). So a resume from a completed checkpoint burns a window, a flush and -- at accum=1 -- an optimizer step before the caller can learn the run is over.",
+      "failure": "RunClock(epochs=1, batch_windows=1, accum=1, resume_step=634, resume_epoch=1); advance() returns Tick(step=Windows(635), flush_due=True, rolled=False, finished=True) and note_backward() on that flush returns True -> counters {step:635, flushes:1, backwards:1, opt_steps:1}.",
+      "evidence": "h4_resume_horizon.py F7 block.",
+      "note": "requires someone to resume an already-finished run; the extra step only happens if the driver runs the B rows before testing finished."
+    }
+  ],
+  "checked_and_sound": [
+    "DIFFERENTIAL, 80,945 windows: 300 randomized trials (epochs 1-8, batch_windows 1-17, accum 1-5, random epoch lengths 1-120, 1-3 backwards per flush, random resume_step) driven against an independent reimplementation. Every Tick field (flush_due/rolled/finished/step/epoch), every counter, every accum_due answer and the per-epoch window conservation matched exactly. h5_diff.py: 'trials=300 windows driven = 80945 / mismatches: 0'.",
+    "FLUSH-BEFORE-ROLL IS RIGHT. batch_windows=5, epoch of 10: window 10 comes back flush_due=True AND rolled=True -- the exactly-filled batch is flushed, not dropped -- and the batch never spans a roll, because the roll zeroes batch_len that the flush already zeroed. No window is double-counted or lost: in all 300 trials the advances between rolls equalled the declared epoch length. h2_edges.py H2a, h5_diff.py CONSERVE.",
+    "finished IS COMPUTED AT THE RIGHT MOMENT. It is read from the property AFTER the roll, so on the tick that completes the last epoch both rolled and finished come back True together (epochs=2, len=3: tick 6 -> (rolled True, finished True)), which is what makes the caller's 'test finished before rolled' obligation satisfiable. finished is never True with rolled False except when resume_epoch >= epochs. h2_edges.py H3.",
+    "flushes AND backwards TRACK AND ARE DISTINGUISHABLE. Identical in every one-backward-per-flush trial; with 2 backwards per flush (batch_windows=4, 16 windows) they read Flushes(4) vs Backwards(8). They cannot be confused by accident either: `clock.flushes == clock.backwards` raises UnitError ('==: Flushes against Backwards'). h2_edges.py H4.",
+    "opt_steps IS EXACTLY THE accum_due COUNT. Asserted per call for accum in {0,1,2,4,-3} over 20 windows and in all 300 randomized trials: opt_steps == the number of True answers, and == derive.opt_steps_from_backwards(backwards, accum) wherever that function accepts the rate (it refuses accum=0 and accum=-3 by its declared asymmetry, while the clock clamps to 1 exactly as accum_due documents). No off-by-one at n_backward=0. h2_edges.py H5, h1_conserve.py.",
+    "begin_epoch RESETS THE EPOCH CURSOR AND NOT THE RUN TOTAL. 3 epochs of 10/7/13 -> step Windows(30), epoch Epochs(3); _in_epoch is zeroed by both the roll and begin_epoch. h1_conserve.py.",
+    "begin_epoch(0) rolls on every advance, but it is UNREACHABLE from the root: spine/compose.py:2453 _windows_in_epoch returns max(1, len(ids)//ctx). begin_epoch(-1) is refused, and a Clock argument is refused. h2_edges.py H6.",
+    "batch_windows <= 0 makes every window flush_due and accum <= 0 makes every backward due, but both are refused at startup by opt/api.py:952 (OPT_BATCH_WINDOWS < 1) and opt/api.py:948 (OPT_ACCUM < 1), so neither reaches the clock on the root path. h3_alias_resume.py R3.",
+    "NO SHARED-DEFAULT ALIASING BETWEEN CLOCKS -- the class docstring's claim is TRUE. Two RunClocks share no counter object (all five `is` comparisons False), driving one leaves the other at zero, and each increment mints a fresh Clock (`prev is c.step` -> False after advance). h3_alias_resume.py A1/A2.",
+    "AND THE REBINDING DISCIPLINE IS LOAD-BEARING, MEASURED. Cadences.due stores the live clock.step object as its seed, so a clock written `self.step.n += 1` instead of rebinding moves its own seed: a stand-in in-place clock fired the period-5 ckpt gate 0 times in 40 windows (ledger 40 checks / 0 fires) where the real RunClock fired 7 times. h6_cadence.py C2.",
+    "THE __init__ RESUME COMMENT'S CLAIM HOLDS. Resuming `step` itself (rather than adding an offset later) makes the lazy Cadences seed land at the resumed step: at resume_step=1000, period 5, the gate fires at 1006 and 1011 -- the same phase as the cold start's 6 and 11 -- so no gate banks the resume. h6_cadence.py C1."
+  ],
+  "caller_dependent_caveat": {
+    "claim": "Under the LOOP_ORDER A-row reading ('finished is tested BEFORE rolled ... the loop leaves for R'), a run whose last window is also a flush ends with flushes == backwards + 1, because the flush is counted in advance() and the B rows never run. At the shipped batch_windows=1 EVERY window is flush_due, so this is the end state of every default run.",
+    "measured": "8 windows, batch_windows=1, driver leaves on finished: {step:8, flushes:8, backwards:7, opt_steps:7} -> flushes - backwards = 1. h4_resume_horizon.py F8.",
+    "why_not_a_finding": "no loop driver exists in this tree, so which of the two orderings a real caller uses is not measurable. Recorded only so that an off-by-one between flushes and backwards is not later read as the microbatching signal new_clock's docstring reserves it for -- the directions differ (end-of-run gives flushes > backwards, microbatching gives backwards > flushes)."
+  }
+}

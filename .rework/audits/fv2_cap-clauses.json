@@ -1,0 +1,75 @@
+{
+  "status": "complete",
+  "target": "src/capacity/api.py::startup_refusals (lines 1408-1510)",
+  "read_only": true,
+  "harness": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/harness.py -- spine.lever._reopen_assembly() + spine.assemble.build(environ=...) per environment, then capacity.api.new_valve + startup_refusals. Cross-validated against the real compose() by monkeypatching spine.compose.cap_api.startup_refusals with a spy.",
+  "anchor_measurements": {
+    "compose(environ={}) hands live_experts": 2048,
+    "FAB_N0 default": "2048 (src/fabric/levers.py:289)",
+    "d_operating_population at defaults": 1844,
+    "refusals at shipped defaults": [],
+    "derive.cull_gate_open(2048,4096,0.45)": true,
+    "derive.cull_gate_open(1843,4096,0.45)": false
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "critical",
+      "file": "src/capacity/api.py",
+      "line": 1479,
+      "claim": "Clause (1b) and clause (2) have disjoint admissible ranges at the shipped defaults, so NO value of CAP_FAB_START arms the expert valve. (1b) demands cap >= live_experts (2048 = FAB_N0); (2) demands cap <= settles (1844). Sweep of CAP_FAB_START 0..4300 at CAP_TARGETS=experts and at =both: clearing set EMPTY. The unique cap that actually works, 1844 (the population is culled 2048 -> 1844 and pins on the cap), is precisely the one (1b) refuses.",
+      "evidence": "CAP_TARGETS=experts live=2048 settles=1844: CAP_FAB_START in 0..4300 clearing ALL refusals -> []   /   CAP_TARGETS=both ... -> []   /   FAB_PRESSURE sweep: 0.45 -> EMPTY, 0.5 (settles 2048) -> exactly {2048}, 0.6 (settles 2458) -> [2048..2458]",
+      "root_cause": "(1b) tests the STARTING population; the permanent C30 freeze it describes needs the EQUILIBRIUM population (settles, which this same function already reads) above the cap. With settles <= cap < live the cull opens (measured cull_gate_open(2048,4096,0.45)=True) and the freeze is transient."
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "file": "src/capacity/api.py",
+      "line": 1484,
+      "claim": "Clause (1b)'s own message says 'This is unreachable on a fresh run and entirely reachable on a RESUME' and it fires on a FRESH run: compose() with no checkpoint hands live_experts=2048 because FAB_N0=2048 > any cap clause (2) permits.",
+      "evidence": "spy on compose(environ={'CAP_TARGETS':'experts','CAP_FAB_START':'1844'}) -> live_experts=2048, 1 refusal, text contains 'This is unreachable on a fresh run'."
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "file": "src/capacity/api.py",
+      "line": 1487,
+      "claim": "Each clause names a remedy the other clause refuses, and on one config both fire about ONE number with contradictory sentences. (1b): 'set CAP_FAB_START=0 for the hard ceiling' -> clause (2) refuses (0 is the sentinel -> 4096 > settles). (2): 'Set CAP_FAB_START to 1844 or below' -> clause (1b) refuses whenever live > settles. At CAP_FAB_START=1900, live=2048 both fire: (1b) prints 'below the live population of 2048' and (2) prints 'it never reaches 1900' -- the population is already at 2048.",
+      "evidence": "two-step reproduction: resume cap 12 -> refusal naming CAP_FAB_START=0; applying it verbatim -> clause (2) refusal. And targets=both CAP_FAB_START=1900 CAP_VOCAB_START=-3 live=2048 -> 3 refusals, [1] and [2] both about 1900."
+    },
+    {
+      "id": "F4",
+      "severity": "low",
+      "file": "src/capacity/api.py",
+      "line": 1504,
+      "claim": "Clause (2) prints the settling point as '(FAB_PRESSURE x FAB_SLOTS, the wire d_operating_population)'; derive.operating_population is max(3, int(p*slots)). At FAB_SLOTS=16 FAB_PRESSURE=0.1 the line prints 'settling point of 3' where FAB_PRESSURE x FAB_SLOTS = 1.6, and its remedy 'raise FAB_PRESSURE' is inert until p > 0.1875 (measured: p=0.18 -> still 3).",
+      "evidence": "operating_population(0.1,16)=3, (0.18,16)=3, (0.19,16)=4; refusal text quoted with 'settling point of 3 (FAB_PRESSURE x FAB_SLOTS...)'"
+    },
+    {
+      "id": "F5",
+      "severity": "low",
+      "file": "src/capacity/api.py",
+      "line": 1436,
+      "claim": "LEVERS READ declares 'fab_start, targets'; the body never reads cap.fab_start. AST over the function: attributes read off the cap Config are ['d_operating_population','owned_by','targets']. No check catches it (K4 passes because new_valve reads fab_start).",
+      "evidence": "ast.walk over startup_refusals -> ATTRIBUTES READ OFF THE CAP Config: ['d_operating_population', 'owned_by', 'targets']"
+    },
+    {
+      "id": "F6",
+      "severity": "low",
+      "file": "src/capacity/api.py",
+      "line": 1466,
+      "claim": "Both (1a) and (1b) open 'CAP_FAB_START resolved the soft expert cap to N (<origin>)' even when the origin says otherwise -- 'checkpoint (lifted to 12)' and 'off (valve disabled; the cap is the hard ceiling)'. The file's own _clamp_blocked_clause comment (lines 203-209) calls naming a lever that did not produce the cap the defect that 'made the clause false on the restore path'.",
+      "evidence": "restored={'fab_start':12} -> 'CAP_FAB_START resolved the soft expert cap to 12 (checkpoint (lifted to 12))'"
+    }
+  ],
+  "checked_and_sound": [
+    "shipped defaults are silent: compose(environ={}) -> refusals [] (measured through the real root, live_experts=2048, cap_e=4096, targets=off)",
+    "crash-safety: Valve(12,12) with default origin=() renders '(unrecorded)'; origin=('a',) renders; cap 10**20, live_experts float/0/-7 all return without raising",
+    "clause (1a) and clause (2) cannot double-fire: operating_population has a max(3,...) floor so settles >= 3 > any nonpositive cap",
+    "the clause-(2) gate on targets in ('experts','both') is correct and load-bearing: ungated it refuses the default tree (cap 4096 > settles 1844 at targets=off); at targets='vocab'/'off' no pin is needed so nothing is let through. The vocabulary arm has no settling point wire and new_valve declares the omission deliberately.",
+    "FAB_SLOTS=0 / LM_VOCAB_SLOTS=0 produce a nonsense (1a) message, but the branch is UNREACHABLE: FAB refuses FAB_SLOTS=0 with a LeverError long before row 29",
+    "clause (2)'s inequality (cap > settles) agrees with new_valve's expert_room (ce <= operating) -- no third spelling",
+    "all 15 test_ownership O-checks pass, test_census/assemble/couplings/derive/fabric all pass; the 3 test_contract failures (K1, K6, K13) are RUN.RunClock.finished and stale doc counts, not CAP"
+  ],
+  "caveat": "compose() does not itself abort on a non-empty refusal list today -- it collects into System.refusals and continues. CAP's own docstring calls startup_refusals 'where a run dies', and compose.py:2154 says appending to System.refusals 'would make a collapsed encoder abort the run', so the list is fatal by contract."
+}

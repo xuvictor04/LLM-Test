@@ -1,0 +1,18 @@
+{
+  "status": "IN PROGRESS (2)",
+  "measured": {
+    "suite": "all 7 test files exit 0: contract 16 checks + 77 self-test cases 0 failing; ownership 15+73 0; census 8 0; assemble 9 0; couplings 4 0; fabric 9 0; derive 575 oracle cases 0 mismatches",
+    "compose": "compose(environ={}) RETURNS spine.compose.System",
+    "_periods": "6 keys, all units.Windows: curve=2000 dom.manage=100 fab.manage=500 dom.rekey=200 ckpt=0 progress=100",
+    "_run_windows": "Windows(634)",
+    "cadence_audit_at_defaults": "2 lines (curve starved, ckpt DISARMED); derive returns [('curve',2000,634),('ckpt',0,0)]",
+    "old_inline_dict": "git show 98d2fb0 confirms it had exactly 5 keys and NO 'progress'",
+    "second_construction": "AST scan of src/tests/tools: exactly ONE dict literal with gate keys, compose.py line 2890 inside _periods; one call site per accessor",
+    "positive_branch_render": "str(Windows(60000)) == '60000 windows' -> sentence reads naturally"
+  },
+  "candidate_findings": [
+    "compose.py:692 ASSEMBLY_ORDER 'audit' row still says 'those five cannot fire' while the mapping it now receives has six keys",
+    "ckpt/api.py:270 says the period is read into the periods mapping 'at two sites in spine/compose.py' -- now one site"
+  ],
+  "checked_and_sound": []
+}
