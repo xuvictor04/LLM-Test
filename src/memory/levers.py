@@ -259,10 +259,28 @@ class MEMLevers(LeverSet):
     # never multiplies -- 1.5 and 1.0 do exactly the same nothing, and only one of the two spellings
     # admits it. 0.0 zeroes every retrieval count at the interval, which is the extreme of recency
     # this rule exists to provide.
-    # ABOVE 1.0 THE RULE RUNS BACKWARDS. `use` is the ranking key src/memory/api.py::write evicts on
-    # under evict="usage", and a factor above 1 compounds it, so an early-run burst of retrievals
-    # grows every interval instead of fading -- which is exactly the immortal entry the line above
-    # says this multiplier exists to prevent.
+    # ABOVE 1.0 THE RULE GOES INERT; IT DOES NOT RUN BACKWARDS, AND THIS PARAGRAPH SAID IT DID UNTIL
+    # 2026-09-15. It read "a factor above 1 compounds it, so an early-run burst of retrievals grows
+    # every interval instead of fading", which CONTRADICTS the paragraph directly above it -- two
+    # adjacent statements about the same value, citing the same two lines, saying opposite things.
+    # The frozen tree settles it: `if self.use_decay < 1.0 and self._wc >= self.decay_every:
+    # self.use *= self.use_decay` (memory.py:495-496). The multiplication is INSIDE the `< 1.0`
+    # test, so at 1.5 the branch is never entered, nothing is multiplied, and `use` stays a lifetime
+    # total. The immortal entry the first paragraph warns about IS reachable above 1.0 -- but by the
+    # decay never running, not by the count compounding, and an operator who reads "runs backwards"
+    # goes looking for a growing number that does not exist.
+    # THE SAME SHAPE WAS ALREADY FOUND AND CORRECTED ONCE IN THIS TREE, which is why it is worth a
+    # named paragraph rather than a quiet edit: OPT_LR_RESTART_DAMP's refusal message claimed a
+    # value above 1.0 amplifies every failed restart, while src/opt/api.py::maybe_step guards its
+    # one multiplication with `float(opt.lr_restart_damp) < 1.0`, so above 1.0 the loop goes inert
+    # and amplifies nothing (.rework/DECISIONS.md, the domain ruling). A guarded multiplication read
+    # as an unguarded one is a repeating defect in this file's register, not a one-off slip.
+    # NEITHER READING IS REACHABLE FROM THE ENVIRONMENT TODAY, and saying so is what keeps this from
+    # being a report about a live run. `domain=(0.0, 1.0)` above refuses 1.5 at the lever, and
+    # src/memory/api.py::write -- which declares use_decay and use_decay_every in its LEVERS READ
+    # line and is where the decay would run -- is still a P4 stub, so no code in src/ multiplies
+    # `use` by anything. This is a statement about what the rule WILL do when write is written,
+    # taken from the tree it is being ported from.
 
     use_decay_every = Lever(
         20000, "How many entries must be WRITTEN before the retrieval counters are decayed.", U.ENTRIES)

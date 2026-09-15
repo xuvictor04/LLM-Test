@@ -606,3 +606,55 @@ somewhere different — which is what floating-point overflow at different width
 `FAB_ALPHA`'s boundary between 1e24 and 1e26 is one data point for it — then no universal ceiling
 exists, and the upper end is a per-lever measurement arriving one lever at a time, with `domain=`
 as the place to record it as it arrives.
+
+---
+
+## Q-CAP-2 (OPEN, for the owner). The fabric is born above the point its own cull settles at, so with the expert arm armed there is NO soft cap the startup refusals accept.
+
+**MEASURED 2026-09-15**, building CAP and FAB against `{"CAP_TARGETS": "experts"}` and reading the
+resolved values rather than the lever literals:
+
+    FAB_N0     (founding population)   2048
+    FAB_SLOTS  (hard ceiling)          4096
+    FAB_PRESSURE                       0.45
+    d_operating_population             1844     = pressure x slots
+    founding population is 204 ABOVE the settling point
+
+`capacity/api.py::startup_refusals` refuses a soft expert cap **below the live population** (the C30
+freeze) and refuses one **above the cull's settling point** (the dead valve). At the shipped FAB
+defaults a silent configuration would need `cap >= 2048` and `cap <= 1844` at the same time.
+Enumerated over every integer cap from 1 to `FAB_SLOTS`: **zero of 4096 trip neither clause.** So
+`CAP_TARGETS=experts` cannot be set at the shipped defaults without some refusal firing.
+
+**THIS IS A STATEMENT ABOUT THE DEFAULTS, NOT ABOUT THE CLAUSES**, and it disproves a sentence the
+contract leans on. `startup_refusals`' own docstring says the below-population clause is
+"Unreachable on a fresh run; entirely reachable on a resume". That is false at the shipped
+`FAB_N0`: the founding population is 2048 on a FRESH run, so any cap at or below the settling point
+is below the population before a single window is drawn. The clause was written for the resume case
+(523 experts against a gc arm's 160) and reaches a case its author believed it could not.
+
+**THE THREE READINGS, AND NONE IS TAKEN HERE.**
+
+(a) **`FAB_N0` is wrong.** A founding population above the cull's own setpoint means the first
+management flushes spend themselves culling experts the run just built. If the intent is for the
+population to grow INTO its pressure band, `FAB_N0` belongs at or below 1844. This is the reading
+that makes the contract's "unreachable on a fresh run" true again, and it is a FAB default, not a
+CAP one -- which is why it is a question and not an edit.
+
+(b) **The below-population clause should not fire on a transient overshoot.** On a fresh run the
+cull brings the population down toward 1844, so `cap - population` starts negative and becomes
+non-negative on its own; the freeze is transient, not "for the entire run". Under this reading the
+clause should compare against the SETTLED population rather than the live one, or fire only on a
+resume. The cost is that it stops catching the resume case early, which is the case it exists for.
+
+(c) **Both numbers are right and the pair is simply unrunnable.** `CAP_TARGETS` defaults to "off",
+so nothing in the shipped configuration is refused today and the contradiction is only reachable by
+an operator who arms the valve. Under this reading the refusal is doing its job: it is telling that
+operator that the fabric's own defaults leave the valve no room, which is exactly the dead-valve
+state `fab_start`'s levers.py comment spends a paragraph on.
+
+**WHAT WOULD DECIDE IT IS A MEASUREMENT NOBODY HAS RUN**: does the population actually settle at
+1844 from a start of 2048, and how many flushes does it take? That is a fabric question, it needs a
+run, and until it is answered (a) and (b) are guesses about a mechanism's behaviour rather than
+readings of it. Recorded rather than resolved, because guessing here would bake a fabric default
+into a capacity refusal on no evidence.
