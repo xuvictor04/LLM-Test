@@ -146,114 +146,87 @@ corrections are dispatched; this entry is the correction to the record.
 
 # OPEN ROUND — the live handoff. Update this section; do not append a second one.
 
-Last updated at commit `dbc0db6`, 2026-09-15. **A fresh session should start here.** Everything below
-is either owed or in flight; everything above is history.
+Last updated at commit `33b933b`, 2026-09-15. **A fresh session should start here.**
 
-## THE ROUND'S RESULT, IN ONE LINE
+## STATE IN THREE LINES
 
-**`compose(environ={})` returns a System.** Verified in a fresh process, not relayed: type `System`,
-final stage `assembled`, 0 refusals, 3 warnings, and the clock, cadences, retention, save flag,
-fabric and optimizer are all real objects. All six blocking entry points have bodies.
+`compose(environ={})` **returns a System** — type `System`, stage `assembled`, 0 refusals, ~6s on an
+idle box. The **loop path is 34 of 54** entry points written, up from 19 the same day. The suite is
+green across all seven files and has been run by hand at every commit, never relayed.
 
     cd /tmp && PYTHONPATH=/home/user/LLM-Test/src python -c \
       "from spine.compose import compose; s=compose(environ={}); print(type(s).__name__, s.stage)"
 
-**Do not read that as "the system works."** It means the ASSEMBLY runs. Nothing trains, no loop
-driver exists, and neither definitive goal has been measured once. See OWED below.
+**Do not read that as "the system works."** The ASSEMBLY runs and the CHECKPOINT path runs. Nothing
+trains: seven of the seventeen B-row entry points are still stubs, so no window completes a step.
 
-## What this round built (all committed, suite green at `dbc0db6`)
+## WHAT IS LEFT, BY ROW — re-run the count rather than quoting it
 
-Six entry points, four written here and two by an agent that owned `src/ckpt/api.py` alone:
-`CAP.startup_refusals`; `RUN.new_clock` + `RunClock`; `RUN.new_cadences` + `Cadences`;
-`RUN.cadence_audit`; `CKPT.new_retention` + `Retention`; `CKPT.install_save_signal`.
+    row B (train step)   10/17   WORLD.loss_terms, LM.anchor_term, FAB.own_lr_scale,
+                                 LM.residual_ratios, TOK.mint_burst, TOK.judge_probation,
+                                 DOM.note_competence
+    row C (checkpoint)   14/14   COMPLETE
+    row R (report)        8/13   DOM.census, MEM.census, and three others
 
-The cadence repair is the load-bearing one and it is measured: over 200,000 windows a gate with a
-period of 1000 fires 199/199/199/198/198/195 times at `BATCH_W` of 1/2/8/15/16/32. The modulo form
-it replaces fired 999 times at 1 and **zero** at every other width, with `CKPT_EVERY` in that block.
+    cd /tmp && PYTHONPATH=/home/user/LLM-Test/src python -c "
+    import sys; sys.path.insert(0, '/home/user/LLM-Test/tests')
+    from test_contract import _k13_entry_points
+    from spine.compose import plan
+    stubs = {f'{p}.{n}' for p,n,b in _k13_entry_points('/home/user/LLM-Test/src') if b}
+    rows = {}
+    for r in plan()[1]: rows.setdefault(r[0], set()).add(f'{r[1]}.{r[2]}')
+    for k in ('B','C','R'):
+        ks = sorted(rows.get(k, ())); bad = [x for x in ks if x in stubs]
+        print(k, f'{len(ks)-len(bad)}/{len(ks)}', bad)"
 
-`C11 IS NOW STATED AT STARTUP FOR THE FIRST TIME`: at the shipped defaults the audit reports
-`'curve'` starved (period 2000 against a 634-window run) and `'ckpt'` **disarmed** (period 0).
-
-Suite: ownership 15 + 73, contract 16 + 77, census 8 + self, assemble 9, couplings 4, fabric 9,
-derive all oracle cases. Zero failing — **run per file, by hand, not relayed.** An agent reported
-this same suite as all-PASS while it had five failures; verify it yourself before quoting it.
+**THE TWO CENSUSES ARE THE NEXT REAL WORK.** `DOM.census` and `MEM.census` each return a declared
+record type (`PartitionCensus`, `StoreCensus`) that P4 must define, and both are read by more than
+one package — MEM's `live_sources` crosses into DOM, DOM's `comp_glob` crosses into FAB. They are
+bigger than anything left in row B and worth a careful pass rather than a quick one.
 
 ## OWED — in priority order
 
-1. **THE LOOP PATH IS 19 OF 54 WRITTEN, AND A LOOP DRIVER IS NOT THE NEXT THING.** This item said
-   "there is no loop driver ... the only thing standing between a System and a run" when this
-   section was first written today, and counting disproved it within the hour. `LOOP_ORDER` has 58
-   rows naming 54 distinct entry points, and **35 of them still raise `NotImplementedError`**:
-
-       CAP 0/3   DOM 0/7   WORLD 0/3   TOK 1/6   LM 1/6   DATA 1/2   MEM 1/3
-       SIG 2/5   FAB 2/6   CKPT 2/3   RUN 5/6    OPT 4/4
-
-   So a driver written today would run until the first stub and stop — **the stub ladder one level
-   up**, which is the shape `compose()` just spent this whole round climbing, and `K7`'s docstring
-   already names it as "this project's oldest shape". Writing the driver first buys a second ladder
-   to climb rather than a run.
-   **`LM.embed` IS A STUB, WHICH SETTLES THE ORDER.** Nothing can compute a forward pass, so nothing
-   can train, so goal A cannot be measured at all yet — and goal B is a statement about what
-   survives a second pass of training that does not happen. The next work is loop-path BODIES, and
-   the highest-value ones are the ones the forward pass needs: `LM.embed`, `LM.anchor_term`,
-   `SIG.train_step`, `TOK.on_window`, `DOM.observe`, `FAB.manage`. `OPT` is already 4/4 and `RUN`
-   5/6, so the optimizer and the clock are not what is missing.
-
-   Reproduce the count (it will change as bodies land, so re-run it rather than quoting this):
-
-       cd /tmp && PYTHONPATH=/home/user/LLM-Test/src python -c "
-       import sys; sys.path.insert(0, '/home/user/LLM-Test/tests')
-       from test_contract import _k13_entry_points
-       from spine.compose import plan
-       stubs = {f'{p}.{n}' for p,n,b in _k13_entry_points('/home/user/LLM-Test/src') if b}
-       uniq = sorted({f'{r[1]}.{r[2]}' for r in plan()[1]})
-       print(len(uniq)-len([k for k in uniq if k in stubs]), 'of', len(uniq), 'written')"
-2. **The resume path is untested and partly unwritten.** `K2` now prints this rather than hiding it:
-   of the 39 `ASSEMBLY_ORDER` entry points, **10 sit behind a resume guard and a fresh `compose()`
-   never exercises them**; eight are still `NotImplementedError` (`CAP.restore`,
-   `CKPT.check_geometry`, `DATA.restore_stream_state`, `FAB.load_state_dict`, `LM.load_state`,
-   `SIG.load_state_dict`, `TOK.restore_vocab`, `WORLD.load_into`). A returning `compose()` is not
-   evidence the resume path works.
+1. **`LM.build_model` DECLARES NO `Gate` OBJECTS AT ALL**, though `LM.counters`' contract says
+   "Every gated mechanism above appears here in the three-state form G4 requires". LM has gated arms
+   — `mask_dead_rows`, `compose`, the anchor, `new_row_init` — decided INLINE. `LM.counters` now
+   reports the absence under `gate:lm.none_declared` rather than returning a gateless ledger, which
+   would look identical to a package whose gates all read zero. Porting them means declaring each
+   `Gate` where the arm is decided, at build, with the numbers that made it true or false. Real
+   work, not a patch.
+2. **The resume path is written but never driven end to end.** Every piece round-trips in isolation
+   (each was driven on populated state, not empty structures), and K2 still reports that 10 of the
+   39 assembly rows sit behind a resume guard a fresh `compose()` never enters. The missing test is
+   one run that saves and a second that resumes from it.
 3. **A mid-epoch resume replays its epoch.** `_in_epoch` is not carried by a Snapshot, so a clock
    resumed 400 windows into a 1000-window epoch rolls 1000 later instead of 600. This MOVES THE
    EPOCH BOUNDARY, which is where a continual-learning measurement is taken. Fixing it is a frozen
    signature change and therefore an owner's call. Recorded at `train/api.py::new_clock`.
-4. **No behavioural check covers RUN, CAP or CKPT.** `test_fabric` is still the suite's only
-   behavioural file. Everything proved about the clock and the cadences this round was proved by
-   throwaway scripts and by one agent's 300 randomized trials — none of it is pinned by the suite,
-   so all of it can silently regress.
+4. **No behavioural check covers RUN, CAP, CKPT or the persistence pairs.** `test_fabric` is still
+   the suite's only behavioural file. Everything proved this round was proved by throwaway scripts;
+   none of it is pinned, so all of it can silently regress.
 5. **The residue of the earlier verifier reports** — 37 refutations and 39 findings in `fv_*.json`,
-   of which only the 9 critical/high were acted on.
+   of which only the critical/high were acted on.
 
-## OPEN FOR THE OWNER — do not decide these in an agent
+## OPEN FOR THE OWNER
 
-- **Q-CAP-2 (new this round, in `.rework/DECISIONS.md`).** The fabric is born 204 experts ABOVE the
-  point its own cull settles at (`FAB_N0` 2048 against `0.45 x 4096 -> 1844`). With
-  `CAP_TARGETS=experts`, **zero of 4096 possible `CAP_FAB_START` values** trip neither startup
-  clause, so the expert arm cannot be armed at the shipped defaults without a refusal firing. Three
-  readings are written out; none is taken, because what decides between them is a fabric measurement
-  nobody has run — does the population actually settle at 1844 from a start of 2048, and how fast?
-- **`U.FRACTION` vs a declared domain above 1.0** (carried from the previous round, unchanged).
+- **Q-CAP-2** (`.rework/DECISIONS.md`). The fabric is born 204 experts ABOVE the point its own cull
+  settles at (`FAB_N0` 2048 against `0.45 x 4096 -> 1844`), so with `CAP_TARGETS=experts`
+  **zero of 4096** possible `CAP_FAB_START` values trip neither startup clause. Three readings are
+  written out; none is taken, because what decides between them is a fabric measurement nobody has
+  run — does the population actually settle at 1844 from a start of 2048, and how fast?
+- **`U.FRACTION` vs a declared domain above 1.0** (carried, unchanged).
 
-## CLOSED THIS ROUND, so nobody re-derives them
+## HOW THIS ROUND WORKED, AND THE TWO THINGS THAT COST TIME
 
-- **DID A RETIREMENT LOSE A VALUE? No.** The four clauses retired by the domain ruling were
-  reconstructed from git and re-run as predicates over 18 values each: **`LOST: []`**. Eight cells
-  moved the other way and every one is an alias of an admitted value or a crash. `TOK_DROPOUT` is
-  fully closed; `SIG_WARMUP_MIN_FRAC` is open in spelling only. Full record in `DECISIONS.md`.
-- **`MEM_USE_DECAY`'s self-contradiction** — corrected; above 1.0 the rule goes INERT, it does not
-  run backwards.
-- **`tests/test_fabric.py::_period_refusal`** — the layer is now read from the caught exception's
-  traceback instead of asserted as a literal. The old literal was true; it was not checked.
-- **`K2`'s expired premise** — "every mechanism is a stub, so compose cannot complete" went red the
-  moment the project succeeded. It now tests the thing the premise stood in for, and derives the
-  resume-guarded exemption from `compose.py`'s AST rather than a hand-written list.
+**Verify, never relay.** An agent reported the suite as all-PASS when it had five failures. It was
+caught only by running it directly. Two of this round's own bugs were caught the same way, by
+driving the code rather than reading it: a geometry gate that refused 128 against 128 (both sides
+came from one manifest, so only a real checkpoint could expose it) and a `splitext` spelling the
+docstring forbids BY NAME two paragraphs above where it was written.
 
-## THE STANDING LIMIT, AND THE COLLISION THAT COST THIS ROUND
+**Check for live agents before editing.** A workflow dispatched before a context compaction was
+still running afterwards and its agents were editing the same files as the resumed session —
+`src/train/api.py` was written by an agent 25 seconds before an edit here. Nothing was lost, but
+only because it was noticed. `ls -lt` the source files and `.rework/audits/p_*.json` first.
 
-Write to disk EARLY — the rule held again. But a NEW failure appeared this round and is worth more
-than the old one: **a workflow dispatched before a context compaction was still running afterwards,
-and its agents were editing the same files as the resumed session.** `src/train/api.py` was modified
-by an agent 25 seconds before an edit here. Nothing was lost, but only because it was noticed.
-**Before resuming work after any reset, check for live agents** (`ls -lt` the source files and
-`.rework/audits/p_*.json`) and stop the workflow before editing what it owns.
+**Write to disk early** — the older rule, and it held again.
