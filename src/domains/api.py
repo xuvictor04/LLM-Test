@@ -462,9 +462,58 @@ def state_dict(dom: Config, part):
     DID IT FIRE: part.n_state_dicts
     """
     dom = dom.owned_by("DOM")
-    raise NotImplementedError(
-        "DOM.state_dict: P4 (domains) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DOM.")
+    # WRITTEN IN EXACTLY THE SHAPE open_partition(restored=...) READS, key for key. The two halves
+    # of a persistence pair are one mechanism, and the failure they had is asymmetry: the old blob
+    # saved cent/size/last/next_id and dropped the reservoir, comp and comp_glob, tokc, and the
+    # adjacent-distance history -- so competence protection protected nothing after a resume, the
+    # prior histogram restarted empty while still being paid for every window, and the relative
+    # shift test had no history to be relative to. M51 is the four of them together.
+    domains = {}
+    for i in part.cent:
+        domains[str(i)] = {
+            "cent": part.cent[i].detach().cpu().tolist(),
+            # THE RESERVOIR, which is a LIST of tensors per domain rather than one tensor: it is the
+            # sample a rekey draws its new centroid from, and a resume without it re-keys off
+            # whatever arrives next.
+            "reservoir": [x.detach().cpu().tolist() for x in (part.reservoir.get(i) or [])],
+            "size": int(part.size.get(i, 0)),
+            "act": float(part.act.get(i, 0.0)),
+            "born": int(part.born.get(i, 0)),
+            "last": int(part.last.get(i, 0)),
+            "visits": int(part.visits.get(i, 0)),
+            "rad": float(part.rad.get(i, 0.0)),
+            # THE TOKEN HISTOGRAM. DOM.prior is computed from it, so a resume without it pays for
+            # the prior every window and gets a uniform one.
+            "tokc": dict(part.tokc.get(i, {}) or {}),
+            # THE COMPETENCE EMA, per domain, with comp_glob below as the population baseline. A
+            # domain is protected from culling by being MORE competent than the baseline, so losing
+            # either half of that comparison disarms the protection rather than loosening it.
+            "comp": float(part.comp.get(i, 0.0)),
+        }
+    out = {
+        "domains": domains,
+        "next_id": int(part.next_id),
+        "merged": {str(k): int(v) for k, v in (part.merged or {}).items()},
+        "radp": float(part.radp),
+        "comp_glob": float(part.comp_glob),
+        # THE ADJACENT-DISTANCE HISTORY the relative shift test calibrates on. Without it the first
+        # windows of a resumed run are tested against an empty calibration, which is the same as
+        # testing them against nothing.
+        "adj_hist": list(part.adj_hist or []),
+        "sh": int(part.sh),
+        # THE BOUNDARY CLOCK, AND IT MUST NOT RESTART. At :4991 it did, and a restored domain then
+        # looked as though it had seen no boundaries, so the fold swallowed any that had not
+        # happened to be re-entered twice since the resume. open_partition stamps bornb from this
+        # value AFTER restoring it, so grace re-arms against the real clock rather than expiring
+        # against a zero.
+        "nb": int(part.nb),
+    }
+    # `cur`, `run`, `run_sig` and `pend` ARE NOT SAVED, and open_partition resets them. The current
+    # domain is a property of the STREAM POSITION and the resume starts a new stream; carrying it
+    # would attribute the first window of the resumed run to whatever the parent was in the middle
+    # of. That is a save-side statement as much as a load-side one, which is why it is here too.
+    part.counters["part.n_state_dicts"] = part.counters.get("part.n_state_dicts", 0) + 1
+    return out
 
 
 def manage_period(dom: Config):

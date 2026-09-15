@@ -801,9 +801,51 @@ def state_dict(mem: Config, store):
     DID IT FIRE: store.n_state_dicts
     """
     mem = mem.owned_by("MEM")
-    raise NotImplementedError(
-        "MEM.state_dict: P4 (memory) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section MEM.")
+    # ROW BY ROW, EACH CARRYING ITS OWNER BLOCK, which is the shape _restore_by_block reads. Blocks
+    # are stored WITH their block index so open_store places rows back BY BLOCK and refuses a row
+    # whose block no longer exists, rather than truncating in save order. Lowering MEM_OWNERS makes
+    # some recorded blocks unreachable, and keeping whatever fitted made which memories survive a
+    # resume a function of WRITE ORDER -- silently, on the boundary every goal-B number is
+    # measured across.
+    rows = []
+    for i in range(int(store.capacity)):
+        if not bool(store.active[i]):
+            continue
+        rows.append({
+            "key": store.keys[i].detach().cpu().tolist(),
+            "tok": int(store.tok[i]), "src": int(store.src[i]),
+            "pos": int(store.pos[i]), "ctx": int(store.ctx[i]),
+            "own": int(store.own[i]),
+            # THE FOUR OMISSIONS OF THE OLD BLOB, EACH OF WHICH DISARMED A LIVE MECHANISM AT THE RUN
+            # BOUNDARY. `prob` is M52: probation is scan resistance, and losing it turns it off
+            # exactly when a new area arrives. `recon` is M66 and `selfcon` its twin -- a resumed
+            # store whose judgements had all reset to 0.0 was indistinguishable from a fresh one to
+            # the wrongness detector, and judge()'s -1 "unchecked" sentinel is what makes the
+            # difference readable.
+            "prob": bool(store.prob[i]),
+            "use": int(store.use[i]), "last": int(store.last[i]), "born": int(store.born[i]),
+            "recon": float(store.recon[i]), "selfcon": float(store.selfcon[i]),
+        })
+    out = {
+        "rows": rows,
+        "tick": int(store.tick),
+        # THE WRITE COUNTER BEHIND use_decay_every. It counts ENTRIES WRITTEN, not steps, so a
+        # resume that restarted it would postpone the next decay by a whole interval.
+        "n_written": int(store.n_written),
+        # nsrc_max IS SAVED RATHER THAN RE-DERIVED on the other side, and that is M53/M67: it is the
+        # starvation alarm's only baseline, and re-deriving it from the restored counts forgets
+        # every source that was evicted before the save -- so the alarm compares against a peak
+        # that never happened.
+        "nsrc_max": int(store.nsrc_max),
+        # gate_theta IS THE FOURTH (ISSUES:537). A resumed run that rebuilt it writes on a
+        # different threshold than the one it stopped with, so the surprise gate is recalibrated by
+        # the act of resuming.
+        "gate_theta": float(store.gate_theta),
+        "rekey_cursor": int(store.rekey_cursor),
+        "counters": dict(store.counters),
+    }
+    store.counters["store.n_state_dicts"] = store.counters.get("store.n_state_dicts", 0) + 1
+    return out
 
 
 def rekey_period(mem: Config):
