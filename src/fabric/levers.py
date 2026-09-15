@@ -309,7 +309,7 @@ class FABLevers(LeverSet):
 
     pressure = Lever(0.45, "Occupancy SETPOINT: below pressure x slots the utilization cull, the "
                            "utilization spare and `rescue` are all unreachable, so it chooses the "
-                           "operating population size.", U.FRACTION, domain=(0.0, 1.0))
+                           "operating population size.", U.FRACTION, domain=(0.0, None))
     # THE UNTRIPPABLE-GUARD CLASS (60 records) IN ITS MOST EXPENSIVE FORM, and the reason the default
     # is 0.45 and not the 0.75 the merged EXPERT_PRESSURE row carried: n0=2048 against slots=4096
     # parks occupancy at exactly 0.50, permanently below 0.75, so the gate could never open. Measured
@@ -317,7 +317,7 @@ class FABLevers(LeverSet):
     # mechanisms switched on. Measured the other way too: gate_press predicted 0.45 x 4096 = 1843
     # live and the run ended at 1838 (:201-208). MERGED IN: EXPERT_PRESSURE (0.75), the identical
     # gate on the legacy router -- `(1 - len(free)/cap) >= pressure_on` at :3087 -- whose 0.75 is
-    # deliberately NOT carried over, because carrying it would carry the untrippable guard. DOMAIN: AT THE FOOT.
+    # deliberately NOT carried over, because carrying it would carry the untrippable guard. DOMAIN: AT THE FOOT, AND HI IS None ON PURPOSE.
 
     grow = Lever(True, "Master switch for population growth: off freezes the population at n0 while "
                        "routing, selection, replication and the cull all still run.", U.FLAG)
@@ -987,11 +987,21 @@ class FABLevers(LeverSet):
 #   is False. src/fabric/api.py::build now refuses EVERY float lever declared here at nan and at both
 #   infinities, and each of the three guard sites carries its own measurement in its own docstring
 #   (fabric/api.py::_decay_to_floor, fabric/api.py::_spawn_check, fabric/api.py::_entry_logits).
-#   ONE FLOAT LEVER IS REFUSED SOMEWHERE ELSE AND IT IS NOT AN EXCEPTION TO THE RULE: `pressure` is
-#   consumed by the FAB.d_operating_population coupling DURING spine/assemble.py::build, before any
-#   Config is frozen, so the refusal that fires is spine/derive.py::operating_population's -- which
-#   names the setpoint it was computing but cannot name this lever, because two packages' couplings
-#   reach that function.
+#   ONE FLOAT LEVER USED TO BE REFUSED SOMEWHERE ELSE, AND AS OF 2026-09-14 IT IS NOT. AS RECORDED,
+#   UNTIL THEN: "`pressure` is consumed by the FAB.d_operating_population coupling DURING
+#   spine/assemble.py::build, before any Config is frozen, so the refusal that fires is
+#   spine/derive.py::operating_population's -- which names the setpoint it was computing but cannot
+#   name this lever." WHAT IS TRUE NOW, and it is true at the non-finite spelling as well as at the
+#   range: spine/lever.py::Lever.coerce runs at the FIRST read, before any coupling, so
+#   FAB_PRESSURE=nan is refused there and the message NAMES FAB_PRESSURE. Driven, one fresh process
+#   per cell, through a real spine/assemble.py::build over a dict environment:
+#     FAB_PRESSURE=nan   -> "FAB_PRESSURE='nan' is not finite (it reads as nan)"   [REFUSE_NON_FINITE_FLOAT]
+#     same cell in a copy of this tree outside the repository with
+#     spine/lever.py::REFUSE_NON_FINITE_FLOAT = False
+#                        -> "FAB_PRESSURE=nan is outside its declared domain [0.0, unbounded]"
+#   Neither is spine/derive.py::operating_population's ValueError and both name the lever. That
+#   function's refusal is not dead -- see the pressure paragraph in the block below for the door it
+#   still stands in, and for the narrower thing it actually refuses.
 #
 #   ZEROS. Most zeros here are DECLARED sentinels and stay legal -- depth0=0 is no curriculum,
 #   dom_frac=0 switches the breadth cap off, ec_w/hop_sup/rescue=0 are off, route_region_w=0 routes
@@ -1037,29 +1047,89 @@ class FABLevers(LeverSet):
 # THE ELEVEN, AND THE ONE THING THAT DID NOT DECIDE ANY OF THEM: U.FRACTION. Ten of the eleven are
 # labelled U.FRACTION and one U.PROBABILITY, and the label bounds nothing -- this file's own
 # src/fabric/api.py::build says so of its shares, and two sibling packages have ruled the same way.
-# Every pair below is read off what the CONSUMER does with the number, which is why two of them end
-# at 2.0 and not at 1.0:
+# What the label IS still wrong about is recorded at the two declarations it is wrong about; see
+# discover and merge_dist, where a printed "fraction 0..1" now sits beside an ENFORCED ceiling of 2.0.
 #
-#   (0.0, 1.0)  cull_frac   share of the eligible set        fabric/api.py::manage
-#   (0.0, 1.0)  halt_max    ceiling on a softmax column      fabric/api.py::forward
-#   (0.0, 1.0)  lr_amin     floor under a unit envelope      fabric/api.py::own_lr_scale
-#   (0.0, 1.0)  lr_gamma    per-cycle decay multiplier       fabric/api.py::own_lr_scale
-#   (0.0, 1.0)  mut_big_p   chance of one branch per birth   fabric/api.py::grow_check
-#   (0.0, 1.0)  new_frac    share of the live population     fabric/api.py::grow_check
-#   (0.0, 1.0)  parent_max  share of the birth_win record    fabric/api.py::grow_check
-#   (0.0, 1.0)  pressure    occupancy setpoint               spine/derive.py::operating_population
-#   (0.0, 1.0)  xover       rate per birth                   fabric/api.py::grow_check
-#   (0.0, 2.0)  discover    COSINE DISTANCE                  fabric/api.py::_ground_update
-#   (0.0, 2.0)  merge_dist  COSINE DISTANCE                  fabric/api.py::manage
+# WHAT EACH PAIR RESTS ON, AND THE HEADER THAT USED TO STAND HERE WAS FALSE FOR EIGHT OF ELEVEN.
+# AS RECORDED, UNTIL 2026-09-15: "Every pair below is read off what the CONSUMER does with the
+# number." THAT IS TRUE OF THREE. An AST walk over every .py in src/ for each of the eleven field
+# names, counting Name/Attribute/arg occurrences outside this file, finds executable reads for
+# halt_max (5, all fabric/api.py), pressure (12: fabric/api.py, spine/derive.py, and the two
+# spine/assemble.py::COUPLINGS rows) and discover (11, all fabric/api.py) -- and ZERO for the other
+# eight. cull_frac and merge_dist are read by fabric/api.py::manage, new_frac, parent_max, mut_big_p
+# and xover by fabric/api.py::grow_check, lr_gamma and lr_amin by fabric/api.py::own_lr_scale, and
+# ALL THREE OF THOSE FUNCTIONS RAISE NotImplementedError -- they are P4 stubs whose docstrings are a
+# frozen contract. So those eight intervals are read off a SPECIFICATION, not off a body. That is a
+# weaker claim than the one this header used to make and it is still a real one, but the file may not
+# state it in the present indicative as though the body existed, which is the distinction this file
+# draws correctly two paragraphs above ("unreachable only because FAB.observe is still a stub").
+# The BASIS column below says which of the two each pair has. Read the comment at each of the eight
+# declarations with the tense corrected: "grow_check refuses a parent that already holds parent_max"
+# is what grow_check's frozen contract SPECIFIES, not what any shipped line does today.
+#
+#   READ OFF A BODY THAT EXISTS -- three, and each hi was re-driven on 2026-09-15:
+#     (0.0, 1.0)     halt_max    ceiling on a softmax column   fabric/api.py::forward
+#     (0.0, None)    pressure    occupancy setpoint            spine/derive.py::operating_population
+#     (0.0, 2.0)     discover    COSINE DISTANCE               fabric/api.py::_ground_update
+#
+#   READ OFF A FROZEN CONTRACT IN A STUB'S DOCSTRING -- eight, no executable reader anywhere in src/:
+#     (0.0, 1.0)     cull_frac   share of the eligible set     fabric/api.py::manage        (stub)
+#     (0.0, 1.0)     lr_amin     floor under a unit envelope   fabric/api.py::own_lr_scale  (stub)
+#     (0.0, 1.0)     lr_gamma    per-cycle decay multiplier    fabric/api.py::own_lr_scale  (stub)
+#     (0.0, 1.0)     mut_big_p   chance of one branch per birth fabric/api.py::grow_check   (stub)
+#     (0.0, 1.0)     new_frac    share of the live population  fabric/api.py::grow_check    (stub)
+#     (0.0, 1.0)     parent_max  share of the birth_win record fabric/api.py::grow_check    (stub)
+#     (0.0, 1.0)     xover       rate per birth                fabric/api.py::grow_check    (stub)
+#     (0.0, 2.0)     merge_dist  COSINE DISTANCE               fabric/api.py::manage        (stub)
+#
+# AND A SECOND THING THE OLD HEADER LET A READER ASSUME, WHICH IS THAT EVERY hi BOUNDS ONLY A
+# SPELLING. FIVE DO -- above the endpoint the reader cannot tell the difference, measured where a
+# reader exists and stated by the contract where one does not: halt_max (a softmax column is in
+# [0, 1], so `raw.clamp(max=h)` and the `(raw > h)` counter beside it are bit-identical for every
+# h >= 1.0 -- driven at 1.0, 1.0000000000000002, 1.5, 2.0 and 1e9, all torch.equal with
+# halt_clamped 0); discover (`1.0 - best` cannot exceed 2.0, so `> discover` is False at 2.0 and at
+# every value above it -- driven on the anti-parallel construction, 1-best = 2.0 exactly, fires at
+# 1.5 and 1.9999999 and not at 2.0, 2.0000001 or 3.0); and mut_big_p, xover and parent_max, where
+# 1.0 is already "always", "every birth" and "quota off". FOUR DO NOT: lr_gamma above 1.0 GROWS the
+# envelope instead of decaying it and lr_amin above 1.0 is a floor above the envelope's own maximum,
+# both of which are distinguishable behaviours refused as INVERSIONS of the field's own name, on the
+# argument src/capacity/api.py::new_valve gives for CAP_LIFT; and new_frac and cull_frac above 1.0
+# name a share larger than the finite set it is a share OF, which the contract calls impossible and
+# no body can be driven to confirm. THE ELEVENTH IS pressure AND IT IS WHY THIS PARAGRAPH EXISTS:
+# its hi removed a distinguishable, documented, reachable configuration, and it is now None. A hi
+# that bounds a spelling costs nothing; a hi that bounds a behaviour is a ruling and must be argued
+# as one at its own declaration. All four above are. The twelfth case does not exist because the
+# check for it is this paragraph and nothing in the tree performs it.
 #
 # halt_max -- (0.0, 1.0). fabric/api.py::forward reads the halt column out of a SOFTMAX over the
 # entry logits and the halt logit, so the quantity being clamped is a probability and lives in
 # [0, 1]. Above 1.0 the clamp cannot bind on any input, which is the state 1.0 already spells, so
 # refusing it removes no configuration an operator can ask for -- the identical argument
-# src/fabric/api.py::build makes for FAB_ROUTE_T at nan and -inf. Below 0.0 is the measured harm and
-# it is the worst of the eight negatives that function chose not to refuse: at -0.9 the clamp makes
-# the halted mass NEGATIVE, so the residual is AMPLIFIED rather than damped and sum|g|max goes from
-# 1.3968892609970744 to 2.5214699913394156 over two forward passes. 0.0 is measured legitimate and
+# src/fabric/api.py::build makes for FAB_ROUTE_T at nan and -inf. Re-driven 2026-09-15 on a real
+# softmax column: clamp(max=h) is torch.equal to clamp(max=1.0) at h = 1.0000000000000002, 1.5, 2.0
+# and 1e9, and the `(raw > h)` counter beside it is 0 at every one of them, so the hi bounds the
+# spelling and nothing else. Below 0.0 is the measured harm and it is the worst of the eight
+# negatives that function chose not to refuse: at -0.9 the clamp makes the halted mass NEGATIVE, so
+# the residual is AMPLIFIED rather than damped.
+# THE ARM THAT HARM IS MEASURED ON IS FAB_SOCIETY=1 AND THE SENTENCE USED TO OMIT IT, WHICH IS THE
+# difference between an under-specified argument and a wrong one. As recorded, this paragraph gave
+# "sum|g|max goes from 1.3968892609970744 to 2.5214699913394156 over two forward passes" with no
+# configuration beside it. Those two figures are not reproducible from anything this repository
+# ships and they are withdrawn. WHAT REPRODUCES, driven 2026-09-15 at the widths
+# tests/test_fabric.py uses (D_MODEL=16, SIG_D=12, BATCH=2, LEN=4, FAB_N0=4, FAB_SLOTS=8,
+# RUN_SEED=7), two forward/backward passes, summing |grad|.max() over the population's
+# gradient-carrying tensors, with the halt_max domain neutralised in a copy of this tree outside the
+# repository so the -0.9 cell can run at all -- and recorded in .rework/audits/g_fabric.json:
+#     FAB_SOCIETY=0 (THE SHIPPED DEFAULT): the lever is INERT across its whole legal range. aux
+#       0.5027000308036804 and composed 2.9975576400756836, bit-identical at 0.0, 0.5, 0.9 and 1.0,
+#       and sum|g|max 0.138609484773292 against 0.1386094922238726 at -0.9. There is no harm to see.
+#     FAB_SOCIETY=1: sum|g|max 0.17325015087069456 at 0.0 and 0.17244604054576484 at 0.5/0.9/1.0
+#       against 0.2600051062255294 at -0.9 -- a 1.51x inflation, and the composed objective separates
+#       too (4.070240020751953 at 0.0, 4.068942070007324 at -0.9).
+# A reader who checks this declaration against the shipped default and finds nothing moving is not
+# finding the argument wrong; they are finding the arm unnamed, and it is named now. The DIRECTION
+# is what the lo rests on and the direction is stable; the MAGNITUDE is configuration-dependent and
+# no number in this file may be read as the size of the harm. 0.0 is measured legitimate and
 # not a defect: no halt mass at all, the walk never stops early, every row clamped, everything
 # finite. WHAT THE PAIR DOES NOT DO, said here because the declaration's own comment is the reason
 # it matters: 1.0 IS INSIDE THIS DOMAIN and 1.0 is the absorbing state that comment is about -- a
@@ -1067,37 +1137,95 @@ class FABLevers(LeverSet):
 # that receives no gradient can never become worth routing to. The pair bounds the SPELLING of a
 # ceiling. It does not restore the barrier, and no reader may take it as having done so.
 #
-# pressure -- (0.0, 1.0). It is an OCCUPANCY setpoint and both of its readers say so in their own
-# units line: spine/derive.py::cull_gate_open compares n_live/max(1, slots) against it, and
-# spine/derive.py::operating_population multiplies it by the slot count to get the population the
-# fabric equilibrates at. An occupancy is a live count over a preallocated count, so a setpoint above
-# 1.0 asks the gate to open at an occupancy the pool cannot reach, and the second of those functions
-# states the property it holds only for 0 < pressure <= 1. 0.0 is measured legitimate -- the setpoint
-# floors to the same 3 the gate's own n_live <= 2 clause floors to, and the gate then stands open at
-# every occupancy -- so the low end is inclusive rather than the strict one that function's property
-# line uses. THE REFUSAL NOW ARRIVES EARLIER AND WITH A NAME. pressure is consumed DURING
-# spine/assemble.py::build by the FAB.d_operating_population coupling, which is why the paragraph
-# above records that a bad value is refused by spine/derive.py::operating_population, in a message
-# that names the setpoint and CANNOT name the lever, because two packages' couplings reach that
-# function. A domain is checked in spine/lever.py::Lever.coerce, which runs before any coupling, so
-# FAB_PRESSURE=2.0 and FAB_PRESSURE=-0.45 are now refused by their own generated environment name at
-# the first read. That does not make the derive-side refusal dead code: it is the only thing standing
-# between a non-finite or out-of-range number and the coupling for any caller that reaches
-# spine/derive.py::operating_population without passing through this declaration.
+# pressure -- (0.0, None), AND THE None IS THE ONLY ENTRY IN THIS BLOCK THAT HAD TO BE WALKED BACK.
+# THIS PAIR SHIPPED AS (0.0, 1.0) ON 2026-09-14 AND THAT hi REMOVED A WORKING CONFIGURATION. The
+# argument it was written on was that an occupancy is a live count over a preallocated count, so a
+# setpoint above 1.0 asks the gate to open at an occupancy the pool cannot reach. Every clause of
+# that sentence is true and the conclusion does not follow, because ASKING FOR AN UNREACHABLE
+# OCCUPANCY IS A MEANING HERE AND THE SHIPPED TREE SAYS SO IN AS MANY WORDS.
+# spine/derive.py::operating_population carries this comment above its own return: "Never above the
+# hard slot count. Reachable whenever pressure > 1, which is a configuration the gate answers by
+# never opening -- the population then runs to the cap, and this says the cap."
+# WHAT THAT CONFIGURATION IS, AND WHY NOTHING ELSE SPELLS IT. FAB_PRESSURE > 1.0 is the only
+# environment setting that shuts spine/derive.py::cull_gate_open at EVERY occupancy, which disarms
+# the utilization cull, the utilization spare and FAB_RESCUE together -- the three mechanisms this
+# lever's own help string names. There is no boolean cull switch in FABLevers, so an operator who
+# wants the population to run to the cap with selection off has this lever and nothing else.
+# hi=1.0 DID NOT PRESERVE IT, and the endpoint is exactly where it fails. MEASURED, calling
+# spine/derive.py at slots=8, printing cull_gate_open at n_live = 0,1,2,3,4,6,8:
+#     pressure=0.45                 operating_population=4  gate F F F F T T T
+#     pressure=1.0                  operating_population=8  gate F F F F F F T   <- STILL OPENS AT 8/8
+#     pressure=1.0000000000000002   operating_population=8  gate F F F F F F F
+#     pressure=1.5 / 2.0 / 10.0 / 1e6 / 1e300   identical to 1.0000000000000002, every one of them
+# At 1.0 the gate still opens at a full pool; the configuration begins at the FIRST FLOAT ABOVE 1.0.
+# WHY None AND NOT A WIDER FINITE hi, WHICH IS THE QUESTION THAT DECIDES THIS LINE. Above 1.0 the
+# two readers stop distinguishing values: operating_population is min(slots, ceil(p*slots)) and is
+# the slot count for EVERY p >= 1.0, and cull_gate_open compares p against n_live/max(1, slots),
+# whose largest reachable value is 1.0 because n_live never exceeds slots. So pressure > 1 is ONE
+# state with no top -- 1.5, 10.0 and 1e300 are the same run -- and there is no value above which it
+# "means nothing further" to write down as a ceiling, because the saturation happens immediately
+# above 1.0 at a float nobody types. A hi of 2.0 would be a number read off nothing, which is the
+# one thing every other line in this table is not. hi=None is the honest declaration and
+# spine/lever.py::_domain_ends says so in its own words: "Unbounded is spelled None, which is a
+# sentence a reader can see." THE LOW END STAYS AND IS UNCHANGED AT 0.0, on its own argument:
+# 0.0 is measured legitimate -- the setpoint floors to the same 3 the gate's own n_live <= 2 clause
+# floors to, and the gate then stands open at every occupancy -- and a negative is not an occupancy;
+# measured, operating_population(-1.0, 4096) and operating_population(-1e300, 4096) are both 3 and
+# the gate answers True from three experts up, bit-identical to the already-legal 0.0, so refusing
+# the negative spelling removes no configuration. A finite lo also refuses nan for free.
+# WHAT hi=None COSTS, PAID IN FULL HERE RATHER THAN DISCOVERED LATER. It re-opens a hole the hi had
+# incidentally covered, and the hole is in a file this package does not own. MEASURED through a real
+# spine/assemble.py::build: FAB_PRESSURE=1e305 -- FINITE, so REFUSE_NON_FINITE_FLOAT does not see it,
+# and inside this domain, so the pair does not either -- reaches spine/derive.py::operating_population,
+# where `exact = p * n_slots` overflows to inf and `int(exact)` raises a bare
+# "OverflowError: cannot convert float infinity to integer" out of startup, naming no lever, no
+# setpoint and no coupling. That is the exact failure the refusal above that line was written to end,
+# arriving from the one direction that refusal does not check. It is filed for spine/derive.py's
+# owner in .rework/audits/g_fabric.json and it is NOT repaired by narrowing this lever: the threshold
+# is p * slots against the float ceiling, so it moves with FAB_SLOTS and is not a per-lever pair at
+# all -- the category this block's last paragraph already reserves for "ceiling is another lever".
+# WHERE THE REFUSAL COMES FROM NOW, AND THE REASON THE OLD TEXT GAVE FOR THE NAMING GAP WAS WRONG.
+# The paragraph that stood here said a bad value is refused by spine/derive.py::operating_population
+# "in a message that names the setpoint and CANNOT name the lever, because two packages' couplings
+# reach that function." The premise is false and the two couplings it points at are the disproof.
+# Both live in spine/assemble.py::COUPLINGS, both declare src=("FAB.pressure", "FAB.slots"), and
+# both compute derive.operating_population(r["FAB"].pressure, r["FAB"].slots); only their dst
+# differs -- CAP.d_operating_population for the capacity valve, FAB.d_operating_population for this
+# package. fabric/api.py::build, the third and last caller in src/, passes float(fab.pressure). The
+# DESTINATIONS differ; the source lever does not, and derive's own message already ends "If this
+# arrived through spine/assemble.py::build at startup, the value typed was FAB_PRESSURE." The real
+# reason is narrower and is not about couplings: a derive function is handed a NUMBER, not the name
+# of the lever whose wire it is computing, and closing that is derive's edit, not this file's.
+# WHAT THE DECLARATION REFUSES AND WHAT DERIVE REFUSES, WHICH ARE NOT THE SAME SET AND NEVER WERE.
+# spine/lever.py::Lever.coerce runs at the first read, before any coupling, so FAB_PRESSURE=-0.45
+# is refused by its own generated environment name. spine/derive.py::operating_population refuses
+# ONLY non-finite -- `if p != p or p in (inf, -inf)` -- and absorbs every finite out-of-range value
+# silently through `max(3, n)` and `min(n_slots, n)`; the comment on that second call is the
+# "Reachable whenever pressure > 1" line above, which is the point. So the derive-side refusal is
+# not dead code and the reason is one value, not a range: with hi=None this domain ADMITS +inf, and
+# measured in a copy of this tree outside the repository with
+# spine/lever.py::REFUSE_NON_FINITE_FLOAT = False, FAB_PRESSURE=inf resolves here and is then
+# refused by spine/derive.py::operating_population's ValueError during the coupling. That door, and
+# the door for a caller who reaches operating_population with a Config this declaration did not
+# produce, is the whole of what it still stands in front of.
 #
-# WHAT ELEVEN PAIRS DO NOT BUY, AND THIS IS THE PART A READER MUST NOT SKIP. They bound a SPELLING,
-# not a harm. Every one of the eleven admits values that are ordinary to type and wrong for a run --
-# pressure=0.99 pins the population at the slot count, cull_frac=1.0 empties the eligible set every
-# pass, parent_max=0.0 is a quota no parent can satisfy, halt_max=1.0 is the absorbing state above.
-# Nothing here is safe, bounded or validated, and the general fact is measured elsewhere in this very
-# file: alpha=1e26 is finite, inside every rule this package has, and leaves fifteen of twenty-three
-# gradient tensors non-finite behind an ordinary-looking loss pair. What the eleven do buy is exact
-# and small: a value outside the interval is refused at the FIRST read, by the generated environment
-# name, before anything is derived from it -- and because the test is written as an inverted chain,
-# any finite endpoint refuses nan for free. Only the finite HIGH end refuses +inf; the 32 float
-# levers here that get no pair keep +inf legal at this layer and are answered by
-# spine/lever.py::REFUSE_NON_FINITE_FLOAT and by src/fabric/api.py::build instead. The floor and the
-# domain are complements, not alternatives.
+# WHAT ELEVEN PAIRS DO NOT BUY, AND THIS IS THE PART A READER MUST NOT SKIP. Ten bound a SPELLING
+# and four of those ten also bound a behaviour their own declaration argues is an inversion; none of
+# the eleven bounds a HARM. Every one of them admits values that are ordinary to type and wrong for a
+# run -- pressure=0.99 pins the population at the slot count, cull_frac=1.0 empties the eligible set
+# every pass, parent_max=0.0 is a quota no parent can satisfy, halt_max=1.0 is the absorbing state
+# above. Nothing here is safe, bounded or validated, and the general fact is measured elsewhere in
+# this very file: alpha=1e26 is finite, inside every rule this package has, and leaves fifteen of
+# twenty-three gradient tensors non-finite behind an ordinary-looking loss pair. What the eleven do
+# buy is exact and small: a value outside the interval is refused at the FIRST read, by the generated
+# environment name, before anything is derived from it -- and because the test is written as an
+# inverted chain, any finite endpoint refuses nan for free, including a lo whose hi is None. Only a
+# finite HIGH end refuses +inf, and after pressure's hi became None that is TEN of the eleven, not
+# eleven: FAB_PRESSURE now joins the 32 float levers here that get no pair at all in keeping +inf
+# legal at this layer, all 33 answered by spine/lever.py::REFUSE_NON_FINITE_FLOAT and by
+# src/fabric/api.py::build instead -- and, for pressure alone and only during the coupling, by
+# spine/derive.py::operating_population. The floor and the domain are complements, not alternatives,
+# and pressure is now the clearest case of it rather than the exception to it.
 #
 # WHAT THE ELEVEN COST A GUARD THAT WAS ALREADY THERE, AND WHAT THAT COST HAS SINCE BEEN SETTLED AS.
 # ONE of the eleven overlapped a refusal this package already shipped: src/fabric/api.py::build
@@ -1123,8 +1251,14 @@ class FABLevers(LeverSet):
 # this declaration does not stand in front of, and O15 does not report it.
 # The other ten pairs duplicate no existing guard in this package.
 #
-# AND WHY ONLY ELEVEN, SO THE SILENCE OF THE OTHER SEVENTY-ONE IS NOT READ AS A VERDICT. A pair was
-# written only where BOTH ends fall out of what the reader does. It was NOT written for the levers
+# AND WHY ONLY ELEVEN, SO THE SILENCE OF THE OTHER SEVENTY-ONE IS NOT READ AS A VERDICT. An END was
+# written only where THAT END falls out of what the consumer does -- ten of the eleven get both, and
+# pressure gets one, because its low end falls out and its high end does not. That is the shape this
+# sentence used to forbid by saying "a pair was written only where BOTH ends fall out", and the
+# forbidding is what produced the one regression in this block: an end that could not be derived was
+# written anyway rather than left None. None is an available answer and spine/lever.py::_domain_ends
+# accepts it on either side; refusing to use it is how a bound gets written over a live meaning. A
+# pair, or an end, was NOT written for the levers
 # whose ceiling this tree has declined to set (the multipliers z, mut_big, spawn_mult, lr_maxr and
 # lr_boost; route_t, which is a temperature), nor for the ones whose ceiling is another lever or a
 # wire and cannot be a per-lever pair at all (n0 against slots, chain_k and ens_k against the live

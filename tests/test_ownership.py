@@ -1256,9 +1256,14 @@ def check_o9_one_config_per_signature(mods):
 # ==================================================================================================
 #
 # THIS IS O2'S RULE ONE FIELD OVER, and it is here for O2's reason rather than by analogy.
-# spine/lever.py::_domain_ends checks a `domain=` at DECLARATION time and refuses six shapes: a
+# spine/lever.py::_domain_ends checks a `domain=` at DECLARATION time and refuses EIGHT shapes: a
 # non-numeric default, a pair that is not a pair, (None, None), a non-numeric end, a fractional end
-# on an int lever, a non-finite end, lo above hi, and a default outside its own pair. EVERY ONE OF
+# on an int lever, a non-finite end, lo above hi, and a default outside its own pair. (The list is
+# eight and the sentence said "six" from the day it was written until 2026-09-15, counted against
+# an earlier draft of the list beside it. RE-DRIVEN at the constructor on 2026-09-15, one
+# Lever(...) per cell: all eight REFUSED -- inf and nan both landing on the non-finite arm -- and
+# five controls BUILT: a closed float pair, an open top, a negative lo, int ends on an int lever,
+# and int ends on a float lever.) EVERY ONE OF
 # THOSE IS ALREADY UNTRIPPABLE FROM HERE, and that was measured rather than assumed -- each was
 # planted at the constructor on 2026-09-14 and each came back LeverError, and the out-of-domain
 # default was then planted in a copy of src/opt/levers.py (lr_decay, default 1.0, given
@@ -1385,22 +1390,30 @@ def check_o14_domain_endpoints_are_literals(mods):
 #
 # WHAT IT DOES NOT DO, said here because the two sentences next to each other are the point. It does
 # not decide whether a domain is RIGHT. It reads two refusals that are both already written down and
-# reports where they disagree; a lever with no read-site refusal is not examined at all, which is 26
-# of the 33 levers carrying a domain today. And it makes no claim about VALUES INSIDE either
+# reports where they disagree; a lever with no read-site refusal is not examined at all, and that is
+# MOST of them -- the DETAIL LINE prints how many, as "N of them have a read-site refusal this pass
+# can read", beside the count of declared domains. DO NOT RESTATE THAT NUMBER HERE. It read "26 of
+# the 33" until 2026-09-15, written the day the check landed; by then it was 31 of 33, because the
+# six retirements this check itself caused each removed a read site and the comment could not
+# follow. And it makes no claim about VALUES INSIDE either
 # interval. Every finding below leaves the mechanism exactly as open as it was: OPT_LR is not in this
 # population, carries no domain, and at 1e6 still runs five stages reporting OK with every parameter
 # at -3928.
 #
 # CALIBRATED OVER THE ARCHIVE, AND THE HONEST ANSWER IS THAT THE ARCHIVE CANNOT CALIBRATE THE
-# VERDICT. 77 of this repository's 196 commits carry src/. The extractor below was run over all 77:
+# VERDICT. ON 2026-09-14, 77 of this repository's then 196 commits carried src/; at 9b9231c it is
+# 81 of 200, and this paragraph is the measurement of that day rather than of today. The extractor
+# below was run over all 77:
 # 31 distinct refusal sites, 0 to 44 per tree, and EVERY ONE of the 31 was opened and read against
 # the first line of the refusal message it sits over -- all 31 pair with the lever their own message
 # names, and every extracted interval matches the interval the message states where the message
 # states one. Zero mis-extractions in 31 sites. The 21 site-instances that pair with more than one
 # lever are the three name/value TABLES in src/fabric/api.py, where one comprehension really does
-# refuse for six to eight levers at once. But `domain=` appears in NONE of the 77 trees -- it is one
-# day old and uncommitted -- so the two arms below had population 0 and 0 findings at every archived
-# commit, which is not evidence of a low false-alarm rate, it is evidence that history has nothing
+# refuse for six to eight levers at once. But `domain=` appeared in NONE of those 77 trees -- it was
+# one day old and uncommitted THEN, and at 9b9231c it stands in exactly four of the 81 (6bbddc2,
+# 2fd3b22, 901de13 and 9b9231c itself), every one of them AFTER this check was written -- so the two
+# arms below had population 0 and 0 findings at every commit the calibration could draw on,
+# which is not evidence of a low false-alarm rate, it is evidence that history has nothing
 # to say. What stands in for it is the live drive above (8 verdicts, every one confirmed in both
 # directions by running it) and the planted cases at the bottom of this file, which include the
 # correct construct that most resembles a finding: a domain whose top end the body's own clause
@@ -1420,14 +1433,23 @@ def check_o14_domain_endpoints_are_literals(mods):
 # What the document DOES owe is the prose, and that is written: docs/04_CONTRACT.md 0.5.
 #
 # CANNOT CATCH:
-#   * a refusal this pass ABSTAINS on. 51 on the tree today, and the detail line prints the number:
-#     49 are an `if` whose test names a lever and is not a comparison of that lever against numeric
-#     literals -- `if _nonfinite:`, `if seg_min < 1 or seg_max < seg_min:`, `if
-#     REFUSE_NEGATIVE_PERIOD and every < 0:`, `if capacity != owners * quota:` -- and 2 are a table
-#     entry the comprehension's condition could not be read for. Every one is skipped and counted. Abstaining can only make this check report LESS. It is also why the over-refusal
+#   * a refusal this pass ABSTAINS on. THE DETAIL LINE PRINTS THE COUNT AND ITS SPLIT -- an `if`
+#     whose test names a lever and is not a comparison of that lever against numeric literals
+#     (`if _nonfinite:`, `if seg_min < 1 or seg_max < seg_min:`, `if REFUSE_NEGATIVE_PERIOD and
+#     every < 0:`, `if capacity != owners * quota:`), against a table entry the comprehension's
+#     condition could not be read for, and within those the entries spelling a name the spine does
+#     not generate. The split is PRINTED rather than written down here because the sentence that
+#     stood here ("51 on the tree today ... 49 are an `if` ... and 2 are a table entry") was an
+#     arithmetic over a number that had already moved, and over a count that DOUBLE-COUNTED: until
+#     2026-09-15 one `if` was recorded once per LOCAL bound to the same lever, so
+#     src/memory/api.py:248 and :319 were each recorded twice under ('MEM','quota') because
+#     `_quota` and `quota` both bind to it. Every abstention is skipped and counted, and abstaining
+#     can only make this check report LESS. It is also why the over-refusal
 #     arm SETS ASIDE any lever with an abstained test: an unread clause could narrow what the body
 #     accepts, and claiming the body accepts a value it refuses is the one way this arm could invent
-#     a finding. 3 of the 5 levers in that population are set aside today for exactly that.
+#     a finding. How many are set aside is on the detail line too, and so is a sentence saying that
+#     arm examined NOTHING on the runs where it does -- its population is small enough that one
+#     extra local used to empty it.
 #   * a refusal written anywhere but an `if` over a Config-annotated parameter with a literal
 #     `owned_by` -- a clamp, a torch constructor raising three frames down, a body that does not
 #     exist yet. Roughly 288 cells across the six sweep reports are UNREACHABLE_TODAY because the
@@ -1436,16 +1458,45 @@ def check_o14_domain_endpoints_are_literals(mods):
 #     the mechanism destroys. FAB_ALPHA=1e26 is finite, inside every rule in this file, and leaves
 #     15 of 23 gradients non-finite over a loss pair of 0.5150710 / 2.943258.
 #
-# EVERY MECHANISM BELOW IS SEEN TO FAIL, which is the claim k_k16.json caught K16 making falsely
-# ("SIX are pinned by NOTHING in all 77 cases"). Thirteen were deleted one at a time against the
-# whole file on 2026-09-14 and the self-test went RED on all thirteen: the raise requirement in
-# _o15_refuses, the Compare arm and the Not/complement arm of _o15_test_set, the abstention gate on
-# the over-refusal arm, the kill-on-rebind in _o15_bindings, the bool rejection in _o15_number, the
-# holder-reaches-a-raise test and the mislabelled-name abstention in the table shape, the env-name
-# pairing in shape one, the bounded-both-ends test, the ambiguous-owned_by abstention, and both of
-# O14's two tests. Four of them were pinned by nothing when the cases were first written -- the
-# raise requirement, the rebind, the bool and the table holder -- and the four cases at the bottom
-# of _CASES that say so exist because of that pass, not before it.
+# EVERY MECHANISM BELOW IS SEEN TO FAIL EXCEPT ONE, WHICH IS NAMED. This is the claim k_k16.json
+# caught K16 making falsely ("SIX are pinned by NOTHING in all 77 cases"), so it is stated with its
+# exception rather than rounded up.
+#
+# THE SWEEP, RE-RUN INDEPENDENTLY ON 2026-09-15 with the 73 self-test cases as the only judge: one
+# text substitution per run, applied to a copy of this file with src/ and docs/ symlinked beside it,
+# and each result read for WHICH case went red. Sixteen arms, and the self-test goes RED on all
+# sixteen: M1 the raise requirement in _o15_refuses; M2 the Compare arm and M3 the Not/complement
+# arm of _o15_test_set; M4a the `field is None` half and M4b the different-FIELD half of the
+# kill-on-rebind in _o15_bindings; M5 the bool rejection in _o15_number; M6 the
+# holder-reaches-a-raise test and M7 the mislabelled-name abstention in the table shape; M8a the
+# env-name pairing on the BINDS arm and M8b the same pairing on the DIRECT-READ arm of shape one;
+# M9 the bounded-both-ends test; M10 the abstention gate on the over-refusal arm; M11 the
+# ambiguous-owned_by abstention; M12 the visible-pair test and M13 the literal-endpoint test in
+# O14; and M14 the per-field abstention in shape one. M4a and M12 must be deleted in the form that
+# does not crash -- removing them outright makes the check raise instead of report, which is a
+# pin by control flow and not the same evidence -- so each was deleted as a silent skip and each
+# still went red on its own case.
+#
+# THE TWO HALVES WERE COUNTED AS ONE UNTIL 2026-09-15 and the claim was false for both of them: the
+# sweep of 2026-09-14 said "thirteen ... RED on all thirteen", but M4b and M8b each survived
+# deletion with the self-test GREEN, because the existing case for each exercised only the other
+# half (_O15_REBOUND rebinds to a non-read, _O15_NAMES_ANOTHER_LEVER guards on a local). Both
+# deletions INVENT a finding on a tree that has none, which is the direction the over-refusal
+# abstention gate exists to prevent. The two cases that pin them are at the bottom of _CASES.
+#
+# THE ONE THAT IS PINNED BY NOTHING, said plainly rather than left out: `if lit is None: return
+# params, None` in _o15_config_params. It CANNOT be pinned, because it is behaviourally redundant --
+# falling through puts None into `prefixes`, and the `len(prefixes) == 1` test below then returns
+# None too. Checked exhaustively over every multiset of up to four owned_by literals drawn from
+# {computed, "A", "B"} (121 combinations, 0 differing in what the caller tests), and deleting the
+# line leaves the self-test green with no verdict changed anywhere. It is kept because it says at
+# the point of the read what the caller would otherwise have to infer, and it is recorded here so
+# that nobody reads the sentence above as covering it.
+#
+# Seven of the sixteen were pinned by nothing when their case was first written -- the raise
+# requirement, both rebind halves, the bool, the table holder, the direct-read pairing and the
+# per-field abstention -- and the cases at the bottom of _CASES that say so exist because of the
+# two sweeps, not before them.
 
 _O15_NEG, _O15_POS = float("-inf"), float("inf")
 _O15_FULL = [(_O15_NEG, False, _O15_POS, False)]
@@ -1660,8 +1711,14 @@ def _o15_refuses(ifnode, raise_names):
     REQUIRED, AND MEASURED. Without it the recogniser matched Gate arms: `elif every > 0:` in
     src/ckpt/api.py, `elif damp >= 1.0:` and `if clip > 0.0:` in src/opt/api.py, `elif float(cap.lift)
     < 0:` in src/capacity/api.py all test a lever against a literal and name that lever in the body,
-    and all four are REPORTS. Ten such arms on the 2026-09-14 tree; with this arm in place the
-    recogniser keeps 27 sites and all 27 raise."""
+    and all four are REPORTS. RE-DRIVEN 2026-09-15 by stubbing this function to `True` and running
+    the same extractor over src/: the recogniser goes from 22 shape-one sites to 32 and from 43
+    abstentions to 77, so this arm is still discarding exactly the ten branches it was written for.
+    The 22 it keeps all reach a raise -- 15 raise directly and 7 append into a name that a raise
+    reads, which is how src/lm/api.py::resolve writes all seven of its refusals. (Those figures are
+    the printed `pattern1` count and its split; the docstring said "27 sites and all 27 raise" from
+    the day it was written until 2026-09-15, when the six retirements it caused had taken it to 22
+    and nothing had re-measured it.)"""
     for st in ifnode.body:
         for n in ast.walk(st):
             if isinstance(n, ast.Raise):
@@ -1746,7 +1803,8 @@ def _o15_refusal_sites(mods):
 
     A site is (refused set, module, line). Two shapes are read and everything else abstains -- see
     the two recognisers above and the CANNOT CATCH block."""
-    sites, abstained, stats = {}, {}, dict(functions=0, pattern1=0, pattern2=0, tables=0, mislabelled=0)
+    sites, abstained, stats = {}, {}, dict(functions=0, pattern1=0, pattern2=0, tables=0,
+                                          mislabelled=0, ab_if=0, ab_table=0)
     for mod in mods:
         for fnode in ast.walk(mod.tree):
             if not isinstance(fnode, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1771,17 +1829,36 @@ def _o15_refusal_sites(mods):
                     field = _o15_read(n, params)
                     if field is not None and f"{prefix}_{field.upper()}" in said:
                         candidates.add((None, field))
+                # ABSTAIN PER (SITE, FIELD), NOT PER (CANDIDATE, FIELD). One lever read under TWO
+                # names makes two candidates for one field at one `if`, and only the name the test
+                # actually mentions can be read; the other returns None. Recording that None as an
+                # abstention counts one test twice AND -- far worse -- hands the over-refusal arm's
+                # abstention gate a clause this pass DID read, which sets the whole lever aside.
+                # DRIVEN 2026-09-15 in both directions on the real tree: with LM_DROPOUT's domain
+                # narrowed to (0.0, 0.5) this check reports both arms; adding the pure alias
+                # `_drop_again = float(lm.dropout)` above `bad = []` in src/lm/api.py::resolve --
+                # no guard, no raise, one local -- took the detail line from "1 lever(s) for
+                # over-refusal, 1 set aside" to "0 ... 2 set aside" and DELETED the over-refusal
+                # finding. A second name for a lever is not a second unread clause. So the readings
+                # are collected per FIELD and the clause abstains only when the field has no single
+                # reading: none readable (nothing was read) or two that DISAGREE (a reading this
+                # pass may not pick between, which is _o15_bindings' rule one level up).
+                by_field = {}
                 for local, field in sorted(candidates, key=lambda c: (c[1], c[0] or "")):
                     def isvar(n, local=local, field=field):
                         if local is not None and isinstance(n, ast.Name) and n.id == local:
                             return True
                         return _o15_read(n, params) == field
-                    refused = _o15_test_set(node.test, isvar)
-                    if refused is None:
+                    by_field.setdefault(field, []).append(_o15_test_set(node.test, isvar))
+                for field in sorted(by_field):
+                    read = {tuple(r) for r in by_field[field] if r is not None}
+                    if len(read) != 1:
+                        stats["ab_if"] += 1
                         abstained.setdefault((prefix, field), []).append((mod, node.lineno))
                         continue
                     stats["pattern1"] += 1
-                    sites.setdefault((prefix, field), []).append((refused, mod, node.lineno))
+                    sites.setdefault((prefix, field), []).append(
+                        (list(next(iter(read))), mod, node.lineno))
 
             # -- shape two: a name/value TABLE filtered by a comprehension whose result is raised --
             tables = _o15_tables(fnode, params, binds)
@@ -1815,6 +1892,7 @@ def _o15_refusal_sites(mods):
                     refused = _o15_inter(refused, part)
                 for lit, field in tables[gen.iter.id]:
                     if not ok:
+                        stats["ab_table"] += 1
                         abstained.setdefault((prefix, field), []).append((mod, n.lineno))
                         continue
                     if lit != f"{prefix}_{field.upper()}":
@@ -1822,6 +1900,7 @@ def _o15_refusal_sites(mods):
                         # ruling to make, so the entry is abstained on and counted rather than
                         # paired with a lever whose name it does not carry.
                         stats["mislabelled"] += 1
+                        stats["ab_table"] += 1
                         abstained.setdefault((prefix, field), []).append((mod, n.lineno))
                         continue
                     stats["pattern2"] += 1
@@ -1933,12 +2012,25 @@ def check_o15_domain_agrees_with_read_site(mods):
                 f"was argued -- not both, see the block above this check.")
 
     n_abstained = sum(len(v) for v in abstained.values())
+    # THE TWO ARMS HAVE TWO POPULATIONS AND `vacuous=` SPEAKS FOR ONE OF THEM. _report's VACUOUS
+    # marker is driven by `examined_levers`, which is the PRE-EMPTION population; the over-refusal
+    # arm's population is `over_pop` and it can reach 0 while the other is not empty -- which is
+    # exactly what one alias local did to it (see the comment inside shape one). An arm that
+    # examined nothing says so on its own, or the day it empties this check prints PASS with
+    # nothing behind it.
+    arms = ["" if examined_sites else
+            " -- NOTHING WAS EXAMINED FOR PRE-EMPTION, so that arm's silence is not evidence",
+            "" if over_pop else
+            " -- NOTHING WAS EXAMINED FOR OVER-REFUSAL, so that arm's silence is not evidence"]
     detail = (f"{len(domains)} lever(s) declare a literal domain, {examined_levers} of them have a "
               f"read-site refusal this pass can read ({examined_sites} site(s) examined for "
               f"pre-emption, {over_pop} lever(s) for over-refusal, {set_aside} set aside there "
-              f"because a refusal on the same lever was abstained on); {stats['pattern1']}+"
+              f"because a refusal on the same lever was abstained on{''.join(arms)}); "
+              f"{stats['pattern1']}+"
               f"{stats['pattern2']} refusal site(s) read across {stats['functions']} owned function(s), "
-              f"{n_abstained} refusal test(s) naming a lever abstained on, {skipped} domain(s) skipped "
+              f"{n_abstained} refusal test(s) naming a lever abstained on ({stats['ab_if']} `if`, "
+              f"{stats['ab_table']} table entry, {stats['mislabelled']} of those for a name the spine "
+              f"does not generate), {skipped} domain(s) skipped "
               f"for a non-literal endpoint (O14)")
     return _report("O15", "a declared domain does not contradict or silence the read-site refusal "
                           "over the same lever", not findings, detail, findings,
@@ -3721,6 +3813,71 @@ def plan(fab: Config, mem: Config):
     return frac * int(mem.quota)
 '''
 
+
+# THE THREE BELOW EXIST FOR THE SAME REASON THE FOUR ABOVE DO, one pass later: .rework/audits/
+# fv_checks.json re-ran the deletion sweep independently against the 70 cases and found two arms
+# the sweep of 2026-09-14 had not separated, plus a defect the cases could not see at all. Each was
+# driven in BOTH directions before it was written down here.
+#
+# (1) THE ENV-NAME PAIRING ON THE DIRECT-READ ARM. `_O15_NAMES_ANOTHER_LEVER` above pins the pairing
+# on the BINDS arm only, because its guard reads a LOCAL: with the message ignored, `frac` is the
+# candidate that comes out of `binds`. Nothing pinned the second arm, which pairs a read written
+# INLINE in the test -- `if float(mem.frac) < 0.0:` -- and dropping `and f"{prefix}_{field.upper()}"
+# in said` from it left the self-test green while inventing a pre-emption finding against MEM_FRAC,
+# a lever this refusal's message does not name. Same ruling as the case above, other arm.
+_O15_DIRECT_READ_NAMES_ANOTHER = '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+    frac = Lever(0.25, "share of the owner's block", domain=(0.0, 1.0))
+
+
+def prune(mem: Config):
+    mem = mem.owned_by("MEM")
+    quota = int(mem.quota)
+    if float(mem.frac) < 0.0:
+        raise ValueError(f"MEM_QUOTA={quota}: the block this share is taken out of is not sized.")
+'''
+
+# (2) THE OTHER HALF OF THE KILL IN _o15_bindings. `_O15_REBOUND` above exercises only the
+# `field is None` half -- `frac = min(1.0, frac)` rebinds to something that is not a lever read at
+# all. The half that kills a name rebound to a DIFFERENT FIELD was pinned by nothing: dropping
+# `or (name in binds and binds[name] != field)` makes the LAST read win, so a guard written over
+# `frac` is attributed to `other`, and a domain on `other` then pre-empts a clause that never tested
+# it. That is the same invent-a-finding direction the over-refusal abstention gate exists for.
+_O15_REBOUND_OTHER_FIELD = '''\
+from spine.lever import Config, Lever, LeverSet
+
+
+class MemoryLevers(LeverSet):
+    PREFIX = "MEM"
+    quota = Lever(64, "slots per owner")
+    frac = Lever(0.25, "share of the owner's block", domain=(0.0, 1.0))
+    other = Lever(0.25, "share of the probation block", domain=(0.0, 1.0))
+
+
+def prune(mem: Config):
+    mem = mem.owned_by("MEM")
+    x = float(mem.frac)
+    if x < 0.0:
+        raise ValueError(f"MEM_OTHER={x}: a negative share.")
+    x = float(mem.other)
+    return x
+'''
+
+# (3) A SECOND, HARMLESS NAME FOR A LEVER ALREADY READ. This is the alias that silenced the whole
+# over-refusal arm on the real tree: `_frac_again` is bound to the same lever, names nothing, guards
+# nothing and raises nothing, but it makes a SECOND candidate for `frac` at the one `if`, and the
+# per-candidate abstention that used to sit there recorded it as an unread clause -- which is the
+# abstention gate's trigger, so the lever was set aside and the over-refusal finding disappeared.
+# The tree below still carries that finding (domain=(0.5, 2.0) against a body that admits
+# [0.0, 1.0]) and must still report it with the alias present.
+_O15_OVER_ALIASED = _O15_FILE % ("0.75", "domain=(0.5, 2.0)",
+                                 "    _frac_again = float(mem.frac)\n" + _O15_CLOSED)
+
 _CASES = (
     ("control: no bypass anywhere in the tree", {},
      {"O3": (0, None), "O8": (0, None), "O9": (0, None)}),
@@ -4038,6 +4195,21 @@ _CASES = (
     ("O15: a function holding TWO owners is abstained on -- nothing here can say whose local it is",
      {"src/fabric/levers.py": _O15_TWO_OWNERS_LEVERS, "src/memory/store.py": _O15_TWO_OWNERS},
      {"O15": (0, None)}),
+
+    ("O15: the same mismatch with the lever read INLINE in the test is abstained on too -- the "
+     "direct-read arm pairs on the message, not on what the test reads",
+     {"src/memory/store.py": _O15_DIRECT_READ_NAMES_ANOTHER},
+     {"O15": (0, None)}),
+
+    ("O15: a local rebound to a DIFFERENT lever is dropped -- the guard above the rebind tested the "
+     "first lever and may not be attributed to the second",
+     {"src/memory/store.py": _O15_REBOUND_OTHER_FIELD},
+     {"O15": (0, None)}),
+
+    ("O15: a second, harmless name for a lever already read does NOT set the over-refusal arm "
+     "aside -- an alias is not an unread clause",
+     {"src/memory/store.py": _O15_OVER_ALIASED},
+     {"O15": (1, "explicitly ACCEPTS")}),
 )
 
 _BY_TAG = {
