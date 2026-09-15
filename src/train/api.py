@@ -471,7 +471,7 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     would silently change period and nothing would say so. Clock._same raises across kinds, so the
     two cannot be one variable.
 
-    LEVERS READ: epochs (via RunClock.finished)
+    LEVERS READ: epochs (via RunClock._finished, published on every Tick as Tick.finished)
     WIRES READ: none
     DID IT FIRE: RunClock.counters() -- the five typed counters plus the batch flush count.
                  flushes == 0 with step > 0 means the batch never filled.
@@ -519,9 +519,22 @@ class RunClock:
         self._in_epoch = 0
 
     @property
-    def finished(self):
+    def _finished(self):
         """True when the run has completed every epoch it was asked for. Reads the epochs count
-        new_clock resolved from the lever; `epoch` is Epochs and the comparison is same-kind."""
+        new_clock resolved from the lever; `epoch` is Epochs and the comparison is same-kind.
+
+        PRIVATE, AND THE UNDERSCORE IS THE WHOLE ARGUMENT. Written `finished` it became a PUBLIC
+        entry point on a frozen surface, and two checks said so on the first run after it landed:
+        K1 ("a public entry point outside the contract is one nobody has agreed to keep" --
+        docs/04_CONTRACT.md does not declare it) and K6 ("named by no row in ASSEMBLY_ORDER or
+        LOOP_ORDER and not in DEFERRED_ENTRY_POINTS"). Neither could be answered by adding a row,
+        because ROWS ARE ENTRY-POINT CALLS and nothing calls this: the loop driver reads the answer
+        off `Tick.finished`, which IS a declared field of a declared record. That is the same
+        argument PROGRESS_WINDOWS makes for having no row of its own, one file up.
+        SO THE PREDICATE IS INTERNAL AND ITS VALUE IS PUBLISHED, which is the shape that keeps the
+        lever read honest without widening the surface. advance() puts it on every Tick, so a caller
+        never needs to reach in here, and `epochs` still has exactly one reader.
+        """
         return self.epoch >= U.Epochs(self.epochs)
 
     def begin_epoch(self, windows_in_epoch):
@@ -617,10 +630,10 @@ class RunClock:
             # token stream, and carrying it across a resample writes memory entries whose
             # provenance points at unrelated text.
             self.batch_len = 0
-        # `finished` is READ FROM THE PROPERTY so the record and the loop's own test cannot
-        # disagree, and it is computed AFTER the roll -- the roll is what can finish the run.
+        # `finished` is READ FROM THE PROPERTY so the record and this method cannot disagree, and
+        # it is computed AFTER the roll -- the roll is what can finish the run.
         return Tick(step=self.step, epoch=self.epoch, flush_due=flush_due, rolled=rolled,
-                    finished=self.finished)
+                    finished=self._finished)
 
     def note_backward(self):
         """Record one backward pass and answer whether an optimizer step is due.
