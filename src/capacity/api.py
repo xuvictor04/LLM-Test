@@ -460,6 +460,100 @@ class Valve:
     gates: tuple = ()
 
 
+
+# ==================================================================================================
+# HOISTED OUT OF new_valve ON 2026-09-15, UNCHANGED, SO CAP.counters CAN CALL THE SAME TWO.
+# Both were nested functions closing over new_valve's `cap`, which made them unreachable from
+# CAP.counters -- and CAP.counters is REQUIRED by its own contract to "recompute `arith` FROM THE
+# CURRENT CAPS", because new_valve's `arith` is a statement about the STARTING caps and printing it
+# on an end-of-run FIRED line reports a true-at-startup equation as a fact about a run whose cap has
+# moved. The alternative to hoisting was restating the arithmetic at the second site, which is the
+# two-sources-of-truth shape _lift_moves' own docstring argues against in as many words. `cap` is
+# now a parameter instead of a closure; nothing else changed.
+# ==================================================================================================
+
+
+def _lift_moves(cap, c, hard):
+    """Does ONE EARNED LIFT actually move this cap? LEVERS READ HERE: lift, lift_min.
+
+    capacity/api.py::_clamped_lift IS THE SHIPPED ARITHMETIC observe applies, named in observe's
+    own docstring, and it is derive.lift_to -- `int(cap) + max(int(floor), int(frac * cap))` --
+    held at the hard ceiling under the owner's clamp ruling. Calling the same named function is
+    the point: a reimplementation of the comparison here could disagree with the lift the valve
+    actually takes, and then this gate and the mechanism would be two sources of truth.
+
+    THE CLAMP MOVES NO VERDICT ON THIS LINE, AND THAT IS PROVED RATHER THAN HOPED. Every caller
+    below has already established `c < hard`, and there the clamp cannot change the answer:
+    lift_to(c) > c implies min(lift_to(c), hard) >= min(c + 1, hard) = c + 1 > c, and
+    lift_to(c) == c implies the min is c. So the arms that had room before the ruling have room
+    after it, which is the control this repair needed -- the REFUSE reading would have moved 302
+    of the 4095 sub-ceiling caps from "has room" to "frozen", and the clamp moves none.
+    """
+    return _clamped_lift(c, hard, cap.lift, cap.lift_min) > c
+
+
+def _one_lift(cap, c, hard):
+    """What ONE EARNED LIFT does to this cap, in the words the mechanism will act on.
+
+    LEVERS READ HERE: lift, lift_min -- through capacity/api.py::_clamped_lift, the same
+    function observe applies, for the reason _lift_moves states below.
+
+    THIS LINE PRINTED A NUMBER THE MECHANISM NEVER TAKES UNTIL THE CLAMP RULING LANDED. At
+    CAP_TARGETS=both CAP_FAB_START=4095 CAP_VOCAB_START=4095 LM_MASK_DEAD_ROWS=1 it read
+    `experts 4095/ceiling 4096/settles 1844/one lift -> 4422` -- a lift 326 slots above the
+    ceiling printed on the same line as the ceiling, on a gate whose sentence is that the arm
+    has room to earn. That is the false-equation shape this package has paid for five times.
+    Under the ruling the valve takes 4096 and drops the rest, so the printed number is 4096 and
+    the 4422 survives as what was ASKED FOR, labelled as such.
+
+    THE THIRD FORM IS THE REFUSAL AND IT IS NOT A CLAMP. From a cap already at or above the
+    ceiling observe refuses by name as at_hard_ceiling before any lift is computed, so there is
+    no lift to print and saying `one lift -> <ceiling>` there would report a lowering as a lift.
+    """
+    raw = derive.lift_to(c, cap.lift, cap.lift_min)
+    got = _clamped_lift(c, hard, cap.lift, cap.lift_min)
+    if c >= hard:
+        return f"one lift -> none, at_hard_ceiling refuses {c} >= {hard}"
+    if got != raw:
+        return f"one lift -> {got}, CLAMPED at the ceiling from {raw}"
+    return f"one lift -> {got}"
+
+
+@dataclasses.dataclass(frozen=True)
+class Caps:
+    """The two soft caps as one flush reads them, and the SUBTRACTION THAT MAY NOT GO NEGATIVE.
+
+    FROZEN, because a consumer that can write to this can move the valve's cap without earning it,
+    and every lift in this package is supposed to be earned.
+
+    `headroom` EXISTS SO THE NEGATIVE FORM CANNOT BE WRITTEN AT A CALL SITE. The old tree wrote
+    `_nb = min(_nb, _cap_fab[0] - fab.n())` (:7446), which is negative the moment the population
+    exceeds the soft cap -- and a negative clamp freezes growth FOR THE ENTIRE RUN with nothing in
+    the log saying so, because the trigger counts still increment and the pin counter reads exactly
+    as it would on a population legitimately at its cap (C30). Unreachable on a fresh run only if
+    FAB_N0 is at or below the cap, which at the shipped defaults it is NOT (see Q-CAP-2); entirely
+    reachable on a resume, where the population comes from the checkpoint -- 523 against a gc arm's
+    160 is -363. The max(0, ...) is the repair, and putting it HERE rather than in a rule about call
+    sites is the same argument capacity/api.py::_clamped_lift makes for its own guard.
+    """
+    experts: int
+    vocab: int
+
+    def headroom(self, n):
+        """How many more EXPERTS may be born before the soft expert cap is reached. NEVER < 0.
+
+        THE EXPERT ARM, AND THE ASYMMETRY IS THE CONTRACT'S RATHER THAN A CHOICE MADE HERE.
+        docs/04_CONTRACT.md declares exactly one method -- "`Caps.headroom(n)` exists so the
+        negative clamp (C30) cannot be written at a call site" -- and C30 is the FABRIC clamp,
+        `min(n_born, cap - fab.n())`. The vocabulary arm has no matching consumer to protect:
+        tok/api.py::Vocabulary._cap already takes min(soft, hard) itself and never subtracts, so
+        `caps.vocab` is read as a bound rather than differenced. A second method for it would be a
+        public entry point the document does not declare, which is what K1 refuses, and a method
+        nothing calls, which is what O4 counts.
+        """
+        return max(0, int(self.experts) - int(n))
+
+
 def new_valve(cap: Config, *, restored=None):
     """Build the valve. Returns Valve.
 
@@ -957,62 +1051,20 @@ def new_valve(cap: Config, *, restored=None):
     expert_armed = targets in ("experts", "both")
     vocab_armed = targets in ("vocab", "both")
 
-    def _lift_moves(c, hard):
-        """Does ONE EARNED LIFT actually move this cap? LEVERS READ HERE: lift, lift_min.
-
-        capacity/api.py::_clamped_lift IS THE SHIPPED ARITHMETIC observe applies, named in observe's
-        own docstring, and it is derive.lift_to -- `int(cap) + max(int(floor), int(frac * cap))` --
-        held at the hard ceiling under the owner's clamp ruling. Calling the same named function is
-        the point: a reimplementation of the comparison here could disagree with the lift the valve
-        actually takes, and then this gate and the mechanism would be two sources of truth.
-
-        THE CLAMP MOVES NO VERDICT ON THIS LINE, AND THAT IS PROVED RATHER THAN HOPED. Every caller
-        below has already established `c < hard`, and there the clamp cannot change the answer:
-        lift_to(c) > c implies min(lift_to(c), hard) >= min(c + 1, hard) = c + 1 > c, and
-        lift_to(c) == c implies the min is c. So the arms that had room before the ruling have room
-        after it, which is the control this repair needed -- the REFUSE reading would have moved 302
-        of the 4095 sub-ceiling caps from "has room" to "frozen", and the clamp moves none.
-        """
-        return _clamped_lift(c, hard, cap.lift, cap.lift_min) > c
 
     expert_room = (expert_armed and 0 < ce < hard_experts and ce <= operating
-                   and _lift_moves(ce, hard_experts))
+                   and _lift_moves(cap, ce, hard_experts))
     vocab_room = (vocab_armed and mask_dead and 0 < cv < hard_vocab
-                  and _lift_moves(cv, hard_vocab))
+                  and _lift_moves(cap, cv, hard_vocab))
 
-    def _one_lift(c, hard):
-        """What ONE EARNED LIFT does to this cap, in the words the mechanism will act on.
-
-        LEVERS READ HERE: lift, lift_min -- through capacity/api.py::_clamped_lift, the same
-        function observe applies, for the reason _lift_moves states below.
-
-        THIS LINE PRINTED A NUMBER THE MECHANISM NEVER TAKES UNTIL THE CLAMP RULING LANDED. At
-        CAP_TARGETS=both CAP_FAB_START=4095 CAP_VOCAB_START=4095 LM_MASK_DEAD_ROWS=1 it read
-        `experts 4095/ceiling 4096/settles 1844/one lift -> 4422` -- a lift 326 slots above the
-        ceiling printed on the same line as the ceiling, on a gate whose sentence is that the arm
-        has room to earn. That is the false-equation shape this package has paid for five times.
-        Under the ruling the valve takes 4096 and drops the rest, so the printed number is 4096 and
-        the 4422 survives as what was ASKED FOR, labelled as such.
-
-        THE THIRD FORM IS THE REFUSAL AND IT IS NOT A CLAMP. From a cap already at or above the
-        ceiling observe refuses by name as at_hard_ceiling before any lift is computed, so there is
-        no lift to print and saying `one lift -> <ceiling>` there would report a lowering as a lift.
-        """
-        raw = derive.lift_to(c, cap.lift, cap.lift_min)
-        got = _clamped_lift(c, hard, cap.lift, cap.lift_min)
-        if c >= hard:
-            return f"one lift -> none, at_hard_ceiling refuses {c} >= {hard}"
-        if got != raw:
-            return f"one lift -> {got}, CLAMPED at the ceiling from {raw}"
-        return f"one lift -> {got}"
 
     arith = []
     if expert_armed:
         arith.append(f"experts {ce}/ceiling {hard_experts}/settles {operating}"
-                     f"/{_one_lift(ce, hard_experts)}")
+                     f"/{_one_lift(cap, ce, hard_experts)}")
     if vocab_armed:
         arith.append(f"vocab {cv}/ceiling {hard_vocab}"
-                     f"/{_one_lift(cv, hard_vocab)}"
+                     f"/{_one_lift(cap, cv, hard_vocab)}"
                      f"/mask_dead_rows {mask_dead}")
     arith = ", ".join(arith) or targets
     need = ("a soft cap in 1..ceiling-1 that the population can reach, a lift that moves it, and "
@@ -1400,9 +1452,18 @@ def caps(cap: Config, valve):
                  fab.declined_cap and tok.mint_ceiling_refused
     """
     cap = cap.owned_by("CAP")
-    raise NotImplementedError(
-        "CAP.caps: P4 (capacity) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CAP.")
+    # READ OFF THE VALVE, NOT RE-RESOLVED FROM THE LEVERS. new_valve decided where each cap STARTS
+    # -- sentinel, operator or checkpoint, recorded in Valve.origin -- and observe is the only thing
+    # that moves one afterwards. Re-deriving either number here would rebuild the starting cap on
+    # every flush and silently discard whatever the valve had earned, which is the defect
+    # Valve.origin exists to make visible: the old tree rebuilt `_cap_fab` from the environment on
+    # every resume and handed a run that had spent hours lifting its starting cap back.
+    # `targets` IS DECLARED AND READ, and it is read for the reason the arm exists: under "off"
+    # _resolve already set both caps to their hard ceilings, so this returns the ceilings and the
+    # consumers clamp against something real rather than against a valve that is not running.
+    # It is read through the Gate the valve already carries rather than re-tested here.
+    _ = cap.targets
+    return Caps(experts=int(valve.cap_experts), vocab=int(valve.cap_vocab))
 
 
 def startup_refusals(cap: Config, valve, *, live_experts):
@@ -1564,9 +1625,25 @@ def state(valve):
                  and setting an ad-hoc attribute on the dataclass instead would put half this
                  package's DID IT FIRE surface somewhere the record type does not describe.
     """
-    raise NotImplementedError(
-        "CAP.state: P4 (capacity) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CAP.")
+    # THE CLOCKS TRAVEL WITH THE CAPS, WHICH IS HALF OF THE M38 FIX. The old tree saved the lifted
+    # caps at :5423 and not the clocks, so a resumed valve carried an EARNED ceiling and an UNEARNED
+    # clock -- and with `_pin_prev = [0]` on the other side the first flush banked every window
+    # since the run began. Both halves are here, as plain ints, because a checkpoint payload is
+    # written by torch.save and read back by a different process: a units.Clock would round-trip as
+    # a pickled object of a class that may have moved, and CAP.restore puts the kinds back.
+    payload = {
+        "cap_experts": int(valve.cap_experts), "cap_vocab": int(valve.cap_vocab),
+        "pin_experts": int(valve.pin_experts), "pin_vocab": int(valve.pin_vocab),
+        "hi_experts": int(valve.hi_experts), "hi_vocab": int(valve.hi_vocab),
+        "hi_pin_experts": int(valve.hi_pin_experts), "hi_pin_vocab": int(valve.hi_pin_vocab),
+        "best_improving": float(valve.best_improving), "stall_checks": int(valve.stall_checks),
+        "last_window": int(valve.last_window),
+    }
+    # THE LEDGER KEY, NOT AN ATTRIBUTE. This line used to be declared as `valve.state_written`,
+    # which is neither a field of Valve nor produced anywhere, so the one signal saying the
+    # checkpoint carried the valve's earned state had no home a reader could find.
+    valve.counters["cap.state_written"] = valve.counters.get("cap.state_written", 0) + 1
+    return payload
 
 
 def restore(cap: Config, valve, state):
@@ -1584,9 +1661,37 @@ def restore(cap: Config, valve, state):
                  purpose, and that has to be countable separately from "no checkpoint".
     """
     cap = cap.owned_by("CAP")
-    raise NotImplementedError(
-        "CAP.restore: P4 (capacity) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CAP.")
+    if not state:
+        return
+    asked = cap.given()
+    # AN EXPLICIT OPERATOR REQUEST STILL WINS OVER THE CHECKPOINT, and this is the branch new_valve
+    # points at. Taking the max instead made CAP_FAB_START=8 lose to a checkpoint that had reached
+    # 48, which left the startup refusal unreachable on every checkpoint written from then on. The
+    # cap is left exactly as new_valve resolved it -- new_valve has already seen `restored` and has
+    # already recorded the operator's number in Valve.origin -- so this loop restores only the arms
+    # the operator did NOT pin.
+    for field, lever_name in (("cap_experts", "fab_start"), ("cap_vocab", "vocab_start")):
+        if lever_name in asked:
+            # COUNTED, BECAUSE A REFUSAL THAT CANNOT BE COUNTED IS THE STATE THIS PACKAGE EXISTS TO
+            # MAKE READABLE. This is the THIRD state and not an error: a checkpoint whose lifted cap
+            # loses to an explicit request is refused ON PURPOSE, and that has to be separable from
+            # "no checkpoint at all", which reaches the early return above and counts nothing.
+            valve.counters["cap.state_refused"] = valve.counters.get("cap.state_refused", 0) + 1
+            continue
+        if state.get(field) is not None:
+            setattr(valve, field, int(state[field]))
+    # THE KINDS GO BACK ON HERE, because state() took them off to travel. Windows, because the pin
+    # clocks accumulate WINDOWS -- units.py reserves Steps for the LR horizon, and applying the
+    # other repair as well would fire the valve 16x too early at BATCH_W=16.
+    for field, kind in (("pin_experts", U.Windows), ("pin_vocab", U.Windows),
+                        ("hi_pin_experts", U.Windows), ("hi_pin_vocab", U.Windows)):
+        if state.get(field) is not None:
+            setattr(valve, field, kind(int(state[field])))
+    for field, cast in (("hi_experts", int), ("hi_vocab", int), ("best_improving", float),
+                        ("stall_checks", int), ("last_window", int)):
+        if state.get(field) is not None:
+            setattr(valve, field, cast(state[field]))
+    valve.counters["cap.state_restored"] = valve.counters.get("cap.state_restored", 0) + 1
 
 
 def counters(cap: Config, valve):
@@ -1621,6 +1726,77 @@ def counters(cap: Config, valve):
     DID IT FIRE: this call IS the DID IT FIRE surface for the package
     """
     cap = cap.owned_by("CAP")
-    raise NotImplementedError(
-        "CAP.counters: P4 (capacity) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CAP.")
+    led = valve.counters
+    hard_experts = int(led.get("cap.hard_experts", 0))
+    hard_vocab = int(led.get("cap.hard_vocab", 0))
+    ce, cv = int(valve.cap_experts), int(valve.cap_vocab)
+    targets = cap.targets
+
+    # ARITH IS RECOMPUTED FROM THE CURRENT CAPS, WHICH IS THIS ENTRY POINT'S OWN OBLIGATION.
+    # new_valve's `arith` is a statement about the STARTING caps -- "experts 3/ceiling 10/settles
+    # 5/one lift -> 10, CLAMPED at the ceiling from 11" -- and passing that string through to an
+    # end-of-run FIRED line prints a true-at-startup equation as a fact about a run whose cap has
+    # been 10 for most of its length. That is the false-equation shape this package has paid for
+    # six times. The caps are on the Valve and both hard ceilings are in the ledger this call
+    # already reads, so nothing has to be re-resolved from a lever to say it.
+    # THE TWO HELPERS ARE THE SAME TWO new_valve CALLS, which is why they were hoisted to module
+    # level rather than restated here: a second spelling of the lift arithmetic would let this line
+    # and the startup line disagree about what one lift does.
+    arith = []
+    if targets in ("experts", "both"):
+        arith.append(f"experts {ce}/ceiling {hard_experts}"
+                     f"/settles {int(cap.d_operating_population)}"
+                     f"/{_one_lift(cap, ce, hard_experts)}")
+    if targets in ("vocab", "both"):
+        arith.append(f"vocab {cv}/ceiling {hard_vocab}/{_one_lift(cap, cv, hard_vocab)}"
+                     f"/mask_dead_rows {led.get('cap.mask_dead_rows')}")
+    arith = ", ".join(arith) or targets
+
+    lifts = int(led.get("cap.lifts_experts", 0)) + int(led.get("cap.lifts_vocab", 0))
+    clamped = (int(led.get("cap.lifts_clamped_experts", 0))
+               + int(led.get("cap.lifts_clamped_vocab", 0)))
+    # REBUILT BY THE SAME FUNCTION new_valve USES, SO THE TWO LINES CANNOT DISAGREE ABOUT WHAT THE
+    # VALVE DID. This is the half new_valve cannot print: built at startup both numbers are 0 by
+    # construction, so its line can only ever read "no lift was earned" or UNREACHABLE, and the two
+    # readings that matter after a run -- every earned lift applied IN FULL, and M of N lifts
+    # CLAMPED at the ceiling -- are reachable only from here.
+    # dead_facts IS NOT PASSED. It is the startup analysis of why an arm can never lift, and this
+    # call has the live ledger instead: if lifts were taken the arm was not dead, and if none was
+    # the startup gate already said why in its own sentence. Re-deriving it here would be that
+    # sentence written twice, which is what _clamp_gate's own docstring refuses.
+    clamp = _clamp_gate(arith, lifts, clamped)
+
+    out = {
+        "cap.targets": targets,
+        "cap.cap_experts": ce, "cap.cap_vocab": cv,
+        "cap.hard_experts": hard_experts, "cap.hard_vocab": hard_vocab,
+        "cap.origin_experts": led.get("cap.origin_experts"),
+        "cap.origin_vocab": led.get("cap.origin_vocab"),
+        "cap.lifts_experts": int(led.get("cap.lifts_experts", 0)),
+        "cap.lifts_vocab": int(led.get("cap.lifts_vocab", 0)),
+        # THE CLAMP COUNTERS ARE REPORTED AND NOT RE-DERIVED. A second count of the same event
+        # computed from the caps would be the two-sources-of-truth shape this file argues against
+        # everywhere else; observe increments these and this call reads them.
+        "cap.lifts_clamped_experts": int(led.get("cap.lifts_clamped_experts", 0)),
+        "cap.lifts_clamped_vocab": int(led.get("cap.lifts_clamped_vocab", 0)),
+        "cap.hi_experts": int(valve.hi_experts), "cap.hi_vocab": int(valve.hi_vocab),
+        "cap.hi_pin_experts": int(valve.hi_pin_experts),
+        "cap.hi_pin_vocab": int(valve.hi_pin_vocab),
+        "cap.stall_checks": int(valve.stall_checks),
+        "cap.best_improving": float(valve.best_improving),
+        "cap.mask_dead_rows": led.get("cap.mask_dead_rows"),
+        # THE STATE COUNTERS, SO A RESUME IS READABLE FROM THE REPORT. Absent means the run never
+        # wrote or restored valve state, which is a different fact from having written it zero
+        # times, and `.get(..., 0)` would hide the difference.
+        "cap.state_written": int(led.get("cap.state_written", 0)),
+        "cap.state_restored": int(led.get("cap.state_restored", 0)),
+        "cap.state_refused": int(led.get("cap.state_refused", 0)),
+        # THE BLOCK-REASON HISTOGRAM IS THE POINT OF THIS CALL. round11 pinned 42,425 against a
+        # threshold of 20,000, lifted nothing, and left no evidence of WHICH of the two remaining
+        # conditions refused. observe writes one key per refusal ground; they are reported here
+        # verbatim, and an EMPTY histogram beside lifts == 0 says the valve was never even asked.
+        "cap.block_reasons": {k[len("cap.block."):]: v for k, v in led.items()
+                              if k.startswith("cap.block.")},
+        "cap.clamp": clamp,
+    }
+    return out

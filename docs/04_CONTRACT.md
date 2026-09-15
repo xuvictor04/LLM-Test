@@ -1330,7 +1330,7 @@ tables claiming one, and it names the producer each is waiting on.
   blackout. No FAB entry point accepted it: `manage`, `observe` and `grow_check` took `step_windows`
   and losses, not a shift event, so the valve half had a route (`CAP.observe`'s `blackout`) and the
   fabric half did not. **Q-FAB-6 is RESOLVED**: `FAB.grow_check` gained `shift_at=None`, typed
-  `units.Windows` — a **frozen-signature move**, made now because most of the 132 entry points are stubs
+  `units.Windows` — a **frozen-signature move**, made now because most of the entry points are stubs
   and the same change after P4 writes the WATCH→BURST→RECOVER machine is a body rewrite. It went on
   `grow_check` and **not** on `manage` as the question proposed, because in the old tree the blackout
   gates **growth**: `note_shift` sets `blackout` at `:2948` and two of its three consumers are
@@ -3382,7 +3382,7 @@ row immediately before `TOK.judge_probation`**. `docs/04_CONTRACT.md`'s §0 refu
 `d_residual_ratio` moved in the same edit, because it named the old route and two frozen documents
 naming two different producers is the defect this ruling repairs.
 
-**Why now rather than "when the surface opens": the surface is open.** Most of the 132 entry points are
+**Why now rather than "when the surface opens": the surface is open.** Most of the entry points are
 stubs and LM's bodies are unwritten, so this cost one stub, one §7 line and one row. After P4 it costs
 a coordinated edit across ten independent agents. And it is **not new machinery** — `LM.anchor_term`
 already computes ‖delta‖/‖composite‖ every flush; what was missing was an entry point that *returns*
@@ -3595,7 +3595,7 @@ named, and the reason CAP mints no blackout-window lever of its own. A sentence 
 the consumers was one sentence away from justifying a second, independent blackout in CAP.
 
 **⚠ THE SIGNATURE:** `FAB.grow_check(fab, pop, *, flush_loss, step_windows, soft_cap,
-memory_pressure, signature, shift_at=None)`. Made **now** because most of the 132 entry points are stubs
+memory_pressure, signature, shift_at=None)`. Made **now** because most of the entry points are stubs
 and the same change after P4 has written the WATCH→BURST→RECOVER machine is a body rewrite. The
 ```contract block, the `compose.py` row and `System.__slots__` moved in the same edit.
 
@@ -4013,7 +4013,7 @@ row and one deleted exemption. After P4 it is a coordinated edit across ten inde
 **THE COUNT WAS RE-VERIFIED BY SCRIPT ON 2026-09-03, NOT COPIED FROM THIS DOCUMENT**, because
 `Q-TOK-11` and this question collided on it once already and a fifth stale count would be the sixth
 time. Running `test_contract.api_signatures()` — K1's own AST walk, the same oracle the check uses —
-over `src/` returns **132 entry points**, against **132 declared** in §7's ```contract block, all
+over `src/` returns **133 entry points**, against **133 declared** in §7's ```contract block, all
 distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 7,
 RUN 14, SIG 10, TOK 9, WORLD 8. LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
 **`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
@@ -4085,8 +4085,13 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 132 entry points — 121 until 2026-09-02, when Q-TOK-11 added
-`LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123). Both are LM, both landed on the same
+Everything above is prose about these 133 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+`LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 since 2026-09-15, when P4 wrote
+`CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it. That one is not a
+new ruling: this document has said since the record was specified that "`Caps.headroom(n)` exists
+so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY POINT the
+moment a body existed to carry it. A record's public method is public surface, which K1 and K6 both
+say in the only way that matters — they went red on it the first run after it landed. Both are LM, both landed on the same
 day from two different rulings, and **that is why the count lives here and nowhere else**: the first
 of the two wrote "121 → 122" while the second was independently preparing to write "121 → 122" for a
 different entry point, and the two together are 123. **THIS BLOCK IS THE COUNT.** The number is restated in prose at four other
@@ -4107,6 +4112,7 @@ compatible.
 CAP: new_valve(cap: Config, *, restored=None)
 CAP: observe(cap: Config, valve, *, elapsed_windows, live_experts, live_vocab, improving, observations, blackout)
 CAP: caps(cap: Config, valve)
+CAP: Caps.headroom(self, n)
 CAP: startup_refusals(cap: Config, valve, *, live_experts)
 CAP: state(valve)
 CAP: restore(cap: Config, valve, state)

@@ -1076,7 +1076,14 @@ LOOP_ORDER = (
                                       "-- Caps.vocab under TOK.lift_vocab_cap's. TWO DIFFERENT "
                                       "CAPS: Vocabulary.soft_cap is the vocabulary's and "
                                       "FAB.grow_check's soft_cap is the experts', and they collide "
-                                      "on one word"),
+                                      "on one word. THE LOOP TAKES ITS BIRTH BUDGET THROUGH "
+                                      "Caps.headroom(population) AND NEVER BY SUBTRACTING: "
+                                      "`min(n_born, cap - fab.n())` is the C30 freeze, negative the "
+                                      "moment the population exceeds the soft cap and silent for "
+                                      "the whole run, and the method exists so that expression "
+                                      "cannot be written at a call site (docs/04_CONTRACT.md says "
+                                      "so of the record). It is credited to this row because the "
+                                      "cap it differences is the one this row produces"),
     ("B", "FAB",   "observe/grow_check", "per_window_loss and flush_loss from LM.lm_loss's two "
                                       "returns; out from FAB.forward; domain_id from DOM.observe; "
                                       "step_windows=clock.step; soft_cap from CAP.caps; "
