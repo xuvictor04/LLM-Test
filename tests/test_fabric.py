@@ -59,11 +59,18 @@ runs):
       multiplying a zero" -- went blind when the aux_loss repair (F5) gave its accumulator's seed a
       graph. Its test, `bal.grad_fn is not None`, became true by construction and it reported a
       genuinely dead balance term as live.
-  F4  src/fabric/api.py::build refuses eleven negative magnitude levers. Three of them -- FAB_BALANCE,
-      FAB_PONDER, FAB_EMB_VAR -- multiply their terms UNGUARDED, so a negative did not switch the
-      mechanism off, it ran it BACKWARDS; the other eight are guarded at `> 0.0` and a negative was
-      bit-identical to 0.0 while the gate printed the operator's negative beside a reason asserting the
-      value was 0.
+  F4  Eleven negative magnitude levers are refused. Three of them -- FAB_BALANCE, FAB_PONDER,
+      FAB_EMB_VAR -- multiply their terms UNGUARDED, so a negative did not switch the mechanism off,
+      it ran it BACKWARDS; the other eight are guarded at `> 0.0` and a negative was bit-identical to
+      0.0 while the gate printed the operator's negative beside a reason asserting the value was 0.
+      THE SUBJECT SPLIT ON 2026-09-14 AND THIS CHECK SPLIT WITH IT: src/fabric/levers.py gave
+      FAB_DISCOVER `domain=(0.0, 2.0)`, a domain is checked at the FIRST read, and
+      src/fabric/api.py::build's entry for that one lever could never fire again -- so the entry was
+      RETIRED and ten of the eleven are refused there while the eleventh is refused by its own
+      declaration. The check no longer asserts "the refusal under test is FAB's". It asserts WHICH
+      LAYER owns which lever, reads that split off the declarations rather than off a list typed in
+      this file, and drives it at BOTH doors: the environment, and a Config built directly, which is
+      the one path a declaration does not stand in.
   F5  FabricOut.aux_loss must be "ONE scalar with a graph -- never a float and never a freshly allocated
       zero" (its own frozen docstring). Both switched-off arms returned exactly the freshly allocated
       zero it names, and the composition root SUMS this field into the objective it backwards, so a
@@ -99,10 +106,12 @@ scratch mirror of src/ OUTSIDE this repository with its own repair reverted -- t
 the arithmetic, `write=learn` back to `write=solo` with the class guard deleted, the alarm back on
 `bal.grad_fn`, the LeverError block deleted, `h[:0].sum()` back to `h.new_zeros(())`, the learn_window
 refusal deleted, one reason's equation re-hardcoded -- and each one FAILED there, on its own check and
-on no other, and passes here. FIFTEEN mirrors over the nine repairs -- 12 over the first eight, because
-two of those eight are not one line in one file, and 3 for F9, because the reason it stands over has two
-arms and each was reverted alone as well as together; 12 + 3 = 15. The breakdown is written beside the
-total because a breakdown reading 12+2+1 was published as 17 in this file one round ago:
+on no other, and passes here. EIGHTEEN mirrors over the nine repairs -- 12 over the first eight, because
+two of those eight are not one line in one file, 3 for F9, because the reason it stands over has two
+arms and each was reverted alone as well as together, and 3 more for F4 on 2026-09-14, because its
+subject became a SPLIT between two layers and one revert proves a third of it; 12 + 3 + 3 = 18. The
+breakdown is written beside the total because a breakdown reading 12+2+1 was published as 17 in this
+file one round ago:
   * THE IDENTITY CACHE HAS TWO DOORS, shut in different rounds, and they were reverted separately:
     `write=solo` reopens the eval door and trips F2's inserted-eval half, `write=True` reopens the
     leave-one-out door too and trips its inserted-counterfactual half. One revert would have left the
@@ -113,6 +122,17 @@ total because a breakdown reading 12+2+1 was published as 17 in this file one ro
     D4's OFF honoured), and derive off with the switch off and FAB's guard ignoring it (FAIL). Two
     pass and two fail, each for its own reason, which is what makes the check a statement about the
     path rather than about one line.
+  * F4'S SUBJECT IS A SPLIT BETWEEN TWO LAYERS and one revert proves one half of it, so it was driven
+    over FOUR mirrors, each red for its own reason and each red on F4 and on no other check here:
+    the LeverError block deleted (ten levers BUILT at -0.5 at BOTH doors, and the report says so
+    lever by lever); FAB_DISCOVER's entry put BACK into that block with its domain kept, which is the
+    untrippable-guard state itself (red on the direct-Config door, where that clause still fires, and
+    tests/test_ownership.py::check_o15_domain_agrees_with_read_site goes red beside it on the same
+    lever -- the behavioural and the static halves of one fact agreeing); the DOMAIN DROPPED with the
+    entry left out (nothing refuses FAB_DISCOVER=-0.5 at either door and 2.0000001 resolves); and the
+    tree as it stood before 2026-09-14, entry present and no domain -- a CONSISTENT tree whose ruling
+    this file's census tuple contradicts, red on the census row and on the empty declaration column,
+    which is the report saying the tuple must move rather than saying the tree is broken.
   * F9'S REASON HAS TWO ARMS -- the floor and the rounded render -- and three mirrors, because one
     revert would have left the other arm unproved: the reason deleted outright (F9 FAILS on all four
     contradicting rows, and on no other check), the floor arm alone kept (FAILS on the two ROUNDING
@@ -197,6 +217,7 @@ from torch.nn import functional as TF                                   # noqa: 
 from spine import assemble                                              # noqa: E402
 from spine import lever                                                 # noqa: E402
 from spine import rng                                                   # noqa: E402
+from spine import registry                                              # noqa: E402
 from spine.lever import LeverError                                      # noqa: E402
 from spine import units as U                                            # noqa: E402
 
@@ -751,24 +772,108 @@ def check_f3_c2_alarm_agrees_with_the_gradient():
 
 
 # ==================================================================================================
-# F4 -- eleven negative magnitude levers refused at build
+# F4 -- eleven negative magnitude levers refused: TEN by FAB.build, ONE by its own declaration
 # ==================================================================================================
 
 REVERSED = ("FAB_BALANCE", "FAB_PONDER", "FAB_EMB_VAR")
-GUARDED_OFF = ("FAB_EC_W", "FAB_EXPLORE", "FAB_DISCOVER", "FAB_DIV_W", "FAB_HOP_SUP",
+GUARDED_OFF = ("FAB_EC_W", "FAB_EXPLORE", "FAB_DIV_W", "FAB_HOP_SUP",
                "FAB_IND_W", "FAB_AE_W", "FAB_DOM_FRAC")
+# THE ELEVENTH OF THE SAME RULING, AND ITS ROW MOVED RATHER THAN DISAPPEARING. src/fabric/levers.py
+# declares FAB_DISCOVER with `domain=(0.0, 2.0)` -- a COSINE DISTANCE, whose ceiling is 2.0 and not
+# the 1.0 its U.FRACTION label invites -- and spine/lever.py::Lever.coerce checks a domain at the
+# FIRST read, before a Config exists. The entry src/fabric/api.py::build carried for this lever was
+# RETIRED on 2026-09-14 instead of being left there unable to fire: one fact standing in two places
+# is the untrippable-guard family this project's founding census counts 60 of, and
+# tests/test_ownership.py::check_o15_domain_agrees_with_read_site fails on exactly that shape.
+# THIS TUPLE IS A CENSUS AND NOT THE SOURCE OF TRUTH. The declarations are, and `_declared_refusals`
+# below reads them off the live Config, so a domain added to or dropped from any of the eleven is
+# REPORTED here as a disagreement rather than quietly changing what this check means.
+RETIRED_TO_DECLARATION = ("FAB_DISCOVER",)
+THE_ELEVEN = REVERSED + GUARDED_OFF + RETIRED_TO_DECLARATION
+
+
+def _fab_fields(base):
+    """{env name: field} over FAB's own levers, GENERATED by the spine rather than typed here --
+    spine/lever.py::Config.lever hands back the same `env_name` the resolver used."""
+    fab = base["FAB"]
+    return {fab.lever(k).env_name: k for k in fab.keys() if not k.startswith("d_")}
+
+
+def _declared_refusals(base, value, names):
+    """Which of `names` have a declared domain that refuses `value` at the first read.
+
+    Read off spine/lever.py::LeverView.domain, which is the pair as declared. The comparison is the
+    one spine/lever.py::Lever.coerce makes -- BOTH ENDS INCLUSIVE, an end of None meaning no bound on
+    that side -- so this cannot drift from the rule it predicts without coerce drifting with it.
+    """
+    fab = base["FAB"]
+    out = set()
+    for env_name, field in _fab_fields(base).items():
+        if env_name not in names:
+            continue
+        dom = fab.lever(field).domain
+        if dom is None:
+            continue
+        if (dom[0] is not None and value < dom[0]) or (dom[1] is not None and value > dom[1]):
+            out.add(env_name)
+    return out
+
+
+def config_the_declaration_did_not_produce(base, field, value):
+    """A FAB Config with one field written AFTER coerce -- THE OTHER DOOR INTO FAB.build.
+
+    A declared domain is checked in exactly one place, spine/lever.py::Lever.coerce, and coerce runs
+    on a STRING arriving from the environment. A Config built directly never passes through it:
+    spine/lever.py's own header says a Config is an ordinary object that does not know who is holding
+    it, and tests/test_couplings.py builds one this way today. So this is the path on which
+    src/fabric/api.py::build's hand-written refusal is the only thing standing, and it is the path
+    that tells a retired clause apart from a clause that is merely unreachable from a shell.
+
+    Every number here is the one a real assembly resolved, every wire is the one the coupling table
+    computed, and exactly one field is replaced -- so a refusal raised on this Config is a refusal
+    about that field and not about a half-built object.
+    """
+    owner = registry.all_sets()["FAB"]
+    real = base["FAB"]
+    vals = {k: getattr(real, k) for k in real.keys() if not k.startswith("d_")}
+    vals[field] = value
+    c = lever.Config(owner, vals, {})
+    for k in real.keys():
+        if k.startswith("d_"):
+            c._wire(k, getattr(real, k))
+    return c._freeze()
 
 
 def check_f4_negative_magnitude_levers_refused():
-    """src/fabric/api.py::build refuses all eleven, alone, naming the lever AND the value it read.
+    """Eleven negative magnitude levers are refused, TEN by src/fabric/api.py::build and ONE by its
+    declaration, each naming the lever AND the value it read -- and this check says which is which.
 
     THE TWO GROUPS AND WHY BOTH ARE REFUSED. FAB_BALANCE, FAB_PONDER and FAB_EMB_VAR multiply their
     loss terms with no `> 0.0` in front of them, so a negative does not switch the mechanism off, it
     runs it BACKWARDS -- the population is paid to collapse onto one expert, the charge on routed
     depth becomes a subsidy, and the anti-collapse term becomes a pro-collapse one. The other eight
     are guarded and a negative is bit-identical to 0.0, so the refusal removes NO configuration an
-    operator can ask for and makes a false gate reason impossible rather than correct once. The ground
-    is src/capacity/api.py::new_valve's refusal of a negative CAP_LIFT.
+    operator can ask for and makes a false gate reason impossible rather than correct once. The
+    ground is src/capacity/api.py::new_valve's refusal of a negative CAP_LIFT.
+
+    WHY THE SUBJECT MOVED, AND WHAT MOVING IT WOULD HAVE BEEN IF IT HAD BEEN DONE DISHONESTLY. One
+    of the eleven, FAB_DISCOVER, now carries `domain=(0.0, 2.0)` on its declaration, so its negative
+    is refused a layer earlier and src/fabric/api.py::build's entry for it could never run again.
+    The repair that would have been WRONG is the small one: leave this check driving -0.5 and quietly
+    accept whatever raised, or move the value until it reaches FAB.build again. Both keep the row
+    green while it has stopped looking at the interesting case, which is the untrippable-guard family
+    arriving in the test file. WHAT IS ASSERTED INSTEAD IS WHICH LAYER OWNS WHICH LEVER, at BOTH
+    doors, with the expectation read off the DECLARATIONS rather than typed here:
+      * THE ENVIRONMENT DOOR -- a real assemble.build then a real FAB.build. Every one of the eleven
+        must be refused at -0.5 by name and beside the value; the layer that answered must be the
+        layer the declared domains predict; and NEITHER layer's population may be empty, because a
+        check that proves one door and calls it two is the defect it exists to catch.
+      * THE DOOR A DECLARATION DOES NOT STAND IN -- FAB.build handed a Config built directly, with no
+        coerce behind it. The ten that kept the hand-written clause must still be refused there. The
+        one that retired must NOT be, and that half is the assertion that a retired clause was really
+        retired rather than left in place where O15 would keep reporting it.
+    A lever that gains a domain covering its negative side moves from one column to the other and the
+    census tuple above is checked against the declarations, so the move is reported and not silent.
 
     THE PREMISE OF THE FIRST GROUP IS MEASURED HERE, not quoted. src/fabric/api.py::_ae_loss takes
     emb_var as a plain argument, so the sign reversal is directly observable: at -1.0 the term is
@@ -777,48 +882,177 @@ def check_f4_negative_magnitude_levers_refused():
 
     AND THE REFUSAL MUST NOT OVERREACH: 0.0 and 1.0 build for every one of the eleven, and
     FAB_BALANCE=5.0 -- a large pressure, still the pressure the lever names -- builds too. U.FRACTION
-    is a label the census renders, not a bound.
+    is a label the census renders, not a bound. FAB_DISCOVER's own pair is driven at BOTH endpoints
+    and at the shipped default for the same reason, and one step above its ceiling is driven because
+    that refusal is the thing the retired clause never had: the clause covered (-inf, 0.0), the
+    declaration covers (-inf, 0.0) U (2.0, inf), and dropping the pair to keep the line would have
+    re-admitted FAB_DISCOVER=3.0.
+
+    WHAT THIS CANNOT CATCH, said here rather than left to the report. It is about the SPELLING of a
+    negative and about which layer refuses it. It says nothing about the values either layer admits:
+    FAB_DISCOVER=1.9 is inside the pair and recruits on material pointing away from every region,
+    FAB_BALANCE=5.0 is asserted to BUILD here, and src/fabric/api.py's own sweep records FAB_ALPHA at
+    1e26 leaving 15 of 23 gradient tensors non-finite behind an ordinary-looking loss pair. Nothing
+    below makes any lever safe, bounded or validated.
     """
     findings, examined = [], 0
+    base = cfg()
+    fields = _fab_fields(base)
+    declared = _declared_refusals(base, -0.5, THE_ELEVEN)
 
-    for name in REVERSED + GUARDED_OFF:
+    # -- the census above, against the declarations themselves --------------------------------
+    examined += 1
+    if declared != set(RETIRED_TO_DECLARATION):
+        gained = sorted(declared - set(RETIRED_TO_DECLARATION))
+        lost = sorted(set(RETIRED_TO_DECLARATION) - declared)
+        findings.append(
+            f"RETIRED_TO_DECLARATION is stale. src/fabric/levers.py declares a domain refusing -0.5 "
+            f"on {sorted(declared)} and this file names {sorted(RETIRED_TO_DECLARATION)}"
+            + (f"; NEWLY DECLARED: {gained} -- each of these is now refused before "
+               f"src/fabric/api.py::build sees it, so its entry in that function's table is an "
+               f"untrippable guard until it is retired, and the tuple above must say so" if gained
+               else "")
+            + (f"; NO LONGER DECLARED: {lost} -- if the domain was dropped, the read-site clause has "
+               f"to be back in src/fabric/api.py::build or NOTHING refuses these" if lost else ""))
+
+    by_declaration, by_build = [], []
+    for name in THE_ELEVEN:
         examined += 1
+        layer = msg = None
         try:
             c = cfg(**{name: -0.5})
-        except Exception as e:                                # noqa: BLE001 -- reported, never swallowed
-            findings.append(f"{name}=-0.5: assemble.build raised {type(e).__name__} before FAB.build "
-                            f"could refuse it ({e}). The refusal under test is FAB's.")
-            continue
-        try:
-            population(c)
-            findings.append(f"{name}=-0.5 BUILT. "
-                            + ("This lever multiplies its term unguarded, so the mechanism now runs "
-                               "with its sign reversed and the objective pays for the opposite of "
-                               "what the lever names." if name in REVERSED else
-                               "This lever is guarded at `> 0.0`, so the run is bit-identical to 0.0 "
-                               "while its gate prints the negative beside a reason asserting the "
-                               "value is 0."))
         except LeverError as e:
-            msg = str(e)
-            # NAMING IT IS TESTED AS ADJACENCY TO THE VALUE READ, not as `name in msg`. This message
-            # carries a static paragraph -- "FAB_BALANCE, FAB_PONDER and FAB_EMB_VAR multiply their
-            # terms UNGUARDED ... (measured at FAB_BALANCE=-1.0: ...)" -- that is emitted whenever
-            # ANY of the three is refused, so `name in msg` could not fail for those three whatever
-            # the refusal read: strip every name out of the generated list and the assertion still
-            # passed for FAB_BALANCE, FAB_PONDER and FAB_EMB_VAR while failing for the other eight.
-            # Three of the eleven rows were untrippable and the check said eleven.
-            if not _names_lever_and_value(msg, name, -0.5):
-                findings.append(f"{name}=-0.5 was refused and the message does not name it BESIDE the "
-                                f"value it read. The name may appear elsewhere in the prose -- this "
-                                f"refusal names all three unguarded levers in a fixed sentence "
-                                f"whichever one it refused -- and prose is not a reading: {msg[:160]}")
-            if "-0.5" not in msg:
-                findings.append(f"{name}=-0.5 was refused without printing the value it read. An "
-                                f"unreachable arm names the lever AND the value that made it so.")
-        except Exception as e:                                # noqa: BLE001
-            findings.append(f"{name}=-0.5 raised {type(e).__name__} rather than LeverError: {e}")
+            layer, msg = "the declaration", str(e)
+        except Exception as e:                                # noqa: BLE001 -- reported, never swallowed
+            findings.append(f"{name}=-0.5: assemble.build raised {type(e).__name__} rather than "
+                            f"LeverError ({e}). A refusal in this tree is a LeverError naming the "
+                            f"lever, whichever layer makes it.")
+            continue
+        if layer is None:
+            try:
+                population(c)
+                findings.append(f"{name}=-0.5 BUILT, refused by NEITHER layer. "
+                                + ("This lever multiplies its term unguarded, so the mechanism now "
+                                   "runs with its sign reversed and the objective pays for the "
+                                   "opposite of what the lever names." if name in REVERSED else
+                                   "This lever is guarded at `> 0.0`, so the run is bit-identical to "
+                                   "0.0 while its gate prints the negative beside a reason "
+                                   "asserting the value is 0."))
+                continue
+            except LeverError as e:
+                layer, msg = "FAB.build", str(e)
+            except Exception as e:                            # noqa: BLE001
+                findings.append(f"{name}=-0.5 raised {type(e).__name__} rather than LeverError: {e}")
+                continue
 
-    for name in REVERSED + GUARDED_OFF:
+        # WHICH LAYER ANSWERED, against what the declarations predict. Getting this wrong in either
+        # direction is a real finding and not bookkeeping: a lever answered by the declaration when
+        # no domain bounds it means some other rule is firing and this check has stopped testing what
+        # it names, and a lever answered by FAB.build when a domain DOES bound it means coerce did
+        # not run on the path this check drives.
+        if layer == "the declaration" and name not in declared:
+            findings.append(f"{name}=-0.5 was refused before FAB.build could refuse it, and "
+                            f"src/fabric/levers.py declares no domain over this lever that refuses "
+                            f"-0.5. Something other than the declared pair is answering first, so "
+                            f"the row this check calls FAB's is not FAB's: {msg[:160]}")
+        elif layer == "FAB.build" and name in declared:
+            findings.append(f"{name}=-0.5 reached FAB.build although src/fabric/levers.py declares a "
+                            f"domain that refuses it at the first read. The declared pair did not "
+                            f"fire on the assembly path, which is where spine/lever.py::Lever.coerce "
+                            f"is supposed to run.")
+
+        # NAMING IT IS TESTED AS ADJACENCY TO THE VALUE READ, not as `name in msg`. FAB.build's
+        # message carries a static paragraph -- "FAB_BALANCE, FAB_PONDER and FAB_EMB_VAR multiply
+        # their terms UNGUARDED ... (measured at FAB_BALANCE=-1.0: ...)" -- that is emitted whenever
+        # ANY of the three is refused, so `name in msg` could not fail for those three whatever the
+        # refusal read: strip every name out of the generated list and the assertion still passed for
+        # FAB_BALANCE, FAB_PONDER and FAB_EMB_VAR while failing for the other eight. Three of the
+        # eleven rows were untrippable and the check said eleven. The requirement is the same on
+        # BOTH layers, which is the point of asserting it here rather than per-layer: a refusal that
+        # moves earlier may not name its lever less precisely for having moved.
+        if not _names_lever_and_value(msg, name, -0.5):
+            findings.append(f"{name}=-0.5 was refused by {layer} and the message does not name it "
+                            f"BESIDE the value it read. The name may appear elsewhere in the prose "
+                            f"-- FAB.build's refusal names all three unguarded levers in a fixed "
+                            f"sentence whichever one it refused -- and prose is not a reading: "
+                            f"{msg[:160]}")
+        if "-0.5" not in msg:
+            findings.append(f"{name}=-0.5 was refused by {layer} without printing the value it read. "
+                            f"A refusal names the lever AND the value that made it fire.")
+        (by_declaration if layer == "the declaration" else by_build).append(name)
+
+    # -- NEITHER LAYER MAY BE EMPTY. This check is a statement about two doors; a door with no lever
+    #    behind it is a row that has stopped looking, which is the whole failure this repair is about.
+    examined += 1
+    if not by_declaration or not by_build:
+        findings.append(f"one of the two layers refused NOTHING at -0.5 -- by the declaration: "
+                        f"{sorted(by_declaration)}; by FAB.build: {sorted(by_build)}. Both halves of "
+                        f"this check must have a population or it is proving one door and claiming "
+                        f"two.")
+
+    # -- THE OTHER DOOR: FAB.build handed a Config no declaration produced --------------------------
+    for name in THE_ELEVEN:
+        examined += 1
+        c = config_the_declaration_did_not_produce(base, fields[name], -0.5)
+        rng.reset_issued()
+        try:
+            FAB.build(c, d_model=D_MODEL, signature_dim=SIG_D, device=torch.device("cpu"),
+                      generator=rng.rng_for("fabric", 1234))
+            refused = None
+        except LeverError as e:
+            refused = str(e)
+        except Exception as e:                                # noqa: BLE001
+            findings.append(f"{name}=-0.5 on a Config no declaration produced raised "
+                            f"{type(e).__name__} rather than LeverError or nothing: {e}")
+            continue
+        if name in declared and refused is not None:
+            findings.append(
+                f"{name}: its declaration refuses -0.5 at the first read AND src/fabric/api.py::build "
+                f"refuses it again here. That is ONE FACT IN TWO PLACES, and the second can never run "
+                f"from an environment -- a guard a future reader trusts and a future edit silently "
+                f"breaks. tests/test_ownership.py::check_o15_domain_agrees_with_read_site reports the "
+                f"same pair statically and states the fork: retire the clause and carry its "
+                f"measurement to the declaration, or drop the domain and leave the ruling where it "
+                f"was argued. Not both. This check does not say which.")
+        elif name not in declared and refused is None:
+            findings.append(
+                f"{name}=-0.5 BUILT on a Config no declaration produced, and no declared domain "
+                f"bounds this lever either, so NOTHING refuses this value on this path. "
+                + ("The term is multiplied unguarded, so the objective now pays for the opposite of "
+                   "what the lever names." if name in REVERSED else
+                   "The gate will print this negative beside a reason asserting the value is 0."))
+        elif name not in declared and not _names_lever_and_value(refused, name, -0.5):
+            findings.append(f"{name}=-0.5 was refused on the direct-Config path and the message does "
+                            f"not name it beside the value it read: {refused[:160]}")
+
+    # -- the pair that took the ruling over does MORE than the clause it retired, and that is the
+    #    argument for the direction this repair went. Both ends of a CLOSED interval, the shipped
+    #    default, and one step above the ceiling the retired clause never had.
+    for v in ("0.0", "2.0", "0.35"):
+        examined += 1
+        try:
+            population(cfg(FAB_DISCOVER=v))
+        except Exception as e:                                # noqa: BLE001
+            findings.append(f"FAB_DISCOVER={v} was refused ({type(e).__name__}: {e}). The declared "
+                            f"domain is (0.0, 2.0) with BOTH ENDS INCLUSIVE and 0.35 is the shipped "
+                            f"default; a pair that refuses its own endpoints or its own default "
+                            f"removes a configuration the mechanism evaluates.")
+    examined += 1
+    try:
+        cfg(FAB_DISCOVER="2.0000001")
+        findings.append("FAB_DISCOVER=2.0000001 resolved. The ceiling is the half of this ruling the "
+                        "retired read-site clause never had -- it covered (-inf, 0.0) only -- and it "
+                        "is why the domain was kept and the clause retired rather than the other way "
+                        "round. A cosine distance runs over [0, 2] and nothing above 2.0 is a reading "
+                        "of `1.0 - best`.")
+    except LeverError as e:
+        if not _names_lever_and_value(str(e), "FAB_DISCOVER", 2.0000001):
+            findings.append(f"FAB_DISCOVER=2.0000001 was refused and the message does not name the "
+                            f"lever beside the value it read: {str(e)[:160]}")
+    except Exception as e:                                    # noqa: BLE001
+        findings.append(f"FAB_DISCOVER=2.0000001 raised {type(e).__name__} rather than LeverError: {e}")
+
+    for name in THE_ELEVEN:
         for v in ("0.0", "1.0"):
             examined += 1
             try:
@@ -832,7 +1066,8 @@ def check_f4_negative_magnitude_levers_refused():
         population(cfg(FAB_BALANCE="5.0"))
     except Exception as e:                                    # noqa: BLE001
         findings.append(f"FAB_BALANCE=5.0 was refused ({type(e).__name__}: {e}). Nothing ABOVE these "
-                        f"levers is refused -- a large pressure is still the pressure the lever names.")
+                        f"levers is refused by FAB.build -- a large pressure is still the pressure "
+                        f"the lever names.")
 
     # -- the premise: a negative on an unguarded weight is applied, not ignored.
     examined += 1
@@ -852,10 +1087,19 @@ def check_f4_negative_magnitude_levers_refused():
                         f"the term is `emb_var * (var + cov)` and the two must be the same magnitude. "
                         f"They are not, so something else in this function depends on emb_var's sign.")
 
-    detail = (f"{examined} case(s): {len(REVERSED) + len(GUARDED_OFF)} levers refused alone at -0.5 "
-              f"with the lever and the value named, the same 11 built at 0.0 and at 1.0, "
+    detail = (f"{examined} case(s): {len(THE_ELEVEN)} levers refused alone at -0.5 with the lever and "
+              f"the value named -- {len(by_build)} by src/fabric/api.py::build "
+              f"({', '.join(sorted(by_build)) or 'NONE'}) and {len(by_declaration)} by a declared "
+              f"domain one layer earlier ({', '.join(sorted(by_declaration)) or 'NONE'}), the split "
+              f"checked against the declarations and not against a list typed here; the same 11 "
+              f"driven again at -0.5 through FAB.build on a Config no declaration produced, where the "
+              f"{len(THE_ELEVEN) - len(declared)} that kept the read-site clause must still be "
+              f"refused and the {len(declared)} that retired must not; FAB_DISCOVER at both closed "
+              f"endpoints, at the shipped 0.35 and at 2.0000001 (refused by the pair, which is the "
+              f"half the retired clause never covered); the same 11 built at 0.0 and at 1.0, "
               f"FAB_BALANCE=5.0 built, and _ae_loss measured at emb_var -1.0 / 0.0 / +1.0")
-    return _report("F4", "eleven negative magnitude levers are refused at build, and nothing else is",
+    return _report("F4", "eleven negative magnitude levers are refused -- ten by FAB.build, one by "
+                         "its declaration -- and nothing else is",
                    not findings, detail, findings, vacuous=not examined)
 
 

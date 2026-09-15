@@ -162,7 +162,8 @@ reporting `'0.4'` beside a mechanism running at zero.
 This document already records, for `src/ckpt/api.py::REFUSE_NEGATIVE_PERIOD` and its four siblings,
 that a refusal kept behind a switch is kept honestly and that the switch is not reachable from a
 shell. **The same sentence is owed to these two and is written here.** There is no `SPINE_REFUSE_*`
-environment name. Neither constant takes a census row or a row in the generated lever document.
+environment name. Neither constant takes a census row, nor a row in the lever document `docs/04_LEVERS.md` is
+planned to generate.
 **An operator holding only a shell cannot reach either one**: turning either off means editing
 `src/spine/lever.py` and rebuilding.
 
@@ -171,8 +172,9 @@ lever-shaped switch is circular — these rules run *inside* `Lever.coerce`, bef
 exists — so the only environment form available is a raw `os.environ` read inside `coerce`. That
 read is legal in this one file and it is refused anyway: it would be the tree's first environment
 name that is not a lever, invisible to `spine/registry.py`, to `tests/test_census.py`, whose N1 and
-N2 join on lever names, and to `docs/04_LEVERS.md`. That is precisely the failure
-`src/spine/lever.py`'s own header exists to end.
+N2 join on lever names, and to the **planned** `docs/04_LEVERS.md` — which does not exist on disk
+yet, and which three `levers.py` files already name as the consumer that will render these
+declarations. That is precisely the failure `src/spine/lever.py`'s own header exists to end.
 
 **What turning the floor off costs.** `nan`, `inf` and `-inf` resolve into frozen `Config`s again on
 all 97 float levers. What is then left standing is the five per-package by-name refusals that exist
@@ -186,6 +188,18 @@ is written by whoever writes the body, whenever they get to it; this one is writ
 **What turning `REFUSE_INEXACT_INT` off costs.** `int(float(raw))` truncates in silence again and
 the `MEM_REKEY_EVERY` class comes back: a fractional cadence lands on a lever's declared disarm with
 no warning and no record except the string in `given()`. Off is the pre-2026-09-14 behaviour exactly.
+
+**`domain=` has no switch, and that asymmetry is deliberate rather than an omission.**
+`src/spine/lever.py::<module>` states the ground in its own words — the two constants govern a rule
+true of a whole declared TYPE, where `domain=` is a **per-lever judgement** whose *"blast radius is
+one lever and deleting the kwarg is the switch"*. A reader should draw the consequence for D17 rather than
+the comfort: a wrong pair is withdrawn by editing one declaration, and a wrong pair is therefore the
+easy failure to reverse. The hard one is the pair **nobody wrote**, which no switch reaches and no
+check reports, because `hi=None` is indistinguishable from a ceiling that was considered and
+declined. **No check in the suite asks whether a lever's range was ever considered**: O14 and O15
+both read `domain=`, and both have as their population the levers that **carry** one, so the 174
+that do not are outside every check this section describes. `tests/test_census.py` joins on lever
+NAMES and reads no other `Lever` field.
 
 ### The floor and the domain are COMPLEMENTS, not alternatives
 
@@ -242,13 +256,14 @@ harm.**
 And a ceiling mostly does not exist to choose. Of the 207 numeric levers, **131 have no derivable
 ceiling at all** — the harmful value is a floating-point dynamic-range or memory property of the
 mechanism and not of the declaration, so no honest reading of the declaration produces a number.
-A further group have a high end that is *another lever or a wire* (`LM_CTX ≤ d_pos_max`,
-`WORLD_N0 ≤ WORLD_NMAX`, `MEM_KEY_DEPTH ≤ LM_LAYERS`), which no per-lever pair can express, and a
-further group have a high end this tree has **explicitly declined to set** three separate times.
-*(The published breakdown of that population does not sum to its own total — one lever is
-unaccounted for between the parts and the whole — so the parts are described here and not quoted as
-figures; the two totals this document does quote, 131 and 163, are the ones the report states
-directly and both were used unchanged.)*
+**15** have a high end that is *another lever or a wire* (`LM_CTX ≤ d_pos_max`,
+`WORLD_N0 ≤ WORLD_NMAX`, `MEM_KEY_DEPTH ≤ LM_LAYERS`), which no per-lever pair can express; **16**
+have a high end this tree has **explicitly declined to set**; and **1** has no ceiling at all.
+*(An earlier revision of this section declined to quote those three parts, recording that the
+published breakdown did not sum to its own total. Re-added on 2026-09-14: 44 + 16 + 15 + 131 + 1 =
+207 and 16 + 15 + 131 + 1 = 163, so the high-end breakdown does sum, in both the part and the
+whole, and the same holds of the low-end breakdown — 149 + 46 + 5 + 2 + 2 + 1 + 1 + 1 = 207. The
+figures are quoted.)*
 
 **Three things a reader must not infer from a `domain=`.**
 
@@ -293,15 +308,53 @@ row and nothing in `affects()` to print it.
 the package bodies and compares their intervals with the declared pairs, in both directions — a
 declaration **narrower** than a refusal that pins both ends stops a configuration the shipped body
 accepts, and a declaration that covers everything a refusal refuses leaves that refusal unable to
-run again. **It is RED as of 2026-09-14 with six findings in four packages**, and that is the check
-working rather than the check being wrong: the pairs were written after the refusals, and
-`OPT_LR_DECAY`, `OPT_LR_RESTART_DAMP` (twice), `SIG_WARMUP_MIN_FRAC`, `TOK_DROPOUT` and
-`FAB_DISCOVER` now each have a by-name refusal the declaration reaches first. Every one was driven
-in both directions. `OPT_LR_RESTART_DAMP=1.5` with the pair in place raises *"is outside its
-declared domain [0.0, 1.0] — BOTH ENDS INCLUSIVE"*; with the pair neutralised it raises *"is above
-1.0, which INVERTS the mechanism…"* — a sentence carrying the measurement, replaced by one that does
-not, with nothing anywhere recording that the trade was made. `tests/test_fabric.py`'s F4 catches
-the `FAB_DISCOVER` instance behaviourally and is red for the same reason.
+run again. **It went RED the hour the pairs landed, with six findings in four packages**, and that
+was the check working rather than the check being wrong: the pairs were written after the refusals,
+so `OPT_LR_DECAY`, `OPT_LR_RESTART_DAMP` (twice), `FAB_DISCOVER`, `SIG_WARMUP_MIN_FRAC` and
+`TOK_DROPOUT` each had a by-name refusal the declaration now reaches first. A guard whose condition
+cannot be satisfied is the **untrippable-guard family** — the second-largest class in this
+project's founding census — so populating `domain=` did not merely find six of them, it **made**
+them, in the same commit, and the check is the only reason anyone knows.
+
+**THE FORK IS RETIRE-OR-DROP AND NEVER BOTH, AND IT IS DECIDED PER LEVER.** Either the read-site
+clause is retired and everything it argued moves to the declaration, or the pair is dropped and the
+ruling stays where it was argued. What is refused is keeping both and reading the dead one as a
+second line of defence, because the second line cannot be reached from any environment and the
+first one carries no argument. **Four of the six were closed by taking the RETIRE arm, each decided
+on its own lever and not as one answer**, and in every case the measurement moved rather than being
+deleted: `src/fabric/api.py::build` dropped its `_gated_off` entry for `FAB_DISCOVER` and
+`src/fabric/levers.py::FABLevers` now carries what that clause knew, and `src/opt/api.py::build`
+dropped `decay`'s inverted chain and both of `damp`'s clauses into `src/opt/levers.py::OPTLevers`.
+Retiring was not a tidy-up in either place: the declaration refuses **more** than the clause did
+— `FAB_DISCOVER=3.0` resolved on this tree until the pair landed — so dropping the pair to keep
+the clause would have removed a working refusal to make a check green. One sentence did not survive
+the move intact and is recorded as corrected rather than requoted: `damp > 1.0`'s message said a
+value above 1.0 amplifies every failed restart, and `src/opt/api.py::maybe_step` guards its one
+`st.restart_amp *= …` with `float(opt.lr_restart_damp) < 1.0`, so above 1.0 the loop goes inert
+and amplifies nothing. **That prose had rotted while it could still print**, which is the sharpest
+argument in this section against leaving a measurement inside a `raise`.
+
+**Two are open, and they are named here rather than carried silently** — `SIG_WARMUP_MIN_FRAC` at
+`src/sig/api.py::warm_up` and `TOK_DROPOUT` at `src/tok/api.py::build_vocabulary`, both owned
+outside this document. Driven 2026-09-14 through the real `spine.assemble.build`, one configuration
+per fresh process, and in each case the **declaration** is what answers:
+
+```
+SIG_WARMUP_MIN_FRAC=-0.5  LeverError: SIG_WARMUP_MIN_FRAC=-0.5 is outside its declared domain [0.0, 1.0] -- BOTH ENDS INCLUSIVE
+SIG_WARMUP_MIN_FRAC=0.0   resolved        SIG_WARMUP_MIN_FRAC=1.0   resolved
+TOK_DROPOUT=-0.5          LeverError: TOK_DROPOUT=-0.5 is outside its declared domain [0.0, 1.0] -- BOTH ENDS INCLUSIVE
+TOK_DROPOUT=1.5           LeverError: TOK_DROPOUT=1.5 is outside its declared domain [0.0, 1.0] -- BOTH ENDS INCLUSIVE
+TOK_DROPOUT=1.0           resolved        TOK_DROPOUT=0.0           resolved
+```
+
+`src/sig/levers.py::SIGLevers` describes that lever's negative end as *"refused TWICE now"*. Both
+rules do exist; what the sentence does not say is that only one of them can be reached by setting an
+environment variable, which is the whole of O15's finding and is why the fork is a **ruling** and
+not a cleanup. `tests/test_fabric.py::check_f4_negative_magnitude_levers_refused` was the same fact
+arriving behaviourally; it was repaired by moving its subject rather than its value — it still
+drives `-0.5`, and now asserts **which layer owns which lever**, reads that split off the
+declarations instead of a list typed into the test, and drives a second door where a `Config` built
+directly reaches the body with no `coerce` behind it. `tests/test_fabric.py` is green.
 
 ---
 
@@ -823,6 +876,14 @@ as `src/lm/api.py::resolve` carries it rather than
 silently modernised; the repair to that file belongs to its owner and is filed, and whoever makes it
 must requote here in the same commit or `tests/test_ownership.py::check_o13_citations_resolve` will
 say so.
+*(`src/capacity/api.py::new_valve` carries a **second** quotation of the same kind, attributing to
+`src/sig/levers.py::SIGLevers` a sentence about `choices` and "no numeric range" that `SIGLevers`
+**no longer contains** — that file was rewritten on 2026-09-14 and now says `Lever` carries
+`choices` and an optional `domain=`, which exactly one of its levers declares. O13 does not reach
+that one: its quotation arm skips a span carrying code punctuation, and this span carries `::`. So
+it is a false quotation that no check will report, filed against `capacity`'s owner with the
+replacement text, and named here because this document has now recorded the same failure twice in
+the same function.)*
 `Caps.headroom(n)` exists so the negative clamp (C30) **cannot be written** at a call site.
 
 **An overshooting lift is CLAMPED at the hard ceiling, not refused — the owner's ruling of

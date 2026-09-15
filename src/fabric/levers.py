@@ -379,10 +379,32 @@ class FABLevers(LeverSet):
     # compared is a cosine distance, and a cosine distance runs over [0, 2]. A hi of 1.0 would refuse
     # 1.5, a threshold that mechanism can still evaluate and that only recruits on material pointing
     # AWAY from every region. The low end is the declared off: the same function gates the whole
-    # branch on `discover > 0`. IT IS ALSO A SECOND ANSWER TO A QUESTION ALREADY RULED, AND THAT COST
-    # SOMETHING: fabric/api.py::build refuses this lever below zero too, and now cannot -- no
-    # environment reaches it, because a domain is checked at the first read. That arm is not deleted
-    # and still covers the other ten levers in its list; the cost is recorded at the foot.
+    # branch on `discover > 0`. IT REPLACED A SECOND ANSWER TO THE SAME QUESTION AND IT CARRIES THAT
+    # ANSWER'S MEASUREMENT RATHER THAN DELETING IT. src/fabric/api.py::build refused this lever below
+    # zero by hand, as one entry in a table of eleven magnitude levers, until 2026-09-14. A domain is
+    # checked in spine/lever.py::Lever.coerce at the FIRST read, so that clause could no longer fire
+    # for discover from any environment, and tests/test_ownership.py::check_o15_domain_agrees_with_read_site
+    # reported it as the untrippable guard it had become. The clause was RETIRED for this lever --
+    # one fact in one place, and the fork that check states is retire-or-drop and never both -- so
+    # WHAT IT WAS MEASURED TO BE ABOUT IS WRITTEN HERE, beside the bound that now holds it:
+    #   A NEGATIVE discover IS NOT A REVERSED MECHANISM, IT IS BIT-IDENTICAL TO 0.0. Measured on one
+    #   forward and one backward pass: aux_loss, the composed loss and the sum of |grad|max over both
+    #   adapter banks, the halt prior, every shared module, the head and the incoming representation
+    #   are the same at a negative as at 0.0, bit for bit, because _ground_update's whole branch is
+    #   guarded at `discover > 0`. The ONLY thing a negative changed was the REPORT, and that is the
+    #   whole argument for the low end: the fab.discover gate printed the operator's own negative in
+    #   its threshold ("cosine distance > -0.5") above a reason that hardcoded a 0 the pass never
+    #   read. Both halves were answered rather than one: the reasons now print the value they read
+    #   (tests/test_fabric.py::check_f7_gate_reasons_print_what_they_read holds that), and the value
+    #   is refused rather than described, which makes the false sentence impossible to produce
+    #   instead of correct once. A gate reason is a report and the mechanism still runs.
+    # THE ENDPOINTS AGREE AND WERE CHECKED, not assumed: `v < 0.0` is FALSE for -0.0 and -0.0 is
+    # inside [0.0, 2.0], 0.0 and 2.0 both build, -1e-320 is refused by both rules. So this is
+    # pre-emption and not the one-point disagreement OPT_LR_DECAY=1.0 is the live example of.
+    # WHAT THE MOVE COST is stated at the foot of this file and in src/fabric/api.py::build's own
+    # paragraph, and it is one door: a Config no declaration produced reaches that function with no
+    # coerce behind it, and on that path the ten levers that kept the hand-written clause are still
+    # refused and this one is not.
     # MERGED IN: EXPERT_NEW_DIST (0.5), the same threshold on the legacy router, which MINTED a new
     # expert at `(1 - sims[j]) > new_dist` (:3051) where this one recruits the coldest existing node
     # (:2421-2424). One concept, two populations, only one of which runs; the 0.5 is not carried.
@@ -1077,17 +1099,28 @@ class FABLevers(LeverSet):
 # spine/lever.py::REFUSE_NON_FINITE_FLOAT and by src/fabric/api.py::build instead. The floor and the
 # domain are complements, not alternatives.
 #
-# WHAT THE ELEVEN COST A GUARD THAT WAS ALREADY THERE -- STATED, NOT HIDDEN, AND NOTHING REMOVED.
-# ONE of the eleven overlaps a refusal this package already shipped: src/fabric/api.py::build refuses
-# eleven negative magnitude levers and FAB_DISCOVER is one of them. A domain is checked in
-# spine/lever.py::Lever.coerce, at the first read, so that arm can no longer fire for FAB_DISCOVER
-# from any environment -- the untrippable-guard class this tree names, arrived at deliberately this
-# time rather than discovered. It is NOT deleted and must not be: it still covers the other ten, and
-# it is still the only thing standing for any caller that reaches build() with a Config this
-# declaration did not produce. The same is true one layer out for `pressure` and
-# spine/derive.py::operating_population. tests/test_fabric.py::check_f4_negative_magnitude_levers_refused
-# is the check that noticed, which is the check working; its own repair is that owner's, and it is a
-# WIDENING -- record which layer answered -- and never a narrowing of the eleven it examines.
+# WHAT THE ELEVEN COST A GUARD THAT WAS ALREADY THERE, AND WHAT THAT COST HAS SINCE BEEN SETTLED AS.
+# ONE of the eleven overlapped a refusal this package already shipped: src/fabric/api.py::build
+# refused eleven negative magnitude levers by hand and FAB_DISCOVER was one of them. A domain is
+# checked in spine/lever.py::Lever.coerce, at the first read, so that arm could no longer fire for
+# FAB_DISCOVER from any environment -- the untrippable-guard class this tree names, arrived at
+# deliberately this time rather than discovered. The paragraph that stood here said the arm was NOT
+# deleted and must not be. THAT RULING WAS REVERSED ON 2026-09-14 and this is the sentence that says
+# so, because a reader who trusts the old one is trusting a guard that cannot run:
+# tests/test_ownership.py::check_o15_domain_agrees_with_read_site states the fork as retire the
+# read-site clause and carry its measurement to the declaration, or drop the domain and leave the
+# ruling where it was argued -- NEVER BOTH, because the second refusal is a guard a future reader
+# trusts and a future edit silently breaks. RETIRED, on this argument and per this lever: the pair
+# refuses everything that clause refused for discover AND a measured ceiling it never had
+# (FAB_DISCOVER=3.0 resolved on this tree until the pair landed), so dropping the pair would have
+# removed a working refusal to keep a line no environment can reach. The measurement is now at the
+# declaration, where the bound is. THE COST IS ONE DOOR AND IT IS NOT HIDDEN: a caller that reaches
+# build() with a Config this declaration did not produce is refused for the other ten and not for
+# this one. Nothing in src/ opens that door and
+# tests/test_fabric.py::check_f4_negative_magnitude_levers_refused drives it on all eleven so the
+# asymmetry is a reading rather than a claim. The `pressure` overlap one layer out is NOT the same
+# case and is NOT retired: spine/derive.py::operating_population refuses on a coupling, for callers
+# this declaration does not stand in front of, and O15 does not report it.
 # The other ten pairs duplicate no existing guard in this package.
 #
 # AND WHY ONLY ELEVEN, SO THE SILENCE OF THE OTHER SEVENTY-ONE IS NOT READ AS A VERDICT. A pair was

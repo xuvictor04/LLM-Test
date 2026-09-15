@@ -279,17 +279,20 @@ those clamps survive elsewhere and one does not, which is worth knowing before s
     accum = 0           SILENTLY CLAMPED to 1 by derive.accum_due (`k = max(1, int(accum))`).
     lr_wavelength < 0   harmless only because the sentinel path treats anything falsy as "one wavelength
                         spans the run"; a negative is not falsy and has no meaning.
-    lr_restart_damp>1   CAUGHT TWICE NOW, and the row stays because the reason is still the reason: the
+    lr_restart_damp>1   CAUGHT ONCE, HERE, and the row stays because the reason is still the reason: the
                         damping multiplies the restart amplitude cumulatively, so a value above 1.0
                         READS AS a request to amplify every failed restart -- the ratchet the lever
                         exists to stop, driven by the lever that stops it. The old `min(1.0, ...)` at
-                        :4739 was once the only thing standing there; src/opt/api.py::build refuses it
-                        at startup, and `domain=(0.0, 1.0)` on the declaration refuses it at the first
-                        read. WHAT IT WOULD HAVE DONE IS NOT THAT AMPLIFICATION EITHER, read at the
-                        site: src/opt/api.py::maybe_step guards its one `st.restart_amp *= ...` with
+                        :4739 was once the only thing standing there; `domain=(0.0, 1.0)` on the
+                        declaration now refuses it at the first read, and that is the whole of it --
+                        src/opt/api.py::build's two by-name clauses over this lever were RETIRED on
+                        2026-09-14 because the pair reached every value before them. WHAT IT WOULD
+                        HAVE DONE IS NOT THAT AMPLIFICATION EITHER, read at the site:
+                        src/opt/api.py::maybe_step guards its one `st.restart_amp *= ...` with
                         `float(opt.lr_restart_damp) < 1.0`, so above 1.0 the loop never multiplies and
-                        the closed loop goes inert. The startup refusal's own message says AMPLIFIES;
-                        that wording is opt/api.py's to correct, not this file's.
+                        the closed loop goes inert. The startup refusal's message said AMPLIFIES to
+                        the end; it is gone with the clause and the corrected sentence is on the
+                        declaration.
 
 IMPORT STYLE, AND WHY IT DEPARTS FROM THE ASSIGNMENT'S SKETCH. `from ..spine.lever import ...` cannot
 work here: every entry point in this tree puts `src/` ITSELF on sys.path (tests/test_derive.py::<module>,
@@ -564,6 +567,11 @@ class OPTLevers(LeverSet):
     # cannot say "strictly below", so this is the outermost interval defensible here and
     # src/opt/api.py::build keeps `not 0.0 <= min_frac < 1.0` to refuse 1.0 by name -- measured
     # constant at peak on all 190 post-warmup steps of that run, which is what its message says.
+    # THAT CLAUSE IS WHY THIS LEVER'S READ SITE SURVIVED 2026-09-14 AND THE OTHER TWO DID NOT. The
+    # damp and decay clauses refused exactly what their pairs refuse, so nothing was left for them
+    # and they retired into the declarations; this one refuses ONE POINT -- 1.0 -- that its pair
+    # admits, so the two do not overlap and both are live. A pair is the outermost interval a
+    # declaration can defend, never the tightest the mechanism has.
     # Census: LR_MIN_FRAC -> OPT_LR_MIN_FRAC, verdict keep, default 0.05 (CENSUS.md:390). Field corrected
     # from `OPT_LR_MIN_FRAC` to `lr_min_frac` (DEFECT 1).
     # ON GOAL B DIRECTLY, AND THE SOURCE STATES IT AT THE FUNCTION THAT USES IT (:4752): "this is a
@@ -637,12 +645,33 @@ class OPTLevers(LeverSet):
     # so only a ratio in 0..1 SHRINKS the swing this lever exists to shrink. Below 0.0 the product
     # flips the swing's sign. Above 1.0 the number asks for an amplification the mechanism will not
     # perform either: the one multiplication is guarded by `float(opt.lr_restart_damp) < 1.0`, so
-    # the request reads as the loop going dead rather than as the ratchet, and it is refused by name
-    # in src/opt/api.py::build before that can be mistaken for a schedule settling. THE INTERVAL IS
+    # the request reads as the loop going dead rather than as the ratchet. THE INTERVAL IS
     # CLOSED BECAUSE BOTH ENDS ARE SETTINGS AND IT BOUNDS THE SPELLING, NOT THE MECHANISM: 0.0
     # collapses the swing onto the floor at the first loss, and 1.0 is the identity multiplier at
     # which no losing cycle can ever damp, which src/opt/api.py::counters already prints as its own
     # gate arm.
+    # THIS PAIR IS THE ONLY REFUSAL OVER THIS LEVER, AS OF 2026-09-14, AND IT CARRIES TWO SENTENCES
+    # THAT USED TO BE SOMEWHERE ELSE. src/opt/api.py::build refused `damp > 1.0` and `damp < 0.0` by
+    # name until this pair landed, at which point neither clause could reach a value again --
+    # tests/test_ownership.py::check_o15_domain_agrees_with_read_site reported both, and the ruling
+    # taken was to retire them here rather than drop the pair. What the two messages argued, kept
+    # because it is the part worth keeping:
+    #   ABOVE 1.0 -- "the damping multiplies the restart amplitude CUMULATIVELY, so a value above
+    #     1.0 AMPLIFIES every failed restart instead of shrinking it -- the ratchet this lever
+    #     exists to stop, driven by the lever that stops it." THAT SENTENCE WAS ALREADY WRONG WHEN
+    #     IT WAS RETIRED and is recorded here corrected rather than requoted: src/opt/api.py::
+    #     maybe_step guards its one `st.restart_amp *= ...` with `float(opt.lr_restart_damp) < 1.0`,
+    #     so above 1.0 nothing is multiplied and the closed loop goes INERT. The request is still
+    #     refused, for the reason two lines up -- a number that asks for the ratchet is not a
+    #     damping -- and no longer for a consequence the code does not have.
+    #   BELOW 0.0 -- "a negative multiplier flips the sign of the restart swing", which is the same
+    #     fact the third sentence of this comment states from the arithmetic.
+    #   AND THE OLD CLAMP, which is why either existed: `min(1.0, max(0.0, _f("LR_RESTART_DAMP",
+    #     0.5)))` at :4739 silently rewrote the operator's number, and a refusal replaced it.
+    # WHAT AN OPERATOR NOW READS AT A BAD VALUE is spine/lever.py::Lever.coerce's message, which
+    # names the lever, the value and this interval and none of the above. That is the cost of the
+    # move and it was weighed: the alternative left a guard nothing could trip, carrying a sentence
+    # already false, which is how the AMPLIFIES claim survived as long as it did.
     # Census: LR_RESTART_DAMP -> OPT_LR_RESTART_DAMP, verdict keep, default 0.5 (CENSUS.md:392). Field
     # corrected from `OPT_LR_RESTART_DAMP` to `lr_restart_damp` (DEFECT 1).
     # THE ONLY CLOSED-LOOP ELEMENT IN THE ENTIRE SCHEDULE, and the defect it answers is measured rather
@@ -689,9 +718,15 @@ class OPTLevers(LeverSet):
     # its seed count, because PLAN 3.8 forbids a verdict on n=1 and a damped restart IS a verdict.
     # THE OLD CLAMP IS GONE AND WAS NOT REPLACED BY ONE. The old read was `min(1.0, max(0.0, _f(...)))`
     # at :4739, which silently rewrote the operator's number; what stands in its place REFUSES instead --
-    # `domain=(0.0, 1.0)` above at the first read, and src/opt/api.py::build by name at startup. Between
-    # them, OPT_LR_RESTART_DAMP=1.5 no longer reaches the schedule at all. See the header's guard table
-    # for what it would have done if it had, which is not what that refusal's message says.
+    # `domain=(0.0, 1.0)` above, at the first read, and as of 2026-09-14 that is the WHOLE of it: the
+    # two clauses src/opt/api.py::build used to add are retired into this pair, because a declaration
+    # that refuses first leaves a read-site clause nothing to refuse and an untrippable guard is worse
+    # than no guard. Driven on 2026-09-14, one fresh process per cell, 20 values from -1e9 to 1e26
+    # through a real spine.assemble.build and a real src/opt/api.py::build, with this pair in place and
+    # then neutralised in a scratch copy so the retired clauses answered alone: the verdict is the same
+    # on every cell, 0.0 and 1.0 build under either, and -1e-09 and 1.0000000000000002 are refused
+    # under either. OPT_LR_RESTART_DAMP=1.5 does not reach the schedule, and now says so once.
+    # See the header's guard table for what it would have done if it had.
 
     lr_decay = Lever(1.0, "Strength of a monotone envelope over successive restart peaks, so each cycle "
                           "keeps its own high phase while the ceiling comes down.", U.FRACTION,
@@ -704,9 +739,23 @@ class OPTLevers(LeverSet):
     # step-for-step IDENTICAL curve to decay=0.0, so a negative asks for something and silently
     # receives the pre-2026-08-26 behaviour; at decay=2.0 the weight drives the blend NEGATIVE and
     # the floor clamp catches it, leaving 110 of 200 steps pinned at lr_min_frac against 45 at the
-    # shipped 1.0 -- an envelope that has degenerated into the floor. Both endpoints are settings
-    # src/opt/api.py::build names in its own refusal (0.0 restores the full-peak restart, 1.0 is
-    # this default), so an exclusive end would refuse a value a shipped body accepts BY NAME.
+    # shipped 1.0 -- an envelope that has degenerated into the floor. BOTH ENDPOINTS ARE SETTINGS:
+    # 0.0 restores the pre-2026-08-26 full-peak restart and 1.0 is this default and the full
+    # envelope, so an exclusive end would refuse a value the shipped body runs on today.
+    # THIS PAIR IS THE ONLY REFUSAL OVER THIS LEVER, AS OF 2026-09-14. src/opt/api.py::build carried
+    # `not 0.0 <= decay <= 1.0` -- the same interval, the same two closed ends -- until this pair
+    # landed and left it nothing to refuse; tests/test_ownership.py::
+    # check_o15_domain_agrees_with_read_site reported it and the ruling taken was to retire the
+    # clause here rather than drop the pair. Its message said "0.0 restores the pre-2026-08-26
+    # behaviour (restarts return to full peak) and 1.0 is the full envelope; the values between are
+    # meaningful and the ones outside are not", which is the sentence two lines up, and the numbers
+    # above are what a reader now has instead of it: the -1.0 and 2.0 curves, driven. What an
+    # operator reads at a bad value is spine/lever.py::Lever.coerce's message, which names this
+    # interval and not the measurement -- the cost of the move, weighed against a guard that could
+    # not run. DRIVEN BEFORE RETIRING: 20 values from -1e9 to 1e26, one fresh process each, through
+    # a real spine.assemble.build and a real src/opt/api.py::build, with this pair in place and then
+    # neutralised in a scratch copy -- identical verdict on every cell, both endpoints accepted by
+    # both layers, both neighbours (-1e-09, 1.0000000000000002) refused by both.
     # Census: LR_DECAY -> OPT_LR_DECAY, verdict keep, default 1.0 (CENSUS.md:389). Field corrected from
     # `OPT_LR_DECAY` to `lr_decay` (DEFECT 1).
     # ITS FAMILY TAG HAD ALREADY DRIFTED, which is the whole reason the ownership spine exists: _SPEC

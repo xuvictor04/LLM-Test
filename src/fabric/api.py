@@ -455,17 +455,19 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     answer and is the owner's open question.
 
     LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode,
-                 depth0, hops, balance, ponder, emb_var, ec_w, explore, discover, div_w, hop_sup,
+                 depth0, hops, balance, ponder, emb_var, ec_w, explore, div_w, hop_sup,
                  ind_w, ae_w, dom_frac,
-                 alpha, bal_floor, birth_jitter, cent_ema, comp_ema, cull_frac, depth_eps, err_fast,
-                 err_slow, fail_tol, halt_max, lr_amin, lr_boost, lr_cycle, lr_gamma, lr_maxr,
-                 merge_dist, mut, mut_big, mut_big_p, new_frac, parent_max, plateau, rescue,
-                 route_region_w, route_t, shift_tol, spawn_floor, spawn_mult, xover, z
+                 alpha, bal_floor, birth_jitter, cent_ema, comp_ema, cull_frac, depth_eps, discover,
+                 err_fast, err_slow, fail_tol, halt_max, lr_amin, lr_boost, lr_cycle, lr_gamma,
+                 lr_maxr, merge_dist, mut, mut_big, mut_big_p, new_frac, parent_max, plateau,
+                 rescue, route_region_w, route_t, shift_tol, spawn_floor, spawn_mult, xover, z
                  (the second block is every remaining FLOAT lever, read ONLY for the finiteness
                  refusal above and for nothing else -- their behaviour is forward's, manage's or, for
                  the 23 with no live reader yet, P4's. They are named here because this function does
                  now read them, and a LEVERS READ line that omitted them would be the claim-without-a-
-                 read this block's own history is made of, in reverse)
+                 read this block's own history is made of, in reverse. `discover` MOVED into this
+                 block on 2026-09-14: its negative refusal retired to its own declaration, and the
+                 only thing this function reads it for now is the finiteness sweep)
     WIRES READ: d_operating_population
     DID IT FIRE: fab.built, fab.n0, fab.cap, fab.operating_population (from
                  derive.operating_population, printed BESIDE the cull gate so the setpoint and the
@@ -495,7 +497,10 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
             f"needs the R matrix, the per-expert SRC marks and the `ctrl` summary, none of which "
             f"exist in this tree. Refused rather than silently running soc.")
 
-    # ELEVEN MAGNITUDE LEVERS MAY NOT BE NEGATIVE, AND THE REFUSAL IS AT STARTUP FOR THE REASON
+    # ELEVEN MAGNITUDE LEVERS MAY NOT BE NEGATIVE -- TEN OF THEM REFUSED BY THE TABLES BELOW AND
+    # THE ELEVENTH, FAB_DISCOVER, BY ITS OWN DECLARATION SINCE 2026-09-14 (the paragraph above those
+    # tables says why the ruling moved and src/fabric/levers.py::FABLevers carries the measurement
+    # it moved with) -- AND THE REFUSAL IS AT STARTUP FOR THE REASON
     # src/capacity/api.py::new_valve gives for CAP_LIFT, in its own words about its own lever: "A
     # valve that lowers on evidence it should raise is not a configuration of this mechanism; it is
     # a different mechanism wearing its name." Read here as: a mechanism running backwards on the
@@ -536,7 +541,10 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     #
     # (2) THE TERM IS GUARDED AT `> 0.0` AND A NEGATIVE IS EXACTLY "OFF" -- aux, every counter and
     #     every gate bit-identical to the same run at 0.0 for all eight of FAB_EC_W, FAB_EXPLORE,
-    #     FAB_DISCOVER, FAB_DIV_W, FAB_HOP_SUP, FAB_IND_W, FAB_AE_W and FAB_DOM_FRAC. Nothing runs
+    #     FAB_DISCOVER, FAB_DIV_W, FAB_HOP_SUP, FAB_IND_W, FAB_AE_W and FAB_DOM_FRAC. MEASURED on
+    #     eight and REFUSED BELOW ON SEVEN: FAB_DISCOVER's negative is refused one layer earlier by
+    #     its declared domain, and the measurement in this paragraph is the one that moved there
+    #     with it. Nothing runs
     #     backwards, so the defect is entirely in the REPORT: each gate prints the operator's own
     #     negative in its `value` and then a reason asserting the value is 0 one line below it --
     #     "ec_w=-1.0" over "FAB_EC_W=0: allocation by loss pressure only". REFUSING rather than
@@ -628,8 +636,9 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # a value ABOVE any of these; FAB_BALANCE=5.0 is a large pressure and still the pressure the
     # lever names. NOR IS THE NEGATIVE SIDE OF EVERY FLOAT SETTLED HERE, and this is a NEGATIVE
     # ruling and not a list of levers left unchecked -- the finiteness rule above covers all 43. The
-    # eleven below are refused negative because each is a weight on an additive term or a share and a
-    # negative one is measured to reverse or to misreport it.
+    # ten below -- and FAB_DISCOVER, the eleventh of the same ruling, at its declaration -- are
+    # refused negative because each is a weight on an additive term or a share and a negative one is
+    # measured to reverse or to misreport it.
     # THE EIGHT THAT ARE NOT REFUSED NEGATIVE ARE NOW MEASURED, WHICH THEY WERE NOT WHEN THIS
     # PARAGRAPH FIRST SAID SO, and the measurement is written down here rather than turned into a
     # guard, because a refusal is a RULING and this round's was the finiteness one. Driven one at a
@@ -657,19 +666,70 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # exactly "off", which is the same split the eleven have. Refusing them is a defensible next
     # ruling and it is NOT taken here; what is not acceptable is the sentence that stood in this
     # place claiming they were unmeasured, which is why the numbers are above it.
+    # ==============================================================================================
+    # FAB_DISCOVER IS NOT IN THE TABLE BELOW ANY MORE, AND ITS ABSENCE IS THE RULING RATHER THAN AN
+    # OVERSIGHT. RETIRED 2026-09-14; WHAT IT REFUSED IS NOW REFUSED EARLIER, BY ITS DECLARATION.
+    # ==============================================================================================
+    # It was the third entry of `_gated_off`. src/fabric/levers.py::FABLevers now declares
+    # `discover` with `domain=(0.0, 2.0)` -- a COSINE DISTANCE, whose ceiling is 2.0 and not the 1.0
+    # its U.FRACTION label invites -- and spine/lever.py::Lever.coerce checks a domain at the FIRST
+    # read, before a Config exists and long before this function runs. So one fact was standing in
+    # two places and the SECOND of them could never run:
+    # tests/test_ownership.py::check_o15_domain_agrees_with_read_site read both intervals and
+    # reported it -- this clause covers (-inf, 0.0), the declaration admits only [0.0, 2.0], nothing
+    # was left for the clause to refuse. That is the untrippable-guard family, 60 of the founding
+    # survey's 475 records, arrived at by an edit rather than found in the old tree.
+    #
+    # THE FORK O15 STATES IS RETIRE-OR-DROP AND NEVER BOTH, AND THIS IS THE ARGUMENT FOR RETIRING.
+    # The pair says everything this clause said about THIS lever and one measured thing more. The
+    # clause refused (-inf, 0.0); the declaration refuses (-inf, 0.0) U (2.0, inf), and the upper
+    # half is not decoration -- FAB_DISCOVER=3.0 resolved on this tree until the pair landed and is
+    # refused now. Dropping the pair to keep this line would therefore have REMOVED a working
+    # refusal to make a check green, to save a line no environment can reach. Checked at the
+    # ENDPOINTS too, because a domain is CLOSED at both ends and the two could have disagreed at one
+    # point the way OPT_LR_DECAY=1.0 does: they do not. `v < 0.0` is FALSE for -0.0, and -0.0 is
+    # inside [0.0, 2.0]; 0.0 and 2.0 both build; -1e-320 is refused by both. The two rules agree at
+    # every value, which is what makes this pre-emption and not a disagreement.
+    #
+    # THE MEASUREMENT MOVED WITH THE RULING AND WAS NOT DELETED. What this clause knew about
+    # discover -- that `_ground_update` guards the whole branch at `discover > 0`, so a negative is
+    # bit-identical to 0.0 in aux, in every counter and in every gate, and the only thing it changes
+    # is that fab.discover prints the operator's negative in its `value` beside a reason asserting
+    # the value is 0 -- is quoted at the declaration, where the bound now is. A domain with no
+    # argument beside it is the U.FRACTION mistake in a new costume, and this package does not ship
+    # one.
+    #
+    # WHAT RETIRING COST, AT THE ONE DOOR A DECLARATION DOES NOT STAND IN, MEASURED AND NOT WAVED
+    # AWAY. A Config that did not come from this declaration reaches this function with no coerce
+    # behind it -- spine/lever.py::Config is an ordinary object and tests/test_couplings.py builds
+    # one directly today -- and on THAT path a negative `discover` is now accepted here, where the
+    # other ten are still refused. Nothing in src/ opens that door, and the asymmetry is a reading
+    # rather than a claim: tests/test_fabric.py::check_f4_negative_magnitude_levers_refused drives
+    # BOTH doors on all eleven and prints which layer answered at each.
+    #
+    # AND THE SHAPE MATTERS, BECAUSE ONE OF THESE TWO REFUSALS COULD NOT HAVE BEEN RETIRED THIS WAY.
+    # This one is a HAND-TYPED table of names and values, so retiring a lever is deleting the entry
+    # somebody typed. The finiteness refusal above is the generated one -- it enumerates every float
+    # lever this package declares through spine/lever.py::Config.keys and ::Config.lever -- and
+    # excluding a single lever from THAT would be writing a name back into a rule whose whole point
+    # is that it has no list to go stale. It needs no exclusion: it still covers `discover`, because
+    # a domain with two finite ends already refuses nan, +inf and -inf, so the two never disagree.
     _applied = (("FAB_BALANCE", float(fab.balance)), ("FAB_PONDER", float(fab.ponder)),
                 ("FAB_EMB_VAR", float(fab.emb_var)))
     _gated_off = (("FAB_EC_W", float(fab.ec_w)), ("FAB_EXPLORE", float(fab.explore)),
-                  ("FAB_DISCOVER", float(fab.discover)), ("FAB_DIV_W", float(fab.div_w)),
-                  ("FAB_HOP_SUP", float(fab.hop_sup)), ("FAB_IND_W", float(fab.ind_w)),
-                  ("FAB_AE_W", float(fab.ae_w)), ("FAB_DOM_FRAC", float(fab.dom_frac)))
+                  ("FAB_DIV_W", float(fab.div_w)), ("FAB_HOP_SUP", float(fab.hop_sup)),
+                  ("FAB_IND_W", float(fab.ind_w)), ("FAB_AE_W", float(fab.ae_w)),
+                  ("FAB_DOM_FRAC", float(fab.dom_frac)))
     # `v < 0.0` AND NOT A SIGN TEST, AND A CHECK NOW DEPENDS ON THAT. -0.0 is not less than 0.0, so
     # NEGATIVE ZERO is admitted here, and it is off exactly as +0.0 is off -- MEASURED on all eleven
     # at once, one forward and one backward each: aux_loss 0.0 both ways, the composed loss
     # 2.4948575496673584 both ways, and the sum of |grad|max over both adapter banks, the halt prior,
     # every shared module, the head and the incoming representation 0.7345285937190056 both ways,
     # bit for bit. That makes {+0.0, -0.0} the ENTIRE reachable domain of the nine `<= 0.0` gate
-    # branches below.
+    # branches below. The claim is unchanged for FAB_DISCOVER and the LAYER that holds it is not:
+    # its `domain=(0.0, 2.0)` admits -0.0 by the same rule (`not -0.0 < 0.0`) and refuses every other
+    # negative at the first read, so the nine still have exactly two reachable readings between them
+    # -- eight of the nine by the line below and discover's by its declaration.
     # tests/test_fabric.py::check_f7_gate_reasons_print_what_they_read is built on precisely that: it
     # sweeps all nine levers at both zeros because two distinct readings are what make a hardcoded
     # constant in a reason detectable at all, and one reading would leave it green over the defect it
@@ -680,9 +740,10 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # ruling owes F7 a different second value, and there is no third one in this domain to reach for.
     # Neither this body nor that check may decide it alone; it is filed in .rework/audits/j_fabric.json
     # as a question for the owner rather than settled here.
-    # NOT-A-NUMBER IS NOT A MAGNITUDE EITHER, AND `v < 0.0` IS FALSE FOR IT -- which is why the eleven
-    # below are ALSO in the finiteness sweep above, and are now caught by it at all three spellings
-    # rather than at two. What that block replaced was a `v != v or v == float("inf")` over exactly
+    # NOT-A-NUMBER IS NOT A MAGNITUDE EITHER, AND `v < 0.0` IS FALSE FOR IT -- which is why all
+    # eleven are ALSO in the finiteness sweep above (it enumerates every float lever, so retiring
+    # FAB_DISCOVER from the table below took nothing away from it), and are now caught by it at all
+    # three spellings rather than at two. What that block replaced was a `v != v or v == float("inf")` over exactly
     # these eleven names: it caught nan and +inf, left -inf to the `v < 0.0` arm below (which reported
     # it as a negative magnitude rather than as an unreal one), and covered eleven of this package's
     # forty-three float levers. Measured at the suite's own widths before the widening: FAB_BALANCE=nan
@@ -705,12 +766,12 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                f"1.9836745 at 0.0, routing mass pushed inward, while the fab.balance gate read "
                f"'no load-balance pressure' and the C2 alarm fab.balance_nonzero stayed at 0). "
                if _rev else "")
-            + (f"SWITCHED OFF AND MISREPORTED: {', '.join(_off)} -- these eight are guarded at "
+            + (f"SWITCHED OFF AND MISREPORTED: {', '.join(_off)} -- these seven are guarded at "
                f"`> 0.0`, so a negative is bit-identical to 0.0 in aux, in every counter and in "
                f"every gate, and the only thing it changes is that the gate prints the negative in "
                f"its value beside a reason asserting the value is 0. " if _off else "")
             + f"Set the lever to 0.0 to switch the mechanism off -- that is what a negative already "
-              f"does on the eight and what a negative does NOT do on the three -- or to a positive "
+              f"does on the seven and what a negative does NOT do on the three -- or to a positive "
               f"magnitude to run it. Refused here, at startup, rather than described by a Gate, "
               f"because a Gate reason is a report and the mechanism still runs: "
               f"src/capacity/api.py::new_valve makes the same ruling for CAP_LIFT and states "

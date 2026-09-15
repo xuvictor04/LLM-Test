@@ -129,7 +129,9 @@ _NONFINITE_MEASURED = {
         "this package's ONLY closed loop -- the goal-B mechanism that shrinks a restart which failed "
         "to beat its inherited held-out. maybe_step clause 4 is `if not paid and "
         "float(opt.lr_restart_damp) < 1.0:`, False for nan, so the loop is dead while both `damp > "
-        "1.0` and `damp < 0.0` admit it from adjacent lines that refuse +inf and -inf by name. "
+        "1.0` and `damp < 0.0` admitted it from adjacent lines that refused +inf and -inf by name "
+        "(those two clauses were RETIRED on 2026-09-14 into this lever's `domain=(0.0, 1.0)`, which "
+        "refuses all three -- nan included, because the domain check is an inverted chain). "
         "Measured over 1000 steps on a four-cycle horizon with a LOSING Reading on every step: at "
         "the shipped 0.5, wraps 3 / detected 2 / damped 1 and restart_amp 0.5; at nan, the identical "
         "wraps 3 / detected 2 / readings 1000 and damped 0, restart_amp still 1.0, with Gate "
@@ -137,14 +139,17 @@ _NONFINITE_MEASURED = {
         "verdict over two real losing restarts",
     "OPT_LR_MIN_FRAC":
         "the schedule's floor as a fraction of peak. Already refused at nan, +inf and -inf by `not "
-        "0.0 <= min_frac < 1.0` three refusals below, which names BOTH ends of the interval and so "
-        "is one of the two guards in this function NaN does not walk through; it is in this block "
+        "0.0 <= min_frac < 1.0` in opt/api.py::build, which names BOTH ends of the interval and so "
+        "is the one guard in this function NaN does not walk through; that clause STAYS beside this "
+        "lever's `domain=(0.0, 1.0)` because it refuses a 1.0 the pair admits. It is in this block "
         "for the same reason the other five are -- so the rule is over the declaration set and not "
         "over a list of names that can go stale",
     "OPT_LR_DECAY":
-        "the strength of the monotone envelope over successive restart peaks. Already refused at "
-        "nan, +inf and -inf by `not 0.0 <= decay <= 1.0` two refusals below, the second of the two "
-        "inverted chains; in this block for the same reason as lr_min_frac",
+        "the strength of the monotone envelope over successive restart peaks. Was refused at nan, "
+        "+inf and -inf by `not 0.0 <= decay <= 1.0` in opt/api.py::build, the second of that "
+        "function's two inverted chains, until that clause was RETIRED on 2026-09-14 into this "
+        "lever's `domain=(0.0, 1.0)`, which refuses the same three at the first read; in this block "
+        "for the same reason as lr_min_frac",
 }
 
 
@@ -657,18 +662,23 @@ def build(opt: Config, *, param_groups, run_windows):
       * ANY OF THIS PACKAGE'S SIX FLOAT LEVERS NON-FINITE -- lr, weight_decay, grad_clip,
         lr_min_frac, lr_restart_damp, lr_decay -- enumerated through spine/lever.py::Config.keys and
         ::Config.lever rather than by name, so the env name in the message is generated and a float
-        lever added tomorrow is covered. This is FIRST because the eleven below cannot see what it
-        sees: nine of them are one-sided order comparisons and NaN is ordered against nothing, so it
-        was False for all nine while +inf additionally passed every lower bound. It closes FOUR
+        lever added tomorrow is covered. This is FIRST because the eight below cannot see what it
+        sees: seven of them are one-sided order comparisons and NaN is ordered against nothing, so it
+        was False for all seven while +inf additionally passed every lower bound. It closes FOUR
         VALUES per lever and BOUNDS NOTHING -- OPT_LR=1e30 still builds, still steps, still reports a
         healthy ledger, and leaves the base parameters at -5.999999901390138e+28. The body carries
-        the measurement for each of the six and the statement of what is left open.
-      * lr_restart_damp > 1.0 -- NOTHING catches it today and it INVERTS the mechanism: the damping
-        multiplies the restart amplitude CUMULATIVELY, so above 1.0 it AMPLIFIES every failed
-        restart -- the ratchet the lever exists to stop, driven by the lever that stops it. The old
-        `min(1.0, max(0.0, ...))` at :4739 was the only thing standing there.
-      * lr_restart_damp < 0.0; lr <= 0; weight_decay < 0; lr_min_frac outside [0.0, 1.0);
-        lr_decay outside [0.0, 1.0]; lr_warmup < 0; lr_wavelength < 0.
+        the measurement for each of the six and the statement of what is left open, including the
+        fact that spine/lever.py::REFUSE_NON_FINITE_FLOAT now refuses all four spellings one layer
+        ahead of it -- so this loop is armed for the arm in which that constant is switched off.
+      * lr <= 0; weight_decay < 0; lr_min_frac outside [0.0, 1.0); lr_warmup < 0;
+        lr_wavelength < 0.
+      * NOT lr_restart_damp OUTSIDE [0.0, 1.0] AND NOT lr_decay OUTSIDE [0.0, 1.0] -- RETIRED
+        2026-09-14 and refused one layer earlier instead: both declarations carry
+        `domain=(0.0, 1.0)` (opt/levers.py::OPTLevers), which refuses the same set at the first
+        read under the same owned name. Three clauses went, the pair took the same ruling and the
+        argument moved to the declaration comment with it. The block above the `if`s in this body
+        records what was driven to establish they cover the same set including both endpoints, and
+        why lr_min_frac's chain -- which refuses a 1.0 its own pair admits -- did NOT go with them.
       * accum < 1 -- LOUDLY. derive.accum_due does `k = max(1, int(accum))` and clamps in SILENCE,
         which is where a typo hides; batch_windows < 1 already raises UnitError in
         derive.flush_period_windows, and this one must not be quieter than that one.
@@ -706,8 +716,14 @@ def build(opt: Config, *, param_groups, run_windows):
     resolves and PRINTS a horizon -- warmup, wavelength, cycles -- for a run whose rate is flat, and
     it is counters() that marks every one of those mechanisms UNREACHABLE.
 
-    LEVERS READ: lr, weight_decay, lr_warmup, lr_wavelength, lr_restarts, lr_restart_damp,
-                 lr_decay, lr_min_frac, accum, batch_windows, grad_clip
+    LEVERS READ: lr, weight_decay, lr_warmup, lr_wavelength, lr_restarts,
+                 lr_restart_damp (still read here and NO LONGER BY NAME as of 2026-09-14 -- this
+                 lever's two by-name clauses retired into its declaration's domain; what reads it
+                 here now is the non-finite scan's getattr over every float lever, which is a read
+                 and is why the name stays on this line rather than becoming the false entry the
+                 lr_sched correction below is about),
+                 lr_decay (the same, for its one retired clause),
+                 lr_min_frac, accum, batch_windows, grad_clip
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: opt.build.calls (exactly 1), opt.build.wavelength_from_sentinel,
                  opt.build.warmup_clamped with opt.build.warmup_asked and opt.build.warmup (the two
@@ -741,16 +757,22 @@ def build(opt: Config, *, param_groups, run_windows):
     opt = opt.owned_by("OPT")
 
     # ==============================================================================================
-    # THE TWELFTH REFUSAL, AND IT IS FIRST BECAUSE THE ELEVEN BELOW CANNOT SEE WHAT IT SEES.
+    # THE TWELFTH REFUSAL, AND IT IS FIRST BECAUSE THE EIGHT BELOW CANNOT SEE WHAT IT SEES.
     #
-    # WHAT SHAPE THE ELEVEN HAVE, stated before the new one so a reader can check the claim. Nine of
-    # the eleven `raise` statements below are ONE-SIDED ORDER COMPARISONS -- `damp > 1.0`,
-    # `damp < 0.0`, `lr <= 0.0`, `weight_decay < 0.0`, `warmup_asked < 0`, `wavelength_asked < 0`,
-    # `n_accum < 1`, `n_batch_windows < 1`, `grad_clip < 0.0` -- each naming ONE side of a boundary.
-    # Two are INVERTED CHAINS naming an interval at both ends: `not 0.0 <= min_frac < 1.0` and
-    # `not 0.0 <= decay <= 1.0`. NaN is ordered against nothing, so it is False for every one of the
-    # nine and True for both of the two; +inf passes every lower bound. MEASURED, one lever per fresh
-    # subprocess through a real spine.assemble.build:
+    # WHAT SHAPE THE EIGHT HAVE, stated before the new one so a reader can check the claim. Seven of
+    # the eight `raise` statements below are ONE-SIDED ORDER COMPARISONS -- `lr <= 0.0`,
+    # `weight_decay < 0.0`, `warmup_asked < 0`, `wavelength_asked < 0`, `n_accum < 1`,
+    # `n_batch_windows < 1`, `grad_clip < 0.0` -- each naming ONE side of a boundary. ONE is an
+    # INVERTED CHAIN naming an interval at both ends: `not 0.0 <= min_frac < 1.0`. NaN is ordered
+    # against nothing, so it is False for every one of the seven and True for the one; +inf passes
+    # every lower bound.
+    #
+    # THEY WERE ELEVEN UNTIL 2026-09-14, when three were retired into two `domain=(0.0, 1.0)` pairs
+    # on the declarations they were arguing about -- `damp > 1.0`, `damp < 0.0` and
+    # `not 0.0 <= decay <= 1.0`, the block under the locals below says where each went and why. So
+    # the count above moved from nine + two to seven + one, and the ONE surviving inverted chain,
+    # min_frac's, is the only guard in this function NaN does not walk through on its own grammar.
+    # MEASURED, one lever per fresh subprocess through a real spine.assemble.build:
     #   OPT_LR=inf              built, AdamW lr=inf, every base parameter -inf after ONE step
     #   OPT_WEIGHT_DECAY=inf    built, AdamW wd=inf, every base parameter -inf after ONE step
     #   OPT_GRAD_CLIP=nan       built, clipping silently OFF at measured grad norms of 8.0e6
@@ -759,7 +781,23 @@ def build(opt: Config, *, param_groups, run_windows):
     #   OPT_LR_DECAY / OPT_LR_MIN_FRAC at nan, inf and -inf   refused, by the two inverted chains
     # So three float levers were bounded on both sides and three on one side only, and the two that
     # held against NaN held BY GRAMMAR rather than by intent -- which is why this block is written
-    # over the DECLARATION SET and not over another hand-typed list of names.
+    # over the DECLARATION SET and not over another hand-typed list of names. That table is the tree
+    # as it stood when this block was written, and every row of it is now refused one layer earlier
+    # than here, which is the next paragraph.
+    #
+    # SINCE 2026-09-14 THIS CANNOT FIRE FROM A LEVER AT THE SHIPPED SETTING, AND IT STAYS ANYWAY.
+    # spine/lever.py::REFUSE_NON_FINITE_FLOAT refuses a non-finite float at the first read, so no
+    # lever this loop scans can carry one and the loop is armed over a set it can no longer be
+    # handed. It stays because THAT CONSTANT IS A SWITCH: set it False -- which its own docstring
+    # tells an operator how to do -- and all four spellings resolve into the frozen Config again,
+    # and this loop is the only thing standing over OPT's six floats.
+    # THAT IS EXACTLY THE ARGUMENT THE THREE RETIRED CLAUSES DID NOT HAVE, and the difference is the
+    # switch. `domain=` carries none by design (spine/lever.py's declaration comment: its blast
+    # radius is one lever and deleting the kwarg is the switch), so a clause the pair covers has
+    # nothing left to refuse in EVERY arm there is, while this loop has an arm in which it is the
+    # whole defence. An untrippable guard is one with no such arm; this one is not that, and the
+    # sentence that would make it that -- "OPT is now covered" -- is false in both arms anyway:
+    # OPT_LR=1e30 is finite, passes here, and is the measurement four paragraphs down.
     #
     # ENUMERATED THROUGH THE SPINE'S OWN INTROSPECTION (spine/lever.py::Config.keys and
     # ::Config.lever), so the OWNED env name in the message is GENERATED, never typed, and a float
@@ -778,8 +816,12 @@ def build(opt: Config, *, param_groups, run_windows):
     # anywhere, and the base parameters read -5.999999901390138e+28 -- finite, so every isfinite
     # check in the tree passes over a run that is already destroyed. OPT_WEIGHT_DECAY=1e30 reaches
     # non-finite parameters on step 2 THROUGH a finite step 1 of -1.9999999124047052e+25. A declared
-    # per-lever domain is the general answer to that and it is the owner's open question, not this
-    # function's.
+    # per-lever domain was named here as the general answer to that, and THREE of the six now carry
+    # one -- lr_restart_damp, lr_decay and lr_min_frac, each a ratio whose two ends are readable off
+    # its own arithmetic. IT IS NOT THE ANSWER FOR THE OTHER THREE AND SAYING SO IS THE POINT: lr,
+    # weight_decay and grad_clip have no derivable ceiling, which is the condition 131 of the tree's
+    # 207 numeric levers are in, and 1e30 above is what a pair would have had to exclude. Three
+    # ratios bounded is three ratios bounded; it is not this package covered.
     # ==============================================================================================
     _nonfinite = []
     for _field in opt.keys():
@@ -810,8 +852,10 @@ def build(opt: Config, *, param_groups, run_windows):
               "closes these four values and leaves the mechanism open. OPT_LR=1e30 is finite, builds, "
               "steps six times reporting stepped=True with no alarm in the ledger, and leaves the "
               "base parameters at -5.999999901390138e+28 -- a number every isfinite check in this "
-              "tree passes. Set the lever to a finite value; a declared per-lever domain is the "
-              "general answer and is open.")
+              "tree passes. Set the lever to a finite value. A declared per-lever domain closes "
+              "more than this does and OPT_LR_RESTART_DAMP, OPT_LR_DECAY and OPT_LR_MIN_FRAC each "
+              "carry one; OPT_LR, OPT_WEIGHT_DECAY and OPT_GRAD_CLIP do not, because no honest "
+              "reading of those three declarations produces a ceiling.")
 
     effective = opt.d_effective_batch_windows    # WIRE READ HERE -- the horizon's divisor
 
@@ -819,24 +863,70 @@ def build(opt: Config, *, param_groups, run_windows):
     lr = float(opt.lr)
     weight_decay = float(opt.weight_decay)
     grad_clip = float(opt.grad_clip)
-    damp = float(opt.lr_restart_damp)
-    decay = float(opt.lr_decay)
     min_frac = float(opt.lr_min_frac)
     warmup_asked = int(opt.lr_warmup)
     wavelength_asked = int(opt.lr_wavelength)
     n_accum = int(opt.accum)
     n_batch_windows = int(opt.batch_windows)
 
-    if damp > 1.0:
-        raise ValueError(
-            f"OPT_LR_RESTART_DAMP={damp!r} is above 1.0, which INVERTS the mechanism. The damping "
-            f"multiplies the restart amplitude CUMULATIVELY, so a value above 1.0 AMPLIFIES every "
-            f"failed restart instead of shrinking it -- the ratchet this lever exists to stop, "
-            f"driven by the lever that stops it. The old `min(1.0, max(0.0, ...))` at :4739 was "
-            f"the only thing standing there and a Lever has no range facility.")
-    if damp < 0.0:
-        raise ValueError(f"OPT_LR_RESTART_DAMP={damp!r} is negative; a negative multiplier flips "
-                         f"the sign of the restart swing.")
+    # ==============================================================================================
+    # THREE REFUSALS LEFT THIS BLOCK ON 2026-09-14 AND THIS IS WHERE THEY WENT. Nothing that was
+    # refused here is accepted now; the refusal moved, the ruling did not change, and the ARGUMENT
+    # moved with it, which is the only reason this is a retirement and not a deletion.
+    #
+    #   `damp > 1.0` and `damp < 0.0`  ->  opt/levers.py::OPTLevers.lr_restart_damp, domain=(0.0, 1.0)
+    #   `not 0.0 <= decay <= 1.0`      ->  opt/levers.py::OPTLevers.lr_decay,        domain=(0.0, 1.0)
+    #
+    # WHY THEY COULD NOT STAY. A closed pair on the declaration refuses inside
+    # spine/lever.py::Lever.coerce, at the first read, under the same generated env name -- so the
+    # value these three tested could no longer arrive here at all, and a condition that cannot be
+    # satisfied is the untrippable-guard shape this project has recorded 60 times. Not a theory:
+    # tests/test_ownership.py::check_o15_domain_agrees_with_read_site read both intervals and
+    # reported all three, and the fork it states is the fork taken here -- carry the measurement to
+    # the declaration, or drop the pair and leave the ruling where it was argued, NOT BOTH.
+    #
+    # WHY THE PAIR IS THE ONE THAT SURVIVED, per lever and not as one answer for three. What each
+    # clause knew was a property OF THE NUMBER, which is exactly what (lo, hi) can state: a
+    # multiplier above 1.0 is not a damping and below 0.0 flips the swing's sign; a convex blend
+    # weight outside [0, 1] is not a blend. None of the three knew a bound that depends on another
+    # lever, on an arm, or on the mechanism -- the case where a read site must keep its clause,
+    # which `not 0.0 <= min_frac < 1.0` below still is: its domain admits 1.0 and its clause refuses
+    # 1.0 BY NAME, the shape spine/lever.py::Lever's declaration comment prescribes. And the
+    # consumers read the Config, not these locals -- maybe_step takes
+    # `float(opt.lr_restart_damp)` and _priced takes `float(opt.lr_decay)` straight off the frozen
+    # object -- so the declaration governs the value every reader of it sees, while a local here
+    # governed a copy this function made.
+    #
+    # DRIVEN BEFORE IT WAS WRITTEN DOWN, 2026-09-14, one fresh process per cell, 20 values per lever
+    # from -1e9 to 1e26 through a real spine.assemble.build and a real OPT.build, with the pair in
+    # place and then NEUTRALISED in a scratch copy of the tree so the clause alone was answering:
+    # the accept/refuse verdict is IDENTICAL on all 40 cells. Both endpoints build under either
+    # layer (0.0 and 1.0); both floating-point neighbours are refused under either (-1e-09, and
+    # 1.0000000000000002, the next float above 1.0). The two intervals agree AT THE ENDPOINTS, which
+    # is what had to be checked before retiring anything: a clause refusing `>= 1.0` beside a domain
+    # admitting 1.0 would disagree at one point and neither arm of the fork would be right.
+    # WITH THE FINITENESS FLOOR OFF TOO (spine/lever.py::REFUSE_NON_FINITE_FLOAT = False), nan on
+    # either lever is still refused at the declaration, by the inverted chain in the domain check --
+    # so the retirement holds in that arm as well, and the twelfth refusal above did not quietly
+    # become these two levers' last line.
+    #
+    # WHAT AN OPERATOR LOSES, STATED AND NOT GLOSSED. The message. The pair says
+    # "OPT_LR_RESTART_DAMP=1.5 is outside its declared domain [0.0, 1.0] -- BOTH ENDS INCLUSIVE";
+    # what stood here said what the number would have done. That sentence is not deleted -- it is in
+    # the declaration comment beside the pair, which is where a reader looking up what the bound
+    # means now finds it, corrected: the old message said a value above 1.0 AMPLIFIES every failed
+    # restart, and maybe_step clause 4 guards its one multiplication with
+    # `float(opt.lr_restart_damp) < 1.0`, so above 1.0 the loop goes INERT and amplifies nothing.
+    # It was prose that had already rotted while it could still print, which is its own argument
+    # against keeping a measurement only in a raise.
+    #
+    # DO NOT PUT THEM BACK. A second refusal for a fact that is refused already is a guard a future
+    # reader trusts and a future edit silently breaks; if the pair is ever wrong, the pair is what
+    # changes. If a future mechanism gives either lever a bound the pair CANNOT state -- one that
+    # depends on lr_min_frac, on the restart detector's bar, on n_cycles -- that clause belongs here
+    # and O15 will not object to it, because it will refuse something the pair admits.
+    # ==============================================================================================
+
     if lr <= 0.0:
         raise ValueError(f"OPT_LR={lr!r} must be positive: every rate this system applies is this "
                          f"number times a multiplier in 0..1.")
@@ -846,11 +936,6 @@ def build(opt: Config, *, param_groups, run_windows):
     if not 0.0 <= min_frac < 1.0:
         raise ValueError(f"OPT_LR_MIN_FRAC={min_frac!r} is outside [0.0, 1.0). It is a fraction of "
                          f"peak and 1.0 would make the cosine a constant.")
-    if not 0.0 <= decay <= 1.0:
-        raise ValueError(f"OPT_LR_DECAY={decay!r} is outside [0.0, 1.0]. 0.0 restores the "
-                         f"pre-2026-08-26 behaviour (restarts return to full peak) and 1.0 is the "
-                         f"full envelope; the values between are meaningful and the ones outside "
-                         f"are not.")
     if warmup_asked < 0:
         raise ValueError(f"OPT_LR_WARMUP={warmup_asked!r} is negative; a warmup is a length.")
     if wavelength_asked < 0:

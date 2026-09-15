@@ -468,3 +468,141 @@ negative, to say so rather than invent work.
 **This ruling is explicitly provisional.** "For now" is recorded. The refusal is expected to be
 revisited if it turns out to forbid a configuration someone wants, and the switch exists so that
 revisiting it costs an environment variable rather than a commit.
+
+---
+
+## D18 · 2026-09-14 · Where a lever's upper end lives — the declared domain and the finiteness floor, adopted together
+
+The options were researched under D11, put to the owner as a comparison of five carriers, read, and
+the **recommended pair was chosen**: a finiteness floor inside `Lever.coerce` *and* an optional
+`domain=(lo, hi)` on the declaration, plus the integrality clause the report filed as its first
+amendment. All three landed in `src/spine/lever.py` in one commit.
+
+**THE QUESTION WAS NEVER "SHOULD LEVERS HAVE RANGES", AND READING IT THAT WAY LOSES THE RULING.**
+That question was already answered YES, by thirteen packages that had written ranges by hand, one
+body at a time, whenever their author got to it. The open question was **where the upper end of a
+number lives** — and, underneath it, whether *"this lever has no ceiling"* is a sentence somebody
+has to **type** or a sentence that is true **by default because nobody typed anything**. The
+tree's own record answers that before the ruling does: of the ten OPT levers carrying a startup
+refusal, seven were bounded **below only**, and those seven are exactly the ones the sweep found
+harmful. That is not carelessness and it is not placement. A careful author holding the mechanism
+writes the bound whose violation they can *picture* — a negative rate — and omits the one they
+cannot: a rate twenty-four orders of magnitude too large. **Moving the check to the declaration does
+not fix that by itself, because `hi=None` is one keystroke**, and this ruling does not claim it does.
+
+**WHY THE FLOOR AND THE DOMAIN ARE COMPLEMENTS AND WERE BUILT TOGETHER, WHICH IS THE ONE RESULT
+THAT DECIDED IT.** They are not a weaker and a stronger version of one rule; they cover **disjoint
+halves** of the special-value surface, and this was measured rather than argued. Any finite endpoint
+refuses `nan` for free, because the comparison is written as an inverted chain. A finite **low** end
+refuses `-inf`. But **only a finite HIGH end refuses `+inf`** — and `hi=None` **admits** it. Under an
+honest, evidence-led population, **163 of the 207** numeric levers get no ceiling, **53 of them
+floats**, which is where `+inf` can be coerced at all. So `domain=` **alone** would have left `+inf`
+legal on 53 float levers, including `OPT_LR`, `OPT_WEIGHT_DECAY`, `SIG_VAR_WEIGHT`, `SIG_COV_WEIGHT`
+and `FAB_ROUTE_T` — five of the sweep's own critical findings. Taking exactly one of the two would
+not have been choosing a lighter rule; it would have been choosing **which half of the surface to
+leave open**.
+
+**THE LIMIT, IN THE RULING ITSELF, SO NOBODY READS THE RULING AS MORE THAN IT IS.** The finiteness
+boundary and the harm boundary are **twenty-four orders of magnitude apart**. `OPT_LR=1e6` runs all
+five stages reporting OK, reports `p_finite=True`, and leaves every parameter at **−3928** — the
+model destroyed, and finite, so every `isfinite` check in the tree passes over it. `FAB_ALPHA=1e26`
+is finite, prints an ordinary-looking loss pair (`aux 0.5150710`, `composed 2.943258`), and already
+leaves **15 of 23** gradient-carrying tensors non-finite, which is *worse* than `+inf`, since `+inf`
+at least comes back `nan` where a report can see it. And a ceiling mostly does not exist to choose:
+of the 207, **131 have no derivable ceiling at all** — the harmful value is a floating-point
+dynamic-range or memory property of the mechanism, not of the declaration — **16 have one this tree
+has explicitly DECLINED to set**, and **15 have a ceiling that is another lever or a wire**
+(`LM_CTX ≤ d_pos_max`, `WORLD_N0 ≤ WORLD_NMAX`, `MEM_KEY_DEPTH ≤ LM_LAYERS`) and **cannot be a pair
+at all**. Those fifteen belong at the read site permanently, which is why the read-site option does
+not go away under this ruling or any other.
+
+**WHAT WAS DELIBERATELY NOT DONE, AND THIS IS THE SENTENCE THAT STOPS THE MISREADING.** Only **33 of
+the 207** levers were given a pair — the 33 whose *both* ends are obvious from the declaration with
+no measurement, no policy choice and no ruling overturned. **NOT ONE of the seven levers the sweep
+filed as critical for a magnitude is among them**: `FAB_ALPHA`, `FAB_CENT_EMA`, `FAB_ROUTE_T`,
+`OPT_LR`, `OPT_WEIGHT_DECAY`, `SIG_VAR_WEIGHT`, `SIG_COV_WEIGHT` carry no pair and are not going to
+get one from taste. **THE 33 ARE REAL AND THEY ARE NOT WHERE THE HARM IS.** Nothing here makes any
+lever safe, bounded or validated; no docstring in `src/spine/lever.py` says otherwise, and none may.
+Populating further is a **per-lever measurement**, not a typing exercise — 46 of the 207 have a low
+value whose meaning is a declared or measured-legitimate sentinel, and only 22 of the 207 mention
+their special value in the help string at all, so an author writing a pair from the declaration
+alone would get 24 of those 46 wrong and delete a working mechanism each time.
+
+**THE FLOOR IS SWITCHABLE, UNDER D17'S STANDING RULE, AND WHAT TURNING IT OFF COSTS IS WRITTEN
+DOWN.** `spine/lever.py::REFUSE_NON_FINITE_FLOAT` is a module constant carrying its own cost in its
+own docstring, in the shape D17 settled on. **The switch is a code edit and not an environment
+variable, and that is a deliberate shortfall against D17's second sentence, not an oversight.** A
+lever-shaped switch is circular — the rule runs *inside* `Lever.coerce`, before any `Config` exists
+— and the only environment form left would be a raw `os.environ` read inside `coerce`: legal in
+that one file, and the tree's first environment name that is not a lever, invisible to
+`spine/registry.py`, to `tests/test_census.py`'s N1/N2 join, and to the planned
+`docs/04_LEVERS.md` (named by three `levers.py` files, not yet on disk). That is the
+exact failure `src/spine/lever.py` exists to end, so the spelling was refused and the shortfall
+recorded. **Off costs this**: `nan`, `inf` and `-inf` resolve into frozen `Config`s again on all 97
+float levers, and what is left standing is the five per-package by-name refusals, which cover only
+the levers those bodies actually read — and roughly 288 cells across the six sweep reports are
+`UNREACHABLE_TODAY` because the consumer is a P4/P5/P6 stub. **A body that does not exist cannot
+refuse anything.** `domain=` itself carries **no** switch, and that asymmetry is intended: its blast
+radius is one lever and deleting the kwarg is the switch.
+
+**`REFUSE_INEXACT_INT` IS A BEHAVIOUR CHANGE TO EVERY INT LEVER, AND THE SCAN IS RECORDED HERE
+BECAUSE A FUTURE READER WILL ASK.** An int lever now resolves to the integer its string denotes or
+is refused; the rule is **losslessness, not notation**, so `"8.0"` and `"1e3"` resolve normally and
+`"0.4"` and `"1e26"` do not. The blast radius was **scanned, not estimated**: every assignment site
+of every int lever's environment name across `src/`, `tests/`, `tools/`, `docs/` and the root
+scripts — **1093 sites in 78 files — and exactly ONE is non-exact**, `MEM_QUOTA=0.4`, which is prose
+inside a comment in `src/memory/api.py` describing this very defect, not a configuration. No script,
+sweep, test or recorded configuration in this tree sets an int lever to a non-exact value. *(Re-run
+independently on 2026-09-14 under a narrower pattern and file set — 520 sites in 54 files — which
+found the same four textual hits and no fifth: all four are prose, in `src/memory/api.py`,
+`src/spine/lever.py` twice and `docs/04_CONTRACT.md`. The two scans disagree on population size and
+agree exactly on the answer: zero live configurations break.)* The class it closes is worse than the
+arithmetic it corrects: `MEM_REKEY_EVERY=0.4` used to truncate to `0`, and `0` is that lever's
+**declared disarm**, so an operator asking for the tightest cadence silently received the off switch
+with `Config.given()` still reporting `'0.4'`.
+
+**TWO THINGS THE IMPLEMENTATION SETTLED THAT THE RECOMMENDATION HAD LEFT OPEN, RECORDED SO THEY CAN
+BE OVERTURNED ON EVIDENCE.** The research asked for the domain to be written as **three** fields —
+a pair plus inclusivity — on the ground that one function alone, `src/opt/api.py::build`, held an
+open low end, a half-open interval and a closed one. **What shipped is a two-field pair, CLOSED at
+both ends**, and the argument is from the levers that were about to use it: on that population both
+endpoints are values somebody configures (`src/opt/api.py::build` accepted `OPT_LR_DECAY=1.0` by
+name already), so an exclusive end would have **refused a value a shipped body accepts**. A
+declaration needing an open end writes the closed pair that *contains* its interval and keeps the
+strict clause at the read site — it under-refuses by exactly one endpoint and never over-refuses.
+`LM_DROPOUT` and `OPT_LR_MIN_FRAC` are both that shape on the real tree and both were driven: `1.0`
+resolves, and the body then refuses it by name. **That is a real trade and the three-field form
+remains available**; what it would cost is a second vocabulary in the spine.
+
+**WHAT THE RULING COST ON THE DAY IT LANDED, WHICH IS THE PART A DECISION RECORD USUALLY OMITS.**
+Writing a pair over a lever whose body already refused the same interval leaves that body's clause
+**unable to run**, and a guard whose condition cannot be satisfied is the **untrippable-guard
+family** — the second-largest class in this project's founding census. Populating 33 declarations
+created **six** of them in one commit, and the only reason anyone knows is that
+`tests/test_ownership.py::check_o15_domain_agrees_with_read_site` was written in the same commit and
+reported them. **The fork is RETIRE-OR-DROP and never both, decided per lever**: either the clause
+retires and everything it argued moves to the declaration, or the pair is dropped and the ruling
+stays where it was argued. Four were closed the same day by retiring, with the measurement carried
+across rather than deleted, and one retired sentence was found to have **rotted while it could
+still print** — `OPT_LR_RESTART_DAMP`'s message claimed a value above 1.0 amplifies every failed
+restart, while `src/opt/api.py::maybe_step` guards its one multiplication with
+`float(opt.lr_restart_damp) < 1.0`, so above 1.0 the loop goes inert and amplifies nothing. It is
+recorded corrected, not requoted. **Two remain open and are not hidden**: `SIG_WARMUP_MIN_FRAC` at
+`src/sig/api.py::warm_up` and `TOK_DROPOUT` at `src/tok/api.py::build_vocabulary`. The standing
+instruction for both is the fork above, decided on the lever and not on the convenience of a green
+suite.
+
+**WHAT THIS RULING DOES NOT CLOSE, NAMED SO THE COUNT IS NOT READ AS A SCORE.** Of the 37 findings
+the non-finite sweep filed, the pair closes 33 and misses four, each for a different reason: a large
+finite magnitude (`FAB_ALPHA=1e26`, `OPT_LR=1e30`) on levers whose ceiling is not derivable; a
+fractional string truncating into a declared disarm, which no `(lo, hi)` pair catches because `0` is
+*inside* the domain and which is why the integrality clause was taken as well; `FAB_SLOTS=0`, where
+`0` is legitimate at `FAB.build` and the defect is in `spine/derive.py::operating_population`; and
+`FAB_MANAGE_EVERY=0`, half closed, still needing `spine/derive.py::flush_period_windows`. The
+falsifier for the whole shape is also on the record and was not run: re-drive the 53 open-topped
+float levers at {1e12, 1e20, 1e26, 1e30}. **If** the harm boundary clusters, a single universal
+magnitude ceiling becomes defensible and this ruling is too small. **If** each lever's boundary sits
+somewhere different — which is what floating-point overflow at different widths predicts, and
+`FAB_ALPHA`'s boundary between 1e24 and 1e26 is one data point for it — then no universal ceiling
+exists, and the upper end is a per-lever measurement arriving one lever at a time, with `domain=`
+as the place to record it as it arrives.
