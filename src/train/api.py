@@ -471,6 +471,19 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     would silently change period and nothing would say so. Clock._same raises across kinds, so the
     two cannot be one variable.
 
+    ONLY TWO COUNTERS RESUME, AND THE OTHER FOUR START AT ZERO. `resume_step` and `resume_epoch`
+    are the whole of what a Snapshot hands back, so a resumed clock has `step` at the checkpoint's
+    window count while `flushes`, `backwards`, `opt_steps` and `dropped_windows` all begin at 0.
+    THAT IS A PROPERTY OF THIS FROZEN SIGNATURE AND NOT AN OVERSIGHT IN THE BODY -- there is no
+    parameter to carry the other four through, and inventing one is a contract change rather than a
+    P4 decision. What it costs is stated here rather than discovered downstream: counters() is
+    declared as "the OBSERVED SIDE OF THE HORIZON COMPARISON", and on a resumed run the observed
+    opt_steps is the count SINCE THE RESUME while `step` is the count since the run began, so
+    derive.opt_steps_from_windows(Windows(step), ...) and `opt_steps` measure different intervals.
+    The residual an owner reads off that pair is the under-anneal PLUS the resume, and nothing in
+    either number separates them. A reader comparing the two across a resume needs the checkpoint's
+    own opt_step count, which lives on the Snapshot and not here.
+
     LEVERS READ: epochs (via RunClock._finished, published on every Tick as Tick.finished)
     WIRES READ: none
     DID IT FIRE: RunClock.counters() -- the five typed counters plus the batch flush count.
@@ -497,7 +510,8 @@ class RunClock:
     """
 
     __slots__ = ("step", "flushes", "backwards", "opt_steps", "epoch", "batch_len",
-                 "epochs", "batch_windows", "accum", "windows_in_epoch", "_in_epoch")
+                 "epochs", "batch_windows", "accum", "windows_in_epoch", "_in_epoch",
+                 "dropped_windows")
 
     def __init__(self, *, epochs, batch_windows, accum, resume_step=0, resume_epoch=0):
         # THE RESUMED STEP IS THE STEP, not an offset held beside one. Cadences seeds _fired[key]
@@ -517,6 +531,13 @@ class RunClock:
         # of a run that rolls through every epoch without reading a single one.
         self.windows_in_epoch = None
         self._in_epoch = 0
+        # WINDOWS THAT NEVER REACHED A BACKWARD PASS. The partial batch a roll discards is a
+        # DELIBERATE drop with a reason (it indexes the old token stream), but a mechanism that acts
+        # and cannot be counted is the armed-but-inert shape from the other side: a run that quietly
+        # threw away four windows an epoch across forty epochs has lost a batch and a half and
+        # nothing in the report says so. A plain int, because these are windows that were counted in
+        # `step` and then not used -- not a clock of their own.
+        self.dropped_windows = 0
 
     @property
     def _finished(self):
@@ -626,14 +647,33 @@ class RunClock:
         if rolled:
             self.epoch = self.epoch + U.Epochs(1)
             self._in_epoch = 0
+            # RE-ARMED TO None, SO A CALLER THAT FORGETS begin_epoch IS REFUSED RATHER THAN SERVED
+            # THE OLD LENGTH. advance()'s own docstring puts the obligation on the caller -- "the
+            # caller must supply a fresh stream and call begin_epoch()" -- and without this line a
+            # caller who skips it keeps rolling on the PREVIOUS epoch's window count. A resampling
+            # stream is a different length every epoch, so that is not a small error: it is every
+            # later roll landing at the wrong window, silently, with the run still reporting epochs.
+            self.dropped_windows += self.batch_len
+            self.windows_in_epoch = None
             # THE PARTIAL BATCH IS DROPPED HERE, as at :6533: it holds (bpos, i) indexing the OLD
             # token stream, and carrying it across a resample writes memory entries whose
-            # provenance points at unrelated text.
+            # provenance points at unrelated text. The count is taken ABOVE, before this zeroes it.
             self.batch_len = 0
         # `finished` is READ FROM THE PROPERTY so the record and this method cannot disagree, and
         # it is computed AFTER the roll -- the roll is what can finish the run.
-        return Tick(step=self.step, epoch=self.epoch, flush_due=flush_due, rolled=rolled,
-                    finished=self._finished)
+        #
+        # THE COUNTERS ARE COPIED OUT, AND WITHOUT THIS THE `frozen=True` ON Tick IS A PROMISE THE
+        # LANGUAGE DOES NOT KEEP. The record block above says Tick is frozen "because a caller that
+        # can write to one of these can move a counter" -- but dataclass freezing refuses to REBIND
+        # THE FIELD and says nothing about the object the field points at, and spine/units.py::Clock
+        # carries `__slots__` with no __setattr__ guard. Measured on 2026-09-15: `t.step = Windows(999)`
+        # raises FrozenInstanceError, and `t.step.n = 999` on the very next line moves the CLOCK to
+        # 999 windows, because the freshly-rebound self.step and the Tick's field are the same
+        # object. `counters()` had the same hole. `type(x)(x)` is Clock's own documented copy
+        # spelling -- __init__ takes a same-kind Clock and reads its `n` -- so this costs one
+        # allocation per counter per window and buys back the guarantee the record claims.
+        return Tick(step=type(self.step)(self.step), epoch=type(self.epoch)(self.epoch),
+                    flush_due=flush_due, rolled=rolled, finished=self._finished)
 
     def note_backward(self):
         """Record one backward pass and answer whether an optimizer step is due.
@@ -669,12 +709,18 @@ class RunClock:
         # these and says so at their own call site; handing bare ints out of the DID IT FIRE
         # surface is how a Windows total gets compared against a Steps horizon by accident, which
         # is the comparison the composition root exists to make explicitly (Q-OPT-5).
+        # COPIED OUT FOR THE REASON advance() GIVES AT LENGTH: handing back the live Clock objects
+        # let a reader of the DID IT FIRE surface move the counters it was reading --
+        # `counters()["backwards"].n = 4242` set the clock's backward count to 4242, measured.
         return {
-            "step": self.step,
-            "flushes": self.flushes,
-            "backwards": self.backwards,
-            "opt_steps": self.opt_steps,
-            "epoch": self.epoch,
+            "step": type(self.step)(self.step),
+            "flushes": type(self.flushes)(self.flushes),
+            "backwards": type(self.backwards)(self.backwards),
+            "opt_steps": type(self.opt_steps)(self.opt_steps),
+            "epoch": type(self.epoch)(self.epoch),
+            # WINDOWS COUNTED IN `step` THAT NEVER REACHED A BACKWARD PASS, because a roll discarded
+            # the partial batch holding them. Published so the drop is readable.
+            "dropped_windows": self.dropped_windows,
             # THE BATCH FLUSH COUNT'S COMPANION, and a plain int because it is not a clock: it is
             # how many windows are queued in the accumulator RIGHT NOW, so a run that ends with
             # batch_len > 0 ended mid-batch and those windows never reached a backward pass.
