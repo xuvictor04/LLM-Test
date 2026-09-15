@@ -585,9 +585,12 @@ class SIGLevers(LeverSet):
     # `floor = int(frac * budget)` and then compares the floor against probe steps drawn from
     # `range(probe_every, budget + 1, probe_every)`, so the ONLY steps this number can name lie in
     # [0, budget] and a share above 1.0 names a step count the run never reaches. 0.0 is admitted --
-    # sig/api.py::build calls it "no floor" -- and the NEGATIVE end keeps its by-name refusal in
-    # sig/api.py::warm_up, which can say that a negative floor removes the guard rather than
-    # lowering it. THE TOP IS CLOSED AND THAT IS LOAD-BEARING, not a default: `int(frac * budget) >=
+    # sig/api.py::build calls it "no floor" -- and THIS PAIR IS THE ONLY RULE ON THE NEGATIVE END.
+    # A by-name `if frac < 0.0: raise` stood at sig/api.py::warm_up's one multiplying site until
+    # 2026-09-15 and was RETIRED here rather than kept beside this pair, because coerce reaches
+    # every negative first and a second refusal that can never run is the untrippable-guard shape
+    # this whole lever exists as a fraction to avoid. What that clause KNEW is carried below rather
+    # than deleted. THE TOP IS CLOSED AND THAT IS LOAD-BEARING, not a default: `int(frac * budget) >=
     # budget` is reachable at frac == 1.0 and nowhere below it, and that is the one value that keeps
     # warm_up's `floor >= budget` gate arm -- the untrippable-guard report -- reachable at all.
     # Census: ENC_WARMUP_MIN -> SIG_WARMUP_MIN_FRAC. Read at :5021 as
@@ -611,11 +614,32 @@ class SIGLevers(LeverSet):
     # frac=0.999 gives floor 19 with the gate reachable, frac=1.0 gives floor 20 and selects the
     # `floor >= budget` arm. What the fraction bought is that no ordinary setting can reach that
     # shape and that it is printed with both numbers beside it instead of silently clamped. The
-    # other end is refused TWICE now: the domain refuses every negative at the first read, and
-    # sig/api.py::warm_up keeps its own by-name refusal at the one site that multiplies, which is
-    # where the REASON lives -- a NEGATIVE share would make a negative floor, not a lower guard but
-    # no guard, eligible from the first probe with no gate saying so. units.FRACTION is still a
-    # label and is not what bounds this lever; the pair on the declaration is. The
+    # other end is refused ONCE, HERE, AND THE REASON IS CARRIED WITH IT -- this is what the
+    # retired clause in sig/api.py::warm_up knew, and it is the most valuable thing it had:
+    # A NEGATIVE SHARE IS NOT A LOWER GUARD, IT IS NO GUARD. `floor = int(frac * budget)` goes
+    # negative, every probe step is already at or above it, and the stop becomes eligible before
+    # any of the budget the floor exists to protect has been spent -- while every arm of Gate
+    # sig.adaptive_stop reports a floor that is merely low. MEASURED, one fresh process per cell
+    # through the real spine.assemble.build with this pair and that clause both neutralised in a
+    # copy of the tree outside the repository, at SIG_WARMUP=20 / probe_every=2 on a stream whose
+    # windows are identical so the encoder has nothing to separate:
+    #   frac=0.25  floor=5    verdict 'collapsing' at step 6 of 20, 3 probes
+    #   frac=-0.5  floor=-10  verdict 'collapsing' at step 2 of 20, 1 probe -- the FIRST probe,
+    #              with the gate printing fired=False reachable=True value=-10 threshold=20 and an
+    #              EMPTY reason. Nothing in the report says the floor was removed.
+    # AND THE PAIR REFUSES MORE THAN THAT CLAUSE EVER DID, which is why retiring it was not a
+    # tidy-up and dropping the pair was not available. The clause covered exactly (-inf, 0.0);
+    # this pair covers (-inf, 0.0) U (1.0, inf). With the pair neutralised and the clause left
+    # standing, SIG_WARMUP_MIN_FRAC=1e9 BUILT, floor=20000000000 against a budget of 20 -- the
+    # untrippable guard walked back in through the top end the clause never looked at -- and
+    # 1e308 reached `int(frac * budget)` and raised a bare `OverflowError: cannot convert float
+    # infinity to integer` naming no lever. Both are refused by name now.
+    # BOTH LAYERS AGREED AT EVERY ENDPOINT BEFORE THE RETIREMENT, checked before it was taken and
+    # not assumed: -0.0, 0.0 and 1.0 all build under either rule alone, so this was pre-emption
+    # and not the one-point disagreement OPT_LR_MIN_FRAC turned out to be, where a clause refusing
+    # `>= 1.0` sits beside a domain admitting exactly 1.0 and both stay live.
+    # units.FRACTION is still a label and is not what bounds this lever; the pair on the
+    # declaration is. The
     # run-time warning at :5046 and the min() clamp both disappear with the absolute unit. The
     # literal 0.25 is 200/800 -- the behaviour of record, not the shipped
     # 3000. NOTE ISSUES P2-M11: a doc prescription asserting the default is 3000 is itself wrong and is
@@ -628,8 +652,11 @@ class SIGLevers(LeverSet):
     # `OverflowError: cannot convert float infinity to integer` from inside the raise statement -- so
     # the operator got the OverflowError instead of the paragraph. At nan and +inf `frac < 0.0` is
     # False, the refusal was skipped, and `floor = int(frac * budget)` one line down raised a bare
-    # ValueError / OverflowError naming no lever, after the encoder had already been built. Every
-    # FINITE negative still reaches that refusal and it keeps its full force there.
+    # ValueError / OverflowError naming no lever, after the encoder had already been built. NO
+    # negative reaches sig/api.py::warm_up at all now: the three non-finite spellings are refused
+    # in sig/api.py::build and every finite negative is refused by the pair above, at the first
+    # read, before an encoder or an optimizer exists. The clause that used to catch them was
+    # retired for exactly that reason and this paragraph is its history, not a live second door.
 
     warmup_plateau_eps = Lever(0.015, "Relative gain in separation below which the adaptive warmup "
                                       "declares the curve flat and stops early.", U.FRACTION)

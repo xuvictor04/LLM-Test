@@ -108,16 +108,23 @@ _NONFINITE_MEASURED = {
         "verdict='budget' peak=nan. Listed separately from var_weight because VICReg weights the two "
         "terms independently and a fix on one does not cover the other",
     "SIG_WARMUP_MIN_FRAC":
-        "the share of the budget that must be spent before the plateau stop may fire. This is the "
-        "one place in the surface where a correct by-name refusal EXISTS, is entered, and dies "
-        "formatting its own message: `frac < 0.0` is True for -inf, warm_up starts raising the "
-        "ValueError that names SIG_WARMUP_MIN_FRAC, and the f-string interpolates `int(frac * "
-        "budget)` = int(-inf), which raises `OverflowError: cannot convert float infinity to "
-        "integer` from inside the raise statement -- the operator gets the OverflowError instead of "
-        "the paragraph written for them. At nan and +inf `frac < 0.0` is False, the by-name refusal "
-        "is skipped entirely, and the same expression one line down (`floor = int(frac * budget)`) "
-        "raises a bare ValueError or OverflowError out of warm_up, after build() has succeeded and "
-        "the encoder has been constructed",
+        "the share of the budget that must be spent before the plateau stop may fire. THIS ENTRY IS "
+        "A MEASUREMENT OF A CLAUSE THAT NO LONGER EXISTS AND IS KEPT AS THE RECORD OF WHY IT WAS "
+        "WRITTEN, not as a description of a live line: warm_up carried `if frac < 0.0: raise "
+        "ValueError(...)` until 2026-09-15, when it was retired into "
+        "sig/levers.py::SIGLevers's domain=(0.0, 1.0) because no environment could reach it any "
+        "more. What was measured while it stood: it was the one place in this surface where a "
+        "correct by-name refusal EXISTED, was entered, and died formatting its own message -- "
+        "`frac < 0.0` is True for -inf, warm_up started raising the ValueError that names "
+        "SIG_WARMUP_MIN_FRAC, and the f-string interpolated `int(frac * budget)` = int(-inf), which "
+        "raises `OverflowError: cannot convert float infinity to integer` from inside the raise "
+        "statement -- the operator got the OverflowError instead of the paragraph written for them. "
+        "At nan and +inf `frac < 0.0` was False, the by-name refusal was skipped entirely, and the "
+        "same expression one line down (`floor = int(frac * budget)`) raised a bare ValueError or "
+        "OverflowError out of warm_up, after build() had succeeded and the encoder had been "
+        "constructed. WHERE THE THREE SPELLINGS STAND NOW: refused in build() below, by the "
+        "finiteness sweep, before an encoder or an optimizer exists -- and every FINITE negative "
+        "is refused one layer earlier still, by the declared domain, at the first read",
     "SIG_WARMUP_PLATEAU_EPS":
         "the ONLY threshold the adaptive warm-up stop has, tested in sig/api.py::_stop_verdict as "
         "`abs(sep - prev) <= eps * abs(prev)`. THREE VALUES, THREE DIFFERENT WRONG ANSWERS. At +inf "
@@ -290,8 +297,13 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
     # operator sees a torch-shaped stack rather than a configuration message. That difference is
     # measured, not asserted: SIG_WARMUP_MIN_FRAC=nan reached `floor = int(frac * budget)` inside
     # warm_up and produced a bare "ValueError: cannot convert float NaN to integer" naming no lever,
-    # and SIG_WARMUP_MIN_FRAC=-inf entered the CORRECT by-name refusal and then raised OverflowError
-    # from inside its own f-string. Both are gone because neither value now reaches that function.
+    # and SIG_WARMUP_MIN_FRAC=-inf entered the by-name refusal that then stood in warm_up and
+    # raised OverflowError from inside that refusal's own f-string. Both are gone because neither
+    # value now reaches that function. THE SECOND HALF OF THAT HISTORY, so it is not read as still
+    # standing: the warm_up clause itself was retired on 2026-09-15 into
+    # sig/levers.py::SIGLevers's `domain=(0.0, 1.0)`, which reaches every negative before this
+    # function does -- so the OverflowError is closed twice over and the sentence above is a
+    # record of what was, not a description of a live line.
     # THE PRICE, STATED RATHER THAN HIDDEN: build() now reads levers it does not use. That is a real
     # cost -- sig/levers.py::SIGLevers spends a paragraph on why an EAGER read is not free ("a
     # default that reads another knob is not a small sin here: it reads that knob EAGERLY, which is
@@ -1054,9 +1066,17 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     default run while telling the run that paid the full budget it had converged. AT exactly 1.0 --
     a legal reading of a lever declared over 0..1 -- the floor IS the budget and the shape is back,
     which is why this function's gate arm for it is selected at 1.0 and not above it, and prints
-    both numbers instead of clamping them together. spine/lever.py::Lever has choices and no
-    numeric range, so the other end of the interval is refused here at the one site that multiplies
-    the fraction by the budget: a negative fraction is not a lower floor but no floor at all.
+    both numbers instead of clamping them together. THE OTHER END IS NOT REFUSED HERE AND NO LONGER
+    PRETENDS TO BE: spine/lever.py::Lever carries `domain=` as well as `choices=` now, the
+    declaration reads domain=(0.0, 1.0), and spine/lever.py::Lever.coerce raises LeverError naming
+    SIG_WARMUP_MIN_FRAC and its value at the first read. The `if frac < 0.0` clause that stood at
+    this function's one multiplying site was retired into that declaration on 2026-09-15 rather
+    than kept beside it, because nothing could reach it any more; what it knew -- that a negative
+    fraction is not a lower floor but no floor at all -- moved with it, MEASURED: at
+    SIG_WARMUP=20 / SIG_WARMUP_PROBE_EVERY=2 on a collapsing stream, frac=0.25 puts the floor at 5
+    and the run-level failure verdict is reached at step 6, while frac=-0.5 puts it at -10 and the
+    same verdict is reached at step 2, on the FIRST probe, with Gate sig.adaptive_stop printing
+    reachable=True, a value of -10 against a threshold of 20 and an empty reason.
 
     The probe draws from this package's own RNG stream, never the global one.
 
@@ -1105,33 +1125,31 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     # a gate arm there rather than a clamp: the two numbers are printed and the arm says which
     # values get the stop back.
     frac = float(sig.warmup_min_frac)
-    if frac < 0.0:
-        # THE OTHER END OF THE SAME RANGE, REFUSED RATHER THAN SILENTLY HONOURED. spine/lever.py
-        # ::Lever carries `choices` and no numeric range, so units.FRACTION on the declaration is a
-        # LABEL and not a constraint; the refusal has to stand at the one site that multiplies the
-        # fraction by the budget. A negative fraction makes a negative floor, which is not a
-        # weaker guard but NO guard: `t >= floor` is then true at the very first probe, the stop
-        # becomes eligible before any of the budget the floor exists to protect has been spent, and
-        # no gate arm below says so -- every one of them reports a floor that is merely low. It is
-        # refused here for the reason SIG_MODE=bigram at width_units=1 is refused in build(): the
-        # failure is a mechanism quietly doing something other than what it is declared to do.
-        # THIS REFUSAL USED TO DIE FORMATTING ITS OWN MESSAGE, and the repair is not here. At
-        # SIG_WARMUP_MIN_FRAC=-inf the test below is True, this correct by-name refusal was ENTERED,
-        # and the f-string's `{int(frac * budget)}` -- int(-inf) -- raised `OverflowError: cannot
-        # convert float infinity to integer` from inside the raise statement: the operator got the
-        # OverflowError instead of the paragraph written for them. Its siblings nan and +inf made
-        # `frac < 0.0` False, skipped this refusal entirely, and hit `floor = int(frac * budget)` one
-        # line down with a bare ValueError / OverflowError naming no lever. All three are now refused
-        # by name in sig/api.py::build, at startup, before an encoder or an optimizer exists, so
-        # `frac` is FINITE by the time this line runs and `int(frac * budget)` cannot raise for a
-        # finite negative against a non-negative int budget. That is a fix in another function
-        # recorded at the site it repairs, because a reader arriving here to ask why the message
-        # renders now will not otherwise find it.
-        raise ValueError(
-            f"SIG_WARMUP_MIN_FRAC={frac}: the floor is a SHARE of SIG_WARMUP={budget} and a share "
-            f"cannot be negative. It would put the floor at {int(frac * budget)} step(s), which no "
-            f"step count is below, so the adaptive stop would be eligible from the first probe "
-            f"onward -- the guard removed rather than lowered, and reported by no gate.")
+    # THE NEGATIVE END IS REFUSED ONE LAYER EARLIER AND NOT AGAIN HERE. A `if frac < 0.0: raise`
+    # stood on this line until 2026-09-15 and was RETIRED, not deleted: what it argued now sits on
+    # the declaration in sig/levers.py::SIGLevers beside `domain=(0.0, 1.0)`, which is the rule
+    # that answers. Retired because it can no longer run -- spine/lever.py::Lever.coerce raises
+    # LeverError naming SIG_WARMUP_MIN_FRAC and the value at the FIRST read, so no environment
+    # reaches this function with a negative frac -- and a guard nothing can trip is a line a
+    # future reader trusts and a future edit silently breaks, which is this repository's
+    # most-recorded defect (60 of the survey's 475 records).
+    # WHICH OF THE TWO WAS WIDER, DRIVEN AND NOT READ, one fresh process per cell against the
+    # real spine.assemble.build at SIG_WARMUP=20 / SIG_WARMUP_PROBE_EVERY=5, with the pair in
+    # place and then neutralised in a copy of the tree outside the repository:
+    #   the clause covered exactly (-inf, 0.0)  -- -1e-320 refused, -0.0 and 0.0 built
+    #   the pair covers (-inf, 0.0) U (1.0, inf) -- the same negatives refused BY NAME, and
+    #                                               1.0000000000000002, 1.5, 2.0, 1e9 and 1e308
+    #                                               refused as well, none of which this clause
+    #                                               ever looked at
+    # With the pair neutralised, SIG_WARMUP_MIN_FRAC=1e9 BUILT with floor=20000000000 against a
+    # budget of 20 -- the untrippable-guard shape this whole lever was made a fraction to remove,
+    # walked straight back in -- and 1e308 died at the line below with a bare `OverflowError:
+    # cannot convert float infinity to integer` naming no lever. Dropping the pair to keep the
+    # clause would have removed a working refusal to make a check green.
+    # BOTH LAYERS AGREE AT EVERY ENDPOINT, which is why this is pre-emption and not the one-point
+    # disagreement OPT_LR_MIN_FRAC turned out to be: -0.0, 0.0 and 1.0 all build under either
+    # rule alone. 1.0 is the value with the history and it is ADMITTED on purpose -- see the
+    # `floor >= budget` arm below, which is selected there and nowhere under it.
     floor = int(frac * budget)
 
     # WHERE THE STOP COULD FIRE, COMPUTED FROM THE LEVERS AND BEFORE THE LOOP RUNS. It is a

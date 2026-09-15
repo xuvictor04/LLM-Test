@@ -505,14 +505,47 @@ class TOKLevers(LeverSet):
     dropout = Lever(0.0, "Probability of skipping an available merge during a counting segmentation, so "
                          "byte-level material still reaches the tally.", U.PROBABILITY,
                     domain=(0.0, 1.0))
-    # DOMAIN (0.0, 1.0) -- IT IS COMPARED AGAINST A DRAW, NOT LABELLED. src/tok/api.py::_segment
-    # skips a merge on `stream.random() < dropout`, and `random()` returns [0.0, 1.0), so every
-    # value at or below 0.0 is "never skip" and every value at or above 1.0 is "skip every available
-    # merge on every counting segmentation". The pair is the interval the comparison can
-    # distinguish. 0.0 is the SHIPPED DEFAULT and means the regularizer is off; 1.0 stays inside,
-    # exactly as src/tok/api.py::build_vocabulary's `not 0.0 <= _drop <= 1.0` already admits it --
-    # and the note below this one measures 1.0 doing what +inf does, which is the whole of what this
-    # domain is: a bound on the SPELLING, with that damage inside it.
+    # DOMAIN (0.0, 1.0) -- IT IS COMPARED AGAINST A DRAW, NOT LABELLED, AND SINCE 2026-09-15 IT IS
+    # THE ONLY RULE OVER THIS INTERVAL. src/tok/api.py::_segment skips a merge on
+    # `stream.random() < dropout`, and `random()` returns [0.0, 1.0), so every value at or below 0.0
+    # is "never skip" and every value at or above 1.0 is "skip every available merge on every
+    # counting segmentation". The pair is the interval the comparison can distinguish. 0.0 is the
+    # SHIPPED DEFAULT and means the regularizer is off; 1.0 stays inside, and the note below
+    # measures 1.0 doing what +inf does, which is the whole of what this domain is: a bound on the
+    # SPELLING, with that damage inside it.
+    #
+    # THE ARGUMENT IS THE DRAW AND IT IS NOT THE UNIT LABEL, AND THAT DISTINCTION IS THIS FILE'S OWN.
+    # `mint_novel` four declarations above carries one of this tree's three standing rulings that a
+    # unit is a label the census renders and not a bound -- "a reader who takes fraction 0..1 as a
+    # bound on legal values will be surprised by 2.0, which is legal" -- and THAT RULING STANDS
+    # UNCHANGED. 75 levers in this tree carry U.FRACTION, 5 carry U.PROBABILITY, and only a handful
+    # of either were given a pair. NOTHING ABOUT THIS DECLARATION EXTENDS TO ITS NEIGHBOURS BY
+    # PROXIMITY: `mint_pmin` is U.PROBABILITY and has NO domain, `mint_novel` is a dimensionless
+    # EXPONENT wearing U.FRACTION and has NO domain, and a pair may not be added to either off the
+    # label. This lever earned its pair by being compared against a bounded draw on every counting
+    # segmentation, which is a fact about the arithmetic; a reader who wants to add a domain
+    # elsewhere in this file must produce a comparison, not a unit.
+    #
+    # THE READ-SITE CLAUSE WAS RETIRED INTO THIS PAIR ON 2026-09-15 AND ITS MEASUREMENT CAME WITH IT.
+    # src/tok/api.py::build_vocabulary carried `not 0.0 <= _drop <= 1.0` from 2026-09-07. Once this
+    # pair landed, spine/lever.py::Lever.coerce refused the same set at the FIRST read, a whole
+    # assembly earlier, so that clause could not run from any environment --
+    # tests/test_ownership.py::check_o15_domain_agrees_with_read_site reported it, and its fork is
+    # retire-or-drop and never both. RETIRE was taken because what the clause knew is a property of
+    # THE NUMBER (a skip probability at or above the top of its draw's range is not a probability of
+    # skipping, it is "always"), which is exactly what a (lo, hi) pair states, and nothing it knew
+    # depended on another lever, on an arm or on a mechanism. DRIVEN BEFORE DECIDING, 22 values per
+    # arm from -1e9 to 1e26 including both endpoints, -0.0, +/-1e-320, 0.9999999999999999,
+    # 1.0000000000000002, nan, inf and -inf, one fresh process per cell, on the shipped tree and
+    # again with this pair neutralised in a copy of src/ outside the repository: 22 of 22 cells
+    # IDENTICAL in verdict, so NEITHER rule was wider and dropping the pair would not have saved a
+    # working refusal the way FAB_DISCOVER=3.0 would have. With
+    # spine/lever.py::REFUSE_NON_FINITE_FLOAT = False the clause is still dead, because TOK's own
+    # non-finite refusal is GENERATED over tok.keys() and covers nan and both infinities by name.
+    # ONE SENTENCE OF THE RETIRED CLAUSE IS RECORDED CORRECTED RATHER THAN REQUOTED: it justified
+    # the interval as following from "it is declared as units.PROBABILITY ... and a probability is
+    # not outside [0, 1]", which is the very inference `mint_novel` rules against, in the same file.
+    # The conclusion was right and the stated reason was not; the paragraph above is the reason.
     # Census: TOK_DROPOUT -> TOK_DROPOUT, verdict keep. Field corrected (DEFECT 1) -- CENSUS.md:299 names
     # the target `TOK.TOK_DROPOUT`, which would have answered to TOK_TOK_DROPOUT.
     # THE NEVER-FIRED CASE, NOT THE SUPERFLUOUS CASE. BPE-dropout is a real regularizer; the default is
@@ -527,11 +560,13 @@ class TOKLevers(LeverSet):
     # package, and L3's isolation sweep -- whose only oracle is affects() -- reports a leak that is real
     # but not the one anybody is looking for.
     # THE REPAIR LANDED AS THE CHILD STREAM tok.dropout.mint AND IT CAN BE UNDONE THROUGH THE VALUE.
-    # Added 2026-09-07: src/tok/api.py::build_vocabulary refuses this lever non-finite and outside
-    # [0.0, 1.0], because it is declared units.PROBABILITY and a probability is not outside [0, 1] --
-    # written as the inverted chain `not 0.0 <= drop <= 1.0`, which is the one guard grammar in this
-    # tree NaN does not walk through. MEASURED against a TOK_DROPOUT=0.0 baseline of size 512 /
-    # tok.build_mint 256 / tok.build_refused 0 / bytes_per_token 3.5925925925925926:
+    # WHICH LAYER NOW REFUSES WHAT, stated once so no reader looks for a second rule: NON-FINITE is
+    # refused by spine/lever.py::Lever.coerce's finiteness floor at the first read and, with
+    # spine/lever.py::REFUSE_NON_FINITE_FLOAT = False, by src/tok/api.py::build_vocabulary's
+    # generated sweep over tok.keys(); EVERYTHING ELSE OUTSIDE [0.0, 1.0] is refused by the pair on
+    # the declaration above and by nothing else. MEASURED (2026-09-07, ~4000 bytes) against a
+    # TOK_DROPOUT=0.0 baseline of size 512 / tok.build_mint 256 / tok.build_refused 0 /
+    # bytes_per_token 3.5925925925925926:
     #   inf and 1.5   size 399, mint 143, refused 143, bytes_per_token 1.0, tok.dropout_skip 3999 of
     #                 4000, and two successive tokenize(regularize=True) calls returning the IDENTICAL
     #                 segmentation -- the P1-H56 symptom ("BPE-dropout that returns the same answer on
@@ -544,11 +579,38 @@ class TOKLevers(LeverSet):
     #                 off on a run the operator switched on.
     #   0.3           the mechanism working: size 402, dropout_skip 737, two regularized calls
     #                 DIFFERING (2280 ids then 2257) and the deterministic call a third answer (1911).
-    # WHAT IS NOT CLOSED, AND THE DEFAULT IS THE REASON THIS MATTERS. TOK_DROPOUT=1.0 IS ADMITTED AND
-    # WAS MEASURED TO DO EXACTLY WHAT inf DOES (size 399, bytes_per_token 1.0, dropout_skip 3999,
-    # identical segmentations): `stream.random()` draws from [0.0, 1.0), so every draw is below 1.0.
-    # 1.0 is a legally typed probability and the top of this lever's own declared interval, and
-    # refusing it would be a range ruling the declaration does not support -- so it stands, named.
+    # WHAT THE NUMBER DOES TO THE REST OF THE TREE, which is why the interval is worth a rule at all
+    # and is the half the retired clause carried that nothing else was saying: bytes_per_token is the
+    # ONE estimator that LEAVES this package. spine/derive.py::signature_width_bytes takes it for
+    # SIG's single signature window width for the whole run, and DATA's splice gate reads it too, so
+    # a dropout typo does not stay in the tokenizer -- it silently makes the signature window several
+    # times too narrow, and the report that says so is a number, not an error.
+    #
+    # WHAT IS NOT CLOSED, AND THE DEFAULT IS THE REASON THIS MATTERS. TOK_DROPOUT=1.0 IS ADMITTED --
+    # by the pair above, which is CLOSED at both ends, and by every rule in src/tok/api.py -- AND IT
+    # DOES EXACTLY WHAT inf DOES. Re-driven 2026-09-15 on a 10000-byte two-area sample, one fresh
+    # process per cell, through a real spine.assemble.build and a real TOK.build_vocabulary:
+    #   0.0                 size 334, mint 78, tok.dropout_skip ABSENT, three tokenize(regularize=
+    #                       True) calls -> ONE distinct answer (the regularizer is off; ABSENT is
+    #                       this file's "unreachable" reading, not a zero).
+    #   1e-320              size 334 and mint 78, bit-identical to 0.0, but tok.dropout_skip 0 and
+    #                       NOT absent -- the stream IS attached because the guard is `> 0` -- which
+    #                       is the armed-but-0 reading, the middle of the three DID IT FIRE states.
+    #   0.3                 size 327, three regularized calls DIFFERING (6336 / 6320 / 6324 ids) and
+    #                       the deterministic call a fourth answer (5577): the mechanism working and
+    #                       the tok.dropout.mint child stream doing its job.
+    #   0.9999999999999999  size 323, mint 67, refused 67, dropout_skip 22374, three regularized
+    #                       calls returning ONE answer of 10000 ids -- BIT-FOR-BIT WHAT 1.0 DOES.
+    #                       THE DAMAGE IS NOT AT THE ENDPOINT: it is already complete at the largest
+    #                       float BELOW it, because `random()` has 53 bits and a draw at or above
+    #                       that value is never seen. An exclusive top end would therefore have
+    #                       bought nothing and cost a legally typed setting, which is the whole
+    #                       argument for the top end being CLOSED.
+    #   1.0                 identical to the line above in every printed number.
+    # An operator who types 1.0 has switched the tokenizer off, not turned the regularizer up: at
+    # 1.0 the P1-H56 symptom returns through the VALUE rather than through the stream, with
+    # tok.dropout_skip still counting 22374 draws, so the stream is innocent and the number is not.
+    # A pair bounds a SPELLING. It does not bound damage, and this lever is the tree's clearest case.
 
     # ==============================================================================================
     # 4. PROBATION -- what happens to a token that did not earn its slot

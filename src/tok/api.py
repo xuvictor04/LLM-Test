@@ -336,10 +336,13 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         single window width. At nan the comparison never fires and the run is BIT-IDENTICAL to
         TOK_DROPOUT=0.0 while tok.dropout_skip is ABSENT, which this file's convention reads as
         "unreachable" -- a report saying the regularizer is off on a run the operator switched on.
-      * TOK_DROPOUT OUTSIDE [0.0, 1.0], which finiteness cannot reach: 1.5 is finite and was
-        measured to do exactly what +inf does. The interval is the lever's DECLARED domain
-        (units.PROBABILITY, "Probability of skipping an available merge"), and 1.0 is inside it,
-        admitted, and does the same damage -- said in the refusal rather than quietly closed.
+      * NOT TOK_DROPOUT OUTSIDE [0.0, 1.0] -- NOT ANY MORE, AND THIS LINE IS WHERE A READER WOULD
+        OTHERWISE GO ON BELIEVING IT DOES. That interval is refused a whole assembly earlier, by
+        `domain=(0.0, 1.0)` on tok/levers.py::TOKLevers's `dropout` declaration, and this function's
+        own clause was RETIRED into it on 2026-09-15 with its measurement, because a declaration
+        that refuses first leaves the clause behind it unable to run. Driven: TOK_DROPOUT=1.5 and
+        =1.0000000000000002 are refused at spine/lever.py::Lever.coerce naming the lever and the
+        value; 1.0 and 0.0 both build here. See the retirement note in the refusal block below.
       * TOK_MAX_BYTES BELOW 2, which no finiteness rule could ever have reached: it is a finite int
         that passes every type check. A merge joins two units, so at 0 AND at 1 the `len(seq) >
         max_bytes` test in Vocabulary._add refuses every candidate and the vocabulary stays at the
@@ -445,26 +448,56 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     #     refused at nan by `int(float(raw))`'s ValueError and at +/-inf by its OverflowError inside
     #     spine/lever.py::Lever.coerce, under their own owned names, and the two str levers (mode,
     #     probation_by) carry `choices=`. 4 + 12 + 2 = 18, the whole set.
-    # (2) TOK_DROPOUT OUTSIDE [0.0, 1.0], which (1) cannot reach: 1.5 is finite and was measured to
-    #     do EXACTLY what +inf does -- vocabulary 399, tok.build_refused 143, bytes_per_token 1.0,
-    #     tok.dropout_skip 3999 of 4000, and two successive regularized calls returning the
-    #     identical segmentation. This is a DECLARED domain and not an invented one: the lever's
-    #     unit is units.PROBABILITY and its help string is "Probability of skipping an available
-    #     merge", and a probability is not outside [0, 1]. It is written as an INVERTED CHAIN naming
-    #     both ends because that is the one guard grammar in this tree NaN does not walk through --
-    #     see the OPT sweep's structural result, where `not 0.0 <= x < 1.0` held against nan at
-    #     three levers and every one-sided `x < 0.0` did not.
-    # (3) TOK_MAX_BYTES BELOW 2. See its own block below; it is a COUNT, not a float, and no
+    # (2) TOK_MAX_BYTES BELOW 2. See its own block below; it is a COUNT, not a float, and no
     #     finiteness rule could ever have reached it.
     #
-    # WHAT THESE DO NOT CLAIM, AND NOTHING BELOW SAYS OTHERWISE. TOK_DROPOUT=1.0 IS STILL ADMITTED
-    # AND IS MEASURED TO DO THE SAME DAMAGE as 1.5 and as +inf: `stream.random()` draws from [0, 1),
-    # so at p=1.0 every draw skips, bytes_per_token collapses to 1.0 and the segmentation is
-    # deterministic again. It is admitted because 1.0 is a legally typed probability and the top of
-    # the lever's own declared interval, and refusing it would be a range ruling the declaration
-    # does not support -- but an operator who types 1.0 has switched the tokenizer off, not turned
-    # the regularizer up, and nothing here stops them. The three float levers other than dropout
-    # have NO declared interval at all and nothing here bounds any of them from either side.
+    # THERE WAS A THIRD AND IT WAS RETIRED ON 2026-09-15, TO THE DECLARATION AND NOT INTO THIN AIR.
+    # `_drop = float(tok.dropout)` followed by `if not 0.0 <= _drop <= 1.0: raise LeverError(...)`
+    # stood here from 2026-09-07. src/tok/levers.py::TOKLevers declares `dropout` with
+    # domain=(0.0, 1.0), CLOSED at both ends, and spine/lever.py::Lever.coerce applies it at the
+    # FIRST read -- one whole assembly before this function exists -- so the clause could not run
+    # from any environment. Two refusals for one fact, the second unreachable: the untrippable-guard
+    # family, which is this repository's second-largest defect class. The fork stated by
+    # tests/test_ownership.py::check_o15_domain_agrees_with_read_site is retire-or-drop and never
+    # both, and the RETIRE arm was taken here for the reason .rework/audits/e_opt.json and
+    # e_fabric.json set as the discriminator: what the clause knew was a property OF THE NUMBER --
+    # the draw it is compared against, `stream.random() < dropout`, runs on [0.0, 1.0), so at or
+    # below 0.0 no merge is ever skipped and at or above 1.0 every available merge is -- and a
+    # (lo, hi) pair states exactly that. It knew nothing that depends on another lever, on an arm,
+    # or on a mechanism, which is the shape no pair can express and the only reason to keep a clause.
+    #
+    # THE TWO SETS WERE ESTABLISHED BY DRIVING THEM, NOT BY READING THE OPERATORS, because a pair
+    # narrower than the clause would have meant dropping a working refusal to green a check (which
+    # is what FAB_DISCOVER=3.0 was). 22 values per arm from -1e9 to 1e26 -- including -0.0, -1e-320,
+    # 1e-320, -1e-09, 0.9999999999999999, 1.0, 1.0000000000000002, nan, inf, -inf -- one fresh
+    # process per cell, through a real spine.assemble.build and this function, first on the shipped
+    # tree and then with the pair NEUTRALISED in a copy of src/ outside the repository so the clause
+    # answered alone. 22 of 22 cells IDENTICAL in verdict; neither rule is wider. And unlike OPT's
+    # twelfth refusal, the clause gains nothing from the other arm of the switch: with
+    # spine/lever.py::REFUSE_NON_FINITE_FLOAT = False, refusal (1) above -- which is GENERATED over
+    # tok.keys() and not a list -- refuses nan, +inf and -inf here by name with the pair gone, so
+    # the clause was dead in BOTH arms.
+    #
+    # ONE SENTENCE OF THE RETIRED CLAUSE DID NOT SURVIVE THE MOVE AND IS RECORDED CORRECTED RATHER
+    # THAN REQUOTED, per the OPT precedent. It said the interval follows because "it is declared as
+    # units.PROBABILITY ... and a probability is not outside [0, 1]". That is the argument THIS
+    # PACKAGE HAS ALREADY RULED AGAINST: src/tok/levers.py::TOKLevers says of `mint_novel` that a
+    # reader who takes the unit label as a bound on legal values "will be surprised by 2.0, which is
+    # legal", and 75 levers in this tree carry U.FRACTION with no domain. The conclusion was right
+    # and the stated reason was the wrong one; the declaration now carries the argument from the
+    # DRAW instead. The measurement the clause carried -- 1.5 measured to do exactly what +inf does,
+    # and bytes_per_token being the one number that LEAVES this package -- moved to the declaration
+    # with it and is not repeated here.
+    #
+    # WHAT REMAINS DOES NOT CLAIM, AND NOTHING BELOW SAYS OTHERWISE. TOK_DROPOUT=1.0 IS ADMITTED,
+    # by the declared domain and by every rule in this file, AND IS MEASURED TO DO THE SAME DAMAGE
+    # as 1.5 and as +inf: `stream.random()` draws from [0, 1), so at p=1.0 every draw skips and the
+    # segmentation is deterministic again -- driven 2026-09-15 on a 10000-byte two-area sample,
+    # three tokenize(regularize=True) calls returning ONE distinct answer, all 10000 ids, against
+    # three distinct answers at 0.3. An operator who types 1.0 has switched the tokenizer off, not
+    # turned the regularizer up, and nothing in this package stops them. The three float levers
+    # other than dropout have NO declared interval at all and nothing here bounds any of them from
+    # either side.
     # ==============================================================================================
     _nonfinite = []
     for _field in tok.keys():
@@ -490,29 +523,14 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
             + ". REFUSED AT STARTUP AND NOT DESCRIBED BY A GATE, because a Gate reason is a report "
               "and the mechanism still runs. WHAT THIS REFUSAL DOES NOT CLAIM: it closes four "
               "values per lever and BOUNDS NOTHING. TOK_DROPOUT=1.5 is finite and was measured to "
-              "do exactly what +inf does; it is closed by the separate probability-interval "
-              "refusal on the next lines, and TOK_DROPOUT=1.0, which does the same damage again, "
-              "is admitted by both. A declared per-lever domain is the general answer and is open.")
-
-    _drop = float(tok.dropout)
-    if not 0.0 <= _drop <= 1.0:
-        raise LeverError(
-            f"TOK_DROPOUT={_drop!r} is outside [0.0, 1.0]. It is declared as units.PROBABILITY and "
-            f"as the 'Probability of skipping an available merge during a counting segmentation', "
-            f"and nothing in this package clamps it: every guard is `dropout > 0.0` and the draw is "
-            f"`stream.random() < dropout`, so ANY value at or above 1.0 skips EVERY available merge "
-            f"on EVERY counting segmentation. MEASURED at 1.5, against a TOK_DROPOUT=0.0 baseline "
-            f"of vocabulary 512 / tok.build_mint 256 / tok.build_refused 0 / bytes_per_token "
-            f"3.5925925925925926: vocabulary 399, tok.build_mint 143, tok.build_refused 143, "
-            f"bytes_per_token 1.0, tok.dropout_skip 3999 over 4000 bytes, and two successive "
-            f"tokenize(regularize=True) calls returning the IDENTICAL segmentation -- BPE-dropout "
-            f"that is not random, which is the symptom the tok.dropout.mint child stream exists to "
-            f"prevent, arriving through the VALUE instead of through the stream. bytes_per_token is "
-            f"the one estimator that leaves this package: spine/derive.py::signature_width_bytes "
-            f"takes it for SIG's single window width and DATA's splice gate reads it too. WHAT THIS "
-            f"REFUSAL DOES NOT CLAIM: 1.0 is INSIDE this interval, is admitted, and does the same "
-            f"thing -- `stream.random()` draws from [0.0, 1.0), so every draw is below 1.0. The "
-            f"interval is the lever's declared domain, not a safety bound.")
+              "do exactly what +inf does; it is closed one layer EARLIER than this, by the "
+              "domain=(0.0, 1.0) on tok/levers.py::TOKLevers's `dropout` declaration, which is "
+              "where that interval's argument and its measurement now live -- this function's own "
+              "[0.0, 1.0] clause was RETIRED to it on 2026-09-15 because it could no longer run. "
+              "TOK_DROPOUT=1.0 does the same damage again and is admitted by both, and so is "
+              "0.9999999999999999, measured bit-for-bit identical to 1.0. The other three float "
+              "levers here carry no declared interval, so for them this refusal is the only rule "
+              "there is and it closes four values.")
 
     # ==============================================================================================
     # TOK_MAX_BYTES BELOW 2 -- A CEILING SO LOW NO MERGE CAN EXIST UNDER IT.
