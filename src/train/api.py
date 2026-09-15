@@ -1005,9 +1005,46 @@ def bench_summary(run: Config, clock, *, elapsed_s, bytes_per_window, n_params, 
                  were available (bench prints the per-component breakdown only when profile is on)
     """
     run = run.owned_by("RUN")
-    raise NotImplementedError(
-        "RUN.bench_summary: P4 (train) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section RUN.")
+    if not bool(run.bench):
+        # OFF. Returns None rather than empty lines, because bench PRINTS INSTEAD OF the eval
+        # battery -- a caller that got [] would print a heading with nothing under it where the
+        # battery should have been.
+        return None
+    c = clock.counters()
+    windows = int(c["step"])
+    # bytes_per_window IS AN ARGUMENT AND MUST BE THE LIVE VALUE, which is P1-L42 and is worth
+    # restating at the arithmetic rather than only in the docstring: `_bpw` was initialised at the
+    # SEED vocabulary (:6237) and refreshed only inside the RATE_EVERY tick (:6493), so a short
+    # BENCH run that never reached a tick quoted kB/s and GB/day at the seed vocabulary. What makes
+    # that structural rather than a slip is that a RUN-owned throughput number depended on an
+    # INSTRUMENT's cadence for its correctness. Taking it as an argument moves the dependency into
+    # the signature where a caller can see it.
+    total_bytes = windows * float(bytes_per_window)
+    secs = max(float(elapsed_s), 1e-9)
+    lines = [
+        f"bench: {windows} windows in {secs:.1f}s "
+        f"({windows / secs:.1f} windows/s, {int(c['opt_steps'])} optimizer steps)",
+        f"bench: {total_bytes / secs / 1024:.1f} kB/s over {total_bytes / 1024:.1f} kB, "
+        f"at {float(bytes_per_window):.4f} bytes/window (LIVE, not the seed vocabulary)",
+        f"bench: {total_bytes / secs * 86400 / 1e9:.3f} GB/day at this rate",
+        f"bench: {int(n_params)} parameters in the optimizer",
+        # THE CLOCKS, SO A READER CAN CHECK THE RATE RATHER THAN TAKE IT. flushes and backwards are
+        # printed separately because they are two kinds and coincide only at one backward per flush.
+        f"bench: clocks step={c['step']} flushes={c['flushes']} backwards={c['backwards']} "
+        f"opt_steps={c['opt_steps']} epoch={c['epoch']} dropped_windows={c['dropped_windows']}",
+    ]
+    spans = timing.spans() if timing is not None else None
+    if spans:
+        # THE PER-COMPONENT BREAKDOWN ONLY WHEN PROFILE IS ON, which is what makes `timing=None` a
+        # legitimate call rather than a missing argument.
+        for name, secs_in in sorted(spans.items(), key=lambda kv: -kv[1]):
+            lines.append(f"bench:   {name}: {secs_in:.2f}s ({secs_in / secs * 100:.1f}%)")
+    else:
+        # SAID RATHER THAN OMITTED. A breakdown that is simply absent reads as a breakdown that was
+        # measured and found empty.
+        lines.append("bench:   no per-component breakdown -- RUN_PROFILE is off, so no spans were "
+                     "timed")
+    return lines
 
 
 def startup_refusals(run: Config, *, disk_stream):

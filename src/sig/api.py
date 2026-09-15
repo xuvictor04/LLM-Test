@@ -1306,6 +1306,46 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
                         separation_final=final, steps=steps, probes=probes)
 
 
+
+def _three_state(gates, ledger):
+    """{name: (state, count, arithmetic)} for every DECLARED gate, in G4's three states.
+
+    RENDERED FROM THE Gate OBJECTS THE PACKAGE ALREADY CARRIES, never from a second inspection of
+    the levers. spine/gate.py::Gate is where `fired`, `reachable`, `value`, `threshold` and
+    `reason` were decided, at build, with the numbers that made them true or false; recomputing any
+    of that here would give this package two answers to "did it fire" and let the report quote
+    whichever it reached first. That is the defect the Gate record was introduced to end.
+
+    THE THIRD STATE IS THE ONE THAT COSTS, which is Gate's own sentence. `fired=False,
+    reachable=True` is a MEASUREMENT -- the mechanism ran and its condition was not met.
+    `reachable=False` is not a measurement at all, and a report that prints them the same way says
+    "0" for both. The count comes from the ledger when the ledger has a key of that name, so a
+    gate that fired N times says N rather than merely "fired".
+    """
+    # BOTH CONTAINERS, BECAUSE THE TREE USES BOTH. SIG carries `gates` as a dict {name: Gate}
+    # while FAB, MEM and CAP carry a tuple of Gate. Neither is wrong and this is not the place to
+    # unify them -- a renderer that accepted only one would silently report zero gates for the
+    # packages using the other, which is the "0 fires nobody can read" state in the very function
+    # written to prevent it. Measured 2026-09-15: sig.gates is a dict of 2, fabric.gates a tuple
+    # of 2, store.gates a tuple of 1, valve.gates a tuple of 3.
+    if isinstance(gates, dict):
+        gates = tuple(gates.values())
+    out = {}
+    for g in (gates or ()):
+        n = int(ledger.get(g.name, ledger.get(g.name + ".count", 0)) or 0)
+        arith = f"{g.value!r} vs {g.threshold!r}"
+        if not g.reachable:
+            out[g.name] = ("unreachable", n, f"{arith} -- {g.reason}")
+        elif g.fired:
+            out[g.name] = ("fired", n, arith)
+        else:
+            # ARMED AND IT DID NOT HAPPEN. The reason rides along when the gate carried one,
+            # because "armed but 0" with the arithmetic beside it is what lets a reader tell a
+            # threshold that was nearly met from one that was never approached.
+            out[g.name] = ("armed-but-zero", n, arith + (f" -- {g.reason}" if g.reason else ""))
+    return out
+
+
 def counters(sig: Config, st):
     """The DID IT FIRE ledger for this package: {name: (state, count, gate_arithmetic)} where state
     is one of fired / armed-but-zero / unreachable. NO MECHANISM IN THIS PACKAGE REPORTS "ON"
@@ -1319,9 +1359,12 @@ def counters(sig: Config, st):
     DID IT FIRE: this call IS the DID IT FIRE surface for the package
     """
     sig = sig.owned_by("SIG")
-    raise NotImplementedError(
-        "SIG.counters: P4 (sig) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section SIG.")
+    # NO MECHANISM IN THIS PACKAGE REPORTS "ON" WITHOUT ONE OF THE THREE STATES, which is this
+    # docstring's own sentence and is why the gates are rendered rather than summarised.
+    out = dict(st.counters)
+    out.update({f"gate:{k}": v for k, v in
+                _three_state(getattr(st, "gates", ()), st.counters).items()})
+    return out
 
 
 def state_dict(sig: Config, st):

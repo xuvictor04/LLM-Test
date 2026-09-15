@@ -423,9 +423,31 @@ def prior(dom: Config, part, *, did):
                  read
     """
     dom = dom.owned_by("DOM")
-    raise NotImplementedError(
-        "DOM.prior: P4 (domains) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DOM.")
+    part.counters["part.n_prior_reads"] = part.counters.get("part.n_prior_reads", 0) + 1
+    # THE WEIGHT TRAVELS WITH THE HISTOGRAM, WHICH IS THE WHOLE POINT OF RETURNING A PAIR.
+    # prior_blend was ONE FIELD DOING TWO JOBS -- a training-side accounting switch that turns the
+    # per-window accumulation on (:6788-6791) and an instrument parameter that is the mixing weight
+    # at eval (:8147-8192) -- and the two could drift apart with nothing saying so. Here `observe`
+    # accumulates on exactly the value this call returns, so they cannot.
+    weight = float(dom.prior_blend)
+    if weight == 0.0:
+        # OFF. Not an error and not an empty histogram: the accounting switch is down, so nothing
+        # was accumulated and there is nothing to blend. Counted apart from `empty` below because
+        # "turned off" and "turned on and never filled" are the two readings this pair exists to
+        # separate -- the finding being that the histogram was PAID FOR every window and never READ.
+        return None, 0.0
+    hist = part.tokc.get(did)
+    if not hist:
+        part.counters["part.n_prior_empty"] = part.counters.get("part.n_prior_empty", 0) + 1
+        return None, 0.0
+    total = float(sum(hist.values()))
+    if total <= 0.0:
+        part.counters["part.n_prior_empty"] = part.counters.get("part.n_prior_empty", 0) + 1
+        return None, 0.0
+    probs = {int(t): (c / total) for t, c in hist.items()}
+    part.counters["part.n_prior_accumulated"] = part.counters.get(
+        "part.n_prior_accumulated", 0) + 1
+    return probs, weight
 
 
 def census(dom: Config, part):
