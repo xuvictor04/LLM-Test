@@ -146,76 +146,89 @@ corrections are dispatched; this entry is the correction to the record.
 
 # OPEN ROUND — the live handoff. Update this section; do not append a second one.
 
-Last updated at commit `41a053f`, 2026-09-15. **A fresh session should start here.** Everything below
+Last updated at commit `dbc0db6`, 2026-09-15. **A fresh session should start here.** Everything below
 is either owed or in flight; everything above is history.
 
-Three container restarts and four session-limit kills hit this round in a row. The lesson is already
-recorded under *Conventions* above — write to disk early — and it held: every agent that wrote early
-survived, every agent that waited for its return value did not. What was NOT recorded, and is the
-reason this section exists, is the **in-flight state**: which agents were dispatched, what landed, and
-what is still owed. Without it a fresh session re-derives the work list from scratch and re-does work
-that already landed.
+## THE ROUND'S RESULT, IN ONE LINE
 
-## What this round built (all committed, suite green at `41a053f`)
+**`compose(environ={})` returns a System.** Verified in a fresh process, not relayed: type `System`,
+final stage `assembled`, 0 refusals, 3 warnings, and the clock, cadences, retention, save flag,
+fabric and optimizer are all real objects. All six blocking entry points have bodies.
 
-`src/spine/lever.py` gained three mechanisms — `REFUSE_NON_FINITE_FLOAT` (a module constant, floor for
-float levers), `domain=(lo, hi)` (optional kwarg, CLOSED at both ends, either end optionally `None`),
-and `REFUSE_INEXACT_INT`. 33 of the 207 numeric levers were given a literal domain. Two checks landed,
-`O14` and `O15`. O15 then found **six** read-site refusals the declaration had made unreachable; all
-six were resolved (opt ×3, fabric, sig, tok). `FAB_MANAGE_EVERY=0` is refused, and `test_fabric.py::F8`
-was rewritten to argue for it.
+    cd /tmp && PYTHONPATH=/home/user/LLM-Test/src python -c \
+      "from spine.compose import compose; s=compose(environ={}); print(type(s).__name__, s.stage)"
 
-Suite: ownership 15 + 73, contract 16 + 77, census 8, assemble 9, couplings 4, fabric 9, derive 575.
+**Do not read that as "the system works."** It means the ASSEMBLY runs. Nothing trains, no loop
+driver exists, and neither definitive goal has been measured once. See OWED below.
 
-## OWED — in priority order, each with its evidence already on disk
+## What this round built (all committed, suite green at `dbc0db6`)
 
-1. **`src/memory/levers.py` contradicts itself within one commit** on `MEM_USE_DECAY` above 1.0.
-   RESOLVED BY READING, NOT YET WRITTEN: the frozen tree's guard at `memory.py:495-496` is
-   `if self.use_decay < 1.0 and self._wc >= self.decay_every:` — the multiplication is INSIDE the
-   `< 1.0` test, so above 1.0 nothing compounds. **The first paragraph is right; the second
-   ("ABOVE 1.0 THE RULE RUNS BACKWARDS") is false and must go.** Note `MEM.maintain` is a P4 stub, so
-   this package has no live reader and both paragraphs were reasoning about a body that does not exist
-   here yet. Evidence: `.rework/audits/fv_pop-dommem.json`.
-2. **`src/fabric/levers.py` claims every pair is "read off what the CONSUMER does with the number"
-   and that is false for EIGHT of eleven.** Only `halt_max`, `pressure` and `discover` have an
-   executable reader; `cull_frac`/`merge_dist` (`FAB.manage`), `new_frac`/`parent_max`/`mut_big_p`/
-   `xover` (`FAB.grow_check`), `lr_gamma`/`lr_amin` (`FAB.own_lr_scale`) are read by P4 stubs only, so
-   those bounds came from docstrings. Correct the claim, and answer in the report whether a bound
-   derived from a docstring for a body that does not exist is safe to declare.
-   Evidence: `.rework/audits/fv_pop-fabric.json`.
-3. **`tests/test_fabric.py::F8`'s layer attribution is a hardcoded string.** `_period_refusal` returns
-   the assembly door's name as a string literal in its `except` block rather than reading it from the
-   exception caught, so "the report says which layer stopped it" is asserted, not read. The FAB door
-   is identified honestly. Evidence: `.rework/audits/fv_manage-every.json`.
-4. **Five verifications have never run**, killed three times: `resolve-opt`, `resolve-fabric`,
-   `resolve-sig`, `resolve-tok`, `resolve-prose`. Their subjects' reports are `e_opt.json`,
-   `e_fabric.json`, `f_sig.json`, `f_tok.json`, `e_prose.json`. **The one question that matters across
-   all five: DID A RETIREMENT LOSE A VALUE?** Every value a retired read-site clause used to refuse
-   must still be refused by the declaration — drive the boundary of the OLD clause, reconstructing it
-   from git, not the new one.
-5. **The residue of the six surviving verifier reports.** They returned 37 refutations and 39
-   unreported findings; only the 9 critical/high have been acted on. The rest are in `fv_*.json`.
+Six entry points, four written here and two by an agent that owned `src/ckpt/api.py` alone:
+`CAP.startup_refusals`; `RUN.new_clock` + `RunClock`; `RUN.new_cadences` + `Cadences`;
+`RUN.cadence_audit`; `CKPT.new_retention` + `Retention`; `CKPT.install_save_signal`.
+
+The cadence repair is the load-bearing one and it is measured: over 200,000 windows a gate with a
+period of 1000 fires 199/199/199/198/198/195 times at `BATCH_W` of 1/2/8/15/16/32. The modulo form
+it replaces fired 999 times at 1 and **zero** at every other width, with `CKPT_EVERY` in that block.
+
+`C11 IS NOW STATED AT STARTUP FOR THE FIRST TIME`: at the shipped defaults the audit reports
+`'curve'` starved (period 2000 against a 634-window run) and `'ckpt'` **disarmed** (period 0).
+
+Suite: ownership 15 + 73, contract 16 + 77, census 8 + self, assemble 9, couplings 4, fabric 9,
+derive all oracle cases. Zero failing — **run per file, by hand, not relayed.** An agent reported
+this same suite as all-PASS while it had five failures; verify it yourself before quoting it.
+
+## OWED — in priority order
+
+1. **THERE IS NO LOOP DRIVER.** `LOOP_ORDER` has 58 rows and nothing executes them. This is now the
+   single largest gap and the only thing standing between a System and a run. Until it exists,
+   goal A and goal B remain unmeasured, exactly as they were before this round.
+2. **The resume path is untested and partly unwritten.** `K2` now prints this rather than hiding it:
+   of the 39 `ASSEMBLY_ORDER` entry points, **10 sit behind a resume guard and a fresh `compose()`
+   never exercises them**; eight are still `NotImplementedError` (`CAP.restore`,
+   `CKPT.check_geometry`, `DATA.restore_stream_state`, `FAB.load_state_dict`, `LM.load_state`,
+   `SIG.load_state_dict`, `TOK.restore_vocab`, `WORLD.load_into`). A returning `compose()` is not
+   evidence the resume path works.
+3. **A mid-epoch resume replays its epoch.** `_in_epoch` is not carried by a Snapshot, so a clock
+   resumed 400 windows into a 1000-window epoch rolls 1000 later instead of 600. This MOVES THE
+   EPOCH BOUNDARY, which is where a continual-learning measurement is taken. Fixing it is a frozen
+   signature change and therefore an owner's call. Recorded at `train/api.py::new_clock`.
+4. **No behavioural check covers RUN, CAP or CKPT.** `test_fabric` is still the suite's only
+   behavioural file. Everything proved about the clock and the cadences this round was proved by
+   throwaway scripts and by one agent's 300 randomized trials — none of it is pinned by the suite,
+   so all of it can silently regress.
+5. **The residue of the earlier verifier reports** — 37 refutations and 39 findings in `fv_*.json`,
+   of which only the 9 critical/high were acted on.
 
 ## OPEN FOR THE OWNER — do not decide these in an agent
 
-- **`U.FRACTION` vs a declared domain above 1.0.** `FAB_DISCOVER` and `FAB_MERGE_DIST` are declared
-  `U.FRACTION, domain=(0.0, 2.0)` while `spine/units.py`'s `FRACTION` is literally `"fraction 0..1"`.
-  The file's own rule is NARROW BY ITS OWN WORDS and keyed to the DEFAULT falsifying the label — 0.35
-  and 0.10 both satisfy it — so the five multipliers moved to `U.COUNT` are not this case. A *domain*
-  falsifying the label is a new way for a declaration to contradict itself, and none of the fifteen
-  labels in `spine/units.py` honestly describes a cosine distance over [0, 2]. Adding one is a
-  spine-vocabulary change.
-  **Correction to the finding as filed:** it argued from `docs/04_LEVERS.md` being generated and
-  printing `"2.0 fraction 0..1"`. THAT DOCUMENT DOES NOT EXIST — `docs/` holds `02_OPERATIONS`,
-  `03_WIRING`, `04_CONTRACT` and `proposals/`, and PLAN.md still lists it as to-be-generated. The
-  quoted sentence is `fabric/levers.py`'s own reasoning about a future document.
+- **Q-CAP-2 (new this round, in `.rework/DECISIONS.md`).** The fabric is born 204 experts ABOVE the
+  point its own cull settles at (`FAB_N0` 2048 against `0.45 x 4096 -> 1844`). With
+  `CAP_TARGETS=experts`, **zero of 4096 possible `CAP_FAB_START` values** trip neither startup
+  clause, so the expert arm cannot be armed at the shipped defaults without a refusal firing. Three
+  readings are written out; none is taken, because what decides between them is a fabric measurement
+  nobody has run — does the population actually settle at 1844 from a start of 2048, and how fast?
+- **`U.FRACTION` vs a declared domain above 1.0** (carried from the previous round, unchanged).
 
-## The standing limit on everything this round built
+## CLOSED THIS ROUND, so nobody re-derives them
 
-A FINITE VALUE DOES THE SAME DAMAGE AS `inf`. `OPT_LR=1e6` destroys the model — parameters at −3928 —
-while passing every rule in the tree. `FAB_ALPHA=1e26` returns an ordinary-looking loss over a
-population already 15 of 23 gradient tensors poisoned. 131 of 207 levers have no derivable ceiling, 16
-have one the tree has explicitly declined to set, and 15 have a ceiling that is another lever and
-cannot be a pair at all. **Not one of the seven levers the lever sweep filed as critical for a
-magnitude is among the 33 populated.** No docstring in this tree may say "safe", "bounded" or
-"validated", and this section is the reason.
+- **DID A RETIREMENT LOSE A VALUE? No.** The four clauses retired by the domain ruling were
+  reconstructed from git and re-run as predicates over 18 values each: **`LOST: []`**. Eight cells
+  moved the other way and every one is an alias of an admitted value or a crash. `TOK_DROPOUT` is
+  fully closed; `SIG_WARMUP_MIN_FRAC` is open in spelling only. Full record in `DECISIONS.md`.
+- **`MEM_USE_DECAY`'s self-contradiction** — corrected; above 1.0 the rule goes INERT, it does not
+  run backwards.
+- **`tests/test_fabric.py::_period_refusal`** — the layer is now read from the caught exception's
+  traceback instead of asserted as a literal. The old literal was true; it was not checked.
+- **`K2`'s expired premise** — "every mechanism is a stub, so compose cannot complete" went red the
+  moment the project succeeded. It now tests the thing the premise stood in for, and derives the
+  resume-guarded exemption from `compose.py`'s AST rather than a hand-written list.
+
+## THE STANDING LIMIT, AND THE COLLISION THAT COST THIS ROUND
+
+Write to disk EARLY — the rule held again. But a NEW failure appeared this round and is worth more
+than the old one: **a workflow dispatched before a context compaction was still running afterwards,
+and its agents were editing the same files as the resumed session.** `src/train/api.py` was modified
+by an agent 25 seconds before an edit here. Nothing was lost, but only because it was noticed.
+**Before resuming work after any reset, check for live agents** (`ls -lt` the source files and
+`.rework/audits/p_*.json`) and stop the workflow before editing what it owns.
