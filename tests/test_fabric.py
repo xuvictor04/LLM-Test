@@ -1527,8 +1527,26 @@ def _period_refusal(every, *, couplings=None):
     try:
         configs, _wires, warnings = assemble.build(e, **kw)
     except Exception as exc:                      # noqa: BLE001 -- classified below, not swallowed
-        return ("the assembly (spine/derive.py::flush_period_windows, via the FAB.d_manage_period "
-                "coupling)"), str(exc), None
+        # THE LAYER IS READ OFF THE EXCEPTION, NOT ASSERTED BESIDE IT. This block returned the
+        # string "the assembly (spine/derive.py::flush_period_windows, via the FAB.d_manage_period
+        # coupling)" as a LITERAL until 2026-09-15, so the one thing F8 claims to establish -- that
+        # the report names the layer that actually stopped the value -- was a sentence this helper
+        # wrote rather than a fact it observed. Any other failure inside assemble.build (a different
+        # coupling's compute, an unrelated derive refusal, a typo in the environment dict) would
+        # have been reported under flush_period_windows' name, and the check would have passed while
+        # describing a mechanism that never ran. The FAB door below was already honest -- it catches
+        # LeverError and names FAB.manage_period because that is the only thing that raises there --
+        # and the asymmetry between the two halves is what made this one easy to miss.
+        tb = exc.__traceback__
+        frame = None
+        while tb is not None:                     # the DEEPEST frame is the one that raised
+            frame = tb.tb_frame
+            tb = tb.tb_next
+        where = "unknown"
+        if frame is not None:
+            mod = frame.f_globals.get("__name__", "?").replace(".", "/")
+            where = f"{mod}.py::{frame.f_code.co_name}"
+        return f"the assembly ({where})", str(exc), None
     if warnings:
         raise AssertionError(f"assemble.build warned on {e}: {warnings}")
     try:
