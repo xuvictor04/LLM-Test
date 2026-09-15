@@ -29,6 +29,7 @@ import math
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from spine.lever import Config
 from spine import rng as _rng
@@ -467,9 +468,24 @@ def embed(lm: Config, model, x):
                  trains and observing one it does not)
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.embed: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    _bump("lm.embed.calls")
+    # THE TABLE COMES FROM model.token_table(), WHICH IS THE ONE PLACE THAT KNOWS WHICH ARM BUILT
+    # IT. Writing `model.emb.weight` here would be the second of the three producers this
+    # docstring refuses, and it is an AttributeError on every run with lm.compose set, because
+    # build_model does not construct `emb` at all on that arm. token_table() is also what decode()
+    # reads, so the vectors the world model observes and the vectors the head scores against are
+    # the same tensor by construction rather than by two call sites agreeing.
+    table = model.token_table()
+    # WHICH ARM ANSWERED IS COUNTED, because the docstring makes it a reporting obligation: it is
+    # "the difference between the world model observing the table the LM trains and observing one
+    # it does not". Exactly one of these two is nonzero on a run. The flag is read off `model`
+    # rather than off `lm.compose` so the count reports the table that was actually returned.
+    _bump("lm.embed.from_composed_table" if model.compose else "lm.embed.from_emb_weight")
+    # EMBEDDING, AND NOTHING ELSE. No positional term (the transformer arm adds one inside encode),
+    # no dropout (decode owns the regulariser), no block. F.embedding rather than `table[x]` because
+    # the two differ on a non-contiguous index tensor and this one is the documented spelling for a
+    # table that may be a composed intermediate carrying grad.
+    return F.embedding(x, table)
 
 
 def encode(lm: Config, model, x, *, n_layers=None, extra=None):
@@ -754,9 +770,27 @@ def lm_loss(lm: Config, logits, y):
     DID IT FIRE: lm.loss.calls
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.lm_loss: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    _bump("lm.loss.calls")
+    # THE LAST DIMENSION IS CHECKED AGAINST THE LEVER, WHICH IS THE ONLY THING vocab_slots IS READ
+    # FOR HERE. logits arrive from decode(), which builds them from a (vocab_slots, width) table,
+    # so a mismatch means the logits and the model disagree about how many rows exist -- and
+    # cross_entropy would happily score them anyway, against class ids it silently reinterprets.
+    slots = int(lm.vocab_slots)
+    if logits.shape[-1] != slots:
+        raise ValueError(
+            f"LM.lm_loss: logits have {logits.shape[-1]} classes and LM_VOCAB_SLOTS is {slots}. "
+            f"Cross-entropy does not check this, so a run would score every window against the "
+            f"wrong class ids and report a loss that means nothing.")
+    # reduction='none' THEN mean(-1) THEN mean(). Arithmetically identical to cross_entropy's own
+    # 'mean' ONLY when every window has the same length, which is the case here because the batch is
+    # cut at a fixed L -- and the difference that matters is not the number, it is that the
+    # PER-WINDOW vector survives. Competence attribution, the domain EMA and the marginal-
+    # contribution counterfactual all read it (:6899-6902) and not one of them can be tracked from
+    # a scalar. Taking the reduction and then trying to recover the parts is what this returns
+    # instead of.
+    flat = F.cross_entropy(logits.reshape(-1, slots), y.reshape(-1), reduction="none")
+    per_window = flat.view(y.shape).mean(-1)
+    return per_window, per_window.mean()
 
 
 def anchor_term(lm: Config, model, *, token_seen):

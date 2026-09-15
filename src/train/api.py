@@ -895,6 +895,25 @@ class Cadences:
                 f"{period}. The ledger prints the declared one, so a run that took this branch "
                 f"would report a cadence it did not use.")
         self._checks[key] += 1
+        # A NON-POSITIVE PERIOD IS DISARMED, AND WITHOUT THIS LINE IT WAS THE OPPOSITE: FIRE ALWAYS.
+        # The comparison below is `now - seeded >= period`, and at Windows(0) that is `0 >= 0` on
+        # the first evaluation after seeding and true on every one after -- so the gate fired on
+        # EVERY WINDOW. CKPT_EVERY=0 IS THE SHIPPED DEFAULT and its declared meaning is "periodic
+        # saving disabled", so measured at those defaults this wrote a checkpoint 632 times in a
+        # 633-window run: the most expensive operation in the loop, running every window, on a
+        # configuration asking for it never.
+        # THREE STATEMENTS DISAGREED AND ONLY THIS ONE WAS LOAD-BEARING. CKPT's own Gate on the same
+        # object reports fired=False and says "the only saves this run makes are the FINAL one and
+        # any SIGUSR1"; RUN.cadence_audit on the same mapping prints that 'ckpt' is DISARMED and
+        # "cannot fire at ANY run length"; spine/derive.py::cadences_that_cannot_fire puts every
+        # `period.n <= 0` in its cannot-fire list. All three described the intended behaviour and
+        # this primitive did the reverse, which is the shape where a report is not merely wrong but
+        # actively reassuring.
+        # THE CHECK IS STILL COUNTED, so the ledger reads checks > 0 with fires == 0 and the period
+        # column says 0 -- disarmed AND reached, which is a different fact from either a gate that
+        # was never evaluated or one that was armed and never came due.
+        if int(period) <= 0:
+            return False
         now = clock.step
         if not isinstance(now, U.Windows):
             raise U.UnitError(
