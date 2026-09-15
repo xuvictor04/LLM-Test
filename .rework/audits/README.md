@@ -180,9 +180,34 @@ this same suite as all-PASS while it had five failures; verify it yourself befor
 
 ## OWED — in priority order
 
-1. **THERE IS NO LOOP DRIVER.** `LOOP_ORDER` has 58 rows and nothing executes them. This is now the
-   single largest gap and the only thing standing between a System and a run. Until it exists,
-   goal A and goal B remain unmeasured, exactly as they were before this round.
+1. **THE LOOP PATH IS 19 OF 54 WRITTEN, AND A LOOP DRIVER IS NOT THE NEXT THING.** This item said
+   "there is no loop driver ... the only thing standing between a System and a run" when this
+   section was first written today, and counting disproved it within the hour. `LOOP_ORDER` has 58
+   rows naming 54 distinct entry points, and **35 of them still raise `NotImplementedError`**:
+
+       CAP 0/3   DOM 0/7   WORLD 0/3   TOK 1/6   LM 1/6   DATA 1/2   MEM 1/3
+       SIG 2/5   FAB 2/6   CKPT 2/3   RUN 5/6    OPT 4/4
+
+   So a driver written today would run until the first stub and stop — **the stub ladder one level
+   up**, which is the shape `compose()` just spent this whole round climbing, and `K7`'s docstring
+   already names it as "this project's oldest shape". Writing the driver first buys a second ladder
+   to climb rather than a run.
+   **`LM.embed` IS A STUB, WHICH SETTLES THE ORDER.** Nothing can compute a forward pass, so nothing
+   can train, so goal A cannot be measured at all yet — and goal B is a statement about what
+   survives a second pass of training that does not happen. The next work is loop-path BODIES, and
+   the highest-value ones are the ones the forward pass needs: `LM.embed`, `LM.anchor_term`,
+   `SIG.train_step`, `TOK.on_window`, `DOM.observe`, `FAB.manage`. `OPT` is already 4/4 and `RUN`
+   5/6, so the optimizer and the clock are not what is missing.
+
+   Reproduce the count (it will change as bodies land, so re-run it rather than quoting this):
+
+       cd /tmp && PYTHONPATH=/home/user/LLM-Test/src python -c "
+       import sys; sys.path.insert(0, '/home/user/LLM-Test/tests')
+       from test_contract import _k13_entry_points
+       from spine.compose import plan
+       stubs = {f'{p}.{n}' for p,n,b in _k13_entry_points('/home/user/LLM-Test/src') if b}
+       uniq = sorted({f'{r[1]}.{r[2]}' for r in plan()[1]})
+       print(len(uniq)-len([k for k in uniq if k in stubs]), 'of', len(uniq), 'written')"
 2. **The resume path is untested and partly unwritten.** `K2` now prints this rather than hiding it:
    of the 39 `ASSEMBLY_ORDER` entry points, **10 sit behind a resume guard and a fresh `compose()`
    never exercises them**; eight are still `NotImplementedError` (`CAP.restore`,
