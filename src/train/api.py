@@ -985,10 +985,30 @@ def cadence_audit(run: Config, *, run_windows, periods):
         return [f"cadence audit: every declared gate can fire at this run length -- "
                 f"{len(periods)} gate(s) checked against a run of {run_windows}."]
     out = []
+    # THE THIRD ELEMENT OF THE TUPLE MEANS TWO DIFFERENT THINGS AND THIS LOOP USED TO RENDER IT AS
+    # ONE. spine/derive.py::cadences_that_cannot_fire appends `(key, period.n, 0)` when the period
+    # is NON-POSITIVE and `(key, period.n, run_windows.n)` when the period merely exceeds the run --
+    # so the 0 in the first branch is a SENTINEL, not a length. Printed through one f-string it
+    # produced "'ckpt' has a period of 0 windows and this run is 0 windows long" on a run of 634
+    # windows, in the same returned list as a 'curve' line correctly saying 634. Two lines from one
+    # call disagreeing about the length of the run is a false equation in a report, which is the
+    # defect this package's whole cadence apparatus exists to stop printing.
+    # THE TWO ARE ALSO DIFFERENT FACTS AND DESERVE DIFFERENT SENTENCES. A period longer than the run
+    # is a gate that is ARMED and STARVED -- lengthen the run and it fires. A period at or below
+    # zero is a gate that is DISARMED at any run length, and no amount of running reaches it.
     for key, period_n, run_n in starved:
-        out.append(f"cadence audit: {key!r} has a period of {period_n} windows and this run is "
-                   f"{run_n} windows long, so it CANNOT FIRE ONCE. Whatever it gates does not "
-                   f"happen in this run, and a report that says it did nothing is reporting a "
-                   f"mechanism that was never reached -- which is a different statement. Shorten "
-                   f"the period, or lengthen the run (DATA.stream_bytes, LM.ctx, RUN.epochs).")
+        if period_n <= 0:
+            out.append(f"cadence audit: {key!r} has a period of {period_n} windows, so it is "
+                       f"DISARMED rather than starved -- it cannot fire at ANY run length, and "
+                       f"lengthening the run will not reach it. Whatever it gates does not happen "
+                       f"in this run, and a report that says it did nothing is reporting a "
+                       f"mechanism that was never armed, which is a different statement. Set a "
+                       f"period of 1 or more on the package that owns this threshold.")
+        else:
+            out.append(f"cadence audit: {key!r} has a period of {period_n} windows and this run is "
+                       f"{run_n} windows long, so it CANNOT FIRE ONCE. Whatever it gates does not "
+                       f"happen in this run, and a report that says it did nothing is reporting a "
+                       f"mechanism that was never reached -- which is a different statement. "
+                       f"Shorten the period, or lengthen the run (DATA.stream_bytes, LM.ctx, "
+                       f"RUN.epochs).")
     return out

@@ -24,6 +24,14 @@ RECORD TYPES RETURNED (P4 defines them):
 """
 import dataclasses
 import os
+# THE HANDLER INSTALL LIVES IN install_save_signal BELOW, AND THIS IS THE ONLY IMPORT
+# THIS PACKAGE GROWS FOR IT. tests/test_ownership.py::check_o10_no_backdoor_imports judges
+# an import by the HEAD of its dotted name: head "spine" is an ALLOWLIST over
+# {lever, units, derive, rng, wire, gate, init}, and a head in the set of package
+# directories under src/ (minus spine) is a foreign package. "signal" is neither, so the
+# standard library is outside that rule's scope. Read from the check rather than assumed,
+# and MEASURED: tests/test_ownership.py is green with this import in place (2026-09-15).
+import signal
 
 import torch
 
@@ -309,10 +317,15 @@ def save_period(ckpt: Config):
 
     (3) NOTHING RENDERS IT YET, so the condition this Gate states reaches an OBJECT GRAPH and not
     an operator. `grep -rn "[.]line()" src/` returns exactly one call site, in opt/api.py, over
-    OPT's own local list; `grep -rn "[.]gates" src/` finds SIX producing sites -- the five named
-    above plus this function's own -- and NO consumer, compose included. (Six and not five: the
-    paragraph above counts the packages that ALREADY produced one before this ruling, and re-using
-    that number for the grep would be the off-by-one this file's other count paragraph is about.)
+    OPT's own local list; `grep -rn "[.]gates" src/` finds SEVEN producing sites -- the five named
+    above, this function's own, and ckpt/api.py::install_save_signal's ckpt.sigusr1_armed on the
+    flag object it returns, which landed 2026-09-15 with that body -- and NO consumer, compose
+    included. Both halves re-measured by running the grep on 2026-09-15, not by adding one to the
+    old number. (Seven and not six: the paragraph above counts the packages that ALREADY produced
+    one before this ruling, and re-using that number for the grep would be the off-by-one this
+    file's other count paragraph is about. It read SIX until the seventh producer landed in THIS
+    SAME FILE two hundred lines below it, which is the drift O12's rule is about -- open the
+    sentence, do not trust it.)
     The path from here to a printed line exists -- spine/compose.py holds the same
     `periods` mapping it passes to RUN.new_cadences and RUN.cadence_audit -- but both of those are
     still `raise NotImplementedError` stubs, so the round-1 complaint that "the condition is stated
@@ -520,6 +533,69 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
         "docs/04_CONTRACT.md, section CKPT.")
 
 
+class _SaveFlag:
+    """The SIGUSR1 save flag: `kill -USR1 <pid>` sets it, the loop drains it with take().
+
+    PRIVATE BY NAME, AND THAT IS A CONTRACT FACT RATHER THAN A STYLE ONE. install_save_signal's
+    docstring calls the returned object "a Flag object with .take()", and a module-level class
+    named `Flag` with a method named `take` IS a public entry point to
+    tests/test_contract.py::api_signatures, which walks every public ClassDef in a package's
+    api.py and records its public methods. MEASURED 2026-09-15 by spelling it `Flag` and running
+    tests/test_contract.py: K1 reported `src/ckpt/api.py defines 'CKPT: Flag.take(self)', which
+    the document does not declare`, and the tree's entry-point total moved. That is the same
+    refusal save_period's docstring records for a new public accessor, and it lands in
+    docs/04_CONTRACT.md and the entry-point counts, which a body writer may not take unilaterally.
+    The OBJECT is as public as it ever was -- the composition root binds it to System.save_flag and
+    the loop calls .take() on it -- it is the NAME in this module that is not an entry point.
+
+    THE DRAIN IS A HIGH-WATER MARK, NOT A read-and-clear ASSIGNMENT, and the difference is a lost
+    signal. `if self._set: self._set = False; return True` is two bytecodes with a window between
+    them: CPython runs a Python-level signal handler BETWEEN bytecodes, so a SIGUSR1 arriving in
+    that window sets the flag and the very next store clears it, and the operator's save never
+    happens with nothing said. Counting arrivals and remembering how many have been drained closes
+    it: a signal that lands after the snapshot leaves `_received` ahead of `_drained`, so the next
+    take() still returns True. The handler is the only writer of `_received` and take() is the only
+    writer of `_drained`, so neither races itself.
+
+    `_received` DOUBLES AS THE DID IT FIRE COUNT for the SIGUSR1 route -- the arrivals, against
+    Saves.sigusr1's writes -- which is the pair that tells "nobody pressed it" from "it was pressed
+    and nothing was saved".
+    """
+
+    __slots__ = ("_received", "_drained", "armed", "gates")
+
+    def __init__(self):
+        self._received = 0
+        self._drained = 0
+        self.armed = False
+        self.gates = ()
+
+    def _arrive(self, signum, frame):
+        """The handler. ONE integer increment and NOTHING ELSE.
+
+        NEVER torch.save IN HERE -- reentrancy (self_organize.py:5457-5462, whose own comment says
+        "never torch.save inside a handler"). A handler runs between arbitrary bytecodes, so it can
+        land in the middle of the allocator, the autograd engine or a half-written .tmp file; the
+        save happens at the next SAFE point, which is the loop's own drain beside the periodic
+        save.
+        """
+        self._received += 1
+
+    def take(self):
+        """Read-and-clear: True iff at least one SIGUSR1 has arrived since the last call.
+
+        Returns a BOOLEAN and not a count on purpose -- the loop's question is "save now?", and n
+        signals between two drains are one save, which is what the old tree's `_ckpt_req["on"]`
+        boolean meant (self_organize.py:7710-7712). The arrivals are not lost: `_received` keeps
+        counting them for the report.
+        """
+        seen = self._received          # ONE read; a signal arriving after it leaves _received
+        if seen == self._drained:      # ahead of _drained and is taken on the NEXT call.
+            return False
+        self._drained = seen
+        return True
+
+
 def install_save_signal():
     """Arm `kill -USR1 <pid>`: sets a flag the loop drains beside the periodic save. Returns a Flag
     object with .take() (read-and-clear).
@@ -528,13 +604,95 @@ def install_save_signal():
     plus the cadence" is not read as complete. NEVER torch.save inside a handler -- reentrancy
     (:5457-5462).
 
+    THE ARMING IS REPORTED, WHICH IS THE ONE THING THE OLD TREE DID NOT DO. self_organize.py:5462
+    reads `try: _signal.signal(_signal.SIGUSR1, _on_usr1) except (ValueError, OSError): pass`, and
+    its own trailing comment says what that costs -- "not the main thread / unsupported platform ->
+    silently skip". The next four lines (:5464-5467) then PRINT, unconditionally, "checkpoint-on-
+    demand: kill -USR1 <pid> -> saves to <dir> at the next step". So on exactly the configurations
+    where the install had just failed, the run told the operator the mechanism was armed. That is
+    the armed-but-inert collapse spine/gate.py exists to refuse, in its most expensive form: an
+    operator sends the signal to a long run, the process takes the DEFAULT SIGUSR1 disposition, and
+    the default disposition for SIGUSR1 is to TERMINATE. The repair is not to let the exception
+    out -- a run must not die because it could not arm a convenience -- it is to SAY SO, on the
+    object the root already holds.
+
+    THE STATE IS A spine.gate.Gate ON `.gates`, WHICH IS THE TREE'S SHAPE FOR THIS AND NOT A NEW
+    ONE. Five entry points already hand their gates back on an attribute of that name
+    (fabric/api.py::build, capacity/api.py::new_valve, memory/api.py::open_store,
+    tok/api.py::build_vocabulary, sig/api.py::warm_up as a dict), and ckpt/api.py::save_period
+    attaches one to the period it returns; this is the seventh producing site and save_period's own
+    count paragraph is corrected in the same edit. A private `armed`/`reason` pair instead would be
+    the thirteen-private-Gate-classes shape spine/gate.py's docstring refuses in as many words.
+    `.armed` IS ALSO SET, as the plain bool the loop branches on, and it is the SAME fact the gate
+    renders -- one source, two readings, not two answers.
+
+    THREE ARMS, AND THE FIRST TWO ARE NOT THE SAME STATEMENT. A platform whose `signal` module has
+    no SIGUSR1 at all can never deliver one; a platform that HAS it and refuses the install (this
+    is not the main thread) could deliver one to a process that arranged it differently. Both are
+    UNREACHABLE for this run and both carry a reason, because Gate refuses an unreachable arm
+    without one -- but a reader who sees "no SIGUSR1 on this platform" looks for a different fix
+    than one who sees "not the main thread".
+
+    NOTHING RENDERS THE GATE YET, the same residue save_period's cost (3) records: `grep -rn
+    "[.]gates" src/` still finds no consumer, compose included, so this state reaches an object
+    graph and not an operator until the report lands. It is on the System (spine/compose.py binds
+    it to sysm.save_flag), which is where a renderer will look.
+
     LEVERS READ: none
     WIRES READ: none
-    DID IT FIRE: Saves.sigusr1
+    DID IT FIRE: Saves.sigusr1 counts the saves this route caused; the flag's own `_received`
+                 counts the signals that ARRIVED, and the two differ exactly when a signal was
+                 taken and the save was refused. The gate on `.gates` answers the prior question --
+                 whether the route could be armed at all -- which nothing in the old tree asked.
     """
-    raise NotImplementedError(
-        "CKPT.install_save_signal: P4 (ckpt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CKPT.")
+    flag = _SaveFlag()
+    # getattr AND NOT hasattr-THEN-ACCESS: the same lookup twice is two chances to disagree, and
+    # the number is wanted for the gate's printed value anyway. SIGUSR1 is absent on Windows, where
+    # the signal module defines only the six ANSI C signals plus SIGBREAK.
+    signum = getattr(signal, "SIGUSR1", None)
+    if signum is None:
+        flag.gates = (Gate("ckpt.sigusr1_armed", False, None, "SIGUSR1", reachable=False,
+                           reason="this interpreter's `signal` module declares no SIGUSR1, so "
+                                  "`kill -USR1` cannot be delivered to this process at all and no "
+                                  "handler would be reached if one were installed. Reported "
+                                  "UNREACHABLE rather than as an unmet condition, which would send "
+                                  "an operator to send a signal that does not exist here. The "
+                                  "periodic and final saves are unaffected."),)
+        return flag
+    try:
+        signal.signal(signum, flag._arrive)
+    except Exception as e:                  # noqa: BLE001 -- see the two sentences below
+        # BROAD ON PURPOSE, AND NOT SILENT. The old tree caught (ValueError, OSError) and passed;
+        # ValueError is what CPython raises off the main thread ("signal only works in main thread
+        # of the main interpreter"), OSError what a platform refusal raises, and RuntimeError what
+        # a sub-interpreter raises -- but the contract this arm owes is "an exception from
+        # signal.signal does not escape", and naming three types is a promise about a stdlib
+        # implementation rather than about this function. The TYPE AND MESSAGE ARE RENDERED into
+        # the gate, so nothing that lands here is swallowed: a class nobody predicted shows up by
+        # name in the report instead of as a dead mechanism.
+        flag.gates = (Gate("ckpt.sigusr1_armed", False, f"{type(e).__name__}: {e}", "SIGUSR1",
+                           reachable=False,
+                           reason=f"signal.signal(SIGUSR1) was refused by this process with "
+                                  f"{type(e).__name__}: {e} -- the usual cause is that the run was "
+                                  f"started off the main thread, where CPython refuses to install "
+                                  f"a handler. The run continues and the exception is NOT "
+                                  f"re-raised: a run must not die because it could not arm a "
+                                  f"convenience. But `kill -USR1` now takes this process's DEFAULT "
+                                  f"SIGUSR1 disposition, which TERMINATES it, so an operator who "
+                                  f"believes the old tree's unconditional 'checkpoint-on-demand' "
+                                  f"line kills the run instead of checkpointing it. Reported "
+                                  f"UNREACHABLE: the periodic and final saves are unaffected and "
+                                  f"no configuration of CKPT's levers changes this arm."),)
+        return flag
+    flag.armed = True
+    # FIRED = THE HANDLER IS INSTALLED. This gate's subject is the ARMING and not a save: its name
+    # says `armed`, and the save this route causes is counted by Saves.sigusr1, which is CKPT.save's
+    # surface. The printed pair is the signal number against the name, because the number is what
+    # an operator's `kill -<n>` takes and it is not 10 everywhere (it is 10 on Linux/x86-64, 30 on
+    # macOS, 16 on some MIPS ABIs), so rendering the name alone would be the one thing a reader
+    # cannot check.
+    flag.gates = (Gate("ckpt.sigusr1_armed", True, int(signum), "SIGUSR1"),)
+    return flag
 
 
 def resume_source(ckpt: Config):
@@ -668,24 +826,208 @@ def check_geometry(ckpt: Config, snapshot, geometry):
         "docs/04_CONTRACT.md, section CKPT.")
 
 
+# ==================================================================================================
+# THE RETENTION RECORD
+# ==================================================================================================
+
+@dataclasses.dataclass(frozen=True)
+class BestAction:
+    """What one held-out probe earned. Returned by Retention.consider.
+
+    TWO INDEPENDENT ANSWERS, NOT ONE VERDICT, and the old tree ran them as two separate tests for a
+    reason. The single global best is `_cm < _best_bpb[0]` -- strict improvement, one file that is
+    overwritten every time. The rotation slot is the WEAKER "descent into a good region" test at
+    self_organize.py:6478-6479, which is a deliberate SUPERSET of the local minima. A probe can
+    earn both, either, or neither, and collapsing them into one boolean would lose the distinction
+    the two levers exist to express.
+
+    `rotate_slot` IS A SLOT NUMBER AND NOT A SUFFIX STRING. 1-based, exactly as
+    self_organize.py:6480 computed it (`_slot = (len(_bkeep) % BEST_KEEP) + 1`). It stays a number
+    because the same value is spliced into TWO artifact names by two different packages --
+    spine/compose.py's LOOP_ORDER hands the SAME `suffix` to CKPT.save and to TOK.save_vocabulary,
+    which is the whole of M46's fix -- so a Retention that returned the rendered string ".best3"
+    would be deciding a spelling this package does not own, on behalf of one that does. None means
+    no rotation was earned by this probe.
+    """
+    save_best: bool
+    rotate_slot: object = None
+
+
 def new_retention(ckpt: Config, *, restored=None):
     """The best-model policy. Returns Retention.
 
-    LEVERS READ: best_keep, best_keep_tol
+    LEVERS READ: best_keep, best_keep_tol, dir (through saving_on, for the inert_reason's
+                 saving-is-off clause -- the same parenthetical save_period's LEVERS READ line
+                 carries for the same reason, added 2026-09-15 when this body was written. The
+                 line named two levers while spine/compose.py's `persist` row REQUIRED this
+                 entry point to know whether saving is on: "it must precede new_retention, whose
+                 inert_reason is populated when best_keep > 0 AND SAVING IS OFF". A LEVERS READ
+                 line that omits a lever the body must read is the prose half of the same defect
+                 K4 exists to catch on the other side)
     WIRES READ: none
     DID IT FIRE: Retention.counters() -> (probes_seen, new_bests, rotations, slots_used,
                  inert_reason). `inert_reason` is populated when best_keep > 0 and saving is off,
                  and when NO CURVE VALUE HAS EVER ARRIVED -- which at P3 is always, and must read
                  as armed-but-inert rather than as zero local lows.
+
+    TWO OBLIGATIONS THE FROZEN SIGNATURES CANNOT MEET, WRITTEN DOWN RATHER THAN FAKED.
+
+    (1) `best_saved` CANNOT MEAN "WRITTEN TO DISK" HERE, AND IT DID IN THE OLD TREE. `_best_bpb`
+        was `[best, step, saved?]` (self_organize.py:4243) and the third slot was set from the
+        RETURN of the save, and the rotation ring appended a slot only `if _save_ckpt(...)`
+        returned True (:6481-6483) -- so the old tree's ring recorded slots that were actually
+        written. In this tree CKPT.save is a separate entry point the COMPOSITION ROOT calls
+        (docs/04_CONTRACT.md section 3.2: the fan-out is rows, not calls inside CKPT.save), it
+        returns True iff a file was written, and NO frozen entry point on this object takes that
+        answer back. So `best_saved` here means A SAVE WAS ORDERED and the ring records slots
+        ORDERED, not slots on disk. WHAT WOULD CLOSE IT: one more entry point on this class --
+        `Retention.note_saved(ok, slot=None)` -- called from the C rows beside CKPT.save. That is
+        a contract edit (docs/04_CONTRACT.md's ```contract block, K1, K13's entry-point count and
+        a LOOP_ORDER row), not a body fix, so it is REFERRED and not taken here.
+    (2) THE INERT CLAUSE IS PINNED TO best_keep > 0 AND THE GAP IS ONE LEVER WIDE. At
+        best_keep == 0 the single global best is equally unsaveable with CKPT_DIR off -- 0 is not
+        "off", ckpt/levers.py::CKPTLevers.best_keep says 0 means exactly what BEST_TRACK=1 did, a
+        single rotating .best -- but the condition this body must implement is spelled twice
+        outside this file, in spine/compose.py's `persist` ASSEMBLY_ORDER row and again at the
+        `retention` call site, both as "best_keep > 0 AND SAVING IS OFF". Widening it here would
+        make this body and the root's own prose disagree, which is the drift the order tables are
+        data to prevent. It costs nothing at P3: the second clause -- no curve value has ever
+        arrived -- populates inert_reason on every configuration anyway.
+
+    TWO REFUSALS, BOTH OVER THIS PACKAGE'S OWN LEVERS, AND NEITHER GETS A SWITCH. That is not an
+    omission: REFUSE_NEGATIVE_PERIOD at the top of this file states in as many words that it is
+    NOT a precedent -- "lm/api.py::resolve, opt/api.py::build and capacity/api.py::new_valve all
+    refuse out-of-range lever values with no switch of any kind, and none of them grows one from
+    this" -- because the owner asked for THAT refusal to be turn-off-able by name.
+      * best_keep < 0. The old tree wrote `BEST_KEEP = max(0, _i("BEST_KEEP", 0))`
+        (self_organize.py:4235), a coercion at read time that makes a printed number a lie: the
+        report at :9615 renders `BEST_KEEP={BEST_KEEP} slots`, so an operator who typed -2 was
+        shown 0 and told nothing. That is the FAB_MIN_STEPS shape this rebuild refuses by name.
+      * best_keep_tol outside 0..1. spine/units.py::FRACTION is the string "fraction 0..1" and
+        that IS the declared range; spine/lever.py does not enforce it (FRACTION is a label, not a
+        validator -- checked by reading Lever.coerce, which has no per-unit range hook). A
+        NEGATIVE tolerance inverts the lever: `best * (1 + tol)` falls BELOW the best, so the
+        "how close to the best a descending probe must land" test starts demanding a probe
+        strictly BETTER than the best by a margin, which is the mechanism running backwards -- the
+        same reading save_period's guard gives a negative period.
+    NEITHER REFUSAL CAN FIRE ON A CONFIGURATION THIS REPOSITORY SHIPS, checked rather than assumed
+    on 2026-09-15: `grep -rn BEST_KEEP` over the tree finds longrun.sh:421 (BEST_KEEP=2),
+    longrun.sh:430 (BEST_KEEP=4), longrun.sh:519-521 and notes/CURRENT_DEFAULTS.md
+    (BEST_KEEP=0, BEST_KEEP_TOL=0.02) -- every one of them in range.
     """
     ckpt = ckpt.owned_by("CKPT")
-    raise NotImplementedError(
-        "CKPT.new_retention: P4 (ckpt) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CKPT.")
+    keep = int(ckpt.best_keep)
+    tol = float(ckpt.best_keep_tol)
+    if keep < 0:
+        raise LeverError(
+            f"CKPT_BEST_KEEP={keep}: the number of rotating .best1..bestN slots to retain is a "
+            f"COUNT and there is no mechanism a negative one names. Neither meaning is lost: 0 is "
+            f"the declared default and keeps the single global .best alone (it is what BEST_TRACK=1 "
+            f"did before the merge), and n > 0 keeps n recent local lows on top of it. Refused "
+            f"rather than clamped: self_organize.py:4235 read this lever as "
+            f"`max(0, _i('BEST_KEEP', 0))` and the end-of-run report at :9615 then printed "
+            f"'BEST_KEEP={{BEST_KEEP}} slots' from the clamped value, so an operator who typed a "
+            f"negative was shown 0 and told nothing.")
+    if not 0.0 <= tol <= 1.0:
+        raise LeverError(
+            f"CKPT_BEST_KEEP_TOL={tol}: the tolerance is a FRACTION OF the best held-out "
+            f"bits/byte seen so far (spine/units.py::FRACTION is the string 'fraction 0..1', and "
+            f"that is the declared range -- spine/lever.py::Lever.coerce does not enforce it, "
+            f"which is why the refusal is here). The test is `probe <= best * (1 + tol)` "
+            f"(self_organize.py:6479), so a NEGATIVE tolerance puts the admission threshold BELOW "
+            f"the best and demands a probe strictly better than the best by a margin -- the "
+            f"opposite of 'how close to the best a descending probe must land', which is this "
+            f"lever's own help text -- and a tolerance above 1 admits anything up to twice the "
+            f"best, which fills the rotation with the warmup weights ckpt/levers.py::CKPTLevers."
+            f"best_keep_tol says this lever exists to keep out. 0.0 admits only a probe at or "
+            f"below the best itself; the shipped default is 0.02.")
+    # saving_on IS CALLED, NOT RE-TYPED. The six spellings of off live in one predicate in this
+    # file, and re-testing them at a call site is the defect that wrote a directory literally
+    # named `0` into the repository root. The ROOT already computed this value one stage earlier
+    # (spine/compose.py's `persist` row records it on the System as sysm.saving) and this call is
+    # a SECOND evaluation of the same pure predicate over the same frozen Config -- not a second
+    # source of truth, because Config is frozen after spine.assemble.build returns, so the two
+    # calls cannot disagree. The alternative -- a `saving` parameter -- is a frozen-signature
+    # change to an entry point docs/04_CONTRACT.md declares.
+    return Retention(keep=keep, tol=tol, saving=saving_on(ckpt), restored=restored)
 
 
 class Retention:
-    """The best-model policy object. Constructed by new_retention()."""
+    """The best-model policy object. Constructed by new_retention().
+
+    STATE ROUND-TRIPS AS PLAIN PYTHON, NOT AS SPINE OBJECTS. state() is written into the
+    checkpoint as Snapshot.best_state and read back by torch.load; a units.Windows or a Gate in
+    that blob would make the FILE depend on this tree's import path, so every number that crosses
+    the disk boundary is an int, a float, a bool or None. The KIND is not lost, it is asserted at
+    the door instead: consider() refuses a `step` that is not units.Windows.
+    """
+
+    __slots__ = ("_keep", "_tol", "_saving", "_best_bpb", "_best_step", "_best_saved",
+                 "_prev_probe", "_slots", "_ordered", "_probes_seen", "_new_bests", "_rotations")
+
+    # THE FIVE FIELDS state() WRITES AND new_retention(restored=) READS BACK, in one place, because
+    # a restore that quietly accepts a blob missing one of them is M45 arriving through the repair
+    # for M45: the first post-resume probe would satisfy "no best yet" and overwrite the parent's
+    # best-by-held-out snapshot with the Adam re-warm bump.
+    _STATE_FIELDS = ("best_bpb", "best_step", "best_saved", "prev_probe", "ring")
+
+    def __init__(self, *, keep, tol, saving, restored=None):
+        self._keep = keep
+        self._tol = tol
+        self._saving = saving
+        # THE COLD START IS THE OLD TREE'S, FIELD FOR FIELD: `_best_bpb = [None, -1, False]`
+        # (self_organize.py:4243) and `_prev_probe = [None]` (:4244). -1 and not 0 for the step,
+        # because 0 is a step a run actually reaches and "no best yet" must not be readable as
+        # "the best was at the very first window".
+        self._best_bpb = None
+        self._best_step = -1
+        self._best_saved = False
+        self._prev_probe = None
+        self._slots = {}          # {slot: (bpb, step)} -- the resident ring contents
+        self._ordered = 0         # rotations ORDERED, i.e. self_organize.py:6480's len(_bkeep)
+        self._probes_seen = 0
+        self._new_bests = 0
+        self._rotations = 0
+        if restored is None:
+            return
+        # A RESTORE THAT CANNOT BE READ IS A REFUSAL, NOT A COLD START. `restored` is
+        # Snapshot.best_state, and the entire reason that field is in the checkpoint is M45: a
+        # resume that started the best-so-far cold overwrote the PARENT's best model with the
+        # first post-resume probe. Falling back to the cold start on an unrecognised blob would
+        # reproduce M45 exactly, silently, on every resume from a checkpoint this code cannot
+        # read. A checkpoint written BEFORE best_state existed carries None and takes the cold
+        # path above -- that is the one legitimate absence, and it is spelled as None.
+        if not isinstance(restored, dict):
+            raise ValueError(
+                f"CKPT.new_retention(restored=...): Snapshot.best_state is "
+                f"{type(restored).__name__}, not the mapping CKPT.Retention.state() returns. "
+                f"Accepting it and starting cold would be M45 -- the first post-resume probe "
+                f"satisfies 'no best yet' and overwrites the parent's best-by-held-out snapshot "
+                f"with the Adam re-warm bump -- arriving through the field that exists to fix it. "
+                f"A checkpoint written before best_state existed carries None, which IS handled "
+                f"and starts cold.")
+        missing = [f for f in self._STATE_FIELDS if f not in restored]
+        if missing:
+            raise ValueError(
+                f"CKPT.new_retention(restored=...): Snapshot.best_state is missing "
+                f"{missing!r}. CKPT.Retention.state() writes all of {list(self._STATE_FIELDS)!r}; "
+                f"a partial one cannot be told from a corrupted one here, and guessing a default "
+                f"for a missing best is M45.")
+        self._best_bpb = None if restored["best_bpb"] is None else float(restored["best_bpb"])
+        self._best_step = int(restored["best_step"])
+        self._best_saved = bool(restored["best_saved"])
+        self._prev_probe = None if restored["prev_probe"] is None else float(restored["prev_probe"])
+        ring = restored["ring"] or {}
+        # THE RING CARRIES ITS POINTER AND NOT ONLY ITS CONTENTS, which is why `ring` is a mapping
+        # and not the bare {slot: ...} the phrase "rotation ring" first suggests. The slot a low
+        # lands in is `(rotations_ordered % keep) + 1`, so once the ring has wrapped, len(contents)
+        # is keep and no longer says where the next one goes: a resume that recomputed the pointer
+        # from the contents would restart the rotation at slot 1 and overwrite the OLDEST
+        # surviving low first on a ring that is already full -- rotating, but not in the order the
+        # mechanism claims.
+        self._ordered = int(ring.get("ordered", 0))
+        self._slots = {int(s): (float(v["bpb"]), int(v["step"]))
+                       for s, v in dict(ring.get("slots") or {}).items()}
 
     def consider(self, curve_bpb, step):
         """One held-out probe arrives. Returns BestAction(save_best, rotate_slot).
@@ -713,15 +1055,180 @@ class Retention:
         with nothing said until a report that called it PLATEAUED. It is an EVAL Reading over the
         curve (derive.blowup_stale), and gating an instrument on a checkpoint flag is what this
         rebuild exists to end.
+
+        NO CALLER EXISTS AND THIS BODY DOES NOT CREATE ONE. spine/compose.py's
+        DEFERRED_ENTRY_POINTS names this entry point "P5, WITH EVAL.curve_probe": nothing in the
+        tree produces `curve_bpb`, because eval/api.py::curve_probe is itself deferred for want of
+        units_by_domain and logits_fn. The deferral is about the ROW, not the body -- and writing
+        the body is what lets counters() tell "armed and no probe has ever arrived" from "probes
+        arrived and none qualified", which is the exact statement that same table demands
+        ("Retention.counters() must report inert_reason='no curve value has ever arrived' rather
+        than a bare zero").
+
+        `step` MUST BE units.Windows AND A BARE int IS REFUSED. docs/04_CONTRACT.md's producer
+        table says this argument IS RunClock.step, which train/api.py::RunClock carries as a
+        units.Windows, and the number is RECORDED -- it goes into the checkpoint as best_step and
+        into the report as the window the best model was at. A Flushes or a Steps arriving under
+        the same name is the pin_tick defect with nothing to catch it, because this function makes
+        no cross-kind comparison that units.py could raise on.
+
+        A NON-FINITE PROBE IS REFUSED, AND THE COST OF ACCEPTING ONE WAS MEASURED (2026-09-15,
+        python3 over the two comparisons this body makes). `-inf < best` is True, so a single
+        divergent probe becomes the global best and NOTHING CAN EVER BEAT IT: 2.4, 1.9, 0.5 and
+        0.0 all compare False against a best of -inf, so the one file that holds the good model --
+        which ckpt/levers.py::<module> says is the only copy of it that exists, 1.1-1.3 b/B better
+        than the model the report generates from -- is frozen at garbage for the rest of the run
+        and the run says nothing. A NaN is milder and still silent: `nan < best` and
+        `nan < prev - 1e-6` are both False, so the probe itself is inert, and the NEXT probe's
+        descent test runs against a NaN predecessor and is False too -- exactly one rotation
+        opportunity lost, invisibly. Refused here rather than reported, because this is an input
+        that is not a measurement; the DIVERGENCE it signals is EVAL's to alarm on
+        (derive.blowup_stale), which is the same division of labour the blow-up paragraph above
+        states.
         """
-        raise NotImplementedError("CKPT.Retention.consider: P4 (ckpt) fills this in.")
+        if not isinstance(step, U.Windows):
+            raise U.UnitError(
+                f"CKPT.Retention.consider: step is {type(step).__name__}({step!r}), not "
+                f"units.Windows. docs/04_CONTRACT.md's producer table says this argument is "
+                f"RunClock.step, which train/api.py::RunClock carries as units.Windows, and the "
+                f"value is RECORDED -- it becomes best_step in the checkpoint and the window the "
+                f"report names the best model at. A bare int carries no kind, so a Flushes count "
+                f"arriving here would be off by the batch width with nothing to raise on it.")
+        cm = float(curve_bpb)
+        # `cm != cm` IS THE NaN TEST WITHOUT AN IMPORT. math.isnan would do as well; the pair of
+        # comparisons below is the whole check and both arms are cited in the docstring.
+        if cm != cm or cm in (float("inf"), float("-inf")):
+            raise ValueError(
+                f"CKPT.Retention.consider: curve_bpb={curve_bpb!r} is not a finite bits/byte "
+                f"measurement. Measured 2026-09-15: at -inf the global best is captured "
+                f"permanently -- 2.4, 1.9, 0.5 and 0.0 all lose to it -- so the .best snapshot, "
+                f"which is the only copy of the good model this run will hold, is frozen at a "
+                f"divergent probe with nothing said; at NaN both comparisons this body makes are "
+                f"False, so the probe is inert AND the next probe's descent test is lost. The "
+                f"divergence itself is EVAL's to alarm on (spine/derive.py::blowup_stale), not "
+                f"this policy's to absorb.")
+        self._probes_seen += 1
+        # BOTH TESTS READ THE STATE AS IT WAS BEFORE THIS PROBE. Snapshotting `prev` and `best`
+        # here is not defensive style, it is what makes the two arms independent of the order they
+        # are written in: the tolerance arm compares against `_best_bpb`, and updating the best
+        # first would compare a new best against ITSELF. It happens to admit the same probes
+        # either way -- if cm is a new best then cm <= cm * (1 + tol) for any tol >= 0, and
+        # cm <= best_old * (1 + tol) too since cm < best_old -- but "the answer is the same" is a
+        # property of today's rule, not of the shape, and the shape should not depend on it.
+        prev, best = self._prev_probe, self._best_bpb
+        save_best = False
+        rotate_slot = None
+        if best is None or cm < best:
+            self._best_bpb = cm
+            self._best_step = int(step)
+            self._new_bests += 1
+            # ORDERED ONLY WHERE THERE IS SOMEWHERE TO WRITE. With CKPT_DIR off the NUMBER is
+            # still tracked -- the report must be able to say what the best was even on a run that
+            # saved nothing -- but ordering a save that CKPT.save would refuse as refused_off
+            # would put a save this run did not make into BestAction, and Saves.refused_off exists
+            # precisely so "0 saves" can name which route was never taken.
+            save_best = self._saving
+            self._best_saved = save_best
+        if (self._keep > 0 and self._saving and prev is not None and best is not None
+                and cm < prev - 1e-6 and cm <= best * (1.0 + self._tol)):
+            # 1-BASED AND ROUND-ROBIN OVER ORDERS, NOT OVER RESIDENTS: self_organize.py:6480 is
+            # `_slot = (len(_bkeep) % BEST_KEEP) + 1`, and _bkeep grows by one per low TAKEN. The
+            # difference from the old tree is owned in new_retention's obligation (1): _bkeep grew
+            # only when the save RETURNED True, and nothing hands that answer back here, so this
+            # pointer counts orders.
+            rotate_slot = (self._ordered % self._keep) + 1
+            self._slots[rotate_slot] = (cm, int(step))
+            self._ordered += 1
+            self._rotations += 1
+        # THE PREVIOUS PROBE IS UPDATED ON EVERY PROBE, QUALIFYING OR NOT (self_organize.py:6487,
+        # `_prev_probe[0] = _cm`, which sits OUTSIDE the keep block). The descent test asks whether
+        # the curve went down since the LAST reading, not since the last reading that qualified.
+        self._prev_probe = cm
+        return BestAction(save_best=save_best, rotate_slot=rotate_slot)
 
     def state(self):
         """The retention state for the checkpoint: (best_bpb, best_step, best_saved, prev_probe,
-        rotation ring). Restored by new_retention(restored=...). This is the M45 fix."""
-        raise NotImplementedError("CKPT.Retention.state: P4 (ckpt) fills this in.")
+        rotation ring). Restored by new_retention(restored=...). This is the M45 fix.
+
+        A MAPPING AND NOT THE FIVE-TUPLE THE LINE ABOVE READS LIKE. The parenthesised list names
+        the CONTENTS, the way this file's other record lines do (Saves(periodic, sigusr1, best,
+        best_keep_by_slot, final, refused_off); Resume(attempted, loaded, ...)). It is a dict for
+        two reasons that are not taste: this value is written to disk and read back by
+        new_retention in a LATER PROCESS, possibly built from a different commit, and a positional
+        tuple turns any added field into a silent re-binding of the wrong value rather than the
+        named refusal __init__ raises; and every DID IT FIRE surface in this tree that has a body
+        -- RUN.RunClock.counters, RUN.Cadences.ledger, CAP.Valve.counters -- is a name->value
+        mapping, so a report that reads them all reads one shape.
+
+        `best_saved` MEANS "A SAVE WAS ORDERED", NOT "A FILE EXISTS". See new_retention's obligation
+        (1): CKPT.save returns True iff a file was written and no frozen entry point carries that
+        answer back to this object. The same caveat governs the ring's contents.
+        """
+        return {
+            "best_bpb": self._best_bpb,
+            "best_step": self._best_step,
+            "best_saved": self._best_saved,
+            "prev_probe": self._prev_probe,
+            # THE POINTER TRAVELS WITH THE CONTENTS -- see __init__'s ring comment: once the ring
+            # has wrapped, the number of resident slots no longer says where the next low goes.
+            "ring": {"ordered": self._ordered,
+                     "slots": {s: {"bpb": b, "step": st}
+                               for s, (b, st) in sorted(self._slots.items())}},
+        }
 
     def counters(self):
         """(probes_seen, new_bests, rotations, slots_used, inert_reason) -- the DID IT FIRE surface
-        for the retention half of this package."""
-        raise NotImplementedError("CKPT.Retention.counters: P4 (ckpt) fills this in.")
+        for the retention half of this package.
+
+        A MAPPING, for the reason state() gives: the five written counters()/ledger() surfaces in
+        this tree are all name->value mappings, and a positional five-tuple read at a report site
+        is how a count gets printed under the wrong label.
+
+        `inert_reason` IS COMPUTED HERE AND NOT FROZEN AT CONSTRUCTION, because one of its two
+        clauses is about a RUNTIME fact -- whether any probe has ever arrived -- and a reason
+        computed at build time would say "no curve value has ever arrived" for the whole run,
+        including after one had.
+
+        `rotations` COUNTS ORDERS, `slots_used` COUNTS RESIDENTS, and the two differ once the ring
+        wraps: self_organize.py:9612-9615 printed exactly this pair -- "N local low(s) taken, M
+        still on disk ... earlier ones were overwritten" -- and the second number is len() of the
+        slot map, not of the history.
+        """
+        return {
+            "probes_seen": self._probes_seen,
+            "new_bests": self._new_bests,
+            "rotations": self._rotations,
+            "slots_used": len(self._slots),
+            "inert_reason": self._inert_reason(),
+        }
+
+    def _inert_reason(self):
+        """The armed-but-inert sentence, or "" when the mechanism has actually been exercised.
+
+        TWO CLAUSES, BOTH OF WHICH CAN HOLD AT ONCE, so they are joined rather than chosen between.
+        The old tree printed one of them and only under `if BEST_KEEP:` (self_organize.py:9620-9622,
+        "BEST-KEEP: ARMED ... and took NOTHING ... Either the run never improved after its first
+        probe, or SAVE_CKPT is off so every save returned False") -- an OR of two causes it had not
+        distinguished, on a line a run with best_keep == 0 never reached at all. These are two
+        separate statements and each is only made when it is true.
+
+        THIS IS NOT A spine.gate.Gate, deliberately. `inert_reason` is the name the frozen
+        docstring on new_retention and both mentions in spine/compose.py's DEFERRED_ENTRY_POINTS
+        give it ("Retention.counters().inert_reason must report 'no curve value has ever
+        arrived'"), and it is a FIELD OF counters(), not a separate DID IT FIRE channel. A Gate
+        beside it would be a second, differently-shaped answer to one question.
+        """
+        clauses = []
+        if self._keep > 0 and not self._saving:
+            clauses.append(
+                f"CKPT_BEST_KEEP={self._keep} with CKPT_DIR off: the rotation is armed and there "
+                f"is nowhere to write, so no probe can earn a slot however good it is. Raising "
+                f"CKPT_BEST_KEEP changes nothing; setting CKPT_DIR does.")
+        if self._probes_seen == 0:
+            clauses.append(
+                "no curve value has ever arrived: CKPT.Retention.consider has not been called "
+                "once, so 0 new bests and 0 rotations are not a measurement of this run's curve. "
+                "EVAL.curve_probe is deferred (spine/compose.py::DEFERRED_ENTRY_POINTS -- nothing "
+                "produces units_by_domain or logits_fn), which is the whole reason the event "
+                "cannot arrive.")
+        return " ".join(clauses)

@@ -436,8 +436,68 @@ except NotImplementedError as e:
 except Exception as e:
     print("WRONG_ERROR", type(e).__name__, str(e).replace("\n", " ")[:200])
     raise SystemExit(0)
-print("NO_ERROR")
+# THE ROWS ARE PRINTED ONLY ON THE COMPLETING PATH, because that is the only verdict that needs
+# them: if compose() finished, the check has to decide whether it was ENTITLED to. Each row's
+# package prefix and entry-point name go out as PFX.name so the parent can join them against the
+# stub flags it reads by AST, without importing src/ into the checking process.
+# str.join over a set comprehension, and NOTHING in this probe may contain a percent sign: the
+# template is applied with an old-style format against src_dir, so a percent-s written anywhere
+# here -- in code OR in a comment -- is eaten by that outer format and the check dies with "not
+# enough arguments for format string" before the probe ever runs. Measured twice, once from the
+# code and once from the comment that explained the first one.
+print("NO_ERROR", " ".join(sorted({str(r[1]) + "." + str(r[2]) for r in a})))
 """
+
+
+def _k2_resume_only(src_dir):
+    """{"PFX.entry"} -- entry points whose ONLY call in compose.py sits under a resume guard.
+
+    WHY THIS HAS TO BE DERIVED RATHER THAN LISTED. K2's completing branch asks whether compose()
+    finished while a row it names is still a stub, and the honest answer needs one distinction the
+    row table cannot make: `compose(environ={})` builds FRESH, so every row behind
+    `if restored is not None:` or `if "PKG" in saved:` is never executed and its stub is never
+    reached. Eight rows are in that position -- CAP.restore, CKPT.check_geometry,
+    DATA.restore_stream_state, FAB.load_state_dict, LM.load_state, SIG.load_state_dict,
+    TOK.restore_vocab and WORLD.load_into -- and calling those a swallowed failure would be this
+    check crying wolf about the one shape it exists to catch.
+    A HAND-WRITTEN LIST WOULD BE THE DEFECT tests/test_fabric.py::_period_refusal WAS JUST REPAIRED
+    FOR: a fact about the tree asserted beside the tree instead of read out of it. It would also rot
+    the first time a resume row moved. So the guard is read from compose.py's own AST: an `If` whose
+    test mentions `restored`, `saved` or `resume`, and every `<alias>.<name>(...)` call inside it.
+    The alias-to-prefix map comes from compose.py's own imports joined to PKG_DIR, so a renamed
+    import cannot silently empty this set.
+
+    WHAT THIS DOES NOT CLAIM. These eight are not verified by a completing compose(); they are
+    EXEMPTED from the swallowed-failure test because nothing called them. K2's detail line says so
+    in as many words, because "compose() returns a System" read as "the resume path works" is
+    exactly the over-reading this suite exists to prevent.
+    """
+    tree = _k13_parse(os.path.join(src_dir, COMPOSE_REL))
+    if tree is None:
+        return set()
+    alias = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in set(PKG_DIR.values()):
+            pfx = next(k for k, v in PKG_DIR.items() if v == node.module)
+            for a in node.names:
+                if a.name == "api":
+                    alias[a.asname or a.name] = pfx
+    out = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        names = {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
+        if not (names & {"restored", "saved", "resume"}):
+            continue
+        for body in (node.body, node.orelse):
+            for sub in body:
+                for call in ast.walk(sub):
+                    if (isinstance(call, ast.Call)
+                            and isinstance(call.func, ast.Attribute)
+                            and isinstance(call.func.value, ast.Name)
+                            and call.func.value.id in alias):
+                        out.add(f"{alias[call.func.value.id]}.{call.func.attr}")
+    return out
 
 
 def check_k2_compose(src_dir=SRC):
@@ -459,15 +519,52 @@ def check_k2_compose(src_dir=SRC):
                         f"-- not a missing body, and it would be indistinguishable from 'P4 has not "
                         f"landed yet' if this check did not separate them.")
     elif verdict == "NO_ERROR":
-        findings.append("compose() completed without raising. Every mechanism is a stub, so it "
-                        "cannot have: something is swallowing the NotImplementedError, and a "
-                        "swallowed failure is the one shape this repository cannot afford.")
+        # COMPLETING IS A LEGITIMATE VERDICT AS OF 2026-09-15, AND WHAT REPLACED THE OLD ONE IS NOT
+        # A WEAKENING. This branch read "compose() completed without raising. Every mechanism is a
+        # stub, so it cannot have" -- a premise with an expiry date, and it expired the moment P4
+        # wrote the last body on the assembly path. A check whose failure message asserts that the
+        # system cannot work is a check that goes red exactly when the project succeeds, and the
+        # repair is NOT to accept completion: it is to ask the question the old premise was standing
+        # in for. "Something is swallowing the NotImplementedError" is still the thing to catch, and
+        # it has an observable signature -- compose() finishing while a row on the assembly path
+        # still points at a stub. That is now tested directly instead of being inferred from a count
+        # of stubs that changes every time somebody writes a body.
+        # THE STUB FLAGS COME FROM _k13_entry_points, WHICH IS THE COUNTER K13 ALREADY USES. A
+        # second stub detector written here could disagree with that one, and then the tree would
+        # have two answers to "is this a stub" -- the shape this suite exists to refuse.
+        on_path = set((line.split(" ", 1)[1] if " " in line else "").split())
+        stubs = {f"{pfx}.{name}" for pfx, name, is_stub in _k13_entry_points(src_dir) if is_stub}
+        # THE RESUME ROWS ARE SUBTRACTED, AND THE DETAIL LINE PRINTS HOW MANY. A fresh compose never
+        # enters them, so their stubs are not evidence of a swallowed anything -- and they are not
+        # evidence the resume path works either, which is why the count is reported rather than
+        # quietly removed.
+        exempt = _k2_resume_only(src_dir)
+        swallowed = sorted((on_path & stubs) - exempt)
+        if swallowed:
+            findings.append(
+                f"compose() completed without raising, and {len(swallowed)} entry point(s) named by "
+                f"ASSEMBLY_ORDER still raise NotImplementedError: {', '.join(swallowed)}. One of "
+                f"those two statements is false. Either a row is not calling the entry point it "
+                f"names, or something between the call and this probe is swallowing the "
+                f"NotImplementedError -- and a swallowed failure is the one shape this repository "
+                f"cannot afford.")
     elif verdict != "NOTIMPLEMENTED":
         findings.append(f"the probe produced no verdict (stdout={proc.stdout!r}, "
                         f"stderr={(proc.stderr or '')[-300:]!r})")
     got = line.split(" ", 1)[1] if verdict == "NOTIMPLEMENTED" and " " in line else "-"
-    detail = (f"compose(environ={{}}) run in a subprocess; verdict {verdict}, "
-              f"first unimplemented stub: {got}")
+    if verdict == "NO_ERROR":
+        # THE POSITIVE RESULT IS PRINTED AS ONE. A reader of this line needs to be able to tell
+        # "compose ran end to end" from "compose stopped at the first stub", and both are PASS.
+        rows = set((line.split(" ", 1)[1] if " " in line else "").split())
+        ex = _k2_resume_only(src_dir) & rows
+        detail = (f"compose(environ={{}}) run in a subprocess; verdict NO_ERROR -- it RETURNED a "
+                  f"System. {len(rows)} entry point(s) named by ASSEMBLY_ORDER, of which "
+                  f"{len(ex)} sit behind a resume guard and were NOT exercised by this fresh "
+                  f"build ({', '.join(sorted(ex)) or 'none'}); no other named entry point is "
+                  f"still a NotImplementedError stub")
+    else:
+        detail = (f"compose(environ={{}}) run in a subprocess; verdict {verdict}, "
+                  f"first unimplemented stub: {got}")
     return _report("K2", "the composition root imports and fails only at a stub",
                    not findings, detail, findings)
 

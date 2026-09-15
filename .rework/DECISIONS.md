@@ -658,3 +658,57 @@ state `fab_start`'s levers.py comment spends a paragraph on.
 run, and until it is answered (a) and (b) are guesses about a mechanism's behaviour rather than
 readings of it. Recorded rather than resolved, because guessing here would bake a fabric default
 into a capacity refusal on no evidence.
+
+---
+
+## The retirement audit, run 2026-09-15. DID A RETIREMENT LOSE A VALUE? **No — on all four, measured over 72 cells.**
+
+The domain ruling closed four dead read-site refusals by RETIRING them (`2fd3b22`, `901de13`), and
+the falsifier it left owed was the obvious one: **every value a retired clause used to refuse must
+still be refused by the declaration.** `tests/test_ownership.py::check_o15_domain_agrees_with_read_site`
+cannot answer it, and saying why is the point — O15 compares a declared pair against a clause that
+**still exists**, and a retired clause is gone from the tree, so the one case the retirement created
+is the one case the check that authorised it is blind to.
+
+**METHOD.** The four retired clauses were reconstructed from git rather than from anybody's memory
+of them — `git show 2fd3b22 -- src/opt/api.py` and `git show 901de13 -- src/sig/api.py src/tok/api.py`:
+
+    OPT_LR_RESTART_DAMP   `damp > 1.0` and `damp < 0.0`        -> domain (0.0, 1.0)
+    OPT_LR_DECAY          `not 0.0 <= decay <= 1.0`            -> domain (0.0, 1.0)
+    SIG_WARMUP_MIN_FRAC   `frac < 0.0`                         -> domain (0.0, 1.0)
+    TOK_DROPOUT           `not 0.0 <= _drop <= 1.0`            -> domain (0.0, 1.0)
+
+Each clause was then re-run **as a Python predicate** over 18 values spanning both boundaries
+(`-1e-320`, `-0.0`, `-0.5`, `-1.0`, `-1e9`, `0.0`, `1e-320`, `0.5`, `1.0`, `0.9999999999999999`,
+`1.0000000000000002`, `1.5`, `2.0`, `1e9`, `1e300`, `inf`, `-inf`, `nan`) and compared against what
+the live tree does with the same value, one fresh process per cell.
+
+**RESULT: `LOST: []`.** Not one value the old clause refused is admitted today. Both `-0.0` cells
+agree in the other direction too, which is the endpoint most likely to drift: `-0.0 < 0.0` is False,
+so the shipped bodies accepted it, and `-0.0 == 0.0` so the closed domain accepts it as well.
+
+**WHAT MOVED IS THE OTHER DIRECTION, AND IT IS EIGHT CELLS, NOT A REGRESSION.**
+
+*`OPT_LR_RESTART_DAMP=nan`, one cell.* The old clause was two one-sided comparisons and **every**
+comparison against NaN is False, so the shipped body ACCEPTED NaN and handed it to the multiplier.
+`REFUSE_NON_FINITE_FLOAT` refuses it now. That is the floor doing exactly the job it was added for,
+and the fact that the retired clause missed it is an argument FOR the retirement rather than against.
+
+*`SIG_WARMUP_MIN_FRAC` above 1.0, seven cells.* This is the one that looks like a loss and is not.
+The old clause refused only the negative end, so `1.5` was legal. **No behaviour was lost, and this
+is measured rather than argued**: the lever's only consumer is the Gate predicate
+`int(warmup_min_frac * warmup) < warmup`, and at the shipped `SIG_WARMUP=800` the adaptive stop is
+armed at 0.25 and at 0.9999999999999999, and DISARMED at 1.0, 1.0000000000000002, 1.5, 2.0, 1e9 and
+1e300 alike. **1.0 is the never-stop-early arm and every value above it is that same arm spelled as
+a fraction that cannot be one** — the shape `FAB_PRESSURE` and `MEM_USE_DECAY` both have, and only
+one of the two spellings admits what it does. The two non-finite cells are better than benign:
+`int(inf * 800)` raises `OverflowError: cannot convert float infinity to integer`, which is the
+**precise crash the retired clause's own comment recorded** — the operator got an OverflowError from
+inside a `raise` statement instead of the refusal. Refusing `inf` at the declaration repairs it.
+
+**`TOK_DROPOUT` IS NOW CLOSED AND IT WAS ONE OF THE TWO LISTED OPEN.** Its old clause already
+refused outside `[0.0, 1.0]`, so the declared pair reproduces it **exactly**: zero lost cells and
+zero over-refused cells across all 18. There is nothing left to decide on the RETIRE-OR-DROP fork for
+it. `SIG_WARMUP_MIN_FRAC` stays open in form only — the seven cells are enumerated above and every
+one is an alias of 1.0 or a crash — so the fork is now a question about SPELLING, not about a
+behaviour anybody can still reach.

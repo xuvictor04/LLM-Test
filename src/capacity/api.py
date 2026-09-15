@@ -1433,7 +1433,12 @@ def startup_refusals(cap: Config, valve, *, live_experts):
         Above it the population never pins, the pin clock never accumulates, and the valve is dead
         while looking armed.
 
-    LEVERS READ: fab_start, targets
+    LEVERS READ: fab_start, targets. BOTH ARE READ BY THE BODY as of 2026-09-15; until then this
+                 line named fab_start while nothing below touched it, and the messages printed the
+                 RESOLVED cap under the lever's name -- telling an operator to change a number that
+                 was not the number shown. `fab_start` is the value ASKED FOR and Valve.cap_experts
+                 is what it RESOLVED to; they differ whenever the sentinel, a checkpoint or
+                 targets="off" is in play, and both belong in a refusal about either.
     WIRES READ: d_operating_population
     DID IT FIRE: the returned list; an empty list is a positive result and is printed as one
     """
@@ -1443,6 +1448,15 @@ def startup_refusals(cap: Config, valve, *, live_experts):
     # the mechanism it checks cannot disagree about where the cull settles the population -- which
     # is the whole reason the quantity is a wire and not a second multiplication written here.
     settles = int(cap.d_operating_population)
+    # ASKED VERSUS RESOLVED, AND THE DECLARED LEVERS READ LINE IS WHY BOTH ARE HERE. This body read
+    # only `targets` and the wire until 2026-09-15, while the docstring declared "fab_start,
+    # targets" -- a LEVERS READ line naming a lever the body never touched, which is the prose-that-
+    # passes-a-parser shape tests/test_contract.py's closing note warns it cannot catch. Reading it
+    # makes the line true AND makes the messages better: the number an operator TYPED and the number
+    # the valve RESOLVED are different whenever the sentinel, a checkpoint or `targets=off` is in
+    # play, and a message that prints only the second while naming the first as the thing to change
+    # is telling them to edit a value they cannot see.
+    asked_e = int(cap.fab_start)
     out = []
     cap_e, cap_v = int(valve.cap_experts), int(valve.cap_vocab)
     # origin is a 2-tuple set by new_valve. Read defensively rather than indexed blind: a Valve
@@ -1463,12 +1477,12 @@ def startup_refusals(cap: Config, valve, *, live_experts):
     for lever_name, value, origin in (("CAP_FAB_START", cap_e, orig_e),
                                       ("CAP_VOCAB_START", cap_v, orig_v)):
         if value <= 0:
-            out.append(f"{lever_name} resolved the soft cap to {value} ({origin}), which is at or "
+            out.append(f"the soft cap is {value}, from {origin}, which is at or "
                        f"below zero and therefore below any population there can be. The growth "
                        f"clamp takes min(n_born, cap - population), so it is negative on the FIRST "
                        f"flush and growth is frozen for the entire run while the trigger counts "
                        f"keep incrementing -- the C30 shape, where the log reads exactly as it "
-                       f"would on a population legitimately at its cap. Set it above the "
+                       f"would on a population legitimately at its cap. Set {lever_name} above the "
                        f"population, or to 0 for the sentinel, which starts at the hard ceiling.")
 
     # (1b) A SOFT CAP BELOW THE POPULATION. Same freeze, arrived at from above rather than from
@@ -1477,14 +1491,16 @@ def startup_refusals(cap: Config, valve, *, live_experts):
     # is reported once, by (1a), which names the specific mistake -- two refusals for one number
     # would make an operator fixing the second wonder what the first one was.
     if 0 < cap_e < int(live_experts):
-        out.append(f"CAP_FAB_START resolved the soft expert cap to {cap_e} ({orig_e}), "
-                   f"below the live population of {int(live_experts)}. The growth clamp takes "
+        out.append(f"the soft expert cap is {cap_e}, from {orig_e} (CAP_FAB_START={asked_e}), below "
+                   f"the live population of {int(live_experts)}. The growth clamp takes "
                    f"min(n_born, cap - population) = {cap_e - int(live_experts)} on the first "
                    f"flush, so growth is frozen for the whole run and the pin counter reads exactly "
-                   f"as it would on a population legitimately at its cap (C30). This is unreachable "
-                   f"on a fresh run and entirely reachable on a RESUME, where the population comes "
-                   f"from the checkpoint -- 523 experts against a gc arm's 160 is -363. Raise the "
-                   f"cap above {int(live_experts)}, or set CAP_FAB_START=0 for the hard ceiling.")
+                   f"as it would on a population legitimately at its cap (C30). THE POPULATION'S "
+                   f"SOURCE IS NOT VISIBLE FROM HERE -- it arrives as a plain count -- so it is "
+                   f"either a resume carrying a checkpoint's population (523 experts against a gc "
+                   f"arm's 160 is -363, the case this clause was written for) or a fresh run whose "
+                   f"FAB_N0 is simply above this cap. Raise the cap above {int(live_experts)}, or "
+                   f"set CAP_FAB_START=0 for the hard ceiling.")
 
     # (2) THE IRREDUCIBLE COUPLING, DECLARED RATHER THAN REMOVED. The soft cap must sit AT OR BELOW
     # the cull's settling point. Above it the population never reaches the cap, never pins, the pin
@@ -1499,14 +1515,26 @@ def startup_refusals(cap: Config, valve, *, live_experts):
     # settling point costs nothing and there is nothing to report. Measured: cap.d_operating_population
     # is 1844 and cap_experts is 4096 on compose(environ={}).
     if cap.targets in ("experts", "both") and cap_e > settles:
-        out.append(f"CAP_FAB_START resolved the soft expert cap to {cap_e} ({orig_e}) "
-                   f"with CAP_TARGETS={cap.targets!r}, above the cull's settling point of {settles} "
-                   f"(FAB_PRESSURE x FAB_SLOTS, the wire d_operating_population). The cull holds the "
-                   f"population at about {settles}, so it never reaches {cap_e}, never pins, the pin "
-                   f"clock never accumulates and the valve cannot lift -- while every report line "
-                   f"says it is armed. Set CAP_FAB_START to {settles} or below, raise FAB_PRESSURE "
-                   f"so the population settles higher, or set CAP_TARGETS to a value that does not "
-                   f"include the experts.")
+        # THE SETTLING POINT IS NAMED, NOT RE-DERIVED. This message printed "(FAB_PRESSURE x
+        # FAB_SLOTS)" until 2026-09-15 and that is not the arithmetic: spine/derive.py::
+        # operating_population is `min(n_slots, max(3, n))` around the product, so at a small
+        # FAB_SLOTS the printed equation and the number beside it disagree -- a false equation in a
+        # refusal, which is the defect class this package was founded on. The wire's NAME is the
+        # honest citation, and it is the same call the fabric's own row makes.
+        clash = "" if int(live_experts) <= settles else (
+            f" NOTE: the live population is already {int(live_experts)}, ABOVE this settling point, "
+            f"so every cap at or below {settles} also trips the below-population clause and NO cap "
+            f"satisfies both at once. That is a statement about the FAB defaults rather than about "
+            f"any cap you could choose; it is filed as Q-CAP-2 in .rework/DECISIONS.md.")
+        out.append(f"the soft expert cap is {cap_e}, from {orig_e} (CAP_FAB_START={asked_e}), with "
+                   f"CAP_TARGETS={cap.targets!r}, above the cull's settling point of {settles} "
+                   f"(the wire d_operating_population, through spine/derive.py::"
+                   f"operating_population). The cull holds the population at about {settles}, so it "
+                   f"never reaches {cap_e}, never pins, the pin clock never accumulates and the "
+                   f"valve cannot lift -- while every report line says it is armed. Set "
+                   f"CAP_FAB_START to {settles} or below, raise FAB_PRESSURE so the population "
+                   f"settles higher, or set CAP_TARGETS to a value that does not include the "
+                   f"experts.{clash}")
     return out
 
 
