@@ -471,6 +471,18 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     would silently change period and nothing would say so. Clock._same raises across kinds, so the
     two cannot be one variable.
 
+    A MID-EPOCH RESUME REPLAYS THE EPOCH IT WAS INTERRUPTED IN, AND THIS IS THE SHARPEST EDGE OF
+    THE SAME LIMITATION. `_in_epoch` -- how far into the CURRENT stream the loop has read -- is not
+    among the two things a Snapshot hands back, so a clock resumed 400 windows into a 1000-window
+    epoch begins that epoch at 0 and rolls 1000 windows later instead of 600. The run then trains
+    1400 windows in an epoch declared to hold 1000, and the epoch boundary -- which is where DATA
+    draws a fresh stream and where a continual-learning result takes its measurement -- lands in a
+    place no lever asked for. Unlike the counters below this is not a reporting error: it changes
+    WHERE the roll happens, so it changes what the model sees. It is stated here because the frozen
+    signature cannot carry the number, and because a resume taken at an epoch boundary has none of
+    this problem -- which is the configuration every result in this project has been taken under so
+    far, and the reason it has not yet been paid for.
+
     ONLY TWO COUNTERS RESUME, AND THE OTHER FOUR START AT ZERO. `resume_step` and `resume_epoch`
     are the whole of what a Snapshot hands back, so a resumed clock has `step` at the checkpoint's
     window count while `flushes`, `backwards`, `opt_steps` and `dropped_windows` all begin at 0.
@@ -494,6 +506,18 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     # RunClock.finished)" means. The Config is frozen and the clock outlives this call, so reading
     # it once and carrying the int keeps the lever out of the loop body entirely -- there is no
     # window at which a second read could disagree with the first.
+    # A Clock IS REFUSED AT BOTH RESUME ARGUMENTS, because `int()` on one SUCCEEDS SILENTLY. That
+    # is the exact sentence spine/derive.py uses to refuse a Clock in three places ("int() on a
+    # Clock succeeds, so..."), and without it a Snapshot handing back Flushes(5) as `resume_step`
+    # would seed a WINDOW counter from a FLUSH count and every later comparison would be off by the
+    # batch width with nothing raising. The kinds are put on INSIDE the clock; what arrives here is
+    # a plain count, and this refusal is what keeps "plain" from meaning "anything int() accepts".
+    for _label, _v in (("resume_step", resume_step), ("resume_epoch", resume_epoch)):
+        if isinstance(_v, U.Clock):
+            raise U.UnitError(
+                f"RUN.new_clock: {_label}={_v!r} is a Clock. It arrives from a CKPT Snapshot as a "
+                f"plain count and the kind is attached here; int() on a Clock succeeds silently, so "
+                f"a wrong-kind clock would seed the counter and raise nothing.")
     return RunClock(epochs=int(run.epochs),
                     batch_windows=int(batch_windows), accum=int(accum),
                     resume_step=int(resume_step), resume_epoch=int(resume_epoch))
@@ -721,10 +745,21 @@ class RunClock:
             # WINDOWS COUNTED IN `step` THAT NEVER REACHED A BACKWARD PASS, because a roll discarded
             # the partial batch holding them. Published so the drop is readable.
             "dropped_windows": self.dropped_windows,
-            # THE BATCH FLUSH COUNT'S COMPANION, and a plain int because it is not a clock: it is
-            # how many windows are queued in the accumulator RIGHT NOW, so a run that ends with
-            # batch_len > 0 ended mid-batch and those windows never reached a backward pass.
+            # HOW MANY WINDOWS ARE QUEUED IN THE ACCUMULATOR RIGHT NOW. A plain int, because it is
+            # not a clock. THE READING THIS LINE CARRIED UNTIL 2026-09-15 WAS UNREACHABLE: it said
+            # "a run that ends with batch_len > 0 ended mid-batch and those windows never reached a
+            # backward pass", but a run ends by finishing its last epoch, and the roll that finishes
+            # it zeroes batch_len on the way past -- so the end-of-run value is 0 whether or not
+            # windows were discarded. dropped_windows below is the reading that survives, and it
+            # exists because this one did not.
             "batch_len": self.batch_len,
+            # THE TARGET, PUBLISHED SO `finished` IS ANSWERABLE WITHOUT SPENDING A WINDOW. _finished
+            # is private (see its own docstring) and reaches a caller only on a Tick, so a clock
+            # RESUMED at epoch >= epochs could not be asked whether it was already done -- the
+            # driver had to advance once to find out, and that one window is a window of training
+            # the run was not asked for. `epoch` and this are the same comparison the property
+            # makes, on the public surface, and it is a lever-derived count rather than a counter.
+            "epochs_target": self.epochs,
         }
 
 
