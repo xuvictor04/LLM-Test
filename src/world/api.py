@@ -34,7 +34,7 @@ import dataclasses
 import torch
 from torch import nn
 
-from spine.lever import Config
+from spine.lever import Config, LeverError
 
 
 class World:
@@ -365,9 +365,31 @@ def state_dict(world: Config, w):
     DID IT FIRE: world.state_written
     """
     world = world.owned_by("WORLD")
-    raise NotImplementedError(
-        "WORLD.state_dict: P4 (world) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section WORLD.")
+    def _t(x):
+        return None if x is None else x.detach().cpu().clone()
+    out = {
+        "encoder": w.encoder.state_dict() if hasattr(w.encoder, "state_dict") else None,
+        "qproj": w.qproj.state_dict() if hasattr(w.qproj, "state_dict") else None,
+        "world_proj": w.world_proj.state_dict() if hasattr(w.world_proj, "state_dict") else None,
+        # THE POPULATION. preds and keys are Parameters and travel as tensors rather than through a
+        # module's state_dict, because they are not owned by one -- they are the population itself.
+        "preds": _t(w.preds), "keys": _t(w.keys),
+        # THE BUFFERS, AND `alive` IS THE LOAD-BEARING ONE. WORLD.load_into's contract says it may
+        # not be re-derived on the other side: a resume that rebuilt `alive` from anything else
+        # would silently resurrect culled predictors.
+        "fit": _t(w.fit), "mass": _t(w.mass), "alive": _t(w.alive), "grown": _t(w.grown),
+        "n_live": int(w.n_live), "nmax": int(w.nmax),
+        # THE LOOP-SIDE PLATEAU STATE, WHICH MOVES INSIDE THIS PACKAGE. `_wl_ema` travels for the
+        # same reason FAB's growth EMAs must: an EMA seeded from the first loss on the NEW material
+        # cannot detect the arrival of a new area, and that arrival is the one moment continual
+        # learning has a signal. Seeding it fresh on every resume is the same as not having it.
+        "_wl_ema": None if w._wl_ema is None else float(w._wl_ema),
+        "_wl_lastgrow": int(w._wl_lastgrow),
+        "counters": dict(w.counters),
+        "rng": (w.rng._r.getstate(), int(w.rng._draws)) if getattr(w, "rng", None) else None,
+    }
+    w.counters["world.state_written"] = w.counters.get("world.state_written", 0) + 1
+    return out
 
 
 def load_into(world: Config, w, sd):
@@ -389,9 +411,59 @@ def load_into(world: Config, w, sd):
     DID IT FIRE: world.state_restored, world.state_refused
     """
     world = world.owned_by("WORLD")
-    raise NotImplementedError(
-        "WORLD.load_into: P4 (world) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section WORLD.")
+
+    def _refuse(reason):
+        w.counters["world.state_refused"] = w.counters.get("world.state_refused", 0) + 1
+        raise LeverError(reason)
+
+    if not sd:
+        return w
+    # THE SIZE COMPARED IS THE ALLOCATED COUNT, len(preds), NOT n_live. Under Q-WORLD-8 (b)
+    # `n <= nmax` is an invariant this may assert rather than hope for.
+    saved_alloc = 0 if sd.get("preds") is None else int(sd["preds"].shape[0])
+    live_alloc = int(w.preds.shape[0])
+    if saved_alloc > int(w.nmax):
+        # THE OLD TREE SPUN THE REPLAY LOOP FOREVER HERE, because grow() returns None without
+        # appending at capacity, so `while world_fwd.n() < _want2` never terminated. Named against
+        # the lever an operator can actually move.
+        _refuse(f"WORLD_NMAX: the checkpoint holds {saved_alloc} predictors and this run allocates "
+                f"at most {int(w.nmax)}. Raise WORLD_NMAX to {saved_alloc} or more, or start a new "
+                f"run -- a replay loop cannot grow past its own ceiling and the old tree spun "
+                f"forever trying.")
+    if saved_alloc != live_alloc:
+        # REFUSED IN BOTH DIRECTIONS (M43). The replay `while world_fwd.n() < _want2` (:4591)
+        # handles only GROWTH, so a checkpoint with FEWER predictors than this run builds fell
+        # through to load_state_dict as "Missing key(s) preds.N.*" -- a torch error about a key
+        # name, for a configuration difference an operator could have been told about by name.
+        _refuse(f"WORLD_N0/WORLD_NMAX: the checkpoint allocates {saved_alloc} predictors and this "
+                f"run allocates {live_alloc}. Both directions are refused: growth is a replay this "
+                f"function does not perform, and shrinkage would drop trained predictors whose "
+                f"slots other saved tensors still index.")
+
+    if sd.get("encoder") is not None and hasattr(w.encoder, "load_state_dict"):
+        w.encoder.load_state_dict(sd["encoder"])
+    if sd.get("qproj") is not None and hasattr(w.qproj, "load_state_dict"):
+        w.qproj.load_state_dict(sd["qproj"])
+    if sd.get("world_proj") is not None and hasattr(w.world_proj, "load_state_dict"):
+        w.world_proj.load_state_dict(sd["world_proj"])
+    with torch.no_grad():
+        for field in ("preds", "keys"):
+            if sd.get(field) is not None:
+                getattr(w, field).copy_(sd[field].to(getattr(w, field).device))
+    for field in ("fit", "mass", "alive", "grown"):
+        if sd.get(field) is not None:
+            getattr(w, field).copy_(sd[field].to(getattr(w, field).device))
+    w.n_live = int(sd.get("n_live", w.n_live))
+    w._wl_ema = sd.get("_wl_ema")
+    w._wl_lastgrow = int(sd.get("_wl_lastgrow", 0))
+    if sd.get("counters"):
+        w.counters.update(sd["counters"])
+    if sd.get("rng") and getattr(w, "rng", None) is not None:
+        state, draws = sd["rng"]
+        w.rng._r.setstate(state)
+        w.rng._draws = int(draws)
+    w.counters["world.state_restored"] = w.counters.get("world.state_restored", 0) + 1
+    return w
 
 
 def startup_refusals(world: Config, *, ctx_tokens):

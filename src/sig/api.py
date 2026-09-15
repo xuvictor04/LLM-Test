@@ -1340,9 +1340,38 @@ def state_dict(sig: Config, st):
     DID IT FIRE: sig.state_written
     """
     sig = sig.owned_by("SIG")
-    raise NotImplementedError(
-        "SIG.state_dict: P4 (sig) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section SIG.")
+    enc = getattr(st, "encoder", None)
+    out = {
+        # THE ENCODER, OR THE FROZEN BIGRAM MODULUS. Both arms come through `st.encoder`; only one
+        # of them is an nn.Module, so the branch is on what is there rather than on a lever -- the
+        # lever already chose, and re-reading it here would be a second answer to one question.
+        "encoder": enc.state_dict() if hasattr(enc, "state_dict") else enc,
+        "counters": dict(st.counters),
+        # THE WARMUP CURVE AND ITS VERDICT. The curve is what SIG.warm_up built and what a reader
+        # uses to tell a converged plateau from a collapse; without it a resumed run reports a
+        # warmup it cannot show.
+        "warmup_curve": list(getattr(st, "warmup_curve", ()) or ()),
+        "warmup_verdict": st.counters.get("sig.warmup_verdict"),
+        # THIS PACKAGE'S RNG STREAM, so a resume does not replay the draws the first run already
+        # spent. spine/rng.py::Rng wraps random.Random, and the pair (its state, the draw count) is
+        # the whole of the stream's position.
+        "rng": (st.rng._r.getstate(), int(st.rng._draws)) if getattr(st, "rng", None) else None,
+        # THE SIDECAR. SIG.load_state_dict refuses a resume that disagrees about any of these, BY
+        # FIELD -- the old tree recorded sig_space and enc_v and checked neither on three consumers
+        # (ISSUES:677), and a width that differs between the run that WROTE the centroids and the
+        # run that READS them makes every centroid a mean of two different measurements.
+        "sidecar": {
+            "width_units": int(st.width_units), "alphabet_size": int(st.alphabet_size),
+            "space": st.space, "d": int(st.d), "mode": st.mode,
+        },
+    }
+    # NOT IN IT AND DELIBERATELY RE-EARNED: the lookahead queue (the old `_sigq`), which any
+    # boundary invalidates anyway. The encoder optimizer's moments belong to OPT and are
+    # checkpointed there; this package asserts only that a resized alphabet_size invalidates them
+    # -- which the old tree got wrong in the OPPOSITE direction, dropping the encoder's moments for
+    # a FABRIC widening (P3-H24).
+    st.counters["sig.state_written"] = st.counters.get("sig.state_written", 0) + 1
+    return out
 
 
 def load_state_dict(sig: Config, st, sd, *, sidecar):
@@ -1359,9 +1388,36 @@ def load_state_dict(sig: Config, st, sd, *, sidecar):
     DID IT FIRE: sig.resume_geometry_checked, sig.resume_refused
     """
     sig = sig.owned_by("SIG")
-    raise NotImplementedError(
-        "SIG.load_state_dict: P4 (sig) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section SIG.")
+    st.counters["sig.resume_geometry_checked"] = st.counters.get(
+        "sig.resume_geometry_checked", 0) + 1
+    # THE SIDECAR IS THE AUTHORITY AND THE LEVERS ARE THE COMPARISON, never the other way round.
+    # LEVERS READ says "compared against the sidecar; never overriding it": if they disagree the
+    # resume is REFUSED, because silently preferring either one produces a run whose centroids were
+    # measured in a space its own report does not describe.
+    live = {"width_units": int(st.width_units), "alphabet_size": int(st.alphabet_size),
+            "space": st.space, "d": int(st.d), "mode": st.mode}
+    for field, was in (sidecar or {}).items():
+        if field in live and was != live[field]:
+            st.counters["sig.resume_refused"] = st.counters.get("sig.resume_refused", 0) + 1
+            raise LeverError(
+                f"SIG resume refused on {field}: the checkpoint was written at {was!r} and this "
+                f"run resolves {live[field]!r}. This fails HERE, by name, rather than late with a "
+                f"torch shape dump -- a width that differs between the run that WROTE the "
+                f"centroids and the run that READS them makes every centroid a mean of two "
+                f"different measurements, and nothing downstream can detect that.")
+    enc = getattr(st, "encoder", None)
+    saved_enc = sd.get("encoder")
+    if saved_enc is not None and hasattr(enc, "load_state_dict"):
+        enc.load_state_dict(saved_enc)
+    if sd.get("counters"):
+        st.counters.update(sd["counters"])
+    if sd.get("warmup_curve") is not None:
+        st.warmup_curve = list(sd["warmup_curve"])
+    if sd.get("rng") and getattr(st, "rng", None) is not None:
+        state, draws = sd["rng"]
+        st.rng._r.setstate(state)
+        st.rng._draws = int(draws)
+    return st
 
 
 def encoder_parameters(sig: Config, st):

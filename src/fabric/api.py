@@ -2938,9 +2938,46 @@ def state_dict(fab: Config, pop):
     DID IT FIRE: fab.state_written
     """
     fab = fab.owned_by("FAB")
-    raise NotImplementedError(
-        "FAB.state_dict: P4 (fabric) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section FAB.")
+    def _t(x):
+        return None if x is None else x.detach().cpu().clone()
+    out = {
+        # THE PARAMETERS. A and B are the expert tensors; halt_b is the halting bias; everything
+        # else with parameters lives in `modules`, which build allocates and which carries eemb,
+        # edec, q_route, hproj, halt_key, norm and nov_proj under its own names. Going through the
+        # ModuleDict rather than listing them here is what keeps this save side from naming a
+        # tensor nothing allocates -- the `ctrl` defect this docstring records, where the contract
+        # promised to checkpoint a parameter build never created and only a resume could falsify it.
+        "A": _t(pop.A), "B": _t(pop.B), "halt_b": _t(pop.halt_b),
+        "modules": pop.modules.state_dict(),
+        # THE `cent` BUFFER. Not a parameter and not derivable: it is where each expert sits in
+        # signature space, and a resume that rebuilt it would route every window differently.
+        "cent": _t(pop.cent),
+        # EVERY BOOK. These are plain Python lists and one list of sets; they carry which expert was
+        # born when, how used it is, which domains it serves, and the per-expert EMAs. dom_of holds
+        # sets, which torch.save handles but which are listified here so the payload is inspectable
+        # without unpickling behaviour.
+        "books": {
+            "born": list(pop.born), "use": list(pop.use), "uage": list(pop.uage),
+            "dom_of": [sorted(d) for d in pop.dom_of],
+            "ef": list(pop.ef), "es": list(pop.es), "comp": list(pop.comp),
+            "contrib": list(pop.contrib), "parent": list(pop.parent),
+            "mutscale": list(pop.mutscale),
+        },
+        "n_live": int(pop.n_live), "cap": int(pop.cap), "depth_now": int(pop.depth_now),
+        "births": int(pop.births), "rescued": int(pop.rescued),
+        "halt_ema": getattr(pop, "halt_ema", None), "learn_window": pop.learn_window,
+        "counters": dict(pop.counters),
+        "rng": (pop.rng._r.getstate(), int(pop.rng._draws)) if getattr(pop, "rng", None) else None,
+        # THE SIDECAR load_state_dict REFUSES AGAINST. Three widths produced one error message in
+        # the old tree (:4678-4684) -- "it can be failing on FAB_EMB_HID, SIG_D or D_MODEL and no
+        # prefix of it means anything" -- so each is carried separately and refused by name.
+        "sidecar": {
+            "slots": int(pop.cap), "rank": int(pop.A.shape[2]), "dk": int(pop.A.shape[1]),
+            "signature_dim": int(pop.cent.shape[1]),
+        },
+    }
+    pop.counters["fab.state_written"] = pop.counters.get("fab.state_written", 0) + 1
+    return out
 
 
 def load_state_dict(fab: Config, pop, sd, *, sidecar):
@@ -2956,9 +2993,78 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
     DID IT FIRE: fab.resume_widened, fab.resume_refused
     """
     fab = fab.owned_by("FAB")
-    raise NotImplementedError(
-        "FAB.load_state_dict: P4 (fabric) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section FAB.")
+
+    def _refuse(reason):
+        pop.counters["fab.resume_refused"] = pop.counters.get("fab.resume_refused", 0) + 1
+        raise LeverError(reason)
+
+    if not sd:
+        return pop
+    live = {"slots": int(pop.cap), "rank": int(pop.A.shape[2]), "dk": int(pop.A.shape[1]),
+            "signature_dim": int(pop.cent.shape[1])}
+    was = dict(sidecar or {})
+    # rank AND dk ARE INNER DIMENSIONS AND CANNOT BE PREFIX-WIDENED. A prefix widen adds ROWS; these
+    # two change what each row MEANS, so an expert restored across a change of either is a tensor of
+    # the right shape holding a different decomposition. signature_dim is the same argument one
+    # package over: the centroids were measured in a space of that width.
+    for field in ("rank", "dk", "signature_dim"):
+        if field in was and int(was[field]) != live[field]:
+            _refuse(f"FAB resume refused on {field}: the checkpoint was written at {was[field]} "
+                    f"and this run resolves {live[field]}. This is an INNER dimension -- it changes "
+                    f"what every row means, not how many there are, so it cannot be prefix-widened "
+                    f"and a same-shaped restore would be a different decomposition wearing the "
+                    f"right shape.")
+    saved_slots = int(was.get("slots", live["slots"]))
+    if saved_slots > live["slots"]:
+        # SLOTS MAY WIDEN BUT NEVER NARROW. Narrowing would drop trained experts whose indices the
+        # books, the centroids and every dom_of set still refer to.
+        _refuse(f"FAB_SLOTS: the checkpoint holds {saved_slots} slots and this run allocates "
+                f"{live['slots']}. Widening is supported and narrowing is not -- the books, the "
+                f"centroids and every dom_of entry index these slots by position.")
+
+    widened = 0
+    with torch.no_grad():
+        for field in ("A", "B", "cent"):
+            got = sd.get(field)
+            if got is None:
+                continue
+            want = getattr(pop, field)
+            got = got.to(want.device)
+            if tuple(got.shape) == tuple(want.shape):
+                want.copy_(got)
+            else:
+                # THE PREFIX. Slot i stays slot i, and everything above the saved count keeps the
+                # initialisation build gave it.
+                want[:got.shape[0]].copy_(got)
+                widened += 1
+        if sd.get("halt_b") is not None:
+            pop.halt_b.copy_(sd["halt_b"].to(pop.halt_b.device))
+    if sd.get("modules") is not None:
+        pop.modules.load_state_dict(sd["modules"])
+
+    books = sd.get("books") or {}
+    for name in ("born", "use", "uage", "ef", "es", "comp", "contrib", "parent", "mutscale"):
+        if books.get(name) is not None:
+            cur = getattr(pop, name)
+            cur[:len(books[name])] = list(books[name])
+    if books.get("dom_of") is not None:
+        for i, ids in enumerate(books["dom_of"]):
+            pop.dom_of[i] = set(ids)
+    for field in ("n_live", "depth_now", "births", "rescued"):
+        if sd.get(field) is not None:
+            setattr(pop, field, int(sd[field]))
+    if "halt_ema" in sd:
+        pop.halt_ema = sd["halt_ema"]
+    if "learn_window" in sd:
+        pop.learn_window = sd["learn_window"]
+    if sd.get("counters"):
+        pop.counters.update(sd["counters"])
+    if sd.get("rng") and getattr(pop, "rng", None) is not None:
+        state, draws = sd["rng"]
+        pop.rng._r.setstate(state)
+        pop.rng._draws = int(draws)
+    pop.counters["fab.resume_widened"] = pop.counters.get("fab.resume_widened", 0) + widened
+    return pop
 
 
 def manage_period(fab: Config):

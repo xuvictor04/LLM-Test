@@ -913,6 +913,24 @@ def residual_ratios(lm: Config, model):
         "docs/04_CONTRACT.md, section LM.")
 
 
+@dataclasses.dataclass(frozen=True)
+class LoadReport:
+    """What a resume DID to the saved tensors, or why it would not.
+
+    FIELDS ONLY, NO METHODS, and that is deliberate rather than minimal: a public method on a
+    public class in an api.py IS an entry point -- tests/test_contract.py's K1 and K6 both say so,
+    and `Caps.headroom` was the 133rd the day it landed. A record that answers with its fields
+    costs the contract nothing.
+
+    `refused` and `reason` TRAVEL TOGETHER because a refusal that cannot be read is a traceback.
+    The counters are ints (counters() is declared {name: int}), so the SENTENCE has to live here --
+    `lm.ckpt.refused` says one happened and this says which knob and both numbers.
+    """
+    widened: int
+    refused: bool
+    reason: str
+
+
 def state_dict(lm: Config, model, geom):
     """The tensors plus the resolved LMGeometry, so a resume can refuse a mismatch BY KNOB NAME.
 
@@ -931,9 +949,36 @@ def state_dict(lm: Config, model, geom):
     DID IT FIRE: lm.ckpt.saved
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.state_dict: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    out = {
+        "module": model.state_dict(),
+        # THE RESOLVED GEOMETRY, FIELD BY FIELD, so a resume can refuse a mismatch BY KNOB NAME.
+        # The old checkpoint recorded model_type and layers at :5340 and nothing about maxlen,
+        # heads, compose or max_token_bytes, so a mismatch surfaced as "it can be failing on
+        # FAB_EMB_HID, SIG_D or D_MODEL and no prefix of it means anything". Stored as a plain dict
+        # rather than the dataclass: a payload crosses processes, and unpickling a record type that
+        # has since gained a field is how a resume dies reading its own provenance.
+        "geometry": dataclasses.asdict(geom),
+        "counters": dict(_COUNTS),
+    }
+    # THE COMPOSER'S `born` TENSOR IF THERE IS ONE, AND A DECLARED ABSENCE IF THERE IS NOT.
+    # Without it a resume releases every token's anchor immediately or holds every token forever,
+    # because anchor_term masks on `born`. It is read with getattr because THE COMPOSER IS NOT
+    # BUILT IN THIS TREE YET: model.composed_table() raises NotBuilt and LM.on_mint is a P4 stub,
+    # so under compose there is no composer and therefore no born. Saving `None` and saying so
+    # beats omitting the key -- a missing key on load is indistinguishable from an old checkpoint,
+    # and this one has to be distinguishable, because a resume that silently finds no born is a
+    # resume that silently releases every anchor.
+    born = getattr(model, "born", None)
+    out["born"] = None if born is None else born.detach().cpu().clone()
+    out["born_unbuilt_reason"] = None if born is not None else (
+        "the ByteComposer is not built in this tree (LM.composed_table raises NotBuilt and "
+        "LM.on_mint is a P4 stub), so no token has a birth step to anchor against")
+    # NOT IN IT: the composer's derived byte-index tensors (_idx/_msk/_len/_v) and the dead-row
+    # mask cache. Both are REBUILT on load, so a resume with a re-segmented vocabulary cannot come
+    # back with a stale table -- which is the point, and is why they are named here rather than
+    # simply absent.
+    _bump("lm.ckpt.saved")
+    return out
 
 
 def load_state(lm: Config, model, geom, saved):
@@ -962,9 +1007,89 @@ def load_state(lm: Config, model, geom, saved):
                  (with the reason string, so a refusal is a Reading and not a traceback)
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.load_state: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+
+    def _refuse(reason):
+        # A REFUSAL IS A READING, NOT A TRACEBACK. The count says one happened; the sentence says
+        # which knob and both numbers, because "it can be failing on FAB_EMB_HID, SIG_D or D_MODEL"
+        # is the report this package exists to stop printing.
+        _bump("lm.ckpt.refused")
+        return LoadReport(widened=0, refused=True, reason=reason)
+
+    saved_geom = saved.get("geometry") or {}
+    # EVERY GEOMETRY FIELD THAT MAY NOT MOVE, CHECKED BY NAME AND REPORTED WITH BOTH NUMBERS.
+    # `compose` is in this list and is refused IN BOTH DIRECTIONS: under compose emb/head are not
+    # constructed at all, so the two arms are not resume-compatible either way, and a resume across
+    # the flip would index a trained head by a vocabulary that means something different.
+    for field in ("arch", "width", "layers", "heads", "ctx", "pos_max", "compose",
+                  "max_token_bytes"):
+        if field in saved_geom and saved_geom[field] != getattr(geom, field):
+            return _refuse(
+                f"LM_{field.upper()}: the checkpoint was written at {saved_geom[field]!r} and this "
+                f"run resolves {getattr(geom, field)!r}. The tensors do not fit and no prefix of "
+                f"them means anything. Resume with the saved value, or start a new run.")
+    saved_slots = int(saved_geom.get("vocab_slots", geom.vocab_slots))
+    live_slots = int(geom.vocab_slots)
+    if saved_slots > live_slots:
+        # THE d_vocab_ceiling CONSEQUENCE, AND IT SAYS WHICH FILE TO OPEN. A tokenizer file
+        # carrying its own larger vmax is the ZERO-mint failure at :1231-1241: the vocabulary is
+        # full on arrival, nothing can be minted, and a new area is segmented entirely with the
+        # previous one's merges.
+        return _refuse(
+            f"LM_VOCAB_SLOTS: the checkpoint has {saved_slots} rows and this run resolves "
+            f"{live_slots}. NARROWING IS REFUSED -- slot i must stay slot i, and dropping rows "
+            f"would silently retire trained tokens. If the larger number came from a tokenizer "
+            f"file rather than from LM_VOCAB_SLOTS, that file is the one to look at.")
+
+    module = saved.get("module") or {}
+    live = model.state_dict()
+    missing = [k for k in live if k not in module]
+    if missing:
+        # strict=True ON THE MODULE IS WHAT MADE EVERY EXISTING CHECKPOINT UNRESUMABLE the day one
+        # parameter was added to the LM (P1-M49), with a raw torch error and no name in it. This is
+        # the same refusal with the names in it.
+        return _refuse(
+            f"the checkpoint is missing {len(missing)} tensor(s) the live model has, first "
+            f"{missing[:3]}. That is a model this checkpoint was not written from.")
+
+    # WIDENS ON vocab_slots ONLY, AND BY PREFIX. Slot i is still slot i and token id i is still
+    # token id i (:846-877). A resume that cannot widen the softmax cannot add capacity for the
+    # area it is adding: the run that motivated this had the vocabulary full at 2048/2048, so a new
+    # language got ZERO tokens of its own.
+    widened = 0
+    fitted = {}
+    for k, want in live.items():
+        got = module[k]
+        if tuple(got.shape) == tuple(want.shape):
+            fitted[k] = got
+            continue
+        if (got.dim() == want.dim() and got.shape[0] == saved_slots
+                and want.shape[0] == live_slots and live_slots > saved_slots
+                and tuple(got.shape[1:]) == tuple(want.shape[1:])):
+            grown = want.clone()
+            grown[:saved_slots] = got            # THE PREFIX. Everything above it keeps its init.
+            fitted[k] = grown
+            widened += 1
+            continue
+        return _refuse(
+            f"tensor {k!r} is {tuple(got.shape)} in the checkpoint and {tuple(want.shape)} live, "
+            f"and the difference is not a vocabulary widening ({saved_slots} -> {live_slots}). "
+            f"Only the leading vocabulary dimension may grow.")
+    model.load_state_dict(fitted, strict=True)
+
+    born = saved.get("born")
+    if born is not None and hasattr(model, "born"):
+        n = min(int(born.shape[0]), int(model.born.shape[0]))
+        model.born[:n] = born[:n].to(model.born.device)
+    # THE DERIVED TABLES ARE DROPPED ON PURPOSE, which is the other half of what state_dict does
+    # not save: a resume with a re-segmented vocabulary must not come back with a stale byte-index
+    # table or a stale dead-row mask.
+    model._dead_mask_cache = None
+
+    _bump("lm.ckpt.loaded")
+    _bump("lm.ckpt.rows_widened", widened)
+    return LoadReport(widened=widened, refused=False,
+                      reason=(f"{widened} tensor(s) widened by prefix, {saved_slots} -> "
+                              f"{live_slots} rows" if widened else "fitted exactly, nothing widened"))
 
 
 def counters(lm: Config, model):
