@@ -3,37 +3,48 @@
   "note_on_timing": "src/train/api.py CHANGED mid-audit (md5 6e3be2e7c0b97aefeebbab2b938df9f2). The two defects I first measured -- Windows(0) firing every check, and the per-flush rate deficit -- have both been repaired in the file since. Everything below is re-measured against the CURRENT body.",
   "findings": [
     {
-      "file": "src/train/api.py", "line": 859, "severity": "medium",
+      "file": "src/train/api.py",
+      "line": 859,
+      "severity": "medium",
       "claim": "due()'s headline sentence, 'True at most once per period WINDOWS elapsed since this key last fired', is measurably false under the new floor-division catch-up. Two fires can land one window apart on a 100-window period.",
       "failure": "Gate declared Windows(100), evaluated every window except a 1000-window blackout (windows 500..1499). Fire steps: [101,201,301,401,1500,1501,1601,...]. Gap 1500->1501 = 1 window. The seed advances by 10 whole periods to 1401, leaving remainder 99, so the very next window satisfies elapsed>=100. Bounded: exactly one short gap per blackout, then back on a clean lattice.",
       "evidence": "r3_burst.py R8"
     },
     {
-      "file": "src/train/api.py", "line": 948, "severity": "medium",
+      "file": "src/train/api.py",
+      "line": 945,
+      "severity": "medium",
       "claim": "The comment 'THE FLOOR-DIVISION IS WHAT KEEPS IT FROM BURSTING ... so exactly one fire happens per call' does not hold in the sense it means: the gate does fire on two consecutive calls after a gap.",
       "failure": "same run as above: fires at window 1500 and again at window 1501, consecutive evaluations, declared period 100.",
       "evidence": "r3_burst.py R8"
     },
     {
-      "file": "src/train/api.py", "line": 859, "severity": "low",
+      "file": "src/train/api.py",
+      "line": 859,
+      "severity": "low",
       "claim": "Per-flush evaluation now matches the per-window RATE exactly, but individual gaps are routinely shorter than the declared period -- the spacing guarantee the pre-fix rule had is gone.",
       "failure": "period Windows(100) evaluated per flush over 20,000 windows: at batch_windows=64, 87 of 198 gaps are shorter than 100 (min 64, gaps alternate 128/64); at batch_windows=8, 99 of 198 (min 96). At the tree's own cited longrun config CKPT_EVERY=4000 / BATCH_W=12, 2 of 3 gaps are short (3996 vs 4000).",
       "evidence": "r2_retest.py R4"
     },
     {
-      "file": "src/train/api.py", "line": 917, "severity": "low",
+      "file": "src/train/api.py",
+      "line": 915,
+      "severity": "low",
       "claim": "The `if int(period) <= 0: return False` early return sits ABOVE the clock.step kind check, so with a non-positive period due() never looks at `clock` at all.",
       "failure": "Cadences({'g': Windows(0)}).due('g', Windows(0), None) returns False; the same call with 'garbage' as the clock also returns False; with Windows(100) it raises AttributeError. 'ckpt' is Windows(0) at the shipped defaults, so that one call site's clock argument is unvalidated while the other five gates still raise UnitError on a wrong-kind clock.",
       "evidence": "r2_retest.py R5"
     },
     {
-      "file": "src/train/api.py", "line": 922, "severity": "low",
+      "file": "src/train/api.py",
+      "line": 902,
+      "severity": "low",
       "claim": "The new comment's run length is off by one: it says 'a checkpoint 632 times in a 633-window run'; compose(environ={}) reports run_windows = 634 windows and windows_in_epoch = 634, where the pre-fix rule fires 633 times.",
       "failure": "pre-fix update rule driven on the real save_period(Windows(0)): 633-window run -> 632 fires; 634-window run -> 633 fires. compose(environ={}) hands cadence_audit run_windows=Windows(634).",
       "evidence": "r2_retest.py R7, t8_compose.py"
     }
   ],
   "checked_and_sound": [
+    "END-TO-END on the real composed System (sysm.cadences / sysm.clock from compose(environ={}), 634 windows, A rows per window and the ckpt gate at the flush tail): ledger reads ckpt=(634 checks, 0 fires, None, Windows(0)), curve=(0,0,None,Windows(2000)), dom.manage=(634,6,Windows(601),Windows(100)), dom.rekey=(634,3,...,Windows(200)), fab.manage=(634,1,Windows(501),Windows(500)), progress=(634,6,...,Windows(100)).",
     "NON-POSITIVE PERIOD IS NOW DISARMED: Windows(0) and Windows(-5) fire 0 times over 634 windows and the ledger reads (634, 0, None, Windows(0)) -- checks counted, fires zero, disarmed AND reached.",
     "MODULO PATHOLOGY GONE: period Windows(2000) over 200,000 windows fires 99 times at EVERY batch_windows in {1,2,8,15,16,32}; the old flush-tail `(step-1) % 2000 == 0` form fires 0 times at every batch_windows > 1 in the same loop.",
     "RATE IS NOW PHASE-INDEPENDENT: per-window and per-flush fire counts are IDENTICAL for every (period, batch_windows) in {100,200,500,2000} x {1,2,8,15,16,32,64} over 200,000 windows.",
@@ -48,6 +59,8 @@
   "could_not_break": [
     "asking one key twice in one window: the first call consumes the event and the second returns False -- matches compose.py's stated expectation",
     "new_cadences build-time type guard catches every wrong kind I could pass",
-    "the catch-up burst is bounded at exactly one short gap per blackout, not an unbounded run of fires"
-  ]
+    "the catch-up burst is bounded at exactly one short gap per blackout, not an unbounded run of fires",
+    "I could NOT name a live call site in ASSEMBLY_ORDER/LOOP_ORDER that produces an evaluation blackout long enough to trigger the catch-up burst; the R8 finding is a property of the primitive's stated contract, demonstrated by a constructed blackout, not an observed run."
+  ],
+  "status": "COMPLETE"
 }

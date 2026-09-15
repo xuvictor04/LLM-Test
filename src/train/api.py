@@ -856,7 +856,25 @@ class Cadences:
         self._seeded = {}
 
     def due(self, key, period, clock):
-        """True at most once per `period` WINDOWS elapsed since this key last fired.
+        """Fires at a long-run RATE of once per `period` WINDOWS, with jitter bounded by the caller's
+        evaluation stride.
+
+        THIS SENTENCE READ "True at most once per `period` WINDOWS elapsed since this key last
+        fired" UNTIL 2026-09-15, AND THE REMAINDER-CARRYING REPAIR BELOW MADE IT FALSE. Measured at
+        a declared period of 100 evaluated at the flush tail with batch_windows=64: fires land at
+        192, 320, 384, 512, 576 ... so the gaps alternate 128, 64, 128, 64 and FOUR of the first
+        nine are SHORTER than the declared period. The old spelling guaranteed the spacing and got
+        the rate wrong by up to 28%; this one guarantees the rate and lets the spacing jitter by at
+        most one evaluation stride either side. Both are defensible and NEITHER IS FREE, so the one
+        this implements is named here rather than left for a reader to infer from a sentence that
+        describes the other.
+        WHY RATE WAS THE ONE TO KEEP: every period in the mapping is an operator-set "every N
+        windows", and all six consumers -- the checkpoint, the curve probe, two manage gates, the
+        rekey and the progress line -- are counted per run rather than depended on for a minimum
+        separation. A systematic 28% shortfall in how often a checkpoint is written is a silent
+        wrong answer to the number somebody typed; an occasional 64-window gap where 100 was asked
+        is not. If a gate is ever added that NEEDS the minimum separation, it needs a different
+        primitive and this docstring is where that has to be argued.
 
         ELAPSED-SINCE-LAST-FIRE, NOT MODULO, and this is the load-bearing repair in the package.
         `step % N == 0` evaluated BELOW the batch early-out asks for a simultaneous solution to two
@@ -899,9 +917,10 @@ class Cadences:
         # The comparison below is `now - seeded >= period`, and at Windows(0) that is `0 >= 0` on
         # the first evaluation after seeding and true on every one after -- so the gate fired on
         # EVERY WINDOW. CKPT_EVERY=0 IS THE SHIPPED DEFAULT and its declared meaning is "periodic
-        # saving disabled", so measured at those defaults this wrote a checkpoint 632 times in a
-        # 633-window run: the most expensive operation in the loop, running every window, on a
-        # configuration asking for it never.
+        # saving disabled", so measured at those defaults this fired 632 times in 633 evaluations:
+        # the most expensive operation in the loop, running every window, on a configuration asking
+        # for it never. (633 evaluations, not the run's full length -- compose(environ={}) reports
+        # run_windows = Windows(634); the count is what the drive measured, not the run.)
         # THREE STATEMENTS DISAGREED AND ONLY THIS ONE WAS LOAD-BEARING. CKPT's own Gate on the same
         # object reports fired=False and says "the only saves this run makes are the FINAL one and
         # any SIGUSR1"; RUN.cadence_audit on the same mapping prints that 'ckpt' is DISARMED and
@@ -912,13 +931,17 @@ class Cadences:
         # THE CHECK IS STILL COUNTED, so the ledger reads checks > 0 with fires == 0 and the period
         # column says 0 -- disarmed AND reached, which is a different fact from either a gate that
         # was never evaluated or one that was armed and never came due.
-        if int(period) <= 0:
-            return False
+        # THE CLOCK IS TYPE-CHECKED BEFORE THE DISARMED EARLY-OUT, NOT AFTER. With the order the
+        # other way round a caller passing garbage as `clock` got silently no error on any gate
+        # whose period was 0 -- and 'ckpt' ships at 0, so the one gate most likely to be wired up
+        # wrong was the one gate that validated nothing.
         now = clock.step
         if not isinstance(now, U.Windows):
             raise U.UnitError(
                 f"RUN.Cadences.due: clock.step is {type(now).__name__}({now!r}), not "
                 f"units.Windows. This gate measures elapsed WINDOWS since the last fire.")
+        if int(period) <= 0:
+            return False
         if key not in self._seeded:
             # SEEDED AT WHATEVER THE CLOCK READS NOW, which on a resume is the checkpoint's step.
             # The first evaluation therefore banks nothing and answers False; the first fire comes
@@ -942,12 +965,16 @@ class Cadences:
             # 32 and 129.0 at 64. A checkpoint cadence 28% slower than the number an operator set,
             # with nothing saying so, is the same class of defect as the modulo form this primitive
             # replaced -- smaller, and silent in the same way.
-            # THE FLOOR-DIVISION IS WHAT KEEPS IT FROM BURSTING. Advancing by a single period after
-            # a long gap would leave the seed far behind `now` and fire on several consecutive
-            # calls to catch up; advancing by as many whole periods as have elapsed lands the seed
-            # just behind `now`, so exactly one fire happens per call and the REMAINDER carries into
-            # the next interval. Evaluated per window the two spellings are identical, because
-            # `elapsed` is then exactly `period` and the multiplier is 1.
+            # THE FLOOR-DIVISION BOUNDS THE CATCH-UP; IT DOES NOT REMOVE IT, and this comment said
+            # it did. Advancing by a SINGLE period after a long gap would leave the seed far behind
+            # `now` and fire on many consecutive calls; advancing by as many whole periods as have
+            # elapsed lands the seed within one period of `now`, so the backlog is spent at once
+            # instead of over a burst. What survives is jitter, not a burst: two CONSECUTIVE
+            # evaluations can both fire when the stride is at least `period` minus the carried
+            # remainder, which is how a declared period of 100 produces a 64-window gap at
+            # batch_windows=64. The docstring states that trade. Evaluated per window the two
+            # spellings are identical, because `elapsed` is then exactly `period` and the
+            # multiplier is 1.
             self._seeded[key] = self._seeded[key] + type(period)(
                 int(period) * (int(elapsed) // int(period)))
             self._fires[key] += 1

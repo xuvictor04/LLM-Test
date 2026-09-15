@@ -500,10 +500,34 @@ def _k2_resume_only(src_dir):
     return out
 
 
+# HOW LONG THE PROBE MAY TAKE, AND WHY IT IS NO LONGER A FORMALITY. Until P4 wrote the last body on
+# the assembly path this probe raised at the first stub in under a second; a compose() that RETURNS
+# builds a 2048-expert fabric, tokenizes a corpus and warms an encoder, which is ~90s idle on the
+# reference box and several times that when the machine is also running agents. 180s was the old
+# number and it EXPIRED THE SAME WAY K2's old premise did -- measured 2026-09-15, the suite died
+# here with TimeoutExpired while the tree was green. Raised, and the expiry is now reported rather
+# than raised (see below), so the number being wrong again costs one finding instead of the run.
+_K2_TIMEOUT_S = 900
+
+
 def check_k2_compose(src_dir=SRC):
     findings = []
-    proc = subprocess.run([sys.executable, "-c", _K2_PROBE % src_dir],
-                          capture_output=True, text=True, timeout=180)
+    try:
+        proc = subprocess.run([sys.executable, "-c", _K2_PROBE % src_dir],
+                              capture_output=True, text=True, timeout=_K2_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        # A CHECK MAY FAIL; A CHECK MAY NOT KILL THE SUITE. This call let TimeoutExpired propagate,
+        # so a slow machine took out not just K2 but every check after it: K1 reported and K3
+        # through K16 never ran, with the harness exiting on a traceback that names subprocess
+        # rather than anything about the tree. main() closes with "A broken check is a worse failure
+        # than anything a check reports", and this is that, inside the check file itself.
+        return _report("K2", "the composition root imports and fails only at a stub", False,
+                       f"compose(environ={{}}) did not finish within {_K2_TIMEOUT_S}s",
+                       [f"the probe timed out after {_K2_TIMEOUT_S}s. That is NOT a verdict about "
+                        f"the tree -- compose() may be correct and merely slow, which it now is by "
+                        f"construction because it builds a real system. Re-run on an unloaded "
+                        f"machine before reading anything into it, and raise _K2_TIMEOUT_S if the "
+                        f"honest build time has grown past it."])
     out = (proc.stdout or "").strip().splitlines()
     line = out[-1] if out else ""
     verdict = line.split(" ", 1)[0] if line else "NO_OUTPUT"
