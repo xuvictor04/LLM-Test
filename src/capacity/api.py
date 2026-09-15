@@ -1416,9 +1416,17 @@ def startup_refusals(cap: Config, valve, *, live_experts):
         below any population there can be, so this clause covers it -- `min(n_born, cap - fab.n())`
         is negative on the FIRST flush and growth is frozen for the whole run with nothing in the
         log. Naming it here is what the 2026-09-03 sentinel repair left owed: moving an explicit 0
-        out of the soft-cap space did not close the shape 0 belonged to. Until this body exists
-        nothing refuses it, and capacity/api.py::new_valve's cap.valve reports it as UNREACHABLE
-        with this arithmetic in the reason, which is a report line and not a refusal.
+        out of the soft-cap space did not close the shape 0 belonged to. This body exists as of
+        2026-09-15 and the clause below refuses it by name; capacity/api.py::new_valve's cap.valve
+        still reports it as UNREACHABLE with this arithmetic in the reason, which remains a report
+        line and not a refusal -- the two are the startup ANALYSIS and the startup REFUSAL and they
+        are meant to agree, not to substitute for one another.
+        WHAT THIS CLAUSE CANNOT SAY, DECLARED RATHER THAN GLOSSED: "where the population came
+        from". The population arrives as the plain int `live_experts` and carries no provenance, so
+        the message below names BOTH reachable sources (a fresh run's FAB_N0, a resume's checkpoint)
+        instead of the one that applies. Closing it means widening this frozen signature, which is
+        an owner's call and not a P4 one; the alternative -- reading FAB's levers from inside CAP to
+        tell the two apart -- is the ownership violation the spine exists to prevent.
     (2) THE IRREDUCIBLE COUPLING, DECLARED RATHER THAN REMOVED: the soft cap must sit at or below
         the cull's settling point, which arrives as the wire d_operating_population (FAB.pressure x
         FAB.slots, through the SAME derive.operating_population call the fabric's own row uses).
@@ -1430,10 +1438,76 @@ def startup_refusals(cap: Config, valve, *, live_experts):
     DID IT FIRE: the returned list; an empty list is a positive result and is printed as one
     """
     cap = cap.owned_by("CAP")
-    _ = cap.d_operating_population    # WIRE READ HERE -- the cull's settling point
-    raise NotImplementedError(
-        "CAP.startup_refusals: P4 (capacity) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section CAP.")
+    # THE WIRE IS READ ONCE, HERE. d_operating_population is FAB.pressure x FAB.slots through the
+    # SAME spine/derive.py::operating_population call the fabric's own row uses, so this check and
+    # the mechanism it checks cannot disagree about where the cull settles the population -- which
+    # is the whole reason the quantity is a wire and not a second multiplication written here.
+    settles = int(cap.d_operating_population)
+    out = []
+    cap_e, cap_v = int(valve.cap_experts), int(valve.cap_vocab)
+    # origin is a 2-tuple set by new_valve. Read defensively rather than indexed blind: a Valve
+    # built by a test with the default `origin=()` would turn a refusal into an IndexError, and a
+    # guard that crashes while reporting is worse than one that reports "unrecorded".
+    orig_e = valve.origin[0] if len(valve.origin) > 0 else "unrecorded"
+    orig_v = valve.origin[1] if len(valve.origin) > 1 else "unrecorded"
+
+    # (1a) A CAP AT OR BELOW ZERO. Taken BEFORE the below-population clause, and spelled as its own
+    # sentence, because it is reachable straight from the environment and reads as a different kind
+    # of mistake. _resolve reads an explicit 0 as the documented sentinel and hands back the hard
+    # ceiling, so the only route to this state is a NEGATIVE request: CAP_FAB_START=-5 resolves
+    # cap_experts=-5 with origin "operator (fab_start=-5)". It is below any population there can be,
+    # so `min(n_born, cap - fab.n())` is negative on the FIRST flush and growth is frozen for the
+    # whole run with nothing in the log saying so. BOTH ARMS GET THE CLAUSE: the vocabulary cap
+    # reaches the identical state by the identical route through CAP_VOCAB_START, and there is no
+    # live_vocab argument to reach it by the population test below.
+    for lever_name, value, origin in (("CAP_FAB_START", cap_e, orig_e),
+                                      ("CAP_VOCAB_START", cap_v, orig_v)):
+        if value <= 0:
+            out.append(f"{lever_name} resolved the soft cap to {value} ({origin}), which is at or "
+                       f"below zero and therefore below any population there can be. The growth "
+                       f"clamp takes min(n_born, cap - population), so it is negative on the FIRST "
+                       f"flush and growth is frozen for the entire run while the trigger counts "
+                       f"keep incrementing -- the C30 shape, where the log reads exactly as it "
+                       f"would on a population legitimately at its cap. Set it above the "
+                       f"population, or to 0 for the sentinel, which starts at the hard ceiling.")
+
+    # (1b) A SOFT CAP BELOW THE POPULATION. Same freeze, arrived at from above rather than from
+    # below, and the one the 2026-09-03 sentinel repair left owed: moving an explicit 0 out of the
+    # soft-cap space did not close the shape 0 belonged to. Guarded on `cap_e > 0` so a negative cap
+    # is reported once, by (1a), which names the specific mistake -- two refusals for one number
+    # would make an operator fixing the second wonder what the first one was.
+    if 0 < cap_e < int(live_experts):
+        out.append(f"CAP_FAB_START resolved the soft expert cap to {cap_e} ({orig_e}), "
+                   f"below the live population of {int(live_experts)}. The growth clamp takes "
+                   f"min(n_born, cap - population) = {cap_e - int(live_experts)} on the first "
+                   f"flush, so growth is frozen for the whole run and the pin counter reads exactly "
+                   f"as it would on a population legitimately at its cap (C30). This is unreachable "
+                   f"on a fresh run and entirely reachable on a RESUME, where the population comes "
+                   f"from the checkpoint -- 523 experts against a gc arm's 160 is -363. Raise the "
+                   f"cap above {int(live_experts)}, or set CAP_FAB_START=0 for the hard ceiling.")
+
+    # (2) THE IRREDUCIBLE COUPLING, DECLARED RATHER THAN REMOVED. The soft cap must sit AT OR BELOW
+    # the cull's settling point. Above it the population never reaches the cap, never pins, the pin
+    # clock never accumulates, and the valve is dead while every report line says it is armed --
+    # which is strictly worse than a valve that is off, because "off" is legible.
+    #
+    # GATED ON THE ARM BEING ARMED, AND THE GATE IS LOAD-BEARING RATHER THAN TIDINESS. At the
+    # shipped defaults targets is "off", which makes _resolve hand back the HARD CEILING as the cap
+    # -- 4096 against a settling point of 0.45 x 4096 -> 1844 -- so an ungated comparison refuses
+    # the default configuration of the whole tree on a condition about a mechanism that is switched
+    # off. Pinning is what the valve does; where the valve may not lift the experts, a cap above the
+    # settling point costs nothing and there is nothing to report. Measured: cap.d_operating_population
+    # is 1844 and cap_experts is 4096 on compose(environ={}).
+    if cap.targets in ("experts", "both") and cap_e > settles:
+        out.append(f"CAP_FAB_START resolved the soft expert cap to {cap_e} ({orig_e}) "
+                   f"with CAP_TARGETS={cap.targets!r}, above the cull's settling point of {settles} "
+                   f"(FAB_PRESSURE x FAB_SLOTS, the wire d_operating_population). The cull holds the "
+                   f"population at about {settles}, so it never reaches {cap_e}, never pins, the pin "
+                   f"clock never accumulates and the valve cannot lift -- while every report line "
+                   f"says it is armed. Set CAP_FAB_START to {settles} or below, raise FAB_PRESSURE "
+                   f"so the population settles higher, or set CAP_TARGETS to a value that does not "
+                   f"include the experts.")
+    return out
 
 
 def state(valve):

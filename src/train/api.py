@@ -35,6 +35,8 @@ import time
 import torch
 
 from spine.lever import Config
+from spine import derive as _derive
+from spine import gate as _gate
 from spine import rng as _rng
 from spine import units as U
 
@@ -152,6 +154,34 @@ class RunMode:
     bench: bool
     profile: bool
     timing: object
+
+
+@dataclasses.dataclass(frozen=True)
+class Tick:
+    """What one window's advance decided. FROZEN, for the reason the block above this class gives.
+
+    `step` is units.Windows and `epoch` is units.Epochs -- the counters themselves, handed over with
+    their kinds attached rather than unwrapped to bare ints, because the whole of this package's
+    mechanical contribution is that the loop cannot compare one clock against another by accident.
+    The three flags are plain bools: they are ANSWERS about this window, not counts of anything, and
+    there is no kind for them to carry.
+
+    THE ACCUMULATOR IS NOT HERE, AND THAT IS spine/compose.py::LOOP_ORDER's ruling rather than an
+    omission -- "THE ACCUMULATOR IS WHERE THE FLUSH BATCH COMES FROM and Tick does not carry it --
+    the cut is named once, at _flush_bounds". This record says a flush is DUE; the batch itself is
+    the loop driver's, cut where that file names the cut.
+
+    PRECEDENCE, restated from the same row because it is the caller's obligation and not this
+    record's: `finished` is tested BEFORE `rolled`. Both can be True on one advance -- at the
+    shipped RUN_EPOCHS=1 the only roll a run ever takes is exactly that one -- and a caller that
+    tests `rolled` first re-enters the stage-E rows to draw a stream for an epoch the run has
+    already finished.
+    """
+    step: object
+    epoch: object
+    flush_due: bool
+    rolled: bool
+    finished: bool
 
 
 class Timing:
@@ -447,13 +477,52 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
                  flushes == 0 with step > 0 means the batch never filled.
     """
     run = run.owned_by("RUN")
-    raise NotImplementedError(
-        "RUN.new_clock: P4 (train) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section RUN.")
+    # epochs IS READ HERE AND NOT IN advance(), which is what "LEVERS READ: epochs (via
+    # RunClock.finished)" means. The Config is frozen and the clock outlives this call, so reading
+    # it once and carrying the int keeps the lever out of the loop body entirely -- there is no
+    # window at which a second read could disagree with the first.
+    return RunClock(epochs=int(run.epochs),
+                    batch_windows=int(batch_windows), accum=int(accum),
+                    resume_step=int(resume_step), resume_epoch=int(resume_epoch))
 
 
 class RunClock:
-    """The run's typed counters. Constructed by new_clock(); never instantiated by a package."""
+    """The run's typed counters. Constructed by new_clock(); never instantiated by a package.
+
+    THE SIX COUNTERS ARE ATTRIBUTES AND THE KINDS ARE PUT ON HERE, ONCE. Every increment below is
+    `self.x = self.x + Kind(1)`, never `self.x.n += 1`: spine/units.py::Clock carries `__slots__`
+    and no __setattr__ guard, so the in-place spelling writes through to whatever object the
+    attribute happens to point at -- which is the shared-class-default defect capacity/api.py::Valve
+    records from the other end. Clock.__add__ returns a FRESH instance, so rebinding cannot alias.
+    """
+
+    __slots__ = ("step", "flushes", "backwards", "opt_steps", "epoch", "batch_len",
+                 "epochs", "batch_windows", "accum", "windows_in_epoch", "_in_epoch")
+
+    def __init__(self, *, epochs, batch_windows, accum, resume_step=0, resume_epoch=0):
+        # THE RESUMED STEP IS THE STEP, not an offset held beside one. Cadences seeds _fired[key]
+        # at whatever this reads on the first evaluation, so a clock that started at 0 and added
+        # the resume afterwards would bank the entire resume step count into the first gate.
+        self.step = U.Windows(int(resume_step))
+        self.epoch = U.Epochs(int(resume_epoch))
+        self.flushes = U.Flushes(0)
+        self.backwards = U.Backwards(0)
+        self.opt_steps = U.Steps(0)
+        self.batch_len = 0
+        self.epochs = int(epochs)
+        self.batch_windows = int(batch_windows)
+        self.accum = int(accum)
+        # DECLARED UNKNOWN RATHER THAN GUESSED AT ZERO. A length of 0 would make the first advance()
+        # roll immediately; None makes begin_epoch's absence a refusal at the first window instead
+        # of a run that rolls through every epoch without reading a single one.
+        self.windows_in_epoch = None
+        self._in_epoch = 0
+
+    @property
+    def finished(self):
+        """True when the run has completed every epoch it was asked for. Reads the epochs count
+        new_clock resolved from the lever; `epoch` is Epochs and the comparison is same-kind."""
+        return self.epoch >= U.Epochs(self.epochs)
 
     def begin_epoch(self, windows_in_epoch):
         """Declare how many WINDOWS this epoch's stream holds.
@@ -471,7 +540,35 @@ class RunClock:
         is the shrinkage projection at :6338-6362 -- Q-OPT-5, and OPT's -- and sending an
         implementer here to look for it is how one bug gets fixed twice, differently.
         """
-        raise NotImplementedError("RUN.RunClock.begin_epoch: P4 (train) fills this in.")
+        # A BARE COUNT, AND A Clock IS REFUSED -- the same way round as its sibling consumer, which
+        # is the opposite of what this guard said when it was first written. The first draft here
+        # demanded units.Windows and cited spine/compose.py::_run_windows' "IT RETURNS
+        # units.Windows"; that sentence is about a DIFFERENT helper. The value handed here comes
+        # from _windows_in_epoch, which is `len(Segmentation.ids) // LM.ctx` -- a bare int by
+        # design, because its other consumer is derive.run_windows_from_epochs, whose rate end
+        # REFUSES a Clock in as many words: "a rate is a ratio of two kinds, not a count of one".
+        # Demanding Windows here would have made one quantity need two spellings, one per call
+        # site. Measured: the strict form raised UnitError on int(634) at the `epoch0` stage of
+        # compose(environ={}) on 2026-09-15, which is how the mistake was caught.
+        # THE KIND CANNOT SEE THIS ARGUMENT'S REAL DEFECT EITHER, which is the other half of why it
+        # is not asked for. `stream_bytes // ctx` and `len(ids) // ctx` are both ints and both would
+        # wrap as Windows; what separates them is WHICH STREAM was divided, and no type states that.
+        # The division is named once, at _windows_in_epoch, for exactly that reason.
+        if isinstance(windows_in_epoch, U.Clock):
+            raise U.UnitError(
+                f"RUN.RunClock.begin_epoch: windows_in_epoch={windows_in_epoch!r} is a Clock. This "
+                f"epoch's length arrives as a plain count from spine/compose.py::_windows_in_epoch, "
+                f"which is the same value derive.run_windows_from_epochs takes as its RATE and "
+                f"refuses a Clock for. One quantity, one spelling.")
+        if int(windows_in_epoch) < 0:
+            raise ValueError(
+                f"RUN.RunClock.begin_epoch: an epoch cannot hold {int(windows_in_epoch)} windows.")
+        self.windows_in_epoch = int(windows_in_epoch)
+        # THE EPOCH-LOCAL CURSOR RESETS AND THE RUN TOTAL DOES NOT. `step` is the run's window
+        # total across every epoch -- it is what OPT's horizon is compared against -- while
+        # `_in_epoch` is how far into THIS stream the loop has read, which is the only quantity a
+        # roll may zero.
+        self._in_epoch = 0
 
     def advance(self):
         """Advance one window. Returns Tick(step, epoch, flush_due, rolled, finished).
@@ -485,7 +582,45 @@ class RunClock:
 
         ONE ADVANCE, NOT TWO: the early-out and the flush tail converge here.
         """
-        raise NotImplementedError("RUN.RunClock.advance: P4 (train) fills this in.")
+        if self.windows_in_epoch is None:
+            raise RuntimeError(
+                "RUN.RunClock.advance before begin_epoch: the clock does not know how long this "
+                "epoch is, so it cannot say whether this window rolled it. compose.py calls "
+                "begin_epoch at the `epoch0` stage for exactly this reason; a loop driver that "
+                "reaches here first has skipped it.")
+        # ONE ADVANCE, NOT TWO. The old tree wrote `i += WIN; step += 1` at :6796 and :7708, 900
+        # lines apart, and every argument about which clock a gate compares against is downstream
+        # of that duplication. Rebinding, never `.n +=` -- see the class docstring.
+        self.step = self.step + U.Windows(1)
+        self._in_epoch += 1
+        self.batch_len += 1
+
+        # THE FLUSH IS DECIDED BEFORE THE ROLL, so a batch that fills exactly on an epoch's last
+        # window is FLUSHED rather than dropped. The drop below is for a PARTIAL batch, which is
+        # what :6533 dropped; a full one has all its windows from the stream it was cut from and
+        # discarding it would silently shorten the run by one optimizer step per epoch.
+        flush_due = self.batch_len >= self.batch_windows
+        if flush_due:
+            # COUNTED WHERE THE BATCH FILLS, NOT WHERE THE BACKWARD HAPPENS, and that is the whole
+            # reason Flushes and Backwards are two kinds. Incrementing this in note_backward would
+            # make the two counters identical BY CONSTRUCTION, and the microbatching case the
+            # new_clock docstring names -- more than one backward inside a flush -- would then be
+            # undetectable in the very ledger that exists to detect it.
+            self.flushes = self.flushes + U.Flushes(1)
+            self.batch_len = 0
+
+        rolled = self._in_epoch >= self.windows_in_epoch
+        if rolled:
+            self.epoch = self.epoch + U.Epochs(1)
+            self._in_epoch = 0
+            # THE PARTIAL BATCH IS DROPPED HERE, as at :6533: it holds (bpos, i) indexing the OLD
+            # token stream, and carrying it across a resample writes memory entries whose
+            # provenance points at unrelated text.
+            self.batch_len = 0
+        # `finished` is READ FROM THE PROPERTY so the record and the loop's own test cannot
+        # disagree, and it is computed AFTER the roll -- the roll is what can finish the run.
+        return Tick(step=self.step, epoch=self.epoch, flush_due=flush_due, rolled=rolled,
+                    finished=self.finished)
 
     def note_backward(self):
         """Record one backward pass and answer whether an optimizer step is due.
@@ -495,7 +630,14 @@ class RunClock:
         before it was on `step`, and two real runs one line apart measured 55 optimizer steps where
         13 were due. Passing a Windows clock here raises UnitError.
         """
-        raise NotImplementedError("RUN.RunClock.note_backward: P4 (train) fills this in.")
+        self.backwards = self.backwards + U.Backwards(1)
+        due = _derive.accum_due(self.backwards, self.accum)
+        if due:
+            # THE CLOCK TAKES THE STEP COUNT, because new_clock is "the ONLY object in the tree
+            # that increments any of them". A caller that incremented opt_steps itself would be a
+            # second place a counter advances, which is the one thing this package contributes.
+            self.opt_steps = self.opt_steps + U.Steps(1)
+        return due
 
     def counters(self):
         """The five typed counters plus the batch flush count, as the DID IT FIRE surface.
@@ -510,7 +652,21 @@ class RunClock:
         against st.horizon.run_steps, two units.Steps, so the residual is a subtraction. RUN does
         not compute the comparison and does not name OPT's horizon; it publishes the observed side.
         """
-        raise NotImplementedError("RUN.RunClock.counters: P4 (train) fills this in.")
+        # TYPED ON THE WAY OUT, NOT UNWRAPPED. A reader that wants an int calls int() on one of
+        # these and says so at their own call site; handing bare ints out of the DID IT FIRE
+        # surface is how a Windows total gets compared against a Steps horizon by accident, which
+        # is the comparison the composition root exists to make explicitly (Q-OPT-5).
+        return {
+            "step": self.step,
+            "flushes": self.flushes,
+            "backwards": self.backwards,
+            "opt_steps": self.opt_steps,
+            "epoch": self.epoch,
+            # THE BATCH FLUSH COUNT'S COMPANION, and a plain int because it is not a clock: it is
+            # how many windows are queued in the accumulator RIGHT NOW, so a run that ends with
+            # batch_len > 0 ended mid-batch and those windows never reached a backward pass.
+            "batch_len": self.batch_len,
+        }
 
 
 def new_cadences(run: Config, *, periods):
@@ -559,14 +715,51 @@ def new_cadences(run: Config, *, periods):
                  checks > 0 and fires == 0 is armed-but-inert with its own arithmetic attached; a
                  key ABSENT was never wired, which is a different statement and G4 needs both.
     """
+    # owned_by IS CALLED AND NOTHING IS READ THROUGH IT, WHICH IS THE POINT. "Reads NONE of RUN's
+    # levers" is a claim about this body, and the ownership handshake is what makes the claim
+    # checkable rather than a comment -- a later edit that reaches for run.epochs here has to get
+    # past a Config that would hand it over, and O-series reads the LEVERS READ line against what
+    # the body touches.
     run = run.owned_by("RUN")
-    raise NotImplementedError(
-        "RUN.new_cadences: P4 (train) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section RUN.")
+    for key, period in periods.items():
+        # EVERY DECLARED PERIOD IS CHECKED AT BUILD, NOT AT FIRST FIRE. Cadences.due refuses a bare
+        # int, and three of the five gates were handed one until 2026-08-30 (H51) -- but due() is
+        # evaluated inside the loop, so that refusal arrives after the model is built and the
+        # corpus is drawn. Checking the mapping here moves every one of those failures to startup.
+        if not isinstance(period, U.Windows):
+            raise U.UnitError(
+                f"RUN.new_cadences: the period for {key!r} is "
+                f"{type(period).__name__}({period!r}), not units.Windows. Config hands back a bare "
+                f"int for all 35 levers that declare a Clock unit, which is why each period comes "
+                f"through its owning package's typed accessor (EVAL.curve_period and its "
+                f"siblings); a bare int here is that accessor bypassed.")
+    return Cadences(periods)
 
 
 class Cadences:
-    """The one cadence primitive in the tree. Constructed by new_cadences()."""
+    """The one cadence primitive in the tree. Constructed by new_cadences().
+
+    THE LEDGER IS SEEDED WITH EVERY DECLARED KEY, AT BUILD, AND THAT IS WHAT MAKES G4's THIRD STATE
+    READABLE. new_cadences' own DID IT FIRE line splits two readings a lazily-built dict cannot:
+    "checks > 0 and fires == 0" is armed-but-inert, and "a key ABSENT was never wired". If the row
+    only appeared once the gate was first evaluated, a gate that was wired and never reached would
+    be indistinguishable from one nobody wired -- which is the armed-but-inert census category
+    (57 records) arriving through the mechanism built to report it.
+    """
+
+    __slots__ = ("_periods", "_checks", "_fires", "_last", "_seeded")
+
+    def __init__(self, periods):
+        self._periods = dict(periods)
+        self._checks = {k: 0 for k in self._periods}
+        self._fires = {k: 0 for k in self._periods}
+        self._last = {k: None for k in self._periods}
+        # WHEN THIS KEY LAST FIRED, IN WINDOWS, seeded LAZILY at the first evaluation rather than
+        # at 0 here. On a resume the clock starts at the checkpoint's step, and a baseline of 0
+        # would make `elapsed = step - 0` exceed every period on the first window -- every gate in
+        # the run firing at once because the run was resumed. :5281-5282 already seeded at the
+        # resumed step; new_cadences has no clock to read, so the seed happens where one arrives.
+        self._seeded = {}
 
     def due(self, key, period, clock):
         """True at most once per `period` WINDOWS elapsed since this key last fired.
@@ -584,12 +777,59 @@ class Cadences:
         RESUMED step, not 0 (:5281-5282 already did this), so the first post-resume evaluation does
         not bank the whole resume step count.
         """
-        raise NotImplementedError("RUN.Cadences.due: P4 (train) fills this in.")
+        if key not in self._periods:
+            # THE KEYS ARE THE ROOT'S, NOT A CALL SITE'S. A key invented here would have no ledger
+            # row, no cadence_audit coverage and no readable "0 fires" -- which is the state this
+            # class exists to remove, so an unknown key is a refusal and not a new row.
+            raise KeyError(
+                f"RUN.Cadences.due: {key!r} is not a declared gate. The declared keys are "
+                f"{sorted(self._periods)}, assembled by spine/compose.py::_periods from the "
+                f"package that OWNS each threshold. A gate whose key is not in that mapping is a "
+                f"gate with no DID IT FIRE surface.")
+        if not isinstance(period, U.Windows):
+            raise U.UnitError(
+                f"RUN.Cadences.due: the period for {key!r} is {type(period).__name__}"
+                f"({period!r}), not units.Windows. An int raises and a Flushes raises; the kind is "
+                f"what keeps this gate phase-independent across the window and flush call sites.")
+        if period != self._periods[key]:
+            # TWO SOURCES OF TRUTH FOR ONE THRESHOLD, REFUSED RATHER THAN RECORDED. The ledger
+            # prints a period per key and the gate evaluates one; if they can differ, the report
+            # says the run checked a cadence it did not check. Both come from the same _periods
+            # mapping in a correct caller, so a disagreement is a defect and never a configuration.
+            raise ValueError(
+                f"RUN.Cadences.due: {key!r} was declared at {self._periods[key]} and evaluated at "
+                f"{period}. The ledger prints the declared one, so a run that took this branch "
+                f"would report a cadence it did not use.")
+        self._checks[key] += 1
+        now = clock.step
+        if not isinstance(now, U.Windows):
+            raise U.UnitError(
+                f"RUN.Cadences.due: clock.step is {type(now).__name__}({now!r}), not "
+                f"units.Windows. This gate measures elapsed WINDOWS since the last fire.")
+        if key not in self._seeded:
+            # SEEDED AT WHATEVER THE CLOCK READS NOW, which on a resume is the checkpoint's step.
+            # The first evaluation therefore banks nothing and answers False; the first fire comes
+            # one full period later, which is what "at most once per period elapsed" means from a
+            # cold start as much as from a warm one.
+            self._seeded[key] = now
+            return False
+        # ELAPSED-SINCE-LAST-FIRE, NOT MODULO. `step % N == 0` below the batch early-out asks for a
+        # simultaneous solution to two congruences that usually has none: simulated over 200,000
+        # windows the mint fired 999 times at BATCH_W=1 and ZERO times at BATCH_W in {2, 8, 15, 16,
+        # 32}. CKPT_EVERY sat in that block, so a long run would never have checkpointed. The
+        # subtraction is same-kind and Clock.__sub__ returns a Windows.
+        if now - self._seeded[key] >= period:
+            self._seeded[key] = now
+            self._fires[key] += 1
+            self._last[key] = now
+            return True
+        return False
 
     def ledger(self):
         """{key: (checks, fires, last_fired_step, period)} -- the DID IT FIRE surface for every
         periodic gate in the run, in one place, whoever owns the threshold."""
-        raise NotImplementedError("RUN.Cadences.ledger: P4 (train) fills this in.")
+        return {k: (self._checks[k], self._fires[k], self._last[k], self._periods[k])
+                for k in self._periods}
 
 
 def bench_summary(run: Config, clock, *, elapsed_s, bytes_per_window, n_params, timing=None):
@@ -718,7 +958,24 @@ def cadence_audit(run: Config, *, run_windows, periods):
                  is indistinguishable from the audit not having run.
     """
     run = run.owned_by("RUN")
-    raise NotImplementedError(
-        "RUN.cadence_audit: P4 (train) fills this in -- it is one call to "
-        "derive.cadences_that_cannot_fire plus the sentences. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section RUN.")
+    starved = _derive.cadences_that_cannot_fire(run_windows, periods)
+    if not starved:
+        # THE POSITIVE RESULT IS A RETURNED SENTENCE, AND THE ALTERNATIVE READING IS NAMED RATHER
+        # THAN LEFT OPEN. This docstring requires that an empty result "must be printed as one",
+        # and the only caller does `sysm.warnings.extend(cadence_audit(...))` -- so a literal empty
+        # list is printed as NOTHING and is indistinguishable from the audit never having run,
+        # which is the exact state the sentence forbids. The other reading puts the obligation on
+        # the report instead; it is rejected here because the report does not exist yet and an
+        # obligation owed to an absent reader is how C11 went unstated for a round in the first
+        # place. If a report is later written that says this itself, this branch is what it
+        # replaces -- and one of the two must go, because two sources would print it twice.
+        return [f"cadence audit: every declared gate can fire at this run length -- "
+                f"{len(periods)} gate(s) checked against a run of {run_windows}."]
+    out = []
+    for key, period_n, run_n in starved:
+        out.append(f"cadence audit: {key!r} has a period of {period_n} windows and this run is "
+                   f"{run_n} windows long, so it CANNOT FIRE ONCE. Whatever it gates does not "
+                   f"happen in this run, and a report that says it did nothing is reporting a "
+                   f"mechanism that was never reached -- which is a different statement. Shorten "
+                   f"the period, or lengthen the run (DATA.stream_bytes, LM.ctx, RUN.epochs).")
+    return out

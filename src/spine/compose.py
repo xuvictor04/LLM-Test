@@ -2194,12 +2194,17 @@ def compose(environ=None, *, restored=None):
     # capacity/api.py::<module> records for derive.pin_tick: a file asserting a repair as done with the
     # call the repair requires never written. Each period comes from the package that DECLARES its
     # kind, as units.Windows; K9 refuses a bare lever read here.
+    # AND IT WAS A SECOND CONSTRUCTION WITH FIVE KEYS, WHICH IS THE DEFECT BOTH ROWS ABOVE FORBID
+    # IN AS MANY WORDS. This line built its own mapping from the five typed accessors and dropped
+    # 'progress' -- so RUN.PROGRESS_WINDOWS had no Cadences.ledger row and no cadence_audit
+    # coverage, which is exactly the "0 fires nobody can read" state new_cadences' docstring
+    # describes, and K9 could not see it because K9 reads _periods rather than this call. The
+    # ROW says "periods is _periods(sysm) -- the SIX gates' thresholds" and the audit's row says
+    # "the SAME _periods(sysm) mapping new_cadences receives -- the same object, not a second
+    # construction, or the audit would describe gates other than the ones evaluated". Both are
+    # true of the call now. Found 2026-09-15, writing the three RUN bodies these two rows call.
     sysm.stage = "cadence"
-    periods = {"curve": eval_api.curve_period(ev),
-               "dom.manage": dom_api.manage_period(dom),
-               "fab.manage": fab_api.manage_period(fab),
-               "dom.rekey": mem_api.rekey_period(mem),
-               "ckpt": ckpt_api.save_period(ckpt)}
+    periods = _periods(sysm)
     sysm.cadences = run_api.new_cadences(run, periods=periods)
 
     # AND THE AUDIT WAS A ROW NOBODY CALLED. `grep cadence_audit` found it only inside its own row
