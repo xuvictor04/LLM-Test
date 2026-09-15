@@ -712,3 +712,65 @@ zero over-refused cells across all 18. There is nothing left to decide on the RE
 it. `SIG_WARMUP_MIN_FRAC` stays open in form only — the seven cells are enumerated above and every
 one is an alias of 1.0 or a crash — so the fork is now a question about SPELLING, not about a
 behaviour anybody can still reach.
+
+---
+
+## THE FIRST RUN, 2026-09-15. The system trains: loss 8.3247 -> 3.9402 over 400 windows.
+
+`spine/loop.py` is the loop driver -- the thing `LOOP_ORDER`'s 58 rows describe and which nothing
+executed until today. `run.py` is its entry point. On the shipped defaults, CPU, no GPU:
+
+    400 windows, 400 flushes, 400 optimizer steps, 40.8s (9.8 windows/s)
+    loss 8.3247 -> 3.9402
+    curve every 40th: 8.325, 5.618, 4.541, 4.937, 12.581, 3.979, 5.37, 3.898, 4.187, 3.994
+
+**8.3247 IS NOT AN ARBITRARY STARTING POINT AND THAT IS THE CHECK ON IT**: `ln(4096)` is 8.3178,
+the loss of a uniform distribution over `LM_VOCAB_SLOTS` rows, which is what an untrained softmax
+scores. The run starts where an untrained model must start and ends well below it. The spike to
+12.581 at window ~160 is real and unexplained, and is left on the record rather than smoothed out
+of the quoted curve.
+
+**PARAMETERS MOVE, INCLUDING THE ONES A PREVIOUS ROUND THOUGHT WERE DEAD.** Measured by snapshot
+and difference over 24 windows: all 8 LM parameters moved, and all 20 fabric tensors moved --
+`A` by 1.060e-02 and `B` by 1.062e-02. `B` IS ALL ZERO AT BUILD, which is the trap INV-R2-1
+recorded: with `B == 0`, `dL/dA` is proportional to `B` and vanishes, so a probe that touches the
+experts only through their product measures zero gradient on both and concludes the fabric cannot
+train. Under the real routed path it does: `B` moves first (its own gradient is proportional to
+`A`, which is not zero), and `A` follows. The earlier finding was a property of the probe, not of
+the system, and this is the measurement that separates them.
+
+**THREE DEFECTS I WROTE INTO THE DRIVER, ALL OF ONE SHAPE, ALL CAUGHT BY DRIVING IT.**
+
+(1) `try: sig_vec = sig_api.encode(...) except Exception: sig_vec = None`, then skipping
+`FAB.forward` when it was None. The fabric silently left the forward path and nothing in the result
+said so -- the exact shape `sig/api.py::encode` spends its opening paragraph refusing ("a caller
+that cannot supply width_units units gets an EXCEPTION, never a narrower window and never a zero
+vector", the whole of the C4/C5 repair), reproduced in the one file that decides what runs. The
+underlying fault was mundane: the call passed `ctx` ids (128) where SIG asks for `width_units`
+units (192).
+
+(2) `h = out.h if hasattr(out, "h") else h`. `FabricOut`'s field is `hidden`, so the branch never
+matched, the routed output was discarded, and the run trained on the UNROUTED hidden while
+reporting the fabric was in the path. **The tell was that the loss curve was byte-identical to the
+run taken before the fabric was wired in at all** -- 8.3167 -> 5.8026 both times. With the field
+named correctly it moves to 8.3247 -> 5.7564, and the run gets slower, which is what routing
+costing something looks like.
+
+(3) The fabric's `aux_loss` was computed and dropped. That trains the router on nothing but the
+language loss, which is the configuration every load-balance result in this project's history was
+accidentally taken under.
+
+**`hasattr(x, "a") else <unchanged>` AND A BARE `except` ARE THE SAME DEFECT.** Both convert a
+wrong assumption into a silent no-op, and both leave a report describing a mechanism that did not
+run. Two of the three above were that pattern, written within two lines of each other, in a file
+whose own docstring argues against exactly this.
+
+**WHAT THE RUN DOES NOT MEASURE, PRINTED BY THE RUN ITSELF.** Eleven `LOOP_ORDER` B-row entry
+points are still stubs, and `RunResult.skipped` names every one with its consequence -- "THE FABRIC
+DOES NOT GROW", "NOTHING IS EVER WRITTEN TO MEMORY", "THE VOCABULARY NEVER MINTS A TOKEN". The list
+is derived from the live functions rather than typed, so it shrinks as bodies land instead of
+rotting. **This is a goal-A run.** Goal B is a claim about what survives a second pass through
+growth, memory and domains, and those are the mechanisms not called.
+
+The cadence ledger shows `checks=0` on five of six gates, which is the third state doing its job: a
+gate that was never EVALUATED is a different fact from one that was evaluated and did not fire.
