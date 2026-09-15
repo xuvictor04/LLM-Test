@@ -1648,9 +1648,31 @@ def stream_state(dat: Config, areas):
     DID IT FIRE: data.state_written
     """
     dat = dat.owned_by("DATA")
-    raise NotImplementedError(
-        "DATA.stream_state: P4 (data) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DATA.")
+    out = {
+        # THE PER-AREA READ CURSORS, WHICH ARE THE LOAD-BEARING PART. Without them a resume
+        # re-reads the head of every area under seg_contig and silently trains a SECOND time on
+        # material the parent already used -- which does not look like a bug in any report, it
+        # looks like a model that learned that text unusually well.
+        "cursors": {k: int(v) for k, v in areas.cursors.items()},
+        # THE HOLDOUT BLOCK, OFFSET AND SIZE, PER AREA, so restore_stream_state can refuse a resume
+        # whose held-out block MOVED. That refusal is the one goal B rests on: an ACROSS THE RUN
+        # BOUNDARY number computed over a different block than the parent's compares two different
+        # texts and reports the difference as forgetting.
+        "holdout": {k: {"offset": int((areas.rng_holdout.get(k) or {}).get("offset", 0)),
+                        "size": int(areas.holdout_bytes.get(k, 0)),
+                        "key": (areas.rng_holdout.get(k) or {}).get("key")}
+                    for k in areas.names},
+        "bytes_present": {k: int(v) for k, v in areas.bytes_present.items()},
+        "bytes_taken": {k: int(v) for k, v in areas.bytes_taken.items()},
+        # THE COUNTER VECTOR, because a DID-IT-FIRE count that resets on resume counts the wrong
+        # thing -- it counts "since the last checkpoint" while being read as "this run".
+        "counters": dict(areas.counters),
+    }
+    # THE CACHED Stream AT resample=False IS NOT CHECKPOINTED and that is deliberate: it is rebuilt
+    # from (seed, epoch), so saving it would put a second copy of a derivable thing in the payload
+    # and let the two disagree.
+    areas.counters["data.state_written"] = areas.counters.get("data.state_written", 0) + 1
+    return out
 
 
 def restore_stream_state(dat: Config, areas, state):
@@ -1688,6 +1710,57 @@ def restore_stream_state(dat: Config, areas, state):
                  statement "this resume added nothing"), data.area_vanished
     """
     dat = dat.owned_by("DATA")
-    raise NotImplementedError(
-        "DATA.restore_stream_state: P4 (data) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DATA.")
+    if not state:
+        return areas
+
+    def _refuse(reason):
+        areas.counters["data.state_refused"] = areas.counters.get("data.state_refused", 0) + 1
+        raise CorpusError(reason)
+
+    recorded = dict(state.get("holdout") or {})
+    cursors = dict(state.get("cursors") or {})
+    live = set(areas.names)
+
+    # NOT SET-EQUALITY, AND THE RULING IS 2026-09-02's (Q-DATA-4). An add-an-area run is BY
+    # DEFINITION a resume whose area list gained a name -- longrun.sh:938 runs DOMAINS="eng,$NAME"
+    # against a parent trained on eng -- so a set-equality reading would refuse goal B's headline
+    # experiment at startup, on a row that runs unconditionally whenever "DATA" is in the snapshot.
+    for name in recorded:
+        if name not in live:
+            # AN AREA THAT VANISHED IS A LOUD REFUSAL, NOT A SILENT DROP. The parent trained on text
+            # this run cannot score, so its ACROSS THE RUN BOUNDARY number has no counterpart. It is
+            # counted separately from an arrival because "an area arrived" and "an area vanished"
+            # are two different statements and only one of them is an experiment.
+            areas.counters["data.area_vanished"] = areas.counters.get("data.area_vanished", 0) + 1
+            _refuse(f"DATA: the checkpoint recorded area {name!r} and this run does not have it. "
+                    f"The parent trained on text this run cannot score, so its across-the-boundary "
+                    f"number has no counterpart. Restore the area, or start a new run.")
+        was, now = recorded[name], {
+            "offset": int((areas.rng_holdout.get(name) or {}).get("offset", 0)),
+            "size": int(areas.holdout_bytes.get(name, 0)),
+            "key": (areas.rng_holdout.get(name) or {}).get("key"),
+        }
+        for field in ("offset", "size", "key"):
+            if was.get(field) != now[field]:
+                _refuse(
+                    f"DATA: area {name!r} had holdout {field}={was.get(field)!r} in the checkpoint "
+                    f"and {now[field]!r} now. A resume whose held-out block moved compares two "
+                    f"different texts across the run boundary, and that is the one number goal B "
+                    f"rests on. Named here rather than discovered in the eval.")
+        if name in cursors:
+            areas.cursors[name] = int(cursors[name])
+
+    for name in areas.names:
+        if name not in recorded:
+            # THE ADD-AN-AREA RUN. Admitted, cursor at 0, and PRINTED -- the count is 0 on an
+            # ordinary resume, which is itself the statement "this resume added nothing".
+            areas.cursors[name] = 0
+            areas.counters["data.area_added"] = areas.counters.get("data.area_added", 0) + 1
+            areas.counters.setdefault("data.areas_added_names", []).append(name)
+    if state.get("counters"):
+        for k, v in state["counters"].items():
+            if k not in ("data.state_restored", "data.state_refused", "data.area_added",
+                         "data.area_vanished", "data.areas_added_names"):
+                areas.counters[k] = v
+    areas.counters["data.state_restored"] = areas.counters.get("data.state_restored", 0) + 1
+    return areas

@@ -1547,10 +1547,40 @@ def vocab_state(tok: Config, vocab):
     DID IT FIRE: tok.state_written
     """
     tok = tok.owned_by("TOK")
-    _ = tok.d_cap_lift_period                # WIRE READ HERE -- reported beside tok.cap_lift
-    raise NotImplementedError(
-        "TOK.vocab_state: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    lift_period = tok.d_cap_lift_period      # WIRE READ HERE -- reported beside tok.cap_lift
+    out = {
+        # THE RETIREMENTS AND THE PROVENANCE TABLE, WHICH IS DEFECT D-T3. A save/load round trip
+        # UNDID EVERY RETIREMENT, because load() replays every merge into the match table including
+        # the retired ones, and `prov` did not exist in the file at all -- so every token on
+        # probation at save time was silently CONFIRMED by the act of checkpointing. The merge list
+        # alone cannot carry either: it says what was built, not what was withdrawn or when.
+        "retired": sorted(int(i) for i in vocab.retired),
+        "prov": {str(k): v for k, v in vocab.prov.items()},
+        "v0": int(vocab.v0),
+        "soft_cap": None if vocab.soft_cap is None else int(vocab.soft_cap),
+        "merge_count": len(vocab.merges),
+        # THE PAIR TALLY DIGEST rather than the tally: it is the candidate evidence a mint draws on,
+        # and carrying the counts lets a resumed run continue accumulating instead of restarting the
+        # window that was already paid for.
+        "pair_digest": len(getattr(vocab, "pair", ()) or ()),
+        "counters": dict(vocab.counters),
+        # THE CAP-LIFT CADENCE, REPORTED AS A READING. "0 lifts" and "the valve's period is longer
+        # than the run" are different facts, and round6 measured 0 vocabulary lifts on gc_real when
+        # it was a CLOCK-UNIT fault rather than the plateau condition. This line prints the period
+        # and points at the package that owns the verdict; it must not grow a second verdict of its
+        # own -- CAP.counters' block-reason histogram is the authority, and it now has a body.
+        "cap_lift_period": int(lift_period),
+    }
+    # THE CADENCE `_fired` MAP IS DECLARED ABSENT RATHER THAN OMITTED. TOK.on_window owns this
+    # package's four cadences and is still a P4 stub, so no `_fired` map exists to save. Writing the
+    # reason beats leaving the key out, because a missing key on the other side is indistinguishable
+    # from an older checkpoint -- and a resume that silently finds no cadence state restarts every
+    # one of them at zero.
+    out["fired"] = None
+    out["fired_unbuilt_reason"] = ("TOK.on_window is a P4 stub, so this package's four cadences "
+                                   "have no _fired map yet; there is no cadence state to carry")
+    vocab.counters["tok.state_written"] = vocab.counters.get("tok.state_written", 0) + 1
+    return out
 
 
 def restore_vocab(tok: Config, state, vocab):
@@ -1562,6 +1592,31 @@ def restore_vocab(tok: Config, state, vocab):
     DID IT FIRE: tok.state_restored, tok.state_refused
     """
     tok = tok.owned_by("TOK")
-    raise NotImplementedError(
-        "TOK.restore_vocab: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    if not state:
+        return vocab
+    # THE MERGE COUNT IS CHECKED FIRST AND THE REFUSAL IS LOUD. This state describes a vocabulary
+    # built from a FILE, and the file is loaded separately: if the two disagree, every id in
+    # `retired` and every key in `prov` points at a different token than the one it was recorded
+    # against, and the restore would retire tokens at random rather than fail.
+    was, now = int(state.get("merge_count", -1)), len(vocab.merges)
+    if was >= 0 and was != now:
+        vocab.counters["tok.state_refused"] = vocab.counters.get("tok.state_refused", 0) + 1
+        raise LeverError(
+            f"TOK resume refused: the checkpoint records {was} merges and the vocabulary just "
+            f"built from the file has {now}. Every id in the retirement set and the provenance "
+            f"table is an index into that merge list, so restoring across a mismatch would retire "
+            f"and confirm tokens at random instead of failing. The tokenizer file and the "
+            f"checkpoint are from different runs.")
+    # RETIREMENTS GO BACK, WHICH IS THE HALF load() UNDOES. It replays every merge into the match
+    # table including the retired ones, so without this line a resume silently re-admits them.
+    vocab.retired = set(int(i) for i in (state.get("retired") or ()))
+    if state.get("prov"):
+        vocab.prov = {int(k): v for k, v in state["prov"].items()}
+    if state.get("v0") is not None:
+        vocab.v0 = int(state["v0"])
+    if "soft_cap" in state:
+        vocab.soft_cap = None if state["soft_cap"] is None else int(state["soft_cap"])
+    if state.get("counters"):
+        vocab.counters.update(state["counters"])
+    vocab.counters["tok.state_restored"] = vocab.counters.get("tok.state_restored", 0) + 1
+    return vocab

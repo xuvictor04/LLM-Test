@@ -1139,11 +1139,17 @@ def pin_tick(held, pinned, dstep):
     names as "the original defect again". This is repair (a), applied here, once.
 
     Repair (b) -- converting the THRESHOLD to Flushes -- stays only in FAB.d_cap_lift_period and
-    TOK.d_cap_lift_period, which fabric/api.py::grow_check and tok/api.py::vocab_state._ read for REPORTING beside the
+    TOK.d_cap_lift_period, which fabric/api.py::grow_check and tok/api.py::vocab_state read for REPORTING beside the
     lift counters, because "0 lifts" cannot otherwise distinguish "never full" from "never
     plateaued". (Those two line numbers were :305 and :313 until 2026-09-03 and had drifted onto
-    unrelated prose; the reads are the `_ = fab.d_cap_lift_period` and `_ = tok.d_cap_lift_period`
-    lines, which K5 will fail on if either goes.) Nothing compares them against this clock, and
+    unrelated prose. THE TWO READS ARE NO LONGER THE SAME SHAPE, as of 2026-09-15: FAB's is still
+    `_ = fab.d_cap_lift_period`, a placeholder in a stub, and K5 will fail if it goes; TOK's is a
+    REAL read now that vocab_state has a body -- `lift_period = tok.d_cap_lift_period`, returned in
+    the blob as `cap_lift_period`, so the period an operator reads beside "0 lifts" is the number
+    the wire actually carried. This paragraph cited `vocab_state._` until the body landed and
+    renamed that local, which O13 reported the same day: a citation into another file's
+    function-local is a claim with the shortest possible shelf life, and the symbol is now the
+    function rather than a name inside it.) Nothing compares them against this clock, and
     Windows >= Flushes raises, so both repairs cannot be live in the valve at once by construction
     rather than by discipline. THE REPORTING WIRES ARE NOT PERMANENT: Q-CLOCK-1 is MEASURABLE, and
     the condition that retires both rows -- CAP.counters rendering its block-reason histogram beside
