@@ -1,0 +1,54 @@
+{
+  "agent": "B-FAB",
+  "owns": "src/fabric/api.py",
+  "targets": [
+    "FAB.observe",
+    "FAB.grow_check",
+    "FAB.own_lr_scale"
+  ],
+  "status": "DONE -- three bodies written, driven and green",
+  "baseline": "all seven suites rc=0 before any edit (ownership contract census assemble couplings derive fabric)",
+  "findings": [
+    "Population.__slots__ has NO slot for the growth machine, although the module docstring's RECORD TYPES block lists 'the growth machine' among Population's fields. Same shape as the dom_of defect: a declared field nothing allocated, invisible because its only reader was a stub. __slots__ is closed, so pop.growth = {...} at a point of use is AttributeError.",
+    "No home for comp_glob either (observe's docstring requires the population EMA at comp_ema; manage's comp_protect spare reads it).",
+    "MEM.census is a stub -> memory_pressure can only be None today; grow_on_mem_pressure is UNREACHABLE with two named causes.",
+    "observe's LEVERS READ names only comp_ema/err_fast/err_slow, but its own DID IT FIRE declares fab.experts_past_grace_ever (needs grace) and the credit rule needs chain_k to reconstruct the COMPUTED set.",
+    "FabricOut carries no per-hop selection record: the computed set is exactly recoverable from out.weights only at depth 1 (the shipped default, depth0=1). Above one hop the union approximation under-credits uage.",
+    "MEASURED COLD START OF THE RUNNING MAD: at the shipped defaults the regression leg fires at WINDOW 2 -- 'loss=8.3406 slow=8.3247 dev=0.000159 n=2' -- because dev is seeded from a single |loss - slow| and max(1e-6, dev) is then ~0. One expert is born on the first upward blip of every run. This is the old tree's arithmetic verbatim (:2997-3005) and the rebuild's docstring specifies it, so it is REPORTED and not silently repaired; the cooldown bounds the damage (measured: 1 birth, then 2 fab.grow_regression_refused_cooldown and 38 fab.grow_recover_passes over 40 windows). Candidate repairs, none taken: a minimum g['n'] before the regression arms (a new threshold with no census row); seeding dev from the first few passes' spread (same); applying `warmup` to both legs (changes a declared lever's meaning and would suppress a genuine early regression).",
+    "Q-FAB-5's arithmetic CONFIRMED by measurement rather than by argument: 40 windows at batch_windows=1 with chain_k=8 gives fab.uage_mean 0.156174 at n_live=2049 (= 40*8/2049), so grace=48 needs ~12,288 windows and fabric.cull_eligible is UNREACHABLE at every shipped run length, not armed-and-inert. fab.experts_with_use reads 197 distinct experts of 2049 over those 40 windows."
+  ],
+  "measured": [
+    "observe: real compose() at FAB_N0=8/SLOTS=16/RANK=4/DK=8, two real flushes (LM.encode -> SIG.encode -> FAB.forward -> LM.decode -> lm_loss -> backward). use [0.0764,0.7707,0.0004,...] (ROUTING MASS), uage [8,8,3,8,...] (SELECTIONS), comp/ef/es seeded at the first credit and EMA'd after, dom_of {3} then {3,5}; fab.experts_with_use 9, fab.uage_mean 7.111111, fab.mass_per_selection 0.124961, fab.comp_glob 8.33272.",
+    "grow_check REGRESSION: 319 improving windows -> 0 asks; flush_loss=40.0 at window 400 -> 'Gate fab.growth_regression: FIRED (loss-slow=32.774373 vs z=4.0 x dev=2.057350)', 1 asked / 1 grown, n_live 8 -> 9, parent 4, born 400. THE FABRIC GREW.",
+    "grow_check STALL: constant loss 3.0 -> fires at window 300 (== FAB_WARMUP), improving=-0.0, 299 fab.grow_warmup_refused before it; the next check returns 0 with state R and fab.grow_recover_passes 1.",
+    "grow_check CLAMPS: FAB_BURST=5 with CAP_FAB_START=10 at n_live=8 -> 'Gate fab.grow_cap: FIRED (3 of 5 refused by the ceiling vs Caps.headroom(8)=2, pool 2 of 10)', then new_frac takes 1 more: asked 5, grown 1, declined_cap 3, declined_newfrac 1.",
+    "grow_check FROZEN: FAB_GROW=0 -> 0 asks, growth['slow'] stays None and n stays 0, 'Gate fab.growth: UNREACHABLE', build-time 'Gate fab.growth_armed: armed, did not fire (FAB_GROW=False vs FAB_GROW=True)'.",
+    "grow_check BLACKOUT: shift_at=Windows(350) with a regression at 400 -> suppressed, blackout_left 350, fab.growth_blackout_suppressed.regression 1; shift_at=U.Steps(350) raises UnitError('cannot build Windows from Steps').",
+    "grow_check soft_cap=16 (a bare int) raises TypeError naming Caps and C30, on the FIRST call rather than on the first regression.",
+    "grow_check BIRTH OPERATORS: FAB_XOVER=1.0 FAB_MUT_BIG_P=1.0 FAB_PARENT_MAX=0.02 FAB_BIRTH_WIN=8 FAB_BURST=6 -> 6 grown, 6 replicated, 6 crossed, 2 parent_quota_refusals, distinct_parents 6, mutscale 1.5 (= mut*mut_big), |child-parent| 0.45..0.71, centroid norms all 1.0.",
+    "grow_check FAB_REPLICATE=0 -> random_born 1, parent -1, B max |.| exactly 0.0 (a fresh birth is an identity).",
+    "grow_check MEM: FAB_GROW_ON_MEM_PRESSURE=1 on a strongly improving run (improving=0.692418, plateau=0.002) -> 0 asks at pressure False, asked_stall 1 / grown 1 at pressure True.",
+    "own_lr_scale OFF -> None with every fab.lr_* counter seeded at 0; ON at uage [0,1,12,24,47,48,200,5000] -> ratios [2.0,1.9208,1.05,0.1,1.0104,2.1,0.29,0.29], lr_eligible 3, lr_boosted 1, lr_cycle_max 105, lr_envelope_pinned 2; applied_lr=1e-6 -> all 8 clamped at lr_maxr=4.0; applied_lr=0 -> fab.lr_zero_applied 1.",
+    "state_dict/load_state_dict round trip restores growth (slow 7.265627, last 400, state R, 1 birth recorded) and comp_glob.",
+    "mini-driver at compose(environ={}) (the SHIPPED defaults, FAB_N0=2048) reproducing LOOP_ORDER's B row plus the three entry points, 40 windows: loss 8.3247 -> 5.7568 in 3.7s; fab.grow_checks 40, fab.grow_asked_regression 1 / fab.grown_regression 1 at window 2, fab.replicated 1, fab.crossed 1, n_live 2048 -> 2049, fab.observed_windows 40, fab.experts_with_use 197, fab.uage_mean 0.156174, fab.mass_per_selection 0.009152, fab.comp_glob 7.749114, fab.lr_calls 40 with every fab.lr_* at 0 (FAB_LR_OWN=False), and gate:fab.lr_own reading armed-but-zero through FAB.counters."
+  ],
+  "owed": [
+    "THE DRIVER MUST WIRE THESE IN THE SAME CHANGE. spine/loop.py decides RunResult.skipped with _is_stub(fn), which asks whether the body raises NotImplementedError -- not whether the driver calls it. Measured: `python run.py --max-windows 40` now prints '6 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED' instead of 11, and FAB.observe / FAB.grow_check / FAB.own_lr_scale have dropped off that list while spine/loop.py still calls only fab_api.forward (grep 'fab_api.' -> lines 141-143 are the skipped tuple, 306 is the only call). The run's report is now SILENT about the fabric not growing, which is the two-states-printed-as-one collapse in the file written to refuse it.",
+    "grow_check must be handed the Caps RECORD, not Caps.experts. spine/compose.py's CAP.caps row says 'soft_cap -- Caps.experts under FAB.grow_check's spelling' (an int) and four lines later says the budget goes through Caps.headroom(population); both cannot hold, because O10 forbids FAB importing capacity. An int raises TypeError on the FIRST call (by design, and deliberately not on the first regression).",
+    "CAP.observe's `improving` still has no PARAMETER to arrive through. The two EMAs now exist inside FAB and are on the ledger as fab.grow_slow / fab.grow_fast / fab.grow_improving; GrowReport does not carry the reading because docs/04_CONTRACT.md says it carries asks, deliveries and decline reasons and not the reading. Adding the field is the owner's call, and it is what would let CAP.observe stop being deferred alongside `observations`.",
+    "uage is credited ONCE per window per expert, not once per HOP. FabricOut carries no per-hop selection record -- weights is the accumulated, renormalised distribution -- so the computed set is reconstructed as its top-chain_k, which is EXACT at the shipped depth0=1 and a union approximation above it. Closing it needs a per-hop selection count leaving forward (a FabricOut field or a re-earned Population slot), both changes to landed code.",
+    "spawn still ignores FAB_GROW and the soft cap at the moment it fires. grow_check now charges spawn births against the new_frac budget (fab.newfrac_spent_on_spawn), which is the half that can be closed from here; the other half is a soft_cap keyword on FAB.forward, a frozen-signature move.",
+    "FAB.manage and FAB.contribution are still stubs, so nothing culls what grows and nothing spares it: fab.comp_glob, comp, ef/es and contrib now have a writer (or, for contrib, still none) but no reader. Growth without selection is the arm D1 warns about."
+  ],
+  "wrote": [
+    "src/fabric/api.py::observe -- full body (use by routing MASS, uage by SELECTION, comp/ef/es EMAs, dom_of, comp_glob) + 3 added counters declared in the docstring",
+    "src/fabric/api.py::grow_check -- full WATCH/BURST/RECOVER body, both legs on separate cooldown clocks, blackout, both clamps INSIDE, births (replicate/crossover/mutation/fresh), 5 Gates, returns GrowReport",
+    "src/fabric/api.py::own_lr_scale -- triangular2 on the uage (Selections) clock, gamma envelope floored at lr_amin, lr_boost on the past-grace bottom, lr_maxr ratio clamp",
+    "src/fabric/api.py::GrowReport -- new frozen record (asks, deliveries, decline reasons, blackout state, gates)",
+    "src/fabric/api.py::_claim_slot, _loss_float, _headroom, _signature_point, _fitness_pick, _birth_write -- private helpers; _spawn_check now goes through _claim_slot (the docstring's 'one claim_slot()')",
+    "Population.__slots__ += growth, comp_glob (allocated, checkpointed by state_dict, restored by load_state_dict)",
+    "build(): two new build-time Gates, fab.growth_armed and fab.lr_own"
+  ],
+  "suite": "all seven green (ownership contract census assemble couplings derive fabric), rc=0 each, on the working tree AND on a mirror with src/memory/api.py reverted to HEAD",
+  "run_after": "python run.py --max-windows 40 -> '=== 40 windows, 40 flushes, 40 optimizer steps, 0 epoch(s) in 4.2s (9.6 w/s)' and '=== loss 8.3247 -> 5.7564' -- bit-identical to the same command before this change, because spine/loop.py does not call the three entry points. The skipped list went 11 -> 6 and the three FAB rows dropped OFF it anyway, which is the honesty regression recorded first in `owed`."
+}

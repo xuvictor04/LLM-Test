@@ -25,7 +25,9 @@ RECORD TYPES RETURNED (P4 defines them):
   FabricOut      logits or hidden, expert_ids, weights, per_expert_logits, aux_loss, gates
   ContribReport  per-expert contribution, distinct_values, positive, negative, degenerate
   ManageReport   cull_fail, cull_util, spared_*, rescued, deepened, cull_gate arithmetic
-  GrowReport     asked vs grown, per trigger; declined_cap, declined_newfrac, lineage counts
+  GrowReport     asked vs grown, per trigger; declined_cap, declined_newfrac, lineage counts, and
+                 the blackout state (open/closed and the windows left) the root joins into
+                 CAP.observe's `blackout` boolean
 """
 import dataclasses
 import math
@@ -146,12 +148,17 @@ _NONFINITE_MEASURED = {
 }
 """Per-lever, what a nan or an inf was MEASURED to do -- quoted into build()'s refusal for whichever
 levers the operator actually set. Nine entries against 43 float levers, and the gap is the honest
-part: the other 34 are refused on the same rule with no measurement of their own, because 23 of them
-have NO LIVE READER TODAY (FAB.manage, FAB.grow_check and FAB.own_lr_scale are P4 stubs, so the cull
-fraction, the mutation scale, the merge distance and the whole per-expert learning-rate envelope
-freeze a nan into the Config and arm the day a body is written -- one of them, FAB_COMP_EMA, already
-crosses a package boundary as DOM.d_comp_ema before this function runs) and the remaining eleven are
-the magnitude levers whose nan/+inf refusal build() already carried.
+part: the other 34 are refused on the same rule with no measurement of their own. THE SET WITHOUT A
+LIVE READER SHRANK ON 2026-09-17 and this sentence moved with it: FAB.grow_check and
+FAB.own_lr_scale have bodies, so z, plateau, new_frac, parent_max, mut, mut_big, mut_big_p, xover,
+birth_jitter, lr_cycle, lr_gamma, lr_amin, lr_maxr and lr_boost are now read on a real flush and a
+nan in any of them reaches arithmetic rather than freezing into the Config -- WHICH IS WORSE AND NOT
+BETTER, and is exactly why the refusal above enumerates every float lever rather than a list. What
+is still unread is FAB.manage's and FAB.contribution's: the cull fraction, the merge distance and
+the two error tolerances, which freeze a nan into the Config and arm the day a body is written (one
+of them, FAB_COMP_EMA, already crosses a package boundary as DOM.d_comp_ema before this function
+runs, and is read here by FAB.observe as well). The remaining eleven are the magnitude levers whose
+nan/+inf refusal build() already carried.
 
 WHAT THIS DOES NOT SAY, AND MUST NOT BE READ AS SAYING. Refusing nan/+inf/-inf closes FOUR VALUES
 PER LEVER AND LEAVES THE MECHANISM OPEN. A FINITE value does the same damage and worse: measured on
@@ -195,6 +202,55 @@ class FabricOut:
     gates: tuple = ()
 
 
+@dataclasses.dataclass(frozen=True)
+class GrowReport:
+    """What ONE growth check asked for and what the population actually delivered. FROZEN.
+
+    THE ASK AND THE DELIVERY ARE TWO NUMBERS AND BOTH ARE HERE, which is the whole reason this
+    record exists rather than an integer. The old tree applied the soft cap and the new_frac budget
+    at the CALL SITE, after `n_regr` had already been incremented inside step() (:7444-7470), so a
+    regression whose entire burst was declined still printed as a regression that FIRED -- and the
+    diagnostic written to catch exactly that was gated on n_regr being zero, so it stayed silent in
+    the one case where it was needed. `asked_regression` against `grown_regression` is that pair,
+    per leg, and `declined_cap` / `declined_newfrac` say which clamp took the difference.
+
+    `blackout_open` AND `blackout_left` ARE CAP'S HALF OF Q-FAB-6 AND ARE NOT DECORATION. CAP.observe
+    takes a `blackout` BOOLEAN and CAP declares no blackout-window lever of its own; in the old tree
+    the boolean was `(step - fabgrow.blackout) < fabgrow.cool` (:7397), i.e. computed from FAB's
+    `cooldown` at a foreign call site. These two fields are what let the root JOIN a value FAB
+    computed with FAB's own lever instead -- the route ROW_ARGUMENTS_ELSEWHERE["CAP.observe"] names
+    ("one field on GrowReport and one root join"). `blackout_left` is in units.Windows' unit and is
+    an int, because a boolean alone cannot say how long the state still has to run.
+
+    WHAT THIS RECORD DELIBERATELY DOES NOT CARRY, and the absence is a contract statement rather
+    than an omission: the READING. docs/04_CONTRACT.md's ROW_ARGUMENTS_ELSEWHERE["CAP.observe"] says
+    "GrowReport carries asks, deliveries and decline reasons, not the reading", and CAP.observe's
+    `improving` -- (slow - fast)/|slow| off the two EMAs this package now maintains inside
+    fabric/api.py::grow_check -- is therefore still without a producer. Adding a field for it here
+    would close that gap and would also contradict the sentence the deferral of CAP.observe rests
+    on, so it is NOT taken silently: the EMAs are on the counter ledger (fab.grow_slow, fab.grow_fast,
+    fab.grow_improving) where a report can read them, and the field is the owner's call.
+
+    NO COUNTER COPY, for FabricOut's reason: the DID IT FIRE ledger lives on Population.counters and
+    a second copy on a per-pass record is a second source of truth the report would have to choose
+    between. `gates` is per-call because a gate's ARITHMETIC is about the call that evaluated it.
+    """
+    asked_regression: int = 0
+    asked_stall: int = 0
+    grown_regression: int = 0
+    grown_stall: int = 0
+    declined_cap: int = 0
+    declined_newfrac: int = 0
+    replicated: int = 0
+    crossed: int = 0
+    random_born: int = 0
+    parent_quota_refusals: int = 0
+    distinct_parents: int = 0
+    blackout_open: bool = False
+    blackout_left: int = 0
+    gates: tuple = ()
+
+
 class Population:
     """The preallocated pool and the books. GROWTH NEVER REALLOCATES; only n_live moves.
 
@@ -222,8 +278,19 @@ class Population:
     # the emb_every cache the old tree carried as _kc/_kstep/_kn (self_organize.py:1938-1953);
     # halt_ema is its _mass_ema; `learn_window` is the window index of the last gradient-carrying
     # training pass, which fabric/api.py::forward compares against to refuse a second one.
+    # `growth` AND `comp_glob` WERE ADDED 2026-09-17 WITH THE BODIES THAT READ THEM, and they are
+    # NOT re-earned: both are checkpointed by fabric/api.py::state_dict beside the books. The module
+    # docstring's RECORD TYPES block has listed "the growth machine" among this record's fields for
+    # the whole life of the rebuild and nothing allocated it -- the same shape as `dom_of` being an
+    # int per expert while the docstring specified `dom_of[e].add(...)`, and invisible for the same
+    # reason: its only reader was a stub. There is no writing around it at a point of use, because
+    # __slots__ is closed and `pop.growth = {...}` from outside this class is an AttributeError.
+    # comp_glob is the population competence EMA fabric/api.py::observe's docstring requires ("comp
+    # per expert and the population EMA comp_glob, both at rate comp_ema") and fabric/api.py::manage's
+    # comp_protect spare compares against; the old tree kept it on the assembler (:6932).
     __slots__ = ("A", "B", "cent", "n_live", "cap", "depth_now", "born", "use", "uage", "dom_of",
                  "ef", "es", "comp", "contrib", "births", "rescued", "parent", "mutscale",
+                 "growth", "comp_glob",
                  "modules", "counters", "rng", "on", "hop_arm", "gates", "halt_b",
                  "ident", "ident_live", "ident_step", "ident_graph", "halt_ema", "marks",
                  "learn_window")
@@ -265,6 +332,28 @@ class Population:
         self.rescued = 0
         self.parent = [-1] * cap
         self.mutscale = [1.0] * cap
+        # THE GROWTH MACHINE: WATCH -> BURST -> RECOVER, and the two clocks that keep the common
+        # event from silencing the rare one. `last` is the spacing clock BOTH legs set; `last_regr`
+        # is the REGRESSION's OWN, and it exists because sharing one let a routine stall 772 windows
+        # earlier suppress an injected regression (self_organize.py:2921-2926) -- the event goal B
+        # depends on, refused by the event that happens all the time. `births` is the sliding record
+        # (window, parent) that BOTH birth budgets are measured on: new_frac over the last `cooldown`
+        # windows, parent_max over the last `birth_win` births. `spawned_seen` is the fab.spawned
+        # count as of the previous check, which is how fabric/api.py::grow_check charges a
+        # spawn-by-specification birth against the newborn budget it did not go through.
+        # A PLAIN DICT AND NOT A CLASS, deliberately: every value is a float, an int, a string, None
+        # or a list of pairs, so state_dict can write it and load_state_dict can read it back
+        # without a second record type that torch.save would pickle by reference to this module.
+        self.growth = {
+            "fast": None, "slow": None, "dev": 0.0, "n": 0,
+            "state": "W", "t0": None, "last": None, "last_regr": None,
+            "births": [], "spawned_seen": 0,
+        }
+        # None AND NOT 0.0: competence here is a LOSS (lower is better, self_organize.py:3694 spares
+        # on `comp[d] < comp_glob`), so a population EMA seeded at zero would read as a population
+        # that models everything perfectly and no expert could ever beat it. None means "no window
+        # has been attributed yet", which is a different statement and is the one that is true.
+        self.comp_glob = None
         # THE LEARNED HALT PRIOR, ALLOCATED HERE RATHER THAN IN `modules` BECAUSE nn.ModuleDict
         # CANNOT HOLD A BARE PARAMETER. Shape and initialisation are the frozen old tree's, not a
         # guess: `s.halt_b = nn.Parameter(torch.zeros(1))` at :1733, "prior on halting, learned;
@@ -454,7 +543,7 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     population already 15 of 23 gradient tensors poisoned. A declared per-lever domain is the general
     answer and is the owner's open question.
 
-    LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, hop_mode,
+    LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, lr_own, hop_mode,
                  depth0, hops, balance, ponder, emb_var, ec_w, explore, div_w, hop_sup,
                  ind_w, ae_w, dom_frac,
                  alpha, bal_floor, birth_jitter, cent_ema, comp_ema, cull_frac, depth_eps, discover,
@@ -616,9 +705,11 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
             f"declares no float lever for which any of the three is a reading -- every declared "
             f"sentinel in fabric/levers.py::FABLevers is a ZERO. WHAT EACH ONE WAS MEASURED TO DO: "
             + " || ".join(f"{k}={v}: " + _NONFINITE_MEASURED.get(
-                k, "no live reader today -- FAB.manage, FAB.grow_check and FAB.own_lr_scale are P4 "
-                   "stubs, so this value freezes into the Config and arms the day a body is "
-                   "written, in the cull, the mutation scale or the per-expert learning rate")
+                k, "no measurement of its own on this table: either it is read on a live path "
+                   "whose nan was never driven (FAB.observe, FAB.grow_check and FAB.own_lr_scale "
+                   "have bodies as of 2026-09-17, so their levers reach arithmetic), or its only "
+                   "readers are FAB.manage and FAB.contribution, which are still P4 stubs -- there "
+                   "the value freezes into the Config and arms the day a body is written")
                 for k, v in _nonfinite)
             + ". REFUSED AT STARTUP AND NOT DESCRIBED BY A GATE, because a Gate reason is a report "
               "and the mechanism still runs: at FAB_ALPHA=nan the fab.halt gate prints the verdict "
@@ -1048,6 +1139,30 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
              reason="FAB_ON=0: there is no population to cull. The occupancy arithmetic still "
                     "evaluates, and printing it as FIRED would claim a mechanism ran that the "
                     "switch above had already turned off."),
+        # THE TWO ARMS THAT ARE DECIDED HERE AND SPENT SOMEWHERE ELSE. Both belong at build for the
+        # reason the three control-arm counters above do: the answer is a frozen lever, it is
+        # settled before any window runs, and the entry point that acts on it may never be CALLED --
+        # spine/loop.py names FAB.grow_check and FAB.own_lr_scale in RunResult.skipped today, so a
+        # gate that only existed inside them would leave "growth is switched off" and "growth was
+        # never invoked" printing the same nothing, which is the collapse spine/gate.py exists for.
+        # NEITHER IS A SECOND EVALUATION OF ANYTHING: grow_check and own_lr_scale read the same
+        # lever, and what they add is the per-call arithmetic (the MAD trigger, the envelope), which
+        # is about the call and rides their own return.
+        Gate("fab.growth_armed", grow, value=f"FAB_GROW={grow}", threshold="FAB_GROW=True",
+             reason="" if grow else
+                    f"FAB_GROW={grow}: the population is FROZEN at FAB_N0={n0}. Both growth legs "
+                    f"are off -- no regression burst and no stall birth -- while culling, routing "
+                    f"and selection all still run, which is what makes this the arm that isolates "
+                    f"growth from everything else the fabric does. It does not freeze "
+                    f"spawn-by-specification, which is FAB_SPAWN and a different door."),
+        Gate("fab.lr_own", bool(fab.lr_own), value=f"FAB_LR_OWN={bool(fab.lr_own)}",
+             threshold="FAB_LR_OWN=True",
+             reason="" if bool(fab.lr_own) else
+                    f"FAB_LR_OWN={bool(fab.lr_own)}: every expert trains at the global rate. The "
+                    f"per-expert triangular2 envelope, its lr_boost for the cull-eligible bottom "
+                    f"and the lr_maxr ratio clamp are all inert, and FAB.own_lr_scale returns None "
+                    f"rather than a table of ones -- a table of ones is a schedule that ran and "
+                    f"chose 1.0, which is a different statement."),
     )
     # THE WIRE IS READ AND COMPARED, not merely touched: d_operating_population is the same
     # derive.operating_population call the counter above makes, computed by the assembly from the
@@ -1455,8 +1570,10 @@ def _breadth_ban(pop, n, domain_id, live_domains, dom_frac, dom_min):
     affiliated = sum(1 for e in range(n) if pop.dom_of[e])
     if affiliated == 0:
         return None, limit, ("no expert holds an affiliation yet: FAB.observe is the only writer of "
-                             "dom_of and it is a stub, so the cap has nothing to measure breadth "
-                             "against.")
+                             "dom_of, so until it has been called on a routed flush the cap has "
+                             "nothing to measure breadth against. Its body landed 2026-09-17; "
+                             "whether it is CALLED is spine/loop.py's answer and RunResult.skipped "
+                             "is where a reader finds it.")
     over = [e for e in range(n)
             if len(pop.dom_of[e]) >= limit and int(domain_id) not in pop.dom_of[e]]
     if not over:
@@ -1496,6 +1613,44 @@ def _explore_swap(pop, idx, val, weights, n, k, explore):
         val[r, -1] = weights[r, pick]
         targets.append(pick)
     return idx, val, len(rows), tuple(targets)
+
+
+def _claim_slot(pop, slot, step_n, *, parent=-1, mutscale=1.0):
+    """Take slot `slot` into the live population and CLEAR EVERY BOOK. The one birth door.
+
+    ONE FUNCTION FOR BOTH BIRTH PATHS, which is what fabric/api.py::grow_check's docstring requires
+    in as many words: "Both birth paths call one claim_slot() that clears EVERY book". The old tree
+    had two and they disagreed -- grow() cleared use/comp/contrib and NOT ef/es, so a newborn
+    inherited a dead expert's error history and could be culled by the failure route for something
+    it never did (L30). Two clearing sites is two chances to forget a book, and the books grow.
+
+    `use` IS CLEARED TO 0.0 AND NOT TO 0, and the type is the statement. Since the use/uage split
+    (fabric/api.py::observe) `use` is ROUTING MASS -- a float -- and `uage` is the integer SELECTION
+    count; a slot handed back an int 0 reads identically today and is the first place a future
+    reader would conclude they are the same kind of number again.
+
+    IT DOES NOT DRAW AND IT DOES NOT WRITE A AND B. The caller has already decided what the new
+    expert IS -- a decoded query for spawn, a mutated parent or a fresh identity for growth -- and
+    doing it here would put two unrelated mechanisms behind one name.
+    """
+    pop.born[slot] = int(step_n)
+    pop.use[slot] = 0.0
+    pop.uage[slot] = 0
+    pop.ef[slot] = 0.0
+    pop.es[slot] = 0.0
+    pop.comp[slot] = 0.0
+    pop.contrib[slot] = 0.0
+    pop.dom_of[slot] = set()
+    pop.parent[slot] = int(parent)
+    pop.mutscale[slot] = float(mutscale)
+    pop.n_live = slot + 1
+    pop.births += 1
+    # THE IDENTITY CACHE IS NOW STALE IN BOTH SENSES -- it is the wrong length, and the tensor it was
+    # embedded from has a new version. Dropped rather than patched: a cache that survives a write to
+    # its own source is the "backward through the graph a second time" failure with extra steps.
+    pop.ident = pop.ident_graph = pop.ident_step = None
+    pop.ident_live = -1
+    return slot
 
 
 def _spawn_check(pop, query, spawn_mult, spawn_floor, step_n):
@@ -1579,23 +1734,12 @@ def _spawn_check(pop, query, spawn_mult, spawn_floor, step_n):
         d_model, rank = int(pop.A.shape[1]), int(pop.A.shape[2])
         pop.A[slot] = decoded[:d_model * rank].reshape(d_model, rank)
         pop.B[slot] = decoded[d_model * rank:].reshape(rank, d_model)
-    pop.born[slot] = int(step_n)
-    pop.use[slot] = 0
-    pop.uage[slot] = 0
-    pop.ef[slot] = 0.0
-    pop.es[slot] = 0.0
-    pop.comp[slot] = 0.0
-    pop.contrib[slot] = 0.0
-    pop.dom_of[slot] = set()
-    pop.parent[slot] = -1
-    pop.mutscale[slot] = 1.0
-    pop.n_live = slot + 1
-    pop.births += 1
-    # THE IDENTITY CACHE IS NOW STALE IN BOTH SENSES -- it is the wrong length, and the tensor it was
-    # embedded from has a new version. Dropped rather than patched: a cache that survives a write to
-    # its own source is the "backward through the graph a second time" failure with extra steps.
-    pop.ident = pop.ident_graph = pop.ident_step = None
-    pop.ident_live = -1
+    # THE BOOKS ARE CLEARED THROUGH THE ONE DOOR, not inline here: fabric/api.py::_claim_slot is the
+    # single clearing site both birth paths go through, and the L30 defect it records is exactly
+    # what two of them produced. `parent=-1` because a spawn has no parent -- it is decoded from the
+    # router's query, not inherited -- and that -1 is what keeps fab.distinct_parents a reading
+    # about REPLICATION rather than about every birth.
+    _claim_slot(pop, slot, step_n, parent=-1, mutscale=1.0)
     return slot, gap, typ
 
 
@@ -1894,11 +2038,14 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # preallocation ceiling. It is NOT bound by CAP's operating soft cap, because `soft_cap` arrives
     # at fabric/api.py::grow_check and at no other entry point -- so the sentence in grow_check's
     # docstring, "spawn births are counted here too so BOTH DOORS ARE BOUND BY THE SAME CAP", is
-    # today only half true: the count is available to grow_check through fab.spawned, and the
-    # BINDING is not. Named here rather than fixed by reading a foreign number: the fix is either a
-    # `soft_cap` keyword on this entry point (a frozen-signature move) or a rule that grow_check
-    # subtracts spawn births from its own budget, and choosing between those is not this body's
-    # decision to take silently. fab.spawned is what makes the gap countable meanwhile.
+    # half true, and WHICH HALF MOVED ON 2026-09-17. The fork named here was "a `soft_cap` keyword
+    # on this entry point (a frozen-signature move) or a rule that grow_check subtracts spawn births
+    # from its own budget", and the SECOND was taken: grow_check reads fab.spawned, charges every
+    # birth this door produced against the new_frac budget and counts it as
+    # fab.newfrac_spent_on_spawn, so the two doors now share one newborn budget. What is still not
+    # bound is the moment of the birth itself -- this door neither consults the soft cap nor reads
+    # FAB_GROW, so a frozen population still drifts upward by spawn alone (the :7332-7335 defect),
+    # and closing that is the first option, which is still a frozen-signature move.
     spawned = None
     # THE REACHABILITY IS DECIDED BEFORE THE TEST RUNS, not after it. Asking "is the pool full"
     # afterwards reads the state the spawn ITSELF produced -- a birth that takes the population to
@@ -2269,11 +2416,13 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                              f"test -- -0.0 is not less than 0.0 -- and `balance_w > 0.0`, the "
                              f"verdict above, is False for it exactly as it is for +0.0, which is "
                              f"why the equation opening this sentence may print a minus sign."))
-    # THE DEFICIT BONUS IS ARMED ON A TABLE NOTHING WRITES YET, and that is a third state. `use` is
-    # credited by fabric/api.py::observe and by nothing else, so until that entry point has a body
-    # every expert's utilization is 0, the fair share is 0, and there is no deficit to score -- which
-    # is not the same statement as "ec_w is off" and not the same as "every expert was already at
-    # its share".
+    # THE DEFICIT BONUS IS ARMED ON A TABLE ONE ENTRY POINT WRITES, and that is a third state. `use`
+    # is credited by fabric/api.py::observe and by nothing else, so on a run where that entry point
+    # is never CALLED every expert's utilization is 0, the fair share is 0, and there is no deficit
+    # to score -- which is not the same statement as "ec_w is off" and not the same as "every expert
+    # was already at its share". The stub is gone (2026-09-17) and the third state is not: a body
+    # that exists and a body that runs are different facts, and spine/loop.py's RunResult.skipped is
+    # the only place the second one is answered.
     _use_total = float(sum(pop.use[:n]))
     gates.append(Gate("fab.expert_choice", ec_any, value=f"ec_w={ec_w}",
                       threshold=f"sum(use)={_use_total}",
@@ -2283,7 +2432,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                               if ec_w <= 0.0 else
                               "n_live is 1: one expert has no share to be under." if n <= 1 else
                               "every `use` is 0: FAB.observe is the only writer of the utilization "
-                              "table and it is a stub, so the deficit is identically zero.")))
+                              "table, so until it has been called on a routed flush every share is "
+                              "zero and the deficit with it. The body landed 2026-09-17; whether "
+                              "the driver CALLS it is a different question and RunResult.skipped "
+                              "is where that one is answered.")))
     # THE SWAP NEEDS TWO COMPUTED SLOTS AND THE GATE HAD NOT SAID SO. fabric/api.py::_explore_swap
     # refuses at `k >= 2` because the swap gives away the LOWEST-RANKED of the computed experts, and
     # k here is max(1, min(chain_k, n)) -- so at FAB_CHAIN_K=1 there is no lowest-ranked slot to
@@ -2470,7 +2622,25 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
     would make one operator edit to chain_k silently move the cull's eligibility threshold through a
     default, where `grep -rn d_` cannot see it.
 
-    LEVERS READ: comp_ema, err_fast, err_slow
+    LEVERS READ: comp_ema, err_fast, err_slow, chain_k, grace
+    TWO OF THOSE FIVE WERE ADDED WITH THE BODY, 2026-09-17, AND NEITHER IS A CONVENIENCE -- the line
+    read three until then and its own DID IT FIRE block below could not be satisfied by three:
+      `grace` because fab.experts_past_grace_ever IS a comparison against it. The counter is
+        declared four lines down, it is CUMULATIVE by that declaration, and there is no way to
+        decide whether an expert has ever crossed the line without reading where the line is.
+      `chain_k` because "the COMPUTED experts" is what this function credits, and FabricOut does not
+        carry them. FabricOut.weights is the routing distribution ACCUMULATED over the hops and
+        RENORMALISED (fabric/api.py::forward), so the per-hop top-`chain_k` sets are not on the
+        record; the top-`chain_k` of the accumulated weights is the same set EXACTLY at one hop and
+        the union approximation above it. AT THE SHIPPED DEFAULTS THE RECONSTRUCTION IS EXACT --
+        depth0=1 means one hop, so `weights` IS that hop's distribution -- which is also the arm the
+        Q-FAB-5 arithmetic below is computed on (chain_k=8 credits per window, 8x and not 32x).
+        ABOVE ONE HOP IT UNDER-CREDITS: an expert selected on three hops takes one uage tick here
+        and three by the specification, so the clock ticks up to `hops` times slower than the
+        paragraph above says and fab.mass_per_selection reads correspondingly high. WHAT WOULD CLOSE
+        IT is a per-hop selection count leaving `forward` -- a field on FabricOut, or a re-earned
+        Population slot forward writes -- and both are changes to a record and a body that are
+        already landed, so it is recorded rather than taken here.
     WIRES READ: none
     DID IT FIRE: fab.observed_windows, fab.experts_with_use (DISTINCT experts ever credited -- the
                  number that reads 43 of 4096 when attribution samples one row in sixteen),
@@ -2484,11 +2654,160 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
                  is worth. THIS IS THE NUMBER THE P9 RETUNE OF `grace` MUST BE SET FROM. It depends
                  on the router and so cannot be computed at build time, which is exactly why grace
                  stays a literal and the retune is a measurement rather than an argument)
+    THREE MORE KEYS THE BODY WRITES, DECLARED HERE BECAUSE A KEY IN THE REPORT THAT THE CONTRACT
+    DOES NOT ADMIT TO PRODUCING IS THE SAME DEFECT AS A DECLARED KEY NOTHING WRITES (the count in
+    fabric/api.py::forward's own DID IT FIRE block was taken in both directions for this reason):
+      fab.uage_mean -- sum(uage)/n_live, the CUMULATIVE reading the example line above quotes
+        ("mean uage 2.0 over 506 windows at n_live=2048"). It is a different number from
+        fab.uage_per_expert_per_pass, which is this pass's RATE (credits issued / n_live), and one
+        key cannot carry both: the rate says how fast the clock runs and the mean says where it has
+        got to, and the unreachability sentence needs them both.
+      fab.observe_unrouted -- passes where FabricOut.weights is None, which is exactly the two arms
+        `forward` returns early from (FAB_ON=0 and FAB_NORM_ONLY=1). Without it "0 experts credited"
+        cannot be told from "no expert was computed", which is this driver's own skipped-mechanism
+        distinction arriving one entry point in.
+      fab.comp_glob -- the population competence EMA itself, so the comp_protect spare's threshold
+        is on the ledger beside the per-expert numbers it will be compared against.
     """
     fab = fab.owned_by("FAB")
-    raise NotImplementedError(
-        "FAB.observe: P4 (fabric) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section FAB.")
+    counters = pop.counters
+    n = int(pop.n_live)
+    # SEEDED BEFORE THE EARLY RETURN, so a run on FAB_ON=0 -- where every call takes that return --
+    # reports this family as ZERO rather than as ABSENT. The distinction is the one _bump's
+    # docstring records SIG paying for, and here the two are especially easy to confuse because
+    # "nothing was credited" is the true answer on that arm and a missing key looks like it.
+    for _k in ("fab.observed_windows", "fab.observe_unrouted", "fab.experts_with_use",
+               "fab.experts_past_grace_ever"):
+        counters.setdefault(_k, 0)
+    # THE TWO OFF ARMS DO NOT PRODUCE AN ATTRIBUTION AND THIS IS NOT A FAILURE. FabricOut.weights is
+    # None on exactly the paths fabric/api.py::forward returns early from -- FAB_ON=0, where the
+    # forward is the identity, and FAB_NORM_ONLY=1, where the control arm keeps the normalization
+    # and removes the nodes. Crediting anything here would attribute a window to a population that
+    # never saw it, and returning silently would make "no expert was computed" indistinguishable
+    # from "every expert scored zero". The counter is the difference.
+    w = out.weights
+    if w is None or n <= 0:
+        _bump(counters, "fab.observe_unrouted")
+        return None
+
+    comp_ema = float(fab.comp_ema)
+    r_fast, r_slow = float(fab.err_fast), float(fab.err_slow)
+    grace, chain_k = int(fab.grace), int(fab.chain_k)
+
+    losses = per_window_loss.detach().reshape(-1)
+    rows = int(w.shape[0])
+    if int(w.shape[1]) < n:
+        # THE ROUTING TABLE IS NARROWER THAN THE POPULATION, which means this FabricOut was produced
+        # before the population last grew. Refused rather than credited over the prefix: the columns
+        # would still line up, so the attribution would look complete while every expert born since
+        # that pass silently took none of it -- and those are exactly the experts a growth burst
+        # just created because the material changed, which is the one cohort goal B is about.
+        raise ValueError(
+            f"FAB.observe: FabricOut.weights is {int(w.shape[1])} wide and n_live is {n}. The "
+            f"record is from a pass taken before the population grew, so it cannot attribute this "
+            f"flush. `forward` spawns before it routes, so a live record is never narrower than "
+            f"the population it routed over.")
+    if int(losses.numel()) != rows:
+        # REFUSED, NOT TRUNCATED TO THE SHORTER OF THE TWO. `per_window_loss` is LM.lm_loss's
+        # reduction='none' vector and `out.weights` is this flush's routing table; they are two
+        # views of ONE batch, so a disagreement is a cut defect upstream and not a short read. A
+        # min() here would credit the first k windows' experts with the first k windows' losses and
+        # report a full attribution, which is the "row 0 only" family (H13) sized differently.
+        raise ValueError(
+            f"FAB.observe: per_window_loss has {int(losses.numel())} row(s) and FabricOut.weights "
+            f"has {rows}. These are the same flush's batch measured twice -- LM.lm_loss's "
+            f"per-window vector against FAB.forward's routing distribution -- so they cannot "
+            f"disagree about how many windows there were. Attributing the overlap would report a "
+            f"complete attribution over part of the batch.")
+
+    # THE COMPUTED SET, AND WHY IT IS RECONSTRUCTED RATHER THAN READ. See the LEVERS READ note
+    # above: the per-hop selections do not leave `forward`, `weights` is their renormalised sum, and
+    # this top-k is the same set exactly at the shipped depth0=1 and their union above it.
+    k = max(1, min(chain_k, n))
+    top = w[:, :n].detach().topk(k, dim=-1)
+    # THREE HOST SYNCS FOR THE WHOLE PASS, NOT ONE PER EXPERT. At n0=2048 with chain_k=8 the loop
+    # below touches 8 books per window; reading each `w[b, e]` off the device inside it would be
+    # batch_w * k separate syncs on a GPU run, which is the shape of a mechanism that is correct and
+    # unaffordable, and this package's whole cost argument (chain_k decouples population size from
+    # per-step cost) would be spent on the instrument rather than on the experts.
+    idx_l, mass_l, loss_l = top.indices.tolist(), top.values.tolist(), losses.tolist()
+
+    # comp_glob IS THE FLUSH MEAN, WHICH IS WHAT THE SPARE COMPARES AGAINST. self_organize.py:6932
+    # is `_cg = float(loss)` -- the composed per-flush loss -- and the per-expert EMA below is over
+    # the per-WINDOW losses, so "this expert beats the population on its own material" is a
+    # comparison between an expert's windows and all windows. Seeding on the first pass rather than
+    # decaying from a zero, for the reason Population.__init__ gives for the None.
+    glob = sum(loss_l) / max(1, len(loss_l))
+    pop.comp_glob = glob if pop.comp_glob is None else \
+        (1.0 - comp_ema) * float(pop.comp_glob) + comp_ema * glob
+
+    # DISTINCT RECIPIENTS LIVE IN `marks` AND NOT IN A COUNTER, which is what that field is for: a
+    # cumulative count of credits cannot answer "how many DIFFERENT experts were ever credited",
+    # and 43 of 4096 is the reading the old attribution produced by sampling one row in sixteen.
+    used = pop.marks.setdefault("used", set())
+    past = pop.marks.setdefault("past_grace", set())
+    credits = 0
+    for r in range(rows):
+        v = float(loss_l[r])
+        for e, m in zip(idx_l[r], mass_l[r]):
+            e = int(e)
+            # TWO DIFFERENT QUESTIONS, TWO DIFFERENT NUMBERS. `use` takes the ROUTING MASS (how much
+            # of this window the router actually spent on this expert) and `uage` takes ONE
+            # SELECTION. The old tree's bump_use incremented both by 1 for the argmax only
+            # (:2044-2051), so the cull's ranking key and its eligibility test were the same number
+            # (H12) and every non-argmax expert sat at use-age 0 for ever (H13).
+            pop.use[e] = float(pop.use[e]) + float(m)
+            pop.uage[e] = int(pop.uage[e]) + 1
+            credits += 1
+            if pop.uage[e] == 1:
+                # SEEDED ON THE FIRST CREDIT, AND THE TEST IS THE USE-CLOCK RATHER THAN `== 0.0`.
+                # _claim_slot clears comp/ef/es to 0.0, so "never attributed" and "attributed, and
+                # the loss was zero" are the same float; the selection count distinguishes them and
+                # is incremented one line above. An EMA decayed from a zero would credit every
+                # newborn with a perfect competence it never earned and, worse, would give it a
+                # fast/slow error PAIR that agrees -- which is the failure cull's "not adapting"
+                # reading, on an expert that has seen one window.
+                pop.comp[e] = pop.ef[e] = pop.es[e] = v
+            else:
+                pop.comp[e] = (1.0 - comp_ema) * float(pop.comp[e]) + comp_ema * v
+                # THE PAIR WHOSE DIFFERENCE IS THE WHOLE POINT: fast >> slow is a shift IN PROGRESS
+                # and that expert is adapting, not failing, which is the goal-B protection
+                # fabric/api.py::manage's shift_tol spare reads. Both are credited over the same
+                # COMPUTED set, so the difference is about the expert and not about which of the
+                # two happened to be updated on this window.
+                pop.ef[e] = (1.0 - r_fast) * float(pop.ef[e]) + r_fast * v
+                pop.es[e] = (1.0 - r_slow) * float(pop.es[e]) + r_slow * v
+            # THE AFFILIATION MAP, WRITTEN EXACTLY AS THE SPECIFICATION SPELLS IT. `dom_of[e]` is a
+            # SET and the breadth cap in `forward` bans an expert once len(dom_of[e]) passes
+            # dom_frac x live_domains; it was one int per expert until 2026-09-04, on which this
+            # line is an AttributeError -- the field the frozen docstring specified the write
+            # against could not have held it.
+            pop.dom_of[e].add(int(domain_id))
+            used.add(e)
+            if pop.uage[e] >= grace:
+                past.add(e)
+
+    _bump(counters, "fab.observed_windows", rows)
+    counters["fab.experts_with_use"] = len(used)
+    # CUMULATIVE, NOT THE SNAPSHOT. ISSUES P1-M58 is the record of what a snapshot costs here:
+    # fabric.cull_eligible read ARMED AND INERT off a set recomputed each pass, so a run in which
+    # experts crossed grace and were then culled reported that none ever had.
+    counters["fab.experts_past_grace_ever"] = len(past)
+    counters["fab.uage_per_expert_per_pass"] = round(credits / max(1, n), 6)
+    _sum_uage = int(sum(pop.uage[:n]))
+    counters["fab.uage_mean"] = round(_sum_uage / max(1, n), 6)
+    # THE NUMBER THE P9 RETUNE OF `grace` MUST BE SET FROM: how many argmax-equivalents of routing
+    # mass one post-split uage tick is worth. It cannot be computed at build time because it depends
+    # on how sharply the router concentrates, which is why `grace` stays a literal 48 and the retune
+    # is a measurement. `_sum_uage` is at least `credits` here, so the denominator guard below can
+    # only be reached on a population whose books were restored empty.
+    counters["fab.mass_per_selection"] = round(float(sum(pop.use[:n])) / max(1, _sum_uage), 6)
+    counters["fab.comp_glob"] = round(float(pop.comp_glob), 6)
+    # NOTHING IS RETURNED, AND THE ABSENCE IS DELIBERATE. compose.py's LOOP_ORDER row for this entry
+    # point is a four-element row with no `produces` column: the books ARE the product, they live on
+    # the Population every later reader already holds, and a record here would be a second copy of
+    # numbers whose single source of truth is the point of this design.
+    return None
 
 
 def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, baseline_loss,
@@ -2647,6 +2966,191 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         "docs/04_CONTRACT.md, section FAB.")
 
 
+# ==================================================================================================
+# PRIVATE HELPERS FOR GROWTH.
+#
+# Same three rules as the forward pass's block above and for the same reasons: underscore-prefixed
+# so they do not join the frozen entry-point surface, NO Config in any signature (O9 -- one owner
+# assertion per entry point, not one per helper), and NO clock lever read off a Config here. Every
+# window count arrives as a bare int the caller has already put through units.Windows, so the
+# arithmetic below is same-kind (windows against windows) and is not the cross-kind conversion
+# spine/units.py::Clock.convert requires a named function in spine.derive for.
+# ==================================================================================================
+
+_FAST_EMA, _SLOW_EMA, _MAD_EMA = 0.02, 0.002, 0.01
+"""The growth controller's three EMA rates: fast, slow, and the running mean absolute deviation.
+
+PORTED VERBATIM AND DELIBERATELY NOT LEVERS. self_organize.py:2997-2999 is
+`s.fast = 0.98*s.fast + 0.02*loss`, `s.slow = 0.998*s.slow + 0.002*loss` and
+`s.dev = 0.99*s.dev + 0.01*d`; the three constants are hardcoded there and the census minted no row
+for any of them. Three reasons they stay constants rather than becoming FABLevers rows 83, 84 and
+85, in the order they bind:
+  1. `z` AND `plateau` ARE EXPRESSED IN THESE UNITS. z is "how many robust deviations above the
+     slow EMA" and plateau is "relative improvement OF THE SLOW EMA", so moving a rate silently
+     reprograms both triggers without either lever's value changing -- the L1 defect (a lever whose
+     default is computed from another lever) arriving through a rate instead of through a default.
+  2. A lever with no census row is what tests/test_census.py exists to refuse, and three new rows
+     would each need the departure entry and the measurement that this round has not taken.
+  3. THE RATIO IS THE MECHANISM, not the values: fast/slow at 10x apart is what makes
+     (slow - fast)/|slow| a plateau reading at all, and a pair of independent levers admits the
+     configuration fast == slow, where `improving` is identically zero and the stall trigger fires
+     on every check after warmup.
+WHAT THIS IS NOT: a claim that 0.02/0.002/0.01 are right. They have never been swept in this
+project, and a sweep is the thing that would justify a lever."""
+
+
+def _loss_float(x, where):
+    """One flush's loss as a plain float, whether it arrived pooled or per-window.
+
+    EXPLICIT DISPATCH ON THE TYPE, NEVER `getattr(x, "mean", None)`. compose.py's LOOP_ORDER row
+    says flush_loss is "per_window -- the same return pooled over the flush", and a caller that
+    hands the unpooled vector is handing the same quantity one reduction earlier; both are real and
+    both are accepted, but WHICH arrived is decided by asking the type, not by probing for a method
+    that a float does not have and a tensor does.
+    """
+    if x is None:
+        raise ValueError(
+            f"{where}: flush_loss is None. The growth triggers ARE a reading of the loss -- a "
+            f"regression is `loss - slow > z * dev` and a stall is a relative improvement of the "
+            f"slow EMA -- so there is no answer to give without one, and returning 'did not grow' "
+            f"would report a trigger that was never evaluated as one that was and declined.")
+    if isinstance(x, torch.Tensor):
+        return float(x.detach().float().mean())
+    return float(x)
+
+
+def _headroom(soft_cap, n, where):
+    """How many more experts CAP's operating ceiling admits, THROUGH Caps.headroom and never by
+    subtracting.
+
+    THE SUBTRACTION IS THE C30 FREEZE AND IT MAY NOT BE WRITTEN HERE. `min(n_born, cap - fab.n())`
+    (:7446) is negative the moment the population exceeds the soft cap, which at the shipped
+    FAB_N0=2048 against a valve starting below it is the state on step 0 (Q-CAP-2), and a negative
+    clamp freezes growth FOR THE WHOLE RUN with nothing in the log saying so -- the trigger counts
+    still increment and the pin counter reads exactly as it would on a population legitimately at
+    its cap. capacity/api.py::Caps.headroom exists so that expression cannot be written at a call
+    site, and this function's whole body is the call. THE max(0, ...) IS NOT REPEATED HERE: the
+    record guarantees it, and a second implementation of a one-line method is two answers to one
+    quantity, which is what the wire discipline exists to stop.
+
+    A BARE INT IS REFUSED, LOUDLY, AND THAT IS A REAL DISAGREEMENT IN THE CONTRACT rather than
+    defensive typing. spine/compose.py's CAP.caps row says the produced value is "soft_cap --
+    Caps.experts under FAB.grow_check's spelling" (an int) and says, four lines below, "THE LOOP
+    TAKES ITS BIRTH BUDGET THROUGH Caps.headroom(population) AND NEVER BY SUBTRACTING". Both cannot
+    be true at this call site: FAB may not import capacity (O10), so the only way to reach the
+    method is for the RECORD to arrive. Refusing an int is what makes the choice visible on the day
+    the root wires it, instead of leaving FAB to re-derive the subtraction the method was created to
+    delete.
+    """
+    room = getattr(soft_cap, "headroom", None)
+    if not callable(room):
+        raise TypeError(
+            f"{where}: soft_cap arrived as {type(soft_cap).__name__} and this entry point needs "
+            f"the capacity/api.py::Caps RECORD, because the birth budget is Caps.headroom(n) and "
+            f"nothing else. Pass `soft_cap=caps` (the whole record CAP.caps returns), not "
+            f"`caps.experts`: differencing the integer here would re-create `min(n_born, cap - "
+            f"fab.n())`, which is ISSUES P3-C30 -- negative the moment the population sits above "
+            f"the soft cap, which at FAB_N0=2048 it already does (Q-CAP-2), and silent for the "
+            f"whole run. FAB cannot import capacity (O10), so the method has to arrive on the "
+            f"object.")
+    return int(room(int(n)))
+
+
+def _signature_point(signature, like, where):
+    """The flush's signature as ONE unit vector in the space the centroids live in, ON THEIR DEVICE.
+
+    THE DEVICE MOVE IS NOT DEFENSIVE TYPING. SIG builds its own tensor and need not agree with the
+    process device -- spine/loop.py moves it explicitly for exactly that reason -- and this vector
+    is both multiplied against `cent` and written into it. Left where it arrived it is a
+    device-mismatch raise on the first birth of every GPU run and never on a CPU smoke test, which
+    is the failure shape fabric/api.py::build names as the worst one this defect can take.
+
+    The batch is averaged because a birth is ONE event answering ONE flush: the material that
+    triggered it is the flush, not a window, and picking row 0 would make the newborn's region a
+    property of the batch's cut. The width is CHECKED rather than assumed -- an einsum five frames
+    down naming a shape is the geometry failure fabric/api.py::forward refuses by name at the one
+    place a live tensor can prove it, and this is that place for the centroid space.
+    """
+    s = signature.detach().float()
+    s = s.mean(0) if s.dim() > 1 else s
+    want = int(like.shape[1])
+    if int(s.numel()) != want:
+        raise ValueError(
+            f"{where}: the signature is {int(s.numel())} wide and the centroids are {want}. "
+            f"A newborn's region is written in SIG's space, so a mismatch here would either raise "
+            f"inside the cosine or, at a coincidence of widths, place every birth in a region "
+            f"nothing means.")
+    return F.normalize(s.to(device=like.device, dtype=torch.float32), dim=-1)
+
+
+def _fitness_pick(rng, cands, use):
+    """One parent, SAMPLED proportional to fitness within the shortlist. Never argmaxed.
+
+    Argmax is greedy cloning of the incumbent: at parent_k=8 it would make every birth in a burst a
+    child of the same expert, which converts population growth into population duplication and is
+    exactly what parent_max exists to bound. Sampling keeps the shortlist meaningful.
+
+    ALL-ZERO FITNESS IS UNIFORM, AND IT IS THE STATE A RUN STARTS IN. `use` is credited only by
+    fabric/api.py::observe, so before the first attributed flush every candidate reads 0.0 and a
+    weighted draw over all-zero weights is undefined (random.choices raises). Uniform is the honest
+    answer there -- nothing is known about these experts yet -- and it is not a fallback that hides
+    a fault, because the same condition is what fab.experts_with_use reports.
+    """
+    w = [max(0.0, float(use[c])) for c in cands]
+    if sum(w) <= 0.0:
+        return rng.choice(cands)
+    return rng.choices(cands, weights=w, k=1)[0]
+
+
+def _birth_write(pop, dst, gen, *, src=None, other=None, scale=0.0, point=None, jitter=0.0,
+                 rank_take=()):
+    """Write ONE newborn's adapter and centroid. `src=None` mints a fresh identity.
+
+    CROSSOVER TAKES A WHOLE RANK SLICE FROM BOTH FACTORS, and that pairing is the mechanism rather
+    than a detail: an expert's function is dW = A @ B, so rank direction j is column j of A TOGETHER
+    WITH row j of B. Taking one without the other would splice a left factor onto an unrelated right
+    factor and produce a direction neither parent ever learned -- the same arithmetic error the
+    merge in fabric/api.py::manage records for averaging the factors instead of the product.
+
+    THE MUTATION IS RELATIVE TO THE PARENT'S OWN STD, so it means the same thing for a well-trained
+    parent and a fresh one; that is the scale-free discipline `z` and `spawn_mult` also use. B IS
+    ZERO AT A FOUNDER'S BIRTH, so a child of an untrained parent inherits a zero B, its own std is
+    zero and its B mutation is zero too -- the newborn is an IDENTITY, which is the Population
+    docstring's guarantee holding rather than an inert mutation.
+
+    THE CENTROID IS THE TRIGGERING SIGNATURE PLUS JITTER because a burst grows several experts at
+    ONE signature; without the jitter they are born with identical regions and can never
+    differentiate (fabric/levers.py::FABLevers.birth_jitter quotes its own source on that).
+    """
+    with torch.no_grad():
+        if src is None:
+            # THE FOUNDING INITIALISATION, VERBATIM FROM `build`: A drawn uniform at 1/sqrt(d_model)
+            # and B left at ZERO, so a fresh birth is an identity and adding it disturbs nothing.
+            bound = (1.0 / max(1, int(pop.A.shape[1]))) ** 0.5
+            a = torch.empty_like(pop.A[dst]).uniform_(-bound, bound, generator=gen)
+            b = torch.zeros_like(pop.B[dst])
+        else:
+            a, b = pop.A[src].clone(), pop.B[src].clone()
+            if other is not None and len(rank_take):
+                idx = torch.tensor(list(rank_take), dtype=torch.long, device=a.device)
+                a[:, idx] = pop.A[other][:, idx]
+                b[idx, :] = pop.B[other][idx, :]
+            if scale > 0.0:
+                sa = float(a.std()) if a.numel() > 1 else 0.0
+                sb = float(b.std()) if b.numel() > 1 else 0.0
+                if sa > 0.0:
+                    a = a + (scale * sa) * torch.randn(a.shape, generator=gen, device=a.device,
+                                                       dtype=a.dtype)
+                if sb > 0.0:
+                    b = b + (scale * sb) * torch.randn(b.shape, generator=gen, device=b.device,
+                                                       dtype=b.dtype)
+        pop.A[dst], pop.B[dst] = a, b
+        c = point.to(device=pop.cent.device, dtype=pop.cent.dtype)
+        if jitter > 0.0:
+            c = c + jitter * torch.randn(c.shape, generator=gen, device=c.device, dtype=c.dtype)
+        pop.cent[dst] = F.normalize(c, dim=-1)
+
+
 def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_pressure,
                signature, shift_at=None):
     """The growth trigger and, if it fires, the births. Returns WHAT WAS ACTUALLY CREATED.
@@ -2772,12 +3276,388 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
                  blackout actually refused, split by leg so a suppressed REGRESSION is not filed
                  under a suppressed stall -- the two keep separate cooldown clocks above for the
                  same reason)
+    ELEVEN MORE KEYS THE BODY WRITES, DECLARED HERE FOR THE REASON fabric/api.py::forward gives: a
+    key in the report that the contract does not admit to producing is the same defect as a declared
+    key nothing writes, and the count is taken in both directions.
+      fab.grow_checks -- how many times this entry point was CALLED. Without it every counter below
+        reads 0 both when growth declined and when spine/loop.py never invoked it, which is the
+        distinction RunResult.skipped exists to make and it has to survive one entry point in.
+      fab.grow_regression_refused_cooldown / fab.grow_stall_refused_cooldown -- the old tree's
+        n_regr_supp (:2946), split the way the clocks are. "Detected and refused by its own
+        spacing" is not "not detected", and the regression one is the number that would have shown
+        the shared-clock defect at the time rather than eight months later.
+      fab.grow_recover_passes -- checks that returned inside RECOVER. A run whose growth is quiet
+        because it is in lockout looks exactly like a run with no evidence, and this is the
+        difference.
+      fab.grow_warmup_refused -- stall checks before `warmup`, same argument one clock over.
+      fab.grow_slow / fab.grow_fast / fab.grow_dev / fab.grow_improving -- THE READINGS the two
+        triggers are made of, on the ledger because they exist nowhere else in the tree:
+        docs/04_CONTRACT.md's ROW_ARGUMENTS_ELSEWHERE["CAP.observe"] records that `improving` is
+        (slow - fast)/|slow| "off the growth controller's EMAs, which live INSIDE FAB and are on no
+        returned record", and that the root must NOT maintain a second pair over the same loss. It
+        still has no PARAMETER to arrive through, so this is a reading and not the join; what it
+        removes is the need to re-derive it from outside.
+      fab.newfrac_spent_on_spawn -- spawn births charged against the newborn budget. This is the
+        HALF of "both doors are bound by the same cap" that can be closed from here: `forward`'s
+        spawn writes into the pool before this entry point ever sees the flush, so it cannot be
+        refused retroactively, but it CAN be made to spend the budget, and this is the option
+        fabric/api.py::forward's own note names ("a rule that grow_check subtracts spawn births from
+        its own budget"). The other half -- spawn ignoring FAB_GROW and the soft cap at the moment
+        it fires -- is still open and is a `soft_cap` keyword on `forward`, a frozen-signature move.
+      fab.cap_lift_period -- the d_cap_lift_period wire, printed beside the decline counters exactly
+        as the WIRES READ line above requires, and NOT a verdict about which condition blocked a
+        lift: that is CAP.counters' block-reason histogram and Q-CLOCK-1 is what retires this row.
     """
     fab = fab.owned_by("FAB")
-    _ = fab.d_cap_lift_period        # WIRE READ HERE -- reported beside the decline counters
-    raise NotImplementedError(
-        "FAB.grow_check: P4 (fabric) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section FAB.")
+    lift_period = fab.d_cap_lift_period        # WIRE READ HERE -- beside the decline counters
+    counters, where = pop.counters, "FAB.grow_check"
+    step = U.Windows(step_windows)
+    step_n = int(step)
+
+    # THE LEVERS, READ ONCE AND INTO BARE LOCALS. The clock levers among them (warmup, cooldown,
+    # recover_min, recover_max) are compared against `step_windows`, which the caller has already
+    # typed; reading them off the Config inside the arithmetic below would put a Clock-unit
+    # attribute in an operand, which is what O11 forbids and what every cross-kind defect in this
+    # project was written as.
+    grow_on = bool(fab.grow)
+    burst = max(1, int(fab.burst))
+    z_dev, plateau = float(fab.z), float(fab.plateau)
+    warm_n, cool_n = int(fab.warmup), int(fab.cooldown)
+    rec_min, rec_max = int(fab.recover_min), int(fab.recover_max)
+    new_frac = float(fab.new_frac)
+    mem_on, spawn_on = bool(fab.grow_on_mem_pressure), bool(fab.spawn)
+    replicate, parent_k = bool(fab.replicate), max(1, int(fab.parent_k))
+    parent_max, birth_win = float(fab.parent_max), max(1, int(fab.birth_win))
+    mut, mut_big, mut_big_p = float(fab.mut), float(fab.mut_big), float(fab.mut_big_p)
+    xover, jitter = float(fab.xover), float(fab.birth_jitter)
+    slots, n0 = int(fab.slots), int(fab.n0)
+
+    # SEEDED BEFORE ANY BRANCH DECIDES, so ABSENT never masquerades as ZERO. SIG shipped a counter
+    # that was missing rather than 0 for a whole run at the one configuration the tree ships,
+    # because the lines that seeded it stood inside the else of the gate they described
+    # (fabric/api.py::_bump says so). These fourteen are the ones a report reads to decide whether
+    # growth happened, so an absent key here is the worst possible spelling of "no".
+    # THE ADDED KEYS ARE SEEDED TOO, AND LEAVING THEM OUT WAS CAUGHT BY DRIVING THIS BODY RATHER
+    # THAN BY READING IT: the first run of the stall case raised KeyError on
+    # fab.grow_recover_passes from the PROBE, i.e. a report that asked the ledger what the RECOVER
+    # leg did would have crashed rather than read 0 -- which is the absent-versus-zero defect in the
+    # one direction that is loud, and it would have been silent for any reader using .get().
+    for _k in ("fab.grow_asked_regression", "fab.grow_asked_stall", "fab.grown_regression",
+               "fab.grown_stall", "fab.declined_cap", "fab.declined_newfrac", "fab.replicated",
+               "fab.crossed", "fab.random_born", "fab.parent_quota_refusals",
+               "fab.grow_mem_eligible", "fab.shift_notifications",
+               "fab.growth_blackout_suppressed.regression",
+               "fab.growth_blackout_suppressed.stall",
+               "fab.grow_regression_refused_cooldown", "fab.grow_stall_refused_cooldown",
+               "fab.grow_recover_passes", "fab.grow_warmup_refused",
+               "fab.newfrac_spent_on_spawn"):
+        counters.setdefault(_k, 0)
+    _bump(counters, "fab.grow_checks")
+    counters["fab.cap_lift_period"] = int(lift_period)
+
+    # THE CEILING IS READ ON EVERY CHECK AND NOT ONLY WHEN SOMETHING ASKS, and the first driven run
+    # of this body is why. With the call inside the `if ask:` block a root that had wired
+    # `soft_cap=caps.experts` -- the spelling spine/compose.py's CAP.caps row uses -- ran green for
+    # the whole warm-up and raised on the FIRST REGRESSION, hundreds of windows in, which is both
+    # the least convenient moment and the one where the run has the most to lose. TWO CEILINGS, TWO
+    # KINDS: `room` is CAP's operating valve, reached through Caps.headroom because the subtraction
+    # is C30; `pool_room` is the hard PREALLOCATION pop.cap (= max(n0, slots)), and its max(0, ...)
+    # is not a repeat of that repair -- n_live can reach cap and never pass it.
+    n_live = int(pop.n_live)
+    room = _headroom(soft_cap, n_live, where)
+    pool_room = max(0, int(pop.cap) - n_live)
+
+    g = pop.growth
+
+    # ---- the blackout: a shift WE caused is not new material (Q-FAB-6) --------------------------
+    # THE ROOT SUPPLIES THE STAMP AND THIS PACKAGE APPLIES ITS OWN `cooldown`. A boolean argument
+    # would have forced the caller to apply a FAB lever at a foreign call site, which `grep -rn d_`
+    # could never index; the threshold stays in the package that declares it, which is the same rule
+    # fabric/api.py::manage_period exists to enforce one accessor over.
+    # U.Windows() IS THE TYPE CHECK AND NOT A CAST: OPT.maybe_step takes the SAME event stamped into
+    # units.Steps off clock.opt_steps, and handing that object here raises UnitError instead of
+    # being batch_windows-fold wrong -- 16x at BATCH_W=16, and exactly right at 1, which is the
+    # shape of every clock defect this project has recorded.
+    blackout_open, blackout_left = False, 0
+    if shift_at is not None:
+        stamp = U.Windows(shift_at)
+        _bump(counters, "fab.shift_notifications")
+        since_shift = int(step - stamp)
+        if since_shift < cool_n:
+            blackout_open, blackout_left = True, cool_n - since_shift
+
+    # ---- the other door's births, charged against this door's budget ----------------------------
+    # SPAWN WRITES INTO THE POOL INSIDE `forward`, BEFORE THIS ENTRY POINT SEES THE FLUSH, so it
+    # cannot be refused here -- but it spends the same slots, and a newborn budget that ignored it
+    # would let the two doors deliver more newborns than either admits. Recorded at THIS window
+    # rather than at the window it happened, which is the honest approximation: the count is exact
+    # and the timestamp is one flush late at worst. parent=-1 keeps them out of fab.distinct_parents,
+    # which is a reading about REPLICATION lineage.
+    if spawn_on:
+        _seen = int(counters.get("fab.spawned", 0))
+        _new = max(0, _seen - int(g.get("spawned_seen", 0)))
+        if _new:
+            g["births"].extend((step_n, -1) for _ in range(_new))
+            _bump(counters, "fab.newfrac_spent_on_spawn", _new)
+        g["spawned_seen"] = _seen
+    # THE RECORD IS TWO WINDOWS AT ONCE AND IS TRIMMED TO THE LONGER OF THEM: new_frac counts births
+    # in the last `cooldown` WINDOWS and parent_max counts them over the last `birth_win` BIRTHS, so
+    # dropping on either alone would silently shorten the other.
+    _keep_from = len(g["births"]) - birth_win
+    g["births"] = [b for i, b in enumerate(g["births"])
+                   if i >= _keep_from or (step_n - int(b[0])) < cool_n]
+
+    loss = _loss_float(flush_loss, where)
+    mem_eligible = bool(mem_on and memory_pressure)
+    if mem_eligible:
+        _bump(counters, "fab.grow_mem_eligible")
+
+    asked_r = asked_s = 0
+    improving = unexpected = None
+    if grow_on:
+        # ---- WATCH: the three EMAs, then the two triggers ---------------------------------------
+        g["n"] = int(g["n"]) + 1
+        g["fast"] = loss if g["fast"] is None else \
+            (1.0 - _FAST_EMA) * float(g["fast"]) + _FAST_EMA * loss
+        g["slow"] = loss if g["slow"] is None else \
+            (1.0 - _SLOW_EMA) * float(g["slow"]) + _SLOW_EMA * loss
+        _d = abs(loss - float(g["slow"]))
+        g["dev"] = _d if g["n"] == 1 else (1.0 - _MAD_EMA) * float(g["dev"]) + _MAD_EMA * _d
+        improving = (float(g["slow"]) - float(g["fast"])) / max(1e-6, abs(float(g["slow"])))
+        # A RUNNING MAD AND NOT A FIXED THRESHOLD, which is what makes `z` scale-free: a loss of 8.3
+        # at the start of a run and 2.1 at the end are the same distance from their own slow EMA in
+        # deviations, and a threshold fitted to one loss level is a threshold that stops detecting
+        # anything once the run has improved.
+        _thresh = z_dev * max(1e-6, float(g["dev"]))
+        unexpected = (loss - float(g["slow"])) > _thresh
+
+        # A REGRESSION IS TESTED FIRST AND ON ITS OWN CLOCK. It preempts RECOVER deliberately:
+        # RECOVER exists so a burst's own transient cannot re-trigger growth, which is not evidence
+        # about new material, and a genuine regression must be able to interrupt it. What is NOT
+        # relaxed is the blackout -- a loss jump WE caused (a retok, a resample, an LR restart) is
+        # the system reacting to itself.
+        if unexpected:
+            if blackout_open:
+                _bump(counters, "fab.growth_blackout_suppressed.regression")
+            elif g["last_regr"] is not None and (step_n - int(g["last_regr"])) < cool_n:
+                # DETECTED AND REFUSED BY ITS OWN SPACING -- counted, never silent. The old tree
+                # refused it by the SHARED clock instead, so a routine stall 772 windows earlier
+                # suppressed an injected regression (:2921-2926) and the counter that would have
+                # said so did not exist on that path.
+                _bump(counters, "fab.grow_regression_refused_cooldown")
+            else:
+                asked_r = burst
+                g["last"] = g["last_regr"] = g["t0"] = step_n
+                g["state"] = "R"
+
+        if not asked_r:
+            if g["state"] == "R":
+                # ---- RECOVER: wait for the improvement to FLATTEN, or for the hard ceiling ------
+                # THE EXIT TEST IS TWO-SIDED FOR THE SAME REASON THE STALL TEST IS, and this is a
+                # judgement this body takes rather than inherits. The old form is `improving < s.rel`
+                # (:3010), which every negative value satisfies -- so a DIVERGING run leaves RECOVER
+                # at the first opportunity and is then free to grow on the next stall check, which
+                # is capacity added in answer to divergence (M36) arriving through the other door.
+                # |improving| < plateau is "improvement has flattened", which is what the leg's own
+                # description says it waits for; the price is that a run still improving fast stays
+                # in RECOVER until recover_max, and recover_max is precisely the escape hatch
+                # fabric/levers.py declares for that case ("growth re-arms even if improvement never
+                # flattens"). The alternative -- keeping the one-sided form -- was rejected because
+                # it makes the lockout shortest exactly when the run is worst.
+                _since_t0 = step_n - int(g["t0"] if g["t0"] is not None else step_n)
+                if _since_t0 >= rec_min and (abs(improving) < plateau or _since_t0 > rec_max):
+                    g["state"] = "W"
+                _bump(counters, "fab.grow_recover_passes")
+            elif blackout_open:
+                _bump(counters, "fab.growth_blackout_suppressed.stall")
+            elif g["last"] is not None and (step_n - int(g["last"])) < cool_n:
+                _bump(counters, "fab.grow_stall_refused_cooldown")
+            elif step_n < warm_n:
+                # EARLY NOISE IS NOT A PLATEAU. Memory pressure does not bypass this: an occupancy
+                # reading taken while the run is still finding its scale is not evidence about
+                # capacity either, and bypassing the one gate that exists to stop early noise from
+                # growing the population would be the ramp's defect arriving through MEM.
+                _bump(counters, "fab.grow_warmup_refused")
+            elif abs(improving) < plateau or mem_eligible:
+                # THE STALL TEST IS TWO-SIDED (M36). `improving < plateau` is satisfied by every
+                # negative value there is, so a diverging run satisfied the stall condition and grew
+                # an expert -- capacity added in answer to divergence. `mem_eligible` stands in for
+                # the plateau reading and not for the gates above it: it is MEM's VERDICT (Q-MEM-4),
+                # already compared against MEM's own pressure_thresh inside MEM.census, and this
+                # function reads no threshold of MEM's.
+                asked_s = 1
+                g["last"] = g["t0"] = step_n
+                g["state"] = "R"
+
+    # ---- BURST: the clamps run INSIDE, before the counter (:7444-7470) --------------------------
+    ask = asked_r + asked_s
+    grown_r = grown_s = declined_cap = declined_new = 0
+    replicated = crossed = random_born = quota_refusals = 0
+    n_born = 0
+    if ask:
+        _bump(counters, "fab.grow_asked_regression", asked_r)
+        _bump(counters, "fab.grow_asked_stall", asked_s)
+        allow = min(room, pool_room)
+        n_born = min(ask, allow)
+        declined_cap = ask - n_born
+        # THE NEWBORN BUDGET, OVER THE COOLDOWN WINDOW AND INCLUDING THE OTHER DOOR'S BIRTHS.
+        # max(1, ...) exists because int(0.04 * 3) is 0 and a small founding population could
+        # otherwise never grow at all (measured in the old tree: reached 7 instead of 256).
+        recent = sum(1 for _w, _p in g["births"] if (step_n - int(_w)) < cool_n)
+        budget = max(0, max(1, int(new_frac * n_live)) - recent)
+        if budget < n_born:
+            declined_new = n_born - budget
+            n_born = budget
+        if n_born:
+            # THE GENERATOR IS SEEDED OFF THIS PACKAGE'S OWN STREAM, EXACTLY AS `build` DOES IT --
+            # and NOT `pop.rng.torch_generator(...)`, which derives its seed from the subsystem NAME
+            # and therefore hands back the same stream on every call: every birth in every burst of
+            # the whole run would take bit-identical mutation noise, and a population of clones
+            # would be reported as a population of mutants.
+            gen = torch.Generator(device=pop.A.device)
+            gen.manual_seed(pop.rng.randint(0, 2 ** 31 - 1))
+            point = _signature_point(signature, pop.cent, where)
+            # THE RELEVANCE SHORTLIST: the parent_k region owners nearest the signature that
+            # triggered the growth, so a birth lands near the material that asked for it. At k=1
+            # growth is greedy cloning of the incumbent and at k=population it is unfocused.
+            with torch.no_grad():
+                _cos = F.normalize(pop.cent[:n_live].float(), dim=-1) @ point
+                shortlist = _cos.topk(max(1, min(parent_k, n_live))).indices.tolist()
+            for _ in range(n_born):
+                slot = int(pop.n_live)
+                parent, other, take, scale = -1, None, (), 1.0
+                if replicate:
+                    cands = [int(c) for c in shortlist if int(c) < int(pop.n_live)]
+                    while cands:
+                        pick = _fitness_pick(pop.rng, cands, pop.use)
+                        # THE QUOTA IS A SHARE OF THE WINDOW, NOT OF WHAT THE WINDOW HAPPENS TO
+                        # HOLD. parent_max x birth_win is 51 of the last 256 births at the shipped
+                        # defaults; measuring the share against len(record) instead would refuse
+                        # EVERY parent while the record is empty (0 held is not less than 0.2 x 0),
+                        # so the first birth of every run would be random and the `replicate` arm
+                        # would never be exercised at the one moment it is cheapest to check.
+                        # AT parent_max=0.0 NOTHING CAN EVER BE A PARENT and every birth is fresh:
+                        # that is the tightest quota the mechanism can state, fabric/levers.py
+                        # admits it deliberately and leaves what it does to this body, and this is
+                        # what it does -- a legible arm, not an accident.
+                        held = sum(1 for _w, p in g["births"][-birth_win:] if p == pick)
+                        if held < parent_max * birth_win:
+                            parent = pick
+                            break
+                        cands.remove(pick)
+                        quota_refusals += 1
+                if parent >= 0:
+                    scale = mut
+                    if mut_big_p > 0.0 and pop.rng.random() < mut_big_p:
+                        # THE HEAVY TAIL: rate and magnitude are separate levers because they trade
+                        # off against each other, and one knob carrying both would make "more
+                        # exploration" ambiguous.
+                        scale = mut * mut_big
+                    if xover > 0.0 and len(cands) > 1 and pop.rng.random() < xover:
+                        other = _fitness_pick(pop.rng, [c for c in cands if c != parent], pop.use)
+                        take = [j for j in range(int(pop.A.shape[2])) if pop.rng.random() < 0.5]
+                        if take:
+                            crossed += 1
+                        else:
+                            other = None
+                    _birth_write(pop, slot, gen, src=parent, other=other, scale=scale,
+                                 point=point, jitter=jitter, rank_take=take)
+                    replicated += 1
+                else:
+                    # A FRESH IDENTITY. This is the counterfactual the inheritance claim needs:
+                    # `replicate` says a new expert starts from something already learned, and a
+                    # random birth is the only arm that tests it. It is also where a birth lands
+                    # when every shortlisted parent is over its quota -- refusing the birth outright
+                    # would file a delivered trigger as an undelivered one and would need a third
+                    # decline reason no counter names.
+                    _birth_write(pop, slot, gen, src=None, point=point, jitter=jitter)
+                    random_born += 1
+                _claim_slot(pop, slot, step_n, parent=parent, mutscale=scale)
+                g["births"].append((step_n, parent))
+        # ONE LEG PER CHECK BY CONSTRUCTION: the stall arm is inside `if not asked_r`, so the ask
+        # this delivery belongs to is never ambiguous and the two deliveries never double-count.
+        if asked_r:
+            grown_r = n_born
+        else:
+            grown_s = n_born
+        _bump(counters, "fab.grown_regression", grown_r)
+        _bump(counters, "fab.grown_stall", grown_s)
+        _bump(counters, "fab.declined_cap", declined_cap)
+        _bump(counters, "fab.declined_newfrac", declined_new)
+        _bump(counters, "fab.replicated", replicated)
+        _bump(counters, "fab.crossed", crossed)
+        _bump(counters, "fab.random_born", random_born)
+        _bump(counters, "fab.parent_quota_refusals", quota_refusals)
+
+    # THE LINEAGE READING IS ABOUT THE LIVE POPULATION AND NOT ABOUT THE BIRTH RECORD, because D7's
+    # question is "is this population one lineage wearing n hats", which is a property of who is
+    # alive now. `parent` is renumbered by the one declared list in remove() (state_dict's note on
+    # L28), so it survives the cull that the birth record would not.
+    _live = int(pop.n_live)
+    counters["fab.distinct_parents"] = len({int(p) for p in pop.parent[:_live] if int(p) >= 0})
+    if grow_on:
+        counters["fab.grow_slow"] = round(float(g["slow"]), 6)
+        counters["fab.grow_fast"] = round(float(g["fast"]), 6)
+        counters["fab.grow_dev"] = round(float(g["dev"]), 6)
+        counters["fab.grow_improving"] = round(float(improving), 6)
+
+    gates = (
+        Gate("fab.growth", n_born > 0,
+             value=f"{ask} asked, {n_born} grown, n_live={_live}",
+             threshold=f"soft cap headroom + new_frac={new_frac} of {_live} (FAB_N0={n0}, "
+                       f"FAB_SLOTS={slots})",
+             reachable=grow_on,
+             reason="" if grow_on else
+                    f"FAB_GROW={grow_on}: the population is frozen at FAB_N0={n0}. Neither leg is "
+                    f"evaluated -- the EMAs this trigger is made of are not even advanced -- so "
+                    f"every growth counter on this ledger is unreachable rather than zero."),
+        Gate("fab.growth_regression", asked_r > 0,
+             value=("not evaluated" if not grow_on else
+                    f"loss-slow={loss - float(g['slow']):.6f}"),
+             threshold=("not evaluated" if not grow_on else
+                        f"z={z_dev} x dev={float(g['dev']):.6f}"),
+             reachable=grow_on,
+             reason=("" if grow_on else
+                     f"FAB_GROW={grow_on}: the regression trigger -- the only signal continual "
+                     f"learning has that new material has arrived -- is not evaluated.")),
+        Gate("fab.growth_blackout", blackout_open,
+             value=(f"{blackout_left} window(s) left" if blackout_open else
+                    f"{int(counters['fab.shift_notifications'])} notification(s)"),
+             threshold=f"cooldown={cool_n} windows",
+             reachable=int(counters["fab.shift_notifications"]) > 0,
+             reason="" if int(counters["fab.shift_notifications"]) > 0 else
+                    "NOBODY IS SUPPLYING shift_at: it is a defaulted keyword, which is invisible to "
+                    "K10, and 0 notifications means the blackout cannot open at all -- not that it "
+                    "was armed and no shift happened. The three sites that would stamp it are the "
+                    "epoch resample, TOK.mint_burst's retok and OPT's LR restart."),
+        Gate("fab.grow_mem_pressure", mem_eligible,
+             value=f"FAB_GROW_ON_MEM_PRESSURE={mem_on}, memory_pressure={memory_pressure!r}",
+             threshold="MEM's own verdict, already compared against MEM_PRESSURE_THRESH",
+             reachable=bool(mem_on and memory_pressure is not None),
+             reason="" if (mem_on and memory_pressure is not None) else
+                    (f"FAB_GROW_ON_MEM_PRESSURE={mem_on}: the memory-pressure signal is printed and "
+                     f"does not make growth eligible."
+                     if not mem_on else
+                     "memory_pressure is None: MEM.census is a P4 stub, so no verdict is produced "
+                     "at all. Even with a body it would be exactly 0.0 for every configuration "
+                     "until MEM.maintain's probe has contexts -- nothing promotes out of probation, "
+                     "so every eviction takes the probation branch (Q-MEM-4). TWO named causes, "
+                     "not one.")),
+        Gate("fab.grow_cap", declined_cap > 0,
+             value=f"{declined_cap} of {ask} refused by the ceiling",
+             threshold=f"Caps.headroom({n_live})={room}, pool {pool_room} of {int(pop.cap)}",
+             reachable=grow_on,
+             reason="" if grow_on else
+                    f"FAB_GROW={grow_on}: nothing asks, so no ask can be refused."),
+    )
+    return GrowReport(
+        asked_regression=asked_r, asked_stall=asked_s,
+        grown_regression=grown_r, grown_stall=grown_s,
+        declined_cap=declined_cap, declined_newfrac=declined_new,
+        replicated=replicated, crossed=crossed, random_born=random_born,
+        parent_quota_refusals=quota_refusals,
+        distinct_parents=int(counters["fab.distinct_parents"]),
+        blackout_open=blackout_open, blackout_left=blackout_left, gates=gates)
 
 
 def own_lr_scale(fab: Config, pop, *, applied_lr):
@@ -2804,12 +3684,121 @@ def own_lr_scale(fab: Config, pop, *, applied_lr):
     WIRES READ: d_base_lr, d_lr_min_frac
     DID IT FIRE: fab.lr_scaled_experts, fab.lr_boosted, fab.lr_cycle_max (a max above ~12 means
                  every survivor is pinned at lr_amin and the schedule is a constant)
+    FIVE MORE KEYS THE BODY WRITES, DECLARED HERE FOR fabric/api.py::forward's reason (a key in the
+    report the contract does not admit to producing is the same defect as a declared key nothing
+    writes):
+      fab.lr_calls -- how many times this was CALLED, so "no expert was scaled" is distinguishable
+        from "spine/loop.py never invoked it", which is the state of the tree today.
+      fab.lr_eligible -- the size of the PAST-GRACE set the boost budget is sized on. fab.lr_boosted
+        reading 0 has two causes -- nobody is in trouble, and nobody is eligible to be -- and at the
+        shipped defaults it is the second: Q-FAB-5's arithmetic puts mean uage at 1.98 against
+        grace=48, so this number is 0 and the boost is UNREACHABLE rather than armed. One counter
+        cannot say which.
+      fab.lr_envelope_pinned -- how many live experts sit at the lr_amin floor. The docstring's
+        "a max above ~12 means every survivor is pinned" is a rule of thumb about fab.lr_cycle_max;
+        this is the reading itself, and it is what the old tree's warning (:7305-7315) was about.
+      fab.lr_ratio_clamped -- experts whose own rate hit the lr_maxr ceiling. All of them clamped is
+        the one-moment state the old tree's diagnostic reported when it fired at step 3 and looked
+        like a broken mechanism (x4.00..x4.00) rather than a badly timed print.
+      fab.lr_zero_applied -- calls where `applied_lr` was not positive. The ratio to a zero rate is
+        not a number; the denominator is floored at fabric/api.py::_FLOOR, which is declared "only
+        ever a denominator guard, never a rate", and this counter is what stops that floor from
+        being read as a measurement.
     """
     fab = fab.owned_by("FAB")
-    _ = (fab.d_base_lr, fab.d_lr_min_frac)   # WIRES READ HERE -- the envelope's two endpoints
-    raise NotImplementedError(
-        "FAB.own_lr_scale: P4 (fabric) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section FAB.")
+    base_lr, lr_min_frac = fab.d_base_lr, fab.d_lr_min_frac   # WIRES READ HERE -- the two endpoints
+    counters = pop.counters
+    _bump(counters, "fab.lr_calls")
+    # SEEDED BEFORE THE OFF RETURN, for the reason fabric/api.py::observe seeds its family there:
+    # at the shipped FAB_LR_OWN=False every call takes that return, and a reader asking the ledger
+    # how many experts were scaled must get 0 and not a KeyError -- which is what the first driven
+    # run of grow_check's RECOVER counter produced before it was seeded.
+    for _k in ("fab.lr_scaled_experts", "fab.lr_boosted", "fab.lr_cycle_max", "fab.lr_eligible",
+               "fab.lr_envelope_pinned", "fab.lr_ratio_clamped", "fab.lr_zero_applied"):
+        counters.setdefault(_k, 0)
+    # None AND NOT A TABLE OF ONES, which is the same distinction the build-time fab.lr_own gate
+    # prints: a table of ones is a schedule that ran and chose 1.0 for every expert, and this arm
+    # did not run at all. A caller that multiplied by it would be applying a mechanism that is off.
+    if not bool(fab.lr_own):
+        return None
+    n = int(pop.n_live)
+    if n <= 0:
+        return None
+
+    # THE CLOCK IS `uage` AND NOT `use`, AND SINCE THE SPLIT THAT IS FORCED RATHER THAN CHOSEN.
+    # fabric/levers.py declares lr_cycle in units.Selections; fabric/api.py::observe credits `use`
+    # by ROUTING MASS (a float that is not a count of anything) and `uage` by SELECTION, so `use` is
+    # no longer a Selections quantity at all. The old tree read `fab.use_age(i)` (:7217) when the
+    # two were one number, and the lever's own sentence -- "clocked from its own use count" -- is
+    # from that era. Reading `use` here would compare a mass against a half-cycle declared in
+    # selections, which is the cross-kind comparison spine/units.py exists to make impossible for
+    # clocks and can only be prevented by argument inside one package.
+    half = max(1.0, float(fab.lr_cycle))
+    gamma, amin = float(fab.lr_gamma), float(fab.lr_amin)
+    maxr, boost = float(fab.lr_maxr), float(fab.lr_boost)
+    cull_frac, grace = float(fab.cull_frac), int(fab.grace)
+    # THE ENVELOPE IS BUILT FROM THE PEAK AND ITS FLOOR, WHICH ARE BOTH WIRES: :7251 is
+    # `_lo = LR * LR_MIN_FRAC` and :7252 blends from it. The RATIO is against what the optimizer is
+    # ABOUT to apply, which is live and arrives as the argument -- so there is no configuration in
+    # which this function reads an undefined global, which ISSUES P1-H15 (a NameError on `_lrv`
+    # whenever LR_SCHED=none and lr_own=1) is the record of.
+    peak = float(base_lr)
+    lo = peak * float(lr_min_frac)
+    applied = float(applied_lr)
+    if not (applied > 0.0):
+        _bump(counters, "fab.lr_zero_applied")
+
+    own, cyc_max, pinned = [], 0.0, 0
+    for i in range(n):
+        # +half SO A NEWBORN STARTS AT THE PEAK AND NOT IN THE TROUGH (:7217-7219): at t == half the
+        # triangle is exactly at its maximum, which is the phase a fresh expert should enter on.
+        # The 1e6 ceiling is the old tree's own, and it is a guard against an expert whose selection
+        # count has run away rather than a schedule decision.
+        t = min(float(pop.uage[i]), 1e6) + half
+        cycle = math.floor(1.0 + t / (2.0 * half))
+        x = abs(t / half - 2.0 * cycle + 1.0)
+        # THE ENVELOPE HAS A FLOOR AND IT NEEDS ONE. gamma**(cycle-1) goes to zero and the use clock
+        # has no horizon, so a heavily-selected expert burns cycles fast and is then pinned at the
+        # floor for the rest of the run, unable to respond to a distribution shift no matter how
+        # badly it is doing -- which is the "aged out and cannot learn" state an evolutionary design
+        # may tolerate in an individual but must not impose on every survivor by construction.
+        env = gamma ** (cycle - 1.0)
+        if env <= amin:
+            env, pinned = amin, pinned + 1
+        own.append(lo + (peak - lo) * max(0.0, 1.0 - x) * env)
+        cyc_max = max(cyc_max, cycle)
+
+    # ---- the boost: the bottom of the SAME ranking the cull uses --------------------------------
+    # AN EXPERT IN THE CULL-ELIGIBLE FRACTION IS ALREADY FAILING, and annealing it on the same curve
+    # as a thriving one spends its remaining life confirming that. The budget is sized on the
+    # ELIGIBLE count and not on n_live: at 523 live / 84 eligible, `cull_frac * n_live` is 10 over a
+    # list of 84 and "the worst 2%" meant "all of them" (:7273-7281). `grace` is the same clock the
+    # cull tests, so "has had its chances" means one thing in both places.
+    eligible = [i for i in range(n) if int(pop.uage[i]) >= grace]
+    counters["fab.lr_eligible"] = len(eligible)
+    boosted = 0
+    if boost > 1.0 and n > 2 and eligible:
+        rank = sorted(eligible, key=lambda i: float(pop.use[i]))
+        nb = max(1, int(cull_frac * len(eligible)))
+        for i in rank[:nb]:
+            own[i] = own[i] * boost
+            boosted += 1
+
+    denom = applied if applied > 0.0 else _FLOOR
+    ratios = [min(o / denom, maxr) for o in own]
+    counters["fab.lr_scaled_experts"] = n
+    counters["fab.lr_boosted"] = boosted
+    counters["fab.lr_cycle_max"] = int(cyc_max)
+    counters["fab.lr_envelope_pinned"] = pinned
+    counters["fab.lr_ratio_clamped"] = sum(1 for o in own if o / denom > maxr)
+    # A TENSOR ON THE POPULATION'S OWN DEVICE AND DTYPE, because the one use this multiplier has
+    # ever had is `A[:n] = prev + r.view(-1, 1, 1) * (A[:n] - prev)` (:7291-7293) -- a per-row
+    # rescale of the two adapter banks. Returning a Python list would move the arithmetic to the
+    # caller and, on a GPU run, put a host-to-device copy inside the optimizer step. THE CONTRACT
+    # ALREADY RECORDS THAT NOTHING TAKES IT: compose.py's row for this entry point is a four-element
+    # row -- "IT PRODUCES NOTHING ANY SIGNATURE ACCEPTS" -- so fab.lr_scaled_experts counts an
+    # effect nothing in this tree applies, and that is the statement, not a defect in this body.
+    return torch.tensor(ratios, device=pop.A.device, dtype=pop.A.dtype)
 
 
 
@@ -2885,7 +3874,15 @@ def counters(fab: Config, pop):
 
 def state_dict(fab: Config, pop):
     """Parameters (A, B, q_route, hproj, eemb, edec, halt_key, halt_b, norm, nov_proj), the `cent`
-    BUFFER, every book, the cumulative counter ledger, and the package RNG stream.
+    BUFFER, every book, the growth machine and comp_glob, the cumulative counter ledger, and the
+    package RNG stream.
+
+    THE GROWTH MACHINE AND comp_glob JOINED THIS LIST ON 2026-09-17, in the same edit that gave
+    Population a slot for them and fabric/api.py::grow_check and ::observe bodies that write them.
+    They are saved for the reason the lifted cap is (capacity/api.py::new_valve): they are earned
+    state, not configuration, and a resume that rebuilt them would re-arm growth inside a lockout
+    the checkpointed run was still serving. The payload key is checked by load_state_dict below and
+    UPDATES the built default rather than replacing it, so an older checkpoint restores.
 
     EVERY NAME IN THAT LIST IS NOW ALLOCATED BY `build`, WHICH IT WAS NOT UNTIL 2026-09-03. The
     list named eleven tensors and build created five; halt_b, norm and nov_proj are now built
@@ -3014,6 +4011,16 @@ def state_dict(fab: Config, pop):
             "contrib": list(pop.contrib), "parent": list(pop.parent),
             "mutscale": list(pop.mutscale),
         },
+        # THE GROWTH MACHINE AND THE POPULATION COMPETENCE EMA, SAVED AND NOT RE-EARNED. Both are
+        # EARNED STATE in the sense capacity/api.py::new_valve gives the phrase for its lifted cap:
+        # they are what the run has learned about its own loss, and rebuilding them on a resume
+        # would hand the successor a machine with no cooldown clock, no RECOVER leg and no MAD --
+        # so the first flush after a restart can fire a growth burst that the run it resumed was
+        # still in lockout for, and the report would show a regression the loss never made. The
+        # values are plain floats/ints/None/str plus a list of (window, parent) pairs, which is why
+        # the field could be a dict rather than a record type (Population.__init__ says so).
+        "growth": {k: (list(v) if isinstance(v, list) else v) for k, v in pop.growth.items()},
+        "comp_glob": pop.comp_glob,
         "n_live": int(pop.n_live), "cap": int(pop.cap), "depth_now": int(pop.depth_now),
         "births": int(pop.births), "rescued": int(pop.rescued),
         "halt_ema": getattr(pop, "halt_ema", None), "learn_window": pop.learn_window,
@@ -3104,6 +4111,15 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
     for field in ("n_live", "depth_now", "births", "rescued"):
         if sd.get(field) is not None:
             setattr(pop, field, int(sd[field]))
+    if sd.get("growth"):
+        # UPDATE, NOT REPLACE, so a checkpoint written before a key existed restores what it has and
+        # keeps this build's default for what it does not -- the alternative is a Population whose
+        # growth dict is missing a key that every branch of grow_check reads, i.e. a KeyError on the
+        # first flush after a resume from an older payload.
+        pop.growth.update(sd["growth"])
+        pop.growth["births"] = [tuple(b) for b in (pop.growth.get("births") or ())]
+    if "comp_glob" in sd:
+        pop.comp_glob = sd["comp_glob"]
     if "halt_ema" in sd:
         pop.halt_ema = sd["halt_ema"]
     if "learn_window" in sd:
@@ -3232,9 +4248,9 @@ def manage_period(fab: Config):
         raise LeverError(
             f"FAB_MANAGE_EVERY={every}: a management cadence is a count of windows ELAPSED since "
             f"the last pass and may not run backwards. RUN.Cadences.due DECLARES its contract as "
-            f"'True at most once per `period` WINDOWS elapsed since this key last fired' -- its "
-            f"body is still a P4 stub, so this is a statement about the contract and not about "
-            f"running code -- and a body written to that contract compares "
+            f"a long-run RATE of one fire per `period` WINDOWS, with jitter bounded by the caller's "
+            f"evaluation stride -- its body exists, so this is a statement about running code and "
+            f"not only about a contract, and that body compares "
             f"`step - last_fired >= period`, so a negative period is true on the first window and "
             f"on every window after it -- {every} does not mean 'manage less often' or 'do not "
             f"manage', it means the cull, the spares, replication and the staged-depth check on "

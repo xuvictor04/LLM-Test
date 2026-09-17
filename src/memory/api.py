@@ -31,10 +31,12 @@ RECORD TYPES RETURNED (P4 defines them):
                  is not even a function: DOM.census's `live` reaches MEM as `live_sources` while its
                  `n_live` reaches FAB as `live_domains`, so one record feeds two vocabularies.
 """
+import dataclasses
+
 import torch
 
 from spine.lever import Config, LeverError
-from spine.gate import Gate
+from spine.gate import Gate, NotBuilt
 from spine import units as U
 
 
@@ -94,12 +96,57 @@ class Store:
     BEING WRITTEN was evicted oldest-first BY CONSTRUCTION. That is goal B's failure mode performed
     by the eviction rule itself -- the store forgets exactly the area the run has moved on from,
     which is the area a continual-learning measurement is about.
+    SO write STAMPS `born` AND LEAVES `last` AT 0. A fresh entry that stamped `last` would be back in
+    write-recency the moment eviction ranked on it, which is the whole defect; 0 reads as "never
+    retrieved", which is also exactly what `prob` says, and probation -- whose members are by
+    construction never-retrieved -- is ranked on `born`, its own oldest. Both clocks are the WINDOW
+    clock: write and maintain both carry `now`, and `tick` is advanced to it, so "born at window 120,
+    last retrieved at window 400" is a sentence the report can write. The rejected alternative was an
+    internal per-call counter (the old tree's `self.tick += 1`), which is finer-grained inside one
+    flush and means nothing to any reader.
+
+    `ctx` IS THE STORED CONTEXT WINDOW, (capacity, ctx_w), AND IT WAS ONE LONG PER ENTRY UNTIL THE
+    REKEY WAS WRITTEN. maintain's job 2 re-encodes stored entries so the keys track a model that
+    moves underneath them, and there is nothing to re-encode FROM unless the entry keeps the token
+    window its key was built from. The frozen tree kept exactly that and for exactly this reason --
+    memory.py:121-123, `if self.ctx_w > 0: self.ctx = torch.zeros(cap, self.ctx_w, ...)` under the
+    comment "store a raw context window per entry so keys can be RE-ENCODED (drift fix)", filled by
+    archive/garry/self_organize.py:353 `mem_ctx(x) = _windows(x, KW).reshape(-1, KW) if KEY_SRC ==
+    "model" else None`. With one long per entry the amortized rekey is not a mechanism that declines
+    to run, it is a mechanism that cannot exist, and key drift is a forgetting channel that has
+    nothing to do with eviction -- goal B, directly.
+    ITS WIDTH IS ALLOCATED BY write AND NOT HERE, and that is not tidiness: the width is MEM_KEY_WIN,
+    and open_store's frozen LEVERS READ line names quota, owners, key_src and key_depth and says in
+    as many words that the ten others "were never read by THIS entry point's body". write and
+    maintain both name key_win in their own LEVERS READ lines, so the first write grows the array to
+    its width the way the census grows on demand, and a store that has never been written carries
+    (capacity, 0).
+
+    `use` IS A FLOAT AND WAS A LONG, which is a type error the decay makes visible rather than a
+    preference. MEM_USE_DECAY's own help calls `use` "decayed retrieval mass" and the eviction lever
+    calls it the same; a mass multiplied by 0.98 is not an integer. Measured on the declared dtype:
+    `torch.zeros(3, dtype=torch.long).mul_(0.98)` raises "result type Float can't be cast to the
+    desired output type Long", and the out-of-place spelling truncates instead -- every entry with
+    exactly one retrieval goes to 0 at the first decay, so the rule that exists to FADE retrieval
+    mass wipes it. The frozen tree wrote `self.use[idx] = 0.0` into a float array (memory.py:489).
+
+    `gate_seeded`, `rekey_snap` and `gen` ARE THE THREE PIECES OF STATE THE TWO CADENCED BODIES NEED
+    AND THE OLD RECORD HAD NOWHERE TO PUT. `gate_seeded` says whether gate_theta has been initialised
+    from this run (the quantile arm seeds from the first batch, the additive arm from MEM_WRITE_GATE)
+    and it is CHECKPOINTED, because a resumed run that re-seeds writes against a different admission
+    bar than the one it stopped with -- ISSUES:537, the same defect gate_theta itself was restored
+    for. `rekey_snap` is the snapshot job 2 walks, held so that entries written DURING a pass cannot
+    shift the indexing out from under it; it is deliberately NOT checkpointed and is retaken after a
+    resume. `gen` is ONE torch.Generator per store, built once here: spine/rng.py::Rng.torch_generator
+    RE-SEEDS A FRESH GENERATOR ON EVERY CALL, so calling it per write would draw the identical victim
+    pool every time -- a sampler that samples one sample.
     """
 
-    __slots__ = ("keys", "tok", "src", "pos", "ctx", "own", "active", "prob", "use", "last",
-                 "born", "selfcon", "recon", "tick", "gate_theta", "n_written", "rekey_cursor",
-                 "nsrc", "nsrc_max", "live_src", "capacity", "quota", "owners", "key_dim",
-                 "lm_kind", "counters", "gates", "rng")
+    __slots__ = ("keys", "tok", "src", "pos", "ctx", "ctx_w", "own", "active", "prob", "use",
+                 "last", "born", "selfcon", "recon", "tick", "gate_theta", "gate_seeded",
+                 "n_written", "rekey_cursor", "rekey_snap", "nsrc", "nsrc_max", "live_src",
+                 "capacity", "quota", "owners", "key_dim", "lm_kind", "counters", "gates", "rng",
+                 "gen")
 
     def __init__(self, *, capacity, quota, owners, key_dim, device, rng, lm_kind):
         z = lambda *shape, dtype=torch.float32: torch.zeros(*shape, dtype=dtype, device=device)
@@ -109,11 +156,14 @@ class Store:
         self.tok = z(capacity, dtype=torch.long)
         self.src = z(capacity, dtype=torch.long)
         self.pos = z(capacity, dtype=torch.long)
-        self.ctx = z(capacity, dtype=torch.long)
+        # WIDTH 0 UNTIL THE FIRST WRITE. See the class docstring: the width is MEM_KEY_WIN and
+        # open_store may not read it, so `write` grows this array once, the way the census grows.
+        self.ctx_w = 0
+        self.ctx = z(capacity, 0, dtype=torch.long)
         self.own = z(capacity, dtype=torch.long)
         self.active = z(capacity, dtype=torch.bool)
         self.prob = z(capacity, dtype=torch.bool)
-        self.use = z(capacity, dtype=torch.long)
+        self.use = z(capacity)                         # DECAYED RETRIEVAL MASS -- float, see above
         self.last = z(capacity, dtype=torch.long)      # RETRIEVAL tick
         self.born = z(capacity, dtype=torch.long)      # WRITE tick -- see the class docstring
         self.selfcon = z(capacity)
@@ -122,13 +172,26 @@ class Store:
             self.own[b * quota:(b + 1) * quota] = b
         self.tick = 0
         self.gate_theta = 0.0
+        # FALSE MEANS gate_theta HAS NEVER BEEN SET BY THIS STORE, which is a different statement
+        # from "it is 0.0" -- 0.0 is a legal admission bar (write_gate=0.0 stores every candidate).
+        # The quantile arm seeds it from the first batch it sees and the additive arm from
+        # MEM_WRITE_GATE; a resume must not do either again, so this flag is checkpointed beside
+        # gate_theta itself.
+        self.gate_seeded = False
         self.n_written = 0
         self.rekey_cursor = 0
+        self.rekey_snap = None          # the re-encode snapshot; NOT checkpointed, retaken on resume
         self.nsrc = None                # the census; sized by open_store, GROWS on demand
         self.nsrc_max = 0
         self.live_src = 0
         self.counters = {}
         self.gates = ()
+        # ONE GENERATOR PER STORE, DRAWN ONCE. Rng.torch_generator() manual_seeds a FRESH generator
+        # from the subsystem name on every call, so a per-write call would hand the victim sampler
+        # the same draw sequence every time -- measured as the identical candidate pool on two
+        # consecutive calls. Every stochastic choice in this package comes off this stream and never
+        # off the global torch one.
+        self.gen = rng.torch_generator(device=device)
 
     def _block_of(self, row):
         return int(row) // self.quota
@@ -368,6 +431,17 @@ def _restore_by_block(store, blob):
     """
     rows = blob.get("rows") or []
     restored, refused = 0, 0
+    # THE STORED CONTEXT WINDOW COMES BACK AT THE WIDTH IT WAS SAVED AT, and the width is carried in
+    # the blob rather than re-derived from this run's MEM_KEY_WIN. Re-deriving it would silently
+    # reshape somebody else's tokens: a run saved at key_win=8 and resumed at key_win=16 would have
+    # its 8-token contexts read as half of a 16-token one, and the rekey would then re-encode
+    # nonsense into the live key space. memory/api.py::write is where a width change is REFUSED, by
+    # name, because that is where MEM_KEY_WIN may be read.
+    _cw = int(blob.get("ctx_w", 0))
+    if _cw != int(store.ctx_w):
+        store.ctx_w = _cw
+        store.ctx = torch.zeros(int(store.capacity), _cw, dtype=torch.long,
+                                device=store.keys.device)
     for r in rows:
         b = int(r.get("own", -1))
         if not 0 <= b < store.owners:
@@ -379,12 +453,25 @@ def _restore_by_block(store, blob):
             refused += 1
             continue
         store.keys[free] = torch.as_tensor(r["key"], device=store.keys.device)
-        for field in ("tok", "src", "pos", "ctx"):
+        for field in ("tok", "src", "pos"):
             getattr(store, field)[free] = int(r.get(field, 0))
+        # `ctx` IS A ROW, NOT A SCALAR, and it is restored only at the width this blob declares. A
+        # row of the wrong length is a geometry disagreement inside one file and is refused with the
+        # same argument as the owner-block refusal above: a restore that quietly keeps part of an
+        # entry makes what survives a resume a function of what fitted.
+        if store.ctx_w:
+            _c = r.get("ctx") or []
+            if len(_c) != store.ctx_w:
+                raise StoreError(
+                    f"a checkpoint entry carries a {len(_c)}-token context window against the "
+                    f"blob's declared ctx_w={store.ctx_w}. The stored window is what "
+                    f"MEM.maintain re-encodes keys from, so a partial one is a key in a space "
+                    f"nothing else is in.")
+            store.ctx[free] = torch.as_tensor(_c, dtype=torch.long, device=store.ctx.device)
         store.own[free] = b
         store.active[free] = True
         store.prob[free] = bool(r.get("prob", False))
-        store.use[free] = int(r.get("use", 0))
+        store.use[free] = float(r.get("use", 0.0))   # DECAYED MASS -- see Store's docstring
         store.last[free] = int(r.get("last", 0))
         store.born[free] = int(r.get("born", 0))
         # `recon` AND `selfcon` ARE TWO OF THE FOUR CHECKPOINTED ADDITIONS docs/04_CONTRACT.md
@@ -415,6 +502,13 @@ def _restore_by_block(store, blob):
             f"project is measured across.")
     store.tick = int(blob.get("tick", 0))
     store.n_written = int(blob.get("n_written", 0))
+    # THE REKEY CURSOR WAS SAVED AND NEVER READ BACK until the rekey was written: state_dict has
+    # carried `rekey_cursor` since it was written, and nothing on this side assigned it, so every
+    # resume restarted the amortized re-encode at row 0 and the tail of the store waited a whole
+    # pass longer than the operator asked for. The snapshot it indexes is NOT checkpointed -- it is
+    # retaken on the first maintain after a resume, and MEM.maintain clamps this cursor into the
+    # retaken snapshot rather than trusting a number taken against a different one.
+    store.rekey_cursor = int(blob.get("rekey_cursor", 0))
     # nsrc_max IS CARRIED FORWARD from the blob rather than re-derived from the restored counts:
     # re-deriving it forgets every source that was evicted before the save.
     store.nsrc_max = int(blob.get("nsrc_max", int(store.nsrc.max()) if store.nsrc.numel() else 0))
@@ -428,7 +522,487 @@ def _restore_by_block(store, blob):
     # numbers are measured across. Restored from the BLOB TOP LEVEL, not per-row: it is a store-wide
     # scalar, alongside tick/n_written/nsrc_max above.
     store.gate_theta = float(blob.get("gate_theta", 0.0))
+    # AND THE FLAG THAT SAYS THE RESTORED gate_theta IS A MEASUREMENT AND NOT A DEFAULT. Restoring
+    # the number without it leaves the quantile arm free to re-seed from the first batch after the
+    # resume and the additive arm free to reset to MEM_WRITE_GATE, which puts the run back on a
+    # different admission bar than the one it stopped with -- the whole of ISSUES:537, arriving one
+    # field later. A blob written before this field existed reads as "not seeded", which is the
+    # conservative arm: it re-seeds once, exactly as that tree did.
+    store.gate_seeded = bool(blob.get("gate_seeded", False))
     return restored, refused
+
+
+
+
+# ==================================================================================================
+# THE SURPRISE CONTROLLER'S THREE NUMBERS, WHICH ARE NOT LEVERS AND SAY SO HERE
+# ==================================================================================================
+
+GATE_STEP, GATE_FLOOR, GATE_CEIL = 0.02, 0.0, 0.95
+"""The step, floor and ceiling of the non-fixed write gates. Module constants, with no env name.
+
+THEY ARE THE SHIPPED FORM OF THE TREE THIS IS PORTED FROM -- memory.py:24, `gate_step=0.02,
+gate_floor=0.0, gate_ceil=0.95` -- and they are NOT levers because the census did not carry them:
+memory/levers.py's own accounting is "21 rename + 3 keep -> 24 levers declared, 8 drop", and MEM_GATE
+is one of the eight. Adding three environment names here would be minting levers the census refused,
+in the file that is supposed to implement its decision.
+
+WHAT EACH ONE IS FOR, so a reader can judge the numbers rather than the names. GATE_CEIL is the one
+with a measurement behind it: with V=16384 and an undertrained model, surprise is 1 - p_model and
+sits near 1.0 almost everywhere, so the additive controller drives gate_theta straight INTO the
+ceiling -- the kept fraction ran 1.00 / 0.93 / 0.80 against a requested 0.12 and the store filled by
+step ~831 instead of ~6510 (memory/levers.py::MEMLevers, at its `write_gate` declaration). The ceiling is what stops it starving
+writes entirely; it is not what makes the arm work, and the quantile arm exists because nothing does.
+GATE_STEP is both the controller's step and the quantile arm's EMA rate, which is the one place this
+port differs in shape from nothing -- the frozen tree used the same `gate_step` field for both
+(memory.py:145, :150), and splitting it here would be a second number nobody measured.
+
+TURNING THEM IS A CODE EDIT, and that is the same standing REFUSE_NEGATIVE_PERIOD above has: a
+lever per number would be three more environment names for a controller the shipped configuration
+does not even select (MEM_WRITE_MODE defaults to "fixed", so at the defaults these three are read
+by nothing -- the `mem.write_target` Gate declared in write() prints exactly that).
+"""
+
+
+@dataclasses.dataclass(frozen=True)
+class WriteReceipt:
+    """What one flush's write did, in the eight numbers this module's header declares.
+
+    FROZEN, for the reason train/api.py freezes Tick and spine/loop.py freezes RunResult: a caller
+    that can write to this can change what the run reported.
+
+    `offered` and `committed` ARE THE PAIR, and neither means anything alone. offered is every
+    candidate row the flush presented, committed is what is in the store at the end of it, and the
+    RATIO is the kept fraction the adaptive and quantile arms claim to control -- the number that ran
+    1.00 / 0.93 / 0.80 against a requested 0.12 while the report printed the request. `kept` is the
+    middle term the pair cannot show: what survived the surprise gate BEFORE the per-block quota
+    truncated it, so `kept - committed` is the truncation and `offered - kept` is the gate.
+
+    `gate_theta` IS ON THE RECEIPT because on two of the three arms it is the thing that decided, and
+    it moves every window. A receipt that printed the kept fraction without the bar it was taken
+    against would be the same claim-without-arithmetic spine/gate.py::Gate exists to refuse.
+    """
+    offered: int
+    kept: int
+    committed: int
+    evicted_free: int
+    evicted_probation: int
+    evicted_main: int
+    floor_blocked: int
+    gate_theta: float
+
+
+def _bump(store, key, n=1):
+    """One counter, one place. `store.counters` is the DID IT FIRE surface MEM.census passes through."""
+    store.counters[key] = store.counters.get(key, 0) + n
+
+
+def _declare_gates(store, gates):
+    """Put these gates on the store, replacing any of the SAME NAME and keeping every other one.
+
+    THE GATES ARE NOT ALL DECLARED AT BUILD AND THIS IS WHY. G4 asks for a gate to be declared where
+    its arm is decided; for MEM that is mostly `open_store`, and the mem.key_depth gate is there. It
+    cannot be ALL of them: open_store's frozen LEVERS READ line names quota, owners, key_src and
+    key_depth and states in as many words that the other ten "were never read by THIS entry point's
+    body". write_mode, write_target, evict, use_decay, probe_every and rekey_every are six of those
+    ten, so declaring their arms at build would mean open_store reading six levers its own contract
+    says it does not read -- trading a true sentence about ownership for an earlier line in a report.
+    They are declared at the first read of the lever instead, which is inside write and maintain, and
+    REFRESHED on every call so the verdict is this run's and not the first flush's.
+    """
+    names = {g.name for g in gates}
+    store.gates = tuple(g for g in store.gates if g.name not in names) + tuple(gates)
+
+
+def _require_rows(name, t, shape, what):
+    """A shape refusal that names the argument, both shapes and what the argument is FOR.
+
+    NOT A RESHAPE AND NOT A BROADCAST. Every one of write's six per-row arguments is a different
+    quantity about the same rows, and the two that are per-WINDOW (sources, owners) differ from the
+    four that are per-POSITION by exactly one dimension -- so a silently broadcast argument writes
+    every entry of a flush with window 0's domain id, which is a provenance error the per-source
+    floor then protects the wrong source against.
+    """
+    if not torch.is_tensor(t) or tuple(t.shape) != tuple(shape):
+        got = tuple(t.shape) if torch.is_tensor(t) else type(t).__name__
+        raise StoreError(
+            f"MEM.write: `{name}` arrived as {got} where {tuple(shape)} is required -- {what}. "
+            f"Refused rather than reshaped: the six per-row arguments are six different quantities "
+            f"about the same rows, and a broadcast one writes a whole flush under one window's "
+            f"provenance.")
+
+
+def _key_windows(contexts, key_win):
+    """(B, L) token ids -> (B, L, key_win): for each position, the key_win positions ENDING at it.
+
+    THE SPELLING IS THE FROZEN TREE'S, verbatim in shape: `_windows(x, W) = F.pad(x, (W - 1, 0))
+    .unfold(1, W, 1)` (archive/garry/self_organize.py:344). The left pad is what makes the first
+    positions of a window keyable at all; padding with token id 0 is the same choice that tree made
+    and is visible in the stored context, which is what `ctx` being a real window buys.
+    """
+    return torch.nn.functional.pad(contexts, (key_win - 1, 0)).unfold(1, key_win, 1)
+
+
+def _encode_keys(key_fn, rows, key_depth):
+    """(N, key_win) token ids -> (N, key_dim) unit-norm keys, through the caller's encoder.
+
+    `n_layers` IS THE SPELLING AND `depth` IS NOT. maintain's docstring writes the call as
+    `key_fn(..., depth=key_depth)`; the callable is LM.encode partially applied
+    (spine/compose.py::_key_fn, `lambda x, **kw: lm_api.encode(lm, model, x, **kw)`) and its keyword
+    is `n_layers` -- docs/04_CONTRACT.md's LM section spells the join `n_layers <- MEM's key_depth`.
+    Written once here so the write path and the rekey cannot disagree about it.
+
+    0 IS "THE FULL STACK" AND IS PASSED AS None, not as 0. MEM_KEY_DEPTH's own help says 0 means the
+    whole stack; passing the 0 through would ask the encoder for zero blocks, which is the shape of
+    every off-by-a-sentinel this file refuses elsewhere.
+
+    UNDER no_grad, AND THE LAST POSITION IS THE KEY. The frozen tree's `_model_key(win) =
+    model.encode(win)[:, -1]` (archive/garry/self_organize.py:347) -- the key is what the encoder
+    makes of the whole window, read at the position the window ends on. Gradients have no business
+    here: a stored key is data, and keeping the graph alive would hold the whole flush's activations
+    for as long as the entry lives.
+    """
+    with torch.no_grad():
+        h = key_fn(rows, n_layers=(key_depth if key_depth > 0 else None))
+        return torch.nn.functional.normalize(h[:, -1].detach().float(), dim=-1)
+
+
+def _gate_window(store, mode, write_gate, target, surprise):
+    """One window's surprise -> its keep mask, ADVANCING gate_theta. Called once per window, in order.
+
+    THE ORDER IS THE MECHANISM. gate_theta is a controller state, so the sequence of windows it sees
+    is what it converges on; running the gate for every window first, before any encode, is what
+    makes the trajectory independent of the batch width (memory.py:127-130, the frozen `_gate`).
+
+    THE FOURTH ARM IS A RAISE AND NOT A FALL-THROUGH. MEM_WRITE_MODE carries choices=, so an
+    unrecognised value is a startup LeverError and cannot reach here today -- but the defect this
+    lever is named in is precisely a body whose `else` swallowed an arm it did not recognise
+    (WRITE_ADAPTIVE and WRITE_QUANTILE encoded three rules in two booleans and the shipped
+    combination ran the fixed threshold the quantile gate was written to replace). A fourth choice
+    added to the lever without a body here raises instead of silently writing on the fixed gate.
+    """
+    sd = surprise.detach().float().flatten()
+    if mode == "quantile":
+        # SCALE-FREE, WHICH THE ADDITIVE ARM IS NOT. An absolute threshold cannot track a
+        # distribution squeezed against 1.0; a quantile hits the target by construction.
+        q = float(torch.quantile(sd, min(1.0, max(0.0, 1.0 - target))))
+        if not store.gate_seeded:
+            # SEEDED FROM THE FIRST BATCH, not from write_gate: the quantile arm's whole claim is
+            # that it does not need a number anybody typed.
+            store.gate_theta, store.gate_seeded = q, True
+        else:
+            store.gate_theta = (1.0 - GATE_STEP) * store.gate_theta + GATE_STEP * q
+        return sd > store.gate_theta
+    if mode == "adaptive":
+        if not store.gate_seeded:
+            store.gate_theta, store.gate_seeded = float(write_gate), True
+        keep = sd > store.gate_theta
+        fired = float(keep.float().mean())
+        store.gate_theta = min(GATE_CEIL, max(GATE_FLOOR,
+                                              store.gate_theta + GATE_STEP * (fired - target)))
+        return keep
+    if mode == "fixed":
+        # `>=`, NOT `>`, and it is the difference between a documented arm and a dead one:
+        # MEM_WRITE_GATE=0.0 is declared as store-every-candidate, and surprise can be exactly 0.
+        return sd >= write_gate
+    raise LeverError(
+        f"MEM_WRITE_MODE={mode!r} has no body in memory/api.py::write. The lever declares "
+        f"choices=('fixed', 'adaptive', 'quantile') and this function implements those three; a "
+        f"fourth arm added to the declaration without one here would otherwise fall into the fixed "
+        f"threshold the other two exist to replace, which is the defect MEM_WRITE_MODE is named in.")
+
+
+def _unprotected(store, cand, need, share):
+    """Drop candidates whose source is at or below its reserved floor. -> (cand, blocked, deadlock).
+
+    WHY A RANKING FUNCTION CANNOT REPLACE IT. Eviction ranked on retrieval asks "what is the CURRENT
+    stream asking for", and for a domain that is not currently streaming the answer is nothing BY
+    CONSTRUCTION: no query resembles it, its clock never advances, it is the victim every time.
+    Measured twice in the tree this is ported from, once under write-recency and once under
+    retrieval-recency, with the same outcome: after a Python run, English held 0 of 200,000 entries.
+
+    NEVER DEADLOCKS. If protection would leave nothing to evict -- every source at its floor, which
+    is what a full, balanced store looks like -- the filter is dropped FOR THIS CALL and counted. A
+    store that cannot evict is worse than one that evicts something protected.
+
+    THE DIVISOR IS LIVE STATE AND HERE IT IS A COUNT. store.live_src is what MEM.apply_domain_plan
+    sets from DOM's `live_sources`; until it has run it is the number of sources HOLDING ENTRIES,
+    which is the frozen tree's documented `live_src=None` arm ("no domain information supplied and
+    everything with entries is eligible"). WHAT THIS CANNOT DO, because the Store keeps a count and
+    not a SET: it cannot make an ORPHANED source ineligible. On a measured run 125 source ids held
+    entries against 27 live domains, so a floor divided by the wrong one of those gave each domain
+    800 slots instead of the ~3300 it was due -- the divisor here is right the moment DOM has spoken,
+    but a dead source that still holds entries is still protected by it. Closing that needs a live-id
+    SET on the Store, written by apply_domain_plan, which is a stub.
+    """
+    if share <= 0.0:
+        # THE SUPERSEDED RULE IS STILL REACHABLE, which is what D3 asks for: src_share=0 disarms the
+        # reservoir and leaves "pressure is a signal, not a wall" as the selectable arm.
+        return cand, 0, False
+    has = store.nsrc > 0
+    live = int(store.live_src) if int(store.live_src) > 0 else int(has.sum())
+    if live <= 1:
+        return cand, 0, False                      # one source owns everything anyway
+    floor = int(share * int(store.capacity) / live)
+    if floor <= 0:
+        return cand, 0, False
+    prot = has & (store.nsrc <= floor)
+    cs = store.src[cand].clamp(min=0, max=store.nsrc.numel() - 1)
+    # src < 0 IS "NO PROVENANCE" AND IS NEVER PROTECTED. -2 is the reserved id for synthetic
+    # eval-injected entries, so the wrongness harness can never collide with a real domain (H30).
+    keep = (~prot[cs]) & (store.src[cand] >= 0)
+    out = cand[keep]
+    blocked = int(cand.numel() - out.numel())
+    if int(out.numel()) >= need:
+        return out, blocked, False
+    return cand, blocked, True
+
+
+def _victims(store, occ, need, evict, prob_frac, quota, share, over_budget):
+    """Choose `need` occupied slots of ONE owner block to evict.
+
+    -> (idx, branch, floor_blocked, deadlock). `branch` is "probation" or "main", which is the
+    partition MEM.census's `pressure` is main/(main + prob) over.
+
+    RANKED OVER OCCUPIED ROWS ONLY. Ranking the whole block puts the never-stamped free rows first --
+    their clock reads 0, the oldest possible -- so the `need` oldest were exactly the free rows the
+    caller had already taken, and `cat([free, victims])` returned indices of which only free.numel()
+    were distinct. Every duplicate is a row the caller believed it stored AND a double decrement of
+    the displaced source's census, which is how a per-source count reaches a NEGATIVE number and
+    prints as "s779 (-2 now, peaked 111230)".
+
+    THE POOL IS SAMPLED, UNIQUE'D AND THEN RE-PERMUTED, and the last step is not decoration.
+    torch.unique SORTS, and topk resolves ties toward the EARLIER index, so a sorted pool makes
+    low-numbered slots the systematic loser of every tie -- and under evict="usage" with no
+    retrievals every `use` is 0, so ties are the common case and not the edge one. Arbitrary is what
+    that ranking has to stay.
+
+    PROBATION DECIDES WHICH POOL, THE FLOOR DECIDES WHO INSIDE IT, AND BOTH ARE ASKED. The first
+    version of this in the frozen tree narrowed to probation and went straight to the ranking, so a
+    source at its floor lost its entries anyway as long as they were unpromoted -- the two mechanisms
+    cancelled and the domain-switch test went from 49 survivors back to 0.
+    """
+    dev = occ.device
+    n_occ = int(occ.numel())
+    ns = int(min(n_occ, max(8 * need, 64)))
+    draw = torch.randint(0, n_occ, (ns,), generator=store.gen, device=dev)
+    cand = torch.unique(occ[draw])
+    cand = cand[torch.randperm(int(cand.numel()), generator=store.gen, device=dev)]
+
+    branch = "main"
+    if over_budget:
+        pc = cand[store.prob[cand]]
+        if int(pc.numel()) < need:
+            # THE SAMPLE WAS THIN -- take the region itself, oldest first, rather than falling out
+            # of the probation branch because a random draw happened to miss it.
+            allp = occ[store.prob[occ]]
+            pc = allp[store.born[allp].argsort()] if int(allp.numel()) else pc
+        if int(pc.numel()) >= need:
+            cand, branch = pc, "probation"
+
+    cand, blocked, deadlock = _unprotected(store, cand, need, share)
+
+    # THE THREE CLOCKS, AND WHICH ONE RANKS IS THE WHOLE OF MEM_EVICT.
+    #   usage    -> `use`, decayed retrieval mass (LFU).
+    #   lru      -> `last`, the RETRIEVAL tick. 0 for everything that has never been retrieved.
+    #   recency  -> `born`, write order. This is the frozen tree's circular overwrite expressed
+    #               without a pointer: a block written in order and swept in order is the same
+    #               victim sequence, and a pointer would be a second piece of unsaved state that a
+    #               resume restarts from 0 anyway. The difference the two spellings have is on a
+    #               block whose rows were freed out of order, where born-order is the more defensible
+    #               of the two -- it still means "oldest write dies", which is what the lever says.
+    # INSIDE PROBATION THE RANKING IS ALWAYS `born`, whatever MEM_EVICT says, and that is
+    # probation_frac's own words: eviction narrows to "probation's own oldest". It is not a
+    # substitution of MEM_EVICT's signal either -- every probation member is by definition
+    # never-retrieved, so `use` and `last` are 0 across the whole pool and ranking on either is an
+    # all-ties ranking decided by the permutation above.
+    if branch == "probation" or evict == "recency":
+        sig = store.born[cand]
+    elif evict == "usage":
+        sig = store.use[cand]
+    else:
+        sig = store.last[cand]
+    kk = int(min(need, int(cand.numel())))
+    idx = cand[sig.topk(kk, largest=False).indices]
+
+    if int(idx.numel()) < need:
+        # THE PAD MUST NOT RE-TAKE WHAT THE POOL ALREADY TOOK. Walk the block's occupied rows in
+        # write order and keep only what is not already claimed.
+        walk = occ[store.born[occ].argsort()]
+        pad = walk[~torch.isin(walk, idx)][:need - int(idx.numel())]
+        idx = torch.cat([idx, pad]) if int(pad.numel()) else idx
+    return idx, branch, blocked, deadlock
+
+
+
+
+def _write_gates(store, mode, fixed_gate, target, evict, decay, decay_every, prob_frac, quota):
+    """The three arms write() decides, DECLARED WHERE THE LEVER IS READ and re-stated at every call.
+
+    NOT AT open_store, and _declare_gates carries the full argument: open_store's frozen LEVERS READ
+    line names four levers and says the other ten are read by write/read/maintain/judge, so putting
+    these there would make that sentence false to buy an earlier line in a report.
+
+    CALLED AT write's RETURNS AND NOT AT ITS HEAD. A gate declared before the work reports the
+    PREVIOUS call: the first driven flush evicted 128 entries out of probation and the gate declared
+    at the head of that same call printed "armed, did not fire (0 vs 0)" -- a verdict about a
+    mechanism that was running while the line was being written. Measured, on the first two-flush
+    drive of this body.
+    """
+    offered = int(store.counters.get("store.n_writes_offered", 0))
+    committed = int(store.counters.get("store.n_writes_committed", 0))
+    n_prob = int(store.counters.get("store.n_evict_probation", 0))
+    written = int(store.n_written)
+    _declare_gates(store, (
+        # THE KEPT FRACTION AGAINST THE SETPOINT -- the number the two controller arms claim to
+        # control, and the one that ran 1.00 / 0.93 / 0.80 against a requested 0.12 while the report
+        # printed the request. Under "fixed" the setpoint controls nothing, and a bare 0 on this line
+        # would read as a controller that ran and chose not to move.
+        Gate("mem.write_target", committed >= target * offered,
+             round(committed / offered, 4) if offered else 0.0, target)
+        if mode != "fixed" else
+        Gate("mem.write_target", False, target, target, reachable=False,
+             reason=f"MEM_WRITE_MODE={mode!r} admits on MEM_WRITE_GATE={fixed_gate} alone, so this "
+                    f"setpoint selects nothing and neither do GATE_STEP, GATE_FLOOR or GATE_CEIL. "
+                    f"The kept fraction is still measured -- "
+                    f"n_writes_committed/n_writes_offered = {committed}/{offered} -- it is simply "
+                    f"not controlled by anything."),
+        # THE DECAY'S OWN ARITHMETIC: entries written against the interval. At the shipped 20000 a
+        # short run cannot reach it, and "0 decays" then means "the interval has not elapsed", which
+        # is a different fact from "the multiplier is 1.0".
+        Gate("mem.use_decay", written >= decay_every, written, decay_every,
+             reason=f"MEM_USE_DECAY={decay} is the multiplier and MEM_USE_DECAY_EVERY={decay_every} "
+                    f"is the interval, counted in ENTRIES WRITTEN and not in steps"
+                    + ("" if evict == "usage" else
+                       f"; MEM_EVICT={evict!r} ranks victims on "
+                       f"{'born (write order)' if evict == 'recency' else 'last (retrieval tick)'}, "
+                       f"so `use` decides no eviction here and the decay changes nothing a victim is "
+                       f"chosen by"))
+        if decay < 1.0 else
+        Gate("mem.use_decay", False, decay, 1.0, reachable=False,
+             reason=f"MEM_USE_DECAY={decay} is at or above 1.0, and the multiplication is INSIDE the "
+                    f"`< 1.0` test -- so the rule goes INERT and `use` stays a lifetime total. It "
+                    f"does not run backwards and nothing compounds; the immortal entry a lifetime "
+                    f"total can produce is reachable here, by the decay never running."),
+        # SCAN RESISTANCE: did eviction ever narrow to the never-retrieved region.
+        Gate("mem.probation", n_prob > 0, n_prob, 0,
+             reason=f"the narrowing is a PER-BLOCK test against MEM_PROBATION_FRAC={prob_frac}, "
+                    f"which at quota={quota} is {prob_frac * quota:.1f} entries inside a block and "
+                    f"not {prob_frac * int(store.capacity):.0f} across the store -- the factor is "
+                    f"the block count. It cannot narrow before a block is full, and nothing leaves "
+                    f"probation until a retrieval promotes it: MEM.read is a stub, so today every "
+                    f"eviction is a probation eviction and MEM.census's `pressure`, which is "
+                    f"main/(main+prob) over these branches, is exactly 0 by construction."),
+    ))
+
+
+def _windows_of(now, where):
+    """`now` as a plain count of WINDOWS, refusing any other clock kind BY NAME.
+
+    int() ON A Clock IS SILENT ACROSS KINDS -- int(Steps(5)) is 5 -- which is the one hole
+    spine/units.py cannot close, because __int__ has to exist for range() and slicing. MEM's two
+    internal cadences are Windows and are compared against this number, so a Flushes handed in here
+    would fire them at the flush rate under a windows label: at OPT_BATCH_WINDOWS=64 that is the
+    probe running 64 times as often as the operator asked, with nothing in any report saying so.
+    """
+    if isinstance(now, U.Clock) and not isinstance(now, U.Windows):
+        raise U.UnitError(
+            f"{where}: `now` arrived as {type(now).__name__} and every clock this package compares "
+            f"it against is WINDOWS -- MEM_PROBE_EVERY and MEM_REKEY_EVERY both declare U.Windows, "
+            f"and memory/api.py::maintain's contract is that no conversion is performed or needed. "
+            f"If this conversion is real, name it in spine.derive and call it.")
+    return int(now)
+
+
+def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_frac, share, born):
+    """Put one window's already-gated, already-keyed rows into ONE owner block.
+
+    -> (committed, free_used, evicted_probation, evicted_main, floor_blocked, deadlock).
+
+    ONE WRITE PATH AND NO `if blocks > 1:`. The owner NARROWS the candidate slot set to its block and
+    probation, the floor and the ranking all run INSIDE that set; with blocks == 1 the block is the
+    store. The tree this is ported from had two bodies -- a per-owner arm that returned before
+    probation, the floor and the pressure counters, and a global arm that ran all three -- while the
+    report printed all three either way (H31). Two code paths are two chances to disagree, and this
+    one disagreed.
+    """
+    dev = store.keys.device
+    rows = store._rows_of(o)
+    blk = torch.arange(rows.start, rows.stop, device=dev)
+    act = store.active[blk]
+    free, occ = blk[~act], blk[act]
+    m = int(keys.shape[0])
+    free_used = int(min(m, int(free.numel())))
+    branch, blocked, deadlock = None, 0, False
+    if m <= int(free.numel()):
+        idx = free[:m]
+    else:
+        need = m - int(free.numel())
+        # PROBATION IS A PER-BLOCK PREDICATE AND THIS LINE IS THAT SENTENCE. At the shipped
+        # d_capacity=8192 / d_owner_blocks=64 / quota=128 a 0.10 share is 12.8 entries INSIDE THIS
+        # BLOCK, not 819 across the store -- a factor of 64 in when eviction narrows. The store-wide
+        # `probation_share` MEM.census reports is an aggregate over the same flag and is NOT this
+        # test (Q-MEM-4, settled 2026-09-02).
+        over = int(store.prob[occ].sum()) > prob_frac * quota
+        vic, branch, blocked, deadlock = _victims(store, occ, need, evict, prob_frac, quota,
+                                                  share, over)
+        idx = torch.cat([free, vic]) if int(free.numel()) else vic
+
+    # DUPLICATES ARE REFUSED, NOT COLLAPSED. Index assignment collapses a repeat silently -- keys[idx]
+    # with idx naming slot j twice writes the later row and drops the earlier -- so the store reports
+    # m writes and holds fewer. The damage is in the accounting: the census below decrements the
+    # displaced owner ONCE PER OCCURRENCE while crediting the new source idx.numel() times, which
+    # overcharges the displaced source and drives its count NEGATIVE (measured drift 9 in 200). The
+    # two known producers are fixed above; this is the invariant so a third cannot be silent.
+    if int(idx.numel()) != int(torch.unique(idx).numel()):
+        _bump(store, "store.n_dup_refused", int(idx.numel()) - int(torch.unique(idx).numel()))
+        raise StoreError(
+            f"MEM.write named {int(idx.numel()) - int(torch.unique(idx).numel())} slot(s) twice in "
+            f"one commit into owner block {o} (rows {rows.start}..{rows.stop - 1}). Refused rather "
+            f"than collapsed: a collapse double-decrements the displaced source's census and drives "
+            f"the per-source count -- the floor's only input -- negative, which is how a report "
+            f"comes to print a source holding minus two entries.")
+
+    # SOURCE ACCOUNTING BEFORE THE OVERWRITE: the slots being taken still hold their old owners.
+    old = store.src[idx]
+    oa = old[(old >= 0) & store.active[idx]]
+    if int(oa.numel()):
+        store.nsrc.index_add_(0, oa.clamp(min=0, max=store.nsrc.numel() - 1),
+                              torch.full((int(oa.numel()),), -1, dtype=store.nsrc.dtype, device=dev))
+        neg = int((store.nsrc < 0).sum())
+        if neg:
+            # A COUNT OF ENTRIES CANNOT BE NEGATIVE, and if this clamp bites the incremental census
+            # has already drifted from what `src & active` says. Clamping alone would hide the next
+            # drift, so the bite is COUNTED and MEM.census(reconcile=True) is what repairs it.
+            _bump(store, "store.n_src_underflow", neg)
+            store.nsrc.clamp_(min=0)
+    if src >= int(store.nsrc.numel()):
+        # THE CENSUS GROWS AND IS NEVER CLAMPED. Clamping ids into a fixed-width table is the exact
+        # pattern that re-broke this at the scale it was written for: the table was 64 rows wide on
+        # every default run while a real one carried 125 source ids.
+        grown = torch.zeros(src + 1, dtype=store.nsrc.dtype, device=store.nsrc.device)
+        grown[:store.nsrc.numel()] = store.nsrc
+        store.nsrc = grown
+    if src >= 0:
+        store.nsrc[src] += m
+        store.nsrc_max = max(int(store.nsrc_max), int(store.nsrc[src]))
+
+    store.keys[idx] = keys
+    store.tok[idx] = toks.to(dev)
+    store.src[idx] = int(src)
+    store.pos[idx] = poss.to(dev)                  # WHERE it came from, in TRUE BYTE OFFSETS
+    if store.ctx_w:
+        store.ctx[idx] = ctxs.to(dev)              # the window MEM.maintain re-encodes from
+    store.own[idx] = int(o)
+    store.active[idx] = True
+    store.prob[idx] = True                         # every write lands on probation; retrieval promotes
+    store.use[idx] = 0.0
+    store.last[idx] = 0                            # NEVER RETRIEVED -- see Store's docstring
+    store.born[idx] = int(born)
+    store.selfcon[idx] = -1.0                      # new entry: self-consistency not yet checked
+    store.recon[idx] = -1.0                        # new entry: reconstruction not yet checked
+    return m, free_used, (m if branch == "probation" else 0), \
+        (m if branch == "main" else 0), blocked, deadlock
 
 
 def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn,
@@ -481,9 +1055,186 @@ def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, po
                  n_writes_by_block (a block with 0 writes is the owner fold showing)
     """
     mem = mem.owned_by("MEM")
-    raise NotImplementedError(
-        "MEM.write: P4 (memory) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section MEM.")
+    mode, fixed_gate, target = str(mem.write_mode), float(mem.write_gate), float(mem.write_target)
+    evict, decay, decay_every = str(mem.evict), float(mem.use_decay), int(mem.use_decay_every)
+    prob_frac, share, quota = float(mem.probation_frac), float(mem.src_share), int(mem.quota)
+    kwin, kdepth, ksrc = int(mem.key_win), int(mem.key_depth), str(mem.key_src)
+
+    if ksrc != "model":
+        # DECLARED AND NOT BUILT, refused at the point of use and not with NotImplementedError: the
+        # frozen-key arm is a real configuration (memory/levers.py calls it "the null for every claim
+        # memory makes") and its encoder does not exist in this tree. `key_fn` is LM.encode partially
+        # applied; there is no byte-statistic table anywhere in src/, no lever that sizes one and no
+        # argument that supplies one. Writing model keys under MEM_KEY_SRC="frozen" would be the
+        # silent-else this lever is named in (KEY_SRC=Model fell into the else and ran the frozen
+        # baseline with no error), wearing the other sign.
+        raise NotBuilt(
+            f"MEM_KEY_SRC={ksrc!r}: the frozen byte-statistic key table is DECLARED and NOT BUILT in "
+            f"this tree. Nothing in src/ computes one, no lever sizes it and no argument carries "
+            f"one -- `key_fn` is the live model's encoder, which is the other arm. Writing with it "
+            f"anyway would put model keys in a store the operator asked to key by bytes, which is "
+            f"the exact silent substitution MEM_KEY_SRC's choices= exists to refuse. What closes "
+            f"this: a frozen encoder on MEM's own surface, or a second callable argument beside "
+            f"key_fn -- both are signature changes and therefore the owner's call.")
+
+    # ==============================================================================================
+    # WHAT THE FLUSH HANDED OVER, CHECKED BY SHAPE AND REFUSED BY NAME
+    # ==============================================================================================
+    # `contexts` ARE TOKEN IDS, NOT HIDDEN STATES, and the two spellings in spine/compose.py
+    # disagree: its LOOP_ORDER B row says "contexts and tokens are the flush's x and y at
+    # _flush_bounds" and its ROW_ARGUMENTS_ELSEWHERE["MEM.write"] says "contexts is LM.encode's `h`".
+    # The row is the one that can be true. This function's own contract is that the survivors are
+    # encoded AFTER the gate by ONE key_fn call, key_fn IS LM.encode (spine/compose.py::_key_fn), and
+    # LM.encode takes (B, L) ids -- so `contexts` is its INPUT or there is nothing for it to encode.
+    # MEM_KEY_WIN agrees in its own declaration: "How many preceding input positions the encoder sees
+    # when it builds one memory key", slicing "the model input x".
+    if not torch.is_tensor(contexts) or contexts.dim() != 2 or contexts.is_floating_point():
+        got = (f"{tuple(contexts.shape)} of {contexts.dtype}" if torch.is_tensor(contexts)
+               else type(contexts).__name__)
+        raise StoreError(
+            f"MEM.write: `contexts` arrived as {got}. It must be the flush's (B, L) TOKEN IDS -- the "
+            f"same `x` LM.encode takes -- because this body encodes the survivors with `key_fn`, "
+            f"which IS LM.encode bound to (lm, model). A (B, L, width) hidden state cannot be "
+            f"encoded again and cannot be sliced to MEM_KEY_WIN preceding POSITIONS. "
+            f"spine/compose.py's LOOP_ORDER B row spells it 'the flush's x and y at _flush_bounds'; "
+            f"its ROW_ARGUMENTS_ELSEWHERE entry for this call says `h` and is the one that is wrong.")
+    B, L = int(contexts.shape[0]), int(contexts.shape[1])
+    _require_rows("tokens", tokens, (B, L),
+                  "the true next token at every position, the same cut shifted one token")
+    _require_rows("surprise", surprise, (B, L),
+                  "1 - p_model(true token) at every position, which is what the gate ranks on")
+    _require_rows("positions", positions, (B, L),
+                  "the TRUE BYTE OFFSET of every position, from Segmentation.byte_pos -- not an "
+                  "arange over token indices, which drifts 200+ bytes per window against a 220-byte "
+                  "recall span because a token averages ~1.85 bytes")
+    _require_rows("sources", sources, (B,), "one domain id per WINDOW, from DOM.observe's `did`")
+    _require_rows("owners", owners, (B,),
+                  "one owner block per WINDOW, argmax over FabricOut.weights modulo "
+                  "MEM.d_owner_blocks")
+
+    # THE CONTEXT ARRAY IS GROWN TO MEM_KEY_WIN ONCE, HERE, because this is the first place in the
+    # package that may read that lever (open_store's LEVERS READ line does not name it).
+    if int(store.ctx_w) != kwin:
+        if int(store.ctx_w) and int(store.active.sum()):
+            raise StoreError(
+                f"MEM_KEY_WIN={kwin} against a store holding {int(store.active.sum())} entries whose "
+                f"context windows are {int(store.ctx_w)} token(s) wide. Refused: the stored window "
+                f"is what MEM.maintain re-encodes a key from, so re-keying an 8-token context as "
+                f"half of a 16-token one puts the store into two key spaces that do not compare -- "
+                f"the drift MEM_REKEY_EVERY exists to prevent, caused by the thing that prevents it. "
+                f"Resume at the width the checkpoint was written with, or start a new store.")
+        store.ctx_w = kwin
+        store.ctx = torch.zeros(int(store.capacity), kwin, dtype=torch.long,
+                                device=store.keys.device)
+
+    # BOTH OF THIS STORE'S CLOCKS ARE THE WINDOW CLOCK. `born` is stamped from it below, and
+    # MEM.read stamps `last` from the same field, so "born at window 120, last retrieved at window
+    # 400" is a sentence the report can write and the two are comparable.
+    w = _windows_of(now, "MEM.write")
+    store.tick = max(int(store.tick), w)
+
+    # ==============================================================================================
+    # PHASE 1 -- THE GATE, FOR EVERY WINDOW, IN WINDOW ORDER, BEFORE ANY ENCODE
+    # ==============================================================================================
+    # THE ORDER IS LOAD-BEARING: gate_theta is a controller state, so it must see the windows in
+    # window order and nothing else, whatever the batch width. Encoding after the gate is exactly
+    # equivalent -- the encoder is row-independent, so a row's key does not depend on which other
+    # rows are in the batch -- and it is the single largest saving in the step: the tree this is
+    # ported from encoded a key for EVERY position and threw ~88% of them away here, which made this
+    # the most expensive operation in the step by a wide margin.
+    keeps = [_gate_window(store, mode, fixed_gate, target, surprise[b]) for b in range(B)]
+    offered = B * L
+    kept = int(sum(int(k.sum()) for k in keeps))
+    _bump(store, "store.n_writes_offered", offered)
+    _bump(store, "store.n_writes_kept", kept)
+
+    receipt = WriteReceipt(offered=offered, kept=kept, committed=0, evicted_free=0,
+                           evicted_probation=0, evicted_main=0, floor_blocked=0,
+                           gate_theta=float(store.gate_theta))
+    if kept == 0:
+        _bump(store, "store.n_writes_committed", 0)
+        _write_gates(store, mode, fixed_gate, target, evict, decay, decay_every, prob_frac, quota)
+        return receipt
+
+    # ==============================================================================================
+    # PHASE 1b -- THE PER-BLOCK QUOTA, TRUNCATED BY SURPRISE RANK
+    # ==============================================================================================
+    # One window can present far more survivors than a block holds. The tree this is ported from kept
+    # the FIRST quota of them while its comment claimed it kept the most surprising; the difference
+    # is not cosmetic, because the tail it dropped is exactly the material the gate rated highest.
+    # Truncation happens BEFORE the encode, so a truncated row never costs a key.
+    sel = []
+    for b in range(B):
+        k = keeps[b]
+        m = int(k.sum())
+        if m > quota:
+            idx = k.nonzero(as_tuple=True)[0]
+            top = surprise[b].detach().float()[idx].topk(quota).indices
+            k = torch.zeros_like(k)
+            k[idx[top]] = True
+            _bump(store, "store.n_write_truncated", m - quota)
+            keeps[b] = k
+        sel.append(int(k.sum()))
+
+    # ==============================================================================================
+    # PHASE 2 -- ONE key_fn CALL FOR THE WHOLE FLUSH
+    # ==============================================================================================
+    wins = _key_windows(contexts, kwin)                       # (B, L, key_win)
+    rows = torch.cat([wins[b][keeps[b]] for b in range(B) if sel[b]], 0)
+    keys = _encode_keys(key_fn, rows, kdepth)
+
+    # ==============================================================================================
+    # PHASE 3 -- THE ROWS COMMIT PER WINDOW, EACH INTO ITS OWN OWNER BLOCK
+    # ==============================================================================================
+    by_block = list(store.counters.get("store.n_writes_by_block", [0] * int(store.owners)))
+    committed = free_used = ev_prob = ev_main = blocked = 0
+    off = 0
+    n_before = int(store.n_written)
+    for b in range(B):
+        m = sel[b]
+        if not m:
+            continue
+        k = keeps[b]
+        o = int(owners[b]) % int(store.owners)
+        c, f, p, mn, fb, dl = _commit_window(
+            store, o, keys[off:off + m], tokens[b][k], positions[b][k], wins[b][k],
+            int(sources[b]), quota, evict, prob_frac, share, w)
+        off += m
+        committed += c
+        free_used += f
+        ev_prob += p
+        ev_main += mn
+        blocked += fb
+        by_block[o] += c
+        if dl:
+            _bump(store, "store.n_floor_dropped_deadlock")
+        store.n_written += c
+
+    # THE DECAY IS DRIVEN BY THE CUMULATIVE WRITE COUNTER AND NOT BY A RESETTABLE ONE, which is what
+    # makes it survive a resume: MEM_USE_DECAY_EVERY is "how many entries must be WRITTEN before the
+    # retrieval counters are decayed", `n_written` is checkpointed, and asking how many INTERVALS the
+    # counter has crossed needs no second piece of state that a restore would restart. The frozen
+    # tree kept a `_wc` it reset to 0 (memory.py:494-496) and a resume restarted it, postponing the
+    # next decay by up to a whole interval.
+    # THE MULTIPLICATION IS INSIDE THE `< 1.0` TEST. Above 1.0 the rule goes INERT -- it does not run
+    # backwards -- which is the correction memory/levers.py carries and this line must not re-break.
+    if decay < 1.0 and decay_every > 0:
+        crossed = int(store.n_written) // decay_every - n_before // decay_every
+        if crossed > 0:
+            store.use *= decay ** crossed
+            _bump(store, "store.n_use_decays", crossed)
+
+    store.counters["store.n_writes_by_block"] = by_block
+    _bump(store, "store.n_writes_committed", committed)
+    _bump(store, "store.n_evict_free", free_used)
+    _bump(store, "store.n_evict_probation", ev_prob)
+    _bump(store, "store.n_evict_main", ev_main)
+    _bump(store, "store.n_floor_blocked", blocked)
+    _write_gates(store, mode, fixed_gate, target, evict, decay, decay_every, prob_frac, quota)
+    return dataclasses.replace(receipt, committed=committed, evicted_free=free_used,
+                               evicted_probation=ev_prob, evicted_main=ev_main,
+                               floor_blocked=blocked, gate_theta=float(store.gate_theta))
+
 
 
 def read(mem: Config, store, *, queries, promote=True):
@@ -604,9 +1355,176 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
                  n_keys_at_capped_depth
     """
     mem = mem.owned_by("MEM")
-    raise NotImplementedError(
-        "MEM.maintain: P4 (memory) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section MEM.")
+    every_p, probe_rows = int(mem.probe_every), int(mem.probe_rows)
+    every_r, ksrc = int(mem.rekey_every), str(mem.key_src)
+    kdepth, kwin = int(mem.key_depth), int(mem.key_win)
+
+    # NO CONVERSION TO FLUSHES IS PERFORMED AND NONE IS NEEDED. `now` is WINDOWS, both periods are
+    # declared in Windows, and elapsed-since-last-fire is PHASE-INDEPENDENT -- so this call may be
+    # made once per flush and still mean "at most once per N windows", which is exactly what
+    # RUN.Cadences.due guarantees for the keys the spine owns. _windows_of refuses another kind
+    # rather than letting int() cross it silently.
+    w = _windows_of(now, "MEM.maintain")
+    store.tick = max(int(store.tick), w)
+    c = store.counters
+
+    # ==============================================================================================
+    # 3 (FIRST) -- RESEGMENT. It invalidates what job 2 walks, so it cannot run after it.
+    # ==============================================================================================
+    # WHAT IS SATISFIABLE HERE IS THE SNAPSHOT RETAKE AND NOTHING MORE, and the gap is named rather
+    # than papered over. `resegment` is the RetokEvent the composition root distributes; NO ENTRY
+    # POINT'S DOCSTRING DECLARES ITS FIELDS -- spine/compose.py says so itself ("the event itself is
+    # a record type tok/api.py::<module> declares and no entry point's docstring returns"), and
+    # tok/api.py's header names it in one line with no shape. Applying it to `tok` and `ctx` needs an
+    # old-id -> new-id mapping that is not declared anywhere, and INVENTING one here would rewrite
+    # every stored token under a guess. So the declared consequence is performed -- the rekey
+    # snapshot is dropped and retaken, which is this docstring's own sentence -- the event is
+    # counted, and the stale ids are left visibly stale rather than silently rewritten.
+    if resegment is not None:
+        _bump(store, "store.n_resegment_events")
+        store.rekey_snap, store.rekey_cursor = None, 0
+
+    # ==============================================================================================
+    # 1 -- THE READ PROBE. Without it evict="lru" and evict="usage" are write-order FIFO whatever
+    #      they say, and probation can never promote.
+    # ==============================================================================================
+    if every_p > 0:
+        last_p = c.get("store.probe_last_window")
+        if last_p is None or (w - int(last_p)) >= every_p:
+            c["store.probe_last_window"] = w
+            # THE CADENCE IS COUNTED WHERE IT FIRES, not where it finds material. n_probe_fired
+            # counting the cadence beside n_probe_rows == 0 is the honest armed-but-0 reading, and
+            # it is a DIFFERENT fact from a probe that never fired -- which the old report could not
+            # tell apart.
+            _bump(store, "store.n_probe_fired")
+            n_ctx = 0 if probe_contexts is None else int(probe_contexts.shape[0])
+            if n_ctx and probe_rows > 0:
+                # DETERMINISTIC STRIDE, NEVER A RANDOM DRAW. A probe that consumed RNG draws would
+                # make the probe CADENCE change the training trajectory, and a diagnostic that
+                # silently edits the run is the class spine/rng.py exists for.
+                stride = max(1, n_ctx // probe_rows)
+                rows = probe_contexts[::stride][:probe_rows]
+                # THE NARROWING TO key_win AND THE ENCODE AT key_depth HAPPEN HERE, ONCE. `read`
+                # declares no key lever and takes no key_fn, so it cannot encode and its `queries`
+                # must already be key-space vectors; this function holds key_fn and all three key
+                # levers. Any other site that forms `queries` must use the same two levers or the
+                # store is queried in one key space and written in another.
+                queries = _encode_keys(key_fn, rows[:, -kwin:], kdepth)
+                # THE PROBE *IS* read(), NOT A SECOND RETRIEVAL (Q-MEM-9, RESOLVED (a)). Open-coding
+                # a kNN here would put n_reads/n_promoted/n_wrong_* on one path while the store is
+                # moved by another, and would give wrong_read and match_floor a second
+                # implementation free to drift. MEM.read is still a P4 stub, so this line raises
+                # NotImplementedError the moment a caller supplies probe_contexts -- which is the
+                # loud state, and is why the cadence above is counted before it.
+                retrieval = read(mem, store, queries=queries, promote=True)
+                _bump(store, "store.n_probe_rows", int(rows.shape[0]))
+                # ONE RETRIEVAL THAT RETURNED AT LEAST ONE ENTRY, which is what this counter is
+                # declared to be -- a probe that fires and retrieves nothing is a different finding
+                # from a probe that never fires. IT READS Retrieval.hits AND ASSUMES ONE THING ABOUT
+                # IT: that a slot the retrieval did not fill is marked with a negative id. That is
+                # the only convention this file takes on faith from an unwritten body; whoever
+                # writes read() either keeps it or changes this line in the same edit.
+                if int((retrieval.hits >= 0).sum()) > 0:
+                    _bump(store, "store.n_probe_hits")
+
+    # ==============================================================================================
+    # 2 -- THE AMORTIZED REKEY. Key drift is a forgetting channel with nothing to do with eviction.
+    # ==============================================================================================
+    # rekey_every == 0 DISARMS, BEHIND A GUARD. The tree this is ported from documented 0 as the off
+    # switch and then divided by it -- an untrippable guard whose escape hatch was a
+    # ZeroDivisionError on the first flush.
+    armed = ksrc == "model" and every_r > 0 and int(store.ctx_w) > 0
+    if armed:
+        last_r = c.get("store.rekey_last_window")
+        if last_r is None:
+            c["store.rekey_last_window"] = w      # first sight of the clock: nothing has elapsed yet
+            last_r = w
+        elapsed = w - int(last_r)
+        if elapsed > 0:
+            # A SNAPSHOT, AND THE WORD IS LOAD-BEARING. Entries written DURING a pass shift which
+            # rows are active, so walking the live set with a cursor would re-key some rows twice and
+            # never reach others. The snapshot is taken once per pass and is NOT checkpointed: after
+            # a resume it is retaken and the restored cursor is clamped into it, because a cursor
+            # taken against one snapshot indexes nothing in another.
+            if store.rekey_snap is None or int(store.rekey_snap.numel()) == 0:
+                store.rekey_snap = store.active.nonzero(as_tuple=True)[0]
+                store.rekey_cursor = min(int(store.rekey_cursor), int(store.rekey_snap.numel()))
+            snap = store.rekey_snap
+            n = int(snap.numel())
+            if n:
+                # SIZED SO THE WHOLE SNAPSHOT IS COVERED ONCE PER `every_r` WINDOWS. `span` is that
+                # count of windows and `per` is entries per window; multiplying by the windows that
+                # actually elapsed is what makes the pass take the same number of WINDOWS whatever
+                # the batch width, which is the property the cadence is declared in Windows for.
+                span = max(1, every_r)
+                per = -(-n // span)                              # ceil, integer, never 0
+                take = max(1, per * elapsed)
+                cur = int(store.rekey_cursor)
+                rows = snap[cur:cur + take]
+                # AN ENTRY EVICTED SINCE THE SNAPSHOT IS NOT RE-KEYED. Its slot now holds somebody
+                # else's row, and re-encoding the new row from the old row's context would write a
+                # key that belongs to neither.
+                rows = rows[store.active[rows]]
+                if int(rows.numel()):
+                    # THE SAME key_depth THE WRITE PATH USED, through the same helper. A truncated
+                    # key path plus a full-depth rekey drifts the store into two key spaces that do
+                    # not compare -- the drift this whole mechanism exists to prevent.
+                    store.keys[rows] = _encode_keys(key_fn, store.ctx[rows], kdepth)
+                    _bump(store, "store.n_rekey_entries", int(rows.numel()))
+                    if kdepth > 0 and str(store.lm_kind) == "transformer":
+                        _bump(store, "store.n_keys_at_capped_depth", int(rows.numel()))
+                _bump(store, "store.n_rekey_slices")
+                cur += take
+                if cur >= n:
+                    _bump(store, "store.n_rekey_passes")
+                    store.rekey_snap, cur = None, 0
+                store.rekey_cursor = cur
+                c["store.rekey_last_window"] = w
+
+    # ==============================================================================================
+    # THE TWO GATES WITH NO LEDGER KEY (G4)
+    # ==============================================================================================
+    # docs/04_CONTRACT.md names both: they are compared against a Windows `now` INSIDE this call and
+    # `maintain` takes no `due` flag, so RUN.Cadences.ledger() cannot see either of them and these
+    # counters are their only did-it-fire surface. Declared at the END, for the reason _write_gates
+    # records: a gate declared before the work reports the previous call.
+    fired_p = int(c.get("store.n_probe_fired", 0))
+    rows_p = int(c.get("store.n_probe_rows", 0))
+    passes = int(c.get("store.n_rekey_passes", 0))
+    _declare_gates(store, (
+        Gate("mem.probe", fired_p > 0, fired_p, 0,
+             reason=f"MEM_PROBE_EVERY={every_p} windows x MEM_PROBE_ROWS={probe_rows} query rows; "
+                    f"{rows_p} row(s) have actually been issued. n_probe_rows=0 beside a nonzero "
+                    f"fire count is ARMED-BUT-0 and not silence: `probe_contexts` has no producer "
+                    f"in spine/loop.py, so the cadence is reached and there is nothing to query "
+                    f"with -- which is exactly the state that makes evict='lru' and evict='usage' "
+                    f"write-order FIFO whatever they say, and probation unable to promote.")
+        if every_p > 0 else
+        Gate("mem.probe", False, every_p, 0, reachable=False,
+             reason="MEM_PROBE_EVERY=0 disarms every retrieval-based rule in this package: `use` and "
+                    "`last` never move off their write-time values, so MEM_EVICT's two retrieval "
+                    "arms degenerate to write order and MEM_PROBATION_FRAC can never promote. The "
+                    "lever's own declaration says the report must say so."),
+        Gate("mem.rekey", passes > 0, passes, 0,
+             reason=f"one full pass over the readable store every MEM_REKEY_EVERY={every_r} "
+                    f"windows: {int(c.get('store.n_rekey_slices', 0))} slice(s), "
+                    f"{int(c.get('store.n_rekey_entries', 0))} entr(y/ies) re-encoded so far. A run "
+                    f"shorter than the period cannot complete one.")
+        if armed else
+        Gate("mem.rekey", False, every_r, 0, reachable=False,
+             reason=(f"MEM_KEY_SRC={ksrc!r}: the keys are not the model's, so there is no drift to "
+                     f"track and nothing to re-encode."
+                     if ksrc != "model" else
+                     f"MEM_REKEY_EVERY={every_r} is the DECLARED DISARM -- the store stops tracking "
+                     f"the model and no run length reaches this, which is a different fact from a "
+                     f"period the run was too short for."
+                     if every_r <= 0 else
+                     f"no entry in this store carries a context window (ctx_w=0), so there is "
+                     f"nothing to re-encode a key FROM. That is the state of a store that has "
+                     f"never been written, and of one restored from a blob written before the "
+                     f"window was stored.")),
+    ))
+
 
 
 def apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources):
@@ -785,8 +1703,21 @@ def census(mem: Config, store, *, reconcile=False):
 
 def state_dict(mem: Config, store):
     """The checkpoint blob. Everything mutable that the store cannot re-derive: keys, tok, src,
-    pos, ctx, own, active, use, last, born, prob, selfcon, recon, nsrc, nsrc_max, gate_theta, the
-    write counter behind use_decay_every, the tick clocks, and every store.n_* counter.
+    pos, ctx, own, active, use, last, born, prob, selfcon, recon, nsrc_max, gate_theta,
+    gate_seeded, ctx_w, the rekey cursor, the write counter behind use_decay_every, the tick clocks,
+    and every store.n_* counter.
+
+    THREE OF THOSE NAMES ARRIVED WITH THE TWO CADENCED BODIES AND ONE LEFT. `ctx` is now the stored
+    CONTEXT WINDOW rather than one long per entry, because it is the only thing MEM.maintain can
+    re-encode a key from, and `ctx_w` is its width, carried so the other side restores the rows
+    without re-deriving it from a lever that may have moved between the two runs. `gate_seeded` is
+    what makes the restored `gate_theta` readable: 0.0 is both "never seeded" and a legal admission
+    bar, and the two behave differently on the next write. WHAT LEFT IS `nsrc`, which this line
+    claimed and this function has never written: the per-source census is REBUILT EXACTLY from the
+    saved rows by open_store(restored=...) -- _restore_by_block's own paragraph says so and is what
+    closed C16 -- so it is re-derivable by construction and does not belong in a list of things that
+    are not. The claim was harmless and it was still a claim nobody could check against the code
+    three lines below it.
 
     THE FOUR OMISSIONS IN THE OLD BLOB WERE EACH A LIVE MECHANISM DISARMED AT THE RUN BOUNDARY:
     prob (M52 -- scan resistance off exactly when a new area arrives), recon (M66), nsrc_max
@@ -814,7 +1745,11 @@ def state_dict(mem: Config, store):
         rows.append({
             "key": store.keys[i].detach().cpu().tolist(),
             "tok": int(store.tok[i]), "src": int(store.src[i]),
-            "pos": int(store.pos[i]), "ctx": int(store.ctx[i]),
+            "pos": int(store.pos[i]),
+            # THE CONTEXT WINDOW, NOT A SCALAR. It is the only thing MEM.maintain can re-encode a
+            # key from, so a blob without it resumes into a store whose keys can never track the
+            # model again -- a forgetting channel that survives the resume silently.
+            "ctx": store.ctx[i].detach().cpu().tolist(),
             "own": int(store.own[i]),
             # THE FOUR OMISSIONS OF THE OLD BLOB, EACH OF WHICH DISARMED A LIVE MECHANISM AT THE RUN
             # BOUNDARY. `prob` is M52: probation is scan resistance, and losing it turns it off
@@ -823,7 +1758,7 @@ def state_dict(mem: Config, store):
             # the wrongness detector, and judge()'s -1 "unchecked" sentinel is what makes the
             # difference readable.
             "prob": bool(store.prob[i]),
-            "use": int(store.use[i]), "last": int(store.last[i]), "born": int(store.born[i]),
+            "use": float(store.use[i]), "last": int(store.last[i]), "born": int(store.born[i]),
             "recon": float(store.recon[i]), "selfcon": float(store.selfcon[i]),
         })
     out = {
@@ -841,6 +1776,13 @@ def state_dict(mem: Config, store):
         # different threshold than the one it stopped with, so the surprise gate is recalibrated by
         # the act of resuming.
         "gate_theta": float(store.gate_theta),
+        # WITHOUT THIS FLAG THE NUMBER ABOVE IS NOT ENOUGH. gate_theta=0.0 is both "never seeded"
+        # and a legal admission bar, and the two behave differently on the next write: one re-seeds
+        # from the first batch after the resume, the other does not.
+        "gate_seeded": bool(store.gate_seeded),
+        # THE WIDTH OF THE ROWS ABOVE, so the other side restores them without re-deriving it from
+        # a lever that may have moved between the two runs.
+        "ctx_w": int(store.ctx_w),
         "rekey_cursor": int(store.rekey_cursor),
         "counters": dict(store.counters),
     }
