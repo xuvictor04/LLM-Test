@@ -249,8 +249,15 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     """
     ids = sysm.segmentation.ids
     pairs = _flush_bounds(batch)
-    x = torch.tensor([ids[a:a + ctx] for a, b in pairs], dtype=torch.long)
-    y = torch.tensor([ids[a + 1:b] for a, b in pairs], dtype=torch.long)
+    # THE BATCH IS CUT ONTO THE PROCESS DEVICE, NOT ONTO THE DEFAULT ONE. RUN.process_setup
+    # resolved the device once and every module was built with `.to()` targeting it; a batch made
+    # with a bare torch.tensor() lands on the CPU regardless, so at RUN_DEVICE=cuda the model is on
+    # the GPU and its inputs are not. That is an immediate device-mismatch raise at the first
+    # matmul -- not a silent slowdown, but a crash on the first flush of every GPU run, which is
+    # the whole of what this driver had been tested against (CPU, where the two agree by accident).
+    dev = sysm.process.device
+    x = torch.tensor([ids[a:a + ctx] for a, b in pairs], dtype=torch.long, device=dev)
+    y = torch.tensor([ids[a + 1:b] for a, b in pairs], dtype=torch.long, device=dev)
 
     h = lm_api.encode(lm_cfg, model, x)
     # THE SIGNATURE IS REAL OR THE CALL RAISES, AND THE FIRST DRAFT OF THIS BLOCK SWALLOWED IT.
@@ -281,6 +288,11 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
             chunk = chunk + bytes(wu - len(chunk))
         units.append(list(chunk))
     sig_vec = sig_api.encode(sig_cfg, st, units)
+    # SIG BUILDS ITS OWN TENSOR AND NEED NOT AGREE WITH THE PROCESS DEVICE, so the signature is
+    # moved rather than assumed. Checked instead of called unconditionally, because `.to()` on a
+    # tensor already there is a copy on some backends.
+    if sig_vec.device != x.device:
+        sig_vec = sig_vec.to(dev)
     # NOVELTY IS THE PREVIOUS FLUSH'S PER-WINDOW SURPRISE, AND THE FIRST FLUSH HAS NONE.
     # Seeded at zeros rather than at a guess, and the distinction is reportable: a zero novelty
     # says "nothing was surprising yet" for exactly one flush, which is true, where any other seed
@@ -288,7 +300,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # which happens on the last, short flush of a stream.
     nb = x.shape[0]
     if novelty is None or int(novelty.shape[0]) != nb:
-        novelty = torch.zeros(nb)
+        novelty = torch.zeros(nb, device=dev)
+    elif novelty.device != x.device:
+        novelty = novelty.to(dev)
     out = fab_api.forward(
         fab_cfg, pop, h=h, signature=sig_vec, novelty=novelty,
         step_windows=U.Windows(int(clock.step)),
