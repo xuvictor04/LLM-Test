@@ -55,6 +55,27 @@ def main(argv=None):
     # is what keeps the resolved Config the single source for every knob.
     sysm = compose(environ=os.environ)
 
+    # WHAT HARDWARE AND WHAT ARITHMETIC, PRINTED BEFORE ANYTHING ELSE. A run that does not say
+    # which device it used is a run whose throughput number means nothing and whose loss curve
+    # cannot be compared with another's -- and this script did not say it until 2026-09-17, when a
+    # GPU smoke came back 5x faster than CPU and the only way to tell a real cuda run from a silent
+    # fallback was to reason about process_setup's source.
+    # THERE IS NO SILENT FALLBACK TO FALL BACK TO, which is worth printing precisely because it is
+    # the thing a reader would otherwise have to check: RUN.process_setup takes `device =
+    # str(run.device)` verbatim, with no torch.cuda.is_available() guard, so RUN_DEVICE=cuda on a
+    # machine without CUDA RAISES at the first .to() rather than quietly training on the CPU.
+    p = sysm.process
+    n_params = sum(int(t.numel()) for t in sysm.base_params)
+    print(f"=== device={p.device} amp={p.amp_state} tf32={p.tf32_applied} "
+          f"torch_seed={p.torch_seed}")
+    if p.amp_reason:
+        print(f"===   amp: {p.amp_reason}")
+    print(f"=== {n_params} trainable parameter(s) in the base group")
+    # SEEDS DO NOT CROSS DEVICES, AND A READER COMPARING TWO CURVES NEEDS TO KNOW IT. torch's CUDA
+    # generator and its CPU generator produce different draws from the SAME seed, so a cuda run and
+    # a cpu run at one RUN_SEED start from different weights -- measured, 8.3784 against 8.3247 on
+    # the first flush of otherwise identical 20-window runs. That is not a defect and it is not
+    # noise: it means a cpu curve and a cuda curve are two experiments, not two samples of one.
     print(f"=== composed: stage={sysm.stage}, {len(sysm.refusals)} refusal(s), "
           f"{len(sysm.warnings)} warning(s)")
     for r in sysm.refusals:
