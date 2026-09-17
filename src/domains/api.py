@@ -112,7 +112,16 @@ class Partition:
         self.sh = 0
         self.nb = 0               # THE BOUNDARY CLOCK -- must not restart across a resume
         self.radp = 0.0
-        self.comp_glob = 0.0
+        # None AND NOT 0.0, CHANGED 2026-09-17 WITH THE BODY THAT WRITES IT. note_competence's DID
+        # IT FIRE line requires exactly this state -- "comp_glob is None until the first one lands,
+        # which is the state in which competence protection cannot fire" -- and a 0.0 cannot say
+        # it: competence here is a LOSS (lower is better; :3694 spares a domain on comp < comp_glob),
+        # so a baseline seeded at zero reads as a population that models everything perfectly and no
+        # domain could ever beat it. The protection would then be armed, inert, and indistinguishable
+        # from one that ran. fabric/api.py::Population.__init__ made the identical change for the
+        # identical field on the identical argument, and the two populations' books are compared.
+        # state_dict and open_partition carry the None through rather than casting it.
+        self.comp_glob = None
         self.collapsed_at = None
         self.adj_hist = []        # the adjacent-distance history behind the relative shift test
         self.counters = {}
@@ -188,7 +197,12 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
         part.next_id = int(restored.get("next_id", (max(part.cent) + 1) if part.cent else 0))
         part.merged = {int(k): int(v) for k, v in (restored.get("merged") or {}).items()}
         part.radp = float(restored.get("radp", 0.0))
-        part.comp_glob = float(restored.get("comp_glob", 0.0))
+        # THE None SURVIVES THE ROUND TRIP. A checkpoint taken before the first competence update
+        # holds comp_glob = None, and `float(... or 0.0)` here would restore a baseline no window
+        # ever measured -- which is precisely the reading the constructor's None exists to refuse,
+        # arriving through the resume instead of through the build.
+        _cg = restored.get("comp_glob")
+        part.comp_glob = None if _cg is None else float(_cg)
         part.adj_hist = list(restored.get("adj_hist") or [])
         part.sh = int(restored.get("sh", 0))
         # THE BOUNDARY CLOCK MUST NOT RESTART, and this is the line the whole paragraph in the
@@ -320,10 +334,79 @@ def note_competence(dom: Config, part, *, did, bits):
                  the state in which competence protection cannot fire, and the Gate says so
     """
     dom = dom.owned_by("DOM")
-    _ = dom.d_comp_ema           # WIRE READ HERE -- one smoothing rate for both populations
-    raise NotImplementedError(
-        "DOM.note_competence: P4 (domains) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section DOM.")
+    rate = float(dom.d_comp_ema)  # WIRE READ HERE -- one smoothing rate for both populations
+    did = int(did)
+    # ONE WINDOW'S READING, AND A BATCH MEAN IS REFUSED RATHER THAN AVERAGED. The row that drives
+    # this says "bits from the per-window loss", and LM.lm_loss keeps reduction='none' precisely so
+    # the per-window vector survives -- "competence attribution, the domain EMA and the marginal-
+    # contribution counterfactual all read them and not one of them can be tracked from a scalar".
+    # A caller handing the flush mean here would fold one number into the EMA where BATCH_W windows
+    # belong, at 1/BATCH_W of the rate the report says the EMA moves at, and the only trace would be
+    # a competence series that lags for a reason nobody can see.
+    if isinstance(bits, torch.Tensor):
+        if bits.numel() != 1:
+            raise ValueError(
+                f"DOM.note_competence: `bits` holds {int(bits.numel())} values and this call folds "
+                f"ONE window's reading into ONE domain's EMA. A per-window vector is a loop over "
+                f"this call, one `did` at a time -- averaging it here would attribute a whole "
+                f"batch's windows to whichever domain the last one landed in.")
+        bits = float(bits.detach())
+    bits = float(bits)
+    if bits != bits or bits in (float("inf"), float("-inf")):
+        # REFUSED, NOT FOLDED. A nan entering an EMA is permanent: every later update multiplies it
+        # forward, so one bad window silently ends competence protection for the rest of the run and
+        # for every run resumed from the checkpoint that saved it.
+        raise ValueError(
+            f"DOM.note_competence: `bits` is {bits!r} for domain {did}. An EMA that takes one nan "
+            f"or inf never recovers -- it would disable the competence spare for the rest of this "
+            f"run and for every resume from it -- so this is refused at the one place it enters.")
+    # THE UNIT IS THE CALLER'S AND THIS CALL DOES NOT CONVERT. `bits` is folded exactly as handed
+    # over, and comp is only ever compared against comp_glob, which is fed from this same argument,
+    # so the comparison is unit-consistent whatever the caller supplies. What is NOT free is the
+    # NAME: LM.lm_loss's per-window value is in NATS, and a report that prints this series as
+    # bits/window without the caller dividing by ln(2) is the wrong-measurement class this tree
+    # rates worst. Converting here instead would be worse -- it would silently rescale a caller who
+    # had already converted -- so the obligation is stated and left with the one caller that knows.
+
+    if did not in part.cent:
+        # A DOMAIN THE PARTITION DOES NOT HOLD, AND IT IS LEGAL. DOM.observe returns did=0 for every
+        # window at DOM_ENABLED=0 -- "0 is a real source id that MEM sees" -- so the off-partition
+        # run folds a whole run's competence into one book that has no centroid. Counted rather than
+        # refused, because refusing would make the partition-off configuration crash, and counted
+        # separately rather than silently, because a nonzero here on an ENABLED partition means
+        # something is scoring windows against ids the assignment never produced.
+        part.counters["part.n_competence_no_centroid"] = part.counters.get(
+            "part.n_competence_no_centroid", 0) + 1
+
+    prev = part.comp.get(did)
+    if prev is None:
+        # SEEDED ON THE FIRST READING, NOT DECAYED FROM A ZERO -- FAB.observe's rule for the same
+        # book ("an EMA decayed from a zero would credit every newborn with a perfect competence it
+        # never earned"), and here the zero would be worse than in the fabric: a domain's competence
+        # is a LOSS, so a book seeded at 0.0 says this domain predicts its material perfectly and
+        # the cull's competence spare would protect it on its first window for ever.
+        part.comp[did] = bits
+        part.counters["part.n_competence_seeded"] = part.counters.get(
+            "part.n_competence_seeded", 0) + 1
+    else:
+        part.comp[did] = (1.0 - rate) * float(prev) + rate * bits
+
+    # THE POPULATION BASELINE, AT THE SAME RATE AND FROM THE SAME READINGS. Two rates would make
+    # "this domain is better than the population" a comparison between two differently smoothed
+    # series, which is the whole argument for d_comp_ema being a wire from FAB rather than a lever
+    # here. None until the first one lands: that is the state in which competence protection cannot
+    # fire, and part.n_competence_updates below is how a reader tells it from a baseline that
+    # happens to read zero.
+    part.comp_glob = bits if part.comp_glob is None else \
+        (1.0 - rate) * float(part.comp_glob) + rate * bits
+    part.counters["part.n_competence_updates"] = part.counters.get(
+        "part.n_competence_updates", 0) + 1
+    part.counters["part.n_competence_domains"] = len(part.comp)
+    # NOTHING IS RETURNED. The books ARE the product -- they live on the Partition every later
+    # reader already holds -- and a record here would be a second copy of numbers whose single
+    # source of truth is the point of this design (FAB.observe's row says the same, and for the
+    # same reason its LOOP_ORDER row has no `produces` column).
+    return None
 
 
 def manage(dom: Config, part, *, now, memory_counts, mem_floor_entries):
@@ -517,7 +600,11 @@ def state_dict(dom: Config, part):
         "next_id": int(part.next_id),
         "merged": {str(k): int(v) for k, v in (part.merged or {}).items()},
         "radp": float(part.radp),
-        "comp_glob": float(part.comp_glob),
+        # NOT CAST THROUGH float(): comp_glob is None until the first note_competence lands
+        # (2026-09-17), and float(None) is a TypeError on the save path of a run whose domains have
+        # never been scored -- which is every run where DOM.note_competence is not yet driven. The
+        # None is the fact being saved: "no window has been attributed yet".
+        "comp_glob": None if part.comp_glob is None else float(part.comp_glob),
         # THE ADJACENT-DISTANCE HISTORY the relative shift test calibrates on. Without it the first
         # windows of a resumed run are tested against an empty calibration, which is the same as
         # testing them against nothing.

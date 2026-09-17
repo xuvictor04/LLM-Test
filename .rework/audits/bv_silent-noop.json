@@ -1,0 +1,95 @@
+{
+  "agent": "BV-SILENT-NOOP",
+  "scope": "read-only audit of the new B-row bodies: src/fabric/api.py + src/memory/api.py (committed 2e48b92) and src/domains/api.py, src/lm/api.py, src/tok/api.py, src/world/api.py (uncommitted working tree)",
+  "baseline": "all seven suites rc=0 BEFORE and AFTER the audit (ownership contract census assemble couplings derive fabric). `git status` confirms I modified nothing under src/ or tests/.",
+
+  "grep_sweep_for_the_four_refused_shapes": {
+    "bare except / except Exception": "NONE. The only real handler in any new body is lm/api.py:1065 `except NotBuilt:` in residual_ratios -- caught BY NAME, with the comment that NotBuilt deliberately does not subclass NotImplementedError so it cannot swallow a P4 marker -- and it bumps lm.residual.table_unbuilt. SOUND.",
+    "hasattr(...) else <unchanged>": "NONE of the refused shape. Three live sites: lm/api.py:1268 (`born is not None and hasattr(model,'born')`, C-row restore, guarded upstream by the `compose` geometry refusal), tok/api.py:785 (dict-or-list area_heads, both arms yield the same iterable), world/api.py:667-669/739-743 (C-row state_dict). None leaves a caller holding a stale value while reporting success.",
+    "getattr(x,'a',default) substituting for a real value": "fabric/api.py::_headroom RAISES TypeError naming Caps and C30 rather than defaulting -- verified by driving. lm/api.py::_composer_books returns a DISTINGUISHED (None,None,reason) and each of its two callers counts its own arm (lm.anchor.no_composer / lm.residual.no_composer). The one that does substitute is domains/api.py -- FINDING B.",
+    "if x is None: return, where None is reachable and the caller cannot tell": "Every such return in the new bodies bumps a DISTINCT counter first: observe -> fab.observe_unrouted; anchor_term -> five separate arms (unreachable / weight_zero / no_composer / no_counter / none_young); residual_ratios -> three; own_lr_scale seeds all seven fab.lr_* keys BEFORE the off-return; judge_probation's embed arm returns with an explicit unreachable Gate and deliberately leaves the counters ABSENT. This discipline is genuinely present and I could not break it."
+  },
+
+  "findings": [
+    {
+      "id": "A",
+      "severity": "critical",
+      "file": "src/spine/loop.py",
+      "site": ":57-71 _is_stub, :136-153 the `skipped` tuple",
+      "claim": "THE RUN NOW REPORTS ZERO SKIPPED MECHANISMS WHILE spine/loop.py CALLS NONE OF THE ELEVEN. `skipped` is filtered by `_is_stub(fn)`, which asks whether the BODY raises NotImplementedError -- not whether the driver invokes it. With the last six bodies landed, all eleven filter out and the tuple is empty. The commit message for 2e48b92 called this 'a reporting falsehood I introduced'; it has gone from partial (11 -> 6) to total (11 -> 0). This is the two-states-printed-as-one collapse, in the one file whose module docstring is written to refuse it: 'A reader of this run's output can tell \"the fabric did not grow\" from \"the fabric's growth was never called\"'. As of the working tree, they cannot.",
+      "evidence_1": {
+        "command": "cd /home/user/LLM-Test && python run.py --max-windows 40",
+        "output": "=== 40 windows, 40 flushes, 40 optimizer steps, 0 epoch(s) in 253.4s (0.2 w/s)\n=== loss 8.3247 -> 5.7564\n=== 0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED:"
+      },
+      "evidence_2": {
+        "command": "AST walk of every attribute call in spine/loop.py",
+        "output": "ALL attribute calls in spine/loop.py:\n    U.Windows / _c._periods / batch.append / cadences.due / cadences.ledger / clock.advance / clock.counters / clock.note_backward / curve.append / dataclasses.dataclass / fab_api.forward / lm_api.decode / lm_api.encode / lm_api.lm_loss / mean.detach / novelty.to / opt_api.maybe_step / opt_api.scaled_backward / per_window.detach / sig_api.encode / sig_vec.to / time.time / torch.tensor / torch.zeros / units.append / vocab.live_size / warnings.append\n\nOf the eleven B-row entry points, the loop CALLS: NONE"
+      },
+      "evidence_3": {
+        "command": "L.run(compose(small), max_windows=6) then read every ledger the eleven would have written",
+        "output": "RunResult.skipped        = ()\nlen(skipped)             = 0\nwindows / loss           = 6 8.3329 -> 8.3649\n\nAND YET, after that run:\n  fabric n_live                 = 8 (FAB_N0=8, so nothing was born)\n  fab.observed_windows on ledger= ABSENT\n  fab.grow_checks on ledger     = ABSENT\n  fab.lr_calls on ledger        = ABSENT\n  memory rows written           = 0 / n_written = 0\n  store.n_writes_offered        = ABSENT\n  domains scored (part.comp)    = {}  comp_glob = None\n  vocab tokens minted this run  = ABSENT",
+        "why_absence_is_proof": "observe, grow_check and own_lr_scale each `counters.setdefault(...)` their whole family BEFORE any branch decides, precisely so ABSENT can never masquerade as ZERO. ABSENT therefore proves zero calls, not zero fires."
+      },
+      "evidence_4": {
+        "command": "identical 8-window run of the HEAD tree (git archive HEAD) and the working tree, torch threads=1, same process shape",
+        "output": "/tmp/claude-0/ab:        compose=5.31s  loop=2.98s  windows=8  w/s=2.68  loss 8.3247 -> 8.3116  skipped=6\n/home/user/LLM-Test:     compose=5.23s  loop=2.91s  windows=8  w/s=2.75  loss 8.3247 -> 8.3116  skipped=0",
+        "reading": "The loss curve is BIT-IDENTICAL, which proves the executed path did not change at all between the two trees. The only thing that changed is that the report stopped naming six unrun mechanisms."
+      },
+      "what_would_close_it": "`skipped` must be decided by whether the DRIVER calls the row, not by whether the body is a stub. Until the loop is wired, the honest predicate is a list of LOOP_ORDER rows this driver does not call -- `_is_stub` can stay as a SECOND, separate reason string ('still a stub') so the two states remain distinguishable once wiring starts."
+    },
+
+    {
+      "id": "B",
+      "severity": "high",
+      "file": "src/domains/api.py",
+      "site": "state_dict :596 `float(part.comp.get(i, 0.0))`; open_partition :195 `float(blob.get(\"comp\", 0.0))`; against note_competence's seed branch :381-390",
+      "claim": "comp_glob was deliberately made None-preserving across the round trip IN THIS SAME EDIT, with a paragraph explaining that a fabricated 0.0 baseline reads as 'a population that models everything perfectly'. The PER-DOMAIN comp on the adjacent lines was not given the same treatment: an unscored domain saves 0.0 and restores 0.0, so note_competence's seed test `prev = part.comp.get(did); if prev is None` cannot fire after a resume and the EMA decays from a fabricated zero. That is exactly the state the seed branch's own comment says must not exist ('a book seeded at 0.0 says this domain predicts its material perfectly and the cull's competence spare would protect it on its first window for ever'), and part.n_competence_seeded stays ABSENT so nothing on the ledger says so. Today EVERY checkpoint is taken in this state, because DOM.note_competence is never called and part.comp is therefore always empty at save time.",
+      "driven": "open_partition -> one live domain (id 7) -> state_dict -> open_partition(restored=...) -> the SAME first note_competence(did=7, bits=8.0), compared against the same call with no resume",
+      "output": "A no-resume : comp[7]=8.0  seeded=1  updates=1  comp_glob=8.0\nB saved blob for domain 7: {'size': 3, 'comp': 0.0}  comp_glob= None\nB after restore, BEFORE any reading: part.comp = {7: 0.0}  comp_glob = None\nB post-resume: comp[7]=0.16  seeded=None  updates=1  comp_glob=8.0\n\nd_comp_ema = 0.02\nSPARE RULE is comp < comp_glob (lower loss is better).\n  A: comp[7]=8.000000 vs comp_glob=8.000000 -> spared? False\n  B: comp[7]=0.160000 vs comp_glob=8.000000 -> spared? True",
+      "reading": "0.16 = 0.98*0.0 + 0.02*8.0. The spare verdict INVERTS across a resume on identical input, and part.n_competence_seeded is absent rather than 0, so the ledger cannot tell the two runs apart.",
+      "what_would_close_it": "Save `comp` only for domains that HAVE a reading (omit the key, or save null), and restore with `part.comp[i] = None if blob.get('comp') is None else float(...)` -- the same shape comp_glob already got four lines down. The restore side must not write a key note_competence's `is None` test will then read as a measurement."
+    },
+
+    {
+      "id": "C",
+      "severity": "medium",
+      "file": "src/memory/api.py",
+      "site": "state_dict :1787 writes `\"counters\": dict(store.counters)`; open_store :400 assigns `store.counters = {...}` AFTER _restore_by_block, replacing the dict wholesale. Nothing in the file ever reads blob[\"counters\"].",
+      "claim": "MEM's checkpoint carries a counters payload that the load side silently discards -- a save-side claim falsifiable only by a resume, which is the defect class fabric/api.py::state_dict's docstring names for `ctrl`. The pair store.n_writes_offered / store.n_writes_committed is, by write()'s own DID IT FIRE line, 'the kept fraction, which is the number the adaptive arm claims to control', and _write_gates :852-854 renders the mem.write_target Gate's arithmetic from it. After a resume the gate prints a fraction over a post-resume-only denominator while store.n_written -- which IS checkpointed -- says otherwise, so the ledger contradicts itself.",
+      "driven": "4 identical MEM.write flushes, once uninterrupted and once with state_dict/open_store(restored=...) between flush 3 and flush 4",
+      "output": "UNINTERRUPTED RUN, after 4 flushes:\n    mem.write_target | reason snippet: d/n_writes_offered = 48/64 -- it is simply not controlled by anything.\n   offered/committed = 64 / 48\n   n_writes_by_block = [24, 24, 0, 0]\n\nRESUMED RUN, same 4 flushes, checkpoint taken after flush 3:\n    mem.write_target | reason snippet: d/n_writes_offered = 13/16 -- it is simply not controlled by anything.\n   offered/committed = 16 / 13\n   n_writes_by_block = [6, 7, 0, 0]\n   rows actually live in the store: 48  n_written (checkpointed) = 48",
+      "second_consequence": "maintain's two cadence clocks live in the same dict -- `c['store.probe_last_window']` and `c['store.rekey_last_window']`. Both therefore restart at the resume. Measured directly: the FIRST maintain after any restore takes the `last_r is None` branch, sets the clock and computes elapsed=0, so it re-keys NOTHING. `maintain at w=10 -> rekey_slices=None ... maintain at w=14 -> rekey_slices=1 entries=35`. _restore_by_block restores rekey_cursor with a paragraph about 'the tail of the store waited a whole pass longer than the operator asked for' -- the cursor survives, the clock it is paced by does not, so that repair is half-landed.",
+      "what_would_close_it": "Either restore the blob's counters (update, not replace, and BEFORE the five open-time keys are written) or stop saving them and say in state_dict's docstring that the ledger is per-process. Both are honest; writing them and dropping them is not."
+    },
+
+    {
+      "id": "D",
+      "severity": "medium",
+      "file": "src/fabric/api.py",
+      "site": "state_dict :3875-4040 (no `marks` key) against observe :2747-2748 / :2793-2795",
+      "claim": "observe's two counters declared CUMULATIVE are backed by pop.marks['used'] and pop.marks['past_grace'], and state_dict saves neither. pop.counters IS restored, so the OLD values come back -- and then the first observe after the resume OVERWRITES them by assignment (`counters['fab.experts_with_use'] = len(used)`) from an empty set. The counters therefore DECREASE, which is impossible for a cumulative counter, and fab.experts_past_grace_ever is ISSUES P1-M58 (fabric.cull_eligible reading ARMED AND INERT off a recomputed set) arriving across the run boundary instead of within one run. state_dict's own 'Re-earned rather than restored' list does not name marks either, so the omission is undeclared. The same field also backs fab.explore_distinct_targets and fab.discover_targets.",
+      "driven": "20 windows of real flushes at FAB_N0=64/FAB_GRACE=2, then state_dict -> fresh compose -> load_state_dict -> one more observe",
+      "output": "BEFORE SAVE (20 windows):  fab.experts_with_use=12  fab.experts_past_grace_ever=9\n  is \"marks\" in the FAB checkpoint payload? False\nAFTER RESTORE, before observe: fab.experts_with_use=12  fab.experts_past_grace_ever=9  pop.marks={}\nAFTER RESTORE + ONE observe:   fab.experts_with_use=8  fab.experts_past_grace_ever=8\n  experts with uage>=grace(2) actually on the books now: 9",
+      "reading": "The DATA survives -- uage is in `books` and restores correctly -- so only the REPORT loses it. Note that past_grace is recomputable from the restored uage (uage >= grace), but `used` is not: nothing on the books records that an expert was ever credited and then decayed out.",
+      "what_would_close_it": "Add marks to state_dict (listify the sets, as dom_of already is) and restore them in load_state_dict; or rebuild past_grace from uage at load and save only `used`."
+    }
+  ],
+
+  "checked_and_could_not_break": [
+    "fabric/api.py::_headroom -- driven with a bare int soft_cap: raises TypeError naming Caps, C30 and O10 on the FIRST call rather than on the first regression. No default path exists.",
+    "fabric/api.py::observe -- driven over three real flushes at FAB_N0=8: use [3.5724, 0.0006, 1.5195, 0.8001, ...] (routing MASS), uage [6,6,6,6,6,6,6,6,0] (SELECTIONS), fab.observed_windows 6, experts_with_use 8, uage_per_expert_per_pass 2.0, uage_mean 6.0, mass_per_selection 0.125, comp_glob 8.334208. The H12/H13 split is real -- use and uage are visibly different numbers -- and every counter in the family is seeded before the early return.",
+    "fabric/api.py::_claim_slot -- sets pop.n_live = slot + 1, so the births in one burst do not all land in the same slot. n_born is clamped by min(Caps.headroom, pop.cap - n_live) computed before the loop, so a burst cannot overrun the preallocation.",
+    "fabric/api.py::grow_check -- `counters.get('fab.spawned', 0)` names the key fabric/api.py:2067 actually bumps, and g['spawned_seen'] lives in pop.growth, which IS checkpointed. The spawn charge is not a silent no-op.",
+    "memory/api.py::maintain rekey -- driven end to end. With an UNDRIFTED model it re-encodes 105 entries and changes 0 keys, which is correct (it reproduces the write-time key bit for bit, proving the write path and the rekey path share one key space). With the model perturbed by 0.05*randn: 'rows re-encoded: 12  rows whose key MOVED: 12 of 12  mean |delta key| = 0.903522'. The mechanism is real.",
+    "memory/api.py::write -- driven: WriteReceipt(offered=16, kept=12, committed=12, evicted_free=12, ...), ctx_w lazily set to key_win=8 on the first write, n_writes_by_block [6,6,0,0]. The surprise gate, the per-block commit and the ctx window all work.",
+    "lm/api.py::anchor_term and ::residual_ratios -- five and three distinct early-return arms, each with its own counter, plus a build-time Gate pair declared in build_model. I could not construct an input on which either returns without counting why.",
+    "tok/api.py::_prov_online -- accepts tuple AND list (the JSON round-trip leg) and RAISES on anything else rather than reading it as 'not on probation'. That is D-T3 refused rather than re-introduced.",
+    "tok/api.py::mint_burst -- the walk cannot loop forever (done.add(pair) before every continue; widening doubles until pool >= tally, then exhausted breaks) and the P1-M77 fail-open genuinely scans `pool` (frequency order) and not `order` (novelty order).",
+    "tok/api.py::Vocabulary.rev -- in __slots__ (:156), initialised (:263), bumped by all three match-table writers (_add :359, _retire :387, _reinstate :416) and READ by tokenize's cache stamp (:1327). The warning the old comment left about a reinstatement invisible to the stamp is genuinely closed.",
+    "domains/api.py::note_competence -- refuses a batch vector, refuses nan/inf, counts a did with no centroid separately. Everything except the resume path above is sound.",
+    "world/api.py::loss_terms -- every early exit either returns a declared null WorldStep with a reason string, or RAISES (empty window, dim mismatch, all-culled population). The `seeded = w.mass[live] == 0` test is the shape FAB.observe explicitly rejected for comp, but weights come from a dense softmax so wmass is strictly positive, WORLD.manage is still a stub so nothing culls or reseeds a slot mid-run, and I could not produce a live predictor whose mass returns to exactly 0. Recorded, not claimed.",
+    "PERFORMANCE: the 0.2 w/s I first measured is CONTENTION, NOT A REGRESSION. At torch threads=1, HEAD and the working tree run 8 windows at 2.68 and 2.75 w/s with a bit-identical loss curve. load average was 3.41-5.94 on 4 cores during the slow run."
+  ],
+
+  "suite": "all seven rc=0 after the audit (ownership contract census assemble couplings derive fabric); nothing under src/ or tests/ was touched."
+}

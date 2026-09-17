@@ -26,15 +26,71 @@ parameters -- not levers.
 RECORD TYPES RETURNED (P4 defines them):
   World         encoder, population (preds/keys/qproj), fit/mass/alive/grown buffers, world_proj,
                 the plateau state (_wl_ema, _wl_lastgrow), counters. `built` is "live" | "null".
-  WorldStep     loss, latent, inv, latent_std
+  WorldStep     loss, latent, inv, latent_std, horizon -- the last one ADDED WITH THE BODY THAT
+                RETURNS IT, because loss_terms' docstring requires that every reading carry the
+                horizon it was measured at and `inv` and `latent_std` are readings whose meaning
+                changes with it; the record's own docstring argues the case
   ManageResult  grow_attempted, grown, soft_culled, live, blocked_reason
 """
 import dataclasses
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from spine.lever import Config, LeverError
+
+
+# ==================================================================================================
+# THE UNDECLARED CONSTANTS, NAMED -- the module docstring's "FIVE UNDECLARED CONSTANTS THE PORT MUST
+# NOT INHERIT", for the two that `loss_terms` below actually reads, plus one the docstring's list
+# missed. Each is a MODULE CONSTANT with a written reason, which is the disposition that docstring
+# rules: not a lever (no census row creates one, and inventing a name and a default on no authority
+# is how a knob acquires its second default in the first place) and not a signature default living
+# inside a declared lever, which is the shape L1 forbids.
+#
+# min_mass = 1e-3 and the plateau pair are NOT declared here. They are read by `manage`, which is
+# still a stub, and a named constant with no reader is the armed-and-inert shape one level down --
+# they land with the body that reads them.
+# ==================================================================================================
+
+W_COV = 0.04
+"""The covariance half of the anti-collapse term, relative to the variance half.
+
+IT WAS A SECOND DEFAULT INSIDE A DECLARED LEVER, in two places that never had to agree: hardcoded at
+self_organize.py:7061 as `WORLD_VAR * (_wv + 0.04 * _wc)` and again as the keyword default
+`w_cov=0.04` in world_model.py:55, whose wm_loss the product loop never calls. The covariance half of
+WORLD_COLLAPSE_W's term is therefore controlled by that lever TIMES A CONSTANT NOBODY CAN SET; the
+constant stays (no census row mints a lever for it) but it is spelled once, here, so the two copies
+cannot drift and a reader can find it."""
+
+W_BAL = 0.01
+"""The load-balance weight folded into the prediction term: `inv + W_BAL * bal`.
+
+FLAT FOR THE WHOLE RUN, AND THE PROBE DISAGREES. self_organize.py:7060 holds it at 0.01 while
+world_model.py's _probe_population decays it 0.05 -> 0 over 2000 steps
+(`_bal = 0.05 * max(0.0, 1.0 - step / 2000.0)`), so the loop and the probe optimise different
+objectives and every "population specialises" reading came from the decayed one. The flat value is
+what the PRODUCT loop used and is what is ported; the decay is a lever-shaped question nobody has
+filed a census row for, and the disagreement is recorded here rather than resolved by a body that
+would then be a third answer."""
+
+TAU = 1.0
+"""The routing softmax temperature. world_model.py's signature says tau=1.0 and the product loop
+passed (3, 6, 128, 24) without one, so 1.0 is what every recorded run actually routed at -- while
+_probe_population passes tau=0.5 and reports the specialisation number the subsystem is argued for
+on. Spelled here so "the probe routes sharper than the run" is a fact a reader can see."""
+
+FIT_DECAY = 0.98
+"""The EMA rate on the per-predictor fitness and routing-mass books.
+
+A SIXTH UNDECLARED CONSTANT, FOUND WHILE WRITING loss_terms AND NOT ON THE MODULE DOCSTRING'S LIST
+OF FIVE: `update_fitness(s, w, outs, z_next, decay=0.98)` (world_model.py) is a signature default
+that the product loop never overrides, so it has exactly the shape the other five are indicted for.
+It is recorded rather than inherited silently. It is NOT FAB's comp_ema and must not be wired to it:
+that rate smooths a per-EXPERT competence over language-model loss, this one smooths a per-PREDICTOR
+forward-error over a latent MSE, and a wire between them would make two different quantities move at
+one rate because they were spelled alike."""
 
 
 class World:
@@ -166,6 +222,98 @@ def build(world: Config, *, d_model, device, ctx_tokens, rng):
     return w
 
 
+@dataclasses.dataclass(frozen=True)
+class WorldStep:
+    """What one flush's world-model pass measured. FIELDS ONLY, NO METHODS.
+
+    No methods, for the reason lm/api.py::LoadReport states: a public method on a public class in an
+    api.py IS an entry point -- tests/test_contract.py's K1 and K6 both say so -- and a record that
+    answers with its fields costs the contract nothing.
+
+    `horizon` IS A FIELD AND THE MODULE DOCSTRING'S FIELD LIST GREW BY IT (loss, latent, inv,
+    latent_std -> and horizon), because loss_terms' own docstring makes it an obligation this record
+    is the only thing that can keep: "`horizon` slices z[:, :-K] against z[:, K:], so a number
+    labelled 'forward-pred MSE' silently means a DIFFERENT COMPARISON at every value -- EVERY READING
+    MUST CARRY THE HORIZON IT WAS MEASURED AT or two runs' numbers are not comparable and nothing
+    says so." `inv` and `latent_std` are exactly such readings. Putting the horizon in a counter
+    instead would separate it from the number it qualifies at the first report line that prints one
+    without the other, which is the separation the sentence forbids.
+
+    `inv` AND `latent_std` ARE None ON THE NULL WORLD, AND THAT IS NOT A ZERO. A null world measures
+    nothing; a latent_std of 0.0 is what a fully COLLAPSED encoder reads, and the record whose
+    subsystem never ran may not print the number its worst failure produces. `loss` is a real zero
+    tensor there, because it is a SUMMAND -- the composed objective adds it on every arm and a
+    caller that had to branch on None would be the "the branch that only runs when the subsystem is
+    off is the branch that rots" case this package's class docstring refuses.
+    """
+    loss: object
+    latent: object
+    inv: object
+    latent_std: object
+    horizon: int
+
+
+def _var_cov(z):
+    """VICReg's two anti-collapse statistics over a (N, lat) latent: (var_loss, cov_loss).
+
+    PORTED FROM world_model.py::_var_cov WITH ONE CHANGE, and the change is the diagonal. The source
+    writes `cov.fill_diagonal_(0)` -- an IN-PLACE write into the output of `z.T @ z`, a tensor
+    autograd is holding for the backward of the very matmul that produced it. Multiplying by an
+    off-diagonal mask is the same arithmetic (the diagonal contributes 0 to the sum either way) with
+    no in-place write, which is the difference between a term that is correct and one that is
+    correct until torch's version counter starts checking. Nothing else moves: the 1e-4 inside the
+    sqrt, the relu(1 - std) hinge and the /d normaliser are the source's.
+    """
+    n, d = z.shape
+    if n < 2:
+        # REFUSED, NOT COMPUTED. The covariance divides by (n - 1) and a single row makes that a
+        # division by zero -- inf, then nan through the sum, and a nan loss is a NUMBER the run
+        # keeps training on rather than an error anybody sees. This is the same refusal
+        # startup_refusals makes about an empty slice, at the one place the actual row count is
+        # known.
+        raise ValueError(
+            f"WORLD.loss_terms: the anti-collapse term was handed {n} latent row(s) and needs at "
+            f"least 2 -- the covariance normaliser is (n - 1). A batch and a window this small "
+            f"cannot estimate a covariance, and computing one anyway returns nan rather than "
+            f"raising.")
+    z = z - z.mean(0)
+    std = torch.sqrt(z.var(0) + 1e-4)
+    var_loss = F.relu(1.0 - std).mean()
+    cov = (z.t() @ z) / (n - 1)
+    off = 1.0 - torch.eye(d, device=z.device, dtype=cov.dtype)
+    cov_loss = (cov * off).pow(2).sum() / d
+    return var_loss, cov_loss
+
+
+def _route(w, z, live):
+    """(weights, outs) over the LIVE predictors only: weights (N, L), outs (N, L, lat).
+
+    DEAD SLOTS ARE NOT IN THE FORWARD AT ALL, and that is `manage`'s ruling applied at the only
+    place the forward exists: "A DEAD PREDICTOR IS SKIPPED IN THE FORWARD, not merely down-weighted:
+    world_model.py:92-94 stacks EVERY predictor's output and :88 holds the dead ones down with
+    log(alive.clamp_min(1e-6)), so a culled predictor ran and took gradient every step for about
+    1e-6 of the routing mass. A hard penalty is a skip." So the log(alive) bias term is deliberately
+    NOT ported -- the mask selects the rows instead, and the compute cost of a culled predictor
+    actually stops being paid.
+
+    THE PREDICTOR IS RESIDUAL: pred_i = z + z @ preds[i]. world_model.py::ForwardModel returns
+    `z + s.net(x)` with the comment "residual: predict the CHANGE (delta) -> stable multi-step
+    rollout", and build() relies on exactly this when it leaves `preds` at ZERO: a slot whose map is
+    the zero map predicts persistence, which is what makes a newborn "the identity-free zero map"
+    that "perturbs nothing that already works". A non-residual `z @ preds[i]` would make every
+    newborn predict the ZERO VECTOR instead, which is not a neutral element of the blend.
+    """
+    q = w.qproj(z)
+    keys = w.keys[live]
+    logits = (q @ keys.t()) / (float(keys.shape[-1]) ** 0.5)
+    weights = torch.softmax(logits / TAU, dim=-1)
+    # sum_d z[n,d] * preds[l,d,k] -- each live predictor's linear map applied to every row, in one
+    # einsum rather than a python loop over slots: the population is the point of this subsystem and
+    # a per-slot loop would make its cost grow with a number the design wants free to grow.
+    outs = z.unsqueeze(1) + torch.einsum("nd,ldk->nlk", z, w.preds[live])
+    return weights, outs
+
+
 def loss_terms(world: Config, w, obs_emb):
     """The two terms this subsystem adds to the training loss. Called once per FLUSH.
 
@@ -195,9 +343,129 @@ def loss_terms(world: Config, w, obs_emb):
                  says never once exceeded 0.15 against the code's own "want ~1" bar
     """
     world = world.owned_by("WORLD")
-    raise NotImplementedError(
-        "WORLD.loss_terms: P4 (world) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section WORLD.")
+    horizon = int(world.horizon)
+    w.counters["world.loss_terms.calls"] = w.counters.get("world.loss_terms.calls", 0) + 1
+    if not w._is_live():
+        # THE NULL WORLD ANSWERS, AND ITS ANSWER IS NOT A MEASUREMENT. The class docstring's D4
+        # repair is this line: OFF is a configuration the run can actually take, on the same code
+        # path, so no caller tests for None and the off-branch cannot rot between the runs that use
+        # it. `loss` is a real zero on the argument's own device -- it is a summand of the composed
+        # objective and the caller adds it unconditionally -- while inv and latent_std are None,
+        # because a latent_std of 0.0 is what a COLLAPSED encoder reads and printing the worst
+        # failure's number for a subsystem that never ran is the "0 world loss from a live
+        # subsystem and 0 world loss from a null one printed the same way" defect the survey has 57
+        # records of.
+        w.counters["world.loss_terms.inert"] = w.counters.get("world.loss_terms.inert", 0) + 1
+        w.counters["world.loss_terms.unreachable"] = (
+            "WORLD_ENABLED=0: build() returned a null world, so there is no encoder to measure a "
+            "latent with and no population to predict one forward")
+        return WorldStep(loss=torch.zeros((), device=obs_emb.device), latent=None, inv=None,
+                         latent_std=None, horizon=horizon)
+
+    # THE TWO WEIGHTS, READ AS TWO. Folding them is the historical bug and the names are what make
+    # folding require deliberately writing the wrong name: the integration once multiplied the
+    # anti-collapse term by WORLD_W=0.1, ran it at one tenth strength, and the latent collapsed to
+    # std 0.24; splitting it out moved latent std 0.24 -> 0.97 and forward-pred against persistence
+    # +13.6% -> +34.1%. They are read into two locals and multiplied into two separate summands
+    # below, and there is no expression anywhere in this function in which one scales the other.
+    predict_w, collapse_w = float(world.predict_w), float(world.collapse_w)
+
+    z = w.encoder(obs_emb)
+    if z.dim() != 3:
+        raise ValueError(
+            f"WORLD.loss_terms: obs_emb encoded to {tuple(z.shape)} and this function slices a "
+            f"(B, W, lat) latent along its WINDOW axis. LM.embed returns (B, L, width); a caller "
+            f"that flattened it has removed the axis the horizon is measured along.")
+    width = int(z.shape[1])
+    if width <= horizon:
+        # BOTH SLICES EMPTY, REFUSED WHERE THE REAL WIDTH IS KNOWN. startup_refusals already
+        # refuses horizon >= ctx_tokens, which is the same statement made against the LEVER before
+        # any tensor exists; this one is against the tensor that actually arrived, because the two
+        # can disagree (a caller may pass a narrower window than LM_CTX) and the failure mode is a
+        # loss of nan rather than an error -- a number the run keeps training on.
+        raise ValueError(
+            f"WORLD.loss_terms: the window is {width} position(s) wide and WORLD_HORIZON is "
+            f"{horizon}, so z[:, :-{horizon}] and z[:, {horizon}:] are both empty and the loss "
+            f"comes out nan rather than raising. The startup refusal makes this statement against "
+            f"LM_CTX; this one is against the tensor that arrived.")
+
+    lat = int(z.shape[-1])
+    # THE SLICE IS THE MEASUREMENT'S DEFINITION, which is why every reading below travels with the
+    # horizon on the record: at horizon 1 `inv` is "predict the next position", at 8 it is "predict
+    # eight positions on", and the two are printed under the same words by every report this
+    # project has written.
+    z_t = z[:, :-horizon].reshape(-1, lat)
+    z_next = z[:, horizon:].reshape(-1, lat)
+
+    live = w.alive.nonzero(as_tuple=True)[0]
+    if int(live.numel()) == 0:
+        # NOT A ZERO LOSS. An empty live population cannot produce a forecast at all, and returning
+        # zero terms here would be indistinguishable from the null world two branches above -- the
+        # one confusion this package's whole shape exists to prevent. soft_cull is specified never
+        # to take the last live predictor, so reaching this is a `manage` defect and says so.
+        raise ValueError(
+            "WORLD.loss_terms: every predictor slot is culled (alive.sum() == 0), so nothing can "
+            "route and no forward prediction exists. soft_cull never takes the last live "
+            "predictor, so this state is written by something that ignored that rule -- it is not "
+            "a configuration, and a zero loss here would read as WORLD_ENABLED=0.")
+    if int(live.numel()) != int(w.n_live):
+        # RECORDED, NOT REPAIRED. `alive` is the load-bearing book (state_dict says so: a resume
+        # that rebuilt it from anything else would silently resurrect culled predictors) and
+        # `n_live` is a summary of it; when they disagree the mask wins here, and the disagreement
+        # is a counter rather than a silent correction, because whichever writer let them drift is
+        # the thing that needs finding.
+        w.counters["world.live_mask_vs_n_live"] = f"{int(live.numel())} vs {int(w.n_live)}"
+
+    weights, outs = _route(w, z_t, live)
+    pred = (weights.unsqueeze(-1) * outs).sum(1)
+    inv = F.mse_loss(pred, z_next)
+    # THE LOAD-BALANCE HALF OF THE PREDICTION TERM, exactly as world_model.py::pop_loss spells it:
+    # uniform load scores w.size(1) * (1/n)^2 summed = 1, and any concentration scores higher. It
+    # stops the early collapse onto one predictor, which is the failure that makes a POPULATION an
+    # expensive way to have one forward model.
+    bal = float(weights.shape[1]) * weights.mean(0).pow(2).sum()
+    pop_loss = inv + W_BAL * bal
+
+    # THE ANTI-COLLAPSE TERM IS TAKEN OVER THE WHOLE LATENT, ONCE. The rejected alternative is
+    # world_model.py::wm_loss's `w_var * (v1 + v2) + w_cov * (c1 + c2)` -- _var_cov called on BOTH
+    # slices and summed -- which at one weight is the same term at DOUBLE magnitude, and this
+    # function's docstring fixes the expression as `collapse_w * (var + 0.04 * cov)`, one of each.
+    # The two slices' union IS every position of z (z[:, :-K] together with z[:, K:] covers all of
+    # them for any K < W), so measuring once over the flattened z regularises exactly the same
+    # vectors the paired form does, at the magnitude the 0.24 -> 0.97 repair was measured at.
+    var_loss, cov_loss = _var_cov(z.reshape(-1, lat))
+    loss = predict_w * pop_loss + collapse_w * (var_loss + W_COV * cov_loss)
+
+    with torch.no_grad():
+        # THE BOOKS `manage` SELECTS ON, UPDATED HERE BECAUSE THIS IS THE ONLY CALL THAT HOLDS THE
+        # ROUTING TABLE. world_model.py::pop_loss updates fitness inside itself for the same
+        # reason. Leaving them at zero was the rejected alternative and it is not neutral: `mass`
+        # is what soft_cull's min_mass tests, so a population whose mass never moves is one where
+        # every predictor but the last is culled on the first management pass, and `fit` is what
+        # grow() clones the fittest from, so an unmoved fit makes "the fittest" mean slot 0.
+        # FIT_DECAY is the module constant above, not FAB's comp_ema -- see its docstring.
+        err = (outs - z_next.unsqueeze(1)).pow(2).mean(-1)          # (N, L) per-live-predictor error
+        wmass = weights.sum(0)
+        werr = (weights * err).sum(0) / wmass.clamp_min(1e-6)
+        seeded = w.mass[live] == 0
+        # SEEDED ON THE FIRST PASS RATHER THAN DECAYED FROM A ZERO, which is FAB.observe's rule for
+        # the identical shape: an EMA decayed from zero reports a fitness no predictor earned for
+        # as long as it takes the rate to forget the seed, and `fit` is a selection key.
+        w.mass[live] = torch.where(seeded, wmass,
+                                   FIT_DECAY * w.mass[live] + (1.0 - FIT_DECAY) * wmass)
+        w.fit[live] = torch.where(seeded, werr,
+                                  FIT_DECAY * w.fit[live] + (1.0 - FIT_DECAY) * werr)
+        latent_std = float(z_t.std(0).mean())
+    w.counters["world.fitness_updates"] = w.counters.get("world.fitness_updates", 0) + 1
+    # THE COLLAPSE CHECK, AS A GAUGE AND WITH ITS HORIZON. The record says this number never once
+    # exceeded 0.15 against the code's own "want ~1" bar across 413 full-stack readings, so it is
+    # the first thing a reader of this subsystem looks for; `world.horizon` is already in the
+    # counters from build(), and the WorldStep carries it beside the reading itself.
+    w.counters["world.latent_std"] = round(latent_std, 6)
+    w.counters["world.inv"] = round(float(inv.detach()), 6)
+    w.counters["world.live"] = int(live.numel())
+    return WorldStep(loss=loss, latent=z_t.detach(), inv=float(inv.detach()),
+                     latent_std=latent_std, horizon=horizon)
 
 
 def forecast(world: Config, w, obs_emb):

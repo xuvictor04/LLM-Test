@@ -1,0 +1,38 @@
+{
+  "session": "B-row rest: WORLD.loss_terms, LM.anchor_term, LM.residual_ratios, DOM.note_competence",
+  "status": "four bodies written and driven; all seven suite files green; the driver still does not CALL any of them",
+  "baseline_before_any_edit": {
+    "suite": "ownership contract census assemble couplings derive fabric -- exit=0 each",
+    "counts": "133 entry points, 34 stubs (the tree was moving: another session landed FAB/MEM bodies and is writing src/tok/api.py in the same working copy)",
+    "run": "HEAD worktree (2e48b92), python run.py --max-windows 40: loss 8.3247 -> 5.7564, '6 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED'"
+  },
+  "wrote": [
+    "src/world/api.py: WorldStep record (loss, latent, inv, latent_std, horizon), module constants W_COV/W_BAL/TAU/FIT_DECAY, private _var_cov and _route, and the loss_terms body",
+    "src/lm/api.py: _composer_books helper, anchor_term body, residual_ratios body, two Gate declarations in build_model (lm.anchor.unreachable, lm.residual_unreachable), rewritten counters() none-declared note",
+    "src/domains/api.py: note_competence body; Partition.comp_glob 0.0 -> None with open_partition and state_dict carrying the None"
+  ],
+  "measured": {
+    "world_loss_terms_live": "loss=0.987468 inv=0.000167 latent_std=0.009123 horizon=1 on a (4,128) batch; grad reaches encoder (4 tensors), preds (2.34e-06) and keys (8.42e-12); fit/mass seeded [1.667e-4 x3, 0,0,0] / [169.3 x3, 0,0,0]",
+    "two_weights_not_folded": "predict_w=0.1 collapse_w=1.0 -> loss 0.987468; collapse_w folded to 0.1 -> 0.099662 (the historical one-tenth-strength bug); predict_w=0.0 collapse_w=1.0 -> 0.986451, so enabled=False and predict_w=0 are NOT the same arm",
+    "null_world": "WORLD_ENABLED=0 -> loss=tensor(0.) addable, inv=None, latent_std=None, counters world.loss_terms.inert=1 with an unreachable reason string",
+    "refusals": "WORLD_HORIZON=4 against a 4-wide window raises naming both; alive.sum()==0 raises rather than returning a zero loss",
+    "anchor_term": "compose off -> None, lm.anchor.unreachable; compose on, composer unbuilt -> None, lm.anchor.no_composer; with a stand-in composer: delta=0 -> term 0.0 (fired, measured zero), delta~N(0,0.1) -> 0.004574 with anchor_w=0.05 already folded in, grad reaches delta rows 0..299 and exactly 0.0 on never-minted rows, seen=5000 vs uses=400 -> None (lm.anchor.none_young)",
+    "residual_ratios": "compose off -> None; unbuilt -> None; with a stand-in: (4096,) vector, minted rows mean 0.1002 (delta std 0.1 / composite std 1.0), never-minted 0.0, lm.residual_rows=300",
+    "note_competence": "d_comp_ema=0.02; comp_glob None at build, 4.0 on the first reading, 3.882384 after 4; nan and a 4-element tensor both refused by name; checkpoint round trip None -> None and 3.0 -> 3.0",
+    "end_to_end_harness": "60 windows through a hand-driven _flush that calls all four: lm_loss 8.3247 -> 4.4659, world counters calls=60 fitness_updates=60, partition comp_glob=6.8441 updates=60",
+    "world_term_changes_the_run": "30-window curves with and without the world term differ from window 2 (8.340567 vs 8.340569) -- the term reaches LM emb.weight (grad norm 0.006614, 100 rows) and nothing else, because WORLD's own tensors are in NO optimizer param group",
+    "run_after": "python run.py --max-windows 40: loss 8.3247 -> 5.7564, identical to the HEAD worktree, because the driver calls none of these four"
+  },
+  "owed": [
+    "THE RUN NOW PRINTS A FALSE HEADLINE: '0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED'. RunResult.skipped is built from _is_stub, i.e. 'which entry points are stubs', not 'which were called'. Measured by wrapping the live functions and calling spine.loop.run: skipped=() while WORLD.loss_terms, LM.anchor_term, LM.residual_ratios, DOM.note_competence AND LM.embed were called ZERO times. The driver is not mine to edit; the orchestrator must either wire the rows or make `skipped` say what it means.",
+    "WORLD's parameters are in no optimizer param group (OPT.build already warns). loss_terms' gradient therefore trains nothing in WORLD -- latent_std moved 0.0088 -> 0.0102 over 60 driven windows. The 0.24 -> 0.97 repair cannot be reproduced until the encoder/preds/keys/qproj/world_proj join a group.",
+    "anchor_term needs System.token_seen, which is None after compose(); the loop must own and increment it (the LOOP_ORDER row says so) before this entry point can do anything but count no_counter.",
+    "LM.anchor_term and LM.residual_ratios need the ByteComposer's per-token books. They are read through _composer_books as model.delta and model.born -- `born` is the name LM.state_dict already commits to. Whoever builds the composer must land both there and flip the two Gates in build_model from reachable=False.",
+    "DOM.note_competence's DID IT FIRE line says 'the Gate says so'. DOM declares no Gate objects and Partition has no slot for them; the arm (comp_glob is None, so competence protection cannot fire) is decided by the CONSUMER, DOM.manage/DOM.census, which are stubs. The three states are in part.counters (n_competence_updates, n_competence_seeded, n_competence_no_centroid) until that Gate has a place where it is decided.",
+    "`bits` is folded in whatever unit the caller supplies; LM.lm_loss's per-window value is in NATS. A report printing this series as bits/window needs the caller to divide by ln(2)."
+  ],
+  "unfinished": [
+    "WORLD.forecast and WORLD.manage are still stubs; _route exists for both and manage's slot-reuse/plateau arithmetic is untouched.",
+    "The fitness books (fit/mass) are now written every flush, but nothing reads them until WORLD.manage lands."
+  ]
+}

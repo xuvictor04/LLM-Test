@@ -1,0 +1,84 @@
+{
+  "audit": "bv_contract-truth",
+  "reviewer": "B-VERIFY, read-only on src/ and tests/",
+  "tree": "branch rm-predict-DC, HEAD 2e48b92, plus the uncommitted bodies in domains/lm/tok/world api.py",
+  "scope": "every factual claim in the FAB.observe / FAB.grow_check / FAB.own_lr_scale prose, and every pre-existing claim those bodies made false",
+  "suite": "all seven rc=0, 0 FAIL lines, before and after (ownership contract census assemble couplings derive fabric). None of the findings below is caught by any of them.",
+
+  "findings": [
+    {
+      "id": "BV1",
+      "severity": "critical",
+      "file": "src/spine/loop.py:56-72 (_is_stub) and 133-152 (skipped)",
+      "claim_falsified": "loop.py: 'Eleven entry points on LOOP_ORDER's B row are still raise NotImplementedError ... every skipped mechanism is recorded in RunResult.skipped, by name, with the reason'; run.py: 'The run PRINTS that list'; .rework/DECISIONS.md:768-772 'The list is derived from the live functions rather than typed, so it shrinks as bodies land instead of rotting.'",
+      "measured": [
+        "cd /home/user/LLM-Test && python run.py --max-windows 40 --quiet  ->  '=== 0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED:' followed by an EMPTY list, loss 8.3247 -> 5.7564",
+        "instrumented run (wrap each of the eleven, loop.run(max_windows=3)): _is_stub=False for all eleven, RunResult.skipped = (), and every one of the eleven called 0 times."
+      ],
+      "why": "_is_stub asks whether the BODY raises, not whether the DRIVER calls. _flush() calls only lm.encode / sig.encode / fab.forward / lm.decode / lm.lm_loss / opt.scaled_backward, and run() adds only opt.maybe_step. At HEAD alone the list is 6 (the FAB three dropped off); with the working tree's four further bodies it is 0.",
+      "consequence": "The one line in the report that separates 'the fabric did not grow' from 'growth was never called' now asserts the second is impossible. Three fabric/api.py docstrings written in this same commit -- :1572-1576, :2417-2419, :1145 -- explicitly send the reader to RunResult.skipped for that answer."
+    },
+    {
+      "id": "BV2",
+      "severity": "high",
+      "file": "src/fabric/api.py:2586 observe -- the computed-set reconstruction",
+      "claim_falsified": "'uage credited by SELECTION over the COMPUTED experts'; 'AT THE SHIPPED DEFAULTS THE RECONSTRUCTION IS EXACT -- depth0=1 means one hop, so weights IS that hop's distribution'; and the H13 repair 'including the one exploration deliberately inserted so it would get traffic'.",
+      "measured": "12 flushes x 8 windows on a real compose (FAB_N0=64, shipped FAB_EXPLORE=0.15), instrumenting _explore_swap to capture the post-swap idx and comparing it against observe's top-chain_k(weights): rows examined 96; expert-slots COMPUTED but NOT credited 12; expert-slots CREDITED but NOT computed 13; fab.explored_rows 13, fab.explore_distinct_targets 11. Examples: 'step 3 row 4: computed-not-credited=[6] credited-not-computed=[23]', 'step 5 row 5: computed-not-credited=[39] credited-not-computed=[23]'.",
+      "why": "forward's _explore_swap (fabric/api.py:1586) overwrites idx[r,-1] with a COLD expert and never touches w, and FabricOut carries no per-hop selection record. observe reconstructs from w.topk(k), so the explored expert takes no use and no uage and the displaced incumbent takes both. The targets are already on the population as pop.marks['explore'].",
+      "consequence": "The experts that receive zero clock are exactly the low-use ones exploration exists to rescue, and the ones over-credited are the high-mass incumbents -- the self-fulfilling ranking _explore_swap's own docstring says it is 'THE ONLY THING BETWEEN THE UTILIZATION CULL AND A SELF-FULFILLING RANKING'."
+    },
+    {
+      "id": "BV3",
+      "severity": "high",
+      "file": "src/fabric/levers.py:1030, 1059-1065, 1076-1083",
+      "claim_falsified": "'unreachable only because FAB.observe is still a stub' (twice); 'cull_frac and merge_dist are read by manage, new_frac/parent_max/mut_big_p/xover by grow_check, lr_gamma/lr_amin by own_lr_scale, and ALL THREE OF THOSE FUNCTIONS RAISE NotImplementedError'; the table header 'READ OFF A FROZEN CONTRACT IN A STUB'S DOCSTRING -- eight, no executable reader anywhere in src/' and its six '(stub)' rows.",
+      "measured": "the file's own method (AST walk for Name/Attribute/arg outside fabric/levers.py) now finds in src/fabric/api.py: new_frac 4 (3327,3507,3607), xover 4 (3332,3556), mut_big_p 4 (3331,3551), parent_max 3 (3330,3544), cull_frac 3 (3739,3782), lr_gamma 1 (3737), lr_amin 1 (3737). Only merge_dist is still 0. grep 'raise NotImplementedError' src/fabric/api.py -> 2 sites (2843 contribution, 2964 manage)."
+    },
+    {
+      "id": "BV4",
+      "severity": "medium",
+      "file": "src/fabric/api.py:2586 observe -- fab.experts_with_use, fab.experts_past_grace_ever",
+      "claim_falsified": "'DISTINCT experts ever credited'; 'CUMULATIVE, not the snapshot that made fabric.cull_eligible read ARMED AND INERT, ISSUES P1-M58'.",
+      "measured": "FAB_N0=32, FAB_GRACE=2. Before save: fab.experts_past_grace_ever=8, fab.experts_with_use=16. state_dict saves `counters` and does NOT save `marks`. After load_state_dict + ONE flush touching 8 fresh experts: fab.experts_past_grace_ever=0 while 8 experts still hold uage>=grace, and fab.experts_with_use=8 while 24 experts hold uage>0.",
+      "why": "the distinct-recipient sets live in pop.marks, which Population's docstring files under re-earned state and state_dict omits, while the counters derived from them ARE checkpointed and then overwritten by len(empty set) on the next call.",
+      "consequence": "the counter written to refuse P1-M58 IS P1-M58 across a resume, and it moves BACKWARD, which no cumulative counter may do."
+    },
+    {
+      "id": "BV5",
+      "severity": "low",
+      "file": "src/fabric/api.py:3679-3681 (own_lr_scale DID IT FIRE)",
+      "claim_falsified": "'fab.lr_cycle_max (a max above ~12 means every survivor is pinned at lr_amin and the schedule is a constant)'.",
+      "measured": "uage [0,1,12,24,47,48,200,5000] at the shipped lr_gamma=0.5 / lr_amin=0.15: fab.lr_cycle_max=105, fab.lr_envelope_pinned=2 of 8, ratios [2.0,1.9208,1.05,0.1,1.0104,2.1,0.29,0.29] -- not a constant. gamma**(c-1) <= amin first at cycle 4, not 12; and cycle_max is a MAX, so it says nothing about 'every survivor'."
+    },
+    {
+      "id": "BV6",
+      "severity": "low",
+      "file": "src/fabric/api.py:3826-3827 (_three_state)",
+      "claim_falsified": "'Measured 2026-09-15: sig.gates is a dict of 2, fabric.gates a tuple of 2, store.gates a tuple of 1, valve.gates a tuple of 3.'",
+      "measured": "build() now declares four: len(pop.gates)=4, ['fab.on','fab.cull_gate','fab.growth_armed','fab.lr_own'] -- the two new ones were added by this same commit."
+    },
+    {
+      "id": "BV7",
+      "severity": "low",
+      "file": "tests/test_fabric.py:36-39",
+      "claim_falsified": "'FAB has eleven public entry points and eight of them still raise NotImplementedError (observe, contribution, manage, grow_check, own_lr_scale, counters, state_dict, load_state_dict) ... The three with bodies are build, forward and manage_period ... this file is all of the behaviour FAB currently has.'",
+      "measured": "grep -n 'raise NotImplementedError' src/fabric/api.py -> 2 sites (2843, 2964). Nine entry points have bodies; the file exercises three of them."
+    }
+  ],
+
+  "tried_and_could_not_break": [
+    "own_lr_scale numbers reproduce EXACTLY at applied_lr=0.001 (which the report did not state): ratios [2.0,1.9208,1.05,0.1,1.0104,2.1,0.29,0.29], lr_eligible 3, lr_boosted 1, lr_cycle_max 105, lr_envelope_pinned 2. At applied_lr=d_base_lr=0.002 every ratio is exactly half. The envelope, the +half newborn phase, the lr_amin floor, the past-grace boost sized on the eligible count and the lr_maxr clamp all behave as written.",
+    "grow_check soft_cap=16 (bare int) raises TypeError naming Caps and P3-C30, on the FIRST call, before any regression.",
+    "grow_check shift_at=U.Steps(350) raises UnitError('cannot build Windows from Steps'); shift_at=U.Windows(...) bumps fab.shift_notifications and opens the blackout.",
+    "the cold-start MAD finding reproduces to the digit: w=2 loss=8.3406 slow=8.324732 dev=0.000158682 n=2 -> asked 1, grown 1, n_live 8->9, birth record (2, parent 4). It is reported, not hidden.",
+    "both clamps INSIDE, before the counters: FAB_BURST=5 with headroom 2 -> asked 5, grown 1, declined_cap 3, declined_newfrac 1, Gate fab.grow_cap 'FIRED (3 of 5 refused by the ceiling vs Caps.headroom(8)=2, pool 56 of 64)'.",
+    "birth operators: crossover takes A column j WITH B row j; mutscale of a heavy-tail birth is exactly mut*mut_big=1.5; centroid norms 1.0; FAB_REPLICATE=0 gives parent -1 and B max|.| exactly 0.0 (a fresh birth IS an identity).",
+    "FAB_GROW_ON_MEM_PRESSURE: 0 asks at pressure False on a strongly improving run (improving 0.679951), asked_stall 1 / grown 1 at pressure True, fab.grow_mem_eligible 1.",
+    "state_dict/load_state_dict round-trips growth and comp_glob; an older payload whose growth dict holds only {fast, slow} restores update-not-replace and keeps the built defaults for the rest.",
+    "observe refuses a per_window_loss/weights row mismatch and a narrower (stale) FabricOut, by name; weights=None bumps fab.observe_unrouted and credits nothing; use takes routing MASS, uage takes SELECTIONS, comp/ef/es seed on the first credit (test uage==1) and EMA after at comp_ema/err_fast/err_slow, dom_of accumulates a SET, comp_glob is the flush mean then an EMA.",
+    "all 26 keys grow_check's docstring declares are present in the ledger after ONE call at the shipped defaults; fab.cap_lift_period carries the d_cap_lift_period wire (20000).",
+    "LEVERS READ / WIRES READ lines match the bodies: observe reads exactly comp_ema, err_fast, err_slow, chain_k, grace and no wire; grow_check reads exactly its 22 named levers plus d_cap_lift_period; own_lr_scale reads exactly its 8 levers plus d_base_lr and d_lr_min_frac.",
+    "fab.grow_slow/fast/dev/improving are ABSENT rather than 0 at FAB_GROW=0 -- checked and judged correct: they are READINGS the body did not take, and the fab.growth gate says so in as many words ('the EMAs this trigger is made of are not even advanced').",
+    "the 'fourteen' in the seeding comment is the DID IT FIRE family of 14 declared names, not the 19-entry tuple below it; the comment's next sentence says the added keys are seeded too. Not a miscount."
+  ]
+}

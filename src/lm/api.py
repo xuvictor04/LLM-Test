@@ -33,7 +33,7 @@ from torch.nn import functional as F
 
 from spine.lever import Config
 from spine import rng as _rng
-from spine.gate import NotBuilt
+from spine.gate import Gate, NotBuilt
 from spine.init import is_scale as _is_scale
 
 
@@ -418,6 +418,32 @@ def build_model(lm: Config, geom, *, device, seed):
                 t.fill_(1.0)
             else:
                 t.zero_()
+    # THE GATES ARE DECLARED WHERE THE ARM IS DECIDED, WHICH IS HERE. counters() has been printing
+    # "gate:lm.none_declared" -- "the obligation is on whoever ports those arms: declare the Gate
+    # where the arm is decided, at build, with the numbers that made it true or false" -- and these
+    # two are that obligation kept for the two arms whose bodies landed with them. Recomputing
+    # reachability inside anchor_term or residual_ratios would give this package two answers to
+    # "could it fire", which is the defect the Gate record was introduced to end.
+    #
+    # BOTH ARE reachable=False TODAY AND ON BOTH ARMS OF compose, for two different reasons, and
+    # the reason string carries which. At compose off there is no composer by configuration; at
+    # compose on the ByteComposer is not built in this tree (_LM.composed_table raises NotBuilt,
+    # LM.on_mint is a P4 stub), so the mechanism cannot run either way. Declaring them reachable at
+    # compose=1 would put "armed, did not fire" -- the words Gate.line reserves for a mechanism
+    # that RAN -- on a mechanism that has no body to run.
+    # THE UNBUILT SENTENCE IS THE ONE _composer_books HANDS BACK, not a second copy of it: the gate
+    # and the entry points that take the same arm say the same thing because they read the same
+    # string, which is the only way two sentences about one mechanism cannot drift apart.
+    _off = ("the LM_COMPOSE arm is off, so the token table is emb.weight and a row has no byte "
+            "composite to be held near or measured against")
+    model.gates = (
+        Gate(name="lm.anchor.unreachable", fired=False,
+             value=geom.compose, threshold=True, reachable=False,
+             reason=(_COMPOSER_UNBUILT if geom.compose else _off)),
+        Gate(name="lm.residual_unreachable", fired=False,
+             value=geom.compose, threshold=True, reachable=False,
+             reason=(_COMPOSER_UNBUILT if geom.compose else _off)),
+    )
     return model
 
 
@@ -793,6 +819,37 @@ def lm_loss(lm: Config, logits, y):
     return per_window, per_window.mean()
 
 
+# THE COMPOSER'S TWO PER-TOKEN BOOKS, AND THE SENTENCE FOR WHEN THEY ARE NOT THERE.
+_COMPOSER_UNBUILT = (
+    "the ByteComposer is not built in this tree: _LM.composed_table raises NotBuilt and LM.on_mint "
+    "is a P4 stub, so no token has a free residual (`delta`) or a birth stamp (`born`) yet")
+
+
+def _composer_books(model):
+    """(delta, born, reason) -- the composer's per-token residual table and birth stamps, or
+    (None, None, why-not).
+
+    THE NAMES ARE THE ONES THIS MODULE ALREADY COMMITTED TO. LM.state_dict reads
+    `getattr(model, "born", None)` and saves it under "born" with a written absence reason, so
+    `born` is where the birth stamps live on this module whether or not anything builds them yet;
+    `delta` is the other half of the same record -- world_model-era ByteComposer keeps the two
+    beside each other (self_organize.py:1455-1457) and both are per-token tables of the vocabulary's
+    width. Whoever builds the composer lands them here, and the two readers below then fire without
+    another edit.
+
+    THIS IS NOT THE `hasattr(...) else <unchanged>` DEFECT, and the difference is what happens on the
+    absent arm. That shape is refused because it turns a wrong assumption into a SILENT NO-OP: the
+    caller proceeds with a stale value and the report describes a mechanism that did not run. Here
+    the absent arm returns a distinguished answer with a reason attached, every caller counts it
+    under its own name, and NOTHING proceeds as if the books were there.
+    """
+    delta = getattr(model, "delta", None)
+    born = getattr(model, "born", None)
+    if delta is None or born is None:
+        return None, None, _COMPOSER_UNBUILT
+    return delta, born, ""
+
+
 def anchor_term(lm: Config, model, *, token_seen):
     """The loss term that holds a newly minted token's residual near its byte composite, ALREADY
     MULTIPLIED BY anchor_w. Returns None when there is nothing young enough to hold.
@@ -821,9 +878,88 @@ def anchor_term(lm: Config, model, *, token_seen):
                  predicate, never as silence)
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.anchor_term: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    _bump("lm.anchor.calls")
+    if not model.compose:
+        # THE DECLARED GATE'S ARM, AND IT IS NOT SILENCE. build_model declares
+        # Gate("lm.anchor.unreachable") with this same predicate and its numbers, so counters()
+        # renders "UNREACHABLE" with the arithmetic beside it rather than a 0 that reads like a
+        # measurement. There is no composer at lm.compose=False -- emb/head are the token table and
+        # a row has no residual to be held near a composite it does not have -- so this is
+        # unreachable, not armed-and-inert.
+        _bump("lm.anchor.unreachable")
+        return None
+    weight = float(lm.anchor_w)
+    if weight == 0.0:
+        # ARMED AND PRICED AT ZERO. Returning `0.0 * term` here would put an exact zero into the
+        # objective and let the report count a fire, which is the thing this entry point's
+        # docstring exists to prevent from the other direction: LM_ANCHOR_W=0.05 was printed on the
+        # EFFECTIVE line of every run in this project's history while the term never entered the
+        # loss. A term nobody weights did not fire, and this counter says which of the three states
+        # that is.
+        _bump("lm.anchor.weight_zero")
+        return None
+    delta, born, _why = _composer_books(model)
+    if delta is None:
+        # THE COMPOSER IS NOT BUILT IN THIS TREE. Not fabricated, not stubbed around: the residual
+        # table the anchor penalises does not exist, so there is nothing to hold and the counter
+        # says exactly that. This is a THIRD state and it is neither "compose is off" (the gate
+        # above) nor "nothing is young enough" (the measurement below); collapsing it into either
+        # would make the report answer a question nobody asked.
+        _bump("lm.anchor.no_composer")
+        return None
+    if token_seen is None:
+        # THE COUNTER LIVES IN THE TRAINING LOOP, NOT HERE (self_organize.py:1530 takes the same
+        # branch), and `anchor_uses` is now the ONLY release rule -- TOK_ANCHOR_TAU, the steps-side
+        # rival, is dropped by the census, so there is no second schedule to fall back to. Counted
+        # rather than substituted: a zero counter would hold every row at full weight for ever,
+        # which is not "no anchor" but "the strongest possible anchor", and a caller who forgot the
+        # argument would get the opposite of what the omission looks like.
+        _bump("lm.anchor.no_counter")
+        return None
+
+    # THE WIDTHS ARE CHECKED, NOT MINIMISED. lm_loss refuses a logits width that disagrees with the
+    # lever for the same reason: taking min() of three tables would anchor a PREFIX of the
+    # vocabulary and report a full anchor, and the rows it dropped are the recently minted ones --
+    # exactly the cohort the anchor exists for.
+    rows = int(delta.shape[0])
+    if int(born.numel()) != rows or int(token_seen.shape[0]) != rows:
+        raise ValueError(
+            f"LM.anchor_term: the composer's residual table has {rows} row(s), its birth stamps "
+            f"{int(born.numel())} and the appearance counter {int(token_seen.shape[0])}. These "
+            f"three index ONE vocabulary, so a disagreement is a mint that reached some of them "
+            f"and not the others -- anchoring the overlap would hold a prefix and report a whole "
+            f"vocabulary.")
+    uses = float(lm.anchor_uses)
+    seen = token_seen.detach().to(delta.dtype)
+    # APPEARANCES, NOT STEPS, AND THE FLOOR IS THE SOURCE'S OWN. A token minted early appears
+    # constantly and is thoroughly trained; one minted late is rare BY CONSTRUCTION -- that is WHY
+    # it was minted late -- so a shared wall-clock release is anti-correlated with how ready each
+    # token is. max(1.0, uses) keeps the exponential defined at LM_ANCHOR_USES=0; it is not the
+    # `max(1, ...)` coercion this tree refuses elsewhere, because that one rewrote a lever the
+    # banner then printed unchanged, and this one is a division guard on a value the report reads
+    # from the Config either way.
+    w = torch.exp(-seen / max(1.0, uses))
+    # NEVER-MINTED ROWS ARE NOT YOUNG, THEY ARE ABSENT. born is -1e9 for an id that has never been
+    # minted, and the appearances rule cannot tell "minted, not yet seen" from "does not exist" --
+    # both sit at seen=0 and would be held at FULL weight. Their delta is zeros and stays zeros, so
+    # the term they contribute is 0 either way; masking them keeps the reported MAGNITUDE
+    # comparable between vocabularies of different fullness, which is what a per-row mean destroys.
+    minted = born > -10 ** 8
+    w = w * minted.to(w.dtype)
+    _set("lm.anchor.rows_minted", int(minted.sum()))
+    if float(w.max()) < 1e-3:
+        # ARMED, AND NOTHING IS YOUNG ENOUGH. The measurement state: the mechanism ran, every
+        # minted row has been seen enough times for its weight to have decayed past the floor, and
+        # the anchor has released them all. Distinct from every branch above it.
+        _bump("lm.anchor.none_young")
+        return None
+    term = (w[:, None] * delta.pow(2)).sum(-1).mean()
+    _bump("lm.anchor.fired")
+    # ALREADY MULTIPLIED, WHICH IS THE WHOLE POINT OF RETURNING THE TERM RATHER THAN THE NUMBER.
+    # LM_ANCHOR_W was read in one package and applied in another, and the application was simply
+    # missing from the loss-weight list at :5802-5813 while the weight went on being printed. Here
+    # the number and the tensor never separate.
+    return weight * term
 
 
 def on_mint(lm: Config, model, mints, id2bytes, *, at_window, sig_emb=None):
@@ -908,9 +1044,61 @@ def residual_ratios(lm: Config, model):
                  (compose off -- printed with its predicate, never as silence)
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.residual_ratios: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    _bump("lm.residual.calls")
+    if not model.compose:
+        # THE GATE'S ARM, AND M41'S REPAIR. At lm.compose = False there is no composer and no
+        # residual to read, so this returns None and TOK's Gate prints "unreachable (no
+        # residual_ratio supplied)" rather than silently running the "use" test -- which is ISSUES
+        # P1-M41, the record of the embed arm running the use test while the banner said embed.
+        _bump("lm.residual_unreachable")
+        return None
+    delta, born, _why = _composer_books(model)
+    if delta is None:
+        # DECLARED AND NOT BUILT. Counted apart from the compose arm above because the two say
+        # different things to TOK: "this run has no composer by configuration" and "this tree has
+        # no composer yet". Both return None, and a consumer that cannot tell them apart would read
+        # the second as the first and stop asking.
+        _bump("lm.residual.no_composer")
+        return None
+    try:
+        table = model.composed_table()
+    except NotBuilt:
+        # NotBuilt IS CAUGHT BY NAME AND NOTHING ELSE IS. spine/gate.py::NotBuilt exists for exactly
+        # this -- "a mechanism that is DECLARED and deliberately NOT BUILT, refused at the point of
+        # use" -- and it deliberately does not subclass NotImplementedError, so catching it cannot
+        # swallow a P4 stub marker. A bare `except` here would also catch the shape and device
+        # errors a real composer can raise, and would report "no composer" for a composer that is
+        # there and broken.
+        _bump("lm.residual.table_unbuilt")
+        return None
+    slots = int(lm.vocab_slots)
+    if int(table.shape[0]) != slots or int(delta.shape[0]) != slots:
+        # THE RETURN IS PROMISED AS (vocab_slots,) AND INDEXED EXACTLY AS TOK'S `appearances` IS.
+        # A narrower vector would be read by id and would answer about the wrong token, which is
+        # the class of defect that makes a probation decision look like a measurement.
+        raise ValueError(
+            f"LM.residual_ratios: the composed table has {int(table.shape[0])} row(s), the "
+            f"residual table {int(delta.shape[0])} and LM_VOCAB_SLOTS is {slots}. This vector is "
+            f"indexed by token id by its consumer, so a width that is not the vocabulary's is a "
+            f"vector whose rows mean something other than what TOK will read them as.")
+    with torch.no_grad():
+        # A PURE READ: no grad, no side effect, no mutation of the composer. It is called on the
+        # probation cadence from a judgement path, and an instrument that leaves a graph behind on
+        # a path nobody backwards through is a leak with no symptom.
+        composite = table - delta
+        # ||delta[t]|| / ||composite[t]||, RECOMPUTED AT JUDGEMENT TIME AND NOT READ OFF THE MINT.
+        # That is the whole reason this entry point exists (Q-TOK-11): MintReport.residual_ratio is
+        # produced at the moment the row is created, when the free residual starts at zero under
+        # every new_row_init arm, so the "embed" arm's `residual_ratio[t] >= probation_residual`
+        # test failed for every candidate and retired 100% of them -- an arm wrong BY CONSTRUCTION
+        # rather than by tuning.
+        ratios = delta.norm(dim=-1) / composite.norm(dim=-1).clamp_min(1e-12)
+        # LIVE ROWS ARE THE MINTED ONES, and the count is the reading that separates "the
+        # vocabulary has no composed rows yet" (0 with a non-None return) from "compose is off"
+        # (None). born is -1e9 for an id that was never minted, the same mask anchor_term applies.
+        _set("lm.residual_rows", int((born > -10 ** 8).sum()))
+        _bump("lm.residual_read")
+        return ratios.detach().to(torch.float32)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1153,19 +1341,25 @@ def counters(lm: Config, model):
     gates = getattr(model, "gates", None)
     out.update({f"gate:{k}": v for k, v in _three_state(gates or (), _COUNTS).items()})
     if not gates:
-        # THIS PACKAGE DECLARES NO Gate OBJECTS, AND THE DOCSTRING ABOVE ASSUMES IT DOES. It says
+        # NO Gate OBJECTS ON THIS MODEL, AND THE DOCSTRING ABOVE ASSUMES THERE ARE SOME. It says
         # "Every gated mechanism above appears here in the three-state form G4 requires", and LM
-        # really does have gated arms -- mask_dead_rows, compose, the anchor, new_row_init -- but
-        # build_model constructs no spine/gate.py::Gate for any of them, so there is nothing for
-        # this call to render. Measured: getattr(model, "gates", None) is None on a built model.
+        # really does have gated arms -- mask_dead_rows, compose, the anchor, new_row_init.
+        # BUILD_MODEL NOW DECLARES TWO OF THEM (lm.anchor.unreachable and lm.residual_unreachable,
+        # 2026-09-17, with the two bodies that read those arms), so a model this package built
+        # never takes this branch: measured, `getattr(model, "gates", None)` is a tuple of 2 on a
+        # freshly built model and was None before that edit. What still takes it is a model from a
+        # source that is not build_model -- a stand-in in a test, an object rebuilt from a
+        # checkpoint by hand -- and the remaining arms (mask_dead_rows, new_row_init) are still
+        # decided inline and declare no Gate at all.
         # REPORTED RATHER THAN LEFT AS SILENCE, because a ledger with no gate rows in it looks
         # exactly like a package whose gates all read zero -- which is the two-states-printed-as-one
         # collapse G4 exists to refuse, arriving inside the surface built to prevent it. The
-        # obligation is on whoever ports those arms: declare the Gate where the arm is decided, at
-        # build, with the numbers that made it true or false.
+        # obligation on the two arms that remain is unchanged: declare the Gate where the arm is
+        # decided, at build, with the numbers that made it true or false.
         out["gate:lm.none_declared"] = (
             "unreachable", 0,
-            "LM.build_model constructs no Gate objects, so this package has no three-state surface "
-            "yet -- its gated arms (mask_dead_rows, compose, anchor, new_row_init) are decided "
-            "inline and report only through the tallies above")
+            "this model carries no Gate objects, so it has no three-state surface -- "
+            "LM.build_model declares the anchor and residual gates, and a model that has none "
+            "did not come from it; the arms decided inline (mask_dead_rows, new_row_init) declare "
+            "none either way and report only through the tallies above")
     return out

@@ -62,9 +62,12 @@ import json
 import math
 import os
 
+import heapq
+
 from spine.lever import Config, LeverError
 from spine import derive as _derive
 from spine import rng as _rng
+from spine import units as _units
 from spine.gate import Gate
 
 
@@ -150,7 +153,8 @@ class Vocabulary:
 
     __slots__ = ("id2bytes", "seq2id", "merges", "bytes_per_id", "mlbf", "maxlen", "retired",
                  "prov", "pair", "ceiling", "soft_cap", "v0", "bytes_per_token", "max_bytes",
-                 "dropout_rng", "counters", "gates", "_retok_cache")
+                 "dropout_rng", "counters", "gates", "tally", "tally_seen", "rev",
+                 "_retok_cache")
 
     def __init__(self, *, ceiling, soft_cap=None, max_bytes=16):
         self.id2bytes = [bytes([b]) for b in range(256)]
@@ -164,7 +168,25 @@ class Vocabulary:
         self.mlbf = [1] * 256
         self.maxlen = 1
         self.retired = set()
-        self.prov = {}               # id -> how it was minted ("build" | "online" | "replay")
+        # PROV CARRIES THE BIRTH STEP FOR AN ONLINE MINT AND A BARE STRING FOR THE REST, and
+        # this line said "id -> how it was minted" alone until judge_probation was written. The old
+        # tree's probation test is quoted in tok/levers.py::TOKLevers.probation_deadline as
+        # `step - TOK.prov[t][2] >= TOK_PROBATION_STEPS`, so the birth step lived in this table
+        # there too, and TOK.vocab_state's docstring already promises "the prov table with birth
+        # steps" -- there was nowhere for that promise to be kept. The two shapes:
+        #   "build" | "replay" | "replay:..."        -- minted before the loop; never on probation
+        #   ("online", born)                         -- minted by TOK.mint_burst at window `born`,
+        #                                               NOT YET JUDGED
+        #   ("online", born, "kept" | "retired")     -- judged by TOK.judge_probation, verdict kept
+        # THE VERDICT IS THE THIRD ELEMENT AND NOT A SEPARATE SET, because a separate set is a
+        # second home for the same fact and TOK.vocab_state carries exactly `retired` and `prov`
+        # across a checkpoint (DEFECT D-T3 is what happens when a retirement has no home in the
+        # file): with the verdict inside prov, one table says both what a token is and whether its
+        # probation is over, and restore_vocab's existing `{int(k): v for ...}` carries it with no
+        # edit. A torch.save payload round-trips the tuple; a JSON one would hand back a LIST, so
+        # every reader here takes a sequence of length 2 or 3 and refuses anything else loudly --
+        # see _prov_online.
+        self.prov = {}               # id -> "build" | "replay" | ("online", born[, verdict])
         self.pair = {}               # id -> (left_id, right_id) that produced it
         self.ceiling = int(ceiling)
         self.soft_cap = None if soft_cap is None else int(soft_cap)
@@ -204,6 +226,41 @@ class Vocabulary:
         #   is not"), and the build and dropout rows follow it.
         self.counters = {}
         self.gates = ()
+        # THE PAIR TALLY, WHICH IS THE CANDIDATE EVIDENCE TOK.mint_burst DRAWS ON. It lives on the
+        # Vocabulary because TOK.on_window's own docstring puts it here -- "Tallies the adjacent
+        # pairs of `ids` into the vocabulary's tally" -- and because mint_burst's frozen signature
+        # is (tok, vocab, *, step): no ids reach it, so the vocabulary is the ONLY channel a
+        # candidate can arrive through.
+        # IT IS CUMULATIVE AND IS NOT CLEARED AT A BURST. `tally_seen` is what each pair's count
+        # WAS when a burst last considered it, and tok.mint_novel's re-rank is
+        # (c - seen)/(1+seen)**novel -- growth since last considered. Clearing the tally would make
+        # `seen` meaningless and turn the novelty re-rank into a second copy of plain frequency,
+        # which is the one knob in this package that addresses the tokenizer's own version of
+        # catastrophic forgetting (tok/levers.py::TOKLevers.mint_novel).
+        # `tally_seen` IS ONLY MAINTAINED AT mint_novel > 0. At the shipped 0.0 nothing reads it,
+        # and one entry per considered pair for the length of a run is the unbounded-instrument
+        # shape ISSUES P1-L68 records against h_pmin_seen (one float per candidate, millions at
+        # cand_window=1024).
+        # NOTHING FILLS `tally` TODAY: TOK.on_window is the only declared producer and it is still
+        # a P4 stub that spine/loop.py does not call, so a burst on the tree as it stands finds an
+        # empty tally and mints nothing. That reads as tok.mint 0 with tok.mint_exhausted 1 -- a
+        # measurement of an empty pool -- and mint_burst says so in its own comment rather than
+        # letting the two states collapse.
+        self.tally = collections.Counter()
+        self.tally_seen = {}
+        # THE MATCH-TABLE REVISION COUNTER, AND IT CLOSES A HOLE THIS FILE NAMED IN ADVANCE.
+        # tokenize()'s stamp was (size, len(seq2id), len(retired)) and its own comment says what
+        # that triple cannot see: "a retire of one id paired with a REINSTATEMENT of a different
+        # retired id in the same flush moves len(seq2id) by -1 then +1 AND len(retired) by +1 then
+        # -1, both to a net zero, while the match table has genuinely changed. No count of the two
+        # sets can see that; only a monotone revision number bumped by every match-table mutation
+        # can, and there is nothing to bump it in yet." Both bodies that mutate the match table now
+        # exist -- mint_burst reinstates, judge_probation retires -- and LOOP_ORDER puts them on
+        # the same flush, so the pair is reachable rather than hypothetical. This is that number:
+        # bumped by _add, _retire and _reinstate, read by tokenize as the fourth stamp term, and
+        # never reset (a resumed run keeps counting from zero, which is correct -- the cache is
+        # per-process and starts empty).
+        self.rev = 0
         # THE RE-SEGMENTATION NO-OP CACHE (round1 tok/api.py::build_vocabulary/420, re-filed at :462). One slot,
         # not a dict keyed by every text ever segmented: the contract's own words are "since the
         # LAST one", singular, and tokenize() is called once per epoch plus on every
@@ -237,19 +294,22 @@ class Vocabulary:
         #   seed       -> NOT COVERED AND DOES NOT NEED TO BE: tokenize's body never reads it (see
         #                 that function's own note on the parameter). It selects nothing, so it
         #                 cannot make a cached answer wrong.
-        #   vocab      -> cache[3], the stamp, over the THREE structures _segment consults --
-        #                 seq2id (through size() and len(seq2id)), `retired` (len), and `mlbf`,
-        #                 the per-first-byte max length that decides which lengths are probed at
-        #                 all. THIS PARAGRAPH SAID TWO UNTIL 2026-09-04 and _segment reads all
+        #   vocab      -> cache[3], the stamp: FOUR terms over the three structures _segment
+        #                 consults -- seq2id (through size() and len(seq2id)), `retired` (len),
+        #                 and `mlbf` -- the per-first-byte max length that decides which
+        #                 lengths are probed at all -- through `rev`, the fourth term.
+        #                 THIS PARAGRAPH SAID TWO UNTIL 2026-09-04 and _segment reads all
         #                 three (`s2i, mlbf, retired = ...`, then `hi = min(mlbf[b0], n - i)`).
-        #                 mlbf needs no term of its own TODAY because it is written only inside
-        #                 Vocabulary._add, which always appends to id2bytes first and so always
-        #                 moves size() -- so the first stamp term already catches every change to
-        #                 it. That implication is written down rather than left to be re-derived:
-        #                 a future reinstatement that puts a sequence back into the match table
-        #                 WITHOUT going through _add breaks it, and needs the revision counter
-        #                 tokenize's own paragraph already asks for. See that paragraph for the one
-        #                 match-table change this stamp still cannot see.
+        #                 mlbf needed no term of its own while _add was its only writer: _add
+        #                 always appends to id2bytes first and so always moves size(), so the first
+        #                 stamp term caught every change to it. THE REINSTATEMENT THAT PARAGRAPH
+        #                 WARNED ABOUT NOW EXISTS (2026-09-17): Vocabulary._reinstate puts a
+        #                 sequence back into the match table without going through _add and raises
+        #                 mlbf itself when it has to. It is covered by the FOURTH stamp term rather
+        #                 than by a term of its own -- `vocab.rev`, the monotone revision counter
+        #                 _add, _retire and _reinstate all bump, which is precisely what that
+        #                 warning asked for. There is no longer a match-table change this stamp
+        #                 cannot see.
         self._retok_cache = None
 
     def size(self):
@@ -292,7 +352,116 @@ class Vocabulary:
             self.mlbf[b0] = len(seq)
         if len(seq) > self.maxlen:
             self.maxlen = len(seq)
+        # THE MATCH TABLE MOVED. size() moves here too, so tokenize's stamp already caught this
+        # site; the bump is here anyway because the invariant `rev` states is "every mutation of
+        # the match table", and a term that holds for two of its three writers is a term the third
+        # reader has to re-derive.
+        self.rev += 1
         return i
+
+    def _retire(self, i):
+        """Withdraw one id from the match table WITHOUT renumbering. True if this call moved it.
+
+        BOTH HALVES, AND NEITHER ALONE. `seq2id` is popped so _segment stops producing the token
+        and its text re-segments to its parts; `retired` gains the id so live_size()'s subtraction
+        is right and so TOK.vocab_state has something to carry across a checkpoint (DEFECT D-T3).
+        _segment tests BOTH (`j = s2i.get(...)`, then `if j is None or j in retired`), so either
+        half alone would stop segmentation -- and either half alone would also leave one of
+        live_size() and the reinstatement lookup reading a table the other half contradicts.
+        `id2bytes` IS LEFT INTACT AND THE ID IS NOT REUSED. Ids are POSITIONS: merges[] is replayed
+        in order and every later token is built on this one's index, so removing an id renumbers
+        the vocabulary and attaches the parent's trained embedding rows to different tokens
+        (src/tok/api.py::_replay_merges refuses a replay for exactly that reason). The embedding row
+        keeps its meaning and LM masks it by id through Judgement.retired_ids.
+        THE ALIAS TEST IS NOT DEFENSIVE CLUTTER: two different pairs can produce the same bytes
+        ("th"+"e" and "t"+"he"), only one of them owns the seq2id entry, and popping on behalf of
+        the other would take a LIVE token out of the match table under another token's retirement.
+        """
+        i = int(i)
+        if i in self.retired:
+            return False
+        seq = self.id2bytes[i]
+        if self.seq2id.get(seq) == i:
+            del self.seq2id[seq]
+        self.retired.add(i)
+        self.rev += 1
+        return True
+
+    def _reinstate(self, i):
+        """Put a retired id back into the match table. True if this call moved it.
+
+        WHY THIS IS NOT A FRESH MINT (ISSUES P1-M79). retire() pops from seq2id and leaves
+        id2bytes, so the bytes are absent from the match table while the id still exists; minting
+        them again would create a SECOND id with identical bytes and split every statistic between
+        the two -- and LM would initialise a fresh row for a token that already has a trained one.
+        `mlbf` IS REPAIRED HERE AND THAT IS NOT BELT-AND-BRACES. tokenize()'s stamp paragraph names
+        this exact shape: "putting a sequence back into seq2id without going through _add moves
+        neither size() nor mlbf's writer". mlbf[b] bounds the lengths _segment probes at a position
+        starting with byte b, so a sequence back in seq2id whose length exceeds that bound is a
+        table entry the matcher never probes for -- present, and unreachable. It cannot be too
+        small on the path this tree takes today (mlbf never shrinks, and the id was minted through
+        _add), so this is the one line here that is written for the path rather than for the run.
+        """
+        i = int(i)
+        if i not in self.retired:
+            return False
+        seq = self.id2bytes[i]
+        self.seq2id[seq] = i
+        self.retired.discard(i)
+        b0 = seq[0]
+        if len(seq) > self.mlbf[b0]:
+            self.mlbf[b0] = len(seq)
+        if len(seq) > self.maxlen:
+            self.maxlen = len(seq)
+        self.rev += 1
+        return True
+
+
+@dataclasses.dataclass(frozen=True)
+class Mint:
+    """One token TOK.mint_burst minted, and the evidence it was minted on.
+
+    THE COUNT TRAVELS WITH THE MINT because it is the whole case for the merge: an operator reading
+    a burst of six sees what each one was taken on, and a token minted at a count barely over
+    tok.min_pair is the "merge taken on a transient burst" that probation exists to catch
+    (tok/levers.py::TOKLevers.probation_deadline).
+    A REINSTATEMENT IS NOT A Mint AND MUST NOT BE ONE. The composition root hands this list to
+    LM.on_mint for new-row initialisation and to SIG for the encoder row; a reinstated id already
+    carries a trained row, and initialising it again would destroy exactly the learning the soft
+    retirement was designed to preserve. Reinstatements are counted on tok.mint_reinstated and
+    appear in no list.
+    """
+    new_id: int
+    left_id: int
+    right_id: int
+    token_bytes: bytes
+    count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class Judgement:
+    """What TOK.judge_probation decided, and the two vocabulary sizes that are NOT the same number.
+
+    `live_size` and `id_count` ARE DIFFERENT NUMBERS AND BOTH ARE NEEDED, which is this module's
+    header verbatim. id_count is the positional boundary -- where never-minted rows begin, i.e.
+    Vocabulary.size() -- and it is what LM.decode's `live_vocab` argument must receive, because ids
+    are positional: retire() pops from the match table and leaves id2bytes intact, so retired rows
+    sit BELOW the boundary and are handled separately, by id. live_size is that boundary minus the
+    retired count, and passing it to decode would move the boundary down and mask exactly that many
+    LIVE rows to -inf.
+    `kept` IS THIS CALL'S AND `retired_ids` IS THE WHOLE SET, and the asymmetry is deliberate
+    rather than an oversight. A kept token is marked in `prov` and never judged again, so "kept" has
+    no meaning other than "kept by this call". `retired_ids` is the REFRESH LM.decode takes
+    (spine/compose.py::LOOP_ORDER's judge_probation row: "retired_ids -- Judgement.retired_ids,
+    LM.decode's exact spelling and the REFRESH of what the vocabulary produced at assembly"), and a
+    mask built from one flush's retirements alone would re-admit every row retired before it.
+    """
+    kept: tuple
+    retired_ids: tuple
+    pending: int
+    live_size: int
+    id_count: int
+
 
 
 
@@ -1124,12 +1293,26 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     # because it is what a reinstatement breaks: putting a sequence back into seq2id without going
     # through _add moves neither size() nor mlbf's writer, and that is the same shape as the
     # retire+reinstate pair the next paragraph says no count of the two sets can see.
-    # It cannot go stale in this tree yet: `Vocabulary` has no retire() method, nothing anywhere
-    # writes `vocab.retired`, and the body that would (judge_probation) is `raise
-    # NotImplementedError` -- so len(retired) is 0 on every reachable configuration and this term
-    # changes no value today. It closes ONE of the two shapes that defeat the pair once those bodies
-    # land: a retire that adds to `retired` WITHOUT popping seq2id, which moves neither of the other
-    # two terms.
+    # It could not go stale while this sentence was first written -- `Vocabulary` had no retire()
+    # method, nothing anywhere wrote `vocab.retired`, and judge_probation was `raise
+    # NotImplementedError` -- so len(retired) was 0 on every reachable configuration. THAT IS NO
+    # LONGER TRUE (2026-09-17): Vocabulary._retire and ._reinstate exist, judge_probation calls the
+    # first and mint_burst the second, and the term now changes value on any run with
+    # TOK_PROBATION_USES > 0. It closes ONE of the two shapes that defeat the pair: a retire that
+    # adds to `retired` WITHOUT popping seq2id, which moves neither of the other two terms.
+    # THE FOURTH TERM IS `vocab.rev` AND IT CLOSES THE SECOND SHAPE, WHICH THE PARAGRAPH BELOW
+    # SAID WAS OPEN (2026-09-17, when mint_burst and judge_probation were written). Read the next
+    # paragraph as the statement of the defect and this one as its repair: `rev` is a monotone
+    # counter bumped by Vocabulary._add, ._retire and ._reinstate -- every writer of the match
+    # table there is -- so the retire+reinstate pair that nets to zero in the other three terms
+    # moves this one by two. It is the "monotone revision number bumped by every match-table
+    # mutation" the paragraph asks for, and it exists now because the two bodies that mutate the
+    # match table exist now: LOOP_ORDER puts TOK.mint_burst and TOK.judge_probation on the same
+    # flush, with a Due.retok tokenize between them, so the pair was reachable the moment those
+    # bodies landed rather than hypothetical. THE TERM CAN ONLY MAKE THE CACHE MORE CONSERVATIVE:
+    # every mutation that moves one of the other three moves `rev` as well, so no call that
+    # rebuilds today starts skipping, and the calls that start rebuilding are exactly the ones the
+    # paragraph below says are being served a stale answer.
     # IT DOES NOT CLOSE THE SECOND SHAPE, AND SAYING SO IS THE POINT OF THIS PARAGRAPH. Under the
     # retirement this package already describes -- judge_probation's "the bytes are popped from the
     # match table", plus the addition to `retired` that Vocabulary.live_size's own subtraction
@@ -1141,7 +1324,7 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     # see that; only a monotone revision number bumped by every match-table mutation can, and there
     # is nothing to bump it in yet. Recorded in this file rather than left for a fifth reader to
     # rediscover as a fresh defect against the same cache.
-    stamp = (vocab.size(), len(vocab.seq2id), len(vocab.retired))
+    stamp = (vocab.size(), len(vocab.seq2id), len(vocab.retired), vocab.rev)
     cache = vocab._retok_cache
     is_retok = cache is not None and cache[0] is data and cache[1] == start and cache[2] == len(data)
     if is_retok and drop <= 0.0 and cache[3] == stamp and not cache[5] and cache[6] is labels:
@@ -1339,6 +1522,28 @@ def on_window(tok: Config, vocab, ids, *, step):
         "docs/04_CONTRACT.md, section TOK.")
 
 
+def _cand_key(item):
+    """The candidate ranking key: count DESCENDING, then pair ascending. A TOTAL order."""
+    return (-item[1], item[0])
+
+
+def _candidate_window(tally, k):
+    """The `k` highest-count pairs of `tally`, in _cand_key order. A list of ((a, b), count).
+
+    NOT Counter.most_common(k), and the difference is the one thing mint_burst's widening depends
+    on. most_common resolves ties by the tally's own insertion order, so the deeper window it
+    returns is not guaranteed to have the shallower one as a PREFIX -- and the widening examines a
+    deeper window and carries on past the candidates it has already seen, which only means anything
+    if those sit at the front. `(-count, pair)` is a total order on distinct pairs, so the prefix
+    property holds by construction and two processes ranking the same tally rank it identically
+    whatever order the pairs arrived in. build_vocabulary's own `tally.most_common()` is untouched:
+    it materialises the WHOLE tally once per pass and never widens, so it has no prefix to preserve.
+    """
+    if k >= len(tally):
+        return sorted(tally.items(), key=_cand_key)
+    return heapq.nsmallest(k, tally.items(), key=_cand_key)
+
+
 def mint_burst(tok: Config, vocab, *, step):
     """Mint up to tok.grow_burst tokens from the current tally and return what was minted, as
     a list of Mint(new_id, left_id, right_id, token_bytes, count).
@@ -1382,10 +1587,376 @@ def mint_burst(tok: Config, vocab, *, step):
                  add-an-area run), tok.mint_exhausted
     """
     tok = tok.owned_by("TOK")
-    _ = tok.d_vocab_ceiling                              # WIRE READ HERE -- the hard row count
-    raise NotImplementedError(
-        "TOK.mint_burst: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    ceiling = int(tok.d_vocab_ceiling)                   # WIRE READ HERE -- the hard row count
+
+    # THE WIRE IS THE AUTHORITY AND THE VOCABULARY'S OWN CEILING IS CHECKED AGAINST IT, ONCE, HERE
+    # (DEFECT D-T1). This module's header is unconditional: the ceiling is hard, it comes from the
+    # wire on every path including a resume, and a saved file's vmax is a recorded fact to
+    # reconcile against rather than an authority. Minting is the one act that can reserve an id the
+    # model has no embedding row for, so this entry point is where that sentence has to bite.
+    # THE CHECK IS LATENT ON TODAY'S TREE AND THAT IS SAID RATHER THAN IMPLIED: build_vocabulary is
+    # the only writer of vocab.ceiling, it takes this same wire, and its one exception
+    # (mode="fixed") only ever NARROWS -- so no environment an operator can set reaches this raise.
+    # What trips it is the shape D-T1 names, a Vocabulary whose ceiling came from a file rather than
+    # from the wire, which is how "a tokenizer saved full at 2048 came back full at 2048 and refused
+    # every candidate for the whole run" happened on the first run that ever added an area.
+    # IT IS A REFUSAL AND NOT A CLAMP, because a clamp would be a SECOND cap rule standing beside
+    # Vocabulary.at_cap(), which that class calls THE ONE PREDICATE for exactly this reason.
+    if int(vocab.ceiling) > ceiling:
+        raise LeverError(
+            f"TOK.mint_burst: this vocabulary's ceiling is {int(vocab.ceiling)} and the wire "
+            f"d_vocab_ceiling -- LM.vocab_slots, the embedding row count -- is {ceiling}. Minting "
+            f"against the wider of the two reserves ids the model has no row for. The wire is the "
+            f"authority on every path including a resume (DEFECT D-T1), so this is refused rather "
+            f"than clamped: clamping here would put a second copy of the cap rule beside "
+            f"Vocabulary.at_cap().")
+
+    # THE LEVERS, READ ONCE AND INTO BARE LOCALS, the idiom fabric/api.py::grow_check states: a
+    # Config attribute inside the arithmetic below would put a lever read in an operand, and
+    # `grow_burst` is TOKENS while `cand_window` and `min_pair` are COUNTS.
+    burst = int(tok.grow_burst)
+    floor_n = int(tok.min_pair)
+    max_b = int(tok.max_bytes)
+    # FLOORED AT 2, AND THE FLOOR CANNOT BE DECLARED ON THE LEVER. tok/levers.py::TOKLevers's
+    # cand_window says so in as many words: `choices=` cannot express "at least 2", so the floor
+    # lives at the point of use. At a window of 1 there is nothing to walk on to and one unmintable
+    # top pair ends the burst -- the fault the lazy re-query exists to patch (tokenizer.py:325-329).
+    width = max(2, int(tok.cand_window))
+    pmin = float(tok.mint_pmin)
+    novel = float(tok.mint_novel)
+    # THE BIRTH STEP, TYPED THROUGH units.Windows AT THE DOOR (the idiom
+    # fabric/api.py::forward uses on step_windows). Config hands back a bare int for every
+    # clock-unit lever, so a kind is metadata at a READ site -- but this arrives as an ARGUMENT from
+    # the root, and spine/units.py::Clock refuses to build a Windows out of a Steps. judge_probation
+    # compares `step - birth` against probation_deadline, which is Windows; handed the optimizer's
+    # step counter instead, every probation deadline would be wrong by the effective batch width and
+    # right at batch_windows=1, which is the shape of every clock defect this project has recorded.
+    born = int(_units.Windows(step))
+
+    c = vocab.counters
+    # PRESENT-AND-0 FROM THE FIRST CALL ON THE ARMS THAT CAN RUN, ABSENT ON THE ARMS THAT CANNOT.
+    # This file's convention, stated by _replay_merges for tok.load_reconciled and by the build loop
+    # for tok.build_pass: a key present-and-0 means the mechanism ran and did not fire, and an
+    # ABSENT key means it was unreachable on the arm this vocabulary took. The gate rows are
+    # therefore seeded only when there is a gate (mint_pmin > 0) and the novelty row only when
+    # there is a re-rank (mint_novel > 0) -- at the shipped 0.0 defaults those four keys never
+    # appear, which is what the docstring's "unreachable at mint_novel=0.0" asks for and what keeps
+    # a reader from reading "0 blocked" off a gate that was never evaluated.
+    for _row in ("tok.mint", "tok.mint_skipped", "tok.mint_reinstated", "tok.mint_rescued",
+                 "tok.mint_widened", "tok.mint_ceiling_refused", "tok.mint_exhausted"):
+        c.setdefault(_row, 0)
+    if pmin > 0.0:
+        for _row in ("tok.mint_gate_pass", "tok.mint_gate_block", "tok.mint_gate_forced"):
+            c.setdefault(_row, 0)
+    if novel > 0.0:
+        c.setdefault("tok.mint_novel_reranked", 0)
+
+    # THE REVERSE MAP FOR REINSTATEMENT, BUILT PER BURST AND NOT KEPT. `retire` pops the bytes out
+    # of seq2id, so a retired token cannot be found by the lookup every other caller uses, and
+    # ISSUES P1-M79 is what happens when the burst mints them again instead: two ids with identical
+    # bytes, the statistics split between them, and a fresh embedding row for a token that already
+    # had a trained one. Rebuilt on each call rather than carried on the Vocabulary because it is
+    # derived state -- a second home for `retired` would be one more thing a resume has to
+    # reconcile -- and because `retired` is small by construction (it is bounded by the tokens this
+    # run minted) while a burst happens once every tok.grow_every windows.
+    retired_bytes = {vocab.id2bytes[i]: i for i in vocab.retired}
+
+    # p(b|a)'s DENOMINATOR, COMPUTED ONLY WHEN THERE IS A GATE TO FEED. The left marginal is the
+    # tally's own: sum of counts over every pair starting with `a`. It is the same evidence the
+    # numerator comes from, so the ratio is scale-free and needs no second instrument --
+    # tok/levers.py::TOKLevers.mint_pmin argues that at length against an absolute
+    # branching-entropy cutoff, which rejected 81% of left tokens over 400 kB of English and
+    # rejected the USEFUL merges first. The scan is O(tally) and is skipped entirely at the shipped
+    # mint_pmin=0.0, where nothing reads it.
+    marginal = None
+    if pmin > 0.0:
+        marginal = collections.Counter()
+        for (_a, _b), _n in vocab.tally.items():
+            marginal[_a] += _n
+
+    made = []
+    taken = 0                    # burst budget spent: mints AND reinstatements, see _take
+    skips = 0                    # candidates this burst refused for length or for already existing
+    blocked = 0                  # candidates this burst's p(b|a) gate turned away
+    exhausted = False
+    at_ceiling = False
+
+    def _drop(pair):
+        """Take a pair out of the tally for good, with its `seen` entry."""
+        vocab.tally.pop(pair, None)
+        vocab.tally_seen.pop(pair, None)
+
+    def _take(pair, cnt):
+        """Turn one candidate into a match-table change, or say why not.
+
+        Returns a Mint, or one of "reinstated" / "skipped" / "ceiling". THE ORDER OF THE TESTS IS
+        LOAD-BEARING and the retired lookup comes BEFORE the seq2id one: TOK.restore_vocab puts
+        `retired` back on a resume WITHOUT popping seq2id (it cannot -- the file is replayed by
+        _replay_merges, which re-adds every entry), so after a resume a retired token's bytes are
+        in BOTH tables. Asking seq2id first would call that candidate "already exists", skip it,
+        and leave the token retired forever; asking `retired` first reinstates it, which is what it
+        is.
+        WHICH REFUSALS DROP THE PAIR FROM THE TALLY, AND WHY ONLY THOSE. A pair is dropped when it
+        can never be a candidate again: minted (its bytes are one token now, so the pair stops
+        occurring), reinstated (same), or longer than max_bytes (a length is a property of the pair
+        and tok.max_bytes is frozen for the run, so it is too long for every later burst too).
+        A pair refused AT THE CAP is NOT dropped -- CAP.lift_vocab_cap can raise the soft cap and
+        make it mintable -- and neither is one whose bytes already exist at a LIVE id, because that
+        id may itself be retired later, at which point this pair is a reinstatement. Leaving the
+        permanently-dead ones in would clog the candidate window with entries that can never mint:
+        the window is finite, and at cand_window=64 the window itself starved minting to 419 of
+        1024 (tok/levers.py::TOKLevers.cand_window).
+        """
+        a, b = pair
+        seq = vocab.id2bytes[a] + vocab.id2bytes[b]
+        if vocab.at_cap():
+            # THE ONE PREDICATE, not a second min(soft_cap, ceiling) written here. This is the row
+            # that read "ZERO tokenizer.mint 0 ARMED AND INERT" on the first run that ever added an
+            # area: the vocabulary was full, every candidate was refused, and nothing counted it.
+            return "ceiling"
+        if len(seq) > max_b:
+            # THE LEVER DECIDES HERE, AND Vocabulary._add APPLIES THE VOCABULARY'S OWN COPY. The two
+            # are one number with two homes: build_vocabulary constructs the Vocabulary with
+            # max_bytes taken from this same lever, so they agree on every path this tree has. This
+            # entry point reads the LEVER because that is what its contract declares (LEVERS READ:
+            # ... max_bytes), and if the two copies ever disagree the raise below is where it
+            # surfaces -- which is the right place for two copies of one number to be caught, and
+            # is how this disagreement was found: a driving script that mutated `vocab.max_bytes`
+            # alone got a candidate past this test and refused by _add.
+            _drop(pair)
+            return "skipped"
+        old = retired_bytes.get(seq)
+        if old is not None:
+            vocab._reinstate(old)
+            del retired_bytes[seq]
+            _drop(pair)
+            return "reinstated"
+        if seq in vocab.seq2id:
+            return "skipped"
+        new_id = vocab._add(seq, prov=("online", born), pair=(a, b))
+        if new_id is None:
+            # _add REFUSES FOR EXACTLY THREE REASONS -- the cap, max_bytes, and already existing --
+            # and all three were tested above. Reaching here means the tests and _add disagree
+            # about the same table, which is a defect in this file and not a candidate to skip.
+            raise ValueError(
+                f"TOK.mint_burst: Vocabulary._add refused {seq!r} for pair {pair!r} after this "
+                f"burst had cleared all three of the conditions _add refuses on: the cap "
+                f"({vocab.size()} of {vocab._cap()}), the length ({len(seq)} against "
+                f"TOK_MAX_BYTES={max_b} and vocab.max_bytes={vocab.max_bytes}) and the match table "
+                f"({'present' if seq in vocab.seq2id else 'absent'} in seq2id). The two readings of "
+                f"the same conditions disagree. If the two max_bytes differ, that is the cause: "
+                f"they are one number with two homes and build_vocabulary is what keeps them "
+                f"equal.")
+        _drop(pair)
+        return Mint(new_id=new_id, left_id=a, right_id=b, token_bytes=seq, count=cnt)
+
+    # THE CANDIDATE WINDOW. `pool` stays in FREQUENCY order for the whole call and `order` is what
+    # the walk below actually follows; at mint_novel=0 they are the same list. The two are held
+    # SEPARATELY because of ISSUES P1-M77: the fail-open fallback claims to take "the most frequent
+    # candidate clearing min_pair" and the shipped tree re-used the novelty-sorted list, so at
+    # mint_novel > 0 it took the most NOVEL one instead -- the two re-rankers were designed to
+    # compose and the fallback silently inherited one.
+    width_now = width
+    pool = _candidate_window(vocab.tally, width_now)
+    order = pool
+    if novel > 0.0:
+        # THE NOVELTY RE-RANK (tok/levers.py::TOKLevers.mint_novel). most_common(1) mints the
+        # globally most frequent pair, which by construction re-segments ALL existing material at
+        # once; in a system whose point is continual learning a new area should buy vocabulary for
+        # ITSELF rather than rewrite how everything already learned is spelled. `seen` is what the
+        # pair's count was when a burst last considered it, so (c - seen) is growth SINCE then.
+        order = sorted(pool, key=lambda kv: -((kv[1] - vocab.tally_seen.get(kv[0], 0))
+                                              / (1.0 + vocab.tally_seen.get(kv[0], 0)) ** novel))
+        c["tok.mint_novel_reranked"] += 1
+    done = set()
+    # A CURSOR, NOT A RESCAN FROM THE TOP EACH TIME. `done` only grows and `order` is a list, so
+    # advancing an index past the entries already examined is O(window) for the whole walk where
+    # re-scanning is O(window^2). That is not a micro-optimisation at the sizes this lever reaches:
+    # a burst that skips every candidate -- TOK_MAX_BYTES small, which is a configuration
+    # tok/levers.py::TOKLevers.max_bytes has on record as a real stall -- walks the whole window,
+    # and the window widens by doubling, so at a tally of tens of thousands of pairs the rescan is
+    # billions of comparisons inside one flush. The index resets to 0 whenever `order` is rebuilt,
+    # and the skip loop below walks the done prefix again, which is O(window) once per widening.
+    idx = 0
+
+    while taken < burst:
+        while idx < len(order) and order[idx][0] in done:
+            idx += 1
+        cand = order[idx] if idx < len(order) else None
+        if cand is None:
+            # THE WINDOW IS WALKED OUT. Widen and carry on -- the lazy re-query at
+            # tokenizer.py:325-329 -- unless there is nothing deeper, or unless the window already
+            # reaches BELOW the frequency floor, in which case everything deeper is below it too
+            # and a deeper window is a sort nobody can use.
+            if len(pool) >= len(vocab.tally) or (pool and pool[-1][1] < floor_n):
+                exhausted = True
+                break
+            width_now = min(len(vocab.tally), width_now * 2)
+            pool = _candidate_window(vocab.tally, width_now)
+            order = pool
+            if novel > 0.0:
+                order = sorted(pool, key=lambda kv: -((kv[1] - vocab.tally_seen.get(kv[0], 0))
+                                                      / (1.0 + vocab.tally_seen.get(kv[0], 0))
+                                                      ** novel))
+            c["tok.mint_widened"] += 1
+            idx = 0
+            continue
+        pair, cnt = cand
+        done.add(pair)
+        if cnt < floor_n:
+            # BELOW THE FREQUENCY FLOOR. In frequency order every later candidate is below it too,
+            # so the pool is spent; AFTER A NOVELTY RE-SORT IT IS NOT, because the list is no longer
+            # frequency-ordered and a later entry can be more frequent. The docstring names this
+            # early exit and names the condition under which it must be disabled.
+            if novel > 0.0:
+                continue
+            exhausted = True
+            break
+        if pmin > 0.0:
+            # THE GATE MAY REORDER AND MAY NEVER PREVENT. As a HARD gate mint_pmin left 609 of 2048
+            # rows (29.7%) never minted and scored 3.600 b/B against a ~1.96 baseline; here it
+            # SKIPS a candidate and the fail-open below guarantees the burst can still mint. The
+            # marginal is the tally's own, so `left` is at least `cnt` by construction -- a
+            # KeyError here would mean the marginal and the window were built from different
+            # tallies, which is a defect and not a candidate to skip.
+            left = marginal[pair[0]]
+            if cnt / left < pmin:
+                c["tok.mint_gate_block"] += 1
+                blocked += 1
+                continue
+            c["tok.mint_gate_pass"] += 1
+        got = _take(pair, cnt)
+        if got == "ceiling":
+            c["tok.mint_ceiling_refused"] += 1
+            at_ceiling = True
+            break
+        if got == "skipped":
+            # SKIPPED, NOT "NOTHING LEFT TO MINT". A candidate refused for max_bytes or for already
+            # existing used to abort the whole burst, and that hole stalled a vocabulary at 658/4000
+            # with 1866 pairs still above min_pair (tokenizer.py:318-324).
+            c["tok.mint_skipped"] += 1
+            skips += 1
+            continue
+        if got == "reinstated":
+            # A REINSTATEMENT SPENDS BUDGET AND MINTS NOTHING. It changes the spelling of the stream
+            # exactly as a mint does, and grow_burst is the bound on how much the spelling may move
+            # at one grow event (tok/levers.py::TOKLevers.grow_burst: grow_every x grow_burst is the
+            # mint budget the modalities claim is priced in). The alternative -- reinstatements are
+            # free -- lets one burst put every retired token back at once, which is the retire/
+            # reinstate churn probation exists to make a measured decision rather than a loop.
+            c["tok.mint_reinstated"] += 1
+            taken += 1
+            continue
+        made.append(got)
+        c["tok.mint"] += 1
+        taken += 1
+        if skips:
+            # THE MINTS THE OLD "A REFUSAL ENDS THE BURST" BEHAVIOUR WOULD HAVE LOST: a mint taken
+            # in a burst that had already skipped at least one candidate. It is the direct
+            # measurement of the 658/4000 repair rather than an argument that the repair is in.
+            c["tok.mint_rescued"] += 1
+
+    if pmin > 0.0 and blocked and taken == 0 and not at_ceiling:
+        # THE FAIL-OPEN, SCANNED IN FREQUENCY ORDER OFF `pool` AND NOT OFF `order` (ISSUES P1-M77).
+        # A quality criterion that can empty the softmax is not a quality criterion: if the gate
+        # turned everything away, the burst still takes the most frequent candidate clearing
+        # min_pair. ONE, not a burst's worth -- the docstring says "the most frequent candidate",
+        # singular, and a gate that can be overridden wholesale is not reordering anything.
+        for _pair, _cnt in pool:
+            if _cnt < floor_n:
+                break
+            if _pair not in vocab.tally:
+                # ALREADY DROPPED BY THE WALK ABOVE, so it is permanently unmintable and was
+                # already counted. `pool` is a snapshot taken before the walk ran; re-refusing an
+                # entry it still lists would count one candidate's refusal twice.
+                continue
+            got = _take(_pair, _cnt)
+            if got == "ceiling":
+                if _pair not in done:
+                    c["tok.mint_ceiling_refused"] += 1
+                at_ceiling = True
+                break
+            if got == "skipped":
+                # COUNTED ONLY IF THE WALK HAD NOT ALREADY REFUSED IT. This fallback exists to
+                # reconsider the GATE's verdict, not to refuse a second time what the walk refused
+                # for length or for already existing.
+                if _pair not in done:
+                    c["tok.mint_skipped"] += 1
+                    skips += 1
+                done.add(_pair)
+                continue
+            if got == "reinstated":
+                c["tok.mint_reinstated"] += 1
+                c["tok.mint_gate_forced"] += 1
+                taken += 1
+                break
+            made.append(got)
+            c["tok.mint"] += 1
+            c["tok.mint_gate_forced"] += 1
+            taken += 1
+            break
+
+    if novel > 0.0:
+        # `seen` IS RECORDED FOR THE WHOLE MATERIALISED WINDOW, NOT FOR THE HANDFUL THE BUDGET
+        # REACHED, and this is the difference between a live re-rank and an inert one. "How much a
+        # pair has grown since it was last considered" (tok/levers.py::TOKLevers.mint_novel) makes a
+        # pair CONSIDERED when it was ranked against the others, which is every entry in the window:
+        # at cand_window=1024 and grow_burst=6 the walk below examines about six, so recording only
+        # those leaves 1018 windowed pairs at seen=0 forever, where (c - 0)/(1 + 0)**novel is c --
+        # plain most-frequent minting wearing the novelty knob's name. MEASURED on the sweep that
+        # found it: with the per-candidate write, a burst that minted its whole budget left
+        # tally_seen EMPTY, because every pair it touched was dropped from the tally by the mint.
+        # THE MEMORY IS BOUNDED BY DISTINCT PAIRS EVER WINDOWED, not by candidates ever scored --
+        # one int per pair, replaced in place -- which is the bound ISSUES P1-L68 asks for against
+        # h_pmin_seen's one float per candidate for the whole run (millions at cand_window=1024).
+        # The final `pool` is the whole window this call materialised: a widening only ever extends
+        # it, and _candidate_window's total order makes the shallower window its prefix.
+        for _pair, _cnt in pool:
+            if _pair in vocab.tally:
+                vocab.tally_seen[_pair] = _cnt
+
+    if exhausted:
+        # THE POOL RAN OUT WITH BUDGET LEFT. It is counted once per burst rather than once per
+        # candidate, and it is NOT the cap refusal above: "the corpus has no pair left worth
+        # minting" and "the vocabulary is full" are different facts about a burst that minted
+        # nothing, and build_vocabulary's tok.build_converged carries the same distinction for the
+        # seed build.
+        # AN EMPTY TALLY REACHES HERE TOO, AND IT IS THE STATE THIS TREE IS ACTUALLY IN.
+        # TOK.on_window is the only declared producer of vocab.tally and it is still a P4 stub that
+        # spine/loop.py does not call, so on the tree as it stands every burst finds an empty pool
+        # and reads tok.mint 0 with tok.mint_exhausted 1 -- a measurement of an empty pool, which is
+        # a different statement from a mechanism that was never reached, and the reader can tell
+        # which they are looking at by whether vocab.tally has anything in it.
+        c["tok.mint_exhausted"] += 1
+    return made
+
+
+def _prov_online(entry):
+    """(born, verdict) for a token minted during the run, or None for one that never was.
+
+    THE TWO SHAPES ARE Vocabulary.prov'S, WHICH THAT FIELD'S COMMENT STATES IN FULL: a bare string
+    for the build and the replay, ("online", born) for a token TOK.mint_burst minted and nothing has
+    judged, ("online", born, verdict) once TOK.judge_probation has.
+    A LIST IS ACCEPTED AS WELL AS A TUPLE, and that is not laxity. TOK.vocab_state hands this table
+    to CKPT.save as part of an opaque payload; torch.save round-trips a tuple as a tuple, and any
+    JSON leg -- today's tokenizer sidecar is JSON, and a future payload writer may be -- hands back
+    a LIST. Reading only tuples would make a resumed run see no token on probation at all and
+    report a clean sweep, which is DEFECT D-T3's shape (a round trip silently confirming every
+    token that was on probation) reintroduced by a type check.
+    ANYTHING ELSE RAISES. An unrecognised entry treated as "not on probation" is the silent no-op
+    this package refuses everywhere else: it would make this function report a verdict over a table
+    it could not read.
+    """
+    if isinstance(entry, str):
+        return None
+    if isinstance(entry, (tuple, list)) and len(entry) in (2, 3) and entry[0] == "online":
+        return int(entry[1]), (None if len(entry) == 2 else str(entry[2]))
+    raise ValueError(
+        f"TOK.judge_probation: Vocabulary.prov carries {entry!r}, which is neither a provenance "
+        f"string nor an (\"online\", born[, verdict]) record. Refused rather than read as \"not on "
+        f"probation\": that reading would report a clean sweep over a table this function cannot "
+        f"read, which is how a save/load round trip came to confirm every token on probation "
+        f"(DEFECT D-T3).")
 
 
 def judge_probation(tok: Config, vocab, *, step, appearances, residual_ratio=None):
@@ -1427,9 +1998,171 @@ def judge_probation(tok: Config, vocab, *, step, appearances, residual_ratio=Non
                  rather than silently running the "use" test
     """
     tok = tok.owned_by("TOK")
-    raise NotImplementedError(
-        "TOK.judge_probation: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    # THE LEVERS, READ ONCE AND INTO BARE LOCALS -- and the deadline is TYPED HERE, at the read,
+    # rather than compared as an int below. Its census row is the reason: the old name said
+    # TOK_PROBATION_STEPS and the quantity is WINDOWS, so at BATCH_W=16 reading it as steps is a
+    # 16x error, and tok/levers.py::TOKLevers.probation_deadline says the unit type is how the
+    # comparison stops compiling if anyone reads it as steps again. `step` goes through
+    # units.Windows at the same door for the same reason.
+    uses = int(tok.probation_uses)
+    deadline = _units.Windows(int(tok.probation_deadline))
+    by = str(tok.probation_by)
+    resid_min = float(tok.probation_residual)
+    now = _units.Windows(step)
+    c = vocab.counters
+
+    def _seal(gate):
+        """Put one gate on the vocabulary, replacing any earlier gate of the SAME NAME.
+
+        NEITHER OF THE TWO OBVIOUS SPELLINGS IS RIGHT HERE. Assigning the whole tuple is
+        build_vocabulary's discipline -- it declares its entire surface at each of its three return
+        points -- and doing it here would DELETE tok.build_passes_advice, which describes the build
+        and is the only gate this package has. Appending would grow one tuple by an entry per flush
+        for the length of the run, which is exactly why fabric/api.py::forward keeps its per-pass
+        gates on the returned record instead of on the population. Replacing by name is bounded by
+        the number of distinct gate names -- two -- and leaves the last reading of each in place,
+        which is what a report renders.
+        """
+        vocab.gates = tuple(g for g in vocab.gates if g.name != gate.name) + (gate,)
+
+    # THE OFF ARM, AND IT LEAVES THE FOUR COUNTERS ABSENT. The docstring's own row says all four are
+    # "unreachable at probation_uses = 0, the default", and this file's convention is that an
+    # unreachable mechanism leaves its key ABSENT while an armed one that did not fire prints 0.
+    # Nothing is on probation at 0 -- tok/levers.py::TOKLevers says "THE DEFAULT 0 MEANS OFF" of
+    # this lever, and a threshold of zero appearances is earned by every token the instant it is
+    # minted -- so `pending` is 0 and not the count of online tokens: a token nothing will ever
+    # judge is not waiting for a judgement.
+    if uses <= 0:
+        _seal(Gate("tok.probation_embed", False, value=f"probation_by={by!r}",
+                   threshold=resid_min, reachable=False,
+                   reason="TOK_PROBATION_USES=0: probation is off, so neither the use test nor the "
+                          "embed test runs and the four probation counters are absent rather than "
+                          "0. Every token minted this run keeps its slot by default."))
+        return Judgement(kept=(), retired_ids=tuple(sorted(int(i) for i in vocab.retired)),
+                         pending=0, live_size=vocab.live_size(), id_count=vocab.size())
+
+    # WHO IS ON PROBATION: every token minted during the run that nothing has judged yet. Read off
+    # `prov`, which is the one table that survives a checkpoint with its birth steps (DEFECT D-T3),
+    # and materialised into a list first because the loop below writes back into `prov`.
+    waiting = []
+    for tid, entry in list(vocab.prov.items()):
+        got = _prov_online(entry)
+        if got is None or got[1] is not None:
+            continue
+        waiting.append((int(tid), got[0]))
+
+    embed = (by == "embed")
+    if embed and residual_ratio is None:
+        # THE EMBED ARM IS UNREACHABLE AND SAYS SO, WHICH IS ISSUES P1-M41's REPAIR. At
+        # TOK_PROBATION_BY=embed with TOK_COMPOSE=0 the old tree left the residual at None and FELL
+        # THROUGH to the "use" test with no warning anywhere, while the banner printed the requested
+        # mode and the end-of-run vocabulary line reported "judged by embed" -- a wrong-measurement
+        # record, which is the largest defect class in the survey.
+        # NOTHING IS JUDGED ON THIS ARM AND NOTHING IS RETIRED. The alternative -- raise -- was
+        # considered and refused: lm.compose=False is a legal configuration, LM.residual_ratios
+        # returns None on it by contract, and the root calls this row unconditionally on
+        # Due.probation, so raising would turn a legal run into a crash at the first probation
+        # cadence. The tokens stay pending, the counters stay ABSENT (the test could not run, so 0
+        # judged would be a false reading of a mechanism that was never evaluated), and the Gate
+        # carries the arithmetic.
+        _seal(Gate("tok.probation_embed", False,
+                   value=f"{len(waiting)} token(s) on probation, none judged",
+                   threshold=resid_min, reachable=False,
+                   reason="unreachable (no residual_ratio supplied): TOK_PROBATION_BY=embed needs "
+                          "LM.residual_ratios, which returns None at lm.compose=False. The 'use' "
+                          "test is NOT run in its place -- that silent fall-through is ISSUES "
+                          "P1-M41, where the banner reported 'judged by embed' on a run that had "
+                          "judged by use."))
+        return Judgement(kept=(), retired_ids=tuple(sorted(int(i) for i in vocab.retired)),
+                         pending=len(waiting), live_size=vocab.live_size(), id_count=vocab.size())
+
+    # THE SHARED COUNTER IS INDEXED BY ID AND THE TWO MUST AGREE ABOUT HOW MANY ROWS EXIST. A short
+    # `appearances` is not a small problem to work around: it means the loop's per-token counter and
+    # this vocabulary were sized from different numbers, so every id past its end would be judged on
+    # somebody else's count or on an exception at a random index.
+    if appearances is None:
+        raise ValueError(
+            "TOK.judge_probation: appearances is None. It is System.token_seen, the ONE shared "
+            "per-token counter, and probation is judged on it -- judging without it would retire "
+            "tokens on a count nobody took.")
+    n_rows = len(appearances)
+    for _tid, _born in waiting:
+        if _tid >= n_rows:
+            raise ValueError(
+                f"TOK.judge_probation: token {_tid} is on probation and the appearance counter has "
+                f"{n_rows} rows. The counter and the vocabulary were sized from different numbers; "
+                f"judging past the end would read another token's count or raise at an index this "
+                f"function chose.")
+        if embed and _tid >= len(residual_ratio):
+            raise ValueError(
+                f"TOK.judge_probation: token {_tid} is on probation and residual_ratio has "
+                f"{len(residual_ratio)} rows. LM.residual_ratios is read off the live composer, so "
+                f"a short vector means the model and the vocabulary disagree about how many tokens "
+                f"exist.")
+
+    for _row in ("tok.probation_judged", "tok.probation_kept", "tok.probation_retired"):
+        c.setdefault(_row, 0)
+
+    # `judged` IS THIS CALL'S AND tok.probation_judged IS THE RUN'S. The Gate below prints the
+    # per-call number beside `embed_used`, which is also per-call: pairing a cumulative counter with
+    # a per-call one on one line is an arithmetic a reader cannot check, and it reads correct for
+    # exactly as long as there has only ever been one call.
+    kept, pending, embed_used, judged = [], 0, 0, 0
+    for tid, tborn in waiting:
+        seen_n = int(appearances[tid])
+        earned = seen_n >= uses
+        # THE DEADLINE IS THE TEST. Judging only on reaching the threshold can never retire
+        # anything: a token that has not earned its appearances yet may still earn them tomorrow,
+        # so without a by-when there is no moment at which the answer is no.
+        overdue = (now - _units.Windows(tborn)) >= deadline
+        if not (earned or overdue):
+            pending += 1
+            continue
+        keep = earned
+        if embed:
+            # THE TWO TESTS COMPOSE, DELIBERATELY, AND DROPPING EITHER TURNS A TWO-SIDED JUDGEMENT
+            # INTO A ONE-SIDED ONE: a residual near zero because the token was never seen says
+            # nothing about the merge, so the embed arm requires BOTH that the token was used and
+            # that its learned residual moved away from what its bytes already say.
+            keep = earned and float(residual_ratio[tid]) >= resid_min
+            embed_used += 1
+        c["tok.probation_judged"] += 1
+        judged += 1
+        if keep:
+            vocab.prov[tid] = ("online", tborn, "kept")
+            kept.append(tid)
+            c["tok.probation_kept"] += 1
+        else:
+            # RETIREMENT IS SOFT AND THE VERDICT IS WRITTEN BESIDE THE BIRTH STEP. Vocabulary._retire
+            # pops the bytes out of the match table and leaves the id and its embedding row; the
+            # verdict goes into `prov` so a second judgement pass does not re-judge a token whose
+            # probation is over, and so TOK.vocab_state -- which carries `retired` and `prov` and
+            # nothing else about probation -- survives the round trip that used to undo every
+            # retirement (DEFECT D-T3).
+            vocab._retire(tid)
+            vocab.prov[tid] = ("online", tborn, "retired")
+            c["tok.probation_retired"] += 1
+
+    # A LEVEL, NOT A TOTAL, AND IT IS THE ONE ROW HERE THAT IS ASSIGNED RATHER THAN ADDED TO.
+    # tok.probation_pending is how many tokens are waiting for a verdict AS OF THIS CALL; summing it
+    # over calls would count the same waiting token once per probation cadence. build_vocabulary's
+    # tok.build_converged is assigned for the same reason -- it is a state, not a tally.
+    c["tok.probation_pending"] = pending
+    _seal(Gate("tok.probation_embed", embed,
+               value=(f"{embed_used} of {judged} judged on ||delta||/||composite|| this call"
+                      if embed else
+                      f"{judged} judged on appearances against {uses} this call"),
+               threshold=resid_min, reachable=embed,
+               reason="" if embed else
+                      f"TOK_PROBATION_BY={by!r}: the residual test is not this run's test, so its "
+                      f"threshold is printed beside a verdict it did not decide. The use test ran "
+                      f"and its numbers are tok.probation_judged / _kept / _retired."))
+    return Judgement(kept=tuple(kept),
+                     # THE WHOLE SET, NOT THIS CALL'S RETIREMENTS -- see Judgement's own docstring.
+                     # LM.decode takes this as the refresh of what it must mask, and a mask built
+                     # from one flush's verdicts alone re-admits every row retired before it.
+                     retired_ids=tuple(sorted(int(i) for i in vocab.retired)),
+                     pending=pending, live_size=vocab.live_size(), id_count=vocab.size())
 
 
 def lift_vocab_cap(tok: Config, vocab, *, to: int):

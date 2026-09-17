@@ -1,0 +1,100 @@
+{
+  "audit": "bv_did-it-fire",
+  "agent": "BV (skeptic, READ-ONLY on src/ and tests/)",
+  "scope": "The DID IT FIRE surfaces of the five new B-row bodies (FAB.observe, FAB.grow_check, FAB.own_lr_scale, MEM.write, MEM.maintain) and of the run report that is supposed to carry them.",
+  "method": "Every claim below is a command that was RUN and its quoted output. Probes live in /tmp/claude-0/probe/ and touch nothing in src/ or tests/.",
+  "baseline": {
+    "suite": "cd /tmp && PYTHONPATH=/home/user/LLM-Test/src python /home/user/LLM-Test/tests/test_<n>.py -- ownership rc=0, contract rc=0, census rc=0, assemble rc=0, couplings rc=0, derive rc=0, fabric rc=0 (ALL SEVEN GREEN on the working tree, before and unchanged by this audit).",
+    "run": "cd /home/user/LLM-Test && python run.py --max-windows 20 -> '=== 20 windows, 20 flushes, 20 optimizer steps, 0 epoch(s) in 2.0s (9.9 w/s)' / '=== loss 8.3247 -> 8.0163'",
+    "tree": "git status: src/domains/api.py, src/lm/api.py, src/tok/api.py, src/world/api.py MODIFIED (uncommitted); fabric+memory committed at 2e48b92. ALL ELEVEN B-row bodies now exist."
+  },
+  "findings": [
+    {
+      "id": "BV-1",
+      "severity": "critical",
+      "file": "src/spine/loop.py:63-77 (_is_stub), :139-160 (the skipped tuple)",
+      "claim": "RunResult.skipped is decided by whether the body raises NotImplementedError, NOT by whether the driver calls it. All eleven bodies now exist, so the run prints '0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED' while the driver calls NONE of them. The report is now silent about exactly the eleven mechanisms goal B is made of.",
+      "measured": "python run.py --max-windows 20 -> '=== 0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED:' (was 11 at abd51ec). Instrumented 12-window run through spine.loop.run with all eleven entry points wrapped by a counter: RunResult.skipped -> 0 (); fabric.api.observe calls=0, grow_check calls=0, own_lr_scale calls=0, memory.api.write calls=0, maintain calls=0, tok mint_burst=0, judge_probation=0, lm anchor_term=0, residual_ratios=0, world loss_terms=0, domains note_competence=0. sysm.fabric.counters after that run carries NO fab.observed_windows and NO fab.grow_checks."
+    },
+    {
+      "id": "BV-2",
+      "severity": "high",
+      "file": "src/memory/api.py:1008 (write) -- no setdefault anywhere in the file",
+      "claim": "MEM.write seeds none of its twelve declared DID IT FIRE keys. On the kept==0 early return (:1153-1157) NINE of the twelve are never created; on the fully successful path FIVE are still absent.",
+      "measured": "Two real MEM.write calls on a composed store, surprise=0.9: n_floor_dropped_deadlock / n_dup_refused / n_src_underflow / n_write_truncated / n_use_decays all <<ABSENT>>. Same two calls at surprise=0.0 (armed, gate admits nothing): only n_writes_offered=256 and n_writes_committed=0 exist; n_evict_free, n_evict_probation, n_evict_main, n_floor_blocked, n_writes_by_block and the five above are all <<ABSENT>>."
+    },
+    {
+      "id": "BV-3",
+      "severity": "high",
+      "file": "src/memory/api.py:1308 (maintain), :1396-1413",
+      "claim": "maintain's docstring states 'WITH probe_contexts None OR EMPTY the honest DID IT FIRE reading is n_probe_fired counting the CADENCE and n_probe_rows == 0'. The body never writes n_probe_rows on that path, so it is ABSENT, not 0.",
+      "measured": "12 MEM.maintain calls with probe_contexts=None: n_probe_fired=1; n_probe_rows, n_probe_hits, n_rekey_slices, n_rekey_passes, n_rekey_entries, n_resegment_events, n_keys_at_capped_depth all <<ABSENT>> (7 of the 8 declared keys). Gate mem.probe reads FIRED and only survives because its reason string uses c.get(...,0)."
+    },
+    {
+      "id": "BV-9",
+      "severity": "high",
+      "file": "src/memory/api.py:861-863 (_write_gates), against :1008 write's docstring and :855-860 _gate_window",
+      "claim": "Gate mem.write_target compares n_writes_committed/n_writes_offered against MEM_WRITE_TARGET, but write's own docstring says write_target is 'a setpoint on the KEPT FRACTION' and _gate_window drives gate_theta from `fired = keep.float().mean()` -- the KEPT fraction. committed is kept MINUS per-block quota truncation and floor blocking, which the controller does not own and cannot correct. The gate therefore issues a false verdict about the controller whenever the quota bites.",
+      "measured": "MEM_WRITE_MODE=quantile MEM_WRITE_TARGET=0.5 MEM_QUOTA=8, one real write: offered=128 kept=61 committed=16 truncated=45. CONTROLLER's own fraction kept/offered = 0.4766 (it hit 0.5 to within 0.024). GATE's fraction committed/offered = 0.1250. 'Gate mem.write_target: armed, did not fire (0.125 vs 0.5)'. Same call at MEM_QUOTA=128: kept=88 committed=88, both fractions 0.6875 -- the two only diverge once truncation is reached, i.e. once a block is full, which is the steady state.",
+      "note": "At the shipped MEM_WRITE_MODE='fixed' the gate is correctly UNREACHABLE, so this is latent until an operator selects adaptive or quantile. The number the gate should read, store.n_writes_kept, is computed one line away (:1149) and is BV-8's undeclared key."
+    },
+    {
+      "id": "BV-4",
+      "severity": "medium",
+      "file": "src/fabric/api.py:2677-2683 (observe's seeding block)",
+      "claim": "observe seeds four keys 'BEFORE THE EARLY RETURN, so a run on FAB_ON=0 ... reports this family as ZERO rather than as ABSENT' -- but two of its five DECLARED DID IT FIRE keys (fab.uage_per_expert_per_pass, fab.mass_per_selection) plus fab.uage_mean and fab.comp_glob are written only AFTER that return.",
+      "measured": "4 real flushes at FAB_ON=0 and at FAB_NORM_ONLY=1: observed_windows=0, observe_unrouted=4, experts_with_use=0, experts_past_grace_ever=0 (present), uage_per_expert_per_pass / uage_mean / mass_per_selection / comp_glob all <<ABSENT>>. Rendering the line the docstring prescribes raises KeyError: 'fab.uage_mean' on both arms and succeeds on the routed arm."
+    },
+    {
+      "id": "BV-5",
+      "severity": "medium",
+      "file": "src/fabric/api.py:3519 (_signature_point call site), :3059-3084 (_signature_point)",
+      "claim": "grow_check validates soft_cap on EVERY call (the comment says why) but validates `signature` only inside `if n_born:` -- so a mis-wired signature runs green for the whole warm-up and dies at the first birth with a bare AttributeError, which is the failure shape that comment claims to have removed.",
+      "measured": "signature=None, FAB_Z=1000 (armed, never asks): 6 checks, 0 asks, 0 births, rc=0. signature=None at the shipped defaults (a regression arrives at window 2): AttributeError: 'NoneType' object has no attribute 'detach' at fabric/api.py:3074. _headroom by contrast raises a named TypeError citing C30 on the first call."
+    },
+    {
+      "id": "BV-6",
+      "severity": "medium",
+      "file": "src/fabric/api.py:3793-3797 (own_lr_scale's counter writes)",
+      "claim": "fab.lr_ratio_clamped (declared DID IT FIRE) is an ASSIGNMENT, not a bump, so the end-of-run ledger reports only the LAST call. A run whose lr_maxr clamp bit on every expert during LR warm-up ends reading 0 -- the M58 cumulative-vs-snapshot collapse this package cites by number elsewhere.",
+      "measured": "FAB_LR_OWN=1, n_live=8: own_lr_scale(applied_lr=1e-9) -> lr_ratio_clamped=8; own_lr_scale(applied_lr=3e-3) -> lr_ratio_clamped=0. FINAL LEDGER fab.lr_ratio_clamped = 0. fab.lr_zero_applied in the same family IS a _bump, so the body distinguishes the two kinds and this key took the wrong one."
+    },
+    {
+      "id": "BV-7",
+      "severity": "high",
+      "file": "src/fabric/api.py:4015-4030 (state_dict payload), :4114-4129 (load_state_dict), :2747-2748 + :2793-2795 (observe)",
+      "claim": "The two CUMULATIVE observe counters are computed by ASSIGNMENT from pop.marks, and pop.marks is NOT in state_dict's payload. load_state_dict restores pop.counters, so the saved values are present for exactly as long as it takes the first post-resume flush to overwrite them from an empty set. fab.experts_past_grace_ever -- a counter whose cumulative-ness is justified by ISSUES P1-M58 by name -- goes DOWN.",
+      "measured": "FAB_N0=64, chain_k=8, FAB_GRACE=2, 20 real windows: fab.experts_with_use=15, fab.experts_past_grace_ever=9. state_dict: \"'marks' in payload: False | load_state_dict mentions 'marks': False\"; payload counters carry {15, 9}. After restore: 15, 9. AFTER THE FIRST FLUSH OF PASS 2: fab.experts_with_use=8, fab.experts_past_grace_ever=8 -- while the ground truth is '9 of 65 live experts have uage >= FAB_GRACE=2'. pop.uage IS checkpointed, so past_grace is reconstructible without marks; experts_with_use is not.",
+      "note": "This is the one that bites goal B directly: continual learning is a claim about a SECOND PASS, and the counter that says whether any expert ever became cull-eligible resets on the resume that starts it."
+    },
+    {
+      "id": "BV-8",
+      "severity": "low",
+      "file": "src/memory/api.py:1149 (n_writes_kept), :1391 + :1440 (probe_last_window / rekey_last_window)",
+      "claim": "Three keys live in store.counters -- the dict MEM.state_dict checkpoints as 'the counter ledger' and MEM.census is declared to render -- that no DID IT FIRE block admits to producing. Two of them are not counts at all: they are maintain's cadence CLOCK POSITIONS.",
+      "measured": "One MEM.write + one MEM.maintain on a composed store, every key in store.counters listed against the three declared blocks: store.n_writes_kept=128, store.probe_last_window=1, store.rekey_last_window=1 are NOT DECLARED IN ANY DID IT FIRE BLOCK. n_writes_kept is not redundant either -- at MEM_QUOTA=8 the same call reads offered=128, kept=128, committed=16.",
+      "note": "FAB's three bodies each declare their extra keys in the docstring for exactly this rule ('a key in the report that the contract does not admit to producing is the same defect as a declared key nothing writes'); MEM's two do not."
+    }
+  ],
+  "checked_and_sound": [
+    "FAB.grow_check's seeding: 19 keys via setdefault, plus fab.grow_checks / fab.cap_lift_period / fab.distinct_parents written unconditionally on every call. Measured at FAB_GROW=0: every one present at 0 after 6 calls. Only fab.grow_slow/fast/dev/improving are absent and that is the declared unreachable arm (the EMAs are not advanced).",
+    "fab.grow_checks is not in the setdefault list but is bumped unconditionally at the top of the body, so ABSENT and 0 are the same fact (never called). Not a defect.",
+    "The three states are distinguishable for grow_check: FAB_GROW=0 -> gate:fab.growth_armed armed-but-zero with reason + all counters 0; armed and quiet (FAB_Z=1000) -> grow_checks=6, asked=0; fired -> asked_regression=1, grown_regression=1, replicated=1, crossed=1, n_live 8->9.",
+    "own_lr_scale's off arm is honest: FAB_LR_OWN=0 -> returns None, lr_calls=4, all seven lr_* keys present at 0, gate:fab.lr_own armed-but-zero with its reason. FAB_LR_OWN=1 -> lr_scaled_experts=8, lr_cycle_max=1.",
+    "fab.observe_unrouted does NOT by itself separate FAB_ON=0 from FAB_NORM_ONLY=1, but fab.off / fab.norm_only do, and gate:fab.on reads armed-but-zero on the first and fired on the second. Tried to break it, could not.",
+    "_claim_slot clears uage to 0, so observe's `pop.uage[e] == 1` seed test is correct for a reborn slot; the L30 inheritance (ef/es) is genuinely cleared.",
+    "MEM.write's shape refusals fire by name on every call (_require_rows) and the contexts check refuses a float (B,L,width) hidden state with the compose.py contradiction spelled out.",
+    "MEM.maintain's two gates (mem.probe, mem.rekey) render all three states correctly and carry their arithmetic; mem.rekey reads UNREACHABLE with ctx_w=0 rather than armed-but-0.",
+    "observe refuses a stale (narrower) FabricOut and a loss/weights row mismatch rather than crediting the overlap -- both raise with a named reason. Could not get either to credit a partial batch.",
+    "store.n_writes_by_block IS cumulative -- :1189 seeds it from the previous value rather than from zeros -- so the 'a block with 0 writes is the owner fold showing' reading survives across flushes. Tried to break it, could not.",
+    "MEM.write's use-decay is driven by the checkpointed store.n_written and not by a resettable per-run counter, so it survives a resume as its comment claims.",
+    "grow_check's blackout three states, driven: shift_at never supplied -> 'Gate fab.growth_blackout: UNREACHABLE (0 notification(s) vs cooldown=400 windows)' with the K10 reason; shift_at=U.Windows(s) -> 'FIRED (400 window(s) left vs cooldown=400 windows)', fab.shift_notifications 0 -> 1; shift_at=U.Steps(1) -> UnitError: cannot build Windows from Steps. All three as specified.",
+    "The other four GrowReport gates read correctly on a quiet armed run: fab.growth and fab.growth_regression 'armed, did not fire' WITH their arithmetic, fab.grow_mem_pressure UNREACHABLE with the two named causes, fab.grow_cap 'armed, did not fire (0 of 0 refused vs Caps.headroom(9)=7, pool 7 of 16)'.",
+    "Gate mem.write_target is correctly UNREACHABLE at the shipped MEM_WRITE_MODE='fixed' (measured), which is what keeps BV-9 latent rather than live today."
+  ],
+  "could_not_break": [
+    "fab.lr_boosted and fab.lr_envelope_pinned are also assignments, but uage is monotone and no cull exists, so neither can regress from >0 to 0 in this tree. Reported as sound rather than as a second instance of BV-6.",
+    "observe's `used`/`past_grace` marks are keyed by expert index and FAB.manage's cull would renumber them -- but there is no remove() in fabric/api.py at all, so it is not reachable and not a finding."
+  ],
+  "status": "DONE -- 9 findings, all measured; 11 negative results recorded"
+}

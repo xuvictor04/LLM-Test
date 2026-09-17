@@ -1,0 +1,96 @@
+{
+  "audit": "bv_the-run",
+  "date": "2026-09-17",
+  "scope": "Does the run still work, and did it change? Read-only on src/ and tests/.",
+  "baseline": "HEAD~1 = 8ac2a3e, checked out as a non-destructive git worktree at /tmp/before-base (no stash, working tree untouched)",
+  "after": "HEAD = 2e48b92 plus the uncommitted domains/lm/tok/world edits",
+
+  "headline": "The run still works and is BIT-IDENTICAL to the baseline. The only thing that changed is that its report now makes a FALSE CLAIM: it prints '0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED' while all eleven are called exactly zero times. spine/loop.py and run.py were not touched this round (git diff --stat HEAD~1 -- src/spine/loop.py run.py is empty); the eleven bodies landed, so _is_stub() stopped returning True, and RunResult.skipped emptied out without a single call site being added.",
+
+  "measurements": {
+    "suite": "all seven green AFTER the change: ownership/contract/census/assemble/couplings/derive/fabric each rc=0",
+    "run_after": "cd /home/user/LLM-Test && python run.py --max-windows 200  ->  200 windows, 200 flushes, 200 optimizer steps in 19.6s (10.2 w/s); loss 8.3247 -> 4.1911; '=== 0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED:'",
+    "run_before": "cd /tmp/before-base && python run.py --max-windows 200  ->  200 windows, 200 flushes, 200 optimizer steps in 19.2s (10.4 w/s); loss 8.3247 -> 4.1911; '=== 11 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED:' listing all eleven",
+    "curve_identity": "full 200-element loss_curve sha256[:32] = 50e9fcdd49ee88aa08bbad8480ab0af2 in BOTH trees. first/last identical to full float repr: 8.324668884277344 -> 4.191148281097412. Progress line identical at window 101: loss=4.1011.",
+    "curve_hash_repeatability_control": "two default 20-window runs of the same tree -> ba51c19dd0edc5eefc7462a58fd14e07 twice (deterministic)",
+    "curve_hash_sensitivity_control": "RUN_SEED=7, 20 windows -> 8f76caa97a9d4a113acdffd6f8275f71 (differs, so the hash DOES detect a real change)",
+    "lever_inertness": "FAB_GROW=1 -> ba51c19d... and FAB_LR_OWN=1 -> ba51c19d..., both bit-identical to default. Both verified to be REAL levers that resolve (FAB.grow=True, FAB.lr_own=True). Arming growth and per-expert LR changes nothing, because the driver never calls the mechanisms they gate.",
+    "call_counters": "instrumented wrapper on all eleven plus a positive control, loop.run(max_windows=40): CONTROL lm.encode=40, lm.decode=40, lm.lm_loss=40, fabric.forward=40; ELEVEN world.loss_terms=0, lm.anchor_term=0, lm.residual_ratios=0, fabric.own_lr_scale=0, fabric.observe=0, fabric.grow_check=0, memory.write=0, memory.maintain=0, tok.mint_burst=0, tok.judge_probation=0, domains.note_competence=0; RunResult.skipped == ()",
+    "call_sites": "grep across src/ tools/ run.py for '.loss_terms(|.anchor_term(|.residual_ratios(|.own_lr_scale(|.grow_check(|.mint_burst(|.judge_probation(|.note_competence(' and for mem write/maintain and fab observe: ZERO call sites anywhere in the tree. The only occurrences of those names in spine/loop.py are lines 138-152, inside the `skipped` tuple.",
+    "driver_reserved_slots": "System carries token_seen=None, shift_at_windows=None, due=None, plus store / world / partition. grep of src/spine/loop.py for any of them: none. The driver never reads or writes them."
+  },
+
+  "findings": [
+    {
+      "id": "BV1",
+      "severity": "critical",
+      "file": "src/spine/loop.py:136-153 (and run.py:104-106 which prints it)",
+      "claim": "RunResult.skipped is now empty and the run prints '=== 0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED:', which is false: all eleven B-row entry points are called zero times.",
+      "failure": "cd /home/user/LLM-Test && python run.py --max-windows 200 prints '=== 0 MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED:' while an instrumented run of the same driver counts 0 calls to each of the eleven against 40/40/40/40 for the control functions.",
+      "why_it_matters": "This is exactly the collapse loop.py's own module docstring says it exists to refuse -- 'A driver that simply did not call them would produce a run whose report is indistinguishable from a run where those mechanisms were ARMED AND DID NOTHING'. It is now worse than indistinguishable: the report affirmatively asserts they were called. run.py prints no counters, so nothing else in the run's output lets a reader tell.",
+      "not_the_writers_fault_but": "the eleven bodies are what flipped _is_stub; the defect is that loop.py used 'is a stub' as a proxy for 'this driver cannot call it' and the proxy FAILS OPEN."
+    },
+    {
+      "id": "BV2",
+      "severity": "high",
+      "file": "src/spine/loop.py:59-72 (_is_stub) and :136-153",
+      "claim": "_is_stub answers 'is this a P4 stub', and the driver uses it to answer 'could this driver call it'. The two agreed only while the bodies were unwritten.",
+      "failure": "The eleven bodies landed; _is_stub returns False for all of them; `skipped` empties; the executed path is unchanged (identical curve sha). The list that was the run's only statement about the missing B row now says nothing, and no test noticed: no test in tests/ imports spine.loop at all (grep 'import loop|spine.loop' tests/*.py -> none). test_contract's K6 only checks that an entry point naming levers is NAMED by compose.py's ASSEMBLY_ORDER/LOOP_ORDER table -- being on the table is not being called by the driver.",
+      "what_would_close_it": "a per-run CALL ledger (the shape cadence_ledger already has: checks=0 is a different fact from fires=0), incremented at each real call site, so 'not called' is measured rather than inferred from bytecode constants."
+    },
+    {
+      "id": "BV3",
+      "severity": "high",
+      "file": "src/spine/loop.py:242-333 (_flush)",
+      "claim": "None of the eleven is wired into the driver. _flush calls exactly six entry points: lm.encode, sig.encode, fab.forward, lm.decode, lm.lm_loss, opt.scaled_backward.",
+      "failure": "Arming the two real goal-B levers changes nothing measurable: FAB_GROW=1 and FAB_LR_OWN=1 each give curve sha ba51c19dd0edc5eefc7462a58fd14e07, identical to the default, while RUN_SEED=7 gives a different sha (so the instrument works).",
+      "what_the_driver_would_have_to_pass": {
+        "FAB.observe": "out=FabricOut from fab.forward, per_window_loss=LM.lm_loss's per-window vector, domain_id. DRIVEN AND WORKS: measured below.",
+        "FAB.grow_check": "flush_loss, step_windows=units.Windows(clock.step), soft_cap=THE WHOLE capacity.api.Caps RECORD (it refuses an int by name: 'soft_cap arrived as int and this entry point needs the capacity/api.py::Caps RECORD, because the birth budget is Caps.headroom(n)'), memory_pressure, signature=one SIG row, shift_at=Windows or None. capacity.api.caps(cfg['CAP'], sysm.valve) is the producer and the driver never calls it.",
+        "MEM.write": "contexts=x (B,L), tokens=y (B,L), surprise (B,L), sources (B,) per-window domain id, owners (B,), positions (B,L) TRUE BYTE OFFSETS from Segmentation.byte_pos (it refuses an arange by name), key_fn, now=Windows. key_fn already exists: spine/compose.py::_key_fn(sysm) at :2816.",
+        "MEM.maintain": "now=Windows, key_fn=_key_fn(sysm); probe_contexts has no producer (compose.py's own MEM row records that).",
+        "LM.anchor_term": "token_seen -- System.token_seen exists and is None; nothing increments it.",
+        "FAB.own_lr_scale": "applied_lr=StepOutcome.lr from OPT.maybe_step. SEE BV5: the return has no consumer."
+      }
+    },
+    {
+      "id": "BV4",
+      "severity": "medium",
+      "file": "run.py:19-23 docstring; src/spine/loop.py:23-38 module docstring",
+      "claim": "Both docstrings now state falsehoods, and one of them promises behaviour the file no longer has.",
+      "failure": "run.py: 'eleven entry points on LOOP_ORDER's B row are still stubs' and 'The run PRINTS that list before it starts' -- the list is now empty, so the run prints nothing. loop.py: 'Eleven entry points on LOOP_ORDER's B row are still `raise NotImplementedError`' (false -- they have bodies) and 'every skipped mechanism is recorded in RunResult.skipped, by name, with the reason' (nothing is recorded, while eleven are skipped). loop.py's closing paragraph -- 'the fabric does not grow, memory is never written, the vocabulary never mints' -- remains TRUE of the run and is now the only correct sentence of the three."
+    },
+    {
+      "id": "BV5",
+      "severity": "medium",
+      "file": "src/fabric/api.py::own_lr_scale, against src/opt/api.py::maybe_step",
+      "claim": "Wiring FAB.own_lr_scale into the driver will still not change the run: its return value has no consumer in the frozen contract.",
+      "failure": "inspect.signature(opt.api.maybe_step) == '(opt: Config, st, *, best_bpb=None, shift_at=None)' -- there is no parameter for per-expert learning-rate multipliers. compose.py's own LOOP_ORDER row for this entry point records the same thing: 'IT PRODUCES NOTHING ANY SIGNATURE ACCEPTS ... so fab.lr_scaled_experts counts an effect nothing in this contract applies'. At shipped defaults own_lr_scale returns None anyway (FAB.lr_own=False).",
+      "note": "not a regression -- a pre-existing structural gap the orchestrator needs before it wires this row and expects a curve change."
+    },
+    {
+      "id": "BV6",
+      "severity": "low",
+      "file": "src/lm/api.py::anchor_term, ::residual_ratios",
+      "claim": "These two cannot do work on today's tree at ANY lever setting, so wiring them cannot change the curve either.",
+      "failure": "Both return None at defaults because LM.compose=False. Turning it on does not help: LM_COMPOSE=1 raises spine.gate.NotBuilt from lm/api.py:188 composed_table() inside LM.encode on the first flush -- 'the ByteComposer is P4's TOK-side row and lands with LM.mint_rows ... its table is not built yet'. That is a legitimately-unbuilt mechanism (NotBuilt, not NotImplementedError), correctly refused; it just means these two rows are inert until the composer lands."
+    }
+  ],
+
+  "checked_and_could_not_break": [
+    "NO new bare `except` and NO new `hasattr(...) else <unchanged>` were introduced. grep of the full diff HEAD~1..worktree for 'hasattr' across tok/lm/world/fabric/memory/domains returns only one ADDED line, and it is a comment in lm/api.py explaining that a nearby construct is NOT that defect. src/ contains no bare `except:` at all.",
+    "FAB.observe does real work when driven. Over three real flushes on a composed system the books move: uage[0] 0->1, use[0] 0.0->0.0315, comp_glob None->8.3332->8.3336->8.3338, and counters land: fab.observed_windows=6, fab.experts_with_use=20, fab.experts_past_grace_ever=0, fab.uage_mean=0.023438, fab.mass_per_selection=0.028154, fab.comp_glob=8.333838.",
+    "observe's seeding rule is self-consistent. The comment justifies testing `pop.uage[e] == 1` rather than `comp == 0.0` on the grounds that _claim_slot clears comp to 0.0; I checked _claim_slot (fabric/api.py:1618) and it clears uage to 0 as well, so a REBORN slot re-seeds correctly rather than EMA-ing from zero. I tried to break this and could not.",
+    "FAB.grow_check actually grows. Driven over 6 and then 8 flushes with the real Caps record (Caps(experts=4096, vocab=4096), headroom(2048)=2048): n_live 2048 -> 2049, one birth at flush 1.",
+    "grow_check's unit typing holds. shift_at=Steps(5) -> UnitError 'cannot build Windows from Steps'; shift_at=Selections(5) -> UnitError; Windows(5), a bare int and None are accepted.",
+    "A birth between forward and backward does NOT corrupt autograd, which was my main suspicion given _spawn_check's own warning about in-place writes to pop.A bumping version counters. Driven forward -> observe -> grow_check -> opt.scaled_backward for 8 consecutive flushes including the one that births: backward OK every time.",
+    "The two new Population slots round-trip. 'growth' and 'comp_glob' are in __slots__, appear in state_dict, and restore into a fresh Population (comp_glob 7.25 and a probe key survive). An OLD payload with both keys DELETED restores without raising and leaves the fresh defaults in place -- the writers' 'update-not-replace' claim is correct.",
+    "MEM.write refuses every wrong-shaped argument BY NAME rather than reshaping (tokens, positions, sources each got its own StoreError naming the required shape and why a broadcast would be wrong), and does real work when fed correctly: store.n_writes_offered=256, store.n_writes_kept=177 on one two-window flush.",
+    "The key_fn keyword discrepancy is already handled. maintain's docstring writes `key_fn(..., depth=key_depth)` but LM.encode's keyword is `n_layers`; memory/api.py::_encode_keys is the single door for both the write path (:1184) and both maintain paths (:1412, :1472), it uses `n_layers`, and its docstring explicitly records that the docstring spelling is wrong. No live code uses `depth=`.",
+    "LM.anchor_term does not silently no-op on a missing input. Each None return is a DISTINCT counted state: lm.anchor.unreachable (compose off), lm.anchor.weight_zero, lm.anchor.no_composer, lm.anchor.no_counter (token_seen is None).",
+    "All seven tests stay green after the change.",
+    "My first lever sweep was wrong and the spine caught it: MEM_ON, TOK_MINT and WORLD_ON are NOT declared levers ('UNREAD MEM_ON: matches no declared lever'), so the identical curve hashes under those names prove nothing and are NOT cited as evidence. Only FAB_GROW and FAB_LR_OWN, both verified to resolve, are cited in BV3."
+  ],
+
+  "cadence_note": "dom.manage (period=100), dom.rekey (200), fab.manage (500), curve (2000) and ckpt (0) all show checks=0 in BOTH the before and the after run, i.e. the driver never evaluates those gates either. Unchanged this round and honestly reported ('checks=0 means the gate was never evaluated, which is a different fact from fires=0'), so not filed as a finding -- but at 200 windows dom.manage would have been due twice."
+}

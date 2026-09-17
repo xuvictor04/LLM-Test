@@ -72,6 +72,80 @@ def _is_stub(fn):
     return any(isinstance(c, str) and "P4 (" in c and "fills this in" in c for c in consts)
 
 
+
+# THE ENTRY POINTS `_flush` AND `run` ACTUALLY INVOKE. Adding a call above means adding its name
+# here, in the same edit, and the cross-check below turns a forgotten one into a raise rather than
+# into a report that overstates what the run did.
+_CALLS = frozenset({
+    "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
+    "OPT.scaled_backward", "OPT.maybe_step",
+})
+
+# CALLS THIS DRIVER MAKES THAT ARE NOT B-ROW ENTRY POINTS. The clock, which LOOP_ORDER lists under
+# RUN and which `run` drives directly, and SIG.encode, which is a ROW A entry point -- the
+# per-window signature -- that the flush needs before FAB.forward can route on it.
+# THE CROSS-CHECK BELOW FOUND SIG.encode ON ITS FIRST RUN, which is the guard doing its job: the
+# first draft of _CALLS listed it as though it were a B-row name, and a set that quietly disagreed
+# with the table is exactly what the check exists to refuse. Row A, not row B, measured through
+# spine/compose.py::plan().
+_NOT_B_ROW = frozenset({"RUN.RunClock.advance", "RUN.RunClock.note_backward", "SIG.encode"})
+
+# WHY EACH UNWIRED MECHANISM'S ABSENCE MATTERS, in the consequence a reader needs rather than the
+# name they already have. Missing keys fall back to a plain sentence; nothing here is load-bearing
+# for correctness, only for legibility.
+_WHY = {
+    "WORLD.loss_terms": "no world-model loss term enters the objective",
+    "LM.anchor_term": "minted tokens are not held near their byte composite",
+    "LM.residual_ratios": "no residual-ratio reading is produced",
+    "FAB.own_lr_scale": "every expert trains at the base learning rate",
+    "FAB.observe": "per-expert usage and competence are never recorded",
+    "FAB.grow_check": "THE FABRIC DOES NOT GROW -- no expert is ever born",
+    "MEM.write": "NOTHING IS EVER WRITTEN TO MEMORY",
+    "MEM.maintain": "no eviction, decay or rekey runs",
+    "TOK.mint_burst": "THE VOCABULARY NEVER MINTS A TOKEN",
+    "TOK.judge_probation": "no minted token is ever confirmed or retired",
+    "DOM.note_competence": "per-domain competence is never updated",
+    "CKPT.save": "no checkpoint is written by the loop",
+}
+
+
+def _b_row_entry_points():
+    """{"PKG.name"} for LOOP_ORDER's B row, splitting the rows that name two in one column.
+
+    `FAB.observe/grow_check` and `MEM.write/maintain` are ONE ROW EACH and TWO ENTRY POINTS EACH.
+    A count that does not split them is short by four, which is exactly the error the orchestrator
+    made when it reported this row as 10/17 rather than 10/21.
+    """
+    from spine import compose as _c
+    out = set()
+    for row in _c.LOOP_ORDER:
+        if row[0] != "B":
+            continue
+        for part in str(row[2]).split("/"):
+            part = part.strip()
+            if part:
+                out.add(f"{row[1]}.{part}")
+    return out
+
+
+def _entry(key):
+    """The live function behind "PKG.name", so `_is_stub` can be asked about it."""
+    import importlib
+    pkg, _, name = key.partition(".")
+    mod = importlib.import_module(f"{_PKG_DIR[pkg]}.api")
+    obj = mod
+    for part in name.split("."):
+        obj = getattr(obj, part, None)
+        if obj is None:
+            return None
+    return obj
+
+
+_PKG_DIR = {"CAP": "capacity", "CKPT": "ckpt", "DATA": "data", "DOM": "domains", "EVAL": "eval",
+            "FAB": "fabric", "LM": "lm", "MEM": "memory", "OPT": "opt", "RUN": "train",
+            "SIG": "sig", "TOK": "tok", "WORLD": "world"}
+
+
 @dataclasses.dataclass(frozen=True)
 class RunResult:
     """What one run did. FROZEN, for the reason train/api.py freezes Tick: a caller that can write
@@ -133,24 +207,40 @@ def run(sysm, *, max_windows=None, progress=True):
     # WHAT CANNOT BE CALLED, DETERMINED ONCE, BEFORE THE FIRST WINDOW. Deciding per-flush would put
     # a branch on a stub check inside the hot loop and would let the answer change mid-run, which
     # is not a state any report could describe.
-    skipped = tuple(sorted(
-        f"{pkg}.{name}: {why}" for pkg, name, fn, why in (
-            ("WORLD", "loss_terms", getattr(__import__("world.api", fromlist=["api"]),
-                                            "loss_terms"), "no world-model loss term enters the objective"),
-            ("LM", "anchor_term", lm_api.anchor_term, "minted tokens are not held near their byte composite"),
-            ("FAB", "own_lr_scale", fab_api.own_lr_scale, "every expert trains at the base learning rate"),
-            ("FAB", "observe", fab_api.observe, "per-expert usage and competence are never recorded"),
-            ("FAB", "grow_check", fab_api.grow_check, "THE FABRIC DOES NOT GROW -- no expert is ever born"),
-            ("MEM", "write", __import__("memory.api", fromlist=["api"]).write,
-             "NOTHING IS EVER WRITTEN TO MEMORY"),
-            ("MEM", "maintain", __import__("memory.api", fromlist=["api"]).maintain,
-             "no eviction, decay or rekey runs"),
-            ("TOK", "mint_burst", tok_api.mint_burst, "THE VOCABULARY NEVER MINTS A TOKEN"),
-            ("TOK", "judge_probation", tok_api.judge_probation, "no minted token is ever confirmed or retired"),
-            ("LM", "residual_ratios", lm_api.residual_ratios, "no residual-ratio reading is produced"),
-            ("DOM", "note_competence", __import__("domains.api", fromlist=["api"]).note_competence,
-             "per-domain competence is never updated, so domain protection has no input"),
-        ) if _is_stub(fn)))
+    # WHAT THIS DRIVER CALLS, WRITTEN DOWN, BECAUSE THE DRIVER IS THE ONLY THING THAT KNOWS.
+    # THIS BLOCK ASKED THE WRONG QUESTION UNTIL 2026-09-17 AND THE ANSWER WENT FROM MISLEADING TO
+    # FALSE THE DAY THE BODIES LANDED. It filtered LOOP_ORDER's B row through `_is_stub(fn)` --
+    # "does this body raise NotImplementedError" -- and used it to answer "will this run invoke
+    # it". The two agree only while every unwired mechanism happens also to be unwritten. P4 wrote
+    # all eleven, `skipped` emptied, and the run printed "0 MECHANISM(S) ON LOOP_ORDER WERE NOT
+    # CALLED" while `_flush` called exactly six entry points and not one of the eleven. Three
+    # independent skeptics reported it within the hour, which is the correct outcome and not a
+    # consolation: the report was WRONG, in the direction of claiming work that did not happen.
+    #
+    # THE FACT IS ABOUT THE DRIVER, SO IT IS STATED IN THE DRIVER. `_CALLS` is the set `_flush` and
+    # `run` actually invoke; it is a literal because there is nothing to derive it from -- an AST
+    # walk of this file would be a second parser answering a question the author of the call site
+    # already knows. It is checked against the B row below, so a row this driver never calls cannot
+    # be silently dropped from the report, and an entry in `_CALLS` that LOOP_ORDER does not list
+    # raises rather than passing.
+    b_row = _b_row_entry_points()
+    # _NOT_B_ROW IS SUBTRACTED TOO, AND LEAVING IT OUT PUT A CALL THIS DRIVER MAKES ON THE
+    # NOT-CALLED LIST. `RUN.RunClock.note_backward` is invoked every flush (it is what counts the
+    # backward and answers whether an optimizer step is due), and it appeared under "not called by
+    # this driver" on the first corrected run. The set excuses a name from the cross-check below
+    # AND states that the driver calls it; only the first of those two was wired up.
+    # OVER-REPORTING IS THE SAFE DIRECTION AND STILL WRONG: a reader who trusts this list would
+    # have concluded no backward was counted, on a run whose optimizer stepped twelve times.
+    unwired = sorted(b_row - _CALLS - _NOT_B_ROW)
+    stray = sorted(_CALLS - b_row - _NOT_B_ROW)
+    if stray:
+        raise RuntimeError(
+            f"spine/loop.py::_CALLS names {stray}, which LOOP_ORDER's B row does not list and "
+            f"_NOT_B_ROW does not excuse. One of the three is wrong, and a driver whose own record "
+            f"of what it calls disagrees with the table is a driver whose report cannot be read.")
+    skipped = tuple(f"{k}: {_WHY.get(k, 'not called by this driver')}"
+                    + ("" if not _is_stub(_entry(k)) else "  [and the body is still a P4 stub]")
+                    for k in unwired)
 
     warnings = list(sysm.warnings)
     clock, cadences = sysm.clock, sysm.cadences
