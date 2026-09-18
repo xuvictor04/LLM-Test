@@ -51,6 +51,10 @@ from sig import api as sig_api
 from fabric import api as fab_api
 from opt import api as opt_api
 from capacity import api as cap_api
+from ckpt import api as ckpt_api
+from domains import api as dom_api
+from memory import api as mem_api
+from world import api as world_api
 
 
 # THE ELEVEN, READ OFF THE TREE RATHER THAN TYPED. A hand-written list would rot the first time a
@@ -78,7 +82,7 @@ def _is_stub(fn):
 # into a report that overstates what the run did.
 _CALLS = frozenset({
     "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
-    "OPT.scaled_backward", "OPT.maybe_step",
+    "OPT.scaled_backward", "OPT.maybe_step", "CKPT.save",
 })
 
 # CALLS THIS DRIVER MAKES THAT ARE NOT B-ROW ENTRY POINTS. The clock, which LOOP_ORDER lists under
@@ -166,6 +170,53 @@ class RunResult:
     skipped: tuple
     cadence_ledger: dict
     warnings: tuple
+
+
+def _payload(sysm):
+    """Every package's checkpoint state, in one dict, through its OWN declared entry point.
+
+    THE ROOT NEVER REACHES INTO A PACKAGE'S OBJECT TO BUILD THIS. Each value comes from the entry
+    point that package declares for the purpose -- LM.state_dict, FAB.state_dict, CAP.state and so
+    on -- because each of them knows what is derivable and must NOT be saved (LM's byte-index
+    tables, SIG's lookahead queue) and what is earned and must be (DOM's reservoir, MEM's
+    gate_theta, the two pin clocks on the valve). A root that assembled tensors itself would be a
+    second opinion about what a resume needs, and the resume would believe whichever it read first.
+
+    `payload` IS OPAQUE TO CKPT, which is why this is here and not there: ckpt/api.py::Snapshot
+    declares it as such, and the package that writes the file has no business knowing what is in it.
+    """
+    cfg = sysm.configs
+    return {
+        "LM": lm_api.state_dict(cfg["LM"], sysm.model, sysm.geometry),
+        "SIG": sig_api.state_dict(cfg["SIG"], sysm.sig),
+        "FAB": fab_api.state_dict(cfg["FAB"], sysm.fabric),
+        "WORLD": world_api.state_dict(cfg["WORLD"], sysm.world),
+        "MEM": mem_api.state_dict(cfg["MEM"], sysm.store),
+        "DOM": dom_api.state_dict(cfg["DOM"], sysm.partition),
+        "CAP": cap_api.state(sysm.valve),
+        "OPT": opt_api.state_dict(cfg["OPT"], sysm.optimizer),
+        "DATA": data_api.stream_state(cfg["DATA"], sysm.areas),
+        "TOK": tok_api.vocab_state(cfg["TOK"], sysm.vocab),
+    }
+
+
+def _save(sysm, clock, reason, suffix=""):
+    """One checkpoint, plus the tokenizer file that belongs to the SAME snapshot.
+
+    THE VOCABULARY TRAVELS WITH THE SUFFIX OR THE SNAPSHOT CANNOT BE RESUMED FROM. P1-M46: a
+    reason="bestN" save used to write runs/x.best3/ckpt.pt while the tokenizer always went to the
+    BASE path, so the snapshot's recorded merge count stopped matching the file it names -- and
+    resuming from it resolves d_vocab_read_path to a file nothing ever wrote, build_vocabulary
+    falls through to "build", and the restored embedding table is indexed by a different
+    vocabulary. TOK.save_vocabulary takes the same suffix for exactly this reason, so the two go
+    out together, here, and cannot drift apart.
+    """
+    wrote = ckpt_api.save(sysm.configs["CKPT"], payload=_payload(sysm),
+                          geometry=dict(sysm.manifest), step=int(clock.step),
+                          epoch=int(clock.epoch), reason=reason, suffix=suffix)
+    if wrote:
+        tok_api.save_vocabulary(sysm.configs["TOK"], sysm.vocab, suffix=suffix)
+    return wrote
 
 
 def _window_bounds(ids, i, ctx):
@@ -294,6 +345,19 @@ def run(sysm, *, max_windows=None, progress=True):
             if clock.note_backward():
                 opt_api.maybe_step(opt_cfg, sysm.optimizer)
 
+        # THE PERIODIC CHECKPOINT, THROUGH THE SAME Cadences EVERY OTHER GATE USES. A 53-minute
+        # run finished with `ckpt checks=0` -- the gate was never EVALUATED, so nothing was written
+        # and the trained weights were lost at process exit. That is what this call is: not a
+        # refinement, a repair. It is evaluated per window rather than per flush because the period
+        # is in WINDOWS and Cadences.due is phase-independent by construction.
+        if cadences.due("ckpt", periods["ckpt"], clock):
+            _save(sysm, clock, "periodic")
+        # AND THE SIGUSR1 FLAG, DRAINED ONCE PER WINDOW. CKPT.install_save_signal armed it at
+        # compose; take() returns True exactly once per `kill -USR1`, so a checkpoint is written on
+        # demand without the run being stopped to get one.
+        if sysm.save_flag is not None and sysm.save_flag.take():
+            _save(sysm, clock, "sigusr1")
+
         if progress and cadences.due("progress", periods["progress"], clock):
             print(f"[{int(tick.step)} windows] loss={last_loss:.4f} "
                   f"opt_steps={int(clock.counters()['opt_steps'])} "
@@ -314,6 +378,18 @@ def run(sysm, *, max_windows=None, progress=True):
                             f"argument and not a lever -- this run is shorter than RUN.epochs and "
                             f"DATA asked for, and no report line should be read as a full run.")
             break
+
+    # THE FINAL SAVE, UNCONDITIONALLY, WHATEVER ENDED THE RUN. A run that stops because the epoch
+    # finished, because max_windows was reached, or because the stream ran out has all done the
+    # same amount of training, and losing it in the last two cases would make the driver's own
+    # argument the difference between a kept model and a discarded one.
+    # saving_on IS NOT RE-TESTED HERE: CKPT.save asks it and returns False, counting refused_off,
+    # which is the reading that makes "0 saves" distinguishable from "saving is off".
+    final_written = _save(sysm, clock, "final")
+    if not final_written:
+        warnings.append(
+            "loop: no final checkpoint was written -- CKPT_DIR names no directory, so saving is "
+            "off and this run's weights end with the process. Set CKPT_DIR to keep them.")
 
     c = clock.counters()
     return RunResult(

@@ -2280,10 +2280,22 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     if d:
         os.makedirs(d, exist_ok=True)
     blob = {
-        # THE MERGES, WHICH ARE THE FILE'S REASON TO EXIST. build_vocabulary REPLAYS them on a
-        # resume, which is why TOK.vocab_state carries "everything a resume needs THAT THE MERGE
-        # LIST ALONE DOES NOT CARRY" and explicitly not these.
-        "merges": [list(m) for m in vocab.merges],
+        # `entries`, IN THE SHAPE build_vocabulary READS, AND THE FIRST DRAFT WROTE `merges`.
+        # The two halves of a persistence pair are ONE mechanism and this one was written from its
+        # own docstring without opening the loader -- the exact mistake that was avoided for DOM and
+        # MEM by reading their restore side first. The file was produced, the path resolved, and
+        # the resume then died on "'...dyntok.json' carries neither `entries` nor `id2bytes`",
+        # which is build_vocabulary refusing rather than silently replaying nothing. A save side
+        # that writes a schema the load side does not accept is a checkpoint that cannot be
+        # resumed from, discovered only by resuming.
+        # ONE RECORD PER MINTED ID FROM 256 UP, each carrying its bytes AND the pair that made it.
+        # The `pair` is what makes this the full form rather than the id2bytes-only fallback the
+        # loader accepts and then marks as "no pair history in the file": without it a resumed
+        # vocabulary has the right ids and an EMPTY merge table, which the loader records as a real
+        # loss rather than passing off as a clean restore.
+        "entries": [{"bytes": bytes(vocab.id2bytes[i]).hex(),
+                     "pair": list(vocab.pair[i]) if vocab.pair.get(i) else None}
+                    for i in range(256, len(vocab.id2bytes))],
         # PLUS THE SETTINGS THIS RUN ACTUALLY USED, beside the snapshot that names them. What was
         # USED rather than what was ASKED FOR is the difference between a file a later run can check
         # against and one that merely agrees with the environment it was written in.
