@@ -550,6 +550,26 @@ def run(sysm, *, max_windows=None, progress=True):
     # argument the difference between a kept model and a discarded one.
     # saving_on IS NOT RE-TESTED HERE: CKPT.save asks it and returns False, counting refused_off,
     # which is the reading that makes "0 saves" distinguishable from "saving is off".
+    # WHAT THE MINTS ACTUALLY DID TO THIS RUN, WHICH IS LESS THAN "THE VOCABULARY GREW" SOUNDS.
+    # The stream is segmented ONCE, before the first window, at the vocabulary the run entered with;
+    # the only thing that re-segments it is the retok, and this driver raises that Due and does not
+    # act on it (see the Due.retok branch in _flush for why). So every id minted during the run is
+    # a row LM.on_mint initialised from its parents and NOTHING IN Segmentation.ids EVER REFERS TO
+    # IT. The merge table has it, a resume carries it, tok.mint counts it -- and no window contains
+    # it, so no gradient reaches it and the vocabulary's growth cannot show up in the loss.
+    # THIS IS SAID HERE BECAUSE NOTHING ELSE IN THE REPORT SAYS IT. tok.mint reads 18 and
+    # lm.mint.rows_init_mean reads 18 and both are true; a reader adding those to "the vocabulary
+    # mints" would conclude the mechanism is contributing to this run's numbers, and it is not.
+    _minted = int(vocab.counters.get("tok.mint", 0))
+    if _minted:
+        warnings.append(
+            f"loop: {_minted} token(s) were minted and their rows initialised, and NONE OF THEM "
+            f"CAN APPEAR IN THIS RUN'S TRAINING STREAM. Segmentation.ids was built once, before "
+            f"the first window, at the vocabulary the run entered with, and the only thing that "
+            f"re-segments it is the retok -- which this driver raises (tok.due_retok) and does not "
+            f"act on (tok.due_dropped). The mints are real, the rows are real and a resume carries "
+            f"both; what they are not is USED. Minting contributes nothing to this run's loss.")
+
     final_written = _save(sysm, clock, "final")
     saves += 1 if final_written else 0
     if not final_written:

@@ -108,6 +108,17 @@ def main(argv=None):
           f"{result.opt_steps} optimizer steps, {result.epochs} epoch(s) "
           f"in {result.elapsed_s:.1f}s ({result.windows / max(result.elapsed_s, 1e-9):.1f} w/s)")
     print(f"=== loss {result.loss_first:.4f} -> {result.loss_last:.4f}")
+    # WHAT THE CARD ACTUALLY HELD, on the runs where there is a card. A throughput number without
+    # a memory figure cannot answer "would a bigger batch or a wider model fit", which is the first
+    # question anyone asks of a GPU run -- and on this tree it is the question, because the step is
+    # LAUNCH-bound rather than compute-bound and the honest way to use a big card is to make each
+    # launch do more work rather than to make more launches.
+    # max_memory_allocated AND NOT memory_allocated: the peak is what has to fit, and the value at
+    # the end of a run is whatever survived the last free.
+    if str(p.device).startswith("cuda"):
+        import torch
+        print(f"=== peak CUDA memory {torch.cuda.max_memory_allocated() / 2**30:.3f} GiB "
+              f"allocated, {torch.cuda.max_memory_reserved() / 2**30:.3f} GiB reserved")
     print(f"=== {len(result.skipped)} MECHANISM(S) ON LOOP_ORDER HAVE NO CALL SITE AT ALL:")
     for s in result.skipped:
         print(f"      - {s}")
