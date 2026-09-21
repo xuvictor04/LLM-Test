@@ -13,12 +13,25 @@ in its own warnings.
     PYTHONPATH=src RUN_DEVICE=cuda python run.py      # on a GPU
     PYTHONPATH=src DATA_STREAM_BYTES=50000000 RUN_EPOCHS=1 RUN_DEVICE=cuda python run.py
 
-WHAT THIS RUN MEASURES AND WHAT IT DOES NOT. It trains a language model routed through the fabric,
-on the corpus DATA draws -- goal A's core. It does NOT measure goal B: eleven entry points on
-LOOP_ORDER's B row are still stubs, so the fabric does not grow, memory is never written, the
-vocabulary never mints and no domain is ever scored. The run PRINTS that list before it starts,
-because a report that omits it is indistinguishable from a run where those mechanisms were armed
-and did nothing.
+WHAT THIS RUN MEASURES. Goal A's core -- a language model routed through the fabric, trained by the
+optimizer on the corpus DATA draws -- and, since every one of LOOP_ORDER's B rows acquired a call
+site, the mechanisms goal B is made of: the fabric GROWS, memory is WRITTEN and maintained, and the
+vocabulary MINTS with LM.on_mint initialising each new row from its parents.
+
+WHAT IT STILL DOES NOT MEASURE, AND THE RUN PRINTS BOTH LISTS RATHER THAN CLAIMING OTHERWISE:
+  * A CALL SITE IS NOT A CALL. Three B rows stand behind events -- TOK.mint_burst behind Due.mint,
+    LM.residual_ratios and TOK.judge_probation behind Due.probation -- and the probation family is
+    UNREACHABLE at the shipped TOK_PROBATION_USES=0. The GATED CALL SITES block says which of the
+    three states each one is in, read off the counter the owning package keeps.
+  * THE RETOK IS RAISED AND NOT ACTED ON. TOK's retok_every cadence fires and the root does not
+    re-segment, because that needs a new Segmentation mid-epoch against a clock whose epoch length
+    was measured on the old one. The fire is counted in tok.due_dropped, which Q-TOK-12 says must
+    read zero -- so a nonzero value there is this, stated loudly rather than hidden.
+  * DOMAINS ARE OFF. DOM.observe is a stub, so every window is domain 0 and the fabric's per-domain
+    books, the breadth ban and MEM's per-source floor all see exactly one source.
+  * MEMORY IS WRITE-ONLY. MEM.read is a stub, so MEM.maintain's probe fires and retrieves nothing:
+    evict='lru' and evict='usage' are write-order FIFO whatever they say, and probation can never
+    promote. The store's own counters (n_probe_fired against n_probe_rows) are where that reads.
 """
 import argparse
 import os
@@ -95,9 +108,17 @@ def main(argv=None):
           f"{result.opt_steps} optimizer steps, {result.epochs} epoch(s) "
           f"in {result.elapsed_s:.1f}s ({result.windows / max(result.elapsed_s, 1e-9):.1f} w/s)")
     print(f"=== loss {result.loss_first:.4f} -> {result.loss_last:.4f}")
-    print(f"=== {len(result.skipped)} MECHANISM(S) ON LOOP_ORDER WERE NOT CALLED:")
+    print(f"=== {len(result.skipped)} MECHANISM(S) ON LOOP_ORDER HAVE NO CALL SITE AT ALL:")
     for s in result.skipped:
         print(f"      - {s}")
+    # AND THE GATED ONES, SEPARATELY, BECAUSE "IT HAS A CALL SITE" IS NOT "IT RAN". Three of the
+    # twenty-one B rows stand behind events that are UNREACHABLE at the shipped defaults --
+    # TOK_PROBATION_USES=0 turns the whole probation family off -- so a report that printed "0 not
+    # called" and stopped would say this run judged probation when nothing did. That is the same
+    # overstatement the skipped list itself was written to repair, one layer in.
+    print("=== GATED CALL SITES (a call site is not a call):")
+    for g in result.gated:
+        print(f"      - {g}")
     print("=== cadence ledger (checks=0 means the gate was never evaluated, which is a different "
           "fact from fires=0):")
     for k, v in sorted(result.cadence_ledger.items()):

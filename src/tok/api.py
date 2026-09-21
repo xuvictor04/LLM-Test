@@ -241,11 +241,15 @@ class Vocabulary:
         # and one entry per considered pair for the length of a run is the unbounded-instrument
         # shape ISSUES P1-L68 records against h_pmin_seen (one float per candidate, millions at
         # cand_window=1024).
-        # NOTHING FILLS `tally` TODAY: TOK.on_window is the only declared producer and it is still
-        # a P4 stub that spine/loop.py does not call, so a burst on the tree as it stands finds an
-        # empty tally and mints nothing. That reads as tok.mint 0 with tok.mint_exhausted 1 -- a
-        # measurement of an empty pool -- and mint_burst says so in its own comment rather than
-        # letting the two states collapse.
+        # TOK.on_window FILLS `tally` AND IS ITS ONLY PRODUCER. This comment read "NOTHING FILLS
+        # `tally` TODAY ... a P4 stub that spine/loop.py does not call" until the body and the call
+        # site landed together; the sentence it replaces is kept in substance because the state it
+        # described is still REACHABLE and still has to be readable when it happens. A burst that
+        # finds an empty tally mints nothing and reads as tok.mint 0 with tok.mint_exhausted 1 -- a
+        # measurement of an empty pool -- which is now the signature of a REAL condition (a freeze,
+        # tok.mode="fixed", or a burst whose candidates were all consumed) rather than of an
+        # unwired producer. mint_burst says so in its own comment rather than letting the two
+        # states collapse.
         self.tally = collections.Counter()
         self.tally_seen = {}
         # THE MATCH-TABLE REVISION COUNTER, AND IT CLOSES A HOLE THIS FILE NAMED IN ADVANCE.
@@ -415,6 +419,33 @@ class Vocabulary:
             self.maxlen = len(seq)
         self.rev += 1
         return True
+
+
+@dataclasses.dataclass(frozen=True)
+class Due:
+    """What THIS WINDOW made due. FOUR FIELDS, no methods, and the module header's spelling exactly.
+
+    FROZEN, and it is a record of EVENTS rather than a state a consumer may edit: `_due` RECORDS
+    the step at the moment it answers True, so a Due that is modified after the fact describes a
+    fire that has already been banked and cannot be un-banked.
+
+    THREE OF THE FOUR ARE EVENTS AND THE FOURTH IS A STATE, which is the whole reason the root can
+    treat them differently. `mint`, `retok` and `probation` are each true on the windows their own
+    cadence came due and false everywhere else; `frozen` is monotone -- at step >= tok.freeze_at it
+    is true from then on -- so OR-ing it over a batch and taking the last window's value are the
+    same number, which is what Q-TOK-12's ruling relies on.
+
+    NO `or_with` METHOD, AND THE ABSENCE IS THE RULING'S. Q-TOK-12 says "`Due` keeps its four
+    fields and no signature moves", and this module's header declares the record as four names with
+    no methods beside them, unlike `Vocabulary`, whose five are listed. The OR is the composition
+    root's because the root is the only thing that can see a batch; spine/loop.py does it with
+    dataclasses.replace on the record THIS package produced, so no caller has to name the
+    constructor of a type it does not own.
+    """
+    mint: bool = False
+    retok: bool = False
+    probation: bool = False
+    frozen: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1517,9 +1548,142 @@ def on_window(tok: Config, vocab, ids, *, step):
                  reading this is the number that says what it cost)
     """
     tok = tok.owned_by("TOK")
-    raise NotImplementedError(
-        "TOK.on_window: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    mode = str(tok.mode)
+    grow_n, retok_n = int(tok.grow_every), int(tok.retok_every)
+    freeze_n, deadline_n = int(tok.freeze_at), int(tok.probation_deadline)
+    uses = int(tok.probation_uses)
+    # THE ARGUMENT GOES THROUGH units.Windows AT THE DOOR, for judge_probation's reason: every
+    # cadence below is compared against it and tok/levers.py declares all four in Windows, so the
+    # optimizer's step counter handed in here would be wrong by the effective batch width and
+    # exactly right at batch_windows=1 -- the shape of every clock defect this project has recorded.
+    now = _units.Windows(step)
+    now_n = int(now)
+    c = vocab.counters
+
+    # PRESENT-AND-0 FROM THE FIRST CALL ON THE ARMS THAT CAN RUN, ABSENT ON THE ARMS THAT CANNOT --
+    # this module's convention, stated by _replay_merges for tok.load_reconciled and by mint_burst
+    # for its four gate rows. `tok.due_merged` and `tok.due_dropped` are seeded HERE and written by
+    # the COMPOSITION ROOT, which is the only thing that can see a batch; they are on this entry
+    # point's DID IT FIRE line because the fires they count are this entry point's, and seeding
+    # them here is what stops a reader finding them absent on a run where the root was doing its
+    # job. tok.due_dropped MUST READ 0 -- Q-TOK-12 chose the OR precisely so that no raised Due is
+    # ever discarded, and a counter that must read zero is how a later reader can tell which of the
+    # two readings was actually implemented.
+    for _row in ("tok.tally", "tok.due_mint", "tok.due_retok", "tok.due_merged", "tok.due_dropped"):
+        c.setdefault(_row, 0)
+    # THE PROBATION FAMILY IS ABSENT AT THE SHIPPED TOK_PROBATION_USES=0, which is judge_probation's
+    # own arm ("the four probation counters are absent rather than 0") carried one row up to the
+    # cadence that gates it. docs/04_CONTRACT.md: "TOK_PROBATION_USES = 0, so the whole probation
+    # family is inert as shipped". A cadence raised for a consumer that returns on its first branch
+    # is a gate evaluated for nothing, and a 0 here would read as "the deadline never came".
+    if uses > 0:
+        c.setdefault("tok.due_probation", 0)
+    # tok.mint_frozen_at IS THE STEP, OR UNREACHABLE WHEN freeze_at = 0 -- the docstring's own
+    # words, so the key is ABSENT on the shipped default and present-and-0 while the freeze is
+    # armed and has not arrived.
+    if freeze_n:
+        c.setdefault("tok.mint_frozen_at", 0)
+
+    # THE FREEZE IS A STATE AND NOT AN EVENT. It is monotone by construction -- once now >= freeze
+    # it is true for every later window -- which is the property Q-TOK-12's ruling rests on when it
+    # takes `frozen` from the last window of a batch and calls that the same thing as the OR.
+    frozen = bool(freeze_n) and now_n >= freeze_n
+    if frozen and not c["tok.mint_frozen_at"]:
+        c["tok.mint_frozen_at"] = now_n
+
+    # MINTING IS ONLINE'S ALONE. tok.mode="fixed" builds a vocabulary before the loop and never
+    # adds to it, so there is nothing for a tally to feed and a mint cadence would be a clock for a
+    # mechanism that is off; the retok cadence goes the same way for the same reason (the archive's
+    # gate is `if ONLINE and step % RETOK_EVERY == 0`, :702).
+    online = (mode == "online")
+
+    # ---- THE TALLY, WHICH IS THE ONLY CANDIDATE EVIDENCE mint_burst HAS -------------------------
+    # `mint_burst(tok, vocab, *, step)` TAKES NO ids, so the vocabulary is the one channel a
+    # candidate can arrive through and this is the one producer. Cumulative and never cleared at a
+    # burst: `tally_seen` is what a pair's count WAS when a burst last considered it, and
+    # tok.mint_novel's re-rank is growth since then -- clearing would turn that re-rank into a
+    # second copy of plain frequency, which is the one knob in this package aimed at the
+    # tokenizer's own version of forgetting.
+    # NOT TALLIED WHILE FROZEN, which is the docstring's "unless minting is frozen" and is not an
+    # optimisation: a tally that keeps growing after the freeze describes candidates for a burst
+    # that can never happen, and `tally_seen` would then measure growth nobody ever considered.
+    if online and not frozen:
+        _t = vocab.tally
+        _prev = ids[0] if len(ids) else None
+        _n = 0
+        for _cur in ids[1:]:
+            _t[(int(_prev), int(_cur))] += 1
+            _prev = _cur
+            _n += 1
+        c["tok.tally"] += _n
+
+    # ---- THE THREE CADENCES, ASKED ONCE EACH, UNDER THREE DISTINCT KEYS -------------------------
+    # ASKED ONCE EACH AND NEVER TWICE. `_due` RECORDS the step when it answers True, so a second
+    # ask under the same key CONSUMES the event: probation sharing the grow key meant minting never
+    # fired at all, and asking twice in one if/elif killed BOTH retok branches for three 18-epoch
+    # runs. There is ONE call per key in this function and the keys are literals, so the collision
+    # is not spellable rather than merely avoided.
+    mint = bool(online and not frozen and _due(vocab, "mint", grow_n, now))
+    retok = bool(online and _due(vocab, "retok", retok_n, now))
+    probation = bool(uses > 0 and _due(vocab, "probation", deadline_n, now))
+    if mint:
+        c["tok.due_mint"] += 1
+    if retok:
+        c["tok.due_retok"] += 1
+    if probation:
+        c["tok.due_probation"] += 1
+    return Due(mint=mint, retok=retok, probation=probation, frozen=frozen)
+
+
+def _due(vocab, key, period_n, now):
+    """One of TOK's own cadences: True at a long-run RATE of once per `period_n` WINDOWS.
+
+    THE ARITHMETIC IS RUN.Cadences.due's, DELIBERATELY AND LINE FOR LINE, and the duplication is
+    forced rather than chosen: the spine's gates take their periods from spine/compose.py::_periods,
+    which is assembled from the packages that own each threshold, and TOK's three are NOT in that
+    mapping -- `Cadences.due` refuses an undeclared key by name ("a gate whose key is not in that
+    mapping is a gate with no DID IT FIRE surface"). TOK's cadences are asked INSIDE this package,
+    once per window, from the one entry point that holds grow_every, retok_every and
+    probation_deadline. Adding three root keys would move three TOK thresholds into the spine's
+    mapping and put the cadence one call further from the lever that declares it. What this costs
+    is the risk the two spellings drift, so the four properties are named here and each one has a
+    reason a reader can check against train/api.py::Cadences.due:
+      * ELAPSED-SINCE-LAST-FIRE, NOT MODULO. `step % N == 0` below a batch early-out asks for a
+        simultaneous solution to two congruences that usually has none -- simulated over 200,000
+        windows the mint fired 999 times at BATCH_W=1 and ZERO times at BATCH_W in {2,8,15,16,32}.
+        This function IS that repair for the gate the simulation was about.
+      * A NON-POSITIVE PERIOD IS DISARMED. `now - seeded >= 0` is true on every evaluation, so
+        without this line a period of 0 fires EVERY WINDOW -- measured at 632 fires in 633
+        evaluations on the spine's own copy, on the lever whose documented meaning was "disabled".
+      * THE FIRST EVALUATION SEEDS AND ANSWERS FALSE, so the first fire comes one full period
+        later. That matches the archive's `step % GROW_EVERY == 0 and step > 0` (:690), where the
+        `and step > 0` is the same statement, and it means a resumed run banks nothing for the
+        windows it was not present for.
+      * THE SEED ADVANCES BY WHOLE PERIODS, carrying the remainder. Asked once per window `elapsed`
+        is exactly `period` and the multiplier is 1, so this is a no-op HERE -- it is written
+        anyway because the alternative spelling (`seeded = now`) is correct only under that
+        condition, and a reader comparing the two primitives should find them the same.
+    THE STATE LIVES IN `vocab.counters`, which is MEM's precedent for the identical problem:
+    memory/api.py::maintain keeps `store.probe_last_window` in `store.counters` beside its counts.
+    It is not a count and it is in the counts dict because that dict is what TOK.vocab_state
+    carries across a checkpoint (`"counters": dict(vocab.counters)`) and restore_vocab puts back --
+    so a resumed run's cadences continue from where the parent's left off instead of re-seeding at
+    the resumed step and banking a period nobody ran.
+    """
+    c = vocab.counters
+    if int(period_n) <= 0:
+        return False
+    seed_key = f"tok.{key}_seeded_window"
+    seeded = c.get(seed_key)
+    if seeded is None:
+        c[seed_key] = int(now)
+        return False
+    elapsed = int(now) - int(seeded)
+    if elapsed >= int(period_n):
+        c[seed_key] = int(seeded) + int(period_n) * (elapsed // int(period_n))
+        c[f"tok.{key}_last_window"] = int(now)
+        return True
+    return False
 
 
 def _cand_key(item):

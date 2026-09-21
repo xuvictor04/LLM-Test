@@ -998,9 +998,141 @@ def on_mint(lm: Config, model, mints, id2bytes, *, at_window, sig_emb=None):
                  number of MINT EVENTS, not the number of mints), lm.compose.table_calls
     """
     lm = lm.owned_by("LM")
-    raise NotImplementedError(
-        "LM.on_mint: P4 (lm) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section LM.")
+    arm, compose_on = str(lm.new_row_init), bool(lm.compose)
+    slots = int(lm.vocab_slots)
+    # `id2bytes` IS READ BY STEP 1 AND BY NOTHING ELSE, so off the compose arm it is unused HERE
+    # and that is the contract rather than a loose end: it is the composer's input -- the whole
+    # table after the mint, sized to geom.max_token_bytes so two long tokens sharing their first 16
+    # bytes cannot get identical composites (P1-M21) -- and step 1 is the branch that raises
+    # NotBuilt below. It stays in the signature because the signature is frozen and because the day
+    # the ByteComposer lands it is what set_vocab takes.
+    _ = id2bytes
+
+    # SEEDED BEFORE ANY BRANCH DECIDES, so ABSENT never masquerades as ZERO -- the rule
+    # fabric/api.py::grow_check states and the one sig/api.py broke for a whole run. All six are
+    # reachable on some arm of this call, so all six are present from the first mint event onward.
+    for _k in ("lm.mint.rows_init_random", "lm.mint.rows_init_mean", "lm.mint.rows_init_last_first",
+               "lm.mint.compose_skip", "lm.mint.sig_rows", "lm.compose.table_calls"):
+        _bump(_k, 0)
+    # ONE PER MINT EVENT AND NOT ONE PER MINT, which is the docstring's own requirement
+    # ("must equal the number of MINT EVENTS, not the number of mints"). A burst of six tokens is
+    # ONE call and therefore one set_vocab, and a counter that counted tokens would read six on a
+    # tree where the composer was told once.
+    _bump("lm.mint.set_vocab_calls")
+
+    if compose_on:
+        # 1. THE COMPOSER IS TOLD THE VOCABULARY GREW -- AND THERE IS NO COMPOSER TO TELL.
+        # NotBuilt AND NOT NotImplementedError, and the distinction is the tree's: NotImplementedError
+        # is the P4 stub marker tests/test_census.py counts, and this body is not a stub. The
+        # ByteComposer is a separate, still-unbuilt TOK-side piece -- LMModel.composed_table() raises
+        # NotBuilt in as many words -- so `set_vocab` and `note_born` have no object to be called on,
+        # and steps 2 and 3 below cannot substitute for them: step 2 is explicitly skipped under
+        # compose (the rows are the composer's output, not parameters), so returning a report here
+        # would claim a mint event that left the vocabulary's new ids pointing at nothing.
+        raise NotBuilt(
+            "LM.on_mint at LM_COMPOSE=1: step 1 of this entry point is `composer.set_vocab` plus "
+            "`note_born`, and the ByteComposer is DECLARED AND NOT BUILT in this tree -- "
+            "LMModel.composed_table() says so and raises the same exception. It is not a stub and "
+            "this is not NotImplementedError: what is missing is TOK's composer, not this body. "
+            "Under compose the new rows are the composer's OUTPUT and step 2 is skipped by "
+            "contract, so there is nothing this call could do instead that would leave the minted "
+            "ids pointing at a trained vector. Run at LM_COMPOSE=0, where the emb/head rows exist "
+            "and new_row_init writes them.")
+
+    # 2. THE NEW ROWS, UNDER THE ARM new_row_init NAMES. THIS IS GOAL B's ROW-LEVEL CASE and
+    # lm/levers.py says so: "a freshly minted token id points at a randomly initialised embedding
+    # row and a randomly initialised head row, so the model must re-learn from scratch material it
+    # can already spell with the parents". The three arms ARE that experiment.
+    # THE TWO SIDES ARE NOT SYMMETRIC, which is why "last_first" is not a typo for "first_first":
+    # `head` scores "the next token is ab" from the state BEFORE a has been consumed, so it takes
+    # a's row; `emb` is what the recurrence consumes AFTER the token, so it takes b's.
+    written = 0
+    with torch.no_grad():
+        emb_w = model.emb.weight
+        head_w, head_b = model.head.weight, model.head.bias
+        for m in mints:
+            nid, a, b = int(m.new_id), int(m.left_id), int(m.right_id)
+            if not (0 <= a < slots and 0 <= b < slots and 0 <= nid < slots):
+                # REFUSED BY NAME RATHER THAN CLAMPED OR SKIPPED. An id at or above vocab_slots is a
+                # token the embedding table has no row for, and writing it would be an IndexError at
+                # best and a silent wrap at worst; TOK.mint_burst refuses to mint past
+                # d_vocab_ceiling for the same reason and from the same number, so a pair arriving
+                # here out of range means the two ceilings have come apart (DEFECT D-T1).
+                raise GeometryError(
+                    f"LM.on_mint: Mint(new_id={nid}, left_id={a}, right_id={b}) against "
+                    f"LM_VOCAB_SLOTS={slots}. Every one of the three must be a row this model has. "
+                    f"d_vocab_ceiling is this same number and TOK.mint_burst refuses to mint past "
+                    f"it, so an id out of range here means the vocabulary's ceiling and the model's "
+                    f"row count have come apart -- which is DEFECT D-T1, a saved ceiling outliving "
+                    f"the wire.")
+            if arm == "mean":
+                emb_w[nid] = 0.5 * (emb_w[a] + emb_w[b])
+                head_w[nid] = 0.5 * (head_w[a] + head_w[b])
+                # ALL THREE, which the docstring says of this arm and only of this arm.
+                head_b[nid] = 0.5 * (head_b[a] + head_b[b])
+                written += 1
+            elif arm == "last_first":
+                emb_w[nid] = emb_w[b]
+                head_w[nid] = head_w[a]
+                # THE BIAS IS LEFT AT THE CONSTRUCTOR'S VALUE ON THIS ARM, deliberately and
+                # literally: the contract writes "mean" as "0.5*(a+b) into all three" and
+                # "last_first" as "emb[nid]=emb[b] and head[nid]=head[a]" -- two tensors, named.
+                # Copying the bias as well would be a fourth write nobody measured, on the arm whose
+                # 1.4822 (sd 0.011) is the number every later comparison is against.
+                written += 1
+            # "random" IS AN ARM THAT RUNS AND WRITES NOTHING. The constructor's initialisation IS
+            # the arm -- lm/levers.py records WARMSTART folding into this lever as its "random"
+            # value -- so there is no branch here, and the counter below is what says it ran.
+    # EXACTLY ONE OF THE THREE ACCUMULATES, which is the docstring's requirement, and the "random"
+    # row counts the rows that TOOK that arm rather than the rows it wrote -- it writes none, and a
+    # 0 there would be indistinguishable from an arm that never ran. `written` is the other two's,
+    # and it is what MintReport.rows_initialised reports, so the record and the ledger answer the
+    # same question with the same number on the arms where a row was written.
+    _bump({"random": "lm.mint.rows_init_random", "mean": "lm.mint.rows_init_mean",
+           "last_first": "lm.mint.rows_init_last_first"}[arm],
+          len(mints) if arm == "random" else written)
+
+    # 3. SIG'S OWN ROW FOR THE SAME TOKEN, under the same rule. SIG NEEDS THIS MORE THAN THE LM
+    # DOES: a domain centroid is a MEAN of encodings, so one freshly-random token id inside a window
+    # perturbs every signature containing it and the assembler reads that as a domain shift -- a
+    # spurious shift caused by the tokenizer, arriving at the mechanism whose whole job is to notice
+    # real ones. The table is handed in by the spine as an nn.Embedding; this package never imports
+    # sig.
+    sig_rows = 0
+    if sig_emb is not None:
+        with torch.no_grad():
+            sw = sig_emb.weight
+            n_rows = int(sw.shape[0])
+            for m in mints:
+                nid, a, b = int(m.new_id), int(m.left_id), int(m.right_id)
+                if not (nid < n_rows and a < n_rows and b < n_rows):
+                    # SKIPPED AND COUNTED, NOT RAISED, AND THE ASYMMETRY WITH STEP 2 IS THE POINT:
+                    # SIG's encoder may legitimately be in BYTE space, where it has 256 rows and no
+                    # row for a token id at all. That is not a broken ceiling, it is a different
+                    # alphabet, and the counter's declared job is to tell "SIG is in token space and
+                    # got its rows" from "SIG is in byte space and needs none" from "nobody passed
+                    # it" -- three states, of which this is the second.
+                    continue
+                if arm == "mean":
+                    sw[nid] = 0.5 * (sw[a] + sw[b])
+                elif arm == "last_first":
+                    sw[nid] = sw[b]
+                sig_rows += 1
+        _bump("lm.mint.sig_rows", sig_rows)
+
+    # `at_window` IS RECORDED AND NOT COMPARED. Under compose it would be note_born's stamp; off
+    # compose there is no composer to hold a birth table and TOK's `prov` already carries the birth
+    # window (("online", born)), which is the table that survives a checkpoint. A second home for
+    # the same number is what DEFECT D-T3 is about, so this gauge is a READING of the last mint
+    # event and never a source anything reads back.
+    _set("lm.mint.last_window", int(at_window))
+    # lm.mint.compose_skip IS SEEDED AND CAN NEVER INCREMENT ON THIS TREE, and saying so is cheaper
+    # than leaving a reader to wonder. It counts step 2 being skipped because the rows are the
+    # composer's output -- a state only reachable at LM_COMPOSE=1, where this body raises NotBuilt
+    # at step 1 and never reaches step 2 at all. The key is present-and-0 rather than absent
+    # because the mechanism IS declared and the arm IS legal; what is missing is the composer.
+    return MintReport(rows_initialised=written, arm_used=arm, sig_rows_written=sig_rows,
+                      composer_rows=0, residual_ratio=None)
 
 
 def residual_ratios(lm: Config, model):
@@ -1099,6 +1231,36 @@ def residual_ratios(lm: Config, model):
         _set("lm.residual_rows", int((born > -10 ** 8).sum()))
         _bump("lm.residual_read")
         return ratios.detach().to(torch.float32)
+
+
+@dataclasses.dataclass(frozen=True)
+class MintReport:
+    """What ONE mint event did to this package's tensors. FIELDS ONLY, NO METHODS, for LoadReport's
+    reason: a public method on a public class in an api.py IS an entry point (K1/K6), and
+    `Caps.headroom` was the 133rd the day it landed.
+
+    `rows_initialised` IS ROWS AND `arm_used` IS WHICH RULE WROTE THEM, and the pair is why this is
+    a record rather than an int. lm/levers.py::LMLevers.new_row_init records the three arms as a measured
+    experiment -- immediate post-mint loss over 6 pairs x 3 seeds, random 2.1699 (sd 0.120), mean
+    1.8222 (sd 0.078), last/first 1.4822 (sd 0.011) -- so a report that says how many rows were
+    written without saying under which rule cannot be compared against that table.
+    `rows_initialised` IS 0 ON THE "random" ARM AND THAT IS NOT AN OMISSION: the arm's whole content
+    is leaving the constructor's initialisation in place, so nothing is written and the honest count
+    of rows this call wrote is zero. `arm_used` is what says the arm ran.
+
+    `residual_ratio` IS THE MINT-TIME READ AND IS NOT THE PROBATION TEST'S INPUT (Q-TOK-11, ruled
+    2026-09-02). It is ||delta|| / ||composite|| at the moment the row is CREATED, when the free
+    residual is zero by construction under every arm -- so TOK's `embed` arm sourcing it from here
+    would retire 100% of candidates, an arm wrong BY CONSTRUCTION rather than by tuning. The number
+    the probation test wants is LM.residual_ratios(lm, model), read at judgement time. This field
+    is still the right number FOR THE MINT and is kept for that; it is None off the compose arm,
+    where there is no composite to be a residual from.
+    """
+    rows_initialised: int = 0
+    arm_used: str = ""
+    sig_rows_written: int = 0
+    composer_rows: int = 0
+    residual_ratio: object = None
 
 
 @dataclasses.dataclass(frozen=True)

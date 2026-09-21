@@ -20,22 +20,31 @@ EVERY PERIODIC GATE GOES THROUGH Cadences.due(key, period, clock). The modulo fo
 here: `step % N == 0` below a batch early-out fired 999 times at BATCH_W=1 and ZERO times at every
 other width, and CKPT_EVERY sat in that block. The keys are the root's, from compose.py::_periods.
 
-WHAT THIS DRIVER SKIPS, AND WHY IT SAYS SO OUT LOUD
-====================================================
-Eleven entry points on LOOP_ORDER's B row are still `raise NotImplementedError`. A driver that
-simply did not call them would produce a run whose report is indistinguishable from a run where
-those mechanisms were ARMED AND DID NOTHING -- which is the two-states-printed-as-one collapse this
-whole tree is built to refuse, arriving in the one file that decides what runs.
+WHAT THIS DRIVER SKIPS, AND WHY IT SAYS SO OUT LOUD -- IN TWO LISTS, NOT ONE
+============================================================================
+`RunResult.skipped` names every LOOP_ORDER B row this driver has NO CALL SITE FOR. It is empty as
+of the edit that wired the last of the twenty-one, and an empty list is exactly the state that made
+the FIRST version of this report wrong: it filtered the B row through "is the body a stub" and
+printed "0 MECHANISM(S) NOT CALLED" on a run that invoked six of twenty-one. The list is derived
+from the table and cross-checked against `_CALLS` in both directions, so a row this driver drops
+cannot vanish from the report and a `_CALLS` entry the table does not list raises.
 
-So every skipped mechanism is recorded in `RunResult.skipped`, by name, with the reason, and the
-progress line prints the count. A reader of this run's output can tell "the fabric did not grow"
-from "the fabric's growth was never called", which are different facts about different runs.
+`RunResult.gated` IS THE SECOND LIST AND IT EXISTS BECAUSE A CALL SITE IS NOT A CALL. Three rows
+stand behind events (Due.mint, Due.probation) and one behind "the optimizer actually stepped"; at
+the shipped TOK_PROBATION_USES=0 the probation cadence is never even asked, so two of the
+twenty-one have a call site that CANNOT RUN. Reporting only the first list would say this run
+judged probation when nothing did -- the same overstatement, one layer in. `_gate_report` reads the
+three states (fired N / armed but 0 / unreachable) off the counter each owning package keeps,
+rather than re-deriving a verdict here from levers this file does not own.
 
 WHAT A RUN ON THIS DRIVER MEASURES TODAY: goal A's core -- a language model, routed through the
-fabric, trained by the optimizer on the corpus DATA draws. WHAT IT DOES NOT MEASURE: goal B. The
-fabric does not grow, memory is never written, the vocabulary never mints, domains are never
-scored and the world model contributes no loss. Continual learning is a claim about what survives
-a second pass through mechanisms that are, today, not called.
+fabric, trained by the optimizer -- AND the mechanisms goal B is made of. The fabric grows, memory
+is written and maintained, the vocabulary mints and LM.on_mint initialises each new row from its
+parents. WHAT IS STILL MISSING, all of it for a named reason a reader can check: DOM.observe is a
+stub so every window is domain 0; MEM.read is a stub so the store is write-only and its eviction
+rules are write-order FIFO whatever they say; MEM.census is a stub so growth's memory-pressure leg
+is unreachable; and the retok is RAISED AND NOT ACTED ON, counted in tok.due_dropped rather than
+allowed to look like a cadence that never came due.
 """
 import dataclasses
 import math
@@ -89,6 +98,7 @@ _CALLS = frozenset({
     "LM.embed", "WORLD.loss_terms", "LM.anchor_term",
     "FAB.observe", "DOM.note_competence",
     "FAB.own_lr_scale", "CAP.caps", "FAB.grow_check", "MEM.write", "MEM.maintain",
+    "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
 })
 
 # CALLS THIS DRIVER MAKES THAT ARE NOT B-ROW ENTRY POINTS. The clock, which LOOP_ORDER lists under
@@ -99,7 +109,7 @@ _CALLS = frozenset({
 # with the table is exactly what the check exists to refuse. Row A, not row B, measured through
 # spine/compose.py::plan().
 _NOT_B_ROW = frozenset({"RUN.RunClock.advance", "RUN.RunClock.note_backward",
-                        "SIG.encode", "DOM.observe"})
+                        "SIG.encode", "DOM.observe", "TOK.on_window", "LM.on_mint"})
 
 # WHY EACH UNWIRED MECHANISM'S ABSENCE MATTERS, in the consequence a reader needs rather than the
 # name they already have. Missing keys fall back to a plain sentence; nothing here is load-bearing
@@ -119,6 +129,71 @@ _WHY = {
     "DOM.note_competence": "per-domain competence is never updated",
     "CKPT.save": "no checkpoint is written by the loop",
 }
+
+
+# THE CALL SITES THAT ARE GATED, AND THE COUNTER THAT SAYS WHETHER THE GATE OPENED.
+# A DRIVER THAT CALLS AN ENTRY POINT ONLY WHEN AN EVENT FIRES HAS NOT CALLED IT ON A RUN WHERE THE
+# EVENT DID NOT, AND A REPORT THAT SAYS "0 NOT CALLED" IS THE SAME OVERSTATEMENT `skipped` EXISTS
+# TO PREVENT, ONE LAYER IN. The first version of `skipped` filtered LOOP_ORDER's B row through "is
+# the body a stub" and printed 0 on a run that invoked six entry points of twenty-one; this is that
+# error's smaller sibling -- every B row now HAS a call site, and three of them stand behind gates
+# that are UNREACHABLE at the shipped defaults (TOK_PROBATION_USES=0 turns the whole probation
+# family off, and its cadence is never even asked). Printing "0 not called" and stopping there
+# would say a run judged probation when nothing did.
+# THE THREE STATES ARE THE TREE'S OWN, read off the counter dicts by the convention every package
+# in it states: an ABSENT key means the mechanism was UNREACHABLE on the arm this run took, a key
+# PRESENT AND 0 means it was armed and did not fire, and a positive value is a fire count. So this
+# table names the gate in words and the counter to ask, and the reading is the counter's -- not a
+# second opinion computed here from levers this file does not own.
+_GATED = {
+    "TOK.mint_burst": ("Due.mint, TOK's grow_every cadence asked at row A", "tok.due_mint"),
+    "LM.residual_ratios": ("Due.probation (TOK_PROBATION_USES=0 makes it unreachable)",
+                           "tok.due_probation"),
+    "TOK.judge_probation": ("Due.probation (TOK_PROBATION_USES=0 makes it unreachable)",
+                            "tok.due_probation"),
+    "FAB.own_lr_scale": ("a flush on which the optimizer actually stepped", "fab.lr_calls"),
+}
+# CKPT.save IS GATED TOO AND IS NOT IN THAT TABLE, because its count is not in a counters dict this
+# file can index -- CKPT keeps its books on the Retention record -- and because the driver itself
+# holds the fact: `_save` returns whether a file was written, and the three routes into it (the
+# cadence, SIGUSR1, the final save) are all this function's. Its line is appended by `run` from
+# that count, which is a measurement rather than a lookup.
+
+
+def _gate_report(sysm):
+    """One line per gated call site: fired N / armed but 0 / unreachable. A tuple of strings.
+
+    THE COUNTER IS ASKED, NOT RE-DERIVED. Each row names a key in the package's own did-it-fire
+    dict -- vocab.counters for tok.*, Population.counters for fab.*, the retention record for
+    ckpt.* -- and the three states come from whether that key is absent, zero or positive, which is
+    the convention tok/api.py::Vocabulary.__init__ and fabric/api.py::_bump both state in full.
+    Computing the answer here from levers would be a second verdict about a question the package
+    that owns the threshold has already answered.
+    """
+    books = {"tok.": getattr(sysm.vocab, "counters", {}) or {},
+             "fab.": getattr(sysm.fabric, "counters", {}) or {}}
+    out = []
+    for name in sorted(_GATED):
+        why, key = _GATED[name]
+        book = None
+        for pre, d in books.items():
+            if key.startswith(pre):
+                book = d
+        if book is None:
+            raise RuntimeError(
+                f"spine/loop.py::_gate_report: {name} names the counter {key!r} and no package's "
+                f"book in this function owns that prefix. A gated call site whose did-it-fire key "
+                f"cannot be read is a call site whose three states collapse back into one, which "
+                f"is what this function exists to prevent.")
+        if key not in book:
+            out.append(f"{name}: UNREACHABLE -- gated on {why}, and {key} is ABSENT, which in this "
+                       f"tree means the mechanism was never armed on the arm this run took")
+        elif not book[key]:
+            out.append(f"{name}: ARMED BUT 0 -- gated on {why}; {key} is present and 0, so the gate "
+                       f"was evaluated and never came due in this run's length")
+        else:
+            out.append(f"{name}: fired {book[key]} time(s) -- gated on {why}")
+    return tuple(out)
 
 
 def _b_row_entry_points():
@@ -176,6 +251,7 @@ class RunResult:
     loss_curve: tuple
     elapsed_s: float
     skipped: tuple
+    gated: tuple
     cadence_ledger: dict
     warnings: tuple
 
@@ -262,6 +338,7 @@ def run(sysm, *, max_windows=None, progress=True):
     cfg = sysm.configs
     run_cfg, lm_cfg, tok_cfg = cfg["RUN"], cfg["LM"], cfg["TOK"]
     fab_cfg, sig_cfg, dat_cfg, opt_cfg = cfg["FAB"], cfg["SIG"], cfg["DATA"], cfg["OPT"]
+    tok_cfg = cfg["TOK"]
     dom_cfg = cfg["DOM"]
 
     # WHAT CANNOT BE CALLED, DETERMINED ONCE, BEFORE THE FIRST WINDOW. Deciding per-flush would put
@@ -329,6 +406,7 @@ def run(sysm, *, max_windows=None, progress=True):
     key_fn = _c_key_fn(sysm)
 
     curve, t0 = [], time.time()
+    saves = 0
     did = 0
     first_loss = last_loss = float("nan")
     batch = []
@@ -375,6 +453,35 @@ def run(sysm, *, max_windows=None, progress=True):
         # taking the units AHEAD of the cursor is what that helper's own docstring rules out. The
         # repair belongs in the root, which owns the slicer.
 
+        # ---- ROW A: TOK'S FOUR CADENCES, ASKED ONCE PER WINDOW ---------------------------------
+        # ASKED HERE AND ACTED ON AT THE FLUSH, which is the whole of Q-TOK-12. batch_windows Dues
+        # reach one flush and the root ORs them PER CADENCE KEY, because `_due` RECORDS the step
+        # when it answers True: a Due a flush discards is a fire that is silently GONE, at a rate of
+        # gcd(period, batch_windows)/batch_windows -- half of all mints at grow_every=200 with
+        # batch_windows=16, and 15 of every 16 at any period coprime with the batch.
+        # THE OR IS THE ROOT'S BECAUSE THE ROOT IS THE ONLY THING THAT CAN SEE A BATCH, and it is
+        # written with dataclasses.replace on the record TOK returned rather than by naming
+        # tok_api.Due: this file receives records from packages and reads them, and the ruling that
+        # settled the OR also said "`Due` keeps its four fields and no signature moves".
+        # `frozen` COMES FROM THE LAST WINDOW, which is the same value as the OR because it is a
+        # monotone STATE and not an event -- at step >= freeze_at it is True from then on.
+        due = tok_api.on_window(tok_cfg, vocab, ids[bounds[0]:bounds[1]], step=tick.step)
+        if sysm.due is None:
+            sysm.due = due
+        else:
+            prev = sysm.due
+            merged = ((prev.mint and due.mint) or (prev.retok and due.retok)
+                      or (prev.probation and due.probation))
+            if merged:
+                # tok.due_merged: A FLUSH WHERE MORE THAN ONE WINDOW RAISED THE SAME KEY.
+                # UNREACHABLE AT THE SHIPPED batch_windows=1, where no two windows share a flush --
+                # which is why it is bumped here, in the branch that only a second window can reach,
+                # rather than seeded to a number the shipped configuration cannot produce.
+                vocab.counters["tok.due_merged"] = vocab.counters.get("tok.due_merged", 0) + 1
+            sysm.due = dataclasses.replace(
+                prev, mint=prev.mint or due.mint, retok=prev.retok or due.retok,
+                probation=prev.probation or due.probation, frozen=due.frozen)
+
         if tick.flush_due:
             loss, per_window = _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg,
                                       opt_cfg, vocab, clock, sysm.novelty, did, key_fn)
@@ -407,17 +514,18 @@ def run(sysm, *, max_windows=None, progress=True):
         # refinement, a repair. It is evaluated per window rather than per flush because the period
         # is in WINDOWS and Cadences.due is phase-independent by construction.
         if cadences.due("ckpt", periods["ckpt"], clock):
-            _save(sysm, clock, "periodic")
+            saves += 1 if _save(sysm, clock, "periodic") else 0
         # AND THE SIGUSR1 FLAG, DRAINED ONCE PER WINDOW. CKPT.install_save_signal armed it at
         # compose; take() returns True exactly once per `kill -USR1`, so a checkpoint is written on
         # demand without the run being stopped to get one.
         if sysm.save_flag is not None and sysm.save_flag.take():
-            _save(sysm, clock, "sigusr1")
+            saves += 1 if _save(sysm, clock, "sigusr1") else 0
 
         if progress and cadences.due("progress", periods["progress"], clock):
             print(f"[{int(tick.step)} windows] loss={last_loss:.4f} "
                   f"opt_steps={int(clock.counters()['opt_steps'])} "
-                  f"skipped_mechanisms={len(skipped)}", flush=True)
+                  f"n_live={int(pop.n_live)} vocab={int(vocab.size())} "
+                  f"uncalled={len(skipped)}", flush=True)
 
         if tick.finished:
             break
@@ -442,6 +550,7 @@ def run(sysm, *, max_windows=None, progress=True):
     # saving_on IS NOT RE-TESTED HERE: CKPT.save asks it and returns False, counting refused_off,
     # which is the reading that makes "0 saves" distinguishable from "saving is off".
     final_written = _save(sysm, clock, "final")
+    saves += 1 if final_written else 0
     if not final_written:
         warnings.append(
             "loop: no final checkpoint was written -- CKPT_DIR names no directory, so saving is "
@@ -452,6 +561,9 @@ def run(sysm, *, max_windows=None, progress=True):
         windows=int(c["step"]), opt_steps=int(c["opt_steps"]), flushes=int(c["flushes"]),
         epochs=int(c["epoch"]), loss_first=first_loss, loss_last=last_loss,
         loss_curve=tuple(curve), elapsed_s=time.time() - t0, skipped=skipped,
+        gated=_gate_report(sysm) + (
+            f"CKPT.save: {saves} checkpoint(s) written by this run (periodic, SIGUSR1 and the "
+            f"final one together); 0 means CKPT_DIR names no directory and saving is off",),
         cadence_ledger=cadences.ledger(), warnings=tuple(warnings))
 
 
@@ -467,6 +579,7 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     cfg_dom = sysm.configs["DOM"]
     cfg_mem = sysm.configs["MEM"]
     cfg_cap = sysm.configs["CAP"]
+    tok_cfg = sysm.configs["TOK"]
     """One flush: cut the batch, forward, loss, backward. Returns the scalar loss, or None.
 
     THE ORDER IS LOOP_ORDER's B ROW, minus the rows whose entry points are stubs -- and the caller
@@ -554,8 +667,21 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # language loss, which is the configuration every load-balance result in this project's history
     # was accidentally taken under.
     aux = out.aux_loss
+    # `live_vocab` IS THE POSITIONAL BOUNDARY AND NOT THE COUNT OF LIVE ROWS, and this line read
+    # `vocab.live_size()` until TOK.judge_probation was wired. tok/api.py's header is explicit:
+    # "id_count is the positional boundary -- where never-minted rows begin, i.e. Vocabulary.size()
+    # -- and it is what LM.decode's `live_vocab` argument must receive, because ids are positional:
+    # retire() pops from the match table and leaves id2bytes intact, so retired rows sit BELOW the
+    # boundary and are handled separately, by id. live_size is that boundary minus the retired
+    # count, and passing it to decode would move the boundary down and mask exactly that many LIVE
+    # rows to -inf. The composition root's own wiring table named live_size here until 2026-09-03."
+    # THE TWO ARE EQUAL UNTIL SOMETHING RETIRES, which is why this survived every run so far: with
+    # `retired` empty size() == live_size(), and nothing could retire while judge_probation was
+    # uncalled. It is the same defect the header describes, one call site over, and it would have
+    # started masking the `len(retired)` HIGHEST live ids on the first retirement of the first run
+    # that turned probation on.
     logits = lm_api.decode(lm_cfg, model, h,
-                           live_vocab=int(vocab.live_size()), retired_ids=tuple(vocab.retired))
+                           live_vocab=int(vocab.size()), retired_ids=tuple(vocab.retired))
     per_window, mean = lm_api.lm_loss(lm_cfg, logits, y)
 
     # THE APPEARANCE COUNTER IS ADVANCED BY THIS FLUSH'S TOKENS, BEFORE THE TERMS THAT READ IT.
@@ -707,6 +833,70 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # Windows and elapsed-since-last-fire is phase-independent.
     mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
                      probe_contexts=None, resegment=None)
+
+    # ---- THE EVENT-DRIVEN ROWS: what THIS BATCH'S Dues made due ---------------------------------
+    # ACTED ON PER FLUSH, ASKED PER WINDOW. The Due was OR-ed across the batch in `run`; it is
+    # CONSUMED here, so a fire is acted on exactly once and the next batch starts from nothing.
+    due = sysm.due
+    sysm.due = None
+    if due is not None:
+        now_w2 = U.Windows(int(clock.step))
+        if due.mint:
+            # THE VOCABULARY MINTS. `step` is clock.step AT THE FLUSH, so a token raised by a
+            # mid-batch window is born up to batch_windows-1 windows later -- tok/api.py::on_window
+            # says so ("BIRTH STEPS ARE FLUSH-ALIGNED") and probation_deadline compares
+            # `step - birth` with both in Windows, so nothing raises.
+            mints = tok_api.mint_burst(tok_cfg, vocab, step=now_w2)
+            if mints:
+                # AND THE MODEL IS TOLD, IN THE SAME FLUSH, WHICH IS NOT OPTIONAL. lm/levers.py
+                # calls this goal B's row-level case: "a freshly minted token id points at a
+                # randomly initialised embedding row and a randomly initialised head row, so the
+                # model must re-learn from scratch material it can already spell with the parents",
+                # measured at 2.1699 (random) against 1.4822 (last_first) immediate post-mint loss.
+                # Minting without this call is that 2.1699 arm, chosen by omission.
+                # sig_emb IS None BECAUSE SIG.encoder_embedding IS A P4 STUB, and the consequence
+                # is SIG's and not LM's: a domain centroid is a mean of encodings, so one
+                # freshly-random token inside a window perturbs every signature containing it and
+                # the assembler reads that as a domain shift. lm.mint.sig_rows reading 0 is the
+                # third of its three declared states -- "nobody passed it" -- and it is this line.
+                lm_api.on_mint(lm_cfg, model, mints, vocab.id2bytes, at_window=now_w2,
+                               sig_emb=None)
+        if due.retok:
+            # THE RETOK IS RAISED AND NOT ACTED ON, AND THE FIRE IS COUNTED AS DROPPED RATHER THAN
+            # LEFT TO LOOK LIKE A CADENCE THAT NEVER CAME DUE. Q-TOK-12 says tok.due_dropped is
+            # "0 BY CONSTRUCTION" under the OR and that "a counter that must read zero is the only
+            # way a later reader can tell which reading was actually implemented" -- that sentence
+            # is about the BATCH, where the OR really does drop nothing. This is a larger fact of
+            # the same kind: `_due` banked the step, the act did not happen, and the next retok is
+            # a full retok_every away. So the counter is bumped, which makes the claim visibly
+            # false on any run where it happens, which is the loud state.
+            # WHY IT IS NOT DRIVEN: the act is TOK.tokenize over the whole stream, producing a new
+            # Segmentation -- new ids, new byte_pos -- mid-epoch. The clock's windows_in_epoch was
+            # measured on the OLD segmentation (compose.py::_windows_in_epoch), every byte offset
+            # already written into the memory store indexes the old one, and the RetokEvent the
+            # root is supposed to distribute is a record type "no entry point's docstring returns"
+            # (compose.py's own words), with DOM.on_retokenize a stub and SIG and FAB having no
+            # retokenize entry point at all. Doing a third of it would put the run into two
+            # segmentations at once, which is worse than not doing it.
+            vocab.counters["tok.due_dropped"] = vocab.counters.get("tok.due_dropped", 0) + 1
+        if due.probation:
+            # THE RESIDUAL READ AND THE JUDGEMENT, IN THAT ORDER AND UNDER THE SAME GATE. The row
+            # above exists so the per-token norm is NOT computed every flush for a consumer on a
+            # probation_deadline-window cadence: "an instrument computed thousands of times and
+            # discarded". It returns None at lm.compose=False, which is the shipped default, and
+            # TOK's Gate then prints "unreachable (no residual_ratio supplied)" instead of silently
+            # running the `use` test -- ISSUES P1-M41, the defect where the banner said embed and
+            # the run had judged by use.
+            ratios = lm_api.residual_ratios(lm_cfg, model)
+            tok_api.judge_probation(tok_cfg, vocab, step=now_w2, appearances=sysm.token_seen,
+                                    residual_ratio=ratios)
+            # THE Judgement IS NOT STORED, AND THAT IS NOT IT BEING DROPPED ON THE FLOOR. Its three
+            # numbers -- retired_ids, id_count, live_size -- are a REFRESH of what the vocabulary
+            # holds, and the decode above reads them off `vocab` itself on the next flush, which is
+            # the same object judge_probation just mutated. Keeping a copy here would be a second
+            # home for a fact one object already owns, which is what DEFECT D-T3 is about from the
+            # other side. What the record buys a caller that needs the numbers WITHOUT the
+            # vocabulary in hand is real; this caller has the vocabulary.
 
     # COMPETENCE IS SEPARATE FROM DOM.observe BECAUSE THE NUMBER IS ONLY KNOWN AFTER THE FORWARD
     # PASS. It is bits per window, not nats: the loss is a natural-log cross-entropy and the
