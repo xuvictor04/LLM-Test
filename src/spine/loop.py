@@ -93,28 +93,66 @@ def _is_stub(fn):
 # here, in the same edit, and the cross-check below turns a forgotten one into a raise rather than
 # into a report that overstates what the run did.
 _CALLS = frozenset({
-    "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
-    "OPT.scaled_backward", "OPT.maybe_step", "CKPT.save",
-    "LM.embed", "WORLD.loss_terms", "LM.anchor_term",
-    "FAB.observe", "DOM.note_competence",
-    "FAB.own_lr_scale", "CAP.caps", "FAB.grow_check", "MEM.write", "MEM.maintain",
-    "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
+    # ---- stage A, per window
+    "RUN.RunClock.advance", "SIG.encode", "TOK.on_window",
+    # ---- stage B, per flush: all twenty-one
+    "LM.embed", "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
+    "WORLD.loss_terms", "LM.anchor_term", "OPT.scaled_backward", "RUN.RunClock.note_backward",
+    "OPT.maybe_step", "FAB.own_lr_scale", "CAP.caps", "FAB.observe", "FAB.grow_check",
+    "MEM.write", "MEM.maintain", "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
+    "DOM.note_competence", "CKPT.save",
+    # ---- stage C, the checkpoint fan-out, through _payload and _save
+    "DATA.stream_state", "TOK.vocab_state", "LM.state_dict", "SIG.state_dict", "FAB.state_dict",
+    "WORLD.state_dict", "WORLD.geometry", "MEM.state_dict", "DOM.state_dict", "CAP.state",
+    "OPT.state_dict", "CKPT.Retention.state", "TOK.save_vocabulary",
+    # ---- stage R, the report, through _report and run's own tail
+    "DOM.prior", "LM.counters", "SIG.counters", "FAB.counters", "OPT.counters", "CAP.counters",
+    "RUN.RunClock.counters", "RUN.Cadences.ledger", "CKPT.Retention.counters",
+    "RUN.bench_summary",
 })
 
-# CALLS THIS DRIVER MAKES THAT ARE NOT B-ROW ENTRY POINTS. The clock, which LOOP_ORDER lists under
-# RUN and which `run` drives directly, and SIG.encode, which is a ROW A entry point -- the
-# per-window signature -- that the flush needs before FAB.forward can route on it.
-# THE CROSS-CHECK BELOW FOUND SIG.encode ON ITS FIRST RUN, which is the guard doing its job: the
-# first draft of _CALLS listed it as though it were a B-row name, and a set that quietly disagreed
-# with the table is exactly what the check exists to refuse. Row A, not row B, measured through
-# spine/compose.py::plan().
-_NOT_B_ROW = frozenset({"RUN.RunClock.advance", "RUN.RunClock.note_backward",
-                        "SIG.encode", "DOM.observe", "TOK.on_window", "LM.on_mint"})
+# CALLS THIS DRIVER MAKES THAT LOOP_ORDER DOES NOT GIVE A ROW OF THEIR OWN. Exactly one: LM.on_mint
+# is named inside TOK.mint_burst's B-row text ("-> LM.on_mint(sig_emb=SIG.encoder_embedding(...))")
+# rather than carrying a row, so it is a real call with no row to be counted against.
+# THIS SET USED TO CARRY FOUR NAMES AND TWO OF THEM WERE WRONG IN OPPOSITE DIRECTIONS.
+# RUN.RunClock.advance and RUN.RunClock.note_backward are ON the table -- A and B respectively --
+# and belong in _CALLS, which is where they are now. DOM.observe was in here, and this set does two
+# things at once: it excuses a name from the cross-check AND asserts the driver calls it. The driver
+# does NOT call DOM.observe -- the comment at that call site says so at length -- so listing it here
+# subtracted it from the uncalled list and hid it. It was invisible while the report only ever read
+# the B row, because DOM.observe is a row-A entry point and the subtraction was a no-op; the moment
+# the report covered every stage it would have started lying. Two wrongs cancelling is not a test
+# passing.
+_OFF_TABLE = frozenset({"LM.on_mint"})
 
-# WHY EACH UNWIRED MECHANISM'S ABSENCE MATTERS, in the consequence a reader needs rather than the
+# WHY EACH UNCALLED MECHANISM'S ABSENCE MATTERS, in the consequence a reader needs rather than the
 # name they already have. Missing keys fall back to a plain sentence; nothing here is load-bearing
 # for correctness, only for legibility.
 _WHY = {
+    # ---- stage E: the epoch driver. Not a gap in the wiring -- a statement about this driver.
+    "DATA.draw_stream": "compose() draws epoch 0's stream and this driver runs a single pass, so "
+                        "no second epoch is ever drawn and DATA's phase schedule never advances",
+    "TOK.tokenize": "the stream is segmented ONCE, before the first window; nothing re-segments "
+                    "it, which is why a minted id can never appear in the run that minted it",
+    "RUN.RunClock.begin_epoch": "compose() begins epoch 0; a roll stops this driver rather than "
+                                "starting the next epoch",
+    # ---- stage A: the cadenced maintenance stage, and the six stubs in it
+    "DOM.observe": "EVERY WINDOW IS DOMAIN 0 -- the partition never assigns, so the fabric's "
+                   "per-domain books, its breadth ban and MEM's per-source floor all see ONE source",
+    "DOM.manage": "no domain is ever culled, merged or spared; the 'dom.manage' cadence key reads "
+                  "checks=0, which is the ledger saying the gate was never EVALUATED",
+    "DOM.rekey": "domain centroids are never re-encoded, so the partition and the live signature "
+                 "drift into two spaces that do not compare; 'dom.rekey' also reads checks=0",
+    "DOM.census": "the partition has no did-it-fire surface and the R stage lists it as having no "
+                  "producer",
+    "FAB.manage": "NO EXPERT IS EVER CULLED OR SPARED. Growth runs and pruning does not, so the "
+                  "population only ever rises; 'fab.manage' reads checks=0",
+    "MEM.census": "the store has no did-it-fire surface, and FAB.grow_check's memory_pressure has "
+                  "no producer, so grow_on_mem_pressure is UNREACHABLE rather than off",
+    "SIG.cadence_due": "SIG's own training cadence is never asked",
+    "SIG.train_step": "THE SIGNATURE ENCODER NEVER LEARNS -- sig.train_steps reads 0, so every "
+                      "routing and domain decision is taken on the warm-up encoder for the whole run",
+    # ---- stage B is complete; these remain for the gated-call-site report's wording
     "CAP.caps": "no operating ceiling is read, so growth has no budget to be refused by",
     "WORLD.loss_terms": "no world-model loss term enters the objective",
     "LM.anchor_term": "minted tokens are not held near their byte composite",
@@ -134,12 +172,10 @@ _WHY = {
 # THE CALL SITES THAT ARE GATED, AND THE COUNTER THAT SAYS WHETHER THE GATE OPENED.
 # A DRIVER THAT CALLS AN ENTRY POINT ONLY WHEN AN EVENT FIRES HAS NOT CALLED IT ON A RUN WHERE THE
 # EVENT DID NOT, AND A REPORT THAT SAYS "0 NOT CALLED" IS THE SAME OVERSTATEMENT `skipped` EXISTS
-# TO PREVENT, ONE LAYER IN. The first version of `skipped` filtered LOOP_ORDER's B row through "is
-# the body a stub" and printed 0 on a run that invoked six entry points of twenty-one; this is that
-# error's smaller sibling -- every B row now HAS a call site, and three of them stand behind gates
-# that are UNREACHABLE at the shipped defaults (TOK_PROBATION_USES=0 turns the whole probation
-# family off, and its cadence is never even asked). Printing "0 not called" and stopping there
-# would say a run judged probation when nothing did.
+# TO PREVENT, ONE LAYER IN. Three B rows stand behind gates that are UNREACHABLE at the shipped
+# defaults (TOK_PROBATION_USES=0 turns the whole probation family off, and its cadence is never
+# even asked), so printing "0 with no call site" and stopping there would say a run judged
+# probation when nothing did.
 # THE THREE STATES ARE THE TREE'S OWN, read off the counter dicts by the convention every package
 # in it states: an ABSENT key means the mechanism was UNREACHABLE on the arm this run took, a key
 # PRESENT AND 0 means it was armed and did not fire, and a positive value is a fire count. So this
@@ -154,21 +190,21 @@ _GATED = {
     "FAB.own_lr_scale": ("a flush on which the optimizer actually stepped", "fab.lr_calls"),
 }
 # CKPT.save IS GATED TOO AND IS NOT IN THAT TABLE, because its count is not in a counters dict this
-# file can index -- CKPT keeps its books on the Retention record -- and because the driver itself
-# holds the fact: `_save` returns whether a file was written, and the three routes into it (the
-# cadence, SIGUSR1, the final save) are all this function's. Its line is appended by `run` from
-# that count, which is a measurement rather than a lookup.
+# file can index -- CKPT keeps its books on the Retention record and in its own _SAVES ledger --
+# and because the driver itself holds the fact: `_save` returns whether a file was written, and the
+# three routes into it (the cadence, SIGUSR1, the final save) are all this function's. Its line is
+# appended by `run` from that count, which is a measurement rather than a lookup.
 
 
 def _gate_report(sysm):
     """One line per gated call site: fired N / armed but 0 / unreachable. A tuple of strings.
 
     THE COUNTER IS ASKED, NOT RE-DERIVED. Each row names a key in the package's own did-it-fire
-    dict -- vocab.counters for tok.*, Population.counters for fab.*, the retention record for
-    ckpt.* -- and the three states come from whether that key is absent, zero or positive, which is
-    the convention tok/api.py::Vocabulary.__init__ and fabric/api.py::_bump both state in full.
-    Computing the answer here from levers would be a second verdict about a question the package
-    that owns the threshold has already answered.
+    dict -- vocab.counters for tok.*, Population.counters for fab.* -- and the three states come
+    from whether that key is absent, zero or positive, which is the convention
+    tok/api.py::Vocabulary and fabric/api.py::_bump both state in full. Computing the answer here
+    from levers would be a second verdict about a question the package that owns the threshold has
+    already answered.
     """
     books = {"tok.": getattr(sysm.vocab, "counters", {}) or {},
              "fab.": getattr(sysm.fabric, "counters", {}) or {}}
@@ -196,22 +232,32 @@ def _gate_report(sysm):
     return tuple(out)
 
 
-def _b_row_entry_points():
-    """{"PKG.name"} for LOOP_ORDER's B row, splitting the rows that name two in one column.
+def _rows_by_stage():
+    """{stage: {"PKG.name"}} for ALL of LOOP_ORDER, splitting rows that name two in one column.
 
     `FAB.observe/grow_check` and `MEM.write/maintain` are ONE ROW EACH and TWO ENTRY POINTS EACH.
     A count that does not split them is short by four, which is exactly the error the orchestrator
-    made when it reported this row as 10/17 rather than 10/21.
+    made when it reported the B row as 10/17 rather than 10/21.
+
+    THIS FUNCTION READ ONLY THE B ROW UNTIL 2026-09-21, AND THAT IS THE THIRD TIME THIS REPORT HAS
+    OVERSTATED WHAT THE RUN DID. The first version asked "is the body a stub" instead of "does the
+    driver call it" and printed 0 while calling six of twenty-one. The second answered that
+    correctly and said nothing about call sites standing behind gates that cannot open, which
+    `gated` now covers. This one restricted the whole question to ONE STAGE of five: every B row
+    acquired a call site, the report said "0 MECHANISM(S) ... HAVE NO CALL SITE AT ALL", and stage
+    A had SEVEN entry points this driver has never called -- six of them stubs, and three of them
+    (FAB.manage, DOM.manage, DOM.rekey) holding cadence keys in the root's own ledger that read
+    `checks=0` on every run ever taken, which is the ledger saying the gate was never EVALUATED.
+    A report scoped to the stage where the work happened to be finished is a report that gets more
+    confident as it covers less.
     """
     from spine import compose as _c
-    out = set()
+    out = {}
     for row in _c.LOOP_ORDER:
-        if row[0] != "B":
-            continue
         for part in str(row[2]).split("/"):
             part = part.strip()
             if part:
-                out.add(f"{row[1]}.{part}")
+                out.setdefault(row[0], set()).add(f"{row[1]}.{part}")
     return out
 
 
@@ -285,6 +331,12 @@ def _payload(sysm):
     }
 
 
+# DISAGREEMENTS BETWEEN THE TWO GEOMETRY PRODUCERS, COLLECTED ACROSS THE RUN AND SURFACED ONCE.
+# Module level rather than per-call because _save runs on a cadence and a reader needs the fact
+# once, not once per checkpoint; `run` drains it into RunResult.warnings.
+_disagree = []
+
+
 def _save(sysm, clock, reason, suffix=""):
     """One checkpoint, plus the tokenizer file that belongs to the SAME snapshot.
 
@@ -296,9 +348,61 @@ def _save(sysm, clock, reason, suffix=""):
     vocabulary. TOK.save_vocabulary takes the same suffix for exactly this reason, so the two go
     out together, here, and cannot drift apart.
     """
+    # THE RECORDED MANIFEST IS THE LIVE ONE PLUS WORLD'S GROWN COUNT, AND THE OVERLAY WAS MISSING.
+    # compose.py's C row for WORLD.geometry: "IT IS THE OVERLAY, NOT THE RECORD ... the one thing
+    # it genuinely adds is `n`, THE GROWN POPULATION -- the only quantity in this whole gate that
+    # cannot be computed from frozen Configs ... this row supplies world.n on TOP of it,
+    # recorded-only, reported UNCHECKED by the child's gate and re-refused in both directions by
+    # WORLD.load_into (M43)."
+    # RECORDING MORE THAN THE GATE CAN CHECK IS THE DESIGN AND NOT AN ACCIDENT.
+    # compose.py::_geometry_manifest says the grown counts are absent from the LIVE manifest "for a
+    # reason that cannot be engineered away here: WORLD.geometry(world, w) needs a BUILT world, and
+    # the only build that could supply it is the one this gate exists to happen before", and that
+    # check_geometry's contract "covers that case -- a field present in the checkpoint and absent
+    # from the manifest is reported UNCHECKED, not skipped". So the asymmetry is deliberate: the
+    # SAVE side records world.n, the GATE side cannot compute it and says UNCHECKED, and WORLD's own
+    # loader re-refuses it. Until this line the save side did not record it either, so there was
+    # nothing for the child to report as unchecked and nothing for M43 to be re-refused against.
+    # `world.n` ONLY, WHICH IS WHAT THE ROW SAYS AND IS NOT THE SAME AS "the record it returns".
+    # The C row: WORLD.geometry "returns SIX fields, five of which (lat, hid, route_d, nmax,
+    # feedback) the live manifest already carries as world.*, so the one thing it genuinely adds is
+    # `n`, THE GROWN POPULATION -- the only quantity in this whole gate that cannot be computed from
+    # frozen Configs ... this row supplies world.n on TOP of it".
+    # THE FIRST DRAFT OVERLAID ALL SIX AND THE RESUME REFUSED ITSELF ON THE NEXT RUN, which is how
+    # the disagreement below was found. Two producers for `world.hid` returned 32 and 128 at the
+    # shipped defaults, because world/api.py::geometry read it off `preds`, which is (n, lat, lat)
+    # and carries no hid axis -- WORLD_HID is the ENCODER's width. That is fixed at the source now;
+    # what stays here is the cross-check, because THE ROOT IS THE ONLY THING THAT SEES BOTH
+    # PRODUCERS. A field with two producers and no comparison is the shape this whole tree is
+    # organised against, and it stayed invisible for as long as one of the two was never called.
+    wg = world_api.geometry(sysm.configs["WORLD"], sysm.world)
+    recorded = dict(sysm.manifest)
+    for _k, _v in wg.items():
+        if _k not in recorded:
+            recorded[_k] = _v
+        elif recorded[_k][0] != _v[0]:
+            _disagree.append(
+                f"{_k}: the live manifest (spine/compose.py::_geometry_manifest, off the frozen "
+                f"Config) says {recorded[_k][0]!r} and world/api.py::geometry (off the built "
+                f"tensors) says {_v[0]!r}. Two producers for one recorded geometry field, "
+                f"disagreeing, inside the instrument that decides whether a resume is allowed. The "
+                f"manifest's value is the one recorded -- the gate compares against it and it is "
+                f"the one an operator typed -- and this line is the only place the disagreement is "
+                f"visible at all.")
+    # THE RETENTION STATE TRAVELS WITH THE SNAPSHOT OR EVERY RESUME OVERWRITES ITS PARENT'S BEST.
+    # ckpt/api.py::load reads `blob.get("best_state")` and CKPT.save did not put the key in the
+    # blob, so Snapshot.best_state was None on every checkpoint this tree has ever written,
+    # new_retention(restored=None) started cold, and the first post-resume probe satisfied "no best
+    # yet". That is ISSUES P1-M45 exactly, live, and spine/compose.py's own C row for
+    # CKPT.Retention.state names the consequence in advance. CKPT.save gained a DEFAULTED
+    # `best_state` keyword for it, with a counter pair, because a defaulted argument is invisible
+    # to K10.
     wrote = ckpt_api.save(sysm.configs["CKPT"], payload=_payload(sysm),
-                          geometry=dict(sysm.manifest), step=int(clock.step),
-                          epoch=int(clock.epoch), reason=reason, suffix=suffix)
+                          geometry=recorded, step=int(clock.step),
+                          epoch=int(clock.epoch), reason=reason,
+                          best_state=(None if sysm.retention is None
+                                      else sysm.retention.state()),
+                          suffix=suffix)
     if wrote:
         tok_api.save_vocabulary(sysm.configs["TOK"], sysm.vocab, suffix=suffix)
     return wrote
@@ -361,24 +465,27 @@ def run(sysm, *, max_windows=None, progress=True):
     # already knows. It is checked against the B row below, so a row this driver never calls cannot
     # be silently dropped from the report, and an entry in `_CALLS` that LOOP_ORDER does not list
     # raises rather than passing.
-    b_row = _b_row_entry_points()
-    # _NOT_B_ROW IS SUBTRACTED TOO, AND LEAVING IT OUT PUT A CALL THIS DRIVER MAKES ON THE
-    # NOT-CALLED LIST. `RUN.RunClock.note_backward` is invoked every flush (it is what counts the
-    # backward and answers whether an optimizer step is due), and it appeared under "not called by
-    # this driver" on the first corrected run. The set excuses a name from the cross-check below
-    # AND states that the driver calls it; only the first of those two was wired up.
-    # OVER-REPORTING IS THE SAFE DIRECTION AND STILL WRONG: a reader who trusts this list would
-    # have concluded no backward was counted, on a run whose optimizer stepped twelve times.
-    unwired = sorted(b_row - _CALLS - _NOT_B_ROW)
-    stray = sorted(_CALLS - b_row - _NOT_B_ROW)
+    rows = _rows_by_stage()
+    every = set().union(*rows.values())
+    # THE CROSS-CHECK RUNS IN BOTH DIRECTIONS AND OVER EVERY STAGE. A row this driver never calls
+    # cannot be silently dropped from the report, and a name in `_CALLS` that LOOP_ORDER does not
+    # list raises rather than passing -- which is what caught SIG.encode being filed as a B row on
+    # this guard's very first run.
+    stray = sorted(_CALLS - every - _OFF_TABLE)
     if stray:
         raise RuntimeError(
-            f"spine/loop.py::_CALLS names {stray}, which LOOP_ORDER's B row does not list and "
-            f"_NOT_B_ROW does not excuse. One of the three is wrong, and a driver whose own record "
+            f"spine/loop.py::_CALLS names {stray}, which LOOP_ORDER does not list at any stage and "
+            f"_OFF_TABLE does not excuse. One of the three is wrong, and a driver whose own record "
             f"of what it calls disagrees with the table is a driver whose report cannot be read.")
-    skipped = tuple(f"{k}: {_WHY.get(k, 'not called by this driver')}"
-                    + ("" if not _is_stub(_entry(k)) else "  [and the body is still a P4 stub]")
-                    for k in unwired)
+    # PER STAGE, BECAUSE A TOTAL HIDES WHICH PART OF THE LOOP IS MISSING. Stage E uncalled means
+    # this driver runs one pass; stage A uncalled means the cadenced maintenance never happens;
+    # stage C uncalled would mean the checkpoint is short a package. Those are three different
+    # runs and one number cannot say which.
+    uncalled = {st: sorted(rows[st] - _CALLS) for st in sorted(rows) if rows[st] - _CALLS}
+    skipped = tuple(
+        f"[{st}] {k}: {_WHY.get(k, 'not called by this driver')}"
+        + ("" if not _is_stub(_entry(k)) else "  [and the body is still a P4 stub]")
+        for st in sorted(uncalled) for k in uncalled[st])
 
     warnings = list(sysm.warnings)
     clock, cadences = sysm.clock, sysm.cadences
@@ -571,6 +678,9 @@ def run(sysm, *, max_windows=None, progress=True):
             f"both; what they are not is USED. Minting contributes nothing to this run's loss.")
 
     final_written = _save(sysm, clock, "final")
+    for _d in dict.fromkeys(_disagree):
+        warnings.append(f"loop: recorded-geometry disagreement -- {_d}")
+    _disagree.clear()
     saves += 1 if final_written else 0
     if not final_written:
         warnings.append(

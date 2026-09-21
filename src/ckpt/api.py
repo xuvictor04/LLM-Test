@@ -502,7 +502,14 @@ def save_period(ckpt: Config):
     return period
 
 
+# best_state_supplied / best_state_absent ARE SEEDED HERE WITH THE OTHER SIX, and the pair is what
+# makes the M45 repair readable. A defaulted keyword is invisible to K10 -- nothing in the contract
+# checks can tell a caller that passes `best_state` from one that does not -- so the counter is the
+# only surface that separates "the composition root never wired it" from "it was wired and the
+# retention had no best to record yet". fabric/api.py::grow_check carries fab.shift_notifications
+# for exactly this hazard and says so in the same words.
 _SAVES = {"periodic": 0, "sigusr1": 0, "best": 0, "bestN": 0, "final": 0,
+          "best_state_supplied": 0, "best_state_absent": 0,
           "best_keep_by_slot": 0, "refused_off": 0}
 """The DID IT FIRE ledger for CKPT.save, SEEDED AT ZERO rather than created on first use.
 
@@ -513,7 +520,7 @@ came due print the same nothing.
 """
 
 
-def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
+def save(ckpt: Config, *, payload, geometry, step, epoch, reason, best_state=None, suffix=""):
     """Write one checkpoint generation ATOMICALLY (.tmp + os.replace, one previous generation kept).
     Returns True iff a file was written -- the caller used to assume success and printed "saved to
     None.best".
@@ -539,6 +546,12 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
     WIRES READ: none
     DID IT FIRE: Saves(periodic, sigusr1, best, best_keep_by_slot, final, refused_off) -- SIX
                  counters, because "0 saves" cannot distinguish "never due" from "saving is off"
+    TWO MORE THE BODY WRITES, DECLARED HERE for the reason fabric/api.py::forward gives (a key in
+    the report the contract does not admit to producing is the same defect as a declared key nothing
+    writes): best_state_supplied / best_state_absent, the pair that says whether the composition
+    root is passing `best_state` at all. A DEFAULTED KEYWORD IS INVISIBLE TO K10, so without these
+    "nobody wired it" and "it was wired and the retention had no best yet" are one number --
+    fab.shift_notifications exists for the identical hazard and is quoted in full at _SAVES.
     """
     ckpt = ckpt.owned_by("CKPT")
     if not saving_on(ckpt):
@@ -568,7 +581,27 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix=""):
     os.makedirs(d, exist_ok=True)
     dst = os.path.join(d, "ckpt.pt" + (suffix or ""))
     tmp = dst + ".tmp"
-    blob = {"payload": payload, "geometry": geometry,
+    # `best_state` GOES IN THE BLOB, AND UNTIL 2026-09-21 THIS DICT DID NOT HAVE THE KEY AT ALL --
+    # WHILE load() READ IT. ckpt/api.py::load is unambiguous: "`best_state` IS IN THE CHECKPOINT
+    # (ISSUES P1-M45)", and its body does `best_state = blob.get("best_state")`, which on every
+    # checkpoint this tree has ever written returned None. So Snapshot.best_state was always None,
+    # new_retention(restored=None) started cold on every resume, and THE FIRST POST-RESUME PROBE
+    # SATISFIED "no best yet" AND OVERWROTE THE PARENT'S BEST MODEL. That is M45 itself, live, in
+    # the function whose whole job is to stop it -- and spine/compose.py's own C row says so in
+    # advance: "Without it the first post-resume probe satisfies 'no best yet' and overwrites the
+    # parent's best model (M45)".
+    # THE SIGNATURE MOVED FOR THIS, which is a frozen-surface change and is not taken lightly. It
+    # is the shape fabric/api.py::grow_check's `shift_at=None` already established: a DEFAULTED
+    # keyword, so no existing caller breaks, plus a counter that says whether anyone is supplying
+    # it -- because a defaulted argument is invisible to K10 and "nobody wired it" would otherwise
+    # be indistinguishable from "it was wired and the retention had nothing to record yet".
+    # NOT PART OF `payload`, which is the composition root's opaque per-package mapping. The C row
+    # calls best_state "a FIELD OF ITS OWN and not part of payload", and Snapshot declares it as a
+    # field beside payload rather than inside it, because CKPT is the package that owns retention
+    # and this is the one value in the file that is CKPT's own rather than a package's.
+    _k = "best_state_supplied" if best_state is not None else "best_state_absent"
+    _SAVES[_k] = _SAVES.get(_k, 0) + 1
+    blob = {"payload": payload, "geometry": geometry, "best_state": best_state,
             "step": int(step), "epoch": int(epoch), "reason": reason}
     # ATOMIC, AND ONE PREVIOUS GENERATION KEPT. A half-written checkpoint that replaces a good one
     # is worse than no checkpoint: torch.save straight onto `dst` leaves exactly that on any

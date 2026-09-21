@@ -636,8 +636,24 @@ def geometry(world: Config, w):
         "world.lat": (int(w.lat), "EXACT", "WORLD_LAT", "the latent width every predictor maps into"),
         "world.route_d": (int(w.keys.shape[1]), "EXACT", "WORLD_ROUTE_D",
                           "the routing key width; qproj projects into it"),
-        "world.hid": (int(w.preds.shape[-1]), "EXACT", "WORLD_HID",
-                      "the predictor hidden width, an inner dimension with no valid prefix"),
+        # THE ENCODER'S HIDDEN WIDTH, AND THIS LINE READ `w.preds.shape[-1]` UNTIL 2026-09-21,
+        # WHICH IS `lat`. WORLD_HID is spent in exactly one place -- build's
+        # `nn.Sequential(nn.Linear(d_model, hid), nn.Tanh(), nn.Linear(hid, lat))` -- and `preds`
+        # is (n, lat, lat), carrying no hid axis at all. So this field reported 32 where the lever
+        # said 128 at the shipped defaults: a RECORDED GEOMETRY FIELD THAT NAMED ONE QUANTITY AND
+        # CARRIED ANOTHER, under an EXACT rule, inside the instrument that decides whether a resume
+        # is allowed to happen.
+        # NOTHING COULD HAVE CAUGHT IT BECAUSE NOTHING CALLED THIS FUNCTION. It is the only
+        # geometry() in the tree (Q-CKPT-1) and spine/loop.py::_save did not invoke it until the
+        # same day, so the wrong number had never been compared against anything. The first
+        # comparison ever made refused a legitimate resume by name -- "WORLD_HID: the checkpoint was
+        # written at world.hid=32 and this run resolves 128" -- which is the good outcome: a loud
+        # refusal on the first call rather than a quiet acceptance on the thousandth.
+        # READ OFF THE MODULE THE LEVER BUILT, so a change to the encoder's shape moves this with
+        # it and the two cannot drift again.
+        "world.hid": (int(w.encoder[0].out_features), "EXACT", "WORLD_HID",
+                      "the encoder's hidden width -- Linear(d_model, hid) then Linear(hid, lat); "
+                      "an inner dimension with no valid prefix"),
         "world.n": (int(w.preds.shape[0]), "MAY_WIDEN_AND_MAY_NARROW", "WORLD_N0",
                     "the ALLOCATED predictor count, len(preds) -- never the live count (M70)"),
         "world.nmax": (int(w.nmax), "MAY_WIDEN", "WORLD_NMAX",

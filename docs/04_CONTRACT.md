@@ -3305,6 +3305,52 @@ log of the interpolated distribution and scores it. So `MEM.blend`'s probability
 the standard formulation and option (a) is what the field already does. The literature does **not**
 bear on where the join lives in this tree; that is settled by O10 and by the C8/C9 record.
 
+### Q-CKPT-3 — `CKPT.save` never wrote `best_state`, so every resume overwrote its parent's best model — **RESOLVED 2026-09-21: ⚠ A FROZEN SIGNATURE MOVED — `save(..., reason, best_state=None, suffix="")`**
+
+`ckpt/api.py::load` reads `blob.get("best_state")` and its docstring says in as many words that
+"`best_state` IS IN THE CHECKPOINT (ISSUES P1-M45)". `save` built its blob from four keys —
+`payload`, `geometry`, `step`, `epoch`, `reason` — and **never put `best_state` in it**. So
+`Snapshot.best_state` was `None` on every checkpoint this tree has ever written,
+`new_retention(restored=None)` started cold in every child process, and the first post-resume probe
+satisfied *"no best yet"* and overwrote the parent's best model. That is **M45 itself, live, inside
+the function whose entire purpose is to prevent it** — and `LOOP_ORDER`'s own C row for
+`CKPT.Retention.state` states the consequence in advance: *"Without it the first post-resume probe
+satisfies 'no best yet' and overwrites the parent's best model (M45)."*
+
+**Why the signature and not the payload.** `payload` is the composition root's opaque per-package
+mapping and the C row is explicit that `best_state` is *"a FIELD OF ITS OWN and not part of
+payload"*; `Snapshot` declares it beside `payload`, not inside it, because retention is CKPT's own
+state rather than a package's. There is no route into the blob that does not go through this
+signature.
+
+**It is DEFAULTED, and that costs a counter.** `best_state=None` means no existing caller breaks —
+the same shape `Q-FAB-6` established when `grow_check` gained `shift_at=None`. A defaulted argument
+is invisible to K10, so `_SAVES` gains `best_state_supplied` / `best_state_absent`: without the
+pair, *"the composition root never wired it"* and *"it was wired and the retention had no best to
+record yet"* are one number, which is the state this ruling is repairing.
+
+**Found by calling it.** Nothing had compared `save`'s blob against `load`'s reader, because the
+loop driver that writes checkpoints was itself only written this month.
+
+### Q-WORLD-9 — `WORLD.geometry` reported `lat` under the name `hid` — **RESOLVED 2026-09-21: read it off the module the lever built. No signature moves**
+
+`world.hid` was `int(w.preds.shape[-1])`. `WORLD_HID` is spent in exactly one place —
+`build`'s `nn.Sequential(nn.Linear(d_model, hid), nn.Tanh(), nn.Linear(hid, lat))` — and `preds` is
+`(n, lat, lat)`, carrying **no `hid` axis at all**. At the shipped defaults the field reported 32
+where the lever said 128: a recorded geometry field naming one quantity and carrying another, under
+an **EXACT** rule, inside the instrument that decides whether a resume is allowed to happen.
+
+**Nothing could have caught it, because nothing called the function.** It is the only `geometry()`
+in the tree (Q-CKPT-1) and `spine/loop.py::_save` did not invoke it until 2026-09-21. The first
+comparison ever made refused a legitimate resume by name — *"WORLD_HID: the checkpoint was written
+at world.hid=32 and this run resolves 128"* — which is the good outcome: a loud refusal on the
+first call rather than a quiet acceptance on the thousandth.
+
+It now reads `int(w.encoder[0].out_features)`, so a change to the encoder's shape moves the recorded
+field with it. The root additionally **cross-checks the five fields the live manifest and
+`WORLD.geometry` both carry**, because the root is the only thing that sees both producers, and a
+field with two producers and no comparison is the shape this whole document is organised against.
+
 ### Q-TOK-10 — `TOK.save_vocabulary` takes no suffix, so M46 is not closed — **RESOLVED 2026-09-02: (b), OVERRULING THIS DOCUMENT'S OWN RECOMMENDATION (a). ⚠ A FROZEN SIGNATURE MOVED: `save_vocabulary(tok, vocab, *, suffix="")`**
 `CKPT.save` has a `suffix` and says *"THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT"*;
 `save_vocabulary(tok, vocab)` has **no suffix parameter** and writes `d_vocab_save_path`, a string
@@ -4119,7 +4165,7 @@ CAP: restore(cap: Config, valve, state)
 CAP: counters(cap: Config, valve)
 CKPT: saving_on(ckpt: Config)
 CKPT: save_period(ckpt: Config)
-CKPT: save(ckpt: Config, *, payload, geometry, step, epoch, reason, suffix='')
+CKPT: save(ckpt: Config, *, payload, geometry, step, epoch, reason, best_state=None, suffix='')
 CKPT: install_save_signal()
 CKPT: resume_source(ckpt: Config)
 CKPT: load(ckpt: Config)
